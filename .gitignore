@@ -1,0 +1,6 @@
+bin/
+orig/
+*.i64
+*.idb
+game/
+cd/

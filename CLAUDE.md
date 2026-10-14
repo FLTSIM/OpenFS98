@@ -16,6 +16,8 @@ possibly Android.
 - **Transliterate, do not rewrite**, and **reproduce retail's bugs.** The goal
   is a sim that behaves as FS98 behaves, not one that is arithmetically tidier.
   Omit only dead code with no observable effect, and say that you did.
+- Preserve every existing staged, unstaged and untracked change. A dirty
+  worktree is another contributor's work, not disposable scratch space.
 
 ## Read these, in this order
 
@@ -46,16 +48,26 @@ the table.
 ```sh
 make utildiff-run        # UTIL service by service   -> 6222442 comparisons, 0 mismatches
 make utildiff-portable   # the same with x87 compiled out (the ARM path)
+make numericdiff-run     # all NUMERIC formats/ranges -> 545778 comparisons, 0 mismatches
 make difftest-run        # whole-module SLEW         -> 0/2000 vectors differ
 make ofstest-run         # in-process, via the host  -> passed 68, failed 0
-make smoke               # boot the sim with GLOBAL, SLEW and UTIL installed -> PASS
+make smoke               # GLOBAL, NUMERIC, SLEW and UTIL installed -> 27/27, 95 gauges, PASS
 make util-trace          # which UTIL services the game calls, counted in-game
 ```
 
 Those exact numbers are the current baseline. If a run reports fewer
 comparisons or any mismatch, something regressed — investigate before building
-on it. Anything that calls the host or another module **cannot** be checked by
-the external harnesses; it needs `ofstest`.
+on it. Calls through imports can be tested externally when those dependencies
+have small faithful stubs, as NUMERIC demonstrates. Code that needs the real
+host process or live game state still needs `ofstest`.
+
+## Current next slice
+
+Implement **CHAIN.DLL**, module id 4. Its preflight is already recorded in
+[docs/modules/chain.md](docs/modules/chain.md): five linkage functions, three
+public callback-list services, four stub-friendly host memory calls, and no
+actual GLOBAL access. Build a whole-module external differential harness first,
+then package and smoke-test it. NUMERIC is complete; do not resume its old plan.
 
 ## Two things not to rediscover the hard way
 

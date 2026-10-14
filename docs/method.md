@@ -20,19 +20,21 @@ place by catching mistakes.
    still to be done. A tool that under-reports looks exactly like a small
    module. Both are fixed, but the habit is the point: if a module looks
    surprisingly small, count the table by hand before believing it.
-2. **Check what it reaches for** before reading any code. A service that calls
-   the host or another module cannot be checked by the current harness -- see
-   *What cannot be tested yet* below -- so finding that out first saves
-   disassembling something unverifiable.
+2. **Check what it reaches for** before reading any code. An imported service
+   is externally testable when its behavior can be represented by a small,
+   faithful stub; NUMERIC does this for the host, GLOBAL and UTIL. Code which
+   needs the real host process or live game state belongs in the in-process
+   harness. Decide which applies before disassembling the whole service.
 3. **Disassemble it.** `objdump -d -M intel --start-address=... --stop-address=...`
    The sizes the mappers report are upper bounds: they are the gap to the next
    table-referenced address, so internal helpers fall inside them.
 4. **Transliterate, do not rewrite.** See the next section.
-5. **Add it to the harness** -- `tools/difftest/utildiff.c` for UTIL services,
-   `tools/difftest/slewdiff.c` for whole modules -- with edge cases chosen
-   from the code, not at random.
-6. **Run it.** `make utildiff-run`, `make difftest-run`, and
-   `make utildiff-portable` for anything touching floating point.
+5. **Add it to a harness** -- the existing examples cover individual UTIL
+   services, whole-module SLEW and imported-service NUMERIC. Use edge cases
+   chosen from the code, not at random.
+6. **Run it.** The current targets are `make utildiff-run`,
+   `make numericdiff-run`, `make difftest-run`, and `make utildiff-portable`
+   for UTIL's portable floating-point path.
 7. **Write down what it is** in the module's document, including anything that
    surprised you. The surprises are the valuable part.
 
@@ -126,9 +128,10 @@ rare. Say which is which when reporting.
 
 ## Two harnesses, and when to use which
 
-**Outside the process** -- `make utildiff-run`, `make difftest-run`. Loads the
-retail binary beside the reimplementation and calls both. Fast, scriptable,
-millions of vectors, and the right tool for anything self-contained.
+**Outside the process** -- `make utildiff-run`, `make numericdiff-run`,
+`make difftest-run`. Loads the retail binary beside the reimplementation and
+calls both. Fast, scriptable, millions of vectors, and the right tool for
+self-contained code or code whose imports can be stubbed faithfully.
 
 **Inside the sim** -- `make ofstest-run`. Builds `src/test/ofstest.c` as a
 module with its own id, drops it into `Modules\`, and lets the real loader bind

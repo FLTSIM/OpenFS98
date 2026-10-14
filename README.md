@@ -65,6 +65,7 @@ else's 1997 build, and it should read that way.
 | `make difftest-run` | drive a rebuilt module and retail over identical synthetic state and diff the result; `N=...` sets the vector count |
 | `make utildiff-run` | compare individual rebuilt UTIL services against retail's, service by service |
 | `make utildiff-portable` | the same with the x87 assembly compiled out, as an ARM build would use |
+| `make numericdiff-run` | compare all NUMERIC formatter/parser ids and ranged parses against retail |
 | `make ofstest-run` | run assertions *inside* the sim, where the host is reachable; `ofstest-remove` takes the module back out |
 | `make util-trace` | boot the sim with a UTIL that counts every service call, and list what ran; `UTIL_TRACE_SECS=` for a longer session to play in |
 | `make graph` | module id and dependency table, read live from `orig/` |
@@ -102,8 +103,8 @@ once an aircraft has resolved, its visual model has been found and its panel
 built, so a gauge load means startup went all the way through.
 
 **Verified working**: under wine 9.0 the retail game reaches its main menu —
-27/27 modules, 95 gauges — and so does the build with OpenFS98's `GLOBAL.DLL`
-substituted, with identical counts.
+27/27 modules, 95 gauges — and so does the build with OpenFS98's `GLOBAL`,
+`NUMERIC`, `SLEW` and `UTIL` modules substituted, with identical counts.
 
 ## Where this is going
 
@@ -151,11 +152,13 @@ emulate 80-bit arithmetic to preserve a rounding artefact. See
 | --- | --- | --- | --- |
 | `GLOBAL` | 2 | 54 | **reimplemented and running in-game** |
 | `SLEW` | 9 | 1,270 | **reimplemented and verified** — 200,000 differential vectors, byte-identical |
+| `CHAIN` | 4 | 966 | **next slice; preflight mapped** — three callback-list services — see [docs/modules/chain.md](docs/modules/chain.md) |
+| `NUMERIC` | 17 | 14,684 | **reimplemented, verified, and running in-game** — 545,778 differential comparisons, zero mismatches — see [docs/modules/numeric.md](docs/modules/numeric.md) |
 | `UTIL` | 20 | 11,062 | **reimplemented, verified, and running in-game** — all 47 services; 19 seen called in a hands-on session, the modal alert among them — see [docs/modules/util.md](docs/modules/util.md) |
 | `FLTSIM98.EXE` | 1 (host) | 82,016 | 194 services mapped, 21 with confirmed prototypes, 11 verified in-process, 2 implemented — see [docs/modules/host.md](docs/modules/host.md) |
 
-Retail baseline and the OpenFS98 build -- GLOBAL, SLEW and UTIL all installed --
-both reach the panel: 27/27 modules, 95 gauges, `make smoke` PASS.
+Retail baseline and the OpenFS98 build -- GLOBAL, NUMERIC, SLEW and UTIL all
+installed -- both reach the panel: 27/27 modules, 95 gauges, `make smoke` PASS.
 
 `GLOBAL.DLL`'s 4764-byte shared state block is byte-identical to retail, and the
 module id matches. The remaining differences from the retail binary are
@@ -171,18 +174,22 @@ Nothing is blocked. The in-process harness (`make ofstest-run`) reaches
 anything that calls the host, and the external one
 (`make utildiff-run`, `make difftest-run`) covers everything self-contained.
 
-Reasonable next steps, roughly in order of value:
+The next implementation slice is **`CHAIN.DLL`**: 966 bytes, three services,
+and only four small host memory dependencies. Its binary layout, data model,
+service behavior and external differential-test plan are already mapped in
+[docs/modules/chain.md](docs/modules/chain.md). Start there; do not redo
+NUMERIC or spend the first pass selecting another module.
+
+After CHAIN, reasonable follow-up work is:
 
 1. **Reach UTIL's menu paths.** A hands-on session exercised 19 of its 47
    services in-game, but the flight, lesson and options screens -- where the
    file listings and the exchange engine run -- were not reachable under wine.
    Worth retrying with `make util-trace UTIL_TRACE_SECS=600` whenever the sim
    gets further, or on Windows.
-2. **`NUMERIC`** (14,684 bytes) — the only import UTIL's tests still stub, and
-   what every number in a dialog goes through. Arithmetic throughout.
-3. **The `English\` modules** — `Flights`, `Options`, `Alerts` and the rest
+2. **The `English\` modules** — `Flights`, `Options`, `Alerts` and the rest
    own 64 of the host's 65 dialogs; `make graph` does not see them yet.
-4. **The host's 84 services that call no platform API** — portable logic, and
+3. **The host's 84 services that call no platform API** — portable logic, and
    the specification a native host has to satisfy.
 
 ### Order of work
@@ -190,12 +197,12 @@ Reasonable next steps, roughly in order of value:
 Bottom of the dependency graph first, because everything imports it and
 nothing in it imports anything interesting:
 
-1. **`GLOBAL`** (54 bytes) — done. Pure data: the shared state block.
-2. **`CHAIN`** (966) — imports only the host and `GLOBAL`.
-3. **`NUMERIC`** (14,684) and **`UTIL`** (11,062) — the utility layer.
-4. ~~**`SLEW`** (1,270)~~ — done and verified against retail.
-5. ~~**`UTIL`** (11,062)~~ — done, verified, and running in-game. Unlike SLEW it cannot be installed until every slot exists,
-   so it advances a service at a time under `make utildiff-run`.
+1. ~~**`GLOBAL`** (54 bytes)~~ — done. Pure data: the shared state block.
+2. **`CHAIN`** (966 bytes) — next; preflight mapped, imports only the host and
+   an unused `GLOBAL` link.
+3. ~~**`NUMERIC`** (14,684 bytes)~~ — done, verified and running in-game.
+4. ~~**`SLEW`** (1,270 bytes)~~ — done and verified against retail.
+5. ~~**`UTIL`** (11,062 bytes)~~ — done, verified and running in-game.
 6. Then outward: `WINMSG`, `ACONTAIN`, `ATC`, `LANDME`, `REALITY`, `BOOSTER`…
 7. `HG2D` (390 KB, the 2D rasteriser) last. It is 26% of the project on its
    own.

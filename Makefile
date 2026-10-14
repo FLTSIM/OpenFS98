@@ -37,10 +37,11 @@ FS98_DIR?= $(HOME)/.wine/drive_c/FS98
 
 # module name -> retail image base, so our build maps where the original did
 BASE_GLOBAL := 0x20720000
+BASE_NUMERIC := 0x20870000
 BASE_SLEW   := 0x208c0000
 BASE_UTIL   := 0x208e0000
 
-MODULES := GLOBAL SLEW UTIL
+MODULES := GLOBAL NUMERIC SLEW UTIL
 
 # Setup renames two modules on the way from CD to install, and the game loads
 # the *installed* names.  A rebuilt FACIL.DLL copied in as FACIL.DLL would just
@@ -66,6 +67,20 @@ $(BIN)/SLEW.DLL: src/slew/slew.c src/slew/slew.def $(BIN)/slew.res
 	      -o $@ src/slew/slew.c $(BIN)/slew.res src/slew/slew.def -lkernel32
 
 $(BIN)/slew.res: src/slew/slew.rc
+	@mkdir -p $(BIN)
+	$(RC) $< -O coff -o $@
+
+$(BIN)/NUMERIC.DLL: src/numeric/numeric.c src/numeric/numeric.def \
+                    src/numeric/numeric_imports.h \
+                    src/numeric/numeric_data.inc include/fs98/numeric.h \
+                    $(BIN)/numeric.res
+	@mkdir -p $(BIN)
+	$(CC) $(CFLAGS) -DFS98_NUMERIC_MODULE -Isrc/numeric $(LDFLAGS) \
+	      -Wl,--image-base=$(BASE_NUMERIC) \
+	      -o $@ src/numeric/numeric.c $(BIN)/numeric.res \
+	      src/numeric/numeric.def -lmsvcrt -lkernel32 -lgcc
+
+$(BIN)/numeric.res: src/numeric/numeric.rc
 	@mkdir -p $(BIN)
 	$(RC) $< -O coff -o $@
 
@@ -113,6 +128,9 @@ $(BIN)/util.res: src/util/util.rc
 
 src/global/global_state.inc: $(ORIG)/Modules/GLOBAL.DLL tools/gen_global_state.py
 	python3 tools/gen_global_state.py $< $@
+
+src/numeric/numeric_data.inc: $(ORIG)/Modules/NUMERIC.DLL tools/gen_numeric_tables.py
+	@python3 tools/gen_numeric_tables.py $< $@
 
 # The in-process test module.  The host cannot be loaded beside an external
 # test program -- no .reloc, so it only works at 0x400000, which is already
@@ -169,6 +187,15 @@ $(DIFFDIR)/utildiff.exe: tools/difftest/utildiff.c src/util/util_math.c src/util
 	$(CC) -std=c99 -O1 -Wall -Wextra -Iinclude -Isrc/util -o $@ \
 	      tools/difftest/utildiff.c src/util/util_math.c src/util/util_exchange.c src/util/util_alert.c
 
+$(DIFFDIR)/numericdiff.exe: tools/difftest/numericdiff.c \
+                            src/numeric/numeric.c \
+                            src/numeric/numeric_imports.h \
+                            src/numeric/numeric_data.inc \
+                            include/fs98/numeric.h
+	@mkdir -p $(DIFFDIR)
+	$(CC) -std=c99 -O1 -Wall -Wextra -Iinclude -Isrc/numeric -o $@ \
+	      tools/difftest/numericdiff.c src/numeric/numeric.c -lm
+
 src/util/cos_table.inc: $(ORIG)/Modules/UTIL.DLL tools/gen_util_tables.py
 	@python3 tools/gen_util_tables.py $< $@
 
@@ -188,6 +215,12 @@ utildiff-portable: $(DIFFDIR)/utildiff_portable.exe utildiff
 
 utildiff-run: utildiff
 	@cd $(DIFFDIR) && WINEDEBUG=-all wine utildiff.exe
+
+numericdiff: $(DIFFDIR)/numericdiff.exe
+	@cp $(ORIG)/Modules/NUMERIC.DLL $(DIFFDIR)/NUMERIC_retail.dll
+
+numericdiff-run: numericdiff
+	@cd $(DIFFDIR) && WINEDEBUG=-all wine numericdiff.exe
 
 difftest: $(DIFFDIR)/slewdiff.exe all
 	@cp $(ORIG)/Modules/SLEW.DLL $(DIFFDIR)/SLEW_retail.dll
@@ -360,4 +393,4 @@ smoke: all
 clean:
 	rm -rf $(BIN)
 
-.PHONY: all stage setup-map graph hostmap compare run trace trace-render trace-ddraw kill window-reset wm-unmanaged wm-managed vd-on vd-off mode8 mode16 ddraw-gdi ddraw-default smoke difftest difftest-run utildiff utildiff-run utildiff-portable ofstest ofstest-run ofstest-remove util-trace install revert installed-name-of clean
+.PHONY: all stage setup-map graph hostmap compare run trace trace-render trace-ddraw kill window-reset wm-unmanaged wm-managed vd-on vd-off mode8 mode16 ddraw-gdi ddraw-default smoke difftest difftest-run utildiff utildiff-run utildiff-portable numericdiff numericdiff-run ofstest ofstest-run ofstest-remove util-trace install revert installed-name-of clean

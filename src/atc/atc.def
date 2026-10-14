@@ -1,0 +1,4 @@
+LIBRARY ATC.DLL
+EXPORTS
+    Linkage DATA
+    ImportTable DATA

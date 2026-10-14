@@ -36,9 +36,10 @@ possibly Android.
 make graph                                  # module ids and dependencies
 make hostmap                                # the host's 194 service slots
 python3 tools/dumplinkage.py orig/Modules/UTIL.DLL   # one module's table + sizes
+python3 tools/impscan.py orig/Modules/ATC.DLL        # which imported services it calls
 ```
 
-All three read the retail binaries live, so they cannot drift from the truth.
+All of these read the retail binaries live, so they cannot drift from the truth.
 They *can* be buggy — both have under-reported table sizes before, which looks
 exactly like a small module. If something looks surprisingly small, hand-count
 the table.
@@ -50,9 +51,10 @@ make utildiff-run        # UTIL service by service   -> 6222442 comparisons, 0 m
 make utildiff-portable   # the same with x87 compiled out (the ARM path)
 make numericdiff-run     # all NUMERIC formats/ranges -> 545778 comparisons, 0 mismatches
 make chaindiff-run       # whole-module CHAIN        -> 20000 scenarios, 0 differ
+make atcdiff-run         # whole-module ATC          -> 20000 scenarios, 0 differ
 make difftest-run        # whole-module SLEW         -> 0/2000 vectors differ
 make ofstest-run         # in-process, via the host  -> passed 68, failed 0
-make smoke               # CHAIN, GLOBAL, NUMERIC, SLEW, UTIL installed -> 27/27, 95 gauges, PASS
+make smoke               # ATC, CHAIN, GLOBAL, NUMERIC, SLEW, UTIL installed -> 27/27, 95 gauges, PASS
 make util-trace          # which UTIL services the game calls, counted in-game
 ```
 
@@ -64,12 +66,11 @@ host process or live game state still needs `ofstest`.
 
 ## Current next slice
 
-CHAIN is done. Every remaining module imports at least one unfinished one, so
-start with a **preflight of WINMSG, ATC and LANDME** -- the smallest -- to
-find which needs the fewest, simplest stubs, then implement that one the way
-CHAIN was: whole-module differential harness first (`tools/difftest/chaindiff.c`
-is the template), then install and `make smoke`. See the README's
-"What to do next".
+ATC is done. **LANDME** is next per [docs/preflight.md](docs/preflight.md),
+blocked on understanding the records FE `+0x20`/`+0x54` hand back -- see the
+README's "What to do next". `tools/difftest/atcdiff.c` is now the template for
+a module with unfinished imports: retail's finished modules loaded for real,
+logging stubs for the rest, and the module's whole `.data` image compared.
 
 ## Two things not to rediscover the hard way
 

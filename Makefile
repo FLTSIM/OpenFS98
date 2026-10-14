@@ -36,13 +36,14 @@ BIN     := bin
 FS98_DIR?= $(HOME)/.wine/drive_c/FS98
 
 # module name -> retail image base, so our build maps where the original did
+BASE_ATC    := 0x20640000
 BASE_CHAIN  := 0x20660000
 BASE_GLOBAL := 0x20720000
 BASE_NUMERIC := 0x20870000
 BASE_SLEW   := 0x208c0000
 BASE_UTIL   := 0x208e0000
 
-MODULES := CHAIN GLOBAL NUMERIC SLEW UTIL
+MODULES := ATC CHAIN GLOBAL NUMERIC SLEW UTIL
 
 # Setup renames two modules on the way from CD to install, and the game loads
 # the *installed* names.  A rebuilt FACIL.DLL copied in as FACIL.DLL would just
@@ -70,6 +71,21 @@ $(BIN)/CHAIN.DLL: src/chain/chain.c src/chain/chain.def $(BIN)/chain.res
 $(BIN)/chain.res: src/chain/chain.rc
 	@mkdir -p $(BIN)
 	$(RC) $< -O coff -o $@
+
+# ATC keeps ImportTable, Linkage and its state in one image laid out as
+# retail's .data; the exports are aliases into it.  sscanf comes from MSVCRT,
+# as retail's does.
+$(BIN)/ATC.DLL: src/atc/atc.c src/atc/atc.def src/atc/atc_data.inc $(BIN)/atc.res
+	@mkdir -p $(BIN)
+	$(CC) $(CFLAGS) -Isrc/atc $(LDFLAGS) -Wl,--image-base=$(BASE_ATC) \
+	      -o $@ src/atc/atc.c $(BIN)/atc.res src/atc/atc.def -lmsvcrt -lkernel32 -lgcc
+
+$(BIN)/atc.res: src/atc/atc.rc
+	@mkdir -p $(BIN)
+	$(RC) $< -O coff -o $@
+
+src/atc/atc_data.inc: $(ORIG)/Modules/ATC.DLL tools/gen_atc_data.py
+	@python3 tools/gen_atc_data.py $< $@
 
 $(BIN)/SLEW.DLL: src/slew/slew.c src/slew/slew.def $(BIN)/slew.res
 	@mkdir -p $(BIN)
@@ -238,6 +254,23 @@ chaindiff: $(DIFFDIR)/chaindiff.exe $(BIN)/CHAIN.DLL
 
 chaindiff-run: chaindiff
 	@cd $(DIFFDIR) && WINEDEBUG=-all timeout 600 wine chaindiff.exe $(N)
+
+# ATC, whole-module: retail and OpenFS98 driven through Linkage over random
+# scripts, against retail CHAIN, NUMERIC and UTIL and stub WINMSG/WEATHERM.
+# N=... sets the scenario count.
+$(DIFFDIR)/atcdiff.exe: tools/difftest/atcdiff.c
+	@mkdir -p $(DIFFDIR)
+	$(CC) -std=c99 -O1 -Wall -Wextra -o $@ tools/difftest/atcdiff.c
+
+atcdiff: $(DIFFDIR)/atcdiff.exe $(BIN)/ATC.DLL
+	@cp $(ORIG)/Modules/ATC.DLL     $(DIFFDIR)/ATC_retail.dll
+	@cp $(BIN)/ATC.DLL              $(DIFFDIR)/ATC_ours.dll
+	@cp $(ORIG)/Modules/CHAIN.DLL   $(DIFFDIR)/CHAIN_retail.dll
+	@cp $(ORIG)/Modules/NUMERIC.DLL $(DIFFDIR)/NUMERIC_retail.dll
+	@cp $(ORIG)/Modules/UTIL.DLL    $(DIFFDIR)/UTIL_retail.dll
+
+atcdiff-run: atcdiff
+	@cd $(DIFFDIR) && WINEDEBUG=-all timeout 900 wine atcdiff.exe $(N)
 
 numericdiff: $(DIFFDIR)/numericdiff.exe
 	@cp $(ORIG)/Modules/NUMERIC.DLL $(DIFFDIR)/NUMERIC_retail.dll

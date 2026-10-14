@@ -133,6 +133,13 @@ both signs, zero, the equal-magnitude branch that avoids a divide, the x87 tie
 cases, both sides of a 32-bit boundary. Random vectors will not find a branch
 taken once in 2^32 attempts.
 
+**Fixture data has to be able to match.** ATC's translator compares its keys
+against upper-cased text without upper-casing the keys, so the first set of
+fixture keys -- mixed case, as anyone would write them -- almost never
+matched. Thousands of translated messages went through and a break in the
+matching loop went unnoticed. Read what the comparison actually requires of
+its inputs, then count the hits, not just the calls.
+
 **Random vectors are not coverage.** They are good at the bulk and blind to the
 rare. Say which is which when reporting.
 
@@ -156,6 +163,14 @@ need the in-process harness for that reason.
 Anything running in the in-process harness runs during the sim's startup, so a
 fault there stops the sim from starting. Be defensive, and take the module back
 out with `make ofstest-remove` when not using it.
+
+**Compare the module's state, not only its effects, when the layout allows
+it.** ATC keeps ImportTable, Linkage and every byte of state in one `.data`
+section. The reimplementation keeps one image laid out the same way, with the
+exports as aliases into it. So `atcdiff` finds both images at Linkage-0x40,
+restores each to its as-loaded bytes before every run, and compares them byte
+for byte afterwards: state that has not shown up in an output yet is still
+checked.
 
 ## Editing `util_math.c`
 

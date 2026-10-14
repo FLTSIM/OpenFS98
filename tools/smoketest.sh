@@ -56,6 +56,9 @@ for f in bin/*.DLL; do
     # OFSTEST is a test fixture, not one of the sim's modules: it is installed
     # only by `make ofstest-run` and removed again afterwards.
     [ "$m" = "OFSTEST.DLL" ] && continue
+    # *_TRACE builds are instrumented variants installed only by their own
+    # targets (make util-trace), never by make install.
+    case "$m" in *_TRACE.DLL) continue ;; esac
     if cmp -s "$f" "$GAME/Modules/$m"; then
         echo "  running the OpenFS98 build of $m"
     else

@@ -49,9 +49,10 @@ the table.
 make utildiff-run        # UTIL service by service   -> 6222442 comparisons, 0 mismatches
 make utildiff-portable   # the same with x87 compiled out (the ARM path)
 make numericdiff-run     # all NUMERIC formats/ranges -> 545778 comparisons, 0 mismatches
+make chaindiff-run       # whole-module CHAIN        -> 20000 scenarios, 0 differ
 make difftest-run        # whole-module SLEW         -> 0/2000 vectors differ
 make ofstest-run         # in-process, via the host  -> passed 68, failed 0
-make smoke               # GLOBAL, NUMERIC, SLEW and UTIL installed -> 27/27, 95 gauges, PASS
+make smoke               # CHAIN, GLOBAL, NUMERIC, SLEW, UTIL installed -> 27/27, 95 gauges, PASS
 make util-trace          # which UTIL services the game calls, counted in-game
 ```
 
@@ -63,11 +64,12 @@ host process or live game state still needs `ofstest`.
 
 ## Current next slice
 
-Implement **CHAIN.DLL**, module id 4. Its preflight is already recorded in
-[docs/modules/chain.md](docs/modules/chain.md): five linkage functions, three
-public callback-list services, four stub-friendly host memory calls, and no
-actual GLOBAL access. Build a whole-module external differential harness first,
-then package and smoke-test it. NUMERIC is complete; do not resume its old plan.
+CHAIN is done. Every remaining module imports at least one unfinished one, so
+start with a **preflight of WINMSG, ATC and LANDME** -- the smallest -- to
+find which needs the fewest, simplest stubs, then implement that one the way
+CHAIN was: whole-module differential harness first (`tools/difftest/chaindiff.c`
+is the template), then install and `make smoke`. See the README's
+"What to do next".
 
 ## Two things not to rediscover the hard way
 

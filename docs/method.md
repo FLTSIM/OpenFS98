@@ -106,6 +106,16 @@ every comparison would have passed for nothing. `make ofstest-run` now puts
 retail's UTIL in for the run, and a check fails if the UTIL it is talking to
 is not at retail's Linkage address.
 
+**A deliberate break must actually be built.** Two of CHAIN's breaks first
+"passed" because the edit and the rebuild happened inside one make timestamp
+granule and the old DLL was tested. Delete the output before rebuilding a
+break, and check the harness copy changed.
+
+**An uncaught break may be reachable only from one state -- find it.** A
+CHAIN break went uncaught until the harness seeded new lists with a garbage
+depth of `0xffffffff`, the one value that makes the broken path reachable.
+Ask what state the broken line needs, then make the generator produce it.
+
 **A crash must end the run and say where.** Under wine an unhandled fault
 opens a dialog and the harness sits at 0% CPU until someone closes it.
 `utildiff` installs an unhandled-exception filter that prints the faulting

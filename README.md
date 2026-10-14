@@ -66,6 +66,7 @@ else's 1997 build, and it should read that way.
 | `make utildiff-run` | compare individual rebuilt UTIL services against retail's, service by service |
 | `make utildiff-portable` | the same with the x87 assembly compiled out, as an ARM build would use |
 | `make numericdiff-run` | compare all NUMERIC formatter/parser ids and ranged parses against retail |
+| `make chaindiff-run` | drive retail and OpenFS98 CHAIN side by side over random re-entrant callback scripts; `N=...` sets the count |
 | `make ofstest-run` | run assertions *inside* the sim, where the host is reachable; `ofstest-remove` takes the module back out |
 | `make util-trace` | boot the sim with a UTIL that counts every service call, and list what ran; `UTIL_TRACE_SECS=` for a longer session to play in |
 | `make graph` | module id and dependency table, read live from `orig/` |
@@ -152,13 +153,14 @@ emulate 80-bit arithmetic to preserve a rounding artefact. See
 | --- | --- | --- | --- |
 | `GLOBAL` | 2 | 54 | **reimplemented and running in-game** |
 | `SLEW` | 9 | 1,270 | **reimplemented and verified** — 200,000 differential vectors, byte-identical |
-| `CHAIN` | 4 | 966 | **next slice; preflight mapped** — three callback-list services — see [docs/modules/chain.md](docs/modules/chain.md) |
+| `CHAIN` | 4 | 966 | **reimplemented, verified, and running in-game** — the event bus; 20,000 whole-module differential scripts, zero differences — see [docs/modules/chain.md](docs/modules/chain.md) |
 | `NUMERIC` | 17 | 14,684 | **reimplemented, verified, and running in-game** — 545,778 differential comparisons, zero mismatches — see [docs/modules/numeric.md](docs/modules/numeric.md) |
 | `UTIL` | 20 | 11,062 | **reimplemented, verified, and running in-game** — all 47 services; 19 seen called in a hands-on session, the modal alert among them — see [docs/modules/util.md](docs/modules/util.md) |
 | `FLTSIM98.EXE` | 1 (host) | 82,016 | 194 services mapped, 21 with confirmed prototypes, 11 verified in-process, 2 implemented — see [docs/modules/host.md](docs/modules/host.md) |
 
-Retail baseline and the OpenFS98 build -- GLOBAL, NUMERIC, SLEW and UTIL all
-installed -- both reach the panel: 27/27 modules, 95 gauges, `make smoke` PASS.
+Retail baseline and the OpenFS98 build -- CHAIN, GLOBAL, NUMERIC, SLEW and
+UTIL all installed -- both reach the panel: 27/27 modules, 95 gauges,
+`make smoke` PASS.
 
 `GLOBAL.DLL`'s 4764-byte shared state block is byte-identical to retail, and the
 module id matches. The remaining differences from the retail binary are
@@ -174,13 +176,15 @@ Nothing is blocked. The in-process harness (`make ofstest-run`) reaches
 anything that calls the host, and the external one
 (`make utildiff-run`, `make difftest-run`) covers everything self-contained.
 
-The next implementation slice is **`CHAIN.DLL`**: 966 bytes, three services,
-and only four small host memory dependencies. Its binary layout, data model,
-service behavior and external differential-test plan are already mapped in
-[docs/modules/chain.md](docs/modules/chain.md). Start there; do not redo
-NUMERIC or spend the first pass selecting another module.
+With CHAIN done, every module left imports at least one that is not, so the
+next one needs some of its imports stubbed or bound to retail in its harness.
+The small candidates are **`WINMSG`** (4,416 bytes, imported by six modules),
+**`ATC`** (3,840) and **`LANDME`** (4,094). The next slice is a preflight of
+those three -- which services each calls in modules that are not done, and how
+stub-friendly those are -- then the cheapest one, CHAIN-style: a whole-module
+differential harness first, then install and smoke.
 
-After CHAIN, reasonable follow-up work is:
+Other useful work, in no particular order:
 
 1. **Reach UTIL's menu paths.** A hands-on session exercised 19 of its 47
    services in-game, but the flight, lesson and options screens -- where the
@@ -198,8 +202,7 @@ Bottom of the dependency graph first, because everything imports it and
 nothing in it imports anything interesting:
 
 1. ~~**`GLOBAL`** (54 bytes)~~ — done. Pure data: the shared state block.
-2. **`CHAIN`** (966 bytes) — next; preflight mapped, imports only the host and
-   an unused `GLOBAL` link.
+2. ~~**`CHAIN`** (966 bytes)~~ — done, verified and running in-game.
 3. ~~**`NUMERIC`** (14,684 bytes)~~ — done, verified and running in-game.
 4. ~~**`SLEW`** (1,270 bytes)~~ — done and verified against retail.
 5. ~~**`UTIL`** (11,062 bytes)~~ — done, verified and running in-game.

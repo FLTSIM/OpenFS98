@@ -47,6 +47,7 @@
 #define FS98_HOST_S_ALLOC       0x20c
 #define FS98_HOST_S_REALLOC     0x210
 #define FS98_HOST_S_FREE        0x214
+#define FS98_HOST_S_MEMMOVE     0x21c
 #define FS98_HOST_S_QSORT       0x22c   /* MSVCRT qsort, stdcall comparator */
 #define FS98_HOST_S_LOADSTRING  0x2a0
 #define FS98_HOST_S_STRCPY      0x2a8
@@ -83,6 +84,10 @@ typedef int32_t (FS98_STDCALL *fs98_host_alloc_fn)(int32_t flags, uint32_t size,
  * else is fatal.  Returns 0 on success. */
 typedef int32_t (FS98_STDCALL *fs98_host_realloc_fn)(int32_t flags, uint32_t size,
                                                      void **pp);
+
+/* +0x21c -- MSVCRT memmove(dst, src, size), stdcall; always returns 0. */
+typedef int32_t (FS98_STDCALL *fs98_host_memmove_fn)(void *dst, const void *src,
+                                                     uint32_t size);
 
 /* +0x214 -- frees `*pp` if non-null, then nulls it.  Always returns 0. */
 typedef int32_t (FS98_STDCALL *fs98_host_free_fn)(void **pp);
@@ -240,6 +245,7 @@ typedef int32_t (FS98_STDCALL *fs98_host_path_split_fn)(const char *path,
 #define FS98_HOST_DIALOG_REG(h) FS98_HOST_SLOT(h, FS98_HOST_S_DIALOG_REG, fs98_host_dialog_fn)
 #define FS98_HOST_DIALOG_TICK(h) FS98_HOST_SLOT(h, FS98_HOST_S_DIALOG_TICK, fs98_host_dialog_tick_fn)
 #define FS98_HOST_REALLOC(h)     FS98_HOST_SLOT(h, FS98_HOST_S_REALLOC,     fs98_host_realloc_fn)
+#define FS98_HOST_MEMMOVE(h)     FS98_HOST_SLOT(h, FS98_HOST_S_MEMMOVE,     fs98_host_memmove_fn)
 #define FS98_HOST_QUIT(h)        FS98_HOST_SLOT(h, FS98_HOST_S_QUIT,        fs98_host_quit_fn)
 #define FS98_HOST_STRICMP(h)     FS98_HOST_SLOT(h, FS98_HOST_S_STRICMP,     fs98_host_stricmp_fn)
 #define FS98_HOST_QSORT(h)       FS98_HOST_SLOT(h, FS98_HOST_S_QSORT,       fs98_host_qsort_fn)

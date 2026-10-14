@@ -1,14 +1,20 @@
 # CHAIN.DLL — module id 4
 
-**Next implementation slice.** CHAIN is a 966-byte callback registry: 35
-independent callback lists, selected by a numeric index. It imports the host
-and GLOBAL, although the retail code never reads the GLOBAL linkage pointer.
-The only external behavior it needs is allocation, reallocation, freeing and
-`memmove`, all through confirmed host services.
+**Reimplemented, verified, and running in-game.** CHAIN is a 966-byte
+callback registry -- the sim's event bus: 35 independent callback lists,
+selected by a numeric index. MAIN dispatches 28 different lists, CONTROLS 16,
+WINDOW 9; 19 modules register callbacks. It imports the host and GLOBAL,
+although the retail code never reads the GLOBAL linkage pointer. The only
+external behavior it needs is allocation, reallocation, freeing and `memmove`,
+all through host services.
 
-This preflight is complete enough to begin implementation. The service bodies
-still need a line-by-line transliteration and differential tests before any
-names or inferred semantics below should be treated as final.
+`src/chain/chain.c` is the transliteration and the module shell together.
+`make chaindiff-run` drives retail and the OpenFS98 build side by side over
+20,000 random scripts -- **0 differ** -- and `make smoke` passes with it
+installed beside GLOBAL, NUMERIC, SLEW and UTIL: 27/27 modules, 95 gauges.
+
+The preflight below held up. The sections after it record what the
+line-by-line reading added.
 
 ## Binary and linkage
 
@@ -116,3 +122,58 @@ Minimum cases:
 After the differential suite is clean, add CHAIN to the module build at base
 `0x20660000`, install it beside the current GLOBAL, NUMERIC, SLEW and UTIL
 builds, and require the usual 27-module/95-gauge smoke-test result.
+
+## What the transliteration added
+
+Four behaviours the preflight did not record, all reproduced:
+
+- **A list's dispatch depth is never initialised.** The first add sets count,
+  capacity and the pending flag, but not `+0x00`, so a new list starts at
+  whatever depth `malloc` left. If it is non-zero, every removal from that list
+  is deferred and the list is never compacted. If it is `0xffffffff`, a
+  dispatch increments it to zero, so removals inside a dispatch are immediate
+  and those outside are deferred -- which is the only way a list can empty while
+  removals are still pending.
+- **Removing from a list that was never added to dereferences null.** The
+  remove helper has no null check, unlike add's. Retail faults; the
+  reimplementation returns -1, and the harness never asks retail to.
+- **Removal matches entries already marked removed.** Removing the same
+  callback twice during a dispatch marks the same entry twice and returns 0
+  both times, rather than finding a later duplicate.
+- **A list that empties keeps its pending flag.** Compaction skips a list with
+  a count of zero before it clears the flag.
+
+Both move sizes are computed as `((i+1)·0x1fffffff + count) << 3`, which wraps
+to `(count − i − 1)·8`; transliterated as the latter. No caller in the retail
+modules reads any of the three services' return values -- every one overwrites
+`EAX` first -- but they are reproduced anyway, the empty-list dispatch
+returning the list pointer as retail does.
+
+## The harness
+
+`tools/difftest/chaindiff.c` loads both DLLs and drives them only through
+`Linkage`. The stub host numbers heap blocks in allocation order, fills new
+memory with a chosen byte (the uninitialised depth), and can fail the Nth
+allocation. Eight stdcall callbacks log every call and act back on the module
+under test: removing themselves (once or twice), removing or adding another,
+or dispatching a list from inside a dispatch. Compared after each script: the
+transcript of host calls, callbacks and returns, every live block's bytes, and
+deinit's frees.
+
+Two things it needed:
+
+- **An action budget.** A callback that adds to the list being dispatched is
+  called by that same dispatch, so adds can chain without end -- in retail too.
+  Callbacks act at most 40 times per run, alike on both sides.
+- **A fill of `0xff`.** With only `0x00`, `0xab` and small fills, a deliberate
+  break -- clearing the pending flag of an emptied list -- went uncaught,
+  because that state needs a depth of `0xffffffff`. With it, the break is
+  caught in 4 scenarios of 20,000. Rare, but it is now covered rather than
+  assumed.
+
+Coverage over the 20,000 scripts: 8,512 reallocs, 770 injected allocation
+failures, 14,434 memmoves, 99,520 nested dispatches, 17,690 double
+self-removals, 13,363 scenarios with a non-zero initial depth. Six
+deliberate breaks are each caught: initialising the depth, skipping removed
+entries, caching the count in dispatch, clearing the pending flag in init,
+clearing it for an emptied list, and growing by 20.

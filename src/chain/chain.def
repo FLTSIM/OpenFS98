@@ -1,0 +1,4 @@
+LIBRARY CHAIN.DLL
+EXPORTS
+    Linkage DATA
+    ImportTable DATA

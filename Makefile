@@ -36,12 +36,13 @@ BIN     := bin
 FS98_DIR?= $(HOME)/.wine/drive_c/FS98
 
 # module name -> retail image base, so our build maps where the original did
+BASE_CHAIN  := 0x20660000
 BASE_GLOBAL := 0x20720000
 BASE_NUMERIC := 0x20870000
 BASE_SLEW   := 0x208c0000
 BASE_UTIL   := 0x208e0000
 
-MODULES := GLOBAL NUMERIC SLEW UTIL
+MODULES := CHAIN GLOBAL NUMERIC SLEW UTIL
 
 # Setup renames two modules on the way from CD to install, and the game loads
 # the *installed* names.  A rebuilt FACIL.DLL copied in as FACIL.DLL would just
@@ -58,6 +59,15 @@ $(BIN)/GLOBAL.DLL: src/global/global.c src/global/global.def src/global/global_s
 	      -o $@ src/global/global.c $(BIN)/global.res src/global/global.def -lkernel32
 
 $(BIN)/global.res: src/global/global.rc
+	@mkdir -p $(BIN)
+	$(RC) $< -O coff -o $@
+
+$(BIN)/CHAIN.DLL: src/chain/chain.c src/chain/chain.def $(BIN)/chain.res
+	@mkdir -p $(BIN)
+	$(CC) $(CFLAGS) $(LDFLAGS) -Wl,--image-base=$(BASE_CHAIN) \
+	      -o $@ src/chain/chain.c $(BIN)/chain.res src/chain/chain.def -lkernel32
+
+$(BIN)/chain.res: src/chain/chain.rc
 	@mkdir -p $(BIN)
 	$(RC) $< -O coff -o $@
 
@@ -215,6 +225,19 @@ utildiff-portable: $(DIFFDIR)/utildiff_portable.exe utildiff
 
 utildiff-run: utildiff
 	@cd $(DIFFDIR) && WINEDEBUG=-all wine utildiff.exe
+
+# CHAIN, whole-module: both DLLs driven through Linkage over random scripts
+# whose callbacks re-enter the module.  N=... sets the scenario count.
+$(DIFFDIR)/chaindiff.exe: tools/difftest/chaindiff.c
+	@mkdir -p $(DIFFDIR)
+	$(CC) -std=c99 -O1 -Wall -Wextra -o $@ tools/difftest/chaindiff.c
+
+chaindiff: $(DIFFDIR)/chaindiff.exe $(BIN)/CHAIN.DLL
+	@cp $(ORIG)/Modules/CHAIN.DLL $(DIFFDIR)/CHAIN_retail.dll
+	@cp $(BIN)/CHAIN.DLL          $(DIFFDIR)/CHAIN_ours.dll
+
+chaindiff-run: chaindiff
+	@cd $(DIFFDIR) && WINEDEBUG=-all timeout 600 wine chaindiff.exe $(N)
 
 numericdiff: $(DIFFDIR)/numericdiff.exe
 	@cp $(ORIG)/Modules/NUMERIC.DLL $(DIFFDIR)/NUMERIC_retail.dll
@@ -393,4 +416,4 @@ smoke: all
 clean:
 	rm -rf $(BIN)
 
-.PHONY: all stage setup-map graph hostmap compare run trace trace-render trace-ddraw kill window-reset wm-unmanaged wm-managed vd-on vd-off mode8 mode16 ddraw-gdi ddraw-default smoke difftest difftest-run utildiff utildiff-run utildiff-portable numericdiff numericdiff-run ofstest ofstest-run ofstest-remove util-trace install revert installed-name-of clean
+.PHONY: all stage setup-map graph hostmap compare run trace trace-render trace-ddraw kill window-reset wm-unmanaged wm-managed vd-on vd-off mode8 mode16 ddraw-gdi ddraw-default smoke difftest difftest-run utildiff utildiff-run utildiff-portable numericdiff numericdiff-run chaindiff chaindiff-run ofstest ofstest-run ofstest-remove util-trace install revert installed-name-of clean

@@ -8,7 +8,18 @@ place by catching mistakes.
 ## The loop
 
 1. **Find the boundaries.** `make graph` for modules, `make hostmap` for the
-   host. Both read the retail binaries live, so neither can drift.
+   host, `python3 tools/dumplinkage.py orig/Modules/<M>.DLL` for one module's
+   service table -- it prints every slot, the size of the function behind it,
+   and a total, so the sizes in the module documents need no separate script.
+
+   **Distrust the mappers until they have been checked against a hand count.**
+   Both have been wrong in the same way: `hostmap.py` once reported zero slots
+   because it stopped at the first null, and the table has interior gaps;
+   `dumplinkage.py` capped every table at 32 entries, which silently truncated
+   UTIL's Linkage at `+0x7c` and hid 19 slots -- including all eight services
+   still to be done. A tool that under-reports looks exactly like a small
+   module. Both are fixed, but the habit is the point: if a module looks
+   surprisingly small, count the table by hand before believing it.
 2. **Check what it reaches for** before reading any code. A service that calls
    the host or another module cannot be checked by the current harness -- see
    *What cannot be tested yet* below -- so finding that out first saves
@@ -42,6 +53,19 @@ mismatch found by the harness after the "obvious" version looked right:
   Modelling it as 32-bit saturates where retail wraps.
 - **Precision.** Retail keeps chains on the x87 at 80 bits. Two of UTIL's
   conversions give different answers in 64-bit double; use `long double`.
+- **Argument counts come from the callee, never the call site.** The optimiser
+  interleaves pushes across calls: UTIL's dialog builder pushes two arguments
+  for `host +0x20c`, then calls `host +0x2b8` in the middle of doing it. Because
+  `+0x2b8` is `ret 4` it pops only its own argument and the other two survive to
+  become `+0x20c`'s. Counting pushes before the `call` said `+0x2b8` took three
+  arguments and `+0x20c` took two; both were wrong. Disassemble the target and
+  read its `ret N`.
+- **An `[esp+N]` is relative to `esp` at that instruction.** Every push moves
+  it by four, and the optimiser interleaves loads with pushes. UTIL `+0x94`
+  does `lea edx,[entry]` / `mov ecx,[esp+0x120]` / `push edx`: the load comes
+  *before* the push, so it reads the entry's size at `+0x108`, not its type at
+  `+0x104`. Read the other way it compiles, runs, and returns the right number
+  of records with the wrong field in every one.
 
 And reproduce bugs. Retail's sum of squares carries the wrong way, one of its
 clamps is off by a factor of sixteen, and a conversion treats a signed value as
@@ -59,6 +83,34 @@ while checking nothing: once because it overwrote the result it was about to
 compare, once because the game never left its menu and every screenshot was of
 the main screen. The habit that catches this is to break the implementation on
 purpose and confirm the harness goes red.
+
+**A break the harness misses is either a gap or an equivalence -- prove which.**
+UTIL's flag decoder has a search order that no input can observe, and breaking
+it changed nothing; that was shown arithmetically before it was accepted. "It
+probably doesn't matter" is not the same finding.
+
+**When the static picture says something is impossible, look at the running
+sim.** Static search found nothing registering dialogs 2 and 3, which would
+have meant UTIL's alerts always failed. One in-process probe of the live
+registry showed 65 dialogs, from modules in `English\` that the tooling had
+never scanned. A probe that reads host memory runs during startup, so bound
+every count and pointer it follows: the first version trusted a word that was
+not a list header and took the sim down.
+
+**Know which build a comparison is against.** In-process tests compare the
+reimplementation with "retail's" module by calling whatever the loader bound.
+Once OpenFS98's UTIL was installed that was the reimplementation itself, and
+every comparison would have passed for nothing. `make ofstest-run` now puts
+retail's UTIL in for the run, and a check fails if the UTIL it is talking to
+is not at retail's Linkage address.
+
+**A crash must end the run and say where.** Under wine an unhandled fault
+opens a dialog and the harness sits at 0% CPU until someone closes it.
+`utildiff` installs an unhandled-exception filter that prints the faulting
+address, which implementation was running, the vector number and its inputs,
+and exits. The first exchange-engine fault was found that way in one run:
+retail writing through a callback pointer the test generator should never have
+paired with a width handler.
 
 **Sweep exhaustively when the domain allows it.** 16-bit inputs are only 65536
 cases and run in under a second: sine, arcsine and the 16-bit square root are
@@ -85,12 +137,22 @@ but it is the only way to reach anything that calls the host.
 
 The split exists because the host cannot be loaded beside a test program: it
 has no `.reloc`, so it only works at `0x400000`, and that address is already
-committed in any wine process. Ten of UTIL's remaining services and all 194
-host services need the in-process harness for that reason.
+committed in any wine process. UTIL's dialog trio and all 194 host services
+need the in-process harness for that reason.
 
 Anything running in the in-process harness runs during the sim's startup, so a
 fault there stops the sim from starting. Be defensive, and take the module back
 out with `make ofstest-remove` when not using it.
+
+## Editing `util_math.c`
+
+The file is append-structured: one `/* ---- slot 0xNN: ... */` banner per
+service, in the order they were written rather than in slot order. Anything
+that splices by marker must use *that section's own* end, which is the next
+banner -- not a banner chosen by eye from further down. Getting that wrong
+deletes every service in between, and the compiler reports it as a handful of
+undeclared identifiers rather than as the twenty missing functions it is.
+`grep -n '^/\* ---- '` first.
 
 ## Conventions
 

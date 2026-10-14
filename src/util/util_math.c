@@ -15,6 +15,10 @@
 
 #include <stdint.h>
 
+#include <fs98/host.h>
+
+#include "util_imports.h"
+
 #include "cos_table.inc"
 #include "util_data.inc"
 
@@ -162,26 +166,16 @@ void FS98_STDCALL fs98_util_sincos(int16_t angle, int16_t *out_sin,
  * those steps is wrong in a way that matters (see QUIRK below) -- expressing
  * the "intent" would quietly correct it.
  */
-void FS98_STDCALL fs98_util_metres_to_longitude(const void *in48,
-                                                const void *pos48,
-                                                void *out48)
+/* The latitude circle's circumference, interpolated from the table.  Shared by
+ * `+0x44` and `+0x48`, which are inverses of each other and derive it the same
+ * way. */
+static uint32_t fs98_util_lat_scale(const void *pos48)
 {
-    const unsigned char *in  = (const unsigned char *)in48;
     const unsigned char *pos = (const unsigned char *)pos48;
-    unsigned char *out = (unsigned char *)out48;
-
-    /* numerator = input << 16, held as edx:eax */
-    uint32_t n_hi = *(const uint32_t *)(in + 4);
-    uint32_t n_lo = (uint32_t)(*(const uint16_t *)(in + 2)) << 16;
-
-    /* latitude as a 48-bit value, split the way the retail code splits it */
     uint32_t p_hi   = *(const uint32_t *)(pos + 4);
     uint32_t lat_lo = ((p_hi & 0xffffu) << 16) | *(const uint16_t *)(pos + 2);
     int32_t  lat_hi = (int32_t)p_hi >> 16;
-
-    uint32_t off, frac, ebx, divisor, q_hi, q_lo, res_hi;
-    uint64_t prod, num;
-    int negate = 0;
+    uint32_t off, frac;
 
     if (lat_hi < 0) {                       /* 64-bit negate of lat_hi:lat_lo */
         uint32_t old = lat_lo;
@@ -189,33 +183,45 @@ void FS98_STDCALL fs98_util_metres_to_longitude(const void *in48,
         lat_hi = (int32_t)(~(uint32_t)lat_hi + (old != 0 ? 0u : 1u));
     }
 
-    /* table byte offset, and the leftover bits as the interpolation fraction */
     off  = (uint32_t)(((uint32_t)lat_hi & ~1u) * 2u);
     frac = ((uint32_t)(lat_hi & 1) << 31) | (lat_lo >> 1);
 
     if (off + FS98_UTIL_LATTABLE + 8 > FS98_UTIL_DATA_SIZE)
-        off = 0;                            /* see note on range, below */
+        off = 0;                            /* see the note on range, below */
 
     {
         const unsigned char *t = fs98_util_data + FS98_UTIL_LATTABLE + off;
-        uint32_t cur  = *(const uint32_t *)t;
-        uint32_t next = *(const uint32_t *)(t + 4);
-        ebx  = cur - next;
-        prod = (uint64_t)frac * ebx;        /* mul: unsigned */
+        uint32_t cur   = *(const uint32_t *)t;
+        uint32_t next  = *(const uint32_t *)(t + 4);
+        uint64_t prod  = (uint64_t)frac * (cur - next);
 
         /* QUIRK.  `add eax,eax / adc edx,0` doubles only the low half and
-         * folds its carry into the high one; doubling a 64-bit value wants
-         * `adc edx,edx`.  So the high half is not doubled, and the divisor
-         * comes out fractionally different from the interpolation the code
-         * reads as if it were doing.  Reproduced -- it moves the result by a
-         * unit or two, which is visible. */
+         * folds its carry upward; doubling a 64-bit value wants `adc edx,edx`.
+         * So the high half is not doubled, and the scale comes out
+         * fractionally different from the interpolation the code reads as if
+         * it were doing.  Reproduced -- it moves results by a unit or two. */
         {
             uint32_t p_lo  = (uint32_t)prod;
-            uint32_t p_hi  = (uint32_t)(prod >> 32);
-            uint32_t carry = p_lo >> 31;
-            divisor = cur - (p_hi + carry);
+            uint32_t p_hi2 = (uint32_t)(prod >> 32);
+            return cur - (p_hi2 + (p_lo >> 31));
         }
     }
+}
+
+void FS98_STDCALL fs98_util_metres_to_longitude(const void *in48,
+                                                const void *pos48,
+                                                void *out48)
+{
+    const unsigned char *in  = (const unsigned char *)in48;
+    unsigned char *out = (unsigned char *)out48;
+
+    /* numerator = input << 16, held as edx:eax */
+    uint32_t n_hi = *(const uint32_t *)(in + 4);
+    uint32_t n_lo = (uint32_t)(*(const uint16_t *)(in + 2)) << 16;
+    uint32_t divisor = fs98_util_lat_scale(pos48);
+    uint32_t q_hi, q_lo;
+    uint64_t num;
+    int negate = 0;
 
     num = ((uint64_t)n_hi << 32) | n_lo;
     if ((int32_t)n_hi < 0) {
@@ -242,10 +248,8 @@ void FS98_STDCALL fs98_util_metres_to_longitude(const void *in48,
         q_lo = (uint32_t)(-(int32_t)q_lo);
     }
 
-    /* result = quotient >> 16, stored as a 48-bit value */
-    res_hi = q_hi;
     *(uint16_t *)(out + 2) = (uint16_t)((q_lo >> 16) | (q_hi << 16));
-    *(uint32_t *)(out + 4) = res_hi;
+    *(uint32_t *)(out + 4) = q_hi;
 }
 
 /* ---- slots 0x50, 0x54, 0x58, 0x5c: stubs ----------------------------------
@@ -973,10 +977,7 @@ double FS98_STDCALL fs98_util_frand(void)
  * supplies it; the differential harness injects a stub host with a real strlen
  * at the same offset.
  */
-typedef uint32_t (FS98_STDCALL *fs98_host_strlen_fn)(const char *);
-#define FS98_HOST_STRLEN(h) (*(fs98_host_strlen_fn *)((unsigned char *)(h) + 0x2b8))
-
-static void *fs98_util_host;
+void *fs98_util_host;      /* the harness's stand-in; see util_imports.h */
 
 void fs98_util_set_host(void *host)
 {
@@ -986,8 +987,8 @@ void fs98_util_set_host(void *host)
 const char * FS98_STDCALL fs98_util_longer_string(const char *a, const char *b)
 {
     /* measured in retail's order, second then first */
-    uint32_t lb = FS98_HOST_STRLEN(fs98_util_host)(b);
-    uint32_t la = FS98_HOST_STRLEN(fs98_util_host)(a);
+    uint32_t lb = FS98_HOST_STRLEN(FS98_UTIL_HOST)(b);
+    uint32_t la = FS98_HOST_STRLEN(FS98_UTIL_HOST)(a);
     return (la > lb) ? a : b;
 }
 
@@ -1006,17 +1007,14 @@ const char * FS98_STDCALL fs98_util_longer_string(const char *a, const char *b)
  * with a host stub returning a known sequence it becomes perfectly testable,
  * because what matters is the state left behind, and that is observable.
  */
-typedef uint32_t (FS98_STDCALL *fs98_host_ticks_fn)(void);
-#define FS98_HOST_TICKS(h) (*(fs98_host_ticks_fn *)((unsigned char *)(h) + 0x38))
-
 void FS98_STDCALL fs98_util_init(void)
 {
     uint32_t t;
 
-    fs98_util_rand_state = FS98_HOST_TICKS(fs98_util_host)();
+    fs98_util_rand_state = FS98_HOST_TICKS(FS98_UTIL_HOST)();
 
     do {
-        t = FS98_HOST_TICKS(fs98_util_host)();
+        t = FS98_HOST_TICKS(FS98_UTIL_HOST)();
     } while (t == 0);
     fs98_util_frand_state = 1.0 / (double)t;
 }
@@ -1083,4 +1081,388 @@ void FS98_STDCALL fs98_util_fixed48_to_double_signed(double *out, const void *in
         raw = (281474976710656.0 - raw) * -1.0;
 
     *out = raw * 1.52587890625e-05;
+}
+
+/* ---- slot 0x48: longitude back to metres ----------------------------------
+ *
+ * The inverse of `+0x44`: same latitude table, same interpolation, but the
+ * 48-bit input is *multiplied* by the circumference instead of divided into
+ * it, and the top 64 bits of the 96-bit product are kept.
+ *
+ * A negative input is negated going in and the result negated coming out,
+ * which is the straightforward treatment `+0x44` conspicuously does not get.
+ */
+void FS98_STDCALL fs98_util_longitude_to_metres(const void *in48,
+                                                const void *pos48,
+                                                void *out48)
+{
+    const unsigned char *in = (const unsigned char *)in48;
+    unsigned char *out = (unsigned char *)out48;
+    int32_t  hi   = *(const int32_t  *)(in + 4);
+    uint16_t lo   = *(const uint16_t *)(in + 2);
+    uint32_t v_lo = ((uint32_t)hi << 16) | lo;
+    int32_t  v_hi = hi >> 16;
+    uint32_t scale;
+    uint64_t res;
+    int negate = 0;
+
+    if (v_hi < 0) {                          /* 64-bit negate of v_hi:v_lo */
+        uint32_t old = v_lo;
+        v_lo = (uint32_t)(-(int32_t)v_lo);
+        v_hi = (int32_t)(~(uint32_t)v_hi + (old != 0 ? 0u : 1u));
+        negate = 1;
+    }
+
+    scale = fs98_util_lat_scale(pos48);
+
+    /* (value * scale) >> 32, as the high half of the low product plus the
+     * whole of the high product */
+    res = (uint64_t)(uint32_t)v_hi * scale
+        + (((uint64_t)v_lo * scale) >> 32);
+
+    if (negate)
+        res = (uint64_t)(-(int64_t)res);
+
+    *(uint16_t *)(out + 2) = (uint16_t)res;
+    *(uint32_t *)(out + 4) = (uint32_t)((res >> 16) & 0xffffffffu);
+}
+
+/* ---- slot 0x68: distance and bearing between two points -------------------
+ *
+ * Takes two three-component integer positions and a flags byte, and writes a
+ * distance and a 16-bit bearing. The flags select the work:
+ *
+ *   bit 0   compute the distance; otherwise it is written as zero
+ *   bit 1   compute the bearing; otherwise it is written as zero
+ *   bit 3   ignore the second component -- a horizontal-only measurement
+ *
+ * The bearing is `atan2` of the first and third deltas, so the second
+ * component is the vertical one. Before that call, if both deltas are small
+ * enough that their top halves sit strictly inside +-0x4000, both are doubled
+ * -- a free bit of precision for short distances, skipped when it would
+ * overflow.
+ *
+ * The distance is the square root of the sum of squares, rounded and scaled by
+ * `(root + 0x80) >> 8` -- a *logical* shift, which matters because the sum can
+ * overflow 64 bits for distant points and hand the root its top bit. Note also
+ * that this sum carries correctly, low half first: SLEW's equivalent does not,
+ * which is a reminder that the bugs are particular rather than house style.
+ */
+void FS98_STDCALL fs98_util_range_and_bearing(const int32_t *a, const int32_t *b,
+                                              int32_t flags, int32_t *out_dist,
+                                              int16_t *out_bearing)
+{
+    uint8_t f = (uint8_t)flags;
+    int32_t dx = b[0] - a[0];
+    int32_t dy = 0;
+    int32_t dz = b[2] - a[2];
+    int32_t angle = 0;
+    int32_t dist = 0;
+
+    if (!(f & 8))
+        dy = b[1] - a[1];
+
+    if (f & 2) {
+        int32_t ax = dx, az = dz;
+        if ((ax | az) != 0) {
+            int16_t hx = (int16_t)((uint32_t)ax >> 16);
+            if (hx > (int16_t)0xc000 && hx < 0x4000) {
+                int16_t hz = (int16_t)((uint32_t)az >> 16);
+                if (hz > (int16_t)0xc000 && hz < 0x4000) {
+                    ax += ax;
+                    az += az;
+                }
+            }
+        }
+        angle = fs98_util_atan2(ax, az);
+    }
+
+    if (f & 1) {
+        uint32_t sum[2];
+        int64_t acc = (int64_t)dx * dx;
+        if (!(f & 8))
+            acc += (int64_t)dy * dy;
+        acc += (int64_t)dz * dz;
+        sum[0] = (uint32_t)acc;              /* low half first, as retail */
+        sum[1] = (uint32_t)((uint64_t)acc >> 32);
+        /* `shr`, not `sar`: the scaling is a logical shift, so a root with
+         * its top bit set -- which an overflowing sum of squares can produce
+         * -- scales to a large positive rather than staying negative.  An
+         * arithmetic shift here is wrong by exactly 2^24. */
+        dist = (int32_t)((uint32_t)(fs98_util_sqrt64(sum) + 0x80) >> 8);
+    }
+
+    *out_dist    = dist;
+    *out_bearing = (int16_t)angle;
+}
+
+/* ---- slot 0x4c: rotate a vector through three angles ----------------------
+ *
+ * Takes three 16-bit angles and a three-component 16-bit vector and writes a
+ * three-component 32-bit result. `+0x2c` is called three times, for angles[1],
+ * angles[0] and angles[2] in that order, so the rotations are applied about
+ * the second axis, then the first, then the third.
+ *
+ * Every stage doubles its result, which is the Q15 normalisation showing up
+ * again, and the later stages keep bits 16..47 of a 64-bit product rather than
+ * the low 32.
+ *
+ * One asymmetry is retail's and is reproduced: the final pair of products is
+ * summed with `add edx,ebx` where the matching subtraction uses `sbb`, so the
+ * carry out of the low half is discarded in the sum but borrowed correctly in
+ * the difference.
+ */
+static int32_t fs98_util_shr16_64(int64_t p)
+{
+    return (int32_t)((uint64_t)p >> 16);          /* shld edx,eax,0x10 */
+}
+
+void FS98_STDCALL fs98_util_rotate3d(const int16_t *angles, const int16_t *vec,
+                                     int32_t *out)
+{
+    int16_t s, c;
+    int32_t X, Y, Z, W, P, R;
+
+    fs98_util_sincos(angles[1], &s, &c);
+    X = (int32_t)(((int32_t)vec[0] * c) - ((int32_t)s * vec[1])) * 2;
+    Y = (int32_t)(((int32_t)vec[1] * c) + ((int32_t)vec[0] * s)) * 2;
+
+    fs98_util_sincos(angles[0], &s, &c);
+    Z = (int32_t)(((int32_t)vec[2] * c) + fs98_util_shr16_64((int64_t)s * Y)) * 2;
+    W = (int32_t)(fs98_util_shr16_64((int64_t)c * Y) - ((int32_t)vec[2] * s)) * 2;
+
+    fs98_util_sincos(angles[2], &s, &c);
+    {   /* difference, with the borrow propagated (sbb) */
+        int64_t a = (int64_t)c * Z;
+        int64_t b = (int64_t)s * X;
+        uint32_t lo = (uint32_t)a - (uint32_t)b;
+        uint32_t bo = ((uint32_t)a < (uint32_t)b) ? 1u : 0u;
+        uint32_t hi = (uint32_t)((uint64_t)a >> 32) - (uint32_t)((uint64_t)b >> 32) - bo;
+        P = fs98_util_shr16_64((int64_t)((((uint64_t)hi << 32) | lo) << 1));
+    }
+    {   /* sum, with the carry *not* propagated -- `add edx,ebx`, not `adc` */
+        int64_t a = (int64_t)c * X;
+        int64_t b = (int64_t)s * Z;
+        uint32_t lo = (uint32_t)a + (uint32_t)b;
+        uint32_t hi = (uint32_t)((uint64_t)a >> 32) + (uint32_t)((uint64_t)b >> 32);
+        R = fs98_util_shr16_64((int64_t)((((uint64_t)hi << 32) | lo) << 1));
+    }
+
+    out[0] = R;
+    out[1] = W;
+    out[2] = P;
+}
+
+/* ---- slot 0x64: range and bearing between 48-bit positions ----------------
+ *
+ * The 48-bit counterpart of `+0x68`. It differences two three-component
+ * positions in the 24-byte vector form, converts the second component from
+ * longitude to metres through `+0x48`, and reports a distance, a bearing and a
+ * *scale*.
+ *
+ * The scale exists because the differences are 48-bit and the arithmetic that
+ * follows is 32-bit. Each component whose top sixteen bits are redundant -- all
+ * zeroes or all ones, with the two halves' signs agreeing -- is shifted up by
+ * sixteen and the shared counter, which starts at 3, is decremented. So the
+ * caller is handed three values on a common exponent plus the exponent, rather
+ * than three values it cannot compare.
+ *
+ * Flags, as in `+0x68`: bit 0 distance, bit 1 bearing, bit 3 ignore the third
+ * component. Bit 2 is new and enables the range reduction.
+ *
+ * The bearing's normalisation loop is worth a note: it tests `jle` against
+ * +0x4000 where `+0x68` tests `jge`, so where `+0x68` scales *small* values up,
+ * this one scales *large* values up and terminates only when the doubling
+ * overflows into the opposite sign. Reproduced as written; the two functions
+ * are otherwise so alike that this is unlikely to be deliberate.
+ */
+static int32_t fs98_util_reduce48(int32_t hi, uint16_t lo, int32_t flags,
+                                  uint8_t *scale)
+{
+    if (flags & 4) {
+        uint16_t top = (uint16_t)((uint32_t)hi >> 16);
+        if (top == 0 || top == 0xffff) {
+            if (!((top ^ (uint16_t)hi) & 0x8000u)) {    /* the `js` test */
+                hi = (int32_t)(((uint32_t)hi << 16) | lo);
+                (*scale)--;
+            }
+        }
+    }
+    return hi;
+}
+
+/* one component of the 24-byte vector difference, b - a, as lo16 + hi32 */
+static int32_t fs98_util_sub48(const unsigned char *b, const unsigned char *a,
+                               int off, uint16_t *lo_out)
+{
+    uint32_t t = (uint32_t)*(const uint16_t *)(b + off + 2)
+               - (uint32_t)*(const uint16_t *)(a + off + 2);
+    *lo_out = (uint16_t)t;
+    return *(const int32_t *)(b + off + 4) - *(const int32_t *)(a + off + 4)
+         - (int32_t)((t >> 16) & 1);
+}
+
+void FS98_STDCALL fs98_util_range_and_bearing48(const void *a_, const void *b_,
+                                                int32_t flags, int32_t *out_dist,
+                                                int16_t *out_bearing,
+                                                uint8_t *out_scale)
+{
+    const unsigned char *a = (const unsigned char *)a_;
+    const unsigned char *b = (const unsigned char *)b_;
+    uint8_t scale = 3;
+    uint16_t lo0, lo1, lo2, lon_lo;
+    int32_t raw0, raw2 = 0, D0, D1, D2 = 0, raw_lon;
+    int32_t angle = 0, dist = 0;
+    unsigned char dif[8], conv[8];
+
+    raw0 = fs98_util_sub48(b, a, 0x00, &lo0);
+    D0   = fs98_util_reduce48(raw0, lo0, flags, &scale);
+
+    if (!(flags & 8)) {
+        raw2 = fs98_util_sub48(b, a, 0x10, &lo2);
+        D2   = fs98_util_reduce48(raw2, lo2, flags, &scale);
+    }
+
+    /* the middle component goes through the longitude conversion first */
+    {
+        int32_t h = fs98_util_sub48(b, a, 0x08, &lo1);
+        *(uint16_t *)(dif + 2) = lo1;
+        *(int32_t  *)(dif + 4) = h;
+        fs98_util_longitude_to_metres(dif, a, conv);
+        lon_lo  = *(uint16_t *)(conv + 2);
+        raw_lon = *(int32_t  *)(conv + 4);
+        D1      = fs98_util_reduce48(raw_lon, lon_lo, flags, &scale);
+    }
+
+    if (flags & 1) {
+        uint32_t sum[2];
+        int64_t acc = (int64_t)D1 * D1;
+        if (!(flags & 8))
+            acc += (int64_t)D2 * D2;
+        acc += (int64_t)D0 * D0;
+        sum[0] = (uint32_t)acc;
+        sum[1] = (uint32_t)((uint64_t)acc >> 32);
+        dist = fs98_util_sqrt64(sum);
+    }
+
+    if (flags & 2) {
+        int32_t eb = raw0, ed = raw_lon;
+        if ((eb | ed) != 0) {
+            for (;;) {
+                int16_t si = (int16_t)((uint32_t)eb >> 16);
+                if (si <= (int16_t)0xc000 || si <= 0x4000)
+                    break;
+                si = (int16_t)((uint32_t)ed >> 16);
+                if (si <= (int16_t)0xc000 || si <= 0x4000)
+                    break;
+                eb += eb;
+                ed += ed;
+            }
+        }
+        angle = fs98_util_atan2(ed, eb);
+    }
+
+    *out_dist    = dist;
+    *out_bearing = (int16_t)angle;
+    *out_scale   = scale;
+}
+
+/* ---- slot 0x88: the marshalling engine ------------------------------------
+ *
+ * Walks an array of 16-byte descriptors, converting values out of one source
+ * stream into wherever each descriptor points:
+ *
+ *   +0x0  repeat count
+ *   +0x4  source type, 0..3
+ *   +0x8  destination type, 0..7
+ *   +0xc  destination pointer
+ *
+ * The source pointer is set once and advances across every descriptor, so the
+ * descriptors describe a packed record being unpacked into separate fields.
+ * The destination is reloaded per descriptor.
+ *
+ * Dispatch is a 4x8 matrix in .data: four sub-tables at +0x700, +0x720, +0x740
+ * and +0x760, selected by source type, indexed by destination type. The source
+ * types are a byte, a word, a dword and the 48-bit fixed-point value; the
+ * destination types are those widths again in zero- and sign-extending
+ * variants, plus a null-terminated string copy and a no-op.
+ *
+ * The no-op advances neither pointer, so a descriptor can be disabled by
+ * pointing it at a combination the matrix fills with it -- which is most of
+ * the 48-bit row.
+ *
+ * Retail indexes both tables without bounds checks. The guards here are not
+ * reproducing anything; they exist so that a bad descriptor is inert rather
+ * than undefined.
+ */
+enum {
+    FS98_MAR_NOP = 0, FS98_MAR_B2B, FS98_MAR_B2W_ZX, FS98_MAR_B2W_SX,
+    FS98_MAR_B2D_ZX, FS98_MAR_B2D_SX, FS98_MAR_B2STR,
+    FS98_MAR_W2B, FS98_MAR_W2W, FS98_MAR_W2D_ZX, FS98_MAR_W2D_SX,
+    FS98_MAR_D2B, FS98_MAR_D2W, FS98_MAR_D2D, FS98_MAR_COPY48
+};
+
+/* the dispatch matrix exactly as .data holds it */
+static const unsigned char fs98_util_marshal_matrix[4][8] = {
+    { FS98_MAR_B2B,   FS98_MAR_B2B,   FS98_MAR_B2W_ZX, FS98_MAR_B2W_SX,
+      FS98_MAR_B2D_ZX,FS98_MAR_B2D_SX,FS98_MAR_NOP,    FS98_MAR_B2STR },
+    { FS98_MAR_W2B,   FS98_MAR_W2B,   FS98_MAR_W2W,    FS98_MAR_W2W,
+      FS98_MAR_W2D_ZX,FS98_MAR_W2D_SX,FS98_MAR_NOP,    FS98_MAR_NOP },
+    { FS98_MAR_D2B,   FS98_MAR_D2B,   FS98_MAR_D2W,    FS98_MAR_D2W,
+      FS98_MAR_D2D,   FS98_MAR_D2D,   FS98_MAR_NOP,    FS98_MAR_NOP },
+    { FS98_MAR_NOP,   FS98_MAR_NOP,   FS98_MAR_NOP,    FS98_MAR_NOP,
+      FS98_MAR_NOP,   FS98_MAR_NOP,   FS98_MAR_COPY48, FS98_MAR_NOP }
+};
+
+static void fs98_util_marshal_one(unsigned op, unsigned char **dst,
+                                  const unsigned char **src)
+{
+    unsigned char *d = *dst;
+    const unsigned char *s = *src;
+
+    switch (op) {
+    case FS98_MAR_B2B:    *d = *s; d += 1; s += 1; break;
+    case FS98_MAR_B2W_ZX: *(uint16_t *)d = (uint16_t)*s;          d += 2; s += 1; break;
+    case FS98_MAR_B2W_SX: *(int16_t  *)d = (int16_t)(int8_t)*s;   d += 2; s += 1; break;
+    case FS98_MAR_B2D_ZX: *(uint32_t *)d = (uint32_t)*s;          d += 4; s += 1; break;
+    case FS98_MAR_B2D_SX: *(int32_t  *)d = (int32_t)(int8_t)*s;   d += 4; s += 1; break;
+    case FS98_MAR_B2STR:  do { *d = *s; d++; s++; } while (d[-1]); break;
+    case FS98_MAR_W2B:    *d = (unsigned char)*(const uint16_t *)s; d += 1; s += 2; break;
+    case FS98_MAR_W2W:    *(uint16_t *)d = *(const uint16_t *)s;    d += 2; s += 2; break;
+    case FS98_MAR_W2D_ZX: *(uint32_t *)d = *(const uint16_t *)s;    d += 4; s += 2; break;
+    case FS98_MAR_W2D_SX: *(int32_t  *)d = *(const int16_t  *)s;    d += 4; s += 2; break;
+    case FS98_MAR_D2B:    *d = (unsigned char)*(const uint32_t *)s; d += 1; s += 4; break;
+    case FS98_MAR_D2W:    *(uint16_t *)d = (uint16_t)*(const uint32_t *)s; d += 2; s += 4; break;
+    case FS98_MAR_D2D:    *(uint32_t *)d = *(const uint32_t *)s;    d += 4; s += 4; break;
+    case FS98_MAR_COPY48:
+        *(uint16_t *)(d + 2) = *(const uint16_t *)s;  s += 2;
+        *(uint32_t *)(d + 4) = *(const uint32_t *)s;  s += 4;  d += 8;
+        break;
+    default: break;                       /* NOP advances nothing */
+    }
+    *dst = d;
+    *src = s;
+}
+
+void FS98_STDCALL fs98_util_marshal(const void *source, const void *descriptors,
+                                    int32_t count)
+{
+    const unsigned char *src = (const unsigned char *)source;
+    const unsigned char *d   = (const unsigned char *)descriptors;
+
+    while (count != 0) {
+        uint32_t reps = *(const uint32_t *)(d + 0);
+        uint32_t styp = *(const uint32_t *)(d + 4);
+        uint32_t dtyp = *(const uint32_t *)(d + 8);
+
+        if (reps && styp < 4 && dtyp < 8) {
+            unsigned char *dst = *(unsigned char *const *)(d + 12);
+            unsigned op = fs98_util_marshal_matrix[styp][dtyp];
+            do {
+                fs98_util_marshal_one(op, &dst, &src);
+            } while (--reps);
+        }
+        d += 16;
+        count--;
+    }
 }

@@ -66,6 +66,7 @@ else's 1997 build, and it should read that way.
 | `make utildiff-run` | compare individual rebuilt UTIL services against retail's, service by service |
 | `make utildiff-portable` | the same with the x87 assembly compiled out, as an ARM build would use |
 | `make ofstest-run` | run assertions *inside* the sim, where the host is reachable; `ofstest-remove` takes the module back out |
+| `make util-trace` | boot the sim with a UTIL that counts every service call, and list what ran; `UTIL_TRACE_SECS=` for a longer session to play in |
 | `make graph` | module id and dependency table, read live from `orig/` |
 | `make hostmap` | the host's service table: location, classification, and which libraries each service calls |
 | `make compare` | section sizes of each built module vs. the retail one |
@@ -133,7 +134,7 @@ the reimplementation uses the same instructions on x86 so that "the same" is
 not a matter of opinion. There is no x87 on ARM, so a parallel path goes
 through `sqrt` and `nearbyint` instead -- and `make utildiff-portable` holds it
 to the same standard, checking it against the retail DLL with the assembly
-compiled out. It currently passes all 4,822,345 comparisons, so an ARM build
+compiled out. It currently passes all 6,222,442 comparisons, so an ARM build
 will compute the same numbers as an x86 one.
 
 One service is known not to survive the move: UTIL's double-to-fixed-point
@@ -150,11 +151,11 @@ emulate 80-bit arithmetic to preserve a rounding artefact. See
 | --- | --- | --- | --- |
 | `GLOBAL` | 2 | 54 | **reimplemented and running in-game** |
 | `SLEW` | 9 | 1,270 | **reimplemented and verified** — 200,000 differential vectors, byte-identical |
-| `UTIL` | 20 | 11,062 | 34 of 47 services done and verified — see [docs/modules/util.md](docs/modules/util.md) |
-| `FLTSIM98.EXE` | 1 (host) | 82,016 | 194 services mapped, 6 identified, 2 implemented — see [docs/modules/host.md](docs/modules/host.md) |
+| `UTIL` | 20 | 11,062 | **reimplemented, verified, and running in-game** — all 47 services; 19 seen called in a hands-on session, the modal alert among them — see [docs/modules/util.md](docs/modules/util.md) |
+| `FLTSIM98.EXE` | 1 (host) | 82,016 | 194 services mapped, 21 with confirmed prototypes, 11 verified in-process, 2 implemented — see [docs/modules/host.md](docs/modules/host.md) |
 
-Retail baseline and the OpenFS98 build both reach the main menu: 27/27 modules,
-95 gauges, `make smoke` PASS.
+Retail baseline and the OpenFS98 build -- GLOBAL, SLEW and UTIL all installed --
+both reach the panel: 27/27 modules, 95 gauges, `make smoke` PASS.
 
 `GLOBAL.DLL`'s 4764-byte shared state block is byte-identical to retail, and the
 module id matches. The remaining differences from the retail binary are
@@ -172,13 +173,17 @@ anything that calls the host, and the external one
 
 Reasonable next steps, roughly in order of value:
 
-1. UTIL's five self-contained services: `+0x48`, `+0x4c`, `+0x64`, `+0x68`,
-   `+0x88`.
-2. UTIL's allocator-backed subsystem -- `+0x8c`, `+0x90`, `+0x94`, `+0x98`,
-   `+0xa0`, `+0xa4`, `+0xa8`, `+0xac` -- as a group, since the object layout
-   only becomes clear from seeing all of them.
-3. The host's 84 services that call no platform API, which are portable logic
-   and are what a native host has to provide.
+1. **Reach UTIL's menu paths.** A hands-on session exercised 19 of its 47
+   services in-game, but the flight, lesson and options screens -- where the
+   file listings and the exchange engine run -- were not reachable under wine.
+   Worth retrying with `make util-trace UTIL_TRACE_SECS=600` whenever the sim
+   gets further, or on Windows.
+2. **`NUMERIC`** (14,684 bytes) — the only import UTIL's tests still stub, and
+   what every number in a dialog goes through. Arithmetic throughout.
+3. **The `English\` modules** — `Flights`, `Options`, `Alerts` and the rest
+   own 64 of the host's 65 dialogs; `make graph` does not see them yet.
+4. **The host's 84 services that call no platform API** — portable logic, and
+   the specification a native host has to satisfy.
 
 ### Order of work
 
@@ -189,9 +194,8 @@ nothing in it imports anything interesting:
 2. **`CHAIN`** (966) — imports only the host and `GLOBAL`.
 3. **`NUMERIC`** (14,684) and **`UTIL`** (11,062) — the utility layer.
 4. ~~**`SLEW`** (1,270)~~ — done and verified against retail.
-5. **`UTIL`** (11,062) — in progress, 34 of 47 services. Unlike SLEW it cannot
-   be installed until every slot exists, so it advances a service at a time
-   under `make utildiff-run`.
+5. ~~**`UTIL`** (11,062)~~ — done, verified, and running in-game. Unlike SLEW it cannot be installed until every slot exists,
+   so it advances a service at a time under `make utildiff-run`.
 6. Then outward: `WINMSG`, `ACONTAIN`, `ATC`, `LANDME`, `REALITY`, `BOOSTER`…
 7. `HG2D` (390 KB, the 2D rasteriser) last. It is 26% of the project on its
    own.

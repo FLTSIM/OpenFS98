@@ -39,15 +39,15 @@ address order, so they include any alignment padding.
 | `+0x3c` | `0x1428` | 124 | **atan2** — angle of a 2D vector, via a table and a quadrant fixup |
 | `+0x44` | `0x14a4` | 198 | **metres to longitude** — latitude table, 64-bit divide |
 | `+0x40` | `0x156a` | 48 | **metres32 to longitude** — sign-extends to 48 bits, calls `+0x44` |
-| `+0x48` | `0x159a` | 271 | |
-| `+0x4c` | `0x16a9` | 279 | |
+| `+0x48` | `0x159a` | 271 | **longitude to metres** — the inverse of `+0x44` |
+| `+0x4c` | `0x16a9` | 279 | **rotate3d** — vector through three Euler angles |
 | `+0x50` | `0x17c0` | 19 | **stub** — ignores the first argument, returns the second |
 | `+0x54` | `0x17d3` | 19 | **stub** — identical to `+0x50` |
 | `+0x58` | `0x17e6` | 19 | **stub** — identical to `+0x50` |
 | `+0x5c` | `0x17f9` | 7 | **stub** — saves three registers, restores them, returns |
 | `+0x60` | `0x1800` | 60 | **unpack position** — 8-byte record to the 24-byte vector |
-| `+0x64` | `0x183c` | 392 | |
-| `+0x68` | `0x19c4` | 204 | |
+| `+0x64` | `0x183c` | 392 | **range and bearing, 48-bit** — with a shared scale |
+| `+0x68` | `0x19c4` | 204 | **range and bearing** — distance and heading between two points |
 | `+0x6c` | `0x1a90` | 39 | **rand** — Lehmer generator, seed in `.data+0x0f0` |
 | `+0x70` | `0x1ab7` | 24 | **rand32** — two draws, sixteen bits of each |
 | `+0x74` | `0x1acf` | 85 | **v48 add** — three-component 48-bit vector |
@@ -57,10 +57,16 @@ address order, so they include any alignment padding.
 | `+0x84` | `0x1bf0` | 47 | **shr48** — arithmetic right shift of one 48-bit value |
 | `+0xb0` | `0x1c1f` | 25 | **double to int** — `fld`/`fistp`, so it rounds |
 | `+0xb4` | `0x1c38` | 40 | **double to int64 low** — stores a quadword, returns its low half |
-| `+0x88` | `0x1c60` | 406 | |
-| `+0x8c` | `0x1df6` | 1614 | largest in the module |
-| `+0x90` | `0x2444` | 1804 | |
-| `+0x94`…`+0xc4` | `0x2b50`… | 64–1312 | |
+| `+0x88` | `0x1c60` | 406 | **marshalling engine** — descriptor-driven type conversion |
+| `+0x8c` | `0x1df6` | 1614 | **exchange, write** -- control records into GLOBAL variables |
+| `+0x90` | `0x2444` | 1804 | **exchange, read** -- GLOBAL variables into control records |
+| `+0x94` | `0x2b50` | 496 | **list a tree** -- every match under a directory, recursively |
+| `+0xa0` | `0x2d40` | 400 | **is a directory** -- by listing its parent |
+| `+0x98` | `0x2ed0` | 928 | **catalogue** -- the flight, lesson and video pickers' list |
+| `+0x9c` | `0x3270` | 144 | **longer string** -- plus `+0x98`'s two comparators |
+| `+0xa4` | `0x3300` | 144 | **modal alert** -- returns the answer |
+| `+0xa8` | `0x3390` | 160 | **open a modeless alert** |
+| `+0xac` | `0x3430` | 1312 | **close a modeless alert** -- 64 bytes, then the text builder |
 
 Reproduce with `make graph` plus the slot dump in `tools/dumplinkage.py`.
 
@@ -248,9 +254,10 @@ x87 assembly but still runs on x86, where `long double` is still 80-bit.
 
 ## Reaching outside the module
 
-Two services call the host, and both are now done -- see
-[host.md](host.md). The host's service table was found at `0x00417ba0`:
-194 slots, of which these two matter here.
+The first two services found calling the host were these, and both are done --
+see [host.md](host.md). The host's service table was found at `0x00417ba0`:
+194 slots. The three file listings that call it far more heavily are under
+*Status* below.
 
 `+0x9c` measures two strings through the host's `strlen` at `+0x2b8` and
 returns the longer, ties going to the second argument.
@@ -273,43 +280,258 @@ caught, which is the check that makes the passing result mean something.
 
 ## Status
 
-**34 of 47 services** reimplemented and verified against retail: `0x04`, `0x08`,
-`0x18`, `0x1c`, `0x20`, `0x24`, `0x28`, `0x2c`, `0x30`, `0x34`, `0x38`, `0x3c`,
-`0x40`, `0x44`, `0x50`, `0x54`, `0x58`, `0x5c`, `0x60`, `0x6c`, `0x70`, `0x74`,
-`0x78`, `0x7c`, `0x80`, `0x84`, `0x9c`, `0xb0`, `0xb4`, `0xb8`, `0xbc`, `0xc0`,
-`0xc4`, `0xc8`. **4,822,345 comparisons, zero mismatches** — including all 65,536 sincos angles
-and all 65,536 sqrt16 inputs exhaustively, 300,000 draws from the generator
-with both seeds synchronised, shift counts past 31 where x86's masking bites,
-every x87 tie case and both sides of the 32-bit boundary, both output pointers
-null, and the zero-input short-circuit in `hypot`.
+**All 47 services** reimplemented and verified against retail.
 
-None of the five touches GLOBAL or NUMERIC, which is why they can be checked
-without binding retail's imports. A service that reaches for an import will
-need the binding `slewdiff.c` does.
+`make utildiff-run` covers 44 of them: **6,222,442 comparisons, zero
+mismatches**, including 400,000 random descriptor tables through the exchange
+engine, 100,000 alert sequences, and all 65,536 sincos angles and all 65,536 sqrt16
+inputs exhaustively, 300,000 draws from the generator with both seeds
+synchronised, shift counts past 31 where x86's masking bites, every x87 tie
+case and both sides of the 32-bit boundary, both output pointers null, and the
+zero-input short-circuit in `hypot`. They are also exactly the set SLEW
+depends on, so `slewdiff` runs with **no stubs at all**.
 
-They are also exactly the set SLEW depends on, so `slewdiff` now runs with **no
-stubs at all** — SLEW is driven over the same arithmetic FS98 drives it over,
-and stays byte-identical.
+`0x04`, `0x9c` and the three file listings call the host, so they run in-process
+under `make ofstest-run`, against retail's UTIL and through the real host.
 
-13 services remain, and they fall into two groups.
+### Installed
 
-**Five are self-contained** and testable with the external harness today:
-`+0x48` (271 bytes), `+0x4c` (279), `+0x64` (392), `+0x68` (204) and `+0x88`
-(406, which touches GLOBAL but no host service).
+UTIL is built as a module (`src/util/util.c`, `make`, `make install`) and runs
+in the sim in place of retail's. `make smoke` passes with it -- 27/27 modules,
+95 gauges, startup all the way to the panel.
 
-**Eight form a dynamic data structure subsystem** built on the host's
-allocator: `+0x8c`, `+0x90`, `+0x94`, `+0x98`, `+0xa0`, `+0xa4`, `+0xa8` and
-`+0xac`. They allocate through host `+0x20c` (`malloc`), release through
-`+0x214` (`free`), and share a cluster of host services at `+0x15c`, `+0x160`,
-`+0x164` and `+0x184`. `+0xa8` is the clearest entry point: it asks for a
-0x28-byte block and initialises its fields, so it is a constructor for whatever
-object the rest manipulate.
+The module is a shell around the four service files: an ImportTable in
+retail's order (host, GLOBAL, NUMERIC) and a Linkage table with every service
+at retail's offset and `+0x0c`, `+0x10` and `+0x14` null, `+0x14` being where
+the host would look for a dialog table. Built with `FS98_UTIL_MODULE`, the
+services read their imports straight out of ImportTable on every call, as
+retail's `mov eax, ds:<slot>` does, rather than from a pointer an init would
+have to set -- so they work for any module that calls them before UTIL's own
+init has run. The harnesses build the same files without the flag and set the
+pointers themselves (`util_imports.h`).
 
-These eight are worth reversing as a group rather than one at a time. The
-object layout only becomes clear from seeing what all of them do with it, and
-they are now reachable through the in-process harness.
+Two things were checked before installing. The image ends below WEATHERM's
+base at `0x208f0000`, so it loads where retail's did. And no module reaches
+into UTIL other than through the slot table: a scan of every access through
+UTIL's link in all 27 modules found only slot calls (two apparent exceptions
+in LANDME are a register reloaded by a `pop`).
 
-A note on the scan that produced this split: service sizes are the gap to the
-next table-referenced address, so an internal helper sitting inside that gap
-gets attributed to the service before it. That is what made `+0xc8` look as
-though it called the host -- it does not; the init helper next door does.
+**What the game actually calls.** `make util-trace` builds the module with
+each slot replaced by `incl count[i] / jmp *target[i]` -- transparent to any
+calling convention -- and boots the sim. Startup plus 90 seconds of an idle
+flight call 15 of the 47:
+
+| slot | calls | | slot | calls |
+| --- | --- | --- | --- | --- |
+| `+0x1c` sqrt32 | 2,204 | | `+0x44` metres to longitude | 9 |
+| `+0x48` longitude to metres | 807 | | `+0xb4`, `+0xb8` | 5 each |
+| `+0x18` sqrt64 | 394 | | `+0x24`, `+0x38` | 3 each |
+| `+0x2c` sincos | 61 | | `+0x04` init, `+0x40`, `+0x4c`, `+0x6c`, `+0x70` | 1 each |
+| `+0x3c` atan2 | 58 | | | |
+
+A hands-on session -- a person flying, then quitting the sim normally --
+raised that to **19 of 47**, with nothing going wrong: sincos 847,117 calls,
+longitude to metres 461,867, atan2 8,730, sqrt32 2,693, frand 2,611, angle
+from sine 873, and newly hypot, unpack position and deinit. **`+0xa4`, the modal
+alert, ran once** -- with a clean deinit after it, consistent with the exit
+confirmation going through our alert code into retail's `Alerts.DLL` and back.
+
+Still unexercised in-game: the file listings (`+0x94`, `+0x98`, `+0xa0`), the
+exchange engine (`+0x8c`, `+0x90`), the modeless alerts, `marshal`, the 48-bit
+vector helpers and a few conversions -- 28 in all. Nothing built a flight list,
+so the menus that use them were not reached under wine; they stand on the
+differential and in-process tests until they can be.
+
+### The file listings: `+0x94`, `+0x98`, `+0xa0`
+
+All three are thin layers over the host's enumeration cluster -- find-first,
+-next and -close, path join and split, a growable array, `qsort` and
+`_strcmpi`, documented in [host.md](host.md). They live in
+`src/util/util_files.c`.
+
+**`+0x94`** `(void **data, int *count, dir, pattern, ext_id)` collects
+`<dir>\<name>` for every match, then recurses into each subdirectory not
+starting with a dot. Each 0x108-byte record is a path and **the file's size**
+-- not its type. That was read wrong at first, as the extension id, because
+the size is loaded *before* an interleaved `push` and so sits four bytes
+further from the entry than it looks; the harness caught it on the first run.
+The paths have no extension and nothing records what it was, so with ext `-1`
+`a.BGL` and `a.TXT` come back as the same path.
+
+**`+0xa0`** `(path)` splits the path, lists the parent, and answers 1 if some
+directory there matches the last component case-insensitively. Two
+consequences, both reproduced because the same host does the work:
+
+- **A directory with a dot in its name is never found.** The splitter peels
+  `.BGL` off `dir.BGL` as an extension, and the comparison is against `dir`.
+- **A bare name is checked against the drive root**, not the current
+  directory: `"Modules"` rejoins to an empty parent, and an empty directory
+  string is the root (see host.md). `"Modules"` answers 0 from the game
+  directory and `".\Modules"` answers 1; `"openfs98-enum"` answers 1 when
+  `C:\openfs98-enum` exists.
+
+**`+0x98`** is nine arguments and the most interesting of the three:
+
+```
+int catalogue(stock_id, user_id, ext_id, int *count, void **data,
+              name_cb, cb100, cb500, sort)
+```
+
+MAIN calls it as `(0x9004, 0x9002, 2, ...)`. The ids are string resources --
+not in the EXE but in `ENGLISH.FLL`, which the host's string loader tries
+first -- and they resolve to **relative** directories: `0x9004` is `SITUATIO`,
+`0x9002` `PILOTS`, `0x9007` `VIDEOS`, `0x900a` `CHALLENG`. So the stock flights
+come first and the user's own second; DEMO lists `VIDEOS` and ADVDRV the
+lessons the same way.
+
+Each 0xa08-byte record holds a display name, two 0x400-byte fields the second
+and third callbacks fill, the path, and a flag that is 0 for the first
+directory and **the file's writable bit** for the second -- so a user's saved
+flight can be deleted and a stock one cannot.
+
+The two directories are not treated alike. In the first, any callback returning
+0 drops the record. In the second, return values are ignored entirely, and a
+record is dropped only if the name callback leaves the title empty. The test
+tree has a file whose callback refuses but still writes a title: it is dropped
+from `SITUATIO` and kept from `PILOTS`, on both sides.
+
+The display name is the longer of the file name and the callback's title --
+through `+0x9c`, so ties go to the title. Sort 1 orders by display name, 2 by
+path, anything else not at all. When nothing survives it returns 0 **without
+resetting its static list**, whose buffer then carries into the next call;
+reproduced, though no output shows it.
+
+`ofstest` checks all three against retail on a scratch tree built for the
+purpose -- every callback combination, all three sort orders, read-only files,
+dot-directories, directories named like files, a missing directory -- and runs
+`+0x98` over the game's real `SITUATIO` and `PILOTS` (75 flights) and `VIDEOS`
+as MAIN and DEMO call it. Each of the three, deliberately broken, is caught.
+
+One thing cannot be matched: both loops of `+0x94` share one uninitialised
+entry, and a file with an unregistered extension inherits the previous
+entry's type -- in retail's first iteration, stack garbage. The test tree keeps
+a `.BGL` in every directory so the first loop always sets it; the
+reimplementation starts it at 0.
+
+### The exchange engine: `+0x8c` and `+0x90`
+
+Filed at first with the file browser because their slots are adjacent; they
+are nothing of the kind. They move values between GLOBAL variables and an
+array of per-control records, driven by a table of 20-byte descriptors. MAIN
+calls them 85 times, FE, CONTROLS, ANALYSIS and REALITY a few more. Read as a
+dialog's data exchange -- the reading here, from the shape: `+0x90` fills the
+controls from the sim, `+0x8c` writes the edits back. The
+same table drives both. They live in `src/util/util_exchange.c`, whose header
+comment has the full descriptor and subtype layout.
+
+```
++0x8c  int  put(desc *table, uint32 n, void *records, int mode)  ret 0x10
++0x90  void get(desc *table, uint32 n, void *records)            ret 0xc
+```
+
+A descriptor names a kind (0..8), a record offset, a subtype, a variable, and
+a relocation flag. **While that flag is exactly 1 the variable is an offset
+into GLOBAL**, and the first call through the table adds GLOBAL's address and
+clears the flag -- editing the caller's table, once. A record is a status word
+and a value; for text controls the value is a `char *`.
+
+Subtypes say what the variable is: a dword, word or byte (`0x2002`..`0x200d`,
+cycling); a single bit in a byte, word or dword (`0x41100000`, `0x42200000`,
+`0x44400000` plus a one-bit mask); a string (`0x200e`); a callback (`0x2001`);
+or, for the text kinds 4 and 8, a NUMERIC format id plus `0x1000`, formatted
+by NUMERIC `+0x18` on the way out and parsed by `+0x1c` on the way in. Kinds
+5..8 are output-only -- enable state and display text, written into the
+*status* word -- and `+0x8c`'s handlers for them do nothing.
+
+Things worth knowing:
+
+- **It is hand-written assembly**, and its dispatch is one flat table in
+  `.text` (`0x1d70` and `0x23f0`): nine kind handlers then twelve width
+  handlers, indexed by kind and then by `subtype - 0x1ff9` -- the same formula
+  for every kind. So kinds 9..20 work, as width handlers called directly; a
+  subtype of `0x1ffd`..`0x2000` lands on a kind handler; one of
+  `0x1ff9`..`0x1ffc` re-enters its own kind handler until the stack runs out;
+  and anything off either end jumps into code. The first two are reproduced;
+  the two that crash retail are inert.
+- **`mode` means "validate" at 1, and only some handlers listen.** The width
+  handlers skip their store when mode is exactly 1. The NUMERIC parse writes
+  into a scratch buffer for any non-zero mode. The string and flag handlers
+  always write. Callbacks are told 2 to validate and 1 to commit, the opposite
+  numbering; on a read they are told 0.
+- **`+0x8c` returns 1 if any handler objected** -- a parse error or a callback's
+  non-zero return -- which is how a dialog refuses a bad entry.
+- **`+0x90`'s return is garbage** on some paths -- a bit index, a kind number
+  -- and every one of its 48 call sites in the retail modules ignores it, so the
+  reimplementation returns nothing.
+- Around its two NUMERIC calls and its `strcpy`, retail realigns the stack with
+  a trick: it plants the bytes `07 06 05 04` below `esp`, rounds `esp` down,
+  and reads back the right one as the adjustment to undo. Behaviourally just a
+  call; noted because it looks alarming in a listing.
+
+`utildiff` binds retail's three imports to stubs: the host for `strcpy`, a fake
+GLOBAL block, and a NUMERIC whose `+0x18` and `+0x1c` log their arguments. Both
+sides run 400,000 random tables against one arena, restored between them, and
+the comparison covers the whole arena, the return value and the sequence of
+callback and NUMERIC calls. Deliberately broken five ways -- the scratch-buffer
+condition, the relocation test, kinds past 8, the byte-flag width limit, and
+the flag handler's test against exactly 1 -- it goes red each time.
+
+A sixth break was **not** caught, and that was correct. Letting an
+out-of-range single bit fall through to the next flag width cannot change
+anything: for a subtype to be a single bit above two bases at once, the
+difference between those bases would have to be a difference of two powers of
+two, and `0x01100000` and `0x02200000` are not. The search order is therefore
+unobservable.
+
+### The alerts: `+0xa4`, `+0xa8`, `+0xac`
+
+First read as a general dialog framework, which is what the host service they
+call looked like from here. They are narrower: the dialogs they open are ids 2
+and 3 in the host's dialog registry, and both belong to `English\Alerts.DLL`.
+So this is the game's message box -- see *The dialog engine* in
+[host.md](host.md), which also corrects the "mode 2 / mode 3" reading.
+`src/util/util_alert.c`.
+
+```
++0xa4  int  alert(flags, tag, p1, p2, p3, p4, p5, lines)            dialog 2, modal
++0xa8  void alert_open(void **out, tag, p1, p2, p3, p4, p5, lines)  dialog 3, modeless
++0xac  void alert_close(void **pp)
+```
+
+**The text** is built by an internal function at `.text+0x2480` from up to five
+pieces, each a string-resource id below 0x10000 or a `char *` at or above it,
+joined by spaces -- or newlines when `lines` is set. Loaded strings pass through
+a 256-byte buffer with a limit of 255, so 254 characters survive. The block is
+grown as it goes, and in a specific order: the separator is appended *before*
+the realloc, into the four bytes of slack the last allocation left, and the
+new size is measured with it included. The first piece is mandatory: if it is
+zero the block pointer is never initialised and the next append writes through
+stack garbage.
+
+**The modal descriptor** is 24 bytes on the stack -- zero, a do-nothing handler,
+flags, the answer, the tag, the text. **The answer field is never initialised**:
+the dialog writes it, and an alert that closes without answering returns
+whatever was on the stack. With flag 8 set, an answer of exactly 8 calls host
+`+0x24`, which sends the main window `WM_CLOSE`: the alert's "exit".
+
+**The modeless object** is 0x28 bytes from the host allocator, stored through
+`out` before it is filled. The layout is not the modal one: the tag moves to
+`+0x08`, `+0x0c` is a live flag set to 1, and the text is at `+0x24`, with
+sixteen bytes in between left as malloc returned them. Closing clears the live
+flag and calls host `+0x114`, which sends every modeless dialog `WM_USER+100`
+synchronously -- so the alert sees the flag down and destroys itself -- and only
+then frees the text and the object.
+
+`utildiff` checks them with a host stub that numbers heap blocks in allocation
+order, so the transcript of allocations, reallocs, frees, string loads, dialog
+calls and quits can be compared exactly, along with the descriptor each dialog
+call received, the text, and the answer. 100,000 sequences of a modal alert
+then an open/close pair, every piece shape, both separators, answers including
+the quit case. Broken five ways -- the separator after the realloc, the
+separators swapped, quitting without flag 8, the object opened dead, and a
+256-byte load limit -- it goes red each time.
+
+The first run did not pass, and the fault was the stub's: `malloc` reuses a
+freed block's address, so looking blocks up by address found a dead one. Freed
+blocks now leave the table.
+

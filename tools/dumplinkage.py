@@ -38,11 +38,69 @@ class PE:
 p=sys.argv[1]; pe=PE(p)
 exp=pe.exports()
 print(f"--- {p}  base=0x{pe.base:08x} exports={exp}")
-for name,rva in exp.items():
+
+# Image extent, so a dword can be tested for "is this a pointer into us?".
+def is_va(v):
+    return v>pe.base and pe.off(v-pe.base) is not None
+
+# Code extent, for deciding which slots are functions.
+code_lo=code_hi=None
+for n,vsz,va,rsz,ro in pe.secs:
+    if n=='.text':
+        code_lo=pe.base+va; code_hi=pe.base+va+max(vsz,rsz)
+
+# Tables are NOT a fixed 32 entries.  UTIL's Linkage runs to +0xc8; capping it
+# at 32 hid 19 slots, including every service still to be done.  Walk instead:
+# slot 0 is the module id, then accept nulls (the table has interior gaps) and
+# in-image pointers, and stop at the first dword that is neither.
+def extent(o, limit, kind):
+    n=0
+    while n<limit:
+        v=u32(pe.b,o+n*4)
+        if kind=='pairs':
+            if n%2==0 and v==0 and u32(pe.b,o+(n+1)*4)==0: break
+        elif n>0 and v!=0 and not is_va(v):
+            break
+        n+=1
+    if kind!='pairs':
+        # Trim trailing nulls -- but never for pairs, where a zero *link* is the
+        # legitimate other half of an entry the host has yet to fill in.
+        while n>1 and u32(pe.b,o+(n-1)*4)==0:
+            n-=1
+    return n
+
+byrva=sorted(exp.items(), key=lambda kv: kv[1])
+for i,(name,rva) in enumerate(byrva):
     o=pe.off(rva)
-    print(f"\n== {name} @ RVA 0x{rva:x} (file 0x{o:x})")
-    n=int(sys.argv[2]) if len(sys.argv)>2 else 32
-    for i in range(n):
-        v=u32(pe.b,o+i*4)
-        sref=pe.cstr(v) if v>pe.base else None
-        print(f"  +{i*4:04x}: 0x{v:08x}" + (f"   -> \"{sref}\"" if sref else ""))
+    nxt=byrva[i+1][1] if i+1<len(byrva) else None
+    limit=(nxt-rva)//4 if nxt else 4096           # never read into the next export
+    if len(sys.argv)>2:
+        n=int(sys.argv[2])
+    else:
+        n=extent(o, limit, 'pairs' if name=='ImportTable' else 'slots')
+    print(f"\n== {name} @ RVA 0x{rva:x} (file 0x{o:x})  {n} entries")
+
+    vals=[u32(pe.b,o+j*4) for j in range(n)]
+    # For a service table, a slot's code size is the gap to the next function
+    # start -- which is what the module docs quote, and is an upper bound
+    # because internal helpers fall inside it.
+    starts=sorted({v for v in vals if code_lo and code_lo<=v<code_hi})
+    def size_of(v):
+        later=[x for x in starts if x>v]
+        return (later[0] if later else code_hi)-v
+
+    for j,v in enumerate(vals):
+        sref=pe.cstr(v) if is_va(v) else None
+        line=f"  +{j*4:04x}: 0x{v:08x}"
+        if j==0 and name=='Linkage':
+            line+=f"   module id {v}"
+        elif name=='ImportTable':
+            line+=("   wants module id %d"%v) if j%2==0 else "   (link, filled in by the host)"
+        elif sref:
+            line+=f'   -> "{sref}"'
+        elif v in starts:
+            line+=f"   {size_of(v):5d} bytes"
+        print(line)
+
+    if starts:
+        print(f"  -- {len(starts)} distinct functions, {sum(size_of(v) for v in starts)} bytes of code")

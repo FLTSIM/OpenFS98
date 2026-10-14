@@ -1,5 +1,10 @@
 # Running FS98 under wine
 
+> **Parked, deliberately.** Everything below reproduces with the *retail*
+> modules, so none of it is a decompilation defect, and the project is heading
+> for native renderers that make it moot. Kept as a record of what was tried so
+> it is not retried. Do not spend time here unless asked.
+
 ## The 3D view renders one frame and then stops
 
 **Symptom.** A flight loads and the panel is live — instruments respond, the

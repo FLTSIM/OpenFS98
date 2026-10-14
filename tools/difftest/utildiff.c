@@ -15,6 +15,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <stdarg.h>
 
 #define FS98_STDCALL __attribute__((stdcall))
 int32_t FS98_STDCALL fs98_util_sqrt32(uint32_t v);
@@ -51,6 +52,14 @@ void     FS98_STDCALL fs98_util_fixed48_to_double(double *, const void *);
 void     FS98_STDCALL fs98_util_double_to_fixed48(const double *, void *);
 void     FS98_STDCALL fs98_util_double_to_fixed48_signed(const double *, void *);
 void     FS98_STDCALL fs98_util_fixed48_to_double_signed(double *, const void *);
+void     FS98_STDCALL fs98_util_range_and_bearing(const int32_t *, const int32_t *,
+                                                  int32_t, int32_t *, int16_t *);
+void     FS98_STDCALL fs98_util_longitude_to_metres(const void *, const void *, void *);
+void     FS98_STDCALL fs98_util_rotate3d(const int16_t *, const int16_t *, int32_t *);
+void     FS98_STDCALL fs98_util_range_and_bearing48(const void *, const void *,
+                                                    int32_t, int32_t *, int16_t *,
+                                                    uint8_t *);
+void     FS98_STDCALL fs98_util_marshal(const void *, const void *, int32_t);
 double   FS98_STDCALL fs98_util_frand(void);
 void                  fs98_util_frand_seed(double);
 const char * FS98_STDCALL fs98_util_longer_string(const char *, const char *);
@@ -59,6 +68,15 @@ uint32_t              fs98_util_rand_get(void);
 double                fs98_util_frand_get(void);
 void     FS98_STDCALL fs98_util_init(void);
 uint32_t FS98_STDCALL fs98_util_rand(void);
+int32_t  FS98_STDCALL fs98_util_exchange_put(void *, uint32_t, void *, int32_t);
+void     FS98_STDCALL fs98_util_exchange_get(void *, uint32_t, void *);
+void                  fs98_util_set_global(void *);
+void                  fs98_util_set_numeric(void *);
+int32_t  FS98_STDCALL fs98_util_alert_modal(uint32_t, uint32_t, uint32_t, uint32_t,
+                                            uint32_t, uint32_t, uint32_t, int32_t);
+void     FS98_STDCALL fs98_util_alert_open(void **, uint32_t, uint32_t, uint32_t,
+                                           uint32_t, uint32_t, uint32_t, int32_t);
+void     FS98_STDCALL fs98_util_alert_close(void **);
 
 typedef int32_t (FS98_STDCALL *fn_sqrt32)(uint32_t);
 typedef int32_t (FS98_STDCALL *fn_sqrt64)(const void *);
@@ -113,6 +131,200 @@ static uint32_t FS98_STDCALL stub_strlen(const char *s)
     return n;
 }
 
+/* ---- slots 0x8c / 0x90: an arena, and stubs that log what they are asked --
+ *
+ * Both sides run against the SAME arena, restored between them, so every
+ * pointer the engine stores or passes is identical and the bytes can be
+ * compared directly.  The fake GLOBAL block is the arena's start, so a
+ * relocated descriptor points into it. */
+#define X_GLOBAL   0
+#define X_DESC     256
+#define X_RECS     640
+#define X_POOL     1024             /* 32 strings of 32 bytes */
+#define X_ABS      2048             /* variables addressed absolutely */
+#define X_CBOUT    3072             /* where the callback leaves its marks */
+#define X_ARENA    4096
+
+#define X_BITS8_T  0x41100000u
+#define X_BITS16_T 0x42200000u
+#define X_BITS32_T 0x44400000u
+
+static unsigned char x_arena[X_ARENA], x_init[X_ARENA];
+static unsigned char numeric_blob[0x40];
+
+struct x_call { uint32_t what, a, b, c; };
+static struct x_call x_log[64];
+static unsigned x_nlog;
+
+/* a pointer inside the arena as its offset; anything else -- retail's and
+ * our own scratch buffers -- as one marker */
+static uint32_t x_norm(const void *p)
+{
+    const unsigned char *q = p;
+    if (q >= x_arena && q < x_arena + X_ARENA)
+        return (uint32_t)(q - x_arena);
+    return 0xffffffffu;
+}
+
+static void x_note(uint32_t what, uint32_t a, uint32_t b, uint32_t c)
+{
+    if (x_nlog < 64) {
+        x_log[x_nlog].what = what; x_log[x_nlog].a = a;
+        x_log[x_nlog].b = b; x_log[x_nlog].c = c;
+    }
+    x_nlog++;
+}
+
+static int32_t FS98_STDCALL stub_xcb(uint32_t kind, void *base, int32_t mode)
+{
+    x_note(1, kind, x_norm(base), (uint32_t)mode);
+    x_arena[X_CBOUT + (kind & 63)] += (unsigned char)(mode + 1);
+    return ((kind + (uint32_t)mode) % 3 == 0) ? 0 : (int32_t)(kind ^ (uint32_t)mode);
+}
+
+static int32_t FS98_STDCALL stub_parse(const char *text, uint32_t fmt, void *out)
+{
+    uint32_t h = fmt * 2654435761u;
+    const char *t = text;
+    while (*t) h = h * 31 + (unsigned char)*t++;
+    x_note(2, x_norm(text), fmt, x_norm(out));
+    *(uint32_t *)out = h;
+    return (fmt & 3) ? (int32_t)(fmt & 7) : 0;
+}
+
+static char * FS98_STDCALL stub_format(const void *value, uint32_t fmt, char *out)
+{
+    static const char hex[] = "0123456789abcdef";
+    unsigned char v = *(const unsigned char *)value;
+    x_note(3, x_norm(value), fmt, x_norm(out));
+    out[0] = 'F'; out[1] = hex[fmt & 15]; out[2] = hex[v >> 4]; out[3] = hex[v & 15];
+    out[4] = 0;
+    return out;
+}
+
+static char * FS98_STDCALL stub_strcpy(char *d, const char *s)
+{
+    char *r = d;
+    while ((*d++ = *s++) != 0) ;
+    return r;
+}
+
+/* ---- slots 0xa4 / 0xa8 / 0xac: a host that records what the alerts do ----
+ *
+ * Heap blocks are numbered in allocation order, so "freed block 3" can be
+ * compared across the two sides even though the addresses differ.  The dialog
+ * stub snapshots the descriptor it is handed -- with the text pointer replaced
+ * by the text, and the handler checked separately -- and answers modal alerts
+ * from a script. */
+static uint32_t rng(void);
+#define A_MAXBLK 64
+static void *a_blk[A_MAXBLK];
+static unsigned a_nblk;
+static char a_log[8192];
+static unsigned a_len;
+static int32_t a_answer;
+static void *a_handler_seen;
+
+static void a_put(const char *fmt, ...)
+{
+    va_list ap;
+    va_start(ap, fmt);
+    if (a_len < sizeof a_log)
+        a_len += (unsigned)vsnprintf(a_log + a_len, sizeof a_log - a_len, fmt, ap);
+    va_end(ap);
+}
+
+static int a_index(const void *p)
+{
+    unsigned i;
+    for (i = 0; i < a_nblk; i++) if (a_blk[i] == p) return (int)i;
+    return -1;
+}
+
+static int32_t FS98_STDCALL a_alloc(int32_t fl, uint32_t size, void **out, int32_t tag)
+{
+    unsigned char *p = malloc(size);
+    memset(p, 0xab, size);                  /* "uninitialised", alike on both sides */
+    a_put("alloc#%u(%d,%u,tag %d) ", a_nblk, fl, size, tag);
+    if (a_nblk < A_MAXBLK) a_blk[a_nblk++] = p;
+    *out = p;
+    return 0;
+}
+
+static int32_t FS98_STDCALL a_realloc(int32_t fl, uint32_t size, void **pp)
+{
+    int i = a_index(*pp);
+    void *q = realloc(*pp, size);
+    a_put("realloc#%d(%d,%u) ", i, fl, size);
+    if (i >= 0) a_blk[i] = q;
+    *pp = q;
+    return 0;
+}
+
+static int32_t FS98_STDCALL a_free(void **pp)
+{
+    int i = *pp ? a_index(*pp) : -2;
+    a_put("free#%d ", i);
+    if (i >= 0) a_blk[i] = NULL;            /* malloc will hand the address out again */
+    free(*pp);
+    *pp = NULL;
+    return 0;
+}
+
+static int32_t FS98_STDCALL a_loadstring(uint32_t id, char *buf, int32_t len)
+{
+    /* a length that depends on the id, long enough to be truncated at 254 */
+    int32_t n = (int32_t)((id * 7) % 300), k;
+    if (n > len - 1) n = len - 1;
+    for (k = 0; k < n; k++) buf[k] = (char)('A' + (id + (uint32_t)k) % 26);
+    buf[n] = 0;
+    a_put("load(%u,%d) ", id, len);
+    return n;
+}
+
+static char * FS98_STDCALL a_strcat(char *d, const char *s)
+{
+    strcat(d, s);
+    return d;
+}
+
+static int32_t FS98_STDCALL a_dialog(uint32_t id, void *param)
+{
+    uint32_t *w = param;
+    const char *text = (const char *)(uintptr_t)(id == 2 ? w[5] : w[9]);
+    a_handler_seen = (void *)(uintptr_t)w[1];
+    if (id == 2)
+        a_put("dialog(2: %#x,%#x,%#x | %s) ", w[0], w[2], w[4], text);
+    else
+        a_put("dialog(%u: %#x,%#x,%#x,%#x,%08x%08x%08x%08x | %s) ", id, w[0], w[2], w[3],
+              w[4], w[5], w[6], w[7], w[8], text);
+    if (id == 2) w[3] = (uint32_t)a_answer;
+    return 0;
+}
+
+static void FS98_STDCALL a_tick(void)
+{
+    a_put("tick ");
+}
+
+static int32_t FS98_STDCALL a_quit(void)
+{
+    a_put("quit ");
+    return 1;
+}
+
+static uint32_t a_piece(char *pool, unsigned slot)
+{
+    unsigned r = rng() % 10, n, k;
+    char *s = pool + slot * 400;
+    if (r < 2) return 0;
+    if (r < 6) return 1 + rng() % 0xffff;   /* a string-resource id */
+    n = rng() % 390;                        /* a char *, sometimes long */
+    for (k = 0; k < n; k++) s[k] = (char)('a' + rng() % 26);
+    s[n] = 0;
+    return (uint32_t)(uintptr_t)s;
+}
+
 /* 48-bit value: 16-bit low half at +2, 32-bit high half at +4 */
 static void put48(unsigned char *p, uint16_t lo, int32_t hi)
 {
@@ -124,6 +336,31 @@ static void *slot(HMODULE h, unsigned off)
 {
     unsigned char *link = (unsigned char *)GetProcAddress(h, "Linkage");
     return link ? *(void **)(link + off) : NULL;
+}
+
+/* A fault in either implementation must say where it happened and end the
+ * run, not leave wine's crash dialog waiting for someone to close it. */
+static const char *fault_where = "startup";
+static const uint32_t *fault_descs;
+static unsigned fault_vector;
+
+static LONG WINAPI on_fault(EXCEPTION_POINTERS *e)
+{
+    printf("\nFAULT %#lx at %p, reading/writing %p, in %s vector %u\n",
+           e->ExceptionRecord->ExceptionCode, e->ExceptionRecord->ExceptionAddress,
+           e->ExceptionRecord->NumberParameters > 1
+               ? (void *)e->ExceptionRecord->ExceptionInformation[1] : NULL,
+           fault_where, fault_vector);
+    if (fault_descs) {
+        unsigned i;
+        for (i = 0; i < 8; i++)
+            printf("   desc %u: kind %#x off %#x sub %#x var %#x reloc %u\n", i,
+                   fault_descs[5*i], fault_descs[5*i+1], fault_descs[5*i+2],
+                   fault_descs[5*i+3], fault_descs[5*i+4]);
+    }
+    fflush(stdout);
+    ExitProcess(3);
+    return EXCEPTION_CONTINUE_SEARCH;
 }
 
 static uint32_t rng_state = 0x9e3779b9u;
@@ -142,6 +379,7 @@ int main(void)
     fn_sincos r_sincos; fn_m2lon r_m2lon;
     unsigned i, bad = 0, checked = 0;
 
+    SetUnhandledExceptionFilter(on_fault);
     if (!h) { printf("cannot load UTIL_retail.dll (%lu)\n", GetLastError()); return 2; }
     r_sqrt32 = (fn_sqrt32)slot(h, 0x1c);
     r_sqrt64 = (fn_sqrt64)slot(h, 0x18);
@@ -745,6 +983,365 @@ int main(void)
                 checked++;
                 if (back != v && bad++ < 8)
                     printf("round trip %.17g -> %.17g\n", v, back);
+            }
+        }
+    }
+
+    /* slot 0x68 -- distance and bearing.  All sixteen flag combinations are
+     * swept, since three separate bits change what the function computes, and
+     * the precision-doubling branch is reached by including small deltas. */
+    {
+        typedef void (FS98_STDCALL *fn_rb)(const int32_t *, const int32_t *,
+                                           int32_t, int32_t *, int16_t *);
+        fn_rb r68 = (fn_rb)slot(h, 0x68);
+        for (i = 0; i < 200000; i++) {
+            int32_t A[3], B[3], da = 0, db = 0;
+            int16_t ba = 0, bb = 0;
+            int32_t fl = (int32_t)(i & 0xf);
+            unsigned k;
+            for (k = 0; k < 3; k++) {
+                A[k] = (int32_t)rng() >> (rng() % 24);
+                B[k] = (int32_t)rng() >> (rng() % 24);
+            }
+            if (i % 5 == 0) { B[0] = A[0]; B[2] = A[2]; }   /* the zero-delta path */
+            if (i % 7 == 0) { B[0] = A[0] + 3; B[2] = A[2] - 5; } /* small: doubling */
+            r68(A, B, fl, &da, &ba);
+            fs98_util_range_and_bearing(A, B, fl, &db, &bb);
+            checked++;
+            if ((da != db || ba != bb) && bad++ < 8)
+                printf("range_bearing flags %x: retail %d/%d openfs98 %d/%d\n",
+                       fl, da, ba, db, bb);
+        }
+    }
+
+    /* slot 0x48 -- longitude back to metres, the inverse of +0x44.  Same
+     * latitude range limit, since it shares the table. */
+    {
+        fn_m2lon r48 = (fn_m2lon)slot(h, 0x48);
+        for (i = 0; i < 300000; i++) {
+            unsigned char in[8], pos[8], ra[8], ob[8];
+            int32_t lat_hi = (int32_t)(rng() % 0x9c) - 0x4e;
+            int32_t v_hi = (int32_t)(rng() & 0x01ffffffu) - 0x01000000;
+            if (i % 6 == 0) v_hi = -v_hi;
+            if (i < 40) v_hi = (int32_t)i - 20;
+            memset(in, 0, 8); memset(pos, 0, 8);
+            memset(ra, 0xa7, 8); memset(ob, 0xa7, 8);
+            put48(in, (uint16_t)rng(), v_hi);
+            put48(pos, (uint16_t)rng(), lat_hi);
+            r48(in, pos, ra);
+            fs98_util_longitude_to_metres(in, pos, ob);
+            checked++;
+            if (memcmp(ra, ob, 8) && bad++ < 8)
+                printf("lon2m(%04x:%08x lat %d): retail %04x:%08x openfs98 %04x:%08x\n",
+                       *(uint16_t *)(in + 2), v_hi, lat_hi,
+                       *(uint16_t *)(ra + 2), *(uint32_t *)(ra + 4),
+                       *(uint16_t *)(ob + 2), *(uint32_t *)(ob + 4));
+        }
+    }
+
+    /* slot 0x4c -- three-angle rotation.  Includes the axis-aligned angles,
+     * where the sine or cosine is exactly zero or full scale. */
+    {
+        typedef void (FS98_STDCALL *fn_rot3)(const int16_t *, const int16_t *, int32_t *);
+        fn_rot3 r4c = (fn_rot3)slot(h, 0x4c);
+        static const int16_t axis[] = { 0, 0x4000, (int16_t)0x8000, (int16_t)0xc000 };
+        unsigned k;
+        for (k = 0; k < 64; k++) {
+            int16_t ang[3], v[3];
+            int32_t a[3] = {0,0,0}, bb[3] = {0,0,0};
+            ang[0] = axis[k & 3]; ang[1] = axis[(k >> 2) & 3]; ang[2] = axis[(k >> 4) & 3];
+            v[0] = 1000; v[1] = -2000; v[2] = 3000;
+            r4c(ang, v, a); fs98_util_rotate3d(ang, v, bb);
+            checked++;
+            if (memcmp(a, bb, sizeof a) && bad++ < 8)
+                printf("rot3d axis %u: retail %d,%d,%d openfs98 %d,%d,%d\n",
+                       k, a[0], a[1], a[2], bb[0], bb[1], bb[2]);
+        }
+        for (i = 0; i < 200000; i++) {
+            int16_t ang[3], v[3];
+            int32_t a[3] = {0,0,0}, bb[3] = {0,0,0};
+            unsigned j;
+            for (j = 0; j < 3; j++) { ang[j] = (int16_t)rng(); v[j] = (int16_t)rng(); }
+            r4c(ang, v, a); fs98_util_rotate3d(ang, v, bb);
+            checked++;
+            if (memcmp(a, bb, sizeof a) && bad++ < 8)
+                printf("rot3d: retail %d,%d,%d openfs98 %d,%d,%d\n",
+                       a[0], a[1], a[2], bb[0], bb[1], bb[2]);
+        }
+    }
+
+    /* slot 0x64 -- range and bearing on 48-bit positions.  All sixteen flag
+     * combinations, since four bits change what it computes, and latitudes are
+     * kept inside the table range because it calls +0x48. */
+    {
+        typedef void (FS98_STDCALL *fn_rb48)(const void *, const void *, int32_t,
+                                             int32_t *, int16_t *, uint8_t *);
+        fn_rb48 r64 = (fn_rb48)slot(h, 0x64);
+        for (i = 0; i < 200000; i++) {
+            unsigned char A[24], B[24];
+            int32_t da = 0, db = 0; int16_t ba = 0, bb = 0;
+            uint8_t sa = 0xee, sb = 0xee;
+            int32_t fl = (int32_t)(i & 0xf);
+            unsigned k;
+            memset(A, 0, 24); memset(B, 0, 24);
+            for (k = 0; k < 3; k++) {
+                int32_t hi = (int32_t)(rng() % 0x9c) - 0x4e;
+                put48(A + k * 8, (uint16_t)rng(), hi);
+                put48(B + k * 8, (uint16_t)rng(),
+                      hi + (int32_t)(rng() % 7) - 3);
+            }
+            if (i % 9 == 0) memcpy(B, A, 24);        /* the zero-difference path */
+            r64(A, B, fl, &da, &ba, &sa);
+            fs98_util_range_and_bearing48(A, B, fl, &db, &bb, &sb);
+            checked++;
+            if ((da != db || ba != bb || sa != sb) && bad++ < 8)
+                printf("rb48 flags %x: retail %d/%d/%u openfs98 %d/%d/%u\n",
+                       fl, da, ba, sa, db, bb, sb);
+        }
+    }
+
+    /* slot 0x88 -- the marshalling engine.  Every one of the 32 type pairs is
+     * exercised, plus repeat counts, a zero count, and the string copy, which
+     * is the only handler whose length depends on the data. */
+    {
+        typedef void (FS98_STDCALL *fn_mar)(const void *, const void *, int32_t);
+        fn_mar r88 = (fn_mar)slot(h, 0x88);
+        unsigned st, dt;
+        for (st = 0; st < 4; st++)
+            for (dt = 0; dt < 8; dt++) {
+                unsigned char srcbuf[64], da[128], db[128];
+                uint32_t desc[8];
+                unsigned k;
+                for (k = 0; k < 64; k++) srcbuf[k] = (unsigned char)(rng() | 1);
+                /* the string handler copies until a NUL, so the source needs
+                 * one per repeat or it runs off the end */
+                if (dt == 7) for (k = 5; k < 64; k += 6) srcbuf[k] = 0;
+                memset(da, 0xcc, sizeof da); memset(db, 0xcc, sizeof db);
+
+                desc[0] = 2; desc[1] = st; desc[2] = dt; desc[3] = 0;
+                desc[4] = 1; desc[5] = st; desc[6] = dt; desc[7] = 0;
+
+                *(unsigned char **)&desc[3] = da;
+                *(unsigned char **)&desc[7] = da + 48;
+                r88(srcbuf, desc, 2);
+                *(unsigned char **)&desc[3] = db;
+                *(unsigned char **)&desc[7] = db + 48;
+                fs98_util_marshal(srcbuf, desc, 2);
+                checked++;
+                if (memcmp(da, db, sizeof da) && bad++ < 8)
+                    printf("marshal src %u dst %u differs\n", st, dt);
+            }
+        {   /* a zero repeat count must touch nothing at all */
+            unsigned char srcbuf[16], da[32], db[32];
+            uint32_t desc[4];
+            memset(srcbuf, 0x5a, sizeof srcbuf);
+            memset(da, 0x11, sizeof da); memset(db, 0x11, sizeof db);
+            desc[0] = 0; desc[1] = 0; desc[2] = 0;
+            *(unsigned char **)&desc[3] = da;
+            r88(srcbuf, desc, 1);
+            *(unsigned char **)&desc[3] = db;
+            fs98_util_marshal(srcbuf, desc, 1);
+            checked++;
+            if (memcmp(da, db, sizeof da) && bad++ < 8)
+                printf("marshal with a zero count differs\n");
+        }
+    }
+
+    /* slots 0x8c and 0x90 -- the data-exchange engine.  Random descriptor
+     * tables over every kind and subtype retail survives, including the ones
+     * that only work because the dispatch is one flat table: kinds 9..20,
+     * and subtypes 0x1ffd..0x2000 that land on a kind handler.  The relocation
+     * flag is 0, 1 or 2, since only exactly 1 relocates.  Compared: the whole
+     * arena (descriptors, records, variables, strings), the return value, and
+     * the sequence of callback and NUMERIC calls. */
+    {
+        typedef int32_t (FS98_STDCALL *fn_put)(void *, uint32_t, void *, int32_t);
+        typedef void    (FS98_STDCALL *fn_get)(void *, uint32_t, void *);
+        fn_put r8c = (fn_put)slot(h, 0x8c);
+        fn_get r90 = (fn_get)slot(h, 0x90);
+        struct import { uint32_t id; void *link; } *im;
+        static unsigned char after[X_ARENA];
+        static struct x_call rlog[64];
+        unsigned v, k;
+
+        memset(numeric_blob, 0, sizeof numeric_blob);
+        *(uint32_t *)numeric_blob = 17;
+        *(void **)(numeric_blob + 0x18) = (void *)stub_format;
+        *(void **)(numeric_blob + 0x1c) = (void *)stub_parse;
+        HOST_SLOT(0x2a8) = (void *)stub_strcpy;
+        for (im = (struct import *)GetProcAddress(h, "ImportTable"); im && im->id; im++) {
+            if (im->id == 1)  im->link = host_blob;
+            if (im->id == 2)  im->link = x_arena;
+            if (im->id == 17) im->link = numeric_blob;
+        }
+        fs98_util_set_host(host_blob);
+        fs98_util_set_global(x_arena);
+        fs98_util_set_numeric(numeric_blob);
+
+        for (v = 0; v < 400000; v++) {
+            int get = v & 1;
+            uint32_t n = 1 + rng() % 8, i;
+            uint32_t *d = (uint32_t *)(x_init + X_DESC);
+            int32_t mode = (int32_t)(rng() % 3), rr = 0, oo = 0;
+            unsigned rn;
+
+            for (k = 0; k < X_ARENA; k++) x_init[k] = (unsigned char)rng();
+            for (k = 0; k < 32; k++) {              /* the string pool */
+                unsigned len = rng() % 13, c;
+                for (c = 0; c < len; c++) x_init[X_POOL + k * 32 + c] = (unsigned char)('a' + rng() % 26);
+                x_init[X_POOL + k * 32 + len] = 0;
+            }
+            /* strings the engine may copy out of a variable */
+            for (k = 15; k < 256; k += 16) x_init[X_GLOBAL + k] = 0;
+            for (k = 15; k < 1024; k += 16) x_init[X_ABS + k] = 0;
+
+            for (i = 0; i < n; i++, d += 5) {
+                uint32_t kind, sub, r = rng() % 100;
+                uint32_t *rec = (uint32_t *)(x_init + X_RECS + i * 8);
+
+                kind = (r < 85) ? rng() % 9 : 9 + rng() % 12;
+                r = rng() % 100;
+                if (kind <= 3) {                    /* only what retail survives */
+                    if (kind == 0 && r < 25)
+                        sub = (r & 1 ? X_BITS8_T : (r & 2 ? X_BITS16_T : X_BITS32_T))
+                              + (rng() % 5 ? 1u << (rng() % 34 % 32) : rng() % 4);
+                    else if (r < 35) sub = 0x2001;
+                    else if (r < 50) sub = 0x1ffd + rng() % 4;
+                    else             sub = 0x2002 + rng() % 12;
+                } else if (kind == 5 && r < 25) {
+                    sub = (r & 1 ? X_BITS8_T : X_BITS32_T) + (1u << (rng() % 32));
+                } else if (kind >= 9) {             /* the subtype is not read */
+                    sub = 0x2002 + rng() % 12;
+                } else {
+                    if (r < 15)      sub = 0x2001;
+                    else if (r < 30) sub = 0x2000;
+                    else if (r < 50) sub = 0x200e;
+                    else if (r < 60) sub = 0x2002 + rng() % 12;
+                    else             sub = 0x1000 + rng() % 0x60;
+                }
+
+                d[0] = kind;
+                d[1] = i * 8;
+                d[2] = sub;
+                if (sub == 0x2001) {                /* a callback: never relocated */
+                    d[3] = (uint32_t)(uintptr_t)stub_xcb;
+                    d[4] = rng() % 2 ? 0 : 2;
+                } else if (rng() % 2) {
+                    d[3] = rng() % 224;             /* an offset into GLOBAL */
+                    d[4] = 1;
+                } else {
+                    d[3] = (uint32_t)(uintptr_t)(x_arena + X_ABS + rng() % 992);
+                    d[4] = rng() % 2 ? 0 : 2;
+                }
+
+                /* status: always a pool buffer, for kind 8's reads; value: a
+                 * pool buffer where text may flow through it, else a number
+                 * the flag handlers will test against 1 */
+                rec[0] = (uint32_t)(uintptr_t)(x_arena + X_POOL + (i * 2) * 32);
+                if (kind == 4 || sub == 0x1ffd)
+                    rec[1] = (uint32_t)(uintptr_t)(x_arena + X_POOL + (i * 2 + 1) * 32);
+                else
+                    rec[1] = rng() % 4 ? rng() % 3 : rng();
+            }
+
+            fault_vector = v;
+            fault_descs = (const uint32_t *)(x_init + X_DESC);
+            memcpy(x_arena, x_init, X_ARENA); x_nlog = 0;
+            fault_where = get ? "retail 0x90" : "retail 0x8c";
+            if (get) r90(x_arena + X_DESC, n, x_arena + X_RECS);
+            else     rr = r8c(x_arena + X_DESC, n, x_arena + X_RECS, mode);
+            memcpy(after, x_arena, X_ARENA); memcpy(rlog, x_log, sizeof rlog); rn = x_nlog;
+
+            memcpy(x_arena, x_init, X_ARENA); x_nlog = 0;
+            fault_where = get ? "our 0x90" : "our 0x8c";
+            if (get) fs98_util_exchange_get(x_arena + X_DESC, n, x_arena + X_RECS);
+            else     oo = fs98_util_exchange_put(x_arena + X_DESC, n, x_arena + X_RECS, mode);
+
+            checked++;
+            if ((rr != oo || rn != x_nlog || memcmp(rlog, x_log, sizeof rlog)
+                 || memcmp(after, x_arena, X_ARENA)) && bad++ < 8) {
+                unsigned at = 0;
+                while (at < X_ARENA && after[at] == x_arena[at]) at++;
+                printf("exchange %s vector %u (n %u, mode %d): ret %d/%d, calls %u/%u, "
+                       "first byte differing %u\n", get ? "0x90" : "0x8c", v, n, mode,
+                       rr, oo, rn, x_nlog, at);
+                for (i = 0; i < n; i++) {
+                    uint32_t *dd = (uint32_t *)(x_init + X_DESC) + 5 * i;
+                    printf("   desc %u: kind %u sub %#x var %#x reloc %u\n",
+                           i, dd[0], dd[2], dd[3], dd[4]);
+                }
+            }
+        }
+    }
+
+    /* slots 0xa4, 0xa8, 0xac -- the alerts.  Every argument shape the text
+     * builder takes (ids, pointers, zeros after the first, long strings that
+     * the 254-character load limit truncates, both separators), every answer
+     * including the quit case, and an open/close pair each time.  Compared:
+     * the whole transcript of host calls, block by block, and the text. */
+    {
+        typedef int32_t (FS98_STDCALL *fn_amodal)(uint32_t, uint32_t, uint32_t, uint32_t,
+                                                  uint32_t, uint32_t, uint32_t, int32_t);
+        typedef void (FS98_STDCALL *fn_aopen)(void **, uint32_t, uint32_t, uint32_t,
+                                              uint32_t, uint32_t, uint32_t, int32_t);
+        typedef void (FS98_STDCALL *fn_aclose)(void **);
+        fn_amodal ra4 = (fn_amodal)slot(h, 0xa4);
+        fn_aopen  ra8 = (fn_aopen) slot(h, 0xa8);
+        fn_aclose rac = (fn_aclose)slot(h, 0xac);
+        void *retail_default = (unsigned char *)h + 0x3470;
+        static char pool[5 * 400], rlog[sizeof a_log];
+        unsigned v;
+
+        HOST_SLOT(0x20c) = (void *)a_alloc;
+        HOST_SLOT(0x210) = (void *)a_realloc;
+        HOST_SLOT(0x214) = (void *)a_free;
+        HOST_SLOT(0x2a0) = (void *)a_loadstring;
+        HOST_SLOT(0x2b0) = (void *)a_strcat;
+        HOST_SLOT(0x10c) = (void *)a_dialog;
+        HOST_SLOT(0x110) = (void *)a_dialog;
+        HOST_SLOT(0x114) = (void *)a_tick;
+        HOST_SLOT(0x024) = (void *)a_quit;
+
+        for (v = 0; v < 100000; v++) {
+            uint32_t p[5], flags = rng() & 0x1f, tag = rng();
+            int32_t lines = (int32_t)(rng() % 3), rr, oo;
+            void *robj = NULL, *oobj = NULL, *rh, *oh;
+            unsigned k;
+            int answers[] = { 0, 1, 2, 8, 8, 7, -1 };
+
+            for (k = 0; k < 5; k++) p[k] = a_piece(pool, k);
+            if (!p[0]) p[0] = 1 + rng() % 500;      /* never zero: see util_alert.c */
+            a_answer = answers[rng() % 7];
+            fault_vector = v;
+
+            a_len = 0; a_nblk = 0; a_log[0] = 0;
+            fault_where = "retail 0xa4";
+            rr = ra4(flags, tag, p[0], p[1], p[2], p[3], p[4], lines);
+            rh = a_handler_seen;
+            fault_where = "retail 0xa8/0xac";
+            ra8(&robj, tag, p[0], p[1], p[2], p[3], p[4], lines);
+            if (!(rh == retail_default && a_handler_seen == retail_default)) rh = NULL;
+            rac(&robj);
+            memcpy(rlog, a_log, sizeof rlog);
+
+            a_len = 0; a_nblk = 0; a_log[0] = 0;
+            fault_where = "our 0xa4";
+            oo = fs98_util_alert_modal(flags, tag, p[0], p[1], p[2], p[3], p[4], lines);
+            oh = a_handler_seen;
+            fault_where = "our 0xa8/0xac";
+            fs98_util_alert_open(&oobj, tag, p[0], p[1], p[2], p[3], p[4], lines);
+            if (!(oh != retail_default && a_handler_seen == oh)) oh = NULL;
+            fs98_util_alert_close(&oobj);
+
+            checked++;
+            if ((rr != oo || strcmp(rlog, a_log) || !rh || !oh || robj || oobj)
+                && bad++ < 8) {
+                unsigned at = 0;
+                while (rlog[at] && rlog[at] == a_log[at]) at++;
+                printf("alert vector %u: ret %d/%d handlers %s/%s objs %p/%p\n"
+                       "  retail ...%.200s\n  ours   ...%.200s\n", v, rr, oo,
+                       rh ? "ok" : "BAD", oh ? "ok" : "BAD", robj, oobj,
+                       rlog + (at > 40 ? at - 40 : 0), a_log + (at > 40 ? at - 40 : 0));
             }
         }
     }

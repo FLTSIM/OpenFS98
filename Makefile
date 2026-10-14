@@ -38,8 +38,9 @@ FS98_DIR?= $(HOME)/.wine/drive_c/FS98
 # module name -> retail image base, so our build maps where the original did
 BASE_GLOBAL := 0x20720000
 BASE_SLEW   := 0x208c0000
+BASE_UTIL   := 0x208e0000
 
-MODULES := GLOBAL SLEW
+MODULES := GLOBAL SLEW UTIL
 
 # Setup renames two modules on the way from CD to install, and the game loads
 # the *installed* names.  A rebuilt FACIL.DLL copied in as FACIL.DLL would just
@@ -68,6 +69,48 @@ $(BIN)/slew.res: src/slew/slew.rc
 	@mkdir -p $(BIN)
 	$(RC) $< -O coff -o $@
 
+# UTIL is assembled from four service files plus the module shell.
+# FS98_UTIL_MODULE makes the services read their imports from ImportTable, as
+# retail does; libgcc supplies the 64-bit division helpers.
+UTIL_SRC := src/util/util.c src/util/util_math.c src/util/util_files.c \
+            src/util/util_exchange.c src/util/util_alert.c
+
+$(BIN)/UTIL.DLL: $(UTIL_SRC) src/util/util.def src/util/util_imports.h \
+                 src/util/cos_table.inc src/util/util_data.inc $(BIN)/util.res
+	@mkdir -p $(BIN)
+	$(CC) $(CFLAGS) -DFS98_UTIL_MODULE -Isrc/util $(LDFLAGS) \
+	      -Wl,--image-base=$(BASE_UTIL) \
+	      -o $@ $(UTIL_SRC) $(BIN)/util.res src/util/util.def -lkernel32 -lgcc
+
+# The same module with every slot counted -- see FS98_UTIL_TRACE in util.c.
+# `make util-trace` installs it, boots the sim for UTIL_TRACE_SECS (or until
+# you quit it), prints which services were called and how often, and puts the
+# normal build back.
+UTIL_TRACE_SECS ?= 90
+UTIL_TRACE_LOG  := $(HOME)/.wine/drive_c/openfs98-util-trace.log
+
+$(BIN)/UTIL_TRACE.DLL: $(UTIL_SRC) src/util/util.def src/util/util_imports.h \
+                       src/util/cos_table.inc src/util/util_data.inc $(BIN)/util.res
+	@mkdir -p $(BIN)
+	$(CC) $(CFLAGS) -DFS98_UTIL_MODULE -DFS98_UTIL_TRACE -Isrc/util $(LDFLAGS) \
+	      -Wl,--image-base=$(BASE_UTIL) \
+	      -o $@ $(UTIL_SRC) $(BIN)/util.res src/util/util.def -lkernel32 -lgcc
+
+util-trace: $(BIN)/UTIL_TRACE.DLL $(BIN)/UTIL.DLL
+	@cp $(BIN)/UTIL_TRACE.DLL "$(FS98_DIR)/Modules/UTIL.DLL"
+	@rm -f "$(UTIL_TRACE_LOG)"
+	@echo "tracing UTIL for up to $(UTIL_TRACE_SECS)s -- use the sim, or just wait"
+	@cd $(FS98_DIR) && WINEDEBUG=-all timeout $(UTIL_TRACE_SECS) wine FLTSIM98.EXE >/dev/null 2>&1 || true
+	@cp $(BIN)/UTIL.DLL "$(FS98_DIR)/Modules/UTIL.DLL"
+	@echo "--- services called (slot, count, hex) ---"
+	@grep -v ' 00000000' "$(UTIL_TRACE_LOG)" 2>/dev/null || echo "(no log)"
+	@echo "--- never called ---"
+	@grep ' 00000000' "$(UTIL_TRACE_LOG)" 2>/dev/null | cut -d' ' -f1 | tr '\n' ' '; echo
+
+$(BIN)/util.res: src/util/util.rc
+	@mkdir -p $(BIN)
+	$(RC) $< -O coff -o $@
+
 src/global/global_state.inc: $(ORIG)/Modules/GLOBAL.DLL tools/gen_global_state.py
 	python3 tools/gen_global_state.py $< $@
 
@@ -80,21 +123,28 @@ src/global/global_state.inc: $(ORIG)/Modules/GLOBAL.DLL tools/gen_global_state.p
 # It needs libgcc for the 64-bit division helpers util_math.c uses.
 OFSTEST_LOG := $(HOME)/.wine/drive_c/openfs98-test.log
 
-$(BIN)/OFSTEST.DLL: src/test/ofstest.c src/test/ofstest.def src/util/util_math.c \
+$(BIN)/OFSTEST.DLL: src/test/ofstest.c src/test/ofstest.def src/util/util_math.c src/util/util_files.c src/util/util_exchange.c src/util/util_alert.c \
                     src/util/cos_table.inc src/util/util_data.inc
 	@mkdir -p $(BIN)
 	$(CC) $(CFLAGS) -Isrc/util $(LDFLAGS) -Wl,--image-base=0x20950000 \
-	      -o $@ src/test/ofstest.c src/util/util_math.c src/test/ofstest.def \
+	      -o $@ src/test/ofstest.c src/util/util_math.c src/util/util_files.c src/util/util_exchange.c src/util/util_alert.c src/test/ofstest.def \
 	      -lkernel32 -lgcc
 
 ofstest: $(BIN)/OFSTEST.DLL
 
 # Drop it in, start the sim long enough for the loader to call init, stop, and
 # show what it found.  The module only needs startup, not a flight.
+#
+# The tests compare the reimplementation against whatever UTIL.DLL the loader
+# binds, so retail's is put in for the run -- with OpenFS98's UTIL installed
+# they would be comparing it with itself -- and whatever was there is put back.
 ofstest-run: ofstest
 	@cp $(BIN)/OFSTEST.DLL "$(FS98_DIR)/Modules/OFSTEST.DLL"
+	@cp "$(FS98_DIR)/Modules/UTIL.DLL" $(BIN)/.util-installed.bak
+	@cp $(ORIG)/Modules/UTIL.DLL "$(FS98_DIR)/Modules/UTIL.DLL"
 	@rm -f "$(OFSTEST_LOG)"
 	@cd $(FS98_DIR) && WINEDEBUG=-all timeout 45 wine FLTSIM98.EXE >/dev/null 2>&1 || true
+	@cp $(BIN)/.util-installed.bak "$(FS98_DIR)/Modules/UTIL.DLL"; rm -f $(BIN)/.util-installed.bak
 	@echo "--- $(OFSTEST_LOG) ---"
 	@cat "$(OFSTEST_LOG)" 2>/dev/null || echo "(no log -- init was not reached)"
 
@@ -111,13 +161,13 @@ DIFFDIR := $(BIN)/difftest
 
 $(DIFFDIR)/slewdiff.exe: tools/difftest/slewdiff.c src/util/util_math.c src/util/cos_table.inc
 	@mkdir -p $(DIFFDIR)
-	$(CC) -std=c99 -O1 -Wall -Wextra -Isrc/util -o $@ \
+	$(CC) -std=c99 -O1 -Wall -Wextra -Iinclude -Isrc/util -o $@ \
 	      tools/difftest/slewdiff.c src/util/util_math.c
 
-$(DIFFDIR)/utildiff.exe: tools/difftest/utildiff.c src/util/util_math.c src/util/cos_table.inc
+$(DIFFDIR)/utildiff.exe: tools/difftest/utildiff.c src/util/util_math.c src/util/util_exchange.c src/util/util_alert.c src/util/cos_table.inc
 	@mkdir -p $(DIFFDIR)
-	$(CC) -std=c99 -O1 -Wall -Wextra -Isrc/util -o $@ \
-	      tools/difftest/utildiff.c src/util/util_math.c
+	$(CC) -std=c99 -O1 -Wall -Wextra -Iinclude -Isrc/util -o $@ \
+	      tools/difftest/utildiff.c src/util/util_math.c src/util/util_exchange.c src/util/util_alert.c
 
 src/util/cos_table.inc: $(ORIG)/Modules/UTIL.DLL tools/gen_util_tables.py
 	@python3 tools/gen_util_tables.py $< $@
@@ -128,10 +178,10 @@ utildiff: $(DIFFDIR)/utildiff.exe
 # The same check with the x87 assembly compiled out, which is what an ARM build
 # (Apple silicon, Android) will use.  It has to match retail just as exactly,
 # or those builds would quietly compute different numbers.
-$(DIFFDIR)/utildiff_portable.exe: tools/difftest/utildiff.c src/util/util_math.c src/util/cos_table.inc
+$(DIFFDIR)/utildiff_portable.exe: tools/difftest/utildiff.c src/util/util_math.c src/util/util_exchange.c src/util/util_alert.c src/util/cos_table.inc
 	@mkdir -p $(DIFFDIR)
-	$(CC) -std=c99 -O1 -Wall -Wextra -Isrc/util -DFS98_PORTABLE_FP -o $@ \
-	      tools/difftest/utildiff.c src/util/util_math.c -lm
+	$(CC) -std=c99 -O1 -Wall -Wextra -Iinclude -Isrc/util -DFS98_PORTABLE_FP -o $@ \
+	      tools/difftest/utildiff.c src/util/util_math.c src/util/util_exchange.c src/util/util_alert.c -lm
 
 utildiff-portable: $(DIFFDIR)/utildiff_portable.exe utildiff
 	@cd $(DIFFDIR) && WINEDEBUG=-all wine utildiff_portable.exe
@@ -310,4 +360,4 @@ smoke: all
 clean:
 	rm -rf $(BIN)
 
-.PHONY: all stage setup-map graph hostmap compare run trace trace-render trace-ddraw kill window-reset wm-unmanaged wm-managed vd-on vd-off mode8 mode16 ddraw-gdi ddraw-default smoke difftest difftest-run utildiff utildiff-run utildiff-portable ofstest ofstest-run ofstest-remove install revert installed-name-of clean
+.PHONY: all stage setup-map graph hostmap compare run trace trace-render trace-ddraw kill window-reset wm-unmanaged wm-managed vd-on vd-off mode8 mode16 ddraw-gdi ddraw-default smoke difftest difftest-run utildiff utildiff-run utildiff-portable ofstest ofstest-run ofstest-remove util-trace install revert installed-name-of clean

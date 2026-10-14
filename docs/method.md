@@ -143,6 +143,27 @@ its inputs, then count the hits, not just the calls.
 **Random vectors are not coverage.** They are good at the bulk and blind to the
 rare. Say which is which when reporting.
 
+**Steer onto boundaries with the module's own published state.** A `>` that
+should be `>=` only shows on the exact value, and random data almost never
+lands there. WEATHERM's harness got six breaks of that kind past 20,000 random
+scenarios. They were caught once ops were added to land exactly on those
+values:
+
+- the aircraft placed exactly on a boundary the last update published in
+  GLOBAL;
+- an area's edge placed from the offset the module itself left in `.data`;
+- a scenery effect aimed square to the current wind.
+
+Reading state back to aim the next input is fine: both sides read their own,
+and if they disagree the transcripts already do.
+
+**A retail fault is a finding, not a harness bug.** When retail crashes on a
+generated state, work out why before steering away from it. Then put the
+reason in the generator's header and the module's doc, and make the
+reimplementation fault the same way. WEATHERM's first run crashed retail on its
+own reset defaults. That turned out to be a real overflow, reachable in the
+game above 500 m.
+
 ## Two harnesses, and when to use which
 
 **Outside the process** -- `make utildiff-run`, `make numericdiff-run`,

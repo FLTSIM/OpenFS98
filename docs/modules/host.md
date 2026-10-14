@@ -79,7 +79,7 @@ binary's, not a guess from a call site. All `__stdcall`.
 
 | slot | address | prototype |
 | --- | --- | --- |
-| `+0x20c` | `0x40cdc0` | `int alloc(int flags, size_t size, void **out, int tag)` |
+| `+0x20c` | `0x40cdc0` | `int alloc(int flags, size_t size, void **out, int zero)` |
 | `+0x214` | `0x40cef0` | `int free_p(void **pp)` — frees `*pp`, then NULLs it |
 | `+0x2a0` | `0x40ed70` | `int load_string(unsigned id, char *buf, int len)` |
 | `+0x2a8` | `0x40ee70` | `char *strcpy(char *dst, const char *src)` |
@@ -92,7 +92,10 @@ binary's, not a guess from a call site. All `__stdcall`.
 | `+0x024` | `0x408550` | `int (void)` — quit: `WM_CLOSE` to the main window |
 
 `+0x20c` is the one worth knowing in detail. It calls `malloc(size)` and stores
-the result through `out`. On failure its behaviour depends on `flags`: **`flags
+the result through `out`, and zero-fills the block when the fourth argument is
+non-zero -- that argument was once read as a tag. A caller passing 0 gets
+whatever `malloc` returned, which is how WEATHERM's list code comes to walk
+pointers it never set (see [weatherm.md](weatherm.md)). On failure its behaviour depends on `flags`: **`flags
 == 4` returns -1** and lets the caller cope; anything else retries once after a
 purge hook, and if that also fails it loads string id 9, puts it in a
 `MB_ICONHAND` message box and exits the process. So most of the game treats

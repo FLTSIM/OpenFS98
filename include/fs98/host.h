@@ -69,7 +69,9 @@ typedef uint32_t (FS98_STDCALL *fs98_host_strlen_fn)(const char *s);
 typedef char *(FS98_STDCALL *fs98_host_strcpy_fn)(char *dst, const char *src);
 typedef char *(FS98_STDCALL *fs98_host_strcat_fn)(char *dst, const char *src);
 
-/* +0x20c -- malloc(size) stored through `out`.
+/* +0x20c -- malloc(size) stored through `out`, zero-filled when `zero` is
+ * non-zero (rep stosd/stosb at 0x40ce36); otherwise the block is whatever
+ * malloc returned.
  *
  * On failure the behaviour depends on `flags`: 4 returns -1 and lets the caller
  * cope, anything else retries once after a purge hook and then, if that fails
@@ -77,7 +79,7 @@ typedef char *(FS98_STDCALL *fs98_host_strcat_fn)(char *dst, const char *src);
  * process.  Most of the game therefore treats allocation failure as fatal by
  * choice rather than by omission.  Returns 0 on success. */
 typedef int32_t (FS98_STDCALL *fs98_host_alloc_fn)(int32_t flags, uint32_t size,
-                                                   void **out, int32_t tag);
+                                                   void **out, int32_t zero);
 
 /* +0x210 -- realloc(*pp, size) stored back through `pp`.  Failure follows
  * +0x20c's rule: flags 4 restores the old pointer and returns -1, anything

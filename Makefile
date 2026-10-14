@@ -42,8 +42,9 @@ BASE_GLOBAL := 0x20720000
 BASE_NUMERIC := 0x20870000
 BASE_SLEW   := 0x208c0000
 BASE_UTIL   := 0x208e0000
+BASE_WEATHERM := 0x208f0000
 
-MODULES := ATC CHAIN GLOBAL NUMERIC SLEW UTIL
+MODULES := ATC CHAIN GLOBAL NUMERIC SLEW UTIL WEATHERM
 
 # Setup renames two modules on the way from CD to install, and the game loads
 # the *installed* names.  A rebuilt FACIL.DLL copied in as FACIL.DLL would just
@@ -86,6 +87,22 @@ $(BIN)/atc.res: src/atc/atc.rc
 
 src/atc/atc_data.inc: $(ORIG)/Modules/ATC.DLL tools/gen_atc_data.py
 	@python3 tools/gen_atc_data.py $< $@
+
+# WEATHERM, laid out the same way.  MSVCRT for whatever block copies gcc emits
+# as memcpy, libgcc for the 64-bit divisions.
+$(BIN)/WEATHERM.DLL: src/weatherm/weatherm.c src/weatherm/weatherm.def \
+                     src/weatherm/weatherm_data.inc $(BIN)/weatherm.res
+	@mkdir -p $(BIN)
+	$(CC) $(CFLAGS) -Isrc/weatherm $(LDFLAGS) -Wl,--image-base=$(BASE_WEATHERM) \
+	      -o $@ src/weatherm/weatherm.c $(BIN)/weatherm.res src/weatherm/weatherm.def \
+	      -lmsvcrt -lkernel32 -lgcc
+
+$(BIN)/weatherm.res: src/weatherm/weatherm.rc
+	@mkdir -p $(BIN)
+	$(RC) $< -O coff -o $@
+
+src/weatherm/weatherm_data.inc: $(ORIG)/Modules/WEATHERM.DLL tools/gen_weatherm_data.py
+	@python3 tools/gen_weatherm_data.py $< $@
 
 $(BIN)/SLEW.DLL: src/slew/slew.c src/slew/slew.def $(BIN)/slew.res
 	@mkdir -p $(BIN)
@@ -272,6 +289,22 @@ atcdiff: $(DIFFDIR)/atcdiff.exe $(BIN)/ATC.DLL
 atcdiff-run: atcdiff
 	@cd $(DIFFDIR) && WINEDEBUG=-all timeout 900 wine atcdiff.exe $(N)
 
+# WEATHERM, whole-module: retail and OpenFS98 driven through Linkage over
+# random scripts, against retail CHAIN and UTIL and stub G3D/MAIN.
+# N=... sets the scenario count.
+$(DIFFDIR)/weathermdiff.exe: tools/difftest/weathermdiff.c
+	@mkdir -p $(DIFFDIR)
+	$(CC) -std=c99 -O1 -Wall -Wextra -o $@ tools/difftest/weathermdiff.c
+
+weathermdiff: $(DIFFDIR)/weathermdiff.exe $(BIN)/WEATHERM.DLL
+	@cp $(ORIG)/Modules/WEATHERM.DLL $(DIFFDIR)/WEATHERM_retail.dll
+	@cp $(BIN)/WEATHERM.DLL          $(DIFFDIR)/WEATHERM_ours.dll
+	@cp $(ORIG)/Modules/CHAIN.DLL    $(DIFFDIR)/CHAIN_retail.dll
+	@cp $(ORIG)/Modules/UTIL.DLL     $(DIFFDIR)/UTIL_retail.dll
+
+weathermdiff-run: weathermdiff
+	@cd $(DIFFDIR) && WINEDEBUG=-all timeout 900 wine weathermdiff.exe $(N)
+
 numericdiff: $(DIFFDIR)/numericdiff.exe
 	@cp $(ORIG)/Modules/NUMERIC.DLL $(DIFFDIR)/NUMERIC_retail.dll
 
@@ -449,4 +482,4 @@ smoke: all
 clean:
 	rm -rf $(BIN)
 
-.PHONY: all stage setup-map graph hostmap compare run trace trace-render trace-ddraw kill window-reset wm-unmanaged wm-managed vd-on vd-off mode8 mode16 ddraw-gdi ddraw-default smoke difftest difftest-run utildiff utildiff-run utildiff-portable numericdiff numericdiff-run chaindiff chaindiff-run ofstest ofstest-run ofstest-remove util-trace install revert installed-name-of clean
+.PHONY: all stage setup-map graph hostmap compare run trace trace-render trace-ddraw kill window-reset wm-unmanaged wm-managed vd-on vd-off mode8 mode16 ddraw-gdi ddraw-default smoke difftest difftest-run utildiff utildiff-run utildiff-portable numericdiff numericdiff-run chaindiff chaindiff-run atcdiff atcdiff-run weathermdiff weathermdiff-run ofstest ofstest-run ofstest-remove util-trace install revert installed-name-of clean

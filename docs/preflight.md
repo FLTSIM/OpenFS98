@@ -1,13 +1,141 @@
-# Preflight: WINMSG, ATC, LANDME
+# Preflight
 
-With CHAIN done, every module left imports at least one that is not. This is
-the survey that picks the next one: for each of the three smallest, what it
-calls in modules that are not done, and how faithfully those calls can be
-stubbed in an external harness.
+Every module left imports at least one that is not done. A preflight is the
+survey that picks the next one: for each candidate, what it calls in modules
+that are not done, and how faithfully those calls can be stubbed in an
+external harness.
 
 Produced with `python3 tools/impscan.py orig/Modules/<M>.DLL`, then each call
 site and each callee read by hand. The scanner under-reports rather than
 over-reports (see its header); the call counts below are lower bounds.
+
+Two rounds so far, newest first.
+
+# Round 2: ACONTAIN, REALITY, WEATHERM
+
+## Verdict
+
+**WEATHERM next**, then ACONTAIN. REALITY last, through `ofstest`.
+
+**Outcome:** WEATHERM is done -- [modules/weatherm.md](modules/weatherm.md).
+The two stubs held up as described. Corrections from the full read:
+`+0x24` resets the global and area blocks whose flags ask for it; `+0x20`
+is the time-of-day temperature swing, called from the update itself; and
+retail faults on an even temperature band, including its own reset defaults.
+
+| | WEATHERM | ACONTAIN | REALITY |
+| --- | --- | --- | --- |
+| `.text` | 8,774 | 5,504 | 4,822 |
+| functions in Linkage | 20 | 12 | 4 |
+| written in | asm to `.text+0x2a3f`, C after | C | asm, with x87 and `_ftol` |
+| unfinished imports | MAIN ×1, G3D ×1 | G3D ×2, PANELS ×2, and modules it loads itself | MAIN ×3, HG2D ×3, DEMO, WINDOW, CONTROLS, WINMSG, SOUND |
+| host services | 2: alloc, free | 26, 12 new -- mostly file I/O | 12, 6 new -- windowing, GDI, dialogs |
+| direct Win32 | none | `wsprintfA` | none |
+| external harness | yes, two logging stubs | yes, with fake loaded modules | no -- it draws and runs dialogs |
+
+WEATHERM is the largest of the three but the cheapest to test: apart from the
+two calls below, everything it touches is GLOBAL, CHAIN, UTIL and the host
+heap, all of which a harness already owns or loads for real.
+
+## WEATHERM (id 27)
+
+Weather: winds, temperatures, cloud and visibility state in GLOBAL
+`+0xe6a`..`+0x116a`, recomputed each frame. Two halves:
+
+**Hand-written asm, `.text+0x020`..`+0x2a3f`.** The same alignment macro and
+register-passing internal calls as ATC. No floating point: the two "x87"
+instructions objdump shows (`+0x2e48`, `+0x3110`) are switch tables in
+`.text`.
+
+| slot | who calls it | what it does |
+| --- | --- | --- |
+| `+0x04` init | host | registers `.text+0x28c9` on CHAIN list 3; points `.data+0xe6`.. at three GLOBAL weather records (`+0xf34`, `+0x101c`, `+0x1104`) |
+| `+0x08` deinit | host | unregisters it |
+| `+0x18` | ATC | weather at a given position: the update run with `.data+0xf6` pointed at the caller's record, then back at GLOBAL `+0x560` |
+| `+0x1c` | MAIN | the update at the aircraft, then MAIN `+0x94` |
+| `+0x20` | nobody outside; `.text+0x1c3c` | per-layer helper. Pushes a 16-bit `bx`, so the stack is 2 bytes off until `leave` |
+| `+0x24` | MAIN ×2, multip | when GLOBAL `+0xf12` is set, sets `+0xf20`/`+0xf24`/`+0xf26`, then goes on; MAIN calls it after a weather change. Not read further |
+| `+0x28` | G3D | reads a stream of 8-byte records -- type byte at `+1`, types 1-4 -- by its caller and shape, weather records out of scenery |
+
+The CHAIN callback at `.text+0x28c9` hands GLOBAL `+0x1164` (a pointer) to
+G3D `+0x20` if set, clears it, and steps the three layers through
+`.text+0x1c51`. That helper indexes its three-word arrays at
+`.data+0xc8`/`+0xce`/`+0xd4`/`+0xda` by the layer number unscaled, so layers
+1 and 2 read and write overlapping words -- a probable retail bug to
+reproduce, not fix.
+
+**Compiled C, `.text+0x2a40` on, slots `+0x2c`..`+0x5c`.** A container of
+`0xc0`-byte records, in linked lists. It calls only host `+0x20c`/`+0x214` and
+touches neither GLOBAL nor WEATHERM's `.data`, so a harness can call it
+directly with an arena allocator. **No caller was found** for these 13 slots
+or for `+0x20`. No module's ImportTable reaches them, and the `English\`
+dialog modules import only the host and GLOBAL. Every static call to host
+`+0x298` (acquire a module's Linkage) passes the caller's own Linkage --
+MAIN, multip, mpchat and all the `English\` modules -- except one in PANELS,
+which passes a runtime value. A short in-game trace would settle whether the
+C half is live; it does not block the harness.
+
+Unfinished imports, and the stubs they need:
+
+- **MAIN `+0x94`** -- no arguments. Reads the cloud fields and writes GLOBAL
+  `+0xcd4`, which WEATHERM never reads. Stub records the call.
+- **G3D `+0x20`** -- one pointer, from GLOBAL `+0x1164`; 51 bytes that save
+  it and run a G3D-internal routine. Nothing comes back. Stub records the
+  pointer.
+
+The done imports are CHAIN `+0x18`/`+0x1c` and UTIL `+0x24` mul48, `+0x2c`
+sincos, `+0x34` rotate2d, `+0x3c` atan2, `+0x44`/`+0x48` the
+metres/longitude pair and `+0x6c` rand -- all of which can be retail's real
+modules in the harness. UTIL's rand seed (`.data+0x0f0`) is shared state, so
+it has to be reset to the same value before each side runs.
+
+State is GLOBAL plus WEATHERM's `.data` (0x1c5 bytes at `0x208f5000`), so the
+ATC pattern applies: compare the transcript, GLOBAL and the whole `.data`
+image.
+
+## ACONTAIN (id 23)
+
+By its calls, the aircraft container. It reads profile strings and files and
+loads modules by path through the host. MAIN calls nine of its slots, and
+CONTROLS, PANELS, SOUND, WINDOW and multip call `+0x30`, so most of the sim
+depends on it.
+
+- **Host services:** 26 of them. The 12 not yet in `host.h` are mostly thin
+  file wrappers:
+  - `+0x0f0`: profile string, after resolving the path.
+  - `+0x0c8`: raw `GetPrivateProfileStringA`.
+  - `+0x158`: file exists, via `GetFileAttributesA`.
+  - `+0x17c` open, `+0x13c` close, `+0x194` seek, `+0x19c` read.
+  - `+0x218` memset, `+0x2ac` strncpy, `+0x2bc` strcmp.
+  - `+0x26c`/`+0x270`: load and free a module through the host's loader.
+- **Modules it loads itself:** `+0x26c` takes `(out, path, ext_id)` with ext
+  ids `0x1b` and `0x14`. ACONTAIN then calls the loaded module's Linkage
+  `+0x18`, `+0x1c` and `+0x20`, and checks the first dword of what comes back
+  against `0x24`. A harness needs fake modules with those entry points.
+- **UTIL `+0xa4`:** the modal alert, with strings `0xf540`-`0xf544`, which
+  look like load errors.
+- **G3D `+0x38`/`+0x58` and PANELS `+0x18`/`+0x1c`:** not yet read.
+
+Testable externally, with the file services passed through to real fixture
+files, but it needs more stubs than WEATHERM and fakes for the modules it
+loads.
+
+## REALITY (id 32)
+
+Asm with x87 throughout (56 instructions, plus MSVCRT `_ftol`). It writes a
+spread of GLOBAL flags and reaches nine unfinished modules. Its host calls
+are where it does its work:
+
+- `+0x074`/`+0x078`: GDI, including `DeleteDC`/`DeleteObject`.
+- `+0x084`: `SendMessageA`.
+- `+0x03c`: `PostMessageA`.
+- `+0x10c`: `run_dialog`.
+- HG2D `+0x2c`/`+0x30`/`+0x34`.
+
+Only WINDOW `+0x1c` was found calling it. Its observable behaviour is drawing
+and dialogs, like WINMSG's, so it belongs in `ofstest`.
+
+# Round 1: WINMSG, ATC, LANDME
 
 ## Verdict
 

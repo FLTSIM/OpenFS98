@@ -52,9 +52,10 @@ make utildiff-portable   # the same with x87 compiled out (the ARM path)
 make numericdiff-run     # all NUMERIC formats/ranges -> 545778 comparisons, 0 mismatches
 make chaindiff-run       # whole-module CHAIN        -> 20000 scenarios, 0 differ
 make atcdiff-run         # whole-module ATC          -> 20000 scenarios, 0 differ
+make weathermdiff-run    # whole-module WEATHERM     -> 20000 scenarios, 0 differ
 make difftest-run        # whole-module SLEW         -> 0/2000 vectors differ
 make ofstest-run         # in-process, via the host  -> passed 68, failed 0
-make smoke               # ATC, CHAIN, GLOBAL, NUMERIC, SLEW, UTIL installed -> 27/27, 95 gauges, PASS
+make smoke               # ATC, CHAIN, GLOBAL, NUMERIC, SLEW, UTIL, WEATHERM installed -> 27/27, 95 gauges, PASS
 make util-trace          # which UTIL services the game calls, counted in-game
 ```
 
@@ -66,9 +67,11 @@ host process or live game state still needs `ofstest`.
 
 ## Current next slice
 
-ATC is done. **LANDME** is next per [docs/preflight.md](docs/preflight.md),
-blocked on understanding the records FE `+0x20`/`+0x54` hand back -- see the
-README's "What to do next". `tools/difftest/atcdiff.c` is now the template for
+WEATHERM is done. **ACONTAIN** is next per round 2 of
+[docs/preflight.md](docs/preflight.md): file-I/O host services that can pass
+through to fixtures, plus fake modules for the ones it loads through host
+`+0x26c`. LANDME stays blocked on FE's record format.
+`tools/difftest/weathermdiff.c` and `atcdiff.c` are the templates for
 a module with unfinished imports: retail's finished modules loaded for real,
 logging stubs for the rest, and the module's whole `.data` image compared.
 

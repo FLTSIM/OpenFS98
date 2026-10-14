@@ -67,6 +67,7 @@ else's 1997 build, and it should read that way.
 | `make utildiff-portable` | the same with the x87 assembly compiled out, as an ARM build would use |
 | `make numericdiff-run` | compare all NUMERIC formatter/parser ids and ranged parses against retail |
 | `make atcdiff-run` | drive retail and OpenFS98 ATC side by side over random scripts of ATIS, clearances and frames, comparing every import call and the whole `.data` image; `N=...` sets the count |
+| `make weathermdiff-run` | the same for WEATHERM: updates, frames, resets, scenery effects and list operations, comparing every import call, GLOBAL, the heap and the `.data` image |
 | `make chaindiff-run` | drive retail and OpenFS98 CHAIN side by side over random re-entrant callback scripts; `N=...` sets the count |
 | `make ofstest-run` | run assertions *inside* the sim, where the host is reachable; `ofstest-remove` takes the module back out |
 | `make util-trace` | boot the sim with a UTIL that counts every service call, and list what ran; `UTIL_TRACE_SECS=` for a longer session to play in |
@@ -107,8 +108,8 @@ built, so a gauge load means startup went all the way through.
 
 **Verified working**: under wine 9.0 the retail game reaches its main menu —
 27/27 modules, 95 gauges — and so does the build with OpenFS98's `ATC`,
-`CHAIN`, `GLOBAL`, `NUMERIC`, `SLEW` and `UTIL` modules substituted, with
-identical counts.
+`CHAIN`, `GLOBAL`, `NUMERIC`, `SLEW`, `UTIL` and `WEATHERM` modules
+substituted, with identical counts.
 
 ## Where this is going
 
@@ -158,12 +159,13 @@ emulate 80-bit arithmetic to preserve a rounding artefact. See
 | `SLEW` | 9 | 1,270 | **reimplemented and verified** — 200,000 differential vectors, byte-identical |
 | `ATC` | 24 | 3,840 | **reimplemented, verified, and running in-game** — ATIS and the tower's clearance exchange; 20,000 whole-module differential scripts comparing its whole `.data` image, zero differences — see [docs/modules/atc.md](docs/modules/atc.md) |
 | `CHAIN` | 4 | 966 | **reimplemented, verified, and running in-game** — the event bus; 20,000 whole-module differential scripts, zero differences — see [docs/modules/chain.md](docs/modules/chain.md) |
+| `WEATHERM` | 27 | 8,774 | **reimplemented, verified, and running in-game** — the weather: areas, blending, temperature and pressure by altitude, wind; 20,000 whole-module differential scripts comparing GLOBAL and its whole `.data` image, zero differences — see [docs/modules/weatherm.md](docs/modules/weatherm.md) |
 | `NUMERIC` | 17 | 14,684 | **reimplemented, verified, and running in-game** — 545,778 differential comparisons, zero mismatches — see [docs/modules/numeric.md](docs/modules/numeric.md) |
 | `UTIL` | 20 | 11,062 | **reimplemented, verified, and running in-game** — all 47 services; 19 seen called in a hands-on session, the modal alert among them — see [docs/modules/util.md](docs/modules/util.md) |
 | `FLTSIM98.EXE` | 1 (host) | 82,016 | 194 services mapped, 21 with confirmed prototypes, 11 verified in-process, 2 implemented — see [docs/modules/host.md](docs/modules/host.md) |
 
-Retail baseline and the OpenFS98 build -- ATC, CHAIN, GLOBAL, NUMERIC, SLEW
-and UTIL all installed -- both reach the panel: 27/27 modules, 95 gauges,
+Retail baseline and the OpenFS98 build -- ATC, CHAIN, GLOBAL, NUMERIC, SLEW,
+UTIL and WEATHERM all installed -- both reach the panel: 27/27 modules, 95 gauges,
 `make smoke` PASS.
 
 `GLOBAL.DLL`'s 4764-byte shared state block is byte-identical to retail, and the
@@ -186,12 +188,17 @@ retail's finished modules loaded for real, small logging stubs for the rest,
 and the module's whole `.data` image compared when its layout allows it --
 see [docs/modules/atc.md](docs/modules/atc.md).
 
-Of the [preflight](docs/preflight.md)'s three, **`LANDME` is next**. Its
-blocker is FE: `+0x54` searches around the aircraft and `+0x20` hands back a
-record LANDME reads, and a stub has to produce records in FE's format. Work
-that format out from FE's side first. `WINMSG` owns a window and belongs in
-`ofstest`. A fresh preflight of `ACONTAIN`, `REALITY` and `WEATHERM` is also
-worth having before committing to LANDME, since FE is 49 KB to read.
+**`ACONTAIN` is next**, per the second round of the
+[preflight](docs/preflight.md). It is the aircraft container, and most of the
+sim calls it. Its unknown host services are thin file wrappers that can pass
+through to fixture files. The extra work is that it loads modules through the
+host and calls into them, so its harness needs fake modules. `WEATHERM`, the
+round's first pick, is done -- see [docs/modules/weatherm.md](docs/modules/weatherm.md).
+
+`LANDME` is blocked on FE: `+0x54` searches around the aircraft and `+0x20`
+hands back a record LANDME reads, and a stub has to produce records in FE's
+format. Work that format out from FE's side first. `WINMSG` and `REALITY`
+draw and run dialogs, and belong in `ofstest`.
 
 Other useful work, in no particular order:
 
@@ -216,8 +223,9 @@ nothing in it imports anything interesting:
 4. ~~**`SLEW`** (1,270 bytes)~~ — done and verified against retail.
 5. ~~**`UTIL`** (11,062 bytes)~~ — done, verified and running in-game.
 6. ~~**`ATC`** (3,840 bytes)~~ — done, verified and running in-game.
-7. Then outward: `LANDME`, `WINMSG`, `ACONTAIN`, `REALITY`, `BOOSTER`…
-8. `HG2D` (390 KB, the 2D rasteriser) last. It is 26% of the project on its
+7. ~~**`WEATHERM`** (8,774 bytes)~~ — done, verified and running in-game.
+8. Then outward: `ACONTAIN`, `LANDME`, `WINMSG`, `REALITY`, `BOOSTER`…
+9. `HG2D` (390 KB, the 2D rasteriser) last. It is 26% of the project on its
    own.
 
 `GLOBAL`'s state block is the shared workspace: every module worked through

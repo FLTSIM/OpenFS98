@@ -229,6 +229,100 @@ typedef int32_t (FS98_STDCALL *fs98_host_path_split_fn)(const char *path,
                                                         char *drive, char *dir,
                                                         char *name, int32_t *ext);
 
+/* ---- files and profiles: what ACONTAIN reaches for ------------------------ */
+
+/* Every service here that takes a `path` and an extension id first resolves
+ * them (0x40b350) into a heap copy of path + the extension's text -- ".CFG"
+ * for 0x24, ".AIR" for 0x0f, nothing for -2 -- and fails with -1 if the id is
+ * not one the host knows.  The path is otherwise used as given, so a relative
+ * one is relative to the current directory. */
+
+/* +0x0c8 -- GetPrivateProfileStringA(section, key, buf, buf, size) on the
+ * sim's own FLTSIM98.CFG.  `buf` is the default as well as the output, so
+ * whatever it held comes back when the key is missing.  Returns the count. */
+typedef int32_t (FS98_STDCALL *fs98_host_cfg_string_fn)(const char *section,
+                                                        const char *key,
+                                                        char *buf, uint32_t size);
+
+/* +0x0f0 -- the same on `path` + extension `ext`, after resolving them.
+ * Returns the count, or -1 if the path cannot be resolved. */
+typedef int32_t (FS98_STDCALL *fs98_host_profile_string_fn)(const char *section,
+                                                            const char *key,
+                                                            char *buf, uint32_t size,
+                                                            const char *path,
+                                                            int32_t ext);
+
+/* +0x158 -- 0 if GetFileAttributesA finds `path` + extension -- a directory
+ * counts -- else -1. */
+typedef int32_t (FS98_STDCALL *fs98_host_exists_fn)(const char *path, int32_t ext);
+
+/* Opaque: a 0x10-byte heap block of { HANDLE, char *path, mode, ext }. */
+struct fs98_host_file;
+
+/* +0x17c -- CreateFileA on `path` + extension, OPEN_EXISTING and unshared.
+ * Mode 0 reads, 1 reads and writes, 2 writes, 3 writes at the end; any other
+ * mode fails.  Returns 0 and stores the block, or -1 with *out nulled. */
+typedef int32_t (FS98_STDCALL *fs98_host_file_open_fn)(struct fs98_host_file **out,
+                                                       const char *path,
+                                                       int32_t ext, int32_t mode);
+
+/* +0x13c -- CloseHandle and free the block.  Takes the block BY VALUE, so the
+ * caller's copy is left dangling.  0, or -1 if CloseHandle failed. */
+typedef int32_t (FS98_STDCALL *fs98_host_file_close_fn)(struct fs98_host_file *f);
+
+/* +0x194 -- SetFilePointer(offset, whence).  Fails with -1 when the file's
+ * total size is below `offset` taken unsigned -- whatever `whence` is, so a
+ * relative seek is checked against the size, not against what is left. */
+typedef int32_t (FS98_STDCALL *fs98_host_file_seek_fn)(struct fs98_host_file *f,
+                                                       uint32_t offset,
+                                                       int32_t whence);
+
+/* +0x19c -- ReadFile.  *got is zeroed first, then set to the count read.
+ * Returns 0, or -1 if ReadFile failed or `f` is null.  A short read at the
+ * end of the file is a success. */
+typedef int32_t (FS98_STDCALL *fs98_host_file_read_fn)(struct fs98_host_file *f,
+                                                       void *buf, uint32_t n,
+                                                       uint32_t *got);
+
+/* +0x218 -- memset(dst, byte, n) by rep stosd/stosb.  Always 0. */
+typedef int32_t (FS98_STDCALL *fs98_host_memset_fn)(void *dst, int32_t byte, uint32_t n);
+
+/* +0x2ac -- MSVCRT strncpy; returns dst.  No terminator when src is n long. */
+typedef char *(FS98_STDCALL *fs98_host_strncpy_fn)(char *dst, const char *src, uint32_t n);
+
+/* +0x2bc -- strcmp, two bytes a turn; -1, 0 or 1. */
+typedef int32_t (FS98_STDCALL *fs98_host_strcmp_fn)(const char *a, const char *b);
+
+/* +0x26c -- load `path` + extension as a module through the host's own
+ * loader -- reference-counted, so a module loaded twice is one module -- and
+ * store its Linkage.  -1, with *out untouched, if the file is missing or will
+ * not load.  The .SIM flight models and .MDL visual models are loaded so. */
+typedef int32_t (FS98_STDCALL *fs98_host_module_load_fn)(void **out, const char *path,
+                                                         int32_t ext);
+
+/* +0x270 -- release a module +0x26c loaded, by its Linkage; nulls *link.
+ * Always 0. */
+typedef int32_t (FS98_STDCALL *fs98_host_module_free_fn)(void **link);
+
+#define FS98_HOST_S_CFG_STRING     0x0c8
+#define FS98_HOST_S_PROFILE_STRING 0x0f0
+#define FS98_HOST_S_FILE_CLOSE     0x13c
+#define FS98_HOST_S_EXISTS         0x158
+#define FS98_HOST_S_FILE_OPEN      0x17c
+#define FS98_HOST_S_FILE_SEEK      0x194
+#define FS98_HOST_S_FILE_READ      0x19c
+#define FS98_HOST_S_MEMSET         0x218
+#define FS98_HOST_S_MODULE_LOAD    0x26c
+#define FS98_HOST_S_MODULE_FREE    0x270
+#define FS98_HOST_S_STRNCPY        0x2ac
+#define FS98_HOST_S_STRCMP         0x2bc
+
+/* Extension ids, as the host's table at 0x417f20 has them. */
+#define FS98_HOST_EXT_AIR  0x0f
+#define FS98_HOST_EXT_MDL  0x14
+#define FS98_HOST_EXT_SIM  0x1b
+#define FS98_HOST_EXT_CFG  0x24
+
 /* ---- reaching them ------------------------------------------------------- */
 
 /* A slot holds a function pointer, so fetching one is a load from
@@ -258,6 +352,18 @@ typedef int32_t (FS98_STDCALL *fs98_host_path_split_fn)(const char *path,
 #define FS98_HOST_FIND_CLOSE(h)  FS98_HOST_SLOT(h, FS98_HOST_S_FIND_CLOSE,  fs98_host_find_close_fn)
 #define FS98_HOST_PATH_JOIN(h)   FS98_HOST_SLOT(h, FS98_HOST_S_PATH_JOIN,   fs98_host_path_join_fn)
 #define FS98_HOST_PATH_SPLIT(h)  FS98_HOST_SLOT(h, FS98_HOST_S_PATH_SPLIT,  fs98_host_path_split_fn)
+#define FS98_HOST_CFG_STRING(h)  FS98_HOST_SLOT(h, FS98_HOST_S_CFG_STRING,  fs98_host_cfg_string_fn)
+#define FS98_HOST_PROFILE_STRING(h) FS98_HOST_SLOT(h, FS98_HOST_S_PROFILE_STRING, fs98_host_profile_string_fn)
+#define FS98_HOST_EXISTS(h)      FS98_HOST_SLOT(h, FS98_HOST_S_EXISTS,      fs98_host_exists_fn)
+#define FS98_HOST_FILE_OPEN(h)   FS98_HOST_SLOT(h, FS98_HOST_S_FILE_OPEN,   fs98_host_file_open_fn)
+#define FS98_HOST_FILE_CLOSE(h)  FS98_HOST_SLOT(h, FS98_HOST_S_FILE_CLOSE,  fs98_host_file_close_fn)
+#define FS98_HOST_FILE_SEEK(h)   FS98_HOST_SLOT(h, FS98_HOST_S_FILE_SEEK,   fs98_host_file_seek_fn)
+#define FS98_HOST_FILE_READ(h)   FS98_HOST_SLOT(h, FS98_HOST_S_FILE_READ,   fs98_host_file_read_fn)
+#define FS98_HOST_MEMSET(h)      FS98_HOST_SLOT(h, FS98_HOST_S_MEMSET,      fs98_host_memset_fn)
+#define FS98_HOST_MODULE_LOAD(h) FS98_HOST_SLOT(h, FS98_HOST_S_MODULE_LOAD, fs98_host_module_load_fn)
+#define FS98_HOST_MODULE_FREE(h) FS98_HOST_SLOT(h, FS98_HOST_S_MODULE_FREE, fs98_host_module_free_fn)
+#define FS98_HOST_STRNCPY(h)     FS98_HOST_SLOT(h, FS98_HOST_S_STRNCPY,     fs98_host_strncpy_fn)
+#define FS98_HOST_STRCMP(h)      FS98_HOST_SLOT(h, FS98_HOST_S_STRCMP,      fs98_host_strcmp_fn)
 
 /* The alloc flag that means "give me -1, I will handle it". */
 #define FS98_HOST_ALLOC_NONFATAL 4

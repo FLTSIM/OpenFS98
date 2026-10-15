@@ -7,9 +7,9 @@ possibly Android.
 
 ## Working agreements
 
-- **Do not commit and do not push.** Stage changes (`git add`) and leave them;
-  the user reviews and commits. This holds for every change, including ones
-  they asked for.
+- **Do not stage, commit or push.** Leave changes in the worktree and say
+  which files changed; the user stages, reviews and commits. This holds for
+  every change, including ones they asked for.
 - **Differential testing is the arbiter**, not careful reading. A service is
   done when it matches retail on vectors, not when the disassembly looks
   understood.
@@ -53,9 +53,10 @@ make numericdiff-run     # all NUMERIC formats/ranges -> 545778 comparisons, 0 m
 make chaindiff-run       # whole-module CHAIN        -> 20000 scenarios, 0 differ
 make atcdiff-run         # whole-module ATC          -> 20000 scenarios, 0 differ
 make weathermdiff-run    # whole-module WEATHERM     -> 20000 scenarios, 0 differ
+make acontaindiff-run    # whole-module ACONTAIN     -> 20000 scenarios, 0 differ (~25 min)
 make difftest-run        # whole-module SLEW         -> 0/2000 vectors differ
 make ofstest-run         # in-process, via the host  -> passed 68, failed 0
-make smoke               # ATC, CHAIN, GLOBAL, NUMERIC, SLEW, UTIL, WEATHERM installed -> 27/27, 95 gauges, PASS
+make smoke               # ACONTAIN, ATC, CHAIN, GLOBAL, NUMERIC, SLEW, UTIL, WEATHERM installed -> 27/27, 95 gauges, PASS
 make util-trace          # which UTIL services the game calls, counted in-game
 ```
 
@@ -67,13 +68,16 @@ host process or live game state still needs `ofstest`.
 
 ## Current next slice
 
-WEATHERM is done. **ACONTAIN** is next per round 2 of
-[docs/preflight.md](docs/preflight.md): file-I/O host services that can pass
-through to fixtures, plus fake modules for the ones it loads through host
-`+0x26c`. LANDME stays blocked on FE's record format.
-`tools/difftest/weathermdiff.c` and `atcdiff.c` are the templates for
-a module with unfinished imports: retail's finished modules loaded for real,
-logging stubs for the rest, and the module's whole `.data` image compared.
+WEATHERM and ACONTAIN are done. Round 2 of [docs/preflight.md](docs/preflight.md)
+leaves only REALITY, which draws and runs dialogs and belongs in `ofstest`.
+The next external candidate needs a **round-3 preflight**. LANDME stays blocked
+on FE's record format.
+`tools/difftest/acontaindiff.c`, `weathermdiff.c` and `atcdiff.c` are the
+templates for a module with unfinished imports: retail's finished modules
+loaded for real, logging stubs for the rest, and the module's whole `.data`
+image compared. `acontaindiff.c` adds the pattern for a module that touches
+files: a stub host passing file I/O through to generated fixture trees, behind
+transliterations of the host's own path and find services.
 
 ## Two things not to rediscover the hard way
 

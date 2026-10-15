@@ -36,6 +36,7 @@ BIN     := bin
 FS98_DIR?= $(HOME)/.wine/drive_c/FS98
 
 # module name -> retail image base, so our build maps where the original did
+BASE_ACONTAIN := 0x20600000
 BASE_ATC    := 0x20640000
 BASE_CHAIN  := 0x20660000
 BASE_GLOBAL := 0x20720000
@@ -44,7 +45,7 @@ BASE_SLEW   := 0x208c0000
 BASE_UTIL   := 0x208e0000
 BASE_WEATHERM := 0x208f0000
 
-MODULES := ATC CHAIN GLOBAL NUMERIC SLEW UTIL WEATHERM
+MODULES := ACONTAIN ATC CHAIN GLOBAL NUMERIC SLEW UTIL WEATHERM
 
 # Setup renames two modules on the way from CD to install, and the game loads
 # the *installed* names.  A rebuilt FACIL.DLL copied in as FACIL.DLL would just
@@ -103,6 +104,23 @@ $(BIN)/weatherm.res: src/weatherm/weatherm.rc
 
 src/weatherm/weatherm_data.inc: $(ORIG)/Modules/WEATHERM.DLL tools/gen_weatherm_data.py
 	@python3 tools/gen_weatherm_data.py $< $@
+
+# ACONTAIN, laid out the same way.  USER32 for wsprintfA, which retail calls
+# directly; MSVCRT for whatever block copies gcc emits as memcpy.
+$(BIN)/ACONTAIN.DLL: src/acontain/acontain.c src/acontain/acontain.def \
+                     src/acontain/acontain_data.inc src/acontain/acontain_colours.inc \
+                     $(BIN)/acontain.res
+	@mkdir -p $(BIN)
+	$(CC) $(CFLAGS) -Isrc/acontain $(LDFLAGS) -Wl,--image-base=$(BASE_ACONTAIN) \
+	      -o $@ src/acontain/acontain.c $(BIN)/acontain.res src/acontain/acontain.def \
+	      -lmsvcrt -luser32 -lkernel32
+
+$(BIN)/acontain.res: src/acontain/acontain.rc
+	@mkdir -p $(BIN)
+	$(RC) $< -O coff -o $@
+
+src/acontain/acontain_data.inc src/acontain/acontain_colours.inc &: $(ORIG)/Modules/ACONTAIN.DLL tools/gen_acontain_data.py
+	@python3 tools/gen_acontain_data.py $< src/acontain
 
 $(BIN)/SLEW.DLL: src/slew/slew.c src/slew/slew.def $(BIN)/slew.res
 	@mkdir -p $(BIN)
@@ -305,6 +323,24 @@ weathermdiff: $(DIFFDIR)/weathermdiff.exe $(BIN)/WEATHERM.DLL
 weathermdiff-run: weathermdiff
 	@cd $(DIFFDIR) && WINEDEBUG=-all timeout 900 wine weathermdiff.exe $(N)
 
+# ACONTAIN, whole-module: retail and OpenFS98 driven through Linkage over
+# random scripts against generated aircraft trees, with retail CHAIN, a stub
+# host that passes file I/O through, and fake .SIM and .MDL modules.
+# N=... sets the scenario count.
+$(DIFFDIR)/acontaindiff.exe: tools/difftest/acontaindiff.c
+	@mkdir -p $(DIFFDIR)
+	$(CC) -std=c99 -O1 -Wall -Wextra -o $@ tools/difftest/acontaindiff.c
+
+acontaindiff: $(DIFFDIR)/acontaindiff.exe $(BIN)/ACONTAIN.DLL
+	@cp $(ORIG)/Modules/ACONTAIN.DLL $(DIFFDIR)/ACONTAIN_retail.dll
+	@cp $(BIN)/ACONTAIN.DLL          $(DIFFDIR)/ACONTAIN_ours.dll
+	@cp $(ORIG)/Modules/CHAIN.DLL    $(DIFFDIR)/CHAIN_retail.dll
+	@cp $(ORIG)/ENGLISH.FLL          $(DIFFDIR)/ENGLISH.FLL
+	@cp $(ORIG)/FLTSIM98.EXE         $(DIFFDIR)/FLTSIM98_host.exe
+
+acontaindiff-run: acontaindiff
+	@cd $(DIFFDIR) && WINEDEBUG=-all timeout 1800 wine acontaindiff.exe $(N)
+
 numericdiff: $(DIFFDIR)/numericdiff.exe
 	@cp $(ORIG)/Modules/NUMERIC.DLL $(DIFFDIR)/NUMERIC_retail.dll
 
@@ -482,4 +518,4 @@ smoke: all
 clean:
 	rm -rf $(BIN)
 
-.PHONY: all stage setup-map graph hostmap compare run trace trace-render trace-ddraw kill window-reset wm-unmanaged wm-managed vd-on vd-off mode8 mode16 ddraw-gdi ddraw-default smoke difftest difftest-run utildiff utildiff-run utildiff-portable numericdiff numericdiff-run chaindiff chaindiff-run atcdiff atcdiff-run weathermdiff weathermdiff-run ofstest ofstest-run ofstest-remove util-trace install revert installed-name-of clean
+.PHONY: all stage setup-map graph hostmap compare run trace trace-render trace-ddraw kill window-reset wm-unmanaged wm-managed vd-on vd-off mode8 mode16 ddraw-gdi ddraw-default smoke difftest difftest-run utildiff utildiff-run utildiff-portable numericdiff numericdiff-run chaindiff chaindiff-run atcdiff atcdiff-run weathermdiff weathermdiff-run acontaindiff acontaindiff-run ofstest ofstest-run ofstest-remove util-trace install revert installed-name-of clean

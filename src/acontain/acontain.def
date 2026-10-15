@@ -1,0 +1,4 @@
+LIBRARY ACONTAIN.DLL
+EXPORTS
+    Linkage DATA
+    ImportTable DATA

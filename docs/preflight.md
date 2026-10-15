@@ -17,6 +17,16 @@ Two rounds so far, newest first.
 
 **WEATHERM next**, then ACONTAIN. REALITY last, through `ofstest`.
 
+**Outcome:** ACONTAIN is done too -- [modules/acontain.md](modules/acontain.md).
+The fake loaded modules worked as planned: the `.SIM` and `.MDL` files are
+ordinary module DLLs (ids 25 and 31), and a fake `.MDL` only has to supply a
+header through its `+0x18`. Corrections from the full read: `+0x26c` takes
+`(out, path, ext)` and ACONTAIN checks `*out`, not the return value; the
+loaded module's `+0x18` takes the aircraft record and `+0x1c` the model state,
+and the `0x24` check is on the header that `+0x18` leaves behind. G3D `+0x38`
+is the draw and `+0x58` a flush before a model is unloaded; PANELS `+0x18` builds the panel
+and calls back into ACONTAIN `+0x30`.
+
 **Outcome:** WEATHERM is done -- [modules/weatherm.md](modules/weatherm.md).
 The two stubs held up as described. Corrections from the full read:
 `+0x24` resets the global and area blocks whose flags ask for it; `+0x20`

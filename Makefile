@@ -42,10 +42,11 @@ BASE_CHAIN  := 0x20660000
 BASE_GLOBAL := 0x20720000
 BASE_NUMERIC := 0x20870000
 BASE_SLEW   := 0x208c0000
+BASE_SOUND  := 0x208d0000
 BASE_UTIL   := 0x208e0000
 BASE_WEATHERM := 0x208f0000
 
-MODULES := ACONTAIN ATC CHAIN GLOBAL NUMERIC SLEW UTIL WEATHERM
+MODULES := ACONTAIN ATC CHAIN GLOBAL NUMERIC SLEW SOUND UTIL WEATHERM
 
 # Setup renames two modules on the way from CD to install, and the game loads
 # the *installed* names.  A rebuilt FACIL.DLL copied in as FACIL.DLL would just
@@ -121,6 +122,22 @@ $(BIN)/acontain.res: src/acontain/acontain.rc
 
 src/acontain/acontain_data.inc src/acontain/acontain_colours.inc &: $(ORIG)/Modules/ACONTAIN.DLL tools/gen_acontain_data.py
 	@python3 tools/gen_acontain_data.py $< src/acontain
+
+# SOUND, laid out the same way.  USER32 for wsprintfA and MSVCRT for strtok,
+# both of which retail imports directly.
+$(BIN)/SOUND.DLL: src/sound/sound.c src/sound/sound.def \
+                  src/sound/sound_data.inc src/sound/sound_consts.inc $(BIN)/sound.res
+	@mkdir -p $(BIN)
+	$(CC) $(CFLAGS) -Isrc/sound $(LDFLAGS) -Wl,--image-base=$(BASE_SOUND) \
+	      -o $@ src/sound/sound.c $(BIN)/sound.res src/sound/sound.def \
+	      -lmsvcrt -luser32 -lkernel32
+
+$(BIN)/sound.res: src/sound/sound.rc
+	@mkdir -p $(BIN)
+	$(RC) $< -O coff -o $@
+
+src/sound/sound_data.inc src/sound/sound_consts.inc &: $(ORIG)/Modules/SOUND.DLL tools/gen_sound_data.py
+	@python3 tools/gen_sound_data.py $< src/sound
 
 $(BIN)/SLEW.DLL: src/slew/slew.c src/slew/slew.def $(BIN)/slew.res
 	@mkdir -p $(BIN)
@@ -323,6 +340,28 @@ weathermdiff: $(DIFFDIR)/weathermdiff.exe $(BIN)/WEATHERM.DLL
 weathermdiff-run: weathermdiff
 	@cd $(DIFFDIR) && WINEDEBUG=-all timeout 900 wine weathermdiff.exe $(N)
 
+# SOUND, whole-module: retail and OpenFS98 driven through Linkage and their
+# CHAIN lists over random scripts against generated SOUND.CFG trees (the CD's
+# seven among them), with retail CHAIN and UTIL and a stub host that models
+# the voice engine.  N=... sets the scenario count.
+$(DIFFDIR)/sounddiff.exe: tools/difftest/sounddiff.c
+	@mkdir -p $(DIFFDIR)
+	$(CC) -std=c99 -O1 -Wall -Wextra -o $@ tools/difftest/sounddiff.c
+
+sounddiff: $(DIFFDIR)/sounddiff.exe $(BIN)/SOUND.DLL
+	@cp $(ORIG)/Modules/SOUND.DLL  $(DIFFDIR)/SOUND_retail.dll
+	@cp $(BIN)/SOUND.DLL           $(DIFFDIR)/SOUND_ours.dll
+	@cp $(ORIG)/Modules/CHAIN.DLL  $(DIFFDIR)/CHAIN_retail.dll
+	@cp $(ORIG)/Modules/UTIL.DLL   $(DIFFDIR)/UTIL_retail.dll
+	@cp $(ORIG)/ENGLISH.FLL        $(DIFFDIR)/ENGLISH.FLL
+	@cp $(ORIG)/FLTSIM98.EXE       $(DIFFDIR)/FLTSIM98_host.exe
+	@mkdir -p $(DIFFDIR)/cdsound
+	@for a in B737_400 Extra300 Bell206B Schweizr Lear45 Sopcamel C182; do \
+	    cp $(ORIG)/Aircraft/$$a/sound/sound.cfg $(DIFFDIR)/cdsound/$$a.cfg; done
+
+sounddiff-run: sounddiff
+	@cd $(DIFFDIR) && WINEDEBUG=-all timeout 3600 wine sounddiff.exe $(N)
+
 # ACONTAIN, whole-module: retail and OpenFS98 driven through Linkage over
 # random scripts against generated aircraft trees, with retail CHAIN, a stub
 # host that passes file I/O through, and fake .SIM and .MDL modules.
@@ -518,4 +557,4 @@ smoke: all
 clean:
 	rm -rf $(BIN)
 
-.PHONY: all stage setup-map graph hostmap compare run trace trace-render trace-ddraw kill window-reset wm-unmanaged wm-managed vd-on vd-off mode8 mode16 ddraw-gdi ddraw-default smoke difftest difftest-run utildiff utildiff-run utildiff-portable numericdiff numericdiff-run chaindiff chaindiff-run atcdiff atcdiff-run weathermdiff weathermdiff-run acontaindiff acontaindiff-run ofstest ofstest-run ofstest-remove util-trace install revert installed-name-of clean
+.PHONY: all stage setup-map graph hostmap compare run trace trace-render trace-ddraw kill window-reset wm-unmanaged wm-managed vd-on vd-off mode8 mode16 ddraw-gdi ddraw-default smoke difftest difftest-run utildiff utildiff-run utildiff-portable numericdiff numericdiff-run chaindiff chaindiff-run atcdiff atcdiff-run weathermdiff weathermdiff-run acontaindiff acontaindiff-run sounddiff sounddiff-run ofstest ofstest-run ofstest-remove util-trace install revert installed-name-of clean

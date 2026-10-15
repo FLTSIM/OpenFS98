@@ -1,0 +1,4 @@
+LIBRARY SOUND.DLL
+EXPORTS
+    Linkage DATA
+    ImportTable DATA

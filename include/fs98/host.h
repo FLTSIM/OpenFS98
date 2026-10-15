@@ -304,6 +304,133 @@ typedef int32_t (FS98_STDCALL *fs98_host_module_load_fn)(void **out, const char 
  * Always 0. */
 typedef int32_t (FS98_STDCALL *fs98_host_module_free_fn)(void **link);
 
+/* ---- read for SOUND ------------------------------------------------------ */
+
+/* +0x050 -- the busy cursor: 1 shows the hourglass, 0 the arrow.  Does
+ * nothing if the state is unchanged. */
+typedef void (FS98_STDCALL *fs98_host_busy_fn)(int32_t on);
+
+/* +0x0b8 -- a number from the sim's FLTSIM98.CFG: GetPrivateProfileStringA
+ * into 30 bytes, then strtod into *out -- left alone if the key is missing
+ * or empty.  Always 0. */
+typedef int32_t (FS98_STDCALL *fs98_host_cfg_double_fn)(const char *section,
+                                                        const char *key, double *out);
+
+/* +0x0bc -- the other way: sprintf("%f") and WritePrivateProfileStringA.
+ * Always 0. */
+typedef int32_t (FS98_STDCALL *fs98_host_cfg_put_double_fn)(const char *section,
+                                                            const char *key, double v);
+
+/* +0x0d0 -- GetPrivateProfileIntA on `path` + extension, *inout as the
+ * default.  -1 if the path cannot be resolved, else 0. */
+typedef int32_t (FS98_STDCALL *fs98_host_profile_int_fn)(const char *section,
+                                                         const char *key, int32_t *inout,
+                                                         const char *path, int32_t ext);
+
+/* +0x0e0 -- a number, as +0x0b8 but from `path` + extension. */
+typedef int32_t (FS98_STDCALL *fs98_host_profile_double_fn)(const char *section,
+                                                            const char *key, double *inout,
+                                                            const char *path, int32_t ext);
+
+/* +0x0e8 -- `n` numbers.  Reads into a buffer of n * 30 bytes; if anything
+ * came back, strtod `n` times regardless, skipping ", " after each, so a
+ * short list fills the rest with 0.0.  An empty value leaves `out` alone. */
+typedef int32_t (FS98_STDCALL *fs98_host_profile_doubles_fn)(const char *section,
+                                                             const char *key, double *out,
+                                                             uint32_t n, const char *path,
+                                                             int32_t ext);
+
+/* +0x2b4 -- strdup through the host allocator (not zeroed, fatal flag);
+ * null for null. */
+typedef char *(FS98_STDCALL *fs98_host_strdup_fn)(const char *s);
+
+/* The voice engine, +0x2cc..+0x2f4: DirectSound buffers behind 0x16c-byte
+ * host blocks.  A handle is the block's address; every service but +0x2cc
+ * and +0x2d0 first checks it against the host's list, and most return 0
+ * early when the engine is off.  Errors are 0x9xxxx codes. */
+
+/* +0x2cc -- 1 if the host's sound state (0x41a3cc) is 0, else 0.  The state
+ * is 1 when there is no sound, and SOUND stays silent unless this says 1. */
+typedef int32_t (FS98_STDCALL *fs98_host_sound_off_fn)(void);
+
+/* +0x2d0 -- switch every voice on (1) or off (0). */
+typedef int32_t (FS98_STDCALL *fs98_host_sound_enable_fn)(int32_t on);
+
+/* +0x2d4 -- a new voice.  Types 2, 4 and 5 load the file `src` names
+ * (.WAV appended); 6 and 7 copy the voice `src` is.  0 or an error; *out
+ * is nulled on failure -- except that 0x90003, a buffer that would not be
+ * created with no device present, comes back with the voice kept. */
+typedef int32_t (FS98_STDCALL *fs98_host_voice_load_fn)(const void *src, int32_t type,
+                                                        uint32_t *out);
+
+/* +0x2d8 -- append voice `src`'s samples to `dst`; with src and type 0 and
+ * `final` 1, finish `dst` into a playable buffer.  0, or -1 for a bad
+ * handle; 0 at once with no device. */
+typedef int32_t (FS98_STDCALL *fs98_host_voice_append_fn)(uint32_t src, int32_t type,
+                                                          uint32_t dst, int32_t final);
+
+/* +0x2dc -- release a voice: reference-counted, *h nulled.  0x90019 for a
+ * bad handle, which is left as it was. */
+typedef int32_t (FS98_STDCALL *fs98_host_voice_free_fn)(uint32_t *h);
+
+/* +0x2e0 -- play, looping if `loop`, at `freq` times the natural rate (0.0
+ * keeps it).  A callback still pending from the last play is called first;
+ * the new one is called with the handle when this one finishes -- or at
+ * once with no device. */
+typedef int32_t (FS98_STDCALL *fs98_host_voice_play_fn)(uint32_t h, int32_t loop,
+                                                        double freq,
+                                                        void (FS98_STDCALL *done)(uint32_t h));
+
+/* +0x2e4 -- the rate, as a multiple of the natural one. */
+typedef int32_t (FS98_STDCALL *fs98_host_voice_freq_fn)(uint32_t h, double freq);
+
+/* +0x2ec -- the volume, 0..10000. */
+typedef int32_t (FS98_STDCALL *fs98_host_voice_volume_fn)(uint32_t h, int32_t v);
+
+/* +0x2f0 -- the pan, -10000..10000. */
+typedef int32_t (FS98_STDCALL *fs98_host_voice_pan_fn)(uint32_t h, int32_t pan);
+
+/* +0x2f4 -- stop. */
+typedef int32_t (FS98_STDCALL *fs98_host_voice_stop_fn)(uint32_t h);
+
+/* +0x2fc -- free a list's data.  Nothing else in the header is touched. */
+typedef int32_t (FS98_STDCALL *fs98_host_list_free_fn)(struct fs98_host_list *l);
+
+/* +0x308 -- call fn(element, ctx) for each element in order until one
+ * returns non-zero, and return that (or 0).  Removals during the walk are
+ * queued on a host-wide list and applied when it ends. */
+typedef int32_t (FS98_STDCALL *fs98_host_list_walk_fn)(struct fs98_host_list *l, void *ctx,
+                                                       int32_t (FS98_STDCALL *fn)(void *elem,
+                                                                                  void *ctx));
+
+/* +0x310 -- the first element whose `len` bytes at `offset` match `key`
+ * (or, with `indirect`, whose pointer there points at bytes matching what
+ * `key` points at); null if none. */
+typedef void *(FS98_STDCALL *fs98_host_list_find_fn)(struct fs98_host_list *l, uint32_t offset,
+                                                     const void *key, uint32_t len,
+                                                     int32_t indirect);
+
+#define FS98_HOST_S_BUSY           0x050
+#define FS98_HOST_S_CFG_DOUBLE     0x0b8
+#define FS98_HOST_S_CFG_PUT_DOUBLE 0x0bc
+#define FS98_HOST_S_PROFILE_INT    0x0d0
+#define FS98_HOST_S_PROFILE_DOUBLE 0x0e0
+#define FS98_HOST_S_PROFILE_DOUBLES 0x0e8
+#define FS98_HOST_S_STRDUP         0x2b4
+#define FS98_HOST_S_SOUND_OFF      0x2cc
+#define FS98_HOST_S_SOUND_ENABLE   0x2d0
+#define FS98_HOST_S_VOICE_LOAD     0x2d4
+#define FS98_HOST_S_VOICE_APPEND   0x2d8
+#define FS98_HOST_S_VOICE_FREE     0x2dc
+#define FS98_HOST_S_VOICE_PLAY     0x2e0
+#define FS98_HOST_S_VOICE_FREQ     0x2e4
+#define FS98_HOST_S_VOICE_VOLUME   0x2ec
+#define FS98_HOST_S_VOICE_PAN      0x2f0
+#define FS98_HOST_S_VOICE_STOP     0x2f4
+#define FS98_HOST_S_LIST_FREE      0x2fc
+#define FS98_HOST_S_LIST_WALK      0x308
+#define FS98_HOST_S_LIST_FIND      0x310
+
 #define FS98_HOST_S_CFG_STRING     0x0c8
 #define FS98_HOST_S_PROFILE_STRING 0x0f0
 #define FS98_HOST_S_FILE_CLOSE     0x13c
@@ -319,6 +446,7 @@ typedef int32_t (FS98_STDCALL *fs98_host_module_free_fn)(void **link);
 
 /* Extension ids, as the host's table at 0x417f20 has them. */
 #define FS98_HOST_EXT_AIR  0x0f
+#define FS98_HOST_EXT_WAV  0x13
 #define FS98_HOST_EXT_MDL  0x14
 #define FS98_HOST_EXT_SIM  0x1b
 #define FS98_HOST_EXT_CFG  0x24
@@ -364,6 +492,26 @@ typedef int32_t (FS98_STDCALL *fs98_host_module_free_fn)(void **link);
 #define FS98_HOST_MODULE_FREE(h) FS98_HOST_SLOT(h, FS98_HOST_S_MODULE_FREE, fs98_host_module_free_fn)
 #define FS98_HOST_STRNCPY(h)     FS98_HOST_SLOT(h, FS98_HOST_S_STRNCPY,     fs98_host_strncpy_fn)
 #define FS98_HOST_STRCMP(h)      FS98_HOST_SLOT(h, FS98_HOST_S_STRCMP,      fs98_host_strcmp_fn)
+#define FS98_HOST_BUSY(h)        FS98_HOST_SLOT(h, FS98_HOST_S_BUSY,        fs98_host_busy_fn)
+#define FS98_HOST_CFG_DOUBLE(h)  FS98_HOST_SLOT(h, FS98_HOST_S_CFG_DOUBLE,  fs98_host_cfg_double_fn)
+#define FS98_HOST_CFG_PUT_DOUBLE(h) FS98_HOST_SLOT(h, FS98_HOST_S_CFG_PUT_DOUBLE, fs98_host_cfg_put_double_fn)
+#define FS98_HOST_PROFILE_INT(h) FS98_HOST_SLOT(h, FS98_HOST_S_PROFILE_INT, fs98_host_profile_int_fn)
+#define FS98_HOST_PROFILE_DOUBLE(h) FS98_HOST_SLOT(h, FS98_HOST_S_PROFILE_DOUBLE, fs98_host_profile_double_fn)
+#define FS98_HOST_PROFILE_DOUBLES(h) FS98_HOST_SLOT(h, FS98_HOST_S_PROFILE_DOUBLES, fs98_host_profile_doubles_fn)
+#define FS98_HOST_STRDUP(h)      FS98_HOST_SLOT(h, FS98_HOST_S_STRDUP,      fs98_host_strdup_fn)
+#define FS98_HOST_SOUND_OFF(h)   FS98_HOST_SLOT(h, FS98_HOST_S_SOUND_OFF,   fs98_host_sound_off_fn)
+#define FS98_HOST_SOUND_ENABLE(h) FS98_HOST_SLOT(h, FS98_HOST_S_SOUND_ENABLE, fs98_host_sound_enable_fn)
+#define FS98_HOST_VOICE_LOAD(h)  FS98_HOST_SLOT(h, FS98_HOST_S_VOICE_LOAD,  fs98_host_voice_load_fn)
+#define FS98_HOST_VOICE_APPEND(h) FS98_HOST_SLOT(h, FS98_HOST_S_VOICE_APPEND, fs98_host_voice_append_fn)
+#define FS98_HOST_VOICE_FREE(h)  FS98_HOST_SLOT(h, FS98_HOST_S_VOICE_FREE,  fs98_host_voice_free_fn)
+#define FS98_HOST_VOICE_PLAY(h)  FS98_HOST_SLOT(h, FS98_HOST_S_VOICE_PLAY,  fs98_host_voice_play_fn)
+#define FS98_HOST_VOICE_FREQ(h)  FS98_HOST_SLOT(h, FS98_HOST_S_VOICE_FREQ,  fs98_host_voice_freq_fn)
+#define FS98_HOST_VOICE_VOLUME(h) FS98_HOST_SLOT(h, FS98_HOST_S_VOICE_VOLUME, fs98_host_voice_volume_fn)
+#define FS98_HOST_VOICE_PAN(h)   FS98_HOST_SLOT(h, FS98_HOST_S_VOICE_PAN,   fs98_host_voice_pan_fn)
+#define FS98_HOST_VOICE_STOP(h)  FS98_HOST_SLOT(h, FS98_HOST_S_VOICE_STOP,  fs98_host_voice_stop_fn)
+#define FS98_HOST_LIST_FREE(h)   FS98_HOST_SLOT(h, FS98_HOST_S_LIST_FREE,   fs98_host_list_free_fn)
+#define FS98_HOST_LIST_WALK(h)   FS98_HOST_SLOT(h, FS98_HOST_S_LIST_WALK,   fs98_host_list_walk_fn)
+#define FS98_HOST_LIST_FIND(h)   FS98_HOST_SLOT(h, FS98_HOST_S_LIST_FIND,   fs98_host_list_find_fn)
 
 /* The alloc flag that means "give me -1, I will handle it". */
 #define FS98_HOST_ALLOC_NONFATAL 4

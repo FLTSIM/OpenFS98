@@ -157,6 +157,21 @@ values:
 Reading state back to aim the next input is fine: both sides read their own,
 and if they disagree the transcripts already do.
 
+**Fixtures generated once are a fixed sample.** SOUND's harness first wrote
+nine random `SOUND.CFG` trees at startup and reused them for every scenario,
+so 2,000 scenarios saw nine configurations. Three breaks went uncaught
+because none of the nine had the section they needed. Rewriting the tree
+for each scenario that uses it caught them. Count configurations, not
+scenarios.
+
+**Floating-point breaks need their boundary worked out by hand.** Taking
+log10 two different ways differs only in the last bits, and only under one
+precision control. SOUND truncates the result, which hides that difference
+everywhere except a handful of exact inputs. The break was caught only
+after the arithmetic was carried through on paper to find one: an eyepoint
+400 m less 2/65536 above an aircraft on the ground, under 24-bit precision.
+At exactly 400 m both ways give the same integer.
+
 **A retail fault is a finding, not a harness bug.** When retail crashes on a
 generated state, work out why before steering away from it. Then put the
 reason in the generator's header and the module's doc, and make the

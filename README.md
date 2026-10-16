@@ -73,7 +73,7 @@ else's 1997 build, and it should read that way.
 | `make fegriddiff-run` | FE's grid conversions (`+0x60`..`+0x6c`), retail and OpenFS98 loaded side by side and called directly over every table edge at every level and random values; a fault in either side counts as a difference |
 | `make fediff-run` | FE's assembly engine and compiled-C file services, retail and OpenFS98 loaded side by side over the extracted CD scenery/texture tree plus self-checking synthetic compressed-texture and BGL-section fixtures, comparing every import call and output, GLOBAL, the heap and the whole `.data` image |
 | `make landmediff-run` | LANDME's seven-state landing assistant against retail, each side backed by its own retail FE over the real scenery tree; compares every import call, GLOBAL, the heap and both modules' whole `.data` images |
-| `make facildiff-run` | FACIL's file/index half against retail, each side backed by a separate retail FE and a synthetic five-level facility block, then 20,000 seeded synthetic caches through the `+0x18`/`+0x1c`/`+0x20` queries; compares the complete cache, call transcript (with string comparisons), returned records, GLOBAL, heap and both modules' state |
+| `make facildiff-run` | whole-module FACIL against retail, each side backed by a separate retail FE: a synthetic five-level rebuild, 20,000 seeded synthetic caches through the `+0x18`/`+0x1c`/`+0x20` queries, then the real CD index (with all sixteen boosters) and 10,000 dialog scenarios driven by a stand-in for World.DLL; compares the caches, call transcript (with string comparisons), returned records, GLOBAL, heap and both modules' state |
 | `make weathermdiff-run` | the same for WEATHERM: updates, frames, resets, scenery effects and list operations, comparing every import call, GLOBAL, the heap and the `.data` image |
 | `make chaindiff-run` | drive retail and OpenFS98 CHAIN side by side over random re-entrant callback scripts; `N=...` sets the count |
 | `make ofstest-run` | run assertions *inside* the sim, where the host is reachable; `ofstest-remove` takes the module back out |
@@ -172,7 +172,7 @@ emulate 80-bit arithmetic to preserve a rounding artefact. See
 | `DYNAMIC` | 6 | 12,300 | **reimplemented, verified, and running in-game** — dynamic scenery: an interpreter for the airport traffic programs in scenery files, three of whose opcodes write programs of their own; 20,000 whole-module differential scripts comparing GLOBAL, the heap and its whole `.data` image, zero differences — see [docs/modules/dynamic.md](docs/modules/dynamic.md) |
 | `FE` | 18 | 49,016 | **in progress** — the grid conversions, assembly engine and compiled-C file services are reimplemented and verified (20,000 whole-module scenarios, zero differences); only the Scenery Library dialog remains for `ofstest` — see [docs/modules/fe.md](docs/modules/fe.md) |
 | `LANDME` | 26 | 4,094 | **reimplemented, verified, and running in-game** — nearest-runway selection and all eleven nonzero landing-guidance phases; 20,000 whole-module scenarios over retail FE and real scenery, zero differences — see [docs/modules/landme.md](docs/modules/landme.md) |
-| `FACIL` | 37 | 23,045 | **in progress** — profile state, `INDEX_FILE` validation/rebuild, serialized-record copy and the mapped-cache queries are reimplemented and verified; three dialogs remain, so it is not installable yet — see [docs/modules/facil.md](docs/modules/facil.md) |
+| `FACIL` | 37 | 23,045 | **done** — verified (index, queries and the three dialogs' callbacks) and running in-game — see [docs/modules/facil.md](docs/modules/facil.md) |
 | `NUMERIC` | 17 | 14,684 | **reimplemented, verified, and running in-game** — 545,778 differential comparisons, zero mismatches — see [docs/modules/numeric.md](docs/modules/numeric.md) |
 | `UTIL` | 20 | 11,062 | **reimplemented, verified, and running in-game** — all 47 services; 19 seen called in a hands-on session, the modal alert among them — see [docs/modules/util.md](docs/modules/util.md) |
 | `FLTSIM98.EXE` | 1 (host) | 82,016 | 194 services mapped, 21 with confirmed prototypes, 11 verified in-process, 2 implemented — see [docs/modules/host.md](docs/modules/host.md) |
@@ -230,9 +230,11 @@ each side a separate retail FE over the same fixture tree and steers the
 aircraft through all guidance phases: 20,000 scenarios, 18,881 runways found,
 1,119 no-runway paths and zero differences. See
 [docs/modules/landme.md](docs/modules/landme.md).
-`FACIL` is verified apart from its three dialogs, which are next, in `ofstest`.
-`BOOSTER` still waits for FE; `WINMSG` and `REALITY` draw and run dialogs and
-belong in `ofstest` too.
+`FACIL` is done, verified and running in-game; its dialogs are callbacks for
+World.DLL and were verified externally. Its harness found that FE `+0x88`
+returns stack garbage, which the FE reimplementation must reproduce before FE
+is installed. `BOOSTER` still waits for FE; `WINMSG` and `REALITY` draw and run
+dialogs and belong in `ofstest`.
 
 Other useful work, in no particular order:
 
@@ -263,7 +265,8 @@ nothing in it imports anything interesting:
 10. ~~**`DYNAMIC`** (12,300 bytes)~~ — done, verified and running in-game.
 11. ~~**`LANDME`** (4,094 bytes)~~ — done, verified against retail FE over the
     real scenery tree, and running in-game.
-12. Then outward: round 4 -- `FACIL`'s three dialogs are next; they, `WINMSG`,
+12. ~~**`FACIL`** (23,045 bytes)~~ — done, verified and running in-game.
+    Next in round 4: fix FE `+0x88`'s return (see fe.md); `WINMSG`,
     `REALITY` and FE's dialog need `ofstest`, and `BOOSTER` follows FE.
 13. `HG2D` (390 KB, the 2D rasteriser) last. It is 26% of the project on its
    own.

@@ -1606,6 +1606,1432 @@ static uint32_t FS98_STDCALL facil_unimplemented(void)
     return 0xffffffffu;
 }
 
+/* ---- the dialogs: .text+0x1040..+0x3be0 ---------------------------------
+ *
+ * FACIL has no window code.  Each dialog slot fills a parameter block in
+ * .data and runs a dialog that English\World.DLL registers -- 0x1307,
+ * 0x1308 and 0x1309 -- through host +0x10c.  World draws the controls and
+ * calls back through function pointers in the block, which is all that is
+ * here.  Field offsets inside those blocks are written as raw numbers so they
+ * can be matched against World's side.
+ *
+ *   0x1307  facilities  .data+0x80   Linkage +0x30, and a button in the others
+ *   0x1308  position    .data+0x158  Linkage +0x28
+ *   0x1309  airport     .data+0x3e8  Linkage +0x24
+ *
+ * Result lists here are { count, records, selection } with the 12-byte
+ * records of the query services; some keep an owned payload in the third
+ * word of each record.  Retail leaks freely on both success and failure
+ * paths; every leak is kept. */
+
+typedef uint16_t __attribute__((may_alias)) facil_u16;
+
+#define P32(base, offset)    (*(facil_u32 *)((uint8_t *)(base) + (offset)))
+#define P16(base, offset)    (*(facil_u16 *)((uint8_t *)(base) + (offset)))
+#define PTR(value)           ((uint8_t *)(uintptr_t)(value))
+#define U32(pointer)         ((uint32_t)(uintptr_t)(pointer))
+#define GLOBAL               ((uint8_t *)IMPORT(1))
+#define CHAIN                IMPORT(2)
+#define MAIN                 IMPORT(4)
+#define NUMERIC              IMPORT(5)
+#define G32(offset)          P32(GLOBAL, offset)
+#define G16(offset)          P16(GLOBAL, offset)
+#define G8(offset)           (GLOBAL[offset])
+#define D16(offset)          P16(D, offset)
+#define D8(offset)           (D[offset])
+#define RECORD(list, index)  ((struct facil_result *)PTR(P32(list, 4)) + (index))
+
+typedef void (FS98_STDCALL *facil_void_fn)(void);
+typedef void (FS98_STDCALL *facil_void1_fn)(uint32_t);
+typedef uint32_t (FS98_STDCALL *facil_chain_fn)(uint32_t, uint32_t, uint32_t);
+typedef int32_t (FS98_STDCALL *facil_ground_fn)(void *);
+typedef uint32_t (FS98_STDCALL *facil_fe_next_fn)(void **, void **);
+typedef void (FS98_STDCALL *facil_fe_at_fn)(uint32_t, uint32_t, uint32_t);
+typedef void (FS98_STDCALL *facil_format_fn)(const void *, uint32_t, char *);
+typedef int32_t (FS98_STDCALL *facil_parse_fn)(const char *, uint32_t, void *,
+                                               const void *);
+typedef void (FS98_STDCALL *facil_sincos_fn)(uint32_t, int16_t *, int16_t *);
+typedef void (FS98_STDCALL *facil_lonlat_fn)(const void *, const void *,
+                                             void *);
+typedef void (FS98_STDCALL *facil_marshal_fn)(const void *, const void *,
+                                              int32_t);
+typedef int32_t (FS98_STDCALL *facil_put_fn)(void *, uint32_t, void *,
+                                             int32_t);
+typedef void (FS98_STDCALL *facil_get_fn)(void *, uint32_t, void *);
+typedef void (FS98_STDCALL *facil_to_double_fn)(double *, const void *);
+typedef void (FS98_STDCALL *facil_from_double_fn)(const double *, void *);
+
+#define FE_GROUND             SLOT(FE, 0x30, facil_ground_fn)
+#define FE_AREA_NEXT          SLOT(FE, 0x34, facil_fe_next_fn)
+#define FE_NAV_NEXT           SLOT(FE, 0x38, facil_fe_next_fn)
+#define FE_AREA_FIRST         SLOT(FE, 0x4c, facil_void_fn)
+#define FE_NAV_FIRST          SLOT(FE, 0x50, facil_fe_at_fn)
+#define FE_EXTRACT            SLOT(FE, 0x88, facil_fe_read_fn)
+#define NUM_FORMAT            SLOT(NUMERIC, 0x18, facil_format_fn)
+#define NUM_PARSE             SLOT(NUMERIC, 0x20, facil_parse_fn)
+#define UTIL_SINCOS           SLOT(UTIL, 0x2c, facil_sincos_fn)
+#define UTIL_M32_TO_LON       SLOT(UTIL, 0x40, facil_lonlat_fn)
+#define UTIL_LON_TO_M         SLOT(UTIL, 0x48, facil_lonlat_fn)
+#define UTIL_MARSHAL          SLOT(UTIL, 0x88, facil_marshal_fn)
+#define UTIL_PUT              SLOT(UTIL, 0x8c, facil_put_fn)
+#define UTIL_GET              SLOT(UTIL, 0x90, facil_get_fn)
+#define UTIL_TO_DOUBLE        SLOT(UTIL, 0xc0, facil_to_double_fn)
+#define UTIL_FROM_DOUBLE      SLOT(UTIL, 0xc4, facil_from_double_fn)
+#define UTIL_TO_DOUBLE_S      SLOT(UTIL, 0xc8, facil_to_double_fn)
+#define CHAIN_DISPATCH        SLOT(CHAIN, 0x20, facil_chain_fn)
+#define MAIN_1C               SLOT(MAIN, 0x1c, facil_void_fn)
+#define MAIN_B0               SLOT(MAIN, 0xb0, facil_void_fn)
+#define MAIN_C4               SLOT(MAIN, 0xc4, facil_void_fn)
+/* GLOBAL +0x11d4 is the .SIM module's Linkage. */
+#define SIM_1C                SLOT(PTR(G32(0x11d4)), 0x1c, facil_void_fn)
+#define SIM_34                SLOT(PTR(G32(0x11d4)), 0x34, facil_void1_fn)
+
+#define HOST_STRCPY           FS98_HOST_STRCPY(HOST)
+#define HOST_STRDUP(s)        U32(FS98_HOST_STRDUP(HOST)(s))
+#define HOST_FREE(pp)         FS98_HOST_FREE(HOST)((void **)(pp))
+#define LIST_D0               ((struct facil_filter_list *)(D + 0xd0))
+#define LIST_D100             ((struct facil_filter_list *)(D + 0x100))
+#define LIST_2F8              ((struct facil_filter_list *)(D + 0x2f8))
+#define LIST_4D8              ((struct facil_filter_list *)(D + 0x4d8))
+#define CALLER_OUT                   PTR(D32(0x6d8))
+
+/* MSVCRT's _ftol: truncation towards zero, 64 bits, the x87's indefinite
+ * value out of range. */
+static int64_t facil_ftol(long double value)
+{
+    if (!(value >= -9223372036854775808.0L &&
+          value < 9223372036854775808.0L))
+        return (int64_t)0x8000000000000000LL;
+    return (int64_t)value;
+}
+
+/* ---- shared row builders ------------------------------------------------ */
+
+/* .text+0x1dd0 -- three BCD digits from bits 27..16, then `digits` more after
+ * .data+0x78's separator.  No terminator is written: the row's zeroes end it. */
+static int32_t facil_bcd3(char *out, uint32_t value, uint32_t digits)
+{
+    uint32_t bits = value << 4;
+    uint32_t index;
+    char *cursor;
+
+    out[0] = 0;
+    for (index = 0; index < 3; index++) {
+        out[index] = (char)(((bits >> 28) & 0xf) + 0x30);
+        bits <<= 4;
+    }
+    if (digits != 0) {
+        out[index] = (char)D8(0x78);
+        cursor = out + index + 1;
+        do {
+            *cursor++ = (char)(((bits >> 28) & 0xf) + 0x30);
+            bits <<= 4;
+        } while (--digits != 0);
+    }
+    return 0;
+}
+
+/* .text+0x1d70 -- the same from bits 15..4. */
+static int32_t facil_bcd4(char *out, uint32_t value, uint32_t digits)
+{
+    uint32_t bits = value << 16;
+    uint32_t index;
+    char *cursor;
+
+    out[0] = 0;
+    for (index = 0; index < 3; index++) {
+        out[index] = (char)(((bits >> 28) & 0xf) + 0x30);
+        bits <<= 4;
+    }
+    if (digits != 0) {
+        out[index] = (char)D8(0x78);
+        cursor = out + index + 1;
+        do {
+            *cursor++ = (char)(((bits >> 28) & 0xf) + 0x30);
+            bits <<= 4;
+        } while (--digits != 0);
+    }
+    return 0;
+}
+
+/* .text+0x1200 -- +0x18 over .data+0xd0's region/country/state entries. */
+static int32_t facil_search_at(uint32_t region, uint32_t country,
+                               uint32_t state, struct facil_filter *filter,
+                               struct facil_results *out)
+{
+    D32(0xbc) = region;
+    D32(0xc4) = country;
+    D32(0xcc) = state;
+    return facil_search(LIST_D0, filter, out, 0) != 0 ? -1 : 0;
+}
+
+/* .text+0x12e0 -- a row's four place names and its own name.  +0x1c's
+ * results at .data+0x550 are never freed. */
+static int32_t facil_row_names(uint8_t *row, const struct facil_result *record)
+{
+    uint32_t index;
+
+    if (FS98_HOST_MEMSET(HOST)(row, 0, 0x14) != 0)
+        return -1;
+    if (facil_describe(record->node, LIST_D100,
+                       (struct facil_results *)(D + 0x550)) != 0)
+        return -1;
+    for (index = 0; index < D32(0x550); index++) {
+        struct facil_result *place = RECORD(D + 0x550, index);
+
+        switch (place->kind) {
+        case 0x10001: P32(row, 0x0) = HOST_STRDUP(place->name); break;
+        case 0x20001: P32(row, 0x4) = HOST_STRDUP(place->name); break;
+        case 0x30001: P32(row, 0x8) = HOST_STRDUP(place->name); break;
+        case 0x40001: P32(row, 0xc) = HOST_STRDUP(place->name); break;
+        }
+    }
+    P32(row, 0x10) = HOST_STRDUP(record->name);
+    return 0;
+}
+
+/* .text+0x13f0 -- latitude, longitude and altitude from section 0x10001. */
+static int32_t facil_row_position(uint8_t *row, const struct facil_source *source)
+{
+    uint8_t *section;
+    uint32_t size;
+
+    if (!FE_READ(source, source->value, 0x10001, &section, &size))
+        return -1;
+    if (section != NULL && size != 0) {
+        NUM_FORMAT(section + 0x08, 0x15, (char *)row + 0x1f);
+        NUM_FORMAT(section + 0x10, 0x14, (char *)row + 0x34);
+        NUM_FORMAT(section + 0x18, 0x1004e, (char *)row + 0x49);
+    } else {
+        HOST_STRCPY((char *)row + 0x1f, (const char *)D + 0x55c);
+        HOST_STRCPY((char *)row + 0x34, (const char *)D + 0x55c);
+        HOST_STRCPY((char *)row + 0x49, (const char *)D + 0x55c);
+    }
+    return HOST_FREE(&section) != 0 ? -1 : 0;
+}
+
+/* .text+0x14e0 -- the long name from section 0x10006. */
+static int32_t facil_row_title(uint8_t *row, const struct facil_source *source)
+{
+    uint8_t *section;
+    uint32_t size;
+
+    if (!FE_READ(source, source->value, 0x10006, &section, &size))
+        return -1;
+    if (section != NULL && size != 0)
+        HOST_STRCPY((char *)row + 0x14, (const char *)section + 8);
+    else
+        HOST_STRCPY((char *)row + 0x14, (const char *)D + 0x55c);
+    return HOST_FREE(&section) != 0 ? -1 : 0;
+}
+
+/* .text+0x1570 -- the first type-1 frequency of section 0x20001.  Finding
+ * one returns at once and leaks the section. */
+static int32_t facil_row_frequency(uint8_t *row,
+                                   const struct facil_source *source)
+{
+    uint8_t *section;
+    uint32_t size;
+    uint32_t offset;
+
+    if (!FE_READ(source, source->value, 0x20001, &section, &size))
+        return -1;
+    if (section != NULL && size != 0) {
+        offset = 0;
+        do {
+            if (P32(section + offset, 0xc) == 1)
+                return facil_bcd3((char *)row + 0x51,
+                                  P32(section + offset, 8), 3) != 0 ? -1 : 0;
+            offset = offset + P32(section + offset, 4) + 8;
+        } while (offset < size);
+    } else {
+        HOST_STRCPY((char *)row + 0x51, (const char *)D + 0x55c);
+    }
+    return HOST_FREE(&section) != 0 ? -1 : 0;
+}
+
+/* .text+0x67c0 -- 1 unless the second point lies ahead of the first along
+ * `heading`: the dot product of their separation with the heading's sine and
+ * cosine.  Longitudes go through +0xc0 between 0x4000000 and 0xc0000000 and
+ * through the signed +0xc8 otherwise. */
+static uint32_t facil_behind(const void *latitude1, const void *longitude1,
+                             uint32_t heading, const void *latitude2,
+                             const void *longitude2)
+{
+    int16_t sine;
+    int16_t cosine;
+    uint8_t metres1[8];
+    uint8_t metres2[8];
+    double x1, x2, y1, y2, sine_d, cosine_d;
+    uint32_t high;
+    long double sum;
+
+    UTIL_SINCOS((0x40000000u - heading) >> 16, &sine, &cosine);
+    UTIL_LON_TO_M(longitude1, latitude1, metres1);
+    UTIL_LON_TO_M(longitude2, latitude2, metres2);
+    sine_d = (double)sine;
+    cosine_d = (double)cosine;
+    UTIL_TO_DOUBLE_S(&y1, latitude1);
+    UTIL_TO_DOUBLE_S(&y2, latitude2);
+    high = P32(longitude2, 4);
+    if (high > 0x4000000 && high < 0xc0000000u) {
+        UTIL_TO_DOUBLE(&x1, metres1);
+        UTIL_TO_DOUBLE(&x2, metres2);
+    } else {
+        UTIL_TO_DOUBLE_S(&x1, metres1);
+        UTIL_TO_DOUBLE_S(&x2, metres2);
+    }
+    sum = ((long double)x2 - x1) * cosine_d + ((long double)y2 - y1) * sine_d;
+    return !(sum > 0.0L);
+}
+
+/* .text+0x1830 -- the frequency and name of the last type-4 (ILS) 0x10004
+ * record following the runway that is not behind it. */
+static int32_t facil_runway_ils(uint8_t *end_row, uint8_t *end, uint8_t *runway)
+{
+    uint32_t found = 0;
+    uint32_t frequency = U32(end);
+    const char *name = (const char *)runway;
+    uint8_t *next = runway + P32(runway, 4) + 8;
+
+    while (next < end && P32(next, 0) == 0x10004) {
+        if (facil_behind(runway + 8, runway + 0x10, P32(runway, 0x20),
+                         next + 8, next + 0x10) == 0 &&
+            P32(next, 0x28) == 4) {
+            frequency = P32(next, 0x24);
+            name = (const char *)next + 0x38;
+            found = 1;
+        }
+        next = next + P32(next, 4) + 8;
+    }
+    if (found) {
+        facil_bcd3((char *)end_row + 0x14, frequency, 2);
+        HOST_STRCPY((char *)end_row + 0x1f, name);
+    }
+    return 0;
+}
+
+/* .text+0x17e0 -- one 0x2c-byte runway end. */
+static int32_t facil_runway_end(uint8_t *end_row, uint8_t *end, uint8_t *runway)
+{
+    P32(end_row, 8) = P32(runway, 0x38);
+    NUM_FORMAT(runway + 0x28, 0x1001b, (char *)end_row + 0xc);
+    P32(end_row, 0) = P32(runway, 0x34);
+    P32(end_row, 4) = P32(runway, 0x30);
+    return facil_runway_ils(end_row, end, runway) != 0 ? -1 : 0;
+}
+
+/* .text+0x1630 -- both ends of every runway.  The far end is made by turning
+ * FE's own record round in place: heading plus 0x80000000, pattern sides
+ * 1 and 2 swapped, and the number less 18, wrapped into 1..36. */
+static int32_t facil_row_runways(uint8_t *row, const struct facil_source *source)
+{
+    struct fs98_host_list ends = { 0, 0, 0x20, 0x2c, 0, 0, NULL };
+    uint8_t *block;
+    uint32_t size;
+    uint32_t offset = 0x10;
+    uint8_t *runway;
+    uint8_t *end_row;
+
+    if (!FE_EXTRACT((const struct facil_source *)source, source->value, 1,
+                    &block, &size))
+        return -1;
+    if (block != NULL && size != 0 && size > 0x10) {
+        do {
+            runway = block + offset;
+            if (P32(runway, 0) != 0x10002) {
+                offset = offset + P32(runway, 4) + 8;
+                continue;
+            }
+            end_row = (uint8_t *)FS98_HOST_LIST_ADD(HOST)(&ends);
+            if (facil_runway_end(end_row, block + size, runway) != 0)
+                return -1;
+            end_row = (uint8_t *)FS98_HOST_LIST_ADD(HOST)(&ends);
+            P32(runway, 0x20) += 0x80000000u;
+            switch (P32(runway, 0x30)) {
+            case 1: P32(runway, 0x30) = 2; break;
+            case 2: P32(runway, 0x30) = 1; break;
+            }
+            P32(runway, 0x34) += (uint32_t)-0x12;
+            if ((int32_t)P32(runway, 0x34) <= 0)
+                P32(runway, 0x34) += 0x24;
+            if (facil_runway_end(end_row, block + size, runway) != 0)
+                return -1;
+            do {
+                offset = offset + P32(runway, 4) + 8;
+                runway = block + offset;
+                if (offset >= size)
+                    goto done;
+            } while (P32(runway, 0) != 0x10002);
+        } while (offset < size);
+    }
+done:
+    P32(row, 0x5c) = (uint32_t)ends.count;
+    P32(row, 0x60) = U32(ends.data);
+    if (ends.count == 0 && HOST_FREE(row + 0x60) != 0)
+        return -1;
+    return HOST_FREE(&block) != 0 ? -1 : 0;
+}
+
+/* .text+0x1240 -- one 0x64-byte airport row.  The record copy leaks. */
+static int32_t facil_airport_row(uint8_t *row, const struct facil_result *found)
+{
+    uint8_t *record;
+    uint32_t size;
+    const struct facil_source *source;
+
+    if (facil_copy_record(found->node, &record, &size) != 0)
+        return -1;
+    if (facil_row_names(row, found) != 0)
+        return -1;
+    source = (const struct facil_source *)
+        (record + P32(record, 0x18) + 0x20);
+    if (facil_row_position(row, source) != 0 ||
+        facil_row_title(row, source) != 0 ||
+        facil_row_frequency(row, source) != 0)
+        return -1;
+    return facil_row_runways(row, source) != 0 ? -1 : 0;
+}
+
+/* .text+0x1a20 -- one 0x60-byte navaid row from section 0x10004.  Bits of
+ * +0x5c say which frequency kinds were seen. */
+static int32_t facil_navaid_row(uint8_t *row, const struct facil_result *found)
+{
+    uint8_t *record;
+    uint32_t record_size;
+    uint8_t *section;
+    uint32_t size;
+    const struct facil_source *source;
+    uint32_t offset;
+
+    if (facil_copy_record(found->node, &record, &record_size) != 0)
+        return -1;
+    source = (const struct facil_source *)
+        (record + P32(record, 0x18) + 0x20);
+    if (!FE_READ(source, source->value, 0x10004, &section, &size))
+        return -1;
+    if (facil_row_names(row, found) != 0)
+        return -1;
+    if (section != NULL && size != 0) {
+        NUM_FORMAT(section + 0x08, 0x15, (char *)row + 0x1f);
+        NUM_FORMAT(section + 0x10, 0x14, (char *)row + 0x34);
+        NUM_FORMAT(section + 0x18, 0x1004e, (char *)row + 0x49);
+        HOST_STRCPY((char *)row + 0x14, (const char *)section + 0x38);
+        P32(row, 0x5c) = 0;
+        for (offset = 0; offset < size;
+             offset = offset + P32(section + offset, 4) + 8) {
+            uint8_t *entry = section + offset;
+
+            switch (P32(entry, 0x28)) {
+            case 1:
+                P32(row, 0x5c) |= 1;
+                if (facil_bcd3((char *)row + 0x51, P32(entry, 0x24), 2) != 0)
+                    return -1;
+                break;
+            case 2:
+                P32(row, 0x5c) |= 4;
+                if (facil_bcd3((char *)row + 0x51, P32(entry, 0x24), 2) != 0)
+                    return -1;
+                break;
+            case 3:
+                P32(row, 0x5c) |= 2;
+                if (facil_bcd4((char *)row + 0x51, P32(entry, 0x24), 1) != 0)
+                    return -1;
+                break;
+            case 8:
+                P32(row, 0x5c) |= 0xc;
+                break;
+            }
+        }
+    }
+    if (HOST_FREE(&record) != 0)
+        return -1;
+    if (section != NULL && HOST_FREE(&section) != 0)
+        return -1;
+    return 0;
+}
+
+/* .text+0x1d40 -- airport rows by city, case-sensitively; 0 if either has
+ * none. */
+static int32_t FS98_STDCALL facil_airport_compare(const void *left,
+                                                  const void *right)
+{
+    const char *a = (const char *)PTR(P32(left, 0xc));
+    const char *b;
+
+    if (a != NULL) {
+        b = (const char *)PTR(P32(right, 0xc));
+        if (b != NULL)
+            return FS98_HOST_STRCMP(HOST)(a, b);
+    }
+    return 0;
+}
+
+/* .text+0x1c90 -- navaid rows: those without bit 1 first, then by country,
+ * state and name, case-insensitively. */
+static int32_t FS98_STDCALL facil_navaid_compare(const void *left,
+                                                 const void *right)
+{
+    const uint8_t *a = (const uint8_t *)left;
+    const uint8_t *b = (const uint8_t *)right;
+    int32_t result;
+
+    if (P32(a, 0x5c) & 2) {
+        if (!(b[0x5c] & 2))
+            return 1;
+    } else if (b[0x5c] & 2) {
+        return -1;
+    }
+    if (P32(a, 4) != 0 && P32(b, 4) != 0) {
+        result = FS98_HOST_STRICMP(HOST)((const char *)PTR(P32(a, 4)),
+                                         (const char *)PTR(P32(b, 4)));
+        if (result != 0)
+            return result;
+    }
+    if (P32(a, 8) != 0 && P32(b, 8) != 0) {
+        result = FS98_HOST_STRICMP(HOST)((const char *)PTR(P32(a, 8)),
+                                         (const char *)PTR(P32(b, 8)));
+        if (result != 0)
+            return result;
+    }
+    return FS98_HOST_STRICMP(HOST)((const char *)PTR(P32(a, 0x10)),
+                                   (const char *)PTR(P32(b, 0x10)));
+}
+
+/* ---- dialog 0x1307: facilities ------------------------------------------ */
+
+/* .text+0x10e0 -- block bit 0: airports in each selected place. */
+static int32_t facil_list_airports(uint8_t *block)
+{
+    struct fs98_host_list rows = { 0, 0, 0x20, 0x64, 0, 0, NULL };
+    struct facil_results found;
+    uint32_t index;
+    uint32_t record;
+
+    for (index = 0; index < P32(block, 0x10); index++) {
+        if (facil_search_at(P32(PTR(P32(block, 0x14)), index * 4),
+                            P32(PTR(P32(block, 0x18)), index * 4),
+                            P32(PTR(P32(block, 0x1c)), index * 4),
+                            (struct facil_filter *)(D + 0xd8), &found) != 0)
+            return -1;
+        for (record = 0; record < found.count; record++) {
+            void *row = FS98_HOST_LIST_ADD(HOST)(&rows);
+            if (facil_airport_row((uint8_t *)row,
+                                  &found.records[record]) != 0)
+                return -1;
+        }
+        if (HOST_FREE(&found.records) != 0)
+            return -1;
+    }
+    P32(block, 0x24) = (uint32_t)rows.count;
+    P32(block, 0x28) = U32(rows.data);
+    if (rows.count == 0)
+        return HOST_FREE(block + 0x28) != 0 ? -1 : 0;
+    FS98_HOST_QSORT(HOST)(rows.data, (uint32_t)rows.count, 0x64,
+                          facil_airport_compare);
+    return 0;
+}
+
+/* .text+0x18d0 -- block bit 1: the kinds at .data+0x108 and +0x10c (VOR and
+ * NDB) in each selected place. */
+static int32_t facil_list_navaids(uint8_t *block)
+{
+    struct fs98_host_list rows = { 0, 0, 0x20, 0x60, 0, 0, NULL };
+    struct facil_results found;
+    uint32_t index;
+    uint32_t kind;
+    uint32_t record;
+
+    for (index = 0; index < P32(block, 0x10); index++) {
+        for (kind = 0x108; kind < 0x110; kind += 4) {
+            D32(0x110) = D32(kind);
+            if (facil_search_at(P32(PTR(P32(block, 0x14)), index * 4),
+                                P32(PTR(P32(block, 0x18)), index * 4),
+                                P32(PTR(P32(block, 0x1c)), index * 4),
+                                (struct facil_filter *)(D + 0x110),
+                                &found) != 0)
+                return -1;
+            for (record = 0; record < found.count; record++) {
+                void *row = FS98_HOST_LIST_ADD(HOST)(&rows);
+                if (facil_navaid_row((uint8_t *)row,
+                                     &found.records[record]) != 0)
+                    return -1;
+            }
+            if (HOST_FREE(&found.records) != 0)
+                return -1;
+        }
+    }
+    P32(block, 0x2c) = (uint32_t)rows.count;
+    P32(block, 0x30) = U32(rows.data);
+    if (rows.count == 0)
+        return HOST_FREE(block + 0x30) != 0 ? -1 : 0;
+    FS98_HOST_QSORT(HOST)(rows.data, (uint32_t)rows.count, 0x60,
+                          facil_navaid_compare);
+    return 0;
+}
+
+/* .text+0x1090 -- the block's two unused callbacks. */
+static uint32_t FS98_STDCALL facil_callback_nothing(void *block)
+{
+    (void)block;
+    return 0;
+}
+
+/* .text+0x10a0 -- the facilities block's apply. */
+static uint32_t FS98_STDCALL facil_facilities_apply(uint8_t *block)
+{
+    if ((block[0x20] & 1) && facil_list_airports(block) != 0)
+        return 0xffffffffu;
+    if ((block[0x20] & 2) && facil_list_navaids(block) != 0)
+        return 0xffffffffu;
+    return 0;
+}
+
+/* .text+0x1040 -- Linkage +0x30, after resetting .data+0x80 (.text+0x1070). */
+static uint32_t FS98_STDCALL facil_facilities_dialog(void)
+{
+    D32(0x80) = 0;
+    D32(0xa8) = 0;
+    D32(0xb0) = 0;
+    D32(0xa4) = 0;
+    D32(0xac) = 0;
+    return FS98_HOST_DIALOG(HOST)(0x1307, D + 0x80) != 0 ? 0xffffffffu : 0;
+}
+
+/* .text+0x2840 -- the other dialogs' facilities button. */
+static uint32_t FS98_STDCALL facil_facilities_button(void *block)
+{
+    (void)block;
+    facil_facilities_dialog();
+    return 0;
+}
+
+/* ---- dialog 0x1308: exact position --------------------------------------- */
+
+/* .text+0x2450 */
+static void facil_position_flags(void)
+{
+    G32(0xda8) = (int32_t)G32(0x564) > 0 ? 2 : 3;
+    G32(0xdac) = G32(0x56c) >= 0x7fffffffu ? 1 : 0;
+}
+
+/* .text+0x24a0 -- position, heading and the indicated speed into the block's
+ * variables, then into its controls through UTIL +0x90. */
+static int32_t facil_position_load(void)
+{
+    D16(0x564) = (uint16_t)((uint16_t)(G32(0x580) >> 16) + 0x5b);
+    if (FS98_HOST_MEMMOVE(HOST)(D + 0x568, GLOBAL + 0x560, 0x24) != 0)
+        return -1;
+    if (FS98_HOST_MEMMOVE(HOST)(D + 0x590, GLOBAL + 0xd50, 0x24) != 0)
+        return -1;
+    D32(0x560) = (G16(0x612) == 0 ? G32(0x2b8) : G32(0x2bc)) >> 7;
+    UTIL_GET(D + 0x230, 8, D + 0x158);
+    return 0;
+}
+
+/* .text+0x1e30 -- Linkage +0x28, after resetting the block (.text+0x1e60). */
+static uint32_t FS98_STDCALL facil_position_dialog(void)
+{
+    D32(0x158) = 0;
+    D32(0x174) = G16(0xc18);
+    if (facil_position_load() != 0)
+        return 0xffffffffu;
+    NUM_FORMAT(D + 0x118, 0x10050, (char *)D + 0x5c0);
+    NUM_FORMAT(D + 0x120, 0x10050, (char *)D + 0x5c8);
+    NUM_FORMAT(D + 0x128, 0x1001b, (char *)D + 0x6c0);
+    NUM_FORMAT(D + 0x12c, 0x1001b, (char *)D + 0x6b0);
+    D32(0x1d0) = 0;
+    D32(0x1e8) = 0;
+    D32(0x200) = 0;
+    D32(0x18c) = 0;
+    D32(0x1a4) = 0;
+    D32(0x5b4) = 0;
+    return FS98_HOST_DIALOG(HOST)(0x1308, D + 0x158) != 0 ? 0xffffffffu : 0;
+}
+
+/* .text+0x2310 -- validate the edits; only the last parse decides. */
+static uint32_t FS98_STDCALL facil_position_validate(uint8_t *block)
+{
+    uint8_t scratch[8];
+    uint32_t result = 0;
+
+    if (UTIL_PUT(D + 0x230, 8, D + 0x158, 1) != 0)
+        result = 0xffffffffu;
+    P32(block, 0x94) = (uint32_t)NUM_PARSE((const char *)PTR(P32(block, 0x98)),
+                                           0x50, scratch, D + 0x118);
+    P32(block, 0x50) = (uint32_t)NUM_PARSE((const char *)PTR(P32(block, 0x54)),
+                                           0x50, scratch, D + 0x118);
+    P32(block, 0xac) = (uint32_t)NUM_PARSE((const char *)PTR(P32(block, 0xb0)),
+                                           0, scratch, D + 0x130);
+    P32(block, 0xc0) = (uint32_t)NUM_PARSE((const char *)PTR(P32(block, 0xc4)),
+                                           0x1b, scratch, D + 0x128);
+    if (P32(block, 0xc0) != 0)
+        result = 0xffffffffu;
+    return result;
+}
+
+/* .text+0x1f20 -- write the changed fields back and move the aircraft. */
+static uint32_t FS98_STDCALL facil_position_apply(uint8_t *block)
+{
+    if (UTIL_PUT(D + 0x258, 3, D + 0x158, 0) != 0)
+        return 0xffffffffu;
+    if (P32(block, 0x34) != 0) {
+        if (UTIL_PUT(D + 0x230, 1, D + 0x158, 0) != 0 ||
+            FS98_HOST_MEMMOVE(HOST)(GLOBAL + 0xd50, D + 0x590, 8) != 0)
+            return 0xffffffffu;
+    }
+    if (P32(block, 0x4c) != 0) {
+        if (UTIL_PUT(D + 0x244, 1, D + 0x158, 0) != 0 ||
+            FS98_HOST_MEMMOVE(HOST)(GLOBAL + 0xd58, D + 0x598, 8) != 0)
+            return 0xffffffffu;
+    }
+    if (D32(0x5b4) == 1) {
+        if (UTIL_PUT(D + 0x230, 1, D + 0x158, 0) != 0 ||
+            UTIL_PUT(D + 0x244, 1, D + 0x158, 0) != 0 ||
+            FS98_HOST_MEMMOVE(HOST)(GLOBAL + 0xd50, D + 0x590, 8) != 0 ||
+            FS98_HOST_MEMMOVE(HOST)(GLOBAL + 0xd58, D + 0x598, 8) != 0)
+            return 0xffffffffu;
+    }
+    if (FS98_HOST_MEMMOVE(HOST)(GLOBAL + 0xd60, D + 0x5a0, 8) != 0)
+        return 0xffffffffu;
+    if (P32(block, 0x78) != 0) {
+        if (UTIL_PUT(D + 0x294, 1, D + 0x158, 0) != 0 ||
+            FS98_HOST_MEMMOVE(HOST)(GLOBAL + 0x560, D + 0x568, 8) != 0)
+            return 0xffffffffu;
+    }
+    if (P32(block, 0x90) != 0) {
+        if (UTIL_PUT(D + 0x2a8, 1, D + 0x158, 0) != 0 ||
+            FS98_HOST_MEMMOVE(HOST)(GLOBAL + 0x568, D + 0x570, 8) != 0)
+            return 0xffffffffu;
+    }
+    if (P32(block, 0xa8) != 0) {
+        if (UTIL_PUT(D + 0x2bc, 1, D + 0x158, 0) != 0 ||
+            FS98_HOST_MEMMOVE(HOST)(GLOBAL + 0x570, D + 0x578, 8) != 0)
+            return 0xffffffffu;
+        if (G32(0x574) != 0 || G16(0x572) != 0) {
+            G8(0x366) = 0;
+            if (P32(block, 0x78) != 0 || P32(block, 0x90) != 0 ||
+                (int32_t)G32(0x574) >= ((int32_t)G32(0x20) >> 8))
+                goto moved;
+        }
+        G8(0x366) = 1;
+    }
+moved:
+    G32(0x580) = (D32(0x564) & 0xffff) << 16;
+    facil_position_flags();
+    SIM_34(D32(0x560));
+    G16(0xcb8) = 1;
+    CHAIN_DISPATCH(0x14, 0x33, 0);
+    G8(0x365) = 7;
+    G32(0x11f0) = 1;
+    G32(0x11fc) = G32(0x574);
+    G16(0x11fa) = G16(0x572);
+    G32(0x11f4) = 1;
+    G32(0x1200) = G32(0x580) - ((uint32_t)G16(0x2a0) << 16);
+    MAIN_1C();
+    MAIN_B0();
+    return 0;
+}
+
+/* .text+0x23d0 -- put the original texts back. */
+static uint32_t FS98_STDCALL facil_position_revert(uint8_t *block)
+{
+    HOST_STRCPY((char *)PTR(P32(block, 0x24)),
+                (const char *)PTR(P32(block, 0x68)));
+    HOST_STRCPY((char *)PTR(P32(block, 0x3c)),
+                (const char *)PTR(P32(block, 0x80)));
+    HOST_STRCPY((char *)PTR(P32(block, 0x54)),
+                (const char *)PTR(P32(block, 0x98)));
+    D32(0x5b4) = 1;
+    return 0;
+}
+
+/* .text+0x2430 -- reload from the sim. */
+static uint32_t FS98_STDCALL facil_position_refresh(void *block)
+{
+    (void)block;
+    MAIN_C4();
+    return facil_position_load() != 0 ? 0xffffffffu : 0;
+}
+
+/* ---- dialog 0x1309: airports --------------------------------------------- */
+
+/* .text+0x2b00 -- free each record's name and the array; the selection
+ * stays. */
+static int32_t facil_free_names(uint8_t *list)
+{
+    while (P32(list, 0) != 0) {
+        P32(list, 0)--;
+        if (HOST_FREE(&RECORD(list, P32(list, 0))->name) != 0)
+            return -1;
+    }
+    return HOST_FREE(list + 4) != 0 ? -1 : 0;
+}
+
+/* .text+0x2ae0 */
+static int32_t facil_clear_list(uint8_t *list)
+{
+    P32(list, 8) = 0;
+    return facil_free_names(list) != 0 ? -1 : 0;
+}
+
+/* .text+0x2e40 -- also free each record's payload, last first. */
+static int32_t facil_free_payload_list(uint8_t *list)
+{
+    uint32_t count = P32(list, 0);
+
+    while (count != 0) {
+        count--;
+        if (HOST_FREE(&RECORD(list, count)->node) != 0)
+            return -1;
+    }
+    return facil_clear_list(list) != 0 ? -1 : 0;
+}
+
+/* .text+0x2a70 -- the airport list, whose payloads exist only in mode
+ * 0x1002. */
+static int32_t facil_free_result_list(uint8_t *list, uint32_t payloads)
+{
+    if (payloads != 0)
+        return facil_free_payload_list(list);
+    return facil_clear_list(list) != 0 ? -1 : 0;
+}
+
+/* .text+0x2ea0 -- the runway list: name and payload together, last first. */
+static int32_t facil_free_runway_list(uint8_t *list)
+{
+    while (P32(list, 0) != 0) {
+        struct facil_result *record;
+
+        P32(list, 0)--;
+        record = RECORD(list, P32(list, 0));
+        if (HOST_FREE(&record->name) != 0 || HOST_FREE(&record->node) != 0)
+            return -1;
+    }
+    if (HOST_FREE(list + 4) != 0)
+        return -1;
+    P32(list, 8) = 0;
+    return 0;
+}
+
+/* .text+0x2b50 -- refill a list from +0x18, dropping a leading empty name
+ * (whose string leaks). */
+static int32_t facil_requery(uint8_t *list, struct facil_filter_list *filters,
+                             struct facil_filter *filter, uint32_t dedupe)
+{
+    struct facil_results found;
+
+    if (facil_free_names(list) != 0)
+        return -1;
+    if (facil_search(filters, filter, &found, dedupe) != 0)
+        return -1;
+    if (found.count != 0 && found.records[0].name[0] == 0) {
+        found.count--;
+        if (FS98_HOST_MEMMOVE(HOST)(found.records, found.records + 1,
+                                    found.count * 0xc) != 0)
+            return -1;
+    }
+    P32(list, 0) = found.count;
+    P32(list, 4) = U32(found.records);
+    return 0;
+}
+
+/* .text+0x2cd0 -- requery one place level without its own name, then select
+ * the last record whose name equals it exactly (selection is index + 1). */
+static int32_t facil_place_list(uint8_t *list, struct facil_filter_list *filters,
+                                struct facil_filter *filter, char **name)
+{
+    char *saved = *name;
+    int32_t result;
+
+    *name = NULL;
+    result = facil_requery(list, filters, filter, 1);
+    *name = saved;
+    P32(list, 8) = P32(list, 0);
+    while ((int32_t)P32(list, 8) > 0) {
+        P32(list, 8)--;
+        if (FS98_HOST_STRCMP(HOST)(RECORD(list, P32(list, 8))->name,
+                                   *name) == 0) {
+            P32(list, 8)++;
+            break;
+        }
+    }
+    return result;
+}
+
+/* .text+0x2bf0 -- region, country, state and city, each filtered by the
+ * other three of .data+0x2f8's names. */
+static int32_t facil_place_lists(uint8_t *block)
+{
+    struct facil_filter filter;
+    char **names = (char **)PTR(D32(0x2fc));
+
+    filter.name = NULL;
+    filter.kind = 0x10001;
+    if (facil_place_list(block + 0x44, LIST_2F8, &filter,
+                         (char **)((uint8_t *)names + 4)) != 0)
+        return -1;
+    filter.kind = 0x20001;
+    if (facil_place_list(block + 0x50, LIST_2F8, &filter,
+                         (char **)((uint8_t *)names + 0xc)) != 0)
+        return -1;
+    filter.kind = 0x30001;
+    if (facil_place_list(block + 0x5c, LIST_2F8, &filter,
+                         (char **)((uint8_t *)names + 0x14)) != 0)
+        return -1;
+    filter.kind = 0x40001;
+    return facil_place_list(block + 0x68, LIST_2F8, &filter,
+                            (char **)((uint8_t *)names + 0x1c)) != 0 ? -1 : 0;
+}
+
+/* .text+0x2f80 */
+static int32_t facil_save_place(uint8_t *list, char *destination)
+{
+    if (P32(list, 8) == 0)
+        HOST_STRCPY(destination, (const char *)D + 0xb18);
+    else
+        HOST_STRCPY(destination, RECORD(list, P32(list, 8) - 1)->name);
+    return 0;
+}
+
+/* .text+0x2f10 -- the selected names into .data+0x978.., except on the first
+ * call after opening. */
+static int32_t facil_save_places(uint8_t *block)
+{
+    if (D32(0x2d0) != 0) {
+        D32(0x2d0) = 0;
+        return 0;
+    }
+    if (facil_save_place(block + 0x44, (char *)D + 0x978) == 0 &&
+        facil_save_place(block + 0x50, (char *)D + 0x9e0) == 0 &&
+        facil_save_place(block + 0x5c, (char *)D + 0xa48) == 0)
+        facil_save_place(block + 0x68, (char *)D + 0xab0);
+    return 0;
+}
+
+/* .text+0x2fd0 -- mode 0x1001: the airport of the selected name record.
+ * The index is +0x9c itself, not a selection. */
+static int32_t facil_airport_by_name(uint8_t *block)
+{
+    struct facil_filter filter = { 0x50001, NULL };
+    struct facil_filter_list list = { 1, &filter };
+
+    if (facil_free_names(block + 0x74) != 0)
+        return -1;
+    if (P32(block, 0x98) != 0 &&
+        facil_describe(RECORD(block + 0x94, P32(block, 0x9c))->node, &list,
+                       (struct facil_results *)(block + 0x74)) != 0)
+        return -1;
+    return 0;
+}
+
+/* .text+0x3590 -- one 0x10-byte area: its name and three words, through
+ * UTIL's marshalling table at .data+0x300. */
+static int32_t facil_unpack_area(uint8_t *area, const void *item)
+{
+    UTIL_MARSHAL(item, D + 0x300, 4);
+    P32(area, 4) = D32(0x83c);
+    P32(area, 8) = D32(0x840);
+    P32(area, 0xc) = D32(0x844);
+    P32(area, 0) = HOST_STRDUP((const char *)D + 0x6e0);
+    return 0;
+}
+
+/* .text+0x3720 -- one 0x1c-byte navaid through the table at .data+0x340. */
+static int32_t facil_unpack_navaid(uint8_t *navaid, const void *item)
+{
+    UTIL_MARSHAL(item, D + 0x340, 0xa);
+    FS98_HOST_MEMMOVE(HOST)(navaid, D + 0x818, 0x1c);
+    P32(navaid, 0) = HOST_STRDUP((const char *)D + 0x848);
+    return 0;
+}
+
+/* .text+0x3480 -- FE's area listing into +0xac. */
+static int32_t facil_list_areas(uint8_t *block)
+{
+    struct fs98_host_list list = { 0, 0, 0x20, 0xc, 0, 0, NULL };
+    void *item = NULL;
+    void *state = NULL;
+    struct facil_result *record;
+
+    if (P32(block, 0xb0) != 0)
+        facil_free_payload_list(block + 0xac);
+    P32(block, 0xac) = 0;
+    P32(block, 0xb0) = 0;
+    FE_AREA_FIRST();
+    while (FE_AREA_NEXT(&item, &state)) {
+        record = (struct facil_result *)FS98_HOST_LIST_ADD(HOST)(&list);
+        if (FS98_HOST_ALLOC(HOST)(5, 0x10, (void **)&record->node, 0) != 0 ||
+            facil_unpack_area(PTR(record->node), item) != 0)
+            return -1;
+        record->kind = 0;
+        record->name = (char *)PTR(P32(PTR(record->node), 0));
+    }
+    P32(block, 0xac) = (uint32_t)list.count;
+    P32(block, 0xb0) = U32(list.data);
+    P32(block, 0xb4) = 0;
+    return 0;
+}
+
+/* .text+0x35e0 -- mode 0x1002: FE's navaids around the selected area. */
+static int32_t facil_list_navaids_at(uint8_t *block)
+{
+    struct fs98_host_list list = { 0, 0, 0x20, 0xc, 0, 0, NULL };
+    void *item = NULL;
+    void *state = NULL;
+    struct facil_result *record;
+    uint8_t *area;
+
+    if (P32(block, 0x78) != 0 &&
+        facil_free_result_list(block + 0x74, P32(block, 0xbc)) != 0)
+        return -1;
+    P32(block, 0x74) = 0;
+    P32(block, 0x78) = 0;
+    if (P32(block, 0xac) == 0)
+        return 0;
+    area = PTR(RECORD(block + 0xac, P32(block, 0xb4))->node);
+    FE_NAV_FIRST(P32(area, 0xc), P32(area, 4), P32(area, 8));
+    while (FE_NAV_NEXT(&item, &state)) {
+        record = (struct facil_result *)FS98_HOST_LIST_ADD(HOST)(&list);
+        if (FS98_HOST_ALLOC(HOST)(5, 0x1c, (void **)&record->node, 0) != 0 ||
+            facil_unpack_navaid(PTR(record->node), item) != 0)
+            return -1;
+        record->kind = 0;
+        record->name = (char *)PTR(P32(PTR(record->node), 0));
+    }
+    P32(block, 0x74) = (uint32_t)list.count;
+    P32(block, 0x78) = U32(list.data);
+    P32(block, 0x7c) = 0;
+    return 0;
+}
+
+/* .text+0x3200 -- the selected airport's runways, one per type-1 record of
+ * each source's 0x10005 section, named by number and L/R/C. */
+static int32_t facil_list_runways(uint8_t *block)
+{
+    struct fs98_host_list list = { 0, 0, 0x20, 0xc, 0, 0, NULL };
+    uint8_t *record;
+    uint32_t record_size;
+    uint8_t *section;
+    uint32_t size;
+    uint32_t *runway;
+    char text[0x64];
+    const struct facil_source *source;
+    uint32_t index;
+    uint32_t offset;
+
+    if (facil_copy_record(RECORD(block + 0x74, P32(block, 0x7c))->node,
+                          &record, &record_size) != 0)
+        return -1;
+    source = (const struct facil_source *)
+        (record + P32(record, 0x18) + 0x20);
+    for (index = 0; index < P32(record, 0x1c); index++, source++) {
+        if (!FE_READ(source, source->value, 0x10005, &section, &size))
+            return -1;
+        for (offset = 0; offset < size;
+             offset = offset + P32(section + offset, 4) + 8) {
+            uint8_t *entry = section + offset;
+            struct facil_result *row;
+
+            if (P32(entry, 0x24) != 1)
+                continue;
+            row = (struct facil_result *)FS98_HOST_LIST_ADD(HOST)(&list);
+            NUM_FORMAT(entry + 0x2c, 0x1001b, text);
+            switch (P32(entry, 0x28)) {
+            case 1: FS98_HOST_STRCAT(HOST)(text, (const char *)D + 0x4e0); break;
+            case 2: FS98_HOST_STRCAT(HOST)(text, (const char *)D + 0x4e4); break;
+            case 3: FS98_HOST_STRCAT(HOST)(text, (const char *)D + 0x4e8); break;
+            }
+            row->name = (char *)PTR(HOST_STRDUP(text));
+            row->kind = 1;
+            if (FS98_HOST_ALLOC(HOST)(5, 0x24, (void **)&runway, 1) != 0)
+                return -1;
+            runway[0] = P32(entry, 0x08);
+            runway[1] = P32(entry, 0x0c);
+            runway[2] = P32(entry, 0x10);
+            runway[3] = P32(entry, 0x14);
+            runway[4] = P32(entry, 0x18);
+            runway[5] = P32(entry, 0x1c);
+            runway[8] = P32(entry, 0x20);
+            row->node = U32(runway);
+        }
+        if (HOST_FREE(&section) != 0)
+            return -1;
+    }
+    P32(block, 0xa0) = (uint32_t)list.count;
+    P32(block, 0xa8) = 0;
+    P32(block, 0xa4) = U32(list.data);
+    if (list.count == 0 && HOST_FREE(block + 0xa4) != 0)
+        return -1;
+    HOST_FREE(&record);
+    return 0;
+}
+
+/* .text+0x3860 -- the chosen place names into the caller's output.  The
+ * names are +0x1c's, handed over; the array at .data+0x7e8 leaks. */
+static int32_t facil_fill_output(uint32_t node)
+{
+    uint32_t index;
+
+    if (facil_describe(node, LIST_4D8,
+                       (struct facil_results *)(D + 0x7e8)) != 0)
+        return -1;
+    for (index = 0; index < D32(0x7e8); index++) {
+        struct facil_result *place = RECORD(D + 0x7e8, index);
+        uint32_t name = U32(place->name);
+
+        switch (place->kind) {
+        case 0x10001: P32(CALLER_OUT, 0x00) = name; break;
+        case 0x20001: P32(CALLER_OUT, 0x04) = name; break;
+        case 0x30001: P32(CALLER_OUT, 0x08) = name; break;
+        case 0x40001: P32(CALLER_OUT, 0x0c) = name; break;
+        case 0x50001: P32(CALLER_OUT, 0x10) = name; break;
+        case 0x50002: P32(CALLER_OUT, 0x14) = name; break;
+        }
+    }
+    return 0;
+}
+
+/* .text+0x3120 -- the start position: the selected runway's threshold less
+ * FE's ground height, or the aircraft's own position with no runways. */
+static int32_t facil_airport_position(uint8_t *block, uint8_t *position)
+{
+    if (P32(block, 0xa0) != 0) {
+        uint32_t node;
+
+        if (FS98_HOST_MEMMOVE(HOST)(position,
+                PTR(RECORD(block + 0xa0, P32(block, 0xa8))->node), 0x24) != 0)
+            return -1;
+        P32(position, 0x20) -= (uint32_t)FE_GROUND(position) << 16;
+        if (D32(0x6d8) == 0)
+            return 0;
+        switch (P32(block, 0x28)) {
+        case 0x1000: node = RECORD(block + 0x74, P32(block, 0x7c))->node; break;
+        case 0x1001: node = RECORD(block + 0x94, P32(block, 0x9c))->node; break;
+        default: return 0;
+        }
+        return facil_fill_output(node) != 0 ? -1 : 0;
+    }
+    return FS98_HOST_MEMMOVE(HOST)(position, GLOBAL + 0x55c, 0x24) != 0 ?
+           -1 : 0;
+}
+
+/* .text+0x3a30 -- a double into a 48-bit longitude, wrapping negatives
+ * round 2^48 (.data+0x3e0). */
+static void facil_store_longitude(const double *value, uint8_t *out)
+{
+    long double v = *value;
+    int64_t whole;
+    uint32_t low;
+
+    if (v < 0.0L)
+        v = ((long double)*(double *)(D + 0x3e0) - v * -65536.0L) *
+            (1.0L / 65536.0L);
+    whole = facil_ftol(v);
+    low = (uint32_t)whole;
+    P32(out, 4) = low;
+    P16(out, 2) = (uint16_t)facil_ftol((v - (long double)(int32_t)low) *
+                                       65536.0L);
+}
+
+/* .text+0x3910 -- the tower position: 2,000 units out along heading + 0x18e2
+ * from `position`, written to GLOBAL +0xd50.. */
+static void facil_tower_from(uint8_t *position)
+{
+    int16_t sine;
+    int16_t cosine;
+    int32_t offset;
+    uint8_t delta[8];
+    long double sum;
+    double longitude;
+
+    G32(0xd54) = P32(position, 4);
+    G32(0xd5c) = P32(position, 0xc);
+    G32(0xd64) = P32(position, 0x14) + 0x1e;
+    UTIL_SINCOS((P32(position, 0x20) >> 16) + 0x18e2, &sine, &cosine);
+    G32(0xd54) += (uint32_t)(((int32_t)cosine * 2000) >> 16);
+    offset = (int32_t)sine * 2000;
+    UTIL_M32_TO_LON(&offset, position, delta);
+    sum = ((long double)G32(0xd5c) + (long double)G16(0xd5a) * (1.0L / 65536.0L)) +
+          ((long double)P16(delta, 2) * (1.0L / 65536.0L) +
+           (long double)P32(delta, 4));
+    longitude = (double)sum;
+    facil_store_longitude(&longitude, GLOBAL + 0xd58);
+}
+
+/* .text+0x3a90 -- the tower from the first 0x10003 section of the selected
+ * airport.  0 if found, -1 if not.  The section pointer starts out as the
+ * block itself, so an airport with no sources copies the block into GLOBAL
+ * and frees it. */
+static int32_t facil_airport_tower(uint8_t *block)
+{
+    uint8_t *record;
+    uint32_t record_size;
+    uint32_t size;
+    uint8_t *section = block;
+    const struct facil_source *source;
+    uint32_t index;
+    int32_t result = 0;
+
+    if (facil_copy_record(RECORD(block + 0x74, P32(block, 0x7c))->node,
+                          &record, &record_size) != 0)
+        return -1;
+    source = (const struct facil_source *)
+        (record + P32(record, 0x18) + 0x20);
+    for (index = 0; index < P32(record, 0x1c); index++, source++) {
+        if (!FE_READ(source, source->value, 0x10003, &section, &size))
+            return -1;
+        if (section != NULL)
+            break;
+    }
+    if (section != NULL) {
+        G32(0xd50) = P32(section, 0x08);
+        G32(0xd54) = P32(section, 0x0c);
+        G32(0xd58) = P32(section, 0x10);
+        G32(0xd5c) = P32(section, 0x14);
+        G32(0xd60) = P32(section, 0x18);
+        G32(0xd64) = P32(section, 0x1c);
+    } else {
+        result = -1;
+    }
+    if (HOST_FREE(&section) != 0 || HOST_FREE(&record) != 0)
+        return -1;
+    return result;
+}
+
+/* .text+0x3770 -- a navaid as a start position. */
+static int32_t facil_navaid_position(const uint8_t *navaid, uint8_t *position)
+{
+    uint32_t packed = P32(navaid, 0xc);
+    double altitude;
+
+    P32(position, 4) = (uint32_t)((int32_t)P32(navaid, 4) >> 7);
+    P16(position, 0xa) = 0;
+    P16(position, 2) = (uint16_t)((P16(navaid, 4) & 0xff80) << 1);
+    P32(position, 0xc) = P32(navaid, 8);
+    altitude = (double)((long double)(packed >> 8) -
+                        (long double)(packed & 0xff) * (-1.0L / 256.0L));
+    UTIL_FROM_DOUBLE(&altitude, position + 0x10);
+    P32(position, 0x18) = 0;
+    P32(position, 0x1c) = 0;
+    P32(position, 0x20) = (uint32_t)P16(navaid, 0x10) << 16;
+    return 0;
+}
+
+/* .text+0x3050 -- put the aircraft there. */
+static int32_t facil_move_aircraft(const uint8_t *position)
+{
+    FS98_HOST_MEMMOVE(HOST)(GLOBAL + 0x560, position, 0x18);
+    G32(0x580) = P32(position, 0x20);
+    SIM_1C();
+    facil_position_flags();
+    G16(0xcb8) = 1;
+    CHAIN_DISPATCH(0x14, 0x33, 0);
+    G8(0x365) = 7;
+    G32(0x11f0) = 1;
+    G32(0x11fc) = G32(0x574);
+    G16(0x11fa) = G16(0x572);
+    G32(0x11f4) = 1;
+    G32(0x1200) = G32(0x580);
+    MAIN_B0();
+    return 0;
+}
+
+/* .text+0x2d60 -- free every list and clear the name filter. */
+static int32_t facil_airport_clear(uint8_t *block)
+{
+    if (facil_clear_list(block + 0x44) != 0 ||
+        facil_clear_list(block + 0x50) != 0 ||
+        facil_clear_list(block + 0x5c) != 0 ||
+        facil_clear_list(block + 0x68) != 0 ||
+        facil_free_result_list(block + 0x74, P32(block, 0xbc)) != 0 ||
+        facil_clear_list(block + 0x94) != 0 ||
+        facil_free_runway_list(block + 0xa0) != 0 ||
+        facil_free_payload_list(block + 0xac) != 0)
+        return -1;
+    HOST_STRCPY((char *)PTR(P32(block, 0x84)), (const char *)D + 0xb18);
+    return 0;
+}
+
+/* .text+0x26a0 -- OK: remember the mode and move to the selection.  The
+ * position is an uninitialised stack buffer, as in retail: a navaid fills
+ * only part of it, any other mode with a nonempty list none of it, and the
+ * rest reaches GLOBAL +0x560. */
+static uint32_t FS98_STDCALL facil_airport_accept(uint8_t *block)
+{
+    uint8_t position[0x24];
+    uint32_t mode;
+
+    D32(0x4ec) = P32(block, 0x28);
+    if (P32(block, 0x74) == 0)
+        return 0;
+    mode = P32(block, 0x28);
+    if (mode == 0x1002) {
+        if (facil_navaid_position(
+                PTR(RECORD(block + 0x74, P32(block, 0x7c))->node),
+                position) != 0)
+            return 0xffffffffu;
+        facil_tower_from(position);
+        if (D32(0x6d8) != 0) {
+            P32(CALLER_OUT, 0) = HOST_STRDUP(
+                RECORD(block + 0xac, P32(block, 0xb4))->name);
+            P32(CALLER_OUT, 0x10) = HOST_STRDUP(
+                RECORD(block + 0x74, P32(block, 0x7c))->name);
+        }
+    } else if ((int32_t)mode >= 0x1000 && (int32_t)mode <= 0x1001) {
+        if (facil_airport_position(block, position) != 0)
+            return 0xffffffffu;
+        if (facil_airport_tower(block) != 0)
+            facil_tower_from(position);
+    }
+    if (facil_move_aircraft(position) != 0)
+        return 0xffffffffu;
+    HOST_STRCPY((char *)D + 0x2b60, (const char *)D + 0x978);
+    HOST_STRCPY((char *)D + 0x2bc8, (const char *)D + 0x9e0);
+    HOST_STRCPY((char *)D + 0x2c30, (const char *)D + 0xa48);
+    HOST_STRCPY((char *)D + 0x2c98, (const char *)D + 0xab0);
+    HOST_STRCPY((char *)D + 0xb20, (const char *)D + 0x1300);
+    HOST_STRCPY((char *)D + 0xf10, (const char *)D + 0x16f0);
+    return 0;
+}
+
+/* .text+0x28a0 -- the place lists. */
+static uint32_t FS98_STDCALL facil_airport_places(uint8_t *block)
+{
+    if (facil_save_places(block) != 0)
+        return 0xffffffffu;
+    return facil_place_lists(block) != 0 ? 0xffffffffu : 0;
+}
+
+/* .text+0x28d0 -- the name list: name records (0x50002) starting with the
+ * filter text, deduplicated. */
+static uint32_t FS98_STDCALL facil_airport_names(uint8_t *block)
+{
+    struct facil_filter filter;
+
+    filter.kind = 0x50002;
+    filter.name = (const char *)PTR(P32(block, 0x84));
+    if (facil_requery(block + 0x94, NULL, &filter, 1) != 0)
+        return 0xffffffffu;
+    P32(block, 0x9c) = 0;
+    return 0;
+}
+
+/* .text+0x2920 -- the airport list for the mode.  Mode 0x1002 frees it a
+ * second time, harmlessly. */
+static uint32_t FS98_STDCALL facil_airport_airports(uint8_t *block)
+{
+    struct facil_filter filter;
+
+    if (facil_free_result_list(block + 0x74, P32(block, 0xbc)) != 0)
+        return 0xffffffffu;
+    switch (P32(block, 0x28)) {
+    case 0x1002:
+        if (facil_free_result_list(block + 0x74, P32(block, 0xbc)) != 0 ||
+            facil_list_navaids_at(block) != 0)
+            return 0xffffffffu;
+        P32(block, 0xbc) = 1;
+        return 0;
+    case 0x1001:
+        if (facil_airport_by_name(block) != 0)
+            return 0xffffffffu;
+        P32(block, 0xbc) = 0;
+        P32(block, 0x7c) = 0;
+        return 0;
+    case 0x1000:
+        filter.kind = 0x50001;
+        filter.name = NULL;
+        if (facil_requery(block + 0x74, LIST_2F8, &filter, 0) != 0)
+            return 0xffffffffu;
+        P32(block, 0xbc) = 0;
+        P32(block, 0x7c) = 0;
+        return 0;
+    }
+    return 0;
+}
+
+/* .text+0x2a20 -- the runway list. */
+static uint32_t FS98_STDCALL facil_airport_runways(uint8_t *block)
+{
+    if (facil_free_runway_list(block + 0xa0) != 0)
+        return 0xffffffffu;
+    if ((int32_t)P32(block, 0x28) >= 0x1000 &&
+        (int32_t)P32(block, 0x28) <= 0x1001 && P32(block, 0x74) != 0 &&
+        facil_list_runways(block) != 0)
+        return 0xffffffffu;
+    return 0;
+}
+
+/* .text+0x2850 -- everything. */
+static uint32_t FS98_STDCALL facil_airport_refresh(uint8_t *block)
+{
+    if (facil_airport_clear(block) != 0 ||
+        facil_airport_places(block) != 0 ||
+        facil_airport_names(block) != 0)
+        return 0xffffffffu;
+    return facil_airport_airports(block) != 0 ? 0xffffffffu : 0;
+}
+
+/* .text+0x3810 -- the area changed. */
+static uint32_t FS98_STDCALL facil_airport_area(uint8_t *block)
+{
+    if (facil_free_payload_list(block + 0xac) != 0 ||
+        facil_free_result_list(block + 0x74, P32(block, 0xbc)) != 0)
+        return 0xffffffffu;
+    return facil_list_areas(block) != 0 ? 0xffffffffu : 0;
+}
+
+/* .text+0x2550 -- Linkage +0x24.  `out`, if given, receives six names: the
+ * four places, the airport and its name record (only five are cleared).
+ * Returns the block's answer, or 0 on any failure. */
+static uint32_t FS98_STDCALL facil_airport_dialog(uint8_t *out)
+{
+    D32(0x6d8) = U32(out);
+    D32(0x410) = D32(0x4ec);
+    D32(0x3e8) = 0;
+    D32(0x2d0) = 1;
+    D32(0x414) = G16(0xc18);
+    if (D32(0x6d8) != 0) {
+        P32(CALLER_OUT, 0x0) = 0;
+        P32(CALLER_OUT, 0x4) = 0;
+        P32(CALLER_OUT, 0x8) = 0;
+        P32(CALLER_OUT, 0xc) = 0;
+        P32(CALLER_OUT, 0x10) = 0;
+    }
+    HOST_STRCPY((char *)D + 0x978, (const char *)D + 0x2b60);
+    HOST_STRCPY((char *)D + 0x9e0, (const char *)D + 0x2bc8);
+    HOST_STRCPY((char *)D + 0xa48, (const char *)D + 0x2c30);
+    HOST_STRCPY((char *)D + 0xab0, (const char *)D + 0x2c98);
+    HOST_STRCPY((char *)D + 0x1300, (const char *)D + 0x55c);
+    HOST_STRCPY((char *)D + 0x16f0, (const char *)D + 0x55c);
+    if (FS98_HOST_DIALOG(HOST)(0x1309, D + 0x3e8) != 0)
+        return 0;
+    return facil_airport_clear(D + 0x3e8) != 0 ? 0 : D32(0x3e8);
+}
+
+/* The .text targets of .data's relocations. */
+static facil_fn facil_text_target(uint32_t rva)
+{
+    switch (rva) {
+    case 0x1090: return (facil_fn)facil_callback_nothing;
+    case 0x10a0: return (facil_fn)facil_facilities_apply;
+    case 0x1f20: return (facil_fn)facil_position_apply;
+    case 0x2310: return (facil_fn)facil_position_validate;
+    case 0x23d0: return (facil_fn)facil_position_revert;
+    case 0x2430: return (facil_fn)facil_position_refresh;
+    case 0x2840: return (facil_fn)facil_facilities_button;
+    case 0x26a0: return (facil_fn)facil_airport_accept;
+    case 0x3810: return (facil_fn)facil_airport_area;
+    case 0x2850: return (facil_fn)facil_airport_refresh;
+    case 0x28a0: return (facil_fn)facil_airport_places;
+    case 0x28d0: return (facil_fn)facil_airport_names;
+    case 0x2920: return (facil_fn)facil_airport_airports;
+    case 0x2a20: return (facil_fn)facil_airport_runways;
+    }
+    return (facil_fn)facil_unimplemented;
+}
+
+
 struct facil_image facil_image = {
     {
         { FS98_MOD_HOST,    NULL },
@@ -1632,7 +3058,7 @@ static void facil_install_pointers(void)
 #define FACIL_REL_DATA(offset, target) \
     D32(offset) = (uint32_t)(uintptr_t)(D + (target));
 #define FACIL_REL_TEXT(offset, target) \
-    D32(offset) = (uint32_t)(uintptr_t)facil_unimplemented;
+    D32(offset) = (uint32_t)(uintptr_t)facil_text_target(target);
 #include "facil_data.inc"
 #undef FACIL_REL_TEXT
 #undef FACIL_REL_DATA
@@ -1643,10 +3069,10 @@ static void facil_install_pointers(void)
     facil_image.linkage.slots[0] = (facil_fn)facil_search;
     facil_image.linkage.slots[1] = (facil_fn)facil_describe;
     facil_image.linkage.slots[2] = (facil_fn)facil_copy_record;
-    facil_image.linkage.slots[3] = (facil_fn)facil_unimplemented;
-    facil_image.linkage.slots[4] = (facil_fn)facil_unimplemented;
+    facil_image.linkage.slots[3] = (facil_fn)facil_airport_dialog;
+    facil_image.linkage.slots[4] = (facil_fn)facil_position_dialog;
     facil_image.linkage.slots[5] = (facil_fn)facil_rebuild;
-    facil_image.linkage.slots[6] = (facil_fn)facil_unimplemented;
+    facil_image.linkage.slots[6] = (facil_fn)facil_facilities_dialog;
 }
 
 BOOL WINAPI DllMain(HINSTANCE instance, DWORD reason, LPVOID reserved)

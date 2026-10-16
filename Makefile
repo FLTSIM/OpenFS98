@@ -50,7 +50,7 @@ BASE_SOUND  := 0x208d0000
 BASE_UTIL   := 0x208e0000
 BASE_WEATHERM := 0x208f0000
 
-MODULES := ACONTAIN ATC CHAIN DYNAMIC GLOBAL LANDME NUMERIC SLEW SOUND UTIL WEATHERM
+MODULES := ACONTAIN ATC CHAIN DYNAMIC FACIL GLOBAL LANDME NUMERIC SLEW SOUND UTIL WEATHERM
 
 # Setup renames two modules on the way from CD to install, and the game loads
 # the *installed* names.  A rebuilt FACIL.DLL copied in as FACIL.DLL would just
@@ -58,6 +58,11 @@ MODULES := ACONTAIN ATC CHAIN DYNAMIC GLOBAL LANDME NUMERIC SLEW SOUND UTIL WEAT
 installed_name = $(strip \
   $(if $(filter FACIL,$(1)),FACILITIES.DLL,\
   $(if $(filter MULTIP,$(1)),MULTIPLAYER.DLL,$(1).DLL)))
+
+# The CD's own file names are not all upper case either: facil.dll, multip.dll.
+orig_module = $(ORIG)/Modules/$(strip \
+  $(if $(filter FACIL,$(1)),facil.dll,\
+  $(if $(filter MULTIP,$(1)),multip.dll,$(1).DLL)))
 
 all: $(addprefix $(BIN)/,$(addsuffix .DLL,$(MODULES)))
 
@@ -176,9 +181,8 @@ $(BIN)/fe.res: src/fe/fe.rc
 src/fe/fe_data.inc: $(ORIG)/Modules/FE.DLL tools/gen_fe_data.py
 	@python3 tools/gen_fe_data.py $< $@
 
-# FACIL, the compiled facility index.  Not in MODULES yet: cache rebuilding,
-# record copies and the two query services are verified here, while the three
-# dialogs still remain.  A partial FACIL must never be installed.
+# FACIL, the compiled facility index and its three dialogs' callbacks.  Every
+# Linkage slot is verified by facildiff.
 $(BIN)/FACIL.DLL: src/facil/facil.c src/facil/facil.def \
                    src/facil/facil_data.inc $(BIN)/facil.res
 	@mkdir -p $(BIN)
@@ -421,7 +425,9 @@ landmediff-run: landmediff
 # the harness builds a synthetic five-level facility directory, rebuilds and
 # validates INDEX_FILE, then copies the serialized airport record through
 # Linkage +0x20.  A second phase writes 20,000 seeded synthetic caches and
-# drives +0x18/+0x1c/+0x20 and deinit over each.  The dialogs go to ofstest.
+# drives +0x18/+0x1c/+0x20 and deinit over each.  A third rebuilds the index
+# from the real CD scenery and boosters and runs 10,000 dialog scenarios
+# against a stand-in for World.DLL, with retail NUMERIC.
 $(DIFFDIR)/facildiff.exe: tools/difftest/facildiff.c tools/difftest/fediff.c \
                           src/fe/fe_data.inc src/facil/facil_data.inc
 	@mkdir -p $(DIFFDIR)
@@ -434,6 +440,7 @@ facildiff: $(DIFFDIR)/facildiff.exe $(BIN)/FACIL.DLL
 	@cp $(ORIG)/Modules/FE.DLL     $(DIFFDIR)/FE_facil_retail.dll
 	@cp $(ORIG)/Modules/FE.DLL     $(DIFFDIR)/FE_facil_ours.dll
 	@cp $(ORIG)/Modules/UTIL.DLL   $(DIFFDIR)/UTIL_retail.dll
+	@cp $(ORIG)/Modules/NUMERIC.DLL $(DIFFDIR)/NUMERIC_retail.dll
 
 facildiff-run: facildiff
 	@test -n "$(FE_FIXTURE)" || { \
@@ -582,13 +589,14 @@ disasm-%: all
 compare: all
 	@for m in $(MODULES); do \
 	  echo "== $$m"; \
-	  python3 tools/pesurvey.py $(ORIG)/Modules/$$m.DLL $(BIN)/$$m.DLL 2>/dev/null; \
+	  python3 tools/pesurvey.py $$(make -s orig-module-of M=$$m) $(BIN)/$$m.DLL 2>/dev/null; \
 	done
 
 run:
 	@echo "modules installed:"; for m in $(MODULES); do \
 	  n=$$(make -s installed-name-of M=$$m); \
-	  if cmp -s $(ORIG)/Modules/$$m.DLL "$(FS98_DIR)/Modules/$$n"; then echo "  $$n  retail"; \
+	  o=$$(make -s orig-module-of M=$$m); \
+	  if cmp -s "$$o" "$(FS98_DIR)/Modules/$$n"; then echo "  $$n  retail"; \
 	  elif cmp -s $(BIN)/$$m.DLL "$(FS98_DIR)/Modules/$$n"; then echo "  $$n  OpenFS98"; \
 	  else echo "  $$n  unknown"; fi; done
 	cd $(FS98_DIR) && WINEDEBUG=-all wine FLTSIM98.EXE
@@ -710,11 +718,14 @@ install: all
 revert:
 	@for m in $(MODULES); do \
 	  n=$$(make -s installed-name-of M=$$m); \
-	  cp $(ORIG)/Modules/$$m.DLL "$(FS98_DIR)/Modules/$$n"; echo "reverted $$n"; \
+	  cp "$$(make -s orig-module-of M=$$m)" "$(FS98_DIR)/Modules/$$n"; echo "reverted $$n"; \
 	done
 
 installed-name-of:
 	@echo $(call installed_name,$(M))
+
+orig-module-of:
+	@echo $(call orig_module,$(M))
 
 # boot the game and assert every module still loads
 smoke: all
@@ -723,4 +734,4 @@ smoke: all
 clean:
 	rm -rf $(BIN)
 
-.PHONY: all stage setup-map graph hostmap compare run trace trace-render trace-ddraw kill window-reset wm-unmanaged wm-managed vd-on vd-off mode8 mode16 ddraw-gdi ddraw-default smoke difftest difftest-run utildiff utildiff-run utildiff-portable numericdiff numericdiff-run chaindiff chaindiff-run atcdiff atcdiff-run weathermdiff weathermdiff-run acontaindiff acontaindiff-run sounddiff sounddiff-run dynamicdiff dynamicdiff-run fegriddiff fegriddiff-run fediff fediff-run landmediff landmediff-run facildiff facildiff-run ofstest ofstest-run ofstest-remove util-trace install revert installed-name-of clean
+.PHONY: all stage setup-map graph hostmap compare run trace trace-render trace-ddraw kill window-reset wm-unmanaged wm-managed vd-on vd-off mode8 mode16 ddraw-gdi ddraw-default smoke difftest difftest-run utildiff utildiff-run utildiff-portable numericdiff numericdiff-run chaindiff chaindiff-run atcdiff atcdiff-run weathermdiff weathermdiff-run acontaindiff acontaindiff-run sounddiff sounddiff-run dynamicdiff dynamicdiff-run fegriddiff fegriddiff-run fediff fediff-run landmediff landmediff-run facildiff facildiff-run ofstest ofstest-run ofstest-remove util-trace install revert installed-name-of orig-module-of clean

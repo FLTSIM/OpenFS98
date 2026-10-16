@@ -59,10 +59,10 @@ make dynamicdiff-run     # whole-module DYNAMIC      -> 20000 scenarios, 0 diffe
 make fegriddiff-run      # FE grid conversions        -> 7742499 comparisons, 0 mismatches
 make fediff-run          # FE engine + C file services -> 20000 scenarios, 0 differ
 make landmediff-run      # whole-module LANDME       -> 20000 scenarios, 0 differ
-make facildiff-run       # FACIL index + queries     -> 0 differences, 20000 query scenarios, 0 differ
+make facildiff-run       # whole-module FACIL        -> 0 differences; 20000 query, 10000 dialog scenarios, 0 differ (~27 min)
 make difftest-run        # whole-module SLEW         -> 0/2000 vectors differ
 make ofstest-run         # in-process, via the host  -> passed 68, failed 0
-make smoke               # ACONTAIN, ATC, CHAIN, DYNAMIC, GLOBAL, LANDME, NUMERIC, SLEW, SOUND, UTIL, WEATHERM installed -> 27/27, 95 gauges, PASS
+make smoke               # ACONTAIN, ATC, CHAIN, DYNAMIC, FACIL, GLOBAL, LANDME, NUMERIC, SLEW, SOUND, UTIL, WEATHERM installed -> 27/27, 95 gauges, PASS
 make util-trace          # which UTIL services the game calls, counted in-game
 ```
 
@@ -103,16 +103,22 @@ side a separate retail FE instance, steers the aircraft through all eleven
 nonzero guidance phases, and reports zero differences across 20,000 scenarios
 (`make landmediff-run`).
 
-**FACIL is now in progress; everything but its dialogs is verified.** Its
-complete `.data` image, profile init/deinit, `+0x2c` index validation/rebuild,
-`+0x20` serialized-record copy and the mapped-cache queries `+0x18`/`+0x1c` are
-reimplemented. `make facildiff-run` first rebuilds a synthetic five-level
-facility block against separate retail FE instances (a 0x195-byte cache, a
-0xbcd0-byte arena, zero differences), then runs 20,000 seeded synthetic caches
-through the query services with comparisons logged (zero differ; 17 of 18
-deliberate breaks caught, the eighteenth a proven equivalence). The next slice
-is FACIL's three dialog slots in `ofstest`. FACIL stays out of `MODULES` until
-those are done. See [docs/modules/facil.md](docs/modules/facil.md).
+**FACIL is done, verified and running in-game.** Its "dialogs" turned out to
+be callbacks that `English\World.DLL`'s dialogs call through parameter blocks,
+so they were verified externally rather than in `ofstest`. `make facildiff-run`
+has three phases: a synthetic rebuild, 20,000 synthetic caches through the
+queries, and 10,000 dialog scenarios over the index rebuilt from the real CD
+scenery plus all sixteen boosters' AFD files (3,791 airports), driven by a
+stand-in for World.DLL. All report zero differences. See
+[docs/modules/facil.md](docs/modules/facil.md).
+
+**Next: FE `+0x88`.** FACIL's dialog harness showed that FE `+0x88` returns
+an uninitialised stack word (`[entry esp - 0x11c]`), not memmove's status as
+fe.md said. FACIL's runway lists depend on it being nonzero, which it is in
+the game. `src/fe/fe.c` returns 0, so an installed OpenFS98 FE would empty
+every FACIL runway list. Fix it with an entry shim that returns the word at
+that offset, and make `fediff` paint the slot so it can tell. Details in
+[docs/modules/fe.md](docs/modules/fe.md).
 
 FE's `+0x40` calling-convention break is now confirmed by `fediff`: the
 one-byte probe writes through the caller's edi and returns with ebx/esi/edi

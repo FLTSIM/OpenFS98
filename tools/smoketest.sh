@@ -59,7 +59,12 @@ for f in bin/*.DLL; do
     # *_TRACE builds are instrumented variants installed only by their own
     # targets (make util-trace), never by make install.
     case "$m" in *_TRACE.DLL) continue ;; esac
-    if cmp -s "$f" "$GAME/Modules/$m"; then
+    case "$m" in
+        FACIL.DLL)  installed=FACILITIES.DLL ;;
+        MULTIP.DLL) installed=MULTIPLAYER.DLL ;;
+        *)          installed="$m" ;;
+    esac
+    if cmp -s "$f" "$GAME/Modules/$installed"; then
         echo "  running the OpenFS98 build of $m"
     else
         echo "  NOTE: $m is built but not installed -- the game ran retail's."

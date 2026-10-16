@@ -5,12 +5,11 @@ loads facility directory blocks from BGL scenery files; FACIL turns them into
 `INDEX_FILE`, then its lookup services and three dialogs browse that compiled
 hierarchy. Setup installs the CD's `FACIL.DLL` as `FACILITIES.DLL`.
 
-The module is in progress. Everything outside the dialogs is now
-reimplemented and verified: init/deinit, `+0x2c` cache validation and rebuild,
-`+0x20` copying a selected serialized record, and the mapped-cache query
-services `+0x18`/`+0x1c`. The three dialogs remain. FACIL is therefore
-deliberately absent from `MODULES`; `make install` cannot ship this partial
-DLL.
+The module is done: every Linkage slot is reimplemented and verified --
+init/deinit, `+0x2c` cache validation and rebuild, `+0x20` record copy, the
+mapped-cache queries `+0x18`/`+0x1c`, and the three dialogs `+0x24`, `+0x28`
+and `+0x30`. FACIL is in `MODULES`; `make smoke` passes with it installed, and
+the sim rebuilt `INDEX_FILE` through it.
 
 ## Shape and linkage
 
@@ -27,10 +26,10 @@ relocations: 49 point back into `.data` and 25 into `.text`.
 | `+0x18` | `+0x5420` | verified | filtered, name-sorted search of one sibling run |
 | `+0x1c` | `+0x55c0` | verified | resolve a filter list against a selected node's ancestry |
 | `+0x20` | `+0x5540` | verified | copy one serialized record by file offset |
-| `+0x24` | `+0x2550` | remaining | airport dialog |
-| `+0x28` | `+0x1e30` | remaining | facility-directory dialog |
+| `+0x24` | `+0x2550` | verified | airport dialog (World `0x1309`) |
+| `+0x28` | `+0x1e30` | verified | exact-position dialog (World `0x1308`) |
 | `+0x2c` | `+0x3be0` | verified | validate or rebuild `INDEX_FILE` |
-| `+0x30` | `+0x1040` | remaining | scenery/facilities dialog |
+| `+0x30` | `+0x1040` | verified | facilities dialog (World `0x1307`) |
 
 The imports are host (1), GLOBAL (2), CHAIN (4), FE (18), MAIN (3), NUMERIC
 (17), and UTIL (20). The verified file path uses FE `+0x7c` to list 16-byte
@@ -175,6 +174,79 @@ Flag 1 is never written by the serializer, and flag-2 runs on non-airport
 nodes do not arise from rebuilding. Both are reachable only from a cache
 that FACIL did not write, and the harness covers them with synthetic caches.
 
+## The dialogs
+
+FACIL has no window code and imports nothing from USER32. Each dialog slot
+fills a parameter block in `.data` and calls host `+0x10c` with a dialog id
+that `English\World.DLL` registers; World draws the controls and calls back
+through function pointers in the block. Everything in FACIL's
+`.text+0x1040..+0x3be0` is those callbacks and what they call.
+
+| id | block | entry | callbacks (block offset) |
+| ---: | --- | --- | --- |
+| `0x1307` | `.data+0x80` | `+0x30`, and a button in the other two | `+4`, `+8` do nothing; `+0xc` apply |
+| `0x1308` | `.data+0x158` | `+0x28` | `+4` validate, `+8` apply, `+0xc` revert, `+0x10` reload, `+0x14` facilities |
+| `0x1309` | `.data+0x3e8` | `+0x24` | `+4` nothing, `+8` OK, `+0xc` area, `+0x10` everything, `+0x14` facilities, `+0x18` places, `+0x1c` names, `+0x20` airports, `+0x24` runways |
+
+**Facilities (`0x1307`).** World supplies parallel arrays of region,
+country and state names and a flag word. Bit 0 lists airports: `+0x18` over
+`.data+0xd0`'s place filter, then per airport a 0x64-byte row with its four
+place names (`+0x1c`), latitude/longitude/altitude (FE `+0x84` section
+`0x10001`, formatted by NUMERIC), long name (`0x10006`), first type-1
+frequency (`0x20001`, three BCD digits, a `.`, three more) and runway ends
+(FE `+0x88`). Each runway gives two 0x2c-byte ends: the far one is made by
+turning FE's record round in place -- heading plus `0x80000000`, pattern
+sides 1 and 2 swapped, the number less 18 wrapped into 1..36. An end's ILS is
+the **last** type-4 `0x10004` record after the runway that is not behind it,
+judged by the sign of the separation dotted with the heading's sine and
+cosine (`.text+0x67c0`). Bit 1 lists VORs and NDBs (`.data+0x108`/`+0x10c`)
+as 0x60-byte rows whose `+0x5c` bits record the frequency kinds seen. Rows
+are sorted by host `qsort`: airports by city with the case-sensitive
+`strcmp`, navaids with bit-1 rows last, then by country, state and name.
+
+**Position (`0x1308`).** Reload copies GLOBAL's position, heading and the
+indicated or true airspeed (`+0x612` chooses) into `.data+0x560..` and
+through UTIL `+0x90` into World's text controls. Validate runs UTIL `+0x8c`
+and four NUMERIC parses, but only the last parse decides the result. Apply
+writes back each changed field, decides whether the aircraft is on the
+ground (GLOBAL `+0x366`), then calls the `.SIM` module's `+0x34` through
+GLOBAL `+0x11d4`, CHAIN `+0x20(0x14, 0x33, 0)` and MAIN `+0x1c`/`+0xb0`.
+
+**Airports (`0x1309`).** Four place lists filter each other through
+`.data+0x2f8`; a name list searches `0x50002` name records by prefix; the
+airport list depends on the mode remembered as `GTL_BUTTON` -- `0x1000` by
+place, `0x1001` by name record, `0x1002` FE's navaids around an FE area. The
+runway list reads `0x10005` sections. OK starts from the selected runway's
+threshold less FE `+0x30`'s ground height (or the aircraft's own position
+without runways), puts the tower at the first `0x10003` section or else
+2,000 units off the threshold, moves the aircraft, and saves the place
+names to the profile. With an output pointer it also returns six names,
+though only five are cleared first.
+
+Retail quirks kept:
+
+- OK's start position is an uninitialised stack buffer. In mode `0x1002` a
+  navaid fills only part of it; in a mode other than the three with a stale
+  airport list it fills none of it; either way the rest reaches GLOBAL
+  `+0x560`. The reimplementation leaves its buffer uninitialised too.
+- An airport with no sources makes the tower search use the block itself as
+  the section, copy block words into GLOBAL `+0xd50..`, and free the block.
+- Leaks everywhere: every row's `+0x1c` result and record copy, the found
+  frequency section, the leading empty-name record, `0x1309`'s output
+  array, and a second airport-name allocation in one run.
+- Several `.data` copies -- the sorted filter list in `+0x1c`, a second
+  free in mode `0x1002` -- are made and discarded.
+
+**FE `+0x88` returns stack garbage.** On success it returns a local at
+`[entry esp - 0x11c]` that it never writes (it only zeroes it if the
+memmove fails). FACIL's runway code treats that word as success or failure.
+In the game it is left over from earlier calls -- in this path, from FE
+`+0x84`'s file lookup, whose helper initialises the overlapping local to -1
+-- and is nonzero in practice, so runway lists are built. fe.md had described
+the return as memmove's status, and the FE reimplementation returns 0 there,
+which would make every runway list fail under an installed OpenFS98 FE; that
+is recorded in [fe.md](fe.md) for FE's own harness to settle.
+
 ## Differential harness
 
 `make facildiff-run` loads retail FACIL and OpenFS98 FACIL side by side. Each
@@ -207,16 +279,87 @@ compared, not only the results. Each scenario compares the transcript,
 including every returned record, the arena, and the FACIL image. The view
 copies, queue pointer and handles are compared only as present or absent.
 
-Current baseline:
+Most generated caches thread each level's siblings into one chain across
+parents, as the serializer does (`LAST_OFFSETS` is per level, not per
+parent); a fifth chain siblings only within a parent. The first version
+generated only the latter, so the subtree matcher's stop at a change of
+parent was never reached; a break of it now fails.
+
+A third phase covers the dialogs over real data. Each side first rebuilds
+`INDEX_FILE` from the CD: the `world.vis` registry (`afd_na` -- regions,
+countries, VORs, NDBs -- and `heloafd`) plus all sixteen boosters' AFD files,
+which the game reads from the CD and BOOSTER registers through FE `+0x70`;
+the harness registers copies the same way. That is 18 files, 3,791 airports,
+and a 0x1139ba-byte index, and retail and ours build it identically. Then
+10,000 scenarios each open one of the three dialogs, after randomising the
+aircraft's position, units, speeds and the profile's remembered places and
+mode. Host `+0x10c` is a stand-in for World.DLL that plays a seeded script:
+selections and edits a user makes, kept inside their lists, with dependent
+lists requeried as World's controls would, nested facilities dialogs, and
+the answer. Every list is logged after every callback. MAIN, CHAIN and the
+`.SIM` table are logging stubs; NUMERIC is retail's, bound behind both FACIL
+and UTIL.
+
+Three kinds of stack garbage are handled explicitly, because both sides
+must see the same bytes:
+
+- a callback is entered through an asm invoker that paints the 24 KB below
+  its return address, so OK's uninitialised position reads the same paint;
+- FE `+0x88`'s return word (see *The dialogs*) is written by a thunk in
+  front of each FE's `+0x88`: -1 in seven scenarios in eight, 0 in the rest;
+- FE `+0x94a` keeps the stack address of the position FACIL passed to
+  `+0x30`, and is compared only as a stack address.
+
+Half the scenarios mutate real sections through a wrapper on FE `+0x84`
+(some kind-2 navaid frequencies become kind 8, some type-1 runway entries
+type 3), and one airport or name record in 40 loses its name in the index,
+as an airport without a `0x10006` section does. GLOBAL `+0x20` is steered
+onto the aircraft's altitude in a quarter of the scenarios, the boundary of
+the position dialog's ground test. Heap words that point into a side's own
+FACIL or FE image are compared as offsets.
+
+Current baseline (26 minutes):
 
 ```text
 INDEX_FILE 0x195 bytes, arena 0xbcd0 bytes, 0 differences
-QUERY 20000 scenarios: 45615 searches (7005 with results, 232361 records,
-most 704, 443/193 queue growths past 0x200/0x280, 201328 dedupe drops),
-11658 describes (17683 records), 7140 record copies, 682 empty and 487
+QUERY 20000 scenarios: 45524 searches (10391 with results, 256060 records,
+most 796, 448/194 queue growths past 0x200/0x280, 218549 dedupe drops),
+11681 describes (17785 records), 7103 record copies, 674 empty and 474
 missing caches, 0 differ
+REAL INDEX_FILE 0x1139ba bytes, 18 ids, arena 0x10774e0 bytes, 0 differ
+DIALOG 10000 scenarios (5955 airport, 2515 position, 1530 facilities):
+12228 dialogs, 67766 callbacks; airport: 867/818/831/288 accepts by mode,
+1513 moves, 586 outputs, 485 runway lists, 2114 area lists, 369 area navaid
+lists; facilities: 648228 airport rows, 2021214 runway ends, 249516 ILS,
+852982 navaid rows, 852982 with frequencies; position: 939 applies, 1434
+refused validations; navaid frequency bits 303117/534418/291010/62934,
+airport frequencies none/three-digit/other 560291/87937/0, FE +0x88 zero
+in 1252; 0 differ
 IDENTICAL
 ```
+
+Forty-six deliberate breaks of the dialog code were each run against 400
+scenarios, and forty were caught: BCD formatting, frequency kinds, runway
+turning, ILS kind and selection, the ahead test's sine/cosine, every row
+field and both comparators, the place selection and its first-call skip,
+runway type, suffix and payload, the ground-height shift, the outputs,
+the tower's angle, distance and altitude, the move's size, the position
+dialog's loads, flags and ground test, the mode-`0x1001` index, the area
+fields and FE argument order, and free order. Of the six that were not:
+
+- two are equivalences: the ahead test rewritten into an identical
+  expression, and reading the longitude's integer part as unsigned, which
+  shifts the fraction by 2^32 and, after the 65536 multiply, only bits that
+  the 16-bit truncation drops;
+- reading the ahead test's metres through the other conversion for
+  0xb0000000..0xc0000000 changes both points by the same 2^48 and cancels in
+  the difference, unless a runway and its ILS straddle the 2^47 wrap --
+  no real pair does;
+- a failing earlier parse in validate is, it appears, always also refused
+  by UTIL `+0x8c`, which already fails the call; not proven;
+- airports with more than one source (the tower search's first-found
+  break) and southern navaids in mode `0x1002` (the latitude's arithmetic
+  shift) do not occur in the data. Both are real gaps.
 
 A retail-vs-retail run (a second copy of retail as the comparison) is also
 identical. Eighteen deliberate breaks were run against 2,000 scenarios: heap
@@ -243,9 +386,10 @@ explicit message if neither tree is available.
 
 ## Remaining work and portability
 
-The three dialog slots belong in `ofstest`, where the real host, MAIN and the
-window lifecycle are available. `.text+0x67c0`, a NUMERIC distance test
-called only from the airport dialog, goes with them.
+Nothing in FACIL remains unverified externally. `ofstest` can still confirm
+the World side of the protocol in-process -- the order World calls the
+callbacks and which block fields it writes -- which the harness's stand-in
+assumes.
 
 FACIL has no hand-written assembly. Its tree, serializer, filters and heap
 are ordinary C and suitable for a portable core. The file mapping and the

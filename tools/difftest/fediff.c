@@ -35,7 +35,9 @@
 #define FE_CS_START         0x1734u
 #define FE_CS_END           0x174cu
 #define GLOBAL_SIZE         0x1300u
+#ifndef ARENA_SIZE
 #define ARENA_SIZE          (16u << 20)
+#endif
 #define TRANSCRIPT_SIZE     (8u << 20)
 #define OUTPUT_SIZE         (256u << 10)
 #define MAX_HOST_FILES      16
@@ -334,8 +336,12 @@ static void *fe_arena_get(uint32_t size)
     uint32_t total = 16 + ((size + 15) & ~15u);
     uint8_t *block;
 
-    if (size > ARENA_SIZE || arena_used + total > ARENA_SIZE)
+    if (size > ARENA_SIZE || arena_used + total > ARENA_SIZE) {
+        printf("arena exhausted: %#x more after %#x, scenario %u op %u\n",
+               size, arena_used, current_scenario, current_operation);
+        fflush(stdout);
         return NULL;
+    }
     block = arena + arena_used;
     arena_used += total;
     *(uint32_t *)block = size;
@@ -351,6 +357,9 @@ static int32_t STDCALL host_alloc(int32_t flags, uint32_t size, void **out,
     fe_put_pointer(fe_ptr(block));
     if (block == NULL) {
         fe_put(" ARENA_EXHAUSTED");
+        printf("arena exhausted (%#x bytes) in scenario %u op %u\n", size,
+               current_scenario, current_operation);
+        fflush(stdout);
         ExitProcess(2);
     }
     memset(block, zero ? 0 : 0xa5, size);

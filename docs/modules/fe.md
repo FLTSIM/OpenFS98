@@ -246,8 +246,17 @@ offset at `+0x190` is nonzero:
   leaves the data null but exposes the internal file-record pointer through
   the size output, a retail quirk the synthetic fixture preserves.
 - `+0x88` copies a 16-byte type-1 header plus its fixed payload when the third
-  dword matches the requested kind. Its successful return is the host
-  `memmove` status (0), not a Boolean success.
+  dword matches the requested kind. **Correction, found by FACIL's dialog
+  harness:** its return is not the `memmove` status. On a found record it
+  returns the local at `[entry esp - 0x11c]`, which it never writes except to
+  zero it when the `memmove` fails; on a header mismatch it also stores that
+  same word as the output size. It is stack garbage. FACIL's runway code tests
+  it, and in the game it is nonzero (in that path it overlaps a local of
+  `+0x84`'s lookup helper that starts as -1), so runway lists are built.
+  `fediff` passed only because its own stack left 0 there. The
+  reimplementation still returns 0 and must be changed -- most faithfully by
+  an entry shim that returns the word at that stack offset -- before FE is
+  installed; until then FACIL's harness supplies the word itself.
 
 These use host `memcmp` `+0x228` and the growable-array services
 `+0x2f8`/`+0x300`/`+0x2fc`. `+0x78`, the Scenery Library dialog, remains for

@@ -40,6 +40,7 @@ BASE_ACONTAIN := 0x20600000
 BASE_ATC    := 0x20640000
 BASE_CHAIN  := 0x20660000
 BASE_DYNAMIC := 0x206a0000
+BASE_FE     := 0x206c0000
 BASE_GLOBAL := 0x20720000
 BASE_NUMERIC := 0x20870000
 BASE_SLEW   := 0x208c0000
@@ -156,6 +157,22 @@ $(BIN)/dynamic.res: src/dynamic/dynamic.rc
 
 src/dynamic/dynamic_data.inc: $(ORIG)/Modules/DYNAMIC.DLL tools/gen_dynamic_data.py
 	@python3 tools/gen_dynamic_data.py $< $@
+
+# FE, the scenery file engine, laid out the same way.  Not in MODULES yet:
+# it is being built up a part at a time (docs/preflight.md, round 4), and a
+# partial FE must never be installed.
+$(BIN)/FE.DLL: src/fe/fe.c src/fe/fe.def src/fe/fe_data.inc $(BIN)/fe.res
+	@mkdir -p $(BIN)
+	$(CC) $(CFLAGS) -fno-delete-null-pointer-checks -Isrc/fe $(LDFLAGS) \
+	      -Wl,--image-base=$(BASE_FE) \
+	      -o $@ src/fe/fe.c $(BIN)/fe.res src/fe/fe.def -lkernel32
+
+$(BIN)/fe.res: src/fe/fe.rc
+	@mkdir -p $(BIN)
+	$(RC) $< -O coff -o $@
+
+src/fe/fe_data.inc: $(ORIG)/Modules/FE.DLL tools/gen_fe_data.py
+	@python3 tools/gen_fe_data.py $< $@
 
 $(BIN)/SLEW.DLL: src/slew/slew.c src/slew/slew.def $(BIN)/slew.res
 	@mkdir -p $(BIN)
@@ -311,6 +328,19 @@ utildiff-portable: $(DIFFDIR)/utildiff_portable.exe utildiff
 
 utildiff-run: utildiff
 	@cd $(DIFFDIR) && WINEDEBUG=-all wine utildiff.exe
+
+# FE's grid conversions (+0x60..+0x6c), by vectors: retail and OpenFS98
+# loaded side by side and called directly.  N=... sets the random count.
+$(DIFFDIR)/fegriddiff.exe: tools/difftest/fegriddiff.c
+	@mkdir -p $(DIFFDIR)
+	$(CC) -std=c99 -O1 -Wall -Wextra -o $@ tools/difftest/fegriddiff.c
+
+fegriddiff: $(DIFFDIR)/fegriddiff.exe $(BIN)/FE.DLL
+	@cp $(ORIG)/Modules/FE.DLL $(DIFFDIR)/FE_retail.dll
+	@cp $(BIN)/FE.DLL          $(DIFFDIR)/FE_ours.dll
+
+fegriddiff-run: fegriddiff
+	@cd $(DIFFDIR) && WINEDEBUG=-all wine fegriddiff.exe $(N)
 
 # CHAIN, whole-module: both DLLs driven through Linkage over random scripts
 # whose callbacks re-enter the module.  N=... sets the scenario count.
@@ -594,4 +624,4 @@ smoke: all
 clean:
 	rm -rf $(BIN)
 
-.PHONY: all stage setup-map graph hostmap compare run trace trace-render trace-ddraw kill window-reset wm-unmanaged wm-managed vd-on vd-off mode8 mode16 ddraw-gdi ddraw-default smoke difftest difftest-run utildiff utildiff-run utildiff-portable numericdiff numericdiff-run chaindiff chaindiff-run atcdiff atcdiff-run weathermdiff weathermdiff-run acontaindiff acontaindiff-run sounddiff sounddiff-run dynamicdiff dynamicdiff-run ofstest ofstest-run ofstest-remove util-trace install revert installed-name-of clean
+.PHONY: all stage setup-map graph hostmap compare run trace trace-render trace-ddraw kill window-reset wm-unmanaged wm-managed vd-on vd-off mode8 mode16 ddraw-gdi ddraw-default smoke difftest difftest-run utildiff utildiff-run utildiff-portable numericdiff numericdiff-run chaindiff chaindiff-run atcdiff atcdiff-run weathermdiff weathermdiff-run acontaindiff acontaindiff-run sounddiff sounddiff-run dynamicdiff dynamicdiff-run fegriddiff fegriddiff-run ofstest ofstest-run ofstest-remove util-trace install revert installed-name-of clean

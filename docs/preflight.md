@@ -9,7 +9,208 @@ Produced with `python3 tools/impscan.py orig/Modules/<M>.DLL`, then each call
 site and each callee read by hand. The scanner under-reports rather than
 over-reports (see its header); the call counts below are lower bounds.
 
-Three rounds so far, newest first.
+Four rounds so far, newest first.
+
+# Round 4: FE, LANDME, FACIL, BOOSTER
+
+## Verdict
+
+**FE next, in three parts**, then LANDME, then FACIL. BOOSTER stays last.
+
+1. **The grid conversions, `+0x60`..`+0x6c`.** These are pure and table-driven, so
+   they are tested by vectors like UTIL's. They are small, they pin down FE's
+   word-argument entry stubs before anything depends on them, and the asm
+   engine calls two of them itself.
+2. **The asm engine.** A whole-module harness runs it over the CD's real
+   scenery: a stub host passes file I/O through to a fixture tree, as
+   `acontaindiff` does, and BOOSTER and FACIL are logging stubs.
+3. **The C half's file services:** `+0x1c` (textures, for HG2D) and
+   `+0x7c`..`+0x88` (BGL sections, for FACIL), in the same harness.
+   `+0x78`, the Scenery Library and booster dialogs, goes to `ofstest`.
+
+The surprise is that **LANDME was never blocked on FE's record format.** Its
+harness can load FE for real, retail or ours, once there is a stub host that
+serves a scenery tree. That stub host is exactly what part 2 builds. So FE
+first still holds, for a better reason: its harness is LANDME's fixture.
+
+| | FE | LANDME | FACIL | BOOSTER |
+| --- | --- | --- | --- | --- |
+| `.text` | 49,016: asm 22,418, then C 26,548 | 4,094 | 23,045 | 8,024 |
+| functions in Linkage | 29 (`dumplinkage.py` reports 2) | 3 | 9 | 4 |
+| written in | asm (`+0x18`..`+0x74`), then MSVC C (`+0x1c`, `+0x78`..`+0x88`) | asm | C++ (`new`, `__CxxFrameHandler`, `_ftol`) | C |
+| unfinished imports | BOOSTER ×2, FACIL ×1 | FE ×2, MAIN ×1, WINMSG ×1 | FE ×9 slots, MAIN ×3 | FE ×2 |
+| host services | 46, 21 not yet read before this round | 4 | 38 | 19 |
+| direct Win32 | critical sections | none | file mapping, `Sleep` | threads, mutexes, events, `CopyFileA` |
+| external harness | yes, over real scenery files | yes, with FE loaded for real | its file half, after FE | no -- a worker thread |
+
+## FE (id 18)
+
+FE is the scenery file engine and the sim's whole scenery database. G3D gets
+its scenery stream from it, MAIN its navaid and ground lookups, DYNAMIC its
+traffic blobs, HG2D its textures and FACIL its BGL sections. It also owns the
+Scenery Library and the "performance boosters" (CD scenery cached to disk).
+
+**Layout.** `.text+0x020`..`+0x5792` is hand-written asm with ATC's alignment
+macro. `.text+0x57a0`..`+0xbf54` is MSVC C, and the four `jmp`s after it are the
+critical-section thunks. `.data` is 0x3400 bytes, with dwords at odd
+addresses (`.data+0x119`, `+0x2e7`, `+0xa5d`), so an image struct has to be
+packed. Every asm slot enters and leaves the critical section at `.data+0x1734`,
+because BOOSTER calls `+0x70`/`+0x74` from its own thread. Many slots take
+16-bit arguments, which callers push as `sub esp,2; push cx`, so each needs an
+asm entry stub, as DYNAMIC's `+0x18` did.
+
+**The Linkage, hand-counted.** `+0x10` holds `0xd0000000`, which is where
+`dumplinkage.py` stops. The table actually runs `+0x18`..`+0x88`:
+
+| slot | callers | `ret` | what it is |
+| --- | --- | --- | --- |
+| `+0x18` | G3D ×2 | `0x10` | fill G3D's display buffer `(buf, room, &a, &b)` with the scenery stream |
+| `+0x1c` | HG2D ×3 | `0x10` | load a texture `(buf, name, dir, kind)` from `TEXTURE\` and two fallbacks. Kind 9 reads `0xc0` bytes at `0x240` (a palette); kind 10 reads `0x1000` and sets GLOBAL `+0xcd2`; otherwise a file under 64K is decompressed by `.text+0x54a0`, and a larger one is read raw |
+| `+0x20` | MAIN ×2, G3D, LANDME | `0xc` | the next record of the last search `(word i, &a, &b)` |
+| `+0x24` | MAIN | `0xc` | by its arguments, a navaid by frequency `(word GLOBAL+0x34e, pos, &out)` |
+| `+0x28` | MAIN ×2 | `0x10` | the same with a channel byte `(word +0x34c, byte, pos, out)` |
+| `+0x2c` | MAIN ×2 | `0xc` | the same shape without the channel byte `(word, pos, out)` |
+| `+0x30` | MAIN, FACIL | `4` | from a position; MAIN stores the result in GLOBAL `+0x2a0` |
+| `+0x34`/`+0x38` | FACIL ×2 each | `8` | iterate, after `+0x4c` (no arguments) or `+0x50` (`ret 0xc`) sets up |
+| `+0x3c` | G3D ×2 | `0x14` | size, then contents `(rec, &b, 0, 1, &size)` -- the shape DYNAMIC's `+0x40` has |
+| `+0x40` | DYNAMIC ×2 | `0x10` | the dynamic-scenery blob (see [modules/dynamic.md](modules/dynamic.md)) |
+| `+0x44` | G3D | `4` | reset; also called from FE's own deinit |
+| `+0x48` | G3D ×2 | `4` | a level word G3D derives from its range table -- 3,841 bytes, the engine's core |
+| `+0x54` | MAIN ×2, G3D ×4, LANDME, DYNAMIC | `0xc` | search around a position `(pos, radius, GLOBAL+0x3e4)` |
+| `+0x58`/`+0x5c` | none outside | | `+0x5c` is also FE's frame callback's area test |
+| `+0x60`/`+0x64` | MAIN, G3D | `8`/`0xc` | latitude to grid band and back, through the band table at `.data+0xf20` |
+| `+0x68`/`+0x6c` | MAIN, G3D | `8`/`0xc` | the same for longitude |
+| `+0x70` | BOOSTER | `8` | register one BGL file: read its `0xa8`-byte header, check its version against GLOBAL `+0x424`, and append a `0x1ae`-byte record |
+| `+0x74` | BOOSTER ×2 | `8` | BOOSTER's other callback |
+| `+0x78` | MAIN | | the Scenery Library: `run_dialog` ×3, `qsort`, `.VIS` files, temp names, free space |
+| `+0x7c`..`+0x88` | FACIL ×11 | `8`, `8`, `0x14`, `0x14` | list the scenery files, open one, read a section by kind (`0x10003`..`0x20001`), close |
+
+**How it finds scenery.** Init loads `SCENERY` (string `0x9003`) and `TEXTURE`
+(`0x9006`) from `ENGLISH.FLL`. The world file is `<host dir>\SCENERY\` plus the
+name at GLOBAL `+0x446`, and is (re)read when GLOBAL `+0x444` bit `0x10` is
+set; init sets `0x32`, and the reload clears `0x10`. On the CD that file is
+`Scenery\world.vis`, a binary file with `MR` magic and a description. FE
+reads 0x20 bytes of accepted BGL versions from it into GLOBAL `+0x424`, then
+the area list, and then calls FACIL `+0x2c` (no arguments) to rebuild its
+index.
+
+**Unfinished imports:**
+
+- **BOOSTER `+0x18`** comes from FE's CHAIN list 3 callback (`.text+0x4ce0`). For each area
+  whose files live on the CD, it checks that the cache copy exists. If it
+  doesn't, it raises UTIL's `+0xa4` alert ("Insert the Flight Simulator
+  CD-ROM and press RETRY", string `0xf424`; `0x10` means retry), and then
+  hands the area to BOOSTER. **BOOSTER `+0x1c`** releases one. The stub records
+  both, and the harness calls `+0x70`/`+0x74` itself, as BOOSTER's thread
+  would.
+- **FACIL `+0x2c`**, after the world file is read. The stub records it.
+- G3D is in the ImportTable but never called.
+
+**Done imports:** CHAIN `+0x18`/`+0x1c`; NUMERIC `+0x18` ×10 (in the C half);
+and UTIL `+0x18`..`+0x60`, `+0x8c`..`+0xac`, including the alert. All of these
+can be retail's real modules, with the alert answered by the stub host's
+dialog engine.
+
+**Host services: 46.** Read this round from the callees:
+
+- **Already in `host.h`:** `+0x13c`, `+0x17c`, `+0x194` and `+0x19c`.
+- **Fatal file I/O:** `+0x180` open, `+0x198` seek, `+0x1a0` read and `+0x140`
+  close. On failure each one shows string `0xf520`..`0xf523` plus the name in
+  a `MessageBoxA` and calls `ExitProcess(1)`. A harness has to turn that into
+  a scenario outcome, not a dead process.
+- **File operations:**
+  - `+0x148` (`ret 0xc`) creates a file for writing.
+  - `+0x14c` (`ret 8`) deletes one, and `+0x16c` (`ret 0x10`) moves one.
+  - `+0x134`/`+0x138` (`ret 0xc`) get and set attributes, through the
+    host's own flag bits.
+  - `+0x190` (`ret 8`) tells, `+0x1a4` (`ret 8`) gives the size, `+0x1a8`
+    (`ret 8`) truncates and `+0x1b0` (`ret 0x10`) writes.
+- **Paths and disk:**
+  - `+0x130` (`ret 4`) copies the host's base directory.
+  - `+0x150` (`ret 8`) gives free disk space as 64 bits.
+  - `+0x174` (`ret 8`) makes a unique temp name with `GetTempFileNameA`,
+    deletes the file, and strips `.TMP`.
+  - `+0x18c` (`ret 4`) checks a name character by character.
+- **Memory and lists:** `+0x228` (`ret 0xc`) is `memcmp`, `+0x230` (`ret 0xc`)
+  swaps two blocks through a temporary, and `+0x304` (`ret 4`) zeroes a list
+  header.
+- `+0x2c4` (`ret 0xc`) fits a string to a length; not read further.
+
+**GLOBAL:**
+
+| field | what FE does with it |
+| --- | --- |
+| `+0x3e0`..`+0x3f4` | the search block. DYNAMIC's `+0x3e0` bit 0 lives here |
+| `+0x414`..`+0x420` | written |
+| `+0x424` | the accepted BGL versions |
+| `+0x444`/`+0x446` | the flags and the world file name |
+| `+0x365`, `+0x37e`, `+0x380`, `+0x390`, `+0xcb4`, `+0xcd2`, `+0x12a4` | written |
+
+**The harness.**
+
+- **Fixture tree.** A stub host passes file I/O through to it:
+  - the installed `Scenery\` from the ISO (2.2 MB, including `world.vis`,
+    the navaid and facility BGLs and the Chicago area);
+  - `Texture\`;
+  - two small boosters, `Antarcti` (1.5 MB) and `samerica` (1.1 MB), plus
+    `Facility`. All the boosters together come to 186 MB, so the fixture
+    takes these, not the lot.
+- **Callers.** Scenarios drive the callers' slots (G3D's buffer fills, MAIN's
+  lookups, searches and iterations, DYNAMIC's blobs, FACIL's section reads),
+  the frame callback, GLOBAL `+0x444` reloads and BOOSTER's `+0x70`/`+0x74`.
+- **Compared:** the transcript, every buffer handed back, GLOBAL, the heap,
+  and `.data`. `.data` holds heap pointers, so it is compared with SOUND's
+  pattern of pointers as offsets.
+- **Mutation.** As with DYNAMIC, mutated BGLs will fault, and the fatal
+  services end scenarios, so both are outcomes to compare.
+
+**Risks:**
+
+- the 16-bit arguments and unaligned `.data`;
+- arithmetic that reads flags left by the previous instruction (`+0x64` does
+  `sbb` straight after a `shl`);
+- one x87 sequence (`fild`/`fmul`/`fistp` at `.text+0x3f39`);
+- the texture decompressor, which builds an 8-byte-entry dictionary at
+  `.data+0x1e10`;
+- and sheer size: it is the largest slice yet.
+
+## LANDME (id 26)
+
+Revisited. Its two FE calls (`+0x54` with radius 100000, then `+0x20` to read
+the records back) need no FE stub at all: the harness loads FE for real over
+FE's fixture tree, the same FE on both sides. MAIN
+`+0x70` and WINMSG `+0x18` stay logging stubs, and host `+0x03c` (posting
+`0x100d7`) is recorded. It is a small slice once FE's harness exists.
+
+## FACIL (id 37)
+
+Facilities. It is C++, and maps files itself (`CreateFileMappingA`,
+`MapViewOfFile`), outside the host. It reads BGL sections through FE
+`+0x7c`..`+0x88`, iterates through `+0x34`/`+0x38`, and runs three dialogs.
+Its GLOBAL writes are a position (`+0x56c`, `+0x572`..`+0x580`,
+`+0x11f0`..`+0x1200`), which looks like the jump to an airport. MAIN calls
+`+0x18`, `+0x24`, `+0x28` and `+0x30`, and FE calls `+0x2c`; it calls MAIN
+`+0x1c`/`+0xb0`/`+0xc4` and CHAIN `+0x20`. The file half suits FE's harness,
+and the dialogs go to `ofstest`. After LANDME.
+
+## BOOSTER (id 34)
+
+Now clearer: it is the CD scenery cache. Its strings are in `ENGLISH.FLL` from
+`0xf420`: "Reading Scenery Files", the cache and disk-space errors, and
+"Error copying file from this booster source directory". Each booster on the
+CD is a directory with a `bstinfo` file and `scenery\files*\*.BGL`. Its thread
+copies them into the cache and registers each with FE `+0x70`. The verdict
+from round 3 stands: compare end states after the thread drains, once FE is
+done.
+
+## Things found on the way
+
+- **`ENGLISH.FLL` holds the strings every module loads by id.** The directory
+  names FE uses are at `0x9000`..`0x9016` (`SCENERY`, `TEXTURE`, `BSTINFO`,
+  `BOOSTER`, `.BGL`), and the Scenery Library and booster messages start at
+  `0xf420`.
+- **The host has fatal variants of open, seek, read and close**
+  (`+0x180`/`+0x198`/`+0x1a0`/`+0x140`). Only FE uses them so far.
 
 # Round 3: SOUND, DYNAMIC, BOOSTER
 

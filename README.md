@@ -70,6 +70,7 @@ else's 1997 build, and it should read that way.
 | `make acontaindiff-run` | the same for ACONTAIN, against generated aircraft trees: loads, lists, queries and models, with file I/O passed through and fake `.SIM`/`.MDL` modules, comparing every import call, GLOBAL, the heap and the `.data` image |
 | `make sounddiff-run` | the same for SOUND, against generated `SOUND.CFG` trees and the CD's seven: frames, events, wind, faders and CHAIN messages, with a model of the host's voice engine, comparing every import call, GLOBAL, `FLTSIM98.CFG`, the heap and the `.data` image |
 | `make dynamicdiff-run` | the same for DYNAMIC, against the dynamic-scenery programs of the CD's twelve airport BGLs, often mutated, and three synthetic blocks: frames, the three CHAIN lists, the user's aircraft and MULTIP's players steered onto what the programs test; faults and hangs compared as outcomes |
+| `make fegriddiff-run` | FE's grid conversions (`+0x60`..`+0x6c`), retail and OpenFS98 loaded side by side and called directly over every table edge at every level and random values; a fault in either side counts as a difference |
 | `make weathermdiff-run` | the same for WEATHERM: updates, frames, resets, scenery effects and list operations, comparing every import call, GLOBAL, the heap and the `.data` image |
 | `make chaindiff-run` | drive retail and OpenFS98 CHAIN side by side over random re-entrant callback scripts; `N=...` sets the count |
 | `make ofstest-run` | run assertions *inside* the sim, where the host is reachable; `ofstest-remove` takes the module back out |
@@ -203,15 +204,25 @@ dialogs, so it belongs in `ofstest`, not an external harness.
 Round 3 picked `SOUND`, then `DYNAMIC`, and both are reimplemented and
 verified -- see [docs/modules/sound.md](docs/modules/sound.md) and
 [docs/modules/dynamic.md](docs/modules/dynamic.md). `BOOSTER` works on its
-own thread and is left for later. **Next is a round-4 preflight.** What is
-left mostly waits on FE: `LANDME` reads its records, `BOOSTER` serves it, and
-DYNAMIC's harness stands in for it. FE itself (48 KB, the scenery file
-engine) is the candidate to survey first.
+own thread and is left for later.
 
-`LANDME` is blocked on FE: `+0x54` searches around the aircraft and `+0x20`
-hands back a record LANDME reads, and a stub has to produce records in FE's
-format. Work that format out from FE's side first. `WINMSG` and `REALITY`
-draw and run dialogs, and belong in `ofstest`.
+Round 4 surveyed FE, LANDME, FACIL and BOOSTER -- see the
+[preflight](docs/preflight.md) -- and **FE is in progress**
+([docs/modules/fe.md](docs/modules/fe.md)). Its grid conversions
+(`+0x60`..`+0x6c`) are reimplemented and verified by vectors (`make
+fegriddiff-run`, 7,742,499 comparisons, 0 mismatches). The whole hand-written
+assembly engine is transliterated into `src/fe/fe.c` and builds, but is **not
+yet verified**: the next task is its whole-module harness -- retail FE and ours
+loaded over the real CD scenery (game/Scenery, game/Texture) behind a stub host
+passing file I/O through to a fixture, as `acontaindiff.c` does. The
+compiled-C file services (`+0x1c`, `+0x7c`..`+0x88`) come after that; `+0x78`,
+the Scenery Library dialog, goes to `ofstest`. FE is not in `MODULES`, so a
+partial one is never installed.
+
+`LANDME` comes after FE, and is not blocked on FE's record format: its
+harness loads FE for real over FE's fixture tree. `FACIL` follows, and
+`BOOSTER` still waits for FE. `WINMSG` and `REALITY` draw and run dialogs, and
+belong in `ofstest`.
 
 Other useful work, in no particular order:
 

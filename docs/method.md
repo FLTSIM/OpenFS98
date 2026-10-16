@@ -243,6 +243,25 @@ restores each to its as-loaded bytes before every run, and compares them byte
 for byte afterwards: state that has not shown up in an output yet is still
 checked.
 
+## An unverified quirk does not go into a verified harness
+
+FE's `+0x40` looked, on the page, as if it broke its calling convention on one
+path (writing to the caller's edi, returning with the registers shifted). The
+right place to prove that is FE's own differential harness, against retail FE.
+It was tempting to also retrofit the same model into DYNAMIC's *already
+verified* harness -- DYNAMIC is `+0x40`'s only caller -- so that the 20,000-
+scenario run would exercise it. That retrofit crashed one side with a null
+write, because the register model was wrong, and for a few minutes the verified
+DYNAMIC baseline was broken by a change that had nothing to do with DYNAMIC.
+
+The lesson: a reading you cannot yet test is a hypothesis. Keep it inside the
+module it belongs to, behind that module's own pending verification. Do not
+thread it through a harness that currently passes -- a wrong hypothesis there
+does not surface as "FE is wrong", it surfaces as "the thing that was green is
+now red", and you have spent the baseline's credibility to test a guess. Revert
+to the committed state, confirm green again, and let the owning module's
+harness be the thing that confirms or refutes it.
+
 ## Editing `util_math.c`
 
 The file is append-structured: one `/* ---- slot 0xNN: ... */` banner per

@@ -57,6 +57,7 @@ make acontaindiff-run    # whole-module ACONTAIN     -> 20000 scenarios, 0 diffe
 make sounddiff-run       # whole-module SOUND        -> 20000 scenarios, 0 differ (~40 min)
 make dynamicdiff-run     # whole-module DYNAMIC      -> 20000 scenarios, 0 differ (~15 min)
 make fegriddiff-run      # FE grid conversions        -> 7742499 comparisons, 0 mismatches
+make fediff-run          # FE assembly engine         -> 20000 scenarios, 0 differ
 make difftest-run        # whole-module SLEW         -> 0/2000 vectors differ
 make ofstest-run         # in-process, via the host  -> passed 68, failed 0
 make smoke               # ACONTAIN, ATC, CHAIN, DYNAMIC, GLOBAL, NUMERIC, SLEW, SOUND, UTIL, WEATHERM installed -> 27/27, 95 gauges, PASS
@@ -77,23 +78,26 @@ WEATHERM, ACONTAIN, SOUND and DYNAMIC are done. **FE is in progress**
 
 1. **done and verified** -- the grid conversions `+0x60`..`+0x6c`, by vectors
    (`make fegriddiff-run`, 7,742,499 comparisons, 0 mismatches);
-2. **transliterated into `src/fe/fe.c`, builds, NOT yet verified** -- the whole
+2. **done and verified** -- the whole
    hand-written assembly engine (the scene stream, the nav/ground lookups, the
    listing, object and dynamic-block lookups, world-file loading, BGL
-   registering, the boosters). **The next task is its whole-module harness**:
-   retail FE and ours loaded over the real CD scenery tree (game/Scenery,
-   game/Texture) behind a stub host that passes file I/O through to a fixture,
-   as `acontaindiff.c` does; compare the transcript, GLOBAL, the heap and
-   `.data`. Until that exists, none of part 2 is trusted.
-3. not started -- the compiled-C file services `+0x1c` and `+0x7c`..`+0x88`.
+   registering, and the boosters), by 20,000 whole-module scenarios over the
+   real CD scenery tree (`make fediff-run`, 0 differences). The harness
+   compares every import call and output plus GLOBAL, the heap, and `.data`.
+   The CD's `world.vis` has no booster records, so only the registered
+   callback's empty path is directly covered; a nonempty booster cache still
+   needs a synthetic fixture if that code changes.
+3. **next** -- the compiled-C file services `+0x1c` and `+0x7c`..`+0x88`.
 
 `+0x78`, the Scenery Library dialog, goes to `ofstest`, as do REALITY and
 WINMSG. FE is deliberately **not** in `MODULES`, so `make install` cannot ship
 a partial one. LANDME follows FE, with FE loaded for real in its harness.
 
-One caution carried over in [docs/modules/fe.md](docs/modules/fe.md): FE's
-`+0x40` may break the calling convention on the block-too-big path; that
-reading is unconfirmed and must not be trusted until the FE harness checks it.
+FE's `+0x40` calling-convention break is now confirmed by `fediff`: the
+one-byte probe writes through the caller's edi and returns with ebx/esi/edi
+shifted exactly as the disassembly suggested. `+0x18` has a second, newly
+confirmed preserved-register rotation when its scene state passes through 4.
+Both are reproduced by entry shims; see [docs/modules/fe.md](docs/modules/fe.md).
 `tools/difftest/acontaindiff.c`, `weathermdiff.c` and `atcdiff.c` are the
 templates for a module with unfinished imports: retail's finished modules
 loaded for real, logging stubs for the rest, and the module's whole `.data`

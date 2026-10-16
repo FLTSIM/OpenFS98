@@ -262,6 +262,16 @@ now red", and you have spent the baseline's credibility to test a guess. Revert
 to the committed state, confirm green again, and let the owning module's
 harness be the thing that confirms or refutes it.
 
+That owning harness later confirmed the reading. `fediff` gives `+0x40` a
+one-byte buffer with the caller's edi aimed at committed output space, then
+records the returned size, bytes, ESP/EBP and preserved registers across an
+assembly boundary. Retail really does write through edi and rotate
+ebx/esi/edi; ours now matches it. The same boundary found a second retail bug
+in `+0x18`: one unmatched `push edi` in scene state 4 rotates the preserved
+registers on that return. The important sequencing remains the lesson: prove
+the hypothesis at its owner first, then treat the now-measured behavior as an
+interface fact elsewhere.
+
 ## Editing `util_math.c`
 
 The file is append-structured: one `/* ---- slot 0xNN: ... */` banner per

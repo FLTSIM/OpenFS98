@@ -342,6 +342,26 @@ fegriddiff: $(DIFFDIR)/fegriddiff.exe $(BIN)/FE.DLL
 fegriddiff-run: fegriddiff
 	@cd $(DIFFDIR) && WINEDEBUG=-all wine fegriddiff.exe $(N)
 
+# FE's hand-written assembly engine, whole-module: both DLLs driven through
+# Linkage over the installed scenery tree, with retail UTIL and a stub host
+# passing file I/O through to that fixture.  Prefer a fully extracted orig/
+# tree; fall back to the staged game/ tree used by smoke tests.
+FE_FIXTURE ?= $(if $(wildcard $(ORIG)/Scenery/world.vis),../../$(ORIG),$(if $(wildcard game/Scenery/world.vis),../../game,))
+
+$(DIFFDIR)/fediff.exe: tools/difftest/fediff.c src/fe/fe_data.inc
+	@mkdir -p $(DIFFDIR)
+	$(CC) -std=c99 -O1 -Wall -Wextra -Iinclude -Isrc/fe -o $@ tools/difftest/fediff.c
+
+fediff: $(DIFFDIR)/fediff.exe $(BIN)/FE.DLL
+	@cp $(ORIG)/Modules/FE.DLL   $(DIFFDIR)/FE_retail.dll
+	@cp $(BIN)/FE.DLL            $(DIFFDIR)/FE_ours.dll
+	@cp $(ORIG)/Modules/UTIL.DLL $(DIFFDIR)/UTIL_retail.dll
+
+fediff-run: fediff
+	@test -n "$(FE_FIXTURE)" || { \
+	    echo "FE fixture missing: run tools/extract.sh again or make stage" >&2; exit 2; }
+	@cd $(DIFFDIR) && WINEDEBUG=-all timeout 3600 wine fediff.exe $(if $(N),$(N),20000) "$(FE_FIXTURE)"
+
 # CHAIN, whole-module: both DLLs driven through Linkage over random scripts
 # whose callbacks re-enter the module.  N=... sets the scenario count.
 $(DIFFDIR)/chaindiff.exe: tools/difftest/chaindiff.c
@@ -624,4 +644,4 @@ smoke: all
 clean:
 	rm -rf $(BIN)
 
-.PHONY: all stage setup-map graph hostmap compare run trace trace-render trace-ddraw kill window-reset wm-unmanaged wm-managed vd-on vd-off mode8 mode16 ddraw-gdi ddraw-default smoke difftest difftest-run utildiff utildiff-run utildiff-portable numericdiff numericdiff-run chaindiff chaindiff-run atcdiff atcdiff-run weathermdiff weathermdiff-run acontaindiff acontaindiff-run sounddiff sounddiff-run dynamicdiff dynamicdiff-run fegriddiff fegriddiff-run ofstest ofstest-run ofstest-remove util-trace install revert installed-name-of clean
+.PHONY: all stage setup-map graph hostmap compare run trace trace-render trace-ddraw kill window-reset wm-unmanaged wm-managed vd-on vd-off mode8 mode16 ddraw-gdi ddraw-default smoke difftest difftest-run utildiff utildiff-run utildiff-portable numericdiff numericdiff-run chaindiff chaindiff-run atcdiff atcdiff-run weathermdiff weathermdiff-run acontaindiff acontaindiff-run sounddiff sounddiff-run dynamicdiff dynamicdiff-run fegriddiff fegriddiff-run fediff fediff-run ofstest ofstest-run ofstest-remove util-trace install revert installed-name-of clean

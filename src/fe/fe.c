@@ -326,6 +326,15 @@ typedef uint32_t (FS98_STDCALL *fe_f8)(uint32_t, uint32_t, uint32_t, uint32_t,
  * for its caller, or reads one its caller set, does it through these. */
 static uint32_t eax, ebx, ecx, edx, esi, edi;
 
+/* Retail leaves a saved-register push on the stack when +0x18 passes through
+ * state 4.  The public entry shim uses these to reproduce the resulting
+ * EBX/ESI/EDI rotation without corrupting the C implementation's frame. */
+uint32_t fe_scene_in_ebx;
+uint32_t fe_scene_in_esi;
+uint32_t fe_scene_in_edi;
+uint32_t fe_scene_out_edi;
+uint32_t fe_scene_shifted;
+
 /* A slot's prologue and epilogue push and pop these three, so a slot called
  * from inside the module leaves its caller's. */
 #define SAVE_REGS    uint32_t saved_ebx = ebx, saved_esi = esi, saved_edi = edi
@@ -340,8 +349,9 @@ static uint32_t eax, ebx, ecx, edx, esi, edi;
 /* .text+0x183 -- close the open BGL, fatally. */
 static void close_file(void)
 {
-    if (M32(S_FILE) != 0) {
-        H_CLOSE_F(M32(S_FILE));
+    eax = M32(S_FILE);
+    if (eax != 0) {
+        eax = H_CLOSE_F(M32(S_FILE));
         M32(S_FILE) = 0;
     }
 }
@@ -349,8 +359,9 @@ static void close_file(void)
 /* .text+0x1c2 -- free the search grid. */
 static void free_grid(void)
 {
-    if (M32(D + 0xa5d) != 0) {
-        FREE(D + 0xa5d);
+    eax = M32(D + 0xa5d);
+    if (eax != 0) {
+        eax = FREE(D + 0xa5d);
         M32(D + 0xa5d) = 0;
     }
 }
@@ -573,7 +584,7 @@ static void free_areas(void)
         M32(D + 0x9fb) = 0;
         M16(D + 0x9ff) = 0;
     }
-    M32(D + 0x3ca0) = 0;
+    M32(D + 0x5ca0) = 0;
 }
 
 /* .text+0x976 -- read the world file afresh: its header, the accepted BGL
@@ -600,7 +611,7 @@ static void rebuild_areas(void)
     read_areas();
     H_CLOSE_F(M32(S_WORLD));
     M32(S_WORLD) = 0;
-    FACIL_INDEX();
+    eax = FACIL_INDEX();
 }
 
 /* .text+0xcc1 -- every lookup starts here: the BGL closed, the boosters and
@@ -739,7 +750,7 @@ static uint32_t FS98_STDCALL fe_register(uint32_t area, uint32_t name)
     H_MEMMOVE(rec + 0x100, D + 0xad0, 0x74);
     if (M32(D + 0xb44) == 0x87654321u) {
         H_MEMMOVE(rec + 0x174, D + 0xb4e, 0x28);
-        M32(D + 0x3ca0)++;
+        M32(D + 0x5ca0)++;
     }
     esi = rec;
     M16(esi + 0x19c) = 0;
@@ -2556,7 +2567,7 @@ static uint32_t resume(void)
  *         ones at or below the scene's level
  *   9     their rows offered to the grid; then the next section (8)
  * Any other state ends the stream (0x63). */
-static uint32_t FS98_STDCALL fe_scene(uint32_t buf, int32_t room, uint32_t len, uint32_t area)
+uint32_t FS98_STDCALL fe_scene(uint32_t buf, int32_t room, uint32_t len, uint32_t area)
 {
     uint8_t al;
     int r;
@@ -2597,6 +2608,8 @@ static uint32_t FS98_STDCALL fe_scene(uint32_t buf, int32_t room, uint32_t len, 
             edi = M32(S_COLS) >> 1;
             cell();
             M32(G + 0x418) = M32(ebx);
+            fe_scene_out_edi = edi;
+            fe_scene_shifted = 1;
             esi = M32(S_ROWS) - 1;
             cell();
             M32(G + 0x414) = M32(ebx);
@@ -2826,6 +2839,28 @@ done:
     RESTORE_REGS;
     return eax;
 }
+
+/* +0x18's public entry.  In state 4 retail fails to pop its second saved EDI,
+ * so its epilogue returns EBX=old ESI, ESI=old EDI and EDI=columns/2. */
+__asm__(".text\n"
+        "_fe_scene_entry:\n\t"
+        "movl %ebx, _fe_scene_in_ebx\n\t"
+        "movl %esi, _fe_scene_in_esi\n\t"
+        "movl %edi, _fe_scene_in_edi\n\t"
+        "movl $0, _fe_scene_shifted\n\t"
+        "pushl 16(%esp)\n\t"
+        "pushl 16(%esp)\n\t"
+        "pushl 16(%esp)\n\t"
+        "pushl 16(%esp)\n\t"
+        "call _fe_scene@16\n\t"
+        "cmpl $0, _fe_scene_shifted\n\t"
+        "je 1f\n\t"
+        "movl _fe_scene_in_esi, %ebx\n\t"
+        "movl _fe_scene_in_edi, %esi\n\t"
+        "movl _fe_scene_out_edi, %edi\n"
+        "1:\n\t"
+        "ret $16\n");
+void fe_scene_entry(void);
 
 /* ---- lookups: the shared machinery ---------------------------------------------- */
 
@@ -3732,6 +3767,7 @@ static uint32_t FS98_STDCALL fe_list_at(uint32_t at, uint32_t area, uint32_t ind
     begin();
     M32(S_AREA) = area;
     M32(S_INDEX) = index;
+    eax = index;
     LeaveCriticalSection(CS);
     RESTORE_REGS;
     return eax;
@@ -4129,7 +4165,7 @@ static void fe_init(void)
 {
     CHAIN_ADD(3, ADDR(fe_frame));
     H_LOADSTRING(0x9003, D + 0x81e, 0x100);
-    H_LOADSTRING(0x9006, D + 0x3cc0, 0x100);
+    H_LOADSTRING(0x9006, D + 0x5cc0, 0x100);
     edi = G;
     M16(edi + 0x444) |= 0x32;
     InitializeCriticalSection(CS);
@@ -4167,7 +4203,7 @@ struct fe_image fe_image = {
     {
         FS98_MOD_FE, fe_init, fe_deinit, 0, 0xd0000000u, 0,
         {
-            /* +0x18 */ SLOT(fe_scene), 0, SLOT(fe_next), SLOT(fe_vor),
+            /* +0x18 */ SLOT(fe_scene_entry), 0, SLOT(fe_next), SLOT(fe_vor),
             /* +0x28 */ SLOT(fe_ils), SLOT(fe_beacon), SLOT(fe_ground), SLOT(fe_list_next),
             /* +0x38 */ SLOT(fe_list_read), SLOT(fe_object), SLOT(fe_dynamic_entry), SLOT(fe_reset),
             /* +0x48 */ SLOT(fe_level), SLOT(fe_list_begin), SLOT(fe_list_at), SLOT(fe_search),

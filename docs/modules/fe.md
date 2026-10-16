@@ -1,11 +1,10 @@
 # FE (id 18) — the scenery file engine
 
 **Status: in progress.** Part 1 (the grid conversions) is reimplemented and
-verified. Part 2 (the hand-written assembly engine) is transliterated into
-`src/fe/fe.c` and builds, but is **not yet verified** — its whole-module
-harness is the next piece of work. Part 3 (the compiled-C file services) is not
-started. FE is **not** in `MODULES`, so `make install` never ships a partial
-one.
+verified. Part 2 (the hand-written assembly engine) is reimplemented and
+verified by 20,000 whole-module scenarios over the CD scenery tree. Part 3
+(the compiled-C file services) is not started and is the next piece of work.
+FE is **not** in `MODULES`, so `make install` never ships a partial one.
 
 FE is the sim's scenery database. G3D gets the scene it draws from it, MAIN its
 navaid and ground lookups, DYNAMIC its traffic programs, HG2D its textures and
@@ -77,7 +76,7 @@ harness does not catch change nothing a real caller sees:
 Break list: `febreaks_grid.py` in the scratchpad (see the run runner
 `febreaks.py`). Equivalents' exact conditions are above.
 
-## Part 2 — the assembly engine (transliterated, UNVERIFIED)
+## Part 2 — the assembly engine (verified)
 
 All of `.text+0x20`..`+0x5792` is in `src/fe/fe.c`. The structure:
 
@@ -125,18 +124,20 @@ All of `.text+0x20`..`+0x5792` is in `src/fe/fe.c`. The structure:
   base. The CD's BGLs evidently carry no type-4 section, or the game would
   crash on load; a mutated one in the harness would fault on both sides, which
   is an outcome, not a divergence.
-- **`+0x40` looks like it breaks the calling convention — UNCONFIRMED.**
-  Reading `.text+0x4b24`, the block-too-big path appears to call the read
-  helper (`.text+0x4a81`) without pushing the buffer, which would send the
-  bytes to the address in the caller's **edi** and leave the slot's `ret`
-  shifted. `fe_dynamic`/`fe_dynamic_entry` in `fe.c` currently reproduce that
-  reading. **It is not yet verified**, and an attempt to retrofit the same
-  model into the DYNAMIC harness's FE stub crashed one side with a null write
-  — so either the reading is wrong, or the registers involved are not the ones
-  assumed. I reverted that retrofit: `dynamicdiff.c` and `dynamic.c` are back
-  at their committed, verified state (DYNAMIC still 20,000/0), and this quirk
-  is left for FE's own whole-module harness to pin down against retail FE. Do
-  not trust the `fe_dynamic` register-shift until that harness confirms it.
+- **`+0x18` rotates the preserved registers after scene state 4.** Retail
+  pushes edi after reading the south grid edge at `.text+0x2ef5` and never
+  pops it. Its epilogue therefore returns ebx = old esi, esi = old edi and edi
+  = the grid's column count / 2. The first long scene run exposed this because
+  the harness's optimized caller trusted ebx; a guarded assembly call boundary
+  then measured the rotation directly. `fe_scene_entry` reproduces it.
+- **`+0x40` does break the calling convention on the block-too-big path.**
+  This is now confirmed, not inferred. Retail calls the read helper
+  (`.text+0x4a81`) without pushing its buffer, writes the whole block through
+  the caller's edi, returns `-1` with the required size, and leaves edi = old
+  esi, esi = old ebx and ebx = old ebp. The harness sets edi to a safe output
+  buffer, asks with one byte as DYNAMIC does, and compares the bytes, size and
+  registers. All 2,222 oversized probes in the 20,000-scenario run matched.
+  A deliberate wrong esi rotation was caught at the first such probe.
 
 ### Dead code omitted
 
@@ -153,27 +154,51 @@ within `.data`, and the C half's dialog/handler tables, which point into
 `DLL_PROCESS_ATTACH`; the `.text` ones belong to the C half (part 3) and are
 left zero for now.
 
-### What the harness needs that the repo does not have yet
+### Whole-module harness and fixtures
 
-The engine opens the world file (`<fixture root>` joined with GLOBAL `+0x446`,
-e.g. `Scenery\world.vis`), then the area BGLs, the navaid/facility BGLs and the
-per-airport scenery subtrees, and `Texture\`. **None of that is in `orig/`**:
-`tools/extract.sh` currently pulls only `fs98/Scenery/*5.bgl` (the twelve
-airport BGLs, for `dynamicdiff`) — not `world.vis`, not the `Scenery\<city>\`
-subtrees, not `ndb_na.bgl`/`vor_na.bgl`/`facility.bgl`, not `Texture\`. The
-full tree exists only in the gitignored wine install at `game/Scenery` (2.2 MB)
-and `game/Texture`, which a fresh checkout on another machine will not have.
+`tools/difftest/fediff.c` loads retail FE and ours side by side, binds both to
+retail UTIL, and supplies logging models of the host, CHAIN, BOOSTER, FACIL,
+G3D and NUMERIC. Host file and find operations pass through to the real fixture
+tree; allocations come from a deterministic arena. Each side starts from its
+pristine image and identical GLOBAL, then runs one of nine operation classes:
+scene, next-record search, navaids, ground, listing, dynamic blocks, objects,
+box tests, or register/unregister. Mode 2 loads all three areas in `world.vis`.
 
-So the first step of the harness is provisioning its fixture: either extend
-`extract.sh` to pull `fs98/Scenery/**` and `fs98/Texture/**` from the ISO into
-`orig/`, or copy `game/Scenery` + `game/Texture` when present. The stub host
-(lifted from `acontaindiff.c`) resolves every file path against that fixture
-root, and GLOBAL is set up with an aircraft position over a city that has a
-scenery subtree (Chicago: `game/Scenery/chicago/scenery/` plus `CHICAGO5.BGL`)
-so the lookups and scene stream have something to read. Compare the transcript,
-GLOBAL, the arena and the `.data` image, as SOUND/ACONTAIN do.
+After each scenario the harness compares the complete import/output
+transcript, GLOBAL, the used arena, and FE's image from Linkage - 0x48 through
+the end of `.data`. Relocated image pointers compare by offset. Live critical
+section bytes and the compiled-C half's still-unimplemented handler pointers
+are ignored explicitly. Calls at `+0x18` and `+0x40` cross a guarded assembly
+boundary which records ESP, EBP and ebx/esi/edi and repairs the harness's own
+stack before the next call.
+
+The engine needs `Scenery\world.vis`, the area and navaid/facility BGLs, the
+per-airport subtrees, and `Texture\`. `tools/extract.sh` now extracts the full
+CD `fs98/Scenery` and `fs98/Texture` trees into `orig/`. `make fediff-run`
+prefers that reproducible fixture and falls back to an existing staged
+`game/` tree. The dynamic scenario is pinned over Chicago with a 750 km box so
+every run reaches `CHICAGO5.BGL` and its one-byte oversized-block probe.
+
+`make fediff-run` → **20,000 scenarios, 0 differences**: 2,223 scene
+scenarios, 2,222 of each other operation except next-record (2,223), and 2,222
+confirmed `+0x40` oversized probes. A deliberate wrong register rotation was
+caught at the first dynamic probe.
+
+The shipped `world.vis` has no booster entries: its booster offset points at
+the end marker. The harness therefore verifies CHAIN callback registration and
+the empty per-frame path, but not construction or transfer of a nonempty
+booster cache. That path needs a synthetic world/booster fixture before a
+future change to it can claim direct differential coverage.
+
+Early harness passes exposed six transcription errors: the texture
+string and type-4 count are at `.data+0x5cc0` and `+0x5ca0` (not `+0x3cc0` and
+`+0x3ca0`); `rebuild_areas` keeps FACIL's eax result; `fe_list_at` returns its
+index in eax; and `close_file`/`free_grid` retain the host return in eax. The
+long scene run then found the separate `+0x18` preserved-register bug above.
 
 ## Part 3 — the compiled-C file services (not started)
+
+This is the next FE task.
 
 `+0x1c` (textures, for HG2D: `TEXTURE\` plus two fallbacks, decompressed by the
 9-bit-code expander already transliterated as `decompress`) and `+0x7c`..`+0x88`
@@ -200,4 +225,4 @@ disassembly, plus talk of faults and exception codes for the fault handlers).
 No work was lost either time; the needed bytes were already in tool output. The
 user asked to note it and carry on rather than stop. Recorded here so the
 pattern is visible: transliterating an all-assembly module trips the classifier
-on the raw disassembly, independent of intent. `[[fe-engine-unverified]]`
+on the raw disassembly, independent of intent. `[[fe-engine-verified]]`

@@ -5,11 +5,12 @@ loads facility directory blocks from BGL scenery files; FACIL turns them into
 `INDEX_FILE`, then its lookup services and three dialogs browse that compiled
 hierarchy. Setup installs the CD's `FACIL.DLL` as `FACILITIES.DLL`.
 
-The module is in progress. The externally testable file half is now
+The module is in progress. Everything outside the dialogs is now
 reimplemented and verified: init/deinit, `+0x2c` cache validation and rebuild,
-and `+0x20` copying a selected serialized record. The search services
-`+0x18`/`+0x1c` and the three dialogs remain. FACIL is therefore deliberately
-absent from `MODULES`; `make install` cannot ship this partial DLL.
+`+0x20` copying a selected serialized record, and the mapped-cache query
+services `+0x18`/`+0x1c`. The three dialogs remain. FACIL is therefore
+deliberately absent from `MODULES`; `make install` cannot ship this partial
+DLL.
 
 ## Shape and linkage
 
@@ -23,8 +24,8 @@ relocations: 49 point back into `.data` and 25 into `.text`.
 | --- | ---: | --- | --- |
 | init | `+0x1020` | verified | read the `[FACILITIES]` profile values |
 | deinit | `+0x1030` | verified | release a mapping and save the profile values |
-| `+0x18` | `+0x5420` | remaining | filtered facility search |
-| `+0x1c` | `+0x55c0` | remaining | list facilities below a selected node |
+| `+0x18` | `+0x5420` | verified | filtered, name-sorted search of one sibling run |
+| `+0x1c` | `+0x55c0` | verified | resolve a filter list against a selected node's ancestry |
 | `+0x20` | `+0x5540` | verified | copy one serialized record by file offset |
 | `+0x24` | `+0x2550` | remaining | airport dialog |
 | `+0x28` | `+0x1e30` | remaining | facility-directory dialog |
@@ -114,6 +115,66 @@ closed, then moved over `INDEX_FILE` with the original attribute state. A
 second `+0x2c` call reads the stored ids, obtains and deduplicates the current
 FE ids, and leaves the cache untouched when they match.
 
+## The query services
+
+`+0x18(filters, filter, out, dedupe)` and `+0x1c(node, filters, out)` read
+`INDEX_FILE` through a Win32 file mapping. A filter is 8 bytes, `{ kind, name
+}`; a filter list is `{ count, entries }`. Both return `{ count, records }`,
+where each 12-byte record is `{ name, kind, node offset }` and the caller owns
+the names and the array. The dialogs pass a four-entry region..city list from
+`.data`.
+
+**Mapping.** `+0x18` maps the file on first use (`CreateFileA` read/write,
+`FILE_FLAG_RANDOM_ACCESS`, a read/write mapping, a read view) and keeps three
+copies of the view base at `.data+0x2b50`..`+0x2b58`. A header whose size
+equals its root offset sets the empty flag at `+0x2b5c`. A successful search
+leaves the file mapped; `+0x1c` and `+0x20` never map it themselves and read
+whatever view is there. Unmapping (`.text+0x57e0`) is done by `+0x2c`, deinit
+and every `+0x18` failure, and leaves the view copies stale. If
+`MapViewOfFile` fails, retail closes both handles, still marks the cache
+mapped, and reads the header through the null view.
+
+**`+0x18`.** It descends first children from the root to the filter's level,
+so it scans only that **first** sibling run -- for a state filter, the states
+of the first country of the first region. A node is kept when it is at the
+filter's level (and has its exact kind if the kind's low word is set), its
+name starts with the filter's name **case-sensitively** (`memcmp`), and it
+fits the filter list. The list check uses only entries that have a nonempty
+name, in the caller's order: entries above the node's level must match its
+ancestors, and the first entry at or below its level must be satisfied by
+the node or a descendant chain, both by whole name **case-insensitively**.
+Retail first copies and `qsort`s the list by kind, then discards that sorted
+copy unused and rebuilds the list unsorted.
+
+Matches go into a C++ binary heap ordered by `_strcmpi` on the name, created
+with MSVCRT `operator new`. It starts at capacity 0x200 and grows by 0x80
+through host `realloc`, and its storage pointer is kept one slot below the
+allocation so it can be 1-based. Draining pops in name order; ties come out
+in whatever order the heap leaves them, which the harness compares. With
+`dedupe`, a record whose name equals the last one kept (case-insensitively)
+is dropped and both its name and record are freed. The queue's "owning" bit
+is always clear, and a check that would clear it again can never fire; that
+dead branch is omitted, but its read of the queue (which faults on a failed
+`new`) is kept.
+
+Every failure after `out` is zeroed -- a missing or empty cache, or an
+allocation failure -- unmaps the cache and returns **the unmap's result**,
+so a failed search normally returns 0, not -1. Failures also leak the queue
+and the filter copy.
+
+**`+0x1c`.** It finds the start of the run containing the selected node:
+the node's parent's first child, stepping over runs of flag-2 nodes (an
+airport and the name record serialized after it). For each list entry, in
+caller order, it climbs from there to the entry's level and takes the last
+node in that flag-2 run that matches the entry and does not have flag 1. A
+second match in the same run overwrites the first and leaks its name.
+Entries that resolve to nothing are skipped. This service also copies and
+sorts the list and never uses the copy.
+
+Flag 1 is never written by the serializer, and flag-2 runs on non-airport
+nodes do not arise from rebuilding. Both are reachable only from a cache
+that FACIL did not write, and the harness covers them with synthetic caches.
+
 ## Differential harness
 
 `make facildiff-run` loads retail FACIL and OpenFS98 FACIL side by side. Each
@@ -131,12 +192,43 @@ The run compares:
 - GLOBAL, FE state and FACIL's complete 0x2d1c-byte image;
 - `+0x20`'s copied airport record, allocation size and contents.
 
+A second phase covers the queries. Each of 20,000 seeded scenarios writes
+a synthetic `INDEX_FILE` directly to the cache directory. The caches are
+random five-level trees with placeholder kinds, airport/name-record pairs,
+stray flag-1 and flag-2 nodes, and mixed-case, prefix and duplicate names.
+Some caches are missing, some empty, and about one in 25 has a sibling run
+of 0x1ff..0x2c0 nodes that crosses the queue's 0x200 and 0x280 steps. Each
+side then runs the same sequence of `+0x18`, `+0x1c`, `+0x20` and deinit
+calls. Filters are steered onto the cache's own names (case-flipped, and
+truncated for the prefix match) and onto the first sibling runs that
+`+0x18` actually scans. While this phase runs, `strlen`, `_strcmpi` and
+`memcmp` are logged with their strings, so the order of comparisons is
+compared, not only the results. Each scenario compares the transcript,
+including every returned record, the arena, and the FACIL image. The view
+copies, queue pointer and handles are compared only as present or absent.
+
 Current baseline:
 
 ```text
 INDEX_FILE 0x195 bytes, arena 0xbcd0 bytes, 0 differences
+QUERY 20000 scenarios: 45615 searches (7005 with results, 232361 records,
+most 704, 443/193 queue growths past 0x200/0x280, 201328 dedupe drops),
+11658 describes (17683 records), 7140 record copies, 682 empty and 487
+missing caches, 0 differ
 IDENTICAL
 ```
+
+A retail-vs-retail run (a second copy of retail as the comparison) is also
+identical. Eighteen deliberate breaks were run against 2,000 scenarios: heap
+sift-up ties, pop and sift-down child choice, dedupe against the wrong
+record, the prefix length test, the exact-kind test, the ancestor and
+descendant matchers, the root-sibling stop, unnamed list entries, the
+flag-2 run step, the flag-1 skip, the resolve level test, the growth size,
+the failure return, the first-run descent, and dropping unresolved entries.
+Seventeen were caught. The one that was not, `start < node` changed to
+`<=` in the run-start search, is an equivalence: the extra iteration calls
+the step with `node == target`, which returns at once without reading
+anything and leaves `start` unchanged.
 
 The required deliberate break changed the synthesized kind from `0x50002` to
 `0x50003`. The harness failed at `INDEX_FILE+0x16c` (`02` versus `03`), proving
@@ -151,14 +243,14 @@ explicit message if neither tree is available.
 
 ## Remaining work and portability
 
-`+0x18` and `+0x1c` lazily map `INDEX_FILE` with Win32 file mapping, build a
-temporary C++ priority queue and return filtered 12-byte result records. They
-must be transliterated and added to this harness before the query half is
-called verified. The three dialog slots then belong in `ofstest`, where the
-real host, MAIN and window lifecycle are available.
+The three dialog slots belong in `ofstest`, where the real host, MAIN and the
+window lifecycle are available. `.text+0x67c0`, a NUMERIC distance test
+called only from the airport dialog, goes with them.
 
-There is no hand-written assembly in the new FACIL file half. Its tree and
-serializer logic is ordinary C and is suitable for a portable core. The
-remaining file mapping should be put behind the eventual host/platform file
-abstraction; the exported module shell, 32-bit pointers and stdcall Linkage are
-compatibility-layer concerns, not requirements of the facility algorithm.
+FACIL has no hand-written assembly. Its tree, serializer, filters and heap
+are ordinary C and suitable for a portable core. The file mapping and the
+MSVCRT `operator new`/`delete` pair, which are bound by name at first use
+because mingw's import library lacks the mangled names, should go behind the
+eventual platform layer. The exported module shell, 32-bit pointers and
+stdcall Linkage are compatibility-layer concerns, not requirements of the
+facility algorithm.

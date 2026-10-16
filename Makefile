@@ -176,8 +176,8 @@ $(BIN)/fe.res: src/fe/fe.rc
 src/fe/fe_data.inc: $(ORIG)/Modules/FE.DLL tools/gen_fe_data.py
 	@python3 tools/gen_fe_data.py $< $@
 
-# FACIL, the compiled facility index.  Not in MODULES yet: cache rebuilding
-# and record copies are verified here, while the two query services and three
+# FACIL, the compiled facility index.  Not in MODULES yet: cache rebuilding,
+# record copies and the two query services are verified here, while the three
 # dialogs still remain.  A partial FACIL must never be installed.
 $(BIN)/FACIL.DLL: src/facil/facil.c src/facil/facil.def \
                    src/facil/facil_data.inc $(BIN)/facil.res
@@ -420,7 +420,8 @@ landmediff-run: landmediff
 # FACIL's externally testable file half: each side gets a separate retail FE,
 # the harness builds a synthetic five-level facility directory, rebuilds and
 # validates INDEX_FILE, then copies the serialized airport record through
-# Linkage +0x20.  The query/UI half remains for the next slice.
+# Linkage +0x20.  A second phase writes 20,000 seeded synthetic caches and
+# drives +0x18/+0x1c/+0x20 and deinit over each.  The dialogs go to ofstest.
 $(DIFFDIR)/facildiff.exe: tools/difftest/facildiff.c tools/difftest/fediff.c \
                           src/fe/fe_data.inc src/facil/facil_data.inc
 	@mkdir -p $(DIFFDIR)

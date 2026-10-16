@@ -15,9 +15,9 @@ Four rounds so far, newest first.
 
 ## Verdict
 
-**FE's three external-harness parts and LANDME are done and verified. FACIL's
-file/index half is now verified; its mapped-cache queries are next.** BOOSTER
-stays last.
+**FE's three external-harness parts and LANDME are done and verified. FACIL is
+verified apart from its three dialogs, which go to `ofstest`.** BOOSTER stays
+last.
 
 1. **The grid conversions, `+0x60`..`+0x6c`.** These are pure and table-driven, so
    they are tested by vectors like UTIL's. They are small, they pin down FE's
@@ -210,9 +210,9 @@ copy are reimplemented and verified by `make facildiff-run`. The synthetic BGL
 fixture covers all five hierarchy levels and the absent-airport-name fallback;
 the baseline produces a 0x195-byte cache and a 0xbcd0-byte deterministic arena
 with zero differences. A deliberate wrong synthesized kind was detected at
-cache offset `+0x16c`. The remaining external slice is `+0x18`/`+0x1c`, which
-map and filter the cache; the three dialogs remain assigned to `ofstest`. See
-[modules/facil.md](modules/facil.md).
+cache offset `+0x16c`. The query services `+0x18`/`+0x1c` are now verified too,
+over 20,000 seeded synthetic caches with zero differences. Only the three
+dialogs remain, assigned to `ofstest`. See [modules/facil.md](modules/facil.md).
 
 ## BOOSTER (id 34)
 

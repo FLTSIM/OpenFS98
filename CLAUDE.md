@@ -59,7 +59,7 @@ make dynamicdiff-run     # whole-module DYNAMIC      -> 20000 scenarios, 0 diffe
 make fegriddiff-run      # FE grid conversions        -> 7742499 comparisons, 0 mismatches
 make fediff-run          # FE engine + C file services -> 20000 scenarios, 0 differ
 make landmediff-run      # whole-module LANDME       -> 20000 scenarios, 0 differ
-make facildiff-run       # FACIL file/index half     -> 0 differences
+make facildiff-run       # FACIL index + queries     -> 0 differences, 20000 query scenarios, 0 differ
 make difftest-run        # whole-module SLEW         -> 0/2000 vectors differ
 make ofstest-run         # in-process, via the host  -> passed 68, failed 0
 make smoke               # ACONTAIN, ATC, CHAIN, DYNAMIC, GLOBAL, LANDME, NUMERIC, SLEW, SOUND, UTIL, WEATHERM installed -> 27/27, 95 gauges, PASS
@@ -103,16 +103,16 @@ side a separate retail FE instance, steers the aircraft through all eleven
 nonzero guidance phases, and reports zero differences across 20,000 scenarios
 (`make landmediff-run`).
 
-**FACIL is now in progress.** Its complete `.data` image, profile init/deinit,
-`+0x2c` index validation/rebuild, and `+0x20` serialized-record copy are
-reimplemented. `make facildiff-run` drives retail and OpenFS98 against separate
-retail FE instances and a synthetic five-level facility block; the current
-baseline is a 0x195-byte cache, a 0xbcd0-byte deterministic arena, and zero
-differences across transcript, outputs, GLOBAL, FE and FACIL state. A deliberate
-wrong fallback kind failed at cache offset `+0x16c`. The next slice is FACIL's
-mapped-cache query services `+0x18`/`+0x1c`; its three dialog slots follow in
-`ofstest`. FACIL is also deliberately absent from `MODULES` until those are
-done. See [docs/modules/facil.md](docs/modules/facil.md).
+**FACIL is now in progress; everything but its dialogs is verified.** Its
+complete `.data` image, profile init/deinit, `+0x2c` index validation/rebuild,
+`+0x20` serialized-record copy and the mapped-cache queries `+0x18`/`+0x1c` are
+reimplemented. `make facildiff-run` first rebuilds a synthetic five-level
+facility block against separate retail FE instances (a 0x195-byte cache, a
+0xbcd0-byte arena, zero differences), then runs 20,000 seeded synthetic caches
+through the query services with comparisons logged (zero differ; 17 of 18
+deliberate breaks caught, the eighteenth a proven equivalence). The next slice
+is FACIL's three dialog slots in `ofstest`. FACIL stays out of `MODULES` until
+those are done. See [docs/modules/facil.md](docs/modules/facil.md).
 
 FE's `+0x40` calling-convention break is now confirmed by `fediff`: the
 one-byte probe writes through the caller's edi and returns with ebx/esi/edi

@@ -759,6 +759,763 @@ static int32_t facil_build_index(void)
     return result;
 }
 
+/* ---- the mapped cache: .text+0x5680 and +0x57e0 -------------------------
+ *
+ * +0x18 maps INDEX_FILE on first use and leaves it mapped on success; +0x1c
+ * and +0x20 read through that mapping without mapping it themselves.  Retail
+ * keeps three copies of the view base.  Node offsets are file offsets, and a
+ * zero offset reads the header, exactly as in retail. */
+
+#define MAP_FIRST            D32(0x2b50)
+#define MAP_HEADER           D32(0x2b54)
+#define MAP_VIEW             D32(0x2b58)
+#define MAP_EMPTY            D32(0x2b5c)
+#define QUEUE                DPTR(0x2d04, struct facil_queue)
+#define MAPPED               D32(0x2d08)
+#define MAP_FILE             D32(0x2d0c)
+#define MAP_MAPPING          D32(0x2d10)
+
+#define VIEW                 ((uint8_t *)(uintptr_t)MAP_VIEW)
+#define NODE(offset, field)  (*(facil_u32 *)(VIEW + (offset) + (field)))
+#define NODE_PARENT          0x00
+#define NODE_SIBLING         0x04
+#define NODE_CHILD           0x08
+#define NODE_KIND            0x0c
+#define NODE_FLAGS           0x14
+#define NODE_NAME(offset)    ((char *)VIEW + (offset) + 0x20)
+#define LEVEL(kind)          (((kind) - 0x10000) >> 16)
+#define LEVEL_BITS(kind)     (((kind) - 0x10000) & 0xffff0000)
+
+typedef int32_t (FS98_STDCALL *facil_basedir_fn)(char *);
+#define HOST_BASEDIR          SLOT(HOST, 0x130, facil_basedir_fn)
+
+/* A caller's filter: a kind (0 in the low word matches the whole level) and
+ * an optional name. */
+struct facil_filter {
+    uint32_t kind;
+    const char *name;
+};
+
+struct facil_filter_list {
+    uint32_t count;
+    struct facil_filter *entries;
+};
+
+/* What both query services return: 12-byte records, names owned by the
+ * caller. */
+struct facil_result {
+    char *name;
+    uint32_t kind;
+    uint32_t node;
+};
+
+struct facil_results {
+    uint32_t count;
+    struct facil_result *records;
+};
+
+/* A C++ priority queue of result pointers, 1-based: `data` is kept one slot
+ * below the host allocation. */
+struct facil_queue {
+    uint32_t capacity;
+    uint32_t grow;
+    uint32_t count;
+    struct facil_result **data;
+    uint32_t flags;
+};
+
+typedef char (*facil_query_check)[
+    sizeof(struct facil_filter) == 8 &&
+    sizeof(struct facil_result) == 0xc &&
+    sizeof(struct facil_queue) == 0x14 ? 1 : -1];
+
+/* Retail allocates the queue with MSVCRT's operator new/delete.  mingw's
+ * import library does not carry those mangled names, so they are bound by
+ * name on first use; the routines are the ones retail calls. */
+typedef void *(__cdecl *facil_new_fn)(uint32_t);
+typedef void (__cdecl *facil_delete_fn)(void *);
+static facil_new_fn facil_new;
+static facil_delete_fn facil_delete;
+
+static void facil_bind_crt(void)
+{
+    HMODULE crt;
+
+    if (facil_new != NULL)
+        return;
+    crt = LoadLibraryA("MSVCRT.dll");
+    facil_new = (facil_new_fn)(void *)GetProcAddress(crt, "??2@YAPAXI@Z");
+    facil_delete = (facil_delete_fn)(void *)GetProcAddress(crt,
+                                                     "??3@YAXPAX@Z");
+}
+
+/* .text+0x5680 */
+static int32_t facil_map(void)
+{
+    char directory[0x108];
+    char name[0x100];
+    char path[0x104];
+    HANDLE file;
+    HANDLE mapping;
+    uint8_t *header;
+
+    if (MAPPED == 0) {
+        FS98_HOST_LOADSTRING(HOST)(0x9101, name, 0x100);
+        if (HOST_BASEDIR(directory) != 0)
+            return -1;
+        if (FS98_HOST_PATH_JOIN(HOST)(path, NULL, directory, name) != 0)
+            return -1;
+        file = CreateFileA(path, GENERIC_READ | GENERIC_WRITE,
+                           FILE_SHARE_READ, NULL, OPEN_EXISTING,
+                           FILE_FLAG_RANDOM_ACCESS | FILE_ATTRIBUTE_NORMAL,
+                           NULL);
+        MAP_FILE = (uint32_t)(uintptr_t)file;
+        if (file == INVALID_HANDLE_VALUE)
+            return -1;
+        mapping = CreateFileMappingA(file, NULL, PAGE_READWRITE, 0, 0, NULL);
+        MAP_MAPPING = (uint32_t)(uintptr_t)mapping;
+        if (mapping == NULL) {
+            CloseHandle((HANDLE)(uintptr_t)MAP_FILE);
+            return -1;
+        }
+        MAP_VIEW = (uint32_t)(uintptr_t)MapViewOfFile(mapping, FILE_MAP_READ,
+                                                      0, 0, 0);
+        /* Retail closes both handles on a failed view but still marks the
+         * cache mapped and reads its header through the null view. */
+        if (MAP_VIEW == 0) {
+            CloseHandle((HANDLE)(uintptr_t)MAP_MAPPING);
+            CloseHandle((HANDLE)(uintptr_t)MAP_FILE);
+        }
+        MAPPED = 1;
+        MAP_HEADER = MAP_VIEW;
+        MAP_FIRST = MAP_VIEW;
+    }
+    header = (uint8_t *)(uintptr_t)MAP_HEADER;
+    MAP_EMPTY = *(facil_u32 *)header == *(facil_u32 *)(header + 4);
+    return 0;
+}
+
+/* .text+0x57e0.  The three view copies are left stale. */
+static int32_t facil_unmap(void)
+{
+    if (MAPPED != 0) {
+        if (!UnmapViewOfFile((void *)(uintptr_t)MAP_VIEW))
+            return -1;
+        if (!CloseHandle((HANDLE)(uintptr_t)MAP_MAPPING))
+            return -1;
+        if (!CloseHandle((HANDLE)(uintptr_t)MAP_FILE))
+            return -1;
+        MAPPED = 0;
+    }
+    return 0;
+}
+
+/* ---- the result queue: .text+0x5840..+0x5dd0 and +0x6910 ---------------- */
+
+/* .text+0x5840.  Bits other than 0 and 1 of `flags` keep whatever operator
+ * new returned. */
+static int32_t facil_queue_create(void)
+{
+    struct facil_queue *queue;
+    uint32_t flags;
+
+    facil_bind_crt();
+    queue = (struct facil_queue *)facil_new(0x14);
+    if (queue != NULL) {
+        flags = queue->flags;
+        queue->capacity = 0x200;
+        queue->grow = 0x80;
+        queue->count = 0;
+        queue->data = NULL;
+        queue->flags = (flags & ~2u) | 1;
+        FS98_HOST_ALLOC(HOST)(1, 0x800, (void **)&queue->data, 0);
+        queue->data--;
+    }
+    QUEUE = queue;
+    /* Retail then clears bit 1 when bit 0, sign-extended, equals 1.  That
+     * never holds, so only the read (which faults on a failed new) remains. */
+    flags = *(volatile uint32_t *)&queue->flags;
+    (void)flags;
+    return 0;
+}
+
+/* .text+0x58e0.  Bit 1 (owning) is always clear, so records are never deleted
+ * here; the pointer is left stale. */
+static int32_t facil_queue_destroy(void)
+{
+    struct facil_queue *queue = QUEUE;
+    uint32_t count;
+
+    if (queue != NULL) {
+        if (queue->flags & 1) {
+            queue->data++;
+            if (queue->flags & 2) {
+                for (;;) {
+                    count = queue->count;
+                    queue->count = count - 1;
+                    if (count == 0)
+                        break;
+                    facil_delete(queue->data[count - 1]);
+                }
+            }
+            FS98_HOST_FREE(HOST)((void **)&queue->data);
+        }
+        facil_delete(queue);
+    }
+    return 0;
+}
+
+/* .text+0x5dd0 */
+static int facil_name_greater(const struct facil_result *left,
+                              const struct facil_result *right)
+{
+    return FS98_HOST_STRICMP(HOST)(left->name, right->name) > 0;
+}
+
+/* .text+0x6910 */
+static void facil_sift_down(struct facil_queue *queue, uint32_t index)
+{
+    for (;;) {
+        uint32_t left = index * 2;
+        uint32_t right = index * 2 + 1;
+        uint32_t best = index;
+        struct facil_result *swap;
+
+        if (left <= queue->count &&
+            facil_name_greater(queue->data[index], queue->data[left]))
+            best = left;
+        if (right <= queue->count &&
+            facil_name_greater(queue->data[best], queue->data[right]))
+            best = right;
+        if (best == index)
+            return;
+        swap = queue->data[index];
+        queue->data[index] = queue->data[best];
+        queue->data[best] = swap;
+        index = best;
+    }
+}
+
+/* Inlined three times in .text+0x5aa0. */
+static struct facil_result *facil_queue_pop(struct facil_queue *queue)
+{
+    struct facil_result *top;
+    struct facil_result *swap;
+    uint32_t best;
+
+    if (queue->count == 0)
+        return NULL;
+    top = queue->data[1];
+    queue->data[1] = queue->data[queue->count];
+    queue->count--;
+    best = 1;
+    if (queue->count >= 2 &&
+        facil_name_greater(queue->data[1], queue->data[2]))
+        best = 2;
+    if (queue->count >= 3 &&
+        facil_name_greater(queue->data[best], queue->data[3]))
+        best = 3;
+    if (best != 1) {
+        swap = queue->data[1];
+        queue->data[1] = queue->data[best];
+        queue->data[best] = swap;
+        facil_sift_down(queue, best);
+    }
+    return top;
+}
+
+/* .text+0x5960 -- copy a node's name, kind and offset into the queue. */
+static int32_t facil_queue_insert(uint32_t node)
+{
+    struct facil_result *record;
+    struct facil_queue *queue;
+    struct facil_result *parent;
+    uint32_t index;
+    uint32_t above;
+
+    if (FS98_HOST_ALLOC(HOST)(1, 0xc, (void **)&record, 0) != 0)
+        return -1;
+    if (FS98_HOST_ALLOC(HOST)(1, FS98_HOST_STRLEN(HOST)(NODE_NAME(node)) + 1,
+                              (void **)&record->name, 0) != 0)
+        return -1;
+    FS98_HOST_STRCPY(HOST)(record->name, NODE_NAME(node));
+    record->node = node;
+    record->kind = NODE(node, NODE_KIND);
+    queue = QUEUE;
+    if (queue->count == queue->capacity) {
+        queue->capacity = queue->grow + queue->capacity;
+        queue->data++;
+        FS98_HOST_REALLOC(HOST)(1, queue->capacity << 2,
+                                (void **)&queue->data);
+        queue->data--;
+    }
+    index = ++queue->count;
+    while (index > 1) {
+        above = index >> 1;
+        parent = queue->data[above];
+        if (FS98_HOST_STRICMP(HOST)(record->name, parent->name) > 0)
+            break;
+        queue->data[index] = parent;
+        index = above;
+    }
+    queue->data[index] = record;
+    return 0;
+}
+
+/* .text+0x5aa0 -- empty the queue into `out` in name order.  With `dedupe`,
+ * a record whose name equals the last one kept (case-insensitively) is
+ * dropped, name and all. */
+static int32_t facil_queue_drain(struct facil_results *out, uint32_t dedupe)
+{
+    struct facil_result *record;
+    uint32_t written = 0;
+    uint32_t offset;
+
+    out->count = 0;
+    if (QUEUE->count == 0) {
+        out->records = NULL;
+        out->count = 0;
+        return 0;
+    }
+    if (FS98_HOST_ALLOC(HOST)(1, QUEUE->count * 0xc, (void **)&out->records,
+                              0) != 0)
+        return -1;
+    record = facil_queue_pop(QUEUE);
+    if (record != NULL) {
+        offset = 0;
+        do {
+            if (FS98_HOST_MEMMOVE(HOST)((uint8_t *)out->records + offset,
+                                        record, 0xc) != 0)
+                return -1;
+            if (FS98_HOST_FREE(HOST)((void **)&record) != 0)
+                return -1;
+            record = facil_queue_pop(QUEUE);
+            written++;
+            offset += 0xc;
+            if (dedupe == 0)
+                continue;
+            while (record != NULL &&
+                   FS98_HOST_STRICMP(HOST)(
+                       record->name,
+                       *(char **)((uint8_t *)out->records + offset - 0xc))
+                       == 0) {
+                if (FS98_HOST_FREE(HOST)((void **)record) != 0 ||
+                    FS98_HOST_FREE(HOST)((void **)&record) != 0)
+                    return -1;
+                record = facil_queue_pop(QUEUE);
+            }
+        } while (record != NULL);
+    }
+    out->count = written;
+    return 0;
+}
+
+/* ---- filters: .text+0x5e00..+0x6510 ------------------------------------- */
+
+/* .text+0x5e00 -- descend the first-child chain to the filter's level. */
+static uint32_t facil_first_at_level(uint32_t kind)
+{
+    uint32_t node = *(facil_u32 *)((uint8_t *)(uintptr_t)MAP_HEADER + 4);
+    uint32_t want;
+
+    if (node != 0) {
+        want = LEVEL_BITS(kind);
+        do {
+            if (LEVEL_BITS(NODE(node, NODE_KIND)) >= want)
+                break;
+            node = NODE(node, NODE_CHILD);
+        } while (node != 0);
+    }
+    return node;
+}
+
+/* .text+0x61a0 -- kind level, exact kind when the low word is set, and the
+ * whole name case-insensitively when the entry has one. */
+static uint32_t facil_entry_matches(const struct facil_filter *entry,
+                                    uint32_t node)
+{
+    uint32_t node_kind = NODE(node, NODE_KIND);
+    uint32_t kind = entry->kind;
+
+    if (((kind - 0x10000) ^ (node_kind - 0x10000)) & 0xffff0000)
+        return 0;
+    if ((kind & 0xffff) != 0 && kind != node_kind)
+        return 0;
+    if (entry->name != NULL && FS98_HOST_STRLEN(HOST)(entry->name) != 0 &&
+        FS98_HOST_STRICMP(HOST)(NODE_NAME(node), entry->name) != 0)
+        return 0;
+    return 1;
+}
+
+/* .text+0x60d0 -- as above, but the name is a case-sensitive prefix. */
+static uint32_t facil_filter_matches(const struct facil_filter *filter,
+                                     uint32_t node)
+{
+    uint32_t node_kind = NODE(node, NODE_KIND);
+    uint32_t kind = filter->kind;
+    uint32_t length;
+
+    if (((kind - 0x10000) ^ (node_kind - 0x10000)) & 0xffff0000)
+        return 0;
+    if ((kind & 0xffff) != 0 && kind != node_kind)
+        return 0;
+    if (filter->name == NULL)
+        return 1;
+    length = FS98_HOST_STRLEN(HOST)(filter->name);
+    if (length == 0)
+        return 1;
+    if (FS98_HOST_STRLEN(HOST)(NODE_NAME(node)) < length)
+        return 0;
+    return FS98_HOST_MEMCMP(HOST)(NODE_NAME(node), filter->name,
+                                  FS98_HOST_STRLEN(HOST)(filter->name)) == 0;
+}
+
+/* .text+0x5e90 -- every filter entry above the node's level must match the
+ * node's ancestor at that level. */
+static uint32_t facil_ancestors_match(const struct facil_filter_list *list,
+                                      uint32_t node)
+{
+    uint32_t level = LEVEL(NODE(node, NODE_KIND));
+    uint32_t index = 0;
+    uint32_t remaining;
+    uint32_t entry_level;
+    uint32_t node_level;
+    const struct facil_filter *entry;
+
+    if (list->count != 0) {
+        while (LEVEL(list->entries[index].kind) < level) {
+            index++;
+            if (index >= list->count)
+                break;
+        }
+    }
+    if (index == 0) {
+        entry_level = LEVEL(list->entries[0].kind);
+        if (entry_level > level)
+            return 1;
+        if (entry_level == level)
+            return facil_entry_matches(&list->entries[0], node);
+    }
+    remaining = index;
+    entry = &list->entries[index - 1];
+    for (;;) {
+        entry_level = LEVEL(entry->kind);
+        node_level = LEVEL(NODE(node, NODE_KIND));
+        while (node_level > entry_level) {
+            node = NODE(node, NODE_PARENT);
+            node_level = LEVEL(NODE(node, NODE_KIND));
+        }
+        if (!facil_entry_matches(entry, node))
+            return 0;
+        entry--;
+        if (--remaining == 0)
+            return 1;
+    }
+}
+
+/* .text+0x6010 -- does some node in this sibling run (or below it) match
+ * entries[index..]?  Siblings are followed only while their parent is
+ * `limit`; the top-level call passes 0, so it checks just the one node. */
+static uint32_t facil_subtree_match(const struct facil_filter_list *list,
+                                    uint32_t limit, uint32_t node,
+                                    uint32_t index)
+{
+    uint32_t entry_level;
+
+    if (node == 0)
+        return 0;
+    entry_level = LEVEL(list->entries[index].kind);
+    for (;;) {
+        if (LEVEL(NODE(node, NODE_KIND)) == entry_level) {
+            if (facil_entry_matches(&list->entries[index], node)) {
+                if (index == list->count - 1)
+                    return 1;
+                if (facil_subtree_match(list, node, NODE(node, NODE_CHILD),
+                                        index + 1))
+                    return 1;
+            }
+        } else if (facil_subtree_match(list, node, NODE(node, NODE_CHILD),
+                                       index)) {
+            return 1;
+        }
+        node = NODE(node, NODE_SIBLING);
+        if (node == 0 || NODE(node, NODE_PARENT) == 0 ||
+            NODE(node, NODE_PARENT) != limit)
+            return 0;
+    }
+}
+
+/* .text+0x5f80 -- the filter entries at and below the node's level must be
+ * satisfied by the node or its descendants. */
+static uint32_t facil_descendants_match(const struct facil_filter_list *list,
+                                        uint32_t node)
+{
+    uint32_t level = LEVEL(NODE(node, NODE_KIND));
+    uint32_t count = list->count;
+    uint32_t index = 0;
+    uint32_t result;
+
+    if (count != 0) {
+        while (LEVEL(list->entries[index].kind) < level) {
+            index++;
+            if (index >= count)
+                break;
+        }
+    }
+    if (index == count)
+        return 1;
+    if (LEVEL(list->entries[index].kind) == level)
+        result = facil_subtree_match(list, 0, node, index);
+    else
+        result = facil_subtree_match(list, node, NODE(node, NODE_CHILD),
+                                     index);
+    return result != 0 ? 1 : 0;
+}
+
+/* .text+0x5e50.  Both halves always run. */
+static uint32_t facil_matches_filters(const struct facil_filter_list *list,
+                                      uint32_t node)
+{
+    if (list != NULL && list->count != 0)
+        return facil_ancestors_match(list, node) &
+               facil_descendants_match(list, node);
+    return 1;
+}
+
+/* .text+0x6440 */
+static uint32_t facil_entry_unnamed(const struct facil_filter *entry)
+{
+    if (entry->name == NULL)
+        return 1;
+    return FS98_HOST_STRLEN(HOST)(entry->name) == 0;
+}
+
+/* .text+0x6470 */
+static int32_t facil_list_copy(struct facil_filter_list *destination,
+                               const struct facil_filter_list *source)
+{
+    if (destination != NULL && source != NULL) {
+        destination->count = source->count;
+        if (FS98_HOST_ALLOC(HOST)(1, source->count << 3,
+                                  (void **)&destination->entries, 0) != 0)
+            return -1;
+        if (FS98_HOST_MEMMOVE(HOST)(destination->entries, source->entries,
+                                    source->count << 3) != 0)
+            return -1;
+    }
+    return 0;
+}
+
+/* .text+0x6510 */
+static int32_t FS98_STDCALL facil_filter_compare(const void *left,
+                                                 const void *right)
+{
+    uint32_t a = *(const facil_u32 *)left;
+    uint32_t b = *(const facil_u32 *)right;
+
+    if (a > b)
+        return 1;
+    return a != b ? -1 : 0;
+}
+
+/* .text+0x64e0 */
+static int32_t facil_list_sort(struct facil_filter_list *list)
+{
+    FS98_HOST_QSORT(HOST)(list->entries, list->count, 8,
+                          facil_filter_compare);
+    return 0;
+}
+
+/* .text+0x6370 -- replace `list` with the named entries of `source`, in
+ * source order.  The sorted copy the caller just made is freed unused. */
+static int32_t facil_named_filters(const struct facil_filter_list *source,
+                                   const struct facil_filter *unused,
+                                   struct facil_filter_list *list)
+{
+    struct fs98_host_list named = { 0, 0, 0x20, 8, 0, 0, NULL };
+    uint32_t index;
+    void *slot;
+
+    (void)unused;
+    list->count = 0;
+    if (source != NULL) {
+        for (index = 0; index < source->count; index++) {
+            if (facil_entry_unnamed(&source->entries[index]))
+                continue;
+            slot = FS98_HOST_LIST_ADD(HOST)(&named);
+            if (slot == NULL ||
+                FS98_HOST_MEMMOVE(HOST)(slot, &source->entries[index], 8) != 0)
+                return -1;
+        }
+    }
+    if (list->entries != NULL)
+        FS98_HOST_FREE(HOST)((void **)&list->entries);
+    list->entries = (struct facil_filter *)named.data;
+    list->count = (uint32_t)named.count;
+    return 0;
+}
+
+/* ---- +0x1c's helpers: .text+0x6540..+0x6770 ----------------------------- */
+
+/* .text+0x6770 -- step over a run of flag-2 nodes (an airport and the name
+ * record serialized after it).  Returns 1 when `target` is in the run. */
+static uint32_t facil_group_step(uint32_t node, uint32_t target,
+                                 uint32_t *next)
+{
+    if (node != target) {
+        do {
+            if (!(VIEW[node + NODE_FLAGS] & 2)) {
+                *next = NODE(node, NODE_SIBLING);
+                return 0;
+            }
+            node = NODE(node, NODE_SIBLING);
+        } while (node != target);
+    }
+    *next = node;
+    return 1;
+}
+
+/* .text+0x6710 -- the first node of the run containing `node`. */
+static uint32_t facil_group_start(uint32_t node)
+{
+    uint32_t start;
+    uint32_t next;
+
+    if (LEVEL_BITS(NODE(node, NODE_KIND)) == 0)
+        return *(facil_u32 *)((uint8_t *)(uintptr_t)MAP_HEADER + 4);
+    start = NODE(NODE(node, NODE_PARENT), NODE_CHILD);
+    while (start < node) {
+        if (facil_group_step(start, node, &next))
+            break;
+        start = next;
+    }
+    return start;
+}
+
+/* .text+0x6610 -- climb from `start` to the entry's level and take the last
+ * matching node of that run.  A second match leaks the first name. */
+static int32_t facil_resolve(uint32_t start, const struct facil_filter *entry,
+                             struct facil_result *record)
+{
+    uint32_t node = start;
+    uint32_t want;
+
+    record->name = NULL;
+    record->kind = 0;
+    record->node = 0;
+    want = LEVEL_BITS(entry->kind);
+    if (want > LEVEL_BITS(NODE(node, NODE_KIND)) || node == 0)
+        return 0;
+    while (LEVEL_BITS(NODE(node, NODE_KIND)) > want) {
+        node = NODE(node, NODE_PARENT);
+        if (node == 0)
+            return 0;
+    }
+    for (;;) {
+        if (!(VIEW[node + NODE_FLAGS] & 1) &&
+            facil_entry_matches(entry, node)) {
+            if (FS98_HOST_ALLOC(HOST)(
+                    1, FS98_HOST_STRLEN(HOST)(NODE_NAME(node)) + 1,
+                    (void **)&record->name, 0) != 0)
+                return -1;
+            FS98_HOST_STRCPY(HOST)(record->name, NODE_NAME(node));
+            record->node = node;
+            record->kind = NODE(node, NODE_KIND);
+        }
+        if (!(VIEW[node + NODE_FLAGS] & 2))
+            return 0;
+        node = NODE(node, NODE_SIBLING);
+        if (node == 0)
+            return 0;
+    }
+}
+
+/* .text+0x6540 */
+static int32_t facil_collect(uint32_t start,
+                             const struct facil_filter_list *filters,
+                             struct facil_results *out)
+{
+    struct fs98_host_list results = { 0, 0, 0x20, 0xc, 0, 0, NULL };
+    struct facil_result record;
+    uint32_t written = 0;
+    uint32_t index;
+    void *slot;
+
+    out->count = 0;
+    for (index = 0; index < filters->count; index++) {
+        if (facil_resolve(start, &filters->entries[index], &record) != 0)
+            return -1;
+        if (record.name == NULL)
+            continue;
+        slot = FS98_HOST_LIST_ADD(HOST)(&results);
+        if (slot == NULL ||
+            FS98_HOST_MEMMOVE(HOST)(slot, &record, 0xc) != 0)
+            return -1;
+        written++;
+    }
+    out->count = written;
+    out->records = (struct facil_result *)results.data;
+    return 0;
+}
+
+/* .text+0x5420 -- Linkage +0x18: every node at `filter`'s level whose name
+ * starts with filter's name and which fits the named entries of `filters`,
+ * in name order.  Every failure after the zeroing unmaps the cache and, if
+ * that succeeds, returns 0 -- retail's error result is the unmap's.  Success
+ * leaves the cache mapped for +0x1c and +0x20; failure also leaks the queue
+ * and the filter copy. */
+static uint32_t FS98_STDCALL facil_search(
+    const struct facil_filter_list *filters, const struct facil_filter *filter,
+    struct facil_results *out, uint32_t dedupe)
+{
+    struct facil_filter_list named = { 0, NULL };
+    uint32_t node;
+
+    out->count = 0;
+    out->records = NULL;
+    if (facil_map() != 0 || MAP_EMPTY != 0)
+        goto fail;
+    if (facil_queue_create() != 0)
+        return 0xffffffffu;
+    node = facil_first_at_level(filter->kind);
+    if (facil_list_copy(&named, filters) != 0 ||
+        facil_list_sort(&named) != 0 ||
+        facil_named_filters(filters, filter, &named) != 0)
+        goto fail;
+    for (; node != 0; node = NODE(node, NODE_SIBLING))
+        if (facil_matches_filters(&named, node) &&
+            facil_filter_matches(filter, node) &&
+            facil_queue_insert(node) != 0)
+            goto fail;
+    if (facil_queue_drain(out, dedupe) != 0 ||
+        facil_queue_destroy() != 0 ||
+        FS98_HOST_FREE(HOST)((void **)&named.entries) != 0)
+        goto fail;
+    return 0;
+fail:
+    return facil_unmap() != 0 ? 0xffffffffu : 0;
+}
+
+/* .text+0x55c0 -- Linkage +0x1c: for each entry of `filters`, in caller
+ * order, the selected node's ancestor-or-self that matches it.  Reads the
+ * mapping +0x18 left behind.  The sorted copy is made and freed unused. */
+static uint32_t FS98_STDCALL facil_describe(
+    uint32_t node, const struct facil_filter_list *filters,
+    struct facil_results *out)
+{
+    struct facil_filter_list sorted = { 0, NULL };
+
+    out->count = 0;
+    out->records = NULL;
+    if (facil_list_copy(&sorted, filters) != 0 ||
+        facil_list_sort(&sorted) != 0)
+        return 0xffffffffu;
+    if (facil_collect(facil_group_start(node), filters, out) != 0)
+        return 0xffffffffu;
+    return FS98_HOST_FREE(HOST)((void **)&sorted.entries) != 0 ?
+           0xffffffffu : 0;
+}
+
 static uint32_t FS98_STDCALL facil_rebuild(void)
 {
     uint8_t *old_ids = NULL;
@@ -767,7 +1524,7 @@ static uint32_t FS98_STDCALL facil_rebuild(void)
     uint32_t new_count = 0;
     int32_t result = 0;
 
-    if (D32(0x2d08) != 0)
+    if (facil_unmap() != 0)
         return 0xffffffffu;
     if (facil_read_old_ids(&old_ids, &old_count) != 0)
         return 0xffffffffu;
@@ -829,7 +1586,7 @@ static uint32_t FS98_STDCALL facil_init(void)
 
 static uint32_t FS98_STDCALL facil_deinit(void)
 {
-    if (D32(0x2d08) != 0)
+    if (facil_unmap() != 0)
         return 0xffffffffu;
     HOST_CFG_PUT_STRING((const char *)D + 0x4f0, (const char *)D + 0x53c,
                         (const char *)D + 0x2b60);
@@ -883,8 +1640,8 @@ static void facil_install_pointers(void)
 
     facil_image.linkage.init = facil_init;
     facil_image.linkage.deinit = facil_deinit;
-    facil_image.linkage.slots[0] = (facil_fn)facil_unimplemented;
-    facil_image.linkage.slots[1] = (facil_fn)facil_unimplemented;
+    facil_image.linkage.slots[0] = (facil_fn)facil_search;
+    facil_image.linkage.slots[1] = (facil_fn)facil_describe;
     facil_image.linkage.slots[2] = (facil_fn)facil_copy_record;
     facil_image.linkage.slots[3] = (facil_fn)facil_unimplemented;
     facil_image.linkage.slots[4] = (facil_fn)facil_unimplemented;

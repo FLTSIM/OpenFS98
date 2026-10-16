@@ -781,6 +781,666 @@ static int32_t facil_compare_image(const uint8_t *retail_image,
     return -1;
 }
 
+/* ---- the query half: +0x18, +0x1c and +0x20 over synthetic caches --------
+ *
+ * Each scenario writes a seeded INDEX_FILE straight to the cache directory
+ * and runs one seeded sequence of searches, node descriptions, record copies
+ * and deinits on each side.  The rebuild path never produces flag 1 or
+ * flag-2 runs on ordinary nodes, and +0x18 maps whatever file is there, so
+ * the cache is generated rather than rebuilt: random five-level trees with
+ * placeholder kinds, mixed-case and prefix names for the case-insensitive
+ * comparisons and the case-sensitive prefix match, airport/name-record pairs,
+ * stray flags, empty and missing caches, and sibling runs that cross the
+ * queue's 0x200 and 0x280 capacity steps.
+ *
+ * Filter kinds stay within levels 1..6 and every node has a parent one level
+ * up: an entry below region level would walk +0x18's ancestor match past the
+ * root into the header, in retail as well.  While this phase runs, strlen,
+ * stricmp and memcmp are logged with their string arguments, so the order of
+ * comparisons is compared and not only their outcomes. */
+
+#define QUERY_CACHE_MAX  0x100000u
+#define QUERY_NODES_MAX  0x2000u
+#define QUERY_OPS_MAX    8u
+
+struct query_filter {
+    uint32_t kind;
+    const char *name;
+};
+
+struct query_filter_list {
+    uint32_t count;
+    struct query_filter *entries;
+};
+
+struct query_result {
+    char *name;
+    uint32_t kind;
+    uint32_t node;
+};
+
+struct query_results {
+    uint32_t count;
+    struct query_result *records;
+};
+
+struct query_op {
+    uint32_t type;
+    uint32_t dedupe;
+    uint32_t pick;
+    uint32_t from_result;
+    struct query_filter filter;
+    struct query_filter entries[6];
+    struct query_filter_list list;
+    char names[7][16];
+};
+
+struct query_stats {
+    uint32_t searches;
+    uint32_t search_hits;
+    uint32_t records;
+    uint32_t most;
+    uint32_t over_0x200;
+    uint32_t over_0x280;
+    uint32_t dedupe_drops;
+    uint32_t describes;
+    uint32_t describe_records;
+    uint32_t copies;
+    uint32_t empty;
+    uint32_t missing;
+};
+
+static const char *const query_names[] = {
+    "", "A", "a", "AB", "ab", "Ab", "aB", "ABC", "abc", "AbC", "B", "b",
+    "BA", "ba", "BAC", "Z", "z", "ZZ", "zz", "ZZZ", "KSEA", "ksea", "KSEATAC",
+    "SEATTLE", "Seattle", "seattle", "SEA"
+};
+
+static uint8_t query_cache[QUERY_CACHE_MAX];
+static uint32_t query_cache_size;
+static uint32_t query_nodes[QUERY_NODES_MAX];
+static uint32_t query_node_count;
+static uint32_t query_wide_level;
+static uint32_t query_wide_count;
+static int query_logging;
+static struct query_op query_ops[QUERY_OPS_MAX];
+static uint32_t query_op_count;
+static struct query_stats query_stats;
+static uint32_t query_last_nodes[16];
+static uint32_t query_last_count;
+static uint32_t query_arena_high;
+
+#define QNODE(offset, field) (*(uint32_t *)(query_cache + (offset) + (field)))
+
+static const char *query_name(void)
+{
+    return query_names[fe_rnd() %
+                       (sizeof(query_names) / sizeof(query_names[0]))];
+}
+
+static uint32_t query_write_node(uint32_t parent, uint32_t kind,
+                                 uint32_t flags, const char *name)
+{
+    uint32_t offset = query_cache_size;
+    uint32_t name_size = (uint32_t)strlen(name) + 1;
+    uint32_t sources = fe_rnd() % 3;
+    uint32_t index;
+
+    if (offset + 0x20 + name_size + sources * 0x14 > QUERY_CACHE_MAX ||
+        query_node_count >= QUERY_NODES_MAX)
+        return 0;
+    memset(query_cache + offset, 0, 0x20);
+    QNODE(offset, 0x00) = parent;
+    QNODE(offset, 0x0c) = kind;
+    QNODE(offset, 0x10) = name_size + sources * 0x14 + 0x0c;
+    QNODE(offset, 0x14) = flags;
+    QNODE(offset, 0x18) = name_size;
+    QNODE(offset, 0x1c) = sources;
+    memcpy(query_cache + offset + 0x20, name, name_size);
+    for (index = 0; index < sources * 0x14; index++)
+        query_cache[offset + 0x20 + name_size + index] = (uint8_t)fe_rnd();
+    query_cache_size = offset + 0x20 + name_size + sources * 0x14;
+    query_nodes[query_node_count++] = offset;
+    return offset;
+}
+
+static void query_write_level(uint32_t parent, uint32_t level, int first)
+{
+    uint32_t count;
+    uint32_t previous = 0;
+    uint32_t index;
+
+    if (first && level == query_wide_level)
+        count = query_wide_count;
+    else if (query_wide_level != 0)
+        count = 1;
+    else
+        count = 1 + fe_rnd() % (level == 5 ? 4 : 3);
+    for (index = 0; index < count; index++) {
+        uint32_t kind;
+        uint32_t flags = 0;
+        uint32_t node;
+
+        if (level == 5)
+            kind = 0x50001 + fe_rnd() % 4;
+        else
+            kind = (level << 16) | (fe_rnd() % 5 != 0 ? 1 : 0);
+        if (fe_rnd() % 8 == 0)
+            flags |= 1;
+        if (level != 5 && fe_rnd() % 10 == 0)
+            flags |= 2;
+        if (kind == 0x50001)
+            flags |= 2;
+        node = query_write_node(parent, kind, flags,
+                                (kind & 0xffff) == 0 && fe_rnd() % 2 ?
+                                "" : query_name());
+        if (node == 0)
+            return;
+        if (previous != 0)
+            QNODE(previous, 0x04) = node;
+        else if (parent != 0)
+            QNODE(parent, 0x08) = node;
+        else
+            QNODE(0, 0x04) = node;
+        previous = node;
+        if (kind == 0x50001) {
+            node = query_write_node(parent, 0x50002,
+                                    fe_rnd() % 8 == 0 ? 1 : 0, query_name());
+            if (node == 0)
+                return;
+            QNODE(previous, 0x04) = node;
+            previous = node;
+        }
+        if (level < 5)
+            query_write_level(node, level + 1, first && index == 0);
+    }
+}
+
+static void query_make_cache(void)
+{
+    uint32_t ids = fe_rnd() % 4;
+    uint32_t index;
+
+    memset(query_cache, 0, 12);
+    query_node_count = 0;
+    query_cache_size = 12 + ids * 16;
+    *(uint32_t *)(query_cache + 8) = ids;
+    for (index = 0; index < ids * 16; index++)
+        query_cache[12 + index] = (uint8_t)fe_rnd();
+    query_wide_level = 0;
+    query_wide_count = 0;
+    if (fe_rnd() % 25 == 0) {
+        static const uint32_t widths[] = {
+            0x1ff, 0x200, 0x201, 0x27f, 0x280, 0x281, 0x2c0
+        };
+        query_wide_level = 1 + fe_rnd() % 5;
+        query_wide_count = widths[fe_rnd() % 7];
+        /* An airport level doubles its run with name records. */
+        if (query_wide_level == 5)
+            query_wide_count /= 2;
+    }
+    if (fe_rnd() % 30 != 0)
+        query_write_level(0, 1, 1);
+    *(uint32_t *)(query_cache + 0) = query_cache_size;
+    if (*(uint32_t *)(query_cache + 4) == 0)
+        *(uint32_t *)(query_cache + 4) = query_cache_size;
+}
+
+static void query_make_filter(struct query_filter *filter)
+{
+    uint32_t level = 1 + fe_rnd() % 5;
+    uint32_t choice = fe_rnd() % 10;
+
+    if (choice < 6)
+        filter->kind = level << 16;
+    else if (choice < 9)
+        filter->kind = level == 5 ? 0x50001 + fe_rnd() % 4 :
+                       (level << 16) | (fe_rnd() % 2);
+    else
+        filter->kind = 6u << 16;
+    choice = fe_rnd() % 10;
+    filter->name = choice < 3 ? NULL : choice < 4 ? "" : query_name();
+}
+
+/* Steer onto names that exist: a real node's name, case-flipped at one
+ * position half the time (stricmp still matches, the prefix memcmp may not),
+ * and for +0x18's own filter truncated to a prefix half the time. */
+static const char *query_steer_name(char *buffer, uint32_t node, int prefix)
+{
+    const char *name = (const char *)query_cache + node + 0x20;
+    uint32_t length = (uint32_t)strlen(name);
+
+    if (length > 15)
+        length = 15;
+    memcpy(buffer, name, length);
+    buffer[length] = 0;
+    if (length != 0 && fe_rnd() % 2) {
+        uint32_t at = fe_rnd() % length;
+        buffer[at] ^= 0x20;
+    }
+    if (prefix && length != 0 && fe_rnd() % 2)
+        buffer[fe_rnd() % (length + 1)] = 0;
+    return buffer;
+}
+
+static uint32_t query_ancestor(uint32_t node, uint32_t level)
+{
+    while (node != 0 && (QNODE(node, 0x0c) >> 16) > level)
+        node = QNODE(node, 0x00);
+    return node;
+}
+
+/* +0x18 scans only the first sibling run at the filter's level: the one
+ * reached by following first children down from the root. */
+static uint32_t query_first_run_node(void)
+{
+    uint32_t node = *(uint32_t *)(query_cache + 4);
+    uint32_t depth = fe_rnd() % 5;
+    uint32_t steps;
+
+    while (depth-- != 0 && QNODE(node, 0x08) != 0)
+        node = QNODE(node, 0x08);
+    for (steps = fe_rnd() % 8; steps != 0 && QNODE(node, 0x04) != 0; steps--)
+        node = QNODE(node, 0x04);
+    return node;
+}
+
+static void query_steer_op(struct query_op *op)
+{
+    uint32_t node = fe_rnd() % 2 ? query_first_run_node() :
+                    query_nodes[fe_rnd() % query_node_count];
+    uint32_t level = QNODE(node, 0x0c) >> 16;
+    uint32_t entry;
+
+    op->filter.kind = fe_rnd() % 3 == 0 ? QNODE(node, 0x0c) : level << 16;
+    op->filter.name = fe_rnd() % 4 == 0 ? NULL :
+                      query_steer_name(op->names[6], node, 1);
+    if (fe_rnd() % 3 == 0)
+        return;
+    /* The dialogs' list: usually the same node's own ancestry. */
+    if (fe_rnd() % 3 == 0)
+        node = query_nodes[fe_rnd() % query_node_count];
+    op->list.count = 4;
+    for (entry = 0; entry < 4; entry++) {
+        uint32_t above = query_ancestor(node, entry + 1);
+        uint32_t choice = fe_rnd() % 10;
+
+        op->entries[entry].kind = (entry + 1) << 16;
+        if (above != 0 && (QNODE(above, 0x0c) >> 16) == entry + 1 &&
+            choice < 6)
+            op->entries[entry].name =
+                query_steer_name(op->names[entry], above, 0);
+        else
+            op->entries[entry].name = choice < 8 ? NULL : query_name();
+    }
+}
+
+static void query_make_ops(void)
+{
+    uint32_t index;
+
+    query_op_count = 1 + fe_rnd() % QUERY_OPS_MAX;
+    for (index = 0; index < query_op_count; index++) {
+        struct query_op *op = &query_ops[index];
+        uint32_t choice = fe_rnd() % 20;
+        uint32_t entry;
+
+        memset(op, 0, sizeof(*op));
+        op->type = choice < 10 ? 0 : choice < 15 ? 1 : choice < 18 ? 2 : 3;
+        op->dedupe = fe_rnd() % 2;
+        op->pick = fe_rnd();
+        op->from_result = fe_rnd() % 3 == 0;
+        query_make_filter(&op->filter);
+        op->list.entries = op->entries;
+        if (fe_rnd() % 2) {
+            /* The dialogs' shape: region..city in order. */
+            op->list.count = 4;
+            for (entry = 0; entry < 4; entry++) {
+                uint32_t choice = fe_rnd() % 10;
+                op->entries[entry].kind = (entry + 1) << 16;
+                op->entries[entry].name =
+                    choice < 4 ? NULL : choice < 5 ? "" : query_name();
+            }
+        } else {
+            op->list.count = fe_rnd() % 7;
+            for (entry = 0; entry < op->list.count; entry++)
+                query_make_filter(&op->entries[entry]);
+        }
+        if (query_node_count != 0 && fe_rnd() % 3 != 0)
+            query_steer_op(op);
+    }
+    /* A wide cache is only worth having if its run reaches the queue. */
+    if (query_wide_level != 0) {
+        query_ops[0].type = 0;
+        query_ops[0].filter.kind = query_wide_level << 16;
+        query_ops[0].filter.name = NULL;
+        query_ops[0].list.count = 0;
+    }
+}
+
+static int query_write_file(int present)
+{
+    char path[MAX_PATH * 2];
+
+    facil_delete_cache();
+    if (!present)
+        return 1;
+    snprintf(path, sizeof(path), "%s\\INDEX_FILE", cache_root);
+    return fe_write_fixture_file(path, query_cache, query_cache_size);
+}
+
+static void query_put_text(const char *value, uint32_t limit)
+{
+    if (value == NULL)
+        fe_put("null");
+    else
+        fe_put("'%.*s'", (int)limit, value);
+}
+
+static uint32_t STDCALL query_host_strlen(const char *value)
+{
+    uint32_t length = host_strlen(value);
+
+    if (query_logging) {
+        fe_put(" len(");
+        query_put_text(value, 64);
+        fe_put(")");
+    }
+    return length;
+}
+
+static int32_t STDCALL query_host_stricmp(const char *left, const char *right)
+{
+    if (query_logging) {
+        fe_put(" icmp(");
+        query_put_text(left, 64);
+        fe_put(",");
+        query_put_text(right, 64);
+        fe_put(")");
+    }
+    return host_stricmp(left, right);
+}
+
+static int32_t STDCALL query_host_memcmp(const void *left, const void *right,
+                                         uint32_t size)
+{
+    if (query_logging) {
+        fe_put(" mcmp(");
+        query_put_text((const char *)left, size < 64 ? size : 64);
+        fe_put(",");
+        query_put_text((const char *)right, size < 64 ? size : 64);
+        fe_put(",%#x)", size);
+    }
+    return host_memcmp(left, right, size);
+}
+
+static void query_put_results(const char *what, uint32_t result,
+                              struct query_results *out)
+{
+    uint32_t index;
+
+    fe_put(" %s=%#x,count=%#x,records=", what, result, out->count);
+    fe_put_pointer(fe_ptr(out->records));
+    if (out->records == NULL)
+        return;
+    query_last_count = 0;
+    for (index = 0; index < out->count; index++) {
+        struct query_result *record = &out->records[index];
+
+        fe_put(" [");
+        query_put_text(record->name, 64);
+        fe_put(",%#x,%#x]", record->kind, record->node);
+        if (query_last_count < 16)
+            query_last_nodes[query_last_count++] = record->node;
+        host_free((void **)&record->name);
+    }
+    host_free((void **)&out->records);
+}
+
+static uint32_t query_pick_node(const struct query_op *op)
+{
+    if (op->from_result && query_last_count != 0)
+        return query_last_nodes[op->pick % query_last_count];
+    if (query_node_count == 0)
+        return *(uint32_t *)(query_cache + 4);
+    return query_nodes[op->pick % query_node_count];
+}
+
+static uint32_t query_count_text(const char *text, const char *pattern)
+{
+    uint32_t count = 0;
+
+    while ((text = strstr(text, pattern)) != NULL) {
+        count++;
+        text++;
+    }
+    return count;
+}
+
+static int query_mapped(const struct facil_side *side)
+{
+    return *(uint32_t *)(side->image + 0x2d08) != 0;
+}
+
+/* The view copies, the queue and the handles are addresses or handle values
+ * private to a side.  Compare whether each is set, and the view copies
+ * against each other. */
+static void query_normalize_image(uint8_t *image)
+{
+    static const uint32_t private_fields[] = {
+        0x2b50, 0x2b54, 0x2b58, 0x2d04, 0x2d0c, 0x2d10
+    };
+    uint32_t view = *(uint32_t *)(image + 0x2b58);
+    uint32_t index;
+
+    for (index = 0; index < 6; index++) {
+        uint32_t *field = (uint32_t *)(image + private_fields[index]);
+
+        if (index < 2)
+            *field = *field == view ? 0x7e7e0000u : *field - view;
+        else if (*field != 0 && *field != 0xffffffffu)
+            *field = 0x7e7e0001u;
+    }
+}
+
+static void query_run_side(struct facil_side *side, uint32_t scenario,
+                           int present, uint8_t *image,
+                           uint8_t *arena_image, uint32_t *arena_size,
+                           struct query_stats *stats)
+{
+    uint32_t index;
+
+    current = side->fe;
+    facil_current = side;
+    current_scenario = scenario;
+    transcript_len = 0;
+    transcript[0] = 0;
+    arena_used = 0;
+    /* Allocation padding is never written; reset what earlier runs used. */
+    memset(arena, 0xa5, query_arena_high);
+    memcpy(side->image, side->pristine, FACIL_IMAGE_SIZE);
+    query_last_count = 0;
+    if (!query_write_file(present)) {
+        printf("cannot write synthetic INDEX_FILE\n");
+        exit(2);
+    }
+    facil_index_active = 1;
+    fe_put("QUERY %u", scenario);
+    side->link->init();
+    query_logging = 1;
+    for (index = 0; index < query_op_count; index++) {
+        struct query_op *op = &query_ops[index];
+        struct query_results out = { 0x5a5a5a5au, (void *)0x5a5a5a5a };
+        uint32_t result;
+        uint32_t node;
+        uint32_t start;
+
+        current_operation = 1000 + index;
+        switch (op->type) {
+        case 0:
+            fe_put(" | search(%#x,", op->filter.kind);
+            query_put_text(op->filter.name, 64);
+            fe_put(",list=%u,dedupe=%u)", op->list.count, op->dedupe);
+            start = transcript_len;
+            result = side->link->search(fe_ptr(&op->list),
+                                        fe_ptr(&op->filter), fe_ptr(&out),
+                                        op->dedupe);
+            /* A successful search frees each popped record, the name of each
+             * dropped one, and its two filter copies. */
+            if (stats != NULL && result == 0 && op->dedupe &&
+                out.records != NULL) {
+                uint32_t frees = query_count_text(transcript + start,
+                                                  " free(");
+                if (frees > out.count + 2)
+                    stats->dedupe_drops += (frees - out.count - 2) / 2;
+            }
+            if (stats != NULL) {
+                stats->searches++;
+                if (out.count != 0)
+                    stats->search_hits++;
+                stats->records += out.count;
+                if (out.count > stats->most)
+                    stats->most = out.count;
+            }
+            query_put_results("SEARCH", result, &out);
+            break;
+        case 1:
+            if (!query_mapped(side))
+                break;
+            node = query_pick_node(op);
+            fe_put(" | describe(%#x,list=%u)", node, op->list.count);
+            result = side->link->names(node, fe_ptr(&op->list), fe_ptr(&out));
+            if (stats != NULL) {
+                stats->describes++;
+                stats->describe_records += out.count;
+            }
+            query_put_results("DESCRIBE", result, &out);
+            break;
+        case 2: {
+            uint8_t *record = NULL;
+            uint32_t size = 0;
+
+            if (!query_mapped(side))
+                break;
+            node = query_pick_node(op);
+            fe_put(" | record(%#x)", node);
+            result = side->link->record(node, fe_ptr(&record), fe_ptr(&size));
+            fe_put(" RECORD=%#x,size=%#x,data=", result, size);
+            fe_put_blob(record, size);
+            host_free((void **)&record);
+            if (stats != NULL)
+                stats->copies++;
+            break;
+        }
+        default:
+            fe_put(" | deinit");
+            fe_put(" DEINIT=%#x", side->link->deinit());
+            break;
+        }
+    }
+    query_logging = 0;
+    fe_put(" | final DEINIT=%#x", side->link->deinit());
+    facil_index_active = 0;
+    if (transcript_len >= sizeof(transcript) - 512)
+        fe_put(" TRANSCRIPT_FULL");
+    memcpy(image, side->image, FACIL_IMAGE_SIZE);
+    query_normalize_image(image);
+    memcpy(arena_image, arena, arena_used);
+    *arena_size = arena_used;
+    if (arena_used > query_arena_high)
+        query_arena_high = arena_used;
+}
+
+
+static int query_run(uint32_t scenarios, uint8_t *retail_arena,
+                     uint8_t *ours_arena)
+{
+    static uint8_t retail_image[FACIL_IMAGE_SIZE];
+    static uint8_t ours_image[FACIL_IMAGE_SIZE];
+    static char retail_transcript[TRANSCRIPT_SIZE];
+    uint32_t retail_arena_size;
+    uint32_t ours_arena_size;
+    uint32_t scenario;
+    int32_t difference;
+    int bad = 0;
+
+    SET_SLOT(host, 0x2b8, query_host_strlen);
+    SET_SLOT(host, 0x2c0, query_host_stricmp);
+    SET_SLOT(host, 0x228, query_host_memcmp);
+    memset(&query_stats, 0, sizeof(query_stats));
+    memset(arena, 0xa5, ARENA_SIZE);
+    query_arena_high = 0;
+    for (scenario = 0; scenario < scenarios && bad < 5; scenario++) {
+        int present;
+        int failed = 0;
+
+        rng = 0x9e3779b9u * (scenario + 1) ^ 0xfac11u;
+        if (rng == 0)
+            rng = 1;
+        query_make_cache();
+        present = fe_rnd() % 40 != 0;
+        if (!present)
+            query_stats.missing++;
+        else if (*(uint32_t *)(query_cache + 0) ==
+                 *(uint32_t *)(query_cache + 4))
+            query_stats.empty++;
+        query_make_ops();
+
+        counting = 1;
+        query_run_side(&facil_retail, scenario, present, retail_image,
+                       retail_arena, &retail_arena_size, &query_stats);
+        memcpy(retail_transcript, transcript, transcript_len + 1);
+        counting = 0;
+        query_stats.over_0x200 +=
+            query_count_text(retail_transcript, " realloc(1,0xa00,");
+        query_stats.over_0x280 +=
+            query_count_text(retail_transcript, " realloc(1,0xc00,");
+        query_run_side(&facil_ours, scenario, present, ours_image,
+                       ours_arena, &ours_arena_size, NULL);
+
+        if (strcmp(retail_transcript, transcript) != 0) {
+            printf("scenario %u: transcript differs\n", scenario);
+            fe_dump_transcript_difference(retail_transcript, transcript);
+            failed = 1;
+        }
+        if (strstr(retail_transcript, "TRANSCRIPT_FULL") != NULL) {
+            printf("scenario %u: transcript full\n", scenario);
+            failed = 1;
+        }
+        difference = facil_compare_image(retail_image, ours_image);
+        if (difference >= 0) {
+            printf("scenario %u: FACIL image differs at +%#x: %02x/%02x\n",
+                   scenario, (uint32_t)difference, retail_image[difference],
+                   ours_image[difference]);
+            failed = 1;
+        }
+        if (retail_arena_size != ours_arena_size ||
+            memcmp(retail_arena, ours_arena, retail_arena_size) != 0) {
+            printf("scenario %u: arena differs: retail %#x comparison %#x\n",
+                   scenario, retail_arena_size, ours_arena_size);
+            failed = 1;
+            if (retail_arena_size == ours_arena_size)
+                fe_dump_difference("arena", retail_arena, ours_arena,
+                                   retail_arena_size);
+        }
+        bad += failed;
+    }
+    printf("QUERY %u scenarios: %u searches (%u with results, %u records, "
+           "most %u, %u/%u queue growths past 0x200/0x280, %u dedupe drops), "
+           "%u describes (%u records), %u record copies, "
+           "%u empty and %u missing caches, %d differ\n",
+           scenario, query_stats.searches, query_stats.search_hits,
+           query_stats.records, query_stats.most, query_stats.over_0x200,
+           query_stats.over_0x280, query_stats.dedupe_drops,
+           query_stats.describes,
+           query_stats.describe_records, query_stats.copies,
+           query_stats.empty, query_stats.missing, bad);
+    SET_SLOT(host, 0x2b8, host_strlen);
+    SET_SLOT(host, 0x2c0, host_stricmp);
+    SET_SLOT(host, 0x228, host_memcmp);
+    return bad;
+}
+
 int main(int argc, char **argv)
 {
     static uint8_t retail_facil[FACIL_IMAGE_SIZE];
@@ -805,11 +1465,14 @@ int main(int argc, char **argv)
     uint32_t ours_second;
     int32_t image_difference;
     char temp[MAX_PATH * 2];
+    uint32_t scenarios;
+    int query_bad;
     int bad = 0;
 
     SetUnhandledExceptionFilter(fe_unhandled);
     if (argc < 4) {
-        printf("usage: facildiff.exe retail-facil comparison-facil fixture-root\n");
+        printf("usage: facildiff.exe retail-facil comparison-facil "
+               "fixture-root [query-scenarios]\n");
         return 2;
     }
     if (GetFullPathNameA(argv[3], sizeof(fixture), fixture, NULL) == 0 ||
@@ -909,6 +1572,9 @@ int main(int argc, char **argv)
 
     printf("INDEX_FILE %#x bytes, arena %#x bytes, %d differences\n",
            retail_cache_size, retail_arena_size, bad);
+    scenarios = argc > 4 ? (uint32_t)strtoul(argv[4], NULL, 0) : 20000;
+    query_bad = query_run(scenarios, retail_arena, ours_arena);
+    bad += query_bad;
     if (bad == 0)
         printf("IDENTICAL\n");
     SetCurrentDirectoryA(original_dir);

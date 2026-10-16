@@ -36,6 +36,7 @@
 /* ---- slot numbers -------------------------------------------------------- */
 #define FS98_HOST_S_QUIT        0x024   /* WM_CLOSE to the main window */
 #define FS98_HOST_S_TICKS       0x038   /* timeGetTime, straight through the IAT */
+#define FS98_HOST_S_POST_COMMAND 0x03c  /* PostMessageA(main, WM_COMMAND, a, b) */
 #define FS98_HOST_S_DIALOG      0x10c   /* run a registered dialog, by id */
 #define FS98_HOST_S_DIALOG_REG  0x110   /* a forwarder to +0x10c, nothing more */
 #define FS98_HOST_S_DIALOG_TICK 0x114   /* service the modeless dialogs */
@@ -62,6 +63,11 @@
 
 /* +0x038 -- milliseconds; UTIL's init seeds both generators from it. */
 typedef uint32_t (FS98_STDCALL *fs98_host_ticks_fn)(void);
+
+/* +0x03c -- PostMessageA(main_hwnd, WM_COMMAND, command, parameter).
+ * The host discards PostMessageA's result and returns zero. */
+typedef int32_t (FS98_STDCALL *fs98_host_post_command_fn)(uint32_t command,
+                                                          uint32_t parameter);
 
 /* +0x2b8 -- strlen by `repnz scasb`, returning 0 for a null pointer. */
 typedef uint32_t (FS98_STDCALL *fs98_host_strlen_fn)(const char *s);
@@ -464,6 +470,7 @@ typedef void *(FS98_STDCALL *fs98_host_list_find_fn)(struct fs98_host_list *l, u
     (*(type *)((unsigned char *)(h) + (slot)))
 
 #define FS98_HOST_TICKS(h)      FS98_HOST_SLOT(h, FS98_HOST_S_TICKS,      fs98_host_ticks_fn)
+#define FS98_HOST_POST_COMMAND(h) FS98_HOST_SLOT(h, FS98_HOST_S_POST_COMMAND, fs98_host_post_command_fn)
 #define FS98_HOST_STRLEN(h)     FS98_HOST_SLOT(h, FS98_HOST_S_STRLEN,     fs98_host_strlen_fn)
 #define FS98_HOST_STRCPY(h)     FS98_HOST_SLOT(h, FS98_HOST_S_STRCPY,     fs98_host_strcpy_fn)
 #define FS98_HOST_STRCAT(h)     FS98_HOST_SLOT(h, FS98_HOST_S_STRCAT,     fs98_host_strcat_fn)

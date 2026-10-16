@@ -41,6 +41,7 @@ BASE_ATC    := 0x20640000
 BASE_CHAIN  := 0x20660000
 BASE_DYNAMIC := 0x206a0000
 BASE_FE     := 0x206c0000
+BASE_LANDME := 0x207d0000
 BASE_GLOBAL := 0x20720000
 BASE_NUMERIC := 0x20870000
 BASE_SLEW   := 0x208c0000
@@ -48,7 +49,7 @@ BASE_SOUND  := 0x208d0000
 BASE_UTIL   := 0x208e0000
 BASE_WEATHERM := 0x208f0000
 
-MODULES := ACONTAIN ATC CHAIN DYNAMIC GLOBAL NUMERIC SLEW SOUND UTIL WEATHERM
+MODULES := ACONTAIN ATC CHAIN DYNAMIC GLOBAL LANDME NUMERIC SLEW SOUND UTIL WEATHERM
 
 # Setup renames two modules on the way from CD to install, and the game loads
 # the *installed* names.  A rebuilt FACIL.DLL copied in as FACIL.DLL would just
@@ -173,6 +174,22 @@ $(BIN)/fe.res: src/fe/fe.rc
 
 src/fe/fe_data.inc: $(ORIG)/Modules/FE.DLL tools/gen_fe_data.py
 	@python3 tools/gen_fe_data.py $< $@
+
+# LANDME, the landing-assistance state machine.  It uses retail FE in-game and
+# in its differential harness, so it can be completed independently of FE's
+# remaining Scenery Library dialog.
+$(BIN)/LANDME.DLL: src/landme/landme.c src/landme/landme.def \
+                   src/landme/landme_data.inc $(BIN)/landme.res
+	@mkdir -p $(BIN)
+	$(CC) $(CFLAGS) -Isrc/landme $(LDFLAGS) -Wl,--image-base=$(BASE_LANDME) \
+	      -o $@ src/landme/landme.c $(BIN)/landme.res src/landme/landme.def -lkernel32
+
+$(BIN)/landme.res: src/landme/landme.rc
+	@mkdir -p $(BIN)
+	$(RC) $< -O coff -o $@
+
+src/landme/landme_data.inc: $(ORIG)/Modules/LANDME.DLL tools/gen_landme_data.py
+	@python3 tools/gen_landme_data.py $< $@
 
 $(BIN)/SLEW.DLL: src/slew/slew.c src/slew/slew.def $(BIN)/slew.res
 	@mkdir -p $(BIN)
@@ -361,6 +378,26 @@ fediff-run: fediff
 	@test -n "$(FE_FIXTURE)" || { \
 	    echo "FE fixture missing: run tools/extract.sh again or make stage" >&2; exit 2; }
 	@cd $(DIFFDIR) && WINEDEBUG=-all timeout 3600 wine fediff.exe $(if $(N),$(N),20000) "$(FE_FIXTURE)"
+
+# LANDME's whole state machine, with a separate retail FE instance behind each
+# side so both see the same scenery without sharing FE's mutable search state.
+$(DIFFDIR)/landmediff.exe: tools/difftest/landmediff.c tools/difftest/fediff.c \
+                           src/fe/fe_data.inc
+	@mkdir -p $(DIFFDIR)
+	$(CC) -std=c99 -O1 -Wall -Wextra -Iinclude -Isrc/fe \
+	      -o $@ tools/difftest/landmediff.c
+
+landmediff: $(DIFFDIR)/landmediff.exe $(BIN)/LANDME.DLL
+	@cp $(ORIG)/Modules/LANDME.DLL $(DIFFDIR)/LANDME_retail.dll
+	@cp $(BIN)/LANDME.DLL          $(DIFFDIR)/LANDME_ours.dll
+	@cp $(ORIG)/Modules/FE.DLL     $(DIFFDIR)/FE_landme_retail.dll
+	@cp $(ORIG)/Modules/FE.DLL     $(DIFFDIR)/FE_landme_ours.dll
+	@cp $(ORIG)/Modules/UTIL.DLL   $(DIFFDIR)/UTIL_retail.dll
+
+landmediff-run: landmediff
+	@test -n "$(FE_FIXTURE)" || { \
+		echo "landmediff-run needs Scenery/world.vis and Texture/fs5.pal under orig/ or game/"; exit 2; }
+	@cd $(DIFFDIR) && WINEDEBUG=-all timeout 3600 wine landmediff.exe $(if $(N),$(N),20000) "$(FE_FIXTURE)"
 
 # CHAIN, whole-module: both DLLs driven through Linkage over random scripts
 # whose callbacks re-enter the module.  N=... sets the scenario count.
@@ -644,4 +681,4 @@ smoke: all
 clean:
 	rm -rf $(BIN)
 
-.PHONY: all stage setup-map graph hostmap compare run trace trace-render trace-ddraw kill window-reset wm-unmanaged wm-managed vd-on vd-off mode8 mode16 ddraw-gdi ddraw-default smoke difftest difftest-run utildiff utildiff-run utildiff-portable numericdiff numericdiff-run chaindiff chaindiff-run atcdiff atcdiff-run weathermdiff weathermdiff-run acontaindiff acontaindiff-run sounddiff sounddiff-run dynamicdiff dynamicdiff-run fegriddiff fegriddiff-run fediff fediff-run ofstest ofstest-run ofstest-remove util-trace install revert installed-name-of clean
+.PHONY: all stage setup-map graph hostmap compare run trace trace-render trace-ddraw kill window-reset wm-unmanaged wm-managed vd-on vd-off mode8 mode16 ddraw-gdi ddraw-default smoke difftest difftest-run utildiff utildiff-run utildiff-portable numericdiff numericdiff-run chaindiff chaindiff-run atcdiff atcdiff-run weathermdiff weathermdiff-run acontaindiff acontaindiff-run sounddiff sounddiff-run dynamicdiff dynamicdiff-run fegriddiff fegriddiff-run fediff fediff-run landmediff landmediff-run ofstest ofstest-run ofstest-remove util-trace install revert installed-name-of clean

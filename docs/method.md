@@ -251,6 +251,15 @@ restores each to its as-loaded bytes before every run, and compares them byte
 for byte afterwards: state that has not shown up in an output yet is still
 checked.
 
+**Give each side its own instance of a mutable dependency.** LANDME needs real
+FE behavior rather than a small stub, but FE keeps a search cursor, open files
+and a heap in its module image. If retail and OpenFS98 LANDME shared one FE,
+the second call would inherit the first call's state and the comparison would
+be about execution order, not LANDME. `landmediff` therefore loads two
+differently named copies of retail FE, one per side, and compares both FE
+images too. A dependency may be shared only when the services being called are
+stateless; the retail UTIL routines used by LANDME meet that condition.
+
 ## An unverified quirk does not go into a verified harness
 
 FE's `+0x40` looked, on the page, as if it broke its calling convention on one

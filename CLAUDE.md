@@ -58,9 +58,10 @@ make sounddiff-run       # whole-module SOUND        -> 20000 scenarios, 0 diffe
 make dynamicdiff-run     # whole-module DYNAMIC      -> 20000 scenarios, 0 differ (~15 min)
 make fegriddiff-run      # FE grid conversions        -> 7742499 comparisons, 0 mismatches
 make fediff-run          # FE engine + C file services -> 20000 scenarios, 0 differ
+make landmediff-run      # whole-module LANDME       -> 20000 scenarios, 0 differ
 make difftest-run        # whole-module SLEW         -> 0/2000 vectors differ
 make ofstest-run         # in-process, via the host  -> passed 68, failed 0
-make smoke               # ACONTAIN, ATC, CHAIN, DYNAMIC, GLOBAL, NUMERIC, SLEW, SOUND, UTIL, WEATHERM installed -> 27/27, 95 gauges, PASS
+make smoke               # ACONTAIN, ATC, CHAIN, DYNAMIC, GLOBAL, LANDME, NUMERIC, SLEW, SOUND, UTIL, WEATHERM installed -> 27/27, 95 gauges, PASS
 make util-trace          # which UTIL services the game calls, counted in-game
 ```
 
@@ -96,7 +97,10 @@ engine is done and verified**
 
 `+0x78`, the Scenery Library dialog, goes to `ofstest`, as do REALITY and
 WINMSG. FE is deliberately **not** in `MODULES`, so `make install` cannot ship
-a partial one. **LANDME is next**, with FE loaded for real in its harness.
+a partial one. **LANDME is also done and verified**: its harness gives each
+side a separate retail FE instance, steers the aircraft through all eleven
+nonzero guidance phases, and reports zero differences across 20,000 scenarios
+(`make landmediff-run`). **FACIL is next.**
 
 FE's `+0x40` calling-convention break is now confirmed by `fediff`: the
 one-byte probe writes through the caller's edi and returns with ebx/esi/edi

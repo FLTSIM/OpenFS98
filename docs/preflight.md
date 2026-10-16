@@ -15,8 +15,8 @@ Four rounds so far, newest first.
 
 ## Verdict
 
-**FE's three external-harness parts are done and verified. LANDME is next**, then
-FACIL. BOOSTER stays last.
+**FE's three external-harness parts and LANDME are done and verified. FACIL is
+next.** BOOSTER stays last.
 
 1. **The grid conversions, `+0x60`..`+0x6c`.** These are pure and table-driven, so
    they are tested by vectors like UTIL's. They are small, they pin down FE's
@@ -182,11 +182,15 @@ dialog engine.
 
 ## LANDME (id 26)
 
-Revisited. Its two FE calls (`+0x54` with radius 100000, then `+0x20` to read
-the records back) need no FE stub at all: the harness loads FE for real over
-FE's fixture tree, the same FE on both sides. MAIN
-`+0x70` and WINMSG `+0x18` stay logging stubs, and host `+0x03c` (posting
-`0x100d7`) is recorded. It is a small slice once FE's harness exists.
+**Outcome: reimplemented, verified and running in-game.** Its two FE calls
+(`+0x54` with radius 100000, then `+0x20` to read the records back) use
+separately loaded copies of retail FE over FE's fixture tree, so the two sides
+do not share FE's mutable search state. MAIN `+0x70` and WINMSG `+0x18` are
+logging stubs, and host `+0x03c` records command `0x100d7`. The 20,000-scenario
+baseline reaches all seven states and eleven nonzero phases, finds 18,881
+runways, takes 1,119 no-runway paths and has zero differences. With LANDME
+installed, `make smoke` reaches the panel with 27/27 modules and 95 gauges. See
+[modules/landme.md](modules/landme.md).
 
 ## FACIL (id 37)
 
@@ -197,7 +201,7 @@ Its GLOBAL writes are a position (`+0x56c`, `+0x572`..`+0x580`,
 `+0x11f0`..`+0x1200`), which looks like the jump to an airport. MAIN calls
 `+0x18`, `+0x24`, `+0x28` and `+0x30`, and FE calls `+0x2c`; it calls MAIN
 `+0x1c`/`+0xb0`/`+0xc4` and CHAIN `+0x20`. The file half suits FE's harness,
-and the dialogs go to `ofstest`. After LANDME.
+and the dialogs go to `ofstest`. It is next.
 
 ## BOOSTER (id 34)
 

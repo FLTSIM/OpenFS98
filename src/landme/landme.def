@@ -1,0 +1,4 @@
+LIBRARY LANDME.DLL
+EXPORTS
+    Linkage DATA
+    ImportTable DATA

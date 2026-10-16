@@ -59,6 +59,7 @@ make dynamicdiff-run     # whole-module DYNAMIC      -> 20000 scenarios, 0 diffe
 make fegriddiff-run      # FE grid conversions        -> 7742499 comparisons, 0 mismatches
 make fediff-run          # FE engine + C file services -> 20000 scenarios, 0 differ
 make landmediff-run      # whole-module LANDME       -> 20000 scenarios, 0 differ
+make facildiff-run       # FACIL file/index half     -> 0 differences
 make difftest-run        # whole-module SLEW         -> 0/2000 vectors differ
 make ofstest-run         # in-process, via the host  -> passed 68, failed 0
 make smoke               # ACONTAIN, ATC, CHAIN, DYNAMIC, GLOBAL, LANDME, NUMERIC, SLEW, SOUND, UTIL, WEATHERM installed -> 27/27, 95 gauges, PASS
@@ -100,7 +101,18 @@ WINMSG. FE is deliberately **not** in `MODULES`, so `make install` cannot ship
 a partial one. **LANDME is also done and verified**: its harness gives each
 side a separate retail FE instance, steers the aircraft through all eleven
 nonzero guidance phases, and reports zero differences across 20,000 scenarios
-(`make landmediff-run`). **FACIL is next.**
+(`make landmediff-run`).
+
+**FACIL is now in progress.** Its complete `.data` image, profile init/deinit,
+`+0x2c` index validation/rebuild, and `+0x20` serialized-record copy are
+reimplemented. `make facildiff-run` drives retail and OpenFS98 against separate
+retail FE instances and a synthetic five-level facility block; the current
+baseline is a 0x195-byte cache, a 0xbcd0-byte deterministic arena, and zero
+differences across transcript, outputs, GLOBAL, FE and FACIL state. A deliberate
+wrong fallback kind failed at cache offset `+0x16c`. The next slice is FACIL's
+mapped-cache query services `+0x18`/`+0x1c`; its three dialog slots follow in
+`ofstest`. FACIL is also deliberately absent from `MODULES` until those are
+done. See [docs/modules/facil.md](docs/modules/facil.md).
 
 FE's `+0x40` calling-convention break is now confirmed by `fediff`: the
 one-byte probe writes through the caller's edi and returns with ebx/esi/edi

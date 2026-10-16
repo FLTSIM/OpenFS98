@@ -40,6 +40,7 @@ BASE_ACONTAIN := 0x20600000
 BASE_ATC    := 0x20640000
 BASE_CHAIN  := 0x20660000
 BASE_DYNAMIC := 0x206a0000
+BASE_FACIL  := 0x206b0000
 BASE_FE     := 0x206c0000
 BASE_LANDME := 0x207d0000
 BASE_GLOBAL := 0x20720000
@@ -174,6 +175,23 @@ $(BIN)/fe.res: src/fe/fe.rc
 
 src/fe/fe_data.inc: $(ORIG)/Modules/FE.DLL tools/gen_fe_data.py
 	@python3 tools/gen_fe_data.py $< $@
+
+# FACIL, the compiled facility index.  Not in MODULES yet: cache rebuilding
+# and record copies are verified here, while the two query services and three
+# dialogs still remain.  A partial FACIL must never be installed.
+$(BIN)/FACIL.DLL: src/facil/facil.c src/facil/facil.def \
+                   src/facil/facil_data.inc $(BIN)/facil.res
+	@mkdir -p $(BIN)
+	$(CC) $(CFLAGS) -Isrc/facil $(LDFLAGS) -Wl,--image-base=$(BASE_FACIL) \
+	      -o $@ src/facil/facil.c $(BIN)/facil.res src/facil/facil.def \
+	      -lkernel32 -lgcc
+
+$(BIN)/facil.res: src/facil/facil.rc
+	@mkdir -p $(BIN)
+	$(RC) $< -O coff -o $@
+
+src/facil/facil_data.inc: $(ORIG)/Modules/facil.dll tools/gen_facil_data.py
+	@python3 tools/gen_facil_data.py $< $@
 
 # LANDME, the landing-assistance state machine.  It uses retail FE in-game and
 # in its differential harness, so it can be completed independently of FE's
@@ -398,6 +416,29 @@ landmediff-run: landmediff
 	@test -n "$(FE_FIXTURE)" || { \
 		echo "landmediff-run needs Scenery/world.vis and Texture/fs5.pal under orig/ or game/"; exit 2; }
 	@cd $(DIFFDIR) && WINEDEBUG=-all timeout 3600 wine landmediff.exe $(if $(N),$(N),20000) "$(FE_FIXTURE)"
+
+# FACIL's externally testable file half: each side gets a separate retail FE,
+# the harness builds a synthetic five-level facility directory, rebuilds and
+# validates INDEX_FILE, then copies the serialized airport record through
+# Linkage +0x20.  The query/UI half remains for the next slice.
+$(DIFFDIR)/facildiff.exe: tools/difftest/facildiff.c tools/difftest/fediff.c \
+                          src/fe/fe_data.inc src/facil/facil_data.inc
+	@mkdir -p $(DIFFDIR)
+	$(CC) -std=c99 -O1 -Wall -Wextra -Iinclude -Isrc/fe \
+	      -o $@ tools/difftest/facildiff.c
+
+facildiff: $(DIFFDIR)/facildiff.exe $(BIN)/FACIL.DLL
+	@cp $(ORIG)/Modules/facil.dll $(DIFFDIR)/FACIL_retail.dll
+	@cp $(BIN)/FACIL.DLL           $(DIFFDIR)/FACIL_ours.dll
+	@cp $(ORIG)/Modules/FE.DLL     $(DIFFDIR)/FE_facil_retail.dll
+	@cp $(ORIG)/Modules/FE.DLL     $(DIFFDIR)/FE_facil_ours.dll
+	@cp $(ORIG)/Modules/UTIL.DLL   $(DIFFDIR)/UTIL_retail.dll
+
+facildiff-run: facildiff
+	@test -n "$(FE_FIXTURE)" || { \
+		echo "facildiff-run needs Scenery/world.vis and Texture/fs5.pal under orig/ or game/"; exit 2; }
+	@cd $(DIFFDIR) && WINEDEBUG=-all timeout 3600 wine facildiff.exe \
+	      FACIL_retail.dll FACIL_ours.dll "$(FE_FIXTURE)"
 
 # CHAIN, whole-module: both DLLs driven through Linkage over random scripts
 # whose callbacks re-enter the module.  N=... sets the scenario count.
@@ -681,4 +722,4 @@ smoke: all
 clean:
 	rm -rf $(BIN)
 
-.PHONY: all stage setup-map graph hostmap compare run trace trace-render trace-ddraw kill window-reset wm-unmanaged wm-managed vd-on vd-off mode8 mode16 ddraw-gdi ddraw-default smoke difftest difftest-run utildiff utildiff-run utildiff-portable numericdiff numericdiff-run chaindiff chaindiff-run atcdiff atcdiff-run weathermdiff weathermdiff-run acontaindiff acontaindiff-run sounddiff sounddiff-run dynamicdiff dynamicdiff-run fegriddiff fegriddiff-run fediff fediff-run landmediff landmediff-run ofstest ofstest-run ofstest-remove util-trace install revert installed-name-of clean
+.PHONY: all stage setup-map graph hostmap compare run trace trace-render trace-ddraw kill window-reset wm-unmanaged wm-managed vd-on vd-off mode8 mode16 ddraw-gdi ddraw-default smoke difftest difftest-run utildiff utildiff-run utildiff-portable numericdiff numericdiff-run chaindiff chaindiff-run atcdiff atcdiff-run weathermdiff weathermdiff-run acontaindiff acontaindiff-run sounddiff sounddiff-run dynamicdiff dynamicdiff-run fegriddiff fegriddiff-run fediff fediff-run landmediff landmediff-run facildiff facildiff-run ofstest ofstest-run ofstest-remove util-trace install revert installed-name-of clean

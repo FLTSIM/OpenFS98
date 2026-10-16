@@ -69,6 +69,23 @@ mismatch found by the harness after the "obvious" version looked right:
   `+0x104`. Read the other way it compiles, runs, and returns the right number
   of records with the wrong field in every one.
 
+- **A flag can be gone before it is read.** DYNAMIC's refuelling does
+  `shr edx,1` / `xor eax,eax` / `rcr eax,1`. Read as an idiom it puts the
+  bit shifted out at the top of eax, but the `xor` clears the carry first,
+  so `rcr` rotates in a zero. Written the idiom's way, every tank came out
+  a unit high now and then -- found only once steering reached the
+  proportional refuelling at all.
+- **What a callee leaves in a register can be behaviour.** DYNAMIC's frame
+  ends its slicing loop with `loop`, and when there are no objects nothing
+  sets ecx in between: the count is the caller's ecx, or, on the frame that
+  registers with CHAIN, whatever CHAIN's add left there. The C entry is a
+  stub that passes ecx in, and that one CHAIN call goes through a thunk
+  that hands ecx back. Inside the module too: the ramped move keeps its
+  offset in ecx across the timer, and the timer's `path_end` uses ecx as
+  scratch, so the first ramped step after a path moves by the altitude's
+  low word. Check every register a routine keeps across a call against
+  what the callee does with it.
+
 And reproduce bugs. Retail's sum of squares carries the wrong way, one of its
 clamps is off by a factor of sixteen, and a conversion treats a signed value as
 unsigned. All reproduced, all documented. The goal is a sim that behaves as
@@ -171,6 +188,24 @@ everywhere except a handful of exact inputs. The break was caught only
 after the arithmetic was carried through on paper to find one: an eyepoint
 400 m less 2/65536 above an aircraft on the ground, under 24-bit precision.
 At exactly 400 m both ways give the same integer.
+
+**A stub has to keep what the real callee keeps.** Hand-written assembly
+relies on registers surviving calls that the C convention lets a callee
+clobber: UTIL's routines save ecx and edx (some eax too), and retail
+DYNAMIC counts loops in ecx across them. The harness first reached UTIL
+through logging forwarders written in C, so in the harness retail's loop
+counts were corrupted, and in the game they never are. It showed as a
+difference that looked like a bug in the reimplementation. The forwarders are
+now asm thunks that keep what the real routine keeps. Read the callee's
+pushes and pops as well as its `ret N`.
+
+**A hang is an outcome; where it was cut is not.** DYNAMIC runs programs
+from scenery files that nothing checks, and some spin forever -- in
+retail too. A watchdog thread moves a call that has spun for a second out
+of the module, and the transcript says `HANG`. But the spin's state when it
+was cut depends on timing, so the scenario stops there and only the
+transcripts are compared. Comparing the state anyway gave false
+differences that looked exactly like bugs.
 
 **A retail fault is a finding, not a harness bug.** When retail crashes on a
 generated state, work out why before steering away from it. Then put the

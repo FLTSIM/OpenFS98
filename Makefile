@@ -39,6 +39,7 @@ FS98_DIR?= $(HOME)/.wine/drive_c/FS98
 BASE_ACONTAIN := 0x20600000
 BASE_ATC    := 0x20640000
 BASE_CHAIN  := 0x20660000
+BASE_DYNAMIC := 0x206a0000
 BASE_GLOBAL := 0x20720000
 BASE_NUMERIC := 0x20870000
 BASE_SLEW   := 0x208c0000
@@ -46,7 +47,7 @@ BASE_SOUND  := 0x208d0000
 BASE_UTIL   := 0x208e0000
 BASE_WEATHERM := 0x208f0000
 
-MODULES := ACONTAIN ATC CHAIN GLOBAL NUMERIC SLEW SOUND UTIL WEATHERM
+MODULES := ACONTAIN ATC CHAIN DYNAMIC GLOBAL NUMERIC SLEW SOUND UTIL WEATHERM
 
 # Setup renames two modules on the way from CD to install, and the game loads
 # the *installed* names.  A rebuilt FACIL.DLL copied in as FACIL.DLL would just
@@ -138,6 +139,23 @@ $(BIN)/sound.res: src/sound/sound.rc
 
 src/sound/sound_data.inc src/sound/sound_consts.inc &: $(ORIG)/Modules/SOUND.DLL tools/gen_sound_data.py
 	@python3 tools/gen_sound_data.py $< src/sound
+
+# DYNAMIC, laid out the same way.  An interpreter for programs from scenery
+# files, so null-pointer checks stay in: a bad program has to fault where
+# retail's does, not wherever the optimiser moved the access.
+$(BIN)/DYNAMIC.DLL: src/dynamic/dynamic.c src/dynamic/dynamic.def \
+                    src/dynamic/dynamic_data.inc $(BIN)/dynamic.res
+	@mkdir -p $(BIN)
+	$(CC) $(CFLAGS) -fno-delete-null-pointer-checks -Isrc/dynamic $(LDFLAGS) \
+	      -Wl,--image-base=$(BASE_DYNAMIC) \
+	      -o $@ src/dynamic/dynamic.c $(BIN)/dynamic.res src/dynamic/dynamic.def -lkernel32
+
+$(BIN)/dynamic.res: src/dynamic/dynamic.rc
+	@mkdir -p $(BIN)
+	$(RC) $< -O coff -o $@
+
+src/dynamic/dynamic_data.inc: $(ORIG)/Modules/DYNAMIC.DLL tools/gen_dynamic_data.py
+	@python3 tools/gen_dynamic_data.py $< $@
 
 $(BIN)/SLEW.DLL: src/slew/slew.c src/slew/slew.def $(BIN)/slew.res
 	@mkdir -p $(BIN)
@@ -362,6 +380,25 @@ sounddiff: $(DIFFDIR)/sounddiff.exe $(BIN)/SOUND.DLL
 sounddiff-run: sounddiff
 	@cd $(DIFFDIR) && WINEDEBUG=-all timeout 3600 wine sounddiff.exe $(N)
 
+# DYNAMIC, whole-module: retail and OpenFS98 driven through Linkage and their
+# CHAIN lists over random scripts against the dynamic-scenery blocks of the
+# CD's twelve airport BGLs, often mutated.  Compares transcript, GLOBAL, heap
+# and .data.  See the header of tools/difftest/dynamicdiff.c.
+$(DIFFDIR)/dynamicdiff.exe: tools/difftest/dynamicdiff.c
+	@mkdir -p $(DIFFDIR)
+	$(CC) -std=c99 -O1 -Wall -Wextra -o $@ tools/difftest/dynamicdiff.c
+
+dynamicdiff: $(DIFFDIR)/dynamicdiff.exe $(BIN)/DYNAMIC.DLL
+	@cp $(ORIG)/Modules/DYNAMIC.DLL $(DIFFDIR)/DYNAMIC_retail.dll
+	@cp $(BIN)/DYNAMIC.DLL          $(DIFFDIR)/DYNAMIC_ours.dll
+	@cp $(ORIG)/Modules/CHAIN.DLL   $(DIFFDIR)/CHAIN_retail.dll
+	@cp $(ORIG)/Modules/UTIL.DLL    $(DIFFDIR)/UTIL_retail.dll
+	@mkdir -p $(DIFFDIR)/cdscenery
+	@cp $(ORIG)/Scenery/*5.bgl $(DIFFDIR)/cdscenery/
+
+dynamicdiff-run: dynamicdiff
+	@cd $(DIFFDIR) && WINEDEBUG=-all timeout 3600 wine dynamicdiff.exe $(N)
+
 # ACONTAIN, whole-module: retail and OpenFS98 driven through Linkage over
 # random scripts against generated aircraft trees, with retail CHAIN, a stub
 # host that passes file I/O through, and fake .SIM and .MDL modules.
@@ -557,4 +594,4 @@ smoke: all
 clean:
 	rm -rf $(BIN)
 
-.PHONY: all stage setup-map graph hostmap compare run trace trace-render trace-ddraw kill window-reset wm-unmanaged wm-managed vd-on vd-off mode8 mode16 ddraw-gdi ddraw-default smoke difftest difftest-run utildiff utildiff-run utildiff-portable numericdiff numericdiff-run chaindiff chaindiff-run atcdiff atcdiff-run weathermdiff weathermdiff-run acontaindiff acontaindiff-run sounddiff sounddiff-run ofstest ofstest-run ofstest-remove util-trace install revert installed-name-of clean
+.PHONY: all stage setup-map graph hostmap compare run trace trace-render trace-ddraw kill window-reset wm-unmanaged wm-managed vd-on vd-off mode8 mode16 ddraw-gdi ddraw-default smoke difftest difftest-run utildiff utildiff-run utildiff-portable numericdiff numericdiff-run chaindiff chaindiff-run atcdiff atcdiff-run weathermdiff weathermdiff-run acontaindiff acontaindiff-run sounddiff sounddiff-run dynamicdiff dynamicdiff-run ofstest ofstest-run ofstest-remove util-trace install revert installed-name-of clean

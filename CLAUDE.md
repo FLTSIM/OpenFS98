@@ -55,9 +55,10 @@ make atcdiff-run         # whole-module ATC          -> 20000 scenarios, 0 diffe
 make weathermdiff-run    # whole-module WEATHERM     -> 20000 scenarios, 0 differ
 make acontaindiff-run    # whole-module ACONTAIN     -> 20000 scenarios, 0 differ (~25 min)
 make sounddiff-run       # whole-module SOUND        -> 20000 scenarios, 0 differ (~40 min)
+make dynamicdiff-run     # whole-module DYNAMIC      -> 20000 scenarios, 0 differ (~15 min)
 make difftest-run        # whole-module SLEW         -> 0/2000 vectors differ
 make ofstest-run         # in-process, via the host  -> passed 68, failed 0
-make smoke               # ACONTAIN, ATC, CHAIN, GLOBAL, NUMERIC, SLEW, SOUND, UTIL, WEATHERM installed -> 27/27, 95 gauges, PASS
+make smoke               # ACONTAIN, ATC, CHAIN, DYNAMIC, GLOBAL, NUMERIC, SLEW, SOUND, UTIL, WEATHERM installed -> 27/27, 95 gauges, PASS
 make util-trace          # which UTIL services the game calls, counted in-game
 ```
 
@@ -69,10 +70,11 @@ host process or live game state still needs `ofstest`.
 
 ## Current next slice
 
-WEATHERM, ACONTAIN and SOUND are done. Round 3 of
-[docs/preflight.md](docs/preflight.md) puts **DYNAMIC** next: a bytecode
-interpreter fed real dynamic-scenery blobs through an FE stub. REALITY belongs
-in `ofstest`; LANDME stays blocked on FE's record format.
+WEATHERM, ACONTAIN, SOUND and DYNAMIC are done. Round 3 of
+[docs/preflight.md](docs/preflight.md) is finished apart from BOOSTER (its own
+thread; later). **Next is a round-4 preflight**: most of what is left waits on
+FE -- LANDME reads its records, BOOSTER serves it, DYNAMIC's harness stands in
+for it -- so survey FE first. REALITY and WINMSG belong in `ofstest`.
 `tools/difftest/acontaindiff.c`, `weathermdiff.c` and `atcdiff.c` are the
 templates for a module with unfinished imports: retail's finished modules
 loaded for real, logging stubs for the rest, and the module's whole `.data`
@@ -82,7 +84,10 @@ transliterations of the host's own path and find services. `sounddiff.c` adds
 three more: comparing an image and heap that hold pointers into the module
 (as offsets, and code through a learnt pairing), recovering from a fault
 retail and ours both take, and running each scenario under a random x87
-precision control.
+precision control. `dynamicdiff.c` adds the pattern for a module that runs
+unchecked data: guard-paged heap and GLOBAL, faults and watchdog-cut hangs
+compared as outcomes, mutated real fixtures, and synthetic ones built to
+reach a boundary.
 
 ## Two things not to rediscover the hard way
 

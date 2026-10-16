@@ -69,6 +69,7 @@ else's 1997 build, and it should read that way.
 | `make atcdiff-run` | drive retail and OpenFS98 ATC side by side over random scripts of ATIS, clearances and frames, comparing every import call and the whole `.data` image; `N=...` sets the count |
 | `make acontaindiff-run` | the same for ACONTAIN, against generated aircraft trees: loads, lists, queries and models, with file I/O passed through and fake `.SIM`/`.MDL` modules, comparing every import call, GLOBAL, the heap and the `.data` image |
 | `make sounddiff-run` | the same for SOUND, against generated `SOUND.CFG` trees and the CD's seven: frames, events, wind, faders and CHAIN messages, with a model of the host's voice engine, comparing every import call, GLOBAL, `FLTSIM98.CFG`, the heap and the `.data` image |
+| `make dynamicdiff-run` | the same for DYNAMIC, against the dynamic-scenery programs of the CD's twelve airport BGLs, often mutated, and three synthetic blocks: frames, the three CHAIN lists, the user's aircraft and MULTIP's players steered onto what the programs test; faults and hangs compared as outcomes |
 | `make weathermdiff-run` | the same for WEATHERM: updates, frames, resets, scenery effects and list operations, comparing every import call, GLOBAL, the heap and the `.data` image |
 | `make chaindiff-run` | drive retail and OpenFS98 CHAIN side by side over random re-entrant callback scripts; `N=...` sets the count |
 | `make ofstest-run` | run assertions *inside* the sim, where the host is reachable; `ofstest-remove` takes the module back out |
@@ -110,8 +111,8 @@ built, so a gauge load means startup went all the way through.
 
 **Verified working**: under wine 9.0 the retail game reaches its main menu —
 27/27 modules, 95 gauges — and so does the build with OpenFS98's `ACONTAIN`,
-`ATC`, `CHAIN`, `GLOBAL`, `NUMERIC`, `SLEW`, `SOUND`, `UTIL` and `WEATHERM` modules
-substituted, with identical counts.
+`ATC`, `CHAIN`, `DYNAMIC`, `GLOBAL`, `NUMERIC`, `SLEW`, `SOUND`, `UTIL` and
+`WEATHERM` modules substituted, with identical counts.
 
 ## Where this is going
 
@@ -164,12 +165,13 @@ emulate 80-bit arithmetic to preserve a rounding artefact. See
 | `WEATHERM` | 27 | 8,774 | **reimplemented, verified, and running in-game** — the weather: areas, blending, temperature and pressure by altitude, wind; 20,000 whole-module differential scripts comparing GLOBAL and its whole `.data` image, zero differences — see [docs/modules/weatherm.md](docs/modules/weatherm.md) |
 | `ACONTAIN` | 23 | 5,504 | **reimplemented, verified, and running in-game** — the aircraft container: finds aircraft by title, resolves their paths, loads the flight and visual models, lists them; 20,000 whole-module differential scripts against generated aircraft trees, zero differences — see [docs/modules/acontain.md](docs/modules/acontain.md) |
 | `SOUND` | 39 | 15,174 | **reimplemented, verified, and running in-game** — engine, warning, marker and Morse ident sounds, driven through the host's voice engine; 20,000 whole-module differential scripts comparing its whole `.data` image, zero differences — see [docs/modules/sound.md](docs/modules/sound.md) |
+| `DYNAMIC` | 6 | 12,300 | **reimplemented, verified, and running in-game** — dynamic scenery: an interpreter for the airport traffic programs in scenery files, three of whose opcodes write programs of their own; 20,000 whole-module differential scripts comparing GLOBAL, the heap and its whole `.data` image, zero differences — see [docs/modules/dynamic.md](docs/modules/dynamic.md) |
 | `NUMERIC` | 17 | 14,684 | **reimplemented, verified, and running in-game** — 545,778 differential comparisons, zero mismatches — see [docs/modules/numeric.md](docs/modules/numeric.md) |
 | `UTIL` | 20 | 11,062 | **reimplemented, verified, and running in-game** — all 47 services; 19 seen called in a hands-on session, the modal alert among them — see [docs/modules/util.md](docs/modules/util.md) |
 | `FLTSIM98.EXE` | 1 (host) | 82,016 | 194 services mapped, 21 with confirmed prototypes, 11 verified in-process, 2 implemented — see [docs/modules/host.md](docs/modules/host.md) |
 
-Retail baseline and the OpenFS98 build -- ACONTAIN, ATC, CHAIN, GLOBAL, NUMERIC,
-SLEW, SOUND, UTIL and WEATHERM all installed -- both reach the panel: 27/27 modules, 95 gauges,
+Retail baseline and the OpenFS98 build -- ACONTAIN, ATC, CHAIN, DYNAMIC, GLOBAL,
+NUMERIC, SLEW, SOUND, UTIL and WEATHERM all installed -- both reach the panel: 27/27 modules, 95 gauges,
 `make smoke` PASS.
 
 `GLOBAL.DLL`'s 4764-byte shared state block is byte-identical to retail, and the
@@ -198,10 +200,13 @@ Round 2 of the [preflight](docs/preflight.md) is done apart from `REALITY`:
 [docs/modules/acontain.md](docs/modules/acontain.md). `REALITY` draws and runs
 dialogs, so it belongs in `ofstest`, not an external harness.
 
-Round 3 picked `SOUND`, and it is reimplemented and verified -- see
-[docs/modules/sound.md](docs/modules/sound.md). **`DYNAMIC` is next**, fed
-real dynamic-scenery blobs through an FE stub. `BOOSTER` works on its own
-thread and is left for later.
+Round 3 picked `SOUND`, then `DYNAMIC`, and both are reimplemented and
+verified -- see [docs/modules/sound.md](docs/modules/sound.md) and
+[docs/modules/dynamic.md](docs/modules/dynamic.md). `BOOSTER` works on its
+own thread and is left for later. **Next is a round-4 preflight.** What is
+left mostly waits on FE: `LANDME` reads its records, `BOOSTER` serves it, and
+DYNAMIC's harness stands in for it. FE itself (48 KB, the scenery file
+engine) is the candidate to survey first.
 
 `LANDME` is blocked on FE: `+0x54` searches around the aircraft and `+0x20`
 hands back a record LANDME reads, and a stub has to produce records in FE's
@@ -234,8 +239,10 @@ nothing in it imports anything interesting:
 7. ~~**`WEATHERM`** (8,774 bytes)~~ — done, verified and running in-game.
 8. ~~**`ACONTAIN`** (5,504 bytes)~~ — done, verified and running in-game.
 9. ~~**`SOUND`** (15,174 bytes)~~ — done, verified and running in-game.
-10. Then outward: `DYNAMIC`, then `LANDME`, `WINMSG`, `REALITY`, `BOOSTER`…
-11. `HG2D` (390 KB, the 2D rasteriser) last. It is 26% of the project on its
+10. ~~**`DYNAMIC`** (12,300 bytes)~~ — done, verified and running in-game.
+11. Then outward: a round-4 preflight -- `FE`, `LANDME`, `WINMSG`, `REALITY`,
+   `BOOSTER`…
+12. `HG2D` (390 KB, the 2D rasteriser) last. It is 26% of the project on its
    own.
 
 `GLOBAL`'s state block is the shared workspace: every module worked through

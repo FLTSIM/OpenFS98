@@ -29,6 +29,17 @@ a completion callback. SOUND also calls the loaded flight model's `+0x38`
 frand and rand32 -- state a harness has to seed. ACONTAIN was stubbed after
 all: two path queries.
 
+**Outcome:** DYNAMIC is done too -- [modules/dynamic.md](modules/dynamic.md).
+The plan held: real blocks behind an FE stub, mutated. The blocks are in the
+twelve city `*5.bgl` files, found through BGL header `+0x52` (FE's cache entry
+`+0x150` is the header from `+2`), and `dynlib.bgl` holds the library
+objects they draw. What the survey did not see: three opcodes (`0x3e`,
+`0x40`, `0x41`) write programs of their own at run time -- a fuel truck's
+drive, a take-off and circuit, a turn onto a heading; `0x3f` refuels the
+user's aircraft, so GLOBAL's tanks (`+0xb74`..`+0xba0`) and `+0x348` are
+written too; and `+0x18` depends on ecx at entry. Unchecked programs spin as
+well as fault, so the harness needed a watchdog.
+
 | | SOUND | DYNAMIC | BOOSTER |
 | --- | --- | --- | --- |
 | `.text` | 15,174 | 12,300 | 8,024 |

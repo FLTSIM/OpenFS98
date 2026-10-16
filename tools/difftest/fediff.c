@@ -1,19 +1,22 @@
-/* Differential test: retail FE.DLL against the OpenFS98 build, assembly engine.
+/* Differential test: retail FE.DLL against the OpenFS98 build.
  *
  * Both DLLs are loaded into one process and driven through Linkage over the
  * installed Scenery tree.  The host passes file and directory operations
  * through to that fixture, allocates from a deterministic arena, and models
- * the small set of services used by FE's hand-written assembly half.  Retail
- * UTIL supplies FE's arithmetic.  CHAIN, BOOSTER and FACIL are logging stubs.
+ * the services used by FE's assembly engine and compiled-C file services.
+ * Retail UTIL supplies FE's arithmetic.  CHAIN, BOOSTER and FACIL are logging
+ * stubs.  Self-checking synthetic fixtures cover compressed textures and BGL
+ * section selection independently of either DLL's result.
  *
  * A scenario starts with a pristine FE image and GLOBAL, then exercises one
  * caller-shaped operation: G3D's scene stream, MAIN's searches and navaid or
  * ground lookups, FACIL's listing, DYNAMIC's blocks, object lookup, box tests,
- * or BOOSTER's register/unregister callbacks.  Compared after every scenario:
- * the import transcript, GLOBAL, the deterministic arena and FE's .data image.
- * Module-local pointers compare by image offset.  The C-half handler pointers
- * (generated as FE_REL_TEXT entries) and the live CRITICAL_SECTION are outside
- * this part's verification and are ignored explicitly.
+ * BOOSTER's register/unregister callbacks, HG2D's texture loader, or FACIL's
+ * BGL file and section services.  Compared after every scenario: the import
+ * transcript, outputs, GLOBAL, the deterministic arena and FE's .data image.
+ * Module-local pointers compare by image offset.  The Scenery Library dialog
+ * handler pointers (generated as FE_REL_TEXT entries) and the live
+ * CRITICAL_SECTION are outside this verification and are ignored explicitly.
  *
  * Build: make fediff     Run: make fediff-run
  */
@@ -119,6 +122,8 @@ enum {
     FE_OP_OBJECT,
     FE_OP_BOX,
     FE_OP_REGISTER,
+    FE_OP_TEXTURE,
+    FE_OP_FACIL,
     FE_OP_COUNT
 };
 
@@ -138,6 +143,8 @@ static uint8_t output[OUTPUT_SIZE] __attribute__((aligned(16)));
 static struct host_file host_files[MAX_HOST_FILES];
 static struct host_find host_finds[MAX_HOST_FINDS];
 static char fixture[MAX_PATH * 2];
+static char original_dir[MAX_PATH * 2];
+static char part3_root[MAX_PATH * 2];
 static char transcript[TRANSCRIPT_SIZE];
 static uint32_t transcript_len;
 static void (STDCALL *frame)(uint32_t arg0, uint32_t arg1);
@@ -147,6 +154,9 @@ static uint32_t coverage[FE_OP_COUNT];
 static uint32_t files_opened;
 static uint32_t records;
 static uint32_t dynamic_oversize;
+static uint32_t texture_loads;
+static uint32_t facil_reads;
+static uint32_t part3_fixture_failures;
 static volatile uint32_t service_step;
 static uint32_t current_scenario;
 static uint32_t current_operation;
@@ -388,6 +398,12 @@ static int32_t STDCALL host_memmove(void *dst, const void *src, uint32_t size)
     return 0;
 }
 
+static int32_t STDCALL host_memcmp(const void *left, const void *right,
+                                   uint32_t size)
+{
+    return memcmp(left, right, size);
+}
+
 static int32_t STDCALL host_basedir(char *out)
 {
     strcpy(out, fixture);
@@ -523,6 +539,10 @@ static const char *fe_extension_text(int32_t extension)
         return "";
     if (extension == 1)
         return ".BGL";
+    if (extension == 9)
+        return ".PAL";
+    if (extension == 10)
+        return ".HAZ";
     return NULL;
 }
 
@@ -798,6 +818,56 @@ static int32_t STDCALL host_find_close(struct host_find **find_ref)
     return 0;
 }
 
+struct host_list {
+    uint32_t count;
+    uint32_t capacity;
+    uint32_t grow;
+    uint32_t elem_size;
+    uint32_t iterating;
+    uint32_t pending;
+    uint8_t *data;
+};
+
+static void *STDCALL host_list_add(struct host_list *list)
+{
+    uint8_t *element;
+
+    if (list->count == list->capacity) {
+        uint32_t capacity = list->capacity + list->grow;
+        uint32_t size = capacity * list->elem_size;
+        uint8_t *data = (uint8_t *)fe_arena_get(size);
+
+        if (data == NULL)
+            ExitProcess(2);
+        memset(data, 0xa5, size);
+        if (list->data != NULL)
+            memcpy(data, list->data, list->count * list->elem_size);
+        list->data = data;
+        list->capacity = capacity;
+    }
+    element = list->data + list->count * list->elem_size;
+    memset(element, 0, list->elem_size);
+    list->count++;
+    fe_put(" listadd=");
+    fe_put_pointer(fe_ptr(element));
+    return element;
+}
+
+static void STDCALL host_list_remove(struct host_list *list, void *element)
+{
+    uint32_t index = (uint32_t)((uint8_t *)element - list->data) /
+                     list->elem_size;
+
+    fe_put(" listremove(%u)", index);
+    if (index >= list->count)
+        return;
+    if (index + 1 < list->count)
+        memmove(list->data + index * list->elem_size,
+                list->data + (index + 1) * list->elem_size,
+                (list->count - index - 1) * list->elem_size);
+    list->count--;
+}
+
 static int32_t STDCALL host_list_free(void *block)
 {
     uint8_t *list = (uint8_t *)block;
@@ -896,13 +966,16 @@ static void fe_build_stubs(void)
     SET_SLOT(host, 0x214, host_free);
     SET_SLOT(host, 0x218, host_memset);
     SET_SLOT(host, 0x21c, host_memmove);
+    SET_SLOT(host, 0x228, host_memcmp);
     SET_SLOT(host, 0x2a0, host_loadstring);
     SET_SLOT(host, 0x2a8, host_strcpy);
     SET_SLOT(host, 0x2b8, host_strlen);
     SET_SLOT(host, 0x2bc, host_strcmp);
     SET_SLOT(host, 0x2c0, host_stricmp);
     SET_SLOT(host, 0x2c4, host_fit);
+    SET_SLOT(host, 0x2f8, host_list_add);
     SET_SLOT(host, 0x2fc, host_list_free);
+    SET_SLOT(host, 0x300, host_list_remove);
 
     SET_SLOT(booster, 0x18, booster_add);
     SET_SLOT(booster, 0x1c, booster_drop);
@@ -1336,6 +1409,200 @@ static void fe_run_register(struct fe_side *side)
            add(0, fe_ptr(name)));
 }
 
+static void fe_run_texture(struct fe_side *side)
+{
+    fe_fn4 load = (fe_fn4)fe_slot(side, 0x1c);
+    uint32_t result;
+
+    memset(output, 0x5a, sizeof(output));
+    result = load(fe_ptr(output), fe_ptr("A S P H A L T . R 8"),
+                  fe_ptr(fixture), 0);
+    fe_put(" TEX_RAW=%#x,data=", result);
+    fe_put_blob(output, 0x10000);
+    if (counting) {
+        if (result == 1)
+            texture_loads++;
+        else
+            part3_fixture_failures++;
+    }
+
+    memset(output, 0x5a, sizeof(output));
+    result = load(fe_ptr(output), fe_ptr("fs5.pal"), fe_ptr(part3_root), 9);
+    fe_put(" TEX_PAL=%#x,data=", result);
+    fe_put_blob(output, 0xc0);
+    if (counting) {
+        if (result == 1)
+            texture_loads++;
+        else
+            part3_fixture_failures++;
+    }
+
+    memset(output, 0x5a, sizeof(output));
+    result = load(fe_ptr(output), fe_ptr("fediff-packed.bin"),
+                  fe_ptr(part3_root), 0);
+    fe_put(" TEX_PACKED=%#x,data=", result);
+    fe_put_blob(output, 6);
+    if (counting) {
+        if (result == 1 && memcmp(output, "ABCZZZ", 6) == 0)
+            texture_loads++;
+        else
+            part3_fixture_failures++;
+    }
+
+    memset(output, 0x5a, sizeof(output));
+    *(uint16_t *)(global + 0xcd2) = 0x7b7b;
+    result = load(fe_ptr(output), fe_ptr("fediff-missing"),
+                  fe_ptr(part3_root), 10);
+    fe_put(" TEX_HAZ=%#x,flag=%#x,data=", result,
+           *(uint16_t *)(global + 0xcd2));
+    fe_put_blob(output, 0x1000);
+    if (counting) {
+        if (result == 1 && *(uint16_t *)(global + 0xcd2) == 0)
+            texture_loads++;
+        else
+            part3_fixture_failures++;
+    }
+
+    result = load(fe_ptr(output), fe_ptr("fediff-missing"),
+                  fe_ptr(part3_root), 0);
+    fe_put(" TEX_MISSING=%#x", result);
+    if (counting && result != 0)
+        part3_fixture_failures++;
+}
+
+static void fe_setup_facil_state(struct fe_side *side)
+{
+    static const uint8_t id[16] = {
+        'F', 'E', '-', 'D', 'I', 'F', 'F', '-', 'P', 'A', 'R', 'T', '3', 0, 0, 0
+    };
+    uint8_t *area = (uint8_t *)fe_arena_get(0x10);
+    uint8_t *record = (uint8_t *)fe_arena_get(0x1ae);
+    size_t path_size = strlen(part3_root) + 1;
+    char *path = (char *)fe_arena_get((uint32_t)path_size);
+
+    if (area == NULL || record == NULL || path == NULL)
+        ExitProcess(2);
+    memset(area, 0, 0x10);
+    memset(record, 0, 0x1ae);
+    memcpy(path, part3_root, path_size);
+    strcpy((char *)record, "fediff_part3");
+    memcpy(record + 0x174, id, sizeof(id));
+    *(uint32_t *)(record + 0x190) = 0x100;
+    *(uint32_t *)(area + 0) = fe_ptr(record);
+    *(uint32_t *)(area + 4) = 0x1ae;
+    *(uint32_t *)(area + 8) = 1;
+    *(uint32_t *)(area + 0xc) = fe_ptr(path);
+    *(uint32_t *)(side->image + 0x2d1) = fe_ptr(area);
+    *(uint32_t *)(side->image + 0x2d5) = 0x10;
+    *(uint32_t *)(side->image + 0x2d9) = 1;
+    *(uint32_t *)(side->image + 0x5ca0) = 1;
+}
+
+static void fe_run_facil(struct fe_side *side, const struct fe_scenario *scenario)
+{
+    fe_fn2 list = (fe_fn2)fe_slot(side, 0x7c);
+    fe_fn2 open = (fe_fn2)fe_slot(side, 0x80);
+    fe_fn5 read = (fe_fn5)fe_slot(side, 0x84);
+    fe_fn5 close = (fe_fn5)fe_slot(side, 0x88);
+    uint32_t ids = 0;
+    uint32_t count = 0;
+    uint32_t data = 0;
+    uint32_t size = 0;
+    uint8_t missing_id[16];
+    uint32_t result;
+
+    result = list(fe_ptr(&ids), fe_ptr(&count));
+    fe_put(" FACIL_EMPTY=%#x,count=%u,ptr=", result, count);
+    fe_put_pointer(ids);
+    if (counting && (result != 1 || count != 0 || ids != 0))
+        part3_fixture_failures++;
+
+    fe_setup_facil_state(side);
+    *(uint16_t *)(global + 0x1288) =
+        scenario->number & 1 ? 0x456 : 0x999;
+
+    result = list(fe_ptr(&ids), fe_ptr(&count));
+    fe_put(" FACIL_LIST=%#x,count=%u,data=", result, count);
+    fe_put_blob((const void *)(uintptr_t)ids, count * 0x10);
+    if (counting && (result != 1 || ids == 0 || count != 1))
+        part3_fixture_failures++;
+    if (ids == 0 || count == 0)
+        return;
+
+    result = open(ids, fe_ptr(&data));
+    fe_put(" FACIL_OPEN=%#x,ptr=", result);
+    fe_put_pointer(data);
+    fe_put(",data=");
+    if (data != 0)
+        fe_put_blob((const void *)(uintptr_t)data,
+                    *(uint32_t *)(uintptr_t)(data + 4) + 8);
+    else
+        fe_put("-");
+    if (counting &&
+        (result != 1 || data == 0 ||
+         *(uint16_t *)(uintptr_t)(data + 8) !=
+             (*(uint16_t *)(global + 0x1288) == 0x456 ? 0x456 : 0x409)))
+        part3_fixture_failures++;
+    if (data != 0)
+        host_free((void **)&data);
+
+    result = read(ids, 0x200, 0x10003, fe_ptr(&data), fe_ptr(&size));
+    fe_put(" FACIL_READ=%#x,size=%#x,data=", result, size);
+    fe_put_blob((const void *)(uintptr_t)data, size);
+    if (counting) {
+        if (result == 1 && data != 0 && size == 0x15)
+            facil_reads++;
+        else
+            part3_fixture_failures++;
+    }
+    if (data != 0)
+        host_free((void **)&data);
+
+    result = read(ids, 0x200, 0x20001, fe_ptr(&data), fe_ptr(&size));
+    fe_put(" FACIL_ABSENT=%#x,size=%#x,ptr=", result, size);
+    fe_put_pointer(data);
+    if (counting && (result != 1 || size != 0 || data != 0))
+        part3_fixture_failures++;
+
+    result = read(ids, 0x380, 0x10003, fe_ptr(&data), fe_ptr(&size));
+    fe_put(" FACIL_LEGACY=%#x,size=", result);
+    fe_put_pointer(size);
+    fe_put(",ptr=");
+    fe_put_pointer(data);
+    if (counting &&
+        (result != 1 || data != 0 ||
+         (uint8_t *)(uintptr_t)size < arena ||
+         (uint8_t *)(uintptr_t)size >= arena + ARENA_SIZE))
+        part3_fixture_failures++;
+
+    result = close(ids, 0x300, 0x20001, fe_ptr(&data), fe_ptr(&size));
+    fe_put(" FACIL_CLOSE=%#x,size=%#x,data=", result, size);
+    fe_put_blob((const void *)(uintptr_t)data, size);
+    if (counting) {
+        if (result == 0 && data != 0 && size == 0x15)
+            facil_reads++;
+        else
+            part3_fixture_failures++;
+    }
+    if (data != 0)
+        host_free((void **)&data);
+
+    memset(missing_id, 0xcc, sizeof(missing_id));
+    result = read(fe_ptr(missing_id), 0x200, 0x10003,
+                  fe_ptr(&data), fe_ptr(&size));
+    fe_put(" FACIL_MISSING=%#x,size=%#x,ptr=", result, size);
+    fe_put_pointer(data);
+    if (counting && (result != 0 || size != 0 || data != 0))
+        part3_fixture_failures++;
+
+    result = open(fe_ptr(missing_id), fe_ptr(&data));
+    fe_put(" FACIL_OPEN_MISSING=%#x,ptr=", result);
+    fe_put_pointer(data);
+    if (counting && (result != 1 || data != 0))
+        part3_fixture_failures++;
+    host_free((void **)&ids);
+}
+
 static void fe_run_operation(struct fe_side *side, const struct fe_scenario *scenario,
                              uint8_t *position)
 {
@@ -1349,6 +1616,8 @@ static void fe_run_operation(struct fe_side *side, const struct fe_scenario *sce
     case FE_OP_OBJECT:   fe_run_object(side, scenario); break;
     case FE_OP_BOX:      fe_run_box(side, position, scenario); break;
     case FE_OP_REGISTER: fe_run_register(side); break;
+    case FE_OP_TEXTURE:  fe_run_texture(side); break;
+    case FE_OP_FACIL:    fe_run_facil(side, scenario); break;
     }
 }
 
@@ -1524,7 +1793,130 @@ static int fe_validate_fixture(const char *root)
         printf("fixture has no %s\n", path);
         return 0;
     }
+    snprintf(path, sizeof(path), "%s\\Texture\\fs5.pal", root);
+    if (GetFileAttributesA(path) == INVALID_FILE_ATTRIBUTES) {
+        printf("fixture has no %s\n", path);
+        return 0;
+    }
     return 1;
+}
+
+static int fe_write_fixture_file(const char *path, const void *data,
+                                 uint32_t size)
+{
+    HANDLE file = CreateFileA(path, GENERIC_WRITE, 0, NULL, CREATE_ALWAYS,
+                              FILE_ATTRIBUTE_NORMAL, NULL);
+    DWORD written = 0;
+    BOOL ok;
+
+    if (file == INVALID_HANDLE_VALUE)
+        return 0;
+    ok = WriteFile(file, data, size, &written, NULL);
+    CloseHandle(file);
+    return ok && written == size;
+}
+
+static uint32_t fe_pack_codes(uint8_t *out, const uint16_t *codes,
+                              uint32_t count)
+{
+    uint32_t accumulator = 0;
+    uint32_t bits = 0;
+    uint32_t used = 0;
+    uint32_t index;
+
+    for (index = 0; index < count; index++) {
+        accumulator = (accumulator << 9) | codes[index];
+        bits += 9;
+        while (bits >= 8) {
+            bits -= 8;
+            out[used++] = (uint8_t)(accumulator >> bits);
+            if (bits == 0)
+                accumulator = 0;
+            else
+                accumulator &= (1u << bits) - 1;
+        }
+    }
+    if (bits != 0)
+        out[used++] = (uint8_t)(accumulator << (8 - bits));
+    return used;
+}
+
+static int fe_make_part3_fixture(void)
+{
+    static const uint16_t codes[] = {
+        0x83, 'A', 'B', 'C', 0x03, 'Z', 0x1ff
+    };
+    uint8_t packed[32];
+    uint8_t bgl[0x400];
+    char temp[MAX_PATH * 2];
+    char path[MAX_PATH * 2];
+    uint32_t offset;
+    uint32_t packed_size;
+
+    if (GetTempPathA(sizeof(temp), temp) == 0)
+        return 0;
+    snprintf(part3_root, sizeof(part3_root), "%sOpenFS98-fediff-%lu", temp,
+             (unsigned long)GetCurrentProcessId());
+    CreateDirectoryA(part3_root, NULL);
+    snprintf(path, sizeof(path), "%s\\Scenery", part3_root);
+    CreateDirectoryA(path, NULL);
+
+    packed_size = fe_pack_codes(packed, codes,
+                                sizeof(codes) / sizeof(codes[0]));
+    snprintf(path, sizeof(path), "%s\\fediff-packed.bin", part3_root);
+    if (!fe_write_fixture_file(path, packed, packed_size))
+        return 0;
+
+    memset(bgl, 0, sizeof(bgl));
+    offset = 0x100;
+    *(uint32_t *)(bgl + offset) = 0x30001;
+    *(uint32_t *)(bgl + offset + 4) = 0x10;
+    *(uint16_t *)(bgl + offset + 8) = 0x409;
+    *(uint32_t *)(bgl + offset + 12) = 0x11223344;
+    offset += 0x18;
+    *(uint32_t *)(bgl + offset) = 0x30001;
+    *(uint32_t *)(bgl + offset + 4) = 0x10;
+    *(uint16_t *)(bgl + offset + 8) = 0x456;
+    *(uint32_t *)(bgl + offset + 12) = 0x55667788;
+
+    *(uint32_t *)(bgl + 0x200) = 1;
+    offset = 0x210;
+    *(uint32_t *)(bgl + offset) = 0x10003;
+    *(uint32_t *)(bgl + offset + 4) = 3;
+    memcpy(bgl + offset + 8, "abc", 3);
+    offset += 11;
+    *(uint32_t *)(bgl + offset) = 0x10004;
+    *(uint32_t *)(bgl + offset + 4) = 4;
+    memcpy(bgl + offset + 8, "DEFG", 4);
+    offset += 12;
+    *(uint32_t *)(bgl + offset) = 0x10003;
+    *(uint32_t *)(bgl + offset + 4) = 2;
+    memcpy(bgl + offset + 8, "hi", 2);
+
+    *(uint32_t *)(bgl + 0x300) = 1;
+    *(uint32_t *)(bgl + 0x304) = 5;
+    *(uint32_t *)(bgl + 0x308) = 0x20001;
+    *(uint32_t *)(bgl + 0x30c) = 0x89abcdef;
+    memcpy(bgl + 0x310, "close", 5);
+    *(uint32_t *)(bgl + 0x380) = 2;
+
+    snprintf(path, sizeof(path), "%s\\Scenery\\fediff_part3.BGL",
+             part3_root);
+    return fe_write_fixture_file(path, bgl, sizeof(bgl));
+}
+
+static void fe_remove_part3_fixture(void)
+{
+    char path[MAX_PATH * 2];
+
+    snprintf(path, sizeof(path), "%s\\fediff-packed.bin", part3_root);
+    DeleteFileA(path);
+    snprintf(path, sizeof(path), "%s\\Scenery\\fediff_part3.BGL",
+             part3_root);
+    DeleteFileA(path);
+    snprintf(path, sizeof(path), "%s\\Scenery", part3_root);
+    RemoveDirectoryA(path);
+    RemoveDirectoryA(part3_root);
 }
 
 int main(int argc, char **argv)
@@ -1551,10 +1943,17 @@ int main(int argc, char **argv)
         printf("usage: fediff.exe [scenarios] fixture-root\n");
         return 2;
     }
-    strncpy(fixture, argv[2], sizeof(fixture) - 1);
-    fixture[sizeof(fixture) - 1] = 0;
+    if (GetFullPathNameA(argv[2], sizeof(fixture), fixture, NULL) == 0 ||
+        GetCurrentDirectoryA(sizeof(original_dir), original_dir) == 0) {
+        printf("cannot resolve fixture root\n");
+        return 2;
+    }
     if (!fe_validate_fixture(fixture))
         return 2;
+    if (!fe_make_part3_fixture()) {
+        printf("cannot create part 3 fixture\n");
+        return 2;
+    }
 
     retail_arena = (uint8_t *)malloc(ARENA_SIZE);
     ours_arena = (uint8_t *)malloc(ARENA_SIZE);
@@ -1568,6 +1967,10 @@ int main(int argc, char **argv)
     if (!fe_load_side(&retail, "FE_retail.dll", "retail", util) ||
         !fe_load_side(&ours, "FE_ours.dll", "openfs98", util))
         return 2;
+    if (!SetCurrentDirectoryA(fixture)) {
+        printf("cannot enter fixture root\n");
+        return 2;
+    }
 
     image_difference = fe_compare_image(retail.pristine, ours.pristine);
     if (image_difference >= 0) {
@@ -1631,6 +2034,13 @@ int main(int argc, char **argv)
         printf(" %u", coverage[scenario]);
     printf("\nfiles opened %u, records returned %u, dynamic oversized probes %u\n",
            files_opened, records, dynamic_oversize);
+    printf("texture loads %u, FACIL section reads %u\n",
+           texture_loads, facil_reads);
+    if (part3_fixture_failures != 0) {
+        printf("part 3 fixture checks failed %u times\n",
+               part3_fixture_failures);
+        bad++;
+    }
     if (coverage[FE_OP_DYNAMIC] != 0 && dynamic_oversize == 0) {
         printf("dynamic oversized path was not covered\n");
         bad++;
@@ -1640,5 +2050,7 @@ int main(int argc, char **argv)
         printf("IDENTICAL\n");
     free(retail_arena);
     free(ours_arena);
+    SetCurrentDirectoryA(original_dir);
+    fe_remove_part3_fixture();
     return bad != 0;
 }

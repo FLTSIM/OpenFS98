@@ -1,10 +1,11 @@
 # FE (id 18) — the scenery file engine
 
-**Status: in progress.** Part 1 (the grid conversions) is reimplemented and
-verified. Part 2 (the hand-written assembly engine) is reimplemented and
-verified by 20,000 whole-module scenarios over the CD scenery tree. Part 3
-(the compiled-C file services) is not started and is the next piece of work.
-FE is **not** in `MODULES`, so `make install` never ships a partial one.
+**Status: in progress.** Parts 1 (grid conversions), 2 (the hand-written
+assembly engine), and 3 (the compiled-C file services) are reimplemented and
+verified. The latest whole-module run covers parts 2 and 3 with 20,000
+scenarios and zero differences. Only `+0x78`, the Scenery Library dialog,
+remains for `ofstest`. FE is **not** in `MODULES`, so `make install` never
+ships a partial one.
 
 FE is the sim's scenery database. G3D gets the scene it draws from it, MAIN its
 navaid and ground lookups, DYNAMIC its traffic programs, HG2D its textures and
@@ -23,13 +24,32 @@ section at `.data+0x1734`, because BOOSTER calls `+0x70`/`+0x74` from its own
 thread. Many slots take 16-bit arguments, pushed `sub esp,2; push cx`; a
 `uint16_t` parameter reads exactly that half, so they are plain stdcall.
 
+### Portability boundary
+
+The scenery algorithms are C, including all of part 3, but the current DLL is
+still an i386 retail-compatibility build. Its remaining assembly is confined
+to three exact divide instructions, one x87 bearing calculation, the two entry
+shims that reproduce retail's `+0x18`/`+0x40` register corruption, and the
+assembler aliases that place `ImportTable` and `Linkage` exactly. The larger
+portability constraint is the retail image itself: pointers are stored as
+32-bit values at fixed, sometimes unaligned `.data` offsets, and the boundary
+uses Win32 `stdcall`, critical sections and DLL startup.
+
+A portable FE is therefore possible, but should be split rather than making
+the retail image pretend to be native: keep this i386 façade as the
+differential oracle/compatibility DLL, expose normal C entry points for a
+native core, replace image pointers with typed state or offset handles, and
+put files, locking and module linkage behind platform services. The deliberate
+ABI bugs belong only in the façade. The divide/x87 islands can then gain
+tested C fallbacks in the same style as `make utildiff-portable`.
+
 The Linkage, hand-counted (`dumplinkage.py` stops at `+0x10`, which holds
 `0xd0000000`), runs `+0x18`..`+0x88`:
 
 | slot | what | part |
 | --- | --- | --- |
 | `+0x18` | the scene stream for G3D | 2 |
-| `+0x1c` | load a texture (HG2D) | 3 |
+| `+0x1c` | load a texture (HG2D) | **3, verified** |
 | `+0x20` | the next record of the last `+0x20` search | 2 |
 | `+0x24` | strongest VOR by frequency (MAIN) | 2 |
 | `+0x28` | strongest ILS by frequency and channel (MAIN) | 2 |
@@ -46,7 +66,7 @@ The Linkage, hand-counted (`dumplinkage.py` stops at `+0x10`, which holds
 | `+0x60`..`+0x6c` | the grid conversions | **1, verified** |
 | `+0x70`/`+0x74` | register / unregister a BGL (BOOSTER) | 2 |
 | `+0x78` | the Scenery Library dialog | `ofstest` |
-| `+0x7c`..`+0x88` | list/open/read/close BGL sections (FACIL) | 3 |
+| `+0x7c`..`+0x88` | list/open/read/close BGL sections (FACIL) | **3, verified** |
 
 ## Part 1 — the grid conversions, `+0x60`..`+0x6c` (verified)
 
@@ -151,8 +171,8 @@ to `+0x62e0` as bytes, with every relocated dword zeroed and listed: the
 Linkage's own pointers (fe.c supplies them as its functions), a few pointers
 within `.data`, and the C half's dialog/handler tables, which point into
 `.text`. `fe.c`'s `fe_relocate` reapplies the within-`.data` ones at
-`DLL_PROCESS_ATTACH`; the `.text` ones belong to the C half (part 3) and are
-left zero for now.
+`DLL_PROCESS_ATTACH`; the `.text` ones belong to the remaining `+0x78` dialog
+code and are left zero for now.
 
 ### Whole-module harness and fixtures
 
@@ -160,15 +180,16 @@ left zero for now.
 retail UTIL, and supplies logging models of the host, CHAIN, BOOSTER, FACIL,
 G3D and NUMERIC. Host file and find operations pass through to the real fixture
 tree; allocations come from a deterministic arena. Each side starts from its
-pristine image and identical GLOBAL, then runs one of nine operation classes:
+pristine image and identical GLOBAL, then runs one of eleven operation classes:
 scene, next-record search, navaids, ground, listing, dynamic blocks, objects,
-box tests, or register/unregister. Mode 2 loads all three areas in `world.vis`.
+box tests, register/unregister, textures, or FACIL sections. Mode 2 loads all
+three areas in `world.vis`.
 
 After each scenario the harness compares the complete import/output
 transcript, GLOBAL, the used arena, and FE's image from Linkage - 0x48 through
 the end of `.data`. Relocated image pointers compare by offset. Live critical
-section bytes and the compiled-C half's still-unimplemented handler pointers
-are ignored explicitly. Calls at `+0x18` and `+0x40` cross a guarded assembly
+section bytes and the remaining dialog's handler pointers are ignored
+explicitly. Calls at `+0x18` and `+0x40` cross a guarded assembly
 boundary which records ESP, EBP and ebx/esi/edi and repairs the harness's own
 stack before the next call.
 
@@ -177,12 +198,18 @@ per-airport subtrees, and `Texture\`. `tools/extract.sh` now extracts the full
 CD `fs98/Scenery` and `fs98/Texture` trees into `orig/`. `make fediff-run`
 prefers that reproducible fixture and falls back to an existing staged
 `game/` tree. The dynamic scenario is pinned over Chicago with a 750 km box so
-every run reaches `CHICAGO5.BGL` and its one-byte oversized-block probe.
+every run reaches `CHICAGO5.BGL` and its one-byte oversized-block probe. Part
+3 adds temporary, self-checking fixtures: a six-byte compressed texture and a
+synthetic BGL with exact, fallback, repeated, absent and legacy section cases.
+The raw, palette and haze paths use the installed `Texture` tree.
 
-`make fediff-run` → **20,000 scenarios, 0 differences**: 2,223 scene
-scenarios, 2,222 of each other operation except next-record (2,223), and 2,222
-confirmed `+0x40` oversized probes. A deliberate wrong register rotation was
-caught at the first dynamic probe.
+`make fediff-run` → **20,000 scenarios, 0 differences**: 1,819 scene and
+next-record scenarios, 1,818 of each of the other nine operations, 1,818
+confirmed `+0x40` oversized probes, 7,272 successful texture loads, and 3,636
+successful FACIL section reads. A deliberate wrong register rotation was
+caught at the first dynamic probe. The part-3 fixture also asserts its expected
+decompressed bytes, selected ids, sizes and null results independently of the
+differential comparison.
 
 The shipped `world.vis` has no booster entries: its booster offset points at
 the end marker. The harness therefore verifies CHAIN callback registration and
@@ -196,16 +223,35 @@ string and type-4 count are at `.data+0x5cc0` and `+0x5ca0` (not `+0x3cc0` and
 index in eax; and `close_file`/`free_grid` retain the host return in eax. The
 long scene run then found the separate `+0x18` preserved-register bug above.
 
-## Part 3 — the compiled-C file services (not started)
+## Part 3 — the compiled-C file services (verified)
 
-This is the next FE task.
+`+0x1c` removes spaces from HG2D's texture name and tries
+`<dir>\TEXTURE\<name>`, `TEXTURE\<name>`, then `<dir>\<name>`. Kind 10 has a
+final `TEXTURE\FS5.HAZ` fallback. Kind 9 seeks to `0x240` and reads the
+`0xc0`-byte palette tail; kind 10 reads `0x1000` bytes and clears GLOBAL
+`+0xcd2`; ordinary files below 64 KiB go through the 9-bit-code decompressor,
+while files at least 64 KiB read exactly 64 KiB raw. The harness reaches every
+route, including a generated compressed stream whose output must be
+`ABCZZZ`.
 
-`+0x1c` (textures, for HG2D: `TEXTURE\` plus two fallbacks, decompressed by the
-9-bit-code expander already transliterated as `decompress`) and `+0x7c`..`+0x88`
-(FACIL's BGL section list/open/read/close, through host growable arrays
-`+0x2f8`/`+0x300`/`+0x2fc` and a by-id finder). The `decompress` routine is in
-`fe.c` already (unused until `+0x1c` is written). `+0x78`, the Scenery Library
-dialog, belongs in `ofstest`.
+The four FACIL services operate on registered BGL records whose directory
+offset at `+0x190` is nonzero:
+
+- `+0x7c` copies their 16-byte ids at record `+0x174` into one flat allocation.
+- `+0x80` reads `0x30001` blocks, selects GLOBAL `+0x1288` by exact 16-bit id,
+  and falls back to id `0x0409`; all unselected blocks are freed.
+- `+0x84` follows `{kind, byte-count}` records and concatenates every matching
+  section. With a type-1 container but no match it allocates then frees a
+  zero-byte block and reports null/size 0. With a non-type-1 container it
+  leaves the data null but exposes the internal file-record pointer through
+  the size output, a retail quirk the synthetic fixture preserves.
+- `+0x88` copies a 16-byte type-1 header plus its fixed payload when the third
+  dword matches the requested kind. Its successful return is the host
+  `memmove` status (0), not a Boolean success.
+
+These use host `memcmp` `+0x228` and the growable-array services
+`+0x2f8`/`+0x300`/`+0x2fc`. `+0x78`, the Scenery Library dialog, remains for
+`ofstest`; it is not part of this verified slice.
 
 ## Corrections to the preflight
 

@@ -15,7 +15,8 @@ Four rounds so far, newest first.
 
 ## Verdict
 
-**FE next, in three parts**, then LANDME, then FACIL. BOOSTER stays last.
+**FE's three external-harness parts are done and verified. LANDME is next**, then
+FACIL. BOOSTER stays last.
 
 1. **The grid conversions, `+0x60`..`+0x6c`.** These are pure and table-driven, so
    they are tested by vectors like UTIL's. They are small, they pin down FE's
@@ -27,6 +28,11 @@ Four rounds so far, newest first.
 3. **The C half's file services:** `+0x1c` (textures, for HG2D) and
    `+0x7c`..`+0x88` (BGL sections, for FACIL), in the same harness.
    `+0x78`, the Scenery Library and booster dialogs, goes to `ofstest`.
+
+The completed `fediff` baseline runs all of parts 2 and 3 for 20,000 scenarios:
+11 operation classes, 7,272 successful texture loads, 3,636 successful FACIL
+section reads, and zero differences. Part 1 remains separately covered by
+7,742,499 grid comparisons with zero mismatches.
 
 The surprise is that **LANDME was never blocked on FE's record format.** Its
 harness can load FE for real, retail or ours, once there is a stub host that

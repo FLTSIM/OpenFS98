@@ -342,11 +342,11 @@ fegriddiff: $(DIFFDIR)/fegriddiff.exe $(BIN)/FE.DLL
 fegriddiff-run: fegriddiff
 	@cd $(DIFFDIR) && WINEDEBUG=-all wine fegriddiff.exe $(N)
 
-# FE's hand-written assembly engine, whole-module: both DLLs driven through
-# Linkage over the installed scenery tree, with retail UTIL and a stub host
-# passing file I/O through to that fixture.  Prefer a fully extracted orig/
-# tree; fall back to the staged game/ tree used by smoke tests.
-FE_FIXTURE ?= $(if $(wildcard $(ORIG)/Scenery/world.vis),../../$(ORIG),$(if $(wildcard game/Scenery/world.vis),../../game,))
+# FE's scenery engine and compiled-C file services, whole-module: both DLLs
+# driven through Linkage over the installed scenery/texture tree, with retail
+# UTIL and a stub host passing file I/O through to that fixture.  Prefer a fully
+# extracted orig/ tree; fall back to the staged game/ tree used by smoke tests.
+FE_FIXTURE ?= $(if $(and $(wildcard $(ORIG)/Scenery/world.vis),$(wildcard $(ORIG)/Texture/fs5.pal)),../../$(ORIG),$(if $(and $(wildcard game/Scenery/world.vis),$(wildcard game/Texture/fs5.pal)),../../game,))
 
 $(DIFFDIR)/fediff.exe: tools/difftest/fediff.c src/fe/fe_data.inc
 	@mkdir -p $(DIFFDIR)

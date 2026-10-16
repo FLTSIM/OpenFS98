@@ -48,6 +48,7 @@
 #define FS98_HOST_S_REALLOC     0x210
 #define FS98_HOST_S_FREE        0x214
 #define FS98_HOST_S_MEMMOVE     0x21c
+#define FS98_HOST_S_MEMCMP      0x228
 #define FS98_HOST_S_QSORT       0x22c   /* MSVCRT qsort, stdcall comparator */
 #define FS98_HOST_S_LOADSTRING  0x2a0
 #define FS98_HOST_S_STRCPY      0x2a8
@@ -129,6 +130,10 @@ typedef int32_t (FS98_STDCALL *fs98_host_quit_fn)(void);
 
 /* +0x2c0 -- MSVCRT _strcmpi.  Case-insensitive, so "a" and "A" compare 0. */
 typedef int32_t (FS98_STDCALL *fs98_host_stricmp_fn)(const char *a, const char *b);
+
+/* +0x228 -- MSVCRT memcmp. */
+typedef int32_t (FS98_STDCALL *fs98_host_memcmp_fn)(const void *a, const void *b,
+                                                    uint32_t size);
 
 /* +0x22c -- MSVCRT qsort with a __stdcall comparator.  The host parks the
  * comparator in a global (0x0041a24c) and hands qsort a cdecl trampoline that
@@ -470,6 +475,7 @@ typedef void *(FS98_STDCALL *fs98_host_list_find_fn)(struct fs98_host_list *l, u
 #define FS98_HOST_DIALOG_TICK(h) FS98_HOST_SLOT(h, FS98_HOST_S_DIALOG_TICK, fs98_host_dialog_tick_fn)
 #define FS98_HOST_REALLOC(h)     FS98_HOST_SLOT(h, FS98_HOST_S_REALLOC,     fs98_host_realloc_fn)
 #define FS98_HOST_MEMMOVE(h)     FS98_HOST_SLOT(h, FS98_HOST_S_MEMMOVE,     fs98_host_memmove_fn)
+#define FS98_HOST_MEMCMP(h)      FS98_HOST_SLOT(h, FS98_HOST_S_MEMCMP,      fs98_host_memcmp_fn)
 #define FS98_HOST_QUIT(h)        FS98_HOST_SLOT(h, FS98_HOST_S_QUIT,        fs98_host_quit_fn)
 #define FS98_HOST_STRICMP(h)     FS98_HOST_SLOT(h, FS98_HOST_S_STRICMP,     fs98_host_stricmp_fn)
 #define FS98_HOST_QSORT(h)       FS98_HOST_SLOT(h, FS98_HOST_S_QSORT,       fs98_host_qsort_fn)

@@ -71,7 +71,7 @@ else's 1997 build, and it should read that way.
 | `make sounddiff-run` | the same for SOUND, against generated `SOUND.CFG` trees and the CD's seven: frames, events, wind, faders and CHAIN messages, with a model of the host's voice engine, comparing every import call, GLOBAL, `FLTSIM98.CFG`, the heap and the `.data` image |
 | `make dynamicdiff-run` | the same for DYNAMIC, against the dynamic-scenery programs of the CD's twelve airport BGLs, often mutated, and three synthetic blocks: frames, the three CHAIN lists, the user's aircraft and MULTIP's players steered onto what the programs test; faults and hangs compared as outcomes |
 | `make fegriddiff-run` | FE's grid conversions (`+0x60`..`+0x6c`), retail and OpenFS98 loaded side by side and called directly over every table edge at every level and random values; a fault in either side counts as a difference |
-| `make fediff-run` | FE's hand-written assembly engine, retail and OpenFS98 loaded side by side over the extracted CD scenery tree: scene, lookup, listing, dynamic, object, box and register operations, comparing every import call and output, GLOBAL, the heap and the whole `.data` image |
+| `make fediff-run` | FE's assembly engine and compiled-C file services, retail and OpenFS98 loaded side by side over the extracted CD scenery/texture tree plus self-checking synthetic compressed-texture and BGL-section fixtures, comparing every import call and output, GLOBAL, the heap and the whole `.data` image |
 | `make weathermdiff-run` | the same for WEATHERM: updates, frames, resets, scenery effects and list operations, comparing every import call, GLOBAL, the heap and the `.data` image |
 | `make chaindiff-run` | drive retail and OpenFS98 CHAIN side by side over random re-entrant callback scripts; `N=...` sets the count |
 | `make ofstest-run` | run assertions *inside* the sim, where the host is reachable; `ofstest-remove` takes the module back out |
@@ -168,7 +168,7 @@ emulate 80-bit arithmetic to preserve a rounding artefact. See
 | `ACONTAIN` | 23 | 5,504 | **reimplemented, verified, and running in-game** — the aircraft container: finds aircraft by title, resolves their paths, loads the flight and visual models, lists them; 20,000 whole-module differential scripts against generated aircraft trees, zero differences — see [docs/modules/acontain.md](docs/modules/acontain.md) |
 | `SOUND` | 39 | 15,174 | **reimplemented, verified, and running in-game** — engine, warning, marker and Morse ident sounds, driven through the host's voice engine; 20,000 whole-module differential scripts comparing its whole `.data` image, zero differences — see [docs/modules/sound.md](docs/modules/sound.md) |
 | `DYNAMIC` | 6 | 12,300 | **reimplemented, verified, and running in-game** — dynamic scenery: an interpreter for the airport traffic programs in scenery files, three of whose opcodes write programs of their own; 20,000 whole-module differential scripts comparing GLOBAL, the heap and its whole `.data` image, zero differences — see [docs/modules/dynamic.md](docs/modules/dynamic.md) |
-| `FE` | 18 | 49,016 | **in progress** — the grid conversions and hand-written assembly engine are reimplemented and verified (20,000 whole-module scenarios, zero differences); the compiled-C file services remain — see [docs/modules/fe.md](docs/modules/fe.md) |
+| `FE` | 18 | 49,016 | **in progress** — the grid conversions, assembly engine and compiled-C file services are reimplemented and verified (20,000 whole-module scenarios, zero differences); only the Scenery Library dialog remains for `ofstest` — see [docs/modules/fe.md](docs/modules/fe.md) |
 | `NUMERIC` | 17 | 14,684 | **reimplemented, verified, and running in-game** — 545,778 differential comparisons, zero mismatches — see [docs/modules/numeric.md](docs/modules/numeric.md) |
 | `UTIL` | 20 | 11,062 | **reimplemented, verified, and running in-game** — all 47 services; 19 seen called in a hands-on session, the modal alert among them — see [docs/modules/util.md](docs/modules/util.md) |
 | `FLTSIM98.EXE` | 1 (host) | 82,016 | 194 services mapped, 21 with confirmed prototypes, 11 verified in-process, 2 implemented — see [docs/modules/host.md](docs/modules/host.md) |
@@ -213,14 +213,15 @@ Round 4 surveyed FE, LANDME, FACIL and BOOSTER -- see the
 ([docs/modules/fe.md](docs/modules/fe.md)). Its grid conversions
 (`+0x60`..`+0x6c`) are reimplemented and verified by vectors (`make
 fegriddiff-run`, 7,742,499 comparisons, 0 mismatches). Its whole hand-written
-assembly engine is also reimplemented and verified: `make fediff-run` drives
-20,000 whole-module scenarios over the extracted CD scenery tree, comparing
+assembly engine and compiled-C file services are also reimplemented and
+verified: `make fediff-run` drives 20,000 whole-module scenarios over the
+extracted CD scenery/texture tree and synthetic part-3 fixtures, comparing
 every import call and output, GLOBAL, the heap and `.data`, with zero
-differences. The next task is the compiled-C file services (`+0x1c`,
-`+0x7c`..`+0x88`); `+0x78`, the Scenery Library dialog, goes to `ofstest`. FE
-is not in `MODULES`, so a partial one is never installed.
+differences. The run includes 7,272 successful texture loads and 3,636 FACIL
+section reads. `+0x78`, the Scenery Library dialog, goes to `ofstest`. FE is
+not in `MODULES`, so a partial one is never installed.
 
-`LANDME` comes after FE, and is not blocked on FE's record format: its
+`LANDME` is next, and is not blocked on FE's record format: its
 harness loads FE for real over FE's fixture tree. `FACIL` follows, and
 `BOOSTER` still waits for FE. `WINMSG` and `REALITY` draw and run dialogs, and
 belong in `ofstest`.
@@ -252,8 +253,8 @@ nothing in it imports anything interesting:
 8. ~~**`ACONTAIN`** (5,504 bytes)~~ — done, verified and running in-game.
 9. ~~**`SOUND`** (15,174 bytes)~~ — done, verified and running in-game.
 10. ~~**`DYNAMIC`** (12,300 bytes)~~ — done, verified and running in-game.
-11. Then outward: a round-4 preflight -- `FE`, `LANDME`, `WINMSG`, `REALITY`,
-   `BOOSTER`…
+11. Then outward: round 4 -- FE's non-dialog engine is done; `LANDME` is next,
+   followed by `FACIL`; `WINMSG`, `REALITY` and FE's dialog need `ofstest`.
 12. `HG2D` (390 KB, the 2D rasteriser) last. It is 26% of the project on its
    own.
 

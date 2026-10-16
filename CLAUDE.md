@@ -57,7 +57,7 @@ make acontaindiff-run    # whole-module ACONTAIN     -> 20000 scenarios, 0 diffe
 make sounddiff-run       # whole-module SOUND        -> 20000 scenarios, 0 differ (~40 min)
 make dynamicdiff-run     # whole-module DYNAMIC      -> 20000 scenarios, 0 differ (~15 min)
 make fegriddiff-run      # FE grid conversions        -> 7742499 comparisons, 0 mismatches
-make fediff-run          # FE assembly engine         -> 20000 scenarios, 0 differ
+make fediff-run          # FE engine + C file services -> 20000 scenarios, 0 differ
 make difftest-run        # whole-module SLEW         -> 0/2000 vectors differ
 make ofstest-run         # in-process, via the host  -> passed 68, failed 0
 make smoke               # ACONTAIN, ATC, CHAIN, DYNAMIC, GLOBAL, NUMERIC, SLEW, SOUND, UTIL, WEATHERM installed -> 27/27, 95 gauges, PASS
@@ -72,7 +72,8 @@ host process or live game state still needs `ofstest`.
 
 ## Current next slice
 
-WEATHERM, ACONTAIN, SOUND and DYNAMIC are done. **FE is in progress**
+WEATHERM, ACONTAIN, SOUND and DYNAMIC are done. **FE's externally testable
+engine is done and verified**
 (round 4 of [docs/preflight.md](docs/preflight.md), survey there; details in
 [docs/modules/fe.md](docs/modules/fe.md)):
 
@@ -87,11 +88,15 @@ WEATHERM, ACONTAIN, SOUND and DYNAMIC are done. **FE is in progress**
    The CD's `world.vis` has no booster records, so only the registered
    callback's empty path is directly covered; a nonempty booster cache still
    needs a synthetic fixture if that code changes.
-3. **next** -- the compiled-C file services `+0x1c` and `+0x7c`..`+0x88`.
+3. **done and verified** -- the compiled-C texture loader `+0x1c` and FACIL
+   BGL services `+0x7c`..`+0x88`, in the same 20,000-scenario run. The latest
+   baseline has 11 operation classes, 7,272 successful texture loads, 3,636
+   successful FACIL section reads, and 0 differences. Synthetic fixtures
+   self-check the compressed texture output and the BGL selector/read paths.
 
 `+0x78`, the Scenery Library dialog, goes to `ofstest`, as do REALITY and
 WINMSG. FE is deliberately **not** in `MODULES`, so `make install` cannot ship
-a partial one. LANDME follows FE, with FE loaded for real in its harness.
+a partial one. **LANDME is next**, with FE loaded for real in its harness.
 
 FE's `+0x40` calling-convention break is now confirmed by `fediff`: the
 one-byte probe writes through the caller's edi and returns with ebx/esi/edi

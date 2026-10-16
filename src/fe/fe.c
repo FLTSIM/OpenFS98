@@ -7,7 +7,8 @@
  * (round 4) has the survey and docs/modules/fe.md the walk through.
  *
  * Retail is two programs in one module: hand-written assembly from .text+0x20
- * to +0x5792, and MSVC C from +0x57a0.  Both are transliterated here; the
+ * to +0x5792, and MSVC C from +0x57a0.  The assembly engine and the C file
+ * services are transliterated here; +0x78's dialog remains for ofstest.  The
  * comments carry retail's addresses.  Before calling into it, know that:
  *
  *   - Everything lives in one .data image laid out exactly as retail's,
@@ -277,12 +278,16 @@ typedef uint32_t (FS98_STDCALL *fe_f8)(uint32_t, uint32_t, uint32_t, uint32_t,
 #define H_FREE       HOST(0x214, fe_f1)  /* (&p) */
 #define H_MEMSET     HOST(0x218, fe_f3)  /* (dst, byte, n) */
 #define H_MEMMOVE    HOST(0x21c, fe_f3)  /* (dst, src, n) */
+#define H_MEMCMP     HOST(0x228, fe_f3)  /* (a, b, n) */
 #define H_LOADSTRING HOST(0x2a0, fe_f3)  /* (id, buf, size) */
 #define H_STRCPY     HOST(0x2a8, fe_f2)  /* (dst, src) */
 #define H_STRLEN     HOST(0x2b8, fe_f1)
 #define H_STRCMP     HOST(0x2bc, fe_f2)
 #define H_STRICMP    HOST(0x2c0, fe_f2)
 #define H_FIT        HOST(0x2c4, fe_f3)  /* (dst, src, n): a string fitted to n */
+#define H_LIST_ADD   HOST(0x2f8, fe_f1)  /* (list): append a zeroed element */
+#define H_LIST_FREE  HOST(0x2fc, fe_f1)  /* (list): free its data */
+#define H_LIST_REMOVE HOST(0x300, fe_f2) /* (list, element): close its gap */
 
 #define BOOSTER_ADD  CALL(2, 0x18, fe_f2)   /* (area record, index) */
 #define BOOSTER_DROP CALL(2, 0x1c, fe_f1)   /* (area record) */
@@ -1349,6 +1354,317 @@ static uint32_t FS98_STDCALL decompress(uint32_t out, uint32_t file)
         H_SEEK(M32(D + 0x1cf0), edx, 0);
     }
     return M32(D + 0x1cf4);
+}
+
+/* .text+0xbcf0 -- +0x1c: HG2D's texture loader.  Spaces are removed from
+ * the name, then the file is tried under <dir>\TEXTURE, under TEXTURE in the
+ * process directory, and directly under <dir>.  The kind-10 fallback is the
+ * default TEXTURE\FS5.HAZ file. */
+static uint32_t FS98_STDCALL fe_texture(uint32_t out, uint32_t name,
+                                        uint32_t dir, uint32_t kind)
+{
+    char clean[0x104];
+    char path[0x104];
+    uint32_t file = 0;
+    uint32_t size = 0;
+    uint32_t got = 0;
+    uint32_t src = name;
+    uint32_t dst = ADDR(clean);
+
+    while (M8(src) != 0) {
+        if (M8(src) != ' ')
+            M8(dst++) = M8(src);
+        src++;
+    }
+    M8(dst) = 0;
+
+    H_JOIN(ADDR(path), 0, dir, D + 0x5cc0);
+    H_JOIN(ADDR(path), 0, ADDR(path), ADDR(clean));
+    if (H_OPEN(ADDR(&file), ADDR(path), 0, 0) != 0) {
+        H_JOIN(ADDR(path), 0, D + 0x5cc0, ADDR(clean));
+        if (H_OPEN(ADDR(&file), ADDR(path), 0, 0) != 0) {
+            H_JOIN(ADDR(path), 0, dir, ADDR(clean));
+            if (H_OPEN(ADDR(&file), ADDR(path), 0, 0) != 0) {
+                if (kind != 10)
+                    return 0;
+                H_JOIN(ADDR(path), 0, D + 0x5cc0, D + 0x3214);
+                if (H_OPEN(ADDR(&file), ADDR(path), kind, 0) != 0)
+                    return 0;
+            }
+        }
+    }
+
+    H_SIZE(file, ADDR(&size));
+    if (kind == 9) {
+        H_SEEK_F(file, 0x240, 0);
+        H_READ_F(file, out, 0xc0, ADDR(&got));
+    } else if (kind == 10) {
+        H_READ_F(file, out, 0x1000, ADDR(&got));
+        M16(G + 0xcd2) = 0;
+    } else if (size < 0x10000) {
+        decompress(out, file);
+    } else {
+        H_READ_F(file, out, 0x10000, ADDR(&got));
+    }
+    H_CLOSE_F(file);
+    return 1;
+}
+
+/* ---- FACIL's compiled-C BGL services ------------------------------------------ */
+
+struct fe_host_list {
+    uint32_t count;
+    uint32_t capacity;
+    uint32_t grow;
+    uint32_t elem_size;
+    uint32_t iterating;
+    uint32_t pending;
+    uint32_t data;
+};
+
+/* .text+0xbb00 -- the next registered file with a FACIL directory.  The
+ * two-dword cursor is area index and file index; -1 starts an area. */
+static uint32_t next_facil_file(uint32_t cursor)
+{
+    uint32_t area_index;
+    uint32_t file_index;
+    uint32_t area;
+    uint32_t record;
+
+    EnterCriticalSection(CS);
+    for (;;) {
+        area_index = M32(cursor);
+        if (area_index >= M32(S_NAREAS)) {
+            record = 0;
+            break;
+        }
+        file_index = M32(cursor + 4) + 1;
+        M32(cursor + 4) = file_index;
+        area = M32(S_AREAS) + 0x10 * area_index;
+        if (file_index >= M32(area + 8)) {
+            M32(cursor) = area_index + 1;
+            M32(cursor + 4) = 0xffffffffu;
+            continue;
+        }
+        record = M32(area) + 0x1ae * file_index;
+        if (M32(record + 0x190) != 0)
+            break;
+    }
+    LeaveCriticalSection(CS);
+    return record;
+}
+
+/* .text+0xbba0 -- find a file by the 16-byte id at record +0x174.  When
+ * requested, also build <area>\SCENERY\<file>.BGL without the extension. */
+static void find_facil_file(uint32_t id, uint32_t out_record, uint32_t path)
+{
+    uint32_t cursor[2] = { 0, 0xffffffffu };
+    uint32_t record;
+    uint32_t area;
+
+    M32(out_record) = 0;
+    EnterCriticalSection(CS);
+    for (;;) {
+        record = next_facil_file(ADDR(cursor));
+        if (record == 0)
+            break;
+        if (H_MEMCMP(record + 0x174, id, 0x10) == 0) {
+            M32(out_record) = record;
+            if (path != 0) {
+                area = M32(S_AREAS) + 0x10 * cursor[0];
+                H_JOIN(path, 0, M32(area + 0xc), D + 0x81e);
+                H_JOIN(path, 0, path, record);
+            }
+            break;
+        }
+    }
+    LeaveCriticalSection(CS);
+}
+
+/* .text+0xb4b0 -- +0x7c: copy every available file id into a flat array of
+ * 16-byte entries. */
+static uint32_t FS98_STDCALL fe_facil_list(uint32_t out, uint32_t out_count)
+{
+    uint32_t cursor[2] = { 0, 0xffffffffu };
+    uint32_t record;
+    uint32_t count;
+
+    M32(out) = 0;
+    M32(out_count) = 0;
+    if (M32(D + 0x5ca0) == 0)
+        return 1;
+
+    EnterCriticalSection(CS);
+    ALLOC(M32(D + 0x5ca0) * 0x10, out, 0);
+    while ((record = next_facil_file(ADDR(cursor))) != 0) {
+        count = M32(out_count);
+        H_MEMMOVE(M32(out) + 0x10 * count, record + 0x174, 0x10);
+        M32(out_count) = count + 1;
+    }
+    if (M32(out_count) == 0)
+        FREE(out);
+    LeaveCriticalSection(CS);
+    return 1;
+}
+
+/* .text+0xb580 -- +0x80: read the file's 0x30001 directory blocks and return
+ * the one selected by GLOBAL +0x1288, or the 0x0409 fallback. */
+static uint32_t FS98_STDCALL fe_facil_open(uint32_t id, uint32_t out)
+{
+    struct fe_host_list list = { 0, 0, 0x20, 4, 0, 0, 0 };
+    char path[0x104];
+    uint32_t record = 0;
+    uint32_t file = 0;
+    uint32_t magic;
+    uint32_t size;
+    uint32_t got;
+    uint32_t slot;
+    uint32_t block;
+    uint32_t index;
+    uint16_t selected;
+
+    M32(out) = 0;
+    find_facil_file(id, ADDR(&record), ADDR(path));
+    if (record != 0 && M32(record + 0x190) != 0) {
+        H_OPEN_F(ADDR(&file), ADDR(path), 1, 0);
+        H_SEEK_F(file, M32(record + 0x190), 0);
+        for (;;) {
+            H_READ_F(file, ADDR(&magic), 4, 0);
+            if (magic != 0x30001)
+                break;
+            H_READ_F(file, ADDR(&size), 4, 0);
+            slot = H_LIST_ADD(ADDR(&list));
+            ALLOC(size + 8, slot, 0);
+            block = M32(slot);
+            M32(block) = magic;
+            M32(block + 4) = size;
+            H_READ_F(file, block + 8, size - 8, ADDR(&got));
+            H_SEEK_F(file, 8, 1);
+        }
+        H_CLOSE_F(file);
+
+        selected = M16(G + 0x1288);
+        for (index = list.count; index != 0; index--) {
+            slot = list.data + 4 * (index - 1);
+            block = M32(slot);
+            if (M16(block + 8) == selected) {
+                M32(out) = block;
+                H_LIST_REMOVE(ADDR(&list), slot);
+                break;
+            }
+        }
+        if (M32(out) == 0) {
+            for (index = list.count; index != 0; index--) {
+                slot = list.data + 4 * (index - 1);
+                block = M32(slot);
+                if (M16(block + 8) == 0x409) {
+                    M32(out) = block;
+                    H_LIST_REMOVE(ADDR(&list), slot);
+                    break;
+                }
+            }
+        }
+    }
+
+    for (index = list.count; index != 0; index--)
+        FREE(list.data + 4 * (index - 1));
+    H_LIST_FREE(ADDR(&list));
+    return 1;
+}
+
+/* .text+0xbc80 -- find one kind in a sequence of {kind, byte count} headers.
+ * A nonmatching count is the number of payload bytes to seek over. */
+static uint32_t find_facil_section(uint32_t file, uint32_t kind,
+                                   uint32_t header)
+{
+    for (;;) {
+        H_READ_F(file, header, 8, 0);
+        if (M32(header) == kind)
+            return 1;
+        if (M32(header) == 0)
+            return 0;
+        H_SEEK_F(file, M32(header + 4), 1);
+    }
+}
+
+/* .text+0xb850 -- +0x84: collect every section of `kind` following a type-1
+ * header.  A type-1 header with no matching sections leaves both outputs
+ * zero. */
+static uint32_t FS98_STDCALL fe_facil_read(uint32_t id, uint32_t offset,
+                                           uint32_t kind, uint32_t out,
+                                           uint32_t out_size)
+{
+    char path[0x104];
+    uint32_t record = 0;
+    uint32_t file = 0;
+    uint32_t header[4];
+    uint32_t section[2];
+    uint32_t got;
+    uint32_t total;
+    uint32_t dst;
+
+    M32(out) = 0;
+    M32(out_size) = 0;
+    find_facil_file(id, ADDR(&record), ADDR(path));
+    if (record == 0)
+        return 0;
+
+    H_OPEN_F(ADDR(&file), ADDR(path), 1, 0);
+    H_SEEK_F(file, offset, 0);
+    H_READ_F(file, ADDR(header), 0x10, 0);
+    if (header[0] == 1) {
+        ALLOC(0, out, 0);
+        total = 0;
+        while (find_facil_section(file, kind, ADDR(section))) {
+            REALLOC(total + section[1] + 8, out);
+            dst = M32(out) + total;
+            M32(dst) = kind;
+            M32(dst + 4) = section[1];
+            H_READ_F(file, dst + 8, section[1], ADDR(&got));
+            total += section[1] + 8;
+        }
+        if (total == 0)
+            FREE(out);
+        M32(out_size) = total;
+    } else {
+        M32(out_size) = record;
+    }
+    H_CLOSE_F(file);
+    return 1;
+}
+
+/* .text+0xb9d0 -- +0x88: copy a fixed section whose type-1 header carries
+ * the requested id in its third dword. */
+static uint32_t FS98_STDCALL fe_facil_close(uint32_t id, uint32_t offset,
+                                            uint32_t kind, uint32_t out,
+                                            uint32_t out_size)
+{
+    char path[0x104];
+    uint32_t record = 0;
+    uint32_t file = 0;
+    uint32_t header[4];
+    uint32_t got;
+    uint32_t size = 0;
+    uint32_t result = 0;
+
+    M32(out) = 0;
+    M32(out_size) = 0;
+    find_facil_file(id, ADDR(&record), ADDR(path));
+    if (record == 0)
+        return 0;
+
+    H_OPEN_F(ADDR(&file), ADDR(path), 1, 0);
+    H_SEEK_F(file, offset, 0);
+    H_READ_F(file, ADDR(header), 0x10, 0);
+    if (header[0] == 1 && header[2] == kind) {
+        size = header[1] + 0x10;
+        ALLOC(size, out, 0);
+        result = H_MEMMOVE(M32(out), ADDR(header), 0x10);
+        H_READ_F(file, M32(out) + 0x10, header[1], ADDR(&got));
+    }
+    H_CLOSE_F(file);
+    M32(out_size) = size;
+    return result;
 }
 
 /* ---- records ------------------------------------------------------------------------ */
@@ -4156,8 +4472,8 @@ static void lib_init(void)
  * +0x320c point at, through host +0x2fc. */
 static void lib_deinit(void)
 {
-    HOST(0x2fc, fe_f1)(M32(D + 0x3208));
-    HOST(0x2fc, fe_f1)(M32(D + 0x320c));
+    H_LIST_FREE(M32(D + 0x3208));
+    H_LIST_FREE(M32(D + 0x320c));
 }
 
 /* .text+0x20 -- +0x04 */
@@ -4203,13 +4519,14 @@ struct fe_image fe_image = {
     {
         FS98_MOD_FE, fe_init, fe_deinit, 0, 0xd0000000u, 0,
         {
-            /* +0x18 */ SLOT(fe_scene_entry), 0, SLOT(fe_next), SLOT(fe_vor),
+            /* +0x18 */ SLOT(fe_scene_entry), SLOT(fe_texture), SLOT(fe_next), SLOT(fe_vor),
             /* +0x28 */ SLOT(fe_ils), SLOT(fe_beacon), SLOT(fe_ground), SLOT(fe_list_next),
             /* +0x38 */ SLOT(fe_list_read), SLOT(fe_object), SLOT(fe_dynamic_entry), SLOT(fe_reset),
             /* +0x48 */ SLOT(fe_level), SLOT(fe_list_begin), SLOT(fe_list_at), SLOT(fe_search),
             /* +0x58 */ SLOT(fe_overlap), SLOT(fe_in_box), SLOT(fe_lat_band), SLOT(fe_band_lat),
             /* +0x68 */ SLOT(fe_lon_band), SLOT(fe_band_lon), SLOT(fe_register), SLOT(fe_unregister),
-            /* +0x78 */ 0, 0, 0, 0, 0,
+            /* +0x78 */ 0, SLOT(fe_facil_list), SLOT(fe_facil_open),
+            /* +0x84 */ SLOT(fe_facil_read), SLOT(fe_facil_close),
         }
     },
     {

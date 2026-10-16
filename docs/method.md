@@ -157,6 +157,14 @@ matched. Thousands of translated messages went through and a break in the
 matching loop went unnoticed. Read what the comparison actually requires of
 its inputs, then count the hits, not just the calls.
 
+**A synthetic fixture should prove its own branch.** FE part 3 generates a
+compressed texture and a BGL with exact-match, fallback, repeated, absent and
+legacy sections. The harness does not count those calls as coverage merely
+because retail and ours agree: it also checks the decompressed bytes, selected
+section ids, output sizes and null/non-null results against constants. This
+caught a section fixture that ran successfully but would otherwise have said
+nothing about whether the intended selector won.
+
 **Random vectors are not coverage.** They are good at the bulk and blind to the
 rare. Say which is which when reporting.
 

@@ -243,9 +243,12 @@ memmove fails). FACIL's runway code treats that word as success or failure.
 In the game it is left over from earlier calls -- in this path, from FE
 `+0x84`'s file lookup, whose helper initialises the overlapping local to -1
 -- and is nonzero in practice, so runway lists are built. fe.md had described
-the return as memmove's status, and the FE reimplementation returns 0 there,
-which would make every runway list fail under an installed OpenFS98 FE; that
-is recorded in [fe.md](fe.md) for FE's own harness to settle.
+the return as memmove's status, and the FE reimplementation returned 0
+there, which would have emptied every runway list under an installed
+OpenFS98 FE. FE now reproduces the leftover word exactly; see
+[fe.md](fe.md). `make facildiff-fe-run` runs this harness with OpenFS98's FE
+behind OpenFS98's FACIL against retail behind retail: 2,000 query and 2,000
+dialog scenarios over the real CD index, zero differences.
 
 ## Differential harness
 

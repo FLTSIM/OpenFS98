@@ -1507,6 +1507,43 @@ static void fe_setup_facil_state(struct fe_side *side)
     *(uint32_t *)(side->image + 0x5ca0) = 1;
 }
 
+/* FE +0x84 and +0x88 return locals they never write on some paths: +0x84
+ * the word at [entry esp - 0x120] for a non-type-1 record, +0x88 the word at
+ * [entry esp - 0x11c] for a found record (also its size on a header
+ * mismatch).  Whatever the caller's earlier calls left there is the answer.
+ * fe_call5_painted(fn, word, a1..a5) writes `word` into +0x88's slot and
+ * `word ^ 0x5a5a5a5a` into +0x84's, relative to the callee's entry, then calls
+ * it, so both sides see the same leftovers, the harness chooses them, and a
+ * read of the wrong slot shows. */
+uint32_t fe_call5_painted(void *fn, uint32_t word, uint32_t a1, uint32_t a2,
+                          uint32_t a3, uint32_t a4, uint32_t a5);
+__asm__(".text\n"
+        ".globl _fe_call5_painted\n"
+        "_fe_call5_painted:\n\t"
+        "pushl %ebp\n\t"
+        "movl %esp, %ebp\n\t"
+        "pushl 32(%ebp)\n\t"
+        "pushl 28(%ebp)\n\t"
+        "pushl 24(%ebp)\n\t"
+        "pushl 20(%ebp)\n\t"
+        "pushl 16(%ebp)\n\t"
+        "movl 12(%ebp), %eax\n\t"
+        "movl %eax, -0x120(%esp)\n\t"
+        "xorl $0x5a5a5a5a, %eax\n\t"
+        "movl %eax, -0x124(%esp)\n\t"
+        "call *8(%ebp)\n\t"
+        "movl %ebp, %esp\n\t"
+        "popl %ebp\n\t"
+        "ret\n");
+
+static uint32_t facil_garbage;
+static uint32_t facil_garbage_kinds[4];
+
+#define FACIL_READ(a, b, c, d, e) \
+    fe_call5_painted((void *)read, facil_garbage, (a), (b), (c), (d), (e))
+#define FACIL_CLOSE(a, b, c, d, e) \
+    fe_call5_painted((void *)close, facil_garbage, (a), (b), (c), (d), (e))
+
 static void fe_run_facil(struct fe_side *side, const struct fe_scenario *scenario)
 {
     fe_fn2 list = (fe_fn2)fe_slot(side, 0x7c);
@@ -1519,7 +1556,15 @@ static void fe_run_facil(struct fe_side *side, const struct fe_scenario *scenari
     uint32_t size = 0;
     uint8_t missing_id[16];
     uint32_t result;
+    static const uint32_t garbage[] = { 0, 1, 0xffffffffu };
 
+    facil_garbage = (scenario->number >> 1) % 4 < 3 ?
+        garbage[(scenario->number >> 1) % 4] :
+        0x9e3779b9u * scenario->number;
+    if (counting)
+        facil_garbage_kinds[facil_garbage <= 1 ? facil_garbage :
+                            facil_garbage == 0xffffffffu ? 2 : 3]++;
+    fe_put(" FACIL_GARBAGE=%#x", facil_garbage);
     result = list(fe_ptr(&ids), fe_ptr(&count));
     fe_put(" FACIL_EMPTY=%#x,count=%u,ptr=", result, count);
     fe_put_pointer(ids);
@@ -1555,7 +1600,7 @@ static void fe_run_facil(struct fe_side *side, const struct fe_scenario *scenari
     if (data != 0)
         host_free((void **)&data);
 
-    result = read(ids, 0x200, 0x10003, fe_ptr(&data), fe_ptr(&size));
+    result = FACIL_READ(ids, 0x200, 0x10003, fe_ptr(&data), fe_ptr(&size));
     fe_put(" FACIL_READ=%#x,size=%#x,data=", result, size);
     fe_put_blob((const void *)(uintptr_t)data, size);
     if (counting) {
@@ -1567,28 +1612,30 @@ static void fe_run_facil(struct fe_side *side, const struct fe_scenario *scenari
     if (data != 0)
         host_free((void **)&data);
 
-    result = read(ids, 0x200, 0x20001, fe_ptr(&data), fe_ptr(&size));
+    result = FACIL_READ(ids, 0x200, 0x20001, fe_ptr(&data), fe_ptr(&size));
     fe_put(" FACIL_ABSENT=%#x,size=%#x,ptr=", result, size);
     fe_put_pointer(data);
     if (counting && (result != 1 || size != 0 || data != 0))
         part3_fixture_failures++;
 
-    result = read(ids, 0x380, 0x10003, fe_ptr(&data), fe_ptr(&size));
+    result = FACIL_READ(ids, 0x380, 0x10003, fe_ptr(&data), fe_ptr(&size));
     fe_put(" FACIL_LEGACY=%#x,size=", result);
     fe_put_pointer(size);
     fe_put(",ptr=");
     fe_put_pointer(data);
+    /* A non-type-1 record returns the never-written local. */
     if (counting &&
-        (result != 1 || data != 0 ||
+        (result != (facil_garbage ^ 0x5a5a5a5au) || data != 0 ||
          (uint8_t *)(uintptr_t)size < arena ||
          (uint8_t *)(uintptr_t)size >= arena + ARENA_SIZE))
         part3_fixture_failures++;
 
-    result = close(ids, 0x300, 0x20001, fe_ptr(&data), fe_ptr(&size));
+    /* A found record returns the never-written local, not a status. */
+    result = FACIL_CLOSE(ids, 0x300, 0x20001, fe_ptr(&data), fe_ptr(&size));
     fe_put(" FACIL_CLOSE=%#x,size=%#x,data=", result, size);
     fe_put_blob((const void *)(uintptr_t)data, size);
     if (counting) {
-        if (result == 0 && data != 0 && size == 0x15)
+        if (result == facil_garbage && data != 0 && size == 0x15)
             facil_reads++;
         else
             part3_fixture_failures++;
@@ -1596,9 +1643,17 @@ static void fe_run_facil(struct fe_side *side, const struct fe_scenario *scenari
     if (data != 0)
         host_free((void **)&data);
 
+    /* A header of the wrong kind returns it too, and stores it as the size. */
+    result = FACIL_CLOSE(ids, 0x300, 0x20002, fe_ptr(&data), fe_ptr(&size));
+    fe_put(" FACIL_CLOSE_KIND=%#x,size=%#x,ptr=", result, size);
+    fe_put_pointer(data);
+    if (counting &&
+        (result != facil_garbage || size != facil_garbage || data != 0))
+        part3_fixture_failures++;
+
     memset(missing_id, 0xcc, sizeof(missing_id));
-    result = read(fe_ptr(missing_id), 0x200, 0x10003,
-                  fe_ptr(&data), fe_ptr(&size));
+    result = FACIL_READ(fe_ptr(missing_id), 0x200, 0x10003,
+                        fe_ptr(&data), fe_ptr(&size));
     fe_put(" FACIL_MISSING=%#x,size=%#x,ptr=", result, size);
     fe_put_pointer(data);
     if (counting && (result != 0 || size != 0 || data != 0))
@@ -2045,6 +2100,9 @@ int main(int argc, char **argv)
            files_opened, records, dynamic_oversize);
     printf("texture loads %u, FACIL section reads %u\n",
            texture_loads, facil_reads);
+    printf("FACIL leftover words 0/1/-1/other: %u/%u/%u/%u\n",
+           facil_garbage_kinds[0], facil_garbage_kinds[1],
+           facil_garbage_kinds[2], facil_garbage_kinds[3]);
     if (part3_fixture_failures != 0) {
         printf("part 3 fixture checks failed %u times\n",
                part3_fixture_failures);

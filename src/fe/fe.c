@@ -1587,12 +1587,20 @@ static uint32_t find_facil_section(uint32_t file, uint32_t kind,
     }
 }
 
+/* The facility reads return locals they never write on some paths, so what
+ * they return there is whatever the caller's earlier calls left on the stack:
+ * +0x84's at [entry esp - 0x120], +0x88's at [entry esp - 0x11c].  Their entry
+ * shims (after +0x88) read those words before any C frame exists. */
+uint32_t fe_facil_read_word;
+uint32_t fe_facil_close_word;
+
 /* .text+0xb850 -- +0x84: collect every section of `kind` following a type-1
  * header.  A type-1 header with no matching sections leaves both outputs
- * zero. */
-static uint32_t FS98_STDCALL fe_facil_read(uint32_t id, uint32_t offset,
-                                           uint32_t kind, uint32_t out,
-                                           uint32_t out_size)
+ * zero.  A record that is not type 1 returns the leftover word and exposes
+ * the registry record through the size. */
+uint32_t FS98_STDCALL fe_facil_read(uint32_t id, uint32_t offset,
+                                    uint32_t kind, uint32_t out,
+                                    uint32_t out_size)
 {
     char path[0x104];
     uint32_t record = 0;
@@ -1628,24 +1636,29 @@ static uint32_t FS98_STDCALL fe_facil_read(uint32_t id, uint32_t offset,
         M32(out_size) = total;
     } else {
         M32(out_size) = record;
+        H_CLOSE_F(file);
+        return fe_facil_read_word;
     }
     H_CLOSE_F(file);
     return 1;
 }
 
 /* .text+0xb9d0 -- +0x88: copy a fixed section whose type-1 header carries
- * the requested id in its third dword. */
-static uint32_t FS98_STDCALL fe_facil_close(uint32_t id, uint32_t offset,
-                                            uint32_t kind, uint32_t out,
-                                            uint32_t out_size)
+ * the requested id in its third dword.  A found record returns the leftover
+ * word -- or 0 if the memmove fails -- and a header that does not match also
+ * stores it as the size.  FACIL's runway lists test it; in the game it is
+ * nonzero. */
+uint32_t FS98_STDCALL fe_facil_close(uint32_t id, uint32_t offset,
+                                     uint32_t kind, uint32_t out,
+                                     uint32_t out_size)
 {
     char path[0x104];
     uint32_t record = 0;
     uint32_t file = 0;
     uint32_t header[4];
     uint32_t got;
-    uint32_t size = 0;
-    uint32_t result = 0;
+    uint32_t size;
+    uint32_t result = fe_facil_close_word;
 
     M32(out) = 0;
     M32(out_size) = 0;
@@ -1659,13 +1672,42 @@ static uint32_t FS98_STDCALL fe_facil_close(uint32_t id, uint32_t offset,
     if (header[0] == 1 && header[2] == kind) {
         size = header[1] + 0x10;
         ALLOC(size, out, 0);
-        result = H_MEMMOVE(M32(out), ADDR(header), 0x10);
+        if (H_MEMMOVE(M32(out), ADDR(header), 0x10) != 0)
+            result = 0;
         H_READ_F(file, M32(out) + 0x10, header[1], ADDR(&got));
+    } else {
+        size = result;
     }
     H_CLOSE_F(file);
     M32(out_size) = size;
     return result;
 }
+
+/* +0x84's and +0x88's public entries: keep the leftover word, then run the
+ * body with the caller's five arguments. */
+__asm__(".text\n"
+        "_fe_facil_read_entry:\n\t"
+        "movl -0x120(%esp), %eax\n\t"
+        "movl %eax, _fe_facil_read_word\n\t"
+        "pushl 20(%esp)\n\t"
+        "pushl 20(%esp)\n\t"
+        "pushl 20(%esp)\n\t"
+        "pushl 20(%esp)\n\t"
+        "pushl 20(%esp)\n\t"
+        "call _fe_facil_read@20\n\t"
+        "ret $20\n"
+        "_fe_facil_close_entry:\n\t"
+        "movl -0x11c(%esp), %eax\n\t"
+        "movl %eax, _fe_facil_close_word\n\t"
+        "pushl 20(%esp)\n\t"
+        "pushl 20(%esp)\n\t"
+        "pushl 20(%esp)\n\t"
+        "pushl 20(%esp)\n\t"
+        "pushl 20(%esp)\n\t"
+        "call _fe_facil_close@20\n\t"
+        "ret $20\n");
+void fe_facil_read_entry(void);
+void fe_facil_close_entry(void);
 
 /* ---- records ------------------------------------------------------------------------ */
 
@@ -4526,7 +4568,7 @@ struct fe_image fe_image = {
             /* +0x58 */ SLOT(fe_overlap), SLOT(fe_in_box), SLOT(fe_lat_band), SLOT(fe_band_lat),
             /* +0x68 */ SLOT(fe_lon_band), SLOT(fe_band_lon), SLOT(fe_register), SLOT(fe_unregister),
             /* +0x78 */ 0, SLOT(fe_facil_list), SLOT(fe_facil_open),
-            /* +0x84 */ SLOT(fe_facil_read), SLOT(fe_facil_close),
+            /* +0x84 */ SLOT(fe_facil_read_entry), SLOT(fe_facil_close_entry),
         }
     },
     {

@@ -3,9 +3,12 @@
 **Status: in progress.** Parts 1 (grid conversions), 2 (the hand-written
 assembly engine), and 3 (the compiled-C file services) are reimplemented and
 verified. The latest whole-module run covers parts 2 and 3 with 20,000
-scenarios and zero differences. Only `+0x78`, the Scenery Library dialog,
-remains for `ofstest`. FE is **not** in `MODULES`, so `make install` never
-ships a partial one.
+scenarios and zero differences, and `make facildiff-fe-run` checks it behind
+OpenFS98 FACIL over the real CD index. Only `+0x78`, the Scenery Library
+dialog, remains -- and like FACIL's dialogs it turns out to be callbacks for
+`English\World.DLL` dialogs (`0x1306`, `0x13080001`.. through host `+0x10c`;
+FE imports only KERNEL32), so it can be verified externally the same way. FE
+is **not** in `MODULES`, so `make install` never ships a partial one.
 
 FE is the sim's scenery database. G3D gets the scene it draws from it, MAIN its
 navaid and ground lookups, DYNAMIC its traffic programs, HG2D its textures and
@@ -65,7 +68,7 @@ The Linkage, hand-counted (`dumplinkage.py` stops at `+0x10`, which holds
 | `+0x58`/`+0x5c` | box overlap / point in box | 2 |
 | `+0x60`..`+0x6c` | the grid conversions | **1, verified** |
 | `+0x70`/`+0x74` | register / unregister a BGL (BOOSTER) | 2 |
-| `+0x78` | the Scenery Library dialog | `ofstest` |
+| `+0x78` | the Scenery Library dialog (World.DLL callbacks) | remaining |
 | `+0x7c`..`+0x88` | list/open/read/close BGL sections (FACIL) | **3, verified** |
 
 ## Part 1 — the grid conversions, `+0x60`..`+0x6c` (verified)
@@ -246,17 +249,27 @@ offset at `+0x190` is nonzero:
   leaves the data null but exposes the internal file-record pointer through
   the size output, a retail quirk the synthetic fixture preserves.
 - `+0x88` copies a 16-byte type-1 header plus its fixed payload when the third
-  dword matches the requested kind. **Correction, found by FACIL's dialog
-  harness:** its return is not the `memmove` status. On a found record it
-  returns the local at `[entry esp - 0x11c]`, which it never writes except to
-  zero it when the `memmove` fails; on a header mismatch it also stores that
-  same word as the output size. It is stack garbage. FACIL's runway code tests
-  it, and in the game it is nonzero (in that path it overlaps a local of
-  `+0x84`'s lookup helper that starts as -1), so runway lists are built.
-  `fediff` passed only because its own stack left 0 there. The
-  reimplementation still returns 0 and must be changed -- most faithfully by
-  an entry shim that returns the word at that stack offset -- before FE is
-  installed; until then FACIL's harness supplies the word itself.
+  dword matches the requested kind. **Its return is stack garbage**, found by
+  FACIL's dialog harness (this document first called it the `memmove`
+  status). On a found record it returns the local at `[entry esp - 0x11c]`,
+  which it never writes except to zero it when the `memmove` fails -- which
+  cannot happen, since host `+0x21c` always returns 0. On a header that does
+  not match, it also stores that word as the output size. FACIL's runway
+  lists test the word; in the game it is nonzero (in that path it overlaps a
+  local of `+0x84`'s lookup helper that starts as -1), so they are built.
+- `+0x84` has the same kind of leftover: for a record that is not type 1 it
+  returns its never-written local at `[entry esp - 0x120]` (type-1 records
+  return 1).
+
+  Both are reproduced exactly. The public entries are asm shims that read
+  the word at that offset from the entry `esp` -- before any C frame exists
+  -- and the bodies return it on those paths. `fediff` calls both through an
+  invoker that paints the two slots with different words (0, 1, -1 or random,
+  a quarter each) before the call, and the fixture self-checks expect the
+  painted word: retail passes them, and reading the wrong slot, storing 0 as
+  the mismatch size, or returning 1 for a non-type-1 record each fail. The
+  first `fediff` passed only because its own stack happened to leave 0 there,
+  which matched the old reimplementation's constant.
 
 These use host `memcmp` `+0x228` and the growable-array services
 `+0x2f8`/`+0x300`/`+0x2fc`. `+0x78`, the Scenery Library dialog, remains for

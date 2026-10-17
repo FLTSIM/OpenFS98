@@ -60,6 +60,7 @@ make fegriddiff-run      # FE grid conversions        -> 7742499 comparisons, 0 
 make fediff-run          # FE engine + C file services -> 20000 scenarios, 0 differ
 make landmediff-run      # whole-module LANDME       -> 20000 scenarios, 0 differ
 make facildiff-run       # whole-module FACIL        -> 0 differences; 20000 query, 10000 dialog scenarios, 0 differ (~27 min)
+make facildiff-fe-run    # OpenFS98 FE+FACIL together -> 2000 query, 2000 dialog scenarios, 0 differ (~5 min)
 make difftest-run        # whole-module SLEW         -> 0/2000 vectors differ
 make ofstest-run         # in-process, via the host  -> passed 68, failed 0
 make smoke               # ACONTAIN, ATC, CHAIN, DYNAMIC, FACIL, GLOBAL, LANDME, NUMERIC, SLEW, SOUND, UTIL, WEATHERM installed -> 27/27, 95 gauges, PASS
@@ -112,13 +113,15 @@ scenery plus all sixteen boosters' AFD files (3,791 airports), driven by a
 stand-in for World.DLL. All report zero differences. See
 [docs/modules/facil.md](docs/modules/facil.md).
 
-**Next: FE `+0x88`.** FACIL's dialog harness showed that FE `+0x88` returns
-an uninitialised stack word (`[entry esp - 0x11c]`), not memmove's status as
-fe.md said. FACIL's runway lists depend on it being nonzero, which it is in
-the game. `src/fe/fe.c` returns 0, so an installed OpenFS98 FE would empty
-every FACIL runway list. Fix it with an entry shim that returns the word at
-that offset, and make `fediff` paint the slot so it can tell. Details in
-[docs/modules/fe.md](docs/modules/fe.md).
+FE `+0x84`/`+0x88` now reproduce retail's stack-leftover returns (FACIL's
+runway lists depend on them) through entry shims, proven at the owner:
+`fediff` paints the slots and goes red on each deliberate break.
+
+**Next: FE `+0x78`, the Scenery Library.** Like FACIL's dialogs it is not
+window code: FE imports only KERNEL32 and runs World.DLL dialogs (`0x1306`,
+`0x13080001`, ...) through host `+0x10c` with parameter blocks in FE's
+`.data`. Verify its callbacks externally with a World stand-in, as
+`facildiff` does; that completes FE and lets it into `MODULES`.
 
 FE's `+0x40` calling-convention break is now confirmed by `fediff`: the
 one-byte probe writes through the caller's edi and returns with ebx/esi/edi

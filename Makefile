@@ -448,6 +448,18 @@ facildiff-run: facildiff
 	@cd $(DIFFDIR) && WINEDEBUG=-all timeout 3600 wine facildiff.exe \
 	      FACIL_retail.dll FACIL_ours.dll "$(FE_FIXTURE)"
 
+# The same harness with OpenFS98's FE behind OpenFS98's FACIL, against retail
+# FE behind retail FACIL: both reimplementations together, over the real CD
+# index and the dialogs.  Shorter by default; Q and D set the phase sizes.
+facildiff-fe-run: facildiff $(BIN)/FE.DLL
+	@test -n "$(FE_FIXTURE)" || { \
+		echo "facildiff-fe-run needs Scenery/world.vis and Texture/fs5.pal under orig/ or game/"; exit 2; }
+	@cp $(BIN)/FE.DLL $(DIFFDIR)/FE_facil_ours.dll
+	@cd $(DIFFDIR) && WINEDEBUG=-all timeout 3600 wine facildiff.exe \
+	      FACIL_retail.dll FACIL_ours.dll "$(FE_FIXTURE)" \
+	      $(if $(Q),$(Q),2000) $(if $(D),$(D),2000); \
+	  status=$$?; cp $(ORIG)/Modules/FE.DLL $(DIFFDIR)/FE_facil_ours.dll; exit $$status
+
 # CHAIN, whole-module: both DLLs driven through Linkage over random scripts
 # whose callbacks re-enter the module.  N=... sets the scenario count.
 $(DIFFDIR)/chaindiff.exe: tools/difftest/chaindiff.c
@@ -734,4 +746,4 @@ smoke: all
 clean:
 	rm -rf $(BIN)
 
-.PHONY: all stage setup-map graph hostmap compare run trace trace-render trace-ddraw kill window-reset wm-unmanaged wm-managed vd-on vd-off mode8 mode16 ddraw-gdi ddraw-default smoke difftest difftest-run utildiff utildiff-run utildiff-portable numericdiff numericdiff-run chaindiff chaindiff-run atcdiff atcdiff-run weathermdiff weathermdiff-run acontaindiff acontaindiff-run sounddiff sounddiff-run dynamicdiff dynamicdiff-run fegriddiff fegriddiff-run fediff fediff-run landmediff landmediff-run facildiff facildiff-run ofstest ofstest-run ofstest-remove util-trace install revert installed-name-of orig-module-of clean
+.PHONY: all stage setup-map graph hostmap compare run trace trace-render trace-ddraw kill window-reset wm-unmanaged wm-managed vd-on vd-off mode8 mode16 ddraw-gdi ddraw-default smoke difftest difftest-run utildiff utildiff-run utildiff-portable numericdiff numericdiff-run chaindiff chaindiff-run atcdiff atcdiff-run weathermdiff weathermdiff-run acontaindiff acontaindiff-run sounddiff sounddiff-run dynamicdiff dynamicdiff-run fegriddiff fegriddiff-run fediff fediff-run landmediff landmediff-run facildiff facildiff-run facildiff-fe-run ofstest ofstest-run ofstest-remove util-trace install revert installed-name-of orig-module-of clean

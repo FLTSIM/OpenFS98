@@ -38,6 +38,7 @@ FS98_DIR?= $(HOME)/.wine/drive_c/FS98
 # module name -> retail image base, so our build maps where the original did
 BASE_ACONTAIN := 0x20600000
 BASE_ATC    := 0x20640000
+BASE_BOOSTER := 0x20650000
 BASE_CHAIN  := 0x20660000
 BASE_DYNAMIC := 0x206a0000
 BASE_FACIL  := 0x206b0000
@@ -195,6 +196,25 @@ $(BIN)/facil.res: src/facil/facil.rc
 
 src/facil/facil_data.inc: $(ORIG)/Modules/facil.dll tools/gen_facil_data.py
 	@python3 tools/gen_facil_data.py $< $@
+
+# BOOSTER, the CD scenery cache and its copying thread.  USER32 for the
+# thread's message loop, MessageBoxA and wsprintfA, all of which retail calls
+# directly; MSVCRT's operator new/delete are bound by name at init; libgcc for
+# _ftol's 64-bit conversion.
+$(BIN)/BOOSTER.DLL: src/booster/booster.c src/booster/booster.def \
+                    src/booster/booster_data.inc $(BIN)/booster.res
+	@mkdir -p $(BIN)
+	$(CC) $(CFLAGS) -fno-delete-null-pointer-checks -Isrc/booster $(LDFLAGS) \
+	      -Wl,--image-base=$(BASE_BOOSTER) \
+	      -o $@ src/booster/booster.c $(BIN)/booster.res src/booster/booster.def \
+	      -luser32 -lkernel32 -lgcc
+
+$(BIN)/booster.res: src/booster/booster.rc
+	@mkdir -p $(BIN)
+	$(RC) $< -O coff -o $@
+
+src/booster/booster_data.inc: $(ORIG)/Modules/BOOSTER.DLL tools/gen_booster_data.py
+	@python3 tools/gen_booster_data.py $< $@
 
 # LANDME, the landing-assistance state machine.  It uses retail FE in-game and
 # in its differential harness, so it can be completed independently of FE's
@@ -494,6 +514,24 @@ fesldiff-run: fesldiff
 	@cd $(DIFFDIR) && WINEDEBUG=-all timeout 3600 wine fesldiff.exe \
 	      $(if $(N),$(N),5000) "$(FE_FIXTURE)" $(FE_CD)
 
+# BOOSTER, whole-module with its worker thread: retail and OpenFS98 run in turn
+# over identical cache trees, four of the CD's boosters and synthetic ones with
+# every record type, the thread drained after every operation.  Needs the CD
+# tree (cd/Boosters).  N=... sets the scenario count.
+$(DIFFDIR)/boosterdiff.exe: tools/difftest/boosterdiff.c
+	@mkdir -p $(DIFFDIR)
+	$(CC) -std=c99 -O1 -Wall -Wextra -o $@ tools/difftest/boosterdiff.c
+
+boosterdiff: $(DIFFDIR)/boosterdiff.exe $(BIN)/BOOSTER.DLL
+	@cp $(ORIG)/Modules/BOOSTER.DLL $(DIFFDIR)/BOOSTER_retail.dll
+	@cp $(BIN)/BOOSTER.DLL          $(DIFFDIR)/BOOSTER_ours.dll
+	@cp $(ORIG)/Modules/UTIL.DLL    $(DIFFDIR)/UTIL_retail.dll
+	@cp $(ORIG)/FLTSIM98.EXE        $(DIFFDIR)/FLTSIM98_host.exe
+
+boosterdiff-run: boosterdiff
+	@test -n "$(FE_CD)" || { echo "boosterdiff-run needs the CD tree in cd/ (cd/Boosters)"; exit 2; }
+	@cd $(DIFFDIR) && WINEDEBUG=-all timeout 7200 wine boosterdiff.exe $(if $(N),$(N),20000) $(FE_CD)
+
 # CHAIN, whole-module: both DLLs driven through Linkage over random scripts
 # whose callbacks re-enter the module.  N=... sets the scenario count.
 $(DIFFDIR)/chaindiff.exe: tools/difftest/chaindiff.c
@@ -780,4 +818,4 @@ smoke: all
 clean:
 	rm -rf $(BIN)
 
-.PHONY: all stage setup-map graph hostmap compare run trace trace-render trace-ddraw kill window-reset wm-unmanaged wm-managed vd-on vd-off mode8 mode16 ddraw-gdi ddraw-default smoke difftest difftest-run utildiff utildiff-run utildiff-portable numericdiff numericdiff-run chaindiff chaindiff-run atcdiff atcdiff-run weathermdiff weathermdiff-run acontaindiff acontaindiff-run sounddiff sounddiff-run dynamicdiff dynamicdiff-run fegriddiff fegriddiff-run fediff fediff-run fesldiff fesldiff-run landmediff landmediff-run facildiff facildiff-run facildiff-fe-run ofstest ofstest-run ofstest-remove util-trace install revert installed-name-of orig-module-of clean
+.PHONY: all stage setup-map graph hostmap compare run trace trace-render trace-ddraw kill window-reset wm-unmanaged wm-managed vd-on vd-off mode8 mode16 ddraw-gdi ddraw-default smoke difftest difftest-run utildiff utildiff-run utildiff-portable numericdiff numericdiff-run chaindiff chaindiff-run atcdiff atcdiff-run weathermdiff weathermdiff-run acontaindiff acontaindiff-run sounddiff sounddiff-run dynamicdiff dynamicdiff-run fegriddiff fegriddiff-run fediff fediff-run fesldiff fesldiff-run boosterdiff boosterdiff-run landmediff landmediff-run facildiff facildiff-run facildiff-fe-run ofstest ofstest-run ofstest-remove util-trace install revert installed-name-of orig-module-of clean

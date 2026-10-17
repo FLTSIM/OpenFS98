@@ -957,7 +957,8 @@ static int file_out(void)
  * cache.  0x220 bytes each at +0x1750 (count +0x1760):
  *   +0x000  the box, from the booster's bstinfo file (16 bytes)
  *   +0x010  handed to BOOSTER, a word
- *   +0x012  the source directory, +0x116 the cache directory
+ *   +0x012  the cache directory, +0x116 the source (the CD's booster
+ *           directory) -- BOOSTER copies from the one to the other
  *   +0x21a, +0x21c  two words from the world file
  *   +0x21e  off for this session; +0x21f  turned off when next seen */
 #define S_BST       (D + 0x1750)
@@ -1016,9 +1017,9 @@ static uint8_t bst_byte(void)
 }
 
 /* .text+0x51c4 -- read the booster list from the world file, as it stands:
- * each a 1 byte and a flag (0: skipped), two words, the cache and source
+ * each a 1 byte and a flag (0: skipped), two words, the source and cache
  * directories (a trailing backslash dropped), and the 16-byte box from the
- * source's bstinfo.  A missing bstinfo puts up "cache directory not found"
+ * cache's bstinfo.  A missing bstinfo puts up "cache directory not found"
  * and turns the booster off.  Not re-entered while that alert is up. */
 static void read_boosters(void)
 {
@@ -1110,10 +1111,11 @@ static void rebuild_boosters(uint16_t n)
 static uint32_t FS98_STDCALL area_by_path(uint32_t name);
 
 /* .text+0x4ce0 -- CHAIN list 3, every frame: each booster whose box holds the
- * aircraft and BOOSTER has not got is handed over, once its cache has a
- * bstinfo; until then "insert the CD and press RETRY" (0x10 retries), naming
- * the source's description from its bstinfo, or its path when that will not
- * open.  Boosters the aircraft has left are taken back.  The counter is a
+ * aircraft and BOOSTER has not got is handed over, once its source on the
+ * CD has a bstinfo; until then "insert the CD and press RETRY" (0x10
+ * retries), naming the booster by the description in the cache's bstinfo,
+ * or by the source's path when that will not open.  Boosters the aircraft
+ * has left are taken back.  The counter is a
  * word, and starts from the low half of the count. */
 static void FS98_STDCALL fe_frame(uint32_t a, uint32_t b)
 {

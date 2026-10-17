@@ -1,14 +1,13 @@
 # FE (id 18) — the scenery file engine
 
-**Status: in progress.** Parts 1 (grid conversions), 2 (the hand-written
-assembly engine), and 3 (the compiled-C file services) are reimplemented and
-verified. The latest whole-module run covers parts 2 and 3 with 20,000
-scenarios and zero differences, and `make facildiff-fe-run` checks it behind
-OpenFS98 FACIL over the real CD index. Only `+0x78`, the Scenery Library
-dialog, remains -- and like FACIL's dialogs it turns out to be callbacks for
-`English\World.DLL` dialogs (`0x1306`, `0x13080001`.. through host `+0x10c`;
-FE imports only KERNEL32), so it can be verified externally the same way. FE
-is **not** in `MODULES`, so `make install` never ships a partial one.
+**Status: done and verified.** Parts 1 (grid conversions), 2 (the hand-written
+assembly engine), 3 (the compiled-C file services) and 4 (`+0x78`, the
+Scenery Library) are reimplemented and verified externally. The whole-module
+run covers parts 2 and 3 with 20,000 scenarios and zero differences, `make
+facildiff-fe-run` checks them behind OpenFS98 FACIL over the real CD index,
+and `make fesldiff-run` drives the Scenery Library through 20,000 scenarios
+of a stand-in for `English\World.DLL`'s dialogs, again with zero
+differences.
 
 FE is the sim's scenery database. G3D gets the scene it draws from it, MAIN its
 navaid and ground lookups, DYNAMIC its traffic programs, HG2D its textures and
@@ -68,7 +67,7 @@ The Linkage, hand-counted (`dumplinkage.py` stops at `+0x10`, which holds
 | `+0x58`/`+0x5c` | box overlap / point in box | 2 |
 | `+0x60`..`+0x6c` | the grid conversions | **1, verified** |
 | `+0x70`/`+0x74` | register / unregister a BGL (BOOSTER) | 2 |
-| `+0x78` | the Scenery Library dialog (World.DLL callbacks) | remaining |
+| `+0x78` | the Scenery Library (World.DLL dialog callbacks) | **4, verified** |
 | `+0x7c`..`+0x88` | list/open/read/close BGL sections (FACIL) | **3, verified** |
 
 ## Part 1 — the grid conversions, `+0x60`..`+0x6c` (verified)
@@ -174,8 +173,8 @@ to `+0x62e0` as bytes, with every relocated dword zeroed and listed: the
 Linkage's own pointers (fe.c supplies them as its functions), a few pointers
 within `.data`, and the C half's dialog/handler tables, which point into
 `.text`. `fe.c`'s `fe_relocate` reapplies the within-`.data` ones at
-`DLL_PROCESS_ATTACH`; the `.text` ones belong to the remaining `+0x78` dialog
-code and are left zero for now.
+`DLL_PROCESS_ATTACH`, and the `.text` ones -- the Scenery Library's dialog
+callbacks and exchange-table handlers -- through `fe_lib_text_target`.
 
 ### Whole-module harness and fixtures
 
@@ -191,7 +190,7 @@ three areas in `world.vis`.
 After each scenario the harness compares the complete import/output
 transcript, GLOBAL, the used arena, and FE's image from Linkage - 0x48 through
 the end of `.data`. Relocated image pointers compare by offset. Live critical
-section bytes and the remaining dialog's handler pointers are ignored
+section bytes and the dialog blocks' handler pointers are ignored
 explicitly. Calls at `+0x18` and `+0x40` cross a guarded assembly
 boundary which records ESP, EBP and ebx/esi/edi and repairs the harness's own
 stack before the next call.
@@ -272,8 +271,100 @@ offset at `+0x190` is nonzero:
   which matched the old reimplementation's constant.
 
 These use host `memcmp` `+0x228` and the growable-array services
-`+0x2f8`/`+0x300`/`+0x2fc`. `+0x78`, the Scenery Library dialog, remains for
-`ofstest`; it is not part of this verified slice.
+`+0x2f8`/`+0x300`/`+0x2fc`.
+
+## Part 4 — the Scenery Library, `+0x78` (verified)
+
+`src/fe/fe_library.c` transliterates `.text+0x57a0`..`+0xb470`. Like FACIL's
+dialogs it is not window code: FE imports only KERNEL32, fills parameter
+blocks in `.data` and runs dialogs that `English\World.DLL` registers,
+through host `+0x10c`; World calls back through function pointers in the
+blocks (word 0 is the answer, 1 for OK).
+
+| dialog | block | callbacks |
+| --- | --- | --- |
+| `0x1306` the world files | `.data+0x2e28` | `+4` nothing, `+8` edit areas, `+0xc` edit caches |
+| `0x13080001` the area list | `+0x2ec8` | `+4` nothing, `+8` add, `+0xc` edit, `+0x10` delete, `+0x14` browse, `+0x18` priority |
+| `0x13080002` areas from a drive | `+0x2f70` | `+4` check, `+8` add, `+0xc` add all, `+0x10` search, `+0x14` next, `+0x18` next folder |
+| `0x13080003` / `4` add / edit an area | `+0x3170` / `+0x3138` | `+4` check |
+| `0x13080005` area priority | `+0x2e78` | `+4` check, `+8` up, `+0xc` down, `+0x10` sort, `+0x14` move |
+| `0x13080006` the cache list | `+0x3000` | `+4` nothing, `+8` add, `+0xc` edit, `+0x10` delete, `+0x14` flush |
+| `0x13080007` / `8` edit / add a cache | `+0x30e8` / `+0x3118` | `+4` check |
+
+Rows go to World through UTIL's exchange engine (`+0x8c`/`+0x90`) and two
+tables in `.data`: `+0x2ef8` maps an area record (layer byte, flag byte,
+path, title) to a 0x40-byte row (`+4` path, `+0x18` title, `+0x2c` layer,
+`+0x34` active, `+0x3c` protected); `+0x3048` maps a cache record to a
+0x80-byte row (`+4` source, `+0x18` cache directory, `+0x2c` name, `+0x40`
+description, `+0x5c` layer, `+0x74` the BSTINFO layer). The world file is
+read whole into `.data` and written back through a temporary file
+(`+0x174`, `+0x148` with extension 14, `.VIS`), which then replaces the
+original with its attributes kept (`+0x134`/`+0x138`, the host's own bit
+vocabulary). Booster paths are checked through their `BSTINFO` file
+(string `0x9013`): its title and description offsets at `0x10`/`0x12`, its
+layer at `0x16`.
+
+Retail behaviour reproduced, all confirmed by the harness:
+
+- An area path with an empty directory makes `.text+0xb2f0` (and the writer's
+  `.text+0xb170`) compare from the byte below its directory buffer: the top
+  byte of the esi it saved, which in the area checks is the block's address
+  and in the writer the world file's handle. The suffix is `\`, so it would
+  match -- and the zero be stored into that saved register -- only for a
+  module at `0x5c000000`. Reproduced by passing the caller's esi down.
+- The priority dialog's move does not check the selection: from one past the
+  list it swaps a row in from beyond the working copy and writes over the
+  heap after it.
+- Next after a cancelled drive search walks the listing the search freed:
+  host `+0x188` is handed a path at `0x108`, and the game faults.
+- Deleting a cache row leaks its four strings; storing the area list takes
+  the fields the exchange table does not cover from whatever `.data+0x4080`
+  last held; `.text+0xa9f0` always returns -1; the temporary file's joined
+  name at `.data+0x3b60` is built and never used.
+
+### The harness, `make fesldiff-run`
+
+`tools/difftest/fesldiff.c` reuses `facildiff.c`'s host (and through it
+`fediff.c`'s) and binds retail UTIL and NUMERIC. Host `+0x10c` is a stand-in
+for World: per dialog a seeded script types paths, titles, layers and
+positions from pools built to reach every check's branches, toggles row
+flags, moves the selection (sometimes one past the list), presses the
+buttons, and finishes with OK or Cancel, logging the block and its rows after
+every callback. Dialog 2, UTIL's modal alert, answers from the same script.
+Callbacks run over a painted stack.
+
+Each side runs over a fresh copy of a writable fixture: the real `world.vis`
+and synthetic world files with booster caches, protected areas, layer and
+title ties, an empty one and (sometimes) one the scan cannot read, some
+read-only. Drive letters are sandboxed: `W:` is the game directory (host
+`+0x130` returns `W:\FS98\`, with the trailing backslash FLTSIM98's
+`_makepath` gives it and FE's `=:\=\` resolution depends on), `M:` a
+synthetic tree of add-on folders, cache directories and BSTINFO files
+(including one whose title lies past its end), and `K:` the real CD's
+`Boosters` directory; every other letter is a directory that does not exist.
+Listings are sorted, so both sides see one order. The comparison copy of
+OpenFS98's FE is linked at `0x20c00000`, so that a `.data` address's top byte
+-- the leftover above -- matches retail's.
+
+Compared: the transcript (host and UTIL calls, string comparisons, the
+stand-in's view of every block, the world files left on disk by name,
+attributes and digest), FE's `.data` (two block words that point into a
+caller's stack frame compare as stack addresses), GLOBAL, and the heap,
+pointer-aware. A fault while the Library runs -- in FE or in a host stub
+handed a bad pointer -- is an outcome, logged and compared.
+
+Baseline: 20,000 scenarios, 0 differ (~6 min): 17,910 returned 0, 2,008 -1
+and 82 faulted; 127,382 callbacks, every button both failing and succeeding;
+3,168 drive searches listing 1,623,941 entries; 8,437 world files rewritten.
+
+Deliberate breaks (36, at 2,000 scenarios each): 33 caught on the first
+pass. Of the three misses two are equivalent by construction -- the header's
+tail words are all zero, and the edit's move base is the same address as the
+block field it replaced -- and one was a harness gap: FE's init sets GLOBAL
+`+0x444`'s 0x10 and 0x20, hiding which flag the Library sets. The harness now
+randomises those flags after init, and the break is caught. The first runs
+also found the leftover byte above, which the transliteration had replaced
+with a zero.
 
 ## Corrections to the preflight
 

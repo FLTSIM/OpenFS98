@@ -74,6 +74,7 @@ else's 1997 build, and it should read that way.
 | `make fediff-run` | FE's assembly engine and compiled-C file services, retail and OpenFS98 loaded side by side over the extracted CD scenery/texture tree plus self-checking synthetic compressed-texture and BGL-section fixtures, comparing every import call and output, GLOBAL, the heap and the whole `.data` image |
 | `make landmediff-run` | LANDME's seven-state landing assistant against retail, each side backed by its own retail FE over the real scenery tree; compares every import call, GLOBAL, the heap and both modules' whole `.data` images |
 | `make facildiff-run` | whole-module FACIL against retail, each side backed by a separate retail FE: a synthetic five-level rebuild, 20,000 seeded synthetic caches through the `+0x18`/`+0x1c`/`+0x20` queries, then the real CD index (with all sixteen boosters) and 10,000 dialog scenarios driven by a stand-in for World.DLL; compares the caches, call transcript (with string comparisons), returned records, GLOBAL, heap and both modules' state |
+| `make fesldiff-run` | FE's `+0x78`, the Scenery Library, retail against OpenFS98 over a writable fixture with sandboxed drive letters, driven by a stand-in for World.DLL's nine dialogs; compares the call transcript (with string comparisons and the world files left on disk), FE's `.data`, GLOBAL and the heap; faults are compared as outcomes |
 | `make facildiff-fe-run` | the same harness with OpenFS98 FE behind OpenFS98 FACIL, against retail FE behind retail FACIL: both reimplementations together over the real CD index and the dialogs (`Q=`/`D=` set the phase sizes, 2,000 each by default) |
 | `make weathermdiff-run` | the same for WEATHERM: updates, frames, resets, scenery effects and list operations, comparing every import call, GLOBAL, the heap and the `.data` image |
 | `make chaindiff-run` | drive retail and OpenFS98 CHAIN side by side over random re-entrant callback scripts; `N=...` sets the count |
@@ -171,7 +172,7 @@ emulate 80-bit arithmetic to preserve a rounding artefact. See
 | `ACONTAIN` | 23 | 5,504 | **reimplemented, verified, and running in-game** — the aircraft container: finds aircraft by title, resolves their paths, loads the flight and visual models, lists them; 20,000 whole-module differential scripts against generated aircraft trees, zero differences — see [docs/modules/acontain.md](docs/modules/acontain.md) |
 | `SOUND` | 39 | 15,174 | **reimplemented, verified, and running in-game** — engine, warning, marker and Morse ident sounds, driven through the host's voice engine; 20,000 whole-module differential scripts comparing its whole `.data` image, zero differences — see [docs/modules/sound.md](docs/modules/sound.md) |
 | `DYNAMIC` | 6 | 12,300 | **reimplemented, verified, and running in-game** — dynamic scenery: an interpreter for the airport traffic programs in scenery files, three of whose opcodes write programs of their own; 20,000 whole-module differential scripts comparing GLOBAL, the heap and its whole `.data` image, zero differences — see [docs/modules/dynamic.md](docs/modules/dynamic.md) |
-| `FE` | 18 | 49,016 | **in progress** — the grid conversions, assembly engine and compiled-C file services are reimplemented and verified (20,000 whole-module scenarios, zero differences); only the Scenery Library dialog remains for `ofstest` — see [docs/modules/fe.md](docs/modules/fe.md) |
+| `FE` | 18 | 49,016 | **reimplemented, verified, and running in-game** — the grid conversions, assembly engine, compiled-C file services (20,000 whole-module scenarios) and the Scenery Library (20,000 scenarios through a World.DLL stand-in), zero differences — see [docs/modules/fe.md](docs/modules/fe.md) |
 | `LANDME` | 26 | 4,094 | **reimplemented, verified, and running in-game** — nearest-runway selection and all eleven nonzero landing-guidance phases; 20,000 whole-module scenarios over retail FE and real scenery, zero differences — see [docs/modules/landme.md](docs/modules/landme.md) |
 | `FACIL` | 37 | 23,045 | **done** — verified (index, queries and the three dialogs' callbacks) and running in-game — see [docs/modules/facil.md](docs/modules/facil.md) |
 | `NUMERIC` | 17 | 14,684 | **reimplemented, verified, and running in-game** — 545,778 differential comparisons, zero mismatches — see [docs/modules/numeric.md](docs/modules/numeric.md) |
@@ -214,7 +215,7 @@ verified -- see [docs/modules/sound.md](docs/modules/sound.md) and
 own thread and is left for later.
 
 Round 4 surveyed FE, LANDME, FACIL and BOOSTER -- see the
-[preflight](docs/preflight.md) -- and **FE is in progress**
+[preflight](docs/preflight.md) -- and **FE is done, verified and running in-game**
 ([docs/modules/fe.md](docs/modules/fe.md)). Its grid conversions
 (`+0x60`..`+0x6c`) are reimplemented and verified by vectors (`make
 fegriddiff-run`, 7,742,499 comparisons, 0 mismatches). Its whole hand-written
@@ -223,8 +224,9 @@ verified: `make fediff-run` drives 20,000 whole-module scenarios over the
 extracted CD scenery/texture tree and synthetic part-3 fixtures, comparing
 every import call and output, GLOBAL, the heap and `.data`, with zero
 differences. The run includes 7,272 successful texture loads and 3,636 FACIL
-section reads. `+0x78`, the Scenery Library dialog, goes to `ofstest`. FE is
-not in `MODULES`, so a partial one is never installed.
+section reads. `+0x78`, the Scenery Library, is World.DLL callbacks like
+FACIL's dialogs: `make fesldiff-run` drives 20,000 scenarios through a stand-in
+for World over a writable fixture, with zero differences.
 
 `LANDME` is also reimplemented, verified and running in-game. Its harness gives
 each side a separate retail FE over the same fixture tree and steers the
@@ -234,9 +236,9 @@ aircraft through all guidance phases: 20,000 scenarios, 18,881 runways found,
 `FACIL` is done, verified and running in-game; its dialogs are callbacks for
 World.DLL and were verified externally. Its harness found that FE `+0x84` and
 `+0x88` return stack leftovers; FE now reproduces them, and
-`make facildiff-fe-run` checks OpenFS98 FE and FACIL together. FE's last slot,
-`+0x78`, is World.DLL callbacks too and is next. `BOOSTER` still waits for FE; `WINMSG` and `REALITY` draw and run
-dialogs and belong in `ofstest`.
+`make facildiff-fe-run` checks OpenFS98 FE and FACIL together. `BOOSTER`,
+which waited for FE, is next; `WINMSG` and `REALITY` draw and run dialogs and
+belong in `ofstest`.
 
 Other useful work, in no particular order:
 
@@ -268,9 +270,8 @@ nothing in it imports anything interesting:
 11. ~~**`LANDME`** (4,094 bytes)~~ — done, verified against retail FE over the
     real scenery tree, and running in-game.
 12. ~~**`FACIL`** (23,045 bytes)~~ — done, verified and running in-game.
-    Next in round 4: FE's `+0x78` Scenery Library callbacks, externally,
-    as FACIL's were; `WINMSG` and `REALITY` need `ofstest`, and `BOOSTER`
-    follows FE.
+    ~~**`FE`** (49,016 bytes)~~ — done, verified and running in-game. Next
+    in round 4: `BOOSTER`; `WINMSG` and `REALITY` need `ofstest`.
 13. `HG2D` (390 KB, the 2D rasteriser) last. It is 26% of the project on its
    own.
 

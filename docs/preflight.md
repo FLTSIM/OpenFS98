@@ -27,7 +27,11 @@ LANDME and FACIL run in-game.** BOOSTER stays last.
    `acontaindiff` does, and BOOSTER and FACIL are logging stubs.
 3. **The C half's file services:** `+0x1c` (textures, for HG2D) and
    `+0x7c`..`+0x88` (BGL sections, for FACIL), in the same harness.
-   `+0x78`, the Scenery Library and booster dialogs, goes to `ofstest`.
+   `+0x78`, the Scenery Library and booster dialogs, was planned for
+   `ofstest`; like FACIL's dialogs it turned out to be World.DLL callbacks
+   and was verified externally instead (`make fesldiff-run`, 20,000
+   scenarios, zero differences). FE is installed; see
+   [modules/fe.md](modules/fe.md).
 
 The completed `fediff` baseline runs all of parts 2 and 3 for 20,000 scenarios:
 11 operation classes, 7,272 successful texture loads, 3,636 successful FACIL

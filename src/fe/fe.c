@@ -4546,6 +4546,9 @@ static void fe_deinit(void)
 
 #define SLOT(fn) ((fe_fn)(fn))
 
+/* Linkage +0x78, the Scenery Library: fe_library.c. */
+static uint32_t FS98_STDCALL fe_library(void);
+
 struct fe_image fe_image = {
     {
         { FS98_MOD_HOST,    0 },
@@ -4567,7 +4570,7 @@ struct fe_image fe_image = {
             /* +0x48 */ SLOT(fe_level), SLOT(fe_list_begin), SLOT(fe_list_at), SLOT(fe_search),
             /* +0x58 */ SLOT(fe_overlap), SLOT(fe_in_box), SLOT(fe_lat_band), SLOT(fe_band_lat),
             /* +0x68 */ SLOT(fe_lon_band), SLOT(fe_band_lon), SLOT(fe_register), SLOT(fe_unregister),
-            /* +0x78 */ 0, SLOT(fe_facil_list), SLOT(fe_facil_open),
+            /* +0x78 */ SLOT(fe_library), SLOT(fe_facil_list), SLOT(fe_facil_open),
             /* +0x84 */ SLOT(fe_facil_read_entry), SLOT(fe_facil_close_entry),
         }
     },
@@ -4577,10 +4580,12 @@ struct fe_image fe_image = {
 };
 
 /* The pointers retail's loader relocates inside the image. */
+#include "fe_library.c"
+
 static void fe_relocate(void)
 {
 #define FE_REL_DATA(off, target) M32(D + (off)) = D + (target);
-#define FE_REL_TEXT(off, rva)
+#define FE_REL_TEXT(off, rva)    M32(D + (off)) = fe_lib_text_target(rva);
 #define FE_RELOCS
 #include "fe_data.inc"
 #undef FE_RELOCS

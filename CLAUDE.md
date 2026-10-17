@@ -61,9 +61,10 @@ make fediff-run          # FE engine + C file services -> 20000 scenarios, 0 dif
 make landmediff-run      # whole-module LANDME       -> 20000 scenarios, 0 differ
 make facildiff-run       # whole-module FACIL        -> 0 differences; 20000 query, 10000 dialog scenarios, 0 differ (~27 min)
 make facildiff-fe-run    # OpenFS98 FE+FACIL together -> 2000 query, 2000 dialog scenarios, 0 differ (~5 min)
+make fesldiff-run        # FE +0x78, the Scenery Library -> 20000 scenarios, 0 differ (~6 min)
 make difftest-run        # whole-module SLEW         -> 0/2000 vectors differ
 make ofstest-run         # in-process, via the host  -> passed 68, failed 0
-make smoke               # ACONTAIN, ATC, CHAIN, DYNAMIC, FACIL, GLOBAL, LANDME, NUMERIC, SLEW, SOUND, UTIL, WEATHERM installed -> 27/27, 95 gauges, PASS
+make smoke               # ACONTAIN, ATC, CHAIN, DYNAMIC, FACIL, FE, GLOBAL, LANDME, NUMERIC, SLEW, SOUND, UTIL, WEATHERM installed -> 27/27, 95 gauges, PASS
 make util-trace          # which UTIL services the game calls, counted in-game
 ```
 
@@ -75,8 +76,8 @@ host process or live game state still needs `ofstest`.
 
 ## Current next slice
 
-WEATHERM, ACONTAIN, SOUND and DYNAMIC are done. **FE's externally testable
-engine is done and verified**
+WEATHERM, ACONTAIN, SOUND and DYNAMIC are done. **FE is done, verified and
+running in-game**
 (round 4 of [docs/preflight.md](docs/preflight.md), survey there; details in
 [docs/modules/fe.md](docs/modules/fe.md)):
 
@@ -97,9 +98,14 @@ engine is done and verified**
    successful FACIL section reads, and 0 differences. Synthetic fixtures
    self-check the compressed texture output and the BGL selector/read paths.
 
-`+0x78`, the Scenery Library dialog, goes to `ofstest`, as do REALITY and
-WINMSG. FE is deliberately **not** in `MODULES`, so `make install` cannot ship
-a partial one. **LANDME is also done and verified**: its harness gives each
+4. **done and verified** -- `+0x78`, the Scenery Library (`src/fe/fe_library.c`).
+   Like FACIL's dialogs it is World.DLL callbacks, so `make fesldiff-run`
+   verifies it externally: a World stand-in drives all nine dialogs over a
+   writable fixture with sandboxed drive letters (the CD's Boosters as `K:`),
+   20,000 scenarios, 0 differences. It found a retail leftover byte (the top
+   byte of a saved esi read below a path buffer), now reproduced.
+
+FE is in `MODULES`. REALITY and WINMSG still go to `ofstest`. **LANDME is also done and verified**: its harness gives each
 side a separate retail FE instance, steers the aircraft through all eleven
 nonzero guidance phases, and reports zero differences across 20,000 scenarios
 (`make landmediff-run`).
@@ -117,11 +123,9 @@ FE `+0x84`/`+0x88` now reproduce retail's stack-leftover returns (FACIL's
 runway lists depend on them) through entry shims, proven at the owner:
 `fediff` paints the slots and goes red on each deliberate break.
 
-**Next: FE `+0x78`, the Scenery Library.** Like FACIL's dialogs it is not
-window code: FE imports only KERNEL32 and runs World.DLL dialogs (`0x1306`,
-`0x13080001`, ...) through host `+0x10c` with parameter blocks in FE's
-`.data`. Verify its callbacks externally with a World stand-in, as
-`facildiff` does; that completes FE and lets it into `MODULES`.
+**Next:** `BOOSTER`, which waited for FE (round 4 of
+[docs/preflight.md](docs/preflight.md)); `WINMSG` and `REALITY` need
+`ofstest`.
 
 FE's `+0x40` calling-convention break is now confirmed by `fediff`: the
 one-byte probe writes through the caller's edi and returns with ebx/esi/edi

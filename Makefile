@@ -50,7 +50,7 @@ BASE_SOUND  := 0x208d0000
 BASE_UTIL   := 0x208e0000
 BASE_WEATHERM := 0x208f0000
 
-MODULES := ACONTAIN ATC CHAIN DYNAMIC FACIL GLOBAL LANDME NUMERIC SLEW SOUND UTIL WEATHERM
+MODULES := ACONTAIN ATC CHAIN DYNAMIC FACIL FE GLOBAL LANDME NUMERIC SLEW SOUND UTIL WEATHERM
 
 # Setup renames two modules on the way from CD to install, and the game loads
 # the *installed* names.  A rebuilt FACIL.DLL copied in as FACIL.DLL would just
@@ -165,10 +165,9 @@ $(BIN)/dynamic.res: src/dynamic/dynamic.rc
 src/dynamic/dynamic_data.inc: $(ORIG)/Modules/DYNAMIC.DLL tools/gen_dynamic_data.py
 	@python3 tools/gen_dynamic_data.py $< $@
 
-# FE, the scenery file engine, laid out the same way.  Not in MODULES yet:
-# it is being built up a part at a time (docs/preflight.md, round 4), and a
-# partial FE must never be installed.
-$(BIN)/FE.DLL: src/fe/fe.c src/fe/fe.def src/fe/fe_data.inc $(BIN)/fe.res
+# FE, the scenery file engine, laid out the same way: the assembly engine and
+# file services (fediff), and the Scenery Library in fe_library.c (fesldiff).
+$(BIN)/FE.DLL: src/fe/fe.c src/fe/fe_library.c src/fe/fe.def src/fe/fe_data.inc $(BIN)/fe.res
 	@mkdir -p $(BIN)
 	$(CC) $(CFLAGS) -fno-delete-null-pointer-checks -Isrc/fe $(LDFLAGS) \
 	      -Wl,--image-base=$(BASE_FE) \
@@ -455,10 +454,45 @@ facildiff-fe-run: facildiff $(BIN)/FE.DLL
 	@test -n "$(FE_FIXTURE)" || { \
 		echo "facildiff-fe-run needs Scenery/world.vis and Texture/fs5.pal under orig/ or game/"; exit 2; }
 	@cp $(BIN)/FE.DLL $(DIFFDIR)/FE_facil_ours.dll
-	@cd $(DIFFDIR) && WINEDEBUG=-all timeout 3600 wine facildiff.exe \
+	@(cd $(DIFFDIR) && WINEDEBUG=-all timeout 3600 wine facildiff.exe \
 	      FACIL_retail.dll FACIL_ours.dll "$(FE_FIXTURE)" \
-	      $(if $(Q),$(Q),2000) $(if $(D),$(D),2000); \
+	      $(if $(Q),$(Q),2000) $(if $(D),$(D),2000)); \
 	  status=$$?; cp $(ORIG)/Modules/FE.DLL $(DIFFDIR)/FE_facil_ours.dll; exit $$status
+
+# FE Linkage +0x78, the Scenery Library: retail FE against OpenFS98's, each
+# run over a fresh copy of a writable fixture (the real world.vis and
+# synthetic ones) with a stand-in for World.DLL's nine dialogs, retail UTIL
+# and NUMERIC, and sandboxed drive letters.  The CD's Boosters directory, when
+# extracted under cd/, is drive K:.  N=... sets the scenario count.
+FE_CD ?= $(if $(wildcard cd/Boosters),../../cd,)
+
+$(DIFFDIR)/fesldiff.exe: tools/difftest/fesldiff.c tools/difftest/facildiff.c \
+                         tools/difftest/fediff.c src/fe/fe_data.inc \
+                         src/facil/facil_data.inc
+	@mkdir -p $(DIFFDIR)
+	$(CC) -std=c99 -O1 -Wall -Wextra -Iinclude -Isrc/fe \
+	      -o $@ tools/difftest/fesldiff.c
+
+# OpenFS98's FE linked again at another 0x20xxxxxx base: one retail
+# leftover is the top byte of a .data address, so the comparison copy keeps
+# retail's (FE_retail.dll stays at its own base).
+$(DIFFDIR)/FE_sl_ours.dll: src/fe/fe.c src/fe/fe_library.c src/fe/fe.def \
+                           src/fe/fe_data.inc $(BIN)/fe.res
+	@mkdir -p $(DIFFDIR)
+	$(CC) $(CFLAGS) -fno-delete-null-pointer-checks -Isrc/fe $(LDFLAGS) \
+	      -Wl,--image-base=0x20c00000 \
+	      -o $@ src/fe/fe.c $(BIN)/fe.res src/fe/fe.def -lkernel32
+
+fesldiff: $(DIFFDIR)/fesldiff.exe $(DIFFDIR)/FE_sl_ours.dll
+	@cp $(ORIG)/Modules/FE.DLL      $(DIFFDIR)/FE_retail.dll
+	@cp $(ORIG)/Modules/UTIL.DLL    $(DIFFDIR)/UTIL_retail.dll
+	@cp $(ORIG)/Modules/NUMERIC.DLL $(DIFFDIR)/NUMERIC_retail.dll
+
+fesldiff-run: fesldiff
+	@test -n "$(FE_FIXTURE)" || { \
+		echo "fesldiff-run needs Scenery/world.vis and Texture/fs5.pal under orig/ or game/"; exit 2; }
+	@cd $(DIFFDIR) && WINEDEBUG=-all timeout 3600 wine fesldiff.exe \
+	      $(if $(N),$(N),5000) "$(FE_FIXTURE)" $(FE_CD)
 
 # CHAIN, whole-module: both DLLs driven through Linkage over random scripts
 # whose callbacks re-enter the module.  N=... sets the scenario count.
@@ -746,4 +780,4 @@ smoke: all
 clean:
 	rm -rf $(BIN)
 
-.PHONY: all stage setup-map graph hostmap compare run trace trace-render trace-ddraw kill window-reset wm-unmanaged wm-managed vd-on vd-off mode8 mode16 ddraw-gdi ddraw-default smoke difftest difftest-run utildiff utildiff-run utildiff-portable numericdiff numericdiff-run chaindiff chaindiff-run atcdiff atcdiff-run weathermdiff weathermdiff-run acontaindiff acontaindiff-run sounddiff sounddiff-run dynamicdiff dynamicdiff-run fegriddiff fegriddiff-run fediff fediff-run landmediff landmediff-run facildiff facildiff-run facildiff-fe-run ofstest ofstest-run ofstest-remove util-trace install revert installed-name-of orig-module-of clean
+.PHONY: all stage setup-map graph hostmap compare run trace trace-render trace-ddraw kill window-reset wm-unmanaged wm-managed vd-on vd-off mode8 mode16 ddraw-gdi ddraw-default smoke difftest difftest-run utildiff utildiff-run utildiff-portable numericdiff numericdiff-run chaindiff chaindiff-run atcdiff atcdiff-run weathermdiff weathermdiff-run acontaindiff acontaindiff-run sounddiff sounddiff-run dynamicdiff dynamicdiff-run fegriddiff fegriddiff-run fediff fediff-run fesldiff fesldiff-run landmediff landmediff-run facildiff facildiff-run facildiff-fe-run ofstest ofstest-run ofstest-remove util-trace install revert installed-name-of orig-module-of clean

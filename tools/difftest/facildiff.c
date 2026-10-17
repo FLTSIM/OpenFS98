@@ -15,7 +15,9 @@
  */
 /* The facilities dialog leaks a +0x1c result for every row it builds, and a
  * region's navaids run to thousands of rows. */
+#ifndef ARENA_SIZE
 #define ARENA_SIZE (256u << 20)
+#endif
 #define main fediff_reference_main
 #include "fediff.c"
 #undef main
@@ -2592,7 +2594,12 @@ static int dialog_run(uint32_t scenarios, uint8_t *retail_arena,
     return bad;
 }
 
-int main(int argc, char **argv)
+/* fesldiff.c reuses this file's host and dialog machinery; it renames this
+ * main through FACILDIFF_MAIN. */
+#ifndef FACILDIFF_MAIN
+#define FACILDIFF_MAIN main
+#endif
+int FACILDIFF_MAIN(int argc, char **argv)
 {
     static uint8_t retail_facil[FACIL_IMAGE_SIZE];
     static uint8_t ours_facil[FACIL_IMAGE_SIZE];

@@ -37,6 +37,7 @@ FS98_DIR?= $(HOME)/.wine/drive_c/FS98
 
 # module name -> retail image base, so our build maps where the original did
 BASE_ACONTAIN := 0x20600000
+BASE_ADVDRV := 0x20610000
 BASE_ATC    := 0x20640000
 BASE_BOOSTER := 0x20650000
 BASE_CHAIN  := 0x20660000
@@ -52,7 +53,7 @@ BASE_SOUND  := 0x208d0000
 BASE_UTIL   := 0x208e0000
 BASE_WEATHERM := 0x208f0000
 
-MODULES := ACONTAIN ATC BOOSTER CHAIN DEMO DYNAMIC FACIL FE GLOBAL LANDME NUMERIC SLEW SOUND UTIL WEATHERM
+MODULES := ACONTAIN ADVDRV ATC BOOSTER CHAIN DEMO DYNAMIC FACIL FE GLOBAL LANDME NUMERIC SLEW SOUND UTIL WEATHERM
 
 # Setup renames two modules on the way from CD to install, and the game loads
 # the *installed* names.  A rebuilt FACIL.DLL copied in as FACIL.DLL would just
@@ -216,6 +217,24 @@ $(BIN)/booster.res: src/booster/booster.rc
 
 src/booster/booster_data.inc: $(ORIG)/Modules/BOOSTER.DLL tools/gen_booster_data.py
 	@python3 tools/gen_booster_data.py $< $@
+
+# ADVDRV, the adventure and lesson interpreter: MSVC C with the x87
+# throughout.  libgcc for _ftol's 64-bit conversion.  Its tables hold distinct
+# routines with identical bodies, so identical-code folding is off.
+$(BIN)/ADVDRV.DLL: src/advdrv/advdrv.c src/advdrv/advdrv.def src/advdrv/advdrv_data.inc \
+                   $(BIN)/advdrv.res
+	@mkdir -p $(BIN)
+	$(CC) $(CFLAGS) -fno-delete-null-pointer-checks -fno-ipa-icf -Isrc/advdrv $(LDFLAGS) \
+	      -Wl,--image-base=$(BASE_ADVDRV) \
+	      -o $@ src/advdrv/advdrv.c $(BIN)/advdrv.res src/advdrv/advdrv.def \
+	      -lkernel32 -lgcc
+
+$(BIN)/advdrv.res: src/advdrv/advdrv.rc
+	@mkdir -p $(BIN)
+	$(RC) $< -O coff -o $@
+
+src/advdrv/advdrv_data.inc: $(ORIG)/Modules/ADVDRV.DLL tools/gen_advdrv_data.py
+	@python3 tools/gen_advdrv_data.py $< $@
 
 # DEMO, flight videos and instant replay: an assembly recorder and player
 # with a C half of dialog callbacks.  libgcc for the 64-bit divisions.  The

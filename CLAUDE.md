@@ -62,9 +62,11 @@ make landmediff-run      # whole-module LANDME       -> 20000 scenarios, 0 diffe
 make facildiff-run       # whole-module FACIL        -> 0 differences; 20000 query, 10000 dialog scenarios, 0 differ (~27 min)
 make facildiff-fe-run    # OpenFS98 FE+FACIL together -> 2000 query, 2000 dialog scenarios, 0 differ (~5 min)
 make fesldiff-run        # FE +0x78, the Scenery Library -> 20000 scenarios, 0 differ (~6 min)
+make boosterdiff-run     # whole-module BOOSTER, its thread drained -> 20000 scenarios, 0 differ (~75 min)
+make demodiff-run        # whole-module DEMO, videos and instant replay -> 20000 scenarios, 0 differ (~25 min)
 make difftest-run        # whole-module SLEW         -> 0/2000 vectors differ
 make ofstest-run         # in-process, via the host  -> passed 68, failed 0
-make smoke               # ACONTAIN, ATC, CHAIN, DYNAMIC, FACIL, FE, GLOBAL, LANDME, NUMERIC, SLEW, SOUND, UTIL, WEATHERM installed -> 27/27, 95 gauges, PASS
+make smoke               # ACONTAIN, ATC, BOOSTER, CHAIN, DEMO, DYNAMIC, FACIL, FE, GLOBAL, LANDME, NUMERIC, SLEW, SOUND, UTIL, WEATHERM installed -> 27/27, 95 gauges, PASS
 make util-trace          # which UTIL services the game calls, counted in-game
 ```
 
@@ -123,9 +125,29 @@ FE `+0x84`/`+0x88` now reproduce retail's stack-leftover returns (FACIL's
 runway lists depend on them) through entry shims, proven at the owner:
 `fediff` paints the slots and goes red on each deliberate break.
 
-**Next:** `BOOSTER`, which waited for FE (round 4 of
-[docs/preflight.md](docs/preflight.md)); `WINMSG` and `REALITY` need
-`ofstest`.
+**BOOSTER is done, verified and running in-game**, which finishes round 4.
+`make boosterdiff-run` runs retail and OpenFS98 in turn over identical cache
+trees: four of the CD's boosters, and synthetic ones carrying all five record
+types. It drains the worker thread after every operation: posted 0x401s are
+counted against the SetEvents that answer them. 20,000 scenarios, 0
+differences, and all 25 deliberate breaks are caught. See
+[docs/modules/booster.md](docs/modules/booster.md), which also records a
+retail UTIL `+0x44` fault (a reach of a whole latitude circle) that
+OpenFS98's UTIL does not reproduce.
+
+**DEMO is done, verified and running in-game** (round 5 of
+[docs/preflight.md](docs/preflight.md)). It covers the flight-video recorder
+and player, instant replay, and the four dialogs' callbacks. `make
+demodiff-run` runs both sides in turn over the CD's six videos and synthetic
+ones, with retail UTIL's catalogue and a stand-in for the host's dialog
+engine. Faults are compared as outcomes, and runaway ops are cut at a fixed
+count: 20,000 scenarios, 0 differences, all 25 deliberate breaks caught or
+proven equivalent. It reproduces a flush that loses edx, a table read past its
+end into code pointers, and callee-left ecx; see
+[docs/modules/demo.md](docs/modules/demo.md).
+
+**Next:** `ADVDRV` (29,330 bytes), the adventure/lesson interpreter, which
+imports DEMO `+0x28`; then `WINDOW`. `WINMSG` and `REALITY` need `ofstest`.
 
 FE's `+0x40` calling-convention break is now confirmed by `fediff`: the
 one-byte probe writes through the caller's edi and returns with ebx/esi/edi

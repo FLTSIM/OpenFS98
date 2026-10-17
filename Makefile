@@ -40,6 +40,7 @@ BASE_ACONTAIN := 0x20600000
 BASE_ATC    := 0x20640000
 BASE_BOOSTER := 0x20650000
 BASE_CHAIN  := 0x20660000
+BASE_DEMO   := 0x20690000
 BASE_DYNAMIC := 0x206a0000
 BASE_FACIL  := 0x206b0000
 BASE_FE     := 0x206c0000
@@ -51,7 +52,7 @@ BASE_SOUND  := 0x208d0000
 BASE_UTIL   := 0x208e0000
 BASE_WEATHERM := 0x208f0000
 
-MODULES := ACONTAIN ATC CHAIN DYNAMIC FACIL FE GLOBAL LANDME NUMERIC SLEW SOUND UTIL WEATHERM
+MODULES := ACONTAIN ATC BOOSTER CHAIN DEMO DYNAMIC FACIL FE GLOBAL LANDME NUMERIC SLEW SOUND UTIL WEATHERM
 
 # Setup renames two modules on the way from CD to install, and the game loads
 # the *installed* names.  A rebuilt FACIL.DLL copied in as FACIL.DLL would just
@@ -215,6 +216,24 @@ $(BIN)/booster.res: src/booster/booster.rc
 
 src/booster/booster_data.inc: $(ORIG)/Modules/BOOSTER.DLL tools/gen_booster_data.py
 	@python3 tools/gen_booster_data.py $< $@
+
+# DEMO, flight videos and instant replay: an assembly recorder and player
+# with a C half of dialog callbacks.  libgcc for the 64-bit divisions.  The
+# image's tables hold distinct routines that do nothing; identical-code folding
+# would make them one, so it is off.
+$(BIN)/DEMO.DLL: src/demo/demo.c src/demo/demo.def src/demo/demo_data.inc $(BIN)/demo.res
+	@mkdir -p $(BIN)
+	$(CC) $(CFLAGS) -fno-delete-null-pointer-checks -fno-ipa-icf -Isrc/demo $(LDFLAGS) \
+	      -Wl,--image-base=$(BASE_DEMO) \
+	      -o $@ src/demo/demo.c $(BIN)/demo.res src/demo/demo.def \
+	      -lkernel32 -lgcc
+
+$(BIN)/demo.res: src/demo/demo.rc
+	@mkdir -p $(BIN)
+	$(RC) $< -O coff -o $@
+
+src/demo/demo_data.inc: $(ORIG)/Modules/DEMO.DLL tools/gen_demo_data.py
+	@python3 tools/gen_demo_data.py $< $@
 
 # LANDME, the landing-assistance state machine.  It uses retail FE in-game and
 # in its differential harness, so it can be completed independently of FE's
@@ -532,6 +551,24 @@ boosterdiff-run: boosterdiff
 	@test -n "$(FE_CD)" || { echo "boosterdiff-run needs the CD tree in cd/ (cd/Boosters)"; exit 2; }
 	@cd $(DIFFDIR) && WINEDEBUG=-all timeout 7200 wine boosterdiff.exe $(if $(N),$(N),20000) $(FE_CD)
 
+# DEMO, whole-module: the flight-video recorder and player, instant replay and
+# the four dialogs' callbacks, retail and OpenFS98 in turn over the CD's six
+# videos and synthetic ones, with retail UTIL's catalogue and a stand-in for
+# the host's dialog engine.  Needs cd/.  N=... sets the scenario count.
+$(DIFFDIR)/demodiff.exe: tools/difftest/demodiff.c
+	@mkdir -p $(DIFFDIR)
+	$(CC) -std=c99 -O1 -Wall -Wextra -o $@ tools/difftest/demodiff.c
+
+demodiff: $(DIFFDIR)/demodiff.exe $(BIN)/DEMO.DLL
+	@cp $(ORIG)/Modules/DEMO.DLL $(DIFFDIR)/DEMO_retail.dll
+	@cp $(BIN)/DEMO.DLL          $(DIFFDIR)/DEMO_ours.dll
+	@cp $(ORIG)/Modules/UTIL.DLL $(DIFFDIR)/UTIL_retail.dll
+	@cp $(ORIG)/FLTSIM98.EXE     $(DIFFDIR)/FLTSIM98_host.exe
+
+demodiff-run: demodiff
+	@test -n "$(FE_CD)" || { echo "demodiff-run needs the CD tree in cd/"; exit 2; }
+	@cd $(DIFFDIR) && WINEDEBUG=-all timeout 3600 wine demodiff.exe $(if $(N),$(N),20000) $(FE_CD)
+
 # CHAIN, whole-module: both DLLs driven through Linkage over random scripts
 # whose callbacks re-enter the module.  N=... sets the scenario count.
 $(DIFFDIR)/chaindiff.exe: tools/difftest/chaindiff.c
@@ -818,4 +855,4 @@ smoke: all
 clean:
 	rm -rf $(BIN)
 
-.PHONY: all stage setup-map graph hostmap compare run trace trace-render trace-ddraw kill window-reset wm-unmanaged wm-managed vd-on vd-off mode8 mode16 ddraw-gdi ddraw-default smoke difftest difftest-run utildiff utildiff-run utildiff-portable numericdiff numericdiff-run chaindiff chaindiff-run atcdiff atcdiff-run weathermdiff weathermdiff-run acontaindiff acontaindiff-run sounddiff sounddiff-run dynamicdiff dynamicdiff-run fegriddiff fegriddiff-run fediff fediff-run fesldiff fesldiff-run boosterdiff boosterdiff-run landmediff landmediff-run facildiff facildiff-run facildiff-fe-run ofstest ofstest-run ofstest-remove util-trace install revert installed-name-of orig-module-of clean
+.PHONY: all stage setup-map graph hostmap compare run trace trace-render trace-ddraw kill window-reset wm-unmanaged wm-managed vd-on vd-off mode8 mode16 ddraw-gdi ddraw-default smoke difftest difftest-run utildiff utildiff-run utildiff-portable numericdiff numericdiff-run chaindiff chaindiff-run atcdiff atcdiff-run weathermdiff weathermdiff-run acontaindiff acontaindiff-run sounddiff sounddiff-run dynamicdiff dynamicdiff-run fegriddiff fegriddiff-run fediff fediff-run fesldiff fesldiff-run boosterdiff boosterdiff-run demodiff demodiff-run landmediff landmediff-run facildiff facildiff-run facildiff-fe-run ofstest ofstest-run ofstest-remove util-trace install revert installed-name-of orig-module-of clean

@@ -74,6 +74,8 @@ else's 1997 build, and it should read that way.
 | `make fediff-run` | FE's assembly engine and compiled-C file services, retail and OpenFS98 loaded side by side over the extracted CD scenery/texture tree plus self-checking synthetic compressed-texture and BGL-section fixtures, comparing every import call and output, GLOBAL, the heap and the whole `.data` image |
 | `make landmediff-run` | LANDME's seven-state landing assistant against retail, each side backed by its own retail FE over the real scenery tree; compares every import call, GLOBAL, the heap and both modules' whole `.data` images |
 | `make facildiff-run` | whole-module FACIL against retail, each side backed by a separate retail FE: a synthetic five-level rebuild, 20,000 seeded synthetic caches through the `+0x18`/`+0x1c`/`+0x20` queries, then the real CD index (with all sixteen boosters) and 10,000 dialog scenarios driven by a stand-in for World.DLL; compares the caches, call transcript (with string comparisons), returned records, GLOBAL, heap and both modules' state |
+| `make boosterdiff-run` | whole-module BOOSTER, worker thread included: retail and OpenFS98 run in turn over identical cache trees (four CD boosters, synthetic ones with every record type), the thread drained after every operation by counting posted 0x401s against SetEvents; MessageBoxA and the file calls hooked and logged; compares the transcript, the whole `.data` image, both heaps, GLOBAL, FE's records and the cache trees |
+| `make demodiff-run` | whole-module DEMO: retail and OpenFS98 in turn over the CD's six videos and synthetic ones with every record class, recording, playback, instant replay and the four dialogs' callbacks (retail UTIL's catalogue, a stand-in for the host's dialog engine); faults compared as outcomes, runaway ops cut at a fixed count; compares the transcript, the whole `.data` image (code pointers through a learnt pairing), the arena, GLOBAL and the trees |
 | `make fesldiff-run` | FE's `+0x78`, the Scenery Library, retail against OpenFS98 over a writable fixture with sandboxed drive letters, driven by a stand-in for World.DLL's nine dialogs; compares the call transcript (with string comparisons and the world files left on disk), FE's `.data`, GLOBAL and the heap; faults are compared as outcomes |
 | `make facildiff-fe-run` | the same harness with OpenFS98 FE behind OpenFS98 FACIL, against retail FE behind retail FACIL: both reimplementations together over the real CD index and the dialogs (`Q=`/`D=` set the phase sizes, 2,000 each by default) |
 | `make weathermdiff-run` | the same for WEATHERM: updates, frames, resets, scenery effects and list operations, comparing every import call, GLOBAL, the heap and the `.data` image |
@@ -174,13 +176,16 @@ emulate 80-bit arithmetic to preserve a rounding artefact. See
 | `DYNAMIC` | 6 | 12,300 | **reimplemented, verified, and running in-game** — dynamic scenery: an interpreter for the airport traffic programs in scenery files, three of whose opcodes write programs of their own; 20,000 whole-module differential scripts comparing GLOBAL, the heap and its whole `.data` image, zero differences — see [docs/modules/dynamic.md](docs/modules/dynamic.md) |
 | `FE` | 18 | 49,016 | **reimplemented, verified, and running in-game** — the grid conversions, assembly engine, compiled-C file services (20,000 whole-module scenarios) and the Scenery Library (20,000 scenarios through a World.DLL stand-in), zero differences — see [docs/modules/fe.md](docs/modules/fe.md) |
 | `LANDME` | 26 | 4,094 | **reimplemented, verified, and running in-game** — nearest-runway selection and all eleven nonzero landing-guidance phases; 20,000 whole-module scenarios over retail FE and real scenery, zero differences — see [docs/modules/landme.md](docs/modules/landme.md) |
+| `BOOSTER` | 34 | 8,024 | **reimplemented, verified, and running in-game** — the performance boosters: CD scenery copied to a disk cache on a worker thread, nearest first, and evicted out of reach; 20,000 whole-module scenarios, zero differences — see [docs/modules/booster.md](docs/modules/booster.md) |
+| `DEMO` | 7 | 16,864 | **reimplemented, verified, and running in-game** — flight videos (record and play), instant replay and the four dialogs' callbacks; 20,000 whole-module scenarios, zero differences — see [docs/modules/demo.md](docs/modules/demo.md) |
 | `FACIL` | 37 | 23,045 | **done** — verified (index, queries and the three dialogs' callbacks) and running in-game — see [docs/modules/facil.md](docs/modules/facil.md) |
 | `NUMERIC` | 17 | 14,684 | **reimplemented, verified, and running in-game** — 545,778 differential comparisons, zero mismatches — see [docs/modules/numeric.md](docs/modules/numeric.md) |
 | `UTIL` | 20 | 11,062 | **reimplemented, verified, and running in-game** — all 47 services; 19 seen called in a hands-on session, the modal alert among them — see [docs/modules/util.md](docs/modules/util.md) |
 | `FLTSIM98.EXE` | 1 (host) | 82,016 | 194 services mapped, 21 with confirmed prototypes, 11 verified in-process, 2 implemented — see [docs/modules/host.md](docs/modules/host.md) |
 
-Retail baseline and the OpenFS98 build -- ACONTAIN, ATC, CHAIN, DYNAMIC,
-GLOBAL, LANDME, NUMERIC, SLEW, SOUND, UTIL and WEATHERM all installed -- both
+Retail baseline and the OpenFS98 build -- ACONTAIN, ATC, BOOSTER, CHAIN,
+DEMO, DYNAMIC, FACIL, FE, GLOBAL, LANDME, NUMERIC, SLEW, SOUND, UTIL and WEATHERM all
+installed -- both
 reach the panel: 27/27 modules, 95 gauges, `make smoke` PASS.
 
 `GLOBAL.DLL`'s 4764-byte shared state block is byte-identical to retail, and the
@@ -237,8 +242,14 @@ aircraft through all guidance phases: 20,000 scenarios, 18,881 runways found,
 World.DLL and were verified externally. Its harness found that FE `+0x84` and
 `+0x88` return stack leftovers; FE now reproduces them, and
 `make facildiff-fe-run` checks OpenFS98 FE and FACIL together. `BOOSTER`,
-which waited for FE, is next; `WINMSG` and `REALITY` draw and run dialogs and
-belong in `ofstest`.
+which waited for FE, is done too: `make boosterdiff-run` runs both sides in
+turn and drains its worker thread after every operation (20,000 scenarios,
+zero differences, see [docs/modules/booster.md](docs/modules/booster.md)).
+That finishes round 4. Round 5 picked `DEMO`, the flight videos, which
+ADVDRV imports, and it is done too (`make demodiff-run`, 20,000 scenarios,
+zero differences, see [docs/modules/demo.md](docs/modules/demo.md)). `ADVDRV`
+is next; `WINMSG` and `REALITY` draw and run dialogs and belong in
+`ofstest`.
 
 Other useful work, in no particular order:
 
@@ -270,8 +281,10 @@ nothing in it imports anything interesting:
 11. ~~**`LANDME`** (4,094 bytes)~~ — done, verified against retail FE over the
     real scenery tree, and running in-game.
 12. ~~**`FACIL`** (23,045 bytes)~~ — done, verified and running in-game.
-    ~~**`FE`** (49,016 bytes)~~ — done, verified and running in-game. Next
-    in round 4: `BOOSTER`; `WINMSG` and `REALITY` need `ofstest`.
+    ~~**`FE`** (49,016 bytes)~~ — done, verified and running in-game.
+    ~~**`BOOSTER`** (8,024 bytes)~~ — done, verified and running in-game.
+    ~~**`DEMO`** (16,864 bytes)~~ — done, verified and running in-game.
+    Next: `ADVDRV` (29,330 bytes); `WINMSG` and `REALITY` need `ofstest`.
 13. `HG2D` (390 KB, the 2D rasteriser) last. It is 26% of the project on its
    own.
 

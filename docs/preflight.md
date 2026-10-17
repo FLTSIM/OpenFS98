@@ -9,7 +9,36 @@ Produced with `python3 tools/impscan.py orig/Modules/<M>.DLL`, then each call
 site and each callee read by hand. The scanner under-reports rather than
 over-reports (see its header); the call counts below are lower bounds.
 
-Four rounds so far, newest first.
+Five rounds so far, newest first.
+
+# Round 5: DEMO, ADVDRV
+
+## Verdict
+
+**DEMO first**, because ADVDRV imports it (`+0x28`, to play a lesson's video).
+It is now done: [modules/demo.md](modules/demo.md).
+
+| | DEMO | ADVDRV |
+| --- | --- | --- |
+| `.text` | 16,864 | 29,330 |
+| functions in Linkage | 12 | 9 |
+| written in | asm to `.text+0x353e`, MSVC C after | C, by its aligned entries (not yet read) |
+| unfinished imports | MAIN ×2, CONTROLS ×1, WINMSG ×1 | MAIN ×12, DEMO ×1, WINMSG ×2 |
+| host services | 29, two new (`+0x170`, `+0x178`) | 38 |
+| direct Win32 | none | none (MSVCRT) |
+| external harness | yes: real CD videos, a dialog stand-in | yes, after DEMO |
+
+DEMO's four unfinished calls are fire-and-forget: MAIN loads a situation,
+CONTROLS takes a command, WINMSG shows a message. Logging stubs model them
+faithfully, apart from the registers CONTROLS leaves, which the harness sets.
+Its dialogs, like FACIL's and the Scenery Library's, are callbacks that the
+host's dialog engine calls through parameter blocks, so they too were
+verified externally.
+
+The rest of the queue by `.text`: MPCHAT 3,104 (needs MULTIP), WINMSG 4,416
+and REALITY 4,822 (windows and dialogs: `ofstest`), ANALYSIS 8,086 (draws
+through HG2D), WINDOW 24,992, ADVDRV, MULTIP 43,318, CONTROLS 48,406, PANELS
+50,038, G3D 92,518, MAIN 119,648, HG2D 389,734.
 
 # Round 4: FE, LANDME, FACIL, BOOSTER
 
@@ -17,6 +46,11 @@ Four rounds so far, newest first.
 
 **FE's three external-harness parts, LANDME and FACIL are done and verified;
 LANDME and FACIL run in-game.** BOOSTER stays last.
+
+**Outcome:** BOOSTER is done as well, verified externally after all:
+[modules/booster.md](modules/booster.md). The thread was no obstacle once
+the harness ran the two sides in turn and drained the thread after every
+operation.
 
 1. **The grid conversions, `+0x60`..`+0x6c`.** These are pure and table-driven, so
    they are tested by vectors like UTIL's. They are small, they pin down FE's

@@ -1,0 +1,4 @@
+LIBRARY DEMO.DLL
+EXPORTS
+    Linkage DATA
+    ImportTable DATA

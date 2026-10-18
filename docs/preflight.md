@@ -9,7 +9,168 @@ Produced with `python3 tools/impscan.py orig/Modules/<M>.DLL`, then each call
 site and each callee read by hand. The scanner under-reports rather than
 over-reports (see its header); the call counts below are lower bounds.
 
-Six rounds so far, newest first.
+Eight rounds so far, newest first.
+
+# Round 8: ANALYSIS
+
+## Verdict
+
+**Externally testable**, and next. It has REALITY's shape: a frame callback
+on CHAIN that records samples, and dialogs whose control procedures draw
+only lines into a host record. A line is its arguments. The one thing it
+draws in the 3D world, the course trail, is a display list that it builds in
+its own heap and hands to G3D, so the list itself can be the logged output.
+All nine host services it uses are already in `host.h`.
+
+| | ANALYSIS |
+| --- | --- |
+| `.text` | 8,086 (`0x1f96`) |
+| functions in Linkage | 12, `+0x04`..`+0x3c` with `+0x0c`..`+0x14` null (hand-counted; `dumplinkage.py` agrees) |
+| written in | asm to `.text+0x915`, MSVC C from `+0x920` |
+| unfinished imports | HG2D ×17 (`+0x2c`, `+0x30`, `+0x34`), G3D ×1 (`+0x28`) |
+| done imports | CHAIN, NUMERIC, UTIL |
+| host services | 9, none new: `+0x074`, `+0x078`, `+0x084`, `+0x10c`, `+0x20c`, `+0x214`, `+0x218`, `+0x21c`, `+0x2a8` |
+| direct Win32 | none (MSVCRT `_ftol`) |
+| callers | MAIN `+0x34` calls `+0x34` (the menu command); nothing else found |
+| external harness | yes: REALITY's dialog stand-in and line stubs, a logging G3D, retail UTIL and NUMERIC |
+
+## Shape
+
+`.data` is one 0x32c-byte image (`ImportTable` at `+0x88`, `Linkage` at
+`+0xc8`) with 23 relocations: the Linkage, three dialog parameter blocks,
+their string pointers and the exchange table's callback. A harness compares
+it as offsets, as `realitydiff` does.
+
+GLOBAL `+0x814` is the mode: 0 off, 1 landing analysis, 2 course tracking,
+3 manoeuvre analysis. Word `+0x1a` bit `0x200` is set while a mode is on.
+
+- **Assembly, `.text+0x020`..`+0x912`.** It uses ATC's stack-alignment
+  wrapper around every import call. `+0x04` allocates the sample buffer,
+  1,000 records of 0x1c bytes (`.data+0x44`), clears it, and registers the
+  frame callback `.text+0x2ae` on CHAIN list 5. `+0x08` unregisters lists 5,
+  0xc and 0xe and frees both heap blocks.
+  - **A sample** is a flag byte (0x81, |2 when GLOBAL `+0x366` is set, 0x83
+    for the touchdown mark), then the 24 bytes of GLOBAL `+0x560`. It is
+    recorded only when those 24 bytes differ from the last sample's
+    (`.text+0x53b`).
+  - **`+0x1c`..`+0x30`** are accessors over the buffer: a whole record, the
+    24 bytes, the flag, a store, the count, and setting the count. Each is
+    bounded by `< 1000`.
+  - **The frame callback** keeps a countdown at `.data+0x70`. It reloads it
+    with 2 in landing mode, with byte table `.data+0x73[+0x824]` (5, 14, 29,
+    50) in course tracking, and with `.data+0x71` in manoeuvre mode.
+  - **Landing mode arms and triggers on height.** It forms the height above
+    the ground from `+0x572`/`+0x574` less `+0x20` with a half-width
+    `sub ah,bl` / `sbb`. It arms above 0x22 and triggers at 0x1e:0x7ae5 or
+    lower (about 100 ft), restarting the buffer. Once GLOBAL `+0x2b8` is at
+    most 0xc7f and `+0x366` is set (both), it opens the landing dialog.
+  - **Manoeuvre mode** registers `.text+0x277` on CHAIN list 0xc. That
+    callback watches for command 0x1002b with a zero argument, which ends the
+    run and opens the manoeuvre dialog. A crash state (GLOBAL `+0x838` 1..4)
+    also ends a run.
+  - **Course tracking with GLOBAL `+0x81c`** registers `.text+0x60a` on
+    list 0xe. That callback builds a display list in a 0x59e4-byte block
+    (`.data+0x50`), with opcodes 0x76, 0x51/0xf00f, 0x2f/0x2e with the
+    sample's position, 0x0e, alternating 0x0f/0x10, and a 0 terminator. It
+    passes the block to G3D `+0x28`. The number of segments comes from
+    dword table `.data+0x76[+0x828]`, which holds 50, 250 and 500. That
+    table overlaps the byte table's last entry.
+- **Compiled C, `.text+0x920`..`+0x2f6e`**: three dialogs through host
+  `+0x10c`.
+  - **`0x14050002`, landing analysis.** The block is at `.data+0x148` and
+    the control procedure at `.text+0x9a0` (0 attach, 1 paint, 2 release,
+    REALITY's protocol). Attach clears the 0xa4-byte record at
+    `.data+0x280`, attaches it with host `+0x074`, and allocates a 0xc0-byte
+    view of half-extents. Paint fills the surface (`+0x94`/`+0x98`) with
+    0xff through host `+0x218` and draws a grid with HG2D `+0x2c`/`+0x30` in
+    colour 0xf000. It then draws the descent in 0xf00f through HG2D `+0x34`:
+    UTIL `+0x64` ranges each sample from the first, and the result is scaled
+    by integer arithmetic. The vertical speed at the 0x83 mark is formatted
+    by NUMERIC `+0x18` (id `0x1000a`) into `.data+0x108`. Release goes
+    through host `+0x078` and `+0x214`.
+  - **`0x14050003`, manoeuvre analysis.** The block is at `.data+0x188` and
+    the procedure at `.text+0x590`. The record and view are the same. It
+    finds the run's extremes (`.text+0x2f0`) and converts them through UTIL
+    `+0xc8`/`+0xc0`/`+0xbc`/`+0xc4`/`+0x48` (48-bit ↔ double, longitude to
+    metres). It scales them on the x87 with `_ftol` and formats the scale
+    with NUMERIC `+0x18`. The units come from GLOBAL `+0xc18`.
+  - **`0x1405`, the options (`+0x34`).** The block is at `.data+0x1a0`, with
+    a UTIL exchange table at `.data+0x1e0`: `+0x90` reads it, `+0x8c(…, 0)`
+    commits it, and `.text+0x2d70` validates through `+0x8c(…, 1)`. The
+    table's callback `.text+0x2d90` maps the mode to and from the dialog
+    (jump table in `.text` at `+0x2e6c`) and writes GLOBAL `+0x814`..`+0x820`
+    and `+0x1a`. GLOBAL `+0x824` and `+0x828` go through the table directly.
+
+## Three things a harness must model
+
+- **The compaction counts in ecx across host `memmove`.** When the buffer
+  fills, `.text+0x5cd` keeps every second sample. Its slot index is ecx, kept
+  across `.text+0x889`/`+0x8d1`. Those save only eax and edx, and they call
+  host `+0x21c`, which loads ecx itself and calls MSVCRT `memmove`. So each
+  kept sample goes to the slot that `memmove` leaves in ecx, and the count
+  ends at that value plus one. Measured with a probe making ANALYSIS's own
+  0x1c-byte copies:
+
+  | runtime | ecx after | what compaction does |
+  | --- | --- | --- |
+  | wine 9 builtin `msvcrt` (what this prefix loads; no override) | 0 | every kept sample written to slot 0, then count 1 |
+  | the CD's `MSVCRT.DLL` (Jan 1997) | 7 (the dword count) | slots 1..6 stale, slot 7 sample 998, then count 8 |
+
+  Either way the trail collapses instead of halving. The interval byte
+  `.data+0x71` is also `rol`'d, so after eight compactions it wraps from 0x80
+  back to 1. The value is platform behaviour, not a property of ANALYSIS.
+  **Decided: reproduce the CD runtime's 7**, because that is the DLL FS98
+  shipped and ran with. The reimplementation leaves 7 in ecx after each of
+  those copies on every platform, and the harness's `+0x21c` stub does the
+  same, so both sides match the CD. Under wine, retail ANALYSIS still gets
+  the builtin's 0 in-game. That is a difference in wine, not one to copy.
+- **The change test counts with cx only.** `.text+0x54f` does `mov cx,0xc` /
+  `repz cmpsw` in 32-bit code, so the count is the caller's top half of ecx
+  joined to 0xc. With a nonzero top half and an unchanged position, the
+  compare runs past the 24 bytes into GLOBAL `+0x578` against
+  `.data+0x44`, and a stationary aircraft records samples anyway. ecx there
+  is what the path left: host `+0x218`'s `rep stos` (0) after a reset,
+  otherwise CHAIN's (`+0x18`, or the dispatch's). The entry needs DYNAMIC's
+  ecx-passing stub, and the harness must choose ecx per scenario.
+- **A trail length index past 2 has no limit.** `.data+0x76[3]` reads 0, and
+  the segment loop's `dec`/`jne` then runs until the samples run out. 1,000
+  samples need about 46,000 bytes of list, and the block is 0x59e4, so the
+  list is written past the block's end. The options dialog's validator
+  (`.text+0x2e80`) refuses list values above 2 (status 0xb; confirmed in
+  the full read). Whether GLOBAL `+0x828` can reach 3 any other way (a saved flight)
+  needs checking. The harness should guard-page that block as `dynamicdiff`
+  does.
+
+## Stubs
+
+- **HG2D** `+0x2c`/`+0x30`/`+0x34`: logged with every argument and GLOBAL
+  `+0x2ec`, plus the view they draw through, as `realitydiff`'s are.
+- **G3D** `+0x28`: logged as the list's bytes up to its terminator. It reads
+  ANALYSIS's own heap block and returns nothing ANALYSIS reads.
+- **Host**: REALITY's dialog stand-in for `+0x10c`, which calls attach,
+  paint, release and the exchange callbacks. Also WINMSG's record model for
+  `+0x074`/`+0x078`/`+0x084`, with a render size and a real surface, because
+  paint `memset`s it. The memory services are transliterated, with `+0x21c`
+  leaving the chosen ecx.
+- **CHAIN**: retail's or OpenFS98's (done). The frame, list 0xc and list 0xe
+  callbacks are driven by the script with a chosen ecx.
+- **UTIL, NUMERIC**: retail's, with state restored per side. `+0x64`,
+  `+0x48`, `+0xbc`..`+0xc8`, `+0x8c` and `+0x90` are all done and verified.
+
+x87: the manoeuvre graph ends in `_ftol`, so run each scenario under a random
+precision control, as `sounddiff` does. UTIL `+0xbc` is the service that
+cannot be bit-identical on ARM ([modules/util.md](modules/util.md)). ANALYSIS
+inherits that through it and adds nothing new.
+
+**Outcome:** done as planned, [modules/analysis.md](modules/analysis.md) --
+20,000 scenarios, 0 differences, the CD runtime's 7 reproduced. The full
+read confirmed the validator (an exchange callback's base is the block, so
+`+0x34`/`+0x3c` are the lists' values and status 0xb a refusal). It added
+the landing height's borrow (a `sar` between `sub ah,bl` and `sbb`), a zero
+range's divide, the highest latitude's tie-break, "off" not staying off, and
+both graphs reading an uninitialised frame with no samples. The change test's
+ecx top half is latent in retail: retail CHAIN passes the dispatch's first
+argument in ecx, and MAIN dispatches list 5 with 0.
 
 # Round 6: WINDOW
 

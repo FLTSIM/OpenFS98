@@ -71,9 +71,11 @@ make winmsgdiff-run      # whole-module WINMSG, the message bar -> 20000 scenari
 make winmsg-breaks       # WINMSG broken on purpose -> 64 breaks, 60 caught, 4 proven equivalent (~13 min)
 make realitydiff-run     # whole-module REALITY, crashes and the analysis -> 20000 scenarios, 0 differ (~1 min)
 make reality-breaks      # REALITY broken on purpose -> 67 breaks, 61 caught, 6 proven equivalent (~7 min)
+make analysisdiff-run    # whole-module ANALYSIS, landing/manoeuvre/course -> 20000 scenarios, 0 differ (~2 min)
+make analysis-breaks     # ANALYSIS broken on purpose -> 103 breaks, 93 caught, 10 proven equivalent (~20 min)
 make difftest-run        # whole-module SLEW         -> 0/2000 vectors differ
 make ofstest-run         # in-process, via the host  -> passed 68, failed 0
-make smoke               # ACONTAIN, ADVDRV, ATC, BOOSTER, CHAIN, DEMO, DYNAMIC, FACIL, FE, GLOBAL, LANDME, NUMERIC, REALITY, SLEW, SOUND, UTIL, WEATHERM, WINDOW, WINMSG installed -> 27/27, 95 gauges, PASS
+make smoke               # ACONTAIN, ADVDRV, ANALYSIS, ATC, BOOSTER, CHAIN, DEMO, DYNAMIC, FACIL, FE, GLOBAL, LANDME, NUMERIC, REALITY, SLEW, SOUND, UTIL, WEATHERM, WINDOW, WINMSG installed -> 27/27, 95 gauges, PASS
 make util-trace          # which UTIL services the game calls, counted in-game
 ```
 
@@ -205,8 +207,21 @@ clamp. The line stubs log the view of the record they draw through: a break
 in a block freed before the comparison went unseen until they did. See
 [docs/modules/reality.md](docs/modules/reality.md).
 
-**Next:** survey `ANALYSIS` (8,086 bytes), which has REALITY's shape (window
-services, the `+0x10c` dialog, HG2D/G3D/NUMERIC/UTIL).
+**ANALYSIS is done, verified and running in-game** (round 8 of
+[docs/preflight.md](docs/preflight.md)): landing and manoeuvre analysis and
+course tracking. `make analysisdiff-run`: 20,000 scenarios, 0 differences;
+`make analysis-breaks`: 93 of 103 caught, 10 proven equivalent. Its sample compaction counts in ecx across
+host `+0x21c`, so the result depends on what MSVCRT `memmove` leaves in ecx
+(wine's builtin 0, the CD's 1997 `MSVCRT.DLL` 7). **Decided: reproduce the
+CD's 7** on every platform, in the module and in the harness's `+0x21c` stub.
+Two findings beyond ANALYSIS: **retail CHAIN calls a callback with ecx set to
+the dispatch's first argument**, and OpenFS98's CHAIN does not (a CHAIN fix,
+not yet made); and a harness stub must leave the registers the real callee
+leaves where retail asm reads them (`analysisdiff.c`'s asm wrappers). See
+[docs/modules/analysis.md](docs/modules/analysis.md).
+
+**Next:** a round-9 survey of what is left (MPCHAT, MULTIP, CONTROLS, PANELS,
+G3D, MAIN), and the CHAIN ecx fix, proven in `chaindiff`.
 
 FE's `+0x40` calling-convention break is now confirmed by `fediff`: the
 one-byte probe writes through the caller's edi and returns with ebx/esi/edi

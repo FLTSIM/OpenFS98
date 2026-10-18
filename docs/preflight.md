@@ -18,6 +18,15 @@ Five rounds so far, newest first.
 **DEMO first**, because ADVDRV imports it (`+0x28`, to play a lesson's video).
 It is now done: [modules/demo.md](modules/demo.md).
 
+**Outcome:** ADVDRV is done and verified too --
+[modules/advdrv.md](modules/advdrv.md). It is MSVC C, an x87 expression stack
+machine over 176 GLOBAL-backed system variables driving a bytecode
+interpreter. `make advdrvdiff-run` runs both sides over the CD's forty-four
+programs and synthetic ones an assembler in the harness writes, 20,000
+scenarios, zero differences. The one obstacle was `op_error`: it stops the
+program (freeing the code) and returns to the interpreter, which runs on
+undefined; the harness poisons comparison past that alert, both sides alike.
+
 | | DEMO | ADVDRV |
 | --- | --- | --- |
 | `.text` | 16,864 | 29,330 |

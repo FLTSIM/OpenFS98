@@ -1,0 +1,5 @@
+LIBRARY ADVDRV.DLL
+EXPORTS
+    Linkage DATA
+    ImportTable DATA
+    advdrv_cover DATA

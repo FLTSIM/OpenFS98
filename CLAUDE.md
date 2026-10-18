@@ -64,9 +64,10 @@ make facildiff-fe-run    # OpenFS98 FE+FACIL together -> 2000 query, 2000 dialog
 make fesldiff-run        # FE +0x78, the Scenery Library -> 20000 scenarios, 0 differ (~6 min)
 make boosterdiff-run     # whole-module BOOSTER, its thread drained -> 20000 scenarios, 0 differ (~75 min)
 make demodiff-run        # whole-module DEMO, videos and instant replay -> 20000 scenarios, 0 differ (~25 min)
+make advdrvdiff-run      # whole-module ADVDRV, adventures and lessons -> 20000 scenarios, 0 differ (~40 min)
 make difftest-run        # whole-module SLEW         -> 0/2000 vectors differ
 make ofstest-run         # in-process, via the host  -> passed 68, failed 0
-make smoke               # ACONTAIN, ATC, BOOSTER, CHAIN, DEMO, DYNAMIC, FACIL, FE, GLOBAL, LANDME, NUMERIC, SLEW, SOUND, UTIL, WEATHERM installed -> 27/27, 95 gauges, PASS
+make smoke               # ACONTAIN, ADVDRV, ATC, BOOSTER, CHAIN, DEMO, DYNAMIC, FACIL, FE, GLOBAL, LANDME, NUMERIC, SLEW, SOUND, UTIL, WEATHERM installed -> 27/27, 95 gauges, PASS
 make util-trace          # which UTIL services the game calls, counted in-game
 ```
 
@@ -146,8 +147,18 @@ proven equivalent. It reproduces a flush that loses edx, a table read past its
 end into code pointers, and callee-left ecx; see
 [docs/modules/demo.md](docs/modules/demo.md).
 
-**Next:** `ADVDRV` (29,330 bytes), the adventure/lesson interpreter, which
-imports DEMO `+0x28`; then `WINDOW`. `WINMSG` and `REALITY` need `ofstest`.
+**ADVDRV is done, verified and running in-game** (round 5 of
+[docs/preflight.md](docs/preflight.md)). It runs the compiled adventures,
+lessons and challenges: a bytecode interpreter with an x87 expression stack
+machine over 176 GLOBAL-backed system variables. `make advdrvdiff-run` runs
+both sides over the CD's forty-four programs and synthetic ones from an
+assembler in the harness, with 20,000 scenarios, 0 differences, all deliberate
+breaks caught or proven equivalent. It reproduces an `op_error` use-after-free
+(the harness poisons comparison past it), a dead `0xffffd8f1` sentinel check,
+sign-and-magnitude 48-bit positions, and displaced-weather-layer field reuse;
+see [docs/modules/advdrv.md](docs/modules/advdrv.md).
+
+**Next:** `WINDOW` (24,992 bytes). `WINMSG` and `REALITY` need `ofstest`.
 
 FE's `+0x40` calling-convention break is now confirmed by `fediff`: the
 one-byte probe writes through the caller's edi and returns with ebx/esi/edi

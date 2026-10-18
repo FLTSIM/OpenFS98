@@ -16,9 +16,9 @@
  *             dialog engine is a stand-in for the two pickers.  The voice
  *             engine plays nothing, and calls back when the harness says a
  *             sound has finished.  Key maps are logged.
- *   KERNEL32  the debug console (AllocConsole, FreeConsole, SetConsoleTitleA,
- *             GetStdHandle, WriteFile), hooked in both import tables and
- *             logged
+ *   KERNEL32  the debug console is left closed: synthetic programs never
+ *             open it, so error messages go to a null handle and fail on both
+ *             sides alike, uncompared
  *   UTIL      retail's: the catalogue (+0x98) real over the trees, the
  *             modeless alerts real over the stub host; the modal alert logged
  *             and answered; the conversions and the random number generator
@@ -115,8 +115,8 @@ typedef uint32_t (STDCALL *callback_fn)(uint32_t, uint32_t);
 
 /* CHAIN, as the real one keeps a list */
 struct chain_list {
-    callback_fn cb[64];
-    uint8_t removed[64];
+    callback_fn cb[2048];
+    uint8_t removed[2048];
     uint32_t count, depth, pending;
 };
 
@@ -158,6 +158,8 @@ static uint32_t op_calls;
 static HANDLE main_thread;
 static volatile DWORD op_started;
 static volatile int in_module;
+static int op_faulted;
+static int poisoned;  /* op_error fired: the code is freed, continuation undefined */
 static void cut_op(void);
 
 /* the scenario: the clock, the answers, and what the stubs hand out */
@@ -209,7 +211,7 @@ static void put(const char *format, ...)
     va_list args;
     int n;
 
-    if (cur == NULL || cur->length >= TRANSCRIPT_SIZE - 1024)
+    if (cur == NULL || poisoned || cur->length >= TRANSCRIPT_SIZE - 1024)
         return;
     va_start(args, format);
     n = vsnprintf(cur->transcript + cur->length, TRANSCRIPT_SIZE - cur->length,
@@ -1114,7 +1116,10 @@ static int32_t STDCALL chain_add(uint32_t list, callback_fn cb)
     put(")");
     if (list >= 0x24) return -1;
     l = &cur->chain[list];
-    if (l->count >= 64) { printf("chain list %u full\n", list); exit(2); }
+    /* a program that sets its rate to the list it is running on re-adds
+     * itself to the dispatch in progress, which visits it again: the sim
+     * hangs.  Cut at the same count on both sides. */
+    if (l->count >= 2048) cut_op();
     l->cb[l->count] = cb;
     l->removed[l->count] = 0;
     l->count++;
@@ -1299,6 +1304,15 @@ static uint32_t STDCALL u_alert(uint32_t flags, uint32_t tag, uint32_t p1, uint3
     if (p1 >= 0x10000) put_s((const char *)(uintptr_t)p1); else put("%#x", p1);
     put(",%#x,%#x,%#x,%#x,%u)=%u", p2, p3, p4, p5, lines, a);
     if (counting) cover_alerts++;
+    /* op_error's alert: it has already freed the running program's code and
+     * will return to a dangling interpreter.  Everything the program touches
+     * from here is undefined (and differs between builds); the transcript is
+     * still compared, but the derived state is not. */
+    if (p1 == 0xf439 && !poisoned) {
+        put(" POISON");
+        poisoned = 1;
+        if (counting) cover_errors++;
+    }
     return a;
 }
 
@@ -1379,84 +1393,6 @@ static uint32_t STDCALL u_list(uint32_t a, uint32_t b, uint32_t c, uint32_t d, u
     r = UTIL_REAL(0x98, util_f9)(a, b, c, d, e, f, g, h, i);
     put("=%#x,%u", r, *(uint32_t *)(uintptr_t)d);
     return r;
-}
-
-/* ---- the debug console, hooked in both import tables -------------------------------- */
-
-#define CONSOLE_HANDLE ((HANDLE)(uintptr_t)0x6c00)
-
-static BOOL WINAPI k_alloc_console(void)
-{
-    count_call();
-    put(" AllocConsole");
-    if (counting) cover_console++;
-    return TRUE;
-}
-
-static BOOL WINAPI k_free_console(void)
-{
-    count_call();
-    put(" FreeConsole");
-    return TRUE;
-}
-
-static BOOL WINAPI k_set_title(const char *title)
-{
-    count_call();
-    put(" SetConsoleTitle(");
-    put_s(title);
-    put(")");
-    return TRUE;
-}
-
-static HANDLE WINAPI k_get_std(DWORD which)
-{
-    count_call();
-    put(" GetStdHandle(%ld)", (long)which);
-    return (HANDLE)((uintptr_t)CONSOLE_HANDLE + (which & 0xff));
-}
-
-static BOOL WINAPI k_write(HANDLE h, const void *buf, DWORD n, DWORD *wrote, OVERLAPPED *o)
-{
-    (void)o;
-    count_call();
-    put(" WriteFile(%#x,%lu,%.*s)", (uint32_t)(uintptr_t)h, (unsigned long)n,
-        (int)(n < 200 ? n : 200), (const char *)buf);
-    if (wrote) *wrote = n;
-    return h != NULL;
-}
-
-static int patch_iat(HMODULE m, const char *dll, const char *fn, void *repl)
-{
-    IMAGE_DOS_HEADER *dos = (IMAGE_DOS_HEADER *)m;
-    IMAGE_NT_HEADERS *nt = (IMAGE_NT_HEADERS *)((uint8_t *)m + dos->e_lfanew);
-    IMAGE_DATA_DIRECTORY *dir = &nt->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_IMPORT];
-    IMAGE_IMPORT_DESCRIPTOR *d = (IMAGE_IMPORT_DESCRIPTOR *)((uint8_t *)m + dir->VirtualAddress);
-
-    for (; d->Name; d++) {
-        IMAGE_THUNK_DATA *names, *iat;
-
-        if (_stricmp((char *)m + d->Name, dll))
-            continue;
-        names = (IMAGE_THUNK_DATA *)((uint8_t *)m +
-                (d->OriginalFirstThunk ? d->OriginalFirstThunk : d->FirstThunk));
-        iat = (IMAGE_THUNK_DATA *)((uint8_t *)m + d->FirstThunk);
-        for (; names->u1.AddressOfData; names++, iat++) {
-            IMAGE_IMPORT_BY_NAME *ibn;
-            DWORD old;
-
-            if (IMAGE_SNAP_BY_ORDINAL(names->u1.Ordinal))
-                continue;
-            ibn = (IMAGE_IMPORT_BY_NAME *)((uint8_t *)m + names->u1.AddressOfData);
-            if (strcmp((char *)ibn->Name, fn))
-                continue;
-            VirtualProtect(&iat->u1.Function, 4, PAGE_READWRITE, &old);
-            iat->u1.Function = (DWORD)(uintptr_t)repl;
-            VirtualProtect(&iat->u1.Function, 4, old, &old);
-            return 1;
-        }
-    }
-    return 0;
 }
 
 #define SET_SLOT(table, offset, fn) (*(void **)((table) + (offset)) = (void *)(fn))
@@ -1585,15 +1521,6 @@ static void load_side(struct side *s, const char *path, const char *name)
     struct import *im;
     IMAGE_DOS_HEADER *dos;
     IMAGE_NT_HEADERS *nt;
-    static const char *const console[] = {
-        "AllocConsole", "FreeConsole", "SetConsoleTitleA", "GetStdHandle", "WriteFile"
-    };
-    static void *const hooks[] = {
-        (void *)k_alloc_console, (void *)k_free_console, (void *)k_set_title,
-        (void *)k_get_std, (void *)k_write
-    };
-    uint32_t i;
-
     memset(s, 0, sizeof *s);
     s->name = name;
     s->transcript = malloc(TRANSCRIPT_SIZE);
@@ -1627,10 +1554,1313 @@ static void load_side(struct side *s, const char *path, const char *name)
         default: printf("%s: unexpected import %u\n", name, im->id); exit(2);
         }
     }
-    for (i = 0; i < 5; i++)
-        if (!patch_iat(s->module, "KERNEL32.dll", console[i], hooks[i])) {
-            printf("%s: no import of %s to hook\n", name, console[i]);
-            exit(2);
-        }
     memcpy(s->pristine, s->image, IMAGE_SIZE);
+}
+
+/* ---- fixtures ------------------------------------------------------------------------- */
+
+static char wav_names[1200][16];
+static uint32_t nwav;
+static char cd_adv[24][16], cd_les[32][16];
+static uint32_t ncd_adv, ncd_les;
+
+/* which system variables have a getter and a setter, from the image's
+ * relocation list */
+static uint8_t has_get[0xb0], has_set[0xb0];
+static uint8_t get_list[0xb0], set_list[0xb0];
+static uint32_t nget, nset;
+
+static void touch(const char *path)
+{
+    FILE *f = fopen(path, "wb");
+    if (f == NULL) { printf("cannot write %s\n", path); exit(2); }
+    fputs("RIFF", f);
+    fclose(f);
+}
+
+static void copy_file(const char *from, const char *to)
+{
+    if (!CopyFileA(from, to, FALSE)) { printf("cannot copy %s\n", from); exit(2); }
+    SetFileAttributesA(to, FILE_ATTRIBUTE_NORMAL);
+}
+
+static void remove_tree(const char *dir)
+{
+    char pattern[MAX_PATH], path[MAX_PATH];
+    WIN32_FIND_DATAA d;
+    HANDLE h;
+
+    snprintf(pattern, sizeof pattern, "%s\\*", dir);
+    h = FindFirstFileA(pattern, &d);
+    if (h != INVALID_HANDLE_VALUE) {
+        do {
+            if (d.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY)
+                continue;
+            snprintf(path, sizeof path, "%s\\%s", dir, d.cFileName);
+            SetFileAttributesA(path, FILE_ATTRIBUTE_NORMAL);
+            DeleteFileA(path);
+        } while (FindNextFileA(h, &d));
+        FindClose(h);
+    }
+}
+
+/* copy every file matching `pattern` in `from`, keeping the names */
+static uint32_t copy_matching(const char *from, const char *pattern, const char *to,
+                              char (*names)[16], uint32_t max)
+{
+    char p[MAX_PATH], a[MAX_PATH], b[MAX_PATH];
+    WIN32_FIND_DATAA d;
+    HANDLE h;
+    uint32_t n = 0;
+
+    snprintf(p, sizeof p, "%s\\%s", from, pattern);
+    h = FindFirstFileA(p, &d);
+    if (h == INVALID_HANDLE_VALUE) return 0;
+    do {
+        snprintf(a, sizeof a, "%s\\%s", from, d.cFileName);
+        snprintf(b, sizeof b, "%s\\%s", to, d.cFileName);
+        copy_file(a, b);
+        if (names && n < max) {
+            char *dot;
+            snprintf(names[n], 16, "%s", d.cFileName);
+            dot = strchr(names[n], '.');
+            if (dot) *dot = 0;
+            _strupr(names[n]);
+        }
+        n++;
+    } while (FindNextFileA(h, &d));
+    FindClose(h);
+    return n;
+}
+
+static void build_static_trees(void)
+{
+    static const char *const dirs[] = {
+        "ADV", "ADV\\WAV", "ADV\\WAV\\CACHE", "ADV\\VIDEOS", "LESSONS", "LESSONS\\WAV",
+        "LESSONS\\VIDEOS", "CHALLENG", "SITUATIO", "PILOTS", "VIDEOS", "EXTRAWAV",
+        "CDROOT", "CDROOT\\fs98", "CDROOT\\fs98\\adv", "CDROOT\\fs98\\adv\\wav"
+    };
+    char p[MAX_PATH];
+    WIN32_FIND_DATAA d;
+    HANDLE h;
+    uint32_t i;
+
+    for (i = 0; i < sizeof dirs / sizeof dirs[0]; i++) {
+        CreateDirectoryA(dirs[i], NULL);
+        remove_tree(dirs[i]);
+    }
+    snprintf(p, sizeof p, "%s\\fs98\\Adv", cd_root);
+    ncd_adv = copy_matching(p, "*.adv", "ADV", cd_adv, 24);
+    copy_matching(p, "*.stn", "ADV", NULL, 0);
+    snprintf(p, sizeof p, "%s\\fs98\\Lessons", cd_root);
+    ncd_les = copy_matching(p, "*.les", "LESSONS", cd_les, 32);
+    copy_matching(p, "*.stn", "LESSONS", NULL, 0);
+    snprintf(p, sizeof p, "%s\\fs98\\Adv\\WAV\\*.wav", cd_root);
+    h = FindFirstFileA(p, &d);
+    if (h != INVALID_HANDLE_VALUE) {
+        do {
+            if (nwav < 1200) {
+                char *dot;
+                snprintf(wav_names[nwav], 16, "%s", d.cFileName);
+                dot = strchr(wav_names[nwav], '.');
+                if (dot) *dot = 0;
+                _strupr(wav_names[nwav]);
+                nwav++;
+            }
+        } while (FindNextFileA(h, &d));
+        FindClose(h);
+    }
+    if (ncd_adv != 20 || ncd_les != 24 || nwav < 1000) {
+        printf("CD tree: %u adventures, %u lessons, %u sounds\n", ncd_adv, ncd_les, nwav);
+        exit(2);
+    }
+    /* sounds: all on the CD, half in ADV\WAV, a few elsewhere */
+    for (i = 0; i < nwav; i++) {
+        snprintf(p, sizeof p, "CDROOT\\fs98\\adv\\wav\\%s.WAV", wav_names[i]);
+        touch(p);
+        if (i % 2 == 0) {
+            snprintf(p, sizeof p, "ADV\\WAV\\%s.WAV", wav_names[i]);
+            touch(p);
+        }
+        if (i % 37 == 0) {
+            snprintf(p, sizeof p, "LESSONS\\WAV\\%s.WAV", wav_names[i]);
+            touch(p);
+        }
+        if (i % 53 == 0) {
+            snprintf(p, sizeof p, "EXTRAWAV\\%s.WAV", wav_names[i]);
+            touch(p);
+        }
+    }
+    touch("ADV\\SIT1.STN");
+    touch("LESSONS\\SIT1.STN");
+    touch("SITUATIO\\SIT2.STN");
+    touch("PILOTS\\SIT3.STN");
+    touch("ADV\\VIDEOS\\INTRO.VID");
+    touch("LESSONS\\VIDEOS\\INTRO.VID");
+    touch("VIDEOS\\OTHER.VID");
+    for (i = 0; i < sizeof code_slots / 2; i++) {
+        uint32_t o = code_slots[i];
+        if (o >= 0x318 && o < 0x10d8) {
+            if ((o - 0x318) % 0x14 == 0) has_get[(o - 0x318) / 0x14] = 1;
+            if ((o - 0x318) % 0x14 == 4) has_set[(o - 0x318) / 0x14] = 1;
+        }
+    }
+    for (i = 0; i < 0xb0; i++) {
+        if (has_get[i]) get_list[nget++] = (uint8_t)i;
+        if (has_set[i]) set_list[nset++] = (uint8_t)i;
+    }
+}
+
+/* the cache, as the scenario starts it */
+static uint32_t cache_seed;
+
+static void build_cache(void)
+{
+    char p[MAX_PATH];
+    uint32_t i, saved = rng;
+
+    remove_tree("ADV\\WAV\\CACHE");
+    rng = cache_seed | 1;
+    for (i = 0; i < 6; i++) {
+        snprintf(p, sizeof p, "ADV\\WAV\\CACHE\\%s.WAV", wav_names[rnd_n(nwav)]);
+        touch(p);
+    }
+    rng = saved;
+}
+
+/* ---- the assembler: synthetic programs ----------------------------------------------- */
+
+struct program {
+    uint8_t b[0x10000];
+    uint32_t n;
+    uint32_t var0, nvars;
+    uint32_t sub[8], nsubs;
+    uint32_t fix[256], fixsub[256], nfix;
+    uint32_t nstrings;
+    uint32_t varfix[8192], varidx[8192], nvarfix;
+    uint32_t first_bad;
+    uint32_t bound[4096], nbound;    /* instruction boundaries, for scan_size */
+    int wild;    /* may emit malformed code that trips op_error */
+};
+
+static struct program prog;
+
+static void b1(uint32_t v) { prog.b[prog.n++] = (uint8_t)v; }
+static void b2(uint32_t v) { b1(v); b1(v >> 8); }
+static void b4(uint32_t v) { b2(v); b2(v >> 16); }
+static void bd(double v) { memcpy(prog.b + prog.n, &v, 8); prog.n += 8; }
+static void bstr(const char *s) { size_t k = strlen(s) + 1; memcpy(prog.b + prog.n, s, k); prog.n += (uint32_t)k; }
+
+/* a variable's offset, patched once the code's end is known */
+static void bvar(uint32_t index)
+{
+    if (prog.nvarfix < 8192) {
+        prog.varfix[prog.nvarfix] = prog.n;
+        prog.varidx[prog.nvarfix++] = index;
+    }
+    b4(8 * index);
+}
+
+/* a handler's address, or -1 */
+static void target_sub(int allow_none)
+{
+    if (prog.nsubs == 0 || prog.nfix >= 256 || (allow_none && rnd_n(5) == 0)) {
+        b4(0xffffffffu);
+        return;
+    }
+    prog.fix[prog.nfix] = prog.n;
+    prog.fixsub[prog.nfix++] = rnd_n(prog.nsubs);
+    b4(0);
+}
+
+static double interesting(void)
+{
+    static const double v[] = { 0.0, 1.0, -1.0, 0.5, 2.0, 10.0, 360.0, -360.0, 180.0,
+                                90.0, 1e10, -1e10, 0.25, 1000.0, 3.5, 118.0, 136.95,
+                                108.15, 200.0, 1699.9, 7777.0, 29.92, 99.0, 1.0/3 };
+    uint32_t k = rnd_n(30);
+    union { uint64_t u; double d; } nan;
+
+    if (k < 24) return v[k];
+    if (k == 24) { nan.u = 0x7ff8000000000000ull; return nan.d; }
+    if (k == 25) { nan.u = 0x7ff0000000000000ull; return nan.d; }
+    return (double)(int32_t)rnd() / (double)(1 + rnd_n(1000));
+}
+
+static uint32_t ops[400], nops;
+static int start_dump;
+
+static void leaf(void)
+{
+    uint32_t k = rnd_n(14);
+
+    if (k < 3) { ops[nops++] = 2; ops[nops++] = 0x1000000 | rnd_n(256); }
+    else if (k < 4) { ops[nops++] = 3; ops[nops++] = 0x2000000 | (rnd() & 0xffff); }
+    else if (k < 5) { ops[nops++] = 4; ops[nops++] = 0x3000000; }
+    else if (k < 7) { ops[nops++] = 5; ops[nops++] = 0x4000000; }
+    else if (k < 10 && prog.nvars) { ops[nops++] = 7; ops[nops++] = 0x5000000 | rnd_n(prog.nvars); }
+    else {
+        uint32_t index = get_list[rnd_n(nget)];
+        if (prog.wild && rnd_n(60) == 0) index = rnd_n(0xc0);
+        ops[nops++] = 8;
+        ops[nops++] = 0x6000000 | index;
+    }
+}
+
+static void tree(int depth)
+{
+    static const uint8_t unary[] = { 0x1a, 0x1b, 0x1c, 0x1d, 0x1f, 0x20, 0x21, 0x22, 0x23,
+                                     0x24, 0x25, 0x26, 0x27, 0x28, 0x2d, 0x2e, 0x2f };
+    static const uint8_t binary[] = { 9, 0xa, 0xb, 0xc, 0xd, 0xe, 0xf, 0x10, 0x11, 0x12,
+                                      0x13, 0x14, 0x15, 0x16, 0x17, 0x18, 0x19, 0x29,
+                                      0x2a, 0x2b, 0x2c };
+    uint32_t k = rnd_n(10);
+
+    if (nops > 300 || depth <= 0 || k < 4) {
+        leaf();
+        return;
+    }
+    if (k < 6) {
+        tree(depth - 1);
+        ops[nops++] = unary[rnd_n(sizeof unary)];
+    } else if (k < 9) {
+        tree(depth - 1);
+        tree(depth - 1);
+        ops[nops++] = binary[rnd_n(sizeof binary)];
+    } else if (rnd_n(3) == 0) {
+        tree(depth - 1); tree(depth - 1); tree(depth - 1); tree(depth - 1);
+        ops[nops++] = 0x30;
+    } else {
+        tree(depth - 1); tree(depth - 1); tree(depth - 1);
+        ops[nops++] = rnd_n(2) ? 0x1e : 0x31;
+    }
+}
+
+static void emit_ops(void)
+{
+    uint32_t i;
+
+    if (nops == 2 && (ops[0] < 9)) {
+        /* one operator: the short form */
+    } else {
+        b1(1);
+    }
+    for (i = 0; i < nops; i++) {
+        uint32_t o = ops[i];
+        if (o < 0x100) { b1(o); continue; }
+        switch (o >> 24) {
+        case 1: b1(o & 0xff); break;
+        case 2: b2(o & 0xffff); break;
+        case 3: b4(rnd_n(3) ? rnd_n(5000) - 100 : rnd()); break;
+        case 4: bd(interesting()); break;
+        case 5: bvar(o & 0xffffff); break;
+        case 6: b2(o & 0xffffff); break;
+        }
+    }
+    if (!(nops == 2 && ops[0] < 9))
+        b1(0);
+    if (getenv("ADV_EXPR") && start_dump && prog.n >= 0x19a && prog.n <= 0x1b0) {
+        uint32_t j;
+        printf("expr at end %#x nops=%u ops:", prog.n, nops);
+        for (j = 0; j < nops; j++) printf(" %#x", ops[j]);
+        printf("\n");
+    }
+}
+
+/* an expression; now and then a malformed one */
+static void expr(void)
+{
+    uint32_t k = rnd_n(400);
+
+    nops = 0;
+    if (!prog.wild) k = 100 + rnd_n(300);   /* well-formed only */
+    if (k == 0) {                   /* past the operand stack */
+        uint32_t i, n = 99 + rnd_n(4);
+        for (i = 0; i < n; i++) { ops[nops++] = 2; ops[nops++] = 0x101; }
+        for (i = 1; i < n; i++) ops[nops++] = 9;
+    } else if (k == 1) {            /* two values left */
+        leaf(); leaf();
+    } else if (k == 2) {            /* none: underflow */
+        ops[nops++] = 9;
+    } else if (k == 3) {            /* an operator with no handler */
+        leaf();
+        ops[nops++] = 0x32 + rnd_n(0x10);
+    } else if (k == 4) {            /* operator 6 stops the program */
+        ops[nops++] = 6;
+        leaf();
+    } else {
+        tree(rnd_n(4));
+    }
+    emit_ops();
+}
+
+/* a small integer, as an expression */
+static void expr_int(uint32_t below)
+{
+    b1(2);
+    b1(rnd_n(below));
+}
+
+static void expr_value(double v)
+{
+    b1(5);
+    bd(v);
+}
+
+static void ref(int allow_system)
+{
+    if (allow_system && nset && rnd_n(4) == 0) {
+        b1(8);
+        b2(prog.wild && rnd_n(40) == 0 ? rnd_n(0xb0) : set_list[rnd_n(nset)]);
+    } else {
+        b1(7);
+        bvar(rnd_n(prog.nvars));
+    }
+}
+
+static void text(void)
+{
+    uint32_t pieces = 1 + rnd_n(4), i;
+    static const char *const words[] = { "Fly heading", "Altitude", "Good", "",
+                                         "Turn left now", "Contact tower" };
+
+    for (i = 0; i < pieces; i++) {
+        uint32_t k = rnd_n(10);
+        if (k < 4) { b1(2); bstr(words[rnd_n(6)]); }
+        else if (k < 7) { b1(3); expr(); }
+        else if (k < 8) { b1(1); }
+        else if (k < 9 && prog.nstrings) { b1(4); b1(0x32); b4(rnd_n(prog.nstrings)); }
+        else if (rnd_n(30) == 0) { b1(5 + rnd_n(3)); return; }
+    }
+    b1(0);
+}
+
+static const char *sound_name(void)
+{
+    uint32_t k = rnd_n(10);
+    if (k == 0) return "";
+    if (k == 1) return "NOPE";
+    return wav_names[rnd_n(nwav)];
+}
+
+static void stmt(int level);
+
+static void stmts(int level, uint32_t n)
+{
+    while (n--)
+        stmt(level);
+}
+
+static void stmt(int level)
+{
+    uint32_t k = rnd_n(1000), at;
+
+    if (prog.nbound < 4096 && prog.first_bad == 0)
+        prog.bound[prog.nbound++] = prog.n;
+    if (prog.n > 0xc000) { b1(0x12); return; }
+    if (k < 160) {                          /* assign */
+        b1(9); ref(1); expr();
+    } else if (k < 220 && level > 0) {      /* if */
+        b1(2); at = prog.n; b4(0); expr();
+        stmts(level - 1, 1 + rnd_n(3));
+        memcpy(prog.b + at, &prog.n, 4);
+    } else if (k < 240 && level > 0) {      /* a counted loop */
+        uint32_t next, out;
+        uint32_t var = rnd_n(prog.nvars);
+        b1(3); b1(7); bvar(var);
+        expr_int(4); expr_int(8); expr_value(rnd_n(5) ? 1.0 : rnd_n(2) ? -1.0 : 0.5);
+        next = prog.n;
+        b1(4); bd(0); bd(0); out = prog.n; b4(0); b1(7); bvar(var);
+        stmts(level - 1, 1 + rnd_n(2));
+        b1(1); b4(next);
+        memcpy(prog.b + out, &prog.n, 4);
+    } else if (k < 290) {                   /* call */
+        b1(5); target_sub(0);
+    } else if (k < 300) {                   /* switch */
+        uint32_t n = 1 + rnd_n(4), i, table, call = rnd_n(2) && prog.nsubs;
+        b1(call ? 8 : 7); b1(n); expr_int(6);
+        table = prog.n;
+        for (i = 0; i < n; i++)
+            b4(0);
+        /* jump tables go on to the next instruction; call tables to handlers */
+        for (i = 0; i < n; i++) {
+            uint32_t to = prog.n;
+            memcpy(prog.b + table + 4 * i, &to, 4);
+            if (call && prog.nfix < 256) {
+                prog.fix[prog.nfix] = table + 4 * i;
+                prog.fixsub[prog.nfix++] = rnd_n(prog.nsubs);
+            }
+        }
+    } else if (k < 380) {                   /* wait */
+        static const double waits[] = { 0.0, -1.0, 0.05, 0.1, 0.3, 1.0, 2.5, -2.0 };
+        b1(0x11); expr_value(waits[rnd_n(8)]); b1(rnd_n(3));
+    } else if (k < 430) {                   /* messages */
+        b1(rnd_n(2) ? 0xd : 0x10); text();
+    } else if (k < 445) {
+        b1(0x22); text();
+    } else if (k < 455) {
+        b1(0x23); expr_int(10); expr_int(10); expr_int(10);
+    } else if (k < 462) {
+        b1(0x24); expr_int(rnd_n(5) ? 20 : 255);
+    } else if (k < 500) {                   /* a sound */
+        b1(0xe); bstr(sound_name());
+    } else if (k < 508) {
+        static const char *const v[] = { "INTRO", "OTHER", "NOVIDEO" };
+        b1(0x26); bstr(v[rnd_n(3)]);
+    } else if (k < 514) {
+        static const char *const s[] = { "SIT1", "SIT2", "SIT3", "NOSIT", "X\\SIT2.STN" };
+        b1(0x18); bstr(s[rnd_n(5)]);
+    } else if (k < 530) {
+        b1(0x16); expr(); expr(); expr();
+    } else if (k < 600) {                   /* weather */
+        uint32_t w = rnd_n(7);
+        b1(0x1a + w);
+        switch (w) {
+        case 0: bstr("AREA"); expr(); expr(); expr(); expr(); break;
+        case 1: expr(); expr(); expr(); expr(); break;
+        case 2:
+            expr_int(5); b1(rnd_n(4) != 0);
+            if (prog.b[prog.n - 1]) {
+                expr_value(rnd_n(20000)); expr_value(rnd_n(30000)); b1(rnd_n(12));
+                expr_int(10); expr_int(8); expr_int(8); expr_int(3);
+            }
+            break;
+        case 3:
+            expr_int(5); b1(rnd_n(4) != 0);
+            if (prog.b[prog.n - 1]) {
+                expr_value(rnd_n(3) ? rnd_n(30000) : 0); expr_value(rnd_n(30000));
+                b1(rnd_n(2)); expr(); expr_int(250); expr_int(255);
+            }
+            break;
+        case 4:
+            expr_int(6); b1(rnd_n(4) != 0);
+            if (prog.b[prog.n - 1]) {
+                expr_value(rnd_n(40000) - 2000.0); expr_value(rnd_n(160) - 80.0);
+                expr_value(rnd_n(30));
+            }
+            break;
+        case 5: expr(); expr(); break;
+        default: expr(); break;
+        }
+    } else if (k < 620) {                   /* keys */
+        uint32_t n = rnd_n(4), i;
+        b1(0x25); b1(rnd_n(3));
+        if (prog.b[prog.n - 1]) {
+            b1(n);
+            for (i = 0; i < n; i++) {
+                b1(3); b2(rnd_n(8) ? 0x41 + rnd_n(26) : rnd_n(0x900));
+            }
+        }
+    } else if (k < 650) {
+        b1(0xc); b1(3); b2(rnd_n(4) ? 0x41 + rnd_n(26) : rnd_n(0x10000)); target_sub(1);
+    } else if (k < 660) {
+        b1(rnd_n(2) ? 0xa : 0xb); target_sub(1);
+    } else if (k < 720) {                   /* events */
+        uint32_t e = rnd_n(4);
+        b1(0x28 + e);
+        if (e == 3) { target_sub(1); }
+        else {
+            expr(); target_sub(1);
+            if (e == 0) target_sub(1);
+            if (e == 1) { target_sub(1); bd(0); }
+            if (e == 2) bd(0);
+        }
+        if (counting) cover_events++;
+    } else if (k < 740) {
+        static const uint8_t which[] = { 0, 1, 2, 3, 4, 5, 100 };
+        b1(0x27); b1(which[rnd_n(7)]);
+        if (prog.b[prog.n - 1] != 100) expr_int(rnd_n(10) ? 7 : 1);
+    } else if (k < 760) {
+        b1(0x12 + rnd_n(4));
+    } else if (k < 765) {
+        b1(0x17);
+    } else if (k < 768) {
+        b1(0x19);
+    } else if (k < 770) {
+        if (prog.wild) {
+            if (prog.first_bad == 0) prog.first_bad = prog.n;
+            b1(rnd_n(3) ? 0x0f : 0x2c + rnd_n(0x10));
+        } else {
+            b1(0x12);
+        }
+    } else if (k < 772) {
+        b1(0);
+    } else if (k < 790 && level > 0) {      /* a jump over what follows */
+        b1(1); at = prog.n; b4(0);
+        stmts(level - 1, 1);
+        memcpy(prog.b + at, &prog.n, 4);
+    } else {
+        b1(9); ref(0); expr();
+    }
+}
+
+static uint32_t crc_table[256];
+
+static uint32_t crc32(const uint8_t *p, uint32_t n)
+{
+    uint32_t c = 0xffffffffu;
+    while (n--)
+        c = (c >> 8) ^ crc_table[(c ^ *p++) & 0xff];
+    return ~c;
+}
+
+/* assemble a program and write it at `path` */
+static void make_program(const char *path, uint32_t k)
+{
+    static uint8_t file[0x12000];
+    uint32_t i, size, scan, version, code_size, kind = rnd_n(20);
+    FILE *f;
+
+    memset(&prog, 0, sizeof prog);
+    prog.nvars = 4 + rnd_n(12);
+    prog.nsubs = rnd_n(6);
+    prog.wild = rnd_n(8) == 0;
+    prog.nstrings = kind < 4 ? 1 + rnd_n(5) : 0;
+    /* the main program, a loop */
+    if (rnd_n(2)) { b1(0x27); b1(rnd_n(2) ? 2 : 1); expr_int(6); }
+    stmts(2, 2 + rnd_n(6));
+    {
+        uint32_t top = prog.n;
+        stmts(2, 4 + rnd_n(20));
+        b1(0x11); expr_value(rnd_n(2) ? 0.2 : 0.0); b1(rnd_n(2));
+        b1(1); b4(rnd_n(8) ? top : 0);
+    }
+    for (i = 0; i < prog.nsubs; i++) {
+        prog.sub[i] = prog.n;
+        stmts(1, 1 + rnd_n(5));
+        b1(6);
+    }
+    for (i = 0; i < prog.nfix; i++)
+        memcpy(prog.b + prog.fix[i], &prog.sub[prog.fixsub[i]], 4);
+    /* the scan region, always ending on an instruction boundary and never
+     * reaching a deliberately-bad opcode -- as the APL compiler's scan_size
+     * does.  Usually the whole code, sometimes a shorter prefix. */
+    {
+        uint32_t limit = prog.first_bad ? prog.first_bad : prog.n;
+        scan = limit;
+        if (rnd_n(3) == 0 && prog.nbound) {
+            uint32_t tries;
+            for (tries = 0; tries < 8; tries++) {
+                uint32_t b = prog.bound[rnd_n(prog.nbound)];
+                if (b <= limit) { scan = b; break; }
+            }
+        }
+    }
+    prog.var0 = prog.n;
+    for (i = 0; i < prog.nvars; i++)
+        bd(rnd_n(3) ? (double)rnd_n(20) : interesting());
+    for (i = 0; i < prog.nvarfix; i++) {
+        uint32_t v = prog.var0 + 8 * prog.varidx[i];
+        memcpy(prog.b + prog.varfix[i], &v, 4);
+    }
+    code_size = prog.n;
+    for (i = 0; i < prog.nstrings; i++) {
+        char s[40];
+        snprintf(s, sizeof s, "String %u of program %u", i, k);
+        bstr(s);
+    }
+    memset(file, 0, 0x200);
+    memcpy(file, rnd_n(3) ? "FS6X Adventure\x1a" : "FS6 Adventure\x1a", 16);
+    snprintf((char *)file + 0x10, 0x40, "Synthetic %u", k);
+    snprintf((char *)file + 0x50, 0x100, "A program assembled for scenario %u", scenario_number);
+    version = kind == 4 || kind == 5 ? 0x10 : 0x61;     /* 1.0 is the old format */
+    if (kind == 6) version = 0x60;                      /* refused */
+    *(uint32_t *)(file + 0x150) = version >> 4;
+    *(uint32_t *)(file + 0x154) = version & 0xf;
+    *(uint32_t *)(file + 0x15c) = prog.nstrings;
+    *(uint32_t *)(file + 0x160) = prog.nstrings && rnd_n(4) == 0 ? code_size + 0x100 : code_size;
+    *(uint32_t *)(file + 0x164) = scan;
+    size = prog.n;
+    memcpy(file + 0x200, prog.b, size);
+    if (version == 0x10)
+        for (i = 0; i < size; i++)
+            file[0x200 + i] = (uint8_t)(i - file[0x200 + i]);
+    *(uint32_t *)(file + 0x158) = crc32(file + 0x200, size) + (kind == 7);
+    if (kind == 8) file[3] = 'Y';
+    f = fopen(path, "wb");
+    if (f == NULL) { printf("cannot write %s\n", path); exit(2); }
+    fwrite(file, 1, 0x200 + size, f);
+    fclose(f);
+    if (getenv("ADV_PROG") && k == (uint32_t)atoi(getenv("ADV_PROG"))) {
+        uint32_t j;
+        printf("prog %u: code=%#x scan=%#x first_bad=%#x nbound=%u\n",
+               k, code_size, scan, prog.first_bad, prog.nbound);
+        printf("bounds:");
+        for (j = 0; j < prog.nbound; j++) printf(" %#x", prog.bound[j]);
+        printf("\n");
+    }
+}
+
+/* ---- scenarios ------------------------------------------------------------------------ */
+
+static void set_precision(uint32_t p);
+static uint8_t global_start[GLOBAL_SIZE];
+static uint8_t nav_start[3][0x60];
+static char programs[MAX_PROGRAMS][MAX_PATH];
+static uint32_t program_types[MAX_PROGRAMS], nprograms;
+
+static void make_scenario(uint32_t number)
+{
+    static const char *const dirs[3] = { "ADV", "LESSONS", "CHALLENG" };
+    static const uint32_t types[3] = { 0x1a, 0x20, 0x21 };
+    static const char *const exts[3] = { "ADV", "LES", "CHL" };
+    char path[MAX_PATH];
+    uint32_t i;
+
+    scenario_number = number;
+    set_precision(0);       /* the generator's own arithmetic, the same each time */
+    rng = 0x9e3779b9u ^ (number * 0x85ebca6bu);
+    rnd();
+    precision = rnd_n(3);
+    sound_on = rnd_n(8) != 0;
+    max_events = rnd_n(4) == 0 ? 3 + rnd_n(20) : 0;
+    cache_wav = rnd_n(3);
+    dme_answer = rnd();
+    value_11d4 = rnd();
+    cache_seed = rnd();
+    for (i = 0; i < GLOBAL_SIZE; i += 4)
+        *(uint32_t *)(global_start + i) = rnd_n(3) ? rnd() & 0x0101ffff : rnd();
+    /* the -9999 "none" sentinel in a spread of 16-bit slots, so the getters
+     * that special-case it are exercised */
+    for (i = 0; i < 40; i++)
+        if (rnd_n(2))
+            *(uint16_t *)(global_start + 2 * rnd_n(GLOBAL_SIZE / 2)) = 0xd8f1;
+    /* the weather-area readback words the getters special-case */
+    for (i = 0xe70; i < 0x1078; i += 2)
+        if (rnd_n(4) == 0)
+            *(uint16_t *)(global_start + i) = 0xd8f1;
+    *(uint32_t *)(global_start + 0x268) = 0;
+    *(uint32_t *)(global_start + 0x758) = 0;
+    *(uint32_t *)(global_start + 0x264) = 0;
+    *(uint32_t *)(global_start + 0x384) = (uint32_t)(uintptr_t)nav_table;
+    *(uint32_t *)(global_start + 0x11d4) = (uint32_t)(uintptr_t)module_11d4;
+    *(uint32_t *)(global_start + 0xb24) = rnd_n(6) != 0;
+    *(uint16_t *)(global_start + 0xf90) = rnd_n(3) == 0;
+    *(uint16_t *)(global_start + 0xb00) = (uint16_t)(1 + rnd_n(0x4000));
+    *(uint16_t *)(global_start + 0x832) = 0;
+    global_start[0x36c] = 0;
+    for (i = 0; i < 3; i++) {
+        uint32_t j;
+        for (j = 0; j < 0x60; j += 4)
+            *(uint32_t *)(nav_start[i] + j) = rnd();
+        nav_start[i][0x1c] = (uint8_t)(rnd_n(2) ? 0xc1 : rnd());
+        *(uint16_t *)(nav_start[i] + 0x18) = (uint16_t)rnd_n(2);
+    }
+    /* the synthetic programs, written once for both sides */
+    for (i = 0; i < 3; i++) {
+        WIN32_FIND_DATAA d;
+        HANDLE h;
+        char pat[MAX_PATH];
+
+        snprintf(pat, sizeof pat, "%s\\SYN*.*", dirs[i]);
+        h = FindFirstFileA(pat, &d);
+        if (h != INVALID_HANDLE_VALUE) {
+            do {
+                snprintf(path, sizeof path, "%s\\%s", dirs[i], d.cFileName);
+                DeleteFileA(path);
+            } while (FindNextFileA(h, &d));
+            FindClose(h);
+        }
+    }
+    nprograms = 2 + rnd_n(MAX_PROGRAMS - 1);
+    for (i = 0; i < nprograms; i++) {
+        start_dump = getenv("ADV_EXPR") && i == 0;
+        uint32_t d = rnd_n(5) == 0 ? 2 : rnd_n(2);
+        snprintf(programs[i], MAX_PATH, "%s\\SYN%u", dirs[d], i);
+        snprintf(path, sizeof path, "%s.%s", programs[i], exts[d]);
+        program_types[i] = types[d];
+        make_program(path, i);
+    }
+}
+
+/* ---- driving ------------------------------------------------------------------------- */
+
+static void set_precision(uint32_t p)
+{
+    static const uint16_t cw[3] = { 0x027f, 0x037f, 0x007f };
+    uint16_t c = cw[p % 3];
+    __asm__ volatile("fninit\n\tfldcw %0" : : "m"(c));
+}
+
+/* A fault in either module is an outcome: logged, and the op abandoned.
+ * Both sides must fault at the same place for the transcripts to agree. */
+static void *fault_jb[5];
+static int trace_exceptions;
+
+static void fault_land(void)
+{
+    __builtin_longjmp(fault_jb, 1);
+}
+
+static void cut_op(void)
+{
+    if (!in_module)
+        return;
+    put(" CUT");
+    if (counting)
+        cover_hangs++;
+    in_module = 0;
+    op_faulted = 1;
+    __builtin_longjmp(fault_jb, 1);
+}
+
+static LONG WINAPI on_vectored(EXCEPTION_POINTERS *e)
+{
+    DWORD code = e->ExceptionRecord->ExceptionCode;
+
+    if (!in_module || cur == NULL)
+        return EXCEPTION_CONTINUE_SEARCH;
+    if (trace_exceptions) {
+        static char line[256];
+        DWORD w;
+        int n = wsprintfA(line, "exception %08lx at %08lx\r\n", code, e->ContextRecord->Eip);
+        WriteFile(GetStdHandle(STD_ERROR_HANDLE), line, (DWORD)n, &w, NULL);
+    }
+    if (code == EXCEPTION_INT_DIVIDE_BY_ZERO || code == EXCEPTION_INT_OVERFLOW)
+        put(" FAULT(div)");
+    else if (code == EXCEPTION_ACCESS_VIOLATION)
+        put(" FAULT(av)");
+    else if (code == EXCEPTION_ILLEGAL_INSTRUCTION || code == EXCEPTION_PRIV_INSTRUCTION)
+        put(" FAULT(ill)");
+    else
+        return EXCEPTION_CONTINUE_SEARCH;
+    if (counting)
+        cover_faults++;
+    in_module = 0;
+    op_faulted = 1;
+    poisoned = 1;   /* a fault is a crash: the program is dead until reloaded */
+    e->ContextRecord->Eip = (DWORD)(uintptr_t)fault_land;
+    return EXCEPTION_CONTINUE_EXECUTION;
+}
+
+#define IMG32(img, o) (*(uint32_t *)((img) + (o)))
+
+static void put_state(void)
+{
+    static uint8_t img[IMAGE_SIZE];
+    uint32_t i, base = (uint32_t)(uintptr_t)cur->image, code;
+
+    if (poisoned)
+        return;    /* op_error fired: output suppressed, both sides alike */
+    memcpy(img, cur->image, IMAGE_SIZE);
+    /* op_error frees the code buffer (A_CODE=0) and the interpreter keeps
+     * running on a dangling cursor until it faults at an implementation-
+     * defined point: the whole image is then post-free garbage, so compare
+     * only the persistent heap and GLOBAL.  A clean fault (a divide, say)
+     * leaves A_CODE intact and the image meaningful but for the cursor. */
+    if (op_faulted && IMG32(img, 0x18fc) == 0) {
+        put("\n  state img=freed arena=%#x/%08x G=%08x util=%08x (fault, code freed)",
+            arena_used, digest(arena, arena_used, 0x811c9dc5u),
+            digest(global, GLOBAL_SIZE, 0x811c9dc5u),
+            digest(util_data, util_data_size, 0x811c9dc5u));
+        return;
+    }
+    /* while stopped the interpreter cursor is dead state: a fault or a
+     * normal stop can leave A_PC and the operand stack at different values
+     * in the two builds, and nothing reads them until a program loads
+     * (which resets them).  Mask them unless a program is running. */
+    if (IMG32(img, 0x18f8) == 0 || op_faulted) {
+        IMG32(img, 0x1900) = 0;         /* A_PC */
+        IMG32(img, 0x278c) = 0;         /* A_SP */
+        IMG32(img, 0x12f8) = 0;         /* A_STEPPED */
+        memset(img + 0x27a0, 0, 0x2ac0 - 0x27a0);   /* the operand stack */
+    }
+    for (i = 0; i < sizeof code_slots / 2; i++)
+        IMG32(img, code_slots[i]) = pair_code(IMG32(img, code_slots[i]));
+    for (i = 0x26c0; i < 0x278c; i += 4)
+        IMG32(img, i) = pair_code(IMG32(img, i));
+    for (i = 0; i < sizeof data_slots / 2; i++) {
+        uint32_t v = IMG32(img, data_slots[i]);
+        if (v >= base && v < base + IMAGE_SIZE)
+            IMG32(img, data_slots[i]) = 0xd0000000u | (v - base);
+    }
+    code = IMG32(img, 0x18fc);
+    put("\n  state img=%08x arena=%#x/%08x G=%08x util=%08x run=%u pc=%#x wait=%u "
+        "depth=%u sp=%u steps=%u list=%u rate=%u events=%u",
+        digest(img, IMAGE_SIZE, 0x811c9dc5u), arena_used,
+        digest(arena, arena_used, 0x811c9dc5u), digest(global, GLOBAL_SIZE, 0x811c9dc5u),
+        digest(util_data, util_data_size, 0x811c9dc5u), IMG32(img, 0x18f8),
+        (op_faulted || IMG32(img, 0x18f8) == 0) ? 0 : IMG32(img, 0x1900) - code,
+        IMG32(img, 0x1708), IMG32(img, 0x18bc),
+        IMG32(img, 0x278c), IMG32(img, 0x12f8), IMG32(img, 0x7c), IMG32(img, 0xc8),
+        IMG32(img, 0x1968));
+    if (getenv("ADV_ARENA")) {
+        char name[64];
+        FILE *f;
+        snprintf(name, sizeof name, "arena_%s_%u.bin", cur->name, op_number);
+        f = fopen(name, "wb");
+        if (f) { fwrite(arena, 1, arena_used, f); fclose(f); }
+    }
+    if (getenv("ADV_IMAGE")) {
+        put("\n  whole");
+        for (i = 0; i + 4 <= IMAGE_SIZE; i += 4)
+            if (IMG32(img, i) != 0)
+                put(" %x:%08x", i, IMG32(img, i));
+        put("\n  gwhole");
+        for (i = 0; i + 4 <= GLOBAL_SIZE; i += 4)
+            put(" %x:%08x", i, *(uint32_t *)(global + i));
+    }
+}
+
+static void steer_global(void)
+{
+    uint32_t k = rnd_n(16), i;
+
+    switch (k) {
+    case 0: *(uint32_t *)(global + 0x564) += rnd_n(4000) - 2000; break;
+    case 1: *(uint32_t *)(global + 0x56c) += rnd() >> 12; break;
+    case 2: *(uint32_t *)(global + 0x574) = rnd_n(3000); break;
+    case 3: *(uint16_t *)(global + 0x2a0) += (uint16_t)rnd_n(4000); break;
+    case 4: *(uint16_t *)(global + 0x832) = (uint16_t)rnd_n(2); break;
+    case 5: global[0x36c] = (uint8_t)rnd_n(2); break;
+    case 6: *(uint32_t *)(global + 0xb24) = rnd_n(5) != 0; break;
+    case 7: *(uint32_t *)(global + 0x268) = rnd_n(10) == 0; break;
+    case 8:
+        for (i = 0; i < 4; i++)
+            *(uint16_t *)(global + 2 * rnd_n(GLOBAL_SIZE / 2)) = 0xd8f1;
+        for (i = 0; i < 8; i++) {
+            uint32_t o = rnd_n(GLOBAL_SIZE / 2) * 2;
+            if (o != 0x384 && o != 0x386 && o != 0x11d4 && o != 0x11d6 &&
+                o != 0x758 && o != 0x75a && o != 0xb00)
+                *(uint16_t *)(global + o) = (uint16_t)rnd();
+        }
+        break;
+    default: break;
+    }
+}
+
+static uint32_t image32(uint32_t o)
+{
+    return *(uint32_t *)(cur->image + o);
+}
+
+static void frame(void)
+{
+    if (poisoned)
+        return;
+    clock_ms += rnd_n(20) == 0 ? 1000 + rnd_n(4000) : 40 + rnd_n(40);
+    if (rnd_n(3) == 0)
+        steer_global();
+    dispatch(1, 0, 0);
+    dispatch(2, 0, 0);
+    dispatch(5, 0, 0);
+    dispatch(3, 0, 0);
+    *(uint32_t *)(global + 0x268) = 0;
+    if (counting) cover_frames++;
+}
+
+static void run_side(struct side *s)
+{
+    uint32_t i, nops;
+    char path[0x200];
+
+    cur = s;
+    fault_side = s->name;
+    fault_op = 0;
+    s->length = 0;
+    memset(s->chain, 0, sizeof s->chain);
+    memcpy(s->image, s->pristine, IMAGE_SIZE);
+    memcpy(util_data, util_data_pristine, util_data_size);
+    arena_used = 0;
+    memset(arena, 0, 0x200000);
+    memcpy(global, global_start, GLOBAL_SIZE);
+    memcpy(nav_records, nav_start, sizeof nav_records);
+    for (i = 0; i < 3; i++)
+        nav_table[i] = (uint32_t)(uintptr_t)nav_records[i];
+    ext_count = 0x25;
+    clock_ms = 100000 + scenario_number;
+    msg_counter = voice_counter = keymap_counter = npending = 0;
+    build_cache();
+    rng = 0x51ed2701u ^ (scenario_number * 0x27d4eb2fu);
+    rnd();
+    for (i = 0; i < 64; i++)
+        script[i] = rnd();
+    script_at = 0;
+    set_precision(precision_start);
+
+    op_number = 0;
+    op_calls = 0;
+    op_faulted = 0;
+    poisoned = 0;
+    put("init:");
+    in_module = 1;
+    if (!__builtin_setjmp(fault_jb))
+        put(" =%#x", s->link->init());
+    in_module = 0;
+    put_state();
+    nops = 8 + rnd_n(MAX_OPS - 8);
+    for (op_number = 1; op_number <= nops; op_number++) {
+        uint32_t k = rnd_n(100), r;
+
+        fault_op = op_number;
+        op_calls = 0;
+        op_faulted = 0;
+        op_started = GetTickCount();
+        if (__builtin_setjmp(fault_jb)) {
+            in_module = 0;
+            set_precision(precision);
+            put_state();
+            if (poisoned)
+                break;    /* a fault is a crash: end the scenario here */
+            continue;
+        }
+        in_module = 1;
+        /* a load, picker, stop or restart brings the interpreter back to a
+         * clean state, so a prior fault/op_error no longer poisons from here */
+        if (k < 16 || (k >= 80 && k < 83))
+            poisoned = 0;
+        if (k < 12) {
+            uint32_t which = rnd_n(3) ? rnd_n(nprograms) :
+                             rnd_n(nprograms + ncd_adv + ncd_les + 2), type;
+            if (which < nprograms) {
+                snprintf(path, sizeof path, "%s", programs[which]);
+                type = program_types[which];
+            } else if ((which -= nprograms) < ncd_adv) {
+                snprintf(path, sizeof path, "ADV\\%s", cd_adv[which]);
+                type = 0x1a;
+            } else if ((which -= ncd_adv) < ncd_les) {
+                snprintf(path, sizeof path, "LESSONS\\%s", cd_les[which]);
+                type = 0x20;
+            } else if (which == ncd_les) {
+                snprintf(path, sizeof path, "ADV\\MISSING");
+                type = 0x1a;
+            } else {
+                memset(path, 'L', 0x110);
+                path[0x110] = 0;
+                type = 0x1a;
+            }
+            put("\nop %u: load(%.80s,%#x)", op_number, path, type);
+            if (counting) cover_ops[0]++;
+            r = s->link->load(path, type);
+            put(" =%#x", r);
+            if (counting && image32(0x18f8)) cover_loaded++;
+            if (counting) cover_loads++;
+        } else if (k < 14) {
+            put("\nop %u: adventures", op_number);
+            if (counting) cover_ops[1]++;
+            put(" =%#x", s->link->adventures());
+        } else if (k < 16) {
+            put("\nop %u: lessons", op_number);
+            if (counting) cover_ops[2]++;
+            put(" =%#x", s->link->lessons());
+        } else if (k < 58) {
+            uint32_t frames = 1 + rnd_n(40), f;
+            put("\nop %u: frames(%u)", op_number, frames);
+            if (counting) cover_ops[3]++;
+            for (f = 0; f < frames; f++)
+                frame();
+        } else if (k < 68) {
+            uint32_t command, handled = 0x55, j, keys[16], nkeys = 0;
+            for (j = 0; j < 0x800 && nkeys < 16; j++)
+                if (cur->image[0x1ec0 + j])
+                    keys[nkeys++] = j;
+            switch (rnd_n(6)) {
+            case 0: command = 0x10001; break;
+            case 1: command = 0x1e000 + rnd_n(0x1000); break;
+            case 2: command = 0x10000 + rnd_n(0x200); break;
+            default:
+                command = 0x1e000 + (nkeys ? keys[rnd_n(nkeys)] : 0x41 + rnd_n(26));
+                break;
+            }
+            put("\nop %u: command(%#x)", op_number, command);
+            if (counting) cover_ops[4]++;
+            if (!poisoned)
+                dispatch(0xb, command, (uint32_t)(uintptr_t)&handled);
+            put(" handled=%#x", handled);
+        } else if (k < 74) {
+            uint32_t code = rnd_n(4) ? 0x50 : 0x21, arg;
+            arg = rnd_n(3) ? image32(0x1720) : rnd_n(2) ? image32(0x1700) : rnd_n(4);
+            put("\nop %u: message(%#x,%#x)", op_number, code, arg);
+            if (counting) cover_ops[5]++;
+            if (!poisoned)
+                dispatch(0x14, code, arg);
+        } else if (k < 80) {
+            put("\nop %u: sound done", op_number);
+            if (counting) cover_ops[6]++;
+            if (npending && !poisoned) {
+                struct voice_done v = pending[0];
+                memmove(pending, pending + 1, --npending * sizeof pending[0]);
+                put(" (%#x)", v.h);
+                v.done(v.h);
+            }
+        } else if (k < 82) {
+            put("\nop %u: stop", op_number);
+            if (counting) cover_ops[7]++;
+            put(" =%#x", s->link->stop());
+        } else if (k < 83) {
+            put("\nop %u: restart", op_number);
+            if (counting) cover_ops[8]++;
+            s->link->restart();
+        } else if (k < 86) {
+            uint32_t type = 0xabcd;
+            r = s->link->running(rnd_n(5) ? &type : NULL);
+            put("\nop %u: running=%u,%#x", op_number, r, type);
+            if (counting) cover_ops[9]++;
+        } else if (k < 88) {
+            uint32_t v = rnd_n(2);
+            put("\nop %u: skip(%u)=%u", op_number, v, s->link->set_skip(v));
+            if (counting) cover_ops[10]++;
+        } else if (k < 97) {
+            put("\nop %u: steer", op_number);
+            if (counting) cover_ops[11]++;
+            for (i = 0; i < 6; i++)
+                steer_global();
+            value_11d4 = rnd();
+            dme_answer = rnd();
+        } else {
+            precision = rnd_n(3);
+            set_precision(precision);
+            put("\nop %u: precision(%u)", op_number, precision);
+            if (counting) cover_ops[12]++;
+        }
+        in_module = 0;
+        put_state();
+        if (poisoned)
+            break;    /* op_error or a fault: a crash -- nothing after is real */
+    }
+    if (poisoned) {
+        /* both sides stopped at the same crash, transcripts identical up to
+         * it; close OS handles silently and end */
+        for (i = 0; i < 12; i++)
+            if (files[i].open) { CloseHandle(files[i].h); files[i].open = 0; }
+        for (i = 0; i < 8; i++)
+            if (finds[i].open) { FindClose(finds[i].h); finds[i].open = 0; }
+        cur = NULL;
+        return;
+    }
+    op_number++;
+    op_calls = 0;
+    op_faulted = 0;
+    put("\ndeinit:");
+    if (!__builtin_setjmp(fault_jb)) {
+        in_module = 1;
+        put(" =%#x", s->link->deinit());
+    }
+    in_module = 0;
+    put_state();
+    for (i = 0; i < 12; i++)
+        if (files[i].open) {
+            put(" open:file%u", i);
+            CloseHandle(files[i].h);
+            files[i].open = 0;
+        }
+    for (i = 0; i < 8; i++)
+        if (finds[i].open) {
+            FindClose(finds[i].h);
+            finds[i].open = 0;
+        }
+    {
+        WIN32_FIND_DATAA d;
+        HANDLE h = FindFirstFileA("ADV\\WAV\\CACHE\\*", &d);
+        static char names[64][64];
+        uint32_t n = 0, j;
+        put("\ncache:");
+        if (h != INVALID_HANDLE_VALUE) {
+            do {
+                if (!(d.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) && n < 64)
+                    snprintf(names[n++], 64, "%s/%lx", d.cFileName,
+                             (unsigned long)(d.dwFileAttributes & FILE_ATTRIBUTE_READONLY));
+            } while (FindNextFileA(h, &d));
+            FindClose(h);
+        }
+        qsort(names, n, 64, (int (*)(const void *, const void *))_stricmp);
+        for (j = 0; j < n; j++)
+            put(" %s", names[j]);
+    }
+    put("\n");
+    cur = NULL;
+}
+
+static void show_difference(void)
+{
+    const char *a = retail.transcript, *b = ours.transcript;
+    uint32_t n = retail.length < ours.length ? retail.length : ours.length, i, from;
+    const char *ls;
+
+    for (i = 0; i < n && a[i] == b[i]; i++)
+        ;
+    ls = a + i;
+    while (ls > a && ls[-1] != '\n')
+        ls--;
+    printf("scenario %u differs at byte %u\n", scenario_number, i);
+    from = (uint32_t)(ls - a) > 1500 ? (uint32_t)(ls - a) - 1500 : 0;
+    printf("--- before:\n%.*s\n", (int)((uint32_t)(ls - a) - from), a + from);
+    from = i - (uint32_t)(ls - a) > 400 ? i - 400 : (uint32_t)(ls - a);
+    printf("--- retail:\n...%.900s\n", a + from);
+    printf("--- ours:\n...%.900s\n", b + from);
+}
+
+static DWORD WINAPI watchdog(LPVOID unused)
+{
+    (void)unused;
+    for (;;) {
+        Sleep(500);
+        if (in_module && op_started && GetTickCount() - op_started > 30000) {
+            CONTEXT c;
+            struct side *t = strcmp(fault_side, "ours") == 0 ? &ours : &retail;
+
+            SuspendThread(main_thread);
+            c.ContextFlags = CONTEXT_FULL;
+            GetThreadContext(main_thread, &c);
+            printf("SPIN scenario %u op %u %s eip %08lx (.text+%#lx)\n", scenario_number,
+                   fault_op, fault_side, c.Eip, c.Eip - (DWORD)(uintptr_t)t->lo - 0x1000);
+            fflush(stdout);
+            ExitProcess(4);
+        }
+    }
+    return 0;
+}
+
+static LONG WINAPI on_fault(EXCEPTION_POINTERS *e)
+{
+    uint8_t *at = (uint8_t *)e->ExceptionRecord->ExceptionAddress;
+    struct side *s[2] = { &retail, &ours };
+    int i;
+
+    for (i = 0; i < 2; i++)
+        if (s[i]->module && at >= s[i]->lo && at < s[i]->hi)
+            printf("\nFAULT in %s ADVDRV at .text+%#x\n", s[i]->name,
+                   (uint32_t)(at - s[i]->lo - 0x1000));
+    printf("FAULT %#lx at %p, scenario %u op %u, running %s\n",
+           e->ExceptionRecord->ExceptionCode, (void *)at, scenario_number, op_number,
+           cur ? cur->name : "none");
+    if (cur != NULL && cur->length > 0) {
+        uint32_t from = cur->length > 2500 ? cur->length - 2500 : 0;
+        printf("--- transcript tail:\n%.*s\n", (int)(cur->length - from), cur->transcript + from);
+    }
+    fflush(stdout);
+    ExitProcess(3);
+    return EXCEPTION_CONTINUE_SEARCH;
+}
+
+int main(int argc, char **argv)
+{
+    uint32_t n = argc > 1 ? (uint32_t)strtoul(argv[1], NULL, 0) : 20000;
+    uint32_t first = argc > 3 ? (uint32_t)strtoul(argv[3], NULL, 0) : 0;
+    uint32_t i, differ = 0;
+
+    if (argc < 3) {
+        printf("usage: advdrvdiff N CD-ROOT [FIRST]\n");
+        return 2;
+    }
+    snprintf(cd_root, sizeof cd_root, "%s", argv[2]);
+    for (i = 0; cd_root[i]; i++)
+        if (cd_root[i] == '/') cd_root[i] = '\\';
+    for (i = 0; i < 256; i++) {
+        uint32_t v = i, b;
+        for (b = 0; b < 8; b++)
+            v = v & 1 ? (v >> 1) ^ 0xedb88320u : v >> 1;
+        crc_table[i] = v;
+    }
+    trace_exceptions = getenv("ADV_EXC") != NULL;
+    AddVectoredExceptionHandler(1, on_vectored);
+    DuplicateHandle(GetCurrentProcess(), GetCurrentThread(), GetCurrentProcess(), &main_thread,
+                    0, FALSE, DUPLICATE_SAME_ACCESS);
+    CreateThread(NULL, 0, watchdog, NULL, 0, NULL);
+    SetUnhandledExceptionFilter(on_fault);
+    load_ext_table("FLTSIM98_host.exe");
+    build_stubs();
+    load_util("UTIL_retail.dll");
+    load_side(&retail, "ADVDRV_retail.dll", "retail");
+    load_side(&ours, "ADVDRV_ours.dll", "ours");
+    build_static_trees();
+
+    if (getenv("ADV_GENCHECK")) {
+        for (i = first; i < first + n; i++) {
+            static uint8_t a[0x20000], b[0x20000];
+            FILE *f;
+            size_t na, nb;
+            make_scenario(i);
+            f = fopen("LESSONS\\SYN1.LES", "rb"); na = f ? fread(a, 1, sizeof a, f) : 0; if (f) fclose(f);
+            if (!f) { f = fopen("ADV\\SYN1.ADV", "rb"); na = f ? fread(a, 1, sizeof a, f) : 0; if (f) fclose(f); }
+            precision_start = precision;
+            {
+                static uint32_t saved[256];
+                uint32_t q;
+                memcpy(saved, crc_table, sizeof saved);
+                if (getenv("ADV_GENRUN")) run_side(&retail);
+                for (q = 0; q < 256; q++)
+                    if (saved[q] != crc_table[q])
+                        printf("crc_table[%u] %08x -> %08x at %p\n", q, saved[q], crc_table[q], (void *)&crc_table[q]);
+                printf("prog %p ops %p crc %p global %p nav %p\n", (void *)&prog, (void *)ops, (void *)crc_table, (void *)global, (void *)nav_records);
+            }
+            printf("nget %u nset %u nwav %u\n", nget, nset, nwav);
+            make_scenario(i);
+            f = fopen("LESSONS\\SYN1.LES", "rb"); nb = f ? fread(b, 1, sizeof b, f) : 0; if (f) fclose(f);
+            if (!f) { f = fopen("ADV\\SYN1.ADV", "rb"); nb = f ? fread(b, 1, sizeof b, f) : 0; if (f) fclose(f); }
+            if (na != nb || memcmp(a, b, na)) {
+                size_t j;
+                for (j = 0; j < na && a[j] == b[j]; j++) ;
+                printf("scenario %u: generation differs at %#x of %#x/%#x\n", i, (unsigned)j, (unsigned)na, (unsigned)nb);
+                for (j = 0; j < na; j++) if (a[j] != b[j]) printf("  %#x: %02x %02x\n", (unsigned)j, a[j], b[j]);
+            }
+        }
+        return 0;
+    }
+    for (i = first; i < first + n; i++) {
+        make_scenario(i);
+        precision_start = precision;
+        counting = 1;
+        run_side(&retail);
+        counting = 0;
+        precision = precision_start;
+        make_scenario(i);
+        run_side(&ours);
+        if (getenv("ADV_DUMP") != NULL) {
+            FILE *f = fopen("adv_retail.txt", "wb");
+            fwrite(retail.transcript, 1, retail.length, f);
+            fclose(f);
+            f = fopen("adv_ours.txt", "wb");
+            fwrite(ours.transcript, 1, ours.length, f);
+            fclose(f);
+        }
+        if (retail.length != ours.length ||
+            memcmp(retail.transcript, ours.transcript, retail.length) != 0) {
+            if (differ++ < 3)
+                show_difference();
+        }
+        if ((i + 1 - first) % 1000 == 0) {
+            printf("%u scenarios, %u differ\n", i + 1 - first, differ);
+            fflush(stdout);
+        }
+    }
+    printf("advdrvdiff: %u scenarios, %u differ\n", n, differ);
+    printf("  ops: load %lu, adventures %lu, lessons %lu, frames %lu, command %lu, "
+           "message %lu, sound done %lu, stop %lu, restart %lu, running %lu, skip %lu, "
+           "steer %lu, precision %lu\n",
+           cover_ops[0], cover_ops[1], cover_ops[2], cover_ops[3], cover_ops[4],
+           cover_ops[5], cover_ops[6], cover_ops[7], cover_ops[8], cover_ops[9],
+           cover_ops[10], cover_ops[11], cover_ops[12]);
+    printf("  loads %lu (%lu started), frames %lu, situations %lu, messages %lu, sounds %lu, "
+           "videos %lu, alerts %lu, commands %lu, keys bound %lu, cache copies %lu, "
+           "deletes %lu\n",
+           cover_loads, cover_loaded, cover_frames, cover_main, cover_msg, cover_sounds,
+           cover_videos, cover_alerts, cover_commands, cover_keys, cover_copies,
+           cover_deletes);
+    printf("  dialogs: adventures %lu, lessons %lu, other %lu\n",
+           cover_dialog[0], cover_dialog[1], cover_dialog[2]);
+    printf("  faults (both sides alike) %lu, ops cut short %lu\n", cover_faults, cover_hangs);
+    {
+        /* the coverage build's counts: what never ran */
+        uint32_t *c = (uint32_t *)(void *)GetProcAddress(ours.module, "advdrv_cover"), j;
+        if (c != NULL) {
+            printf("  coverage (ours):\n   never run: instructions");
+            for (j = 0; j < 0x2c; j++) if (!c[j]) printf(" %#x", j);
+            printf("\n   operators");
+            for (j = 2; j < 0x32; j++) if (!c[0x40 + j]) printf(" %#x", j);
+            printf("\n   read");
+            for (j = 0; j < 0xb0; j++) if (has_get[j] && !c[0x100 + j]) printf(" %u", j);
+            printf("\n   written");
+            for (j = 0; j < 0xb0; j++) if (has_set[j] && !c[0x200 + j]) printf(" %u", j);
+            printf("\n   instructions run:");
+            for (j = 0; j < 0x2c; j++) printf(" %x:%u", j, c[j]);
+            printf("\n   errors:");
+            for (j = 0; j < 10; j++) printf(" %u", c[0x300 + j]);
+            printf("\n");
+        }
+    }
+    (void)cover_console;
+    (void)cover_events;
+    (void)cover_errors;
+    return differ ? 1 : 0;
 }

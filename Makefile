@@ -574,6 +574,37 @@ boosterdiff-run: boosterdiff
 # the four dialogs' callbacks, retail and OpenFS98 in turn over the CD's six
 # videos and synthetic ones, with retail UTIL's catalogue and a stand-in for
 # the host's dialog engine.  Needs cd/.  N=... sets the scenario count.
+# build ADVDRV with one deliberate break and confirm the harness goes red
+advdrv-break-%: advdrvdiff
+	$(CC) $(CFLAGS) -DBREAK=$* -fno-delete-null-pointer-checks -fno-ipa-icf -Isrc/advdrv \
+	      $(LDFLAGS) -Wl,--image-base=$(BASE_ADVDRV) -o $(DIFFDIR)/ADVDRV_ours.dll \
+	      src/advdrv/advdrv.c $(BIN)/advdrv.res src/advdrv/advdrv.def -lkernel32 -lgcc
+	@cd $(DIFFDIR) && WINEDEBUG=-all wine advdrvdiff.exe $(if $(N),$(N),300) $(FE_CD); \
+	 test $$? -ne 0 && echo "BREAK $* caught" || echo "BREAK $* MISSED"
+	@cp $(BIN)/ADVDRV.DLL $(DIFFDIR)/ADVDRV_ours.dll
+
+$(DIFFDIR)/advdrvdiff.exe: tools/difftest/advdrvdiff.c src/advdrv/advdrv_data.inc
+	@mkdir -p $(DIFFDIR)
+	$(CC) -std=c99 -O1 -Wall -Wextra -o $@ tools/difftest/advdrvdiff.c
+
+advdrvdiff: $(DIFFDIR)/advdrvdiff.exe $(BIN)/ADVDRV.DLL
+	@cp $(ORIG)/Modules/ADVDRV.DLL $(DIFFDIR)/ADVDRV_retail.dll
+	@cp $(BIN)/ADVDRV.DLL          $(DIFFDIR)/ADVDRV_ours.dll
+	@cp $(ORIG)/Modules/UTIL.DLL   $(DIFFDIR)/UTIL_retail.dll
+	@cp $(ORIG)/FLTSIM98.EXE       $(DIFFDIR)/FLTSIM98_host.exe
+
+advdrvdiff-run: advdrvdiff
+	@test -n "$(FE_CD)" || { echo "advdrvdiff-run needs the CD tree in cd/"; exit 2; }
+	@cd $(DIFFDIR) && WINEDEBUG=-all timeout 7200 wine advdrvdiff.exe $(if $(N),$(N),20000) $(FE_CD)
+
+# a coverage build of ADVDRV for the harness: what the programs reach
+advdrv-cover: advdrvdiff
+	$(CC) $(CFLAGS) -DADVDRV_COVER -fno-delete-null-pointer-checks -fno-ipa-icf -Isrc/advdrv \
+	      $(LDFLAGS) -Wl,--image-base=$(BASE_ADVDRV) -o $(DIFFDIR)/ADVDRV_ours.dll \
+	      src/advdrv/advdrv.c $(BIN)/advdrv.res src/advdrv/advdrv_cover.def -lkernel32 -lgcc
+	@cd $(DIFFDIR) && WINEDEBUG=-all wine advdrvdiff.exe $(if $(N),$(N),1000) $(FE_CD)
+	@cp $(BIN)/ADVDRV.DLL $(DIFFDIR)/ADVDRV_ours.dll
+
 $(DIFFDIR)/demodiff.exe: tools/difftest/demodiff.c
 	@mkdir -p $(DIFFDIR)
 	$(CC) -std=c99 -O1 -Wall -Wextra -o $@ tools/difftest/demodiff.c
@@ -874,4 +905,4 @@ smoke: all
 clean:
 	rm -rf $(BIN)
 
-.PHONY: all stage setup-map graph hostmap compare run trace trace-render trace-ddraw kill window-reset wm-unmanaged wm-managed vd-on vd-off mode8 mode16 ddraw-gdi ddraw-default smoke difftest difftest-run utildiff utildiff-run utildiff-portable numericdiff numericdiff-run chaindiff chaindiff-run atcdiff atcdiff-run weathermdiff weathermdiff-run acontaindiff acontaindiff-run sounddiff sounddiff-run dynamicdiff dynamicdiff-run fegriddiff fegriddiff-run fediff fediff-run fesldiff fesldiff-run boosterdiff boosterdiff-run demodiff demodiff-run landmediff landmediff-run facildiff facildiff-run facildiff-fe-run ofstest ofstest-run ofstest-remove util-trace install revert installed-name-of orig-module-of clean
+.PHONY: all stage setup-map graph hostmap compare run trace trace-render trace-ddraw kill window-reset wm-unmanaged wm-managed vd-on vd-off mode8 mode16 ddraw-gdi ddraw-default smoke difftest difftest-run utildiff utildiff-run utildiff-portable numericdiff numericdiff-run chaindiff chaindiff-run atcdiff atcdiff-run weathermdiff weathermdiff-run acontaindiff acontaindiff-run sounddiff sounddiff-run dynamicdiff dynamicdiff-run fegriddiff fegriddiff-run fediff fediff-run fesldiff fesldiff-run boosterdiff boosterdiff-run demodiff demodiff-run advdrvdiff advdrvdiff-run advdrv-cover landmediff landmediff-run facildiff facildiff-run facildiff-fe-run ofstest ofstest-run ofstest-remove util-trace install revert installed-name-of orig-module-of clean

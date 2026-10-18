@@ -118,9 +118,10 @@ once an aircraft has resolved, its visual model has been found and its panel
 built, so a gauge load means startup went all the way through.
 
 **Verified working**: under wine 9.0 the retail game reaches its main menu —
-27/27 modules, 95 gauges — and so does the build with OpenFS98's `ACONTAIN`,
-`ATC`, `CHAIN`, `DYNAMIC`, `GLOBAL`, `LANDME`, `NUMERIC`, `SLEW`, `SOUND`,
-`UTIL` and `WEATHERM` modules substituted, with identical counts.
+27/27 modules, 95 gauges — and so does the build with OpenFS98's `ACONTAIN`, `ADVDRV`, `ATC`, `BOOSTER`,
+`CHAIN`, `DEMO`, `DYNAMIC`, `FACIL`, `FE`, `GLOBAL`, `LANDME`, `NUMERIC`,
+`SLEW`, `SOUND`, `UTIL` and `WEATHERM` modules substituted, with identical
+counts.
 
 ## Where this is going
 
@@ -247,9 +248,11 @@ turn and drains its worker thread after every operation (20,000 scenarios,
 zero differences, see [docs/modules/booster.md](docs/modules/booster.md)).
 That finishes round 4. Round 5 picked `DEMO`, the flight videos, which
 ADVDRV imports, and it is done too (`make demodiff-run`, 20,000 scenarios,
-zero differences, see [docs/modules/demo.md](docs/modules/demo.md)). `ADVDRV`
-is next; `WINMSG` and `REALITY` draw and run dialogs and belong in
-`ofstest`.
+zero differences, see [docs/modules/demo.md](docs/modules/demo.md)). `ADVDRV`,
+the adventure and lesson interpreter that DEMO feeds, is done too
+(`make advdrvdiff-run`, 20,000 scenarios, zero differences, see
+[docs/modules/advdrv.md](docs/modules/advdrv.md)). `WINDOW` is next; `WINMSG`
+and `REALITY` draw and run dialogs and belong in `ofstest`.
 
 Other useful work, in no particular order:
 
@@ -284,7 +287,8 @@ nothing in it imports anything interesting:
     ~~**`FE`** (49,016 bytes)~~ — done, verified and running in-game.
     ~~**`BOOSTER`** (8,024 bytes)~~ — done, verified and running in-game.
     ~~**`DEMO`** (16,864 bytes)~~ — done, verified and running in-game.
-    Next: `ADVDRV` (29,330 bytes); `WINMSG` and `REALITY` need `ofstest`.
+    ~~**`ADVDRV`** (29,330 bytes)~~ — done, verified and running in-game.
+    Next: `WINDOW` (24,992 bytes); `WINMSG` and `REALITY` need `ofstest`.
 13. `HG2D` (390 KB, the 2D rasteriser) last. It is 26% of the project on its
    own.
 

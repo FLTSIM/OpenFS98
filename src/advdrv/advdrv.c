@@ -261,6 +261,16 @@ typedef ld (FS98_STDCALL *fld0)(void);
 #define A_DIR        ((char *)D + 0x2da0)   /* the program's directory */
 #define A_CRC_TABLE  0x2ea0
 
+/* A coverage build (make advdrv-cover) counts what runs, for the harness:
+ * instructions at 0, operators at 0x40, variables read at 0x100 and
+ * written at 0x200, errors at 0x300. */
+#ifdef ADVDRV_COVER
+uint32_t advdrv_cover[0x400];
+#define COVER(i) (advdrv_cover[(i) & 0x3ff]++)
+#else
+#define COVER(i) ((void)0)
+#endif
+
 static uint32_t stop(void);
 static void error(uint32_t which);
 static double eval(void);
@@ -853,6 +863,7 @@ static void op_stop(void)
 /* .text+0xbc0, 0x0f and every malformed instruction: stop, and say so */
 static void op_error(void)
 {
+    COVER(0x309);
     op_stop();
     UTIL_ALERT(1, 4, 0xf439, 0, 0, 0, 0, 0);
 }
@@ -1000,7 +1011,11 @@ static void op_wait(void)
     }
     if (fcom(v, K(0x20619000)) & (C0 | C3))
         return;
+#if BREAK==5
+    A_UNTIL = (uint32_t)ftol((ld)v);
+#else
     A_UNTIL = (uint32_t)ftol((ld)v * K(0x20619010));
+#endif
     A_UNTIL = A_UNTIL + H_TICKS();
     A_WAIT = mode == 1 ? 3 : 1;
 }
@@ -1224,7 +1239,11 @@ static void op_position(void)
     to_lon(v, G + 0x568);
     v = (double)((ld)eval() * K(0x20619018));
     to_48(v, G + 0x570);
+#if BREAK==6
+    G8(0x365) = 0xe;
+#else
     G8(0x365) = 0xf;
+#endif
 }
 
 /* .text+0x1410, 0x26: play a video, from the program's VIDEOS, the sim's,
@@ -1501,6 +1520,7 @@ static void step(void)
         op_error();
         return;
     }
+    COVER(op);
     ((void (*)(void))(uintptr_t)D32(A_OPCODES + 4 * op))();
     A_STEPPED++;
 }
@@ -1569,11 +1589,13 @@ static double eval(void)
         op = PC8();
         A_PC++;
         while (op != 0) {
+            COVER(0x40 + (op < 0x3f ? op : 0x3f));
             ((void (*)(void))(uintptr_t)D32(A_OPERATE + 4 * op))();
             op = PC8();
             A_PC++;
         }
     } else {
+        COVER(0x40 + (op < 0x3f ? op : 0x3f));
         ((void (*)(void))(uintptr_t)D32(A_OPERATE + 4 * op))();
     }
     v = pop();
@@ -1933,8 +1955,10 @@ static ld FS98_STDCALL var_get(uint32_t index)
 
     if ((int32_t)index >= 0 && (int32_t)index <= 0xaf) {
         fn = (var_getter)(uintptr_t)P32(VAR(index), 0);
-        if (fn != NULL)
+        if (fn != NULL) {
+            COVER(0x100 + index);
             return fn(VAR(index));
+        }
     }
     op_error();
     return K(0x206190c0);
@@ -1947,8 +1971,10 @@ static uint32_t FS98_STDCALL var_set(uint32_t index, double v)
 
     if ((int32_t)index >= 0 && (int32_t)index <= 0xaf) {
         fn = (var_setter)(uintptr_t)P32(VAR(index), 4);
-        if (fn != NULL)
+        if (fn != NULL) {
+            COVER(0x200 + index);
             return fn(VAR(index), v);
+        }
     }
     op_error();
     return 0;
@@ -2036,9 +2062,13 @@ static ld FS98_STDCALL g_feet16(uint8_t *e)
 {
     uint32_t v = GV(e, uint16_t);
 
+#if BREAK==1
+    return (ld)(int32_t)v * K(0x206190d8);
+#else
     if (v == 0xffffd8f1u)
         return K(0x206190d0);
     return (ld)(int32_t)v * K(0x206190d8);
+#endif
 }
 
 static ld FS98_STDCALL g_u32_scaled(uint8_t *e)
@@ -2150,9 +2180,13 @@ static ld FS98_STDCALL g_256ths(uint8_t *e)
 {
     uint16_t v = GV(e, uint16_t);
 
+#if BREAK==2
+    return (ld)(int32_t)(int16_t)v * K(0x20619140);
+#else
     if (v == 0xd8f1)
         v = 0;
     return (ld)(int32_t)(int16_t)v * K(0x20619140);
+#endif
 }
 
 /* the two halves of a 64-bit value, multiplied */
@@ -2530,9 +2564,15 @@ static uint32_t FS98_STDCALL s_com(uint8_t *e, double v)
     }
     khz = UTIL_LOW((double)((ld)v * K(0x20619130))) % 100;
     step = 0;
+#if BREAK==7
+    if (khz == 50) {
+        step = 7;
+    } else if (G32(0x358) != 0) {
+#else
     if (khz == 50) {
         step = 5;
     } else if (G32(0x358) != 0) {
+#endif
         if (khz == 25)
             step = 2;
         else if (khz == 75)
@@ -2779,7 +2819,11 @@ static void FS98_STDCALL key_bind(uint32_t key)
         H_KEYS_ON(A_KEYMAP);
     if (D8(A_KEYS + key) == 0) {
         binding[0] = key & 0xff;
+#if BREAK==8
+        binding[1] = key >> 8;
+#else
         binding[1] = (key | 0x800) >> 8;
+#endif
         binding[2] = key + 0x1e000;
         H_KEYS_ADD(A_KEYMAP, U32(binding), 1);
     }
@@ -2847,10 +2891,15 @@ static void FS98_STDCALL to_lat(double v, uint8_t *out)
         if (fcom(a, K(0x20619230)) & C0)
             a = a - K(0x20619238);
     }
+#if BREAK==3
+    if (fcom(a, K(0x20619248)) & C0)
+        a = K(0x20619248);
+#else
     if (!(fcom(a, K(0x20619240)) & (C0 | C3)))
         a = K(0x20619240);
     else if (fcom(a, K(0x20619248)) & C0)
         a = K(0x20619248);
+#endif
     if (A_SOUTH == 1)
         a = -a;
     to_48((double)(a * K(0x20619250)), out);
@@ -2917,7 +2966,11 @@ static void FS98_STDCALL to_48(double v, uint8_t *out)
         v = (double)((ld)v - K(0x20619278));
     fraction = advdrv_modf(v, &whole);
     high = (int32_t)ftol(whole);
+#if BREAK==9
+    fraction = fraction * K(0x20619288);
+#else
     fraction = __builtin_fabsl(fraction * K(0x20619288));
+#endif
     PS32(out, 4) = high;
     P16(out, 2) = (uint16_t)ftol(fraction);
 }
@@ -2945,6 +2998,7 @@ static void error(uint32_t which)
 {
     char buf[0x400];
 
+    COVER(0x300 + (which < 8 ? which : 8));
     if (which < 8) {
         H_LOADSTRING(D32(A_ERRORS + 4 * which), U32(buf), 0x400);
         H_STRCAT(U32(buf), U32(A_NEWLINE));
@@ -3709,7 +3763,11 @@ static void w_visibility(void)
                 return;
             }
             before = D16(A_VISIBILITY + 2 * i - 2);
+#if BREAK==4
+            mid = before;
+#else
             mid = (uint16_t)(before + ((int32_t)here - (int32_t)before) / 2);
+#endif
             G16(0x1074) = (int32_t)mid > (int32_t)want ? before : here;
             return;
         }
@@ -4278,7 +4336,9 @@ static uint8_t *FS98_STDCALL skip_sound(uint8_t *name)
             H_JOIN(U32(copy), 0, U32(A_SOUND_DIR3), U32(name));
             H_JOIN(U32(source), 0, U32(A_CACHE_DIR), U32(name));
             H_COPY(U32(copy), 0x13, U32(source), 0x13);
+#if BREAK!=10
             H_SET_ATTR(1, U32(copy), 0x13);
+#endif
         }
         return skip_str(name);
     }

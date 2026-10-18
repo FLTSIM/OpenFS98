@@ -54,8 +54,9 @@ BASE_UTIL   := 0x208e0000
 BASE_WEATHERM := 0x208f0000
 BASE_WINDOW := 0x20900000
 BASE_WINMSG := 0x20910000
+BASE_REALITY := 0x208b0000
 
-MODULES := ACONTAIN ADVDRV ATC BOOSTER CHAIN DEMO DYNAMIC FACIL FE GLOBAL LANDME NUMERIC SLEW SOUND UTIL WEATHERM WINDOW WINMSG
+MODULES := ACONTAIN ADVDRV ATC BOOSTER CHAIN DEMO DYNAMIC FACIL FE GLOBAL LANDME NUMERIC REALITY SLEW SOUND UTIL WEATHERM WINDOW WINMSG
 
 # Setup renames two modules on the way from CD to install, and the game loads
 # the *installed* names.  A rebuilt FACIL.DLL copied in as FACIL.DLL would just
@@ -273,6 +274,22 @@ $(BIN)/window.res: src/window/window.rc
 
 src/window/window_data.inc src/window/window_text.inc: $(ORIG)/Modules/WINDOW.DLL tools/gen_window_data.py
 	@python3 tools/gen_window_data.py $< src/window/window_data.inc src/window/window_text.inc
+
+# REALITY, crashes, damage and the crash analysis: assembly and MSVC C.
+$(BIN)/REALITY.DLL: src/reality/reality.c src/reality/reality.def src/reality/reality_data.inc \
+                    src/reality/reality_rdata.inc $(BIN)/reality.res
+	@mkdir -p $(BIN)
+	$(CC) $(CFLAGS) -fno-delete-null-pointer-checks -fno-ipa-icf -Isrc/reality $(LDFLAGS) \
+	      -Wl,--image-base=$(BASE_REALITY) \
+	      -o $@ src/reality/reality.c $(BIN)/reality.res src/reality/reality.def \
+	      -lkernel32 -lgcc
+
+$(BIN)/reality.res: src/reality/reality.rc
+	@mkdir -p $(BIN)
+	$(RC) $< -O coff -o $@
+
+src/reality/reality_data.inc src/reality/reality_rdata.inc: $(ORIG)/Modules/REALITY.DLL tools/gen_reality_data.py
+	@python3 tools/gen_reality_data.py $< src/reality/reality_data.inc src/reality/reality_rdata.inc
 
 # WINMSG, the on-screen message window: MSVC C.
 $(BIN)/WINMSG.DLL: src/winmsg/winmsg.c src/winmsg/winmsg.def src/winmsg/winmsg_data.inc \
@@ -681,6 +698,33 @@ window-breaks: windowdiff
 windowdiff-run: windowdiff
 	@cd $(DIFFDIR) && WINEDEBUG=-all timeout 7200 wine windowdiff.exe $(if $(N),$(N),20000) $(if $(FE_CD),$(FE_CD),.)
 
+# REALITY, whole-module: crashes, damage and the crash analysis, retail and
+# OpenFS98 in turn over the same scripts, with retail UTIL and NUMERIC, a
+# stand-in for the analysis dialog and logging stubs for the rest (HG2D's
+# lines with their colour).  N=... sets the scenario count.
+$(DIFFDIR)/realitydiff.exe: tools/difftest/realitydiff.c
+	@mkdir -p $(DIFFDIR)
+	$(CC) -std=c99 -O1 -Wall -Wextra -o $@ tools/difftest/realitydiff.c
+
+realitydiff: $(DIFFDIR)/realitydiff.exe $(BIN)/REALITY.DLL
+	@cp $(ORIG)/Modules/REALITY.DLL $(DIFFDIR)/REALITY_retail.dll
+	@cp $(BIN)/REALITY.DLL          $(DIFFDIR)/REALITY_ours.dll
+	@cp $(ORIG)/Modules/UTIL.DLL    $(DIFFDIR)/UTIL_retail.dll
+	@cp $(ORIG)/Modules/NUMERIC.DLL $(DIFFDIR)/NUMERIC_retail.dll
+
+# A deliberately broken copy of reality.c as the harness's "ours" (for
+# tools/reality_breaks.py, which makes the copies and runs the harness).
+reality-break-build:
+	$(CC) $(CFLAGS) -fno-delete-null-pointer-checks -fno-ipa-icf -Isrc/reality $(LDFLAGS) \
+	      -Wl,--image-base=$(BASE_REALITY) -o $(DIFFDIR)/REALITY_ours.dll \
+	      $(REALITY_SRC) $(BIN)/reality.res src/reality/reality.def -lkernel32 -lgcc
+
+reality-breaks: realitydiff
+	@python3 tools/reality_breaks.py $(if $(N),$(N),2000)
+
+realitydiff-run: realitydiff
+	@cd $(DIFFDIR) && WINEDEBUG=-all timeout 3600 wine realitydiff.exe $(if $(N),$(N),20000)
+
 # WINMSG, whole-module: the message window, retail and OpenFS98 in turn over
 # the same scripts, with a model of the host's window and heap, stand-ins for
 # WINDOW's record and MAIN's situation writer, and a CHAIN that answers the
@@ -992,4 +1036,4 @@ smoke: all
 clean:
 	rm -rf $(BIN)
 
-.PHONY: all stage setup-map graph hostmap compare run trace trace-render trace-ddraw kill window-reset wm-unmanaged wm-managed vd-on vd-off mode8 mode16 ddraw-gdi ddraw-default smoke difftest difftest-run utildiff utildiff-run utildiff-portable numericdiff numericdiff-run chaindiff chaindiff-run atcdiff atcdiff-run weathermdiff weathermdiff-run acontaindiff acontaindiff-run sounddiff sounddiff-run dynamicdiff dynamicdiff-run fegriddiff fegriddiff-run fediff fediff-run fesldiff fesldiff-run boosterdiff boosterdiff-run demodiff demodiff-run windowdiff windowdiff-run window-breaks window-break-build winmsgdiff winmsgdiff-run winmsg-breaks winmsg-break-build advdrvdiff advdrvdiff-run advdrv-cover landmediff landmediff-run facildiff facildiff-run facildiff-fe-run ofstest ofstest-run ofstest-remove util-trace install revert installed-name-of orig-module-of clean
+.PHONY: all stage setup-map graph hostmap compare run trace trace-render trace-ddraw kill window-reset wm-unmanaged wm-managed vd-on vd-off mode8 mode16 ddraw-gdi ddraw-default smoke difftest difftest-run utildiff utildiff-run utildiff-portable numericdiff numericdiff-run chaindiff chaindiff-run atcdiff atcdiff-run weathermdiff weathermdiff-run acontaindiff acontaindiff-run sounddiff sounddiff-run dynamicdiff dynamicdiff-run fegriddiff fegriddiff-run fediff fediff-run fesldiff fesldiff-run boosterdiff boosterdiff-run demodiff demodiff-run windowdiff windowdiff-run window-breaks window-break-build winmsgdiff winmsgdiff-run winmsg-breaks winmsg-break-build realitydiff realitydiff-run reality-breaks reality-break-build advdrvdiff advdrvdiff-run advdrv-cover landmediff landmediff-run facildiff facildiff-run facildiff-fe-run ofstest ofstest-run ofstest-remove util-trace install revert installed-name-of orig-module-of clean

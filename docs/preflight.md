@@ -633,6 +633,95 @@ are where it does its work:
 Only WINDOW `+0x1c` was found calling it. Its observable behaviour is drawing
 and dialogs, like WINMSG's, so it belongs in `ofstest`.
 
+# Round 7: REALITY
+
+## Verdict
+
+**Externally testable**, like WINMSG, and next. The "belongs in `ofstest`"
+reading above (round 6) was made before WINMSG showed that a module which
+draws can be verified by the calls it makes. REALITY draws only lines, and a
+line is entirely its arguments.
+
+| | REALITY |
+| --- | --- |
+| `.text` | 4,822 |
+| functions in Linkage | 4 (`+0x04`, `+0x08`, `+0x18`, `+0x1c`) |
+| unfinished imports | MAIN x3, HG2D x3, CONTROLS x1 |
+| done imports | CHAIN, DEMO, WINDOW, NUMERIC, UTIL, WINMSG, SOUND |
+| host services | 12; new: `+0x074`, `+0x078`, `+0x304` |
+| direct Win32 | none (MSVCRT `_ftol`) |
+| external harness | yes: logging stubs, WINMSG's window model, DEMO's dialog stand-in |
+
+## Shape
+
+Two programs, like WINDOW and DEMO. `.data` is one 0x510-byte image
+(`ImportTable` at `+0x48`, `Linkage` at `+0xb0`) with 19 relocations: the
+Linkage, an eight-entry jump table at `+0x00`, the dialog's callbacks and
+some pointers into the image itself, which a harness compares as offsets.
+
+- **Assembly, `.text+0x020`..`+0x8a4`**, with ATC's stack-alignment wrapper
+  around every call. Init registers frame callbacks on CHAIN lists 1 and 3.
+  They count down a crash state in GLOBAL `+0x838` and read the crash code at
+  `+0x832` (0xe folded to 6; 0x10, 0x12 and 0x14 only with `+0x84a`; odd codes
+  and codes above 0x14 become 4). On a crash it loads string `0x258 + code`
+  into WINMSG slot 5 for 0x3c frames, pauses through CONTROLS `+0x5c(8, 1)`,
+  plays SOUND event 0xe with a block (and keeps the result), switches a 3D
+  view to the spot plane through WINDOW `+0x58(view, 4)`, greys the menu
+  through MAIN `+0x30`, and later reloads through MAIN `+0x44`, or posts
+  command `0x100c2`/`0x100c3` (host `+0x03c`). A stress check draws UTIL's
+  random numbers (`+0x6c`, `+0x70`) against GLOBAL thresholds and sets the
+  damage flags at `+0xb64`..`+0xb73` through the jump table, keyed on
+  `+0x258 & 0xe`. `+0x18` clears those flags. `+0x1c`, called from WINDOW's
+  frame, draws a shape from the point table at `.data+0xd0` into the current 3D
+  view through HG2D `+0x34` (clamped to the view's half-extents).
+- **Compiled C, `.text+0xa50`..`+0x22b4`**: the crash-analysis dialog, host
+  `+0x10c` dialog `0x14050001` with the parameter block at `.data+0x228`
+  (`.text+0xb10`, and the control procedure `.text+0xd20`: 0 attach, 1 paint,
+  2 release) and a UTIL `+0x90` exchange table at `.data+0x280` (formatter
+  `.text+0xcc0`, units from GLOBAL `+0xc18`). It reads 24 replay entries back
+  through DEMO `+0x3c` into two host arrays (`+0x2f8`, emptied by `+0x304`),
+  scales them with x87 arithmetic and `_ftol`, and draws a grid (HG2D `+0x2c`,
+  `+0x30`) and the descent through HG2D `+0x34`. The colour is GLOBAL
+  `+0x2ec`.
+
+## Host services, from the callees
+
+- `+0x074 (hwnd, rec)`, `ret 8`: attach a record to an existing dialog
+  control. A 0x90-byte block at `+0xa0` with defaults, the hwnd at block
+  `+0x24`, then `SendMessage(hwnd, 0x467, 0, rec)`, whose handler sizes it.
+  REALITY reads the render size (`+0x84`, `+0x88`) and the surface (`+0x80`,
+  `+0x94`, `+0x98`). -1 for a null record.
+- `+0x078 (rec)`, `ret 4`: release the surface and the block.
+- `+0x304 (list)`, `ret 4`: empty a host array (count 0).
+
+## Stubs
+
+- **HG2D** `+0x2c`/`+0x30`/`+0x34`: logged with every argument and GLOBAL
+  `+0x2ec`, the colour. That is the whole drawing.
+- **MAIN** `+0x30`/`+0x34` grey and restore the menu items `0x1001`..`0x1006`;
+  `+0x44` (1,949 bytes) reloads the flight, and REALITY saves GLOBAL `+0x846`
+  around it, so the stub should sometimes write GLOBAL.
+- **CONTROLS** `+0x5c`: logged.
+- **DEMO** `+0x3c`: a ring entry back, as a position above the ground
+  ([modules/demo.md](modules/demo.md)), from the script.
+- **SOUND** `+0x24`, **WINMSG** `+0x18`, **WINDOW** `+0x58`, **NUMERIC**
+  `+0x18`: logged; NUMERIC writes the format and the value, as in windowdiff.
+- **UTIL**: retail's, with its state restored per side, because `+0x6c` and
+  `+0x70` advance a seed. `+0x90` runs the exchange table and `+0xc8` is called
+  three times; both need reading for what they hand back.
+- **The dialog**: a stand-in for host `+0x10c` that calls the block's
+  callbacks the way DEMO's harness does: attach (with WINMSG's record model
+  plus a render size), paint, release.
+
+x87: the graph's scaling ends in `_ftol`, so run each scenario under a random
+precision control, as `sounddiff` does.
+
+**Outcome:** done as planned, [modules/reality.md](modules/reality.md) --
+20,000 scenarios, 0 differences. UTIL `+0xc8` is 32.16 to double and `+0x90`
+the exchange read, both retail's in the harness. The full read added the
+metric scale's 0x30 stride and the countdown reading the dialog's result in
+ah.
+
 # Round 1: WINMSG, ATC, LANDME
 
 ## Verdict

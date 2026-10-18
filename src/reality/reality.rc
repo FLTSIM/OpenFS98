@@ -1,0 +1,30 @@
+/* Version resource for the reimplemented REALITY.DLL. */
+#include <winver.h>
+
+VS_VERSION_INFO VERSIONINFO
+FILEVERSION     6,10,418,0
+PRODUCTVERSION  6,10,418,0
+FILEFLAGSMASK   VS_FFI_FILEFLAGSMASK
+FILEFLAGS       0
+FILEOS          VOS__WINDOWS32
+FILETYPE        VFT_DLL
+FILESUBTYPE     VFT2_UNKNOWN
+BEGIN
+    BLOCK "StringFileInfo"
+    BEGIN
+        BLOCK "040904b0"
+        BEGIN
+            VALUE "CompanyName",      "OpenFS98"
+            VALUE "FileDescription",  "Flight Simulator 98 module (OpenFS98 reimplementation)"
+            VALUE "FileVersion",      "6.10.418"
+            VALUE "InternalName",     "REALITY"
+            VALUE "OriginalFilename", "REALITY.DLL"
+            VALUE "ProductName",      "OpenFS98"
+            VALUE "ProductVersion",   "6.10.418"
+        END
+    END
+    BLOCK "VarFileInfo"
+    BEGIN
+        VALUE "Translation", 0x409, 1200
+    END
+END

@@ -69,9 +69,11 @@ make windowdiff-run      # whole-module WINDOW, windows and the eye -> 20000 sce
 make window-breaks       # WINDOW broken on purpose -> 109 breaks, 106 caught, 3 proven equivalent (~25 min)
 make winmsgdiff-run      # whole-module WINMSG, the message bar -> 20000 scenarios, 0 differ (~2 min)
 make winmsg-breaks       # WINMSG broken on purpose -> 64 breaks, 60 caught, 4 proven equivalent (~13 min)
+make realitydiff-run     # whole-module REALITY, crashes and the analysis -> 20000 scenarios, 0 differ (~1 min)
+make reality-breaks      # REALITY broken on purpose -> 67 breaks, 61 caught, 6 proven equivalent (~7 min)
 make difftest-run        # whole-module SLEW         -> 0/2000 vectors differ
 make ofstest-run         # in-process, via the host  -> passed 68, failed 0
-make smoke               # ACONTAIN, ADVDRV, ATC, BOOSTER, CHAIN, DEMO, DYNAMIC, FACIL, FE, GLOBAL, LANDME, NUMERIC, SLEW, SOUND, UTIL, WEATHERM, WINDOW, WINMSG installed -> 27/27, 95 gauges, PASS
+make smoke               # ACONTAIN, ADVDRV, ATC, BOOSTER, CHAIN, DEMO, DYNAMIC, FACIL, FE, GLOBAL, LANDME, NUMERIC, REALITY, SLEW, SOUND, UTIL, WEATHERM, WINDOW, WINMSG installed -> 27/27, 95 gauges, PASS
 make util-trace          # which UTIL services the game calls, counted in-game
 ```
 
@@ -112,7 +114,7 @@ running in-game**
    20,000 scenarios, 0 differences. It found a retail leftover byte (the top
    byte of a saved esi read below a path buffer), now reproduced.
 
-FE is in `MODULES`. REALITY still goes to `ofstest`. **LANDME is also done and verified**: its harness gives each
+FE is in `MODULES`. **LANDME is also done and verified**: its harness gives each
 side a separate retail FE instance, steers the aircraft through all eleven
 nonzero guidance phases, and reports zero differences across 20,000 scenarios
 (`make landmediff-run`).
@@ -191,8 +193,20 @@ module memory *outside* the compared image, because a retail overrun into its
 own import table showed up as faults several scenarios later. See
 [docs/modules/winmsg.md](docs/modules/winmsg.md).
 
-**Next:** `REALITY` needs `ofstest`; otherwise pick the next survey from the
-modules whose imports are now all done or stubbable.
+**REALITY is done, verified and running in-game** (round 7 of
+[docs/preflight.md](docs/preflight.md)): crashes, the countdown through the
+reload, stress damage, the cracked windscreen and the crash analysis's graph.
+It too was set aside for `ofstest` and turned out externally testable: it
+draws only lines, and a line is its arguments. `make realitydiff-run`: 20,000
+scenarios, 0 differences; `make reality-breaks`: 61 of 67 caught, 6 proven
+equivalent. It reproduces the countdown reading the dialog's result in ah, a
+metric scale search that steps 0x30 through an 8-byte table, and a half-width
+clamp. The line stubs log the view of the record they draw through: a break
+in a block freed before the comparison went unseen until they did. See
+[docs/modules/reality.md](docs/modules/reality.md).
+
+**Next:** survey `ANALYSIS` (8,086 bytes), which has REALITY's shape (window
+services, the `+0x10c` dialog, HG2D/G3D/NUMERIC/UTIL).
 
 FE's `+0x40` calling-convention break is now confirmed by `fediff`: the
 one-byte probe writes through the caller's edi and returns with ebx/esi/edi

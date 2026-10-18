@@ -236,6 +236,15 @@ behind them. Before treating a fault as an outcome, ask what the game does
 with it; WINDOW's harness now models the filter, and the reimplementation
 computes the saturation without trapping.
 
+**Guard what the comparison does not cover.** A harness that restores and
+compares a module's `.data` image is blind to a write past it. WINMSG's
+retail line copy, given a window wide enough, ran off the end of `.data` into
+its own import table. Nothing differed in that scenario, but `CharNextA`'s
+IAT entry was now text, and retail faulted in scenarios run later in the same
+process. Those faults looked like bugs in the reimplementation. `winmsgdiff`
+now digests all of each module's mapped memory outside the image before and
+after every side, and stops if it changed.
+
 ## Two harnesses, and when to use which
 
 **Outside the process** -- `make utildiff-run`, `make numericdiff-run`,

@@ -73,7 +73,7 @@ makes the native windows (`+0x64`, see [host.md](host.md)).
 | `+0x0c` | number: 0x100 + n for 3D views, 0x200 + n for maps — and their menu ids |
 | `+0x18` | paint callback `(mode, rec, arg, out)`: mode 0 paints, 5 hit-tests |
 | `+0x1c` | the view block, 0xc0 bytes (3D views and maps) |
-| `+0x20`..`+0x2c` | rectangle, in 0x1000ths of the screen |
+| `+0x20`..`+0x2c` | rectangle: x and width in 0x2000ths of the screen's width, y and height in 0x1800ths of its height (the host's scales, `0x402a1e`; read for WINMSG, [winmsg.md](winmsg.md)) |
 | `+0x50`..`+0x5c` | a second rectangle, saved and restored |
 | `+0x60`, `+0x64` | surface size (host) |
 | `+0x68`..`+0x74` | minimum and maximum size (3D views: 0x32 by 0x1e) |

@@ -730,6 +730,15 @@ Its observable behaviour is mostly what it does to a window, which needs a real
 host. Faking that would be testing the fake. It belongs in `ofstest`, once ATC
 and LANDME have shown what its callers expect of it.
 
+**Outcome (after round 6):** WINMSG was verified externally after all --
+[modules/winmsg.md](modules/winmsg.md). What it does to the window is a short
+list of host calls (blank, draw text at place 3 in a slot's colour, show,
+hide, flush), and the host's side is four record fields: the pixel width at
+`+0x38` and the surface at `+0x94`/`+0x98`, besides the flags. The harness
+compares the calls, not the window, so the model only has to give the fields
+plausible values. `+0x08c` was already prototyped by WINDOW; `+0x2b4` is the
+strdup.
+
 ## Things found on the way
 
 - **ATC, LANDME and WEATHERM are hand-written assembly**, not compiled C

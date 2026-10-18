@@ -76,6 +76,7 @@ else's 1997 build, and it should read that way.
 | `make facildiff-run` | whole-module FACIL against retail, each side backed by a separate retail FE: a synthetic five-level rebuild, 20,000 seeded synthetic caches through the `+0x18`/`+0x1c`/`+0x20` queries, then the real CD index (with all sixteen boosters) and 10,000 dialog scenarios driven by a stand-in for World.DLL; compares the caches, call transcript (with string comparisons), returned records, GLOBAL, heap and both modules' state |
 | `make boosterdiff-run` | whole-module BOOSTER, worker thread included: retail and OpenFS98 run in turn over identical cache trees (four CD boosters, synthetic ones with every record type), the thread drained after every operation by counting posted 0x401s against SetEvents; MessageBoxA and the file calls hooked and logged; compares the transcript, the whole `.data` image, both heaps, GLOBAL, FE's records and the cache trees |
 | `make windowdiff-run` | whole-module WINDOW: retail and OpenFS98 in turn over scripts of windows created, closed, maximised, painted frame after frame through every eye mode and transition, and laid out in situations; a model of the host's window services and z-order, and of its filter that repairs integer divide faults; compares the transcript (with each frame's eye), the whole `.data` image, the arena and GLOBAL. `make window-breaks` breaks the module on purpose, one place at a time, and checks the harness notices |
+| `make winmsgdiff-run` | whole-module WINMSG, the message bar: retail and OpenFS98 in turn over scripts of messages shown, appended, cleared and run frame after frame (plain and scrolling, split to fit), with a model of the host's window record and heap, a CHAIN that answers the done message and re-enters, and situation records; compares the transcript with every string drawn, the whole `.data` image, the arena and GLOBAL. `make winmsg-breaks` breaks it on purpose |
 | `make demodiff-run` | whole-module DEMO: retail and OpenFS98 in turn over the CD's six videos and synthetic ones with every record class, recording, playback, instant replay and the four dialogs' callbacks (retail UTIL's catalogue, a stand-in for the host's dialog engine); faults compared as outcomes, runaway ops cut at a fixed count; compares the transcript, the whole `.data` image (code pointers through a learnt pairing), the arena, GLOBAL and the trees |
 | `make fesldiff-run` | FE's `+0x78`, the Scenery Library, retail against OpenFS98 over a writable fixture with sandboxed drive letters, driven by a stand-in for World.DLL's nine dialogs; compares the call transcript (with string comparisons and the world files left on disk), FE's `.data`, GLOBAL and the heap; faults are compared as outcomes |
 | `make facildiff-fe-run` | the same harness with OpenFS98 FE behind OpenFS98 FACIL, against retail FE behind retail FACIL: both reimplementations together over the real CD index and the dialogs (`Q=`/`D=` set the phase sizes, 2,000 each by default) |
@@ -121,7 +122,7 @@ built, so a gauge load means startup went all the way through.
 **Verified working**: under wine 9.0 the retail game reaches its main menu —
 27/27 modules, 95 gauges — and so does the build with OpenFS98's `ACONTAIN`, `ADVDRV`, `ATC`, `BOOSTER`,
 `CHAIN`, `DEMO`, `DYNAMIC`, `FACIL`, `FE`, `GLOBAL`, `LANDME`, `NUMERIC`,
-`SLEW`, `SOUND`, `UTIL`, `WEATHERM` and `WINDOW` modules substituted, with
+`SLEW`, `SOUND`, `UTIL`, `WEATHERM`, `WINDOW` and `WINMSG` modules substituted, with
 identical counts.
 
 ## Where this is going
@@ -183,12 +184,13 @@ emulate 80-bit arithmetic to preserve a rounding artefact. See
 | `FACIL` | 37 | 23,045 | **done** — verified (index, queries and the three dialogs' callbacks) and running in-game — see [docs/modules/facil.md](docs/modules/facil.md) |
 | `NUMERIC` | 17 | 14,684 | **reimplemented, verified, and running in-game** — 545,778 differential comparisons, zero mismatches — see [docs/modules/numeric.md](docs/modules/numeric.md) |
 | `WINDOW` | 10 | 24,992 | **reimplemented, verified, and running in-game** — the view windows, their titles, status lines and layout, and the eyepoint for every view mode with the transitions between them; 20,000 whole-module scenarios against a model of the host's window services, zero differences — see [docs/modules/window.md](docs/modules/window.md) |
+| `WINMSG` | 22 | 4,416 | **reimplemented, verified, and running in-game** — the message bar: queued messages in seven slots, plain or scrolling, split to fit, appended to; 20,000 whole-module scenarios against a model of the host's window record, zero differences — see [docs/modules/winmsg.md](docs/modules/winmsg.md) |
 | `UTIL` | 20 | 11,062 | **reimplemented, verified, and running in-game** — all 47 services; 19 seen called in a hands-on session, the modal alert among them — see [docs/modules/util.md](docs/modules/util.md) |
 | `FLTSIM98.EXE` | 1 (host) | 82,016 | 194 services mapped, 71 with confirmed prototypes, 11 verified in-process, 2 implemented — see [docs/modules/host.md](docs/modules/host.md) |
 
 Retail baseline and the OpenFS98 build -- ACONTAIN, ATC, BOOSTER, CHAIN,
-DEMO, DYNAMIC, FACIL, FE, GLOBAL, LANDME, NUMERIC, SLEW, SOUND, UTIL, WEATHERM
-and WINDOW all installed -- both
+DEMO, DYNAMIC, FACIL, FE, GLOBAL, LANDME, NUMERIC, SLEW, SOUND, UTIL, WEATHERM,
+WINDOW and WINMSG all installed -- both
 reach the panel: 27/27 modules, 95 gauges, `make smoke` PASS.
 
 `GLOBAL.DLL`'s 4764-byte shared state block is byte-identical to retail, and the
@@ -258,9 +260,14 @@ the view windows and the eyepoint, and it is done too (`make windowdiff-run`,
 20,000 scenarios, zero differences, see
 [docs/modules/window.md](docs/modules/window.md)). Its harness models the
 host's window services and the host's integer-divide repair, which retail
-relies on. `WINMSG` and `REALITY` were set aside for `ofstest` because they
-draw through those same services; with the model in hand, `WINMSG` may be
-testable externally too, and is the natural next survey.
+relies on. `WINMSG`, the message bar, was set aside for `ofstest` with
+`REALITY`, but turned out to be testable externally: what it shows is the
+host calls it makes, and the host's side is four fields of the window record
+(`make winmsgdiff-run`, 20,000 scenarios, zero differences, see
+[docs/modules/winmsg.md](docs/modules/winmsg.md)). It found that a scrolling
+message at an ordinary frame rate can start before its buffer and overwrite a
+slot's text pointer, a retail heap corruption now reproduced. `REALITY` draws
+and runs dialogs and still needs `ofstest`.
 
 Other useful work, in no particular order:
 
@@ -297,7 +304,7 @@ nothing in it imports anything interesting:
     ~~**`DEMO`** (16,864 bytes)~~ — done, verified and running in-game.
     ~~**`ADVDRV`** (29,330 bytes)~~ — done, verified and running in-game.
     ~~**`WINDOW`** (24,992 bytes)~~ — done, verified and running in-game.
-    Next: a survey of `WINMSG` (4,416 bytes) against WINDOW's host model;
+    ~~**`WINMSG`** (4,416 bytes)~~ — done, verified and running in-game.
     `REALITY` needs `ofstest`.
 13. `HG2D` (390 KB, the 2D rasteriser) last. It is 26% of the project on its
    own.

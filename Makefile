@@ -53,8 +53,9 @@ BASE_SOUND  := 0x208d0000
 BASE_UTIL   := 0x208e0000
 BASE_WEATHERM := 0x208f0000
 BASE_WINDOW := 0x20900000
+BASE_WINMSG := 0x20910000
 
-MODULES := ACONTAIN ADVDRV ATC BOOSTER CHAIN DEMO DYNAMIC FACIL FE GLOBAL LANDME NUMERIC SLEW SOUND UTIL WEATHERM WINDOW
+MODULES := ACONTAIN ADVDRV ATC BOOSTER CHAIN DEMO DYNAMIC FACIL FE GLOBAL LANDME NUMERIC SLEW SOUND UTIL WEATHERM WINDOW WINMSG
 
 # Setup renames two modules on the way from CD to install, and the game loads
 # the *installed* names.  A rebuilt FACIL.DLL copied in as FACIL.DLL would just
@@ -272,6 +273,22 @@ $(BIN)/window.res: src/window/window.rc
 
 src/window/window_data.inc src/window/window_text.inc: $(ORIG)/Modules/WINDOW.DLL tools/gen_window_data.py
 	@python3 tools/gen_window_data.py $< src/window/window_data.inc src/window/window_text.inc
+
+# WINMSG, the on-screen message window: MSVC C.
+$(BIN)/WINMSG.DLL: src/winmsg/winmsg.c src/winmsg/winmsg.def src/winmsg/winmsg_data.inc \
+                   $(BIN)/winmsg.res
+	@mkdir -p $(BIN)
+	$(CC) $(CFLAGS) -fno-delete-null-pointer-checks -Isrc/winmsg $(LDFLAGS) \
+	      -Wl,--image-base=$(BASE_WINMSG) \
+	      -o $@ src/winmsg/winmsg.c $(BIN)/winmsg.res src/winmsg/winmsg.def \
+	      -lkernel32 -luser32 -lgcc
+
+$(BIN)/winmsg.res: src/winmsg/winmsg.rc
+	@mkdir -p $(BIN)
+	$(RC) $< -O coff -o $@
+
+src/winmsg/winmsg_data.inc: $(ORIG)/Modules/WINMSG.DLL tools/gen_winmsg_data.py
+	@python3 tools/gen_winmsg_data.py $< $@
 
 # LANDME, the landing-assistance state machine.  It uses retail FE in-game and
 # in its differential harness, so it can be completed independently of FE's
@@ -664,6 +681,31 @@ window-breaks: windowdiff
 windowdiff-run: windowdiff
 	@cd $(DIFFDIR) && WINEDEBUG=-all timeout 7200 wine windowdiff.exe $(if $(N),$(N),20000) $(if $(FE_CD),$(FE_CD),.)
 
+# WINMSG, whole-module: the message window, retail and OpenFS98 in turn over
+# the same scripts, with a model of the host's window and heap, stand-ins for
+# WINDOW's record and MAIN's situation writer, and a CHAIN that answers the
+# done message.  N=... sets the scenario count.
+$(DIFFDIR)/winmsgdiff.exe: tools/difftest/winmsgdiff.c
+	@mkdir -p $(DIFFDIR)
+	$(CC) -std=c99 -O1 -Wall -Wextra -o $@ tools/difftest/winmsgdiff.c
+
+winmsgdiff: $(DIFFDIR)/winmsgdiff.exe $(BIN)/WINMSG.DLL
+	@cp $(ORIG)/Modules/WINMSG.DLL $(DIFFDIR)/WINMSG_retail.dll
+	@cp $(BIN)/WINMSG.DLL          $(DIFFDIR)/WINMSG_ours.dll
+
+# A deliberately broken copy of winmsg.c as the harness's "ours" (for
+# tools/winmsg_breaks.py, which makes the copies and runs the harness).
+winmsg-break-build:
+	$(CC) $(CFLAGS) -fno-delete-null-pointer-checks -Isrc/winmsg $(LDFLAGS) \
+	      -Wl,--image-base=$(BASE_WINMSG) -o $(DIFFDIR)/WINMSG_ours.dll \
+	      $(WINMSG_SRC) $(BIN)/winmsg.res src/winmsg/winmsg.def -lkernel32 -luser32 -lgcc
+
+winmsg-breaks: winmsgdiff
+	@python3 tools/winmsg_breaks.py $(if $(N),$(N),2000)
+
+winmsgdiff-run: winmsgdiff
+	@cd $(DIFFDIR) && WINEDEBUG=-all timeout 3600 wine winmsgdiff.exe $(if $(N),$(N),20000)
+
 # CHAIN, whole-module: both DLLs driven through Linkage over random scripts
 # whose callbacks re-enter the module.  N=... sets the scenario count.
 $(DIFFDIR)/chaindiff.exe: tools/difftest/chaindiff.c
@@ -950,4 +992,4 @@ smoke: all
 clean:
 	rm -rf $(BIN)
 
-.PHONY: all stage setup-map graph hostmap compare run trace trace-render trace-ddraw kill window-reset wm-unmanaged wm-managed vd-on vd-off mode8 mode16 ddraw-gdi ddraw-default smoke difftest difftest-run utildiff utildiff-run utildiff-portable numericdiff numericdiff-run chaindiff chaindiff-run atcdiff atcdiff-run weathermdiff weathermdiff-run acontaindiff acontaindiff-run sounddiff sounddiff-run dynamicdiff dynamicdiff-run fegriddiff fegriddiff-run fediff fediff-run fesldiff fesldiff-run boosterdiff boosterdiff-run demodiff demodiff-run windowdiff windowdiff-run window-breaks window-break-build advdrvdiff advdrvdiff-run advdrv-cover landmediff landmediff-run facildiff facildiff-run facildiff-fe-run ofstest ofstest-run ofstest-remove util-trace install revert installed-name-of orig-module-of clean
+.PHONY: all stage setup-map graph hostmap compare run trace trace-render trace-ddraw kill window-reset wm-unmanaged wm-managed vd-on vd-off mode8 mode16 ddraw-gdi ddraw-default smoke difftest difftest-run utildiff utildiff-run utildiff-portable numericdiff numericdiff-run chaindiff chaindiff-run atcdiff atcdiff-run weathermdiff weathermdiff-run acontaindiff acontaindiff-run sounddiff sounddiff-run dynamicdiff dynamicdiff-run fegriddiff fegriddiff-run fediff fediff-run fesldiff fesldiff-run boosterdiff boosterdiff-run demodiff demodiff-run windowdiff windowdiff-run window-breaks window-break-build winmsgdiff winmsgdiff-run winmsg-breaks winmsg-break-build advdrvdiff advdrvdiff-run advdrv-cover landmediff landmediff-run facildiff facildiff-run facildiff-fe-run ofstest ofstest-run ofstest-remove util-trace install revert installed-name-of orig-module-of clean

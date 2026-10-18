@@ -331,6 +331,14 @@ view block and is not a map. `+0x244`/`+0x25c`/`+0x264` add, remove and
 rename "Views" menu items, keyed by the whole 32 bits of an id whose low word
 is the command. `+0x2a4` is a string resource as a host copy.
 
+WINMSG reads three more record fields ([winmsg.md](winmsg.md)). `+0x30`..`+0x3c`
+are the window in pixels (`0x405d24`): the rectangle `+0x20`..`+0x2c` times
+`0x41bda8` (the screen's width `<< 16 / 0x2000`) or `0x41c350` (its height `<< 16
+/ 0x1800`), `sar 16`, the screen's origin added to x and y. So the rectangle
+is in 0x2000ths of the width and 0x1800ths of the height, not 0x1000ths.
+`+0x8c`..`+0x98` describe the surface (`0x4069d0`), `+0x94` its size in bytes
+and `+0x98` its bits.
+
 ## Integer divides are repaired, not fatal
 
 The sim's main loop (`0x401a70`) runs inside a `__try` (`0x412140`) whose

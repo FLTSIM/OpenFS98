@@ -479,7 +479,8 @@ typedef int32_t (FS98_STDCALL *fs98_host_paint_begin_fn)(void *rec);
 typedef int32_t (FS98_STDCALL *fs98_host_paint_end_fn)(void *rec);
 
 /* +0x07c -- message 0x467 and SetWindowTextA: the record's flags and
- * rectangle (+0x20..+0x2c, fractions of 0x1000 of the screen) taken up. */
+ * rectangle (+0x20..+0x2c: x and width in 0x2000ths of the screen's width,
+ * y and height in 0x1800ths of its height) taken up. */
 typedef int32_t (FS98_STDCALL *fs98_host_win_update_fn)(void *rec);
 
 /* +0x080 -- SetWindowTextA from the record's title, on both windows. */

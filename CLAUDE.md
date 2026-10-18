@@ -67,9 +67,11 @@ make demodiff-run        # whole-module DEMO, videos and instant replay -> 20000
 make advdrvdiff-run      # whole-module ADVDRV, adventures and lessons -> 20000 scenarios, 0 differ (~40 min)
 make windowdiff-run      # whole-module WINDOW, windows and the eye -> 20000 scenarios, 0 differ (~2 min)
 make window-breaks       # WINDOW broken on purpose -> 109 breaks, 106 caught, 3 proven equivalent (~25 min)
+make winmsgdiff-run      # whole-module WINMSG, the message bar -> 20000 scenarios, 0 differ (~2 min)
+make winmsg-breaks       # WINMSG broken on purpose -> 64 breaks, 60 caught, 4 proven equivalent (~13 min)
 make difftest-run        # whole-module SLEW         -> 0/2000 vectors differ
 make ofstest-run         # in-process, via the host  -> passed 68, failed 0
-make smoke               # ACONTAIN, ADVDRV, ATC, BOOSTER, CHAIN, DEMO, DYNAMIC, FACIL, FE, GLOBAL, LANDME, NUMERIC, SLEW, SOUND, UTIL, WEATHERM, WINDOW installed -> 27/27, 95 gauges, PASS
+make smoke               # ACONTAIN, ADVDRV, ATC, BOOSTER, CHAIN, DEMO, DYNAMIC, FACIL, FE, GLOBAL, LANDME, NUMERIC, SLEW, SOUND, UTIL, WEATHERM, WINDOW, WINMSG installed -> 27/27, 95 gauges, PASS
 make util-trace          # which UTIL services the game calls, counted in-game
 ```
 
@@ -110,7 +112,7 @@ running in-game**
    20,000 scenarios, 0 differences. It found a retail leftover byte (the top
    byte of a saved esi read below a path buffer), now reproduced.
 
-FE is in `MODULES`. REALITY and WINMSG still go to `ofstest`. **LANDME is also done and verified**: its harness gives each
+FE is in `MODULES`. REALITY still goes to `ofstest`. **LANDME is also done and verified**: its harness gives each
 side a separate retail FE instance, steers the aircraft through all eleven
 nonzero guidance phases, and reports zero differences across 20,000 scenarios
 (`make landmediff-run`).
@@ -174,8 +176,23 @@ into overflow and rely on it, so a harness must model it), and
 Linkage (fixed). See [docs/modules/window.md](docs/modules/window.md) and
 [docs/modules/host.md](docs/modules/host.md).
 
-**Next:** survey `WINMSG` (4,416 bytes) against WINDOW's host model -- it
-may be externally testable after all. `REALITY` needs `ofstest`.
+**WINMSG is done, verified and running in-game**: the message bar, a queue of
+messages in seven slots, plain or scrolling, split at spaces to fit. It was
+externally testable after all: what it shows is the host calls it makes, and
+the host's side is four record fields (pixel width `+0x38`, surface
+`+0x94`/`+0x98`, flags). `make winmsgdiff-run`: 20,000 scenarios, 0
+differences; `make winmsg-breaks`: 60 of 64 caught, 4 proven equivalent. It
+reproduces a scroller drawn before its buffer at ordinary frame rates (over a
+slot's text pointer), a line breaker that reads past its copy's terminator,
+and a stale cut. Two findings beyond WINMSG: **a window rectangle is in
+0x2000ths of the screen's width and 0x1800ths of its height**, not 0x1000ths
+(host `0x402a1e`; window.md and host.h corrected), and a harness must guard
+module memory *outside* the compared image, because a retail overrun into its
+own import table showed up as faults several scenarios later. See
+[docs/modules/winmsg.md](docs/modules/winmsg.md).
+
+**Next:** `REALITY` needs `ofstest`; otherwise pick the next survey from the
+modules whose imports are now all done or stubbable.
 
 FE's `+0x40` calling-convention break is now confirmed by `fediff`: the
 one-byte probe writes through the caller's edi and returns with ebx/esi/edi

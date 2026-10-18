@@ -312,10 +312,43 @@ mechanism yet for replacing code inside the host. What is pinned is the
 contract -- registry, ids, flags, the `param` convention and the tick -- which
 is what a native host's dialog layer has to honour.
 
+## Windows
+
+WINDOW's harness needed a model of the window services, so they were read
+from the callees; prototypes are in `host.h`. A window is the caller's
+0xa4-byte record ([window.md](window.md)). `+0x64` allocates a 0x90-byte
+block of the host's own at record `+0xa0`, creates two native windows, and
+puts the record at the front of its group (record `+0x78`) in a z-order kept
+as a list of groups at `0x41a3dc`, each a singly linked list front first.
+`+0x68` undoes it. `+0x90` raises a record within its group, `+0x94` returns
+the nth shown one. `+0x7c` sends `0x467` and sets the title, `+0x80` sets the
+title on both windows, `+0x84` sends `0x466` to a shown one, `+0x6c`/`+0x70`
+bracket painting with a DC, and `+0x8c` draws text at one of fifteen places.
+The window procedure's `WM_SIZE` (`0x4060ee`) writes the record's render size
+(`+0x84`/`+0x88`) and surface size (`+0x60`/`+0x64`): halved with flag
+`0x10000`, clamped by `+0x68`..`+0x74`, and made odd when the record has a
+view block and is not a map. `+0x244`/`+0x25c`/`+0x264` add, remove and
+rename "Views" menu items, keyed by the whole 32 bits of an id whose low word
+is the command. `+0x2a4` is a string resource as a host copy.
+
+## Integer divides are repaired, not fatal
+
+The sim's main loop (`0x401a70`) runs inside a `__try` (`0x412140`) whose
+filter is `0x4119a0`. On `0xc0000094` or `0xc0000095` it decodes the faulting
+`F6`/`F7` (a `0x66` prefix, ModRM, SIB and displacement for the length), and
+for `div` sets the quotient and remainder to all ones; for `idiv` it reads the
+divisor (register or memory) and sets the quotient to the largest value, or
+the most negative but one (`0x8001`, `0x80000001`; `0x7f81` for a byte), when
+the divisor and the dividend's top half differ in sign, and the remainder to
+the largest. Then it steps EIP past the instruction and continues. Retail
+modules divide into overflow routinely — WINDOW's look direction does every
+time the eye looks within a degree or so of north — and rely on it; a harness
+that loads a retail module has to model it (`windowdiff.c` does).
+
 ## Status
 
-2 of 194 services implemented. 21 have prototypes confirmed from the callee
-and recorded in `host.h`, and 11 are verified in-process: the clock, `strlen`,
+2 of 194 services implemented. 71 have prototypes confirmed from the callee
+and recorded in `host.h` (15 of them the window services, from WINDOW), and 11 are verified in-process: the clock, `strlen`,
 and the nine-service enumeration cluster above. The dialog registry's contents
 are checked in-process too. 13 more are named from their
 shape alone, and all 194 are classified by subsystem. Sizes reported by the mapper are upper bounds:

@@ -9,7 +9,39 @@ Produced with `python3 tools/impscan.py orig/Modules/<M>.DLL`, then each call
 site and each callee read by hand. The scanner under-reports rather than
 over-reports (see its header); the call counts below are lower bounds.
 
-Five rounds so far, newest first.
+Six rounds so far, newest first.
+
+# Round 6: WINDOW
+
+## Verdict
+
+**WINDOW, externally**, after all: what it does to a window it does through
+the host's window services, and those turned out small enough to model
+faithfully (the z-order, the sizes the host's `WM_SIZE` gives a record, the
+menu items), so the harness tests WINDOW's logic rather than a fake host.
+
+**Outcome:** done and verified -- [modules/window.md](modules/window.md).
+`make windowdiff-run`, 20,000 scenarios, zero differences.
+
+| | WINDOW |
+| --- | --- |
+| `.text` | 24,992 |
+| functions in Linkage | 32 (`dumplinkage.py` said 2: it stopped at the `0xc0000000` at `+0x10`) |
+| written in | MSVC C to `.text+0x3490`, asm from `+0x3504` |
+| unfinished imports | MAIN ×8, G3D ×7, HG2D ×6, CONTROLS ×2, PANELS ×2, REALITY ×1 |
+| host services | 32, 15 new: the window services, menus, strings |
+| direct Win32 | none |
+| external harness | yes: a model of the host's windows, logging stubs for the rest |
+
+The unfinished imports are all fire-and-forget from WINDOW's side except
+three values it reads back: MAIN `+0x9c` (whether the frame wants the
+stars), G3D `+0x34` (what a cloud layer covered) and HG2D `+0xbc` (a hit
+test). G3D `+0x3c` normalises a vector in WINDOW's own `.data`; its stub
+does what G3D does (the top bit to bit 28, by G3D's own table).
+
+Reading the harness's first faults found the host's divide filter: the sim
+runs under a `__try` whose filter repairs integer divide overflows, and
+WINDOW's eye overflows constantly. See [modules/host.md](modules/host.md).
 
 # Round 5: DEMO, ADVDRV
 
@@ -46,7 +78,7 @@ verified externally.
 
 The rest of the queue by `.text`: MPCHAT 3,104 (needs MULTIP), WINMSG 4,416
 and REALITY 4,822 (windows and dialogs: `ofstest`), ANALYSIS 8,086 (draws
-through HG2D), WINDOW 24,992, ADVDRV, MULTIP 43,318, CONTROLS 48,406, PANELS
+through HG2D), WINDOW 24,992 (round 6), ADVDRV, MULTIP 43,318, CONTROLS 48,406, PANELS
 50,038, G3D 92,518, MAIN 119,648, HG2D 389,734.
 
 # Round 4: FE, LANDME, FACIL, BOOSTER

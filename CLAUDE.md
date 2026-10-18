@@ -65,9 +65,11 @@ make fesldiff-run        # FE +0x78, the Scenery Library -> 20000 scenarios, 0 d
 make boosterdiff-run     # whole-module BOOSTER, its thread drained -> 20000 scenarios, 0 differ (~75 min)
 make demodiff-run        # whole-module DEMO, videos and instant replay -> 20000 scenarios, 0 differ (~25 min)
 make advdrvdiff-run      # whole-module ADVDRV, adventures and lessons -> 20000 scenarios, 0 differ (~40 min)
+make windowdiff-run      # whole-module WINDOW, windows and the eye -> 20000 scenarios, 0 differ (~2 min)
+make window-breaks       # WINDOW broken on purpose -> 109 breaks, 106 caught, 3 proven equivalent (~25 min)
 make difftest-run        # whole-module SLEW         -> 0/2000 vectors differ
 make ofstest-run         # in-process, via the host  -> passed 68, failed 0
-make smoke               # ACONTAIN, ADVDRV, ATC, BOOSTER, CHAIN, DEMO, DYNAMIC, FACIL, FE, GLOBAL, LANDME, NUMERIC, SLEW, SOUND, UTIL, WEATHERM installed -> 27/27, 95 gauges, PASS
+make smoke               # ACONTAIN, ADVDRV, ATC, BOOSTER, CHAIN, DEMO, DYNAMIC, FACIL, FE, GLOBAL, LANDME, NUMERIC, SLEW, SOUND, UTIL, WEATHERM, WINDOW installed -> 27/27, 95 gauges, PASS
 make util-trace          # which UTIL services the game calls, counted in-game
 ```
 
@@ -158,7 +160,22 @@ breaks caught or proven equivalent. It reproduces an `op_error` use-after-free
 sign-and-magnitude 48-bit positions, and displaced-weather-layer field reuse;
 see [docs/modules/advdrv.md](docs/modules/advdrv.md).
 
-**Next:** `WINDOW` (24,992 bytes). `WINMSG` and `REALITY` need `ofstest`.
+**WINDOW is done, verified and running in-game** (round 6 of
+[docs/preflight.md](docs/preflight.md)): the view windows, titles, status
+lines and situation layout, and the eye for every view mode with the
+transitions between them. `make windowdiff-run` runs both sides over the same
+scripts against a model of the host's window services (z-order, `WM_SIZE`
+sizes, menus): 20,000 scenarios, 0 differences; `make window-breaks` applies
+its deliberate breaks (all caught but three proven equivalences). Two
+findings matter beyond WINDOW: **the host repairs integer divide faults**
+(a `__try` filter at `0x4119a0` saturates the result; retail modules divide
+into overflow and rely on it, so a harness must model it), and
+`dumplinkage.py` stopped at the `+0x10` flag word of CHAIN/FE/WINDOW's
+Linkage (fixed). See [docs/modules/window.md](docs/modules/window.md) and
+[docs/modules/host.md](docs/modules/host.md).
+
+**Next:** survey `WINMSG` (4,416 bytes) against WINDOW's host model -- it
+may be externally testable after all. `REALITY` needs `ofstest`.
 
 FE's `+0x40` calling-convention break is now confirmed by `fediff`: the
 one-byte probe writes through the caller's edi and returns with ebx/esi/edi

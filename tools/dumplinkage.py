@@ -52,14 +52,18 @@ for n,vsz,va,rsz,ro in pe.secs:
 # Tables are NOT a fixed 32 entries.  UTIL's Linkage runs to +0xc8; capping it
 # at 32 hid 19 slots, including every service still to be done.  Walk instead:
 # slot 0 is the module id, then accept nulls (the table has interior gaps) and
-# in-image pointers, and stop at the first dword that is neither.
+# in-image pointers, and stop at the first dword that is neither -- except at
+# +0x10, which in CHAIN, FE and WINDOW holds a flag word (0xe0000000,
+# 0xd0000000, 0xc0000000) with the services after it; stopping there reported
+# all three as 3-entry tables.  Elsewhere a non-pointer really is the end:
+# SOUND's .data goes on with 0xac and then a code pointer at +0x4c.
 def extent(o, limit, kind):
     n=0
     while n<limit:
         v=u32(pe.b,o+n*4)
         if kind=='pairs':
             if n%2==0 and v==0 and u32(pe.b,o+(n+1)*4)==0: break
-        elif n>0 and v!=0 and not is_va(v):
+        elif n>0 and n!=4 and v!=0 and not is_va(v):
             break
         n+=1
     if kind!='pairs':

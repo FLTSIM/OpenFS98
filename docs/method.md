@@ -19,7 +19,11 @@ place by catching mistakes.
    UTIL's Linkage at `+0x7c` and hid 19 slots -- including all eight services
    still to be done. A tool that under-reports looks exactly like a small
    module. Both are fixed, but the habit is the point: if a module looks
-   surprisingly small, count the table by hand before believing it.
+   surprisingly small, count the table by hand before believing it. It
+   happened again with WINDOW: `dumplinkage.py` stopped at the flag word
+   `0xc0000000` at `+0x10` and reported 2 functions of 32. CHAIN and FE carry
+   the same word and had been hand-counted around it; the tool now accepts
+   it at `+0x10`.
 2. **Check what it reaches for** before reading any code. An imported service
    is externally testable when its behavior can be represented by a small,
    faithful stub; NUMERIC does this for the host, GLOBAL and UTIL. Code which
@@ -221,6 +225,16 @@ reason in the generator's header and the module's doc, and make the
 reimplementation fault the same way. WEATHERM's first run crashed retail on its
 own reset defaults. That turned out to be a real overflow, reachable in the
 game above 500 m.
+
+**A fault in the harness may not be one in the game.** WINDOW's first runs
+"crashed" retail in more than half the scenarios, on `idiv` overflows in the
+look direction. They were too common to have shipped, and they had not: the
+host runs the sim under a filter that repairs integer divide faults by
+saturating the result (`0x4119a0`, see [modules/host.md](modules/host.md)).
+Ending each scenario at those faults would have hidden most of the eye code
+behind them. Before treating a fault as an outcome, ask what the game does
+with it; WINDOW's harness now models the filter, and the reimplementation
+computes the saturation without trapping.
 
 ## Two harnesses, and when to use which
 

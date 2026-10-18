@@ -455,6 +455,87 @@ typedef void *(FS98_STDCALL *fs98_host_list_find_fn)(struct fs98_host_list *l, u
 #define FS98_HOST_S_STRNCPY        0x2ac
 #define FS98_HOST_S_STRCMP         0x2bc
 
+/* ---- windows: +0x020..+0x094 (confirmed by WINDOW) ------------------------- */
+
+/* A window is a caller's 0xa4-byte record (see docs/modules/window.md); the
+ * host keeps a 0x90-byte block of its own at record +0xa0, and the record's
+ * render size at +0x84/+0x88 and surface size at +0x60/+0x64, which its
+ * WM_SIZE handler sets: halved for +0x10000, clamped by +0x68..+0x74, made
+ * odd for a record with a view block (+0x1c) that is not a map (type 2). */
+
+/* +0x020 -- a host global (0x41719c); WINDOW paints nothing while it is 0. */
+typedef int32_t (FS98_STDCALL *fs98_host_active_fn)(void);
+
+/* +0x064 -- give the record its native windows (CreateWindowExA twice) and
+ * put it at the front of its group (+0x78) in the host's z-order.  -1 for a
+ * null record or a failed create, else 0. */
+typedef int32_t (FS98_STDCALL *fs98_host_win_create_fn)(void *rec);
+
+/* +0x068 -- out of the z-order, DestroyWindow, free the block. */
+typedef int32_t (FS98_STDCALL *fs98_host_win_destroy_fn)(void *rec);
+
+/* +0x06c / +0x070 -- the DC for painting the record, and its release. */
+typedef int32_t (FS98_STDCALL *fs98_host_paint_begin_fn)(void *rec);
+typedef int32_t (FS98_STDCALL *fs98_host_paint_end_fn)(void *rec);
+
+/* +0x07c -- message 0x467 and SetWindowTextA: the record's flags and
+ * rectangle (+0x20..+0x2c, fractions of 0x1000 of the screen) taken up. */
+typedef int32_t (FS98_STDCALL *fs98_host_win_update_fn)(void *rec);
+
+/* +0x080 -- SetWindowTextA from the record's title, on both windows. */
+typedef int32_t (FS98_STDCALL *fs98_host_win_title_fn)(void *rec);
+
+/* +0x084 -- message 0x466 if the record is shown (+0x08 bit 31). */
+typedef int32_t (FS98_STDCALL *fs98_host_win_flush_fn)(void *rec);
+
+/* +0x08c -- draw `text` in the record at place `where` (0..0xe: corners,
+ * edges and middle) in colour `colour`, opaque or not.  -1 for a null
+ * record, else 0. */
+typedef int32_t (FS98_STDCALL *fs98_host_text_fn)(void *rec, uint32_t where, uint32_t colour,
+                                                  const char *text, int32_t opaque);
+
+/* +0x090 -- to the front of its group.  -1 if it is not in the z-order. */
+typedef int32_t (FS98_STDCALL *fs98_host_raise_fn)(void *rec);
+
+/* +0x094 -- the nth shown record of group `group`, front first, into *out;
+ * null and -1 if there are not that many. */
+typedef int32_t (FS98_STDCALL *fs98_host_nth_fn)(void **out, uint32_t group, uint32_t n);
+
+/* +0x244 -- a menu item `id` (only its low word is kept) under `command`
+ * with `text`; +0x25c takes item `id` out, and +0x264 renames it.  Each
+ * looks the item up by the whole 32 bits of `id`. */
+typedef int32_t (FS98_STDCALL *fs98_host_menu_add_fn)(uint32_t command, uint32_t id,
+                                                      const char *text, uint32_t zero);
+typedef int32_t (FS98_STDCALL *fs98_host_menu_remove_fn)(uint32_t id);
+typedef int32_t (FS98_STDCALL *fs98_host_menu_text_fn)(uint32_t id, const char *text);
+
+/* +0x2a4 -- string `id` (up to 0x400 bytes) as a host copy through `out`
+ * (null if there is no such string); returns its length. */
+typedef int32_t (FS98_STDCALL *fs98_host_string_fn)(uint32_t id, char **out);
+
+#define FS98_HOST_S_ACTIVE      0x020
+#define FS98_HOST_S_WIN_CREATE  0x064
+#define FS98_HOST_S_WIN_DESTROY 0x068
+#define FS98_HOST_S_PAINT_BEGIN 0x06c
+#define FS98_HOST_S_PAINT_END   0x070
+#define FS98_HOST_S_WIN_UPDATE  0x07c
+#define FS98_HOST_S_WIN_TITLE   0x080
+#define FS98_HOST_S_WIN_FLUSH   0x084
+#define FS98_HOST_S_TEXT        0x08c
+#define FS98_HOST_S_RAISE       0x090
+#define FS98_HOST_S_NTH         0x094
+#define FS98_HOST_S_MENU_ADD    0x244
+#define FS98_HOST_S_MENU_REMOVE 0x25c
+#define FS98_HOST_S_MENU_TEXT   0x264
+#define FS98_HOST_S_STRING      0x2a4
+
+/* Not a service: the sim's main loop runs under a __try (0x412140) whose
+ * filter (0x4119a0) repairs integer divide faults.  It decodes the F6/F7
+ * (and a 0x66 prefix), saturates -- div: all ones; idiv: 0x7f..ff, or
+ * 0x80..01 when the divisor and the dividend's top half differ in sign,
+ * the remainder 0x7f..ff -- and carries on after the instruction.  Retail
+ * modules divide into overflow and rely on it; see docs/modules/window.md. */
+
 /* Extension ids, as the host's table at 0x417f20 has them. */
 #define FS98_HOST_EXT_AIR  0x0f
 #define FS98_HOST_EXT_WAV  0x13

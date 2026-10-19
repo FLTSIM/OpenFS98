@@ -220,8 +220,21 @@ not yet made); and a harness stub must leave the registers the real callee
 leaves where retail asm reads them (`analysisdiff.c`'s asm wrappers). See
 [docs/modules/analysis.md](docs/modules/analysis.md).
 
-**Next:** a round-9 survey of what is left (MPCHAT, MULTIP, CONTROLS, PANELS,
-G3D, MAIN), and the CHAIN ecx fix, proven in `chaindiff`.
+**Round 9 surveyed what is left** ([docs/preflight.md](docs/preflight.md)):
+**CONTROLS is next, and in progress.** Its hand-written assembly half
+(init/deinit, the CHAIN callbacks, the command dispatcher and all 342
+handlers: engines, radios, autopilot, the eye, slew, the mouse yoke) is
+transliterated in `src/controls/controls.c` and the module builds and links.
+The compiled-C half (`src/controls/controls_input.c`: the key bindings in
+`FLTSIM98.CFG`, the assignment dialog, the joysticks, and DirectInput 5 force
+feedback) is **not yet transliterated** -- it is optimiser-shuffled C that
+needs instruction-faithful reading, so it holds honest placeholders for now --
+and the `controlsdiff` harness is not built, so **nothing is verified**. See
+[docs/modules/controls.md](docs/modules/controls.md). After CONTROLS come
+MULTIP (DirectPlay through COM, a worker thread) with MPCHAT behind it, then
+G3D. Before G3D, trace who supplies the span routine its clipper calls. PANELS
+waits on HG2D, and MAIN comes last before HG2D. The CHAIN ecx fix, proven
+in `chaindiff`, is still open.
 
 FE's `+0x40` calling-convention break is now confirmed by `fediff`: the
 one-byte probe writes through the caller's edi and returns with ebx/esi/edi

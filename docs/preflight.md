@@ -9,7 +9,228 @@ Produced with `python3 tools/impscan.py orig/Modules/<M>.DLL`, then each call
 site and each callee read by hand. The scanner under-reports rather than
 over-reports (see its header); the call counts below are lower bounds.
 
-Eight rounds so far, newest first.
+Nine rounds so far, newest first.
+
+# Round 9: what is left
+
+## Verdict
+
+**CONTROLS next**, then MULTIP with MPCHAT behind it, then G3D. PANELS and
+MAIN wait, and HG2D stays last.
+
+CONTROLS is the only remaining module whose calls into unfinished modules
+are all fire-and-forget. What it needs from outside is input, and input can
+be scripted: joystick positions, profile sections and a DirectInput that
+lists the devices the scenario chooses. It is also the input layer the
+native goal needs behind a small host abstraction, so a verified CONTROLS
+pins that abstraction down.
+
+| | MPCHAT | MULTIP | CONTROLS | PANELS | G3D | MAIN |
+| --- | --- | --- | --- | --- | --- | --- |
+| id | `0xffffffff` | 35 | 16 | 15 | 14 | 3 |
+| `.text` | 3,104 | 43,318 | 48,406 | 50,038 | 92,518 | 119,648 |
+| `.data` | 0x200 | 0xa00 | 0xc00 | 0x1e00 | 0x18450 | 0x8000 |
+| functions in Linkage | 2, and `+0x14` is a pointer into `.data` | 11 | 20 | 39 | 22 | 47 |
+| written in | C | MSVC C (`_ftol`) | asm to `.text+0x78d0`, MSVC C from there | MSVC C | asm, ATC's wrapper throughout | asm and C interleaved |
+| unfinished imports | MULTIP ×4 | G3D ×3, MAIN ×1 | MAIN ×7, HG2D ×1, PANELS ×1 | HG2D ×36, MAIN ×10, gauges (id 19) | HG2D ×20 | every one but MPCHAT: G3D ×21, HG2D ×21, CONTROLS ×12, MULTIP ×8, PANELS ×5 |
+| return values read from them | 3 of 4 | G3D `+0x64` | **none** | MAIN `+0x80`, HG2D `+0x48`/`+0xac`/`+0xb0`, and four HG2D fields read directly | HG2D `+0x68`, `+0xa8` | 9 slots |
+| host services | 13, 4 new | 44, 8 new | 46, 18 new | 38, 9 new | 11, **none new** | 75, 18 new |
+| direct Win32 | a window of its own (USER32, `RICHED32.DLL` loaded) | threads, events, critical sections, `ShellExecuteA`; **DirectPlay through COM** | `GetKeyboardLayout`; **DirectInput 5 through COM** | GDI: DIB sections, fonts, `DrawTextA`, `FillRect`; resources; `fopen` | `CharLowerA`, `_CIacos` | `LoadImageA`, `GetObjectA`, string and locale calls |
+| callers | none; nothing can import id -1 | MAIN, DYNAMIC, MPCHAT | MAIN, WINDOW, DEMO, REALITY | MAIN, WINDOW, ACONTAIN, CONTROLS | MAIN, MULTIP, HG2D, and five done modules (WINDOW, ACONTAIN, ANALYSIS, DYNAMIC, WEATHERM) | eleven modules, ten of them done |
+| external harness | yes, after MULTIP: a USER32 model | probably: a fake DirectPlay and BOOSTER's drain | **yes**: scripted devices and profiles | after HG2D, or with an HG2D model | probably: retail FE over real scenery, HG2D logged | last before HG2D |
+
+"New" means no done module calls the service, so no harness models it yet.
+45 such services in all. "Return values read" comes from a scan of the
+instructions after each call site that counts a read of eax before eax is
+written. It is a heuristic. "None" is the reliable direction; check each
+read by hand before building a stub on it.
+
+How these were produced, so they can be rerun: `make graph`,
+`dumplinkage.py` and `impscan.py` on each module, `objdump -p` for the
+Win32 imports, and the service table at host `0x417ba0` for the new host
+services. Each Linkage was read against its raw words, and
+`dumplinkage.py` agrees with every one.
+
+## CONTROLS (id 16)
+
+The keyboard and joystick: key and button mapping to the named commands
+(`THROTTLE_INCR`, `GEAR_TOGGLE` and the rest: 426 upper-case names in the
+binary, as strings), the mouse as yoke, joystick calibration, and force feedback
+(`force_ground_bumps_enabled`, `force_crash_enabled`,
+`force_gear_bump_enabled`).
+
+- **Layout.** Hand-written asm with ATC's stack-alignment wrapper (79
+  sites) runs to `.text+0x78d0`. The Linkage entries there are unaligned:
+  `+0x18` is 12,756 bytes and `+0x44` 10,492. MSVC C follows, with entries
+  `+0x4c`..`+0x5c` on 16-byte boundaries. The C half holds the profile, the
+  joystick enumeration and the DirectInput force-feedback code.
+- **The unfinished imports are all fire-and-forget**: MAIN `+0x84`, `+0x8c`,
+  `+0x90` ×2, `+0xa4`, `+0xac`, `+0xc8`, HG2D `+0x64` and PANELS `+0x30`.
+  None has eax read after it, so logging stubs are faithful for the value
+  path. The registers they leave still have to be checked against what
+  CONTROLS reads (method.md, "What a callee leaves in a register").
+- **Commands go out through host `+0x03c`** (8 sites), which posts
+  `WM_COMMAND` to the main window. The posted command and parameter are
+  output, so a harness can log them.
+- **New host services, read from their openings** (not yet read in full):
+  - the profile, all through `GetPrivateProfileStringA` and its writers:
+    `+0x0b0`, `+0x0b4` (`sprintf` and `WritePrivateProfileStringA`),
+    `+0x0d8`, `+0x0f8` (`WritePrivateProfileSectionA`), `+0x100`, `+0x104`;
+  - the joystick: `+0x1c0` (`joyGetNumDevs`, `joyGetDevCapsA`) and `+0x1c4`
+    (`joyGetPosEx`, `joyGetDevCapsA` and the registry); `+0x1c8` calls
+    host helpers only;
+  - the mouse as yoke: `+0x274` (`SetCapture`, `ClipCursor`,
+    `ShowCursor`, `SetCursorPos`) and `+0x278` (releases them);
+  - accelerators `+0x1e4`; menu items `+0x254` (`CheckMenuItem`,
+    `EnableMenuItem`, `DrawMenuBar`);
+  - `+0x048` (calls `0x403950`, which sets up something once, guarded by
+    `0x418854`), `+0x054` (returns the main window and the instance through
+    two pointers), and `+0x1ec`/`+0x1f0`/`+0x1fc`, which go through the
+    host's lookup at `0x410240`.
+- **DirectInput is CONTROLS's own.** `.text+0xb480` loads `dinput` and
+  `DirectInputCreateA`. `.text+0xb4c0` creates version `0x500` and enumerates
+  type 4 (joystick) devices with flags `0x101` (attached and force
+  feedback), then drives the device through about twenty vtable calls. With
+  no such device, enumeration finds nothing and that path stops. That is
+  the case a first harness should model, before adding a device.
+- **`GetKeyboardLayout`** makes key naming depend on the machine. A harness
+  must hook it and fix the layout per scenario, or the two sides could agree
+  by accident on one layout and never see another.
+
+**Harness:** `sounddiff`'s profile passthrough over a generated
+`FLTSIM98.CFG`, with mapping sections written per scenario (count
+configurations, not scenarios). Add a scripted joystick for `+0x1c0`/`+0x1c4`
+(device count, caps and positions as scenario inputs), a model of the mouse
+capture state, and a DirectInput stand-in with zero devices first and one
+force-feedback device later. Commands posted through `+0x03c` are logged.
+Logging stubs cover MAIN, HG2D and PANELS. UTIL, NUMERIC, SOUND, ACONTAIN,
+ADVDRV, ATC, DEMO and WINDOW are done and can be retail's.
+
+**To read first:** where a key arrives. MAIN calls ten CONTROLS slots
+(`+0x24`..`+0x58`); WINDOW calls `+0x24` and `+0x40`; DEMO `+0x44`;
+REALITY `+0x5c`. Those harnesses already stub CONTROLS, and their stubs
+record what retail CONTROLS must accept. Read them for the argument shapes
+before reading `+0x18`.
+
+**Status:** the whole hand-written assembly half (`.text+0x20`..`+0x78c1`:
+init/deinit, the three CHAIN callbacks, the dispatcher and all 342 handlers)
+is transliterated in `src/controls/controls.c` and the module builds and
+links. The compiled-C half (`controls_input.c`: the key config, dialog,
+joysticks and DirectInput force feedback) and the `controlsdiff` harness are
+still to do, so nothing is verified yet. See
+[modules/controls.md](modules/controls.md).
+
+## MULTIP (id 35) and MPCHAT
+
+**MULTIP** is multiplayer: sessions, players and the other aircraft. Its
+options are named in `.data` (`CONNECTION_TYPE`, `MAX_SEGMENTS_PER_SEC`,
+`ALLOW_TEXTURE_SEND`, `COLLISION_SECS`, `FS61_REQUEST_PARAMS`, …).
+
+- MSVC C, 11 functions, with 177 x87 instructions. It reads the user's
+  position and attitude (GLOBAL `+0x560`..`+0x57c`), so some of that is
+  probably the other aircraft's extrapolation. Not yet read.
+- **DirectPlay looks to be driven directly through COM**, not through the
+  host. Only four host services touch the host's DirectPlay globals
+  (`0x41a518`/`0x41a51c`): `+0x120`, `+0x124` and `+0x128`, which load
+  `dplayx`, call through its exports (`DirectPlayEnumerateA`, …) and free
+  it, and the 7,312-byte `+0x094`. MULTIP itself makes COM-shaped calls
+  (`mov ecx,[obj]` / `call [ecx+N]`) at about twenty distinct vtable
+  offsets, and calls one function pointer held at `.data+0x980`. Confirm
+  which interface each object is before designing the fake. A harness
+  needs a fake DirectPlay object with sessions, players and a message queue.
+  The other side of a session is then a script, which is better than a
+  second machine.
+- **A worker thread** (`CreateThread`, `WaitForMultipleObjects`, events,
+  critical sections), so BOOSTER's pattern applies: run the sides in turn
+  and drain the thread after every operation.
+- Unfinished imports are minimal: MAIN `+0x74` (fire-and-forget) and G3D
+  `+0x38` ×2 and `+0x64`. Only `+0x64`'s value is read.
+- `ShellExecuteA` is called once, on a path MULTIP builds at run time in
+  `.data+0xb00`. The harness must hook and log it, never run it.
+
+DirectPlay does not exist on the native targets, so the fake object is more
+than a fixture: it is a written-down account of exactly what MULTIP
+expects from a transport, which a native build will need to provide.
+
+**MPCHAT** (3,104 bytes) is the chat window. Its id is `0xffffffff`, so no
+module can import it. It hooks itself onto CHAIN lists `0x1d`, `0x14`, `0xb`
+and `0xc`, registers a window class, loads `RICHED32.DLL` and builds the
+window from `Button`, `Edit`, `ListBox` and `RichEdit` controls. It calls
+MULTIP `+0x20`..`+0x2c` once each and reads three of the results, and
+WINMSG `+0x18` three times. After MULTIP it is a small harness: the USER32
+calls hooked through its IAT against a model of window text and list
+contents, as `boosterdiff` hooks `MessageBoxA`. Linkage `+0x14`, unusually,
+points into `.data+0x30`, at a record that starts with `0xff00`. That is
+the dialog id MPCHAT passes to host `+0x110`. What reads that record is
+not yet known.
+
+## G3D (id 14)
+
+The 3D pipeline: transforms, clipping and the scene from FE's stream, into
+HG2D. 92,518 bytes of asm with ATC's wrapper at 119 sites, and 99 KB of
+initialised `.data` (0x18600 raw bytes; tables, by the size).
+
+- **Its host needs are trivial**: 11 services, all already modelled by done
+  modules' harnesses. Its Win32 calls are `CharLowerA` and `_CIacos`.
+- **FE ×20 is done**, so the harness can load retail FE over the real
+  scenery tree, as `landmediff` does. `+0x34` (42,875 bytes) is by far
+  the largest service, and the likeliest consumer of FE's scene stream.
+- **HG2D ×20 sites, 17 slots**, and only `+0x68` and `+0xa8` have their
+  results read. The open question is the drawing path. A clipper at
+  `.text+0x7d73` saves and replaces a draw routine at `.data+0x4910` from
+  eax and calls it per span, nine sites. Who supplies that routine, G3D
+  itself or HG2D, decides whether HG2D can be a logging stub. **Trace that
+  before committing to G3D.**
+- GLOBAL: 235 fields, 851 accesses. Most of the sim's view state goes
+  through here, and every one of those names is worth recording.
+
+## PANELS (id 15)
+
+The instrument panel and the gauges. Gauges are module id 19: each of the
+CD's 120 `.GAU` files has Linkage id 19 and imports only PANELS (id 15).
+PANELS's own import of id 19 is never read: nothing in it references the
+link. By the call shapes it reaches gauges through host `+0x298`, which
+looks a record up through the host's table lookup `0x410240` and hands
+back its `+0x08` (or -1 and a null), and `+0x29c`, which PANELS calls
+after calling through `[esi+0xc]` or `[esi+0x10]`. Neither is read in full yet. Either
+way a PANELS harness can load the real gauges, the way FE's runs over
+real scenery.
+
+What holds it back is HG2D. PANELS calls 10 HG2D slots 36 times and reads
+the results of `+0x48`, `+0xac` and `+0xb0`. It also reads four HG2D Linkage
+fields directly (`+0x8c`..`+0x98`, 17 sites), which are HG2D's own state
+rather than a call a stub could answer. It draws with GDI itself (DIB
+sections, fonts, `DrawTextA`) and reads panel files with `fopen`. MAIN
+`+0x80`'s result is read at all four sites. Do it after HG2D, or after G3D
+has shown how much of HG2D a model must carry.
+
+## MAIN (id 3)
+
+The sim's controller, by its strings: situations and flights ("Temporary
+Flight"), the default aircraft, clouds and smoke, and 0x3664 bytes of
+resources. It imports 22
+modules, every unfinished one among them, and calls 75 host services, 18 of
+them new: `+0x018`, `+0x01c`, `+0x028`, `+0x034`, `+0x044`
+(`GetLocalTime`), `+0x048`, `+0x088`, `+0x098` (`GetCommandLineA`),
+`+0x23c`, `+0x240`, `+0x254`, `+0x27c`, `+0x284`, `+0x288`, `+0x298`,
+`+0x29c`, `+0x318` and `+0x31c`. It is the last module before HG2D for the
+same reason HG2D is last: everything else has to be done for its harness to
+be anything but stubs.
+
+## HG2D (id 13)
+
+Not surveyed further: 389,734 bytes, the rasteriser, still last. It calls
+G3D `+0x44` four times and nothing else unfinished, and its host needs are
+10 services, two of them new: `+0x290`, which copies the host's palette
+tables (GDI32 and USER32), and `+0x31c`, a six-way dispatcher into the
+host's DirectDraw, video and audio-compression code.
+
+## Also open
+
+- **The CHAIN ecx fix** from round 8: retail CHAIN calls each callback with
+  ecx set to the dispatch's first argument, and OpenFS98's CHAIN does not.
+  It is independent of this round and should be proven in `chaindiff`
+  first.
 
 # Round 8: ANALYSIS
 

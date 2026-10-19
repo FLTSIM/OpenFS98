@@ -56,6 +56,7 @@ BASE_WINDOW := 0x20900000
 BASE_WINMSG := 0x20910000
 BASE_REALITY := 0x208b0000
 BASE_ANALYSIS := 0x20630000
+BASE_CONTROLS := 0x20670000
 
 MODULES := ACONTAIN ADVDRV ANALYSIS ATC BOOSTER CHAIN DEMO DYNAMIC FACIL FE GLOBAL LANDME NUMERIC REALITY SLEW SOUND UTIL WEATHERM WINDOW WINMSG
 
@@ -291,6 +292,27 @@ $(BIN)/reality.res: src/reality/reality.rc
 
 src/reality/reality_data.inc src/reality/reality_rdata.inc: $(ORIG)/Modules/REALITY.DLL tools/gen_reality_data.py
 	@python3 tools/gen_reality_data.py $< src/reality/reality_data.inc src/reality/reality_rdata.inc
+
+# CONTROLS, the keyboard, joysticks and mouse: a hand-written assembly half
+# (controls.c, complete) and a compiled-C half (controls_input.c, in progress).
+# Not in MODULES until the C half is transliterated and controlsdiff is green.
+CONTROLS_INC := src/controls/controls_data.inc src/controls/controls_rdata.inc \
+                src/controls/controls_table.inc src/controls/controls_pointers.inc
+$(BIN)/CONTROLS.DLL: src/controls/controls.c src/controls/controls_input.c \
+                     src/controls/controls.h src/controls/controls.def \
+                     $(CONTROLS_INC) $(BIN)/controls.res
+	@mkdir -p $(BIN)
+	$(CC) $(CFLAGS) -fno-delete-null-pointer-checks -fno-ipa-icf -Isrc/controls $(LDFLAGS) \
+	      -Wl,--image-base=$(BASE_CONTROLS) \
+	      -o $@ src/controls/controls.c src/controls/controls_input.c \
+	      $(BIN)/controls.res src/controls/controls.def -lkernel32 -lgcc
+
+$(BIN)/controls.res: src/controls/controls.rc
+	@mkdir -p $(BIN)
+	$(RC) $< -O coff -o $@
+
+$(CONTROLS_INC): $(ORIG)/Modules/CONTROLS.DLL tools/gen_controls_data.py
+	@python3 tools/gen_controls_data.py $< $(CONTROLS_INC)
 
 # ANALYSIS, landing and manoeuvre analysis and course tracking: assembly and
 # MSVC C.

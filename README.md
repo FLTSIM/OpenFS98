@@ -279,6 +279,10 @@ differences, see [docs/modules/reality.md](docs/modules/reality.md)).
 scenarios, zero differences, see [docs/modules/analysis.md](docs/modules/analysis.md)).
 It found that retail's sample compaction depends on what MSVCRT `memmove`
 leaves in ecx; OpenFS98 reproduces the CD runtime's.
+Round 9 surveyed the six modules left before HG2D and picked `CONTROLS`.
+It is the only one whose calls into unfinished modules are all
+fire-and-forget, and everything else it needs is input a harness can
+script. `MULTIP` and `MPCHAT` follow it, then `G3D`.
 
 Other useful work, in no particular order:
 
@@ -318,8 +322,10 @@ nothing in it imports anything interesting:
     ~~**`WINMSG`** (4,416 bytes)~~ — done, verified and running in-game.
     ~~**`REALITY`** (4,822 bytes)~~ — done, verified and running in-game.
     ~~**`ANALYSIS`** (8,086 bytes)~~ — done, verified and running in-game.
-    Next: a round-9 survey of what is left: MPCHAT (3,104, needs MULTIP),
-    MULTIP, CONTROLS, PANELS, G3D, MAIN.
+    Round 9 of the [preflight](docs/preflight.md) surveyed what is left.
+    Next: **`CONTROLS`** (48,406 bytes, the keyboard, joystick and force
+    feedback), then `MULTIP` (43,318) with `MPCHAT` (3,104) behind it, then
+    `G3D` (92,518), `PANELS` (50,038) and `MAIN` (119,648).
 13. `HG2D` (390 KB, the 2D rasteriser) last. It is 26% of the project on its
    own.
 

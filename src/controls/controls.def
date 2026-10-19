@@ -1,0 +1,4 @@
+LIBRARY CONTROLS.DLL
+EXPORTS
+    Linkage DATA
+    ImportTable DATA

@@ -73,8 +73,8 @@ make realitydiff-run     # whole-module REALITY, crashes and the analysis -> 200
 make reality-breaks      # REALITY broken on purpose -> 67 breaks, 61 caught, 6 proven equivalent (~7 min)
 make analysisdiff-run    # whole-module ANALYSIS, landing/manoeuvre/course -> 20000 scenarios, 0 differ (~2 min)
 make analysis-breaks     # ANALYSIS broken on purpose -> 103 breaks, 93 caught, 10 proven equivalent (~20 min)
-make controlsdiff-run    # CONTROLS dispatcher, 342 handlers + joystick poll -> 20000 scenarios, 0 differ (~25 min); key/joystick config, dialog, FF not yet driven
-make controls-breaks     # CONTROLS dispatcher broken on purpose -> 12 breaks, 10 caught, 2 reachability gaps
+make controlsdiff-run    # CONTROLS dispatcher, 342 handlers + joystick poll (axes, buttons) -> 20000 scenarios, 0 differ (~25 min); key/joystick config, dialog, FF not yet driven
+make controls-breaks     # CONTROLS dispatcher and joystick poll broken on purpose -> 20 breaks, 18 caught, 2 reachability gaps (~50 min)
 make difftest-run        # whole-module SLEW         -> 0/2000 vectors differ
 make ofstest-run         # in-process, via the host  -> passed 68, failed 0
 make smoke               # ACONTAIN, ADVDRV, ANALYSIS, ATC, BOOSTER, CHAIN, DEMO, DYNAMIC, FACIL, FE, GLOBAL, LANDME, NUMERIC, REALITY, SLEW, SOUND, UTIL, WEATHERM, WINDOW, WINMSG installed -> 27/27, 95 gauges, PASS
@@ -229,15 +229,21 @@ handlers: engines, radios, autopilot, the eye, slew, the mouse yoke) is
 transliterated in `src/controls/controls.c`, and in the compiled-C half
 (`src/controls/controls_input.c`) the key bindings in `FLTSIM98.CFG`
 (read/write/list), the joystick entry points and the per-frame joystick poll
-with its axis response curve are done; the module builds and links. The
-force-feedback/joystick-device setup, the per-frame FF update, the
+with its axis response curve are transliterated; the module builds and links.
+The force-feedback/joystick-device setup, the per-frame FF update, the
 joystick-config persistence, the assignment dialog and the DirectInput 5
 force dispatch are still honest placeholders (optimiser-shuffled C that needs
 instruction-faithful reading -- a `stack.py` annotator in the scratch helps).
-**`make controlsdiff-run` verifies the command dispatcher and all 342
-handlers: 20,000 scenarios, 0 differences**; the config/joystick/dialog/FF
-C-half is not driven yet (phase two needs the host's profile/joystick/
-DirectInput services modelled), so CONTROLS is not in `MODULES`. See
+**`make controlsdiff-run` verifies the command dispatcher, all 342 handlers
+and the per-frame joystick poll, axes and buttons: 20,000 scenarios, 0
+differences**. Driving the buttons proved a repeat-counter bug the listing
+had shown (ours cleared it on every poll, retail only while the button is
+up), now fixed. Not yet driven: deinit and the hand-written half's CHAIN
+callbacks (list 0xb's command entry, list 2's repeat countdown and brake
+step-back, list 3's `coordinate`), the key-binding config, the
+joystick-config persistence, the dialog and FF (phase two needs the host's
+profile/joystick/DirectInput services modelled), so CONTROLS is not in
+`MODULES`. See
 [docs/modules/controls.md](docs/modules/controls.md). After CONTROLS come
 MULTIP (DirectPlay through COM, a worker thread) with MPCHAT behind it, then
 G3D. Before G3D, trace who supplies the span routine its clipper calls. PANELS
@@ -263,7 +269,7 @@ unchecked data: guard-paged heap and GLOBAL, faults and watchdog-cut hangs
 compared as outcomes, mutated real fixtures, and synthetic ones built to
 reach a boundary.
 
-## Two things not to rediscover the hard way
+## Three things not to rediscover the hard way
 
 - **Argument counts come from the callee, never the call site.** The optimiser
   interleaves pushes across calls, so counting pushes before a `call` gives the
@@ -274,3 +280,8 @@ reach a boundary.
   [docs/wine.md](docs/wine.md). It reproduces with the retail modules, so it is
   not a decompilation defect, and native renderers make it moot. Do not spend
   time on it unless asked.
+- **Not every FS98 CD is the reference.** A later pressing rebuilt
+  `FLTSIM98.EXE` and ten modules at base `0x10000000` (CONTROLS among them,
+  with 493 commands instead of 383). If a generator stops with `image base
+  moved`, check `orig/` against README.md's "Which CD" before touching any
+  code.

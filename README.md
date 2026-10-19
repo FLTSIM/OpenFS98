@@ -24,7 +24,7 @@ is. The per-module documents under `docs/modules/` are the detail.
 ## Setup
 
 ```sh
-sudo apt install gcc-mingw-w64-i686-win32         # 32-bit toolchain
+sudo apt install gcc-mingw-w64-i686-win32 p7zip-full   # 32-bit toolchain, 7z
 7z x ~/Downloads/MSFlightSimulator98.iso -ocd     # the CD, for staging
 ./tools/extract.sh ~/Downloads/MSFlightSimulator98.iso   # orig/ reference binaries
 make stage                                        # game/ — a real install
@@ -34,6 +34,32 @@ make && make smoke                                # build, then boot the game
 `cd/`, `orig/`, `game/` and `bin/` are gitignored — no game content goes in the
 repository. The only derived artifact that is committed is
 `docs/setup_map.tsv`, the CD-to-install file map read out of `Setup.exe`.
+
+**Which CD.** FS98 shipped in more than one pressing, and the project is built
+against one in particular. In the reference, `FLTSIM98.EXE` and every module
+are dated 6 August 1997, except MAIN (11 August) and PANELS (7 August, and
+the only one linked at `0x10000000`). One known-good image is a 581,996,544-byte
+`MSFlightSimulator98.iso` with SHA-256
+`be523a66bf368f8769f86aedcddad6f58fb0185908b6a398c456c0c5a4d07436`. Other
+rips of the same CD may hash differently, so go by the dates.
+
+A later pressing, whose ISO files are dated 10 November 1997, rebuilt
+`FLTSIM98.EXE` (28 October 1997) and ten modules (17–20 October 1997, all
+linked at `0x10000000`): ADVDRV, CONTROLS, FE, SOUND, WINMSG, MAIN, G3D,
+HG2D, PANELS and MULTIP. Its other seventeen modules are byte-identical to
+the reference's. The rebuilt ones are different programs (that pressing's
+CONTROLS has 493 commands to the reference's 383, and the host's services
+have moved), so the generators and harnesses do not fit them:
+`tools/gen_controls_data.py`, for one, stops with `image base moved`. Check
+after extracting:
+
+```sh
+objdump -p orig/Modules/CONTROLS.DLL | grep -E 'Time/Date|ImageBase'
+# reference: Wed Aug  6 21:46:24 1997, ImageBase 20670000
+```
+
+The Makefile's `BASE_*` give the reference's base for each module OpenFS98
+builds.
 
 `make stage` exists because the CD layout is not the installed layout: setup
 renames 263 files on the way in, and FS98 opens them by their installed names.
@@ -79,6 +105,7 @@ else's 1997 build, and it should read that way.
 | `make winmsgdiff-run` | whole-module WINMSG, the message bar: retail and OpenFS98 in turn over scripts of messages shown, appended, cleared and run frame after frame (plain and scrolling, split to fit), with a model of the host's window record and heap, a CHAIN that answers the done message and re-enters, and situation records; compares the transcript with every string drawn, the whole `.data` image, the arena and GLOBAL. `make winmsg-breaks` breaks it on purpose |
 | `make realitydiff-run` | whole-module REALITY, crashes and damage: retail and OpenFS98 in turn through every crash gate, the countdown, the reload and the crash analysis (a stand-in for its dialog, retail UTIL and NUMERIC), the stress rolls and the cracked windscreen; HG2D's lines logged with their colour and view; compares the transcript, the whole `.data` image, the arena, GLOBAL and UTIL's and NUMERIC's state. `make reality-breaks` breaks it on purpose |
 | `make analysisdiff-run` | whole-module ANALYSIS, landing and manoeuvre analysis and course tracking: retail and OpenFS98 in turn over the frames, the landing thresholds, the compaction, the trail and all three dialogs (a stand-in for the dialog engine, retail UTIL and NUMERIC), with the register leftovers retail reads (CHAIN's, memset's, the CD MSVCRT memmove's) modelled; HG2D's lines and G3D's display list logged; compares the transcript, the whole `.data` image, the arena, GLOBAL and UTIL's and NUMERIC's state. `make analysis-breaks` breaks it on purpose |
+| `make controlsdiff-run` | CONTROLS, in progress: retail and OpenFS98 side by side over random commands through the dispatcher and the axis, engine and pilot-event entries, and the per-frame joystick poll over a seeded joystick config, with scripted buttons pressed, held (so repeated) and released as the host's joystick read reports them; compares GLOBAL, the whole `.data` image and the import-call transcript. The key/joystick config, the dialog and force feedback are not driven yet. `make controls-breaks` breaks the dispatcher and the joystick poll on purpose |
 | `make demodiff-run` | whole-module DEMO: retail and OpenFS98 in turn over the CD's six videos and synthetic ones with every record class, recording, playback, instant replay and the four dialogs' callbacks (retail UTIL's catalogue, a stand-in for the host's dialog engine); faults compared as outcomes, runaway ops cut at a fixed count; compares the transcript, the whole `.data` image (code pointers through a learnt pairing), the arena, GLOBAL and the trees |
 | `make fesldiff-run` | FE's `+0x78`, the Scenery Library, retail against OpenFS98 over a writable fixture with sandboxed drive letters, driven by a stand-in for World.DLL's nine dialogs; compares the call transcript (with string comparisons and the world files left on disk), FE's `.data`, GLOBAL and the heap; faults are compared as outcomes |
 | `make facildiff-fe-run` | the same harness with OpenFS98 FE behind OpenFS98 FACIL, against retail FE behind retail FACIL: both reimplementations together over the real CD index and the dialogs (`Q=`/`D=` set the phase sizes, 2,000 each by default) |
@@ -279,15 +306,19 @@ differences, see [docs/modules/reality.md](docs/modules/reality.md)).
 scenarios, zero differences, see [docs/modules/analysis.md](docs/modules/analysis.md)).
 It found that retail's sample compaction depends on what MSVCRT `memmove`
 leaves in ecx; OpenFS98 reproduces the CD runtime's.
-Round 9 surveyed the six modules left before HG2D and picked `CONTROLS`.
-Its hand-written half -- the command dispatcher and all 342 handlers
-(engines, radios, autopilot, the eye, slew, the mouse yoke) -- is
-reimplemented and verified: `make controlsdiff-run` drives it against retail
-over 20,000 scenarios with zero differences
-(see [docs/modules/controls.md](docs/modules/controls.md)). Its compiled-C
-half (the key/joystick config, the assignment dialog and DirectInput force
-feedback) is partly transliterated and not yet driven by the harness, so
-CONTROLS is not yet installed. `MULTIP` and `MPCHAT` follow it, then `G3D`.
+Round 9 surveyed the six modules left before HG2D and picked `CONTROLS`,
+which is in progress. Its hand-written half is reimplemented, and its command
+dispatcher and all 342 handlers (engines, radios, autopilot, the eye, slew,
+the mouse yoke) are verified, as is the per-frame joystick poll, axes and
+buttons: `make controlsdiff-run` drives them against retail over 20,000
+scenarios with zero differences
+(see [docs/modules/controls.md](docs/modules/controls.md)). Its per-frame
+CHAIN callbacks and deinit are not driven yet. The rest of its compiled-C
+half is not verified: the key-binding config is transliterated but
+not driven, and the force-feedback setup,
+the joystick-config persistence, the assignment dialog and the DirectInput
+force dispatch are still placeholders. So CONTROLS is not yet installed.
+`MULTIP` and `MPCHAT` follow it, then `G3D`.
 
 Other useful work, in no particular order:
 

@@ -311,8 +311,10 @@ static uint32_t FS98_STDCALL axis_curve(uint32_t joy, uint32_t axis)
 
 /* .text+0x8f20 -- turn joystick `joy`'s freshly-read state into commands: for
  * each of its 0x10 present axes whose value changed, post the axis command
- * with the curved value; for each of its 0x40 buttons, a press/repeat/release
- * state machine posts the press, repeat and release commands.  All go out as
+ * with the curved value; for each of its 0x40 buttons (one word each, 0 or
+ * 1), post the press command on a press and again every repeat interval
+ * (config +0x1cc, in polls) while it is held, and the release command when
+ * it comes up.  All go out as
  * WM_COMMAND (host +0x3c), which returns as a CHAIN list-0xb command. */
 static void FS98_STDCALL joy_map(uint32_t joy)
 {
@@ -343,8 +345,8 @@ static void FS98_STDCALL joy_map(uint32_t joy)
         if (n == 0)
             ;
         else if (n == 1) {
-            M32(slot) = M32(cfg + idx * 4 + 0x1cc);  /* repeat command */
-            M32(slot - 0x100) = 0;
+            M32(slot) = M32(cfg + idx * 4 + 0x1cc);  /* the repeat interval */
+            M32(slot - 0x100) = 0;                   /* so it presses again */
         } else {
             M32(slot) = n - 1;
         }
@@ -356,16 +358,20 @@ static void FS98_STDCALL joy_map(uint32_t joy)
                 M32(slot) = M32(V32(0x350) + idx * 4 + 0x1cc);
             }
         }
-        /* release: up this frame, was held */
-        if (M32(slot - 0x240) == 0 && M32(slot - 0x100) == 1) {
-            uint32_t cmd = M32(cfg + idx * 4 + 0x2cc);
-            if (cmd != 0)
-                HC(0x3c, f2)(cmd, 0);
-            cfg = V32(0x350);
+        /* up this frame: a release if it was held, and either way the
+         * repeat stops -- .text+0x9078 is reached only from this branch, so
+         * a held button keeps its counter */
+        if (M32(slot - 0x240) == 0) {
+            if (M32(slot - 0x100) == 1) {
+                uint32_t cmd = M32(cfg + idx * 4 + 0x2cc);
+                if (cmd != 0)
+                    HC(0x3c, f2)(cmd, 0);
+                cfg = V32(0x350);
+            }
+            M32(slot) = 0;
         }
-        M32(slot) = 0;
     }
-    /* carry this frame's button bitmap to next frame's "held" */
+    /* carry this frame's 0x40 button words to next frame's "held" */
     HC(0x21c, f3)(base + D + 0x4b94, base + D + 0x4a54, 0x100);
 }
 

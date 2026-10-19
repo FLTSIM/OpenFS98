@@ -114,17 +114,23 @@ before reading `+0x18`.
 
 **Status:** the whole hand-written assembly half (`.text+0x20`..`+0x78c1`:
 init/deinit, the three CHAIN callbacks, the dispatcher and all 342 handlers)
-is transliterated in `src/controls/controls.c` and **verified**:
-`make controlsdiff-run` drives it against retail over 20,000 command and
-axis/engine/event scenarios, 0 differences, and `make controls-breaks`
-catches 10 of 12 deliberate breaks (2 reachability gaps). In the compiled-C
+is transliterated in `src/controls/controls.c`. The dispatcher, all 342
+handlers and init are **verified**: `make controlsdiff-run` drives them
+against retail over 20,000 command and axis/engine/event scenarios, 0
+differences, and `make controls-breaks` catches 18 of 20 deliberate breaks,
+including all 8 in the joystick poll (the 2 misses are reachability gaps).
+Deinit and the three CHAIN callbacks are not driven,
+so the list-2 brake step-back (`.text+0x25c`) and list 3's `coordinate`
+(`.text+0x6fdf`), reached only from them, are unverified. In the compiled-C
 half (`controls_input.c`) the key config read/write/list, the joystick entry
 points and the per-frame joystick poll with its axis response curve are
-transliterated but not yet driven by the harness; the force-feedback/
-joystick-device setup, the FF per-frame update, the joystick-config
-persistence, the assignment dialog and the force dispatch are still
-placeholders. Phase two (driving the config/joystick/dialog/FF half) remains.
-See [modules/controls.md](modules/controls.md).
+transliterated. Of those, the harness drives the poll, axes and buttons,
+and it is verified; driving the buttons proved and fixed a repeat-counter
+bug. The key config is not driven. The
+force-feedback/joystick-device setup, the FF per-frame update, the
+joystick-config persistence, the assignment dialog and the force dispatch
+are still placeholders. Phase two (driving the config/joystick/dialog/FF
+half) remains. See [modules/controls.md](modules/controls.md).
 
 ## MULTIP (id 35) and MPCHAT
 

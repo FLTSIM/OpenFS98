@@ -4,28 +4,46 @@
 joystick poll are verified.** `make controlsdiff-run` drives retail and the
 OpenFS98 build side by side over 20,000 scenarios of random commands,
 axis/engine/event entries and joystick polls, comparing GLOBAL, the whole
-`.data` image and every import call: **0 differences** (253k dispatches, 42k
-each of axes/engines/events, 1,844 faults both sides take alike).
-`make controls-breaks` breaks the handlers on purpose and confirms the harness
-goes red: 10 of 12 caught. The two misses -- `select-decr` (the `S_SELECT`
-decrement, which needs ENGINE then a precise run of SELECT_n in one op) and
-`throttle-floor` (a throttle resting exactly on the reverser floor) -- are
-reachability gaps, not transliteration errors; the 20,000-scenario match is
-the evidence.
+`.data` image and every import call: **0 differences** (249k dispatches, 41k
+each of axes/engines/events, 1,825 faults both sides take alike; 189k
+joystick polls posting 45k axis commands, 248k button presses, 215k repeats
+and 122k releases). `make controls-breaks` breaks the module on purpose and
+confirms the harness goes red: 18 of 20 caught, all 8 in the joystick poll.
+The two misses -- `select-decr` (the `S_SELECT` decrement, which needs
+ENGINE then a precise run of SELECT_n in one op) and `throttle-floor` (a
+throttle resting exactly on the reverser floor) -- are reachability gaps,
+not transliteration errors; the 20,000-scenario match is the evidence.
 
 The joystick poll is driven by seeding a joystick config directly (the
-harness fills the axis/button command table, scales, dead zones and present
-mask, identical per side) and scripting the host's joystick read, then
-calling the CHAIN list-1 callback the module registers. That verifies
-`joy_poll`, `joy_map` and the axis response curve (`axis_curve`) -- the
+harness fills the axis command table, scales, dead zones, present mask and
+each button's press command, repeat interval and release command, identical
+per side) and scripting the host's joystick read, then calling the CHAIN
+list-1 callback the module registers, a few frames at a time. The scripted
+read writes the buttons as the host's does (`0x40b8f0`, after
+`joyGetPosEx`): one word per button from `+0x4c`, exactly 0 or 1 -- buttons
+0..31 from the button bits, 32..63 cleared, then one of 32..39 set by the
+POV hat's direction -- each held from frame to frame and toggled now and
+then. That verifies `joy_poll`, `joy_map` (axes, and the buttons' press,
+repeat and release) and the axis response curve (`axis_curve`): the
 per-frame path that turns a stick into commands.
 
-Still unverified: the key-binding config read/write (transliterated; needs
-the `FLTSIM98.CFG` profile and accelerator services modelled), the
-joystick-config load/save from the profile (`ff_frame`'s enumeration and its
-readers), the assignment dialog, and the DirectInput force feedback -- all of
-which remain, with the FF device setup, the dialog and the effect code still
-placeholders. So the module is not yet in `MODULES`.
+It also proved a transliteration bug that reading the listing had found,
+now fixed. `joy_map` ended every button by clearing its repeat counter.
+Retail clears it only while the button is up: `.text+0x9078` is reached
+only from the `down == 0` branch at `+0x903d`, and a held button jumps past
+it to `+0x907e`. So in ours a held button never repeated. The break
+`joy-repeat-clear` puts the old code back, and the harness goes red.
+
+Still unverified: deinit and the hand-written half's three CHAIN callbacks
+(list 0xb's command entry, list 2's repeat countdown and every-sixth-frame
+brake step-back `.text+0x25c`, list 3's `coordinate` `.text+0x6fdf`), which
+the harness never calls; the key-binding config read/write (transliterated;
+needs the `FLTSIM98.CFG` profile and accelerator services modelled); the
+joystick-config load and save (read in the device setup `.text+0xa8d0`,
+written back by `.text+0x94b0`); the assignment dialog; and the DirectInput
+force feedback. The FF device setup, the config persistence, the dialog and
+the effect code are still placeholders. So the module is not yet in
+`MODULES`.
 
 CONTROLS is the keyboard, the joysticks and the mouse. Every key, button and
 axis becomes a *command* — an id from `0x10000` with a value — which it
@@ -40,6 +58,9 @@ video records.
 
 ## Binary and layout
 
+- This is the reference pressing's CONTROLS (README.md, "Which CD"). A later
+  pressing's, dated 17 October 1997 and linked at `0x10000000`, is a
+  different build: `.text` 55,654 bytes and 493 commands.
 - Retail image base `0x20670000`. `.text` 48,406 bytes (`0x20671000`..`+0xbd16`),
   `.data` 0xc020 (0xc00 initialised), `.rdata` 0x30d, `.rsrc`, 20 Linkage
   functions hand-counted (`dumplinkage.py` agrees).
@@ -178,8 +199,22 @@ per-frame joystick poll (the module's init registers it on CHAIN list 1) --
 over random GLOBAL states (including an active view record, reset per side),
 and compares GLOBAL, the whole `.data` image (fixed pointer fields blanked)
 and the import-call transcript. It models the host's integer-divide repair
-(the axis curve divides by a zero knee), which found that the repair's sign
-case (`0x8001` vs `0x7fff`) has to be emulated to match.
+(the keyboard axis curve behind `+0x28`..`+0x34` divides by a zero knee),
+which found that the repair's sign case (`0x8001` vs `0x7fff`) has to be
+emulated to match.
+
+What the harness does not see yet:
+- **deinit and the CHAIN list 0xb/2/3 callbacks** are never called, so the
+  brake step-back and `coordinate`, reached only from them, never run;
+- **five silent stubs**: the profile reads `+0xa8`/`+0xc8`, `memset`
+  `+0x218`, `memmove` `+0x21c` and the joystick read `+0x1c4` log nothing,
+  so their arguments are not in the transcript (what `memset` and `memmove`
+  write does show in the `.data` image).
+
+The summary counts the joystick poll's posts by command id: `joy_setup`
+gives axes, presses and releases disjoint id ranges (a press id per
+joystick and button), and a press posted while the button was already down
+at the previous read is counted as a repeat.
 
 Finding the harness: a transliteration bug in `controls_xcall` (it left the
 callee pointer on the stack as a phantom first argument, shifting every
@@ -209,3 +244,5 @@ Two findings beyond the handlers, both reproduced:
    `+0x1c8`; a mouse-capture model; a DirectInput stand-in, no devices first
    then one force-feedback device; `GetKeyboardLayout` hooked and fixed per
    scenario.
+3. Close the dispatcher phase's remaining gaps (above): call deinit and the
+   list 0xb/2/3 callbacks, and log the five silent stubs.

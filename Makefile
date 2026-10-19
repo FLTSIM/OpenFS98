@@ -781,9 +781,10 @@ analysisdiff: $(DIFFDIR)/analysisdiff.exe $(BIN)/ANALYSIS.DLL
 
 # CONTROLS, the command dispatcher and its handlers: retail and OpenFS98
 # loaded side by side, driven through the directly-callable Linkage entries
-# over random commands and GLOBAL states; compares GLOBAL, the whole .data
-# image and the import-call transcript.  (The config/joystick/dialog half is
-# not yet driven -- see docs/modules/controls.md.)
+# and the per-frame joystick poll over random commands and GLOBAL states;
+# compares GLOBAL, the whole .data image and the import-call transcript.
+# (The key/joystick config, the dialog and force feedback are not yet
+# driven -- see docs/modules/controls.md.)
 $(DIFFDIR)/controlsdiff.exe: tools/difftest/controlsdiff.c
 	@mkdir -p $(DIFFDIR)
 	$(CC) -std=c99 -O1 -Wall -Wextra -o $@ tools/difftest/controlsdiff.c
@@ -798,13 +799,13 @@ controlsdiff-run: controlsdiff
 	@cd $(DIFFDIR) && WINEDEBUG=-all timeout 3600 wine controlsdiff.exe $(if $(N),$(N),20000)
 
 # A deliberately broken copy of the module as the harness's "ours" (for
-# tools/controls_breaks.py).  It rebuilds CONTROLS from the break copy of
-# controls.c plus the unchanged controls_input.c.
+# tools/controls_breaks.py).  It rebuilds CONTROLS from the break copies of
+# controls.c and controls_input.c, one of them broken, the other unchanged.
 CONTROLS_SRC := src/controls/controls.c src/controls/controls_input.c
 controls-break-build:
 	$(CC) $(CFLAGS) -fno-delete-null-pointer-checks -fno-ipa-icf -Isrc/controls $(LDFLAGS) \
 	      -Wl,--image-base=$(BASE_CONTROLS) -o $(DIFFDIR)/CONTROLS_ours.dll \
-	      $(DIFFDIR)/controls_break.c src/controls/controls_input.c \
+	      $(DIFFDIR)/controls_break.c $(DIFFDIR)/controls_input_break.c \
 	      $(BIN)/controls.res src/controls/controls.def -lkernel32 -luser32 -lgcc
 
 controls-breaks: controlsdiff

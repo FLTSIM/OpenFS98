@@ -9,10 +9,14 @@
  * report +0x48, the curve setter +0x18 and the yoke suspend/resume
  * +0x1c/+0x20 -- over random commands and GLOBAL states, comparing GLOBAL,
  * the module's whole .data image and the transcript of every import call.
+ * Each scenario runs init (+0x04) and seeds a joystick config, and the
+ * per-frame joystick poll init registers on CHAIN list 1 is one of the ops,
+ * run for a few frames at a time over scripted sticks whose buttons are
+ * held, repeated and released.
  *
- * It does NOT drive the config entries (+0x04/+0x08/+0x4c/+0x50/+0x58/+0x5c)
- * yet: those run the compiled-C key/joystick/dialog/force-feedback half,
- * which needs the host's profile, accelerator, joystick and DirectInput
+ * It does NOT drive deinit (+0x08), the CHAIN list 0xb/2/3 callbacks, or
+ * the config entries (+0x4c/+0x50/+0x58/+0x5c) yet:
+ * those need the host's profile, accelerator, joystick and DirectInput
  * services modelled.  That is the next phase; see docs/modules/controls.md.
  *
  * GLOBAL and the modules CONTROLS calls fire-and-forget are logging stubs;
@@ -73,6 +77,10 @@ static int counting;
 
 static unsigned long cover_cmd, cover_cmd_crash,  cover_axis, cover_engine,
     cover_event, cover_post, cover_faults;
+/* the joystick poll: polls run, and what they posted -- axis commands, and
+ * the button commands told apart by the id ranges joy_setup gives them */
+static unsigned long cover_jpoll, cover_jaxis, cover_jpress, cover_jrepeat,
+    cover_jrelease;
 
 #define G8(o)  (*(uint8_t *)(global + (o)))
 #define G16(o) (*(uint16_t *)(global + (o)))
@@ -222,8 +230,31 @@ static uint32_t logc(const char *tag, int n, uint32_t a, uint32_t b, uint32_t c,
 #define S2(nm, tag) static uint32_t STDCALL nm(uint32_t a,uint32_t b){return logc(tag,2,a,b,0,0,0,0);}
 #define S3(nm, tag) static uint32_t STDCALL nm(uint32_t a,uint32_t b,uint32_t c){return logc(tag,3,a,b,c,0,0,0);}
 
+/* the scripted joysticks' buttons, bit n for button n: down at the last
+ * read, and at the one before it (so a press posted while the button was
+ * already down is a repeat).  Reset per side by joy_setup. */
+static uint64_t joy_down[4], joy_was[4];
+static int joy_pov[4], in_jpoll;
+
 /* host */
-S2(h_post, "host+0x3c")
+/* +0x3c post WM_COMMAND (cmd, value): logged.  Inside a joystick poll the
+ * id says what posted it: joy_setup gives axes 0x10000.., presses
+ * 0x10080 + joystick*0x40 + button, releases 0x10100 + the same. */
+static uint32_t STDCALL h_post(uint32_t cmd, uint32_t value)
+{
+    if (counting) {
+        cover_post++;
+        if (in_jpoll) {
+            uint32_t k = (cmd - 0x10080) & 0x7f;
+            if (cmd >= 0x10000 && cmd < 0x10080) cover_jaxis++;
+            else if (cmd >= 0x10080 && cmd < 0x10100) {
+                if ((joy_was[k >> 6] >> (k & 0x3f)) & 1) cover_jrepeat++;
+                else cover_jpress++;
+            } else if (cmd >= 0x10100 && cmd < 0x10180) cover_jrelease++;
+        }
+    }
+    return logc("host+0x3c", 2, cmd, value, 0, 0, 0, 0);
+}
 S0(h_quit, "host+0x24")
 S1(h_48, "host+0x48")
 S1(h_90, "host+0x90")
@@ -243,16 +274,25 @@ static uint32_t STDCALL h_memset(uint32_t dst, uint32_t byte, uint32_t n)
 { memset((void *)(uintptr_t)dst, (int)byte, n); return 0; }
 static uint32_t STDCALL h_memmove(uint32_t dst, uint32_t src, uint32_t n)
 { memmove((void *)(uintptr_t)dst, (void *)(uintptr_t)src, n); return 0; }
-/* +0x1c4 read joystick `joy` into `block`: fill the axis values (block+0xc,
- * 0x10 words as dwords) and the button bitmap (block+0x4c) with a scripted
- * state; return 0 (present). */
+/* +0x1c4 read joystick `joy` into `block`; return 0 (present).  The axis
+ * values (block+0xc, 0x10 dwords) are a scripted reading.  The buttons are
+ * written as the host's 0x40b8f0 writes them after joyGetPosEx: one word per
+ * button from block+0x4c, exactly 0 or 1 -- buttons 0..31 from the button
+ * bits, 32..63 cleared (its rep stosd), then one of 32..39 set by the POV
+ * hat's direction.  Each button keeps its state from read to read and
+ * toggles now and then, so presses, holds (and so repeats) and releases
+ * all happen. */
 static uint32_t STDCALL h_joyread(uint32_t joy, uint32_t block)
 {
-    uint32_t i;
-    (void)joy;
+    uint32_t i, j = joy & 3;
     for (i = 0; i < 0x10; i++)
         *(uint32_t *)(uintptr_t)(block + 0xc + i * 4) = (int32_t)(rnd() & 0x7fff) - 0x4000;
-    *(uint32_t *)(uintptr_t)(block + 0x4c) = rnd();      /* button bitmap */
+    joy_was[j] = joy_down[j];
+    if (rnd_n(4) == 0) joy_pov[j] = (int)rnd_n(9) - 1;       /* -1 centred, 0..7 */
+    joy_down[j] = (uint32_t)(joy_down[j] ^ (rnd() & rnd() & rnd()));
+    if (joy_pov[j] >= 0) joy_down[j] |= (uint64_t)1 << (32 + joy_pov[j]);
+    for (i = 0; i < 0x40; i++)
+        *(uint32_t *)(uintptr_t)(block + 0x4c + i * 4) = (uint32_t)(joy_down[j] >> i) & 1;
     return 0;
 }
 /* CHAIN: +0x18/+0x1c register, +0x20 dispatch.  List-1 callbacks are captured
@@ -573,12 +613,17 @@ static void op(void)
         call2((uint32_t)SVC(0x44), 0, 0x100fe, v2);  /* SIM_RATE_DECR */
         break;
     }
-    case 14:            /* the per-frame joystick poll (CHAIN list 1) */
-        if (nlist1) {
+    case 14: {          /* the per-frame joystick poll (CHAIN list 1), a run of frames */
+        uint32_t i, n = 1 + rnd_n(8);
+        for (i = 0; i < n && nlist1; i++) {
             put("\n#jpoll");
+            if (counting) cover_jpoll++;
+            in_jpoll = 1;
             call2(list1[0], 0, 0, 0);
+            in_jpoll = 0;
         }
         break;
+    }
     }
 }
 
@@ -621,23 +666,29 @@ static void put_state(void)
 /* seed a joystick config (D+0x350's table) and enable the joysticks, so the
  * per-frame poll (joy_poll) has axes and buttons to map.  Identical per side.
  * Layout: per joystick 0x3cc bytes -- +0x08 axis-present mask, +0x0c axis
- * command ids (0x10), +0x4c scales, +0x8c dead zones, +0xcc/+0x1cc/+0x2cc
- * button press/repeat/release commands (0x40 each). */
+ * command ids (0x10), +0x4c scales, +0x8c dead zones, then 0x40 each of
+ * +0xcc button press commands, +0x1cc repeat intervals (in polls; 0 is no
+ * repeat) and +0x2cc release commands.  The command ids fall in disjoint
+ * ranges, per button for the buttons, so h_post can count what fired. */
 static void joy_setup(void)
 {
-    uint32_t count = 1 + rnd_n(2), j, cfg = I32(0x350), a, b;
+    uint32_t count = 1 + rnd_n(2), j, cfg = I32(0x350), a, b, r;
+    memset(joy_down, 0, sizeof joy_down);
+    memset(joy_was, 0, sizeof joy_was);
+    for (j = 0; j < 4; j++) joy_pov[j] = -1;
     for (j = 0; j < count; j++) {
         uint32_t c = cfg + 0x3cc * j;
         M32(c + 8) = rnd() & 0xffff;                         /* axis-present mask */
         for (a = 0; a < 0x10; a++) {
-            M32(c + 0xc + a * 4) = rnd_n(3) ? 0 : (0x10000 + rnd_n(0x180));
+            M32(c + 0xc + a * 4) = rnd_n(3) ? 0 : (0x10000 + rnd_n(0x80));
             M32(c + 0x4c + a * 4) = rnd() & 0xffff;
             M32(c + 0x8c + a * 4) = rnd_n(0x2000);
         }
         for (b = 0; b < 0x40; b++) {
-            M32(c + 0xcc + b * 4) = rnd_n(2) ? 0 : (0x10000 + rnd_n(0x180));
-            M32(c + 0x1cc + b * 4) = rnd_n(2) ? 0 : (0x10000 + rnd_n(0x180));
-            M32(c + 0x2cc + b * 4) = rnd_n(2) ? 0 : (0x10000 + rnd_n(0x180));
+            M32(c + 0xcc + b * 4) = rnd_n(2) ? 0 : 0x10080 + ((j * 0x40 + b) & 0x7f);
+            r = rnd_n(6);       /* mostly short intervals, some none, some huge */
+            M32(c + 0x1cc + b * 4) = r < 2 ? 0 : r < 5 ? 1 + rnd_n(4) : rnd();
+            M32(c + 0x2cc + b * 4) = rnd_n(2) ? 0 : 0x10100 + ((j * 0x40 + b) & 0x7f);
         }
     }
     I32(0xbf88) = count;      /* joystick count */
@@ -737,6 +788,8 @@ int main(int argc, char **argv)
     printf("controlsdiff: %u scenarios, %u differ\n", n, differ);
     printf("  dispatches %lu (after a crash %lu), axes %lu, engines %lu, events %lu\n",
            cover_cmd, cover_cmd_crash, cover_axis, cover_engine, cover_event);
+    printf("  joystick polls %lu: posted axes %lu, presses %lu, repeats %lu, releases %lu\n",
+           cover_jpoll, cover_jaxis, cover_jpress, cover_jrepeat, cover_jrelease);
     printf("  posts %lu, faults (both sides alike) %lu\n", cover_post, cover_faults);
     return differ ? 1 : 0;
 }

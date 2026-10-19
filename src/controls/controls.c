@@ -33,6 +33,7 @@
 #include "controls.h"
 
 struct controls_regs controls_regs;
+uint32_t controls_xcall_fn;    /* the pending import target (controls_xcall) */
 
 /* ---- the thunks ------------------------------------------------------------- */
 
@@ -45,6 +46,8 @@ __asm__(".text\n\t.p2align 4\n"
         "pushl %ebx\n\t"
         "pushl %esi\n\t"
         "pushl %edi\n\t"
+        "movl 8(%ebp), %eax\n\t"
+        "movl %eax, _controls_xcall_fn\n\t"
         "movl 12(%ebp), %ecx\n\t"
         "movl 16(%ebp), %edx\n"
         "1:\n\t"
@@ -54,14 +57,13 @@ __asm__(".text\n\t.p2align 4\n"
         "decl %ecx\n\t"
         "jmp 1b\n"
         "2:\n\t"
-        "pushl 8(%ebp)\n\t"
         "movl _controls_regs, %eax\n\t"
         "movl _controls_regs+4, %ecx\n\t"
         "movl _controls_regs+8, %edx\n\t"
         "movl _controls_regs+12, %ebx\n\t"
         "movl _controls_regs+16, %esi\n\t"
         "movl _controls_regs+20, %edi\n\t"
-        "call *(%esp)\n\t"
+        "call *_controls_xcall_fn\n\t"
         "movl %eax, _controls_regs\n\t"
         "movl %ecx, _controls_regs+4\n\t"
         "movl %edx, _controls_regs+8\n\t"

@@ -280,9 +280,14 @@ scenarios, zero differences, see [docs/modules/analysis.md](docs/modules/analysi
 It found that retail's sample compaction depends on what MSVCRT `memmove`
 leaves in ecx; OpenFS98 reproduces the CD runtime's.
 Round 9 surveyed the six modules left before HG2D and picked `CONTROLS`.
-It is the only one whose calls into unfinished modules are all
-fire-and-forget, and everything else it needs is input a harness can
-script. `MULTIP` and `MPCHAT` follow it, then `G3D`.
+Its hand-written half -- the command dispatcher and all 342 handlers
+(engines, radios, autopilot, the eye, slew, the mouse yoke) -- is
+reimplemented and verified: `make controlsdiff-run` drives it against retail
+over 20,000 scenarios with zero differences
+(see [docs/modules/controls.md](docs/modules/controls.md)). Its compiled-C
+half (the key/joystick config, the assignment dialog and DirectInput force
+feedback) is partly transliterated and not yet driven by the harness, so
+CONTROLS is not yet installed. `MULTIP` and `MPCHAT` follow it, then `G3D`.
 
 Other useful work, in no particular order:
 

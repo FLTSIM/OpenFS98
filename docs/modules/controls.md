@@ -1,10 +1,22 @@
 # CONTROLS.DLL — module id 16
 
-**In progress.** The hand-written assembly half is transliterated and the
-module builds and links; the compiled-C half and the `controlsdiff` harness
-are not done, so **nothing here is verified yet**. This document records what
-the module is and what the reading found, so the work can be finished against
-it.
+**In progress; the command dispatcher and all its handlers are verified.**
+`make controlsdiff-run` drives retail and the OpenFS98 build side by side
+through the directly-callable Linkage entries over 20,000 random command and
+axis/engine/event scenarios, comparing GLOBAL, the whole `.data` image and
+every import call: **0 differences** (268k dispatches, 44k each of axes,
+engines and events, 1,839 faults both sides take alike). `make controls-breaks`
+breaks the handlers on purpose and confirms the harness goes red: 10 of 12
+caught. The two misses -- `select-decr` (the `S_SELECT` decrement, which needs
+ENGINE then a precise run of SELECT_n in one op) and `throttle-floor` (a
+throttle resting exactly on the reverser floor) -- are reachability gaps, not
+transliteration errors; the 20,000-scenario match is the evidence.
+
+Still unverified: the compiled-C half's config/joystick/dialog/force-feedback
+paths, which the harness does not drive yet (they need the host's profile,
+accelerator, joystick and DirectInput services modelled -- phase two). The
+assignment dialog, the force-feedback device setup and the DirectInput effect
+code are still placeholders. So the module is not yet in `MODULES`.
 
 CONTROLS is the keyboard, the joysticks and the mouse. Every key, button and
 axis becomes a *command* — an id from `0x10000` with a value — which it
@@ -144,16 +156,38 @@ the joysticks (`+0x1c0`/`+0x1c4`/`+0x1c8`, winmm + registry), the keyboard layou
 (`+0x130`/`+0x184`), the mouse capture (`+0x274`/`+0x278`), the menu (`+0x254`),
 and `+0x48`/`+0x54`. Their `ret N` are recorded in `controls_input.c`.
 
-## What is left
+## controlsdiff (the dispatcher phase)
 
-1. Transliterate `controls_input.c` against the listing.
-2. `controlsdiff`: `sounddiff`'s `FLTSIM98.CFG` passthrough with mapping
-   sections written per scenario (count configurations, not scenarios); a
-   scripted joystick for `+0x1c0`/`+0x1c4`/`+0x1c8`; a mouse-capture model; a
-   DirectInput stand-in, no devices first then one force-feedback device;
-   `GetKeyboardLayout` hooked and fixed per scenario; commands posted through
-   `+0x3c` logged; logging stubs for MAIN, HG2D, PANELS; retail UTIL, NUMERIC,
-   SOUND, ACONTAIN, ATC, DEMO, WINDOW. Drive commands and compare the whole
-   `.data` image, GLOBAL, the arena and the transcript.
-3. Confirm the register leftovers (`+0x44`'s `ecx` for DEMO, the joystick
-   calibrate's) and reproduce them if they differ.
+`tools/difftest/controlsdiff.c` loads retail `CONTROLS.DLL` and the OpenFS98
+build side by side (ImportTable at image+0, Linkage at +0x78), binds GLOBAL to
+a shared array and UTIL/NUMERIC to retail (the eye and the zoom text use them),
+and models the rest with logging stubs. It drives the directly-callable
+Linkage entries -- the dispatcher `+0x44` over every command id, the axes
+`+0x28`..`+0x34`, the engines `+0x38`/`+0x3c`, the pilot event `+0x40`, the
+radio report `+0x48`, `+0x18` and the yoke `+0x1c`/`+0x20` -- over random
+GLOBAL states (including an active view record, reset per side), and compares
+GLOBAL, the whole `.data` image (fixed pointer fields blanked) and the
+import-call transcript. It models the host's integer-divide repair (the
+keyboard axis curve divides by a zero knee), which found that the repair's
+sign case (`0x8001` vs `0x7fff`) has to be emulated to match.
+
+Two findings beyond the handlers, both reproduced:
+- **JOYSTICK_CALIBRATE's `+0x44` leaves `ecx` 0**, because `controls_joystick`
+  ends in `axis_reset`'s `rep stosd`; DEMO reads the `ecx` `+0x44` leaves
+  (docs/modules/demo.md), so `axis_reset` sets `ecx = 0`.
+- **the pilot-event words to DEMO carry retail stack garbage in their top
+  halves**; DEMO reads only the words, and OpenFS98 zero-extends (so the
+  harness compares the words).
+
+## What is left (phase two)
+
+1. Transliterate the rest of `controls_input.c`: the force-feedback device
+   setup (`+0xa8d0`/`+0xa9b0`) and per-frame update (`+0x93b0`), the
+   joystick-config persistence (`+0x94b0`), the assignment dialog (`+0x58`)
+   and the force dispatch (`+0x5c`).
+2. Extend `controlsdiff` to drive those: `sounddiff`'s `FLTSIM98.CFG`
+   passthrough with mapping sections written per scenario (count
+   configurations, not scenarios); a scripted joystick for `+0x1c0`/`+0x1c4`/
+   `+0x1c8`; a mouse-capture model; a DirectInput stand-in, no devices first
+   then one force-feedback device; `GetKeyboardLayout` hooked and fixed per
+   scenario.

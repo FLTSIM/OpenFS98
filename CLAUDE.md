@@ -73,6 +73,8 @@ make realitydiff-run     # whole-module REALITY, crashes and the analysis -> 200
 make reality-breaks      # REALITY broken on purpose -> 67 breaks, 61 caught, 6 proven equivalent (~7 min)
 make analysisdiff-run    # whole-module ANALYSIS, landing/manoeuvre/course -> 20000 scenarios, 0 differ (~2 min)
 make analysis-breaks     # ANALYSIS broken on purpose -> 103 breaks, 93 caught, 10 proven equivalent (~20 min)
+make controlsdiff-run    # CONTROLS command dispatcher + 342 handlers -> 20000 scenarios, 0 differ (~25 min); C-half config/joystick/dialog/FF not yet driven
+make controls-breaks     # CONTROLS dispatcher broken on purpose -> 12 breaks, 10 caught, 2 reachability gaps
 make difftest-run        # whole-module SLEW         -> 0/2000 vectors differ
 make ofstest-run         # in-process, via the host  -> passed 68, failed 0
 make smoke               # ACONTAIN, ADVDRV, ANALYSIS, ATC, BOOSTER, CHAIN, DEMO, DYNAMIC, FACIL, FE, GLOBAL, LANDME, NUMERIC, REALITY, SLEW, SOUND, UTIL, WEATHERM, WINDOW, WINMSG installed -> 27/27, 95 gauges, PASS
@@ -231,8 +233,11 @@ with its axis response curve are done; the module builds and links. The
 force-feedback/joystick-device setup, the per-frame FF update, the
 joystick-config persistence, the assignment dialog and the DirectInput 5
 force dispatch are still honest placeholders (optimiser-shuffled C that needs
-instruction-faithful reading -- a `stack.py` annotator in the scratch helps),
-and the `controlsdiff` harness is not built, so **nothing is verified**. See
+instruction-faithful reading -- a `stack.py` annotator in the scratch helps).
+**`make controlsdiff-run` verifies the command dispatcher and all 342
+handlers: 20,000 scenarios, 0 differences**; the config/joystick/dialog/FF
+C-half is not driven yet (phase two needs the host's profile/joystick/
+DirectInput services modelled), so CONTROLS is not in `MODULES`. See
 [docs/modules/controls.md](docs/modules/controls.md). After CONTROLS come
 MULTIP (DirectPlay through COM, a worker thread) with MPCHAT behind it, then
 G3D. Before G3D, trace who supplies the span routine its clipper calls. PANELS

@@ -779,6 +779,37 @@ analysisdiff: $(DIFFDIR)/analysisdiff.exe $(BIN)/ANALYSIS.DLL
 	@cp $(ORIG)/Modules/UTIL.DLL     $(DIFFDIR)/UTIL_retail.dll
 	@cp $(ORIG)/Modules/NUMERIC.DLL  $(DIFFDIR)/NUMERIC_retail.dll
 
+# CONTROLS, the command dispatcher and its handlers: retail and OpenFS98
+# loaded side by side, driven through the directly-callable Linkage entries
+# over random commands and GLOBAL states; compares GLOBAL, the whole .data
+# image and the import-call transcript.  (The config/joystick/dialog half is
+# not yet driven -- see docs/modules/controls.md.)
+$(DIFFDIR)/controlsdiff.exe: tools/difftest/controlsdiff.c
+	@mkdir -p $(DIFFDIR)
+	$(CC) -std=c99 -O1 -Wall -Wextra -o $@ tools/difftest/controlsdiff.c
+
+controlsdiff: $(DIFFDIR)/controlsdiff.exe $(BIN)/CONTROLS.DLL
+	@cp $(call orig_module,CONTROLS) $(DIFFDIR)/CONTROLS_retail.dll
+	@cp $(BIN)/CONTROLS.DLL          $(DIFFDIR)/CONTROLS_ours.dll
+	@cp $(ORIG)/Modules/UTIL.DLL     $(DIFFDIR)/UTIL_retail.dll
+	@cp $(ORIG)/Modules/NUMERIC.DLL  $(DIFFDIR)/NUMERIC_retail.dll
+
+controlsdiff-run: controlsdiff
+	@cd $(DIFFDIR) && WINEDEBUG=-all timeout 3600 wine controlsdiff.exe $(if $(N),$(N),20000)
+
+# A deliberately broken copy of the module as the harness's "ours" (for
+# tools/controls_breaks.py).  It rebuilds CONTROLS from the break copy of
+# controls.c plus the unchanged controls_input.c.
+CONTROLS_SRC := src/controls/controls.c src/controls/controls_input.c
+controls-break-build:
+	$(CC) $(CFLAGS) -fno-delete-null-pointer-checks -fno-ipa-icf -Isrc/controls $(LDFLAGS) \
+	      -Wl,--image-base=$(BASE_CONTROLS) -o $(DIFFDIR)/CONTROLS_ours.dll \
+	      $(DIFFDIR)/controls_break.c src/controls/controls_input.c \
+	      $(BIN)/controls.res src/controls/controls.def -lkernel32 -luser32 -lgcc
+
+controls-breaks: controlsdiff
+	@python3 tools/controls_breaks.py $(if $(N),$(N),2000)
+
 # A deliberately broken copy of analysis.c as the harness's "ours" (for
 # tools/analysis_breaks.py, which makes the copies and runs the harness).
 analysis-break-build:
@@ -1103,4 +1134,4 @@ smoke: all
 clean:
 	rm -rf $(BIN)
 
-.PHONY: all stage setup-map graph hostmap compare run trace trace-render trace-ddraw kill window-reset wm-unmanaged wm-managed vd-on vd-off mode8 mode16 ddraw-gdi ddraw-default smoke difftest difftest-run utildiff utildiff-run utildiff-portable numericdiff numericdiff-run chaindiff chaindiff-run atcdiff atcdiff-run weathermdiff weathermdiff-run acontaindiff acontaindiff-run sounddiff sounddiff-run dynamicdiff dynamicdiff-run fegriddiff fegriddiff-run fediff fediff-run fesldiff fesldiff-run boosterdiff boosterdiff-run demodiff demodiff-run windowdiff windowdiff-run window-breaks window-break-build winmsgdiff winmsgdiff-run winmsg-breaks winmsg-break-build realitydiff realitydiff-run reality-breaks reality-break-build analysisdiff analysisdiff-run analysis-breaks analysis-break-build advdrvdiff advdrvdiff-run advdrv-cover landmediff landmediff-run facildiff facildiff-run facildiff-fe-run ofstest ofstest-run ofstest-remove util-trace install revert installed-name-of orig-module-of clean
+.PHONY: all stage setup-map graph hostmap compare run trace trace-render trace-ddraw kill window-reset wm-unmanaged wm-managed vd-on vd-off mode8 mode16 ddraw-gdi ddraw-default smoke difftest difftest-run utildiff utildiff-run utildiff-portable numericdiff numericdiff-run chaindiff chaindiff-run atcdiff atcdiff-run weathermdiff weathermdiff-run acontaindiff acontaindiff-run sounddiff sounddiff-run dynamicdiff dynamicdiff-run fegriddiff fegriddiff-run fediff fediff-run fesldiff fesldiff-run boosterdiff boosterdiff-run demodiff demodiff-run windowdiff windowdiff-run window-breaks window-break-build winmsgdiff winmsgdiff-run winmsg-breaks winmsg-break-build realitydiff realitydiff-run reality-breaks reality-break-build analysisdiff analysisdiff-run analysis-breaks analysis-break-build controlsdiff controlsdiff-run controls-breaks controls-break-build advdrvdiff advdrvdiff-run advdrv-cover landmediff landmediff-run facildiff facildiff-run facildiff-fe-run ofstest ofstest-run ofstest-remove util-trace install revert installed-name-of orig-module-of clean

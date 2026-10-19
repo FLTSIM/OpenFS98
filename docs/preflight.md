@@ -114,14 +114,17 @@ before reading `+0x18`.
 
 **Status:** the whole hand-written assembly half (`.text+0x20`..`+0x78c1`:
 init/deinit, the three CHAIN callbacks, the dispatcher and all 342 handlers)
-is transliterated in `src/controls/controls.c`, and in the compiled-C half
-(`controls_input.c`) the key config read/write/list, the joystick entry
-points, and the per-frame joystick poll with its axis response curve are
-done too; the module builds and links. The force-feedback/joystick-device
-setup, the per-frame FF update, the joystick-config persistence, the
-assignment dialog and the DirectInput force dispatch are still honest
-placeholders, and the `controlsdiff` harness is not built, so nothing is
-verified yet. See [modules/controls.md](modules/controls.md).
+is transliterated in `src/controls/controls.c` and **verified**:
+`make controlsdiff-run` drives it against retail over 20,000 command and
+axis/engine/event scenarios, 0 differences, and `make controls-breaks`
+catches 10 of 12 deliberate breaks (2 reachability gaps). In the compiled-C
+half (`controls_input.c`) the key config read/write/list, the joystick entry
+points and the per-frame joystick poll with its axis response curve are
+transliterated but not yet driven by the harness; the force-feedback/
+joystick-device setup, the FF per-frame update, the joystick-config
+persistence, the assignment dialog and the force dispatch are still
+placeholders. Phase two (driving the config/joystick/dialog/FF half) remains.
+See [modules/controls.md](modules/controls.md).
 
 ## MULTIP (id 35) and MPCHAT
 

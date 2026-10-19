@@ -229,6 +229,7 @@ static void axis_reset(void)
         for (i = 0; i < 0x10; i++)
             M32(p + i * 4) = 0xffff8000u;
     }
+    ecx = 0;    /* the rep stosd leaves ecx 0; +0x44's caller (DEMO) reads it */
 }
 
 /* .text+0x9270 -- JOYSTICK_CALIBRATE's enable/report: with `set`, store `on`

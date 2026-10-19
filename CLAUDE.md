@@ -224,11 +224,14 @@ leaves where retail asm reads them (`analysisdiff.c`'s asm wrappers). See
 **CONTROLS is next, and in progress.** Its hand-written assembly half
 (init/deinit, the CHAIN callbacks, the command dispatcher and all 342
 handlers: engines, radios, autopilot, the eye, slew, the mouse yoke) is
-transliterated in `src/controls/controls.c` and the module builds and links.
-The compiled-C half (`src/controls/controls_input.c`: the key bindings in
-`FLTSIM98.CFG`, the assignment dialog, the joysticks, and DirectInput 5 force
-feedback) is **not yet transliterated** -- it is optimiser-shuffled C that
-needs instruction-faithful reading, so it holds honest placeholders for now --
+transliterated in `src/controls/controls.c`, and in the compiled-C half
+(`src/controls/controls_input.c`) the key bindings in `FLTSIM98.CFG`
+(read/write/list), the joystick entry points and the per-frame joystick poll
+with its axis response curve are done; the module builds and links. The
+force-feedback/joystick-device setup, the per-frame FF update, the
+joystick-config persistence, the assignment dialog and the DirectInput 5
+force dispatch are still honest placeholders (optimiser-shuffled C that needs
+instruction-faithful reading -- a `stack.py` annotator in the scratch helps),
 and the `controlsdiff` harness is not built, so **nothing is verified**. See
 [docs/modules/controls.md](docs/modules/controls.md). After CONTROLS come
 MULTIP (DirectPlay through COM, a worker thread) with MPCHAT behind it, then

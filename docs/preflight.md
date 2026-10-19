@@ -114,11 +114,14 @@ before reading `+0x18`.
 
 **Status:** the whole hand-written assembly half (`.text+0x20`..`+0x78c1`:
 init/deinit, the three CHAIN callbacks, the dispatcher and all 342 handlers)
-is transliterated in `src/controls/controls.c` and the module builds and
-links. The compiled-C half (`controls_input.c`: the key config, dialog,
-joysticks and DirectInput force feedback) and the `controlsdiff` harness are
-still to do, so nothing is verified yet. See
-[modules/controls.md](modules/controls.md).
+is transliterated in `src/controls/controls.c`, and in the compiled-C half
+(`controls_input.c`) the key config read/write/list, the joystick entry
+points, and the per-frame joystick poll with its axis response curve are
+done too; the module builds and links. The force-feedback/joystick-device
+setup, the per-frame FF update, the joystick-config persistence, the
+assignment dialog and the DirectInput force dispatch are still honest
+placeholders, and the `controlsdiff` harness is not built, so nothing is
+verified yet. See [modules/controls.md](modules/controls.md).
 
 ## MULTIP (id 35) and MPCHAT
 

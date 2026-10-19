@@ -86,30 +86,53 @@ the generator reads it out of `.text`, not `.data`.
   whatever the stack held, and DEMO reads only the words, so OpenFS98 passes
   them zero-extended.
 
-## The compiled-C half — NOT yet transliterated
+## The compiled-C half — partly transliterated
 
-`.text+0x78d0`..`+0xbd1x`, reached through Linkage `+0x4c`..`+0x5c`:
+`.text+0x78d0`..`+0xbd1x`, reached through Linkage `+0x4c`..`+0x5c`, is
+compiler-generated C in `src/controls/controls_input.c`. Transliterated and
+building so far:
 
-- **The key config** (`+0x4c`/`+0x50`): read and write `[KEYBOARD_MAIN]` and
-  `[KEYBOARD_SLEW]` of `FLTSIM98.CFG` through the host's profile and
-  accelerator services, matching each command by name and kind, into two
-  accelerator tables (ids `0x67`, `0x68`). The alternate path names a key by
-  the keyboard layout (`GetKeyboardLayout`, host `+0x130`/`+0x184`).
+- **the key config read/write/list** (`+0x4c`/`+0x50`/`+0x54`): `section_read`
+  / `section_read_layout` / `section_write` match each command of a kind by
+  name against `[KEYBOARD_MAIN]`/`[KEYBOARD_SLEW]` through the host's profile
+  (`+0xb0`/`+0xb4`/`+0x100`/`+0xf8`), accelerator (`+0x1d8`/`+0x1e4`/`+0x1e8`/
+  `+0x1f4`/`+0x1fc`) and section services, loading the default resource tables
+  (`0x67`/`0x68`) when the cfg has no custom section;
+- **the joystick entries** `controls_input_init`/`deinit`, `controls_joystick`
+  (`+0x9270`, JOYSTICK_CALIBRATE's enable/report) and `controls_accel_menu`
+  (`+0x9290`, the flight/slew joystick-config switch), with `axis_reset`;
+- **the per-frame joystick poll** (`+0x90c0`): reads each attached joystick
+  (`+0x1c4`) and maps it to commands through `joy_map` (`+0x8f20`) and the
+  axis response curve `axis_curve` (`+0x8e90`), posting WM_COMMAND (`+0x3c`)
+  that returns as a CHAIN list-0xb command. The per-(joystick,axis) config
+  lives at `D+0xd48` (flight) / `D+0x82c8` (slew), 0x3cc bytes each, selected
+  by `D+0x350`; the live state at `D+0x4a08`, 0x38c each.
+
+The curve reproduces a retail quirk: a reading below the negated dead zone and
+scale returns `+0x4000` without the final negate the other paths take.
+
+Still placeholder (honest stubs, documented in the source), pending
+transliteration against the listing and `controlsdiff`:
+
+- **The force-feedback / joystick-device setup** (`.text+0xa8d0`/`+0xa9b0`),
+  which also counts the joysticks (`+0x1c0`) and reads their config — so until
+  it is done `D+0xbf88` is zero and the poll does nothing (a sim with no
+  configured joystick, which is safe and matches wine).
+- **The per-frame force-feedback update** (`.text+0x93b0`, CHAIN list 1/6).
+- **The joystick-config persistence** (`.text+0x94b0` and the profile readers
+  it calls).
 - **The dialog** (`+0x58`, dialog `0x140a`, block `D+0x240`): a key-assignment
-  list built per command, with UTIL's exchange (`+0x90`) for the joystick
-  choice and NUMERIC for the readouts.
-- **The joysticks**: host `+0x1c0` counts them, `+0x1c4` reads a state,
-  `+0x1c8` parses caps; a CHAIN list-1 frame poll (`.text+0x90c0`) turns axis
-  and button motion into WM_COMMAND posts, which return as list-0xb commands.
-- **Force feedback**: DirectInput 5, loaded by CONTROLS itself (`dinput`,
-  `DirectInputCreateA`), driven through COM. With no force-feedback device —
-  what wine gives, and the first harness state — every path stops early.
+  list built per command, with UTIL's exchange (`+0x90`) and NUMERIC readouts.
+- **Force feedback** (`+0x5c`): DirectInput 5, loaded by CONTROLS itself
+  (`dinput`, `DirectInputCreateA`), driven through COM. With no force-feedback
+  device — what wine gives, and the first harness state — every path stops
+  early.
 
-It is all compiler-generated C with reused, optimiser-shuffled stack slots, so
-it must be transliterated instruction-faithfully from the listing and verified,
-not paraphrased. `src/controls/controls_input.c` currently holds honest
-placeholders (they keep the joystick-state word the assembly reads back) so the
-assembly half links and can be driven on its own.
+These are compiler-generated C with reused, optimiser-shuffled stack slots, so
+they must be transliterated instruction-faithfully from the listing and
+verified, not paraphrased. A stack-offset annotator
+that resolves each `[esp+N]` to an argument or
+local across stdcall callees — build it into the reading.
 
 ## Host services used (arg counts from the callees)
 

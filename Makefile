@@ -305,7 +305,7 @@ $(BIN)/CONTROLS.DLL: src/controls/controls.c src/controls/controls_input.c \
 	$(CC) $(CFLAGS) -fno-delete-null-pointer-checks -fno-ipa-icf -Isrc/controls $(LDFLAGS) \
 	      -Wl,--image-base=$(BASE_CONTROLS) \
 	      -o $@ src/controls/controls.c src/controls/controls_input.c \
-	      $(BIN)/controls.res src/controls/controls.def -lkernel32 -lgcc
+	      $(BIN)/controls.res src/controls/controls.def -lkernel32 -luser32 -lgcc
 
 $(BIN)/controls.res: src/controls/controls.rc
 	@mkdir -p $(BIN)

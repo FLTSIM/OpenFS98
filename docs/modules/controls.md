@@ -1,22 +1,31 @@
 # CONTROLS.DLL — module id 16
 
-**In progress; the command dispatcher and all its handlers are verified.**
-`make controlsdiff-run` drives retail and the OpenFS98 build side by side
-through the directly-callable Linkage entries over 20,000 random command and
-axis/engine/event scenarios, comparing GLOBAL, the whole `.data` image and
-every import call: **0 differences** (268k dispatches, 44k each of axes,
-engines and events, 1,839 faults both sides take alike). `make controls-breaks`
-breaks the handlers on purpose and confirms the harness goes red: 10 of 12
-caught. The two misses -- `select-decr` (the `S_SELECT` decrement, which needs
-ENGINE then a precise run of SELECT_n in one op) and `throttle-floor` (a
-throttle resting exactly on the reverser floor) -- are reachability gaps, not
-transliteration errors; the 20,000-scenario match is the evidence.
+**In progress; the command dispatcher, all its handlers, and the per-frame
+joystick poll are verified.** `make controlsdiff-run` drives retail and the
+OpenFS98 build side by side over 20,000 scenarios of random commands,
+axis/engine/event entries and joystick polls, comparing GLOBAL, the whole
+`.data` image and every import call: **0 differences** (253k dispatches, 42k
+each of axes/engines/events, 1,844 faults both sides take alike).
+`make controls-breaks` breaks the handlers on purpose and confirms the harness
+goes red: 10 of 12 caught. The two misses -- `select-decr` (the `S_SELECT`
+decrement, which needs ENGINE then a precise run of SELECT_n in one op) and
+`throttle-floor` (a throttle resting exactly on the reverser floor) -- are
+reachability gaps, not transliteration errors; the 20,000-scenario match is
+the evidence.
 
-Still unverified: the compiled-C half's config/joystick/dialog/force-feedback
-paths, which the harness does not drive yet (they need the host's profile,
-accelerator, joystick and DirectInput services modelled -- phase two). The
-assignment dialog, the force-feedback device setup and the DirectInput effect
-code are still placeholders. So the module is not yet in `MODULES`.
+The joystick poll is driven by seeding a joystick config directly (the
+harness fills the axis/button command table, scales, dead zones and present
+mask, identical per side) and scripting the host's joystick read, then
+calling the CHAIN list-1 callback the module registers. That verifies
+`joy_poll`, `joy_map` and the axis response curve (`axis_curve`) -- the
+per-frame path that turns a stick into commands.
+
+Still unverified: the key-binding config read/write (transliterated; needs
+the `FLTSIM98.CFG` profile and accelerator services modelled), the
+joystick-config load/save from the profile (`ff_frame`'s enumeration and its
+readers), the assignment dialog, and the DirectInput force feedback -- all of
+which remain, with the FF device setup, the dialog and the effect code still
+placeholders. So the module is not yet in `MODULES`.
 
 CONTROLS is the keyboard, the joysticks and the mouse. Every key, button and
 axis becomes a *command* — an id from `0x10000` with a value — which it
@@ -164,12 +173,21 @@ a shared array and UTIL/NUMERIC to retail (the eye and the zoom text use them),
 and models the rest with logging stubs. It drives the directly-callable
 Linkage entries -- the dispatcher `+0x44` over every command id, the axes
 `+0x28`..`+0x34`, the engines `+0x38`/`+0x3c`, the pilot event `+0x40`, the
-radio report `+0x48`, `+0x18` and the yoke `+0x1c`/`+0x20` -- over random
-GLOBAL states (including an active view record, reset per side), and compares
-GLOBAL, the whole `.data` image (fixed pointer fields blanked) and the
-import-call transcript. It models the host's integer-divide repair (the
-keyboard axis curve divides by a zero knee), which found that the repair's
-sign case (`0x8001` vs `0x7fff`) has to be emulated to match.
+radio report `+0x48`, `+0x18` and the yoke `+0x1c`/`+0x20` -- plus the
+per-frame joystick poll (the module's init registers it on CHAIN list 1) --
+over random GLOBAL states (including an active view record, reset per side),
+and compares GLOBAL, the whole `.data` image (fixed pointer fields blanked)
+and the import-call transcript. It models the host's integer-divide repair
+(the axis curve divides by a zero knee), which found that the repair's sign
+case (`0x8001` vs `0x7fff`) has to be emulated to match.
+
+Finding the harness: a transliteration bug in `controls_xcall` (it left the
+callee pointer on the stack as a phantom first argument, shifting every
+import argument and leaking the stack) surfaced on the first run -- it would
+have crashed in-game.  Also, the pointer "pairing" that other harnesses use
+to normalise code addresses across builds does not work here, because ours is
+a smaller module than retail, so a data value can fall inside one image and
+not the other; the digest blanks the fixed pointer fields instead.
 
 Two findings beyond the handlers, both reproduced:
 - **JOYSTICK_CALIBRATE's `+0x44` leaves `ecx` 0**, because `controls_joystick`

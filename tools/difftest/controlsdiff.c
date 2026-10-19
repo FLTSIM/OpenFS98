@@ -78,6 +78,7 @@ static unsigned long cover_cmd, cover_cmd_crash,  cover_axis, cover_engine,
 #define G16(o) (*(uint16_t *)(global + (o)))
 #define G32(o) (*(uint32_t *)(global + (o)))
 #define I32(o) (*(uint32_t *)(cur->image + (o)))
+#define M32(a) (*(uint32_t *)(uintptr_t)(a))
 #define I8(o)  (*(uint8_t *)(cur->image + (o)))
 #define SET_SLOT(t, o, fn) (*(void **)((t) + (o)) = (void *)(fn))
 
@@ -232,9 +233,40 @@ static uint32_t STDCALL h_capture(uint32_t cb)
 S0(h_release, "host+0x278")
 S1(h_accel_on, "host+0x1e8")
 S1(h_accel_off, "host+0x1ec")
-/* CHAIN: +0x18/+0x1c register (logged), +0x20 dispatch (logged; no harness cb) */
-S2(chain_add, "chain+0x18")
-S2(chain_remove, "chain+0x1c")
+/* +0xc8 GetPrivateProfileString on FLTSIM98.CFG: leave the default buffer */
+static uint32_t STDCALL h_cfg(uint32_t section, uint32_t key, uint32_t buf, uint32_t size)
+{ (void)section; (void)key; (void)buf; (void)size; return 0; }
+static uint32_t STDCALL h_cfg3(uint32_t section, uint32_t key, uint32_t buf)
+{ (void)section; (void)key; (void)buf; return 0; }
+/* +0x218 memset(dst, byte, n) */
+static uint32_t STDCALL h_memset(uint32_t dst, uint32_t byte, uint32_t n)
+{ memset((void *)(uintptr_t)dst, (int)byte, n); return 0; }
+static uint32_t STDCALL h_memmove(uint32_t dst, uint32_t src, uint32_t n)
+{ memmove((void *)(uintptr_t)dst, (void *)(uintptr_t)src, n); return 0; }
+/* +0x1c4 read joystick `joy` into `block`: fill the axis values (block+0xc,
+ * 0x10 words as dwords) and the button bitmap (block+0x4c) with a scripted
+ * state; return 0 (present). */
+static uint32_t STDCALL h_joyread(uint32_t joy, uint32_t block)
+{
+    uint32_t i;
+    (void)joy;
+    for (i = 0; i < 0x10; i++)
+        *(uint32_t *)(uintptr_t)(block + 0xc + i * 4) = (int32_t)(rnd() & 0x7fff) - 0x4000;
+    *(uint32_t *)(uintptr_t)(block + 0x4c) = rnd();      /* button bitmap */
+    return 0;
+}
+/* CHAIN: +0x18/+0x1c register, +0x20 dispatch.  List-1 callbacks are captured
+ * in order so the harness can drive the joystick poll (first registered). */
+static uint32_t list1[4]; static uint32_t nlist1;
+static uint32_t STDCALL chain_add(uint32_t list, uint32_t cb)
+{
+    char b[24];
+    if (list == 1 && nlist1 < 4) list1[nlist1++] = cb;
+    put("\n  chain+0x18(%#x,%s)", list, pptr(cb, b));
+    return 0;
+}
+static uint32_t STDCALL chain_remove(uint32_t list, uint32_t cb)
+{ char b[24]; put("\n  chain+0x1c(%#x,%s)", list, pptr(cb, b)); return 0; }
 S3(chain_dispatch, "chain+0x20")
 /* MAIN */
 static uint32_t STDCALL main_84(uint32_t rec, uint32_t flags, uint32_t block)
@@ -315,6 +347,8 @@ static void build_stubs(void)
     SET_SLOT(host, 0x3c, h_post); SET_SLOT(host, 0x24, h_quit); SET_SLOT(host, 0x48, h_48);
     SET_SLOT(host, 0x90, h_90); SET_SLOT(host, 0x254, h_menu); SET_SLOT(host, 0x274, h_capture);
     SET_SLOT(host, 0x278, h_release); SET_SLOT(host, 0x1e8, h_accel_on); SET_SLOT(host, 0x1ec, h_accel_off);
+    SET_SLOT(host, 0xc8, h_cfg); SET_SLOT(host, 0x218, h_memset); SET_SLOT(host, 0x1c4, h_joyread);
+    SET_SLOT(host, 0xa8, h_cfg3); SET_SLOT(host, 0x21c, h_memmove);
     *(uint32_t *)chain = 4;
     SET_SLOT(chain, 0x18, chain_add); SET_SLOT(chain, 0x1c, chain_remove); SET_SLOT(chain, 0x20, chain_dispatch);
     *(uint32_t *)main_m = 3;
@@ -470,7 +504,7 @@ static uint32_t call0(uint32_t fn)
 
 static void op(void)
 {
-    uint32_t k = rnd_n(14);
+    uint32_t k = rnd_n(15);
     uint32_t cmd, val = rnd_n(4) == 0 ? rnd() : rnd_n(0x10000);
 
     switch (k) {
@@ -539,6 +573,12 @@ static void op(void)
         call2((uint32_t)SVC(0x44), 0, 0x100fe, v2);  /* SIM_RATE_DECR */
         break;
     }
+    case 14:            /* the per-frame joystick poll (CHAIN list 1) */
+        if (nlist1) {
+            put("\n#jpoll");
+            call2(list1[0], 0, 0, 0);
+        }
+        break;
     }
 }
 
@@ -578,6 +618,32 @@ static void put_state(void)
     }
 }
 
+/* seed a joystick config (D+0x350's table) and enable the joysticks, so the
+ * per-frame poll (joy_poll) has axes and buttons to map.  Identical per side.
+ * Layout: per joystick 0x3cc bytes -- +0x08 axis-present mask, +0x0c axis
+ * command ids (0x10), +0x4c scales, +0x8c dead zones, +0xcc/+0x1cc/+0x2cc
+ * button press/repeat/release commands (0x40 each). */
+static void joy_setup(void)
+{
+    uint32_t count = 1 + rnd_n(2), j, cfg = I32(0x350), a, b;
+    for (j = 0; j < count; j++) {
+        uint32_t c = cfg + 0x3cc * j;
+        M32(c + 8) = rnd() & 0xffff;                         /* axis-present mask */
+        for (a = 0; a < 0x10; a++) {
+            M32(c + 0xc + a * 4) = rnd_n(3) ? 0 : (0x10000 + rnd_n(0x180));
+            M32(c + 0x4c + a * 4) = rnd() & 0xffff;
+            M32(c + 0x8c + a * 4) = rnd_n(0x2000);
+        }
+        for (b = 0; b < 0x40; b++) {
+            M32(c + 0xcc + b * 4) = rnd_n(2) ? 0 : (0x10000 + rnd_n(0x180));
+            M32(c + 0x1cc + b * 4) = rnd_n(2) ? 0 : (0x10000 + rnd_n(0x180));
+            M32(c + 0x2cc + b * 4) = rnd_n(2) ? 0 : (0x10000 + rnd_n(0x180));
+        }
+    }
+    I32(0xbf88) = count;      /* joystick count */
+    I32(0xbf8c) = 1;          /* enabled */
+}
+
 static void run_side(struct side *s)
 {
     uint32_t i, nops;
@@ -587,7 +653,12 @@ static void run_side(struct side *s)
     helper_restore(&util); helper_restore(&numeric);
     rng = scenario_seed;
     g_setup();                       /* rebuild GLOBAL and the view, identically per side */
-    put("scenario %u\n", scenario);
+    nlist1 = 0;
+    inside = 1;
+    if (__builtin_setjmp(fault_jb) == 0) call0((uint32_t)SVC(4));   /* module init */
+    inside = 0;
+    joy_setup();
+    put("scenario %u (joysticks %u)\n", scenario, I32(0xbf88));
     nops = 4 + rnd_n(MAX_OPS);
     faulted = 0;
     for (i = 0; i < nops && !faulted; i++) {

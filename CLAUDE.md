@@ -73,7 +73,7 @@ make realitydiff-run     # whole-module REALITY, crashes and the analysis -> 200
 make reality-breaks      # REALITY broken on purpose -> 67 breaks, 61 caught, 6 proven equivalent (~7 min)
 make analysisdiff-run    # whole-module ANALYSIS, landing/manoeuvre/course -> 20000 scenarios, 0 differ (~2 min)
 make analysis-breaks     # ANALYSIS broken on purpose -> 103 breaks, 93 caught, 10 proven equivalent (~20 min)
-make controlsdiff-run    # CONTROLS command dispatcher + 342 handlers -> 20000 scenarios, 0 differ (~25 min); C-half config/joystick/dialog/FF not yet driven
+make controlsdiff-run    # CONTROLS dispatcher, 342 handlers + joystick poll -> 20000 scenarios, 0 differ (~25 min); key/joystick config, dialog, FF not yet driven
 make controls-breaks     # CONTROLS dispatcher broken on purpose -> 12 breaks, 10 caught, 2 reachability gaps
 make difftest-run        # whole-module SLEW         -> 0/2000 vectors differ
 make ofstest-run         # in-process, via the host  -> passed 68, failed 0

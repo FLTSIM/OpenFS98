@@ -112,25 +112,19 @@ REALITY `+0x5c`. Those harnesses already stub CONTROLS, and their stubs
 record what retail CONTROLS must accept. Read them for the argument shapes
 before reading `+0x18`.
 
-**Status:** the whole hand-written assembly half (`.text+0x20`..`+0x78c1`:
-init/deinit, the three CHAIN callbacks, the dispatcher and all 342 handlers)
-is transliterated in `src/controls/controls.c`. The dispatcher, all 342
-handlers and init are **verified**: `make controlsdiff-run` drives them
-against retail over 20,000 command and axis/engine/event scenarios, 0
-differences, and `make controls-breaks` catches 18 of 20 deliberate breaks,
-including all 8 in the joystick poll (the 2 misses are reachability gaps).
-Deinit and the three CHAIN callbacks are not driven,
-so the list-2 brake step-back (`.text+0x25c`) and list 3's `coordinate`
-(`.text+0x6fdf`), reached only from them, are unverified. In the compiled-C
-half (`controls_input.c`) the key config read/write/list, the joystick entry
-points and the per-frame joystick poll with its axis response curve are
-transliterated. Of those, the harness drives the poll, axes and buttons,
-and it is verified; driving the buttons proved and fixed a repeat-counter
-bug. The key config is not driven. The
-force-feedback/joystick-device setup, the FF per-frame update, the
-joystick-config persistence, the assignment dialog and the force dispatch
-are still placeholders. Phase two (driving the config/joystick/dialog/FF
-half) remains. See [modules/controls.md](modules/controls.md).
+**Status:** all but the key-assignment dialog is transliterated and
+**verified**: the hand-written half (`src/controls/controls.c`: the
+dispatcher, all 342 handlers, the CHAIN callbacks, init/deinit) and the
+compiled-C half (`src/controls/controls_input.c`: the key bindings, the
+joystick poll and watcher, the joystick configs and their defaults, force
+feedback over DirectInput 5). `make controlsdiff-run` drives them against
+retail over 20,000 scenarios, 0 differences, over the host's profile services
+passed through to fixture files, models of its accelerator tables and
+joysticks, and a DirectInput stand-in; `make controls-breaks`: 63 of 65 deliberate breaks caught, one proven
+equivalent and one reachability gap. The
+dialog (`+0x58`) is dialog `0x140a` of `English\Options.DLL`, an MFC dialog
+that calls back into CONTROLS through a parameter block, so it waits on a
+stand-in for that dialog. See [modules/controls.md](modules/controls.md).
 
 ## MULTIP (id 35) and MPCHAT
 

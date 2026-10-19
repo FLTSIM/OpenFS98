@@ -73,8 +73,8 @@ make realitydiff-run     # whole-module REALITY, crashes and the analysis -> 200
 make reality-breaks      # REALITY broken on purpose -> 67 breaks, 61 caught, 6 proven equivalent (~7 min)
 make analysisdiff-run    # whole-module ANALYSIS, landing/manoeuvre/course -> 20000 scenarios, 0 differ (~2 min)
 make analysis-breaks     # ANALYSIS broken on purpose -> 103 breaks, 93 caught, 10 proven equivalent (~20 min)
-make controlsdiff-run    # CONTROLS dispatcher, 342 handlers + joystick poll (axes, buttons) -> 20000 scenarios, 0 differ (~25 min); key/joystick config, dialog, FF not yet driven
-make controls-breaks     # CONTROLS dispatcher and joystick poll broken on purpose -> 20 breaks, 18 caught, 2 reachability gaps (~50 min)
+make controlsdiff-run    # whole-module CONTROLS but its dialog: commands, joysticks, key bindings, force feedback -> 20000 scenarios, 0 differ (~40 min)
+make controls-breaks     # CONTROLS broken on purpose -> 65 breaks, 63 caught, 1 proven equivalent, 1 reachability gap (~25 min)
 make difftest-run        # whole-module SLEW         -> 0/2000 vectors differ
 make ofstest-run         # in-process, via the host  -> passed 68, failed 0
 make smoke               # ACONTAIN, ADVDRV, ANALYSIS, ATC, BOOSTER, CHAIN, DEMO, DYNAMIC, FACIL, FE, GLOBAL, LANDME, NUMERIC, REALITY, SLEW, SOUND, UTIL, WEATHERM, WINDOW, WINMSG installed -> 27/27, 95 gauges, PASS
@@ -223,27 +223,20 @@ leaves where retail asm reads them (`analysisdiff.c`'s asm wrappers). See
 [docs/modules/analysis.md](docs/modules/analysis.md).
 
 **Round 9 surveyed what is left** ([docs/preflight.md](docs/preflight.md)):
-**CONTROLS is next, and in progress.** Its hand-written assembly half
-(init/deinit, the CHAIN callbacks, the command dispatcher and all 342
-handlers: engines, radios, autopilot, the eye, slew, the mouse yoke) is
-transliterated in `src/controls/controls.c`, and in the compiled-C half
-(`src/controls/controls_input.c`) the key bindings in `FLTSIM98.CFG`
-(read/write/list), the joystick entry points and the per-frame joystick poll
-with its axis response curve are transliterated; the module builds and links.
-The force-feedback/joystick-device setup, the per-frame FF update, the
-joystick-config persistence, the assignment dialog and the DirectInput 5
-force dispatch are still honest placeholders (optimiser-shuffled C that needs
-instruction-faithful reading -- a `stack.py` annotator in the scratch helps).
-**`make controlsdiff-run` verifies the command dispatcher, all 342 handlers
-and the per-frame joystick poll, axes and buttons: 20,000 scenarios, 0
-differences**. Driving the buttons proved a repeat-counter bug the listing
-had shown (ours cleared it on every poll, retail only while the button is
-up), now fixed. Not yet driven: deinit and the hand-written half's CHAIN
-callbacks (list 0xb's command entry, list 2's repeat countdown and brake
-step-back, list 3's `coordinate`), the key-binding config, the
-joystick-config persistence, the dialog and FF (phase two needs the host's
-profile/joystick/DirectInput services modelled), so CONTROLS is not in
-`MODULES`. See
+**CONTROLS is next, and all but its dialog is done.** The hand-written half
+(`src/controls/controls.c`: the dispatcher and all 342 handlers, the CHAIN
+callbacks, init/deinit) and the compiled-C half (`src/controls/controls_input.c`:
+the key bindings, the joystick poll and watcher, the joystick configs and
+their defaults, force feedback over DirectInput 5) are transliterated and
+**verified by `make controlsdiff-run`: 20,000 scenarios, 0 differences**, over
+a model of the host's profile, accelerator and joystick services, fixture
+CFG files and a DirectInput stand-in. The verification found and fixed six
+transliteration bugs (a repeat counter, three in the keyboard-layout reader,
+two in the key list). **Left: the key-assignment dialog `+0x58`**, dialog
+`0x140a` of `English\Options.DLL`, which calls back into CONTROLS through a
+parameter block -- it needs a stand-in for that MFC dialog, read from
+Options.DLL, as FACIL's were verified against World.DLL. Until then
+`controls_dialog` is a placeholder and CONTROLS is not in `MODULES`. See
 [docs/modules/controls.md](docs/modules/controls.md). After CONTROLS come
 MULTIP (DirectPlay through COM, a worker thread) with MPCHAT behind it, then
 G3D. Before G3D, trace who supplies the span routine its clipper calls. PANELS

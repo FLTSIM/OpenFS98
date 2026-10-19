@@ -154,8 +154,8 @@ __asm__(".text\n\t.p2align 4\n"
 static void pilot_event(uint32_t which, uint32_t value);
 
 /* the C half (controls_input.c) */
-void controls_input_init(void);                     /* .text+0x92c0 */
-void controls_input_deinit(void);                   /* .text+0x9340 */
+uint32_t controls_input_init(void);                 /* .text+0x92c0 */
+uint32_t controls_input_deinit(void);               /* .text+0x9340 */
 uint32_t FS98_STDCALL controls_joystick(uint32_t set, uint32_t on);     /* .text+0x9270 */
 void FS98_STDCALL controls_accel_menu(uint32_t slew);              /* .text+0x9290 */
 
@@ -188,7 +188,7 @@ void controls_init_body(void)
     XCALL(SVC(CHAIN, 0x18), 0x3, ADDR(cb_frame3_entry));
     /* host +0xa8: [CONTROLS] PAN_RATE into the dword at +0x10c */
     XCALL(SVC(HOST, 0xa8), D + S_SECTION, D + S_PAN_KEY, D + S_PAN_RATE);
-    controls_input_init();
+    eax = controls_input_init();    /* the C half's count is init's eax */
     RESTORE_REGS;
 }
 
@@ -201,7 +201,7 @@ void controls_deinit_body(void)
     XCALL(SVC(CHAIN, 0x1c), 0xb, ADDR(cb_command_entry));
     XCALL(SVC(CHAIN, 0x1c), 0x2, ADDR(cb_frame_entry));
     XCALL(SVC(CHAIN, 0x1c), 0x3, ADDR(cb_frame3_entry));
-    controls_input_deinit();
+    eax = controls_input_deinit();
     RESTORE_REGS;
 }
 

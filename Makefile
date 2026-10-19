@@ -779,12 +779,13 @@ analysisdiff: $(DIFFDIR)/analysisdiff.exe $(BIN)/ANALYSIS.DLL
 	@cp $(ORIG)/Modules/UTIL.DLL     $(DIFFDIR)/UTIL_retail.dll
 	@cp $(ORIG)/Modules/NUMERIC.DLL  $(DIFFDIR)/NUMERIC_retail.dll
 
-# CONTROLS, the command dispatcher and its handlers: retail and OpenFS98
-# loaded side by side, driven through the directly-callable Linkage entries
-# and the per-frame joystick poll over random commands and GLOBAL states;
-# compares GLOBAL, the whole .data image and the import-call transcript.
-# (The key/joystick config, the dialog and force feedback are not yet
-# driven -- see docs/modules/controls.md.)
+# CONTROLS, the whole module but its key-assignment dialog: retail and
+# OpenFS98 loaded side by side over commands, the CHAIN frames, the joysticks,
+# the key bindings and force feedback, with fixture CFG files, models of the
+# host's profile, accelerator and joystick services and a DirectInput
+# stand-in; compares GLOBAL, the whole .data image, the import-call transcript
+# and the profile files.  (The dialog is not driven -- see
+# docs/modules/controls.md.)
 $(DIFFDIR)/controlsdiff.exe: tools/difftest/controlsdiff.c
 	@mkdir -p $(DIFFDIR)
 	$(CC) -std=c99 -O1 -Wall -Wextra -o $@ tools/difftest/controlsdiff.c
@@ -794,6 +795,8 @@ controlsdiff: $(DIFFDIR)/controlsdiff.exe $(BIN)/CONTROLS.DLL
 	@cp $(BIN)/CONTROLS.DLL          $(DIFFDIR)/CONTROLS_ours.dll
 	@cp $(ORIG)/Modules/UTIL.DLL     $(DIFFDIR)/UTIL_retail.dll
 	@cp $(ORIG)/Modules/NUMERIC.DLL  $(DIFFDIR)/NUMERIC_retail.dll
+	@cp $(ORIG)/ENGLISH.FLL          $(DIFFDIR)/ENGLISH.FLL
+	@cp $(ORIG)/FLTSIM98.EXE         $(DIFFDIR)/FLTSIM98_host.exe
 
 controlsdiff-run: controlsdiff
 	@cd $(DIFFDIR) && WINEDEBUG=-all timeout 3600 wine controlsdiff.exe $(if $(N),$(N),20000)

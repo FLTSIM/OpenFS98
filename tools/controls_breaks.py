@@ -51,6 +51,13 @@ BREAKS = [
     ("kohlsman-step", "    GW(0x330) += 5;", "    GW(0x330) += 4;"),
     # the keyboard axis curve (reached through +0x28..+0x34)
     ("curve-clamp", "    imul16((uint16_t)w);", "    imul16((uint16_t)w + 1);"),
+    # the CHAIN callbacks: list 0xb's command entry, list 2's frames, list 3
+    ("cmd-range", "    if (eax >= 0x10000 && eax <= 0x1dfff) {",
+     "    if (eax >= 0x10000 && eax < 0x1dfff) {"),
+    ("taken", "    if (taken == 0) {", "    if (1) {"),
+    ("frame-brakes", "        V8(S_FRAMES) = 6;", "        V8(S_FRAMES) = 5;"),
+    ("brake-release", "            SET_AX(AX - 0x32);", "            SET_AX(AX - 0x31);"),
+    ("coord-shift", "            SET_AX((int16_t)AX >> 6);", "            SET_AX((int16_t)AX >> 5);"),
 ]
 
 # The same, in controls_input.c: the per-frame joystick poll.
@@ -69,6 +76,80 @@ INPUT_BREAKS = [
      "        if (1) {"),
     ("joy-lock", "    if (M32(G + 0x84c) != 0)", "    if (0)"),
     ("curve-quirk", "        return 0x4000;", "        return (uint32_t)-0x4000;"),
+    # the joystick configs: the watcher, the readers, the defaults, the saver
+    ("watch-new", "    if (i < n) {", "    if (i + 1 < n) {"),
+    ("watch-prefs", "controls_joystick(1, on == 0xffffffff ? 1 : on);",
+     "controls_joystick(1, on == 0xffffffff ? 0 : on);"),
+    ("watch-countdown", "            V32(0x43c)--;", "            V32(0x43c) -= 2;"),
+    ("read-locked", "        HC(0xa8, f3)(section, D + 0x468, table + 0);        /* LOCKED */",
+     "        HC(0xa8, f3)(section, D + 0x460, table + 0);        /* LOCKED */"),
+    ("read-name", "            M32(out) = CMD(i).command;", "            M32(out) = CMD(i).command + 1;"),
+    ("read-exists", "        if (HC(0x158, f2)(P(file), 0x24) == 0)",
+     "        if (HC(0x158, f2)(P(file), 0x24) != 0)"),
+    ("parse-neg", "    if (neg && negative)", "    if (neg)"),
+    ("parse-bad", "    if (bad)\n        v = 0;", "    if (0)\n        v = 0;"),
+    ("default-slew", 'h_strcat(buf, D + 0x3f8);                           /* " SLEW" */', ""),
+    ("default-type", "        M32(blk + 4) = desc.id;", "        M32(blk + 4) = desc.id + 1;"),
+    ("install-locked", "    if (M32(dst) == 0) {", "    if (1) {"),
+    ("defaults-current", "    if (M32(V32(0x350) + joy * 0x3cc) != 0)",
+     "    if (M32(D + 0xd48 + joy * 0x3cc) != 0)"),
+    ("save-unset", "            if (M32(e + 0xc + k * 4) == 0)\n                continue;",
+     "            if (0)\n                continue;"),
+    ("save-repeat", "                HC(0xac, f3)(s, P(k78), M32(e + 0x1cc + k * 4));",
+     "                HC(0xac, f3)(s, P(k78), M32(e + 0xcc + k * 4));"),
+    ("write-nameless", "        if (CMD(i).command == value)",
+     "        if (CMD(i).command == value && CMD(i).name)"),
+    ("section-digits", "        NUMF(0x18, f3)(P(&joy), 0xb, s + h_strlen(s));",
+     "        NUMF(0x18, f3)(P(&joy), 0xc, s + h_strlen(s));"),
+    # the key bindings: the three faults the first transliteration had, put back
+    ("layout-return", "        HC(0xd8, f6)(P(layout), P(CMD(i).name), P(parsed), 2, P(dir), 0x24);\n"
+     "        ent[0] = parsed[0];\n        ent[1] = parsed[1];\n        ent[2] = CMD(i).command;\n"
+     "        if (ent[0] == 0)\n            continue;\n        HC(0x1f4, f3)(*pAccel, P(ent), 1);\n"
+     "    }\n    return got;",
+     "        HC(0xd8, f6)(P(layout), P(CMD(i).name), P(parsed), 2, P(dir), 0x24);\n"
+     "        ent[0] = parsed[0];\n        ent[1] = parsed[1];\n        ent[2] = CMD(i).command;\n"
+     "        if (ent[0] == 0)\n            continue;\n        HC(0x1f4, f3)(*pAccel, P(ent), 1);\n"
+     "    }\n    return 0;"),
+    ("layout-args", "HC(0xd8, f6)(P(layout), P(CMD(i).name), P(parsed), 2, P(dir), 0x24);",
+     "HC(0xd8, f6)(P(layout), P(CMD(i).name), 2, P(parsed), P(dir), 0x24);"),
+    ("list-first", "                pair[1] = buf[k * 3 + 0] + (buf[k * 3 + 1] << 8);",
+     "            { pair[1] = buf[k * 3 + 0] + (buf[k * 3 + 1] << 8); break; }",
+     "equivalent while no table gives a command two keys: neither default table "
+     "(ENGLISH.FLL 0x67/0x68) does, a profile section names each command once, "
+     "and the one id with several names, 0, is never bound"),
+    ("accel-default", "        HC(0x1e4, f2)(D + 0x186, 0x67);", "        HC(0x1e4, f2)(D + 0x186, 0x68);"),
+    # force feedback's settings and DirectInput loading
+    ("ff-setting", "    HC(0xa8, f3)(D + 0x192, D + 0x850, D + 0x470);          /* force_master_enabled */",
+     "    HC(0xa8, f3)(D + 0x192, D + 0x850, D + 0x474);          /* force_master_enabled */"),
+    ("ff-dinput", "    if (h == 0)\n        return (uint32_t)-1;", "    if (h == 0)\n        return 0;"),
+    # force feedback: the device, the effects, the stick force's x87, the dispatch
+    ("stick-clamp", "    if (!(m < RD(0x2a0) || m == RD(0x2a0) || m != m))\n        m = RD(0x2a0);",
+     "    if (!(m < RD(0x2a0) || m == RD(0x2a0) || m != m))\n        m = RD(0x2a0) - 1;"),
+    ("stick-north", "    a = a - RD(0x290);", "    a = a + RD(0x290);"),
+    ("bump-period", "    per[3] = dur * 4;", "    per[3] = dur * 2;"),
+    ("periodic-phase", "    per[2] = kind == 2 ? 0x2328 : 0;", "    per[2] = kind == 1 ? 0x2328 : 0;"),
+    ("constant-sample", "    eff[3] = 0x2710;", "    eff[3] = 0x2711;"),
+    ("periodic-set", "    eff[12] = D + 0xbfa0;", "    eff[12] = D + 0xbfa4;"),
+    ("reap-playing", "    if ((uint8_t)status & 1)                            /* DIEGES_PLAYING */",
+     "    if ((uint8_t)status & 2)                            /* DIEGES_PLAYING */"),
+    ("frame-pause", "    if (M16(G + 0x5dc) == 0 && controls_joystick(0, 0) != 0)",
+     "    if (controls_joystick(0, 0) != 0)"),
+    ("crash-second", "        V32(0xbf98) = 2;", "        V32(0xbf98) = 3;"),
+    ("message-60", "    case 0x60:", "    case 0x61:"),
+    ("dispatch-gate", "    if ((r = V32(0xbfbc)) == 0 || (r = V32(0xbff0)) != 0 || (r = V32(0xbff4)) != 0)",
+     "    if ((r = V32(0xbfbc)) == 0 || (r = V32(0xbff0)) != 0)"),
+    ("bump-x87", "    t = (long double)RD(0x270) - t;", "    t = t - (long double)RD(0x270);"),
+    ("create-level", "                r = di_create(wnd, inst, D + 0xbfc0, D + 0xbfc4, 5);",
+     "                r = di_create(wnd, inst, D + 0xbfc0, D + 0xbfc4, 4);"),
+    ("enum-type", "    if (M8(ddi + 0x24) != 4)                            /* dwDevType: DIDEVTYPE_JOYSTICK */",
+     "    if (M8(ddi + 0x24) != 3)                            /* dwDevType: DIDEVTYPE_JOYSTICK */"),
+    ("init-slope", "    HC(0xe0, f5)(P(sect), D + 0x944, D + 0x4c0, P(path), 0x24);    /* ground_bumps_slope1 */",
+     "    HC(0xe0, f5)(P(sect), D + 0x944, D + 0x4d0, P(path), 0x24);    /* ground_bumps_slope1 */"),
+    ("release-unacquire", "        COM(M32(pdev), 0x20, f1)(M32(pdev));            /* Unacquire */", ""),
+    ("crash-args", "            r = eff_constant(V32(0xbfc4), D + 0xbfe4, V32(0x4d8), V32(0x4dc), V32(0x4e0));",
+     "            r = eff_constant(V32(0xbfc4), D + 0xbfe4, V32(0x4d8), V32(0x4e0), V32(0x4dc));"),
+    ("bump-speed", "        speed = (double)(int64_t)(M32(blk + 8) >> 16);",
+     "        speed = (double)(int64_t)(M32(blk + 8) >> 15);"),
 ]
 
 if not os.path.exists("bin/difftest/controlsdiff.exe"):
@@ -91,7 +172,8 @@ for b in [(SRC,) + t for t in BREAKS] + [(INPUT,) + t for t in INPUT_BREAKS]:
     if not os.path.exists("bin/difftest/CONTROLS_ours.dll"):
         print("%-18s BUILD FAILED\n%s" % (name, r.stderr[-800:])); continue
     run = subprocess.run(["wine", "controlsdiff.exe", str(N)], cwd="bin/difftest",
-                         env=dict(os.environ, WINEDEBUG="-all"), capture_output=True, text=True)
+                         env=dict(os.environ, WINEDEBUG="-all", CONTROLS_FIRST="1"),
+                         capture_output=True, text=True)
     differ = run.returncode != 0
     if note:
         print("%-18s %s (%s)" % (name, "caught" if differ else "not shown", note))

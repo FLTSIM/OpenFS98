@@ -30,7 +30,7 @@ struct controls_command {
     void (*handler)(void);
     uint32_t kind;          /* a mask of the key tables it may be bound in */
     uint32_t command;
-    uint32_t key;           /* the default binding */
+    uint32_t sid;           /* its display name's string id (ENGLISH.FLL), 0 if unlisted */
     const char *name;
 };
 extern struct controls_command controls_commands[CT_COMMANDS];

@@ -1,25 +1,21 @@
 # CONTROLS.DLL — module id 16
 
-**In progress: everything but the key-assignment dialog (`+0x58`) is
-transliterated and verified.** `make controlsdiff-run` drives retail and the
-OpenFS98 build side by side over 20,000 scenarios -- commands through the
-dispatcher and through CHAIN list 0xb, the axis/engine/event entries, the
-CHAIN frames (lists 1, 2, 3, 6 and 0x14), the joystick poll and watcher, the
-key bindings (`+0x4c`/`+0x50`/`+0x54`), init/deinit, and force feedback
-(`+0x5c`) over a DirectInput 5 stand-in -- comparing GLOBAL, the whole
-`.data` image, every import call and the profile files as each side left
-them: **0 differences** (159k dispatches and 93k commands through list 0xb, 199k list-2 frames, 120k joystick polls posting 27k axis commands, 53k presses, 13k repeats and 22k releases, 27k deinits saving the joystick configs, 27k key loads reading 544k key specs, 16k DirectInput creations with 4.6k effects started and 21k updated, 1,442 faults both sides take alike). `make controls-breaks` breaks the module on
-purpose: 63 of 65 caught. `list-first` is proven equivalent (below), and
-`throttle-floor` -- a throttle resting exactly on the reverser floor -- is
-the one reachability gap left; the 20,000-scenario match is the evidence.
-
-The dialog (`+0x58`, `.text+0x7e40`..`+0x91d0`) is the one piece left. It is
-dialog `0x140a` of `English\Options.DLL`, an MFC dialog that calls back into
-CONTROLS through a parameter block at `D+0x240` (callbacks at `+0x4`, `+0x1c`,
-`+0x20`, `+0x2c`), so verifying it needs a stand-in for that dialog read from
-Options.DLL, as FACIL's were verified against World.DLL. Until then
-`controls_dialog` is an honest placeholder returning 0, and the module is not
-in `MODULES`.
+**Done, verified and running in-game.** `make controlsdiff-run` drives
+retail and the OpenFS98 build side by side over 20,000 scenarios -- commands
+through the dispatcher and through CHAIN list 0xb, the axis/engine/event
+entries, the CHAIN frames (lists 1, 2, 3, 6 and 0x14), the joystick poll and
+watcher, the key bindings (`+0x4c`/`+0x50`/`+0x54`), init/deinit, force
+feedback (`+0x5c`) over a DirectInput 5 stand-in, and the key-assignment
+dialog (`+0x58`) over a stand-in for Options.DLL's -- comparing GLOBAL, the
+whole `.data` image, every import call and the profile files as each side
+left them: **0 differences** (24,372 dialogs, 19,342 of them answered OK,
+with 158,089 edits and 44,949 callbacks; 153,296 dispatches, 118,239
+joystick polls, 25,448 key loads, 55,251 force-feedback calls with 269
+crashes, 31 of them reaching their second part; 1,347 faults taken alike by
+both sides; about 40 minutes). `make controls-breaks` breaks the module on
+purpose: 81 breaks, 78 caught and 3 proven equivalent (`list-first`,
+`current-mask` and `throttle-floor`, below), about 20 minutes. `make smoke`
+boots the game with it installed: 27/27 modules, 95 gauges, PASS.
 
 CONTROLS is the keyboard, the joysticks and the mouse. Every key, button and
 axis becomes a *command* — an id from `0x10000` with a value — which it
@@ -65,7 +61,7 @@ video records.
 ## The command table
 
 383 records of 20 bytes at `.text+0x15f9`, its address at `+0x15f1` and count
-`0x17f` at `+0x15f5`: `{ handler, kind-mask, command, default-key, name }`.
+`0x17f` at `+0x15f5`: `{ handler, kind-mask, command, display-string id, name }`.
 342 distinct handlers. `tools/gen_controls_data.py` extracts it to
 `controls_table.inc`; `controls.c` turns each handler offset into its
 reimplemented function with `#define H(x) h_##x`. The kind mask selects which
@@ -188,6 +184,25 @@ scale and null, and 64 buttons' down event, repeat interval and up event.
   (list 0x14): 0x20 stops everything, 0x38/0x40/0x42/0x44 the shaker and the
   ground bumps, 0x60 rereads the aircraft's settings.
 
+### The key-assignment dialog (`+0x58`, `.text+0x7e40`..`+0x8e5f`, `+0x9130`)
+
+Dialog `0x140a` of `English\Options.DLL`, run through the host's dialog
+engine (`+0x10c`) on the block at `D+0x240`. Setup builds two lists, flight
+(`D+0x270`) and slew (`D+0x280`): every command a kind can bind, in the order
+of its display string id (the command table's fourth field, an ENGLISH.FLL
+string, copied through host `+0x2a4`), with each device's bindings -- the
+keyboard's from its accelerator table, each attached joystick's from its
+config -- and the sensitivity records (GLOBAL `+0xc02`..`+0xc0c`, labelled
+from ENGLISH.FLL), the force-feedback settings (op 1) and the joysticks'
+enable (UTIL's exchange, one dword at `D+0xb00`). Options.DLL's pages edit
+them and call back: `+0x1c` resets a device's sensitivities (0 the keyboard,
+2 the mouse, 1 a joystick's axis scales and nulls to 100/36), `+0x20` counts
+the joysticks again after the joystick control panel, `+0x4` does nothing.
+`+0x2c` would reset a device to its defaults, but Options.DLL never calls it.
+OK rebuilds both key tables, both joystick configs (from the bindings
+alone: AXIS_FLAGS the bound axes, LOCKED, TYPE and every button-up event
+dropped -- retail's), the sensitivities and force feedback (op 2).
+
 ### Bugs the verification found, all fixed
 
 - `joy_map` cleared a held button's repeat counter every poll, so nothing
@@ -204,6 +219,8 @@ scale and null, and 64 buttons' down event, repeat interval and up event.
 - The integer parser (`.text+0xa200`) steps past the terminator after
   trailing blanks; the buffer is zeroed, so what follows reads as empty.
 - `write_cmd` writes a nameless command's null name, which deletes the key.
+- OK rebuilds a joystick's config from the dialog's bindings alone, so its
+  button-up events, LOCKED and TYPE are lost.
 - The defaults are skipped when the *current* table (flight or slew) has the
   stick locked, and a model whose string is missing installs whatever the
   stack held (no model the host names lacks its strings).
@@ -236,7 +253,12 @@ a shared array and UTIL/NUMERIC to retail, and drives:
   coordination, init and deinit;
 - **the joysticks**: CHAIN list 1 run whole (the poll, then the watcher, then
   the force-feedback frame), list 6, a scripted joystick count and stick
-  descriptions, sticks whose buttons are held, repeated and released;
+  descriptions, and sticks read as host `0x40b8f0` reads them: the caller's
+  axis mask narrowed to the device's axes (each of `wCaps`' Z/R/U/V takes
+  one of `wNumAxes`, the rest shift in low bits, and a short count wraps to
+  `0xffff`), only those axes written, and the hat, on a device that has one,
+  as one of buttons 32..39 by its angle's octant; buttons held, repeated and
+  released;
 - **the profiles**: the host's profile services passed through to the Win32
   API over FLTSIM98.CFG, the devices file and an aircraft file written per
   scenario (joystick sections, keyboard sections, the layout's sections,
@@ -245,12 +267,23 @@ a shared array and UTIL/NUMERIC to retail, and drives:
   transcript;
 - **the key bindings**: `+0x4c`/`+0x50`/`+0x54` over a model of the host's
   accelerator tables;
+- **the dialog**: `+0x58` over a stand-in for Options.DLL's dialog
+  `0x140a` (create `0x22391930`, three tab pages), built from its listing:
+  key and joystick assignments as its pages make them (a conflicting binding
+  cleared, or the edit abandoned), extras, sensitivities, force-feedback
+  settings, the joysticks' enable, the list the page shows, the callbacks as
+  the pages call them, and OK or Cancel; what setup built is logged as a
+  digest of its contents. It also calls `+0x2c`, which Options.DLL does not,
+  so that code is verified too;
 - **force feedback**: `+0x5c` weighted as the game calls it, and list 0x14's
   messages, over a DirectInput 5 stand-in (`LoadLibraryA`/`GetProcAddress`
   patched in both builds' import tables): no DirectInput, one that will not
   create, one with no force-feedback joystick, or one with such a joystick;
   fake COM objects with every method's arity log each call by content (a
-  DIEFFECT whole) and answer from the scenario.
+  DIEFFECT whole) and answer from the scenario. A crash is usually followed
+  by a few list-1 frames, as in the game, so its first part can end and its
+  second start (the second part needs the device up, crashes enabled, the
+  joysticks on and no slew: 31 in the full run's 20,000 scenarios).
 
 It models the host's integer-divide repair (the keyboard axis curve divides
 by a zero knee). For break runs it stops at the first difference
@@ -259,10 +292,31 @@ by a zero knee). For break runs it stops at the first difference
 Finding the harness: a transliteration bug in `controls_xcall` (a phantom
 first argument) surfaced on its first run; code pointers cannot be paired
 across builds of different sizes, so the digest blanks the fixed pointer
-fields. `list-first` in `make controls-breaks` is an equivalence while no
-table gives a command two keys (neither default table does, a profile section
-names each command once, and the one id with several names, 0, is never
-bound); the dialog may change that.
+fields. The dialog's two lists are heap blocks that `dlg_cleanup` frees and
+nulls, but a fault in OK's force-feedback restart (a DirectInput without
+`DirectInputCreateA`) skips the cleanup. Retail's leaked blocks then move
+where ours allocates, so the digest compares the four list pointers as null
+or not (nothing reads them before the next setup rebuilds them). A
+300-scenario run never hit it; the first full run differed 6 times in its
+first 1,000, and until it was fixed every break run "caught" its break there
+at the latest. `current-mask` had shown as caught only that way. With the
+artifact gone the break run missed it and `crash-second`, which was caught
+before the dialog op was added but which no scenario of the new mix reached;
+the frames after a crash now reach it.
+
+Three breaks in `make controls-breaks` are proven equivalences:
+- `list-first`: no table gives a command two keys (neither default table
+  does, a profile section names each command once, the dialog rebuilds a
+  table from one binding per command, and the one id with several names, 0,
+  is never bound).
+- `current-mask`: `joy_current` writes the device's axis mask into
+  `build_list`'s stack copy of the config, which only `fill_joy` reads, and
+  `fill_joy` reads the axis and button commands and their extras, never
+  `+8`.
+- `throttle-floor` (`<` to `<=`): at equality the floor is loaded over the
+  same value. Retail is `cmp ax,[edi+0xb00]` / `jge` / `mov ax,[edi+0xb00]`
+  (`.text+0x5daa`), and the flags are dead: the store, then `shr cx,1`. The
+  A–E notes called it a reachability gap, which it is not.
 
 Two findings beyond the handlers, both reproduced:
 - **JOYSTICK_CALIBRATE's `+0x44` leaves `ecx` 0**, because `controls_joystick`
@@ -274,11 +328,15 @@ Two findings beyond the handlers, both reproduced:
 
 ## What is left
 
-1. The dialog, `+0x58` (`.text+0x7e40`..`+0x91d0`): its setup builds per
-   device (the keyboard's accelerator table, each joystick's description and
-   config) the list of every command with its binding, the dialog edits them,
-   and OK writes them back (`.text+0x7fc0`: the tables, the joystick configs,
-   force feedback's op 2). Transliterate it, and build a stand-in for
-   Options.DLL's dialog `0x140a` (template `0x3a5`) from its listing that
-   calls the four callbacks and edits the block as the real one does.
-2. Then `make smoke` and `ofstest` with CONTROLS installed.
+Nothing in the module. What the verification does not reach:
+
+- **`+0x1c4` failing.** The harness's sticks always answer. The host returns
+  -1 when the joystick subsystem is absent, the index is out of range or
+  `joyGetPosEx` fails (that last after narrowing the mask); CONTROLS then
+  skips `joy_map` for that stick (`joy_poll`), or keeps the config's mask
+  (`joy_current`, which nothing reads).
+- **Options.DLL itself.** The dialog's callbacks are verified against a
+  stand-in built from its listing, not the real MFC pages, and the dialog
+  has not been opened in-game.
+- **Hands-on input.** `make smoke` boots to the panel with CONTROLS
+  installed, but no key, stick or force-feedback device was driven in-game.

@@ -15,8 +15,9 @@ Nine rounds so far, newest first.
 
 ## Verdict
 
-**CONTROLS next**, then MULTIP with MPCHAT behind it, then G3D. PANELS and
-MAIN wait, and HG2D stays last.
+**CONTROLS next** (now done), then MULTIP with MPCHAT behind it, then G3D.
+PANELS and MAIN wait, and HG2D stays last. G3D's open question, who supplies
+the span routine its clipper calls, is settled: G3D does (see its section).
 
 CONTROLS is the only remaining module whose calls into unfinished modules
 are all fire-and-forget. What it needs from outside is input, and input can
@@ -112,19 +113,20 @@ REALITY `+0x5c`. Those harnesses already stub CONTROLS, and their stubs
 record what retail CONTROLS must accept. Read them for the argument shapes
 before reading `+0x18`.
 
-**Status:** all but the key-assignment dialog is transliterated and
-**verified**: the hand-written half (`src/controls/controls.c`: the
-dispatcher, all 342 handlers, the CHAIN callbacks, init/deinit) and the
-compiled-C half (`src/controls/controls_input.c`: the key bindings, the
-joystick poll and watcher, the joystick configs and their defaults, force
-feedback over DirectInput 5). `make controlsdiff-run` drives them against
-retail over 20,000 scenarios, 0 differences, over the host's profile services
-passed through to fixture files, models of its accelerator tables and
-joysticks, and a DirectInput stand-in; `make controls-breaks`: 63 of 65 deliberate breaks caught, one proven
-equivalent and one reachability gap. The
-dialog (`+0x58`) is dialog `0x140a` of `English\Options.DLL`, an MFC dialog
-that calls back into CONTROLS through a parameter block, so it waits on a
-stand-in for that dialog. See [modules/controls.md](modules/controls.md).
+**Status: done, verified and running in-game.** The hand-written half
+(`src/controls/controls.c`: the dispatcher, all 342 handlers, the CHAIN
+callbacks, init/deinit) and the compiled-C half
+(`src/controls/controls_input.c`: the key bindings, the joystick poll and
+watcher, the joystick configs and their defaults, force feedback over
+DirectInput 5, and the key-assignment dialog `+0x58`) are transliterated.
+`make controlsdiff-run` drives them against retail over 20,000 scenarios, 0
+differences, over the host's profile services passed through to fixture
+files, models of its accelerator tables and joysticks, a DirectInput
+stand-in, and a stand-in for the dialog: `0x140a` of `English\Options.DLL`,
+an MFC dialog that calls back into CONTROLS through a parameter block, built
+from its listing. `make controls-breaks`: 78 of 81 deliberate breaks caught,
+3 proven equivalent. `make smoke` passes with it installed. See
+[modules/controls.md](modules/controls.md).
 
 ## MULTIP (id 35) and MPCHAT
 
@@ -182,11 +184,23 @@ initialised `.data` (0x18600 raw bytes; tables, by the size).
   scenery tree, as `landmediff` does. `+0x34` (42,875 bytes) is by far
   the largest service, and the likeliest consumer of FE's scene stream.
 - **HG2D ×20 sites, 17 slots**, and only `+0x68` and `+0xa8` have their
-  results read. The open question is the drawing path. A clipper at
-  `.text+0x7d73` saves and replaces a draw routine at `.data+0x4910` from
-  eax and calls it per span, nine sites. Who supplies that routine, G3D
-  itself or HG2D, decides whether HG2D can be a logging stub. **Trace that
-  before committing to G3D.**
+  results read. The drawing path does not change that. A clipper at
+  `.text+0x7d73` saves the draw routine at `.data+0x4910`, replaces it from
+  eax, calls it per span (nine sites) and restores it on the way out; those
+  are the slot's only writes. **G3D supplies the routine itself** (traced,
+  statically): its three calls (`.text+0x84ec`, `+0x8e29`, `+0xa137`) each
+  load eax just before with an immediate address in G3D's own `.text`
+  (`0x206e9508`, `0x206e9e2f`, `0x206eb17d`). What those reach calls HG2D only
+  fire-and-forget: `+0x48` and `+0x74` with six register arguments,
+  `+0x4c` and `+0x78` with the view record's `+0x80` behind GLOBAL
+  `+0x2f0`'s countdown, and no result read. The third routine also
+  dispatches through two tables at `.data+0x4bac` (11 entries) and
+  `+0x4bd8` (8; the words after them are the clipper's bounds), and reaches
+  a bytecode interpreter at `.text+0x15c0` (opcodes below `0x94`, the
+  stream pointer at `.data+0x126`), whose 148-entry handler table at
+  `.data+0x4220` is likewise G3D's own code. All three tables are static
+  (relocated in the file, never written). So HG2D can be a logging stub on
+  this path, with its arguments as the output.
 - GLOBAL: 235 fields, 851 accesses. Most of the sim's view state goes
   through here, and every one of those names is worth recording.
 

@@ -42,7 +42,10 @@ BREAKS = [
     ("obs-wrap", "    if ((int16_t)GW(at) >= 0x168)", "    if ((int16_t)GW(at) > 0x168)"),
     # the engines
     ("throttle-floor", "        } else if ((int16_t)AX < (int16_t)GW(0xb00)) {",
-     "        } else if ((int16_t)AX <= (int16_t)GW(0xb00)) {"),
+     "        } else if ((int16_t)AX <= (int16_t)GW(0xb00)) {",
+     "equivalent: at equality the floor is loaded over the same value (retail "
+     ".text+0x5daa: cmp ax,[edi+0xb00] / jge / mov ax,[edi+0xb00], and the "
+     "flags are dead -- the store, then shr cx,1)"),
     ("engine-count", "    if (CL >= AL) {", "    if (CL > AL) {"),
     ("engine-or", "    GD(0x888) |= eax;", "    GD(0x888) = eax;"),
     # flaps
@@ -150,6 +153,30 @@ INPUT_BREAKS = [
      "            r = eff_constant(V32(0xbfc4), D + 0xbfe4, V32(0x4d8), V32(0x4e0), V32(0x4dc));"),
     ("bump-speed", "        speed = (double)(int64_t)(M32(blk + 8) >> 16);",
      "        speed = (double)(int64_t)(M32(blk + 8) >> 15);"),
+    # the keyboard-assignments dialog: setup, the lists, the callbacks, apply
+    ("keys-joyflag", "            M32(bind + 4) = (CMD(idx).kind & 3) != 0;",
+     "            M32(bind + 4) = (CMD(idx).kind & 1) != 0;"),
+    ("joy-type", "        M32(bind + k * 8 + 4) = (CMD(idx).kind & 3) != 0 ? 2 : 3;",
+     "        M32(bind + k * 8 + 4) = (CMD(idx).kind & 3) != 0 ? 3 : 2;"),
+    ("joy-button-base", "        M32(bind + at * 8) = a + 0x11;", "        M32(bind + at * 8) = a + 0x10;"),
+    ("apply-repeat", "                M32(P(cfg) + 0x188 + v * 4) = M32(ext + k * 0xc + 8);",
+     "                M32(P(cfg) + 0x288 + v * 4) = M32(ext + k * 0xc + 8);"),
+    ("apply-flags", "                M32(P(cfg) + 8) |= 1u << (v - 1);", "                M32(P(cfg) + 8) |= 1u << v;"),
+    ("apply-keyflags", "        ent[1] = spec >> 8;", "        ent[1] = (spec >> 8) & 7;"),
+    ("records-swap", "    M16(G + 0xc0a) = M16(rec + 0x50);", "    M16(G + 0xc0a) = M16(rec + 0x60);"),
+    ("records-read", "    M16(rec + 0x88) = M16(G + 0xc04);", "    M16(rec + 0x88) = M16(G + 0xc06);"),
+    ("adjust-mouse", "        M16(block + 0x74) = 0x19;", "        M16(block + 0x74) = 0x18;"),
+    ("adjust-scale", "            M32(M32(e + 0x24) + k * 0xc) = 0x64;",
+     "            M32(M32(e + 0x24) + k * 0xc) = 0x63;"),
+    ("refresh-flag", "    V32(0x250) = HC(0x1c0, f0)() == 0;", "    V32(0x250) = HC(0x1c0, f0)() != 0;"),
+    ("reset-default", "                HC(0x1e4, f2)(P(&accel), 0x67);", "                HC(0x1e4, f2)(P(&accel), 0x68);"),
+    ("setup-noff", "    V32(0x300) = ff[0] == 0;", "    V32(0x300) = ff[0] != 0;"),
+    ("dialog-answer", "        if (r == 0 && V32(0x240) == 1)", "        if (r == 0 && V32(0x240) == 0)"),
+    ("keyboard-name", "    h_strcpy(M32(devs + 8), D + 0x1d0);", "    h_strcpy(M32(devs + 8), D + 0x208);"),
+    ("current-mask", "        M32(out + 8) = M32(P(state) + 8);", "        M32(out + 8) = M32(P(state) + 8) | 1;",
+     "equivalent: joy_current writes the mask into build_list's stack copy of the config, "
+     "which only fill_joy reads, and fill_joy reads the axis and button commands and their "
+     "extras, never +8"),
 ]
 
 if not os.path.exists("bin/difftest/controlsdiff.exe"):

@@ -1,5 +1,5 @@
 /* Differential test: retail CONTROLS.DLL against the OpenFS98 build, the
- * whole module but its key-assignment dialog.
+ * whole module.
  *
  * CONTROLS turns every key/button/axis into a command (an id and a value)
  * and dispatches it through a 383-entry table of handlers that move GLOBAL.
@@ -17,8 +17,10 @@
  * run; deinit and init cycle; the key bindings (+0x4c/+0x50/+0x54) and force
  * feedback (+0x5c) are driven over the models below: the host's profile
  * services passed through to fixture files, its accelerator tables, the
- * joysticks, and a DirectInput 5 stand-in.  Not driven: the dialog (+0x58),
- * which waits on a stand-in for Options.DLL's dialog 0x140a.
+ * joysticks, and a DirectInput 5 stand-in.  The assignments dialog (+0x58)
+ * runs against h_run_dialog, a stand-in for Options.DLL's dialog 0x140a: it
+ * edits the block at D+0x240 and calls its callbacks as the tab pages do,
+ * then answers OK or Cancel.
  *
  * GLOBAL and the modules CONTROLS calls fire-and-forget are logging stubs;
  * UTIL and NUMERIC are retail's (the eye and the zoom text use them).  A
@@ -240,6 +242,9 @@ static uint32_t logc(const char *tag, int n, uint32_t a, uint32_t b, uint32_t c,
  * already down is a repeat).  Reset per side by joy_setup. */
 static uint64_t joy_down[4], joy_was[4];
 static int joy_pov[4], in_jpoll;
+/* the sticks: caps is JOYCAPS wCaps (HASZ 1, HASR 2 the rudder, HASU 4, HASV
+ * 8, HASPOV 0x10) and axes its wNumAxes */
+static struct { uint32_t known, model, rudder, caps, axes; char name[0x40]; } fx_stick[4];
 
 /* host */
 /* +0x3c post WM_COMMAND (cmd, value): logged.  Inside a joystick poll the
@@ -283,27 +288,49 @@ static uint32_t STDCALL lh_memmove(uint32_t dst, uint32_t src, uint32_t n)
     put("\n  host+0x21c(%s,%s,%#x)", pptr(dst, a), pptr(src, b), n);
     return h_memmove(dst, src, n);
 }
-/* +0x1c4 read joystick `joy` into `block`; return 0 (present).  The axis
- * values (block+0xc, 0x10 dwords) are a scripted reading.  The buttons are
- * written as the host's 0x40b8f0 writes them after joyGetPosEx: one word per
- * button from block+0x4c, exactly 0 or 1 -- buttons 0..31 from the button
- * bits, 32..63 cleared (its rep stosd), then one of 32..39 set by the POV
- * hat's direction.  Each button keeps its state from read to read and
- * toggles now and then, so presses, holds (and so repeats) and releases
- * all happen. */
+/* +0x1c4 read joystick `joy` into `block`; return 0 (present).  As the
+ * host's 0x40b8f0 does after joyGetPosEx: the caller's axis mask at block+8
+ * is narrowed to the device's axes -- wCaps' HASV 8, HASU 4, HASR 2 and HASZ
+ * 1 each take one of wNumAxes, then each axis left over shifts in a low bit
+ * (X and Y on a sane device; a count short of the flags wraps the 16-bit
+ * count and leaves 0xffff) -- and only the axes left in it are written,
+ * bits 0..5 at +0xc..+0x20 less 0x8000 and bit 6 the hat's raw angle at
+ * +0x24.  The buttons are one word per button from block+0x4c, exactly 0 or
+ * 1: buttons 0..31 from the button bits, 32..63 cleared (its rep stosd),
+ * then, on a device with a hat (wCaps 0x10), one of 32..39 by the angle's
+ * octant; centred (0xffff) sets none.  Each button keeps its state from read
+ * to read and toggles now and then, so presses, holds (and so repeats) and
+ * releases all happen. */
 static uint32_t STDCALL h_joyread(uint32_t joy, uint32_t block)
 {
-    uint32_t i, j = joy & 3;
+    static const uint32_t octant[8] = { 0x8ca, 0x1a5e, 0x2bf2, 0x3d86, 0x4f1a, 0x60ae, 0x7242, 0x83d6 };
+    uint32_t i, j = joy & 3, caps = fx_stick[j].caps, mask = 0, n = fx_stick[j].axes, pos[6], pov;
+    uint32_t *m = (uint32_t *)(uintptr_t)(block + 8);
     char pb[24];
     put("\n  host+0x1c4(%#x,%s)", joy, pptr(block, pb));
-    for (i = 0; i < 0x10; i++)
-        *(uint32_t *)(uintptr_t)(block + 0xc + i * 4) = (int32_t)(rnd() & 0x7fff) - 0x4000;
+    if (caps & 8) { mask = 8; n += 0xffff; }
+    if (caps & 4) { mask |= 4; n += 0xffff; }
+    if (caps & 2) { mask |= 2; n += 0xffff; }
+    if (caps & 1) { mask |= 1; n += 0xffff; }
+    for (n &= 0xffff; n; n--) mask = mask * 2 | 1;
+    *m &= mask & 0xffff;
+    for (i = 0; i < 6; i++)
+        pos[i] = rnd_n(4) ? 0x4000 + (rnd() & 0x7fff) : rnd() & 0xffff;
     joy_was[j] = joy_down[j];
-    if (rnd_n(4) == 0) joy_pov[j] = (int)rnd_n(9) - 1;       /* -1 centred, 0..7 */
+    if (rnd_n(4) == 0)
+        joy_pov[j] = rnd_n(9) == 0 ? 0xffff : rnd_n(3) ? rnd_n(8) * 4500 : rnd_n(36000);
+    pov = (uint32_t)joy_pov[j];
     joy_down[j] = (uint32_t)(joy_down[j] ^ (rnd() & rnd() & rnd()));
-    if (joy_pov[j] >= 0) joy_down[j] |= (uint64_t)1 << (32 + joy_pov[j]);
+    if (caps & 0x10) {
+        if (pov < 0x8ca || (pov >= 0x83d6 && pov < 0x8c3c)) joy_down[j] |= (uint64_t)1 << 32;
+        else for (i = 1; i < 8; i++)
+            if (pov < octant[i]) { joy_down[j] |= (uint64_t)1 << (32 + i); break; }
+    }
     for (i = 0; i < 0x40; i++)
         *(uint32_t *)(uintptr_t)(block + 0x4c + i * 4) = (uint32_t)(joy_down[j] >> i) & 1;
+    for (i = 0; i < 6; i++)
+        if (*m & 1u << i) *(uint32_t *)(uintptr_t)(block + 0xc + i * 4) = pos[i] - 0x8000;
+    if (*m & 0x40) *(uint32_t *)(uintptr_t)(block + 0x24) = pov;
     return 0;
 }
 /* CHAIN: +0x18/+0x1c register, +0x20 dispatch.  Callbacks are captured per
@@ -372,7 +399,6 @@ static uint32_t fx_aircraft;               /* whether ACONTAIN +0x30 names an ai
 /* the scenario's DirectInput (see the stand-in below) */
 enum { DI_ABSENT, DI_NOCREATE, DI_NODEVICE, DI_DEVICE };
 static int di_mode, di_entry_missing, di_keyboard_first;
-static struct { uint32_t known, model, rudder, caps; char name[0x40]; } fx_stick[4];
 static unsigned long cover_cfghit, cover_devhit, cover_strings, cover_saves;
 
 static void put_str(const char *s)
@@ -608,15 +634,16 @@ static uint32_t STDCALL h_joycount(void)
     return fx_count;
 }
 /* +0x1c8 (0x40bcc0): describe joystick `joy`: +0 its model's string id
- * (left alone, and -1 returned, when the host cannot match the name), +4 and
- * +8 caps (+8's bit 1 a rudder), +0xc the rudder, +0x10 the OEM name */
+ * (left alone, and -1 returned, when the host cannot match the name), +4
+ * wNumAxes, +8 wMaxButtons, +0xc wCaps' HASR (a rudder), +0x10 the OEM
+ * name.  CONTROLS reads +0, +0xc and +0x10. */
 static uint32_t STDCALL h_joydesc(uint32_t joy, uint8_t *desc)
 {
     uint32_t j = joy & 3;
     put("\n  host+0x1c8(%#x)", joy);
-    *(uint32_t *)(desc + 4) = 3 + j;
-    *(uint32_t *)(desc + 8) = fx_stick[j].caps | (fx_stick[j].rudder ? 2 : 0);
-    *(uint32_t *)(desc + 0xc) = fx_stick[j].rudder != 0;
+    *(uint32_t *)(desc + 4) = fx_stick[j].axes;
+    *(uint32_t *)(desc + 8) = 0x20;
+    *(uint32_t *)(desc + 0xc) = (fx_stick[j].caps & 2) != 0;
     lstrcpynA((char *)desc + 0x10, fx_stick[j].name, 0x40);
     /* the host matches "<name>_r" for a stick with a rudder */
     if (!fx_stick[j].known || (fx_stick[j].rudder && !models[fx_stick[j].model].rid)) {
@@ -732,7 +759,11 @@ static void fx_write(void)
         fx_stick[j].known = rnd_n(6) != 0;
         fx_stick[j].model = n_models ? rnd_n(n_models) : 0;
         fx_stick[j].rudder = rnd_n(3) == 0;
-        fx_stick[j].caps = rnd() & 0x1d;
+        fx_stick[j].caps = (rnd() & 0x1d) | (fx_stick[j].rudder ? 2 : 0);
+        /* X and Y and one per flag, or now and then a driver's odd count */
+        fx_stick[j].axes = rnd_n(8) ? 2 + (fx_stick[j].caps & 1) + (fx_stick[j].caps >> 1 & 1) +
+                                      (fx_stick[j].caps >> 2 & 1) + (fx_stick[j].caps >> 3 & 1)
+                                    : rnd_n(7);
         if (rnd_n(8) == 0) snprintf(fx_stick[j].name, sizeof fx_stick[j].name, "Unknown Stick %u", j);
         else lstrcpynA(fx_stick[j].name, models[fx_stick[j].model].name, sizeof fx_stick[j].name);
     }
@@ -1060,7 +1091,19 @@ static uint32_t STDCALL h_wndinst(uint32_t *wnd, uint32_t *inst)
  * side, so the pointers CONTROLS keeps in .data compare. */
 
 static unsigned long cover_dicreate, cover_effects, cover_setparams, cover_effstart, cover_dinput,
-    cover_stickset, cover_stickclamp;
+    cover_stickset, cover_stickclamp, cover_crash1, cover_crash2;
+static uint32_t crash_was;
+/* force feedback's crash (D+0xbf98: 1 its first part, 2 its second), noted
+ * as it changes */
+static void crash_note(void)
+{
+    uint32_t c = *(uint32_t *)(cur->image + 0xbf98);
+    if (counting && c != crash_was) {
+        if (c == 1) cover_crash1++;
+        if (c == 2) cover_crash2++;
+    }
+    crash_was = c;
+}
 
 struct fake { void *vtbl; uint32_t kind, id, refs, acquired; };
 static struct fake fakes[0x40];
@@ -1379,6 +1422,165 @@ static void patch_iat(HMODULE mod, const char *dll, const char *fn, void *repl)
     printf("cannot find the import %s!%s\n", dll, fn); exit(2);
 }
 
+/* ---- the keyboard-assignments dialog: a stand-in for Options.DLL's 0x140a ---
+ *
+ * CONTROLS runs it through the host's dialog engine (+0x10c) on its block at
+ * D+0x240.  Options.DLL's dialog (an MFC tab dialog, create 0x22391930) has
+ * three pages that reach the block through two pointers each (the block,
+ * and the block + 0xc); this stand-in does what they do, as read from
+ * Options.DLL:
+ * - the assignments page (0x2239ec00) edits the list it shows (+0x28: 0
+ *   flight, 1 slew): a key (CSimsHotKey's value, key | flags << 8) or a
+ *   joystick's axis (1..0x10) or button (0x11..0x50) for a command, a
+ *   conflicting binding cleared (or the edit abandoned), and resets a
+ *   device's sensitivities through +0x1c (0 the keyboard, 2 the mouse, 1 a
+ *   joystick's axes);
+ * - the second page edits the sensitivities and, after the joystick control
+ *   panel, calls +0x20; the base class calls +0x4;
+ * - the force-feedback page edits +0xc8..+0xf0;
+ * - OK writes 1 to +0x0 and Cancel 0.
+ * +0x2c (reset a device to its defaults) is CONTROLS code Options.DLL never
+ * calls; the stand-in calls it too, now and then, so it is verified.  What
+ * setup built is logged as a digest of its contents (names by their text). */
+
+static unsigned long cover_dialogs, cover_dlg_ok, cover_dlg_edits, cover_dlg_cb;
+
+static uint32_t fnv(uint32_t d, const void *p, size_t n)
+{
+    const uint8_t *b = p;
+    while (n--) d = (d ^ *b++) * 0x01000193u;
+    return d;
+}
+static uint32_t fnv_str(uint32_t d, uint32_t s)
+{
+    const char *t = (const char *)(uintptr_t)s;
+    if (!t) return fnv(d, "\0null", 5);
+    return fnv(d, t, strlen(t) + 1);
+}
+/* the block's contents, by value (strings by their text) */
+static uint32_t dlg_digest(uint32_t blk)
+{
+    static const uint16_t words[] = { 0x64, 0x74, 0x84, 0x9c, 0xac, 0xbc };
+    static const uint16_t labels[] = { 0x54, 0x58, 0x68, 0x78, 0x8c, 0x90, 0x94, 0xa0, 0xa4, 0xb0, 0xb4 };
+    uint32_t d = 0x811c9dc5u, l, k, v;
+    d = fnv(d, (void *)(uintptr_t)(blk + 0x10), 0xc);
+    d = fnv(d, (void *)(uintptr_t)(blk + 0x28), 4);
+    for (l = 0; l < 2; l++) {
+        uint32_t list = blk + 0x30 + l * 0x10, n = *(uint32_t *)(uintptr_t)list;
+        uint32_t pairs = *(uint32_t *)(uintptr_t)(list + 4), ndev = *(uint32_t *)(uintptr_t)(list + 8);
+        uint32_t devs = *(uint32_t *)(uintptr_t)(list + 0xc);
+        d = fnv(d, &n, 4);
+        for (k = 0; k < n; k++) {
+            d = fnv_str(d, *(uint32_t *)(uintptr_t)(pairs + k * 8));
+            d = fnv(d, (void *)(uintptr_t)(pairs + k * 8 + 4), 4);
+        }
+        d = fnv(d, &ndev, 4);
+        for (v = 0; v < ndev; v++) {
+            uint32_t e = devs + v * 0x14, bind = *(uint32_t *)(uintptr_t)(e + 0xc), ext = *(uint32_t *)(uintptr_t)(e + 0x10);
+            d = fnv(d, (void *)(uintptr_t)e, 8);
+            d = fnv_str(d, *(uint32_t *)(uintptr_t)(e + 8));
+            if (bind) d = fnv(d, (void *)(uintptr_t)bind, n * 8);
+            if (ext) d = fnv(d, (void *)(uintptr_t)ext, n * 0xc);
+        }
+    }
+    for (k = 0; k < sizeof words / 2; k++) d = fnv(d, (void *)(uintptr_t)(blk + words[k]), 2);
+    for (k = 0; k < sizeof labels / 2; k++) d = fnv_str(d, *(uint32_t *)(uintptr_t)(blk + labels[k]));
+    for (k = 0; k < 7; k++) d = fnv(d, (void *)(uintptr_t)(blk + 0xc0 + k * 8), 4);
+    return d;
+}
+typedef uint32_t (STDCALL *cb1)(uint32_t);
+typedef uint32_t (STDCALL *cb3)(uint32_t, uint32_t, uint32_t);
+#define BW(o) (*(uint32_t *)(uintptr_t)(blk + (o)))
+/* +0x10c (0x409720): run dialog `id` on `param` */
+static uint32_t STDCALL h_run_dialog(uint32_t id, uint32_t blk)
+{
+    uint32_t n, i;
+    put("\n  host+0x10c(%#x)", id);
+    if (id != 0x140a || rnd_n(24) == 0) { put("=-1"); return (uint32_t)-1; }
+    if (counting) cover_dialogs++;
+    put(" lists %u/%u commands, %u/%u devices, digest %08x", BW(0x30), BW(0x40), BW(0x38), BW(0x48),
+        dlg_digest(blk));
+    n = rnd_n(14);
+    for (i = 0; i < n; i++) {
+        uint32_t r = rnd_n(20), list = blk + 0x30 + (BW(0x28) ? 0x10 : 0), cnt, ndev;
+        cnt = *(uint32_t *)(uintptr_t)list;
+        ndev = *(uint32_t *)(uintptr_t)(list + 8);
+        if (counting) cover_dlg_edits++;
+        if (r < 6 && cnt) {
+            /* an assignment on the device the page shows */
+            uint32_t dev = ndev > 1 && rnd_n(2) ? 1 + rnd_n(ndev - 1) : 0, k = rnd_n(cnt), v, j;
+            uint32_t e = *(uint32_t *)(uintptr_t)(list + 0xc) + dev * 0x14;
+            uint32_t *bind = (uint32_t *)(uintptr_t)*(uint32_t *)(uintptr_t)(e + 0xc);
+            uint32_t *ext = (uint32_t *)(uintptr_t)*(uint32_t *)(uintptr_t)(e + 0x10);
+            if (dev == 0) v = rnd_n(6) ? (0x20 + rnd_n(0x60)) | rnd_n(16) << 8 : 0;
+            else v = rnd_n(6) == 0 ? 0 : bind[k * 2 + 1] == 2 && rnd_n(2) ? 1 + rnd_n(0x10) : 0x11 + rnd_n(0x40);
+            for (j = 0; v && j < cnt; j++)
+                if (j != k && bind[j * 2] == v) {
+                    if (rnd_n(3) == 0) { v = 0xffffffff; break; }   /* "already assigned": no */
+                    bind[j * 2] = 0;
+                }
+            put("\n  dialog: list %u device %u command %u = %#x", BW(0x28) != 0, dev, k, v);
+            if (v != 0xffffffff) bind[k * 2] = v;
+            if (dev && ext && rnd_n(2)) {
+                ext[k * 3] = rnd_n(201); ext[k * 3 + 1] = rnd_n(101); ext[k * 3 + 2] = rnd_n(8);
+                put(" ext %u %u %u", ext[k * 3], ext[k * 3 + 1], ext[k * 3 + 2]);
+            }
+        } else if (r < 8) {
+            static const uint16_t words[] = { 0x64, 0x74, 0x84, 0x9c, 0xac, 0xbc };
+            uint32_t w = words[rnd_n(6)];
+            *(uint16_t *)(uintptr_t)(blk + w) = (uint16_t)rnd_n(0x80);
+            put("\n  dialog: sensitivity +%#x = %#x", w, *(uint16_t *)(uintptr_t)(blk + w));
+        } else if (r < 10) {
+            uint32_t o = 0xc8 + rnd_n(6) * 8;
+            BW(o) = rnd_n(2);
+            put("\n  dialog: force +%#x = %u", o, BW(o));
+        } else if (r < 11) {
+            BW(0x18) = rnd_n(3) ? rnd_n(2) : rnd();
+            put("\n  dialog: joysticks on = %#x", BW(0x18));
+        } else if (r < 13) {
+            BW(0x28) = rnd_n(2);
+            put("\n  dialog: page shows list %u", BW(0x28));
+        } else if (r < 16) {
+            uint32_t mode = rnd_n(3), joy = 0;
+            if (mode == 1) { if (ndev <= 1) continue; joy = rnd_n(ndev - 1); }
+            put("\n  dialog: +0x1c(%u,%u)", mode, joy);
+            if (counting) cover_dlg_cb++;
+            ((cb3)(uintptr_t)BW(0x1c))(blk, mode, joy);
+        } else if (r < 17) {
+            put("\n  dialog: +0x20()");
+            if (counting) cover_dlg_cb++;
+            ((cb1)(uintptr_t)BW(0x20))(blk);
+        } else if (r < 18) {
+            put("\n  dialog: +0x4()");
+            ((cb1)(uintptr_t)BW(0x4))(blk);
+        } else if (ndev) {
+            uint32_t dev = rnd_n(ndev);
+            put("\n  dialog: +0x2c(list %u, device %u)", BW(0x28) != 0, dev);
+            if (counting) cover_dlg_cb++;
+            ((cb3)(uintptr_t)BW(0x2c))(blk, list, dev);
+        }
+    }
+    BW(0) = rnd_n(5) != 0;                       /* OnOK 1, OnCancel 0 */
+    if (counting && BW(0)) cover_dlg_ok++;
+    put("\n  dialog: %s, digest %08x", BW(0) ? "OK" : "Cancel", dlg_digest(blk));
+    return 0;
+}
+#undef BW
+/* +0x2a4 (0x40edc0): string `id` as a host copy through *out (null if
+ * missing); its length */
+static uint32_t STDCALL h_string_copy(uint32_t id, char **out)
+{
+    char b[0x400];
+    int n;
+    *out = NULL;
+    n = LoadStringA(fll, id, b, sizeof b);
+    if (n > 0) {
+        *out = malloc((size_t)n + 1);
+        strcpy(*out, b);
+    }
+    return (uint32_t)(n > 0 ? n : 0);
+}
+
 /* MAIN */
 static uint32_t STDCALL main_84(uint32_t rec, uint32_t flags, uint32_t block)
 { char b1[24], b2[24]; put("\n  main+0x84(%s,%#x,%s)", pptr(rec, b1), flags, pptr(block, b2)); return 0; }
@@ -1471,6 +1673,7 @@ static void build_stubs(void)
     SET_SLOT(host, 0x1f4, h_acc_add); SET_SLOT(host, 0x1fc, h_acc_get); SET_SLOT(host, 0xb0, h_keyspec);
     SET_SLOT(host, 0xb4, h_keyspec_put); SET_SLOT(host, 0xd8, h_keyspec_file); SET_SLOT(host, 0x54, h_wndinst);
     SET_SLOT(host, 0xe0, h_prof_double); SET_SLOT(acontain, 0x30, acontain_30);
+    SET_SLOT(host, 0x10c, h_run_dialog); SET_SLOT(host, 0x2a4, h_string_copy);
     di_vtables();
     *(uint32_t *)chain = 4;
     SET_SLOT(chain, 0x18, chain_add); SET_SLOT(chain, 0x1c, chain_remove); SET_SLOT(chain, 0x20, chain_dispatch);
@@ -1650,7 +1853,7 @@ static uint32_t call0(uint32_t fn)
 
 static void op(void)
 {
-    uint32_t k = rnd_n(24);
+    uint32_t k = rnd_n(25);
     uint32_t cmd, val = rnd_n(4) == 0 ? rnd() : rnd_n(0x10000);
 
     switch (k) {
@@ -1759,11 +1962,12 @@ static void op(void)
                          * and the dialog call it -- the per-frame ones (3, the stick
                          * force; 9, the ground bumps) a few frames running */
         static uint32_t blk[8];
-        /* weighted as the game calls them: the stick force and the ground bumps
-         * every frame, a crash -- which holds the effects off until message 0x60 --
-         * rarely */
-        static const uint8_t ops[] = { 3, 3, 3, 3, 3, 3, 9, 9, 9, 9, 9, 4, 4, 5, 6, 7, 1, 1, 2, 2, 8 };
-        uint32_t op = rnd_n(16) ? ops[rnd_n(sizeof ops)] : pick((const uint32_t[]){ 0, 10, 0xffffffff }, 3), i, arg;
+        /* weighted much as the game calls them: the stick force and the ground
+         * bumps every frame, a crash -- which holds the effects off until
+         * message 0x60 -- less often (more than the game does: its second part
+         * needs the device up, crashes enabled and the frames after it) */
+        static const uint8_t ops[] = { 3, 3, 3, 3, 3, 3, 9, 9, 9, 9, 9, 4, 4, 5, 6, 7, 1, 1, 2, 2, 8, 8, 8 };
+        uint32_t op = rnd_n(16) ? ops[rnd_n(sizeof ops)] : pick((const uint32_t[]){ 0, 10, 0xffffffff }, 3), i, arg = 0;
         uint32_t n = (op == 3 || op == 9) ? 1 + rnd_n(6) : 1, j, speed = rnd_n(4) ? rnd_n(0x400) : rnd() & 0xffff;
         double x = 0, y = 0;
         for (i = 0; i < 8; i++) blk[i] = rnd_n(3) ? rnd_n(2) : rnd();
@@ -1783,8 +1987,10 @@ static void op(void)
             if (op == 3) {
                 memcpy(blk, &x, 8); memcpy(blk + 2, &y, 8);
                 x += (double)((int)rnd_n(201) - 100); y += (double)((int)rnd_n(201) - 100);
-            } else if (op == 4 || op == 8)
+            } else if (op == 4)
                 arg = rnd_n(3) ? rnd_n(2) : rnd_n(4);
+            else if (op == 8)                   /* the crash: 1 starts it, 0 ends it */
+                arg = rnd_n(2) ? 1 : rnd_n(3) ? 0 : rnd_n(4);
             else if (op == 9) {
                 blk[2] = speed << 16 | (rnd() & 0xffff);
                 speed = (speed + rnd_n(9) - 4) & 0xffff;
@@ -1795,6 +2001,21 @@ static void op(void)
             if (counting) cover_force++;
             put(" -> %#x", call2((uint32_t)SVC(0x5c), 0, op, arg));
             if (op == 1) for (i = 0; i < 7; i++) put(" %#x", blk[i]);
+            crash_note();
+        }
+        /* a crash plays on over the frames that follow it, as in the game
+         * (REALITY starts it; the reload ends it), so its first part can
+         * end and its second start */
+        if (op == 8 && arg == 1 && rnd_n(4)) {
+            uint32_t k = 1 + rnd_n(6);
+            for (j = 0; j < k && nlist1; j++) {
+                put("\n#jpoll");
+                if (counting) cover_jpoll++;
+                in_jpoll = 1;
+                chain_run(1, 0, 0);
+                in_jpoll = 0;
+                crash_note();
+            }
         }
         break;
     }
@@ -1805,6 +2026,9 @@ static void op(void)
         chain_run(0x14, m, 0);
         break;
     }
+    case 24:            /* +0x58: the keyboard-assignments dialog */
+        put("\n#dialog -> %#x", call0((uint32_t)SVC(0x58)));
+        break;
     case 18:            /* deinit (saving the joystick configs), then init again */
         put("\n#deinit -> %#x", call0((uint32_t)SVC(8)));
         if (counting) cover_deinit++;
@@ -1855,9 +2079,27 @@ static void put_state(void)
         0x244, 0x25c, 0x260, 0x26c,                               /* dialog procs */
         0x344, 0x350,                                             /* inner .data */
     };
+    /* the dialog's sensitivity records point at the module's own label
+     * strings: compared as image offsets */
+    static const uint32_t selfoff[] = {
+        0x294, 0x298, 0x2a8, 0x2b8, 0x2cc, 0x2d0, 0x2d4, 0x2e0, 0x2e4, 0x2f0, 0x2f4,
+    };
+    /* the dialog's lists' heap blocks (D+0x270/0x280: count, pairs, devices,
+     * blocks): freed and nulled by dlg_cleanup, but a fault in dlg_apply's
+     * force-feedback restart skips it and leaves them.  Retail's leak then
+     * moves where ours allocates, and nothing reads them before the next
+     * dlg_setup rebuilds them, so they are compared as null or not; the
+     * counts beside them are compared as they are. */
+    static const uint32_t heapoff[] = { 0x274, 0x27c, 0x284, 0x28c };
     memcpy(img, cur->image, IMAGE_SIZE);
     for (i = 0; i < sizeof ptroff / 4; i++)
         *(uint32_t *)(img + ptroff[i]) = 0;
+    for (i = 0; i < sizeof selfoff / 4; i++) {
+        uint32_t v = *(uint32_t *)(img + selfoff[i]), base = (uint32_t)(uintptr_t)cur->image;
+        if (v >= base && v < base + IMAGE_SIZE) *(uint32_t *)(img + selfoff[i]) = v - base;
+    }
+    for (i = 0; i < sizeof heapoff / 4; i++)
+        *(uint32_t *)(img + heapoff[i]) = *(uint32_t *)(img + heapoff[i]) != 0;
     for (i = 0x510; i <= 0x7c0; i += 4)         /* the DirectInput object table */
         *(uint32_t *)(img + i) = 0;
     if (getenv("CONTROLS_AXES"))
@@ -1885,7 +2127,7 @@ static void joy_setup(void)
     uint32_t count = rnd_n(2) ? 1 + rnd_n(2) : 0, j, cfg = I32(0x350), a, b, r;
     memset(joy_down, 0, sizeof joy_down);
     memset(joy_was, 0, sizeof joy_was);
-    for (j = 0; j < 4; j++) joy_pov[j] = -1;
+    for (j = 0; j < 4; j++) joy_pov[j] = 0xffff;
     for (j = 0; j < count; j++) {
         uint32_t c = cfg + 0x3cc * j;
         M32(c + 8) = rnd() & 0xffff;                         /* axis-present mask */
@@ -1927,10 +2169,12 @@ static void run_side(struct side *s)
     put(" (joysticks %u)\n", I32(0xbf88));
     nops = 4 + rnd_n(MAX_OPS);
     faulted = 0;
+    crash_was = I32(0xbf98);
     for (i = 0; i < nops && !faulted; i++) {
         op_number = i; inside = 1;
         if (__builtin_setjmp(fault_jb) == 0) op();
         inside = 0;
+        crash_note();
         put_state();
     }
     fx_dump();
@@ -2013,8 +2257,11 @@ int main(int argc, char **argv)
     printf("  key loads %lu: tables loaded %lu, entries added %lu, key specs read %lu; dinput asked %lu\n",
            cover_keysload, cover_accload, cover_accadd, cover_keyspec, cover_dinput);
     printf("  force feedback %lu calls: DirectInput created %lu, effects %lu, started %lu, set %lu"
-           " (stick force %lu, at the clamp %lu)\n", cover_force, cover_dicreate, cover_effects,
-           cover_effstart, cover_setparams, cover_stickset, cover_stickclamp);
+           " (stick force %lu, at the clamp %lu); crashes %lu, their second parts %lu\n",
+           cover_force, cover_dicreate, cover_effects, cover_effstart, cover_setparams,
+           cover_stickset, cover_stickclamp, cover_crash1, cover_crash2);
+    printf("  dialogs %lu (OK %lu): edits %lu, callbacks %lu\n",
+           cover_dialogs, cover_dlg_ok, cover_dlg_edits, cover_dlg_cb);
     printf("  joystick polls %lu: posted axes %lu, presses %lu, repeats %lu, releases %lu\n",
            cover_jpoll, cover_jaxis, cover_jpress, cover_jrepeat, cover_jrelease);
     printf("  posts %lu, faults (both sides alike) %lu\n", cover_post, cover_faults);

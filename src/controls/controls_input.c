@@ -10,8 +10,7 @@
  *                               install the flight one, bring force feedback up
  *   +0x50  controls_keys_save   take force feedback down, write them back
  *   +0x54  controls_keys_list   fill a caller block with a command's key
- *   +0x58  controls_dialog      run the keyboard-assignments dialog (0x140a):
- *                               NOT yet transliterated, a placeholder
+ *   +0x58  controls_dialog      run the keyboard-assignments dialog (0x140a)
  *   +0x5c  controls_force       the force-feedback dispatch (DirectInput 5)
  *   +0x92c0 controls_input_init / +0x9340 controls_input_deinit
  *   +0x9270 controls_joystick   enable/report the joysticks
@@ -1523,17 +1522,472 @@ static uint32_t FS98_STDCALL ff_message(uint32_t msg, uint32_t b)
     return 0;
 }
 
-/* ======== NOT yet transliterated: the keyboard-assignments dialog ===========
+/* ======== the keyboard-assignments dialog: .text+0x7e40..+0x8e5f, +0x9130 ========
  *
- * .text+0x7e40..+0x91d0: dialog 0x140a of English\Options.DLL, which calls
- * back into CONTROLS through the block at D+0x240.  It waits on a stand-in
- * for that dialog to verify it against (docs/modules/controls.md); until then
- * this is an honest placeholder that runs no dialog and returns 0. */
+ * Dialog 0x140a of English\Options.DLL, run through the host's dialog engine
+ * (+0x10c) on the block at D+0x240: +0x0 the answer (1 OK, 0 cancel); +0x4,
+ * +0x1c, +0x20, +0x2c the callbacks Options calls (dlg_none, dlg_adjust,
+ * dlg_refresh, dlg_reset); +0x10 no joysticks; +0x14 the joysticks-enabled
+ * control's record (UTIL's exchange, table D+0x338, variable D+0xb00); +0x24
+ * the sensitivity records (G +0xc02..+0xc0c), +0x28 which list the page
+ * shows (0 flight, 1 slew); +0x30 and +0x40 the flight and slew lists;
+ * +0xc0..+0xf0 the force-feedback settings.
+ *
+ * A list (0x10 bytes): +0 the commands' count, +4 for each { its display
+ * name, a host copy; its command id }, in the order of their display string
+ * ids; +8 the devices' count, +0xc for each (0x14 bytes) { 0 keyboard or 1 a
+ * joystick, the joystick's index, its name, its bindings, the joystick's
+ * extras }.  A binding is { what is bound -- a key and its flags << 8 for the
+ * keyboard, 1..0x10 an axis or 0x11..0x50 a button for a joystick -- and a
+ * type }; a joystick's extra is { scale, null, repeat }. */
 
-/* .text+0x7e40 -- Linkage +0x58: the keyboard-assignments dialog (0x140a). */
+uint32_t FS98_STDCALL controls_force(uint32_t op, uint32_t blk);    /* .text+0xa400 */
+
+/* .text+0x8650 -- the command after *prev in display order: the smallest
+ * display string id above *prev among commands whose kind has a bit of
+ * `mask`.  0 with its index in *idx and its id in *prev, else -1. */
+static uint32_t next_cmd(uint32_t idx, uint32_t prev, uint32_t mask)
+{
+    uint32_t best = 0xffffffff, at = 0, i;
+
+    for (i = 0; i < NCMD; i++) {
+        uint32_t v = CMD(i).sid;
+        if (v < best && v > M32(prev) && (CMD(i).kind & mask) != 0) {
+            best = v;
+            at = i;
+        }
+    }
+    if (best == 0xffffffff)
+        return 0xffffffff;
+    M32(idx) = at;
+    M32(prev) = best;
+    return 0;
+}
+
+/* .text+0x86c0 -- the list position of command `cmd`, into *at: 1, else 0 */
+static uint32_t find_pair(uint32_t list, uint32_t cmd, uint32_t at)
+{
+    uint32_t i;
+
+    for (i = 0; i < M32(list); i++)
+        if (M32(M32(list + 4) + i * 8 + 4) == cmd) {
+            M32(at) = i;
+            return 1;
+        }
+    return 0;
+}
+
+/* .text+0x8390 -- the keyboard's bindings from the accelerator table
+ * `accel`: each listed command's first key, and whether a joystick can take
+ * it (its kind has 1 or 2) */
+static uint32_t fill_keys(uint32_t bind, uint32_t accel, uint32_t mode)
+{
+    uint32_t n, buf, prev, idx, r;
+
+    r = HC(0x1fc, f6)(accel, 0, 0, 2, 0, P(&n));
+    if (r != 0)
+        return r;
+    HC(0x20c, f4)(1, n * 0xc, P(&buf), 1);
+    HC(0x1fc, f6)(accel, 0, 0, 2, buf, P(&n));
+    prev = 0;
+    if (next_cmd(P(&idx), P(&prev), mode) == 0) {
+        do {
+            uint32_t e;
+            M32(bind) = 0;
+            for (e = 0; e < n; e++)
+                if (M32(buf + e * 0xc + 8) == CMD(idx).command) {
+                    M32(bind) = (M32(buf + e * 0xc + 4) << 8) + (M32(buf + e * 0xc) & 0xff);
+                    break;
+                }
+            M32(bind + 4) = (CMD(idx).kind & 3) != 0;
+            bind += 8;
+        } while (next_cmd(P(&idx), P(&prev), mode) == 0);
+    }
+    return HC(0x214, f1)(P(&buf));
+}
+
+/* .text+0x84d0 -- a joystick's bindings and extras from its config `cfg`:
+ * each axis's and button's command, found in the list; then every binding's
+ * type, 2 if a joystick can take the command, else 3 */
+static uint32_t fill_joy(uint32_t list, uint32_t bind, uint32_t ext, uint32_t cfg, uint32_t mode)
+{
+    uint32_t k, a, at, idx, prev, r;
+
+    for (k = 0; k < M32(list); k++) {
+        M32(bind + k * 8) = 0;
+        M32(bind + k * 8 + 4) = 0;
+        M32(ext + k * 0xc) = 0;
+        M32(ext + k * 0xc + 4) = 0;
+        M32(ext + k * 0xc + 8) = 0;
+    }
+    for (a = 0; a < 0x10; a++) {
+        if (M32(cfg + 0xc + a * 4) == 0)
+            continue;
+        if (find_pair(list, M32(cfg + 0xc + a * 4), P(&at)) == 0)
+            continue;
+        M32(bind + at * 8) = a + 1;
+        M32(ext + at * 0xc) = M32(cfg + 0x4c + a * 4);
+        M32(ext + at * 0xc + 4) = M32(cfg + 0x8c + a * 4);
+    }
+    for (a = 0; a < 0x40; a++) {
+        if (M32(cfg + 0xcc + a * 4) == 0)
+            continue;
+        if (find_pair(list, M32(cfg + 0xcc + a * 4), P(&at)) == 0)
+            continue;
+        M32(bind + at * 8) = a + 0x11;
+        M32(ext + at * 0xc + 8) = M32(cfg + 0x1cc + a * 4);
+    }
+    prev = 0;
+    r = next_cmd(P(&idx), P(&prev), mode);
+    for (k = 0; r == 0; k++) {
+        M32(bind + k * 8 + 4) = (CMD(idx).kind & 3) != 0 ? 2 : 3;
+        r = next_cmd(P(&idx), P(&prev), mode);
+    }
+    return r;
+}
+
+/* .text+0x9130 -- joystick `joy`'s config of `kind` (0 flight, 1 slew) into
+ * `out`, its present axes those the host reads now */
+static void joy_current(uint32_t kind, uint32_t joy, uint32_t out)
+{
+    uint8_t state[0x14c];
+    uint32_t r;
+
+    M32(P(state) + 8) = 0xff;
+    r = HC(0x1c4, f2)(joy, P(state));
+    if (kind == 0)
+        HC(0x21c, f3)(out, D + 0xd48 + joy * 0x3cc, 0x3cc);
+    else if (kind == 1)
+        HC(0x21c, f3)(out, D + 0x82c8 + joy * 0x3cc, 0x3cc);
+    if (r == 0)
+        M32(out + 8) = M32(P(state) + 8);
+}
+
+/* .text+0x80a0 -- build a list: the commands of `mode` (4 flight or 8 slew
+ * keys, with 1 or 2 for the joysticks), the keyboard's bindings from `accel`
+ * and, with a joystick bit, each attached joystick's */
+static void build_list(uint32_t list, uint32_t accel, uint32_t mode)
+{
+    uint8_t desc[0x50], cfg[0x3cc];
+    uint32_t prev, idx, n, pairs, off, devs, ndev, j;
+
+    prev = 0;
+    n = 0;
+    if (next_cmd(P(&idx), P(&prev), mode) == 0)
+        do
+            n++;
+        while (next_cmd(P(&idx), P(&prev), mode) == 0);
+    HC(0x20c, f4)(1, n * 8, P(&pairs), 1);
+    M32(list) = n;
+    M32(list + 4) = pairs;
+    prev = 0;
+    off = 0;
+    if (next_cmd(P(&idx), P(&prev), mode) == 0)
+        do {
+            HC(0x2a4, f2)(CMD(idx).sid, pairs + off);
+            off += 8;
+            M32(pairs + off - 4) = CMD(idx).command;
+        } while (next_cmd(P(&idx), P(&prev), mode) == 0);
+    ndev = 1;
+    if (mode & 3)
+        ndev = HC(0x1c0, f0)() + 1;
+    HC(0x20c, f4)(1, ndev * 0x14, P(&devs), 1);
+    M32(list + 8) = ndev;
+    M32(list + 0xc) = devs;
+    HC(0x20c, f4)(1, n * 8, devs + 0xc, 1);
+    M32(devs + 0x10) = 0;
+    M32(devs + 0) = 0;
+    M32(devs + 4) = 0;
+    HC(0x20c, f4)(1, h_strlen(D + 0x1d0) + 1, devs + 8, 0);     /* the keyboard's name */
+    h_strcpy(M32(devs + 8), D + 0x1d0);
+    fill_keys(M32(devs + 0xc), accel, mode);
+    if ((mode & 3) == 0 || ndev <= 1)
+        return;
+    for (j = 0; j + 1 < ndev; j++) {
+        uint32_t e = M32(list + 0xc) + (j + 1) * 0x14;
+        HC(0x20c, f4)(1, n * 8, e + 0xc, 1);
+        HC(0x20c, f4)(1, n * 0xc, M32(list + 0xc) + (j + 1) * 0x14 + 0x10, 1);
+        M32(M32(list + 0xc) + (j + 1) * 0x14) = 1;
+        M32(M32(list + 0xc) + (j + 1) * 0x14 + 4) = j;
+        HC(0x1c8, f2)(j, P(desc));
+        HC(0x20c, f4)(1, h_strlen(P(desc) + 0x10) + 1, M32(list + 0xc) + (j + 1) * 0x14 + 8, 0);
+        h_strcpy(M32(M32(list + 0xc) + (j + 1) * 0x14 + 8), P(desc) + 0x10);
+        if (mode & 1)
+            joy_current(0, j, P(cfg));
+        else if (mode & 2)
+            joy_current(1, j, P(cfg));
+        e = M32(list + 0xc) + (j + 1) * 0x14;
+        fill_joy(list, M32(e + 0xc), M32(e + 0x10), P(cfg), mode);
+    }
+}
+
+/* .text+0x8700 -- the sensitivity records: labels from ENGLISH.FLL, values
+ * from GLOBAL +0xc02..+0xc0c */
+static void records_init(uint32_t rec)
+{
+    M32(rec + 0x2c) = 2;
+    M32(rec + 0x30) = D + 0x208;                            /* the mouse's name */
+    HC(0x2a0, f3)(0xf591, D + 0xb08, 0x40);
+    M32(rec + 0x34) = D + 0xb08;
+    M16(rec + 0x40) = M16(G + 0xc08);
+    HC(0x2a0, f3)(0xf590, D + 0xb48, 0x40);
+    M32(rec + 0x44) = D + 0xb48;
+    M16(rec + 0x50) = M16(G + 0xc0a);
+    HC(0x2a0, f3)(0xf592, D + 0xb88, 0x40);
+    M32(rec + 0x54) = D + 0xb88;
+    M32(rec + 0x64) = 0;
+    M16(rec + 0x60) = M16(G + 0xc0c);
+    M32(rec + 0x68) = D + 0x1d0;                            /* the keyboard's name */
+    HC(0x2a0, f3)(0xf593, D + 0xbc8, 0x40);
+    M32(rec + 0x6c) = D + 0xbc8;
+    HC(0x2a0, f3)(0xf596, D + 0xc88, 0x40);
+    M32(rec + 0x70) = D + 0xc88;
+    M16(rec + 0x78) = M16(G + 0xc02);
+    HC(0x2a0, f3)(0xf594, D + 0xc08, 0x40);
+    M32(rec + 0x7c) = D + 0xc08;
+    HC(0x2a0, f3)(0xf597, D + 0xcc8, 0x40);
+    M32(rec + 0x80) = D + 0xcc8;
+    M16(rec + 0x88) = M16(G + 0xc04);
+    HC(0x2a0, f3)(0xf595, D + 0xc48, 0x40);
+    M32(rec + 0x8c) = D + 0xc48;
+    HC(0x2a0, f3)(0xf598, D + 0xd08, 0x40);
+    M32(rec + 0x90) = D + 0xd08;
+    M16(rec + 0x98) = M16(G + 0xc06);
+}
+
+/* .text+0x88b0 -- and back */
+static void records_apply(uint32_t rec)
+{
+    M16(G + 0xc08) = M16(rec + 0x40);
+    M16(G + 0xc0a) = M16(rec + 0x50);
+    M16(G + 0xc0c) = M16(rec + 0x60);
+    M16(G + 0xc02) = M16(rec + 0x78);
+    M16(G + 0xc04) = M16(rec + 0x88);
+    M16(G + 0xc06) = M16(rec + 0x98);
+}
+
+/* .text+0x8930 -- the keyboard's bindings into the accelerator table
+ * `accel`, emptied first */
+static uint32_t apply_keys(uint32_t list, uint32_t accel)
+{
+    uint32_t r, k, bind, ent[3];
+
+    r = HC(0x1f0, f1)(accel);
+    if (r != 0)
+        return r;
+    bind = M32(M32(list + 0xc) + 0xc);
+    for (k = 0; k < M32(list); k++) {
+        uint32_t spec = M32(bind + k * 8);
+        ent[2] = M32(M32(list + 4) + k * 8 + 4);
+        ent[0] = spec & 0xff;
+        ent[1] = spec >> 8;
+        if (ent[0] != 0)
+            r = HC(0x1f4, f3)(accel, P(ent), 1);
+    }
+    return r;
+}
+
+/* .text+0x89b0 -- each joystick's bindings into a fresh config of `kind`,
+ * installed: AXIS_FLAGS the bound axes, their events, scales and nulls, the
+ * buttons' down events and repeats.  LOCKED, TYPE and the up events stay 0. */
+static void apply_joys(uint32_t list, uint32_t kind)
+{
+    uint8_t desc[0x50], cfg[0x3cc];
+    uint32_t n = M32(list), pairs = M32(list + 4), j;
+
+    if (M32(list + 8) <= 1)
+        return;
+    for (j = 0; j + 1 < M32(list + 8); j++) {
+        uint32_t e = M32(list + 0xc) + (j + 1) * 0x14;
+        uint32_t ext = M32(e + 0x10), bind = M32(e + 0xc), k;
+        HC(0x1c8, f2)(j, P(desc));
+        HC(0x218, f3)(P(cfg), 0, 0x3cc);
+        for (k = 0; k < n; k++) {
+            uint32_t v = M32(bind + k * 8);
+            if (v == 0)
+                continue;
+            if (v >= 0x11 && v <= 0x50) {
+                M32(P(cfg) + 0x88 + v * 4) = M32(pairs + k * 8 + 4);
+                M32(P(cfg) + 0x188 + v * 4) = M32(ext + k * 0xc + 8);
+            }
+            if (v >= 1 && v <= 0x10) {
+                M32(P(cfg) + 8) |= 1u << (v - 1);
+                M32(P(cfg) + 8 + v * 4) = M32(pairs + k * 8 + 4);
+                M32(P(cfg) + 0x48 + v * 4) = M32(ext + k * 0xc);
+                M32(P(cfg) + 0x88 + v * 4) = M32(ext + k * 0xc + 4);
+            }
+        }
+        joy_install(kind, j, P(cfg));
+    }
+}
+
+/* .text+0x8af0 -- free a list */
+static void free_list(uint32_t list)
+{
+    uint32_t i;
+
+    for (i = 0; i < M32(list); i++)
+        HC(0x214, f1)(M32(list + 4) + i * 8);
+    HC(0x214, f1)(list + 4);
+    M32(list) = 0;
+    for (i = 0; i < M32(list + 8); i++) {
+        HC(0x214, f1)(M32(list + 0xc) + i * 0x14 + 8);
+        HC(0x214, f1)(M32(list + 0xc) + i * 0x14 + 0xc);
+        HC(0x214, f1)(M32(list + 0xc) + i * 0x14 + 0x10);
+    }
+    HC(0x214, f1)(list + 0xc);
+    M32(list + 8) = 0;
+}
+
+/* .text+0x8090 -- block +0x4 */
+static uint32_t FS98_STDCALL dlg_none(uint32_t block)
+{
+    (void)block;
+    return 0;
+}
+
+/* .text+0x8ba0 -- block +0x20: after the joystick control panel, whether
+ * there are none now */
+static uint32_t FS98_STDCALL dlg_refresh(uint32_t block)
+{
+    (void)block;
+    V32(0x250) = HC(0x1c0, f0)() == 0;
+    return 0;
+}
+
+/* .text+0x8bc0 -- block +0x2c: device `dev` of `list` back to its defaults
+ * -- the keyboard's from the layout's section or the resource table, a
+ * joystick's from its model's (Options.DLL does not call it) */
+static uint32_t FS98_STDCALL dlg_reset(uint32_t block, uint32_t list, uint32_t dev)
+{
+    uint8_t cfg[0x3cc];
+    uint32_t accel, e = M32(list + 0xc) + dev * 0x14;
+
+    if (M32(e) == 0) {
+        if (M32(block + 0x28) == 0) {
+            if (section_read_layout(D + 0x408, (const char *)(uintptr_t)(D + 0x1a8), 4, &accel) == 0)
+                HC(0x1e4, f2)(P(&accel), 0x67);
+            fill_keys(M32(M32(list + 0xc) + dev * 0x14 + 0xc), accel, 5);
+        } else {
+            if (section_read_layout(D + 0x408, (const char *)(uintptr_t)(D + 0x1b8), 8, &accel) == 0)
+                HC(0x1e4, f2)(P(&accel), 0x68);
+            fill_keys(M32(M32(list + 0xc) + dev * 0x14 + 0xc), accel, 0xa);
+        }
+        return HC(0x1dc, f1)(P(&accel));
+    }
+    if (M32(e) == 1) {
+        uint32_t kind = M32(block + 0x28) == 0 ? 0 : 1, r;
+        r = joy_default(kind, M32(e + 4), P(cfg));
+        if (r != 0)
+            return r;
+        e = M32(list + 0xc) + dev * 0x14;
+        return fill_joy(list, M32(e + 0xc), M32(e + 0x10), P(cfg), kind == 0 ? 5 : 0xa);
+    }
+    return e;
+}
+
+/* .text+0x8d40 -- block +0x1c, the page's reset: mode 0 the keyboard's
+ * sensitivities, 2 the mouse's, else joystick `joy`'s axes back to scale
+ * 100 and null 36 in the list the page shows */
+static uint32_t FS98_STDCALL dlg_adjust(uint32_t block, uint32_t mode, uint32_t joy)
+{
+    uint32_t list, k;
+
+    if (mode == 0) {
+        M16(block + 0x9c) = 0x40;
+        M16(block + 0xac) = 0x40;
+        M16(block + 0xbc) = 0x40;
+        return block;
+    }
+    if (mode == 2) {
+        M16(block + 0x64) = 0x23;
+        M16(block + 0x74) = 0x19;
+        M16(block + 0x84) = 0x40;
+        return block;
+    }
+    list = M32(block + 0x28) == 0 ? block + 0x30 : block + 0x40;
+    for (k = 0; k < M32(list); k++) {
+        uint32_t e = M32(list + 0xc) + joy * 0x14;
+        if (M32(M32(e + 0x20) + k * 8 + 4) == 2 && M32(M32(e + 0x20) + k * 8) != 0) {
+            M32(M32(e + 0x24) + k * 0xc) = 0x64;
+            M32(M32(M32(list + 0xc) + joy * 0x14 + 0x24) + k * 0xc + 4) = 0x24;
+        }
+    }
+    return block;
+}
+
+/* .text+0x7e80 -- set the block up */
+static uint32_t dlg_setup(void)
+{
+    uint32_t ff[7];
+
+    HC(0x2a0, f3)(0x8010, D + 0x1d0, 0x32);                 /* the keyboard's name */
+    HC(0x2a0, f3)(0x8011, D + 0x208, 0x32);                 /* the mouse's */
+    if (HC(0x1c0, f0)() != 0) {
+        V32(0x250) = 0;
+        V32(0xb00) = controls_joystick(0, 1);
+    } else {
+        V32(0x250) = 1;
+        V32(0xb00) = 0;
+    }
+    controls_force(1, P(ff));
+    V32(0x310) = ff[2];
+    V32(0x308) = ff[1];
+    V32(0x328) = ff[5];
+    V32(0x300) = ff[0] == 0;
+    V32(0x320) = ff[4];
+    V32(0x318) = ff[3];
+    V32(0x330) = ff[6];
+    build_list(D + 0x270, V32(0x186), 5);
+    build_list(D + 0x280, V32(0x18a), 0xa);
+    CALL(UTIL, 0x90, f3)(D + 0x338, 1, D + 0x240);
+    records_init(D + 0x264);
+    return 0;
+}
+
+/* .text+0x7fa0 */
+static uint32_t dlg_cleanup(void)
+{
+    free_list(D + 0x270);
+    free_list(D + 0x280);
+    return 0;
+}
+
+/* .text+0x7fc0 -- OK: the joysticks' enable, force feedback, the
+ * sensitivities, the key tables and the joystick configs */
+static uint32_t dlg_apply(void)
+{
+    uint32_t ff[7], r;
+
+    r = CALL(UTIL, 0x8c, f4)(D + 0x338, 1, D + 0x240, 0);
+    controls_joystick(1, V32(0xb00) != 0);
+    ff[1] = V32(0x308);
+    ff[2] = V32(0x310);
+    ff[3] = V32(0x318);
+    ff[4] = V32(0x320);
+    ff[5] = V32(0x328);
+    ff[6] = V32(0x330);
+    controls_force(2, P(ff));
+    records_apply(D + 0x264);
+    apply_keys(D + 0x270, V32(0x186));
+    apply_keys(D + 0x280, V32(0x18a));
+    apply_joys(D + 0x270, 0);
+    apply_joys(D + 0x280, 1);
+    return r;
+}
+
+/* .text+0x7e40 -- Linkage +0x58: the keyboard-assignments dialog (0x140a) */
 uint32_t FS98_STDCALL controls_dialog(void)
 {
-    return 0;
+    uint32_t r = dlg_setup();
+
+    if (r == 0) {
+        r = HC(0x10c, f2)(0x140a, D + 0x240);
+        if (r == 0 && V32(0x240) == 1)
+            dlg_apply();
+    }
+    dlg_cleanup();
+    return r;
 }
 
 /* the ground bumps' period at `speed`: 0.5 - (-1e6 / (slope * speed +
@@ -1666,7 +2120,12 @@ uint32_t FS98_STDCALL controls_force(uint32_t op, uint32_t blk)
     return r;
 }
 
-/* install anything controls.c's DllMain needs from this half (nothing yet) */
+/* install what controls.c's DllMain needs from this half: the code pointers
+ * in the dialog's block */
 void controls_input_install(void)
 {
+    V32(0x244) = P(dlg_none);                               /* the dialog's callbacks */
+    V32(0x25c) = P(dlg_adjust);
+    V32(0x260) = P(dlg_refresh);
+    V32(0x26c) = P(dlg_reset);
 }

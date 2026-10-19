@@ -58,7 +58,7 @@ BASE_REALITY := 0x208b0000
 BASE_ANALYSIS := 0x20630000
 BASE_CONTROLS := 0x20670000
 
-MODULES := ACONTAIN ADVDRV ANALYSIS ATC BOOSTER CHAIN DEMO DYNAMIC FACIL FE GLOBAL LANDME NUMERIC REALITY SLEW SOUND UTIL WEATHERM WINDOW WINMSG
+MODULES := ACONTAIN ADVDRV ANALYSIS ATC BOOSTER CHAIN CONTROLS DEMO DYNAMIC FACIL FE GLOBAL LANDME NUMERIC REALITY SLEW SOUND UTIL WEATHERM WINDOW WINMSG
 
 # Setup renames two modules on the way from CD to install, and the game loads
 # the *installed* names.  A rebuilt FACIL.DLL copied in as FACIL.DLL would just
@@ -294,8 +294,8 @@ src/reality/reality_data.inc src/reality/reality_rdata.inc: $(ORIG)/Modules/REAL
 	@python3 tools/gen_reality_data.py $< src/reality/reality_data.inc src/reality/reality_rdata.inc
 
 # CONTROLS, the keyboard, joysticks and mouse: a hand-written assembly half
-# (controls.c, complete) and a compiled-C half (controls_input.c, in progress).
-# Not in MODULES until the C half is transliterated and controlsdiff is green.
+# (controls.c) and a compiled-C half (controls_input.c), both transliterated
+# and verified whole by controlsdiff.
 CONTROLS_INC := src/controls/controls_data.inc src/controls/controls_rdata.inc \
                 src/controls/controls_table.inc src/controls/controls_pointers.inc
 $(BIN)/CONTROLS.DLL: src/controls/controls.c src/controls/controls_input.c \
@@ -779,13 +779,13 @@ analysisdiff: $(DIFFDIR)/analysisdiff.exe $(BIN)/ANALYSIS.DLL
 	@cp $(ORIG)/Modules/UTIL.DLL     $(DIFFDIR)/UTIL_retail.dll
 	@cp $(ORIG)/Modules/NUMERIC.DLL  $(DIFFDIR)/NUMERIC_retail.dll
 
-# CONTROLS, the whole module but its key-assignment dialog: retail and
-# OpenFS98 loaded side by side over commands, the CHAIN frames, the joysticks,
-# the key bindings and force feedback, with fixture CFG files, models of the
-# host's profile, accelerator and joystick services and a DirectInput
-# stand-in; compares GLOBAL, the whole .data image, the import-call transcript
-# and the profile files.  (The dialog is not driven -- see
-# docs/modules/controls.md.)
+# CONTROLS, whole-module: retail and OpenFS98 loaded side by side over
+# commands, the CHAIN frames, the joysticks, the key bindings, force feedback
+# and the assignments dialog, with fixture CFG files, models of the host's
+# profile, accelerator and joystick services, a DirectInput stand-in and a
+# stand-in for Options.DLL's dialog; compares GLOBAL, the whole .data image,
+# the import-call transcript and the profile files.  See
+# docs/modules/controls.md.
 $(DIFFDIR)/controlsdiff.exe: tools/difftest/controlsdiff.c
 	@mkdir -p $(DIFFDIR)
 	$(CC) -std=c99 -O1 -Wall -Wextra -o $@ tools/difftest/controlsdiff.c

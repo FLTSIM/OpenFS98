@@ -73,11 +73,11 @@ make realitydiff-run     # whole-module REALITY, crashes and the analysis -> 200
 make reality-breaks      # REALITY broken on purpose -> 67 breaks, 61 caught, 6 proven equivalent (~7 min)
 make analysisdiff-run    # whole-module ANALYSIS, landing/manoeuvre/course -> 20000 scenarios, 0 differ (~2 min)
 make analysis-breaks     # ANALYSIS broken on purpose -> 103 breaks, 93 caught, 10 proven equivalent (~20 min)
-make controlsdiff-run    # whole-module CONTROLS but its dialog: commands, joysticks, key bindings, force feedback -> 20000 scenarios, 0 differ (~40 min)
-make controls-breaks     # CONTROLS broken on purpose -> 65 breaks, 63 caught, 1 proven equivalent, 1 reachability gap (~25 min)
+make controlsdiff-run    # whole-module CONTROLS: commands, joysticks, key bindings, force feedback, the dialog -> 20000 scenarios, 0 differ (~40 min)
+make controls-breaks     # CONTROLS broken on purpose -> 81 breaks, 78 caught, 3 proven equivalent (~20 min)
 make difftest-run        # whole-module SLEW         -> 0/2000 vectors differ
 make ofstest-run         # in-process, via the host  -> passed 68, failed 0
-make smoke               # ACONTAIN, ADVDRV, ANALYSIS, ATC, BOOSTER, CHAIN, DEMO, DYNAMIC, FACIL, FE, GLOBAL, LANDME, NUMERIC, REALITY, SLEW, SOUND, UTIL, WEATHERM, WINDOW, WINMSG installed -> 27/27, 95 gauges, PASS
+make smoke               # ACONTAIN, ADVDRV, ANALYSIS, ATC, BOOSTER, CHAIN, CONTROLS, DEMO, DYNAMIC, FACIL, FE, GLOBAL, LANDME, NUMERIC, REALITY, SLEW, SOUND, UTIL, WEATHERM, WINDOW, WINMSG installed -> 27/27, 95 gauges, PASS
 make util-trace          # which UTIL services the game calls, counted in-game
 ```
 
@@ -222,26 +222,30 @@ not yet made); and a harness stub must leave the registers the real callee
 leaves where retail asm reads them (`analysisdiff.c`'s asm wrappers). See
 [docs/modules/analysis.md](docs/modules/analysis.md).
 
-**Round 9 surveyed what is left** ([docs/preflight.md](docs/preflight.md)):
-**CONTROLS is next, and all but its dialog is done.** The hand-written half
-(`src/controls/controls.c`: the dispatcher and all 342 handlers, the CHAIN
-callbacks, init/deinit) and the compiled-C half (`src/controls/controls_input.c`:
-the key bindings, the joystick poll and watcher, the joystick configs and
-their defaults, force feedback over DirectInput 5) are transliterated and
+**Round 9 surveyed what is left** ([docs/preflight.md](docs/preflight.md)).
+**CONTROLS is done, verified and running in-game**, and in `MODULES`. The
+hand-written half (`src/controls/controls.c`: the dispatcher and all 342
+handlers, the CHAIN callbacks, init/deinit) and the compiled-C half
+(`src/controls/controls_input.c`: the key bindings, the joystick poll and
+watcher, the joystick configs and their defaults, force feedback over
+DirectInput 5, the key-assignment dialog `+0x58`) are transliterated and
 **verified by `make controlsdiff-run`: 20,000 scenarios, 0 differences**, over
 a model of the host's profile, accelerator and joystick services, fixture
-CFG files and a DirectInput stand-in. The verification found and fixed six
-transliteration bugs (a repeat counter, three in the keyboard-layout reader,
-two in the key list). **Left: the key-assignment dialog `+0x58`**, dialog
-`0x140a` of `English\Options.DLL`, which calls back into CONTROLS through a
-parameter block -- it needs a stand-in for that MFC dialog, read from
-Options.DLL, as FACIL's were verified against World.DLL. Until then
-`controls_dialog` is a placeholder and CONTROLS is not in `MODULES`. See
-[docs/modules/controls.md](docs/modules/controls.md). After CONTROLS come
-MULTIP (DirectPlay through COM, a worker thread) with MPCHAT behind it, then
-G3D. Before G3D, trace who supplies the span routine its clipper calls. PANELS
-waits on HG2D, and MAIN comes last before HG2D. The CHAIN ecx fix, proven
-in `chaindiff`, is still open.
+CFG files, a DirectInput stand-in, and a stand-in for the dialog (`0x140a`
+of `English\Options.DLL`, an MFC dialog that calls back into CONTROLS
+through a parameter block), built from Options.DLL's listing as FACIL's were
+from World.DLL. The verification found and fixed six transliteration bugs (a
+repeat counter, three in the keyboard-layout reader, two in the key list).
+Two harness lessons: a fault that skips a cleanup leaves heap pointers whose
+values depend on the other side's leak (compare them as null or not), and a
+break "caught" by a harness artifact is not caught (every break run stopped
+at that artifact until it was fixed). See
+[docs/modules/controls.md](docs/modules/controls.md). Next come MULTIP
+(DirectPlay through COM, a worker thread) with MPCHAT behind it, then G3D.
+G3D's open question is settled: it supplies its own span routines (traced in
+the preflight), so HG2D can be a logging stub for it. PANELS waits on HG2D,
+and MAIN comes last before HG2D. The CHAIN ecx fix, proven in `chaindiff`,
+is still open.
 
 FE's `+0x40` calling-convention break is now confirmed by `fediff`: the
 one-byte probe writes through the caller's edi and returns with ebx/esi/edi

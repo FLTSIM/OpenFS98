@@ -28,6 +28,7 @@ sudo apt install gcc-mingw-w64-i686-win32 p7zip-full   # 32-bit toolchain, 7z
 7z x ~/Downloads/MSFlightSimulator98.iso -ocd     # the CD, for staging
 ./tools/extract.sh ~/Downloads/MSFlightSimulator98.iso   # orig/ reference binaries
 make stage                                        # game/ — a real install
+ln -s "$PWD/game" ~/.wine/drive_c/FS98            # game/ as C:\FS98 (see below)
 make && make smoke                                # build, then boot the game
 ```
 
@@ -105,7 +106,7 @@ else's 1997 build, and it should read that way.
 | `make winmsgdiff-run` | whole-module WINMSG, the message bar: retail and OpenFS98 in turn over scripts of messages shown, appended, cleared and run frame after frame (plain and scrolling, split to fit), with a model of the host's window record and heap, a CHAIN that answers the done message and re-enters, and situation records; compares the transcript with every string drawn, the whole `.data` image, the arena and GLOBAL. `make winmsg-breaks` breaks it on purpose |
 | `make realitydiff-run` | whole-module REALITY, crashes and damage: retail and OpenFS98 in turn through every crash gate, the countdown, the reload and the crash analysis (a stand-in for its dialog, retail UTIL and NUMERIC), the stress rolls and the cracked windscreen; HG2D's lines logged with their colour and view; compares the transcript, the whole `.data` image, the arena, GLOBAL and UTIL's and NUMERIC's state. `make reality-breaks` breaks it on purpose |
 | `make analysisdiff-run` | whole-module ANALYSIS, landing and manoeuvre analysis and course tracking: retail and OpenFS98 in turn over the frames, the landing thresholds, the compaction, the trail and all three dialogs (a stand-in for the dialog engine, retail UTIL and NUMERIC), with the register leftovers retail reads (CHAIN's, memset's, the CD MSVCRT memmove's) modelled; HG2D's lines and G3D's display list logged; compares the transcript, the whole `.data` image, the arena, GLOBAL and UTIL's and NUMERIC's state. `make analysis-breaks` breaks it on purpose |
-| `make controlsdiff-run` | whole-module CONTROLS but its key-assignment dialog: retail and OpenFS98 side by side over commands (through the dispatcher and CHAIN list 0xb), the axis, engine and pilot-event entries, the CHAIN frames, the joystick poll and watcher over scripted sticks, the key bindings and force feedback; the host's profile services passed through to fixture CFG files, models of its accelerator tables and joysticks, and a DirectInput 5 stand-in; compares GLOBAL, the whole `.data` image, the import-call transcript and the profile files. `make controls-breaks` breaks it on purpose |
+| `make controlsdiff-run` | whole-module CONTROLS: retail and OpenFS98 side by side over commands (through the dispatcher and CHAIN list 0xb), the axis, engine and pilot-event entries, the CHAIN frames, the joystick poll and watcher over scripted sticks, the key bindings, force feedback and the key-assignment dialog; the host's profile services passed through to fixture CFG files, models of its accelerator tables and joysticks, a DirectInput 5 stand-in and a stand-in for Options.DLL's dialog; compares GLOBAL, the whole `.data` image, the import-call transcript and the profile files. `make controls-breaks` breaks it on purpose |
 | `make demodiff-run` | whole-module DEMO: retail and OpenFS98 in turn over the CD's six videos and synthetic ones with every record class, recording, playback, instant replay and the four dialogs' callbacks (retail UTIL's catalogue, a stand-in for the host's dialog engine); faults compared as outcomes, runaway ops cut at a fixed count; compares the transcript, the whole `.data` image (code pointers through a learnt pairing), the arena, GLOBAL and the trees |
 | `make fesldiff-run` | FE's `+0x78`, the Scenery Library, retail against OpenFS98 over a writable fixture with sandboxed drive letters, driven by a stand-in for World.DLL's nine dialogs; compares the call transcript (with string comparisons and the world files left on disk), FE's `.data`, GLOBAL and the heap; faults are compared as outcomes |
 | `make facildiff-fe-run` | the same harness with OpenFS98 FE behind OpenFS98 FACIL, against retail FE behind retail FACIL: both reimplementations together over the real CD index and the dialogs (`Q=`/`D=` set the phase sizes, 2,000 each by default) |
@@ -125,7 +126,12 @@ else's 1997 build, and it should read that way.
 The game does not need installing — the CD's `fs98` tree runs as-is once
 `mfc42.dll` and `MSVCRT.DLL` from the CD root sit next to `FLTSIM98.EXE`. That
 tree is staged in `game/` (gitignored, 103 MB) and symlinked into the wine
-prefix as `C:\FS98`, so no bulk data lands in `~/.wine`.
+prefix as `C:\FS98`, so no bulk data lands in `~/.wine`. `make install`,
+`make run` and `make ofstest-run` default to that path (`FS98_DIR`), and the
+game must run from drive C:. Two of `ofstest`'s checks are of UTIL's
+drive-root quirk against a fixture at `C:\openfs98-enum`, and they fail when
+the game runs from `Z:\` instead (`make smoke` itself runs `game/` directly
+and does not mind).
 
 ```sh
 make install     # swap rebuilt modules in; backs up to *.orig first
@@ -216,12 +222,13 @@ emulate 80-bit arithmetic to preserve a rounding artefact. See
 | `WINMSG` | 22 | 4,416 | **reimplemented, verified, and running in-game** — the message bar: queued messages in seven slots, plain or scrolling, split to fit, appended to; 20,000 whole-module scenarios against a model of the host's window record, zero differences — see [docs/modules/winmsg.md](docs/modules/winmsg.md) |
 | `REALITY` | 32 | 4,822 | **reimplemented, verified, and running in-game** — crashes, stress damage, the cracked windscreen and the crash analysis's graph; 20,000 whole-module scenarios, zero differences — see [docs/modules/reality.md](docs/modules/reality.md) |
 | `ANALYSIS` | 29 | 8,086 | **reimplemented, verified, and running in-game** — landing and manoeuvre analysis and course tracking: the samples, the trail's display list, the three dialogs; 20,000 whole-module scenarios, zero differences — see [docs/modules/analysis.md](docs/modules/analysis.md) |
+| `CONTROLS` | 16 | 48,406 | **reimplemented, verified, and running in-game** — the keyboard, joysticks and mouse: 342 command handlers, the joystick poll and configs, the key bindings, force feedback over DirectInput 5 and the key-assignment dialog's callbacks; 20,000 whole-module scenarios, zero differences — see [docs/modules/controls.md](docs/modules/controls.md) |
 | `UTIL` | 20 | 11,062 | **reimplemented, verified, and running in-game** — all 47 services; 19 seen called in a hands-on session, the modal alert among them — see [docs/modules/util.md](docs/modules/util.md) |
 | `FLTSIM98.EXE` | 1 (host) | 82,016 | 194 services mapped, 71 with confirmed prototypes, 11 verified in-process, 2 implemented — see [docs/modules/host.md](docs/modules/host.md) |
 
-Retail baseline and the OpenFS98 build -- ACONTAIN, ANALYSIS, ATC, BOOSTER, CHAIN,
-DEMO, DYNAMIC, FACIL, FE, GLOBAL, LANDME, NUMERIC, REALITY, SLEW, SOUND, UTIL,
-WEATHERM, WINDOW and WINMSG all installed -- both
+Retail baseline and the OpenFS98 build -- ACONTAIN, ADVDRV, ANALYSIS, ATC,
+BOOSTER, CHAIN, CONTROLS, DEMO, DYNAMIC, FACIL, FE, GLOBAL, LANDME, NUMERIC,
+REALITY, SLEW, SOUND, UTIL, WEATHERM, WINDOW and WINMSG all installed -- both
 reach the panel: 27/27 modules, 95 gauges, `make smoke` PASS.
 
 `GLOBAL.DLL`'s 4764-byte shared state block is byte-identical to retail, and the
@@ -307,14 +314,14 @@ scenarios, zero differences, see [docs/modules/analysis.md](docs/modules/analysi
 It found that retail's sample compaction depends on what MSVCRT `memmove`
 leaves in ecx; OpenFS98 reproduces the CD runtime's.
 Round 9 surveyed the six modules left before HG2D and picked `CONTROLS`,
-which is done but for its key-assignment dialog. The command dispatcher and
-all 342 handlers, the joysticks (the poll, the watcher, their configs and
-defaults), the key bindings and force feedback over DirectInput 5 are
-reimplemented and verified: `make controlsdiff-run` drives them against
-retail over 20,000 scenarios with zero differences
-(see [docs/modules/controls.md](docs/modules/controls.md)). The dialog,
-`English\Options.DLL`'s `0x140a`, calls back into CONTROLS and needs a
-stand-in for it before it can be verified, so CONTROLS is not yet installed.
+which is done, verified and running in-game. The command dispatcher and all
+342 handlers, the joysticks (the poll, the watcher, their configs and
+defaults), the key bindings, force feedback over DirectInput 5 and the
+key-assignment dialog are reimplemented, and `make controlsdiff-run` drives
+them against retail over 20,000 scenarios with zero differences. The
+dialog, `English\Options.DLL`'s `0x140a`, calls back into CONTROLS through a
+parameter block, so it is verified against a stand-in for that dialog built
+from its listing (see [docs/modules/controls.md](docs/modules/controls.md)).
 `MULTIP` and `MPCHAT` follow it, then `G3D`.
 
 Other useful work, in no particular order:
@@ -355,10 +362,11 @@ nothing in it imports anything interesting:
     ~~**`WINMSG`** (4,416 bytes)~~ — done, verified and running in-game.
     ~~**`REALITY`** (4,822 bytes)~~ — done, verified and running in-game.
     ~~**`ANALYSIS`** (8,086 bytes)~~ — done, verified and running in-game.
+    ~~**`CONTROLS`** (48,406 bytes)~~ — done, verified and running in-game.
     Round 9 of the [preflight](docs/preflight.md) surveyed what is left.
-    Next: **`CONTROLS`** (48,406 bytes, the keyboard, joystick and force
-    feedback), then `MULTIP` (43,318) with `MPCHAT` (3,104) behind it, then
-    `G3D` (92,518), `PANELS` (50,038) and `MAIN` (119,648).
+    Next: `MULTIP` (43,318) with `MPCHAT` (3,104) behind it, then `G3D`
+    (92,518; G3D supplies its own span routines, so HG2D can be a logging
+    stub for it), `PANELS` (50,038) and `MAIN` (119,648).
 13. `HG2D` (390 KB, the 2D rasteriser) last. It is 26% of the project on its
    own.
 

@@ -1,0 +1,4 @@
+LIBRARY G3D.DLL
+EXPORTS
+    Linkage DATA
+    ImportTable DATA

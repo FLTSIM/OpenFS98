@@ -16,10 +16,9 @@ loaded and flown from the keyboard, the 3D view animating throughout:
 
 ```sh
 make sehfix-install   # SEHFIX.DLL into Modules\ -- the fix itself
-make vd-on            # wine virtual desktop -- for focus, see below
 make wm-managed       # wine's default; undoes an earlier wm-unmanaged
 make window-reset     # native 640x480 client at the top-left
-make run
+make run              # inside a 1024x768 virtual desktop -- for focus, see below
 ```
 
 with `[HARDWARE] Device=` (empty) and `Mode=640x480x8`, `FULL_SCREEN=2`, and
@@ -29,6 +28,14 @@ without the virtual desktop, and resizing the window. Each was a suspect
 before the cause was known and may well be fine now; try them one at a time.
 
 `make sehfix-remove` takes the module out; `make sehfix-log` shows its log.
+
+`make run` asks for the virtual desktop on the command line, `wine explorer
+/desktop=FS98,1024x768 FLTSIM98.EXE`, so only the sim gets one (`make run
+VD=` for none, `VD=800x600` for another size). A desktop set in the
+registry (`HKCU\Software\Wine\Explorer`) is opened by every wine program,
+the difference harnesses included; set per program under `AppDefaults` it
+did not take effect here. `make vd-on`/`vd-off` now only clear those
+registry settings.
 
 ### What happens
 

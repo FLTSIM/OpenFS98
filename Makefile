@@ -57,6 +57,7 @@ BASE_WINMSG := 0x20910000
 BASE_REALITY := 0x208b0000
 BASE_ANALYSIS := 0x20630000
 BASE_CONTROLS := 0x20670000
+BASE_G3D    := 0x206e0000
 
 MODULES := ACONTAIN ADVDRV ANALYSIS ATC BOOSTER CHAIN CONTROLS DEMO DYNAMIC FACIL FE GLOBAL LANDME NUMERIC REALITY SLEW SOUND UTIL WEATHERM WINDOW WINMSG
 
@@ -269,6 +270,23 @@ $(BIN)/WINDOW.DLL: src/window/window.c src/window/window.def src/window/window_d
 	      -Wl,--image-base=$(BASE_WINDOW) \
 	      -o $@ src/window/window.c $(BIN)/window.res src/window/window.def \
 	      -lkernel32 -lgcc
+
+# G3D is not in MODULES yet: it is being transliterated a region at a time,
+# and its Linkage is only partly filled.  docs/modules/g3d.md has the plan.
+$(BIN)/G3D.DLL: src/g3d/g3d.c src/g3d/g3d.def src/g3d/g3d_data.inc \
+                src/g3d/g3d_pointers.inc $(BIN)/g3d.res
+	@mkdir -p $(BIN)
+	$(CC) $(CFLAGS) -fno-delete-null-pointer-checks -fno-ipa-icf -Isrc/g3d $(LDFLAGS) \
+	      -Wl,--image-base=$(BASE_G3D) \
+	      -o $@ src/g3d/g3d.c $(BIN)/g3d.res src/g3d/g3d.def \
+	      -lkernel32 -lgcc
+
+src/g3d/g3d_data.inc src/g3d/g3d_pointers.inc: $(ORIG)/Modules/G3D.DLL tools/gen_g3d_data.py
+	@python3 tools/gen_g3d_data.py $< src/g3d/g3d_data.inc src/g3d/g3d_pointers.inc
+
+$(BIN)/g3d.res: src/g3d/g3d.rc
+	@mkdir -p $(BIN)
+	$(RC) $< -O coff -o $@
 
 $(BIN)/window.res: src/window/window.rc
 	@mkdir -p $(BIN)
@@ -761,6 +779,31 @@ window-break-build:
 window-breaks: windowdiff
 	@python3 tools/window_breaks.py $(if $(N),$(N),2000)
 
+# G3D, in progress: retail and OpenFS98 in turn over the same scripts, every
+# register set before each service call and compared after, the host's divide
+# repair modelled; the image (pointers into it as offsets) and GLOBAL compared.
+$(DIFFDIR)/g3ddiff.exe: tools/difftest/g3ddiff.c src/g3d/g3d_pointers.inc
+	@mkdir -p $(DIFFDIR)
+	$(CC) -std=c99 -O1 -Wall -Wextra -o $@ tools/difftest/g3ddiff.c
+
+g3ddiff: $(DIFFDIR)/g3ddiff.exe $(BIN)/G3D.DLL
+	@cp $(ORIG)/Modules/G3D.DLL $(DIFFDIR)/G3D_retail.dll
+	@cp $(ORIG)/Modules/UTIL.DLL $(DIFFDIR)/UTIL_retail.dll
+	@cp $(BIN)/G3D.DLL          $(DIFFDIR)/G3D_ours.dll
+
+g3ddiff-run: g3ddiff
+	@cd $(DIFFDIR) && WINEDEBUG=-all timeout 7200 wine g3ddiff.exe $(if $(N),$(N),20000)
+
+# G3D broken on purpose, a place at a time (tools/g3d_breaks.py).
+G3D_SRC ?= src/g3d/g3d.c
+g3d-break-build:
+	$(CC) $(CFLAGS) -fno-delete-null-pointer-checks -fno-ipa-icf -Isrc/g3d $(LDFLAGS) \
+	      -Wl,--image-base=$(BASE_G3D) -o $(DIFFDIR)/G3D_ours.dll \
+	      $(G3D_SRC) $(BIN)/g3d.res src/g3d/g3d.def -lkernel32 -lgcc
+
+g3d-breaks: g3ddiff
+	@python3 tools/g3d_breaks.py $(if $(N),$(N),2000)
+
 windowdiff-run: windowdiff
 	@cd $(DIFFDIR) && WINEDEBUG=-all timeout 7200 wine windowdiff.exe $(if $(N),$(N),20000) $(if $(FE_CD),$(FE_CD),.)
 
@@ -1029,7 +1072,7 @@ run:
 	  if cmp -s "$$o" "$(FS98_DIR)/Modules/$$n"; then echo "  $$n  retail"; \
 	  elif cmp -s $(BIN)/$$m.DLL "$(FS98_DIR)/Modules/$$n"; then echo "  $$n  OpenFS98"; \
 	  else echo "  $$n  unknown"; fi; done
-	cd $(FS98_DIR) && WINEDEBUG=-all wine FLTSIM98.EXE
+	cd $(FS98_DIR) && WINEDEBUG=-all wine $(if $(VD),explorer /desktop=FS98$(comma)$(VD)) FLTSIM98.EXE
 
 # Capture wine's own complaints while you fly.  Run it, get into a flight, move
 # around, quit the sim; the log lands in /tmp/fs98-render.log.  fixme/err only,
@@ -1056,17 +1099,19 @@ wm-managed:
 	-wine reg delete 'HKCU\Software\Wine\X11 Driver' /v Decorated /f
 	@echo "window manager control restored (wine default)"
 
-# The other documented fix, if wm-unmanaged is not enough.  Everything runs
-# inside one wine-drawn desktop window, which is what keeps the host WM away
-# from the sim's own window entirely.
-vd-on:
-	wine reg add 'HKCU\Software\Wine\Explorer\Desktops' /v Default /d 1024x768 /f
-	wine reg add 'HKCU\Software\Wine\Explorer' /v Desktop /d Default /f
-	@echo "virtual desktop on (1024x768)"
+# The virtual desktop: everything runs inside one wine-drawn desktop window,
+# which keeps the host WM away from the sim's window and settles the focus
+# fight on the opening screen.  `make run` asks for one on the command line
+# (wine explorer /desktop=FS98,$(VD)), so it applies to the sim alone and
+# needs no registry setting; `make run VD=` runs without it.  vd-on and
+# vd-off only clear the registry settings earlier versions of them made.
+VD    ?= 1024x768
+comma := ,
 
-vd-off:
-	-wine reg delete 'HKCU\Software\Wine\Explorer' /v Desktop /f
-	@echo "virtual desktop off"
+vd-on vd-off:
+	-@wine reg delete 'HKCU\Software\Wine\AppDefaults\FLTSIM98.EXE\Explorer' /v Desktop /f >/dev/null 2>&1
+	-@wine reg delete 'HKCU\Software\Wine\Explorer' /v Desktop /f >/dev/null 2>&1
+	@echo "make run uses a $(VD) virtual desktop by itself now; make run VD= for none"
 
 # The sim renders its 3D view at exactly 640x480 and does not survive being
 # asked for anything else: resize the window and the view goes black, and the
@@ -1161,4 +1206,4 @@ smoke: all
 clean:
 	rm -rf $(BIN)
 
-.PHONY: all stage setup-map graph hostmap compare run trace trace-render trace-ddraw kill window-reset wm-unmanaged wm-managed vd-on vd-off mode8 mode16 ddraw-gdi ddraw-default smoke difftest difftest-run utildiff utildiff-run utildiff-portable numericdiff numericdiff-run chaindiff chaindiff-run atcdiff atcdiff-run weathermdiff weathermdiff-run acontaindiff acontaindiff-run sounddiff sounddiff-run dynamicdiff dynamicdiff-run fegriddiff fegriddiff-run fediff fediff-run fesldiff fesldiff-run boosterdiff boosterdiff-run demodiff demodiff-run windowdiff windowdiff-run window-breaks window-break-build winmsgdiff winmsgdiff-run winmsg-breaks winmsg-break-build realitydiff realitydiff-run reality-breaks reality-break-build analysisdiff analysisdiff-run analysis-breaks analysis-break-build controlsdiff controlsdiff-run controls-breaks controls-break-build advdrvdiff advdrvdiff-run advdrv-cover landmediff landmediff-run facildiff facildiff-run facildiff-fe-run ofstest ofstest-run ofstest-remove sehfix sehfix-install sehfix-remove sehfix-log util-trace install revert installed-name-of orig-module-of clean
+.PHONY: all stage setup-map graph hostmap compare run trace trace-render trace-ddraw kill window-reset wm-unmanaged wm-managed vd-on vd-off mode8 mode16 ddraw-gdi ddraw-default smoke difftest difftest-run utildiff utildiff-run utildiff-portable numericdiff numericdiff-run chaindiff chaindiff-run atcdiff atcdiff-run weathermdiff weathermdiff-run acontaindiff acontaindiff-run sounddiff sounddiff-run dynamicdiff dynamicdiff-run fegriddiff fegriddiff-run fediff fediff-run fesldiff fesldiff-run boosterdiff boosterdiff-run demodiff demodiff-run windowdiff windowdiff-run g3ddiff g3ddiff-run g3d-break-build g3d-breaks window-breaks window-break-build winmsgdiff winmsgdiff-run winmsg-breaks winmsg-break-build realitydiff realitydiff-run reality-breaks reality-break-build analysisdiff analysisdiff-run analysis-breaks analysis-break-build controlsdiff controlsdiff-run controls-breaks controls-break-build advdrvdiff advdrvdiff-run advdrv-cover landmediff landmediff-run facildiff facildiff-run facildiff-fe-run ofstest ofstest-run ofstest-remove sehfix sehfix-install sehfix-remove sehfix-log util-trace install revert installed-name-of orig-module-of clean

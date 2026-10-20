@@ -273,16 +273,21 @@ $(BIN)/WINDOW.DLL: src/window/window.c src/window/window.def src/window/window_d
 
 # G3D is not in MODULES yet: it is being transliterated a region at a time,
 # and its Linkage is only partly filled.  docs/modules/g3d.md has the plan.
-$(BIN)/G3D.DLL: src/g3d/g3d.c src/g3d/g3d.def src/g3d/g3d_data.inc \
+$(BIN)/G3D.DLL: src/g3d/g3d.c src/g3d/g3d_mesh.S src/g3d/g3d.def src/g3d/g3d_data.inc \
                 src/g3d/g3d_pointers.inc $(BIN)/g3d.res
 	@mkdir -p $(BIN)
 	$(CC) $(CFLAGS) -fno-delete-null-pointer-checks -fno-ipa-icf -Isrc/g3d $(LDFLAGS) \
 	      -Wl,--image-base=$(BASE_G3D) \
-	      -o $@ src/g3d/g3d.c $(BIN)/g3d.res src/g3d/g3d.def \
-	      -lkernel32 -lgcc
+	      -o $@ src/g3d/g3d.c src/g3d/g3d_mesh.S $(BIN)/g3d.res src/g3d/g3d.def \
+	      -lkernel32 -luser32 -lgcc
 
 src/g3d/g3d_data.inc src/g3d/g3d_pointers.inc: $(ORIG)/Modules/G3D.DLL tools/gen_g3d_data.py
 	@python3 tools/gen_g3d_data.py $< src/g3d/g3d_data.inc src/g3d/g3d_pointers.inc
+
+# The mesh compiler (0x38), x87 compiled C carried over instruction for
+# instruction (tools/gen_g3d_mesh.py says why).
+src/g3d/g3d_mesh.S: $(ORIG)/Modules/G3D.DLL tools/gen_g3d_mesh.py
+	@python3 tools/gen_g3d_mesh.py $< $@
 
 $(BIN)/g3d.res: src/g3d/g3d.rc
 	@mkdir -p $(BIN)
@@ -547,6 +552,7 @@ src/util/cos_table.inc: $(ORIG)/Modules/UTIL.DLL tools/gen_util_tables.py
 
 utildiff: $(DIFFDIR)/utildiff.exe
 	@cp $(ORIG)/Modules/UTIL.DLL $(DIFFDIR)/UTIL_retail.dll
+	@cp $(ORIG)/Modules/WINDOW.DLL $(DIFFDIR)/WINDOW_retail.dll
 
 # The same check with the x87 assembly compiled out, which is what an ARM build
 # (Apple silicon, Android) will use.  It has to match retail just as exactly,
@@ -799,7 +805,7 @@ G3D_SRC ?= src/g3d/g3d.c
 g3d-break-build:
 	$(CC) $(CFLAGS) -fno-delete-null-pointer-checks -fno-ipa-icf -Isrc/g3d $(LDFLAGS) \
 	      -Wl,--image-base=$(BASE_G3D) -o $(DIFFDIR)/G3D_ours.dll \
-	      $(G3D_SRC) $(BIN)/g3d.res src/g3d/g3d.def -lkernel32 -lgcc
+	      $(G3D_SRC) src/g3d/g3d_mesh.S $(BIN)/g3d.res src/g3d/g3d.def -lkernel32 -luser32 -lgcc
 
 g3d-breaks: g3ddiff
 	@python3 tools/g3d_breaks.py $(if $(N),$(N),2000)

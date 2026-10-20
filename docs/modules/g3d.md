@@ -131,6 +131,16 @@ with a zero operand ends it.
   three words, or x and z with y from `.data+0x157` when bit 0 of
   `.data+0x156` is set (the byte is shifted down at every point). Nothing
   in G3D writes `.data+0x156`, and it is 0 on disk.
+- **`0x36`, a row of points by a mask, goes on to where its last point
+  left it.** Its mask walk moves on with `rol al,1; adc esi,1`: a byte a
+  point, and one more each time the bit comes round, not a byte each eight.
+  And its counter goes to `(ebx + 15) >> 4` past `+0x1e`, ebx as the last
+  point left it: the screen x when it is drawn, the eye-space x (16.16)
+  when it is out of view, the step's y when its bit is clear, and with one
+  point and its bit clear the address of `.data+0x104`. Reproduced; the
+  last can only match retail where G3D sits at its retail base, and
+  `g3ddiff` emits `0x36` only where its last point is drawn at a known
+  screen x, followed by nops it lands in.
 - **So is the clippers' unclipped path.** Every clipper sends its vertices
   straight to HG2D when `.data+0xf6` is 2, but G3D only ever writes 1
   there, and it is 0 on disk. Ours keeps the path.
@@ -172,6 +182,13 @@ here, and keep the harness clear of it.
   vertex two bytes off, and the two bytes left over make its handler pop
   the count from the wrong place and return into the middle of an address.
   Ours pushes a word. `g3ddiff` never generates a four-vertex `0x7b`.
+- **Queueing a model whose first instruction is not an object**
+  (`0x206e5eae`). `+0x38` and the queueing opcodes take a `'v'` model
+  whose first instruction (after a `0x89` context) is `0x3a`, `0x4c`,
+  `0x3c`, `0x2f` or `0x77`; for anything else retail sets the carry with
+  the instruction's address still pushed, pops it into `.data+0x1b7`, and
+  returns to the old context as a code address. Ours pops both and refuses
+  the model. `g3ddiff`'s models always start with one of the five.
 
 ## Drawing
 
@@ -377,6 +394,165 @@ jumps `0x5f`/`0x6d` (`0x206f1ee8`, an idiv by GLOBAL `+0xd4c` the host
 repairs); `0x55`, whose x bound is half the low word of the view block's
 address (ebx is loaded over the operand); and `0x70`, the eye inside an
 area, through retail UTIL's atan2 (`+0x3c`), which `g3ddiff` now loads.
+Then a weather effect to WEATHERM `+0x28` (`0x57`), the sun's shade
+(`0x30`), a subroutine run as in the map (`0x3f`), a reject by table
+points (`0x62`), the light record (`0x69`, `0x6b`, `0x6e`), programs kept
+for later in the 64 lists at `0x20710360` (`0x74`, `0x8b`; not yet run),
+a value at a point through HG2D `+0x28` (`0x91`), and the rows of points
+(`0x31` into the table, `0x35`, `0x45`, and `0x36` by a mask -- see
+below). And the positions: the object relative to the eye
+(`0x206e686c`) and the eye relative to the reference and the object
+(`0x206e69cd`), turned by a heading (`0x206e6aa8`), all through retail
+UTIL (`+0x2c`, `+0x40`, `+0x48`, `+0x4c`); the box tests `0x73` and `0x1b`;
+an object's shadow down the sun (`0x40`, which can stop the program) and
+`0x82`, which runs `0x40` on a fake instruction at `0x206fd8e7` with the
+bytes after its own opcode as the context -- reading its record six bytes
+past its own end. The objects: an object's distance on the x87
+(`0x206e694a`, the same instructions on x86, `FS98_PORTABLE_FP` for the
+long double path), its sphere against the view in eye space (`0x206e1774`),
+the eye from its offsets at a scale (`0x206e63ee`, counting overflows), and
+the opcodes that place and test one -- `0x34` (which also sets the scale
+word), `0x2f`, `0x77` (which writes its altitude into the program first),
+`0x4c`, `0x83`, `0x3a`, `0x3c`. A range rejection counts down GLOBAL
+`+0xe04`; an out-of-view one returns past the count. Their one-shot word at
+`+8`, taken when `.data+0x17c` is set, names an entry in the depth queue,
+which `g3ddiff` leaves 0 in the programs it runs and the queue fills in
+when it draws.
+
+**The depth queue** is in too: `+0x38` (`0x206e5d60`) queues a model,
+prepared from its first instruction and sorted by distance (a binary
+search, then a `std; rep movsd` to open the slot); full, it reuses the
+farthest entry's place, and a refused model gives back the newest place
+even then. `+0x34` (`0x206e600f`) draws the entries whose altitude offsets
+fall in its range, farthest first -- all but the farthest when the queue is
+at its limit -- each model run with its one-shot word set to its entry's
+offset; `+0x30` draws them all and empties the queue. The queue's size
+comes from the table at `0x206fd864` (250..700 entries) by GLOBAL
+`+0xb60`, which `+0x38` and `+0x34` read unclamped (init clamps it to 4):
+at 5 the "limit" is `0x206fd878` itself, 0 before anything set it, so a
+queued model takes entry -1, the count goes below zero and the insert
+writes before the queue. `g3ddiff` keeps the level in 0..4, as the game's
+detail levels are. The opcodes `0x32`, `0x2b` queue at an offset,
+`0x75` into the second queue (`0x206fd880`, which the scene builder draws,
+still to come), and `0x5a` runs a subroutine nested and goes on past
+itself (it queues only when the subroutine set `0x206fdc37`, which only
+opcodes still to come do). `g3ddiff` keeps sixteen models at
+`programs+0x10000` for the whole scenario, as the queue holds pointers to
+them, and two more operations: `+0x38` and `+0x34`/`+0x30`.
+
+**Shadows**: points into the table (`0x1a`, and `0x29` with a shade each),
+which in the map are carried down the sun onto the ground (`0x206e7047`:
+through the sun's matrix with `.data+0x1bd` set, scaled by `0x206fd8e7`
+with `0x206fd8dd` set, each axis an idiv the host repairs, clamped to
++-0x7fff); and `0x4a`, which builds the sun's matrix from an object's
+angles through WINDOW `+0x2c` -- `g3ddiff` now loads retail WINDOW for it
+-- and runs a subroutine as a shadow while the sun is high enough.
+
+**Meshes and lights**: `0x90` (compiled C) draws a mesh of table points by
+byte index from a base, a fan of triangles with GLOBAL `+0x12a4` bit 4 and
+polygons otherwise, behind its own plane test; `0x28` draws a light, a
+point at size 1 and a blob through HG2D `+0x84` larger, sized by a rough
+16-bit distance (`0x206f514f`) and a 16-bit idiv the host repairs (0x7fff or
+0x8001, remainder 0x7fff).
+
+**Transforms**: `0x33` (three angles), `0x3b` (a variable's record of
+them; in the map only the heading) and `0x46` (a move of the eye and angles
+plus variables' words) run a subroutine turned, the view state pushed and
+popped round it (`0x206ef162`/`0x206ef1e0`: matrix, eye, sun, angles,
+`.data+0x198`). The turn (`0x206ef25e`) takes UTIL's sine and cosine of
+each angle and applies heading, pitch and bank to the eye and the sun (as
+64-bit products `<< 17`, their high dwords) and to the view matrix (16-bit
+products summed in 32 bits and doubled, the high word saturating on
+overflow -- `0x7fff` when the doubling came out negative, `0x8000`
+otherwise); each is skipped when its angle tests 0 **as a dword**, so the
+word after it counts too. **Object shadows**: `0x41` builds the sun's
+matrix from an object's angles (WINDOW `+0x2c`), turns the shadow's sun
+vector (`0x206fd8ff`.., which the map's facing tests read) by them in
+sign-and-magnitude 32x16 arithmetic, and runs a subroutine as in the map
+with `.data+0x1bd` up; `0x46` with `.data+0x1bd` set (`0x206e7dce`) moves
+by its offset carried onto the ground and turns the sun's matrix by
+columns (`0x206e8030`). `0x206e7dce`'s branch for `.data+0x1bd` clear,
+which would pass whatever cx, bx and dx hold to WINDOW as angles, is never
+reached and is left out.
+
+**Strips** (taxiways, roads): `0x69`/`0x6b` start one, `0x6a`/`0x6c`
+(the same width), `0x78`/`0x79` (a width of their own) and `0x6f` (edge
+lights) draw a segment to the next point (`0x206f48f0`): nothing when both
+ends are out of view on one side; a quad, with a joint to the last
+segment's far corners, when the eye is beside the segment, near an end, or
+the width over the nearer end's distance squared (an unsigned 32x32
+product, a 64-bit divide the host repairs) is 6 or more; a line at 2 to
+6; nothing below. Then the centre-line dashes (the built-in program at
+`0x20710ab8`, a `0x51` and a `0x35` over the segment's own fields) or, for
+`0x6f`, rows of lights along both edges -- but `0x6f` reaches them only
+from a quad, as its line path returns first.
+
+**Textures by name**: `0x18` lower-cases its 8.3 name in the program
+(USER32 `CharLowerA`, G3D's other import; OpenFS98 calls the same), reads
+"red " and "side" as "side2" with GLOBAL `+0x12a4` bit 0, skips
+`"water   .r8"` (`0x206ff8c6`) unless GLOBAL `+0x11bc` is set -- comparing
+13 bytes with `repz cmpsb` and taking the count left, so a name that
+differs only in its last byte counts as the same -- and finds its slot in
+the texture table: the one cached in its operand, one with the name and
+context, a free one, or the one aged most (failing when even that one is
+younger than this one). A slot taken afresh is named but not loaded; one
+taken from another texture is reloaded through HG2D `+0xa8`. With a
+texture, GLOBAL `+0xc8c`, the offsets and WINDOW `+0x20` (the cofactors,
+once a frame); then it opens a surface. `0x5d` opens one with the texture
+there is.
+
+**Grids of ground** (`0x15`): columns, rows, cell sizes, origin and height
+range, then a texture word and a height a vertex. The box's eight corners
+go first (as table points 0..7): all out of view on one side and the
+vertices are skipped; the eye inside below the top draws the floor. The
+vertices then fill the point table from 0 (a grid of more than the table
+holds writes past it), and `0x206e8d73` visits the cells within 5000 of the
+eye's, far rows and far cells first, the eye's row and column last,
+through a routine whose address it keeps in `.data` (`0x206e9508`). Each
+cell is split along alternate diagonals; a triangle is drawn (through the
+textured fast triangle, its texture word's bytes as u and v) when a 64-bit
+sum of the eye's offsets against its normal's terms has the right sign;
+the cell under the eye with neither drawn sets GLOBAL `+0x832` to 2.
+
+**The mesh compiler** (`0x38`, `0x206e35b0` and the compiled C below it to
+`0x206e361a`): with GLOBAL `+0x12a4` bit 4 it turns itself into a `0x02`
+and rewrites the next instruction it can take -- a surface of table points
+(`0x05`, `0x0f`, `0x10`.., `0x08`), a facet `0x3e` or a face `0x1d`, of 4
+to 150 points, past any `0x1e`, `0x7d` or `0x81` -- as a `0x90` mesh and
+nops. It triangulates in single-precision floats: the points scaled by the
+float at `0x206f8000`, ears found by an angle-weighted sum of normals
+(`0x206e3090`, through MSVCRT's `_CIacos`) and a containment test
+(`0x206e3260`), then packs the triangles as fan bytes from the lowest index
+(starting the minimum at 0xff); when they do not fit it triangulates again
+by fans (`0x206e2db0`) but packs with the first triangulation's count. The
+face's plane distance is a dot product of zero-extended words. Because the
+decisions turn on which float intermediates MSVC rounded and which it kept
+at extended precision, **this block is carried over as its own
+instructions** (`src/g3d/g3d_mesh.S`, generated by
+`tools/gen_g3d_mesh.py`: jumps relabelled, `.data` references made
+image-relative, the `.rdata` constants and dispatch tables copied), with
+the CD's `MSVCRT.DLL` `_CIacos` transcribed beside it (the caller's
+precision kept, rounding to nearest, exceptions masked while it works). A
+portable C version, for builds without an x87, is still to come and will be
+checked against it.
+
+Harness lessons from the breaks of stages 1 to 4 (15 missed at first):
+**a fixture has to reach the boundary a comparison sits on**, and random
+values almost never do. `g3ddiff` now steers: counters seeded near their
+turns (`0x206fd6d0`, `0x206fd1fe`, GLOBAL `+0xcbe`); table points on the
+view's cone and at 3:4 depths (the fast routines' 0.75 exactly); rejects
+whose point and radius the generator works out as `point_from_words()`
+would, onto each of the sphere's boundaries, with a radius where sqrt 2's
+last bit shows; plane distances at the eye's dot product, give or take one;
+map faces at right angles to the sun, where the borrow shows. And **an
+outcome has to stay visible**: a reject's skipped `0x09` only counts in a
+GLOBAL word later instructions reset, so half of them skip a `0x87`
+instead; the polygon closes log GLOBAL `+0xc90`, which HG2D reads. The
+generator's own state (scene flags) must be set before it makes anything
+-- twice the sides' programs parted because the models were made from what
+the other side's last scene left. One break is a proven equivalence:
+`sphere-part` (a partly-in sphere taken as wholly in), as both callers
+test only for out.
 
 Left out as dead, with no reference in code or `.data`: `0x206e11c8` (a
 string copy), `0x206e11d8` (a per-axis step divided by `cx`), the

@@ -100,7 +100,7 @@ static struct side retail, ours;
 static struct side *cur;
 static uint8_t global[GLOBAL_SIZE];
 static uint8_t host[0x320], chain[0x40], hg2d[0x100], fe[0x80],
-               window[0x40], weatherm[0x40], atc[0x40], numeric[0x40];
+               weatherm[0x40], atc[0x40], numeric[0x40];
 static uint8_t buffer[0x400];        /* instructions for +0x64 */
 static uint8_t *arena, *programs, *context;
 static uint8_t window_rec[0x100], view_block[0x60];  /* GLOBAL +0x1194, +0x1198 */
@@ -330,7 +330,10 @@ static int div_fixup(CONTEXT *c)
  * retail addresses; each gets an int3, and when it is hit the registers go
  * to g3d_retail_trace.txt, the byte is put back for one single step, and
  * the int3 goes back after it.  Ours logs the same points from a build
- * with -DG3D_TRACE (g3d_ours_trace.txt). */
+ * with -DG3D_TRACE (g3d_ours_trace.txt).  Never break on the mov
+ * [esp-7],0x4050607 that starts an import call's alignment: the single
+ * step's exception frame overwrites the bytes it wrote below esp, and the
+ * call goes out misaligned (retail then differs for the tracer's sake). */
 static uint32_t break_at[32], nbreaks, stepping_from;
 static uint8_t break_byte[32];
 static FILE *trace_file;
@@ -512,8 +515,15 @@ static __attribute__((used)) int32_t STDCALL h_free(void **pp)
     put(")");
     if (*pp != NULL) {
         uint8_t *p = *pp;
+        uint32_t size = *(uint32_t *)(p - 16);
 
-        memset(p, 0xdd, *(uint32_t *)(p - 16));
+        /* a block the arena did not give, or whose size before it has been
+         * written over, is reported, not poisoned: poisoning it once
+         * wiped a transcript */
+        if (p < arena + 16 || p >= arena + ARENA_SIZE || size > (uint32_t)(arena + ARENA_SIZE - p))
+            put(" BADFREE");
+        else
+            memset(p, 0xdd, size);
     }
     *pp = NULL;
     return 0;
@@ -643,10 +653,12 @@ static int32_t STDCALL __attribute__((used)) hg2d_line(uint32_t surf, uint32_t x
     return 0;
 }
 
+/* The closes log GLOBAL +0xc90, the drawing mode HG2D reads as it fills. */
 static int32_t STDCALL __attribute__((used)) hg2d_polygon(uint32_t surf)
 {
     put(" polygon(");
     put_ptr(surf);
+    put(",mode %x", *(uint16_t *)(global + 0xc90));
     put(")");
     if (counting) cover_drawn[2]++;
     return 0;
@@ -684,6 +696,7 @@ static int32_t STDCALL __attribute__((used)) hg2d_shaded_polygon(uint32_t surf)
 {
     put(" spolygon(");
     put_ptr(surf);
+    put(",mode %x", *(uint16_t *)(global + 0xc90));
     put(")");
     if (counting) cover_drawn[5]++;
     return 0;
@@ -707,6 +720,7 @@ static int32_t STDCALL __attribute__((used)) hg2d_textured_polygon(uint32_t surf
 {
     put(" tpolygon(");
     put_ptr(surf);
+    put(",mode %x", *(uint16_t *)(global + 0xc90));
     put(")");
     if (counting) cover_drawn[7]++;
     return 0;
@@ -732,8 +746,61 @@ static int32_t STDCALL __attribute__((used)) hg2d_st_polygon(uint32_t surf)
 {
     put(" stpolygon(");
     put_ptr(surf);
+    put(",mode %x", *(uint16_t *)(global + 0xc90));
     put(")");
     if (counting) cover_drawn[9]++;
+    return 0;
+}
+
+/* +0x28: a point with a value -- the variable's address and a word (pushed
+ * as one). */
+static int32_t STDCALL __attribute__((used)) hg2d_value_point(uint32_t surf, uint32_t x,
+                                                              uint32_t y, uint32_t z,
+                                                              uint32_t var, uint32_t word)
+{
+    put(" vpoint(");
+    put_ptr(surf);
+    put(",%#x,%#x,%#x,", x, y, z);
+    put_ptr(var);
+    put(",%#x)", word & 0xffff);
+    return 0;
+}
+
+/* +0xa8: a texture loaded by name (13 bytes), context and kind: a handle,
+ * or 0 for one that will not load. */
+static int32_t STDCALL __attribute__((used)) hg2d_load_texture(const char *name, uint32_t context,
+                                                               uint32_t kind)
+{
+    uint32_t h = 0x811c9dc5u, i;
+
+    put(" load(%.13s,", name);
+    put_ptr(context);
+    put(",%#x)", kind);
+    for (i = 0; i < 13; i++)
+        h = (h ^ (uint8_t)name[i]) * 0x01000193u;
+    return (h & 7) == 0 ? 0 : (int32_t)(0x2000 + (h & 0xfff));
+}
+
+/* +0x84: a light, a size at x, y (each pushed as a word). */
+static int32_t STDCALL __attribute__((used)) hg2d_light(uint32_t rec, uint32_t size, uint32_t x,
+                                                        uint32_t y)
+{
+    put(" light(");
+    put_ptr(rec);
+    put(",%#x,%#x,%#x)", size & 0xffff, x & 0xffff, y & 0xffff);
+    return 0;
+}
+
+/* WEATHERM +0x28: a weather effect record of eight bytes from scenery. */
+static int32_t STDCALL __attribute__((used)) weather_effect(const uint8_t *rec)
+{
+    uint32_t i;
+
+    put(" weather(");
+    put_ptr((uint32_t)(uintptr_t)rec);
+    for (i = 0; i < 8; i++)
+        put("%s%02x", i ? "" : ",", rec[i]);
+    put(")");
     return 0;
 }
 
@@ -820,6 +887,10 @@ WRAP(w_textured_polygon, hg2d_textured_polygon, 1, 4, 0xd4c);
 WRAP(w_shaded_polygon, hg2d_shaded_polygon, 1, 4, 0xd78);
 WRAP(w_st_vertex, hg2d_st_vertex, 7, 28, 0xd50);
 WRAP(w_st_polygon, hg2d_st_polygon, 1, 4, 0xd54);
+WRAP(w_weather_effect, weather_effect, 1, 4, 0x1b28);
+WRAP(w_value_point, hg2d_value_point, 6, 24, 0xd28);
+WRAP(w_light, hg2d_light, 4, 16, 0xd84);
+WRAP(w_load_texture, hg2d_load_texture, 3, 12, 0xda8);
 
 static void build_stubs(void)
 {
@@ -854,6 +925,11 @@ static void build_stubs(void)
     SET_SLOT(hg2d, 0x78, w_shaded_polygon);
     SET_SLOT(hg2d, 0x50, w_st_vertex);
     SET_SLOT(hg2d, 0x54, w_st_polygon);
+    SET_SLOT(hg2d, 0x28, w_value_point);
+    SET_SLOT(hg2d, 0x84, w_light);
+    SET_SLOT(hg2d, 0xa8, w_load_texture);
+    *(uint32_t *)weatherm = 27;
+    SET_SLOT(weatherm, 0x28, w_weather_effect);
     (void)hg2d_slot_called;
 }
 
@@ -882,6 +958,37 @@ static void load_util(void)
         case 2:  im->link = global; break;
         case 17: im->link = numeric; break;
         default: printf("UTIL_retail.dll: unexpected import %u\n", im->id); exit(2);
+        }
+    }
+}
+
+/* Retail WINDOW, shared too: G3D asks it only for +0x2c, the matrix for
+ * three angles, which reads UTIL and its own scratch.  Its other imports
+ * get an empty table. */
+static uint8_t *window_link;
+static uint8_t empty_link[0x400];
+
+static void load_window(void)
+{
+    HMODULE module = LoadLibraryA("WINDOW_retail.dll");
+    struct import *im;
+
+    if (module == NULL) {
+        printf("cannot load WINDOW_retail.dll (%lu)\n", GetLastError());
+        exit(2);
+    }
+    window_link = (uint8_t *)GetProcAddress(module, "Linkage");
+    im = (struct import *)GetProcAddress(module, "ImportTable");
+    if (window_link == NULL || *(uint32_t *)window_link != 10 || im == NULL) {
+        printf("WINDOW_retail.dll: wrong module\n");
+        exit(2);
+    }
+    for (; im->id; im++) {
+        switch (im->id) {
+        case 1:  im->link = host; break;
+        case 2:  im->link = global; break;
+        case 20: im->link = util_link; break;
+        default: im->link = empty_link; break;
         }
     }
 }
@@ -923,7 +1030,7 @@ static void load_side(struct side *s, const char *path, const char *name)
         case 1:  im->link = host; break;
         case 2:  im->link = global; break;
         case 4:  im->link = chain; break;
-        case 10: im->link = window; break;
+        case 10: im->link = window_link; break;
         case 13: im->link = hg2d; break;
         case 17: im->link = numeric; break;
         case 18: im->link = fe; break;
@@ -1166,7 +1273,19 @@ static uint16_t small_word(void)
 }
 
 static void emit_block(struct gen *g, uint32_t n);
-static int scene_is_map;           /* GLOBAL +0xdca set for this program */
+/* Texture names as FS98 writes them, 8.3 in 13 bytes; 0x18 lower-cases
+ * its own (CharLowerA), so some come upper. */
+static const char *const texture_names[] = {
+    "water   .r8", "runway  .r8", "side    .r8", "red     .r8", "side2   .r8",
+    "grass   .r8", "GRASS   .R8", "Runway  .R8",
+};
+#define NTEXTURE_NAMES (sizeof texture_names / sizeof texture_names[0])
+
+static int scene_is_map;           /* no lines: GLOBAL +0xdca set and the line
+                                    * colour (+0x2ec) not 0x6900, or maybe not */
+static int scene_dca;              /* GLOBAL +0xdca set for this program */
+static int scene_plain;            /* identity matrix, x centre 0x140, +0xd42 small */
+static int scene_steady;           /* identity matrix, the eye where set_scene put it */
 
 /* A point's three words: mostly ahead of the eye (z positive), x and y
  * within the view's cone or a little past it, so some are clipped. */
@@ -1194,19 +1313,211 @@ static void emit_normal(uint8_t *p)
                        i == axis ? (rnd() % 2 ? 0x7fff : 0x8001) : (uint16_t)(rnd() % 0x2000 - 0x1000));
 }
 
-/* A plane's distance, around what the eye's dot product gives. */
-static uint32_t plane_distance(void)
+/* A plane's distance, around what the eye's dot product gives; a quarter
+ * of the time outside the map in a steady scene, exactly at it give or
+ * take one (0x206e7c4c: the high dword of normal << 16 . eye, less the
+ * distance -- shifted down by the scale word 0x206f9159 when it is set). */
+static uint32_t plane_distance(const uint8_t *normal)
 {
+    if (scene_steady && !scene_dca && rnd() % 4 == 0) {
+        int64_t sum = 0;
+        int32_t eye, hi, d = (int32_t)(rnd() % 3) - 1;
+        uint16_t scale;
+        uint32_t i;
+
+        for (i = 0; i < 3; i++) {
+            int16_t w;
+
+            memcpy(&w, normal + 2 * i, 2);
+            memcpy(&eye, global + 0xcdc + 4 * i, 4);
+            sum += (int64_t)(int32_t)((uint32_t)(uint16_t)w << 16) * eye;
+        }
+        hi = (int32_t)((uint64_t)sum >> 32);
+        memcpy(&scale, cur->image + 0x159, 2);
+        if (scale == 0)
+            return (uint32_t)(hi + d);
+        scale &= 31;
+        return (uint32_t)(((uint32_t)hi << scale) + (uint32_t)(d << scale) +
+                          (rnd() % 2 ? 0 : (1u << scale) - 1));
+    }
     return rnd() % 4 ? (uint32_t)((int32_t)(rnd() % 0x20000) - 0x10000) : spread();
 }
 
-/* Points 0x38..0x3f are 0x27's (scenario_run seeds them), kept from the
+/* In the map a face's side is the sun's dot product with its normal
+ * (0x206e740b), negated in 32 bits (0x206e7ce5): its sign turns on a borrow
+ * only when the sum is in 1..0xffff.  A quarter of the time there, the
+ * normal made at right angles to the sun but for its z, set to put the sum
+ * at the sun's z word. */
+static void steer_map_normal(uint8_t *normal)
+{
+    int16_t sun[3];
+    uint16_t on;
+    uint32_t i;
+
+    if (!scene_dca || rnd() % 4)
+        return;
+    memcpy(&on, cur->image + 0x1bd, 2);
+    for (i = 0; i < 3; i++)
+        memcpy(&sun[i], on ? cur->image + 0x4901 + 4 * i : global + 0xb2a + 4 * i, 2);
+    if (sun[2] == 0)
+        return;
+    w16(normal, (uint16_t)sun[1]);
+    w16(normal + 2, (uint16_t)-sun[0]);
+    w16(normal + 4, sun[2] > 0 ? 1 : 0xffff);
+}
+
+/* Points 0x30..0x33 are 3:4 deep for the fast routines' ratio and 0x38..0x3f
+ * are 0x27's (scenario_run seeds them all), kept from the
  * rest. */
 static uint16_t point_index(void)
 {
     uint16_t k = (uint16_t)(rnd() % 8 ? rnd() % 0x20 : rnd() % 0x3e8);
 
-    return k >= 0x38 && k < 0x40 ? k + 8 : k;
+    return k >= 0x30 && k < 0x40 ? k + 0x10 : k;
+}
+
+/* A position packed as three (word, dword) 48-bit values -- latitude,
+ * longitude, altitude, as GLOBAL +0x5b2, +0x5ba, +0x5c2 hold the eye's --
+ * mostly the eye's own with the integer parts a little off, so objects
+ * fall in, across and out of view; now and then anything. */
+static void packed_position(uint8_t *p)
+{
+    static const uint32_t eye[3] = { 0x5b2, 0x5ba, 0x5c2 };
+    uint32_t i, d;
+
+    for (i = 0; i < 3; i++) {
+        if (rnd() % 4 == 0) {
+            w16(p + 6 * i, (uint16_t)rnd());
+            w32(p + 6 * i + 2, rnd());
+            continue;
+        }
+        memcpy(p + 6 * i, global + eye[i], 6);
+        memcpy(&d, p + 6 * i + 2, 4);
+        w32(p + 6 * i + 2, d + (uint32_t)((int32_t)(rnd() % 0x81) - 0x40));
+    }
+}
+
+/* An object instruction (0x2f, 0x77, 0x4c, 0x83, 0x3a, 0x3c) at p, its
+ * target left for the caller; its length.  Range and radius 0 for none, the
+ * one-shot word 0 (the queue fills it when it draws), a scale, and a
+ * packed position or a variable holding a record. */
+static uint32_t emit_object(struct gen *g, uint8_t *p, uint32_t op)
+{
+    uint32_t len = op == 0x83 || op == 0x3a ? 0xc : op == 0x4c ? 0x10 :
+                   op == 0x3c ? 0x1c : 0x20;
+    uint32_t scale = rnd() % 2 ? 1u << (rnd() % 24) : rnd();
+
+    w16(p, op);
+    w16(p + 4, rnd() % 3 ? 0 : (uint16_t)rnd());
+    w16(p + 6, rnd() % 3 ? 0 : rnd() % 2 ? (uint16_t)(rnd() % 0x100) : (uint16_t)rnd());
+    if (op == 0x83) {
+        w32(p + 8, scale);
+    } else {
+        w16(p + 8, 0);
+        if (op == 0x3a) {
+            w16(p + 0xa, variable(g));
+        } else if (op == 0x3c) {
+            packed_position(p + 0xa);
+        } else {
+            w32(p + 0xa, scale);
+            if (op == 0x4c)
+                w16(p + 0xe, variable(g));
+            else
+                packed_position(p + 0xe);
+        }
+    }
+    return len;
+}
+
+/* A point's word on one axis as the sphere test sees it, the integer word
+ * of its eye-space coordinate, worked as point_from_words() works it in a
+ * steady scene: the word << 16 shifted by .data+0x159, less the eye,
+ * halved, times 0x7fff >> 15, z shifted by GLOBAL +0xd42.  0x7fffffff
+ * when the difference overflows (another path). */
+static int32_t eye_word(uint16_t w, int axis)
+{
+    int32_t eye, a, rel, v;
+    int64_t d;
+    uint16_t d42;
+
+    memcpy(&eye, global + 0xcdc + 4 * axis, 4);
+    a = (int32_t)((uint32_t)w << 16) >> (cur->image[0x159] & 31);
+    d = (int64_t)a - eye;
+    if (d != (int32_t)d)
+        return 0x7fffffff;
+    rel = (int32_t)d >> 1;
+    v = (int32_t)(((int64_t)rel * 0x7fff) >> 15);
+    if (axis == 2) {
+        memcpy(&d42, global + 0xd42, 2);
+        v >>= d42 & 31;
+    }
+    return (int16_t)((uint32_t)v >> 16);
+}
+
+/* a word whose eye_word() on the axis is t, or 0x7fffffff */
+static int32_t word_for(int32_t t, int axis)
+{
+    int32_t eye, i;
+
+    memcpy(&eye, global + 0xcdc + 4 * axis, 4);
+    for (i = -6; i <= 6; i++) {
+        int32_t w = 2 * t + (eye >> 16) + i;
+
+        if (w >= -0x8000 && w <= 0x7fff && eye_word((uint16_t)w, axis) == t)
+            return w;
+    }
+    return 0x7fffffff;
+}
+
+/* 0x2c's point and radius (at p) put on a boundary of the sphere test --
+ * x - z, z, y + z or x + z at the radius times sqrt 2 (r', as the test
+ * works it) give or take one -- where its sqrt 2 and its comparisons
+ * show.  0 when no word lands there. */
+static int16_t radius_root2(uint16_t r, uint32_t k)
+{
+    uint32_t q = (uint32_t)r * k;
+
+    return (int16_t)(((q >> 16) * 2 + ((q & 0xffff) >> 15)) & 0xffff);
+}
+
+static int steer_sphere(uint8_t *p)
+{
+    uint16_t r = (uint16_t)(1 + rnd() % 0x100);
+    int16_t rp;
+    int32_t d = (int32_t)(rnd() % 3) - 1, z, x = 0, y = 0, wx, wy, wz;
+    uint32_t k = rnd() % 4, n;
+
+    /* half the time a radius where sqrt 2's last bit shows */
+    if (rnd() % 2)
+        for (n = 0; n < 16; n++) {
+            r = (uint16_t)(0x1000 + rnd() % 0x1a00);
+            if (radius_root2(r, 0xb504) != radius_root2(r, 0xb505))
+                break;
+        }
+    rp = radius_root2(r, 0xb504);
+    /* the first test is z against the radius itself, the rest against r' */
+    z = k == 1 ? -(int32_t)r + d : 0x40 + (int32_t)(rnd() % 0x1c0);
+    /* y's tests come only after x's are passed, which wants z past r' */
+    if (k == 2)
+        z = rp + 0x40 + (int32_t)(rnd() % 0x100);
+    if (k == 0)
+        x = z + rp + d;
+    else if (k == 2)
+        y = -rp - z + d;
+    else if (k == 3)
+        x = -rp - z + d;
+    wx = word_for(x, 0);
+    wy = word_for(y, 1);
+    wz = word_for(z, 2);
+    if (wx == 0x7fffffff || wy == 0x7fffffff || wz == 0x7fffffff)
+        return 0;
+    w16(p, (uint16_t)wx);
+    w16(p + 2, (uint16_t)wy);
+    w16(p + 4, (uint16_t)wz);
+    w16(p + 6, r);
+    if (getenv("G3D_STEERLOG") && cur == &retail)
+        fprintf(stderr, "steer %u: x %d y %d z %d r' %d\n", k, x, y, z, rp);
+    return 1;
 }
 
 /* A drawing: a polygon (surface, start, continues, close), a line, or a
@@ -1216,7 +1527,13 @@ static uint32_t emit_drawing(struct gen *g, uint8_t *p)
 {
     uint32_t k, n, len = 0;
 
-    switch (rnd() % 18) {
+    uint32_t pick = rnd() % 18;
+
+    /* in a steady scene a third of them rejects, steered onto the sphere's
+     * boundaries */
+    if (scene_steady && rnd() % 3 == 0)
+        pick = 7;
+    switch (pick) {
     case 17: {                                  /* a facet that keeps its plane */
         uint32_t i;
 
@@ -1230,7 +1547,7 @@ static uint32_t emit_drawing(struct gen *g, uint8_t *p)
         w16(p, 0x27);
         w16(p + 2, n);
         emit_normal(p + 4);
-        w32(p + 10, plane_distance());
+        w32(p + 10, plane_distance(p + 4));
         for (i = 0; i < n; i++)
             w16(p + 14 + 2 * i, 0x38 + rnd() % 8);
         len = 14 + 2 * n;
@@ -1238,7 +1555,7 @@ static uint32_t emit_drawing(struct gen *g, uint8_t *p)
         break;
     }
     case 15: case 16: {                         /* a textured facet or face */
-        uint32_t i, at;
+        uint32_t i, at, deep;
 
         n = 2 + rnd() % 5;
         if (rnd() % 2) {
@@ -1246,7 +1563,7 @@ static uint32_t emit_drawing(struct gen *g, uint8_t *p)
             w16(p, rnd() % 2 ? 0x20 : 0x7a);
             w16(p + 2, n);
             emit_normal(p + 4);
-            w32(p + 10, plane_distance());
+            w32(p + 10, plane_distance(p + 4));
             at = 14;
         } else {
             /* not three: retail's 0x60 triangle fast path leaves the stack
@@ -1263,10 +1580,18 @@ static uint32_t emit_drawing(struct gen *g, uint8_t *p)
             w16(p + 2, n);
             emit_point(p + 4);
             emit_normal(p + 10);
+            steer_map_normal(p + 10);
             at = 16;
         }
+        deep = rnd() % 4 == 0;
         for (i = 0; i < n; i++) {
-            w16(p + at + 6 * i, point_index());
+            /* a next vertex's index is times 16 in a word: from 0x1000 it
+             * wraps (the unwrapped place, past 0x1031e, holds no pointers) */
+            w16(p + at + 6 * i, i > 0 && rnd() % 16 == 0 ? (uint16_t)(0x1000 + rnd() % 0x20)
+                                                         : point_index());
+            /* a quarter of the time from the 3:4 points, both depths in */
+            if (deep)
+                w16(p + at + 6 * i, (uint16_t)(0x30 + (i == 0 ? 0 : i == 1 ? 2 : rnd() % 4)));
             w16(p + at + 6 * i + 2, (uint16_t)rnd());
             w16(p + at + 6 * i + 4, (uint16_t)rnd());
         }
@@ -1289,7 +1614,7 @@ static uint32_t emit_drawing(struct gen *g, uint8_t *p)
         w16(p, 0x2a);
         w16(p + 2, n);
         emit_normal(p + 4);
-        w32(p + 10, plane_distance());
+        w32(p + 10, plane_distance(p + 4));
         for (i = 0; i < n; i++)
             w16(p + 14 + 2 * i, point_index());
         len = 14 + 2 * n;
@@ -1325,13 +1650,14 @@ static uint32_t emit_drawing(struct gen *g, uint8_t *p)
             w16(p + 2, n);
             emit_point(p + 4);
             emit_normal(p + 10);
+            steer_map_normal(p + 10);
             for (i = 0; i < n; i++)
                 w16(p + 16 + 2 * i, point_index());
             len = 16 + 2 * n;
         } else if (kind == 1) {
             w16(p + 2, n);
             emit_normal(p + 4);
-            w32(p + 10, plane_distance());
+            w32(p + 10, plane_distance(p + 4));
             for (i = 0; i < n; i++)
                 w16(p + 14 + 2 * i, point_index());
             len = 14 + 2 * n;
@@ -1339,7 +1665,7 @@ static uint32_t emit_drawing(struct gen *g, uint8_t *p)
             /* behind skips the 0x09 after it */
             w16(p + 2, 16);
             emit_normal(p + 4);
-            w32(p + 10, plane_distance());
+            w32(p + 10, plane_distance(p + 4));
             w16(p + 14, 0x09);
             len = 16;
         }
@@ -1425,14 +1751,25 @@ static uint32_t emit_drawing(struct gen *g, uint8_t *p)
         if (counting) cover_emitted[0x80]++;
         break;
     default:                                    /* reject, forward */
-        /* out of view skips the 0x09 after it, which counts in GLOBAL
-         * +0x2f4: the two outcomes leave different state */
+        /* out of view skips the instruction after it: a 0x09, which counts
+         * in GLOBAL +0x2f4 (often reset before anything sees it), or a
+         * 0x87, whose operand stays in GLOBAL +0xcbc.  In a steady scene,
+         * on one of the sphere's boundaries */
         w16(p, 0x2c);
-        w16(p + 2, 14);
-        emit_point(p + 4);
-        w16(p + 10, (uint16_t)(rnd() % 4 ? rnd() % 0x200 : rnd()));
-        w16(p + 12, 0x09);
-        len = 14;
+        if (!(scene_steady && steer_sphere(p + 4))) {
+            emit_point(p + 4);
+            w16(p + 10, (uint16_t)(rnd() % 4 ? rnd() % 0x200 : rnd()));
+        }
+        if (rnd() % 2) {
+            w16(p + 2, 14);
+            w16(p + 12, 0x09);
+            len = 14;
+        } else {
+            w16(p + 2, 16);
+            w16(p + 12, 0x87);
+            w16(p + 14, (uint16_t)rnd());
+            len = 16;
+        }
         if (counting) cover_emitted[0x2c]++;
         break;
     }
@@ -1470,7 +1807,17 @@ static void set_scene(void)
     w16(global + 0xd42, rnd() % 4 ? rnd() % 3 : (uint16_t)rnd());
     w32(global + 0x320, rnd() % 8 ? 1 + rnd() % 0x10000 : (rnd() % 2 ? 0 : spread()));
     w16(global + 0xdca, rnd() % 6 ? 0 : 1);
-    scene_is_map = global[0xdca] != 0;
+    scene_dca = global[0xdca] != 0;
+    {
+        uint16_t d42;
+
+        memcpy(&d42, global + 0xd42, 2);
+        scene_steady = m[0] == 0x7fff && m[1] == 0 && m[2] == 0 && m[3] == 0 && m[4] == 0x7fff &&
+                       m[5] == 0 && m[6] == 0 && m[7] == 0 && m[8] == 0x7fff;
+        scene_plain = m[0] == 0x7fff && m[1] == 0 && m[4] == 0x7fff && m[8] == 0x7fff &&
+                      view_block[4] == 0x40 && view_block[5] == 1 && view_block[6] == 0 &&
+                      view_block[7] == 0 && d42 <= 2;
+    }
     w32(global + 0x2ec, rnd() % 4 ? 0x6900 : rnd());
     w16(global + 0x1286, rnd() % 3 ? 0 : (uint16_t)rnd());
     /* bit 3 of GLOBAL +0x12a4 keeps textured triangles and quads off the
@@ -1481,6 +1828,22 @@ static void set_scene(void)
         global[0x12a4] &= ~8;
     if (rnd() % 2)
         w16(cur->image + 0xf4, 1);
+    /* the distance (strips draw near by it, lines far) */
+    w32(global + 0xd4c, rnd() % 2 ? rnd() % 0x400000 : rnd());
+    /* in the map, facets and meshes close only with +0x1298 clear */
+    w32(global + 0x1298, rnd() % 2 ? 0 : rnd());
+    /* 0x87 steps +0xcbe from 1 to 2 */
+    w16(global + 0xcbe, rnd() % 4 ? (uint16_t)(rnd() % 3) : (uint16_t)rnd());
+    /* 0x41 runs its shadow with +0xe8a above 0xfa */
+    w16(global + 0xe8a, rnd() % 2 ? (uint16_t)(0xf8 + rnd() % 5) : (uint16_t)rnd());
+    /* 0x4a runs its shadow with +0x390 at 2 or more, +0x28c set and
+     * +0x116e's low bits clear */
+    w32(global + 0x390, rnd() % 4);
+    w32(global + 0x28c, rnd() % 4 ? rnd() : 0);
+    w16(global + 0x116e, rnd() % 2 ? 0 : (uint16_t)rnd());
+    /* 0x3f runs its subroutine only with both set */
+    w16(global + 0x11b2, rnd() % 4 ? 1 : 0);
+    w16(global + 0xb34, rnd() % 4 ? (uint16_t)rnd() : 0);
     w16(global + 0xc96, (uint16_t)rnd());       /* texture offsets */
     w16(global + 0xc9e, (uint16_t)rnd());
     for (i = 0; i < 3; i++)                     /* the sun's direction */
@@ -1489,10 +1852,28 @@ static void set_scene(void)
     cur->image[0x15a] = 0;
     if (rnd() % 8 == 0)
         cur->image[0x159] = (uint8_t)(rnd() % 4);
+    /* In the map a line is drawn only with the line colour 0x6900; a point
+     * drawn with GLOBAL +0x1286 set may change the colour */
+    {
+        uint32_t colour;
+        uint16_t highlight;
+
+        memcpy(&colour, global + 0x2ec, 4);
+        memcpy(&highlight, global + 0x1286, 2);
+        scene_is_map = scene_dca && !(colour == 0x6900 && highlight == 0);
+    }
 }
 
 /* A subroutine in a 0x100-byte slot of its own after the main program,
  * ending in return (or end), returned as its address. */
+/* The models +0x38 and the queueing opcodes queue: a slot of 0x100 bytes
+ * each at programs+0x10000, made at the start of a scenario and kept
+ * through it (programs are remade over the rest), as the queue keeps
+ * pointers to them until it draws them. */
+#define NMODELS 16
+#define models (programs + 0x10000)
+
+static void seed_textures(void);
 static uint8_t *sub_next;
 static uint32_t reserved_next;
 static uint32_t draw_weight;         /* in ten, how often emit_one draws */
@@ -1524,6 +1905,9 @@ static void emit_one(struct gen *g)
         0x58, 0x5e, 0x61, 0x71, 0x76, 0x7d, 0x81, 0x86, 0x87, 0x88, 0x8d, 0x8f,
         0x92, 0x93, 0x26, 0x7e, 0x4d, 0x4e, 0x4f, 0x65, 0x67, 0x8e, 0x89, 0x48,
         0x2d, 0x2e, 0x84, 0x68, 0x1e, 0x56, 0x5f, 0x6d, 0x55, 0x70,
+        0x57, 0x30, 0x62, 0x69, 0x6b, 0x6e, 0x35, 0x45, 0x31, 0x36,
+        0x91, 0x73, 0x1b, 0x40, 0x82, 0x34, 0x2f, 0x77, 0x4c, 0x83, 0x3a, 0x3c,
+        0x32, 0x2b, 0x75, 0x5a, 0x1a, 0x29, 0x90, 0x28, 0x38, 0x6a, 0x18, 0x5d, 0x15,
     };
     uint8_t *p = g->p, *q;
     uint32_t op, n, i;
@@ -1544,9 +1928,11 @@ static void emit_one(struct gen *g)
     case 5: op = (uint8_t[]){ 0x24, 0x1c, 0x21, 0x39 }[rnd() % 4]; break;
     case 6: op = (uint8_t[]){ 0x0d, 0x16 }[rnd() % 2]; break;
     case 7: op = 0x03; break;
-    default: op = (uint8_t[]){ 0x23, 0x8a, 0x5c, 0x5b }[rnd() % 4]; break;
+    default: op = (uint8_t[]){ 0x23, 0x8a, 0x5c, 0x5b, 0x3f, 0x74, 0x8b, 0x4a, 0x33, 0x3b, 0x46, 0x41 }[rnd() % 12]; break;
     }
-    if (g->depth >= 3 && (op == 0x23 || op == 0x8a || op == 0x5c || op == 0x5b))
+    if (g->depth >= 3 && (op == 0x23 || op == 0x8a || op == 0x5c || op == 0x5b || op == 0x3f ||
+                          op == 0x74 || op == 0x8b || op == 0x5a || op == 0x4a || op == 0x33 ||
+                          op == 0x3b || op == 0x46 || op == 0x41))
         op = 0x02;
     /* Generation order is execution order (branches go forward, and each
      * subroutine is called from where it was made), so once a context may
@@ -1557,6 +1943,8 @@ static void emit_one(struct gen *g)
         context_possible = 1;
     if (counting)
         cover_emitted[op]++;
+    if (scene_dca && (op == 0x51 || op == 0x67 || op == 0x2e))
+        scene_is_map = 1;                       /* the line colour changes */
     w16(p, op);
     switch (op) {
     case 0x02: case 0x43: case 0x64: case 0x85: case 0x04: case 0x76: case 0x7d:
@@ -1571,6 +1959,7 @@ static void emit_one(struct gen *g)
         g->p += 4;
         break;
     case 0x47:
+        scene_plain = scene_steady = 0;         /* it moves the eye */
         w16(p + 2, rnd() % 4 ? rnd() % 0x30 : (uint16_t)rnd());
         g->p += 4;
         break;
@@ -1606,6 +1995,365 @@ static void emit_one(struct gen *g)
             w16(p + 8 + 4 * i, rnd() % 4 ? (uint16_t)(rnd() % 0x11 - 8) : (uint16_t)rnd());
         }
         g->p += 6 + 4 * n;
+        emit_block(g, rnd() % 3);
+        w16(p + 2, (uint32_t)(g->p - p));
+        break;
+    case 0x35: case 0x45:                       /* a row of points */
+        emit_point(p + 2);
+        emit_point(p + 8);
+        w16(p + 0xe, 1 + rnd() % 8);
+        g->p += 0x10;
+        break;
+    case 0x31:                                  /* a row into the point table */
+        n = 1 + rnd() % 8;
+        /* clear of the kept points, 0x30..0x3f */
+        w16(p + 2, rnd() % 2 ? rnd() % (0x30 - n) : 0x40 + rnd() % 0x100);
+        w16(p + 4, n);
+        emit_point(p + 6);
+        emit_point(p + 0xc);
+        g->p += 0x12;
+        break;
+    case 0x36: {                                /* a row of points by a mask */
+        /* The counter goes on (ebx + 15) >> 4 past +0x1e, ebx as the last
+         * point left it: its screen x only when it is drawn.  So only where
+         * the scene puts a point at the eye's x and y on screen at x 0x140
+         * (an identity matrix, the centre 0x140, +0xd42 small), the last
+         * point's bit set and both ends there, the mask bytes with their top
+         * bit set and nops after: landing in them goes on, or stops at the
+         * 0x0200 an odd landing reads. */
+        int32_t eye[3];
+        uint32_t k;
+
+        if (!scene_plain || g->end - p < 0x90) {
+            w16(p, 0x02);
+            g->p += 2;
+            break;
+        }
+        memcpy(eye, global + 0xcdc, 12);
+        n = 1 + rnd() % 7;
+        for (k = 0; k < 2; k++) {
+            w16(p + 2 + 6 * k, (uint16_t)(eye[0] >> 16));
+            w16(p + 4 + 6 * k, (uint16_t)(eye[1] >> 16));
+            w16(p + 6 + 6 * k, (uint16_t)((eye[2] >> 16) + 0x100 + rnd() % 0x100));
+        }
+        w16(p + 0xe, n);
+        for (i = 0x10; i < 0x1e; i++)
+            p[i] = 0xff;
+        for (i = 0; i < n; i++)
+            p[0x1e + i] = (uint8_t)(rnd() | 0x80);
+        p[0x1e + n - 1] |= (uint8_t)(1 << (n - 1));
+        for (i = 0x1e + n; i < 0x1e + n + 0x60; i += 2)
+            w16(p + i, 0x02);
+        g->p += 0x1e + n + 0x60;
+        break;
+    }
+    case 0x34:                                  /* an object's scale */
+        scene_plain = scene_steady = 0;         /* it moves the eye */
+        w16(p + 4, rnd() % 3 ? 0 : (uint16_t)rnd());
+        w16(p + 6, rnd() % 3 ? 0 : (uint16_t)rnd());
+        w16(p + 8, rnd() % 4 ? rnd() % 0x19 : (uint16_t)rnd());
+        g->p += 0xa;
+        emit_block(g, rnd() % 3);
+        w16(p + 2, (uint32_t)(g->p - p));
+        break;
+    case 0x2f: case 0x77: case 0x4c: case 0x83: case 0x3a: case 0x3c:
+        scene_plain = scene_steady = 0;         /* they move the eye */
+        g->p += emit_object(g, p, op);
+        emit_block(g, rnd() % 3);
+        w16(p + 2, (uint32_t)(g->p - p));
+        break;
+    case 0x15: {                                /* a grid of ground */
+        /* small (it fills the point table from 0), near the eye: columns,
+         * rows, cell sizes, origin, the height range, then a texture word
+         * and a height a vertex */
+        uint16_t cols = (uint16_t)(1 + rnd() % 4), rows = (uint16_t)(1 + rnd() % 4);
+        uint16_t cx = (uint16_t)(1 + rnd() % 0x20), cz = (uint16_t)(1 + rnd() % 0x20);
+        uint32_t nv = (uint32_t)(cols + 1) * (rows + 1);
+
+        if (g->end - p < (int32_t)(0x12 + 4 * nv)) {
+            w16(p, 0x02);
+            g->p += 2;
+            break;
+        }
+        w16(p + 2, cols);
+        w16(p + 4, rows);
+        w16(p + 6, cx);
+        w16(p + 8, cz);
+        w16(p + 0xa, (uint16_t)(-(int32_t)(cols * cx) / 2 + (int32_t)(rnd() % 0x21) - 0x10));
+        w16(p + 0xc, (uint16_t)(-(int32_t)(rows * cz) / 2 + (int32_t)(rnd() % 0x21) - 0x10));
+        w16(p + 0xe, (uint16_t)(rnd() % 5 - 4));
+        w16(p + 0x10, (uint16_t)(rnd() % 5));
+        for (i = 0; i < nv; i++) {
+            w16(p + 0x12 + 4 * i, (uint16_t)rnd());
+            w16(p + 0x14 + 4 * i, (uint16_t)(rnd() % 7 - 3));
+        }
+        g->p += 0x12 + 4 * nv;
+        break;
+    }
+    case 0x18: case 0x5d: {                     /* a textured surface, then its vertices */
+        uint8_t *q2;
+
+        if (g->end - p < 0x60) {
+            w16(p, 0x02);
+            g->p += 2;
+            break;
+        }
+        if (op == 0x18) {
+            /* the cached slot (low 14 bits: an offset into the table, a
+             * slot's or not) and the kind/age (top two), the offsets, the
+             * name */
+            uint16_t slot = rnd() % 2 ? (uint16_t)(6 + 0x1c * (rnd() % 8)) : (uint16_t)rnd();
+
+            w16(p + 2, (uint16_t)((slot & 0x3fff) | (rnd() % 4) << 14));
+            for (i = 4; i < 0xa; i += 2)
+                w16(p + i, (uint16_t)rnd());
+            memset(p + 0xa, 0, 12);
+            memcpy(p + 0xa, texture_names[rnd() % NTEXTURE_NAMES], 11);
+            w16(p + 0x16, 0x05);                /* the surface's word, stepped over */
+            q2 = p + 0x18;
+        } else {
+            for (i = 2; i < 8; i += 2)
+                w16(p + i, (uint16_t)rnd());
+            q2 = p + 8;
+        }
+        n = 2 + rnd() % 4;
+        w16(q2, 0x06);
+        emit_point(q2 + 2);
+        q2 += 8;
+        for (i = 0; i < n; i++) {
+            w16(q2, 0x07);
+            emit_point(q2 + 2);
+            q2 += 8;
+        }
+        w16(q2, 0x08);
+        g->p = q2 + 2;
+        break;
+    }
+    case 0x6a: {                                /* a strip: a start and next points */
+        /* near the eye mostly, on the ground: quads, and their markings,
+         * need the eye beside the segment or close to an end */
+#define STRIP_POINT(q) (rnd() % 3 ? (w16((q), (uint16_t)(rnd() % 0x61 - 0x30)),                \
+                                     w16((q) + 2, (uint16_t)(rnd() % 5 - 2)),                  \
+                                     w16((q) + 4, (uint16_t)(rnd() % 0x61 - 0x30)))            \
+                                  : emit_point(q))
+        static const uint8_t next[5] = { 0x6a, 0x6c, 0x6f, 0x78, 0x79 };
+        uint8_t *q2 = p;
+
+        if (g->end - p < 0x50) {
+            w16(p, 0x02);
+            g->p += 2;
+            break;
+        }
+        w16(q2, rnd() % 2 ? 0x69 : 0x6b);
+        w16(q2 + 2, rnd() % 4 ? (uint16_t)(1 + rnd() % (rnd() % 2 ? 8 : 0x40)) : (uint16_t)rnd());
+        STRIP_POINT(q2 + 4);
+        q2 += 10;
+        n = 1 + rnd() % 4;
+        uint32_t lights = rnd() % 2;            /* half of them edge lights */
+        for (i = 0; i < n; i++) {
+            uint8_t o = lights ? 0x6f : next[rnd() % 5];
+
+            w16(q2, o);
+            if (o == 0x78 || o == 0x79) {
+                w16(q2 + 2, rnd() % 4 ? (uint16_t)(1 + rnd() % (rnd() % 2 ? 8 : 0x40)) : (uint16_t)rnd());
+                STRIP_POINT(q2 + 4);
+                q2 += 10;
+            } else {
+                STRIP_POINT(q2 + 2);
+                q2 += 8;
+            }
+        }
+        g->p = q2;
+        break;
+    }
+    case 0x38: {                                /* a mesh compiled from what follows */
+        /* with GLOBAL +0x12a4 bit 4, the next instruction it takes --
+         * past a 0x1e, 0x7d or 0x81 -- is triangulated into a 0x90: a
+         * surface of table points, a facet, a face, four to ten points */
+        uint8_t *q2 = p + 2;
+        uint32_t kind = rnd() % 4;
+
+        if (g->end - p < 0x80) {
+            w16(p, 0x02);
+            g->p += 2;
+            break;
+        }
+        if (rnd() % 4 == 0) {
+            static const uint16_t skip[3] = { 0x1e, 0x7d, 0x81 };
+            uint16_t sop = skip[rnd() % 3];
+
+            w16(q2, sop);
+            if (sop == 0x7d) {
+                q2 += 2;
+            } else {
+                w16(q2 + 2, sop == 0x1e ? 0 : (uint16_t)rnd());
+                q2 += 4;
+            }
+        }
+        n = 4 + rnd() % 7;
+        if (kind <= 1) {
+            w16(q2, 0x05);
+            w16(q2 + 2, 0x0f);
+            w16(q2 + 4, point_index());
+            for (i = 1; i < n; i++) {
+                w16(q2 + 2 + 4 * i, 0x10);
+                w16(q2 + 4 + 4 * i, point_index());
+            }
+            w16(q2 + 2 + 4 * n, 0x08);
+            q2 += 4 + 4 * n;
+        } else if (kind == 2) {
+            w16(q2, 0x3e);
+            w16(q2 + 2, n);
+            emit_normal(q2 + 4);
+            w32(q2 + 10, plane_distance(q2 + 4));
+            for (i = 0; i < n; i++)
+                w16(q2 + 14 + 2 * i, point_index());
+            q2 += 14 + 2 * n;
+        } else {
+            w16(q2, 0x1d);
+            w16(q2 + 2, n);
+            emit_point(q2 + 4);
+            emit_normal(q2 + 10);
+            for (i = 0; i < n; i++)
+                w16(q2 + 16 + 2 * i, point_index());
+            q2 += 16 + 2 * n;
+        }
+        g->p = q2;
+        break;
+    }
+    case 0x28:                                  /* a light of a size */
+        p[2] = (uint8_t)rnd();
+        p[3] = (uint8_t)(rnd() % 4 ? rnd() % 5 : rnd());
+        emit_point(p + 4);
+        g->p += 0xa;
+        break;
+    case 0x90: {                                /* a mesh of table points */
+        /* index bytes from a base, a top bit starting a new centre or
+         * polygon; the first always has it -- a fan's centre is otherwise
+         * a stack slot nothing set (docs/modules/g3d.md) */
+        n = 1 + rnd() % 12;
+        w16(p + 2, n);
+        if (rnd() % 4 == 0) {
+            memset(p + 4, 0, 10);
+        } else {
+            emit_normal(p + 4);
+            w32(p + 10, plane_distance(p + 4));
+        }
+        p[0xe] = (uint8_t)(rnd() % 4 ? rnd() % 0x20 : rnd());
+        for (i = 0; i < n + 2; i++)
+            p[0xf + i] = (uint8_t)(rnd() % 4 == 0 ? 0x80 | rnd() % 0x20 : rnd() % 0x20);
+        p[0xf] |= 0x80;
+        g->p += (n + 0x10) & ~1u;
+        break;
+    }
+    case 0x1a: case 0x29: {                     /* points into the table */
+        uint32_t per = op == 0x29 ? 12 : 6;
+
+        n = 1 + rnd() % 6;
+        /* clear of the kept points, 0x30..0x3f */
+        w16(p + 2, rnd() % 2 ? rnd() % (0x30 - n) : 0x40 + rnd() % 0x100);
+        w16(p + 4, n);
+        for (i = 0; i < n; i++) {
+            emit_point(p + 6 + per * i);
+            if (op == 0x29)
+                emit_normal(p + 12 + per * i);
+        }
+        g->p += 6 + per * n;
+        break;
+    }
+    case 0x32: case 0x2b: case 0x75: {          /* queue a model */
+        uint8_t *m = models + 0x100 * (rnd() % NMODELS);
+        int32_t off = (int32_t)(m - p);
+
+        if (op == 0x2b) {
+            w32(p + 2, (uint32_t)off);
+            g->p += 6;
+        } else if (off >= -0x8000 && off <= 0x7fff) {
+            w16(p + 2, (uint16_t)off);
+            g->p += 4;
+        } else {
+            w16(p, 0x02);
+            g->p += 2;
+        }
+        break;
+    }
+    case 0x5a: {                                /* a subroutine run nested */
+        /* its offset from +2; nothing sets 0x206fdc37 yet, so nothing is
+         * queued and the program goes on past the instruction */
+        uint8_t *sub = subroutine(g);
+
+        if (sub == NULL) {
+            w16(p, 0x02);
+            g->p += 2;
+            break;
+        }
+        w16(p + 2, (uint32_t)(sub - (p + 2)));
+        g->p += 4;
+        break;
+    }
+    case 0x73:                                  /* the eye in a box */
+        for (i = 0; i < 3; i++) {
+            int16_t lo = (int16_t)rnd(), hi = (int16_t)rnd();
+
+            if (rnd() % 3 == 0)
+                lo = -0x8000, hi = 0x7fff;
+            if (lo > hi) {
+                int16_t t = lo;
+
+                lo = hi, hi = t;
+            }
+            w16(p + 4 + 4 * i, (uint16_t)lo);
+            w16(p + 6 + 4 * i, (uint16_t)hi);
+        }
+        g->p += 0x10;
+        emit_block(g, rnd() % 3);
+        w16(p + 2, (uint32_t)(g->p - p));
+        break;
+    case 0x1b:                                  /* the eye in a turned box */
+        for (i = 4; i < 0x16; i += 2)
+            w16(p + i, (uint16_t)rnd());
+        for (i = 0xa; i < 0x10; i += 2)
+            if (rnd() % 2)
+                w16(p + i, 0xfffe);
+        g->p += 0x16;
+        emit_block(g, rnd() % 3);
+        w16(p + 2, (uint32_t)(g->p - p));
+        break;
+    case 0x40:                                  /* an object's shadow */
+        w16(p + 2, variable(g));
+        g->p += 4;
+        break;
+    case 0x82:                                  /* a shadow of its own object */
+        for (i = 2; i < 0x14; i += 2)
+            w16(p + i, (uint16_t)rnd());
+        g->p += 0x14;
+        break;
+    case 0x91:                                  /* a value at a point */
+        emit_point(p + 2);
+        w16(p + 8, variable(g));
+        w16(p + 0xa, (uint16_t)rnd());
+        g->p += 0xc;
+        break;
+    case 0x57:                                  /* a weather effect */
+        for (i = 0; i < 8; i++)
+            p[2 + i] = (uint8_t)rnd();
+        g->p += 10;
+        break;
+    case 0x30:                                  /* a shade from the sun */
+        w16(p + 2, (uint16_t)rnd());
+        g->p += 4;
+        break;
+    case 0x69: case 0x6b: case 0x6e:            /* a light */
+        for (i = 0; i < 4; i++)
+            w16(p + 2 + 2 * i, (uint16_t)rnd());
+        g->p += 10;
+        break;
+    case 0x62:                                  /* a reject by table points */
+        n = 1 + rnd() % 6;
+        w16(p + 4, n);
+        for (i = 0; i < n; i++)
+            w16(p + 6 + 2 * i, point_index());
+        g->p += 6 + 2 * n;
         emit_block(g, rnd() % 3);
         w16(p + 2, (uint32_t)(g->p - p));
         break;
@@ -1723,15 +2471,72 @@ static void emit_one(struct gen *g)
             w16(p + 0x20006, (uint32_t)(land - p));
         }
         break;
-    case 0x23: case 0x8a: case 0x5c: case 0x5b: {
-        uint8_t *sub = subroutine(g);
+    case 0x23: case 0x8a: case 0x5c: case 0x5b: case 0x3f: case 0x74: case 0x8b: case 0x4a:
+    case 0x33: case 0x3b: case 0x46: case 0x41: {
+        /* 0x3f runs its subroutine as in the map: no lines there either */
+        int map = scene_is_map;
+        uint8_t *sub;
+
+        if (op == 0x3f || op == 0x4a || op == 0x41)
+            scene_is_map = 1;
+        sub = subroutine(g);
+        scene_is_map = map;
 
         if (sub == NULL) {
             w16(p, 0x02);
             g->p += 2;
             break;
         }
-        if (op == 0x23) {
+        if (op == 0x74 || op == 0x8b) {
+            /* a program for later, in one of the 64 lists (or past them) */
+            uint16_t list = rnd() % 8 ? (uint16_t)(rnd() % 0x40) : (uint16_t)rnd();
+
+            if (op == 0x74) {
+                w16(p + 2, (uint32_t)(sub - p));
+                w16(p + 4, list);
+                g->p += 6;
+            } else {
+                w32(p + 2, (uint32_t)(sub - p));
+                w16(p + 6, list);
+                g->p += 8;
+            }
+        } else if (op == 0x33 || op == 0x3b || op == 0x46) {
+            /* a turned subroutine: angles, a variable's record of them, or
+             * a move and angles with variables added (a shadow's, with
+             * 0x206f91bd set) */
+            scene_plain = scene_steady = 0;     /* the eye moves inside */
+            w16(p + 2, (uint32_t)(sub - p));
+            if (op == 0x33) {
+                for (i = 4; i < 0xa; i += 2)
+                    w16(p + i, rnd() % 3 ? (uint16_t)rnd() : 0);
+                g->p += 0xa;
+            } else if (op == 0x3b) {
+                w16(p + 4, variable(g));
+                g->p += 6;
+            } else {
+                for (i = 4; i < 0xa; i += 2)
+                    w16(p + i, rnd() % 2 ? (uint16_t)(rnd() % 0x40 - 0x20) : (uint16_t)rnd());
+                for (i = 0xa; i < 0x16; i += 4) {
+                    w16(p + i, rnd() % 3 ? (uint16_t)rnd() : 0);
+                    w16(p + i + 2, rnd() % 2 ? 0 : variable(g));
+                }
+                g->p += 0x16;
+            }
+        } else if (op == 0x41) {
+            /* an object's shadow: the target, a variable holding the
+             * angles' record */
+            w16(p + 2, (uint32_t)(sub - p));
+            w16(p + 4, variable(g));
+            g->p += 6;
+        } else if (op == 0x4a) {
+            /* a shadow: the target, a variable holding the angles' record,
+             * the sun's direction */
+            w16(p + 2, (uint32_t)(sub - p));
+            w16(p + 4, variable(g));
+            for (i = 6; i < 0xc; i += 2)
+                w16(p + i, (uint16_t)rnd());
+            g->p += 0xc;
+        } else if (op == 0x23 || op == 0x3f) {
             w16(p + 2, (uint32_t)(sub - p));
             g->p += 4;
         } else if (op == 0x8a) {
@@ -1775,6 +2580,50 @@ static void emit_block(struct gen *g, uint32_t n)
         emit_one(g);
 }
 
+/* The models: 'v', a context now and then (0x89), an object instruction
+ * (one of the five the queue takes), a few instructions it skips to the end of when the object is
+ * not drawn, and a return.  Made as map code: the map's state when they
+ * run is not known. */
+static void make_models(void)
+{
+    static const uint8_t first[] = { 0x3a, 0x4c, 0x3c, 0x2f, 0x77 };
+    uint32_t m;
+    int map = scene_is_map, plain = scene_plain;
+
+    scene_is_map = 1;
+    scene_plain = 0;
+    scene_steady = 0;                           /* no scene yet: what the */
+    scene_dca = 0;                              /* other side left */
+    context_possible = 1;
+    draw_weight = 5;
+    for (m = 0; m < NMODELS; m++) {
+        struct gen g;
+        uint8_t *p = models + 0x100 * m, *obj;
+
+        memset(p, 0, 0x100);
+        w16(p, 0x76);
+        g.p = p + 2;
+        g.end = p + 0xc0;
+        g.depth = 3;
+        g.context = 0;
+        if (rnd() % 4 == 0) {
+            w16(g.p, 0x89);
+            w32(g.p + 2, (uint32_t)(uintptr_t)context + CONTEXT_SIZE / 2);
+            g.context = 1;
+            g.p += 6;
+        }
+        /* only the five: any other first instruction is retail's crash
+         * (docs/modules/g3d.md) */
+        obj = g.p;
+        g.p += emit_object(&g, g.p, first[rnd() % sizeof first]);
+        emit_block(&g, rnd() % 4);
+        w16(obj + 2, (uint32_t)(g.p - obj));
+        w16(g.p, 0x22);
+    }
+    scene_is_map = map;
+    scene_plain = plain;
+}
+
 /* A program at programs+0: a few instructions and an end.  `contextual`
  * when it will run with a context already set. */
 static uint32_t make_program(int contextual)
@@ -1783,7 +2632,8 @@ static uint32_t make_program(int contextual)
     uint32_t i;
 
     for (i = 0; i < PROGRAM_SIZE; i += 4)
-        w32(programs + i, rnd());
+        if (i < 0x10000 || i >= 0x10000 + 0x100 * NMODELS)
+            w32(programs + i, rnd());
     g.p = programs + 0x10;
     g.end = programs + 0x8000;
     sub_next = programs + 0x8000;
@@ -1813,6 +2663,10 @@ static void op_normalise(void)
         v[i] = rnd() % 8 == 0 ? 0 : spread();
     if (rnd() % 8 == 0)
         v[0] = v[1] = v[2] = 0;
+    /* now and then tiny, where the shift clamps at bit 3 */
+    if (rnd() % 6 == 0)
+        for (i = 0; i < 3; i++)
+            v[i] = (uint32_t)((int32_t)(rnd() % 31) - 15);
     put("+3c(%08x %08x %08x)", v[0], v[1], v[2]);
     if (counting) {
         uint32_t m = 0;
@@ -1877,6 +2731,9 @@ static void op_next(void)
     uint32_t i, at = 2 * (rnd() % 0x40);
     uint16_t opcode = (uint16_t)(rnd() % 8 == 0 ? rnd() : rnd() % 0xa0);
 
+    if (rnd() % 8 == 0)                         /* the top of the table */
+        opcode = (uint16_t)(0x92 + rnd() % 3);
+
     for (i = 0; i < sizeof buffer; i++)
         buffer[i] = (uint8_t)rnd();
     for (i = 2; i < 0x40; i += 2)
@@ -1896,6 +2753,7 @@ static void op_next(void)
  * header, with flags at +0, +0xd, an age word at +0x12 and a texture at
  * +0x14.  Seeded before +0x54, +0x58: some loaded, some flagged with none,
  * ages that tie. */
+
 static void seed_textures(void)
 {
     uint32_t table, i, n;
@@ -1915,6 +2773,14 @@ static void seed_textures(void)
         slot[0xd] = (uint8_t)rnd();
         w16(slot + 0x12, rnd() % 4 ? rnd() % 8 : rnd());
         w32(slot + 0x14, rnd() % 3 ? 0x1000 + rnd() % 0x1000 : 0);
+        /* named as 0x18's programs name them, in use with a texture loaded,
+         * so they find it */
+        if (slot[0] && rnd() % 2) {
+            memset(slot, 0, 13);
+            memcpy(slot, texture_names[rnd() % 6], 11);
+            w32(slot + 0xe, rnd() % 2 ? 0 : (uint32_t)(uintptr_t)context + CONTEXT_SIZE / 2);
+            w32(slot + 0x14, 0x1000 + rnd() % 0x1000);
+        }
     }
 }
 
@@ -1937,6 +2803,49 @@ static void op_textures(void)
         memcpy(global + 0x2a8, &v, 2);
         put("+60(%u)", v);
         call_service(0x60, 0);
+    }
+}
+
+/* +0x38: a model queued, in a context now and then; sometimes two bytes
+ * in, which is not a model ('v') at all. */
+static void op_queue_model(void)
+{
+    uint32_t n = 1 + rnd() % 4, i;
+
+    for (i = 0; i < n; i++) {
+        uint32_t m = (uint32_t)(uintptr_t)(models + 0x100 * (rnd() % NMODELS));
+        uint32_t key = rnd() % 3 ? 0 : (uint32_t)(uintptr_t)context + CONTEXT_SIZE / 2;
+
+        if (rnd() % 8 == 0)
+            m += 2;
+        set_scene();
+        put("+38(");
+        put_ptr(m);
+        put(",");
+        put_ptr(key);
+        put(")");
+        call_service(0x38, 2, m, key);
+    }
+}
+
+/* +0x34 between two altitudes, emptied after or not; or +0x30, all of it. */
+static void op_queue_draw(void)
+{
+    set_scene();
+    if (rnd() % 3 == 0) {
+        put("+30()");
+        call_service(0x30, 0);
+        return;
+    }
+    {
+        uint32_t a = rnd() % 4 ? (uint32_t)((int32_t)(rnd() % 0x200) - 0x100) : spread();
+        uint32_t b = rnd() % 4 ? (uint32_t)((int32_t)(rnd() % 0x200) - 0x100) : spread();
+        uint32_t reset = rnd() % 2;
+
+        if (rnd() % 4 == 0)
+            a = 0x7fffffff, b = 0x80000001;
+        put("+34(%08x,%08x,%u)", a, b, reset);
+        call_service(0x34, 3, a, b, reset);
     }
 }
 
@@ -1998,10 +2907,10 @@ static void op_run(void)
 
 static void op(void)
 {
-    uint32_t k = rnd() % 10;
+    uint32_t k = rnd() % 12;
 
-    if (k >= 7)
-        k = 7;              /* programs, three times in ten */
+    if (k >= 7 && k <= 9)
+        k = 7;              /* programs, three times in twelve */
     if (counting)
         cover_ops[k]++;
     put("#%u ", op_number);
@@ -2016,6 +2925,8 @@ static void op(void)
     case 3: op_tick(); break;
     case 4: op_next(); break;
     case 5: case 6: op_textures(); break;
+    case 10: op_queue_model(); break;
+    case 11: op_queue_draw(); break;
     default: op_run(); break;
     }
     put("\n");
@@ -2047,6 +2958,12 @@ static void run_side(struct side *s)
         global[k] = (uint8_t)rnd();
     for (k = 0; k < CONTEXT_SIZE; k++)
         context[k] = (uint8_t)rnd();
+    /* the queue's size by GLOBAL +0xb60, a detail level 0..4: +0x38 and
+     * +0x34 read the table at 0x206fd864 with it unclamped, and 5 reads its
+     * limit from 0x206fd878, 0 at first, which empties a queue below zero
+     * and has it write before itself */
+    w32(global + 0xb60, rnd() % 5);
+    make_models();
     faulted = 0;
     put("scenario %u\ninit", scenario);
     call_service(0x04, 0);
@@ -2063,8 +2980,28 @@ static void run_side(struct side *s)
         w32(pt, (uint32_t)((int32_t)(rnd() % (2u * (uint32_t)span + 1)) - span) * (rnd() % 4 ? 1 : 2));
         w32(pt + 4, (uint32_t)((int32_t)(rnd() % (2u * (uint32_t)span + 1)) - span) * (rnd() % 4 ? 1 : 2));
         w32(pt + 8, (uint32_t)z);
+        /* now and then 0x30000 or 0x40000 deep: three over four is the fast
+         * routines' threshold (0x206f9178, 0.75) exactly */
+        if (rnd() % 8 == 0) {
+            z = rnd() % 2 ? 0x30000 : 0x40000;
+            w32(pt, (uint32_t)((int32_t)(rnd() % 0x20001) - 0x10000));
+            w32(pt + 4, (uint32_t)((int32_t)(rnd() % 0x20001) - 0x10000));
+            w32(pt + 8, (uint32_t)z);
+        }
+        /* now and then on the cone: |x| = z one's complement, x = z or
+         * -z - 1, where a point is just out of view */
+        if (z > 0 && rnd() % 8 == 0)
+            w32(pt, rnd() % 2 ? (uint32_t)z : (uint32_t)(-z - 1));
         w16(pt + 0xc, (uint16_t)(rnd() & 0x0f0f));
         w16(pt + 0xe, (uint16_t)rnd());
+    }
+    /* 0x30..0x33: two at 0x30000 deep, two at 0x40000, within the cone */
+    for (k = 0x30; k < 0x34; k++) {
+        uint8_t *pt = s->image + 0x31e + 16 * k;
+
+        w32(pt, (uint32_t)((int32_t)(rnd() % 0x20001) - 0x10000));
+        w32(pt + 4, (uint32_t)((int32_t)(rnd() % 0x20001) - 0x10000));
+        w32(pt + 8, k < 0x32 ? 0x30000 : 0x40000);
     }
     /* 0x27's points: z below 0x10000 and y within 0..z, so every vertex,
      * crossing and clamp it draws leaves ecx's high half 0 */
@@ -2076,6 +3013,24 @@ static void run_side(struct side *s)
         w32(pt + 4, 0x100 + rnd() % (uint32_t)(z - 0xff));
         w32(pt + 8, (uint32_t)z);
     }
+    /* The positions' state: computed or not (0x206f917e, 0x206f9180), a
+     * heading to turn by (0x206f9196, 0x206f9198), and 0x40's shadow mode
+     * (0x206fd8dd, which 0x4a counts) */
+    w16(s->image + 0x17e, rnd() % 4 ? 0 : 1);
+    w16(s->image + 0x180, rnd() % 4 ? 0 : 1);
+    w16(s->image + 0x196, rnd() % 2);
+    w16(s->image + 0x198, rnd() % 8 ? (uint16_t)rnd() : 0);
+    w16(s->image + 0x48dd, rnd() % 2);
+    w16(s->image + 0x1bd, rnd() % 2);           /* the sun's matrix on (0x4a) */
+    for (k = 0x4901; k < 0x490d; k++)           /* and its words, 0x41's */
+        s->image[k] = (uint8_t)rnd();
+    /* counters near their turns: 0x04's at 0x206fd6d0 (reloads at 0),
+     * +0x60's at 0x206fd1fe (wraps at 0x12) */
+    w32(s->image + 0x46d0, rnd() % 2 ? 1 + rnd() % 4 : rnd());
+    w16(s->image + 0x41fe, rnd() % 2 ? (uint16_t)(0x0f + rnd() % 4) : (uint16_t)rnd());
+    w16(s->image + 0x48be, rnd() % 4);          /* a record, not packed */
+    w16(s->image + 0x17c, rnd() % 2);           /* the queue's one-shot words */
+    seed_textures();                            /* named slots for 0x18 to find */
     /* In the game a model has always been drawn by the time the sky goes
      * through +0x1c, so 0x206f9161 points at 0x206f9166 as draw_model left
      * it; programs write through it.  Now and then it is still null. */
@@ -2161,6 +3116,7 @@ int main(int argc, char **argv)
     context = VirtualAlloc(NULL, CONTEXT_SIZE, MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE);
     build_stubs();
     load_util();
+    load_window();
     load_side(&retail, "G3D_retail.dll", "retail");
     if ((uint32_t)(uintptr_t)retail.module != 0x206e0000u) {
         printf("retail G3D did not load at its base (%p)\n", (void *)retail.module);

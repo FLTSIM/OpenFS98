@@ -58,8 +58,20 @@ BASE_REALITY := 0x208b0000
 BASE_ANALYSIS := 0x20630000
 BASE_CONTROLS := 0x20670000
 BASE_G3D    := 0x206e0000
+BASE_MULTIP := 0x20850000
 
 MODULES := ACONTAIN ADVDRV ANALYSIS ATC BOOSTER CHAIN CONTROLS DEMO DYNAMIC FACIL FE G3D GLOBAL LANDME NUMERIC REALITY SLEW SOUND UTIL WEATHERM WINDOW WINMSG
+
+# MULTIP is in progress and intentionally is not in MODULES yet.  The first
+# recovered slice is built explicitly and differential-tested below.
+$(BIN)/MULTIP.DLL: src/multip/multip.c src/multip/multip.def $(BIN)/multip.res
+	@mkdir -p $(BIN)
+	$(CC) $(CFLAGS) $(LDFLAGS) -Wl,--image-base=$(BASE_MULTIP) \
+	      -o $@ src/multip/multip.c $(BIN)/multip.res src/multip/multip.def -lkernel32
+
+$(BIN)/multip.res: src/multip/multip.rc
+	@mkdir -p $(BIN)
+	$(RC) $< -O coff -o $@
 
 # Setup renames two modules on the way from CD to install, and the game loads
 # the *installed* names.  A rebuilt FACIL.DLL copied in as FACIL.DLL would just
@@ -801,6 +813,19 @@ g3ddiff: $(DIFFDIR)/g3ddiff.exe $(BIN)/G3D.DLL
 g3ddiff-run: g3ddiff
 	@cd $(DIFFDIR) && WINEDEBUG=-all timeout 7200 wine g3ddiff.exe $(if $(N),$(N),20000)
 
+# MULTIP in progress: the public player-list, lookup, status and active-range
+# queries. The transport-heavy slots are not exercised and it is not installed.
+$(DIFFDIR)/multipdiff.exe: tools/difftest/multipdiff.c
+	@mkdir -p $(DIFFDIR)
+	$(CC) -std=c99 -O1 -Wall -Wextra -Iinclude -o $@ tools/difftest/multipdiff.c
+
+multipdiff: $(DIFFDIR)/multipdiff.exe $(BIN)/MULTIP.DLL
+	@cp $(ORIG)/Modules/multip.dll $(DIFFDIR)/MULTIP_retail.dll
+	@cp $(BIN)/MULTIP.DLL          $(DIFFDIR)/MULTIP_ours.dll
+
+multipdiff-run: multipdiff
+	@cd $(DIFFDIR) && WINEDEBUG=-all wine multipdiff.exe $(if $(N),$(N),20000)
+
 # G3D broken on purpose, a place at a time (tools/g3d_breaks.py).
 G3D_SRC ?= src/g3d/g3d.c
 g3d-break-build:
@@ -1241,4 +1266,4 @@ smoke: all
 clean:
 	rm -rf $(BIN)
 
-.PHONY: all stage setup-map graph hostmap compare run trace trace-render trace-ddraw kill window-reset wm-unmanaged wm-managed vd-on vd-off mode8 mode16 ddraw-gdi ddraw-default smoke difftest difftest-run utildiff utildiff-run utildiff-portable numericdiff numericdiff-run chaindiff chaindiff-run atcdiff atcdiff-run weathermdiff weathermdiff-run acontaindiff acontaindiff-run sounddiff sounddiff-run dynamicdiff dynamicdiff-run fegriddiff fegriddiff-run fediff fediff-run fesldiff fesldiff-run boosterdiff boosterdiff-run demodiff demodiff-run windowdiff windowdiff-run g3ddiff g3ddiff-run g3d-break-build g3d-breaks g3dmeshdiff g3dmeshdiff-run g3ddiff-meshc-run window-breaks window-break-build winmsgdiff winmsgdiff-run winmsg-breaks winmsg-break-build realitydiff realitydiff-run reality-breaks reality-break-build analysisdiff analysisdiff-run analysis-breaks analysis-break-build controlsdiff controlsdiff-run controls-breaks controls-break-build advdrvdiff advdrvdiff-run advdrv-cover landmediff landmediff-run facildiff facildiff-run facildiff-fe-run ofstest ofstest-run ofstest-remove sehfix sehfix-install sehfix-remove sehfix-log util-trace install revert installed-name-of orig-module-of clean
+.PHONY: all stage setup-map graph hostmap compare run trace trace-render trace-ddraw kill window-reset wm-unmanaged wm-managed vd-on vd-off mode8 mode16 ddraw-gdi ddraw-default smoke difftest difftest-run utildiff utildiff-run utildiff-portable numericdiff numericdiff-run chaindiff chaindiff-run atcdiff atcdiff-run weathermdiff weathermdiff-run acontaindiff acontaindiff-run sounddiff sounddiff-run dynamicdiff dynamicdiff-run fegriddiff fegriddiff-run fediff fediff-run fesldiff fesldiff-run boosterdiff boosterdiff-run demodiff demodiff-run windowdiff windowdiff-run g3ddiff g3ddiff-run multipdiff multipdiff-run g3d-break-build g3d-breaks g3dmeshdiff g3dmeshdiff-run g3ddiff-meshc-run window-breaks window-break-build winmsgdiff winmsgdiff-run winmsg-breaks winmsg-break-build realitydiff realitydiff-run reality-breaks reality-break-build analysisdiff analysisdiff-run analysis-breaks analysis-break-build controlsdiff controlsdiff-run controls-breaks controls-break-build advdrvdiff advdrvdiff-run advdrv-cover landmediff landmediff-run facildiff facildiff-run facildiff-fe-run ofstest ofstest-run ofstest-remove sehfix sehfix-install sehfix-remove sehfix-log util-trace install revert installed-name-of orig-module-of clean

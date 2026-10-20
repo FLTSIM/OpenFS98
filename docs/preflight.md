@@ -137,15 +137,17 @@ options are named in `.data` (`CONNECTION_TYPE`, `MAX_SEGMENTS_PER_SEC`,
 - MSVC C, 11 functions, with 177 x87 instructions. It reads the user's
   position and attitude (GLOBAL `+0x560`..`+0x57c`), so some of that is
   probably the other aircraft's extrapolation. Not yet read.
-- **DirectPlay looks to be driven directly through COM**, not through the
+- **DirectPlay is driven directly through COM**, not through the
   host. Only four host services touch the host's DirectPlay globals
   (`0x41a518`/`0x41a51c`): `+0x120`, `+0x124` and `+0x128`, which load
   `dplayx`, call through its exports (`DirectPlayEnumerateA`, …) and free
   it, and the 7,312-byte `+0x094`. MULTIP itself makes COM-shaped calls
   (`mov ecx,[obj]` / `call [ecx+N]`) at about twenty distinct vtable
-  offsets, and calls one function pointer held at `.data+0x980`. Confirm
-  which interface each object is before designing the fake. A harness
-  needs a fake DirectPlay object with sessions, players and a message queue.
+  offsets, and calls one function pointer held at `.data+0x980`. The main
+  object is confirmed as `IDirectPlay3A`: MULTIP queries its literal IID and
+  its calls line up with the inherited vtable through `SetSessionDesc` at
+  `+0x7c`. A harness needs a fake DirectPlay object with sessions, players
+  and a message queue.
   The other side of a session is then a script, which is better than a
   second machine.
 - **A worker thread** (`CreateThread`, `WaitForMultipleObjects`, events,
@@ -159,6 +161,11 @@ options are named in `.data` (`CONNECTION_TYPE`, `MAX_SEGMENTS_PER_SEC`,
 DirectPlay does not exist on the native targets, so the fake object is more
 than a fixture: it is a written-down account of exactly what MULTIP
 expects from a transport, which a native build will need to provide.
+
+**Status: in progress.** The public `+0x24`..`+0x38` player-list, lookup,
+status and active-range slice is transliterated and differential-tested
+against retail. It is kept out of the normal module list until session setup
+and transport exist. See [modules/multip.md](modules/multip.md).
 
 **MPCHAT** (3,104 bytes) is the chat window. Its id is `0xffffffff`, so no
 module can import it. It hooks itself onto CHAIN lists `0x1d`, `0x14`, `0xb`

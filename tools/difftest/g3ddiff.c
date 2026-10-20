@@ -58,6 +58,11 @@
 
 #define STDCALL __attribute__((stdcall))
 
+static void w16(uint8_t *p, uint32_t v) { p[0] = (uint8_t)v; p[1] = (uint8_t)(v >> 8); }
+static void w32(uint8_t *p, uint32_t v) { w16(p, v); w16(p + 2, v >> 16); }
+static uint16_t r16(const uint8_t *p) { return (uint16_t)(p[0] | p[1] << 8); }
+static uint32_t r32(const uint8_t *p) { return r16(p) | (uint32_t)r16(p + 2) << 16; }
+
 #define IMAGE_SIZE      0x18450u
 #define LINKAGE         0x58u
 #define LINKAGE_END     (LINKAGE + 0x68u)
@@ -93,6 +98,7 @@ struct side {
     struct snapshot *snap;
     uint32_t nsnap;
     uint32_t callbacks[32];          /* by first registration */
+    uint32_t callback_list[32];      /* the list each was last added to, 0 removed */
     uint32_t ncallbacks;
 };
 
@@ -109,6 +115,17 @@ static uint32_t arena_used;
 /* Libraries (0x63), FE +0x3c's objects by 16-byte id: programs at
  * programs+0x11000, made with the models.  An id that differs from one in
  * a single dword is no library. */
+/* FE's scene for the frame callbacks: pieces of the stream (+0x18) at
+ * programs+0x13000 -- far ones, area records of 0x44 bytes each opening
+ * with a jump over itself, then near ones, program blocks -- and records
+ * for the search (+0x20) at programs+0x15000, type 0x65 ones with a
+ * program block after their 14 bytes.  Made with the models. */
+#define scene_pieces (programs + 0x13000)
+#define scene_records (programs + 0x15000)
+#define NSCENE 12
+static uint32_t scene_piece_at[NSCENE], scene_piece_len[NSCENE], nscene_far, nscene;
+static uint32_t scene_record_at[8], scene_record_len[8], nscene_records;
+static uint32_t scene_next_piece, scene_next_record;
 #define libraries (programs + 0x11000)
 #define NLIBRARIES 4
 static uint32_t library_length[NLIBRARIES];
@@ -477,6 +494,13 @@ static void *arena_get(uint32_t size)
 
     arena_used = (arena_used + 15) & ~15u;
     if (arena_used + size + 16 > ARENA_SIZE) {
+        /* inside G3D, an outcome (a break that leaks a block a frame gets
+         * here): the scenario ends as a fault would end it */
+        if (in_g3d) {
+            put(" EXHAUSTED");
+            faulted = 1;
+            fault_land();
+        }
         printf("scenario %u: arena exhausted\n", scenario);
         exit(2);
     }
@@ -629,13 +653,21 @@ static uint32_t callback_name(uint32_t cb)
 
 static __attribute__((used)) int32_t STDCALL chain_add(uint32_t list, uint32_t cb)
 {
-    put(" chainadd(%#x,cb%u)", list, callback_name(cb));
+    uint32_t i = callback_name(cb);
+
+    put(" chainadd(%#x,cb%u)", list, i);
+    if (i < 32)
+        cur->callback_list[i] = list;
     return 0;
 }
 
 static __attribute__((used)) int32_t STDCALL chain_remove(uint32_t list, uint32_t cb)
 {
-    put(" chainremove(%#x,cb%u)", list, callback_name(cb));
+    uint32_t i = callback_name(cb);
+
+    put(" chainremove(%#x,cb%u)", list, i);
+    if (i < 32)
+        cur->callback_list[i] = 0;
     return 0;
 }
 
@@ -940,6 +972,105 @@ static int32_t STDCALL __attribute__((used)) fe_object(const uint32_t *id, uint8
 }
 WRAP(w_fe_object, fe_object, 5, 20, 0x123c);
 
+static int32_t STDCALL __attribute__((used)) h_busy(uint32_t on)
+{
+    put(" busy(%u)", on);
+    return 0;
+}
+WRAP(w_busy, h_busy, 1, 4, 0x250);
+
+/* FE's scene stream (+0x18): the next piece into dst when it fits (-1
+ * when it does not), its size through got and a word of its through x; 0
+ * after the last, the stream starting over. */
+static int32_t STDCALL __attribute__((used)) fe_scene(uint8_t *dst, uint32_t size, uint32_t *got,
+                                                      uint32_t *x)
+{
+    uint32_t i = scene_next_piece;
+
+    put(" scene(");
+    put_ptr((uint32_t)(uintptr_t)dst);
+    put(",%#x)", size);
+    if (i >= nscene) {
+        scene_next_piece = 0;
+        return 0;
+    }
+    if (scene_piece_len[i] > size)
+        return -1;
+    memcpy(dst, scene_pieces + scene_piece_at[i], scene_piece_len[i]);
+    *got = scene_piece_len[i];
+    *x = 0x10000 * i + 0x1234;
+    scene_next_piece = i + 1;
+    put("=%u", i);
+    return 1;
+}
+WRAP(w_fe_scene, fe_scene, 4, 16, 0x1218);
+
+/* +0x20: the search's next record (kind 0 starts over), its address and
+ * size; 0 at the end. */
+static int32_t STDCALL __attribute__((used)) fe_next(uint32_t kind, uint32_t *out, uint32_t *len)
+{
+    uint32_t i;
+
+    if ((kind & 0xffff) == 0)
+        scene_next_record = 0;
+    i = scene_next_record;
+    put(" next(%u)", kind & 0xffff);
+    if (i >= nscene_records)
+        return 0;
+    *out = (uint32_t)(uintptr_t)(scene_records + scene_record_at[i]);
+    *len = scene_record_len[i];
+    scene_next_record = i + 1;
+    return 1;
+}
+WRAP(w_fe_next, fe_next, 3, 12, 0x1220);
+
+static int32_t STDCALL __attribute__((used)) fe_reset(uint32_t which)
+{
+    put(" fereset(%u)", which & 0xffff);
+    scene_next_piece = 0;
+    return 0;
+}
+WRAP(w_fe_reset, fe_reset, 1, 4, 0x1244);
+
+static int32_t STDCALL __attribute__((used)) fe_level(uint32_t level)
+{
+    put(" level(%u)", level & 0xffff);
+    return 0;
+}
+WRAP(w_fe_level, fe_level, 1, 4, 0x1248);
+
+/* +0x54: the box radius round the position (48-bit latitude at +4,
+ * longitude at +0xc): north, south, east, west. */
+static int32_t STDCALL __attribute__((used)) fe_search(const uint8_t *pos, uint32_t radius,
+                                                       uint32_t *box)
+{
+    int32_t lat = (int32_t)r32(pos + 4), lon = (int32_t)r32(pos + 0xc);
+
+    put(" search(%#x)", radius);
+    box[0] = (uint32_t)(lat + (int32_t)radius);
+    box[1] = (uint32_t)(lat - (int32_t)radius);
+    box[2] = (uint32_t)(lon + (int32_t)radius);
+    box[3] = (uint32_t)(lon - (int32_t)radius);
+    return 0;
+}
+WRAP(w_fe_search, fe_search, 3, 12, 0x1254);
+
+/* +0x60/+0x68: a band of a position at a level; +0x64/+0x6c the band's
+ * edge back as a 48-bit position (+2 the fraction, +4 the integer). */
+static int32_t STDCALL __attribute__((used)) fe_band(const uint8_t *p, uint32_t level)
+{
+    return (int32_t)((r32(p) >> (8 + (level & 7))) & 0x3fff);
+}
+WRAP(w_fe_band, fe_band, 2, 8, 0x1260);
+
+static int32_t STDCALL __attribute__((used)) fe_band_edge(uint32_t band, uint32_t level, uint8_t *out)
+{
+    w16(out + 2, (uint16_t)(band * 0x9e37));
+    w32(out + 4, (band & 0xffff) << (8 + (level & 7)));
+    return 0;
+}
+WRAP(w_fe_band_edge, fe_band_edge, 3, 12, 0x1264);
+
 /* +0x68: a texture by name with the context, 1 when it loaded. */
 static int32_t STDCALL __attribute__((used)) hg2d_named_texture(const char *name, uint32_t context)
 {
@@ -1038,6 +1169,16 @@ static void build_stubs(void)
     SET_SLOT(hg2d, 0xa8, w_load_texture);
     SET_SLOT(hg2d, 0x68, w_named_texture);
     SET_SLOT(fe, 0x3c, w_fe_object);
+    SET_SLOT(fe, 0x18, w_fe_scene);
+    SET_SLOT(fe, 0x20, w_fe_next);
+    SET_SLOT(fe, 0x44, w_fe_reset);
+    SET_SLOT(fe, 0x48, w_fe_level);
+    SET_SLOT(fe, 0x54, w_fe_search);
+    SET_SLOT(fe, 0x60, w_fe_band);
+    SET_SLOT(fe, 0x64, w_fe_band_edge);
+    SET_SLOT(fe, 0x68, w_fe_band);
+    SET_SLOT(fe, 0x6c, w_fe_band_edge);
+    SET_SLOT(host, 0x50, w_busy);
     *(uint32_t *)weatherm = 27;
     SET_SLOT(weatherm, 0x28, w_weather_effect);
     (void)hg2d_slot_called;
@@ -1332,12 +1473,15 @@ static void find_variables(void)
                 if ((v & 3) == 0 && nreserved < 16 && k == nreserved)
                     reserved_vars[nreserved++] = (uint16_t)i;
             } else if (!(v + 2 > 0x1194 && v < 0x119c) && !(v + 2 > 0xdca && v < 0xdcc) &&
-                       !(v + 4 > 0x248 && v < 0x24a) && !(v + 4 > 0xb60 && v < 0xb64)) {
+                       !(v + 4 > 0x248 && v < 0x24a) && !(v + 4 > 0xb60 && v < 0xb64) &&
+                       !(v + 4 > 0xcdc && v < 0xcfa) && !(v + 4 > 0xd42 && v < 0xd44)) {
                 /* not the window and view pointers the drawing reads, nor
                  * the map flag (lines depend on it, below), nor the season
                  * (0..3 in the game; a ground tile reads names by it, out
                  * of the image past that) or the detail level (0..4; 5 is
-                 * the queue's crash) */
+                 * the queue's crash), nor the eye, the view's matrix and
+                 * +0xd42, which the steering of instructions already made
+                 * (0x36's landing) has counted on */
                 mapped_vars[nmapped++] = (uint16_t)i;
             }
         } else if (v == 0 && nunmapped < 64 && i % 37 == 1) {
@@ -1358,10 +1502,6 @@ struct gen {
     int context;             /* a context is set on this path */
 };
 
-static void w16(uint8_t *p, uint32_t v) { p[0] = (uint8_t)v; p[1] = (uint8_t)(v >> 8); }
-static void w32(uint8_t *p, uint32_t v) { w16(p, v); w16(p + 2, v >> 16); }
-static uint16_t r16(const uint8_t *p) { return (uint16_t)(p[0] | p[1] << 8); }
-static uint32_t r32(const uint8_t *p) { return r16(p) | (uint32_t)r16(p + 2) << 16; }
 
 /* A variable operand: through the table, mapped or not.  Whether a
  * context is set depends on the path taken (a 0x89 in a skipped block never
@@ -3131,6 +3271,90 @@ static void make_models(void)
         library_length[m] = (uint32_t)(g.p + 2 - p) + rnd() % 8;
     }
     in_library = 0;
+    {
+        /* the far pieces' records near the eye (GLOBAL +0x564's latitude,
+         * +0x56a's longitude), so their ellipses take it in now and then */
+        uint32_t at = 0, i, k;
+
+        /* now and then more far pieces than a frame's count of them */
+        nscene_far = rnd() % 4 ? 1 + rnd() % 3 : 4 + rnd() % 5;
+        nscene = nscene_far + rnd() % 4;
+        in_library = 1;
+        for (i = 0; i < nscene; i++) {
+            uint8_t *p = scene_pieces + at;
+
+            if (i < nscene_far) {
+                uint32_t n = 1 + rnd() % 3;
+
+                memset(p, 0, 0x44 * n);
+                for (k = 0; k < n; k++) {
+                    uint8_t *r = p + 0x44 * k;
+
+                    w16(r, 0x0d);
+                    w16(r + 2, 0x44);
+                    w32(r + 0x14, rnd() % 2 ? 0x10000 + rnd() % 0x10000 : rnd());
+                    w32(r + 0x1a, r32(global + 0x564) + rnd() % 0x200 - 0x100);
+                    w16(r + 0x1e, r16(global + 0x56a));
+                    w32(r + 0x20, r32(global + 0x56c) + rnd() % 0x200 - 0x100);
+                    w16(r + 0x2e, rnd() % 4 ? (uint16_t)rnd() : (uint16_t)(0xf000 | rnd() % 0x100));
+                    w32(r + 0x30, rnd() % 0x400);
+                    w32(r + 0x34, rnd() % 0x400);
+                    w16(r + 0x38, (uint16_t)rnd());
+                    w16(r + 0x3a, (uint16_t)(rnd() % 0x200));
+                }
+                scene_piece_len[i] = 0x44 * n;
+            } else {
+                struct gen g;
+
+                g.p = p;
+                g.end = p + 0xc0;
+                g.depth = 3;
+                g.context = 0;
+                /* a model into the second queue (0x75), drawn after the
+                 * scene in the same frame */
+                if (rnd() % 3 == 0) {
+                    w16(g.p, 0x75);
+                    w16(g.p + 2, (uint16_t)(models + 0x100 * (rnd() % NMODELS) - g.p));
+                    g.p += 4;
+                }
+                emit_block(&g, 1 + rnd() % 4);
+                /* a near piece FE gives with nothing in it, now and then */
+                scene_piece_len[i] = rnd() % 10 ? (uint32_t)(g.p - p) : 0;
+            }
+            scene_piece_at[i] = at;
+            at += (scene_piece_len[i] + 0xf) & ~0xfu;
+        }
+        nscene_records = rnd() % 6;
+        for (i = 0, at = 0; i < nscene_records; i++) {
+            uint8_t *p = scene_records + at;
+            struct gen g;
+
+            memset(p, 0, 0x100);
+            p[0] = rnd() % 4 ? 0x65 : (uint8_t)rnd();
+            g.p = p + 0xe;
+            g.end = p + 0xc0;
+            g.depth = 3;
+            g.context = 0;
+            emit_block(&g, 1 + rnd() % 3);
+            scene_record_len[i] = (uint32_t)(g.p - p);
+            scene_record_at[i] = at;
+            at += 0x100;
+        }
+        /* and an area of nops that fills the 0xff8 bytes the areas
+         * program has, give or take, as the first */
+        if (nscene_records && rnd() % 4 == 0) {
+            uint8_t *p = scene_records + 0x600;
+            uint32_t len = 0xfee + 2 * (rnd() % 5), k;
+
+            memset(p, 0, 0xe);
+            p[0] = 0x65;
+            for (k = 0; k < len; k += 2)
+                w16(p + 0xe + k, 0x02);
+            scene_record_at[0] = 0x600;
+            scene_record_len[0] = 0xe + len;
+        }
+        in_library = 0;
+    }
     scene_is_map = map;
     scene_plain = plain;
 }
@@ -3484,9 +3708,132 @@ static void op_records(void)
     }
 }
 
+/* A CHAIN callback G3D registered, called as CHAIN calls it: (a, b),
+ * stdcall, with every register scripted.  For list 0x14, message 0x46
+ * (release the textures) half the time. */
+static void call_callback(uint32_t i, uint32_t a, uint32_t b)
+{
+    uint32_t k;
+
+    put("cb%u(%#x,%#x)", i, a, b);
+    call_nargs = 2;
+    call_args[0] = a;
+    call_args[1] = b;
+    call_target = cur->callbacks[i];
+    for (k = 0; k < 7; k++)
+        do
+            regs_in[k] = rnd();
+        while (as_offset(&retail, regs_in[k]) != regs_in[k] ||
+               as_offset(&ours, regs_in[k]) != regs_in[k]);
+    in_g3d = 1;
+    if (__builtin_setjmp(fault_jb) == 0) {
+        call_regs();
+        put_regs();
+    }
+    in_g3d = 0;
+}
+
+static void op_callback(void)
+{
+    uint32_t live[32], n = 0, i, a;
+
+    for (i = 0; i < cur->ncallbacks; i++) {
+        uint32_t list = cur->callback_list[i];
+
+        if (list == 0)
+            continue;
+        live[n++] = i;
+    }
+    if (n == 0) {
+        put("cb none");
+        return;
+    }
+    i = live[rnd() % n];
+    a = cur->callback_list[i] == 0x14 && rnd() % 2 ? 0x46 : rnd() % 4 ? rnd() % 0x100 : rnd();
+    call_callback(i, a, rnd());
+}
+
+/* A few frames as the host runs them: list 1 (the step: the scene's
+ * builder, a state a frame), 5 (the ground's easing), 0x10 (the scene
+ * drawn), so a build goes through its states. */
+static void op_frames(void)
+{
+    static const uint32_t order[3] = { 1, 5, 0x10 };
+    uint32_t frames = 2 + rnd() % 7, f, k, i;
+
+    /* GLOBAL's view block and the rest of the scene first: as the first
+     * operation, +0x1198 is still the random fill, and the buildings read
+     * the scale through it from wherever that points */
+    set_scene();
+    /* the scene on (+0x390 2) and drawn (+0xdce 0) mostly; the builder's
+     * bits in +0x444 (4 now, 8 and 0x20 a check) now and then, so a build
+     * goes through its states; the view's number (+0x424) steady; the fast
+     * routines' level (+0xcb4); the tiles' texture words and the eye's
+     * height near 0x206eb838's threshold */
+    w16(global + 0xdce, rnd() % 4 ? 0 : rnd() % 2 ? 1 : (uint16_t)rnd());
+    w32(global + 0x390, rnd() % 4 ? 2 : rnd() % 4);
+    w16(global + 0x424, rnd() % 4 ? 0 : (uint16_t)(rnd() % 3));
+    w16(global + 0xcb4, rnd() % 4 ? (uint16_t)(rnd() % 3) : (uint16_t)rnd());
+    w16(global + 0xcd2, rnd() % 2 ? 0 : (uint16_t)rnd());
+    for (k = 0; k < 4; k++)
+        w32(global + 0x414 + 4 * k, rnd() % 2 ? 0x220000 | rnd() % 0x10 :
+                                    rnd() % 2 ? rnd() % 10 : rnd());
+    if (rnd() % 2) {
+        /* the ground copies +0x574 to +0x5c4 before the tiles read it */
+        uint16_t h = (uint16_t)(r16(global + 0x21) + 0x17d0 + rnd() % 8);
+
+        w16(global + 0x5c4, h);
+        w16(global + 0x574, h);
+    }
+    /* the builder's count of pieces a frame (0x206f9176) small */
+    if (rnd() % 4 == 0)
+        w16(cur->image + 0x176, (uint16_t)(1 + rnd() % 3));
+    /* the eye's latitude at one of the far part's level edges
+     * (0x206fd764.., past the box 0x206fd754 and 8) */
+    if (rnd() % 8 == 0) {
+        uint32_t lat = r32(cur->image + 0x4754) + 8 + r32(cur->image + 0x4764 + 4 * (rnd() % 5)) -
+                       rnd() % 2;
+
+        w32(global + 0x564, rnd() % 2 ? lat : -lat);
+    }
+    put("frames%u", frames);
+    for (f = 0; f < frames && !faulted; f++) {
+        uint32_t bits = r16(global + 0x444) & ~0x2cu;
+
+        if (rnd() % 6 == 0)
+            bits |= rnd() % 3 == 0 ? 4 : rnd() % 2 ? 8 : 0x20;
+        w16(global + 0x444, (uint16_t)bits);
+        if (rnd() % 4 == 0) {
+            uint32_t d = rnd() % 2 ? rnd() % 0x20000 : rnd() % 0x400;
+
+            w32(global + 0x564, r32(global + 0x564) + (rnd() % 2 ? d : -d));
+            put(" eye(%x)", r32(global + 0x564));
+        } else if (rnd() % 3 == 0) {
+            /* the eye at a distance the ground and the check turn on from
+             * where the scene was built (0x206fd712..): 3000, 5000, 7000
+             * and 9000 (the squares 0x895440.. 0x4d3f640) and 0x206fd758,
+             * give or take one, due north or south */
+            static const uint32_t turns[4] = { 3000, 5000, 7000, 9000 };
+            uint32_t k = rnd() % 5;
+            uint32_t d = (k < 4 ? turns[k] : r32(cur->image + 0x4758)) + rnd() % 3 - 1;
+
+            w32(global + 0x564, r32(cur->image + 0x4714) + (rnd() % 2 ? d : -d));
+            w16(global + 0x56a, r16(cur->image + 0x471a));
+            w32(global + 0x56c, r32(cur->image + 0x471c));
+            put(" eye(%x)", r32(global + 0x564));
+        }
+        for (k = 0; k < 3 && !faulted; k++)
+            for (i = 0; i < cur->ncallbacks && !faulted; i++)
+                if (cur->callback_list[i] == order[k]) {
+                    put(" ");
+                    call_callback(i, rnd() % 0x100, rnd());
+                }
+    }
+}
+
 static void op(void)
 {
-    uint32_t k = rnd() % 13;
+    uint32_t k = rnd() % 15;
 
     if (k >= 7 && k <= 9)
         k = 7;              /* programs, three times in twelve */
@@ -3508,6 +3855,8 @@ static void op(void)
     case 10: op_queue_model(); break;
     case 11: op_queue_draw(); break;
     case 12: op_records(); break;
+    case 13: op_callback(); break;
+    case 14: op_frames(); break;
     default: op_run(); break;
     }
     put("\n");
@@ -3529,8 +3878,10 @@ static void run_side(struct side *s)
     s->length = 0;
     s->nsnap = 0;
     s->ncallbacks = 0;
+    memset(s->callback_list, 0, sizeof s->callback_list);
     memcpy(s->image, s->pristine, IMAGE_SIZE);
     w32(window_rec + 0x84, 0);                  /* the runways' operation sets it */
+    scene_next_piece = scene_next_record = 0;
     arena_used = 0;
     memset(arena, 0, ARENA_SIZE);
     memset(context, 0, CONTEXT_SIZE);
@@ -3755,6 +4106,10 @@ static void show_difference(void)
     printf("--- before:\n%.*s\n", (int)((uint32_t)(ls - a) - from), a + from);
     printf("--- retail:\n%.700s\n", ls);
     printf("--- ours:\n%.700s\n", b + (ls - a));
+    if (i - (uint32_t)(ls - a) > 600) {
+        printf("--- retail at the byte:\n%.400s\n", a + i - 200);
+        printf("--- ours at the byte:\n%.400s\n", b + i - 200);
+    }
 }
 
 int main(int argc, char **argv)
@@ -3782,6 +4137,21 @@ int main(int argc, char **argv)
     for (i = first; i < first + n; i++) {
         int bad;
 
+        /* G3D_ONLY=a,b,..: just those scenarios, in order (state that
+         * outlives a scenario shows as a pair that differs only together) */
+        if (getenv("G3D_ONLY")) {
+            const char *l = getenv("G3D_ONLY");
+            int in = 0;
+
+            while (*l && !in) {
+                char *e;
+
+                in = strtoul(l, &e, 0) == i;
+                l = *e ? e + 1 : e;
+            }
+            if (!in)
+                continue;
+        }
         scenario = i;
         rng = 0x9e3779b9u ^ (i * 0x85ebca6bu);
         scenario_seed = rnd() | 1;

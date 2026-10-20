@@ -7806,8 +7806,18 @@ done:
  * 0x02, and the next instruction it can take -- a surface of table points
  * (0x05, 0x0f, 0x10.., 0x08), a facet (0x3e) or face (0x1d), past any
  * 0x1e, 0x7d or 0x81 -- becomes a 0x90 mesh and nops.  The counter stays,
- * on the nop.  Otherwise the polygon flag 0x206fd6c8 set and on past it. */
+ * on the nop.  Otherwise the polygon flag 0x206fd6c8 set and on past it.
+ * Without an x87, or with G3D_MESH_C, the compiler is g3d_mesh.c's C,
+ * given the point table (.data+0x12a) and +0x64 as the instructions use
+ * them. */
+#if !G3D_FP_X87 || defined(G3D_MESH_C)
+uint32_t g3d_mesh_compile(uint32_t program, uint32_t points,
+                          uint32_t (FS98_STDCALL *next)(uint32_t));
+uint32_t FS98_STDCALL g3d_next_instruction(uint32_t p) __asm__("_next_instruction");
+#  define g3d_compile_mesh(p) g3d_mesh_compile((p), M32(V(0x206f912a)), g3d_next_instruction)
+#else
 uint32_t FS98_STDCALL g3d_compile_mesh(uint32_t program) __asm__("_g3d_compile_mesh@4");
+#endif
 
 static void op_compile_mesh(void)
 {
@@ -10676,6 +10686,7 @@ off:
 #define RW(a) M16(V(0x2070eb00 + (a)))
 
 static uint16_t retail_word(uint32_t at);
+static uint8_t retail_byte(uint32_t off);
 
 /* 0x206f3864 -- a fresh point list: its marks' list (0x2070efb4 back to
  * 0x2070efb8), no points, edi at the first. */
@@ -13475,23 +13486,1171 @@ static void view_turned_cofactors(void)
 
 /* ---- CHAIN's callbacks ------------------------------------------------------------- */
 
-/* A CHAIN callback is entered as a service is, (a, b) and ret 8.  Those not
- * transliterated yet stop if they are called; init only registers them. */
-#define CALLBACK_PENDING(name)                                                \
-    static void FS98_STDCALL name(uint32_t a, uint32_t b)                    \
-    {                                                                         \
-        (void)a, (void)b;                                                     \
-        __builtin_trap();                                                     \
-    }
+/* A CHAIN callback is entered as a service is, (a, b) and ret 8. */
 
-CALLBACK_PENDING(cb_206e48de)       /* list 0x10 */
-CALLBACK_PENDING(cb_206e4b99)       /* list 1 */
-CALLBACK_PENDING(cb_206e5500)       /* list 5 */
-CALLBACK_PENDING(cb_206f01dc)       /* list 1 */
-CALLBACK_PENDING(cb_206f01b0)       /* list 9 */
-CALLBACK_PENDING(cb_206f0322)       /* list 0x14 */
-CALLBACK_PENDING(cb_206eb55a)       /* list 3 */
-CALLBACK_PENDING(cb_206f4505)       /* list 6 */
+/* ---- the scene: .text+0x38de..+0x4d53, +0x5225..+0x5253, +0xa681..+0xa8a3,
+ * +0x1345e..+0x134bd -------------------------------------------------------------- */
+
+/* The scenery round the eye is a program G3D builds from FE's stream
+ * (+0x18) into a block from the host (0x206fd821, the one being built;
+ * 0x206fd829, the one drawn), a piece a frame (0x206fd77a, the builder's
+ * state, through 0x206fd839) or all at once when the eye has moved far.
+ * Beside it: the areas program at 0x206fd72a, FE's records of type 0x65
+ * (ground heights and their areas) packed into a 'v' model, run to set the
+ * ground under the eye. */
+
+#define FE_SCENE(dst, size, got, x) (eax = IMP4(FE, 0x18, dst, size, got, x))
+#define FE_NEXT(kind, out, len)     (eax = IMP3(FE, 0x20, kind, out, len))
+#define FE_RESET(which)             (eax = IMP1(FE, 0x44, which))
+#define FE_LEVEL(level)             (eax = IMP1(FE, 0x48, level))
+#define FE_SEARCH(pos, radius, box) (eax = IMP3(FE, 0x54, pos, radius, box))
+#define FE_LAT_BAND(p, level)       (eax = IMP2(FE, 0x60, p, level))
+#define FE_BAND_LAT(b, level, out)  (eax = IMP3(FE, 0x64, b, level, out))
+#define FE_LON_BAND(p, level)       (eax = IMP2(FE, 0x68, p, level))
+#define FE_BAND_LON(b, level, out)  (eax = IMP3(FE, 0x6c, b, level, out))
+#define H_BUSY(on)                  (eax = IMP1(HOST, 0x50, on))
+#define CHAIN_SEND(list, a, b)      (eax = IMP3(CHAIN, 0x20, list, a, b))
+
+static void clear_unloaded_body(const uint32_t *arg);
+static void op_texture_name(void);
+
+/* draw_model() as retail's 0x206e15ee is called from inside: ebx, esi,
+ * edi and ebp kept. */
+static void draw_model_kept(uint32_t model)
+{
+    uint32_t b = ebx, s = esi, i = edi, p = ebp;
+
+    draw_model(model);
+    ebx = b, esi = s, edi = i, ebp = p;
+}
+
+/* The longitude from the eye (GLOBAL +0x56a's 48 bits) to `at`'s, its
+ * magnitude in one's complement, to 0x206fd809.., and in metres at the
+ * eye's latitude (UTIL +0x48) to 0x206fd815.. */
+static void scene_lon_distance(uint32_t lo_at, uint32_t hi_at, int from_eye)
+{
+    uint32_t r, borrow;
+
+    edi = G;
+    if (from_eye) {
+        eax = M32(edi + 0x56c);
+        SET_CX(M16(edi + 0x56a));
+        r = (uint32_t)CX - M16(lo_at);
+        SET_CX(r);
+        borrow = (r >> 16) & 1;
+        eax = eax - M32(hi_at) - borrow;
+    } else {
+        SET_CX(M16(lo_at));
+        eax = M32(hi_at);
+        r = (uint32_t)CX - M16(edi + 0x56a);
+        SET_CX(r);
+        borrow = (r >> 16) & 1;
+        eax = eax - M32(edi + 0x56c) - borrow;
+    }
+    if ((int32_t)eax < 0) {
+        eax = ~eax;
+        SET_CX(~CX);
+    }
+    M16(V(0x206fd80b)) = CX;
+    M32(V(0x206fd80d)) = eax;
+    ebx = edi + 0x560;
+    UTIL_LON_TO_M(V(0x206fd809), ebx, V(0x206fd815));
+}
+
+/* 0x206e4bf2 -- the scene's bands at the level (0x206f919a): latitude and
+ * longitude of the search box's edges (GLOBAL +0x3e4..+0x3f0) as bands and
+ * back as positions (0x206fd6e8..), widened by 1000 m north and south and by
+ * 1000 m of longitude (UTIL +0x40) east and west. */
+static void scene_bands(void)
+{
+    uint32_t r, c;
+
+    edi = G;
+    FE_LAT_BAND(edi + 0x3e8, M16(V(0x206f919a)));
+    M16(V(0x206fd70a)) = AX;
+    FE_BAND_LAT(M16(V(0x206fd70a)), M16(V(0x206f919a)), V(0x206fd6f0));
+    FE_LAT_BAND(edi + 0x3e4, M16(V(0x206f919a)));
+    M16(V(0x206fd708)) = AX;
+    FE_BAND_LAT(M16(V(0x206fd708)), M16(V(0x206f919a)), V(0x206fd6e8));
+    FE_LON_BAND(edi + 0x3ec, M16(V(0x206f919a)));
+    M16(V(0x206fd70c)) = AX;
+    FE_BAND_LON(M16(V(0x206fd70c)), M16(V(0x206f919a)), V(0x206fd6f8));
+    FE_LON_BAND(edi + 0x3f0, M16(V(0x206f919a)));
+    M16(V(0x206fd70e)) = AX;
+    FE_BAND_LON(M16(V(0x206fd70e)), M16(V(0x206f919a)), V(0x206fd700));
+    M32(V(0x206fd6ec)) -= 0x3e8;
+    M32(V(0x206fd6f4)) += 0x3e8;
+    M32(V(0x206fd811)) = 0x3e8;
+    ebx = edi + 0x560;
+    UTIL_M32_TO_LON(V(0x206fd811), ebx, V(0x206fd815));
+    SET_AX(M16(V(0x206fd817)));
+    r = (uint32_t)M16(V(0x206fd702)) + AX;
+    M16(V(0x206fd702)) = (uint16_t)r;
+    c = r >> 16;
+    eax = M32(V(0x206fd819));
+    M32(V(0x206fd704)) = M32(V(0x206fd704)) + eax + c;
+    SET_AX(M16(V(0x206fd817)));
+    r = (uint32_t)M16(V(0x206fd6fa)) - AX;
+    M16(V(0x206fd6fa)) = (uint16_t)r;
+    c = (r >> 16) & 1;
+    eax = M32(V(0x206fd819));
+    M32(V(0x206fd6fc)) = M32(V(0x206fd6fc)) - eax - c;
+}
+
+/* 0x206e4e4a -- the box drawn: its corners' positions (0x206f92fc..) and
+ * bands (0x206fd6e0..). */
+static void scene_box(void)
+{
+    M16(V(0x206f92fc)) = M16(V(0x206fd6ea));
+    M32(V(0x206f92fe)) = M32(V(0x206fd6ec));
+    M16(V(0x206f9304)) = M16(V(0x206fd6f2));
+    M32(V(0x206f9306)) = M32(V(0x206fd6f4));
+    M16(V(0x206f930c)) = M16(V(0x206fd6fa));
+    M32(V(0x206f930e)) = M32(V(0x206fd6fc));
+    M16(V(0x206f9314)) = M16(V(0x206fd702));
+    eax = M32(V(0x206fd704));
+    M32(V(0x206f9316)) = eax;
+    M16(V(0x206fd6e0)) = M16(V(0x206fd708));
+    M16(V(0x206fd6e2)) = M16(V(0x206fd70a));
+    M16(V(0x206fd6e4)) = M16(V(0x206fd70c));
+    SET_AX(M16(V(0x206fd70e)));
+    M16(V(0x206fd6e6)) = AX;
+}
+
+/* 0x206e4ed3 -- the areas program (0x206fd72a): the eye's position kept
+ * (0x206fd79f..), a search box of 0x206fd760 round it for FE (+0x54, also
+ * as the box at GLOBAL +0x3e4), then every record FE has there (+0x20) of
+ * type 0x65 appended after its 14-byte header while it fits in 0xff8 bytes;
+ * a return, and 'v' first. */
+static void scene_areas(void)
+{
+    if (M32(V(0x206fd72a)) == 0)
+        return;
+    edi = G;
+    M16(V(0x206fd79f)) = M16(edi + 0x562);
+    M32(V(0x206fd7a1)) = M32(edi + 0x564);
+    M16(V(0x206fd7a7)) = M16(edi + 0x56a);
+    M32(V(0x206fd7a9)) = M32(edi + 0x56c);
+    ebx = edi + 0x560;
+    ecx = edi + 0x3f4;
+    FE_SEARCH(ebx, M32(V(0x206fd760)), ecx);
+    M32(edi + 0x3e4) = M32(edi + 0x3f4);
+    M32(edi + 0x3e8) = M32(edi + 0x3f8);
+    M32(edi + 0x3ec) = M32(edi + 0x3fc);
+    eax = M32(edi + 0x400);
+    M32(edi + 0x3f0) = eax;
+    SET_AX(0);
+    edi = M32(V(0x206fd72a)) + 2;
+    for (;;) {
+        uint32_t keep = edi, i;
+
+        FE_NEXT(AX, V(0x206fd851), V(0x206fd855));
+        {
+            uint32_t found = eax;
+
+            eax = M32(V(0x206fd855));
+            esi = M32(V(0x206fd851));
+            edi = keep;
+            if (found == 0)
+                break;
+        }
+        if (M8(esi) == 0x65) {
+            eax -= 0xe;
+            esi += 0xe;
+            ebx = eax + edi - M32(V(0x206fd72a));
+            if (ebx < 0xff8) {
+                for (i = 0; i < eax; i++)
+                    M8(edi + i) = M8(esi + i);
+                edi += eax;
+                esi += eax;
+                ecx = 0;
+            }
+        }
+        SET_AX(1);
+    }
+    SET_AX(0x22);
+    M16(edi) = AX;
+    edi += 2;
+    edi = M32(V(0x206fd72a));
+    SET_AX(0x76);
+    M16(edi) = AX;
+    edi += 2;
+}
+
+/* 0x206e5596 / 0x206e562e -- the builder's state put back from / kept at
+ * 0x206fd7d9..: the boxes (GLOBAL +0x3e4..+0x400), the write pointer, the
+ * stream's size, the level, 0x206f91a1 and GLOBAL +0x3e0. */
+static void scene_resume(void)
+{
+    uint32_t i;
+
+    edi = G;
+    for (i = 0; i < 8; i++)
+        M32(edi + 0x3e4 + 4 * i) = M32(V(0x206fd7d9) + 4 * i);
+    M32(V(0x206fd825)) = M32(V(0x206fd7f9));
+    eax = M32(V(0x206fd7fd));
+    M32(V(0x206fd82d)) = eax;
+    M16(V(0x206f919a)) = M16(V(0x206fd801));
+    M16(V(0x206f91a1)) = M16(V(0x206fd803));
+    SET_AX(M16(V(0x206fd805)));
+    M16(edi + 0x3e0) = AX;
+}
+
+static void scene_pause(void)
+{
+    uint32_t i;
+
+    edi = G;
+    for (i = 0; i < 8; i++)
+        M32(V(0x206fd7d9) + 4 * i) = M32(edi + 0x3e4 + 4 * i);
+    M32(V(0x206fd7f9)) = M32(V(0x206fd825));
+    eax = M32(V(0x206fd82d));
+    M32(V(0x206fd7fd)) = eax;
+    M16(V(0x206fd801)) = M16(V(0x206f919a));
+    M16(V(0x206fd803)) = M16(V(0x206f91a1));
+    SET_AX(M16(edi + 0x3e0));
+    M16(V(0x206fd805)) = AX;
+}
+
+/* 0x206e56c6 -- the near part: kind 9, search boxes of 0x206fd758 (GLOBAL
+ * +0x3f4) and 0x206fd75c (+0x3e4) round the eye, the level (FE +0x48). */
+static void scene_near(void)
+{
+    edi = G;
+    M16(edi + 0x3e0) = 9;
+    FE_SEARCH(edi + 0x560, M32(V(0x206fd758)), edi + 0x3f4);
+    FE_SEARCH(edi + 0x560, M32(V(0x206fd75c)), edi + 0x3e4);
+    FE_LEVEL(M16(V(0x206f919a)));
+}
+
+/* 0x206e576e -- the far part: the eye's position kept (0x206fd712..), kind
+ * 5, a box of 0x206fd754, and the level by the latitude's magnitude past
+ * that and 8 against the five edges at 0x206fd764 (13 down to 8). */
+static void scene_far(void)
+{
+    edi = G;
+    M32(V(0x206fd714)) = M32(edi + 0x564);
+    M16(V(0x206fd712)) = M16(edi + 0x562);
+    M32(V(0x206fd71c)) = M32(edi + 0x56c);
+    M16(V(0x206fd71a)) = M16(edi + 0x56a);
+    FE_SEARCH(edi + 0x560, M32(V(0x206fd754)), edi + 0x3e4);
+    M16(edi + 0x3e0) = 5;
+    eax = M32(edi + 0x564);
+    if ((int32_t)eax < 0)
+        eax = (uint32_t)-(int32_t)eax;
+    eax -= M32(V(0x206fd754));
+    eax -= 8;
+    SET_CL(0xd);
+    ebx = V(0x206fd764);
+    do {
+        edx = eax - M32(ebx);
+        if ((int32_t)edx < 0)
+            break;
+        ebx += 4;
+        SET_CL(CL - 1);
+    } while (CL != 8);
+    M8(V(0x206f919a)) = CL;
+    FE_LEVEL(M16(V(0x206f919a)));
+}
+
+/* 0x206e5842 -- a block for the scene (0x206fd81d bytes) from the host, a
+ * 'v' and the far part. */
+static void scene_alloc(void)
+{
+    H_ALLOC(2, M32(V(0x206fd81d)), V(0x206fd821), 1);
+    esi = M32(V(0x206fd821));
+    M32(V(0x206fd825)) = esi;
+    M16(esi) = 0x76;
+    M32(V(0x206fd825)) += 2;
+    scene_far();
+}
+
+/* 0x206e5894 -- the room left in the block, less 16 (negative: full). */
+static int32_t scene_room(void)
+{
+    eax = M32(V(0x206fd821)) + M32(V(0x206fd81d)) - M32(V(0x206fd825)) - 0x10;
+    return (int32_t)eax;
+}
+
+/* 0x206e58a9 -- FE's stream into the room (eax): positive while it gave
+ * a piece (its size at 0x206fd831). */
+static int32_t scene_stream(void)
+{
+    M32(V(0x206fd82d)) = eax;
+    FE_SCENE(M32(V(0x206fd825)), M32(V(0x206fd82d)), V(0x206fd831), V(0x206fd835));
+    return (int32_t)eax;
+}
+
+/* 0x206e58e9 -- the far part closed: 0x48 0 (a level jump to nothing), the
+ * bands. */
+static void scene_far_end(void)
+{
+    eax = M32(V(0x206fd825));
+    M16(eax) = 0x48;
+    M16(eax + 2) = 0;
+    M32(V(0x206fd825)) += 4;
+    scene_bands();
+}
+
+/* 0x206e5906 -- the near part's next piece, behind a 0x8d (its operand
+ * filled after, 0x206e5d44). */
+static int32_t scene_stream_near(void)
+{
+    M32(V(0x206fd82d)) = eax;
+    esi = M32(V(0x206fd825));
+    M16(esi) = 0x8d;
+    M32(esi + 2) = 0;
+    M32(V(0x206fd825)) += 6;
+    FE_SCENE(M32(V(0x206fd825)), M32(V(0x206fd82d)), V(0x206fd831), V(0x206fd835));
+    return (int32_t)eax;
+}
+
+/* 0x206e594b -- a near piece taken: the 0x8d's operand from FE's other
+ * answer (0x206fd835); none, and the 0x8d goes; an odd size padded with a
+ * three-byte 0x86. */
+static void scene_take_near(void)
+{
+    esi = M32(V(0x206fd825));
+    eax = M32(V(0x206fd835));
+    M32(esi - 4) = eax;
+    eax = M32(V(0x206fd831));
+    M32(V(0x206fd825)) += eax;
+    if (eax == 0) {
+        M32(V(0x206fd825)) -= 6;
+    } else if (eax & 1) {
+        eax = M32(V(0x206fd825));
+        M32(V(0x206fd825)) += 3;
+        M16(eax) = 0x86;
+        M8(eax + 2) = 0;
+    }
+}
+
+/* 0x206e5986 -- the new scene in: the old block freed, GLOBAL +0x1164 and
+ * +0x1169 cleared, the new one to 0x206fd829, the box. */
+static void scene_swap(void)
+{
+    if (M32(V(0x206fd829)) != 0)
+        H_FREE(V(0x206fd829));
+    eax = G;
+    M32(eax + 0x1164) = 0;
+    M8(eax + 0x1169) = 0;
+    eax = M32(V(0x206fd821));
+    M32(V(0x206fd829)) = eax;
+    M32(V(0x206fd821)) = 0;
+    M32(V(0x206fd825)) = 0;
+    scene_box();
+}
+
+/* 0x206e59f3 -- the whole scene at once: the far part streamed while it
+ * comes, its end (0x206fd726), the near part, a return, the areas, in. */
+static void scene_build(void)
+{
+    scene_alloc();
+    while (scene_room() >= 0 && scene_stream() > 0)
+        M32(V(0x206fd825)) += M32(V(0x206fd831));
+    ebx = M32(V(0x206fd825));
+    M32(V(0x206fd726)) = ebx;
+    scene_far_end();
+    scene_near();
+    while (scene_room() >= 0 && scene_stream_near() > 0)
+        scene_take_near();
+    eax = M32(V(0x206fd825));
+    M16(eax) = 0x22;
+    scene_areas();
+    scene_swap();
+}
+
+/* 0x206e5c77 -- a scene being built dropped: FE reset, the block freed. */
+static void scene_abort(void)
+{
+    FE_RESET(0);
+    M32(V(0x206fd77a)) = 0;
+    H_FREE(V(0x206fd821));
+    M32(V(0x206fd825)) = 0;
+}
+
+/* 0x206e4b12 -- rebuilt at once while the scene is on (GLOBAL +0x390 2),
+ * the busy cursor up: the unloaded textures' flags cleared (+0x58), the
+ * view's number kept (0x206fd782), the ground's easing reset. */
+static void scene_rebuild(void)
+{
+    edi = G;
+    if (M32(edi + 0x390) != 2)
+        return;
+    H_BUSY(1);
+    clear_unloaded_body(0);
+    edi = G;
+    SET_AX(M16(edi + 0x424));
+    M16(V(0x206fd782)) = AX;
+    M32(V(0x206fd74c)) = 0xffffffffu;
+    scene_build();
+    edi = G;
+    M8(edi + 0x444) &= 0xf3;
+    H_BUSY(0);
+}
+
+/* 0x206e4a36 -- whether the scene must change: none yet, rebuild; one
+ * being built, dropped and rebuilt; the view changed or no area under the
+ * eye, rebuild; else, the eye far enough from where it was built (its
+ * latitude difference or'd with the longitude's in metres, against
+ * 0x206fd758), built a piece a frame from state 1. */
+static void scene_check(void)
+{
+    edi = G;
+    if (M32(V(0x206fd829)) == 0) {
+        scene_rebuild();
+        return;
+    }
+    if (M32(V(0x206fd77a)) != 0) {
+        scene_abort();
+        scene_rebuild();
+        return;
+    }
+    SET_AX(M16(edi + 0x424));
+    if (AX != M16(V(0x206fd782)) || M16(V(0x206fd736)) == 0) {
+        scene_rebuild();
+        return;
+    }
+    scene_lon_distance(V(0x206fd71a), V(0x206fd71c), 1);
+    ebx = M32(edi + 0x564) - M32(V(0x206fd714));
+    if ((int32_t)ebx < 0)
+        ebx = (uint32_t)-(int32_t)ebx;
+    ebx |= M32(V(0x206fd819));
+    if (ebx >= M32(V(0x206fd758))) {
+        scene_rebuild();
+        return;
+    }
+    M16(V(0x206f9176)) = 0xf;
+    M32(V(0x206fd77a)) = 1;
+}
+
+/* 0x206e49de -- the areas block (0x1000 bytes) on first use, and the check
+ * once (0x206f9174). */
+static void scene_once(void)
+{
+    if (M32(V(0x206fd72a)) == 0) {
+        H_ALLOC(2, 0x1000, V(0x206fd72a), 1);
+        M8(V(0x206f9174)) = 0;
+    }
+    if (M8(V(0x206f9174)) == 0) {
+        scene_check();
+        M8(V(0x206f9174)) += 1;
+    }
+}
+
+/* 0x206e5b73 .. 0x206e5c58 -- the builder's states: 1 a block and the far
+ * part's start; 2 the far part, 0x206f9176 pieces a frame; 3 the near
+ * part's start; 4 the near part, as many; 5 in. */
+static void scene_state_1(void)
+{
+    edi = G;
+    SET_AX(M16(edi + 0x424));
+    M16(V(0x206fd782)) = AX;
+    scene_alloc();
+    M32(V(0x206fd77a)) = 2;
+    scene_pause();
+}
+
+static void scene_state_2(void)
+{
+    int16_t n;
+
+    scene_resume();
+    n = (int16_t)M16(V(0x206f9176));
+    for (;;) {
+        if (scene_room() < 0 || scene_stream() <= 0)
+            break;
+        M32(V(0x206fd825)) += M32(V(0x206fd831));
+        SET_CX(--n);
+        if (!(n > 0)) {
+            scene_pause();
+            return;
+        }
+    }
+    SET_CX(n);
+    ebx = M32(V(0x206fd825));
+    M32(V(0x206fd77e)) = ebx;
+    scene_far_end();
+    M32(V(0x206fd77a)) = 3;
+    scene_pause();
+}
+
+static void scene_state_3(void)
+{
+    scene_resume();
+    scene_near();
+    M32(V(0x206fd77a)) = 4;
+    scene_pause();
+}
+
+static void scene_state_4(void)
+{
+    int16_t n;
+
+    scene_resume();
+    n = (int16_t)M16(V(0x206f9176));
+    for (;;) {
+        if (scene_room() < 0 || scene_stream_near() <= 0)
+            break;
+        scene_take_near();
+        SET_CX(--n);
+        if (!(n > 0)) {
+            scene_pause();
+            return;
+        }
+    }
+    SET_CX(n);
+    eax = M32(V(0x206fd825));
+    M16(eax) = 0x22;
+    scene_areas();
+    M32(V(0x206fd77a)) = 5;
+}
+
+static void scene_state_5(void)
+{
+    scene_resume();
+    eax = M32(V(0x206fd77e));
+    M32(V(0x206fd726)) = eax;
+    M32(V(0x206fd77a)) = 0;
+    scene_swap();
+}
+
+/* 0x206e5ae7 -- a frame's step: GLOBAL +0x444 bit 2 rebuilds at once (a
+ * build in progress dropped); bit 3 (dropping one too) or bit 5 counts
+ * 0x206f91a0 down, clears bit 3 and checks; else a build in progress is
+ * dropped once the scene is off, or goes on a state (0x206fd839). */
+static void scene_step(void)
+{
+    edi = G;
+    if (M16(edi + 0x444) & 4) {
+        if (M32(V(0x206fd77a)) != 0)
+            scene_abort();
+        scene_rebuild();
+        return;
+    }
+    if ((M16(edi + 0x444) & 8) || (M16(edi + 0x444) & 0x20)) {
+        if ((M16(edi + 0x444) & 8) && M32(V(0x206fd77a)) != 0)
+            scene_abort();
+        M8(V(0x206f91a0)) -= 1;
+        M16(edi + 0x444) &= 0xfff7;
+        scene_check();
+        return;
+    }
+    ebx = M32(V(0x206fd77a));
+    if (ebx != 0) {
+        edi = G;
+        if (M32(edi + 0x390) != 2) {
+            scene_abort();
+            return;
+        }
+    }
+    if (ebx > 6)
+        return;
+    routine(M32(V(0x206fd839) + ebx * 4))();
+}
+
+/* 0x206e504f -- the ground under the eye, while it is within 0x10000 of
+ * where the scene was built (each way; their squares' sum under 0x2ebae40,
+ * or 0x4d3f640 with a build in progress -- else the scene checked): the
+ * pieces a frame by the distance (15, 25, 50 or 0x7d00); with GLOBAL
+ * +0x444 bit 3 none of the areas.  Each area in the scene (0x44-byte
+ * records from 0x206fd829 + 2 to 0x206fd726) whose ellipse (scale +0x14,
+ * half sizes +0x34, +0x30 about +0x1a, +0x1e) takes in the eye gives the
+ * ground height (+0x38, +0x3a: eased in unless 0x206fd74c is negative)
+ * and, for kind 0xf0.., clears GLOBAL +0x11ec; the first one ends the
+ * search.  Then the areas program run with the eye at the reference and
+ * the identity matrix, GLOBAL +0x20 from the area's height (the dword at
+ * 0x206fd731, its low byte the word below). */
+static void scene_ground(void)
+{
+    uint32_t far_;
+
+    scene_once();
+    edi = G;
+    eax = M32(edi + 0x564) - M32(V(0x206fd714));
+    cdq();
+    eax = (eax ^ edx) - edx;
+    if ((int32_t)eax > 0x10000)
+        goto check;
+    far_ = eax;
+    scene_lon_distance(V(0x206fd71a), V(0x206fd71c), 1);
+    eax = far_;
+    if ((int32_t)M32(V(0x206fd819)) > 0x10000)
+        goto check;
+    {
+        uint64_t a = (uint64_t)eax * eax, b;
+
+        ecx = (uint32_t)a;
+        b = (uint64_t)M32(V(0x206fd819)) * M32(V(0x206fd819));
+        edx = (uint32_t)(b >> 32);
+        eax = (uint32_t)b + ecx;
+        if (eax < ecx)
+            goto check;
+        edx = M32(V(0x206fd77a)) == 0 ? 0x2ebae40 : 0x4d3f640;
+        if (eax > edx)
+            goto check;
+        SET_DX(0x7d00);
+        if (eax <= 0x2ebae40) {
+            SET_DX(0x32);
+            if (eax <= 0x17d7840) {
+                SET_DX(0x19);
+                if (eax <= 0x895440)
+                    SET_DX(0xf);
+            }
+        }
+        M16(V(0x206f9176)) = DX;
+    }
+    edi = G;
+    if (M8(edi + 0x444) & 8) {
+        M16(V(0x206fd736)) = 0;
+        goto check;
+    }
+    M16(V(0x206fd736)) = 0;
+    M32(V(0x206fd750)) = M32(V(0x206fd829)) + 2;
+    for (;;) {
+        uint64_t q;
+
+        esi = M32(V(0x206fd750));
+        if (esi >= M32(V(0x206fd726)))
+            break;
+        edi = G;
+        eax = M32(edi + 0x564) - M32(esi + 0x1a);
+        cdq();
+        eax = (eax ^ edx) - edx;
+        q = (uint64_t)eax * M32(esi + 0x14);
+        edx = (uint32_t)(q >> 32);
+        eax = (uint32_t)(q >> 16);
+        ebx = M32(esi + 0x34) >> 1;
+        eax -= ebx;
+        if ((int32_t)eax >= 0)
+            goto next;
+        {
+            uint32_t keep = esi;
+
+            scene_lon_distance(esi + 0x1e, esi + 0x20, 0);
+            esi = keep;
+        }
+        edx = M32(V(0x206fd819));
+        q = (uint64_t)M32(esi + 0x14) * edx;
+        edx = (uint32_t)(q >> 32);
+        eax = (uint32_t)(q >> 16);
+        ebx = M32(esi + 0x30) >> 1;
+        eax -= ebx;
+        if ((int32_t)eax >= 0)
+            goto next;
+        SET_AX(M16(esi + 0x38));
+        M16(V(0x206fd730)) = AX;
+        M16(V(0x206fd73a)) = AX;
+        eax = (uint32_t)(int32_t)(int16_t)M16(esi + 0x3a);
+        M32(V(0x206fd732)) = eax;
+        M32(V(0x206fd73c)) = eax;
+        if ((int32_t)M32(V(0x206fd74c)) < 0) {
+            SET_AX(M16(V(0x206fd73a)));
+            M16(V(0x206f91d9)) = AX;
+            eax = M32(V(0x206fd73c));
+            M32(V(0x206f91db)) = eax;
+            M32(V(0x206fd74c)) = 0;
+        }
+        SET_AX(M16(esi + 0x2e));
+        if (AH == 0xf0) {
+            edi = G;
+            M8(edi + 0x11ec) = 0;
+            M16(V(0x206fd724)) = 1;
+        }
+        M16(V(0x206fd736)) += 1;
+        break;
+next:
+        M32(V(0x206fd750)) += 0x44;
+    }
+    if (M16(V(0x206fd736)) == 0)
+        M16(V(0x206fd736)) += 1;
+    M32(V(0x206fd720)) = M32(V(0x206fd732));
+    edi = G;
+    M16(edi + 0x5b2) = M16(edi + 0x562);
+    M32(edi + 0x5b4) = M32(edi + 0x564);
+    M16(edi + 0x5ba) = M16(edi + 0x56a);
+    M32(edi + 0x5bc) = M32(edi + 0x56c);
+    M16(edi + 0x5c2) = M16(edi + 0x572);
+    M32(edi + 0x5c4) = M32(edi + 0x574);
+    M16(edi + 0xce8) = 0x7fff;
+    M16(edi + 0xcea) = 0;
+    M16(edi + 0xcec) = 0;
+    M16(edi + 0xcee) = 0;
+    M16(edi + 0xcf0) = 0x7fff;
+    M16(edi + 0xcf2) = 0;
+    M16(edi + 0xcf4) = 0;
+    M16(edi + 0xcf6) = 0;
+    M16(edi + 0xcf8) = 0x7fff;
+    draw_model_kept(M32(V(0x206fd72a)));
+    eax = M32(V(0x206fd720));
+    M32(V(0x206fd732)) = eax;
+    eax = M32(V(0x206fd731));
+    edx = eax;
+    { uint32_t t = M32(edi + 0x20); M32(edi + 0x20) = edx; edx = t; }
+    return;
+check:
+    scene_check();
+}
+
+/* 0x206e5008 -- with 0x206fd778 counting down, the ground at once (its
+ * height put in without easing); else while the scene is on. */
+static void scene_ground_step(void)
+{
+    if (M16(V(0x206fd778)) != 0) {
+        M16(V(0x206fd778)) -= 1;
+        scene_ground();
+        SET_AX(M16(V(0x206fd73a)));
+        M16(V(0x206f91d9)) = AX;
+        eax = M32(V(0x206fd73c));
+        M32(V(0x206f91db)) = eax;
+        M32(V(0x206fd74c)) = 0;
+        return;
+    }
+    edi = G;
+    if (M32(edi + 0x390) == 2)
+        scene_ground();
+}
+
+/* 0x206e6225 -- the second queue (0x206fd880, what 0x75 queued) drawn
+ * whole and emptied, in the first's place meanwhile. */
+static void draw_second_queue(void)
+{
+    uint32_t keep = M32(V(0x206fd87c));
+
+    eax = M32(V(0x206fd880));
+    M32(V(0x206fd87c)) = eax;
+    if (eax != 0) {
+        queue_draw(0x7fffffff, 0x80000001, 1);
+        eax = M32(V(0x206fd87c));
+        M32(V(0x206fd880)) = eax;
+        queue_alloc();
+    }
+    M32(V(0x206fd87c)) = keep;
+}
+
+/* 0x206f445e -- the programs 0x74 and 0x8b kept in the 64 lists
+ * (0x20710360: each a count, then 12-byte entries of program, context and
+ * variable context at +0x18) run and the lists emptied. */
+static void drain_lists(void)
+{
+    int32_t n;
+
+    ecx = 0x40;
+    esi = 0;
+    for (n = 0x40; n > 0; n--) {
+        uint32_t keep_esi = esi;
+
+        ecx = 0;
+        { uint32_t t = M32(V(0x20710360) + esi); M32(V(0x20710360) + esi) = ecx; ecx = t; }
+        if (ecx != 0) {
+            esi = M32(V(0x20710378) + esi);
+            do {
+                uint32_t c = ecx, s = esi;
+
+                eax = M32(esi + 4);
+                M32(V(0x206f919c)) = eax;
+                eax = M32(esi);
+                M32(V(0x206f9126)) = eax;
+                eax = M32(esi + 8);
+                M32(V(0x206f91b7)) = eax;
+                interpret();
+                esi = s, ecx = c;
+                esi += 0xc;
+            } while (--ecx != 0);
+        }
+        esi = keep_esi + 0x1c;
+    }
+    for (esi = 0; esi < 0x40 * 0x1c; esi += 0x1c)
+        M32(V(0x20710360) + esi) = 0;
+    ecx = 0;
+}
+
+/* 0x206e5a57 -- the frame's scene drawn: the scene program (no contexts),
+ * then the second queue, CHAIN list 0xf told (0, 0), then the kept
+ * programs; the drawing state cleared between. */
+static void scene_draw(void)
+{
+    M32(V(0x206f919c)) = 0;
+    M32(V(0x206f91b7)) = 0;
+    draw_model_kept(M32(V(0x206fd829)));
+    edi = G;
+    M16(edi + 0xc90) = 0;
+    M8(V(0x206f9125)) = 0;
+    M16(V(0x206f90f4)) = 0;
+    draw_second_queue();
+    CHAIN_SEND(0xf, 0, 0);
+    edi = G;
+    M16(edi + 0xc90) = 0;
+    M8(V(0x206f9125)) = 0;
+    M16(V(0x206f90f4)) = 0;
+    drain_lists();
+}
+
+/* 0x206eb838 -- a ground texture's program by its word (eax; kind 0x22..
+ * keeps the low nibble): 0 0x206fe514, 9 0x206fe70e, 7 0x206fe6b2; others
+ * by GLOBAL +0xcd2 and the eye's height over the word at GLOBAL +0x21. */
+static void tile_texture_program(void)
+{
+    ebx = eax >> 16;
+    if (BL == 0x22)
+        SET_AL(AL & 0xf);
+    if (AL == 0) {
+        eax = V(0x206fe514);
+        return;
+    }
+    if (AL == 9) {
+        eax = V(0x206fe70e);
+        return;
+    }
+    if (AL == 7) {
+        eax = V(0x206fe6b2);
+        return;
+    }
+    edi = G;
+    if (M16(edi + 0xcd2) == 0) {
+        eax = V(0x206fea4c);
+        return;
+    }
+    SET_CX(M16(edi + 0x5c4) - M16(edi + 0x21));
+    eax = (int16_t)CX > 0x17d4 ? V(0x206fe628) : V(0x206fe7f8);
+}
+
+/* 0x206eb681 -- the ground tiles' frame: their switches kept, the four
+ * texture programs (GLOBAL +0x414.. through tile_texture_program, or all
+ * 0x206fe472 with +0xdce 1), the box's corners and the ground height into
+ * the built-in program at 0x206fe108, which is drawn. */
+static void tile_frame(void)
+{
+    uint32_t i;
+    static const uint32_t to[4][2] = { { 0x206fdc7b, 0x206fdc93 }, { 0x206fdcab, 0x206fdcc3 },
+                                      { 0x206fdc83, 0x206fdccb }, { 0x206fdc9b, 0x206fdcb3 } };
+
+    edi = G;
+    M16(V(0x206fdc31)) = M16(edi + 0x39c);
+    M16(V(0x206fdc33)) = M16(edi + 0x11bc);
+    M16(V(0x206fdc35)) = M16(edi + 0x12a4);
+    if (M16(edi + 0xdce) == 1) {
+        eax = V(0x206fe472);
+        for (i = 0; i < 4; i++)
+            M32(V(0x206fdcd9) + 4 * i) = eax;
+    } else {
+        M16(V(0x206fdc1f)) = 0x7000;
+        M16(V(0x206fdc23)) = 0x7000;
+        for (i = 0; i < 4; i++) {
+            eax = M32(edi + 0x414 + 4 * i);
+            tile_texture_program();
+            edi = G;
+            M32(V(0x206fdcd9) + 4 * i) = eax;
+        }
+    }
+    for (i = 0; i < 4; i++) {
+        SET_AX(M16(V(0x206f92fc) + 8 * i));
+        M16(V(to[i][0])) = AX;
+        eax = M32(V(0x206f92fe) + 8 * i);
+        M32(V(to[i][0]) + 2) = eax;
+        SET_AX(M16(V(0x206f92fc) + 8 * i));
+        M16(V(to[i][1])) = AX;
+        eax = M32(V(0x206f92fe) + 8 * i);
+        M32(V(to[i][1]) + 2) = eax;
+    }
+    {
+        static const uint32_t ground[4] = { 0x206fdc8b, 0x206fdca3, 0x206fdcbb, 0x206fdcd3 };
+
+        for (i = 0; i < 4; i++) {
+            SET_AX(M16(V(0x206f91d9)));
+            M16(V(ground[i])) = AX;
+            eax = M32(V(0x206f91db));
+            M32(V(ground[i]) + 2) = eax;
+        }
+    }
+    draw_model_kept(V(0x206fe108));
+}
+
+/* 0x206e48de -- list 0x10, the frame's scene: GLOBAL +0x394 1 when the
+ * scene is on (+0x390 2) and not +0xdce; then the tiles' frame, +0x11ec 1
+ * with the view's +0x14 0 or 1, the scene kept up, GLOBAL +0x20 to the
+ * reference's height (0x206f916a, 48 bits), the scene drawn.  Off, the
+ * areas block freed.  0x206fd724 clears +0x11ec. */
+SERVICE(cb_206e48de, 8);
+static void cb_206e48de_body(const uint32_t *arg)
+{
+    (void)arg;
+    edi = G;
+    M32(edi + 0x394) = 0;
+    if (M32(edi + 0x390) == 2) {
+        if (M16(edi + 0xdce) == 0)
+            M32(edi + 0x394) = 1;
+        tile_frame();
+        edi = G;
+        if (M16(edi + 0xdce) == 0) {
+            eax = M32(edi + 0x1198);
+            if (M32(eax + 0x14) == 0 || M32(eax + 0x14) == 1)
+                M8(edi + 0x11ec) = 1;
+        }
+        scene_once();
+        edi = G;
+        eax = M32(edi + 0x20);
+        cdq();
+        edx = (edx << 24) | (eax >> 8);
+        eax <<= 8;
+        M32(V(0x206f916c)) = edx;
+        M16(V(0x206f916a)) = AX;
+        scene_draw();
+    } else {
+        eax = M32(edi + 0x20);
+        cdq();
+        edx = (edx << 24) | (eax >> 8);
+        eax <<= 8;
+        M32(V(0x206f916c)) = edx;
+        M16(V(0x206f916a)) = AX;
+        if (M32(V(0x206fd72a)) != 0) {
+            H_FREE(V(0x206fd72a));
+            M32(V(0x206fd72a)) = 0;
+        }
+    }
+    edi = G;
+    if (M16(V(0x206fd724)) != 0)
+        M8(edi + 0x11ec) = 0;
+}
+
+/* 0x206e4b99 -- list 1, the frame's step: the builder, the fast routines'
+ * threshold by GLOBAL +0xcb4 (0x206fd784), the ground; every other frame
+ * (0x206f91b5 halved to 0) the texture by name at 0x206fd78e. */
+SERVICE(cb_206e4b99, 8);
+static void cb_206e4b99_body(const uint32_t *arg)
+{
+    (void)arg;
+    scene_step();
+    edi = G;
+    ebx = M16(edi + 0xcb4);
+    if (ebx > 2)
+        ebx = 0;
+    eax = M32(V(0x206fd784) + ebx * 4);
+    M32(V(0x206f9178)) = eax;
+    M16(V(0x206fd724)) = 0;
+    scene_ground_step();
+    M16(V(0x206f91b5)) >>= 1;
+    if (M16(V(0x206f91b5)) == 0) {
+        esi = V(0x206fd78e);
+        op_texture_name();
+    }
+}
+
+/* 0x206e5500 -- list 5, once a frame: the ground's height (0x206f91d9,
+ * the dword at 0x206f91db) eased to a new one (0x206fd73a, 0x206fd73c) in
+ * 30 steps: a change sets the step ((new - now) / 30) and the count; each
+ * frame after adds a step; the last puts the new one in exactly. */
+SERVICE(cb_206e5500, 8);
+static void cb_206e5500_body(const uint32_t *arg)
+{
+    eax = arg[0];
+    eax = arg[1];
+    eax = M32(V(0x206fd73c));
+    if (eax != M32(V(0x206fd744))) {
+        M32(V(0x206fd744)) = eax;
+        eax -= M32(V(0x206f91db));
+        cdq();
+        ebx = 0x1e;
+        idiv32(ebx);
+        M32(V(0x206fd748)) = eax;
+        M32(V(0x206fd74c)) = 0x1e;
+        return;
+    }
+    if (M32(V(0x206fd74c)) == 0) {
+        SET_AX(M16(V(0x206fd73a)));
+        M16(V(0x206f91d9)) = AX;
+        eax = M32(V(0x206fd73c));
+        M32(V(0x206f91db)) = eax;
+        M32(V(0x206fd74c)) = 0;
+        return;
+    }
+    if ((int32_t)M32(V(0x206fd74c)) < 0)
+        return;
+    eax = M32(V(0x206fd748));
+    M32(V(0x206f91db)) += eax;
+    M32(V(0x206fd74c)) -= 1;
+}
+
+/* 0x206f01dc -- list 1, once a frame: the textures aged.  The slot in use,
+ * unloaded and not flagged, with the lowest age, loaded, again and again
+ * while that succeeds and 0x206ff8aa holds (the count of three at
+ * 0x206ff8c4 only calls 0x206f0342, a bare ret, when it runs out, and
+ * goes on); a load that fails flags its slot, so the branch that would
+ * give it the oldest loaded slot's texture is not reached from here.  Then every slot in use ages by 200
+ * (flags bit 1 cleared with 0x206f91a0), and one that passes 0xffff is
+ * freed outright -- not while the window is drawn (0x206ff8ac, list 9).
+ * GLOBAL +0xcb8 taken: set, 0x206ff8aa is 7; it halves each frame. */
+static void age_textures(void)
+{
+    M16(V(0x206ff8c4)) = 3;
+    for (;;) {
+        esi = M32(V(0x206ff8b4));
+        ebx = esi + 6;
+        ecx = M16(esi);
+        SET_AX(0xffff);
+        edx = 0;
+        do {
+            if (M8(ebx) != 0 && M32(ebx + 0x14) == 0 && !(M8(ebx + 0xd) & 2) &&
+                AX > M16(ebx + 0x12)) {
+                SET_AX(M16(ebx + 0x12));
+                edx = ebx;
+            }
+            ebx += M32(V(0x206ff8b0));
+        } while (--ecx != 0);
+        if (edx == 0)
+            break;
+        ebx = edx;
+        if (!texture_reload()) {
+            if (M16(V(0x206ff8aa)) == 0)
+                break;
+            M16(V(0x206ff8c4)) -= 1;
+            continue;
+        }
+        if (M8(ebx + 0xd) & 2)
+            continue;
+        edi = M32(V(0x206ff8b4));
+        esi = edi + 6;
+        ecx = M16(edi);
+        SET_AX(M16(ebx + 0x12));
+        edx = 0;
+        do {
+            if (M8(esi) != 0 && M32(esi + 0x14) != 0 && AX < M16(esi + 0x12)) {
+                SET_AX(M16(esi + 0x12));
+                edx = esi;
+            }
+            esi += M32(V(0x206ff8b0));
+        } while (--ecx != 0);
+        if (edx == 0)
+            break;
+        esi = edx;
+        eax = 0;
+        M8(esi + 0xd) = AL;
+        { uint32_t t = M32(esi + 0x14); M32(esi + 0x14) = eax; eax = t; }
+        M32(ebx + 0x14) = eax;
+        texture_reload();
+        break;
+    }
+    edi = M32(V(0x206ff8b4));
+    ebx = edi + 6;
+    ecx = M16(edi);
+    do {
+        if (M8(ebx) != 0) {
+            uint32_t age;
+
+            if (M8(V(0x206f91a0)) != 0)
+                M8(ebx + 0xd) &= 0xfd;
+            age = (uint32_t)M16(ebx + 0x12) + 0xc8;
+            M16(ebx + 0x12) = (uint16_t)age;
+            if (age > 0xffff) {
+                M16(ebx + 0x12) = 0xffff;
+                if (M32(V(0x206ff8ac)) == 0) {
+                    uint32_t keep_ebx = ebx, keep_ecx = ecx;
+
+                    eax = 0;
+                    M8(ebx) = AL;
+                    M8(ebx + 0xd) = AL;
+                    { uint32_t t = M32(ebx + 0x14); M32(ebx + 0x14) = eax; eax = t; }
+                    HG2D_UNLOAD(eax);
+                    ecx = keep_ecx, ebx = keep_ebx;
+                }
+            }
+        }
+        ebx += M32(V(0x206ff8b0));
+    } while (--ecx != 0);
+    eax = 0;
+    M8(V(0x206f91a0)) = AL;
+    edi = G;
+    { uint16_t t = M16(edi + 0xcb8); M16(edi + 0xcb8) = AX; SET_AX(t); }
+    if (AX != 0)
+        M16(V(0x206ff8aa)) = 7;
+    M16(V(0x206ff8aa)) >>= 1;
+}
+
+SERVICE(cb_206f01dc, 8);
+static void cb_206f01dc_body(const uint32_t *arg)
+{
+    (void)arg;
+    age_textures();
+}
+
+/* 0x206f01b0 -- list 9: the same with 0x206ff8ac set, so nothing is freed
+ * outright. */
+SERVICE(cb_206f01b0, 8);
+static void cb_206f01b0_body(const uint32_t *arg)
+{
+    (void)arg;
+    M32(V(0x206ff8ac)) = 1;
+    age_textures();
+    M32(V(0x206ff8ac)) = 0;
+}
+
+static void release_textures(void);
+
+/* 0x206f0322 -- list 0x14: message 0x46 releases every texture. */
+SERVICE(cb_206f0322, 8);
+static void cb_206f0322_body(const uint32_t *arg)
+{
+    if (arg[0] == 0x46)
+        release_textures();
+}
+
+/* 0x206eb8a4 -- the tiles' colour words (0x206fddf5..0x206fde51) through
+ * HG2D +0x88, in place. */
+static void tile_colours(void)
+{
+    esi = V(0x206fddf5);
+    edi = V(0x206fde51);
+    do {
+        HG2D_COLOUR(M16(esi), V(0x206f91ff));
+        eax = M32(V(0x206f91ff));
+        M16(esi) = AX;
+        esi += 2;
+    } while (esi != edi);
+}
+
+/* 0x206eb55a -- list 3: the tiles' colours once (0x206fddf1), then the
+ * season's letter (GLOBAL +0x248, two on in the south; 2 when +0x566 lies
+ * between 0x206fdc3f and 0x206fdc3d) from 0x206fdc43 into five texture
+ * names. */
+SERVICE(cb_206eb55a, 8);
+static void cb_206eb55a_body(const uint32_t *arg)
+{
+    eax = arg[0];
+    eax = arg[1];
+    if (M32(V(0x206fddf1)) == 0) {
+        tile_colours();
+        M32(V(0x206fddf1)) = 1;
+    }
+    edi = G;
+    SET_BX(M16(edi + 0x248));
+    SET_CX(M16(edi + 0x566));
+    if ((int16_t)CX < 0) {
+        SET_BL(BL + 2);
+        SET_BL(BL & 3);
+    }
+    if ((int16_t)CX <= (int16_t)M16(V(0x206fdc3d)) && (int16_t)CX >= (int16_t)M16(V(0x206fdc3f)))
+        SET_BX(2);
+    ebx = BX;
+    /* unbounded: a season past 3 reads on into the image, pointers and
+     * all, as retail's */
+    SET_AL(retail_byte(V(0x206fdc43) + ebx - D));
+    M8(V(0x206fe563)) = AL;
+    M8(V(0x206fe818)) = AL;
+    M8(V(0x206fe5ed)) = AL;
+    M8(V(0x206fe61c)) = AL;
+    M8(V(0x206fe702)) = AL;
+}
+
+static void release_lists(void);
+
+/* 0x206f4505 -- list 6: the 64 lists emptied (0x206f4522 does nothing). */
+SERVICE(cb_206f4505, 8);
+static void cb_206f4505_body(const uint32_t *arg)
+{
+    eax = arg[0];
+    eax = arg[1];
+    release_lists();
+}
 
 /* ---- init's parts ------------------------------------------------------------------ */
 
@@ -14148,6 +15307,12 @@ static routine_fn routine(uint32_t a)
     case 0x206eb17d: return tile_scatter_cell;
     case 0x206ea7d0: return tile_texture_origin;
     case 0x206eb5dc: return view_turned_cofactors;
+    case 0x206e5b72: return bare_ret;           /* the builder's state 0 */
+    case 0x206e5b73: return scene_state_1;
+    case 0x206e5b9b: return scene_state_2;
+    case 0x206e5bf3: return scene_state_3;
+    case 0x206e5c0d: return scene_state_4;
+    case 0x206e5c58: return scene_state_5;
     case 0x206eb448: return scattered_eb448;
     case 0x206eb456: return scattered_eb456;
     case 0x206eb464: return scattered_eb464;

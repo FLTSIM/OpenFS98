@@ -59,7 +59,7 @@ BASE_ANALYSIS := 0x20630000
 BASE_CONTROLS := 0x20670000
 BASE_G3D    := 0x206e0000
 
-MODULES := ACONTAIN ADVDRV ANALYSIS ATC BOOSTER CHAIN CONTROLS DEMO DYNAMIC FACIL FE GLOBAL LANDME NUMERIC REALITY SLEW SOUND UTIL WEATHERM WINDOW WINMSG
+MODULES := ACONTAIN ADVDRV ANALYSIS ATC BOOSTER CHAIN CONTROLS DEMO DYNAMIC FACIL FE G3D GLOBAL LANDME NUMERIC REALITY SLEW SOUND UTIL WEATHERM WINDOW WINMSG
 
 # Setup renames two modules on the way from CD to install, and the game loads
 # the *installed* names.  A rebuilt FACIL.DLL copied in as FACIL.DLL would just
@@ -271,8 +271,9 @@ $(BIN)/WINDOW.DLL: src/window/window.c src/window/window.def src/window/window_d
 	      -o $@ src/window/window.c $(BIN)/window.res src/window/window.def \
 	      -lkernel32 -lgcc
 
-# G3D is not in MODULES yet: it is being transliterated a region at a time,
-# and its Linkage is only partly filled.  docs/modules/g3d.md has the plan.
+# G3D: the asm transliterated in g3d.c, the mesh compiler (0x38) carried over
+# as instructions in g3d_mesh.S; g3d_mesh.c is its portable C (see
+# docs/modules/g3d.md and g3ddiff-meshc-run).
 $(BIN)/G3D.DLL: src/g3d/g3d.c src/g3d/g3d_mesh.S src/g3d/g3d.def src/g3d/g3d_data.inc \
                 src/g3d/g3d_pointers.inc $(BIN)/g3d.res
 	@mkdir -p $(BIN)
@@ -810,6 +811,34 @@ g3d-break-build:
 g3d-breaks: g3ddiff
 	@python3 tools/g3d_breaks.py $(if $(N),$(N),2000)
 
+# The mesh compiler (0x38) three ways -- retail's instructions, the C on the
+# x87, the C on its software float -- over generated polygons under each
+# precision control; and the whole module with the portable C one in it,
+# against retail.
+$(DIFFDIR)/g3dmeshdiff.exe: tools/difftest/g3dmeshdiff.c src/g3d/g3d_mesh.c src/g3d/g3d_mesh.S
+	@mkdir -p $(DIFFDIR)
+	$(CC) -std=c99 -O1 -Wall -Wextra -c -DG3D_MESH_NAME=g3d_mesh_hw \
+	      -o $(DIFFDIR)/g3d_mesh_hw.o src/g3d/g3d_mesh.c
+	$(CC) -std=c99 -O1 -Wall -Wextra -c -DFS98_PORTABLE_FP -DG3D_MESH_NAME=g3d_mesh_soft \
+	      -o $(DIFFDIR)/g3d_mesh_soft.o src/g3d/g3d_mesh.c
+	$(CC) -std=c99 -O1 -Wall -Wextra -o $@ tools/difftest/g3dmeshdiff.c src/g3d/g3d_mesh.S \
+	      $(DIFFDIR)/g3d_mesh_hw.o $(DIFFDIR)/g3d_mesh_soft.o
+
+g3dmeshdiff: $(DIFFDIR)/g3dmeshdiff.exe
+
+g3dmeshdiff-run: g3dmeshdiff
+	@cd $(DIFFDIR) && WINEDEBUG=-all wine g3dmeshdiff.exe $(if $(N),$(N),100000)
+
+g3ddiff-meshc-run: $(DIFFDIR)/g3ddiff.exe $(BIN)/g3d.res
+	$(CC) $(CFLAGS) -DFS98_PORTABLE_FP -c -o $(DIFFDIR)/g3d_mesh_portable.o src/g3d/g3d_mesh.c
+	$(CC) $(CFLAGS) -fno-delete-null-pointer-checks -fno-ipa-icf -Isrc/g3d -DG3D_MESH_C $(LDFLAGS) \
+	      -Wl,--image-base=$(BASE_G3D) -o $(DIFFDIR)/G3D_ours.dll \
+	      src/g3d/g3d.c $(DIFFDIR)/g3d_mesh_portable.o $(BIN)/g3d.res src/g3d/g3d.def \
+	      -lkernel32 -luser32 -lgcc
+	@cp $(ORIG)/Modules/G3D.DLL $(DIFFDIR)/G3D_retail.dll
+	@cp $(ORIG)/Modules/UTIL.DLL $(DIFFDIR)/UTIL_retail.dll
+	@cd $(DIFFDIR) && WINEDEBUG=-all timeout 7200 wine g3ddiff.exe $(if $(N),$(N),20000)
+
 windowdiff-run: windowdiff
 	@cd $(DIFFDIR) && WINEDEBUG=-all timeout 7200 wine windowdiff.exe $(if $(N),$(N),20000) $(if $(FE_CD),$(FE_CD),.)
 
@@ -1212,4 +1241,4 @@ smoke: all
 clean:
 	rm -rf $(BIN)
 
-.PHONY: all stage setup-map graph hostmap compare run trace trace-render trace-ddraw kill window-reset wm-unmanaged wm-managed vd-on vd-off mode8 mode16 ddraw-gdi ddraw-default smoke difftest difftest-run utildiff utildiff-run utildiff-portable numericdiff numericdiff-run chaindiff chaindiff-run atcdiff atcdiff-run weathermdiff weathermdiff-run acontaindiff acontaindiff-run sounddiff sounddiff-run dynamicdiff dynamicdiff-run fegriddiff fegriddiff-run fediff fediff-run fesldiff fesldiff-run boosterdiff boosterdiff-run demodiff demodiff-run windowdiff windowdiff-run g3ddiff g3ddiff-run g3d-break-build g3d-breaks window-breaks window-break-build winmsgdiff winmsgdiff-run winmsg-breaks winmsg-break-build realitydiff realitydiff-run reality-breaks reality-break-build analysisdiff analysisdiff-run analysis-breaks analysis-break-build controlsdiff controlsdiff-run controls-breaks controls-break-build advdrvdiff advdrvdiff-run advdrv-cover landmediff landmediff-run facildiff facildiff-run facildiff-fe-run ofstest ofstest-run ofstest-remove sehfix sehfix-install sehfix-remove sehfix-log util-trace install revert installed-name-of orig-module-of clean
+.PHONY: all stage setup-map graph hostmap compare run trace trace-render trace-ddraw kill window-reset wm-unmanaged wm-managed vd-on vd-off mode8 mode16 ddraw-gdi ddraw-default smoke difftest difftest-run utildiff utildiff-run utildiff-portable numericdiff numericdiff-run chaindiff chaindiff-run atcdiff atcdiff-run weathermdiff weathermdiff-run acontaindiff acontaindiff-run sounddiff sounddiff-run dynamicdiff dynamicdiff-run fegriddiff fegriddiff-run fediff fediff-run fesldiff fesldiff-run boosterdiff boosterdiff-run demodiff demodiff-run windowdiff windowdiff-run g3ddiff g3ddiff-run g3d-break-build g3d-breaks g3dmeshdiff g3dmeshdiff-run g3ddiff-meshc-run window-breaks window-break-build winmsgdiff winmsgdiff-run winmsg-breaks winmsg-break-build realitydiff realitydiff-run reality-breaks reality-break-build analysisdiff analysisdiff-run analysis-breaks analysis-break-build controlsdiff controlsdiff-run controls-breaks controls-break-build advdrvdiff advdrvdiff-run advdrv-cover landmediff landmediff-run facildiff facildiff-run facildiff-fe-run ofstest ofstest-run ofstest-remove sehfix sehfix-install sehfix-remove sehfix-log util-trace install revert installed-name-of orig-module-of clean

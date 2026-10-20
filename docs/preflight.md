@@ -203,6 +203,13 @@ initialised `.data` (0x18600 raw bytes; tables, by the size).
   this path, with its arguments as the output.
 - GLOBAL: 235 fields, 851 accesses. Most of the sim's view state goes
   through here, and every one of those names is worth recording.
+- **It divides into the host's repair** ([modules/host.md](modules/host.md)):
+  `0x206e18c6` (`.text+0x8c6`, in `+0x28`) faulted 17 times in one flight.
+  The reimplementation has to produce the saturated quotient without
+  trapping, as WINDOW's does, and the harness has to model the filter.
+  HG2D does the same at `0x207376e2`/`0x207376fc`/`0x20737716`
+  (`.text+0x66e2`..), tens of thousands of times a flight, so an HG2D
+  logging stub on G3D's path never sees those -- but a real HG2D would.
 
 ## PANELS (id 15)
 

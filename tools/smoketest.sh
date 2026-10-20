@@ -34,10 +34,14 @@ wineboot -u >/dev/null 2>&1
 ( cd "$GAME" && timeout "$SECS" env WINEDEBUG=+loaddll wine FLTSIM98.EXE ) >"$TRACE" 2>&1
 
 fail=0
-want=$(ls "$GAME/Modules" | wc -l)
+# SEHFIX is a wine compatibility shim, not one of the sim's modules: it is
+# left out of the count so the baseline stays the retail module set.
+sehfix=0; [ -e "$GAME/Modules/SEHFIX.DLL" ] && sehfix=1
+want=$(ls "$GAME/Modules" | grep -vxi 'SEHFIX.DLL' | wc -l)
 mods=0; missing=()
 for f in "$GAME"/Modules/*; do
     m=$(basename "$f")
+    [ "$m" = "SEHFIX.DLL" ] && continue
     if grep -qiE "MODULES.+${m//./\\.}" "$TRACE"; then mods=$((mods+1)); else missing+=("$m"); fi
 done
 gaus=$(grep -ciE '\.GAU' "$TRACE")
@@ -47,7 +51,13 @@ echo "gauges loaded:  $gaus"
 [ ${#missing[@]} -eq 0 ] || { printf 'FAIL: never loaded: %s\n' "${missing[*]}"; fail=1; }
 [ "$gaus" -gt 0 ] || { echo "FAIL: no gauges -- startup stopped before the panel was built"; fail=1; }
 
-errs=$(grep -iE 'err:|unhandled exception' "$TRACE" | grep -viE 'winediag|RandR|KiUserCallbackDispatcher' || true)
+# "KiUserCallbackDispatcher ignoring exception" is wine swallowing a divide
+# fault the host would have repaired (docs/wine.md).  Without SEHFIX it is
+# expected at startup; with SEHFIX installed it means a fault got past it.
+ignore='winediag|RandR'
+[ $sehfix -eq 1 ] || ignore="$ignore|KiUserCallbackDispatcher"
+echo "SEHFIX installed: $([ $sehfix -eq 1 ] && echo yes || echo no)"
+errs=$(grep -iE 'err:|unhandled exception' "$TRACE" | grep -viE "$ignore" || true)
 [ -n "$errs" ] && { echo "FAIL: errors in trace:"; echo "$errs" | head -8; fail=1; }
 
 for f in bin/*.DLL; do
@@ -56,6 +66,7 @@ for f in bin/*.DLL; do
     # OFSTEST is a test fixture, not one of the sim's modules: it is installed
     # only by `make ofstest-run` and removed again afterwards.
     [ "$m" = "OFSTEST.DLL" ] && continue
+    [ "$m" = "SEHFIX.DLL" ] && continue
     # *_TRACE builds are instrumented variants installed only by their own
     # targets (make util-trace), never by make install.
     case "$m" in *_TRACE.DLL) continue ;; esac

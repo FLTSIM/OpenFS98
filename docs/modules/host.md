@@ -353,6 +353,17 @@ modules divide into overflow routinely — WINDOW's look direction does every
 time the eye looks within a degree or so of north — and rely on it; a harness
 that loads a retail module has to model it (`windowdiff.c` does).
 
+The filter is `LONG __stdcall (EXCEPTION_POINTERS *)` and returns -1
+(`EXCEPTION_CONTINUE_EXECUTION`) when it has repaired a divide and 0
+(`EXCEPTION_CONTINUE_SEARCH`) otherwise, the same values a vectored handler
+returns. Other sites that divide into it, from the running sim: the host's
+own `WM_SIZE` (`0x406525`, `0x406538`, `0x40654a`, `0x40655d`, by a zero
+surface size while a view is 0x0), HG2D's gradient setup (`0x207376e2`,
+`0x207376fc`, `0x20737716`, a zero-length edge, tens of thousands per flight)
+and G3D `+0x28` (`0x206e18c6`). Wine never hands the filter a fault raised
+inside a window procedure, and that is what froze the 3D view; see
+[../wine.md](../wine.md) and `SEHFIX.DLL`.
+
 ## Status
 
 2 of 194 services implemented. 71 have prototypes confirmed from the callee

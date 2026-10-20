@@ -473,6 +473,32 @@ ofstest-remove:
 	@rm -f "$(FS98_DIR)/Modules/OFSTEST.DLL"
 	@echo "OFSTEST.DLL removed from Modules"
 
+# Wine compatibility, not part of the sim: wine swallows exceptions raised in
+# window procedures, so the host's integer-divide repair (filter 0x4119a0)
+# never sees the ones retail takes in WM_SIZE and in HG2D's rasteriser.
+# SEHFIX.DLL hands them to that filter from a vectored handler, and logs each
+# one with the SEH chain it walked.  See src/winecompat/sehfix.c and
+# docs/wine.md.
+SEHFIX_LOG := $(HOME)/.wine/drive_c/openfs98-sehfix.log
+
+$(BIN)/SEHFIX.DLL: src/winecompat/sehfix.c src/winecompat/sehfix.def
+	@mkdir -p $(BIN)
+	$(CC) $(CFLAGS) -D_WIN32_WINNT=0x0501 $(LDFLAGS) -Wl,--image-base=0x20960000 \
+	      -o $@ src/winecompat/sehfix.c src/winecompat/sehfix.def -lkernel32
+
+sehfix: $(BIN)/SEHFIX.DLL
+
+sehfix-install: sehfix
+	@cp $(BIN)/SEHFIX.DLL "$(FS98_DIR)/Modules/SEHFIX.DLL"
+	@echo "SEHFIX.DLL installed; its log is $(SEHFIX_LOG)"
+
+sehfix-remove:
+	@rm -f "$(FS98_DIR)/Modules/SEHFIX.DLL"
+	@echo "SEHFIX.DLL removed from Modules"
+
+sehfix-log:
+	@cat "$(SEHFIX_LOG)" 2>/dev/null || echo "(no log -- SEHFIX was not loaded)"
+
 # Differential test.  The game cannot exercise SLEW (its tick only runs in slew
 # mode), so the module is driven directly instead: both builds get an
 # identically seeded GLOBAL block and a stub UTIL, and the blocks are compared
@@ -1012,17 +1038,14 @@ run:
 # manager with it, leaving nothing clickable.  This kills every wine process in
 # the prefix, which is always safe here -- nothing else runs in it.
 kill:
-	-@pkill -9 -f fltsim98 2>/dev/null; pkill -9 -f wineserver 2>/dev/null; true
+	-@wineserver -k 2>/dev/null; true
 	@echo "wine processes killed"
 
-# WineHQ's documented fix for FS98's 3D view: either run in a virtual desktop,
-# or stop the window manager owning wine's windows.  Letting the WM manage the
-# window is what loses the DirectDraw surfaces mid-flight -- the trace shows
-# Restore calls followed immediately by faults in the render path, twice.
-#
-# wm-unmanaged is the less intrusive of the two: no extra desktop window, the
-# sim keeps its own frame, but the WM stops interfering.  Undecorated too,
-# since a decorated-but-unmanaged window behaves oddly.
+# Window-manager control of wine's windows.  wm-unmanaged was tried as a fix
+# for the 3D view freezing; the real cause was wine swallowing the host's
+# divide faults (see sehfix above and docs/wine.md), and an unmanaged window
+# never gets keyboard focus, so keys go to whatever window had it.  Leave the
+# WM in charge (wm-managed, wine's default) and use vd-on for focus.
 wm-unmanaged:
 	wine reg add 'HKCU\Software\Wine\X11 Driver' /v Managed /d N /f
 	wine reg add 'HKCU\Software\Wine\X11 Driver' /v Decorated /d N /f
@@ -1138,4 +1161,4 @@ smoke: all
 clean:
 	rm -rf $(BIN)
 
-.PHONY: all stage setup-map graph hostmap compare run trace trace-render trace-ddraw kill window-reset wm-unmanaged wm-managed vd-on vd-off mode8 mode16 ddraw-gdi ddraw-default smoke difftest difftest-run utildiff utildiff-run utildiff-portable numericdiff numericdiff-run chaindiff chaindiff-run atcdiff atcdiff-run weathermdiff weathermdiff-run acontaindiff acontaindiff-run sounddiff sounddiff-run dynamicdiff dynamicdiff-run fegriddiff fegriddiff-run fediff fediff-run fesldiff fesldiff-run boosterdiff boosterdiff-run demodiff demodiff-run windowdiff windowdiff-run window-breaks window-break-build winmsgdiff winmsgdiff-run winmsg-breaks winmsg-break-build realitydiff realitydiff-run reality-breaks reality-break-build analysisdiff analysisdiff-run analysis-breaks analysis-break-build controlsdiff controlsdiff-run controls-breaks controls-break-build advdrvdiff advdrvdiff-run advdrv-cover landmediff landmediff-run facildiff facildiff-run facildiff-fe-run ofstest ofstest-run ofstest-remove util-trace install revert installed-name-of orig-module-of clean
+.PHONY: all stage setup-map graph hostmap compare run trace trace-render trace-ddraw kill window-reset wm-unmanaged wm-managed vd-on vd-off mode8 mode16 ddraw-gdi ddraw-default smoke difftest difftest-run utildiff utildiff-run utildiff-portable numericdiff numericdiff-run chaindiff chaindiff-run atcdiff atcdiff-run weathermdiff weathermdiff-run acontaindiff acontaindiff-run sounddiff sounddiff-run dynamicdiff dynamicdiff-run fegriddiff fegriddiff-run fediff fediff-run fesldiff fesldiff-run boosterdiff boosterdiff-run demodiff demodiff-run windowdiff windowdiff-run window-breaks window-break-build winmsgdiff winmsgdiff-run winmsg-breaks winmsg-break-build realitydiff realitydiff-run reality-breaks reality-break-build analysisdiff analysisdiff-run analysis-breaks analysis-break-build controlsdiff controlsdiff-run controls-breaks controls-break-build advdrvdiff advdrvdiff-run advdrv-cover landmediff landmediff-run facildiff facildiff-run facildiff-fe-run ofstest ofstest-run ofstest-remove sehfix sehfix-install sehfix-remove sehfix-log util-trace install revert installed-name-of orig-module-of clean

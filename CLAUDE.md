@@ -273,10 +273,13 @@ reach a boundary.
   wrong arity — and the wrong version still compiles. Confirmed host prototypes
   live in [include/fs98/host.h](include/fs98/host.h); add to it from the
   callee's `ret N`.
-- **The wine 3D-viewport bug is parked, deliberately.** See
-  [docs/wine.md](docs/wine.md). It reproduces with the retail modules, so it is
-  not a decompilation defect, and native renderers make it moot. Do not spend
-  time on it unless asked.
+- **The wine 3D-view freeze is solved -- run with `SEHFIX.DLL`.** Wine
+  swallows exceptions raised in window procedures, so the host's integer-divide
+  repair (filter `0x4119a0`) never saw HG2D's divides by a zero-length edge,
+  and the first one in a frame drawn from a callback stopped the rasteriser
+  for good. `make sehfix-install` hands those faults back to the host's
+  filter; `make vd-on` is still needed for focus. Not a decompilation defect.
+  See [docs/wine.md](docs/wine.md).
 - **Not every FS98 CD is the reference.** A later pressing rebuilt
   `FLTSIM98.EXE` and ten modules at base `0x10000000` (CONTROLS among them,
   with 493 commands instead of 383). If a generator stops with `image base

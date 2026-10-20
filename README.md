@@ -113,6 +113,7 @@ else's 1997 build, and it should read that way.
 | `make weathermdiff-run` | the same for WEATHERM: updates, frames, resets, scenery effects and list operations, comparing every import call, GLOBAL, the heap and the `.data` image |
 | `make chaindiff-run` | drive retail and OpenFS98 CHAIN side by side over random re-entrant callback scripts; `N=...` sets the count |
 | `make ofstest-run` | run assertions *inside* the sim, where the host is reachable; `ofstest-remove` takes the module back out |
+| `make sehfix-install` | put `SEHFIX.DLL` in `Modules\`, which hands the divide faults wine swallows back to the host's repair, so the 3D view does not freeze; `sehfix-remove` takes it out, `sehfix-log` shows what it repaired (see [docs/wine.md](docs/wine.md)) |
 | `make util-trace` | boot the sim with a UTIL that counts every service call, and list what ran; `UTIL_TRACE_SECS=` for a longer session to play in |
 | `make graph` | module id and dependency table, read live from `orig/` |
 | `tools/impscan.py FILE` | which imported services a module calls, by import and slot |
@@ -136,6 +137,7 @@ and does not mind).
 ```sh
 make install     # swap rebuilt modules in; backs up to *.orig first
 make run         # wine FLTSIM98.EXE
+make sehfix-install vd-on   # what a flyable sim needs under wine -- docs/wine.md
 make revert      # put the retail modules back
 make trace       # WINEDEBUG=+loaddll, to see which modules got loaded
 ```
@@ -164,8 +166,10 @@ identical counts.
 
 The end state is native builds -- modern Windows, Linux, Mac, maybe Android --
 at which point wine stops mattering. Running the retail binary under wine is
-scaffolding for the middle of the project, not the destination, and it is
-already the only part that misbehaves (see [docs/wine.md](docs/wine.md)).
+scaffolding for the middle of the project, not the destination. Its one real
+problem, the 3D view freezing, was wine swallowing divide faults the host
+repairs; `make sehfix-install` and `make vd-on` give a flyable sim (see
+[docs/wine.md](docs/wine.md)).
 
 How far away that is, measured by what each retail module actually calls:
 

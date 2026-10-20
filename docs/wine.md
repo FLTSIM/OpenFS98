@@ -1,11 +1,123 @@
 # Running FS98 under wine
 
-> **Parked, deliberately.** Everything below reproduces with the *retail*
-> modules, so none of it is a decompilation defect, and the project is heading
-> for native renderers that make it moot. Kept as a record of what was tried so
-> it is not retried. Do not spend time here unless asked.
+> **The 3D view freeze is solved** (2026-10-19): wine swallows the integer
+> divide faults that the host's filter exists to repair, and `SEHFIX.DLL`
+> hands them back. The first section is the cause, the evidence and the
+> setup that works. Everything after it is the investigation that came
+> before, kept so it is not retried; where its conclusions turned out wrong
+> it now says so.
 
-## The 3D view renders one frame and then stops
+## The cause, and the fix
+
+### Setup that works
+
+Tested under wine 9.0 with the retail modules plus OpenFS98's, a flight
+loaded and flown from the keyboard, the 3D view animating throughout:
+
+```sh
+make sehfix-install   # SEHFIX.DLL into Modules\ -- the fix itself
+make vd-on            # wine virtual desktop -- for focus, see below
+make wm-managed       # wine's default; undoes an earlier wm-unmanaged
+make window-reset     # native 640x480 client at the top-left
+make run
+```
+
+with `[HARDWARE] Device=` (empty) and `Mode=640x480x8`, `FULL_SCREEN=2`, and
+no `renderer` override under `HKCU\Software\Wine\Direct3D`.
+**Untested with the fix**: `Mode=640x480x16`, a Direct3D `Device=`, running
+without the virtual desktop, and resizing the window. Each was a suspect
+before the cause was known and may well be fine now; try them one at a time.
+
+`make sehfix-remove` takes the module out; `make sehfix-log` shows its log.
+
+### What happens
+
+The host runs its main loop under a `__try` (`0x412140`) whose filter
+`0x4119a0` repairs integer divide faults: it decodes the `div`/`idiv`, writes
+a saturated quotient into the context, steps eip past it and returns
+`EXCEPTION_CONTINUE_EXECUTION` (see [modules/host.md](modules/host.md)).
+Retail code divides by zero and into overflow routinely and relies on it.
+
+On 32-bit Windows a fault inside a window procedure unwinds out through
+`DispatchMessage` and reaches that `__try`. Wine 9 calls window procedures
+from `KiUserCallbackDispatcher`, which wraps the call in a catch-all of its
+own -- that is the `err:seh:KiUserCallbackDispatcher ignoring exception` seen
+in every log. So under wine the host's filter never sees a divide raised in a
+window procedure. The procedure is abandoned at the faulting instruction and
+everything it had not yet done stays undone.
+
+Two such divides happen in every flight, both retail code:
+
+| address | where | what |
+| --- | --- | --- |
+| `0x406525` (and `0x406538`, `0x40654a`, `0x40655d`) | host `WM_SIZE` (`0x4060b0`) | `idiv [record+0x60]` and its siblings, while a view is still 0x0; four records at startup |
+| `0x207376e2` (and `0x207376fc`, `0x20737716`) | HG2D `.text+0x66e2` | a gradient `(c1 - c0) << 5 / edge` over a zero-length edge, `idiv ebp` |
+
+The `WM_SIZE` ones abandon the tail of each startup layout: the view block's
+scales at `+0x44`..`+0x50`, `0x406590`, and the `+0x70` resize callbacks. The
+HG2D one is the freeze. Most frames are drawn straight from the main loop,
+where the filter does see the fault. But when one is drawn from inside a
+window procedure and hits a degenerate edge, wine unwinds out of the middle
+of the frame, past G3D's clipper, which swaps the span routine at
+`.data+0x4910` and restores it only on the way out
+([preflight.md](preflight.md#g3d-id-14)), and past whatever else HG2D and G3D
+had in flight. The 3D view never draws again; the panel, which is drawn
+separately, carries on.
+
+### The evidence
+
+With `WINEDEBUG=+seh`, one session of each:
+
+- **Without the fix**: five divide faults in the whole session, all
+  `0xc0000094`, all `ignoring exception` -- the four `WM_SIZE` ones at
+  startup and **exactly one** at HG2D `0x207376e2`, after which there were
+  none: the rasteriser had stopped.
+- **With the fix**: about 86,000 faults at each of HG2D's three divides,
+  all repaired and resumed, 17 at G3D `0x206e18c6` (`.text+0x8c6`, inside
+  service `+0x28`), and **zero** exceptions swallowed. The view animated.
+
+A rasteriser that faults thousands of times a minute when working, and
+faulted once and fell silent before, is the freeze seen from the inside.
+
+### SEHFIX.DLL
+
+`src/winecompat/sehfix.c`. A module with id 8 (unused by retail) that imports
+nothing; its `DllMain` registers a vectored exception handler, which runs
+before any frame-based handler, wine's included. On `0xc0000094` or
+`0xc0000095` it walks the SEH chain from `fs:[0]` as x86 Windows would see it:
+frames whose handlers live outside the game's directory -- wine's own -- are
+skipped, and the first frame the game owns decides. If that is the host's
+main-loop frame (handler `0x414cd6`, scope table `0x416110`, try level 0) it
+calls `0x4119a0` and returns its verdict; anything else is left to wine as
+before. It has no saturation logic of its own, so the result is what retail
+computes on Windows.
+
+The log confirmed the model before it was trusted: every chain was the host's
+frame alone, or wine's `ntdll` catch-all and then the host's frame -- no MFC
+or module frame in between. That matters because the game's own SEH users
+(the MFC dialog DLLs in `English\`, `SIMSUI.DLL`, BOOSTER's C++ handler) would
+see a fault before the host's filter on Windows, and a handler that simply
+called the filter for every divide would have overridden them. The chain walk
+keeps their order.
+
+`C:\openfs98-sehfix.log` (`make sehfix-log`) holds the first 32 faults with
+their chains and, at exit, a count per address and verdict. A killed sim
+writes no counts.
+
+### What it means beyond wine
+
+- **It is not a decompilation defect and not a DirectDraw bug.** With
+  `Device=` empty the sim never `Blt`s, `Lock`s or `Flip`s through DirectDraw
+  at all (the ddraw trace has only surface creation, `GetSurfaceDesc` and one
+  `Restore`); frames reach the screen through GDI. The "DirectDraw present
+  failing" framing below was wrong.
+- **Native builds must reproduce the repair** wherever retail divides into
+  it: the host's `WM_SIZE`, HG2D's gradient setup, G3D `+0x28` and WINDOW's
+  look direction so far. A saturated quotient is behaviour; WINDOW's
+  reimplementation already computes it without trapping, and G3D and HG2D's
+  will have to as well.
+
+## History: the 3D view renders one frame and then stops
 
 **Symptom.** A flight loads and the panel is live — instruments respond, the
 aircraft accelerates, the attitude indicator follows the controls — but the 3D
@@ -68,6 +180,11 @@ So:
 - the aircraft, panel, gauges, scenery and flight model are all fine. This is
   one blit, not a broken sim.
 
+*In hindsight:* the first two points stand, the third does not. Nothing was
+wrong with the blit: the frames stopped being drawn, because the rasteriser
+had been unwound out of mid-frame (see the top of this file). A forced
+repaint shows black because nothing draws into the cleared area.
+
 ## 8-bit changes the failure
 
 With `Mode=640x480x8` the 3D view **animates** -- for a few seconds, then
@@ -86,6 +203,13 @@ exception below actually killing the render loop.
 short run. Exceptions thrown inside window callbacks and dropped by wine are a
 plausible shape for "works, then stops".
 
+*In hindsight:* that last candidate was the cause. The four were the
+`WM_SIZE` divides; the freeze is a fifth, in HG2D. The depth-conversion
+explanation was never confirmed. When the freeze comes depends on when a
+frame drawn from a window procedure first meets a degenerate edge, which
+may be all the colour depth changed; 16-bit has not been retried with the
+fix.
+
 Exclusive fullscreen (alt+enter) still freezes the view, and earlier wedged the
 session hard enough that nothing was clickable. Do not use it: wine reports
 
@@ -103,6 +227,10 @@ anything else. Resize the window and the view goes black -- and the new
 geometry is written to `[MAIN] Location=`, so it stays black on the next
 launch, and maximising does not help either. Everything else keeps working,
 which is what makes it look like a fresh bug rather than the resize.
+
+*Not yet retried with SEHFIX.* A resize is a `WM_SIZE`, the handler whose
+divides wine swallowed (`0x406525`), so this may have been the same bug.
+`make window-reset` still recovers if it is not.
 
 ```ini
 Location=635,252,1283,785     ; 648 x 533 -- native: 640x480 client + chrome
@@ -132,12 +260,19 @@ fight documented further down as an environment quirk -- the host window
 manager and the sim arguing over focus -- and running inside wine's own desktop
 settles it, because the host WM never touches the sim's window.
 
-**Next, in order of promise:**
+Confirmed again on 2026-10-19, and the virtual desktop is still needed with
+the fix in. Without it and with the WM managing the window, "Fly Now!"
+would not take a click. With `make wm-unmanaged` (`Managed=N`), the WM never
+gives the sim keyboard focus and keys go to whatever window had it before.
+`wm-unmanaged` was a guess at the freeze; leave it off.
+
+**Superseded** -- the list below was the plan before the cause was found.
+None of it turned out to be needed, and `ddraw-gdi` is no longer applied.
 
 1. `make ddraw-gdi` -- switches wine's DirectDraw from its OpenGL path to plain
    GDI blitting (`HKCU\Software\Wine\Direct3D` → `renderer=gdi`). This is the
    long-standing fix for mid-90s DirectDraw games whose screen never updates,
-   which is the symptom exactly. `make ddraw-default` reverts it. **Applied.**
+   which is the symptom exactly. `make ddraw-default` reverts it.
 2. `Mode=640x480x8`. The software path is at home in 8-bit, and a palettised
    primary surface takes a different route through wine's ddraw.
 3. Toggle `FULL_SCREEN` in `[PREFS]`, currently 2. Exclusive-mode page flipping
@@ -208,3 +343,7 @@ command line being run -- which kills the whole invocation, exit code 144.
 Bracketing the pattern (`'FLT[S]IM98'`) avoids that, but only until some other
 part of the same command, a heredoc for instance, happens to contain the name
 too. Put kills in their own command.
+
+`make kill` used `pkill -f fltsim98`, which is case-sensitive and never
+matched `FLTSIM98.EXE`; it now runs `wineserver -k`, which ends every process
+in the prefix without matching anything.

@@ -1,0 +1,4 @@
+LIBRARY SEHFIX.DLL
+EXPORTS
+    Linkage DATA
+    ImportTable DATA

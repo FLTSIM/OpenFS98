@@ -106,6 +106,20 @@ static uint8_t *arena, *programs, *context;
 static uint8_t window_rec[0x100], view_block[0x60];  /* GLOBAL +0x1194, +0x1198 */
 static uint32_t arena_used;
 
+/* Libraries (0x63), FE +0x3c's objects by 16-byte id: programs at
+ * programs+0x11000, made with the models.  An id that differs from one in
+ * a single dword is no library. */
+#define libraries (programs + 0x11000)
+#define NLIBRARIES 4
+static uint32_t library_length[NLIBRARIES];
+static void library_id(uint32_t k, uint32_t *id)
+{
+    id[0] = 0x4c494230u + k;
+    id[1] = 0x12345678u;
+    id[2] = 0x9abcdef0u;
+    id[3] = 0x0f0f0000u + k;
+}
+
 static uint32_t scenario, op_number, scenario_seed, rng;
 static int counting, faulted;
 static unsigned long cover_ops[32], cover_divfix, cover_faults, cover_shift_masked,
@@ -377,6 +391,12 @@ static int on_break(EXCEPTION_POINTERS *e)
             fprintf(trace_file, "%08x eax %08x ebx %08x ecx %08x edx %08x esi %08x edi %08x ebp %08x\n",
                     break_at[i], (unsigned)c->Eax, (unsigned)c->Ebx, (unsigned)c->Ecx,
                     (unsigned)c->Edx, (unsigned)c->Esi, (unsigned)c->Edi, (unsigned)c->Ebp);
+        /* G3D_BREAKMEM: a dword of retail's image (an address in it) too */
+        if (trace_file && cur == &retail && getenv("G3D_BREAKMEM")) {
+            uint32_t at = (uint32_t)strtoul(getenv("G3D_BREAKMEM"), NULL, 16);
+
+            fprintf(trace_file, "  mem %08x\n", *(uint32_t *)(uintptr_t)at);
+        }
         /* G3D_BREAKFRAME: the 0x60 bytes from ebp too */
         if (trace_file && cur == &retail && getenv("G3D_BREAKFRAME")) {
             uint32_t k;
@@ -638,7 +658,8 @@ static int32_t STDCALL __attribute__((used)) hg2d_point(uint32_t surf, uint32_t 
 {
     put(" point(");
     put_ptr(surf);
-    put(",%#x,%#x,%#x)", x, y, z);
+    /* HG2D tests GLOBAL +0x127e's low byte here (0x20731406) */
+    put(",%#x,%#x,%#x%s)", x, y, z, global[0x127e] ? "" : ",plain");
     if (counting) cover_drawn[0]++;
     return 0;
 }
@@ -892,6 +913,90 @@ WRAP(w_value_point, hg2d_value_point, 6, 24, 0xd28);
 WRAP(w_light, hg2d_light, 4, 16, 0xd84);
 WRAP(w_load_texture, hg2d_load_texture, 3, 12, 0xda8);
 
+/* FE +0x3c: the object (here a library program) whose 16-byte id is at
+ * id: -1 with *got its size when size will not hold it, else copied to
+ * buf, *got its size, 1; 0 for none.  buf and got may be on the stack. */
+static int32_t STDCALL __attribute__((used)) fe_object(const uint32_t *id, uint8_t *buf,
+                                                       uint32_t more, uint32_t size, uint32_t *got)
+{
+    uint32_t k, want[4], len;
+
+    put(" object(%08x%08x%08x%08x,%u,%#x)", id[0], id[1], id[2], id[3], more & 0xffff, size);
+    for (k = 0; k < NLIBRARIES; k++) {
+        library_id(k, want);
+        if (memcmp(want, id, 16) == 0)
+            break;
+    }
+    if (k == NLIBRARIES)
+        return 0;
+    len = library_length[k];
+    *got = len;
+    if (size < len)
+        return -1;
+    put("=");
+    put_ptr((uint32_t)(uintptr_t)buf);
+    memcpy(buf, libraries + 0x100 * k, len);
+    return 1;
+}
+WRAP(w_fe_object, fe_object, 5, 20, 0x123c);
+
+/* +0x68: a texture by name with the context, 1 when it loaded. */
+static int32_t STDCALL __attribute__((used)) hg2d_named_texture(const char *name, uint32_t context)
+{
+    uint32_t h = 0x811c9dc5u, i;
+
+    put(" named(%.13s,", name);
+    put_ptr(context);
+    put(")");
+    for (i = 0; name[i] && i < 13; i++)
+        h = (h ^ (uint8_t)name[i]) * 0x01000193u;
+    return (h & 3) != 0;
+}
+WRAP(w_named_texture, hg2d_named_texture, 2, 8, 0xd68);
+
+/* The host's string services are its own code, copied (0x40ef40 strlen,
+ * 0x40ee70 strcpy) or, for +0x2c0's _strcmpi, the CD MSVCRT's C-locale
+ * loop (0x78014b2f): what they leave in ecx and edx is theirs.  Each logs
+ * its arguments first, every register kept round the logging. */
+static void STDCALL __attribute__((used)) log_string(uint32_t which, const char *a, const char *b)
+{
+    static const char *const name[3] = { "strlen", "strcpy", "strcmpi" };
+
+    put(" %s(", name[which]);
+    put_ptr((uint32_t)(uintptr_t)a);
+    if (which == 0) {
+        put(":%.16s)", a);
+        return;
+    }
+    put(",");
+    put_ptr((uint32_t)(uintptr_t)b);
+    put(":%.16s)", b);
+}
+
+void w_strlen(void), w_strcpy(void), w_strcmpi(void);
+__asm__(".text\n_w_strlen:\n\t"
+        "pushal\n\tpushl $0\n\tpushl 40(%esp)\n\tpushl $0\n\tcall _log_string@12\n\tpopal\n\t"
+        "pushl %edi\n\tmovl 8(%esp), %edi\n\ttestl %edi, %edi\n\tjne 1f\n\t"
+        "xorl %eax, %eax\n\tpopl %edi\n\tret $4\n"
+        "1:\n\torl $-1, %ecx\n\txorl %eax, %eax\n\trepnz scasb\n\tnotl %ecx\n\tdecl %ecx\n\t"
+        "popl %edi\n\tmovl %ecx, %eax\n\tret $4\n"
+        "_w_strcpy:\n\t"
+        "pushal\n\tpushl 40(%esp)\n\tpushl 40(%esp)\n\tpushl $1\n\tcall _log_string@12\n\tpopal\n\t"
+        "pushl %esi\n\tpushl %edi\n\tmovl 16(%esp), %edi\n\torl $-1, %ecx\n\txorl %eax, %eax\n\t"
+        "repnz scasb\n\tnotl %ecx\n\tsubl %ecx, %edi\n\tmovl %edi, %esi\n\tmovl 12(%esp), %edi\n\t"
+        "movl %ecx, %eax\n\tmovl %edi, %edx\n\tshrl $2, %ecx\n\trep movsl\n\tmovl %eax, %ecx\n\t"
+        "movl %edx, %eax\n\tandl $3, %ecx\n\trep movsb\n\tpopl %edi\n\tpopl %esi\n\tret $8\n"
+        "_w_strcmpi:\n\t"
+        "pushal\n\tpushl 40(%esp)\n\tpushl 40(%esp)\n\tpushl $2\n\tcall _log_string@12\n\tpopal\n\t"
+        "pushl %ebp\n\tmovl %esp, %ebp\n\tpushl %edi\n\tpushl %esi\n\tpushl %ebx\n\t"
+        "movl 12(%ebp), %esi\n\tmovl 8(%ebp), %edi\n\tmovb $0xff, %al\n"
+        "1:\n\torb %al, %al\n\tje 2f\n\tmovb (%esi), %al\n\tincl %esi\n\tmovb (%edi), %ah\n\tincl %edi\n\t"
+        "cmpb %al, %ah\n\tje 1b\n\tsubb $0x41, %al\n\tcmpb $0x1a, %al\n\tsbbb %cl, %cl\n\t"
+        "andb $0x20, %cl\n\taddb %cl, %al\n\taddb $0x41, %al\n\txchgb %ah, %al\n\tsubb $0x41, %al\n\t"
+        "cmpb $0x1a, %al\n\tsbbb %cl, %cl\n\tandb $0x20, %cl\n\taddb %cl, %al\n\taddb $0x41, %al\n\t"
+        "cmpb %ah, %al\n\tje 1b\n\tsbbb %al, %al\n\tsbbb $0xff, %al\n"
+        "2:\n\tmovsbl %al, %eax\n\tpopl %ebx\n\tpopl %esi\n\tpopl %edi\n\tleave\n\tret $8\n");
+
 static void build_stubs(void)
 {
     uint32_t i;
@@ -901,6 +1006,9 @@ static void build_stubs(void)
     SET_SLOT(host, 0x20c, w_alloc);
     SET_SLOT(host, 0x210, w_realloc);
     SET_SLOT(host, 0x214, w_free);
+    SET_SLOT(host, 0x2a8, w_strcpy);
+    SET_SLOT(host, 0x2b8, w_strlen);
+    SET_SLOT(host, 0x2c0, w_strcmpi);
     SET_SLOT(host, 0x2f8, w_list_add);
     SET_SLOT(host, 0x2fc, w_list_free);
     SET_SLOT(host, 0x300, w_list_remove);
@@ -928,6 +1036,8 @@ static void build_stubs(void)
     SET_SLOT(hg2d, 0x28, w_value_point);
     SET_SLOT(hg2d, 0x84, w_light);
     SET_SLOT(hg2d, 0xa8, w_load_texture);
+    SET_SLOT(hg2d, 0x68, w_named_texture);
+    SET_SLOT(fe, 0x3c, w_fe_object);
     *(uint32_t *)weatherm = 27;
     SET_SLOT(weatherm, 0x28, w_weather_effect);
     (void)hg2d_slot_called;
@@ -1170,6 +1280,27 @@ static void call_service(uint32_t slot, uint32_t nargs, ...)
     in_g3d = 0;
 }
 
+/* The same with esi given: the services that take a record there. */
+static void call_service_esi(uint32_t slot, uint32_t esi_value)
+{
+    uint32_t i;
+
+    call_nargs = 0;
+    call_target = *(uint32_t *)(cur->link + slot);
+    for (i = 0; i < 7; i++)
+        do
+            regs_in[i] = rnd();
+        while (as_offset(&retail, regs_in[i]) != regs_in[i] ||
+               as_offset(&ours, regs_in[i]) != regs_in[i]);
+    regs_in[4] = esi_value;
+    in_g3d = 1;
+    if (__builtin_setjmp(fault_jb) == 0) {
+        call_regs();
+        put_regs();
+    }
+    in_g3d = 0;
+}
+
 /* ---- programs ------------------------------------------------------------------------- */
 
 /* The variable numbers the table maps to GLOBAL (nonzero on disk) and a few
@@ -1200,9 +1331,13 @@ static void find_variables(void)
                 }
                 if ((v & 3) == 0 && nreserved < 16 && k == nreserved)
                     reserved_vars[nreserved++] = (uint16_t)i;
-            } else if (!(v + 2 > 0x1194 && v < 0x119c) && !(v + 2 > 0xdca && v < 0xdcc)) {
+            } else if (!(v + 2 > 0x1194 && v < 0x119c) && !(v + 2 > 0xdca && v < 0xdcc) &&
+                       !(v + 4 > 0x248 && v < 0x24a) && !(v + 4 > 0xb60 && v < 0xb64)) {
                 /* not the window and view pointers the drawing reads, nor
-                 * the map flag (lines depend on it, below) */
+                 * the map flag (lines depend on it, below), nor the season
+                 * (0..3 in the game; a ground tile reads names by it, out
+                 * of the image past that) or the detail level (0..4; 5 is
+                 * the queue's crash) */
                 mapped_vars[nmapped++] = (uint16_t)i;
             }
         } else if (v == 0 && nunmapped < 64 && i % 37 == 1) {
@@ -1225,6 +1360,8 @@ struct gen {
 
 static void w16(uint8_t *p, uint32_t v) { p[0] = (uint8_t)v; p[1] = (uint8_t)(v >> 8); }
 static void w32(uint8_t *p, uint32_t v) { w16(p, v); w16(p + 2, v >> 16); }
+static uint16_t r16(const uint8_t *p) { return (uint16_t)(p[0] | p[1] << 8); }
+static uint32_t r32(const uint8_t *p) { return r16(p) | (uint32_t)r16(p + 2) << 16; }
 
 /* A variable operand: through the table, mapped or not.  Whether a
  * context is set depends on the path taken (a 0x89 in a skipped block never
@@ -1281,6 +1418,8 @@ static const char *const texture_names[] = {
 };
 #define NTEXTURE_NAMES (sizeof texture_names / sizeof texture_names[0])
 
+static const char *const named_textures[4] = { "water.r8", "runway.r8", "grass", "[@`{].r8" };
+static char last_name[13];         /* 0x19's last, which it often repeats */
 static int scene_is_map;           /* no lines: GLOBAL +0xdca set and the line
                                     * colour (+0x2ec) not 0x6900, or maybe not */
 static int scene_dca;              /* GLOBAL +0xdca set for this program */
@@ -1799,13 +1938,18 @@ static void set_scene(void)
     for (i = 0; i < 3; i++)
         w32(global + 0xcdc + 4 * i, rnd() % 4 ? (uint32_t)((int32_t)(rnd() % 0x40000) - 0x20000)
                                               : spread());
+    /* now and then the eye's z a few thousand out, where 0x72's lights
+     * meet it (they compare the word above, within 2 of 0 otherwise) */
+    if (rnd() % 4 == 0)
+        w32(global + 0xce4, (uint32_t)((int32_t)(rnd() % 0x10000000) - 0x8000000));
     if (rnd() % 4 == 0)
         for (i = 0; i < 9; i++)
             m[i] = (uint16_t)rnd();
     for (i = 0; i < 9; i++)
         w16(global + 0xce8 + 2 * i, m[i]);
     w16(global + 0xd42, rnd() % 4 ? rnd() % 3 : (uint16_t)rnd());
-    w32(global + 0x320, rnd() % 8 ? 1 + rnd() % 0x10000 : (rnd() % 2 ? 0 : spread()));
+    w32(global + 0x320, rnd() % 8 ? (rnd() % 3 ? 1 + rnd() % 0x10000 : 0x10000)
+                                  : (rnd() % 2 ? 0 : spread()));
     w16(global + 0xdca, rnd() % 6 ? 0 : 1);
     scene_dca = global[0xdca] != 0;
     {
@@ -1828,6 +1972,32 @@ static void set_scene(void)
         global[0x12a4] &= ~8;
     if (rnd() % 2)
         w16(cur->image + 0xf4, 1);
+    /* the season (0..3, as in the game; a ground tile indexes tables by
+     * it), the end
+     * bars' switch and pattern 1's (+0x1204, often clear), the eye's
+     * height now and then 0 or small (the VASI's divides) */
+    w16(global + 0x248, rnd() % 4);
+    if (rnd() % 2)
+        w16(global + 0x1204, 0);
+    if (rnd() % 4 == 0)
+        w16(global + 0xce2, (uint16_t)(rnd() % 4));
+    /* the object's 48-bit offsets from the eye (+0x2fe, +0x30a, +0x316)
+     * small half the time, so a ground tile is in view and its scatter's
+     * eye fits; the texture switch (+0x39c) off now and then */
+    if (rnd() % 2)
+        for (i = 0; i < 3; i++) {
+            w16(global + 0x2fe + 0xc * i, (uint16_t)rnd());
+            w32(global + 0x300 + 0xc * i, (uint32_t)((int32_t)(rnd() % 0x80) - 0x40));
+        }
+    if (rnd() % 4 == 0)
+        w16(global + 0x39c, 0);
+    /* the words above the angles' high halves, which the turns test as
+     * dwords: clear, 0x72 at heading 0 leaves the eye where it is */
+    if (rnd() % 2) {
+        w16(global + 0x5cc, 0);
+        w16(global + 0x5d0, 0);
+        w16(global + 0x5d4, 0);
+    }
     /* the distance (strips draw near by it, lines far) */
     w32(global + 0xd4c, rnd() % 2 ? rnd() % 0x400000 : rnd());
     /* in the map, facets and meshes close only with +0x1298 clear */
@@ -1878,6 +2048,7 @@ static uint8_t *sub_next;
 static uint32_t reserved_next;
 static uint32_t draw_weight;         /* in ten, how often emit_one draws */
 static int context_possible;
+static int in_library;               /* generating a library (0x63) */
 
 static uint8_t *subroutine(struct gen *g)
 {
@@ -1896,6 +2067,122 @@ static uint8_t *subroutine(struct gen *g)
     return at;
 }
 
+static void approach_record(uint8_t *p)
+{
+    /* Steered onto the eye's z (GLOBAL +0xce6), where rows, bars and
+     * the header stop -- exactly when the words over the angles are
+     * clear (the turn to a heading of 0 then leaves the eye alone):
+     * the threshold on the eye give or take one; the header's z
+     * (threshold +-5) on it; pattern 1 with 219 lights, whose far end
+     * wraps round onto the eye with the near end past it; a bar of one
+     * light (pattern 8) short of the eye; pattern 1's one light with
+     * the flashers on, the eye well past it; the eye among the lights.
+     * The VASI's first bar on the eye (its distance 0) at 45 degrees,
+     * where both of its divides fault, or twice GLOBAL +0xce2 from
+     * it.  A pattern 0..11 (1..10 are), 1, 9 and 10 more often; VASIs
+     * of 0, 1, 2 bars and more. */
+    uint16_t eye = r16(global + 0xce6), height = r16(global + 0xce2), start, spacing;
+    int steady = !(r16(global + 0x5cc) | r16(global + 0x5d0) | r16(global + 0x5d4));
+    uint8_t pattern = (uint8_t)(rnd() % 4 ? rnd() % 12 : (uint8_t[]){ 1, 9, 10 }[rnd() % 3]);
+    uint8_t count = (uint8_t)(rnd() % 4 ? rnd() % 8 : rnd() % 0x20);
+    uint8_t flags = (uint8_t)rnd();
+
+    switch (rnd() % (steady ? 9 : 3)) {
+    case 0: start = (uint16_t)(rnd() % 0x2000 - 0x1000); break;
+    case 1: start = (uint16_t)(eye + rnd() % 3 - 1); break;
+    case 2:
+        start = (uint16_t)((int16_t)eye < 0 ? eye + rnd() % 0x800 : eye - rnd() % 0x800);
+        break;
+    case 3: case 4:                         /* the header's z, +-5, on it */
+        start = (uint16_t)((int16_t)eye <= -6 ? eye + 5 : (int16_t)eye >= 5 ? eye - 5 : eye);
+        break;
+    case 5:
+        pattern = 1;
+        count = 219;
+        start = (uint16_t)(eye - 0x12c * count);
+        break;
+    case 6:
+        pattern = 8;
+        count = (uint8_t)(rnd() % 3);
+        start = (uint16_t)((int16_t)eye < 0 ? eye + 0xc8 + 1 + rnd() % 0x100
+                                            : eye - 0xc8 - 1 - rnd() % 0x100);
+        break;
+    case 7:
+        pattern = 1;
+        count = 1;
+        flags |= 0x10;
+        start = (uint16_t)((int16_t)eye < 0 ? eye + 0x12c + rnd() % 0x400
+                                            : eye - 0x12c - rnd() % 0x400);
+        break;
+    default:
+        start = (uint16_t)((int16_t)eye < 0 ? eye + rnd() % 0x800 : eye - rnd() % 0x800);
+        break;
+    }
+    w16(p + 2, steady && rnd() % 8 ? 0 : (uint16_t)rnd());
+    w16(p + 4, (uint16_t)(rnd() % 0x200));
+    w16(p + 6, start);
+    p[8] = flags;
+    p[9] = pattern;
+    p[0xa] = count;
+    p[0xb] = (uint8_t)(rnd() % 4 ? rnd() % 3 : rnd());
+    spacing = (uint16_t)(rnd() % 0x100 - 0x80);
+    w16(p + 0xc, rnd() % 4 ? (uint16_t)rnd() : (uint16_t)(0x2000 - 0x2e + rnd() % 3 - 1));
+    w16(p + 0xe, (uint16_t)(rnd() % 0x400 - 0x200));
+    switch (rnd() % 4) {
+    case 0: w16(p + 0x10, (uint16_t)(rnd() % 0x2000 - 0x1000)); break;
+    case 1: w16(p + 0x10, (uint16_t)(eye + ((int16_t)spacing >> 1))); break;
+    case 2: w16(p + 0x10, (uint16_t)(eye + ((int16_t)spacing >> 1) + 2 * height + rnd() % 2)); break;
+    default: w16(p + 0x10, (uint16_t)(eye + rnd() % 5 - 2)); break;
+    }
+    w16(p + 0x12, spacing);
+}
+
+static uint32_t runway_record(uint8_t *p)
+{
+    /* its position, a heading (0 half the time), a length and width
+     * (now and then past their clamps, 25000 and 600; 600 itself
+     * faults the touchdown marks' divide), markings, a number 1..36
+     * with a designator, lights, colours (the record's length), a
+     * surface (past 3 now and then), the thresholds' displacements and
+     * overruns (mostly 0), an approach lighting record for each end */
+    uint32_t len, k;
+
+    packed_position(p + 2);
+    /* mostly a little below the eye: its markings are drawn with the
+     * eye above (the template tests GLOBAL +0xce2) */
+    if (rnd() % 4)
+        w32(p + 2 + 0xe, r32(global + 0x5c4) - 1 - rnd() % 0x20);
+    w16(p + 0x14, rnd() % 2 ? 0 : (uint16_t)rnd());
+    w16(p + 0x16, (uint16_t)(rnd() % 8 ? 0x300 + rnd() % 0x2000 : rnd()));
+    w16(p + 0x18, (uint16_t)(rnd() % 8 ? 0x14 + rnd() % 0x60
+                                       : (uint16_t[]){ 600, 601, 0x1c, 0x1b, 0x3c, 0x3d,
+                                                       0x5a, 0x5f, (uint16_t)rnd() }[rnd() % 9]));
+    p[0x1a] = (uint8_t)rnd();
+    p[0x1b] = (uint8_t)((1 + rnd() % 36) | (rnd() % 4) << 6);
+    p[0x1c] = (uint8_t)rnd();
+    p[0x1d] = (uint8_t)rnd();
+    p[0x1e] = (uint8_t)(rnd() % 4 ? rnd() % 4 : rnd());
+    p[0x1f] = (uint8_t)rnd();
+    /* the program draws most markings only where these are set (its
+     * context is the runway's state: 0x2070ebbf, a bit for each) */
+    for (k = 0x20; k < 0x28; k += 2)
+        w16(p + k, rnd() % 3 == 0 ? 0 : (uint16_t)(1 + rnd() % 0x200));
+    for (k = 0x28; k < 0x40; k += 0xc) {
+        uint32_t j;
+
+        for (j = 0; j < 0xc; j++)
+            p[k + j] = (uint8_t)rnd();
+        if (rnd() % 2)
+            p[k] = 0;
+        p[k + 1] = (uint8_t)(rnd() % 12);
+        p[k + 2] = (uint8_t)(rnd() % 8);
+    }
+    len = p[0x1d] & 1 ? 0x52 : 0x40;
+    for (k = 0x40; k < len; k++)
+        p[k] = (uint8_t)rnd();
+    return len;
+}
+
 /* One instruction at g->p; forward branches land on a later instruction
  * boundary, which emit_block arranges by emitting the skipped part first. */
 static void emit_one(struct gen *g)
@@ -1908,6 +2195,8 @@ static void emit_one(struct gen *g)
         0x57, 0x30, 0x62, 0x69, 0x6b, 0x6e, 0x35, 0x45, 0x31, 0x36,
         0x91, 0x73, 0x1b, 0x40, 0x82, 0x34, 0x2f, 0x77, 0x4c, 0x83, 0x3a, 0x3c,
         0x32, 0x2b, 0x75, 0x5a, 0x1a, 0x29, 0x90, 0x28, 0x38, 0x6a, 0x18, 0x5d, 0x15,
+        0x19, 0x63, 0x49, 0x49, 0x49, 0x72, 0x72, 0x3d, 0x3d, 0x3d, 0x7f, 0x7f, 0x7f,
+        0x42, 0x44, 0x42,
     };
     uint8_t *p = g->p, *q;
     uint32_t op, n, i;
@@ -1932,12 +2221,16 @@ static void emit_one(struct gen *g)
     }
     if (g->depth >= 3 && (op == 0x23 || op == 0x8a || op == 0x5c || op == 0x5b || op == 0x3f ||
                           op == 0x74 || op == 0x8b || op == 0x5a || op == 0x4a || op == 0x33 ||
-                          op == 0x3b || op == 0x46 || op == 0x41))
+                          op == 0x3b || op == 0x46 || op == 0x41 || op == 0x63))
         op = 0x02;
     /* Generation order is execution order (branches go forward, and each
      * subroutine is called from where it was made), so once a context may
      * be set it may be set for everything generated after. */
     if (op == 0x5b && context_possible)
+        op = 0x02;
+    /* a library runs from a copy in a block: a case's default, 0x20006 on,
+     * is not in it, and what is there jumps anywhere */
+    if (op == 0x03 && in_library)
         op = 0x02;
     if (op == 0x89)
         context_possible = 1;
@@ -2129,6 +2422,206 @@ static void emit_one(struct gen *g)
         g->p = q2 + 2;
         break;
     }
+    case 0x42: case 0x44:                       /* a runway: a record of 0x40 or 0x52 bytes */
+        g->p += runway_record(p);
+        break;
+    case 0x3d: {                                /* a ground tile: eleven words */
+        /* a kind (and its edge flags), a mode (0x22 a textured grid, 0x11,
+         * 0x55, 0x33, 0x44 a built-in program, 0 nothing, others the
+         * corners only), sizes below 0x4000 (from 0x100 cells each way the
+         * vertex count's 16-bit check wraps and the grid overruns its
+         * block) with high
+         * words mostly 0 (the divide by 0x100 faults from 0x100), a
+         * height, texture origins across the detail's thresholds, a seed */
+        static const uint8_t kinds[] = { 0x88, 0x89, 0x81, 0x82, 0x8e, 0x06, 0x07, 0x0d, 0x0e,
+                                         0x01, 0x02, 0x10, 0x5d, 0x95, 0xc3, 0x40, 0x8f };
+        static const uint8_t modes[] = { 0x22, 0x22, 0x22, 0x11, 0x55, 0x33, 0x44, 0x00, 0x66 };
+
+        p[2] = rnd() % 3 ? kinds[rnd() % sizeof kinds] : (uint8_t)rnd();
+        p[3] = (uint8_t)rnd();
+        p[4] = modes[rnd() % sizeof modes];
+        p[5] = (uint8_t)rnd();
+        w16(p + 6, (uint16_t)(rnd() % 3 ? 0x100 * (1 + rnd() % 0x3f) : 1 + rnd() % 0x3fff));
+        w16(p + 8, (uint16_t)(rnd() % 16 ? 0 : rnd()));
+        w16(p + 0xa, (uint16_t)(rnd() % 3 ? 0x100 * (1 + rnd() % 0x3f) : 1 + rnd() % 0x3fff));
+        w16(p + 0xc, (uint16_t)(rnd() % 16 ? 0 : rnd()));
+        /* one cell or row (where edges may let it be split in four), and
+         * vertex counts of exactly 0x400, the block's (a grid below it) */
+        if (rnd() % 4 == 0)
+            w16(p + 6 + 4 * (rnd() % 2), (uint16_t)(0x100 + rnd() % 0x100));
+        if (rnd() % 8 == 0) {
+            static const uint16_t fit[3][2] = { { 0x1f00, 0x1f00 }, { 0x3f00, 0x0f00 },
+                                                { 0x0f00, 0x3f00 } };
+            uint32_t f = rnd() % 3;
+
+            w16(p + 6, fit[f][0]);
+            w16(p + 0xa, fit[f][1]);
+        }
+        w16(p + 0xe, (uint16_t)rnd());
+        w16(p + 0x10, (uint16_t)(rnd() % 4 ? rnd() % 0x10 : rnd()));
+        w16(p + 0x12, (uint16_t)(rnd() % 0x4000 - 0x2000));
+        w16(p + 0x14, (uint16_t)(rnd() % 0x4000 - 0x2000));
+        w16(p + 0x16, (uint16_t)rnd());
+        /* at a scale of 1.0, the height (less 0x206f91d9's, added to
+         * GLOBAL +0x30a's 48 bits) chosen so the eye's height is the
+         * tile's top exactly (the floor's test), or 0 (flat triangles' sum
+         * of 0) */
+        if (r32(global + 0x320) == 0x10000 && rnd() % 2) {
+            static const uint16_t top[8] = { 0x80, 0x10, 0x20, 0x40, 0xc0, 0xff, 0x180, 0x1ff };
+            uint16_t t = rnd() % 2 ? 0 : p[4] == 0x22 ? top[(p[2] >> 4) & 7] : 0x10;
+            int64_t y = (int64_t)((uint64_t)r16(global + 0x30a) | (uint64_t)r32(global + 0x30c) << 16);
+            int64_t want = (int64_t)t << 16;
+            uint32_t ground = r16(cur->image + 0x1d9) | (uint32_t)r16(cur->image + 0x1db) << 16;
+            int64_t a;
+
+            y = (y << 16) >> 16;                /* 48 bits, signed */
+            a = (int64_t)ground + (want - y);
+            if (a >= 0 && a <= 0xffffffffLL) {
+                w16(p + 0xe, (uint16_t)a);
+                w16(p + 0x10, (uint16_t)(a >> 16));
+                if (p[4] != 0x22 && rnd() % 2) {
+                    p[2] = (uint8_t)(0x88 + rnd() % 2);   /* the lit grid, top 0x10 */
+                    p[4] = 0x11;
+                }
+            }
+        }
+        g->p += 0x18;
+        break;
+    }
+    case 0x7f:                                  /* the tile's scattered buildings alone */
+        g->p += 2;
+        break;
+    case 0x72:                                  /* approach lights: an 18-byte record */
+        approach_record(p);
+        g->p += 0x14;
+        break;
+    case 0x49: {                                /* a building: kind, colours, position, sizes */
+        /* the kind from bits 4..3 (or the low two of a negative word),
+         * the colours from the low three (0xffff when negative); sizes
+         * small (doubled below 0x10) to the whole range, so the eye is
+         * often inside one.  Kind 1 is retail's crash with the eye inside
+         * (docs/modules/g3d.md): its x is kept near 0x7f00 and its width
+         * at 0x200 or more, so x + width / 2 wraps and no eye is inside. */
+        uint16_t w0 = (uint16_t)rnd(), kind;
+
+        if (rnd() % 4 == 0)
+            w0 |= 0x8000;
+        else
+            w0 &= 0x7fff;
+        kind = w0 & 0x8000 ? w0 & 3 : (w0 >> 3) & 3;
+        w16(p + 2, w0);
+        w16(p + 4, (uint16_t)rnd());
+        for (i = 6; i < 0x12; i += 2) {
+            uint16_t v;
+
+            switch (rnd() % 4) {
+            case 0: v = (uint16_t)(rnd() % 0x20); break;
+            case 1: v = (uint16_t)(rnd() % 0x400); break;
+            case 2: v = (uint16_t)(rnd() % 0x400 - 0x200); break;
+            default: v = (uint16_t)rnd(); break;
+            }
+            w16(p + i, v);
+        }
+        /* nearly the whole range, so the eye is inside */
+        if (kind != 1 && rnd() % 3 == 0) {
+            w16(p + 6, (uint16_t)(rnd() % 0x40 - 0x20));
+            w16(p + 8, (uint16_t)(0x8001 + rnd() % 0x40));
+            w16(p + 0xa, (uint16_t)(rnd() % 0x40 - 0x20));
+            w16(p + 0xc, (uint16_t)(0x3fc0 + rnd() % 0x40));
+            w16(p + 0xe, (uint16_t)(0xffc0 + rnd() % 0x40));
+            w16(p + 0x10, (uint16_t)(0xffc0 + rnd() % 0x40));
+        }
+        /* on the boundaries: the mean half size a quarter of the height
+         * (0x5f or 0x6d), a half size of 0xf (doubled below 0x10) */
+        if (rnd() % 6 == 0) {
+            uint16_t h = (uint16_t)(1 + rnd() % 0x100);
+
+            w16(p + 0xc, h);
+            w16(p + 0xe, (uint16_t)(8 * h + rnd() % 2));
+            w16(p + 0x10, (uint16_t)(8 * h + rnd() % 2 - 2 * (rnd() % 2)));
+        }
+        if (rnd() % 6 == 0)
+            w16(p + 0xe + 2 * (rnd() % 2), (uint16_t)(0x1c + rnd() % 6));
+        /* the eye (0x206f9184, 0x206f918c, 0x206f9190, kept while
+         * 0x206f917e and 0x206f9180 are set) on a face, give or take one */
+        if (kind != 1 && rnd() % 2 && r16(cur->image + 0x17e) && r16(cur->image + 0x180)) {
+            int16_t e[3] = { (int16_t)r16(cur->image + 0x184), (int16_t)r16(cur->image + 0x18c),
+                             (int16_t)r16(cur->image + 0x190) };
+            int16_t d = (int16_t)(rnd() % 3 - 1);
+            uint32_t face = rnd() % 6;
+
+            if (e[0] > -0x7000 && e[0] < 0x7000 && e[1] > -0x7000 && e[1] < 0x7000 &&
+                e[2] > -0x7000 && e[2] < 0x7000) {
+                w16(p + 6, (uint16_t)e[0]);
+                w16(p + 8, (uint16_t)(e[1] - 0x10));
+                w16(p + 0xa, (uint16_t)e[2]);
+                w16(p + 0xc, 0x10);              /* 0x40 high */
+                w16(p + 0xe, 0x200);             /* 0x100 either side */
+                w16(p + 0x10, 0x200);
+                switch (face) {
+                case 0: w16(p + 6, (uint16_t)(e[0] - 0x100 + d)); break;
+                case 1: w16(p + 6, (uint16_t)(e[0] + 0x100 + d)); break;
+                case 2: w16(p + 8, (uint16_t)(e[1] + d)); break;
+                case 3: w16(p + 8, (uint16_t)(e[1] - 0x40 + d)); break;
+                case 4: w16(p + 0xa, (uint16_t)(e[2] - 0x100 + d)); break;
+                default: w16(p + 0xa, (uint16_t)(e[2] + 0x100 + d)); break;
+                }
+            }
+        }
+        if (kind == 1) {
+            w16(p + 6, (uint16_t)(0x7f00 + rnd() % 0x80));
+            w16(p + 0xe, (uint16_t)(0x200 + rnd() % 0xfe00));
+        }
+        g->p += 0x12;
+        break;
+    }
+    case 0x63: {                                /* a library by id: one, or one dword off */
+        uint32_t id[4];
+
+        /* now and then after a surface left open (0x206f9125 up), which
+         * the library's clean drawing state takes back */
+        if (rnd() % 3 == 0) {
+            w16(p, 0x05);
+            p += 2;
+            g->p += 2;
+            w16(p, op);
+        }
+        library_id(rnd() % (NLIBRARIES + 1), id);
+        if (rnd() % 4 == 0)
+            id[rnd() % 4] ^= 1u << (rnd() % 32);
+        memcpy(p + 2, id, 16);
+        g->p += 0x12;
+        break;
+    }
+    case 0x19: {                                /* a texture by name, the string after */
+        /* from a few names in any case, so the last one (0x206fd8d0)
+         * often matches, folded or not; now and then the characters
+         * either side of A..Z, where _strcmpi's fold stops; up to 12, the
+         * buffer's size */
+        const char *b = named_textures[rnd() % 4];
+        uint32_t len = (uint32_t)strlen(b);
+
+        if (last_name[0] && rnd() % 2) {
+            b = last_name;
+            len = (uint32_t)strlen(b);
+        } else if (rnd() % 4 == 0)
+            len = rnd() % 13;
+        for (i = 0; i < len; i++) {
+            char c = i < strlen(b) ? b[i] : (char)('a' + rnd() % 26);
+
+            if (rnd() % 3 == 0 && c >= 'A' && c <= 'Z')
+                c = (char)(c + 0x20);
+
+            if (rnd() % 3 == 0 && c >= 'a' && c <= 'z')
+                c = (char)(c - 0x20);
+            p[2 + i] = (uint8_t)c;
+        }
+        p[2 + len] = 0;
+        p[3 + len] = (uint8_t)rnd();            /* stepped over */
+        memcpy(last_name, p + 2, len + 1);
+        g->p += 4 + len;
+        break;
+    }
     case 0x6a: {                                /* a strip: a start and next points */
         /* near the eye mostly, on the ground: quads, and their markings,
          * need the eye beside the segment or close to an end */
@@ -2243,7 +2736,9 @@ static void emit_one(struct gen *g)
         for (i = 0; i < n + 2; i++)
             p[0xf + i] = (uint8_t)(rnd() % 4 == 0 ? 0x80 | rnd() % 0x20 : rnd() % 0x20);
         p[0xf] |= 0x80;
-        g->p += (n + 0x10) & ~1u;
+        /* retail rounds the address it steps to, not the length: an odd
+         * address (after 0x19's odd lengths) steps one short */
+        g->p = (uint8_t *)((uintptr_t)(p + n + 0x10) & ~(uintptr_t)1);
         break;
     }
     case 0x1a: case 0x29: {                     /* points into the table */
@@ -2594,6 +3089,7 @@ static void make_models(void)
     scene_plain = 0;
     scene_steady = 0;                           /* no scene yet: what the */
     scene_dca = 0;                              /* other side left */
+    last_name[0] = 0;
     context_possible = 1;
     draw_weight = 5;
     for (m = 0; m < NMODELS; m++) {
@@ -2620,6 +3116,21 @@ static void make_models(void)
         w16(obj + 2, (uint32_t)(g.p - obj));
         w16(g.p, 0x22);
     }
+    in_library = 1;
+    for (m = 0; m < NLIBRARIES; m++) {
+        struct gen g;
+        uint8_t *p = libraries + 0x100 * m;
+
+        memset(p, 0, 0x100);
+        g.p = p;
+        g.end = p + 0xc0;
+        g.depth = 3;
+        g.context = 0;
+        emit_block(&g, 1 + rnd() % 4);
+        w16(g.p, rnd() % 2 ? 0x22 : 0x00);
+        library_length[m] = (uint32_t)(g.p + 2 - p) + rnd() % 8;
+    }
+    in_library = 0;
     scene_is_map = map;
     scene_plain = plain;
 }
@@ -2849,6 +3360,36 @@ static void op_queue_draw(void)
     }
 }
 
+/* 0x27's points (0x38..0x3f): z below 0x10000 and y within 0..z, so every
+ * vertex, crossing and clamp it draws leaves ecx's high half 0 -- else its
+ * vertex loop (dec cx, then loop on ecx) runs off into memory past its
+ * indices.  Seeded at the start, and again before each operation when
+ * anything (the earth, +0x2c, draws over them) has left them otherwise. */
+static void seed_facet_points(int always)
+{
+    uint32_t k;
+
+    if (!always) {
+        for (k = 0x38; k < 0x40; k++) {
+            uint8_t *pt = cur->image + 0x31e + 16 * k;
+            int32_t z = (int32_t)r32(pt + 8), y = (int32_t)r32(pt + 4), x = (int32_t)r32(pt);
+
+            if (z < 0x200 || z >= 0x10000 || y < 0x100 || y > z || x < -2 * z || x > 2 * z)
+                break;
+        }
+        if (k == 0x40)
+            return;
+    }
+    for (k = 0x38; k < 0x40; k++) {
+        uint8_t *pt = cur->image + 0x31e + 16 * k;
+        int32_t z = (int32_t)(0x200 + rnd() % 0xfe00);
+
+        w32(pt, (uint32_t)((int32_t)(rnd() % (4u * (uint32_t)z + 1)) - 2 * z));
+        w32(pt + 4, 0x100 + rnd() % (uint32_t)(z - 0xff));
+        w32(pt + 8, (uint32_t)z);
+    }
+}
+
 static void op_run(void)
 {
     uint32_t k = rnd() % 5, ctx = 0, prog;
@@ -2905,14 +3446,53 @@ static void op_run(void)
     }
 }
 
+/* +0x2c (the earth), and the services other modules call with a record in
+ * esi: +0x48 and +0x4c approach lights (the record at esi + 2), +0x50 a
+ * runway.  The records at programs+0x12000. */
+static void op_records(void)
+{
+    uint8_t *rec = programs + 0x12000;
+    uint32_t k = rnd() % 4;
+
+    if (k == 0) {
+        put("+2c");
+        call_service(0x2c, 0);
+        return;
+    }
+    memset(rec, 0, 0x100);
+    if (k < 3) {
+        approach_record(rec);
+        put("+%x", k == 1 ? 0x48 : 0x4c);
+        call_service_esi(k == 1 ? 0x48 : 0x4c, (uint32_t)(uintptr_t)rec);
+    } else {
+        uint32_t n;
+
+        /* half the time a detail range that takes in the whole runway near
+         * (25000 times GLOBAL +0x2b0's scale, at most 40, times the
+         * window's +0x84; an eighth of it near), where the arrows and
+         * numbers are drawn */
+        if (rnd() % 2) {
+            w16(global + 0x2b0, (uint16_t)(0x6900 + rnd() % 0x9700));
+            w32(window_rec + 0x84, 0x200 + rnd() % 0x200);
+        }
+        for (n = 0; n < 4; n++) {
+            memset(rec, 0, 0x100);
+            runway_record(rec);
+            put("+50");
+            call_service_esi(0x50, (uint32_t)(uintptr_t)rec);
+        }
+    }
+}
+
 static void op(void)
 {
-    uint32_t k = rnd() % 12;
+    uint32_t k = rnd() % 13;
 
     if (k >= 7 && k <= 9)
         k = 7;              /* programs, three times in twelve */
     if (counting)
         cover_ops[k]++;
+    seed_facet_points(0);
     put("#%u ", op_number);
     if (getenv("G3D_TRACE")) {
         fprintf(stderr, "scenario %u %s op %u\n", scenario, cur->name, op_number);
@@ -2927,6 +3507,7 @@ static void op(void)
     case 5: case 6: op_textures(); break;
     case 10: op_queue_model(); break;
     case 11: op_queue_draw(); break;
+    case 12: op_records(); break;
     default: op_run(); break;
     }
     put("\n");
@@ -2949,6 +3530,7 @@ static void run_side(struct side *s)
     s->nsnap = 0;
     s->ncallbacks = 0;
     memcpy(s->image, s->pristine, IMAGE_SIZE);
+    w32(window_rec + 0x84, 0);                  /* the runways' operation sets it */
     arena_used = 0;
     memset(arena, 0, ARENA_SIZE);
     memset(context, 0, CONTEXT_SIZE);
@@ -3003,21 +3585,61 @@ static void run_side(struct side *s)
         w32(pt + 4, (uint32_t)((int32_t)(rnd() % 0x20001) - 0x10000));
         w32(pt + 8, k < 0x32 ? 0x30000 : 0x40000);
     }
-    /* 0x27's points: z below 0x10000 and y within 0..z, so every vertex,
-     * crossing and clamp it draws leaves ecx's high half 0 */
-    for (k = 0x38; k < 0x40; k++) {
-        uint8_t *pt = s->image + 0x31e + 16 * k;
-        int32_t z = (int32_t)(0x200 + rnd() % 0xfe00);
-
-        w32(pt, (uint32_t)((int32_t)(rnd() % (4u * (uint32_t)z + 1)) - 2 * z));
-        w32(pt + 4, 0x100 + rnd() % (uint32_t)(z - 0xff));
-        w32(pt + 8, (uint32_t)z);
-    }
+    seed_facet_points(1);
     /* The positions' state: computed or not (0x206f917e, 0x206f9180), a
      * heading to turn by (0x206f9196, 0x206f9198), and 0x40's shadow mode
      * (0x206fd8dd, which 0x4a counts) */
     w16(s->image + 0x17e, rnd() % 4 ? 0 : 1);
     w16(s->image + 0x180, rnd() % 4 ? 0 : 1);
+    /* and, kept, the eye in the object: words of x, y, z at 0x206f9184,
+     * 0x206f918c, 0x206f9190 (0x206f9180 too, mostly, so they stay) */
+    if (r16(s->image + 0x17e)) {
+        for (k = 0x182; k < 0x196; k += 2)
+            w16(s->image + k, (uint16_t)rnd());
+        /* x and z off the scattered buildings' residues (0x16..0x2a and
+         * 0x56..0x6a in 0x80): one of them is retail's crash with the eye
+         * inside (docs/modules/g3d.md) */
+        for (k = 0x184; k <= 0x190; k += 4)
+            w16(s->image + k, (uint16_t)((rnd() % 0x10) * 0x80 - 0x400 +
+                                         (rnd() % 2 ? 0x30 + rnd() % 0x20 : 0x70 + rnd() % 0x20)));
+        if (rnd() % 4)
+            w16(s->image + 0x180, 1);
+    }
+    w16(s->image + 0xf6, rnd() % 3);            /* the clipping (2 none) */
+    /* 0x7f's scatter: now and then the eye on one of its buildings, the
+     * one in the eye's own cell (drawn last, so its GLOBAL +0x832 stays):
+     * retail's generator worked for a cell from the seed in the image
+     * (0x206fdc27) and the detail's mask; the offsets at scale 1/16 (the
+     * scatter's 16 makes 1), the eye at the ground */
+    if (rnd() % 8 == 0) {
+        uint16_t seed = r16(s->image + 0x4c27), mask, ax, dx;
+        uint32_t b60 = r32(global + 0xb60), t;
+
+        mask = r16(s->image + 0x4c6f + 2 * (b60 <= 4 ? b60 : 4));
+        for (t = 0; t < 16; t++) {
+            uint16_t col = (uint16_t)(rnd() % 8), row = (uint16_t)(rnd() % 8), x, z;
+            uint32_t r;
+
+            ax = (uint16_t)((col + 1) * (row + 1));
+            dx = ax;
+            ax = (uint16_t)((uint16_t)(ax << 8 | ax >> 8) + dx + seed);
+            r = (uint32_t)ax * 0x343fdu + 0x269ec3u;
+            ax = (uint16_t)(r >> 16);
+            if (!(mask & ax))
+                continue;
+            x = (uint16_t)(col * 0x80 + 0xfe00 + 0x20 + (ax & 2 ? 0x40 : 0));
+            z = (uint16_t)(row * 0x80 + 0xfe00 + 0x20 + (ax & 4 ? 0x40 : 0));
+            w32(global + 0x320, 0x1000);
+            w16(global + 0x2fe, 0);
+            w32(global + 0x300, (uint32_t)(int32_t)(int16_t)x);
+            w16(global + 0x30a, 0);
+            w32(global + 0x30c, 0);
+            w16(global + 0x316, 0);
+            w32(global + 0x318, (uint32_t)(int32_t)(int16_t)z);
+            w16(s->image + 0x17c, 1);
+            break;
+        }
+    }
     w16(s->image + 0x196, rnd() % 2);
     w16(s->image + 0x198, rnd() % 8 ? (uint16_t)rnd() : 0);
     w16(s->image + 0x48dd, rnd() % 2);
@@ -3031,6 +3653,37 @@ static void run_side(struct side *s)
     w16(s->image + 0x48be, rnd() % 4);          /* a record, not packed */
     w16(s->image + 0x17c, rnd() % 2);           /* the queue's one-shot words */
     seed_textures();                            /* named slots for 0x18 to find */
+    /* 0x63's list (0x20710a70, the host's, 0x18-byte entries): a few
+     * libraries already there, with their blocks or none, and an id one
+     * dword off */
+    if (rnd() % 2) {
+        uint32_t n = 1 + rnd() % 3;
+
+        while (n--) {
+            uint8_t *e = h_list_add((struct host_list *)(s->image + 0x17a70));
+            uint32_t k = rnd() % NLIBRARIES, id[4];
+
+            library_id(k, id);
+            if (rnd() % 4 == 0)
+                id[rnd() % 4] ^= 1u << (rnd() % 32);
+            memcpy(e, id, 16);
+            if (rnd() % 4) {
+                uint8_t *b = arena_get(library_length[k]);
+
+                memcpy(b, libraries + 0x100 * k, library_length[k]);
+                w32(e + 0x10, (uint32_t)(uintptr_t)b);
+            }
+            w16(e + 0x14, (uint16_t)(rnd() % 4));
+        }
+    }
+    /* 0x19's last name (0x206fd8d0, 13 bytes), one its programs use */
+    if (rnd() % 2) {
+        const char *b = named_textures[rnd() % 4];
+
+        memset(s->image + 0x48d0, 0, 13);
+        for (k = 0; b[k]; k++)
+            s->image[0x48d0 + k] = (uint8_t)(b[k] >= 'a' && b[k] <= 'z' && rnd() % 3 == 0 ? b[k] - 0x20 : b[k]);
+    }
     /* In the game a model has always been drawn by the time the sky goes
      * through +0x1c, so 0x206f9161 points at 0x206f9166 as draw_model left
      * it; programs write through it.  Now and then it is still null. */

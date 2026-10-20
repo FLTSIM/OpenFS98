@@ -222,6 +222,20 @@ static void idiv16(uint16_t d)
     SET_DX(0x7fff);
 }
 
+/* div r/m16 of dx:ax, with the host's repair: all ones on a fault. */
+static void div16(uint16_t d)
+{
+    uint32_t n = (uint32_t)DX << 16 | AX;
+
+    if (d != 0 && n / d <= 0xffff) {
+        SET_AX(n / d);
+        SET_DX(n % d);
+        return;
+    }
+    SET_AX(0xffff);
+    SET_DX(0xffff);
+}
+
 /* cdq */
 static void cdq(void)
 {
@@ -247,6 +261,30 @@ static void cdq(void)
             "call _" #name "_body\n\t"                                       \
             "addl $4, %esp\n\t"                                              \
             "popl %ebp\n\tpopl %edi\n\tpopl %esi\n\tpopl %ebx\n\t"           \
+            "movl _g3d_eax, %eax\n\tmovl _g3d_ecx, %ecx\n\t"                 \
+            "movl _g3d_edx, %edx\n\t"                                        \
+            "ret $" #bytes "\n");                                            \
+    void name(void)
+
+/* A service that keeps none of the caller's registers (the routines other
+ * modules call with a record in esi, which retail pushes nothing round):
+ * every register comes back as the body leaves it. */
+#define SERVICE_RAW(name, bytes)                                              \
+    static void name##_body(const uint32_t *arg)                             \
+        __attribute__((used, noinline));                                     \
+    __asm__(".text\n\t.p2align 4\n"                                          \
+            "_" #name ":\n\t"                                                \
+            "movl %eax, _g3d_eax\n\tmovl %ecx, _g3d_ecx\n\t"                 \
+            "movl %edx, _g3d_edx\n\tmovl %ebx, _g3d_ebx\n\t"                 \
+            "movl %esi, _g3d_esi\n\tmovl %edi, _g3d_edi\n\t"                 \
+            "movl %ebp, _g3d_ebp\n\t"                                        \
+            "pushl %ebx\n\tpushl %esi\n\tpushl %edi\n\tpushl %ebp\n\t"       \
+            "leal 20(%esp), %eax\n\tpushl %eax\n\t"                          \
+            "call _" #name "_body\n\t"                                       \
+            "addl $4, %esp\n\t"                                              \
+            "popl %ebp\n\tpopl %edi\n\tpopl %esi\n\tpopl %ebx\n\t"           \
+            "movl _g3d_ebx, %ebx\n\tmovl _g3d_esi, %esi\n\t"                 \
+            "movl _g3d_edi, %edi\n\tmovl _g3d_ebp, %ebp\n\t"                 \
             "movl _g3d_eax, %eax\n\tmovl _g3d_ecx, %ecx\n\t"                 \
             "movl _g3d_edx, %edx\n\t"                                        \
             "ret $" #bytes "\n");                                            \
@@ -646,6 +684,8 @@ __asm__(".text\n\t.p2align 4\n_import_call:\n\t"
 #define IMP2(m, off, a, b)      import_call(M32((m) + (off)), (const uint32_t[]){ a, b }, 2, (m))
 #define IMP3(m, off, a, b, c)   import_call(M32((m) + (off)), (const uint32_t[]){ a, b, c }, 3, (m))
 #define IMP4(m, off, a, b, c, d) import_call(M32((m) + (off)), (const uint32_t[]){ a, b, c, d }, 4, (m))
+#define IMP5(m, off, a, b, c, d, e) \
+    import_call(M32((m) + (off)), (const uint32_t[]){ a, b, c, d, e }, 5, (m))
 
 /* The host's memory and list services (include/fs98/host.h). */
 #define H_ALLOC(fl, size, out, zero) (eax = IMP4(HOST, 0x20c, fl, size, out, zero))
@@ -8929,6 +8969,1256 @@ static void op_texture_again(void)
     op_surface();
 }
 
+/* The host's string services (docs/modules/host.md). */
+#define H_STRCMPI(a, b) (eax = IMP2(HOST, 0x2c0, a, b))
+#define H_STRCPY(d, s)  (eax = IMP2(HOST, 0x2a8, d, s))
+#define H_STRLEN(s)     (eax = IMP1(HOST, 0x2b8, s))
+
+/* 0x206e6d23 -- 0x19, a texture by name (the string after the opcode):
+ * 0x206f91b5 0x100 and GLOBAL +0xcbc 0x40; a name other than the last
+ * (0x206fd8d0, _strcmpi) is kept there and handed to HG2D +0x68 with the
+ * context, GLOBAL +0xcbe 1 when it answers.  On past the name, its nul
+ * and one byte more. */
+static void op_texture_name(void)
+{
+    M16(V(0x206f91b5)) = 0x100;
+    edi = G;
+    M16(edi + 0xcbc) = 0x40;
+    esi += 2;
+    H_STRCMPI(V(0x206fd8d0), esi);
+    if (eax != 0) {
+        H_STRCPY(V(0x206fd8d0), esi);
+        eax = IMP2(HG2D, 0x68, V(0x206fd8d0), M32(V(0x206f919c)));
+        if (eax != 0) {
+            edi = G;
+            M16(edi + 0xcbe) = 1;
+        }
+    }
+    H_STRLEN(esi);
+    eax += 1;
+    esi += eax;
+    esi += 1;
+    M32(V(0x206f9126)) = esi;
+}
+
+
+/* ---- approach lights: 0x72, .text+0xe03c..+0xe161 and +0x128b0..+0x1331a ---------- */
+
+/* 0x72 writes a program at 0x2070fe96 (in a buffer to 0x20710348) from an
+ * 18-byte record, copied to 0x2070fe5a, and runs it with the view turned
+ * to the record's heading.  The record's words and bytes:
+ *   fe5a  the heading             fe5c  the width
+ *   fe5e  the threshold's z, its sign the side the lights run to
+ *   fe60  flags: bit 0 run from the header at 0x2070fe82, bit 2 the end
+ *         bars, bit 4 the sequenced flashers
+ *   fe61  the pattern, 1..10      fe62  a count (the bar's lights)
+ *   fe63  the VASI: 0 none, 1 two bars, else three
+ *   fe64  its glide angle, fe66 its x, fe68 its z, fe6a the bars' spacing
+ * fe6c, fe6e and fe70 are past the record: the flashers' state, which
+ * nothing else writes.  0x2070fe30 is the eye's z (GLOBAL +0xce6).  The
+ * emitters pass the program pointer in edi and their operands in the
+ * registers, as retail's do. */
+
+#define LIGHTS_EYE M16(V(0x2070fe30))
+
+/* 0x206f42fb -- 0x51, colour ax; for 0xf016 (flashing) also 0x30 bx. */
+static void light_colour(void)
+{
+    M16(edi) = 0x51;
+    M16(edi + 2) = AX;
+    edi += 4;
+    if (AX == 0xf016) {
+        M16(edi) = 0x30;
+        M16(edi + 2) = BX;
+        edi += 4;
+    }
+}
+
+/* 0x206f3c14 -- 0x37, a light at x ax, z bx. */
+static void light_point(void)
+{
+    M16(edi) = 0x37;
+    M16(edi + 2) = AX;
+    M16(edi + 4) = 2;
+    M16(edi + 6) = BX;
+    edi += 8;
+}
+
+/* 0x206f423f -- 0x35, si lights from (ax, cx) to (bx, dx), unless both
+ * ends are past the eye on the lights' side. */
+static void light_row(void)
+{
+    if (DX & 0x8000) {
+        if (!((int16_t)DX > (int16_t)LIGHTS_EYE || (int16_t)CX > (int16_t)LIGHTS_EYE))
+            return;
+    } else {
+        if (!((int16_t)DX < (int16_t)LIGHTS_EYE) && (int16_t)CX > (int16_t)LIGHTS_EYE)
+            return;
+    }
+    M16(edi) = 0x35;
+    M16(edi + 2) = AX;
+    M16(edi + 4) = 2;
+    M16(edi + 6) = CX;
+    M16(edi + 8) = BX;
+    M16(edi + 0xa) = 2;
+    M16(edi + 0xc) = DX;
+    M16(edi + 0xe) = SI;
+    edi += 0x10;
+}
+
+/* 0x206f4217 -- a row across, at z dx from x ax to bx, cx lights. */
+static void light_row_across(void)
+{
+    uint16_t c = CX, s = SI;
+
+    SET_SI(CX);
+    SET_CX(DX);
+    light_row();
+    SET_SI(s);
+    SET_CX(c);
+}
+
+/* 0x206f422b -- a row along, at x ax from z cx to dx, bx lights. */
+static void light_row_along(void)
+{
+    uint16_t b = BX, s = SI;
+
+    SET_SI(BX);
+    SET_BX(AX);
+    light_row();
+    SET_SI(s);
+    SET_BX(b);
+}
+
+/* 0x206f4295 -- 0x45, a bar of al lights (more than one) from z dx, bp
+ * apart, in colour 0x6901, unless it starts past the eye. */
+static void light_bar(void)
+{
+    if (AL <= 1)
+        return;
+    {
+        uint16_t a = AX;
+
+        SET_AX(LIGHTS_EYE);
+        if (!(DX & 0x8000) ? !((int16_t)AX > (int16_t)DX) : (int16_t)AX > (int16_t)DX) {
+            SET_AX(a);
+            return;
+        }
+        SET_AX(0x6901);
+        light_colour();
+        SET_AX(a);
+    }
+    SET_AH(0);
+    M16(edi + 0xe) = AX;
+    M16(edi) = 0x45;
+    M16(edi + 0xc) = DX;
+    SET_CX(DX);
+    SET_AX(AX - 1);
+    imul16(BP);
+    SET_AX(AX + CX);
+    M16(edi + 6) = AX;
+    SET_DX(AX);
+    SET_AX(0);
+    M16(edi + 2) = AX;
+    M16(edi + 8) = AX;
+    M16(edi + 4) = 2;
+    M16(edi + 0xa) = 2;
+    edi += 0x10;
+}
+
+/* 0x206f4199 -- the header's words: its colour (0x2070fe84: 0xf010, or
+ * 0xf00f once the eye is past z cx, cx made to point the lights' way and
+ * moved to the threshold), that z (fe8c, fe92), half the width either side
+ * (fe88, fe8e), and the width over bx, rounded up (fe94). */
+static void light_header(void)
+{
+    uint16_t start = M16(V(0x2070fe5e));
+
+    if ((start ^ CX) & 0x8000)
+        SET_CX(-CX);
+    SET_CX(CX + start);
+    SET_DX(0xf010);
+    if (CX & 0x8000) {
+        if (!((int16_t)CX > (int16_t)LIGHTS_EYE))
+            SET_DX(0xf00f);
+    } else {
+        if (!((int16_t)CX < (int16_t)LIGHTS_EYE))
+            SET_DX(0xf00f);
+    }
+    M16(V(0x2070fe84)) = DX;
+    M16(V(0x2070fe8c)) = CX;
+    M16(V(0x2070fe92)) = CX;
+    SET_AX(AX + AX);
+    SET_AX(M16(V(0x2070fe5c)));
+    SET_CX(sar16(AX, 1));
+    M16(V(0x2070fe88)) = CX;
+    SET_CX(-CX);
+    M16(V(0x2070fe8e)) = CX;
+    SET_AX(AX + BX + BX - 1);
+    SET_DX(0);
+    div16(BX);
+    M16(V(0x2070fe94)) = AX;
+}
+
+/* 0x206f39cc -- the end bars (with GLOBAL +0x1204), a light either side
+ * just short of the threshold, unless the eye is past it. */
+static void light_end_bars(void)
+{
+    if (M16(G + 0x1204) == 0)
+        return;
+    SET_BX(M16(V(0x2070fe5e)));
+    if (!(BX & 0x8000)) {
+        if ((int16_t)BX > (int16_t)LIGHTS_EYE)
+            return;
+        SET_BX(BX + 8);
+    } else {
+        if ((int16_t)BX < (int16_t)LIGHTS_EYE)
+            return;
+        SET_BX(BX - 8);
+    }
+    SET_AX((M16(V(0x2070fe5c)) >> 1) + 5);
+    {
+        uint16_t a = AX;
+
+        SET_AX(0xf015);
+        light_colour();
+        SET_AX(a);
+    }
+    light_point();
+    SET_AX(-AX);
+    light_point();
+}
+
+/* 0x206f3a2e -- the sequenced flashers, from dx: the step 0x2000 << 32
+ * over (fe6e times 0xc910) (fe6e is never set: a divide by zero the host
+ * repairs), the angle from 0xc000 (0x2071034e, the top of the dword at
+ * 0x2071034c); fe6c moved on by the next z; then 8 * fe70 - 1 steps (fe70
+ * is never set either), lights on the steps whose low three bits are 5 or
+ * more, by z until fe6c and round a circle of radius fe6e after. */
+static void light_sequence(void)
+{
+    SET_BX(DX);
+    eax = (uint32_t)(int32_t)(int16_t)M16(V(0x2070fe6e));
+    imul32(0xc910);
+    ecx = eax;
+    edx = 0x2000;
+    eax = 0;
+    idiv32(ecx);
+    M32(V(0x20710348)) = eax;
+    M16(V(0x2071034e)) = 0xc000;
+    if (!(BX & 0x8000)) {
+        if ((int16_t)BX > (int16_t)LIGHTS_EYE)
+            return;
+        SET_DX(0x64);
+    } else {
+        if ((int16_t)BX < (int16_t)LIGHTS_EYE)
+            return;
+        SET_DX(0xff9c);
+    }
+    SET_BX(BX + DX);
+    M16(V(0x2070fe6c)) += BX;
+    SET_AX(0xf015);
+    light_colour();
+    SET_AX(0);
+    ecx = M8(V(0x2070fe70));
+    if (CX == 0)
+        return;
+    ecx <<= 3;
+    ecx -= 1;
+    do {
+        if ((DX & 0x8000) ? (int16_t)BX <= (int16_t)M16(V(0x2070fe6c))
+                          : (int16_t)BX >= (int16_t)M16(V(0x2070fe6c)))
+            goto circle;
+        ebp = ecx;
+        SET_BP(BP & 7);
+        if (BP >= 5)
+            light_point();
+        SET_BX(BX + DX);
+    } while (--ecx != 0);
+    return;
+circle:
+    do {
+        ebp = ecx;
+        SET_BP(BP & 7);
+        if (BP >= 5) {
+            uint32_t keep_ecx = ecx;
+            uint16_t keep_dx = DX, keep_di = DI, z, carry;
+
+            SET_BX(M16(V(0x2071034e)));
+            UTIL_SINCOS(BX, V(0x206fd1d8), V(0x206fd1da));
+            SET_DI(keep_di);
+            SET_BX(M16(V(0x2070fe6e)));
+            SET_AX(M16(V(0x206fd1d8)));
+            imul16(BX);
+            carry = AX >> 15;
+            SET_AX(AX + AX);
+            SET_DX(DX + DX + carry);
+            SET_DX(DX + M16(V(0x2070fe6e)));
+            z = DX;
+            SET_AX(M16(V(0x206fd1da)));
+            imul16(BX);
+            carry = AX >> 15;
+            SET_AX(AX + AX);
+            SET_DX(DX + DX + carry);
+            SET_DX(DX + M16(V(0x2070fe6c)));
+            SET_BX(DX);
+            SET_AX(z);
+            SET_DX(keep_dx);
+            ecx = keep_ecx;
+            light_point();
+        }
+        {
+            uint16_t d = DX;
+
+            eax = (uint32_t)(int32_t)(int16_t)DX;
+            imul32(M32(V(0x20710348)));
+            M32(V(0x2071034c)) += eax;
+            SET_DX(d);
+        }
+        SET_CX(CX - 1);
+    } while (CX != 0);
+}
+
+/* 0x206f40ba -- a VASI bar's colour for the glide angle ax: the carry
+ * (none) when the eye is on the other side of the VASI's z; white
+ * (0xf015) when the eye is within GLOBAL +0xce2 of twice its distance;
+ * else red (0xf00f) unless the eye's slope (its height +0xce2 over the
+ * distance) is above the angle's (its sine over its cosine), all unsigned
+ * divides the host repairs. */
+static int vasi_colour(void)
+{
+    uint16_t distance;
+
+    SET_BX(M16(G + 0xce6));
+    SET_CX(BX);
+    SET_BX(BX - M16(V(0x2070fe68)));
+    SET_CX(CX ^ BX);
+    if (CX & 0x8000)
+        return 1;
+    if (BX & 0x8000)
+        SET_BX(-BX);
+    SET_CX(BX >> 1);
+    if (CX < M16(G + 0xce2)) {
+        SET_AX(0xf015);
+        return 0;
+    }
+    distance = BX;
+    SET_BX(AX);
+    {
+        uint32_t keep_edi = edi;
+
+        UTIL_SINCOS(BX, V(0x206fd1d8), V(0x206fd1da));
+        edi = keep_edi;
+    }
+    SET_DX(M16(V(0x206fd1d8)));
+    SET_AX(0);
+    div16(M16(V(0x206fd1da)));
+    SET_CX(AX);
+    SET_DX(M16(G + 0xce2));
+    SET_AX(0);
+    SET_BX(distance);
+    div16(BX);
+    SET_AX(AX > CX ? 0xf015 : 0xf00f);
+    return 0;
+}
+
+/* 0x206f4171 -- a VASI bar in colour ax: five lights at the VASI's z from
+ * its x 0x10 outward. */
+static void vasi_bar(void)
+{
+    light_colour();
+    SET_AX(M16(V(0x2070fe66)));
+    SET_BX(0x10);
+    SET_DX((int16_t)AX < 0 ? 0xffff : 0);
+    SET_BX(BX ^ DX);
+    SET_BX(BX + AX);
+    SET_CX(5);
+    SET_DX(M16(V(0x2070fe68)));
+    light_row_across();
+}
+
+/* 0x206f4021 -- the VASI: the spacing made to point the VASI's z's way,
+ * the far bar half a spacing back (nothing when the eye is on the other
+ * side of that), then its bars at the angle plus 0x2e, the angle (three
+ * bars only) and the angle less 0x2e, a spacing apart. */
+static void vasi(void)
+{
+    SET_AX(M16(V(0x2070fe6a)) ^ M16(V(0x2070fe68)));
+    if (AX & 0x8000)
+        M16(V(0x2070fe6a)) = -M16(V(0x2070fe6a));
+    SET_AX(sar16(M16(V(0x2070fe6a)), 1));
+    M16(V(0x2070fe68)) -= AX;
+    SET_AX(AX ^ M16(G + 0xce6));
+    if (AX & 0x8000)
+        return;
+    SET_AX(M16(V(0x2070fe64)) + 0x2e);
+    if (!vasi_colour())
+        vasi_bar();
+    if (M8(V(0x2070fe63)) != 1) {
+        M16(V(0x2070fe68)) += M16(V(0x2070fe6a));
+        SET_AX(M16(V(0x2070fe64)));
+        if (!vasi_colour())
+            vasi_bar();
+    }
+    M16(V(0x2070fe68)) += M16(V(0x2070fe6a));
+    SET_AX(M16(V(0x2070fe64)) - 0x2e);
+    if (!vasi_colour())
+        vasi_bar();
+}
+
+/* 0x206f3b8b -- pattern 1: from 0x12c past the threshold, white; one
+ * light for a count of 1, else (when the word 0x1204 past the instruction
+ * is set -- retail loads GLOBAL into edi and tests [esi+0x1204]) a row of
+ * that many, 0x12c apart. */
+static void lights_1(void)
+{
+    SET_AX(0x12c);
+    SET_BX(M16(V(0x2070fe5e)));
+    if (BX & 0x8000)
+        SET_AX(-AX);
+    SET_BX(BX + AX);
+    SET_CL(M8(V(0x2070fe62)));
+    SET_CH(0);
+    if (CX == 0)
+        return;
+    {
+        uint16_t a = AX;
+
+        SET_AX(0xf015);
+        light_colour();
+        SET_AX(a);
+    }
+    SET_CX(CX - 1);
+    if (CX == 0) {
+        light_point();
+        SET_DX(BX);
+        return;
+    }
+    imul16(CX);
+    SET_AX(AX + BX);
+    SET_CX(CX + 1);
+    {
+        uint16_t t = CX;
+
+        SET_CX(BX);
+        SET_BX(t);
+    }
+    SET_DX(AX);
+    SET_AX(0);
+    if (M16(esi + 0x1204) != 0)
+        light_row_along();
+}
+
+/* 0x206f3bef -- pattern 8: the bar alone, from 0xc8 past the threshold. */
+static void lights_8(void)
+{
+    SET_BP(0xc8);
+    SET_DX(M16(V(0x2070fe5e)));
+    if (DX & 0x8000)
+        SET_BP(-BP);
+    SET_DX(DX + BP);
+    SET_AL(M8(V(0x2070fe62)));
+    if (AL != 0)
+        light_bar();
+}
+
+/* 0x206f3c6b, 0x206f3d0a -- the rows of patterns 2 to 5: flashing with bx
+ * `flash`, seven rows across 0xc8 apart from the threshold, of five lights
+ * `half` either side of the centre, and at the fifth bars from `bar_x` to
+ * `bar_x2` either side. */
+static void lights_rows(uint16_t flash, uint16_t half, uint16_t bar_x, uint16_t bar_x2)
+{
+    SET_AX(0xf016);
+    SET_BX(flash);
+    light_colour();
+    SET_DX(M16(V(0x2070fe5e)));
+    SET_BP(0xc8);
+    if (DX & 0x8000)
+        SET_BP(-BP);
+    SET_SI(7);
+    do {
+        SET_DX(DX + BP);
+        SET_AX(-half);
+        SET_BX(half);
+        SET_CX(5);
+        light_row_across();
+        if (SI == 3) {
+            SET_AX(bar_x);
+            SET_BX(bar_x2);
+            SET_CX(5);
+            light_row_across();
+            SET_AX(-AX);
+            SET_BX(-BX);
+            light_row_across();
+        }
+        SET_SI(SI - 1);
+    } while (SI != 0);
+}
+
+/* The bar after the rows: one row on (patterns 3 and 5), or back to an
+ * eighth of a row short of the last but one (2 and 4). */
+static void lights_bar_on(void)
+{
+    SET_AL(M8(V(0x2070fe62)));
+    if (AL != 0) {
+        SET_DX(DX + BP);
+        light_bar();
+    }
+}
+
+static void lights_bar_back(void)
+{
+    SET_AL(M8(V(0x2070fe62)));
+    if (AL != 0) {
+        SET_BX(sar16(BP, 3));
+        SET_DX(DX + BX);
+        SET_DX(DX - BP);
+        SET_DX(DX - BP);
+        light_bar();
+    }
+}
+
+static void lights_2(void) { lights_rows(0x2000, 5, 0xffdf, 0xffe9); lights_bar_back(); }   /* 0x206f3c42 */
+static void lights_3(void) { lights_rows(0x2000, 5, 0xffdf, 0xffe9); lights_bar_on(); }     /* 0x206f3c2b */
+static void lights_4(void) { lights_rows(0x4000, 7, 0xffdd, 0xfff1); lights_bar_back(); }   /* 0x206f3cca */
+static void lights_5(void) { lights_rows(0x4000, 7, 0xffdd, 0xfff1); lights_bar_on(); }     /* 0x206f3cf3 */
+
+/* 0x206f3d69 -- patterns 6 and 7, 0x64 apart: its own header (0x2d, by
+ * 5); red rows near the threshold (pattern 7: nine pairs), then flashing
+ * rows of five to the end, with bars at the sixth from the end of the
+ * first (pattern 7 the fourth too); the bar from the sixth. */
+static void lights_6(void)
+{
+    uint16_t sixth = 0;
+
+    SET_AX(0x2d);
+    SET_BX(5);
+    SET_CX(5);
+    light_header();
+    SET_DX(M16(V(0x2070fe5e)));
+    SET_BP(0x64);
+    if (DX & 0x8000)
+        SET_BP(-BP);
+    SET_AX(0xf00f);
+    light_colour();
+    SET_DX(DX + BP);
+    if (M8(V(0x2070fe61)) != 7) {
+        SET_AX(0xffce);
+        SET_BX(0xffe2);
+        SET_CX(5);
+        light_row_across();
+        SET_AX(-AX);
+        SET_BX(-BX);
+        light_row_across();
+        SET_DX(DX + BP);
+        SET_BX(BX + 0xa);
+        SET_CX(3);
+        light_row_across();
+        SET_AX(-AX);
+        SET_BX(-BX);
+        light_row_across();
+        SET_AX(0xfff6);
+        SET_BX(0xa);
+        SET_CX(5);
+        light_row_across();
+        SET_SI(0x16);
+        SET_DX(DX + BP);
+    } else {
+        uint16_t d = DX;
+
+        SET_SI(9);
+        SET_AX(0xffce);
+        SET_BX(0xffd8);
+        SET_CX(3);
+        do {
+            light_row_across();
+            SET_AX(-AX);
+            SET_BX(-BX);
+            light_row_across();
+            SET_AX(-AX);
+            SET_BX(-BX);
+            SET_DX(DX + BP);
+            SET_SI(SI - 1);
+        } while (SI != 0);
+        SET_DX(d);
+        SET_SI(0x18);
+    }
+    SET_AX(0xf016);
+    SET_BX(0x4000);
+    light_colour();
+    do {
+        int pair = 0;
+
+        SET_AX(0xfff6);
+        SET_BX(0xa);
+        SET_CX(5);
+        light_row_across();
+        if (SI == 0x14 && M8(V(0x2070fe61)) == 7) {
+            SET_AX(0xffe0);
+            SET_BX(0xffef);
+            SET_CX(4);
+            pair = 1;
+        } else if (SI == 0xf) {
+            SET_AX(0xffce);
+            SET_BX(0xfff1);
+            SET_CX(8);
+            sixth = DX;
+            pair = 1;
+        }
+        if (pair) {
+            light_row_across();
+            SET_AX(-AX);
+            SET_BX(-BX);
+            light_row_across();
+        }
+        SET_DX(DX + BP);
+        SET_SI(SI - 1);
+    } while (SI != 0);
+    SET_BX(sixth);
+    SET_AL(M8(V(0x2070fe62)));
+    if (AL != 0) {
+        SET_DX(BX);
+        SET_BX(sar16(BP, 3));
+        SET_DX(DX + BX);
+        light_bar();
+    }
+}
+
+/* 0x206f3eb1 -- pattern 9, 0x64 apart: white; rows along the centre and
+ * either side, then rows across widening to the end.  bx the first row's
+ * z. */
+static void lights_9(void)
+{
+    uint16_t first, along;
+
+    SET_DX(M16(V(0x2070fe5e)));
+    SET_BP(0x64);
+    if (DX & 0x8000)
+        SET_BP(-BP);
+    SET_AX(0xf015);
+    light_colour();
+    SET_DX(DX + BP);
+    first = DX;
+    SET_CX(DX);
+    SET_DX(DX + BP + BP + BP);
+    SET_AX(0);
+    SET_BX(4);
+    light_row_along();
+    along = DX;
+    SET_SI((BP << 2) + BP);
+    SET_CX(CX + SI);
+    SET_DX(DX + SI);
+    light_row_along();
+    SET_CX(CX + SI);
+    SET_DX(DX + SI);
+    SET_AX(0xfffd);
+    light_row_along();
+    SET_AX(-AX);
+    light_row_along();
+    SET_CX(CX + SI);
+    SET_DX(DX + SI);
+    light_row_along();
+    SET_AX(-AX);
+    light_row_along();
+    SET_CX(CX + SI - BP);
+    SET_DX(DX + SI + SI + BP);
+    SET_AX(0xfffb);
+    SET_BX(0xb);
+    light_row_along();
+    SET_AX(-AX);
+    light_row_along();
+    SET_AX(0);
+    light_row_along();
+    SET_DX(along + BP);
+    SET_AX(0xffec);
+    SET_BX(0x14);
+    SET_CX(9);
+    light_row_across();
+    SET_DX(DX + SI);
+    SET_AX(0xffe7);
+    SET_BX(0x19);
+    SET_CX(0xb);
+    light_row_across();
+    SET_DX(DX + SI);
+    SET_AX(0xffdf);
+    SET_BX(0x21);
+    SET_CX(0xe);
+    light_row_across();
+    SET_DX(DX + SI);
+    SET_AX(0xffce);
+    SET_BX(0xffec);
+    SET_CX(7);
+    light_row_across();
+    SET_AX(-AX);
+    SET_BX(-BX);
+    light_row_across();
+    SET_DX(DX + SI);
+    light_row_across();
+    SET_AX(-AX);
+    SET_BX(-BX);
+    light_row_across();
+    SET_BX(first);
+}
+
+/* 0x206f3fca -- pattern 10: pattern 9 and red rows along either side of
+ * its start, eight spacings long. */
+static void lights_10(void)
+{
+    uint16_t d;
+
+    lights_9();
+    d = DX;
+    SET_DX(BX);
+    SET_AX(0xf00f);
+    light_colour();
+    SET_BP(BP << 3);
+    SET_CX(DX);
+    SET_DX(DX + BP);
+    SET_AX(0xffdd);
+    SET_BX(9);
+    light_row_along();
+    SET_AX(-AX);
+    light_row_along();
+    SET_AX(AX - 5);
+    light_row_along();
+    SET_AX(-AX);
+    light_row_along();
+    SET_AX(AX + 5);
+    light_row_along();
+    SET_AX(-AX);
+    light_row_along();
+    SET_DX(d);
+}
+
+/* 0x206f38db -- the lights for the record at esi + 2, off the map
+ * (GLOBAL +0xb5c) and unless the view's block +0x10 is 1: the header, the
+ * end bars, the pattern (through 0x2070fe32), the flashers, the VASI and a
+ * return; run from the header or past it, GLOBAL +0x127e 0xffff
+ * meanwhile. */
+static void approach_lights(void)
+{
+    edi = G;
+    SET_AX(M16(edi + 0xce6));
+    LIGHTS_EYE = AX;
+    ebx = M32(edi + 0x1198);
+    if (M32(ebx + 0x10) == 1)
+        return;
+    if (M32(edi + 0xb5c) == 0)
+        return;
+    for (ebx = 0x11; (int32_t)ebx >= 0; ebx--) {
+        SET_AL(M8(ebx + esi + 2));
+        M8(ebx + V(0x2070fe5a)) = AL;
+    }
+    edi = V(0x2070fe96);
+    SET_AX(0xa);
+    SET_BX(0xa);
+    SET_CX(5);
+    light_header();
+    if (M8(V(0x2070fe60)) & 4)
+        light_end_bars();
+    SET_DX(M16(V(0x2070fe5e)));
+    ebx = M8(V(0x2070fe61));
+    ebx -= 1;
+    if ((int32_t)ebx >= 0 && ebx <= 9)
+        routine(M32(V(0x2070fe32) + ebx * 4))();
+    if (M8(V(0x2070fe60)) & 0x10)
+        light_sequence();
+    if (M8(V(0x2070fe63)) != 0)
+        vasi();
+    M16(edi) = 0x22;
+    edi = V(0x20710348) - edi;
+    eax = M8(V(0x2070fe60)) & 1 ? V(0x2070fe82) : V(0x2070fe96);
+    M32(V(0x206f9126)) = eax;
+    {
+        uint16_t keep = M16(G + 0x127e);
+
+        M16(G + 0x127e) = 0xffff;
+        run_program(M32(V(0x206f9126)));
+        eax = G;
+        M16(eax + 0x127e) = keep;
+    }
+}
+
+/* 0x206ef03c -- the view kept (GLOBAL +0xce8's matrix, +0xcdc's eye, the
+ * sun at +0xb28.., the angles at +0x5c8..) at 0x206ff860.., then turned by
+ * pitch ax, bank bx and heading cx. */
+static void view_turn_to(void)
+{
+    uint32_t keep_eax = eax, keep_ecx = ecx, i;
+
+    eax = G;
+    for (i = 0; i < 18; i++)
+        M8(V(0x206ff860) + i) = M8(eax + 0xce8 + i);
+    for (i = 0; i < 12; i++)
+        M8(V(0x206ff872) + i) = M8(eax + 0xcdc + i);
+    esi = eax + 0xce8;
+    ecx = 0;
+    M32(V(0x206ff87e)) = M32(eax + 0xb28);
+    M32(V(0x206ff882)) = M32(eax + 0xb2c);
+    M32(V(0x206ff886)) = M32(eax + 0xb30);
+    M32(V(0x206ff88a)) = M32(eax + 0x5c8);
+    M32(V(0x206ff88e)) = M32(eax + 0x5cc);
+    M32(V(0x206ff892)) = M32(eax + 0x5d0);
+    edx = keep_ecx;
+    eax = keep_eax;
+    edi = G;
+    M16(edi + 0x5ca) = AX;
+    M16(edi + 0x5ce) = BX;
+    M16(edi + 0x5d2) = DX;
+    transform_turn();
+    M16(V(0x206f9180)) = 0;
+    M16(V(0x206f9196)) += 1;
+}
+
+/* 0x206ef0e1 -- the view put back. */
+static void view_put_back(void)
+{
+    uint32_t i;
+
+    eax = G;
+    for (i = 0; i < 18; i++)
+        M8(eax + 0xce8 + i) = M8(V(0x206ff860) + i);
+    for (i = 0; i < 12; i++)
+        M8(eax + 0xcdc + i) = M8(V(0x206ff872) + i);
+    esi = V(0x206ff87e);
+    edi = eax + 0xce8;
+    ecx = 0;
+    M32(eax + 0xb28) = M32(V(0x206ff87e));
+    M32(eax + 0xb2c) = M32(V(0x206ff882));
+    M32(eax + 0xb30) = M32(V(0x206ff886));
+    M32(eax + 0x5c8) = M32(V(0x206ff88a));
+    M32(eax + 0x5cc) = M32(V(0x206ff88e));
+    edx = M32(V(0x206ff892));
+    M32(eax + 0x5d0) = edx;
+    M16(V(0x206f9196)) -= 1;
+    M16(V(0x206f9180)) = 0;
+}
+
+/* 0x206f38b0 -- +0x48: the lights for the record at esi + 2 with the view
+ * turned to its heading; the counter left at esi. */
+static void approach_lights_turned(void)
+{
+    uint32_t keep_ebx = ebx, keep_esi = esi, keep_edi = edi;
+
+    SET_AX(0);
+    SET_BX(0);
+    SET_CX(M16(esi + 2));
+    view_turn_to();
+    esi = keep_esi;
+    approach_lights();
+    view_put_back();
+    M32(V(0x206f9126)) = keep_esi;
+    ebx = keep_ebx, esi = keep_esi, edi = keep_edi;
+}
+
+/* 0x206e4357 -- 0x72, approach lights (0x206f38b0), off the map; on past
+ * the record. */
+static void op_approach_lights(void)
+{
+    edi = G;
+    if (M32(edi + 0xb5c) != 0)
+        approach_lights_turned();
+    M32(V(0x206f9126)) += 0x14;
+}
+
+SERVICE_RAW(approach_lights_turned_svc, 0);
+static void approach_lights_turned_svc_body(const uint32_t *arg)
+{
+    (void)arg;
+    approach_lights_turned();
+}
+
+/* +0x4c: 0x206f38db itself. */
+SERVICE_RAW(approach_lights_svc, 0);
+static void approach_lights_svc_body(const uint32_t *arg)
+{
+    (void)arg;
+    approach_lights();
+}
+
+/* ---- buildings: 0x49, .text+0x87d6..+0x89e1 and +0x14200..+0x1694a ----------------- */
+
+/* 0x49 draws a generic building by filling in one of four built-in
+ * programs (templates of 0x200 bytes from 0x20710ad0: three boxes and an
+ * octagon) and running it.  A template's words, from its base t:
+ *   +0, +2       the apparent width and height (the walls' texture limits)
+ *   +4..         the program: +8 the sphere (centre, +0xe radius) of its
+ *                0x2c, +0x10/+0x14 its detail opcode (0x5f or 0x6d) and
+ *                operand, then the corners and the walls' faces. */
+
+static void corner(uint32_t at, uint16_t x, uint16_t y, uint16_t z)
+{
+    M16(at) = x;
+    M16(at + 2) = y;
+    M16(at + 4) = z;
+}
+
+/* 0x206e97d6 -- the building's colours: with 0x206f931a 0xffff the drawing
+ * state only (0x206f9125, GLOBAL +0xc90, +0xca0); else, off the map, the
+ * built-in program 0x206fdb7c[min(0x206f931a, 7)] run without a context,
+ * every register kept. */
+static void building_colours(void)
+{
+    if (M16(V(0x206f931a)) == 0xffff) {
+        M8(V(0x206f9125)) = 0;
+        M16(G + 0xc90) = 0;
+        M16(G + 0xca0) = 0;
+        return;
+    }
+    if (M16(G + 0xdca) != 0)
+        return;
+    {
+        uint32_t a = eax, b = ebx, c = ecx, d = edx, s = esi, i = edi, p = ebp;
+        uint32_t keep_context, keep_pc;
+
+        ebp = M16(V(0x206f931a));
+        if (ebp > 7)
+            ebp = 7;
+        keep_context = M32(V(0x206f919c));
+        M32(V(0x206f919c)) = 0;
+        keep_pc = M32(V(0x206f9126));
+        M32(V(0x206f9126)) = M32(V(0x206fdb7c) + ebp * 4);
+        interpret();
+        M32(V(0x206f9126)) = keep_pc;
+        M32(V(0x206f919c)) = keep_context;
+        M8(V(0x206f9125)) = 0;
+        edi = G;
+        M16(edi + 0xc90) = 0;
+        M16(edi + 0xca0) = 0;
+        eax = a, ebx = b, ecx = c, edx = d, esi = s, edi = i, ebp = p;
+    }
+}
+
+/* The opening every kind shares: half the width (si) and depth (di), the
+ * height (dx) times 4; the base and top points at base and base + 6; the
+ * detail jump (0x5f by the height, or 0x6d by a quarter of the mean width
+ * plus one, when that half is the larger); GLOBAL +0x832 0xe with the eye
+ * (0x206f9184, 0x206f918c, 0x206f9190) inside, off the map; the sphere,
+ * radius the largest of half the height and the half sizes.  dx the top. */
+static void building_head(uint32_t t, uint32_t base)
+{
+    SET_SI(SI >> 1);
+    SET_DI(DI >> 1);
+    SET_DX(DX + DX);
+    SET_DX(DX + DX);
+    corner(base, AX, BX, CX);
+    corner(base + 6, AX, DX + BX, CX);
+    SET_BP(SI + DI);
+    SET_BP(BP >> 1);
+    if (BP < DX) {
+        M16(t + 0x10) = 0x5f;
+        M16(t + 0x14) = DX;
+    } else {
+        SET_BP((BP >> 1) + 1);
+        M16(t + 0x10) = 0x6d;
+        M16(t + 0x14) = BP;
+    }
+    if (M16(G + 0xdca) == 0 &&
+        (int16_t)M16(V(0x206f918c)) >= (int16_t)BX &&
+        (int16_t)M16(V(0x206f918c)) <= (int16_t)(uint16_t)(BX + DX) &&
+        (int16_t)M16(V(0x206f9184)) >= (int16_t)(uint16_t)(AX - SI) &&
+        (int16_t)M16(V(0x206f9184)) <= (int16_t)(uint16_t)(AX + SI) &&
+        (int16_t)M16(V(0x206f9190)) >= (int16_t)(uint16_t)(CX - DI) &&
+        (int16_t)M16(V(0x206f9190)) <= (int16_t)(uint16_t)(CX + DI))
+        M16(G + 0x832) = 0xe;
+    {
+        uint16_t height = DX;
+
+        SET_DX(DX >> 1);
+        SET_BP(DX);
+        if (BP < SI)
+            SET_BP(SI);
+        if (BP < DI)
+            SET_BP(DI);
+        SET_DX(DX + BX);
+        corner(t + 8, AX, DX, CX);
+        M16(t + 0xe) = BP;
+        SET_DX(height + BX);
+    }
+}
+
+/* The apparent width (the mean of the sizes in si and di) and, for
+ * 0x206f931a 5 and 6, height (bp), at the view's scale (its block's first
+ * and third dwords), doubled, to t +0 and +2; with other colours +2 the
+ * height itself.  si, di and bp kept. */
+static void building_size(uint32_t t)
+{
+    uint16_t s = SI, d = DI, p = BP;
+
+    SET_AX(SI + DI);
+    SET_AX(AX >> 1);
+    ebx = M32(M32(G + 0x1198));
+    apparent_size();
+    SET_SI(s), SET_DI(d), SET_BP(p);
+    SET_AX(AX + AX);
+    M16(t) = AX;
+    SET_AX(BP);
+    if (M16(V(0x206f931a)) >= 5 && M16(V(0x206f931a)) <= 6) {
+        ebx = M32(M32(G + 0x1198) + 8);
+        apparent_size();
+        SET_AX(AX + AX);
+        SET_SI(s), SET_DI(d), SET_BP(p);
+    }
+    M16(t + 2) = AX;
+}
+
+/* A wall facing (nx, nz): its shade from the sun (GLOBAL +0xb2a, +0xb32;
+ * dark when facing away, through 0x206f91bb's ambient), in 0x20 steps, as
+ * u; its texture extents from half its length (si or di, at most 0x1e)
+ * and half the height (bp), each cut to the apparent size at t +0/+2 (but
+ * not below 4), even less one -- four (u, v) at `at`.  si, di and bp kept;
+ * ax, bx, cx and dx as retail leaves them. */
+static void building_wall(uint32_t t, int along_si, uint16_t nx, uint16_t nz, uint32_t at)
+{
+    uint16_t s = SI, d = DI, p = BP, len, limit;
+    uint32_t prod;
+
+    len = (along_si ? SI : DI) >> 1;
+    SET_BP(BP >> 1);
+    if (len >= 0x1e)
+        len = 0x1e;
+    SET_AX(nx);
+    imul16(M16(G + 0xb2a));
+    SET_CX(DX);
+    SET_AX(nz);
+    imul16(M16(G + 0xb32));
+    SET_CX(CX + DX);
+    SET_AX(CX + CX);
+    if (!(AX & 0x8000))
+        SET_AX(0);
+    SET_AX(-AX);
+    SET_BX(0x7fff - M16(V(0x206f91bb)));
+    SET_BX(BX + BX);
+    SET_AX(AX + AX);
+    prod = (uint32_t)AX * BX;
+    SET_AX(prod);
+    SET_DX(prod >> 16);
+    SET_DX(DX + M16(V(0x206f91bb)));
+    SET_DX(DX + M16(V(0x206f91bb)));
+    SET_DX(~DX);
+    SET_AX(DH & 0xe0);
+    limit = M16(t);
+    if (len > limit) {
+        len = limit;
+        if (len < 4)
+            len = 4;
+    }
+    limit = M16(t + 2);
+    if (BP > limit) {
+        SET_BP(limit);
+        if (BP < 4)
+            SET_BP(4);
+    }
+    SET_DX(((AX + len) & 0xfffe) - 1);
+    SET_BP((BP & 0xfffe) - 1);
+    M16(at) = AX;
+    M16(at + 2) = 0;
+    M16(at + 6) = DX;
+    M16(at + 8) = 0;
+    M16(at + 0xc) = DX;
+    M16(at + 0xe) = BP;
+    M16(at + 0x12) = AX;
+    M16(at + 0x14) = BP;
+    SET_SI(s), SET_DI(d), SET_BP(p);
+}
+
+/* Run the filled template, GLOBAL +0x1174 1 meanwhile off the map, the
+ * program counter kept. */
+static void building_run(uint32_t t)
+{
+    uint32_t keep_pc;
+
+    if (M16(G + 0xdca) == 0)
+        M16(G + 0x1174) = 1;
+    keep_pc = M32(V(0x206f9126));
+    run_program(t + 4);
+    M32(V(0x206f9126)) = keep_pc;
+    M16(G + 0x1174) = 0;
+}
+
+/* 0x206f5200, 0x206f5a30, 0x206f6290 -- the boxes, kinds 0, 1 and 2, each
+ * its template (0x20710ad0 + 0x200 * kind): ax, bx, cx the position (bx
+ * the base), si the width, di the depth, dx the height.  Kind 1 raises
+ * the roof's ridge and its walls' texture by si; kind 2 widens the base by
+ * a quarter and narrows the top by one.
+ *
+ * Retail's kind 1 (0x206f5b07) pushes edi before setting GLOBAL +0x832 and
+ * never pops it, so with the eye inside it returns to edi's value and
+ * crashes; this one goes on as the others do (docs/modules/g3d.md). */
+static void building_box(uint32_t kind)
+{
+    uint32_t t = V(0x20710ad0) + 0x200 * kind;
+    uint16_t s, d;
+
+    building_head(t, t + 0x1de);
+    s = SI, d = DI;
+    if (kind == 2) {
+        SET_SI(SI + (SI >> 2));
+        SET_DI(DI + (DI >> 2));
+    }
+    corner(t + 0x1e, AX + SI, BX, CX + DI);
+    corner(t + 0x24, AX - SI, BX, CX + DI);
+    corner(t + 0x2a, AX - SI, BX, CX - DI);
+    corner(t + 0x30, AX + SI, BX, CX - DI);
+    if (kind == 2) {
+        SET_SI(s), SET_DI(d);
+        SET_SI(SI - (SI >> 2));
+        SET_DI(DI - (DI >> 2));
+    }
+    corner(t + 0x36, AX + SI, DX, CX + DI);
+    corner(t + 0x3c, AX - SI, DX, CX + DI);
+    corner(t + 0x42, AX - SI, DX, CX - DI);
+    corner(t + 0x48, AX + SI, DX, CX - DI);
+    corner(t + 0xf8, AX + SI, DX, CX + DI);
+    corner(t + 0x12a, AX - SI, DX, CX + DI);
+    corner(t + 0x15c, AX - SI, DX, CX - DI);
+    corner(t + 0x18e, AX + SI, DX, CX - DI);
+    corner(t + 0x1be, AX + SI, DX, CX + DI);
+    corner(t + 0x6c, AX + SI, DX, CX + DI);
+    corner(t + 0x8c, AX - SI, DX, CX + DI);
+    corner(t + 0xac, AX - SI, DX, CX - DI);
+    corner(t + 0xcc, AX + SI, DX, CX - DI);
+    if (SI < 0x10)
+        SET_SI(SI + SI);
+    if (DI < 0x10)
+        SET_DI(DI + DI);
+    SET_BP(DX & 0xfffe);
+    SET_SI(SI & 0xfffe);
+    SET_DI(DI & 0xfffe);
+    building_size(t);
+    building_wall(t, 0, 0x7fff, 0, t + 0x106);
+    building_wall(t, 0, 0x8001, 0, t + 0x16a);
+    building_wall(t, 1, 0, 0x7fff, t + 0x138);
+    building_wall(t, 1, 0, 0x8001, t + 0x19c);
+    if (kind == 1) {
+        M16(t + 0x44) += SI;
+        M16(t + 0x4a) += SI;
+        M16(t + 0x11a) += SI >> 1;
+        M16(t + 0x178) += SI >> 1;
+        M16(t + 0x1aa) += SI >> 1;
+        M16(t + 0x1b0) += SI >> 1;
+    }
+    building_run(t);
+}
+
+/* 0x206f6b00 -- the octagon, kind 3 (0x207110d0): its eight corners at
+ * the half sizes and half of them again, bottom and top, and eight walls;
+ * its sizes halved and four more before the walls. */
+static void building_octagon(void)
+{
+    uint32_t t = V(0x207110d0);
+    uint16_t s, d, top;
+
+    building_head(t, t + 0x35e);
+    top = DX;
+    s = SI, d = DI;
+    SET_DX(SI >> 1);
+    SET_BP(DI >> 1);
+    corner(t + 0x1e, AX + SI, BX, CX + BP);
+    corner(t + 0x24, AX + DX, BX, CX + DI);
+    corner(t + 0x2a, AX - DX, BX, CX + DI);
+    corner(t + 0x30, AX - SI, BX, CX + BP);
+    corner(t + 0x36, AX - SI, BX, CX - BP);
+    corner(t + 0x3c, AX - DX, BX, CX - DI);
+    corner(t + 0x42, AX + DX, BX, CX - DI);
+    corner(t + 0x48, AX + SI, BX, CX - BP);
+    SET_BX(top);
+    corner(t + 0x4e, AX + SI, BX, CX + BP);
+    corner(t + 0x54, AX + DX, BX, CX + DI);
+    corner(t + 0x5a, AX - DX, BX, CX + DI);
+    corner(t + 0x60, AX - SI, BX, CX + BP);
+    corner(t + 0x66, AX - SI, BX, CX - BP);
+    corner(t + 0x6c, AX - DX, BX, CX - DI);
+    corner(t + 0x72, AX + DX, BX, CX - DI);
+    corner(t + 0x78, AX + SI, BX, CX - BP);
+    corner(t + 0x1a8, AX + SI, BX, CX + BP);
+    corner(t + 0x1da, AX + SI, BX, CX + BP);
+    corner(t + 0x20c, AX - DX, BX, CX + DI);
+    corner(t + 0x23e, AX - DX, BX, CX + DI);
+    corner(t + 0x270, AX - SI, BX, CX - BP);
+    corner(t + 0x2a2, AX - SI, BX, CX - BP);
+    corner(t + 0x2d4, AX + DX, BX, CX - DI);
+    corner(t + 0x306, AX + DX, BX, CX - DI);
+    corner(t + 0x336, AX + DX, BX, CX - DI);
+    corner(t + 0x9c, AX + SI, BX, CX + BP);
+    corner(t + 0xbc, AX + SI, BX, CX + BP);
+    corner(t + 0xdc, AX - DX, BX, CX + DI);
+    corner(t + 0xfc, AX - DX, BX, CX + DI);
+    corner(t + 0x11c, AX - SI, BX, CX - BP);
+    corner(t + 0x13c, AX - SI, BX, CX - BP);
+    corner(t + 0x15c, AX + DX, BX, CX - DI);
+    corner(t + 0x17c, AX + DX, BX, CX - DI);
+    SET_SI(s), SET_DI(d), SET_DX(top);
+    SET_SI((SI >> 1) + 4);
+    SET_DI((DI >> 1) + 4);
+    SET_BP(DX & 0xfffc);
+    SET_SI(SI & 0xfffc);
+    SET_DI(DI & 0xfffc);
+    building_size(t);
+    building_wall(t, 0, 0x7fff, 0, t + 0x1b6);
+    building_wall(t, 1, 0x5a82, 0x5a82, t + 0x1e8);
+    building_wall(t, 1, 0, 0x7fff, t + 0x21a);
+    building_wall(t, 1, 0xa57e, 0x5a82, t + 0x24c);
+    building_wall(t, 0, 0x8001, 0, t + 0x27e);
+    building_wall(t, 1, 0xa57e, 0xa57e, t + 0x2b0);
+    building_wall(t, 1, 0, 0x8001, t + 0x2e2);
+    building_wall(t, 1, 0x5a82, 0xa57e, t + 0x314);
+    building_run(t);
+}
+
+/* 0x206e9888, 0x206e98a2, 0x206e98bc, 0x206e98d6 -- 0x49's four kinds,
+ * through 0x206fdb9c: bx, cx, dx from the operand's dx, bx, cx, 0x206f90f6
+ * 1 for the boxes, the colours, the building. */
+static void building_kind(uint32_t kind)
+{
+    uint16_t b = BX, c = CX, d = DX;
+
+    SET_BX(d), SET_CX(b), SET_DX(c);
+    if (kind != 3)
+        M16(V(0x206f90f6)) = 1;
+    building_colours();
+    if (kind == 3)
+        building_octagon();
+    else
+        building_box(kind);
+}
+
+static void building_0(void) { building_kind(0); }
+static void building_1(void) { building_kind(1); }
+static void building_2(void) { building_kind(2); }
+static void building_3(void) { building_kind(3); }
+
+/* 0x206e997d -- 0x49, a building: the eye in the object (0x206e6aa8); the
+ * operand's +4 to 0x206f931c; its first word the colours (0x206f931a: the
+ * low three bits, or 0xffff when negative) and the kind (bits 4 and 3, or
+ * the low two when negative); position, sizes from the next six words. */
+static void op_building(void)
+{
+    uint32_t keep_esi = esi;
+
+    eye_in_object_turned();
+    esi = keep_esi;
+    SET_AX(M16(esi + 4));
+    M16(V(0x206f931c)) = AX;
+    SET_AX(M16(esi + 2));
+    if (AX & 0x8000) {
+        ebp = (uint32_t)(AX & 3) << 1;
+        SET_AX(0xffff);
+    } else {
+        ebp = ((uint32_t)AX >> 2) & 6;
+        SET_AX(AX & 7);
+    }
+    M16(V(0x206f931a)) = AX;
+    SET_AX(M16(esi + 6));
+    SET_BX(M16(esi + 0xa));
+    SET_DX(M16(esi + 8));
+    SET_CX(M16(esi + 0xc));
+    SET_DI(M16(esi + 0x10));
+    SET_SI(M16(esi + 0xe));
+    M32(V(0x206f9126)) += 0x12;
+    ebp <<= 1;
+    routine(M32(V(0x206fdb9c) + ebp))();
+}
 
 /* ---- grids: .text+0x7d73..+0x87d5 ---------------------------------------------------- */
 
@@ -9069,6 +10359,24 @@ static void grid_triangle(void)
     M16(V(0x206fdc41)) += 1;
 }
 
+/* 0x206e960a -- with neither of the cell's triangles drawn (0x206fdc41)
+ * and the eye over it, GLOBAL +0x832 2.  The ground tiles' cells end here
+ * too. */
+static void grid_cell_eye(void)
+{
+    edi = G;
+    if ((int16_t)M16(V(0x206fdc41)) < 1) {
+        SET_AX(M16(V(0x206fd93c)));
+        SET_BX(M16(V(0x206fd93e)));
+        if ((int16_t)M16(edi + 0xcde) >= (int16_t)AX && (int16_t)M16(edi + 0xce6) >= (int16_t)BX) {
+            SET_AX(AX + M16(V(0x206fd926)));
+            SET_BX(BX + M16(V(0x206fd928)));
+            if ((int16_t)M16(edi + 0xcde) <= (int16_t)AX && (int16_t)M16(edi + 0xce6) <= (int16_t)BX)
+                M16(edi + 0x832) = 2;
+        }
+    }
+}
+
 /* 0x206e9508 -- a cell (bx the column, cx the row): its two triangles,
  * split along alternate diagonals, each drawn when it faces the eye; when
  * neither is drawn and the eye is over the cell, GLOBAL +0x832 2. */
@@ -9135,17 +10443,7 @@ static void grid_cell(void)
         }
     }
     M16(V(0x206f90f6)) = 1;
-    edi = G;
-    if ((int16_t)M16(V(0x206fdc41)) < 1) {
-        SET_AX(M16(V(0x206fd93c)));
-        SET_BX(M16(V(0x206fd93e)));
-        if ((int16_t)M16(edi + 0xcde) >= (int16_t)AX && (int16_t)M16(edi + 0xce6) >= (int16_t)BX) {
-            SET_AX(AX + M16(V(0x206fd926)));
-            SET_BX(BX + M16(V(0x206fd928)));
-            if ((int16_t)M16(edi + 0xcde) <= (int16_t)AX && (int16_t)M16(edi + 0xce6) <= (int16_t)BX)
-                M16(edi + 0x832) = 2;
-        }
-    }
+    grid_cell_eye();
 }
 
 /* 0x206e90c1 -- 0x15, a grid of ground: columns, rows, the cells' x and z
@@ -9352,6 +10650,2827 @@ off:
     edi = G;
     M16(edi + 0xc90) = 0;
     M8(V(0x206f9125)) = 0;
+}
+
+/* ---- runways: 0x42, 0x44, .text+0x1121f..+0x128a3 -------------------------------- */
+
+/* A runway is a record of 0x40 bytes (0x52 with bit 0 of +0x1d) that fills
+ * in the built-in program at 0x2070f01c, an object at the record's
+ * position; the program calls back (0x8c) into the routines below, which
+ * write its markings as point lists (at 0x2070f25c, 0x2070f25a the count)
+ * and the surfaces over them, and its lights.  The record's fields, kept
+ * from 0x2070ebb0:
+ *   +2..+0x13 the position (to 0x2070f02a..)  +0x14 a heading (ebb8)
+ *   +0x16 the length (ebba, at most 25000; half at ebcc)
+ *   +0x18 the width (ebbc and ebf2, at most 600; half at ebce)
+ *   +0x1a markings (ebbe: bit 1 numbers further in, 3 the touchdown
+ *         zone from 3000 long, 5 from 28 wide, 6 the fixed distance)
+ *   +0x1b the number (ebc1: 1..36, its top two bits L, R, C)
+ *   +0x1c lights (ebc3: bits 0-1 the edges, 2-3 the approach)
+ *   +0x1d bit 0 the colours (ebc0)       +0x1e the surface (ebc2)
+ *   +0x20..+0x26 the two thresholds' displacements and overruns (ebd6..)
+ *   +0x28, +0x34 an approach lighting record for each end
+ * ebe8 is the eye's z along the runway (the program sets it), ebea..ebf0
+ * the detail's distances (0x206f237d). */
+
+#define RW(a) M16(V(0x2070eb00 + (a)))
+
+static uint16_t retail_word(uint32_t at);
+
+/* 0x206f3864 -- a fresh point list: its marks' list (0x2070efb4 back to
+ * 0x2070efb8), no points, edi at the first. */
+static void runway_points(void)
+{
+    M32(V(0x2070efb4)) = V(0x2070efb8);
+    M16(V(0x2070f25a)) = 0;
+    edi = V(0x2070f25c);
+    M16(edi) = 0x37;
+}
+
+/* 0x206f3882 -- a mark al: a polygon of al & 0x7f points (bit 7 not a
+ * surface of its own), counted. */
+static void runway_mark(void)
+{
+    uint16_t b = BX;
+
+    ebx = M32(V(0x2070efb4));
+    M8(ebx) = AL;
+    M32(V(0x2070efb4)) += 1;
+    SET_BX(b);                                  /* pop bx: the high half stays */
+    M16(V(0x2070f25a)) += AX & 0x7f;
+}
+
+/* 0x206f28a6 -- a point (ax, 0, bx). */
+static void runway_point(void)
+{
+    M16(edi) = AX;
+    M16(edi + 2) = 0;
+    M16(edi + 4) = BX;
+    edi += 6;
+}
+
+/* The list's points turned end for end (x and z negated): the routines
+ * for a runway's far end draw the near end's and turn them. */
+static void runway_points_turned(void)
+{
+    ecx = M16(V(0x2070f25a));
+    if (CX == 0)
+        return;
+    ebx = V(0x2070f25c);
+    do {
+        M16(ebx) = -M16(ebx);
+        M16(ebx + 4) = -M16(ebx + 4);
+        ebx += 6;
+    } while (--ecx != 0);
+}
+
+/* 0x206f2f43 -- a bar from z ax, bx long, x cx, dx wide, unless it is out
+ * of the detail's range from the eye: near (within ebec) a quad, else two
+ * points (a line: across when narrower than the runway, else along its
+ * middle). */
+static void runway_bar(void)
+{
+    uint16_t a = AX, b = BX, d = DX, p = BP;
+    int narrower;
+
+    SET_BP(AX - RW(0xe8));
+    if ((int16_t)BP > (int16_t)RW(0xea) || (int16_t)BP < (int16_t)RW(0xf0))
+        goto out;
+    narrower = DX < RW(0xbc);
+    SET_BX(BX + AX);
+    SET_DX(DX + CX);
+    if ((int16_t)BP <= (int16_t)RW(0xec) && (int16_t)BP >= (int16_t)RW(0xee)) {
+        M16(edi) = CX;
+        M16(edi + 4) = AX;
+        M16(edi + 6) = DX;
+        M16(edi + 0xa) = AX;
+        M16(edi + 0xc) = DX;
+        M16(edi + 0x10) = BX;
+        M16(edi + 0x12) = CX;
+        M16(edi + 0x16) = BX;
+        SET_DX(0);
+        M16(edi + 2) = 0;
+        M16(edi + 8) = 0;
+        M16(edi + 0xe) = 0;
+        M16(edi + 0x14) = 0;
+        edi += 0x18;
+        SET_AL(4);
+    } else {
+        if (!narrower) {
+            M16(edi) = CX;
+            M16(edi + 4) = AX;
+            M16(edi + 6) = DX;
+            M16(edi + 0xa) = AX;
+        } else {
+            SET_DX(sar16(DX + CX, 1));
+            M16(edi) = DX;
+            M16(edi + 4) = AX;
+            M16(edi + 6) = DX;
+            M16(edi + 0xa) = BX;
+        }
+        SET_DX(0);
+        M16(edi + 2) = 0;
+        M16(edi + 8) = 0;
+        edi += 0xc;
+        SET_AL(0x82);
+    }
+    runway_mark();
+out:
+    SET_BP(p);
+    SET_DX(d);
+    SET_BX(b);
+    SET_AX(a);
+}
+
+/* 0x206f2f2e, 0x206f2f1d, 0x206f2f0c, 0x206f2efb -- one, two, three, four
+ * pairs of bars mirrored across the middle, si + dx apart. */
+static void runway_bar_pair(void)
+{
+    uint16_t c;
+
+    runway_bar();
+    c = CX;
+    SET_CX(-CX - DX);
+    runway_bar();
+    SET_CX(c);
+}
+
+static void runway_bar_pairs(int n)
+{
+    for (;;) {
+        runway_bar_pair();
+        if (--n == 0)
+            break;
+        SET_CX(CX + SI + DX);
+    }
+}
+
+/* 0x206f3857 -- 0x51, colour ax. */
+static void runway_colour(void)
+{
+    M16(edi) = 0x51;
+    M16(edi + 2) = AX;
+    edi += 4;
+}
+
+/* 0x206f32b8 -- with the colours (ebc0 bit 0) 0x52 and 0x51 the word at bx
+ * past 0x2070ebb4 -- retail takes the address of the record's pointer
+ * (lea) where it means the record, so these are words of its own state. */
+static void runway_colours(void)
+{
+    if (M8(V(0x2070ebc0)) & 1) {
+        ebx = BX;
+        SET_AX(M16(V(0x2070ebb4) + ebx));
+        M16(edi) = 0x52;
+        M16(edi + 2) = AX;
+        M16(edi + 4) = 0x51;
+        M16(edi + 6) = AX;
+        edi += 8;
+    }
+}
+
+/* 0x206f3258 -- the surfaces over the list: for each mark a polygon (0x05,
+ * then 0x0f and 0x10s through table points from 0xd3, and 0x08), or for
+ * bit 7 the points without a surface of their own. */
+static void runway_surfaces(void)
+{
+    esi = V(0x2070efb8);
+    SET_BX(0xd3);
+    while (esi != M32(V(0x2070efb4))) {
+        uint16_t c = CX;
+
+        SET_AL(M8(esi));
+        esi += 1;
+        SET_CX(AX);
+        ecx &= 0x7f;
+        if (AL != 0) {
+            int own = !(AL & 0x80);
+
+            if (own) {
+                M16(edi) = 5;
+                edi += 2;
+            }
+            SET_AX(0xf);
+            do {
+                M16(edi) = AX;
+                M16(edi + 2) = BX;
+                SET_BX(BX + 1);
+                edi += 4;
+                SET_AX(0x10);
+            } while (--ecx != 0);
+            if (own) {
+                M16(edi) = 8;
+                edi += 2;
+            }
+        }
+        SET_CX(c);
+    }
+}
+
+/* The list's end: the colours (bx), the surfaces and a return. */
+static void runway_end(uint16_t colour_at)
+{
+    SET_BX(colour_at);
+    runway_colours();
+    runway_surfaces();
+    M16(edi) = 0x22;
+}
+
+/* 0x206f271d -- an arrow at (ax, bx) of half width ebc4, length ebc8: its
+ * point alone (a triangle, mark 0x83) when bp (the last bar's bytes,
+ * negated) is at least -12, else with its shaft (ebc6, ebca) as two
+ * quads. */
+static void runway_arrow(void)
+{
+    uint16_t a = AX, b = BX;
+
+    SET_AX(AX - RW(0xc4));
+    SET_BX(BX - RW(0xc8));
+    M16(V(0x2070ec02)) = AX;
+    M16(V(0x2070ec04)) = BX;
+    SET_AX(AX + RW(0xc4));
+    SET_BX(BX + RW(0xc8));
+    M16(V(0x2070ec06)) = AX;
+    M16(V(0x2070ec08)) = BX;
+    SET_AX(AX + RW(0xc4));
+    SET_BX(BX - RW(0xc8));
+    M16(V(0x2070ec0a)) = AX;
+    M16(V(0x2070ec0c)) = BX;
+#define PT(at) (SET_AX(M16(V(at))), SET_BX(M16(V((at) + 2))), runway_point())
+    if ((int16_t)BP >= (int16_t)0xfff4) {
+        PT(0x2070ec02);
+        PT(0x2070ec06);
+        PT(0x2070ec0a);
+        SET_AL(0x83);
+        runway_mark();
+    } else {
+        SET_AX(AX - 2);
+        M16(V(0x2070ec0e)) = AX;
+        M16(V(0x2070ec10)) = BX;
+        SET_AX(AX - RW(0xc6));
+        SET_BX(BX + RW(0xca));
+        M16(V(0x2070ec12)) = AX;
+        M16(V(0x2070ec14)) = BX;
+        SET_AX(AX - RW(0xc6));
+        SET_BX(BX - RW(0xca));
+        M16(V(0x2070ec16)) = AX;
+        M16(V(0x2070ec18)) = BX;
+        PT(0x2070ec06);
+        PT(0x2070ec12);
+        PT(0x2070ec16);
+        PT(0x2070ec02);
+        SET_AL(4);
+        runway_mark();
+        PT(0x2070ec06);
+        PT(0x2070ec12);
+        PT(0x2070ec0e);
+        PT(0x2070ec0a);
+        SET_AL(4);
+        runway_mark();
+    }
+    SET_BX(b);
+    SET_AX(a);
+}
+
+/* 0x206f253a -- an end's threshold (ax its displacement, ebe4): the bar
+ * across; when it was drawn near and the runway is wider than 20, the
+ * displaced threshold's arrows (sized by the width, or 12 by 45 from 100
+ * wide); then up to seven arrows back along the displacement, each at a
+ * bar's end. */
+static void runway_threshold(void)
+{
+    uint32_t keep_edi;
+
+    RW(0xe4) = AX;
+    runway_points();
+    SET_DX(RW(0xbc));
+    SET_CX(-(DX >> 1));
+    SET_AX(-(RW(0xcc) - RW(0xe4)));
+    SET_BX(0xfff6);
+    ebp = edi;
+    runway_bar();
+    SET_AX(RW(0xe4) + 0x32);
+    SET_BX(0xc8);
+    RW(0xe0) = BX;
+    SET_DX((int16_t)AX < 0 ? 0xffff : 0);
+    div16(BX);
+    if (AX > 7) {
+        SET_AX(RW(0xe4));
+        SET_DX((int16_t)AX < 0 ? 0xffff : 0);
+        SET_BX(7);
+        div16(BX);
+        RW(0xe0) = AX;
+        SET_AX(BX);
+    }
+    SET_SI(AX);
+    ebp -= edi;
+    if ((int32_t)ebp < -12) {
+        SET_AX(RW(0xbc) >> 2);
+        if ((int16_t)AX > 5) {
+            SET_AX(AX - 1);
+            if ((int16_t)AX < 0x18) {
+                uint16_t d = AX;
+                uint32_t p;
+
+                SET_AX(AX >> 1);
+                RW(0xc4) = AX;
+                SET_AX(AX - 2);
+                RW(0xc6) = AX;
+                SET_DX(d);
+                SET_AX(0);
+                SET_CX(0x18);
+                div16(CX);
+                SET_CX(0x2d);
+                p = (uint32_t)AX * CX;
+                SET_AX(p);
+                SET_DX(p >> 16);
+                if ((int16_t)DX <= 0xa)
+                    goto back;
+                RW(0xc8) = DX;
+                SET_DX(DX - 5);
+                RW(0xca) = DX;
+            } else {
+                RW(0xc4) = 0xc;
+                RW(0xc6) = 0xa;
+                RW(0xc8) = 0x2d;
+                RW(0xca) = 0x28;
+            }
+            SET_BX(-(RW(0xcc) - RW(0xe4)) - 0xf);
+            SET_AX(RW(0xce));
+            SET_CX(AX >> 2);
+            SET_AX(-AX + CX);
+            runway_arrow();
+            SET_CX(CX + CX);
+            SET_AX(AX + CX);
+            runway_arrow();
+            SET_AX(-AX);
+            runway_arrow();
+            SET_AX(AX + CX);
+            runway_arrow();
+        }
+    }
+back:
+    if (SI != 0) {
+        RW(0xc4) = 0xc;
+        RW(0xc6) = 0xa;
+        RW(0xc8) = 0x2d;
+        RW(0xca) = 0x28;
+        SET_AX(-(RW(0xcc) - RW(0xe4)) - 0x64);
+        do {
+            uint16_t z = AX;
+
+            SET_AX(AX - 0x28);
+            SET_BX(0xffb0);
+            SET_CX(AX + BX + RW(0xcc));
+            if (CX & 0x8000)
+                SET_BX(BX - CX);
+            SET_CX(0xffff);
+            SET_DX(2);
+            keep_edi = edi;
+            runway_bar();
+            ebp = keep_edi;
+            SET_BX(z);
+            ebp -= edi;
+            if (ebp != 0) {
+                SET_AX(0);
+                runway_arrow();
+            }
+            SET_AX(BX - RW(0xe0));
+            SET_SI(SI - 1);
+        } while (SI != 0);
+    }
+    runway_end(0x4e);
+}
+
+/* 0x206f24f9 / 0x206f2505 -- the near and far thresholds. */
+static void runway_threshold_near(void)
+{
+    SET_AX(RW(0xd6));
+    runway_threshold();
+}
+
+static void runway_threshold_far(void)
+{
+    SET_AX(RW(0xda));
+    RW(0xe8) = -RW(0xe8);
+    runway_threshold();
+    RW(0xe8) = -RW(0xe8);
+    runway_points_turned();
+}
+
+/* 0x206f2a11 -- a point at (bx, ax) and its mirror (-bx, ax) 0x18 bytes
+ * on. */
+static void runway_point_mirrored(void)
+{
+    uint16_t b = BX;
+
+    M16(edi) = BX;
+    M16(edi + 4) = AX;
+    SET_BX(-BX);
+    M16(edi + 0x18) = BX;
+    M16(edi + 0x1c) = AX;
+    SET_BX(0);
+    M16(edi + 2) = 0;
+    M16(edi + 0x1a) = 0;
+    SET_BX(b);
+    edi += 6;
+}
+
+/* 0x206f29c2 -- the threshold's stripes either side of a bar drawn near:
+ * two quads, mirrored (the mirrors 0x18 bytes on, which a 16-bit add steps
+ * over: retail adds to di). */
+static void runway_threshold_stripes(void)
+{
+    uint16_t a = AX;
+
+    SET_AX(AX + BX);
+    SET_BX(sar16(CX, 2));
+    SET_CX(CX + 5);
+    SET_DX(CX - BX);
+    SET_BX(BX - 0xa);
+    runway_point_mirrored();
+    SET_BX(BX + 0xa);
+    runway_point_mirrored();
+    SET_AX(AX + DX);
+    SET_BX(CX);
+    runway_point_mirrored();
+    SET_AX(AX + 0xa);
+    runway_point_mirrored();
+    SET_DI(DI + 0x18);
+    SET_AL(4);
+    runway_mark();
+    runway_mark();
+    SET_AX(a);
+}
+
+/* 0x206f2a36 -- a centreline dash at x ax, z bx, within the detail's
+ * range: near two quads (the arrow-shaped dash), else a triangle; cut at
+ * the far threshold (ebe6). */
+static void runway_dash(void)
+{
+    uint16_t a = AX, b = BX, d = DX;
+
+    SET_DX(sar16(AX, 1) + BX - RW(0xe8));
+    if ((int16_t)DX > (int16_t)RW(0xea) || (int16_t)DX < (int16_t)RW(0xf0))
+        goto out;
+    SET_DX(DX << 1);
+    SET_BX(BX + AX);
+    SET_CX(BX - RW(0xe6));
+    if (CX & 0x8000) {
+        SET_AX(AX - CX);
+        SET_BX(BX - CX);
+    }
+    M16(V(0x2070ec02)) = AX;
+    M16(V(0x2070ec04)) = BX;
+    {
+        uint16_t t = AX;
+
+        SET_BX(BX - AX);
+        SET_AX(0);
+        M16(V(0x2070ec06)) = AX;
+        M16(V(0x2070ec08)) = BX;
+        SET_AX(t);
+    }
+    SET_AX(-AX);
+    SET_BX(BX - AX);
+    M16(V(0x2070ec0a)) = AX;
+    M16(V(0x2070ec0c)) = BX;
+    if ((int16_t)DX > (int16_t)RW(0xec) || (int16_t)DX < (int16_t)RW(0xee)) {
+        PT(0x2070ec02);
+        PT(0x2070ec06);
+        PT(0x2070ec0a);
+        SET_AL(0x83);
+        SET_CL(AL);
+        runway_mark();
+        goto out;
+    }
+    SET_BX(BX - 0xa);
+    if (CX & 0x8000) {
+        SET_BX(BX + 0xa);
+        SET_AX(AX - 0xa);
+    }
+    M16(V(0x2070ec0e)) = AX;
+    M16(V(0x2070ec10)) = BX;
+    {
+        uint16_t t = AX;
+
+        SET_BX(BX + AX);
+        SET_AX(0);
+        M16(V(0x2070ec12)) = AX;
+        M16(V(0x2070ec14)) = BX;
+        SET_AX(t);
+    }
+    SET_AX(-AX);
+    SET_BX(BX + AX);
+    M16(V(0x2070ec16)) = AX;
+    M16(V(0x2070ec18)) = BX;
+    PT(0x2070ec06);
+    PT(0x2070ec12);
+    PT(0x2070ec16);
+    PT(0x2070ec02);
+    SET_AL(4);
+    runway_mark();
+    PT(0x2070ec06);
+    PT(0x2070ec12);
+    PT(0x2070ec0e);
+    PT(0x2070ec0a);
+    SET_AL(4);
+    runway_mark();
+    SET_CL(6);
+out:
+    SET_DX(d);
+    SET_BX(b);
+    SET_AX(a);
+}
+#undef PT
+
+/* 0x206f28fa -- an end's threshold bar and stripes, and the centreline
+ * back from it (bx its overrun, ebe4): dashes 0xc8 apart (0x64 near the
+ * eye), at most ten. */
+static void runway_centreline(void)
+{
+    uint32_t keep_esi;
+
+    RW(0xe4) = BX;
+    SET_AX(-RW(0xcc));
+    RW(0xe2) = AX;
+    SET_AX(AX - BX);
+    RW(0xe6) = AX;
+    runway_points();
+    SET_CX(0xc8);
+    SET_AX(AX - RW(0xe8));
+    if ((int16_t)AX <= 0x578 && (int16_t)AX >= (int16_t)0xf830)
+        SET_CX(sar16(CX, 1));
+    SET_AX(BX + 0xa);
+    SET_DX((int16_t)AX < 0 ? 0xffff : 0);
+    div16(CX);
+    if (AX > 0xa)
+        SET_AX(0xa);
+    RW(0xe0) = CX;
+    SET_BP(AX);
+    SET_DX(RW(0xbc));
+    SET_CX(-(DX >> 1));
+    SET_AX(RW(0xe2));
+    SET_BX(0xfff6);
+    keep_esi = edi;
+    runway_bar();
+    esi = keep_esi - edi;
+    if (esi != 0)
+        runway_threshold_stripes();
+    if (BP != 0) {
+        SET_BX(AX);
+        SET_AX(-(RW(0xce) - 5));
+        SET_BX(BX - 0x50);
+        do {
+            runway_dash();
+            SET_BX(BX - RW(0xe0));
+            SET_BP(BP - 1);
+        } while (BP != 0);
+    }
+    runway_end(0x50);
+}
+
+/* 0x206f28b7 / 0x206f28c4 -- the near and far centrelines. */
+static void runway_centreline_near(void)
+{
+    SET_BX(RW(0xd8));
+    runway_centreline();
+}
+
+static void runway_centreline_far(void)
+{
+    SET_BX(RW(0xdc));
+    RW(0xe8) = -RW(0xe8);
+    runway_centreline();
+    RW(0xe8) = -RW(0xe8);
+    runway_points_turned();
+}
+
+/* 0x206f2c8e -- ax times bx, times eight but for the last carry: dx. */
+static void runway_scaled(void)
+{
+    uint32_t p = (uint32_t)AX * BX;
+    uint32_t c;
+
+    SET_AX(p);
+    SET_DX(p >> 16);
+    c = AX >> 15;
+    SET_AX(AX + AX);
+    SET_DX(DX + DX + c);
+    c = AX >> 15;
+    SET_AX(AX + AX);
+    SET_DX(DX + DX + c);
+    c = AX >> 15;
+    SET_AX(AX + AX);
+    SET_DX(DX + c);
+}
+
+/* 0x206f2bfc -- the touchdown markings at both ends: four pairs of bars
+ * 0x82 long, 0x19 in from each threshold, sized by the width over 600 (a
+ * divide the host repairs at 600 itself). */
+static void runway_touchdown(void)
+{
+    runway_points();
+    SET_DX(RW(0xbc));
+    SET_AX(0);
+    SET_BX(0x258);
+    div16(BX);
+    SET_BX(AX);
+    SET_AX(7);
+    runway_scaled();
+    SET_CX(-(RW(0xce) - DX));
+    SET_AX(5);
+    runway_scaled();
+    SET_SI(DX);
+    SET_AX(0xa);
+    runway_scaled();
+    SET_AX(-(RW(0xcc) - RW(0xd6)) + 0x19);
+    SET_BX(0x82);
+    {
+        uint16_t c = CX;
+
+        runway_bar_pairs(4);
+        SET_CX(c);
+    }
+    SET_AX(-(AX - RW(0xd6)) - RW(0xda));
+    SET_BX(-BX);
+    runway_bar_pairs(4);
+    runway_end(0x48);
+}
+
+/* 0x206f2ca5 -- the aiming point at both ends, 500 in: three pairs of
+ * bars 0x4b long (narrower below 90 wide). */
+static void runway_aiming(void)
+{
+    runway_points();
+    SET_AX(-(RW(0xcc) - RW(0xd6)) + 0x1f4);
+    SET_BX(0x4b);
+    SET_CX(-(RW(0xce) - 9));
+    SET_DX(6);
+    SET_SI(5);
+    if (RW(0xbc) < 0x5a) {
+        SET_CX(CX - 3);
+        SET_DX(DX - 1);
+    }
+    {
+        uint16_t c = CX;
+
+        runway_bar_pairs(3);
+        SET_CX(c);
+    }
+    SET_AX(-(AX - RW(0xd6)) - RW(0xda));
+    SET_BX(-BX);
+    runway_bar_pairs(3);
+    runway_end(0x4a);
+}
+
+/* 0x206f2e1c -- two pairs while the count (ebde) is above 2, else one. */
+static void runway_zone_pairs(void)
+{
+    uint16_t c = CX;
+
+    runway_bar_pairs(M16(V(0x2070ebde)) > 2 ? 2 : 1);
+    SET_CX(c);
+}
+
+/* 0x206f2d1e -- the fixed-distance marks (ebbe bit 3: a pair 1000 in,
+ * narrower below 95 wide) and the touchdown zone (bit 6: from 1500 in,
+ * every 500 while 450 are left, at most four, the first two with two
+ * pairs each). */
+static void runway_zone(void)
+{
+    runway_points();
+    if (M8(V(0x2070ebbe)) & 8) {
+        SET_AX(-(RW(0xcc) - RW(0xd6)) + 0x3e8);
+        SET_BX(0x96);
+        SET_CX(-(RW(0xce) - 9));
+        SET_DX(0x1e);
+        if (RW(0xbc) < 0x5f)
+            SET_DX(0x14);
+        runway_bar_pair();
+        SET_AX(-(AX - RW(0xd6)) - RW(0xda));
+        SET_BX(-BX);
+        runway_bar_pair();
+    }
+    SET_BP(0x40);
+    if (M8(V(0x2070ebbe)) & 0x40) {
+        SET_AX(RW(0xcc) - 0x5dc);
+        SET_BP(AX);
+        SET_AX(AX - RW(0xd6));
+        SET_BP(BP - RW(0xda));
+        SET_AX(-AX);
+        SET_BX(0x4b);
+        SET_CX((RW(0xbc) >> 3) - RW(0xce));
+        SET_DX(6);
+        SET_SI(5);
+        M16(V(0x2070ebde)) = 4;
+        do {
+            uint16_t t;
+
+            runway_zone_pairs();
+            t = BP, SET_BP(AX), SET_AX(t);
+            SET_BX(-BX);
+            runway_zone_pairs();
+            SET_BX(-BX);
+            t = BP, SET_BP(AX), SET_AX(t);
+            SET_AX(AX + 0x1f4);
+            SET_BP(BP - 0x1f4);
+            if ((int16_t)(uint16_t)(BP - AX) < 0x1c2)
+                break;
+            M16(V(0x2070ebde)) -= 1;
+        } while (M16(V(0x2070ebde)) != 0);
+    }
+    runway_end(0x4c);
+}
+
+/* 0x206f2e37 -- the side stripes' count (ebd0: the length less both
+ * displacements and 660 over 200) and step (ebd2), from 370 in (ebd4);
+ * divides the host repairs. */
+static void runway_stripes_setup(void)
+{
+    uint16_t a;
+
+    SET_AX(RW(0xba) - RW(0xd6) - RW(0xda));
+    SET_DX((int16_t)AX < 0 ? 0xffff : 0);
+    SET_AX(AX - 0x294);
+    a = AX;
+    SET_BX(0xc8);
+    div16(BX);
+    RW(0xd0) = AX;
+    SET_BX(AX);
+    SET_AX(a);
+    SET_DX((int16_t)AX < 0 ? 0xffff : 0);
+    div16(BX);
+    RW(0xd2) = AX;
+    SET_AX(-(RW(0xcc) - RW(0xd6) - 0x172));
+    RW(0xd4) = AX;
+}
+
+/* 0x206f2ea1 -- the side stripes, 0x78 long and 4 wide down the middle,
+ * on from where the last frame left them (ebd4, ebd0) while the list has
+ * room for 0x50 points. */
+static void runway_stripes(void)
+{
+    runway_points();
+    SET_AX(RW(0xd4));
+    SET_BX(0x78);
+    SET_CX(0xfffe);
+    SET_DX(4);
+    if (RW(0xd0) != 0) {
+        do {
+            runway_bar();
+            SET_AX(AX + RW(0xd2));
+            RW(0xd0) -= 1;
+            if (RW(0xd0) == 0)
+                break;
+        } while (M16(V(0x2070f25a)) < 0x50);
+    }
+    RW(0xd4) = AX;
+    runway_end(0x44);
+}
+
+/* 0x206f31d7 -- glyph esi at x bx, z bp: its count of triangles (its
+ * first byte), each three points of signed bytes. */
+static void runway_glyph(void)
+{
+    uint32_t i;
+
+    ecx = M8(esi);
+    esi += 2;
+    do {
+        for (i = 0; i < 3; i++) {
+            SET_AX((uint16_t)(int16_t)(int8_t)M8(esi) + BX);
+            SET_DX(AX);
+            SET_AX((uint16_t)(int16_t)(int8_t)M8(esi + 1) + BP);
+            M16(edi) = DX;
+            M16(edi + 2) = 0;
+            M16(edi + 4) = AX;
+            esi += 2;
+            edi += 6;
+        }
+        SET_AX(3);
+        runway_mark();
+    } while (--ecx != 0);
+}
+
+/* 0x206f31ba -- glyph al (from 0x2070ec2a) centred. */
+static void runway_glyph_centred(void)
+{
+    SET_AX((int16_t)(int8_t)AL);
+    esi = AX;
+    esi = M32(V(0x2070ec2a) + esi * 4);
+    SET_AL(M8(esi + 1) >> 1);
+    SET_AX(-AX);
+    SET_BX(AX);
+    runway_glyph();
+}
+
+/* 0x206f30ad -- the number al with designator ah (1 L, 2 R, 3 C) at the
+ * end bp in (further in without ebbe bit 1, and with a designator), in
+ * the detail's range: two digits side by side (11 wider) or one (a lone
+ * 1 is glyph 0xd), the designator a row before (or after, beyond the
+ * runway's middle, L and R swapped); narrow runways (60 and less) have
+ * their glyphs halved across. */
+static void runway_number(void)
+{
+    SET_BP(-BP + 0x104);
+    if (!(M8(V(0x2070ebbe)) & 2)) {
+        SET_BP(BP - 0xf0);
+        if (AH != 0)
+            SET_BP(BP + 0x50);
+    }
+    SET_BX(BP - RW(0xe8));
+    if ((int16_t)BX > (int16_t)RW(0xec) || (int16_t)BX < (int16_t)RW(0xee))
+        return;
+    {
+        uint16_t number = AX;
+
+        SET_AH(0xff);
+        do {
+            SET_AH(AH + 1);
+            SET_AL(AL - 0xa);
+        } while (!(AL & 0x80));
+        SET_AL(AL + 0xa);
+        if (AH != 0) {
+            uint16_t digits = AX, cxw;
+            uint32_t units;
+
+            ebx = AL;
+            ebx = M32(V(0x2070ec2a) + ebx * 4);
+            units = ebx;
+            SET_CH(M8(ebx + 1));
+            ebx = AH;
+            esi = M32(V(0x2070ec2a) + ebx * 4);
+            SET_CL(M8(esi + 1));
+            SET_CL(CL + CH);
+            SET_CL(CL + 0xf);
+            if (AX == 0x101)
+                SET_CL(CL + 0xd);
+            SET_CL(CL >> 1);
+            SET_BL(CL);
+            SET_BX(-BX);
+            SET_CL(CL - CH);
+            cxw = CX;
+            SET_AL(AH);
+            runway_glyph();
+            SET_AX(cxw);
+            SET_AX((int16_t)(int8_t)AL);
+            SET_BX(AX);
+            esi = units;
+            SET_AX(digits);
+            runway_glyph();
+        } else {
+            if (AL == 1)
+                SET_AL(0xd);
+            runway_glyph_centred();
+        }
+        SET_AX(number);
+    }
+    if (AH != 0) {
+        SET_AL(AH + 9);
+        SET_BP(BP - 0x50);
+        if (!(BP & 0x8000)) {
+            SET_BP(BP + 0xa0);
+            if (AL == 0xa)
+                SET_AL(0xb);
+            else if (AL == 0xb)
+                SET_AL(0xa);
+        }
+        runway_glyph_centred();
+    }
+    runway_end(0x46);
+    if (RW(0xbc) <= 0x3c) {
+        ecx = M16(V(0x2070f25a));
+        ebx = V(0x2070f25c);
+        do {
+            M16(ebx) = sar16(M16(ebx), 1);
+            ebx += 6;
+        } while (--ecx != 0);
+    }
+}
+
+/* 0x206f3016 / 0x206f3044 -- the near end's number, and the far end's (the
+ * reciprocal, L and R swapped, turned end for end). */
+static void runway_number_near(void)
+{
+    runway_points();
+    SET_AX(RW(0xcc) - RW(0xd6));
+    SET_BP(AX);
+    SET_AL(M8(V(0x2070ebc1)));
+    SET_BL(AL);
+    SET_AH(0);
+    SET_AX(AX << 2);
+    SET_AL(BL);
+    SET_AL(AL & 0x3f);
+    runway_number();
+}
+
+static void runway_number_far(void)
+{
+    runway_points();
+    SET_AX(RW(0xcc) - RW(0xda));
+    SET_BP(AX);
+    SET_AL(M8(V(0x2070ebc1)));
+    SET_BL(AL);
+    SET_AH(0);
+    SET_AX(AX << 2);
+    if (AH != 0 && AH != 3)
+        SET_AH(AH ^ 3);
+    SET_AL(BL);
+    SET_AL(AL & 0x3f);
+    SET_AL(AL + 0x12);
+    if (AL > 0x24)
+        SET_AL(AL - 0x24);
+    RW(0xe8) = -RW(0xe8);
+    runway_number();
+    RW(0xe8) = -RW(0xe8);
+    runway_points_turned();
+}
+
+/* 0x206f333f -- an end's approach lights: the record's twelve bytes at
+ * esi + bx to 0x2070ebf6 after its z (ax, to ebf4), bit 0 of its flags
+ * (no header) cleared with a displaced threshold (cx), through 0x72's
+ * lights with the record at 0x2070ebf0 (its heading the detail's range,
+ * its width the runway's). */
+static void runway_end_lights(void)
+{
+    uint32_t keep_esi = esi;
+
+    esi += ebx;
+    RW(0xf4) = AX;
+    ebx = 0xb;
+    do {
+        SET_AL(M8(ebx + esi));
+        M8(ebx + V(0x2070ebf6)) = AL;
+        SET_BX(BX - 1);
+    } while (!(BX & 0x8000));
+    if (CX != 0) {
+        SET_AL(AL & 0xfe);
+        M8(V(0x2070ebf6)) = AL;
+    }
+    esi = V(0x2070ebee);
+    approach_lights();
+    esi = keep_esi;
+}
+
+/* 0x206f32e7 -- both ends' approach lights (the record's +0x28 and +0x34),
+ * unless the view's block +0x10 is 1, every register kept. */
+static void runway_approach_lights(void)
+{
+    edi = G;
+    ebx = M32(edi + 0x1198);
+    if (M32(ebx + 0x10) == 1)
+        return;
+    {
+        uint32_t a = eax, b = ebx, c = ecx, d = edx, s = esi, i = edi, p = ebp;
+
+        esi = M32(V(0x2070ebb4));
+        if (M8(esi + 0x28) != 0) {
+            SET_AX(-RW(0xcc));
+            ebx = 0x28;
+            SET_CX(RW(0xd6));
+            runway_end_lights();
+        }
+        if (M8(esi + 0x34) != 0) {
+            SET_AX(RW(0xcc));
+            ebx = 0x34;
+            SET_CX(RW(0xda));
+            runway_end_lights();
+        }
+        eax = a, ebx = b, ecx = c, edx = d, esi = s, edi = i, ebp = p;
+    }
+}
+
+/* 0x206f382e -- 0x35, cx lights from (ax, dx) to (bx, dx). */
+static void runway_light_row(void)
+{
+    M16(edi) = 0x35;
+    M16(edi + 2) = AX;
+    M16(edi + 4) = 0;
+    M16(edi + 6) = DX;
+    M16(edi + 8) = BX;
+    M16(edi + 0xa) = 0;
+    M16(edi + 0xc) = DX;
+    M16(edi + 0xe) = CX;
+    edi += 0x10;
+}
+
+/* 0x206f37f5 -- a bar of lights across at z dx, x ax to bx and mirrored, cx
+ * each, in colour si when beyond the eye (ebe8), else bp; none for 0. */
+static void runway_light_bar(void)
+{
+    uint16_t a = AX, b;
+
+    SET_AX(SI);
+    if (!((int16_t)DX > (int16_t)RW(0xe8)))
+        SET_AX(BP);
+    if (AX == 0) {
+        SET_AX(a);
+        return;
+    }
+    runway_colour();
+    SET_AX(a);
+    runway_light_row();
+    b = BX;
+    SET_AX(-AX);
+    SET_BX(-BX);
+    runway_light_row();
+    SET_BX(b);
+    SET_AX(a);
+}
+
+/* 0x206f37bd -- a row along at x dx from z ax to bx, cx lights (a light
+ * for one). */
+static void runway_light_line(void)
+{
+    M16(edi + 2) = DX;
+    M16(edi + 4) = 0;
+    M16(edi + 6) = AX;
+    if (CX == 1) {
+        M16(edi) = 0x37;
+        edi += 8;
+        return;
+    }
+    M16(edi) = 0x35;
+    M16(edi + 8) = DX;
+    M16(edi + 0xa) = 0;
+    M16(edi + 0xc) = BX;
+    M16(edi + 0xe) = CX;
+    edi += 0x10;
+}
+
+/* 0x206f378d -- the edge rows in colour si (none for 0): along the middle
+ * for dx 0, else both edges (the half width + 7). */
+static void runway_light_edges(void)
+{
+    if (SI == 0)
+        return;
+    {
+        uint16_t a = AX;
+
+        SET_AX(SI);
+        runway_colour();
+        SET_AX(a);
+    }
+    if (DX != 0) {
+        SET_DX(RW(0xce) + 7);
+        runway_light_line();
+        SET_DX(-DX);
+    }
+    runway_light_line();
+}
+
+/* 0x206f3773 / 0x206f3780 -- in the near and far colours (0x2070fe1c,
+ * 0x2070fe1e). */
+static void runway_light_edges_near(void)
+{
+    SET_SI(M16(V(0x2070fe1c)));
+    runway_light_edges();
+}
+
+static void runway_light_edges_far(void)
+{
+    SET_SI(M16(V(0x2070fe1e)));
+    runway_light_edges();
+}
+
+/* 0x206f371a -- a row of lights from z ax to bx at about si apart: the
+ * colours (cx, dx), the count (cx, at least two), the step (ebe0, dx), the
+ * ends moved in by half the remainder plus a step; bp the eye. */
+static void runway_light_spacing(void)
+{
+    uint16_t a, b;
+
+    M16(V(0x2070fe1c)) = CX;
+    M16(V(0x2070fe1e)) = DX;
+    a = AX, b = BX;
+    SET_AX(AX - BX);
+    SET_BX(AX);
+    SET_DX((int16_t)AX < 0 ? 0xffff : 0);
+    div16(SI);
+    if (AX == 0)
+        SET_AX(1);
+    SET_CX(AX + 1);
+    SET_AX(BX);
+    SET_DX((int16_t)AX < 0 ? 0xffff : 0);
+    div16(CX);
+    SET_BP(sar16(DX, 1) + AX);
+    RW(0xe0) = AX;
+    SET_DX(AX);
+    SET_BX(b);
+    SET_AX(a);
+    SET_AX(AX - BP);
+    SET_BX(BX + BP);
+    SET_CX(CX - 1);
+    SET_BP(RW(0xe8));
+}
+
+/* 0x206f36d0 -- the row split at the eye (bp): all far, all near, or the
+ * steps either side in their colours. */
+static void runway_light_split(void)
+{
+    if (!((int16_t)AX > (int16_t)BP)) {
+        runway_light_edges_far();
+        return;
+    }
+    if (!((int16_t)BX < (int16_t)BP)) {
+        runway_light_edges_near();
+        return;
+    }
+    {
+        uint16_t b = BX, c = CX;
+
+        SET_SI(RW(0xe0));
+        do {
+            SET_CX(CX - 1);
+            SET_BX(BX + SI);
+        } while ((int16_t)BX < (int16_t)BP);
+        runway_light_edges_near();
+        SET_SI(c - CX);
+        SET_CX(SI);
+        SET_AX(BX - RW(0xe0));
+        SET_BX(b);
+        runway_light_edges_far();
+    }
+}
+
+/* 0x206f36c1 */
+static void runway_light_run(void)
+{
+    SET_SI(0xb4);
+    runway_light_spacing();
+    runway_light_split();
+}
+
+/* 0x206f3370 -- the runway's lights (GLOBAL +0x1172 bits 1-2), a program
+ * at 0x2070f262: the approach end's centreline (ebc3 bits 2-3) and edges
+ * (bits 0-1, their colour from 0x2070fe12), touchdown-zone lights split
+ * at the eye, the thresholds' and overruns' bars. */
+static void runway_lights(void)
+{
+    edi = G;
+    {
+        int on = (M16(edi + 0x1172) & 6) != 0;
+
+        edi = V(0x2070f262);
+        if (!on)
+            goto end;
+    }
+    M16(V(0x2070fe20)) = 0;
+    if (M8(V(0x2070ebc3)) & 0xc) {
+        SET_AX(RW(0xcc) - 0x19);
+        SET_BX(-AX);
+        SET_CX(0xf014);
+        SET_DX(0xf015);
+        M16(V(0x2070fe1a)) = CX;
+        SET_SI(0x32);
+        runway_light_spacing();
+        SET_BP(0xf015);
+        M16(V(0x2070fe1c)) = BP;
+        M16(V(0x2070fe1a)) = BP;
+        SET_BP(AX - 0x76c);
+        SET_DX(0);
+        runway_light_split();
+    }
+    if (!(M8(V(0x2070ebc3)) & 3))
+        goto end;
+    ebx = M8(V(0x2070ebc3));
+    SET_BX(BX & 3);
+    ebx -= 1;
+    ebx += ebx;
+    SET_DX(M16(V(0x2070fe12) + ebx));
+    M16(V(0x2070fe18)) = DX;
+    SET_AX(RW(0xcc));
+    SET_BX(-AX);
+    SET_AX(AX - RW(0xda));
+    SET_BX(BX + RW(0xd6));
+    SET_CX(0xf014);
+    M16(V(0x2070fe1a)) = CX;
+    SET_SI(0xb4);
+    runway_light_spacing();
+    if (M8(V(0x2070ebbe)) & 0x40) {
+        if ((int16_t)AX > (int16_t)BP) {
+            if (!((int16_t)BX < (int16_t)BP))
+                goto edges;
+            SET_DX(AX + RW(0xda) - 0x76c);
+            if (!((int16_t)DX < (int16_t)BP))
+                SET_BP(DX);
+            M16(V(0x2070fe1e)) = 0;
+            runway_light_split();
+            SET_BP(RW(0xe8));
+        }
+        SET_DX(BX - RW(0xd6) + 0x76c);
+        if (!((int16_t)DX > (int16_t)BP))
+            SET_BP(DX);
+        SET_SI(M16(V(0x2070fe18)));
+        M16(V(0x2070fe1c)) = SI;
+        M16(V(0x2070fe1e)) = 0xf014;
+        runway_light_split();
+    } else {
+        SET_BP(M16(V(0x2070fe18)));
+        M16(V(0x2070fe1c)) = BP;
+        M16(V(0x2070fe1a)) = BP;
+edges:
+        SET_BP(AX - 0x76c);
+        runway_light_split();
+    }
+    if (RW(0xda) != 0) {
+        int beyond;
+
+        SET_DX(RW(0xcc) - RW(0xda));
+        SET_AX(RW(0xce) + 7);
+        SET_BX(AX + 0x1e);
+        SET_CX(4);
+        SET_SI(0);
+        SET_BP(0xf010);
+        runway_light_bar();
+        SET_AX(AX - 0xa);
+        SET_BX(BX - 0xa);
+        SET_DX(DX + RW(0xda));
+        SET_SI(0xf00f);
+        SET_BP(SI);
+        runway_light_bar();
+        SET_BX(DX);
+        SET_AX(BX);
+        SET_BX(BX - RW(0xda));
+        SET_CX(M16(V(0x2070fe1a)));
+        SET_DX(0xf00f);
+        beyond = (int16_t)BX < (int16_t)RW(0xe8);
+        SET_SI(0xb4);
+        runway_light_spacing();
+        if (!beyond) {
+            SET_BX(BX - DX);
+            SET_CX(CX + 1);
+        }
+        runway_light_split();
+    }
+    if (RW(0xd6) != 0) {
+        int beyond;
+
+        SET_DX(-(RW(0xcc) - RW(0xd6)));
+        SET_AX(RW(0xce) + 7);
+        SET_BX(AX + 0x1e);
+        SET_CX(4);
+        SET_SI(0xf010);
+        SET_BP(0);
+        runway_light_bar();
+        SET_AX(AX - 0xa);
+        SET_BX(BX - 0xa);
+        SET_DX(DX - RW(0xd6));
+        SET_SI(0xf00f);
+        SET_BP(SI);
+        runway_light_bar();
+        SET_BX(DX);
+        SET_AX(BX);
+        SET_AX(AX + RW(0xd6));
+        SET_CX(0xf00f);
+        SET_DX(M16(V(0x2070fe1a)));
+        beyond = (int16_t)AX > (int16_t)RW(0xe8);
+        SET_SI(0xb4);
+        runway_light_spacing();
+        if (!beyond) {
+            SET_AX(AX + DX);
+            SET_CX(CX + 1);
+        }
+        runway_light_split();
+    }
+    if (RW(0xdc) != 0) {
+        SET_DX(RW(0xcc) + RW(0xdc));
+        SET_AX(RW(0xce) - 3);
+        SET_BX(AX + 0x1e);
+        SET_CX(4);
+        SET_SI(0xf00f);
+        SET_BP(SI);
+        runway_light_bar();
+        SET_AX(DX);
+        SET_BX(AX);
+        SET_BX(BX - RW(0xdc));
+        SET_CX(0xf00f);
+        SET_DX(SI);
+        runway_light_run();
+    }
+    if (RW(0xd8) != 0) {
+        SET_DX(-(RW(0xcc) + RW(0xd8)));
+        SET_AX(RW(0xce) - 3);
+        SET_BX(AX + 0x1e);
+        SET_CX(4);
+        SET_SI(0xf00f);
+        SET_BP(SI);
+        runway_light_bar();
+        SET_BX(DX);
+        SET_AX(BX);
+        SET_AX(AX + RW(0xd8));
+        SET_CX(0xf00f);
+        SET_DX(CX);
+        runway_light_run();
+    }
+end:
+    M16(edi) = 0x22;
+}
+
+/* 0x206f237d -- the detail's distances: 25000 times the view's scale
+ * (GLOBAL +0x2b0) at most 40, times the window's +0x84, at most 0x7fff
+ * (ebea), an eighth of it (ebec), and both negated (ebf0, ebee). */
+static void runway_detail(void)
+{
+    uint32_t p;
+
+    edi = G;
+    p = 0x61a8u * M16(edi + 0x2b0);
+    SET_AX(p);
+    SET_DX(p >> 16);
+    if (DX > 0x28)
+        SET_DX(0x28);
+    esi = M32(edi + 0x1194);
+    eax = M32(esi + 0x84);
+    p = (uint32_t)AX * DX;
+    SET_AX(p);
+    SET_DX(p >> 16);
+    if (AX > 0x7fff)
+        SET_AX(0x7fff);
+    RW(0xea) = AX;
+    SET_BX(AX >> 3);
+    RW(0xec) = BX;
+    SET_AX(-AX);
+    SET_BX(-BX);
+    RW(0xee) = BX;
+    RW(0xf0) = AX;
+}
+
+/* 0x206f23d9 -- the template's surface: its texture name's digit and
+ * colours by the surface (at most 3; 0xf033 with approach lights and
+ * GLOBAL +0x1172 bit 0 clear), its outline's corners, and the
+ * surface's word (by the unclamped surface, so past the four words at
+ * 0x2070ec1a into the glyph pointers: retail's), width and length. */
+static void runway_template(void)
+{
+    SET_BL(M8(V(0x2070ebc2)));
+    if (BL > 3)
+        SET_BL(3);
+    SET_AL(0x30 + BL);
+    M8(V(0x2070f0e1)) = AL;
+    ebx = BL;
+    ebx += ebx;
+    SET_AX(M16(V(0x2070ec22) + ebx));
+    M16(V(0x2070f0c6)) = AX;
+    M16(V(0x2070f056)) = AX;
+    edi = G;
+    SET_AX(M16(edi + 0x1172));
+    if (!(AX & 1) && (M8(V(0x2070ebc3)) & 3)) {
+        SET_AX(0xf033);
+        M16(V(0x2070f056)) = AX;
+    }
+    SET_AX(RW(0xcc));
+    M16(V(0x2070f158)) = AX;
+    M16(V(0x2070f15e)) = AX;
+    SET_AX(AX + RW(0xdc));
+    M16(V(0x2070f09a)) = AX;
+    M16(V(0x2070f0a0)) = AX;
+    SET_AX(sar16(AX, 4));
+    M16(V(0x2070f078)) = AX;
+    SET_AX(-RW(0xcc));
+    M16(V(0x2070f14c)) = AX;
+    M16(V(0x2070f152)) = AX;
+    SET_AX(AX - RW(0xd8));
+    M16(V(0x2070f08e)) = AX;
+    M16(V(0x2070f094)) = AX;
+    SET_AX(sar16(AX, 4));
+    M16(V(0x2070f072)) = AX;
+    SET_AX(RW(0xce));
+    M16(V(0x2070f08a)) = AX;
+    M16(V(0x2070f09c)) = AX;
+    M16(V(0x2070f148)) = AX;
+    M16(V(0x2070f15a)) = AX;
+    SET_AX(-AX);
+    M16(V(0x2070f090)) = AX;
+    M16(V(0x2070f096)) = AX;
+    M16(V(0x2070f14e)) = AX;
+    M16(V(0x2070f154)) = AX;
+    SET_BL(M8(V(0x2070ebc2)));
+    ebx = BL;
+    SET_BX(BX + BX);
+    SET_AX(retail_word(V(0x2070ec1a) + ebx));
+    M16(V(0x2070f0bc)) = AX;
+    M16(V(0x2070f0be)) = RW(0xbc);
+    M16(V(0x2070f0c0)) = RW(0xba);
+}
+
+/* 0x206f224c -- the record into the template and its state (above), the
+ * thresholds' presence bits (ebbf), the record's length (ebb0), markings
+ * the runway is too short or narrow for dropped; the template's heading
+ * jump (0x33 with a heading, else 0x0d) and the template run. */
+static void runway_build(void)
+{
+    uint32_t i;
+
+    for (i = 0; i <= 0x10; i += 2)
+        M16(V(0x2070f02a) + i) = M16(i + esi + 2);
+    SET_AX(M16(esi + 0x16));
+    if (AX > 0x61a8)
+        SET_AX(0x61a8);
+    RW(0xba) = AX;
+    SET_AX(AX >> 1);
+    RW(0xcc) = AX;
+    SET_AX(M16(esi + 0x14));
+    RW(0xb8) = AX;
+    SET_AX(M16(esi + 0x18));
+    if (AX > 0x258)
+        SET_AX(0x258);
+    RW(0xbc) = AX;
+    RW(0xf2) = AX;
+    SET_AX(AX >> 1);
+    RW(0xce) = AX;
+    M8(V(0x2070ebbe)) = M8(esi + 0x1a);
+    M8(V(0x2070ebc0)) = M8(esi + 0x1d);
+    M8(V(0x2070ebc1)) = M8(esi + 0x1b);
+    M8(V(0x2070ebc2)) = M8(esi + 0x1e);
+    M8(V(0x2070ebc3)) = M8(esi + 0x1c);
+    SET_DL(0);
+    for (ebx = 6; (int32_t)ebx >= 0; ebx -= 2) {
+        SET_AX(M16(ebx + esi + 0x20));
+        M16(ebx + V(0x2070ebd6)) = AX;
+        SET_DL(DL << 1 | (AX != 0));
+        SET_AX(-AX);
+    }
+    M8(V(0x2070ebbf)) = DL;
+    eax = M8(V(0x2070ebc0)) & 1 ? 0x52 : 0x40;
+    M32(V(0x2070ebb0)) = eax;
+    SET_AL(M8(V(0x2070ebbe)));
+    if (RW(0xba) < 0xbb8)
+        SET_AL(AL & 0xf7);
+    if (RW(0xbc) < 0x1c)
+        SET_AL(AL & 0xdf);
+    M8(V(0x2070ebbe)) = AL;
+    runway_template();
+    runway_stripes_setup();
+    runway_detail();
+    SET_AX(0xd);
+    SET_BX(RW(0xb8));
+    if (BX != 0)
+        SET_AX(0x33);
+    M16(V(0x2070f03c)) = AX;
+    M16(V(0x2070f044)) = BX;
+    M16(V(0x2070f064)) = BX;
+    M32(V(0x206f9126)) = V(0x2070f01c);
+    run_program(M32(V(0x206f9126)));
+}
+
+/* 0x206e434b / 0x206e4351 -- 0x42, 0x44, a runway (0x206f2220): the record
+ * at the instruction (0x2070ebb4), the context kept; on past it. */
+static void op_runway(void)
+{
+    uint32_t keep_ebx = ebx, keep_esi = esi, keep_edi = edi;
+    uint32_t keep_context = M32(V(0x206f91b7));
+
+    M32(V(0x2070ebb4)) = esi;
+    runway_build();
+    esi = keep_esi;
+    M32(V(0x206f91b7)) = keep_context;
+    esi += M32(V(0x2070ebb0));
+    M32(V(0x206f9126)) = esi;
+    edi = keep_edi, esi = keep_esi, ebx = keep_ebx;
+}
+
+/* +0x50: 0x206f2220 itself, the record at esi. */
+SERVICE_RAW(runway_svc, 0);
+static void runway_svc_body(const uint32_t *arg)
+{
+    (void)arg;
+    op_runway();
+}
+
+/* 0x206f2140 -- +0x2c, the earth (the built-in model at 0x20708840): its
+ * latitude band (the eye's latitude less 10,000,000 in the 48-bit units,
+ * inverted, halved, its middle 32 bits over 0x9897 -- a divide the host
+ * repairs -- halved), its longitude (the eye's high word plus 0x5500), the
+ * eye's position; drawn as +0x28 draws, the surfaces off. */
+SERVICE(frame_earth, 0);
+static void frame_earth_body(const uint32_t *arg)
+{
+    uint32_t r, borrow;
+    uint64_t v;
+
+    (void)arg;
+    edi = G;
+    SET_DX(M16(edi + 0x5b6));
+    SET_AX(M16(edi + 0x5b4));
+    SET_CX(M16(edi + 0x5b2));
+    r = (uint32_t)AX - 0x9680;
+    SET_AX(r);
+    borrow = (r >> 16) & 1;
+    SET_DX(DX - 0x98 - borrow);
+    SET_DX(~DX);
+    SET_CX(~CX);
+    SET_AX(~AX);
+    v = ((uint64_t)DX << 32 | (uint64_t)AX << 16 | CX) >> 1;
+    SET_DX(v >> 32);
+    SET_AX(v >> 16);
+    SET_CX(v);
+    SET_DH(DL);
+    SET_DL(AH);
+    SET_AH(AL);
+    SET_AL(CH);
+    SET_BX(0x9897);
+    div16(BX);
+    SET_AX(AX >> 1);
+    M16(V(0x2070882a)) = AX;
+    SET_AX(M16(edi + 0x5be) + 0x5500);
+    M16(V(0x2070883e)) = AX;
+    SET_AX(M16(edi + 0x5b2));
+    SET_CX(M16(edi + 0x5b4));
+    SET_DX(M16(edi + 0x5b6));
+    M16(V(0x20708812)) = AX;
+    M16(V(0x20708814)) = CX;
+    M16(V(0x20708816)) = DX;
+    SET_AX(M16(edi + 0x5ba));
+    SET_CX(M16(edi + 0x5bc));
+    SET_DX(M16(edi + 0x5be));
+    M16(V(0x2070881a)) = AX;
+    M16(V(0x2070881c)) = CX;
+    M16(V(0x2070881e)) = DX;
+    SET_AX(0);
+    M16(edi + 0xc90) = AX;
+    M16(edi + 0xcb6) = AX;
+    M32(V(0x206f9126)) = V(0x20708840);
+    draw_model(M32(V(0x206f9126)));
+}
+
+/* ---- ground tiles: 0x3d, 0x7f, .text+0x88e7..+0x897a and +0x89e2..+0xa680 ------- */
+
+/* 0x3d lays a tile of ground: a kind (0x206fdc1c, its edge flags at
+ * 0x206fdc1d), a mode (0x206fdc1e), its size (0x206fdc1f, 0x206fdc23,
+ * each with a high word after), a 32-bit height (0x206fdc39), two
+ * texture origins (0x206f91e1, 0x206f91e9) and a seed (0x206fdc27).  Mode
+ * 0x22 builds a textured grid with heights from a table; 0x11/0x55, 0x33
+ * and 0x44 run one of the built-in programs over the tile's four corners;
+ * kinds 0x88 and 0x89 are a small lit grid; kinds 0x81, 0x82 and 0x8e
+ * scatter buildings over it after (as 0x7f does), each at a cell picked
+ * by a random generator seeded by the cell. */
+
+/* 0x206e8af7 -- the surface colour ax (GLOBAL +0x3c0), and the line
+ * colour (+0x2ec) the same, or 0x6900 in the map. */
+static void surface_colour(void)
+{
+    edi = G;
+    eax = AX;
+    M32(edi + 0x3c0) = eax;
+    if (M16(edi + 0xdca) != 0)
+        eax = 0x6900;
+    M32(edi + 0x2ec) = eax;
+}
+
+/* 0x206e1a02 -- a polygon started without counting it. */
+static void polygon_restart(void)
+{
+    edi = G;
+    eax = M32(edi + 0xc10);
+    M32(edi + 0xc14) = eax;
+    M32(edi + 0x2f0) = 0xffffffffu;
+}
+
+/* 0x206e98e7 -- the generator (0x206fdc06, a dword) seeded with ax. */
+static void tile_seed(void)
+{
+    M16(V(0x206fdc06)) = AX;
+    M16(V(0x206fdc08)) = 0;
+}
+
+/* 0x206e98f7 -- the generator's next: times 0x343fd plus 0x269ec3 (the
+ * product's low dword by 0x206e993b's three 16-bit multiplies), ax its
+ * high word; bx, cx and dx kept. */
+static void tile_random(void)
+{
+    uint16_t b = BX, c = CX, d = DX;
+    uint32_t r = ((uint32_t)M16(V(0x206fdc08)) << 16 | M16(V(0x206fdc06))) * 0x343fdu + 0x269ec3u;
+
+    M16(V(0x206fdc06)) = (uint16_t)r;
+    M16(V(0x206fdc08)) = (uint16_t)(r >> 16);
+    SET_AX(r >> 16);
+    SET_BX(b);
+    SET_CX(c);
+    SET_DX(d);
+}
+
+/* 0x206ea4fd -- the height at corner (ax column, dx row): 0 on an edge
+ * whose flag (0x206fdc1d: bits 0..3 the left, right, near and far edges,
+ * 4..7 the corners) is clear, else the word of the table at 0x206fdcf1 at
+ * a byte from the corner's position at the detail's step (0x206fdc55)
+ * from the texture origins. */
+static void tile_corner_height(void)
+{
+    uint8_t bit;
+    uint32_t p;
+
+    SET_CL(M8(V(0x206fdc1d)));
+    if (AX == 0)
+        bit = DX == 0 ? 0x10 : DX == M16(V(0x206fd924)) ? 0x40 : 0x01;
+    else if (AX == M16(V(0x206fd922)))
+        bit = DX == 0 ? 0x20 : DX == M16(V(0x206fd924)) ? 0x80 : 0x02;
+    else if (DX == 0)
+        bit = 0x04;
+    else if (DX == M16(V(0x206fd924)))
+        bit = 0x08;
+    else
+        bit = 0;
+    if (bit && !(CL & bit)) {
+        SET_AX(0);
+        return;
+    }
+    {
+        uint16_t row = DX;
+
+        p = (uint32_t)AX * M16(V(0x206fdc55));
+        SET_CX(p);
+        p = (uint32_t)row * M16(V(0x206fdc55));
+        SET_DX(p);
+        SET_AX(CX + M16(V(0x206fdc10)));
+        SET_DX(DX + M16(V(0x206fdc0e)));
+        p = (uint32_t)AX * DX;
+        SET_AX(p);
+        SET_DX(p >> 16);
+        SET_AL(AL + AH);
+        ebx = AL;
+        SET_AX(M16(V(0x206fdcf1) + ebx));
+    }
+}
+
+/* 0x206e99e2 -- the tile's grid: with a texture (0x206fdc31) its steps
+ * across (0xff0000 over the columns and rows, divides the host repairs);
+ * the box's eight corners (out of view on one side, nothing), the floor
+ * with the eye inside, the corners' heights (each through the scale
+ * 0x206fdc12 plus 0x206fdc14 as the texture word, and 0x206fdbfa as the
+ * height) and positions into the block at 0x206fdc16, then the cells. */
+static void tile_grid(void)
+{
+    uint32_t i, keep, p;
+
+    if (M16(V(0x206fdc31)) != 0) {
+        eax = 0xff0000;
+        edx = 0;
+        ecx = M16(V(0x206fd922));
+        div32(ecx);
+        M32(V(0x206fd940)) = eax;
+        eax = 0xff0000;
+        edx = 0;
+        ecx = M16(V(0x206fd924));
+        div32(ecx);
+        M32(V(0x206fd944)) = eax;
+    }
+    M16(V(0x206fd92a)) = 0x1388;
+    M16(V(0x206fd92c)) = 0x1388;
+    SET_AX(M16(V(0x206fd922)) + 1);
+    M16(V(0x206fd92e)) = AX;
+    eax = (uint32_t)(int32_t)(int16_t)AX << 4;
+    M32(V(0x206fd932)) = eax;
+    p = (uint32_t)M16(V(0x206fd926)) * M16(V(0x206fd922));
+    SET_AX(p);
+    M16(V(0x206fd936)) = AX;
+    p = (uint32_t)M16(V(0x206fd928)) * M16(V(0x206fd924));
+    SET_AX(p);
+    SET_DX(p >> 16);
+    M16(V(0x206fd938)) = AX;
+    M8(V(0x206fdc0a)) = 0xff;
+    M8(V(0x206fdc0c)) = 0;
+    M8(V(0x206fdbfc)) = 0x7f;
+    keep = esi;
+    edi = M32(V(0x206f912a));
+    for (i = 0; i < 8; i++) {
+        SET_AX(M16(V(0x206f91ef)) + ((i & 1) ^ ((i >> 1) & 1) ? M16(V(0x206fd936)) : 0));
+        SET_BX(M16(V(i < 4 ? 0x206fdbf8 : 0x206fdbfa)));
+        SET_DX(M16(V(0x206f91f1)) + (i & 2 ? M16(V(0x206fd938)) : 0));
+        point_from_words();
+        table_outcode();
+        M8(V(0x206fdc0a)) &= AL;
+        M8(V(0x206fdc0c)) |= AL;
+        SET_AL(M8(V(0x206f9122)));
+        if ((int8_t)AL < (int8_t)M8(V(0x206fdbfc)))
+            M8(V(0x206fdbfc)) = AL;
+        edi += 0x10;
+    }
+    esi = keep;
+    if (M8(V(0x206fdc0a)) != 0)
+        return;
+    M8(V(0x206f9122)) = M8(V(0x206fdbfc));
+    edi = G;
+    SET_AX(M16(V(0x206f91ef)));
+    if ((int16_t)M16(edi + 0xcde) >= (int16_t)AX &&
+        (int16_t)M16(edi + 0xcde) <= (int16_t)(uint16_t)(AX + M16(V(0x206fd936)))) {
+        SET_AX(M16(V(0x206f91f1)));
+        if ((int16_t)M16(edi + 0xce6) >= (int16_t)AX &&
+            (int16_t)M16(edi + 0xce6) <= (int16_t)(uint16_t)(AX + M16(V(0x206fd938))) &&
+            (int16_t)M16(edi + 0xce2) <= (int16_t)M16(V(0x206fdbfa))) {
+            M32(edi + 0x3c0) = 0x6900;
+            polygon_count();
+            eax = 0;
+            table_first();
+            eax = 1;
+            table_next();
+            eax = 2;
+            table_next();
+            eax = 3;
+            table_next();
+            polygon_close();
+        }
+    }
+    edi = M32(V(0x206fdc16));
+    {
+        uint16_t col = 0, row = 0;
+
+        for (;;) {
+            SET_AX(col);
+            SET_DX(row);
+            tile_corner_height();
+            SET_BX(AX);
+            p = (uint32_t)M16(V(0x206fdc12)) * BX;
+            SET_AX(p);
+            SET_DX((p >> 16) + M16(V(0x206fdc14)));
+            M16(edi + 0xe) = DX;
+            p = (uint32_t)M16(V(0x206fdbfa)) * BX;
+            SET_AX(p);
+            SET_DX(p >> 16);
+            M16(edi + 0xc) = DX;
+            SET_BX(DX);
+            p = (uint32_t)col * M16(V(0x206fd926));
+            SET_SI(p);
+            p = (uint32_t)row * M16(V(0x206fd928));
+            SET_DX(p);
+            SET_AX(SI + M16(V(0x206f91ef)));
+            SET_DX(DX + M16(V(0x206f91f1)));
+            {
+                uint32_t d = edi;
+
+                edi = M32(V(0x206f912a));
+                point_from_words();
+                esi = edi;
+                edi = d;
+            }
+            for (i = 0; i < 12; i++)
+                M8(edi + i) = M8(esi + i);
+            esi += 12;
+            edi += 12;
+            ecx = 0;
+            edi += 4;
+            col++;
+            if ((int16_t)col <= (int16_t)M16(V(0x206fd922)))
+                continue;
+            col = 0;
+            row++;
+            if ((int16_t)row > (int16_t)M16(V(0x206fd924)))
+                break;
+        }
+    }
+    grid_cells(0x206e9e2f);
+}
+
+/* The facing test of a tile's triangle: the sign of a 64-bit sum of the
+ * products of three height or size differences (a, b, c, each << 16) with
+ * the eye's offsets from the corner (x, y, z << 16 less GLOBAL +0xcdc,
+ * +0xce0, +0xce4); ebp and ecx the sum, as retail leaves it. */
+static int tile_facing(uint16_t a, uint16_t x, uint16_t b, uint16_t y, uint16_t c, uint16_t z)
+{
+    uint64_t sum;
+    uint32_t g = G;
+
+    sum = (uint64_t)((int64_t)(int32_t)((uint32_t)a << 16) *
+                     (int32_t)(((uint32_t)x << 16) - M32(g + 0xcdc)));
+    sum += (uint64_t)((int64_t)(int32_t)((uint32_t)b << 16) *
+                      (int32_t)(((uint32_t)y << 16) - M32(g + 0xce0)));
+    sum += (uint64_t)((int64_t)(int32_t)((uint32_t)c << 16) *
+                      (int32_t)(((uint32_t)z << 16) - M32(g + 0xce4)));
+    ebp = (uint32_t)sum;
+    ecx = (uint32_t)(sum >> 32);
+    return (int32_t)ecx < 0;
+}
+
+/* A textured triangle's vertices go on the machine stack (0x206ea3aa and
+ * 0x206ea456 return over them) for the fast triangle; the first pushed is
+ * the last of the three. */
+static struct {
+    struct fast_vertex v[3];
+    uint32_t n;
+} tile_tri;
+
+/* 0x206ea396 */
+static void tile_triangle_start(void)
+{
+    textured_start();
+    tile_tri.n = 0;
+}
+
+/* 0x206ea3aa (first) / 0x206ea456 -- the grid's vertex at index (from the
+ * block at 0x206fdc16) with texture u, v at uv: its position, outcode and
+ * texture word; with a texture onto the stack, its u and v plus the
+ * texture's offsets (GLOBAL +0xc94, +0xc9c), its return address kept at
+ * 0x206fd968 as retail pops it there (`ret`, retail's); else the shaded
+ * polygon's.  The first's u, v (0x206f922f), position (0x206f90e4) and
+ * word (0x206f921b) are kept too. */
+static void tile_vertex(int first, uint16_t index, uint32_t uv, uint32_t ret)
+{
+    uint32_t g;
+
+    M32(V(0x206f921f)) = M32(uv);
+    M32(V(0x206f9223)) = M32(uv + 4);
+    eax = (uint32_t)(int32_t)(int16_t)index << 4;
+    eax += M32(V(0x206fdc16));
+    esi = eax;
+    if (first) {
+        M32(V(0x206f922f)) = M32(V(0x206f921f));
+        M32(V(0x206f9233)) = M32(V(0x206f9223));
+    }
+    M32(V(0x206f90c0)) = M32(esi);
+    M32(V(0x206f90c4)) = M32(esi + 4);
+    M32(V(0x206f90c8)) = M32(esi + 8);
+    if (first) {
+        M32(V(0x206f90e4)) = M32(esi);
+        M32(V(0x206f90e8)) = M32(esi + 4);
+        M32(V(0x206f90ec)) = M32(esi + 8);
+    }
+    eax = M32(esi + 8);
+    esi += 12;
+    SET_AX(M16(esi));
+    esi += 2;
+    M8(V(0x206f911c)) = AL;
+    if (first)
+        M8(V(0x206f9121)) = AH;
+    SET_AX(M16(esi));
+    esi += 2;
+    SET_BX(AX);
+    M16(V(0x206f90f0)) = AX;
+    if (first)
+        M16(V(0x206f921b)) = AX;
+    if (M16(V(0x206fdc31)) == 0) {
+        if (first)
+            shaded_first();
+        else
+            shaded_next();
+        return;
+    }
+    M32(V(0x206fd968)) = ret;
+    g = G;
+    edi = g;
+    {
+        struct fast_vertex *v = &tile_tri.v[2 - tile_tri.n++];
+
+        v->c[4] = M32(V(0x206f90c0));
+        v->c[3] = M32(V(0x206f90c4));
+        v->c[2] = M32(V(0x206f90c8));
+        v->c[1] = M32(V(0x206f921f)) + M32(g + 0xc94);
+        v->c[0] = eax = M32(V(0x206f9223)) + M32(g + 0xc9c);
+    }
+}
+
+/* 0x206ea4d3 -- close it: the fast textured triangle (depth 0), or the
+ * shaded polygon's close. */
+static void tile_triangle_close(uint32_t ret)
+{
+    if (M16(V(0x206fdc31)) == 0) {
+        shaded_close();
+        return;
+    }
+    M32(V(0x206fd968)) = ret;
+    SET_AX(0);
+    fast_triangle(0, tile_tri.v);
+}
+
+/* 0x206ea1b4, 0x206ea227, 0x206ea2a5, 0x206ea31c -- a cell's triangles:
+ * the corners (near left, near right, far left, far right: 0x206fd93a,
+ * +1, + a row, both) with their u, v (0x206fd948, 0x206fd950, 0x206fd958,
+ * 0x206fd960). */
+static void tile_triangle(int corner0, int corner1, int corner2, const uint32_t ret[4])
+{
+    static const uint32_t uv[4] = { 0x206fd948, 0x206fd950, 0x206fd958, 0x206fd960 };
+    const int corner[3] = { corner0, corner1, corner2 };
+    uint32_t i;
+
+    tile_triangle_start();
+    for (i = 0; i < 3; i++) {
+        uint16_t index = M16(V(0x206fd93a));
+
+        if (corner[i] & 1)
+            index = (uint16_t)(index + 1);
+        if (corner[i] & 2)
+            index = (uint16_t)(index + M16(V(0x206fd92e)));
+        tile_vertex(i == 0, index, V(uv[corner[i]]), ret[i]);
+    }
+    tile_triangle_close(ret[3]);
+}
+
+/* 0x206e9e2f -- a tile's cell (bx the column, cx the row): its u, v with a
+ * texture, its index and origin; split along a diagonal by the parity of
+ * the cell and of the texture origins at the detail's shift (0x206fdc57);
+ * each triangle drawn facing the eye, then the eye's test (0x206e960a). */
+static void tile_cell(void)
+{
+    uint16_t col = BX, row = CX;
+    uint32_t base, p;
+
+    if (M16(V(0x206fdc31)) != 0) {
+        uint64_t q;
+
+        ebx = col;
+        q = (uint64_t)M32(V(0x206fd940)) * ebx;
+        eax = (uint32_t)q;
+        M32(V(0x206fd948)) = eax;
+        M32(V(0x206fd958)) = eax;
+        eax += M32(V(0x206fd940));
+        M32(V(0x206fd950)) = eax;
+        M32(V(0x206fd960)) = eax;
+        ecx = row;
+        q = (uint64_t)M32(V(0x206fd944)) * ecx;
+        eax = (uint32_t)q;
+        edx = (uint32_t)(q >> 32);
+        M32(V(0x206fd94c)) = eax;
+        M32(V(0x206fd954)) = eax;
+        eax += M32(V(0x206fd944));
+        M32(V(0x206fd95c)) = eax;
+        M32(V(0x206fd964)) = eax;
+    }
+    p = (uint32_t)row * M16(V(0x206fd92e));
+    M16(V(0x206fd93a)) = (uint16_t)(p + col);
+    p = (uint32_t)col * M16(V(0x206fd926));
+    M16(V(0x206fd93c)) = (uint16_t)(p + M16(V(0x206f91ef)));
+    p = (uint32_t)row * M16(V(0x206fd928));
+    M16(V(0x206fd93e)) = (uint16_t)(p + M16(V(0x206f91f1)));
+    M16(V(0x206fdc41)) = 0;
+    SET_AX(col ^ row);
+    SET_CL(M8(V(0x206fdc57)));
+    SET_SI(sar16(M16(V(0x206fdc0e)), CL));
+    SET_DI(sar16(M16(V(0x206fdc10)), CL));
+    SET_AX(AX ^ SI ^ DI);
+    base = (uint32_t)(int32_t)(int16_t)(uint16_t)(M16(V(0x206fd93a)) << 4) + M32(V(0x206fdc16));
+#define H(r) M16((r) + 0xc)
+    if (AX & 1) {
+        static const uint32_t ra[4] = { 0x206ea1d8, 0x206ea1fb, 0x206ea221, 0x206ea226 };
+        static const uint32_t rb[4] = { 0x206ea24f, 0x206ea275, 0x206ea29f, 0x206ea2a4 };
+
+        ebx = esi = edi = base;
+        esi += 0x10;
+        edi += M32(V(0x206fd932));
+        if (!tile_facing(H(esi) - H(ebx), M16(V(0x206fd93c)), -M16(V(0x206fd926)), H(ebx),
+                         H(edi) - H(ebx), M16(V(0x206fd93e)))) {
+            tile_triangle(0, 1, 2, ra);
+            M16(V(0x206fdc41)) += 1;
+        }
+        ebx = esi = edi = base;
+        ebx += 0x10;
+        esi += M32(V(0x206fd932)) + 0x10;
+        edi += M32(V(0x206fd932));
+        if (!tile_facing(H(esi) - H(edi), M16(V(0x206fd93c)) + M16(V(0x206fd926)),
+                         -M16(V(0x206fd926)), H(esi), H(esi) - H(ebx),
+                         M16(V(0x206fd93e)) + M16(V(0x206fd928)))) {
+            tile_triangle(1, 2, 3, rb);
+            M16(V(0x206fdc41)) += 1;
+        }
+    } else {
+        static const uint32_t rc[4] = { 0x206ea2c9, 0x206ea2ec, 0x206ea316, 0x206ea31b };
+        static const uint32_t rd[4] = { 0x206ea340, 0x206ea366, 0x206ea390, 0x206ea395 };
+
+        ebx = esi = edi = base;
+        esi += 0x10;
+        edi += M32(V(0x206fd932)) + 0x10;
+        if (!tile_facing(H(esi) - H(ebx), M16(V(0x206fd93c)), -M16(V(0x206fd926)), H(ebx),
+                         H(edi) - H(esi), M16(V(0x206fd93e)))) {
+            tile_triangle(0, 1, 3, rc);
+            M16(V(0x206fdc41)) += 1;
+        }
+        ebx = esi = edi = base;
+        esi += M32(V(0x206fd932));
+        edi += M32(V(0x206fd932)) + 0x10;
+        if (!tile_facing(H(edi) - H(esi), M16(V(0x206fd93c)), -M16(V(0x206fd926)), H(esi),
+                         H(esi) - H(ebx), M16(V(0x206fd93e)) + M16(V(0x206fd928)))) {
+            tile_triangle(0, 2, 3, rd);
+            M16(V(0x206fdc41)) += 1;
+        }
+    }
+#undef H
+    M16(V(0x206f90f6)) = 1;
+    grid_cell_eye();
+}
+
+/* 0x206ea7a1 -- the carry when a textured tile keeps its 0x100 cells: more
+ * than one each way, or an edge or corner on its one cell or row that is
+ * flagged (0xf0 one cell, 0xf3 one column, 0xfc one row). */
+static int tile_whole(void)
+{
+    SET_AX(M16(V(0x206fd922)) - 1);
+    SET_BX(M16(V(0x206fd924)) - 1);
+    if (AX != 0) {
+        if (BX != 0)
+            return 1;
+        SET_CL(0xfc);
+    } else {
+        SET_CL(BX == 0 ? 0xf0 : 0xf3);
+    }
+    return (M8(V(0x206fdc1d)) & CL) != 0;
+}
+
+/* 0x206ea6cb -- the tile flat: colour 0x69 with the texture word's high
+ * byte, its four corners as table points 0..3, a polygon. */
+static void tile_flat(void)
+{
+    SET_AX(M16(V(0x206fdc14)));
+    SET_AL(AH);
+    SET_AH(0x69);
+    surface_colour();
+    SET_AX(M16(V(0x206f91ef)));
+    SET_BX(0);
+    SET_CX(M16(V(0x206f91f1)));
+    SET_DI(0);
+    table_point();
+    SET_AX(M16(V(0x206f91ef)) + M16(V(0x206fdc1f)));
+    SET_BX(0);
+    SET_CX(M16(V(0x206f91f1)));
+    SET_DI(1);
+    table_point();
+    SET_AX(M16(V(0x206f91ef)) + M16(V(0x206fdc1f)));
+    SET_BX(0);
+    SET_CX(M16(V(0x206f91f1)) + M16(V(0x206fdc23)));
+    SET_DI(2);
+    table_point();
+    SET_AX(M16(V(0x206f91ef)));
+    SET_BX(0);
+    SET_CX(M16(V(0x206f91f1)) + M16(V(0x206fdc23)));
+    SET_DI(3);
+    table_point();
+    polygon_restart();
+    eax = 0;
+    table_first();
+    eax = 1;
+    table_next();
+    eax = 2;
+    table_next();
+    eax = 3;
+    table_next();
+    polygon_close();
+}
+
+/* 0x206ea5a6 -- the textured tile: cells of 0x100 (its 32-bit sizes over
+ * that, divides the host repairs), a quarter of that and four times as
+ * many unless tile_whole(); centred, the texture origins; a grid while its
+ * vertices fit the block (0x206fdc1a), else flat. */
+static void tile_texture_grid(void)
+{
+    uint32_t p;
+
+    SET_AX(0x100);
+    M16(V(0x206fd926)) = AX;
+    M16(V(0x206fd928)) = AX;
+    SET_AX(M16(V(0x206fdc1f)));
+    SET_DX(M16(V(0x206fdc21)));
+    div16(M16(V(0x206fd926)));
+    M16(V(0x206fd922)) = AX;
+    SET_AX(M16(V(0x206fdc23)));
+    SET_DX(M16(V(0x206fdc25)));
+    div16(M16(V(0x206fd928)));
+    M16(V(0x206fd924)) = AX;
+    if (!tile_whole()) {
+        p = 4u * M16(V(0x206fd922));
+        M16(V(0x206fd922)) = (uint16_t)p;
+        p = 4u * M16(V(0x206fd924));
+        SET_AX(p);
+        SET_DX(p >> 16);
+        M16(V(0x206fd924)) = AX;
+        M16(V(0x206fd926)) = 0x40;
+        M16(V(0x206fd928)) = 0x40;
+        M8(V(0x206fdc1d)) = 0;
+    }
+    M16(V(0x206fdbf8)) = 0;
+    M16(V(0x206f91ef)) = (uint16_t)-(M16(V(0x206fdc1f)) >> 1);
+    M16(V(0x206f91f1)) = (uint16_t)-(M16(V(0x206fdc23)) >> 1);
+    M16(V(0x206fdc0e)) = M16(V(0x206f91e1));
+    M16(V(0x206fdc10)) = M16(V(0x206f91e9));
+    SET_AX(M16(V(0x206fd922)) + 1);
+    SET_BX(M16(V(0x206fd924)) + 1);
+    p = (uint32_t)AX * BX;
+    SET_AX(p);
+    SET_DX(p >> 16);
+    if (AX < M16(V(0x206fdc1a)))
+        tile_grid();
+    else
+        tile_flat();
+}
+
+/* 0x206ea7d0 -- called from built-in programs (0x8c): the texture's
+ * origin and steps (GLOBAL +0xca4..+0xcb2) for a tile of 0x206fdc1f by
+ * 0x206fdc23, its corner (+0xc96, +0xc9e) at minus half each. */
+static void tile_texture_origin(void)
+{
+    uint32_t v;
+
+    edi = G;
+    v = ((uint32_t)M16(V(0x206fdc1f)) << 16) - 0x8000;
+    SET_AX(v);
+    SET_DX(v >> 16);
+    M16(edi + 0xcac) = AX;
+    M16(edi + 0xcae) = DX;
+    M16(edi + 0xca4) = 0x8000;
+    M16(edi + 0xca6) = 0;
+    v = ((uint32_t)M16(V(0x206fdc23)) << 16) - 0x8000;
+    SET_AX(v);
+    SET_DX(v >> 16);
+    M16(edi + 0xcb0) = AX;
+    M16(edi + 0xcb2) = DX;
+    M16(edi + 0xca8) = 0x8000;
+    M16(edi + 0xcaa) = 0;
+    SET_AX(-(M16(V(0x206fdc1f)) >> 1));
+    M16(edi + 0xc96) = AX;
+    SET_AX(-(M16(V(0x206fdc23)) >> 1));
+    M16(edi + 0xc9e) = AX;
+}
+
+/* 0x206eae34 -- the carry when the tile's four corners (table points 0..3)
+ * are all out of view on one side. */
+static int tile_out(void)
+{
+    uint32_t i;
+
+    M8(V(0x206fdc0a)) = 0xff;
+    edi = M32(V(0x206f912a));
+    for (i = 0; i < 4; i++) {
+        if (i)
+            edi += 0x10;
+        table_outcode();
+        M8(V(0x206fdc0a)) &= AL;
+        if (M8(V(0x206fdc0a)) == 0)
+            return 0;
+    }
+    return 1;
+}
+
+/* 0x206eaeea -- al as two hex digits, the high one first. */
+static void hex_byte(void)
+{
+    SET_AH(AL);
+    SET_AL(AL & 0xf0);
+    SET_CL(4);
+    SET_AL(AL >> CL);
+    SET_AL(AL + 0x30);
+    if (AL > 0x39)
+        SET_AL(AL + 7);
+    { uint8_t t = AH; SET_AH(AL); SET_AL(t); }
+    SET_AL(AL & 0xf);
+    SET_AL(AL + 0x30);
+    if (AL > 0x39)
+        SET_AL(AL + 7);
+    { uint8_t t = AH; SET_AH(AL); SET_AL(t); }
+}
+
+/* 0x206eae9a -- the texture name for kind al: kinds 0..0xe and 0x80..0x8f
+ * from tables (0x206fdb00, 0x206fdb3c), the rest written in hex into one
+ * of two names (0x206fe4e8 below 0x80, else 0x206fe7c6). */
+static void tile_texture(void)
+{
+    SET_AH(0);
+    if (AX <= 0xe) {
+        ebx = AX;
+        eax = M32(V(0x206fdb00) + ebx * 4);
+    } else if (AX >= 0x80 && AX <= 0x8f) {
+        SET_AX(AX & 0x7f);
+        ebx = AX;
+        eax = M32(V(0x206fdb3c) + ebx * 4);
+    } else if (AX < 0x80) {
+        hex_byte();
+        M16(V(0x206fe508)) = AX;
+        eax = V(0x206fe4e8);
+    } else {
+        hex_byte();
+        M16(V(0x206fe7e6)) = AX;
+        eax = V(0x206fe7c6);
+    }
+}
+
+/* 0x206eaf09 -- the twelve bytes of the kind's texture names (by the
+ * season, GLOBAL +0x248, unless the table has one) to 0x206fe4d2. */
+static void tile_kind_name(uint8_t kind)
+{
+    uint32_t i;
+
+    ebx = kind & 0xf;
+    if (ebx >= 0xc)
+        ebx = 0;
+    esi = M32(V(0x206fd96c) + ebx * 4);
+    if (M32(esi) == 1) {
+        esi += 4;
+    } else {
+        eax = (uint32_t)M16(G + 0x248) * 0xc;
+        esi = eax + esi + 4;
+    }
+    edi = V(0x206fe4d2);
+    for (i = 0; i < 12; i++)
+        M8(edi + i) = M8(esi + i);
+    esi += 12;
+    edi += 12;
+    ecx = 0;
+}
+
+static void tile_scatter(void);
+
+/* 0x206eae82 -- after the tile, kinds 0x81, 0x82 and 0x8e scatter. */
+static void tile_after(void)
+{
+    if (AL == 0x8e || (AL >= 0x81 && AL <= 0x82))
+        tile_scatter();
+}
+
+/* 0x206eb552 -- the eye in the object, every register kept. */
+static void tile_eye(void)
+{
+    uint32_t a = eax, b = ebx, c = ecx, d = edx, s = esi, i = edi, p = ebp;
+
+    eye_in_object_turned();
+    eax = a, ebx = b, ecx = c, edx = d, esi = s, edi = i, ebp = p;
+}
+
+/* 0x206eb385 -- after a scattered building (si, di its sizes): GLOBAL
+ * +0x832 cleared, and 6 with the eye inside it (not for kind 0x8e). */
+static void tile_scatter_eye(void)
+{
+    if (M8(V(0x206fdc1c)) == 0x8e)
+        return;
+    M16(G + 0x832) = 0;
+    if ((int16_t)M16(G + 0xce2) < 0)
+        return;
+    SET_AX(M16(V(0x206fdc5d)) * 4);
+    if ((int16_t)M16(G + 0xce2) > (int16_t)AX)
+        return;
+    SET_SI(SI >> 1);
+    SET_DI(DI >> 1);
+    SET_AX(M16(V(0x206fdc59)) - SI);
+    if ((int16_t)M16(G + 0xcde) < (int16_t)AX)
+        return;
+    SET_AX(AX + SI + SI);
+    if ((int16_t)M16(G + 0xcde) > (int16_t)AX)
+        return;
+    SET_AX(M16(V(0x206fdc5b)) - DI);
+    if ((int16_t)M16(G + 0xce6) < (int16_t)AX)
+        return;
+    SET_AX(AX + DI + DI);
+    if ((int16_t)M16(G + 0xce6) > (int16_t)AX)
+        return;
+    M16(G + 0x832) = 6;
+}
+
+/* 0x206eb448..0x206eb544 -- the scattered buildings: colours, then one of
+ * 0x49's kinds (through 0x206fdbac, the big ones, and 0x206fdbd8). */
+#define SCATTERED(name, colours, kind)                                        \
+    static void name(void)                                                    \
+    {                                                                         \
+        M16(V(0x206f931a)) = colours;                                         \
+        building_kind(kind);                                                  \
+    }
+SCATTERED(scattered_eb448, 7, 0)
+SCATTERED(scattered_eb456, 0, 0)
+SCATTERED(scattered_eb464, 1, 0)
+SCATTERED(scattered_eb472, 1, 0)
+SCATTERED(scattered_eb480, 3, 0)
+SCATTERED(scattered_eb48e, 2, 1)
+SCATTERED(scattered_eb49c, 2, 3)
+SCATTERED(scattered_eb4aa, 3, 0)
+SCATTERED(scattered_eb4b8, 1, 0)
+SCATTERED(scattered_eb4c6, 2, 3)
+SCATTERED(scattered_eb4d4, 4, 3)
+SCATTERED(scattered_eb4e2, 0, 0)
+SCATTERED(scattered_eb4f0, 1, 0)
+SCATTERED(scattered_eb4fe, 2, 0)
+SCATTERED(scattered_eb50c, 3, 0)
+SCATTERED(scattered_eb51a, 4, 0)
+SCATTERED(scattered_eb528, 5, 0)
+SCATTERED(scattered_eb536, 2, 3)
+SCATTERED(scattered_eb544, 7, 0)
+#undef SCATTERED
+
+/* 0x206eb17d -- a cell of the scatter (bx the column, cx the row): the
+ * generator seeded by the cell and 0x206fdc27; a building when its first
+ * number shares a bit with 0x206fdc6d (the detail's mask), at a quarter
+ * cell in (and half a cell more by its bits 1 and 2), the object there
+ * (GLOBAL +0x300, +0x318 from 0x206fdc61/0x206fdc69, its distance); its
+ * height from the room left to the tile's edges and the next number; big
+ * ones (over 0x19) of 0x14 by 0x14 from eleven kinds, else sized by two
+ * more numbers from eight. */
+static void tile_scatter_cell(void)
+{
+    uint16_t col = BX, row = CX;
+    uint32_t p, v, table;
+
+    SET_AX(col + 1);
+    SET_DX(row + 1);
+    p = (uint32_t)AX * DX;
+    SET_AX(p);
+    SET_DX(AX);
+    SET_AX((uint16_t)(AX << 8 | AX >> 8) + DX);
+    SET_AX(AX + M16(V(0x206fdc27)));
+    tile_seed();
+    tile_random();
+    if (!(M16(V(0x206fdc6d)) & AX))
+        return;
+    SET_BP(AX);
+    SET_AX(M16(V(0x206fd926)));
+    SET_SI(AX);
+    p = (uint32_t)AX * BX;
+    SET_AX(p);
+    SET_DX(p >> 16);
+    SET_AX(AX + M16(V(0x206f91ef)) + (SI >> 2));
+    SET_SI(SI >> 2);
+    M16(V(0x206fdc59)) = AX;
+    SET_AX(M16(V(0x206fd928)));
+    SET_SI(AX);
+    p = (uint32_t)AX * CX;
+    SET_AX(p);
+    SET_DX(p >> 16);
+    SET_AX(AX + M16(V(0x206f91f1)) + (SI >> 2));
+    SET_SI(SI >> 2);
+    M16(V(0x206fdc5b)) = AX;
+    if (BP & 2)
+        M16(V(0x206fdc59)) += 0x40;
+    if (BP & 4)
+        M16(V(0x206fdc5b)) += 0x40;
+    SET_AX(M16(V(0x206fdc59)));
+    v = M32(V(0x206fdc61)) - (uint32_t)(int32_t)(int16_t)M16(V(0x206fdc59));
+    SET_BX(v);
+    SET_CX(v >> 16);
+    SET_DX((int16_t)M16(V(0x206fdc59)) < 0 ? 0xffff : 0);
+    edi = G;
+    M16(edi + 0x300) = BX;
+    M16(edi + 0x302) = CX;
+    SET_AX(M16(V(0x206fdc5b)));
+    v = M32(V(0x206fdc69)) - (uint32_t)(int32_t)(int16_t)M16(V(0x206fdc5b));
+    SET_BX(v);
+    SET_CX(v >> 16);
+    SET_DX((int16_t)M16(V(0x206fdc5b)) < 0 ? 0xffff : 0);
+    M16(edi + 0x318) = BX;
+    M16(edi + 0x31a) = CX;
+    object_distance();
+    SET_AX(M16(V(0x206fdc59)));
+    SET_DX((int16_t)AX < 0 ? 0xffff : 0);
+    SET_AX(AX ^ DX);
+    SET_BX((M16(V(0x206fdc1f)) >> 1) - AX);
+    SET_AX(M16(V(0x206fdc5b)));
+    SET_DX((int16_t)AX < 0 ? 0xffff : 0);
+    SET_AX(AX ^ DX);
+    SET_CX((M16(V(0x206fdc23)) >> 1) - AX);
+    p = (uint32_t)BX * CX;
+    SET_AX(p);
+    SET_DX(p >> 16);
+    SET_BX(BX + CX);
+    SET_BX(BX + BX);
+    SET_BX(BX + BX);
+    div16(BX);
+    SET_DX(AX);
+    tile_random();
+    SET_AX(AX | 0x8000);
+    p = (uint32_t)AX * DX;
+    SET_AX(p);
+    SET_DX(p >> 16);
+    M16(V(0x206fdc5d)) = DX;
+    if (DX > 0x19) {
+        SET_SI(0x14);
+        SET_DI(0x14);
+        tile_random();
+        p = (uint32_t)AX * 0xb;
+        SET_AX(p);
+        SET_DX(p >> 16);
+        ebp = DX;
+        table = 0x206fdbac;
+    } else {
+        tile_random();
+        SET_DX(M16(V(0x206fd926)) >> 2);
+        p = (uint32_t)AX * DX;
+        SET_AX(p);
+        SET_DX(p >> 16);
+        SET_SI(DX + 0xf);
+        tile_random();
+        SET_DX(M16(V(0x206fd928)) >> 2);
+        p = (uint32_t)AX * DX;
+        SET_AX(p);
+        SET_DX(p >> 16);
+        SET_DI(DX + 0xf);
+        tile_random();
+        SET_DX(8);
+        p = (uint32_t)AX * DX;
+        SET_AX(p);
+        SET_DX(p >> 16);
+        ebp = DX;
+        table = 0x206fdbd8;
+    }
+    SET_AX(M16(V(0x206fdc59)));
+    SET_DX(0);
+    SET_BX(M16(V(0x206fdc5b)));
+    SET_CX(M16(V(0x206fdc5d)));
+    {
+        uint16_t s = SI, d = DI;
+
+        routine(M32(V(table) + ebp * 4))();
+        SET_DI(d);
+        SET_SI(s);
+    }
+    tile_scatter_eye();
+}
+
+/* 0x206eaffe -- the scatter's grid: 6 by 6 cells of 0x80 for kind 1, else
+ * 8 by 8; the eye moved to the scale times 16 (kind 0x8e: 1) and, when it
+ * fits, the cells within 0x50 of it through tile_scatter_cell(); GLOBAL's
+ * object offsets and the eye put back. */
+static void tile_scatter_grid(void)
+{
+    uint32_t keep[4];
+
+    if (M8(V(0x206fdc1c)) == 1) {
+        M16(V(0x206fd922)) = 6;
+        M16(V(0x206fd924)) = 6;
+        M16(V(0x206f91ef)) = 0xfe80;
+        M16(V(0x206f91f1)) = 0xfe80;
+        M16(V(0x206fdc1f)) = 0x300;
+        M16(V(0x206fdc23)) = 0x300;
+    } else {
+        M16(V(0x206fd922)) = 8;
+        M16(V(0x206fd924)) = 8;
+        M16(V(0x206f91ef)) = 0xfe00;
+        M16(V(0x206f91f1)) = 0xfe00;
+        M16(V(0x206fdc1f)) = 0x400;
+        M16(V(0x206fdc23)) = 0x400;
+    }
+    M16(V(0x206fd926)) = 0x80;
+    M16(V(0x206fd928)) = 0x80;
+    M16(V(0x206fd92a)) = 0x50;
+    M16(V(0x206fd92c)) = 0x50;
+    edi = G;
+    keep[0] = M32(edi + 0xcdc);
+    keep[1] = M32(edi + 0xce0);
+    keep[2] = M32(edi + 0xce4);
+    keep[3] = M32(edi + 0x320);
+    if (M8(V(0x206fdc1c)) != 0x8e) {
+        uint32_t v = M32(edi + 0x320) << 4;
+
+        SET_AX(v);
+        SET_DX(v >> 16);
+        M16(edi + 0x320) = AX;
+        M16(edi + 0x322) = DX;
+    } else {
+        M32(edi + 0x320) = 0x10000;
+    }
+    eye_from_offsets();
+    if (CX == 0) {
+        uint32_t keep_pc;
+
+        edi = G;
+        M32(V(0x206fdc61)) = M32(edi + 0x300);
+        M32(V(0x206fdc69)) = M32(edi + 0x318);
+        eax = 0x206eb17d;
+        keep_pc = M32(V(0x206f9126));
+        grid_cells(0x206eb17d);
+        M32(V(0x206f9126)) = keep_pc;
+        edi = G;
+        M32(edi + 0x300) = M32(V(0x206fdc61));
+        M32(edi + 0x318) = M32(V(0x206fdc69));
+    }
+    edi = G;
+    M32(edi + 0x320) = keep[3];
+    M32(edi + 0xce4) = keep[2];
+    M32(edi + 0xce0) = keep[1];
+    M32(edi + 0xcdc) = keep[0];
+}
+
+/* 0x206eaf51 -- scatter buildings over the tile (when 0x206f917c is set,
+ * else 0x206fdc37 only): the detail's mask (0x206fdc6d by GLOBAL +0xb60),
+ * the program at 0x206fdf22 unless GLOBAL +0x1172 bit 0, the scatter in
+ * the map first (GLOBAL +0x11b2 and +0xb34 set: +0xdca up, +0x832 kept),
+ * then the scatter. */
+static void tile_scatter(void)
+{
+    tile_eye();
+    M16(V(0x206f931c)) = 0xffff;
+    if (M16(V(0x206f917c)) == 0) {
+        M16(V(0x206fdc37)) = 1;
+        return;
+    }
+    edi = G;
+    ebx = M32(edi + 0xb60);
+    ebx += ebx;
+    SET_AX(M16(V(0x206fdc6f) + ebx));
+    M16(V(0x206fdc6d)) = AX;
+    edi = G;
+    if (!(M16(edi + 0x1172) & 1)) {
+        uint32_t keep_pc = M32(V(0x206f9126));
+
+        M32(V(0x206f9126)) = V(0x206fdf22);
+        interpret();
+        M32(V(0x206f9126)) = keep_pc;
+    }
+    edi = G;
+    if (M16(edi + 0x11b2) != 0 && M16(edi + 0xb34) != 0) {
+        uint16_t keep = M16(edi + 0x832);
+
+        M16(edi + 0xdca) += 1;
+        tile_scatter_grid();
+        edi = G;
+        M16(edi + 0xdca) -= 1;
+        M16(edi + 0x832) = keep;
+    }
+    tile_scatter_grid();
+}
+
+/* 0x206eabfa / 0x206eac94 -- kinds 0x88 and 0x89 (with 0x206f917c): a lit
+ * grid of 4 by 4 cells of 0x40, its texture word and scale from the pair
+ * at `at`. */
+static void tile_lit(uint32_t at)
+{
+    if (M16(V(0x206f917c)) != 0) {
+        M16(V(0x206fd922)) = 4;
+        M16(V(0x206fd924)) = 4;
+        M16(V(0x206fd926)) = 0x40;
+        M16(V(0x206fd928)) = 0x40;
+        M16(V(0x206f91ef)) = 0xff80;
+        M16(V(0x206f91f1)) = 0xff80;
+        M16(V(0x206fdbf8)) = 0;
+        M16(V(0x206fdbfa)) = 0x10;
+        SET_AX(M16(at));
+        M16(V(0x206fdc14)) = AX;
+        SET_AX(-AX + M16(at + 2));
+        M16(V(0x206fdc12)) = AX;
+        M16(V(0x206fdc0e)) = M16(V(0x206f91e1));
+        M16(V(0x206fdc10)) = M16(V(0x206f91e9));
+        tile_grid();
+    }
+    M16(V(0x206fdc37)) = 1;
+}
+
+/* Run a built-in program, the counter kept. */
+static void tile_program_at(uint32_t program)
+{
+    uint32_t keep_pc = M32(V(0x206f9126));
+
+    M32(V(0x206f9126)) = program;
+    interpret();
+    M32(V(0x206f9126)) = keep_pc;
+}
+
+/* 0x206eaac3 -- modes 0x11 and 0x55: kinds 0x88, 0x89 lit; else, in view
+ * and unless 0x206f917c, the program at 0x206fe47a without a context;
+ * then tile_after(). */
+static void tile_mode_11(void)
+{
+    if (M8(V(0x206fdc1c)) == 0x88) {
+        tile_lit(V(0x206fde49));
+        return;
+    }
+    if (M8(V(0x206fdc1c)) == 0x89) {
+        tile_lit(V(0x206fde4d));
+        return;
+    }
+    if (M16(V(0x206f917c)) == 0 && !tile_out()) {
+        uint32_t keep_context = M32(V(0x206f919c));
+
+        M32(V(0x206f919c)) = 0;
+        tile_program_at(V(0x206fe47a));
+        M32(V(0x206f919c)) = keep_context;
+    }
+    SET_AL(M8(V(0x206fdc1c)));
+    tile_after();
+}
+
+/* 0x206eab2b -- mode 0x33, in view and unless 0x206f917c: by the edge
+ * flags' low four bits (and 0x10 for kinds 6, 7) a word to 0x206fdce9, and
+ * by the four a program. */
+static void tile_mode_33(void)
+{
+    if (M16(V(0x206f917c)) != 0 || tile_out())
+        return;
+    SET_BL(M8(V(0x206fdc1d)));
+    SET_BX(BX & 0xf);
+    if (M8(V(0x206fdc1c)) >= 6 && M8(V(0x206fdc1c)) <= 7)
+        SET_BX(BX | 0x10);
+    ebx = BX;
+    M32(V(0x206fdce9)) = M32(V(0x206fdea1) + ebx * 4);
+    ebx &= 0xf;
+    tile_program_at(M32(V(0x206fde61) + ebx * 4));
+}
+
+/* 0x206eab8d -- mode 0x44: as 0x33 by the low two bits (and 4), from
+ * 0x206ff4e2 to 0x206fdced and the programs at 0x206ff4d2; then
+ * tile_after(). */
+static void tile_mode_44(void)
+{
+    if (M16(V(0x206f917c)) == 0 && !tile_out()) {
+        SET_BL(M8(V(0x206fdc1d)));
+        SET_BX(BX & 3);
+        if (M8(V(0x206fdc1c)) >= 6 && M8(V(0x206fdc1c)) <= 7)
+            SET_BX(BX | 4);
+        ebx = BX;
+        M32(V(0x206fdced)) = M32(V(0x206ff4e2) + ebx * 4);
+        SET_BX(BX & 3);
+        tile_program_at(M32(V(0x206ff4d2) + ebx * 4));
+    }
+    SET_AL(M8(V(0x206fdc1c)));
+    tile_after();
+}
+
+/* 0x206ead2e -- mode 0x22 (with 0x206f917c): with a texture, its names
+ * (tile_kind_name); the texture word and scale by the kind's low four
+ * bits, or for 0xd and 0xe by the season (GLOBAL +0x248, two on in the
+ * south, +0x566 negative; 0xe four more); the height scale by its high
+ * four; with a texture the program at 0x206fe4ac; the textured tile.
+ * GLOBAL +0xcce cleared, 0x206fdc37 set. */
+static void tile_mode_22(void)
+{
+    if (M16(V(0x206f917c)) != 0) {
+        uint16_t kind;
+
+        if (M16(V(0x206fdc31)) != 0) {
+            SET_AL(M8(V(0x206fdc1c)));
+            tile_kind_name(AL);
+        }
+        SET_BH(0);
+        SET_BL(M8(V(0x206fdc1c)));
+        kind = BX;
+        SET_BX(BX & 0xf);
+        edi = G;
+        SET_AX(M16(edi + 0x248));
+        if ((int16_t)M16(edi + 0x566) < 0) {
+            SET_AL(AL + 2);
+            SET_AX(AX & 3);
+        }
+        if (BX == 0xd || BX == 0xe) {
+            if (BX == 0xe)
+                SET_AX(AX + 4);
+            SET_BX(AX + AX);
+            ebx = BX;
+            SET_AX(retail_word(V(0x206fde29) + ebx));
+            M16(V(0x206fdc14)) = AX;
+            SET_AX(-AX + retail_word(V(0x206fde39) + ebx));
+            M16(V(0x206fdc12)) = AX;
+        } else {
+            SET_BX(BX + BX);
+            ebx = BX;
+            SET_AX(M16(V(0x206fddf5) + ebx));
+            M16(V(0x206fdc14)) = AX;
+            SET_AX(-AX + M16(V(0x206fde0f) + ebx));
+            M16(V(0x206fdc12)) = AX;
+        }
+        SET_BX(kind >> 4);
+        SET_BX(BX + BX);
+        ebx = BX;
+        SET_AX(retail_word(V(0x206fde51) + ebx));   /* kinds 0x80.. read the pointers after */
+        M16(V(0x206fdbfa)) = AX;
+        if (M16(V(0x206fdc31)) != 0)
+            tile_program_at(V(0x206fe4ac));
+        tile_texture_grid();
+    }
+    edi = G;
+    M16(edi + 0xcce) = 0;
+    M16(V(0x206fdc37)) = 1;
+}
+
+/* 0x206ea8b2 -- 0x3d, a ground tile: GLOBAL +0xca0 cleared, its texture,
+ * library and detail switches (+0x39c, +0x11bc, +0x12a4) kept; the
+ * operand's eleven words; the detail's step and shift from the first
+ * texture origin's magnitude against 0x206fdc4b's five words.  With a
+ * mode: the height (less 0x206f91d9's) added to GLOBAL +0x30a's 48 bits,
+ * the eye moved (0x206e63ee), then mode 0x22 apart, the corners as table
+ * points 0..3 and the mode's drawing. */
+static void op_tile(void)
+{
+    uint32_t r, borrow, carry;
+
+    edi = G;
+    M16(edi + 0xca0) = 0;
+    M16(V(0x206fdc31)) = M16(edi + 0x39c);
+    M16(V(0x206fdc33)) = M16(edi + 0x11bc);
+    M16(V(0x206fdc35)) = M16(edi + 0x12a4);
+    esi += 2;
+    lods16();
+    M16(V(0x206fdc1c)) = AX;
+    lods16();
+    M16(V(0x206fdc1e)) = AX;
+    SET_BL(AL);
+    lods16();
+    M16(V(0x206fdc1f)) = AX;
+    lods16();
+    M16(V(0x206fdc21)) = AX;
+    lods16();
+    M16(V(0x206fdc23)) = AX;
+    lods16();
+    M16(V(0x206fdc25)) = AX;
+    lods16();
+    M16(V(0x206fdc39)) = AX;
+    lods16();
+    M16(V(0x206fdc3b)) = AX;
+    lods16();
+    M16(V(0x206f91e1)) = AX;
+    SET_DX(1);
+    M16(V(0x206fdc57)) = 0;
+    SET_CL(5);
+    SET_AX(sar16(AX, CL));
+    if (AX & 0x8000)
+        SET_AX(~AX);
+    edi = V(0x206fdc4b);
+    do {
+        SET_BP(M16(edi));
+        if ((int16_t)AX < (int16_t)BP)
+            break;
+        edi += 2;
+        SET_DX(DX + DX);
+        M16(V(0x206fdc57)) += 1;
+    } while (edi != V(0x206fdc55));
+    M16(V(0x206fdc55)) = DX;
+    lods16();
+    M16(V(0x206f91e9)) = AX;
+    lods16();
+    M16(V(0x206fdc27)) = AX;
+    M32(V(0x206f9126)) = esi;
+    if (BL == 0)
+        return;
+    r = (uint32_t)M16(V(0x206fdc39)) - M16(V(0x206f91d9));
+    SET_AX(r);
+    borrow = (r >> 16) & 1;
+    r = (uint32_t)M16(V(0x206fdc3b)) - M16(V(0x206f91db)) - borrow;
+    SET_CX(r);
+    borrow = (r >> 16) & 1;
+    SET_DX(0 - borrow);
+    edi = G;
+    r = (uint32_t)M16(edi + 0x30a) + AX;
+    M16(edi + 0x30a) = (uint16_t)r;
+    carry = r >> 16;
+    r = (uint32_t)M16(edi + 0x30c) + CX + carry;
+    M16(edi + 0x30c) = (uint16_t)r;
+    carry = r >> 16;
+    M16(edi + 0x30e) = (uint16_t)(M16(edi + 0x30e) + DX + carry);
+    eye_from_offsets();
+    if (M8(V(0x206fdc1e)) == 0x22) {
+        tile_mode_22();
+        return;
+    }
+    SET_AL(M8(V(0x206fdc1c)));
+    tile_texture();
+    M32(V(0x206fdc2d)) = eax;
+    M16(V(0x206f91ef)) = (uint16_t)-(M16(V(0x206fdc1f)) >> 1);
+    M16(V(0x206f91f1)) = (uint16_t)-(M16(V(0x206fdc23)) >> 1);
+    SET_AX(M16(V(0x206f91ef)) + M16(V(0x206fdc1f)));
+    SET_BX(0);
+    SET_CX(M16(V(0x206f91f1)));
+    SET_DI(0);
+    table_point();
+    SET_AX(M16(V(0x206f91ef)) + M16(V(0x206fdc1f)));
+    SET_BX(0);
+    SET_CX(M16(V(0x206f91f1)) + M16(V(0x206fdc23)));
+    SET_DI(1);
+    table_point();
+    SET_AX(M16(V(0x206f91ef)));
+    SET_BX(0);
+    SET_CX(M16(V(0x206f91f1)) + M16(V(0x206fdc23)));
+    SET_DI(2);
+    table_point();
+    SET_AX(M16(V(0x206f91ef)));
+    SET_BX(0);
+    SET_CX(M16(V(0x206f91f1)));
+    SET_DI(3);
+    table_point();
+    switch (M8(V(0x206fdc1e))) {
+    case 0x11:
+    case 0x55:
+        tile_mode_11();
+        break;
+    case 0x33:
+        tile_mode_33();
+        break;
+    case 0x44:
+        tile_mode_44();
+        break;
+    }
+}
+
+/* 0x206eb66b -- 0x7f, scattered buildings alone (as kind 2). */
+static void op_scatter(void)
+{
+    M16(V(0x206fdc1c)) = 2;
+    tile_scatter();
+    M32(V(0x206f9126)) += 2;
+}
+
+/* 0x206eb5dc -- called from built-in programs (0x8c): the view turned by
+ * a heading of 0x1536 for WINDOW's cofactors (+0x20), then put back but
+ * for the eye, the turn's; GLOBAL +0x3a8 1 (the cofactors are this
+ * frame's). */
+static void view_turned_cofactors(void)
+{
+    struct transform_state t;
+
+    transform_push(&t);
+    edi = G;
+    M32(edi + 0x5ca) = 0;
+    M32(edi + 0x5ce) = 0;
+    M32(edi + 0x5d2) = 0x1536;
+    transform_turn();
+    WINDOW_COFACTORS();
+    edi = G;
+    ebx = M32(edi + 0xcdc);
+    ecx = M32(edi + 0xce0);
+    edx = M32(edi + 0xce4);
+    transform_pop(&t);
+    edi = G;
+    M32(edi + 0xcdc) = ebx;
+    M32(edi + 0xce0) = ecx;
+    M32(edi + 0xce4) = edx;
+    M16(edi + 0x3a8) = 1;
 }
 
 /* ---- CHAIN's callbacks ------------------------------------------------------------- */
@@ -9723,6 +13842,50 @@ static void cb_206f462b_body(const uint32_t *arg)
     age_libraries(arg[0], arg[1]);
 }
 
+/* 0x206f46c3 -- 0x63, a library by its 16-byte id (the operand): found in
+ * the list at 0x20710a70, or added there and fetched through FE +0x3c --
+ * once for its size (a byte read into the frame), then into a block the
+ * host gives (the size read to 0x20710a8c); an id FE has not leaves the
+ * entry with no block.  Its count (+0x14) to 3, and with a block it runs
+ * from a clean drawing state, as +0x1c, inside this program; on past the
+ * id. */
+static void op_library(void)
+{
+    uint32_t keep_esi = esi;
+    uint32_t frame[2];                          /* [ebp-8], [ebp-4] */
+
+    ecx = M32(V(0x20710a70));
+    edi = M32(V(0x20710a88));
+    if (ecx != 0) {
+        do {
+            if (M32(esi + 2) == M32(edi) && M32(esi + 6) == M32(edi + 4) &&
+                M32(esi + 0xa) == M32(edi + 8) && M32(esi + 0xe) == M32(edi + 0xc))
+                goto found;
+            edi += 0x18;
+        } while (--ecx != 0);
+    }
+    H_LIST_ADD(V(0x20710a70));
+    edi = eax;
+    M32(edi) = M32(esi + 2);
+    M32(edi + 4) = M32(esi + 6);
+    M32(edi + 8) = M32(esi + 0xa);
+    M32(edi + 0xc) = M32(esi + 0xe);
+    M32(edi + 0x10) = 0;
+    eax = IMP5(FE, 0x3c, edi, (uint32_t)(uintptr_t)frame + 3, 0, 1,
+               (uint32_t)(uintptr_t)&frame[1]);
+    if (eax != 0) {
+        H_ALLOC(2, frame[1], edi + 0x10, 1);
+        eax = IMP5(FE, 0x3c, edi, M32(edi + 0x10), 1, frame[1], V(0x20710a8c));
+    }
+found:
+    M16(edi + 0x14) = 3;
+    eax = M32(edi + 0x10);
+    if (eax != 0)
+        run_program(eax);
+    esi = keep_esi;
+    M32(V(0x206f9126)) = esi + 0x12;
+}
+
 /* 0x206f4570 / 0x206f459a -- the ageing on list 3; at deinit, every entry
  * removed and the list freed. */
 static void init_library_ageing(void)
@@ -9961,6 +14124,62 @@ static routine_fn routine(uint32_t a)
     case 0x206e9508: return grid_cell;
     case 0x206f0343: return op_texture;
     case 0x206f0672: return op_texture_again;
+    case 0x206e6d23: return op_texture_name;
+    case 0x206f46c3: return op_library;
+    case 0x206e997d: return op_building;
+    case 0x206e4357: return op_approach_lights;
+    case 0x206ea8b2: return op_tile;            /* 0x3d */
+    case 0x206e434b: return op_runway;          /* 0x42 */
+    case 0x206e4351: return op_runway;          /* 0x44 */
+    case 0x206f24f9: return runway_threshold_near;
+    case 0x206f2505: return runway_threshold_far;
+    case 0x206f28b7: return runway_centreline_near;
+    case 0x206f28c4: return runway_centreline_far;
+    case 0x206f2bfc: return runway_touchdown;
+    case 0x206f2ca5: return runway_aiming;
+    case 0x206f2d1e: return runway_zone;
+    case 0x206f2ea1: return runway_stripes;
+    case 0x206f3016: return runway_number_near;
+    case 0x206f3044: return runway_number_far;
+    case 0x206f3370: return runway_lights;
+    case 0x206f32e7: return runway_approach_lights;
+    case 0x206eb66b: return op_scatter;         /* 0x7f */
+    case 0x206e9e2f: return tile_cell;
+    case 0x206eb17d: return tile_scatter_cell;
+    case 0x206ea7d0: return tile_texture_origin;
+    case 0x206eb5dc: return view_turned_cofactors;
+    case 0x206eb448: return scattered_eb448;
+    case 0x206eb456: return scattered_eb456;
+    case 0x206eb464: return scattered_eb464;
+    case 0x206eb472: return scattered_eb472;
+    case 0x206eb480: return scattered_eb480;
+    case 0x206eb48e: return scattered_eb48e;
+    case 0x206eb49c: return scattered_eb49c;
+    case 0x206eb4aa: return scattered_eb4aa;
+    case 0x206eb4b8: return scattered_eb4b8;
+    case 0x206eb4c6: return scattered_eb4c6;
+    case 0x206eb4d4: return scattered_eb4d4;
+    case 0x206eb4e2: return scattered_eb4e2;
+    case 0x206eb4f0: return scattered_eb4f0;
+    case 0x206eb4fe: return scattered_eb4fe;
+    case 0x206eb50c: return scattered_eb50c;
+    case 0x206eb51a: return scattered_eb51a;
+    case 0x206eb528: return scattered_eb528;
+    case 0x206eb536: return scattered_eb536;
+    case 0x206eb544: return scattered_eb544;
+    case 0x206f3b8b: return lights_1;
+    case 0x206f3c42: return lights_2;
+    case 0x206f3c2b: return lights_3;
+    case 0x206f3cca: return lights_4;
+    case 0x206f3cf3: return lights_5;
+    case 0x206f3d69: return lights_6;           /* 6 and 7 */
+    case 0x206f3bef: return lights_8;
+    case 0x206f3eb1: return lights_9;
+    case 0x206f3fca: return lights_10;
+    case 0x206e9888: return building_0;
+    case 0x206e98a2: return building_1;
+    case 0x206e98bc: return building_2;
+    case 0x206e98d6: return building_3;
     case 0x206f4888: return op_strip_next;
     case 0x206f4ede: return op_strip_lights;
     case 0x206f4fb4: return op_strip_width;
@@ -10037,6 +14256,31 @@ static const struct { uint32_t at, to; } data_pointers[] = {
 #undef G3D_CODE_TARGET
 };
 
+/* A word of the image as retail's holds it: the bytes of a pointer to the
+ * image itself (relocated here to this one) are retail's address's.  For
+ * tables that retail reads past their end into such pointers. */
+static uint8_t retail_byte(uint32_t off)
+{
+    uint32_t i;
+
+    for (i = 0; i < sizeof data_pointers / sizeof data_pointers[0]; i++) {
+        uint32_t at = data_pointers[i].at, v;
+
+        if (off < at || off >= at + 4)
+            continue;
+        v = M32(D + at);
+        if (v - D < G3D_IMAGE_SIZE)
+            v = v - D + G3D_DATA_VA;
+        return (uint8_t)(v >> 8 * (off - at));
+    }
+    return M8(D + off);
+}
+
+static uint16_t retail_word(uint32_t at)
+{
+    return (uint16_t)(retail_byte(at - D) | retail_byte(at - D + 1) << 8);
+}
+
 static const uint32_t code_targets[] = {
 #define G3D_DATA_POINTER(at, to)
 #define G3D_CODE_TARGET(a) a,
@@ -10057,16 +14301,16 @@ static void g3d_install(void)
         (void *)draw_counted,       /* +0x20 */
         (void *)draw_uncounted,     /* +0x24 */
         (void *)draw,               /* +0x28 */
-        0,                          /* +0x2c */
+        (void *)frame_earth,        /* +0x2c */
         (void *)queue_draw_all,     /* +0x30 */
         (void *)queue_draw_svc,     /* +0x34 */
         (void *)queue_model_svc,    /* +0x38 */
         (void *)normalise_vector,   /* +0x3c */
         (void *)get_912a,           /* +0x40 */
         (void *)scale_to_screen,    /* +0x44 */
-        0,                          /* +0x48 */
-        0,                          /* +0x4c */
-        0,                          /* +0x50 */
+        (void *)approach_lights_turned_svc, /* +0x48 */
+        (void *)approach_lights_svc,        /* +0x4c */
+        (void *)runway_svc,                 /* +0x50 */
         (void *)release_all_textures, /* +0x54 */
         (void *)clear_unloaded,     /* +0x58 */
         (void *)frame_tick,         /* +0x5c */

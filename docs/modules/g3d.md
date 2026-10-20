@@ -68,16 +68,16 @@ for the survey that chose it.
 | `+0x20` | `0x206e1590` | WINDOW ×2, WEATHERM | draw a `'v'` model `(model)`, keeping the countdown `.data+0x15b` |
 | `+0x24` | `0x206e15c3` | MAIN ×6 | the same with `.data+0x15d`/`+0x15e` cleared |
 | `+0x28` | `0x206e15ee` | ANALYSIS | draw a `'v'` model `(model)`: header byte `0x76`, then the program from the next even address |
-| `+0x2c` | `0x206f2140` | WINDOW | G3D's own frame from high up |
+| `+0x2c` | `0x206f2140` | WINDOW | the earth: the built-in model at `0x20708840`, its latitude band and longitude from the eye's |
 | `+0x30` | `0x206e5ff7` | WINDOW | `+0x34(0x7fffffff, 0x80000001, 1)`: the whole queue |
 | `+0x34` | `0x206e600f` | WINDOW ×2 | draw the queue between `(far, near, flag)`; returns what it drew |
 | `+0x38` | `0x206e5d60` | MAIN ×4, MULTIP ×2, ACONTAIN, DYNAMIC | queue a `'v'` model `(model, key)`, sorted, 0x2c-byte entries |
 | `+0x3c` | `0x206e1536` | WINDOW | normalise a vector `(v)` in place (three dwords) |
 | `+0x40` | `0x206e36e7` | MAIN ×2 | the dword at `.data+0x12a` |
 | `+0x44` | `0x206e36f3` | HG2D ×4 | `(x * 2 << (GLOBAL[0xd42] + 8)) / GLOBAL[0x320]`, a 64-bit `idiv` |
-| `+0x48` | `0x206f38b0` | none | |
-| `+0x4c` | `0x206f38db` | none | |
-| `+0x50` | `0x206f2220` | none | |
+| `+0x48` | `0x206f38b0` | none | 0x72's approach lights, the record at `esi + 2`, the view turned to its heading |
+| `+0x4c` | `0x206f38db` | none | the same without the turn (the runways' ends call it) |
+| `+0x50` | `0x206f2220` | none | 0x42's runway, the record at `esi` |
 | `+0x54` | `0x206f078a` | none | |
 | `+0x58` | `0x206f07ef` | ACONTAIN | |
 | `+0x5c` | `0x206e1577` | WINDOW | once a frame: count `.data+0x15b` down, reloading from `+0x15c` |
@@ -85,9 +85,10 @@ for the survey that chose it.
 | `+0x64` | `0x206e2850` | MULTIP | the address after the instruction at `(instr)`, or 0 |
 
 Callers are from `impscan.py` over every retail module and the host. No
-module calls `+0x48`..`+0x54`, and gauges import only PANELS, so those four
-are reached, if at all, some other way; find out before transliterating
-them. `dumplinkage.py`'s sizes for this module are gaps between Linkage
+module calls `+0x48`..`+0x54`; `+0x48`..`+0x50` are the opcodes' own
+routines, which take their record in esi and save no registers, so
+OpenFS98 exports them through a wrapper that returns every register as the
+routine leaves it (`SERVICE_RAW`). `dumplinkage.py`'s sizes for this module are gaps between Linkage
 entries, not function sizes: most of the code is reached through the
 opcode table.
 
@@ -189,6 +190,13 @@ here, and keep the harness clear of it.
   the instruction's address still pushed, pops it into `.data+0x1b7`, and
   returns to the old context as a code address. Ours pops both and refuses
   the model. `g3ddiff`'s models always start with one of the five.
+- **Opcode `0x49`'s second kind of building** (`0x206f5a30`, the box with
+  a ridged roof). With the eye inside the building and off the map, it
+  marks GLOBAL `+0x832` as its siblings do but after a `push edi` that is
+  never popped (`0x206f5b07`), so its `ret` returns to edi's value. Ours
+  marks it and returns. `g3ddiff` keeps that kind's x near `0x7f00` and its
+  width at `0x200` or more, so `x + width / 2` wraps negative and no eye can
+  be inside; the other three kinds are steered to hold the eye.
 
 ## Drawing
 
@@ -386,8 +394,12 @@ HG2D's vertex call returns, which is the ecx G3D called it with;
 `import_call` entered every callee with ecx 0 until then, and the loop ended
 early.
 
-**Stage 5, in progress**: the remaining opcodes. Verified so far, 1,000
-scenarios at a time, every outcome reached: the colours `0x1e`, `0x2d`,
+**Stage 5: every opcode is in**, the last of them (texture by name,
+libraries, buildings, approach lights, ground tiles and their scatter,
+runways) described in *Drawing* below, and the Linkage's `+0x2c` and
+`+0x48`..`+0x50`. **20,000 scenarios, 0 differences** (about 3.5 minutes);
+each family was verified 1,000 to 3,000 scenarios at a time as it landed,
+with every outcome reached (a full break run is still to come): the colours `0x1e`, `0x2d`,
 `0x2e` (which stores ah where it read al: the handler's address byte
 `0x8a`, three times), `0x84`, `0x68`; the level of detail `0x56`; the size
 jumps `0x5f`/`0x6d` (`0x206f1ee8`, an idiv by GLOBAL `+0xd4c` the host
@@ -435,8 +447,8 @@ writes before the queue. `g3ddiff` keeps the level in 0..4, as the game's
 detail levels are. The opcodes `0x32`, `0x2b` queue at an offset,
 `0x75` into the second queue (`0x206fd880`, which the scene builder draws,
 still to come), and `0x5a` runs a subroutine nested and goes on past
-itself (it queues only when the subroutine set `0x206fdc37`, which only
-opcodes still to come do). `g3ddiff` keeps sixteen models at
+itself (it queues only when the subroutine set `0x206fdc37`, which the
+ground tiles do). `g3ddiff` keeps sixteen models at
 `programs+0x10000` for the whole scenario, as the queue holds pointers to
 them, and two more operations: `+0x38` and `+0x34`/`+0x30`.
 
@@ -450,7 +462,9 @@ angles through WINDOW `+0x2c` -- `g3ddiff` now loads retail WINDOW for it
 
 **Meshes and lights**: `0x90` (compiled C) draws a mesh of table points by
 byte index from a base, a fan of triangles with GLOBAL `+0x12a4` bit 4 and
-polygons otherwise, behind its own plane test; `0x28` draws a light, a
+polygons otherwise, behind its own plane test, and steps past its bytes to
+an even *address* -- after an odd-length instruction (`0x19`'s), one byte
+short of its last; `0x28` draws a light, a
 point at size 1 and a blob through HG2D `+0x84` larger, sized by a rough
 16-bit distance (`0x206f514f`) and a 16-bit idiv the host repairs (0x7fff or
 0x8001, remainder 0x7fff).
@@ -499,7 +513,136 @@ younger than this one). A slot taken afresh is named but not loaded; one
 taken from another texture is reloaded through HG2D `+0xa8`. With a
 texture, GLOBAL `+0xc8c`, the offsets and WINDOW `+0x20` (the cofactors,
 once a frame); then it opens a surface. `0x5d` opens one with the texture
-there is.
+there is. `0x19` takes a texture by a nul-terminated name after the opcode,
+through the host's string services: a name other than the last one
+(`0x206fd8d0`, 13 bytes; host `+0x2c0` `_strcmpi`) is copied there (`+0x2a8`)
+and handed to HG2D `+0x68` with the context, which loads it and answers 1
+(GLOBAL `+0xcbe` 1 then). It always sets GLOBAL `+0xcbc` to 0x40 and
+`0x206f91b5` to 0x100, and steps past the name, its nul **and one byte
+more**. The harness's string stubs are the host's own code (and the CD
+MSVCRT's C-locale `_strcmpi` loop), as what they leave in ecx and edx is
+theirs.
+
+**Libraries** (`0x63`): a 16-byte id after the opcode, looked up in the list
+at `0x20710a70` (the host's growable list, 0x18-byte entries: the id, a
+block, a count). An id not there is added and fetched through FE `+0x3c`,
+once for its size (a byte read into the frame, the size back through a
+dword there), then into a block from host `+0x20c` (the size read to
+`0x20710a8c`); an id FE does not have leaves the entry without a block, and
+it is never asked again. The count goes to 3 (CHAIN list 3 ages it once a
+frame and frees the entry when it goes negative), and a block is run, as
+`+0x1c` runs a program, inside the program that named it -- nested
+`interpret()`, which returns to the instruction after the id. `g3ddiff`
+serves four generated libraries from its FE stub, seeds the list with some,
+and leaves the case opcode out of them: a case reads its default 0x20006
+bytes on, which a library's copy in a block does not hold.
+
+**Buildings** (`0x49`): the eye in the object first (`0x206e6aa8`); then a
+kind and colours from the first word (the kind from bits 4..3 and colours
+from bits 2..0, or for a negative word the low two bits and colours
+0xffff), and a position and sizes. Its colours are one of eight built-in
+programs (`0x206fdb7c`), run without a context (`0x206e97d6`). Each kind
+fills in its own built-in program, a template of 0x200 bytes from
+`0x20710ad0`: three boxes (plain, a raised ridge, and a base wider than the
+top) and an octagon. The template gets a reject sphere and a detail jump,
+its corners, its apparent width and height at the view's scale
+(`0x206f1ee8`), and a texture strip for each wall: a shade from the sun on
+the wall's normal, in 0x20 steps, and extents from the wall's length and
+height cut to the apparent size. The filled template is run with GLOBAL
+`+0x1174` set. With the eye inside, GLOBAL `+0x832` is set to `0xe`.
+
+**Approach lights** (`0x72`, off the map): an 18-byte record (heading,
+width, threshold, flags, one of ten patterns, a count, a VASI) is copied to
+`0x2070fe5a`, the view is turned to its heading (`0x206ef03c`, put back by
+`0x206ef0e1`), and a program is written at `0x2070fe96` and run, from a
+header at `0x2070fe82` with flag bit 0. The emitters are hand-written and
+pass everything in registers: colours (`0x51`, flashing `0xf016` with a
+`0x30`), lights (`0x37`), rows (`0x35`) and bars (`0x45`), each row left out
+when both of its ends are past the eye's z (GLOBAL `+0xce6`). The patterns
+are rows across at 0xc8 or 0x64 spacings, with wing bars at one of them. A
+bar of the record's count follows. Pattern 1 tests the word 0x1204 bytes
+past the instruction, not in GLOBAL, as it loads GLOBAL into edi but
+reads `[esi+0x1204]`. The VASI's bars are red or white by the eye's slope
+against the bar's angle (UTIL `+0x2c`, unsigned divides the host repairs).
+The sequenced flashers (bit 4) read three words past the record that
+nothing writes: their step divides by zero, which the host repairs, and
+their loop count is 0, so they draw one colour and move a word of state.
+
+**Ground tiles** (`0x3d`, `0x7f`): a tile of a kind (its low byte, edge
+flags above), a mode, a 32-bit size each way, a height added to GLOBAL
+`+0x30a`'s 48 bits before the eye is moved (`0x206e63ee`), two texture
+origins and a seed. Mode `0x22` is a textured grid of 0x100 cells, or
+four times as many of 0x40 when the tile is one cell or one row whose
+flagged edges allow it. Each vertex's height comes from a byte table at
+`0x206fdcf1`, indexed by the vertex's position at the detail's step, which
+is chosen by the first texture origin's size against five thresholds. The
+height and texture-word scales come from the kind, or for kinds 0xd and
+0xe from the season (GLOBAL `+0x248`, two on in the south). The cells are
+drawn through 0x15's cell walk with their own cell routine (`0x206e9e2f`):
+each cell is split by the parity of the cell and of the texture origins at
+the detail's shift, and a triangle that faces the eye (a 64-bit sum of
+height differences against the eye's offsets) is drawn. With a texture,
+the vertex routines pop their return address into `.data` (`0x206fd968`),
+push the vertex on the machine stack for the fast triangle, and push the
+address back. Ours stores retail's return addresses there, as that word is
+compared. Without a texture, the vertices go to the shaded polygon. A grid
+whose vertex count does not fit the 0x400-vertex block is drawn flat.
+Modes `0x11`/`0x55`, `0x33` and `0x44` run a built-in program per kind or
+edge pattern. Kinds 0x88 and 0x89 draw a small lit grid. Kinds 0x81, 0x82
+and 0x8e scatter buildings afterwards, as `0x7f` does on its own. The
+scatter is an 8 by 8 grid (6 by 6 for kind 1) with the eye moved again at
+16 times the scale. Each cell's building comes from the C library's LCG
+(times 0x343fd, plus 0x269ec3) seeded by the cell and the tile's seed. A
+building is placed when its first number shares a bit with the detail's
+mask. Its size comes from the room left to the tile's edges, and its kind
+from one of two tables of 0x49's kinds (`0x206fdbac`, `0x206fdbd8`). After
+each building, GLOBAL `+0x832` is cleared, and set to 6 with the eye
+inside. Two native routines are called from the tiles' built-in programs
+through `0x8c`: the texture's origin (`0x206ea7d0`), and the view turned by
+0x1536 for WINDOW's cofactors (`0x206eb5dc`).
+
+Mode `0x22` reads its height scale from eight words at `0x206fde51` by the
+kind's high nibble, so kinds from 0x80 read on into the pointers at
+`0x206fde61`. **Retail gets halves of its own addresses there**, and
+OpenFS98 reads those words as retail's (`retail_word()`, which turns a
+relocated self-pointer back into retail's value). The scatter's kind 1
+building is the one that crashes with the eye inside. `g3ddiff` keeps the
+eye-in-object words it seeds off the scatter's positions, which fall at
+0x20 or 0x60 within each 0x80.
+
+**Runways** (`0x42`, `0x44`): a record of 0x40 bytes (0x52 with bit 0 of
+`+0x1d`). It holds a position, a heading, a length (at most 25000) and a
+width (at most 600), markings, a number with an L, R or C designator,
+lights, a surface, the thresholds' displacements and overruns, and an
+approach-lighting record for each end. The record fills the built-in
+program at `0x2070f01c`: its object instruction, outline and surface
+texture (`runway0N.r8`). The program tests that the eye is above the
+runway and that its corners are in view, then calls back through `0x8c`
+into twelve hand-written routines (`0x206f24f9`..`0x206f38a3`):
+
+- the thresholds, with their displaced-threshold arrows;
+- the centreline dashes;
+- the touchdown, aiming-point and fixed-distance marks;
+- the side stripes, which go on from where the last frame left them;
+- the numbers, drawn from glyph triangles at `0x2070ec2a`;
+- the edge, threshold and touchdown-zone lights;
+- 0x72's approach lights for each end.
+
+A marking routine writes points to a list (`0x2070f25c`) and its marks to
+a byte list, then turns the marks into surfaces over table points from
+0xd3. The far end's markings are the near end's, turned end for end. Each
+bar is drawn as a quad near the eye and as two points further off, and
+dropped beyond the detail's range. That range is 25000 times the view's
+scale, times the window's `+0x84`. Retail details kept:
+
+- The colours (`0x206f32b8`) are read past the *address* of the record
+  pointer, 0x2070ebb4 (`lea` where `mov` was meant), so they are words of
+  G3D's own state.
+- A threshold's stripes step over their mirrors with a 16-bit add to di.
+- The touchdown marks divide by 600, which faults at a width of 600 and
+  is repaired by the host.
+- The surface word is indexed by the unclamped surface, so it reads on
+  into the glyph pointers (`retail_word()`).
 
 **Grids of ground** (`0x15`): columns, rows, cell sizes, origin and height
 range, then a texture word and a height a vertex. The box's eight corners
@@ -553,6 +696,27 @@ generator's own state (scene flags) must be set before it makes anything
 the other side's last scene left. One break is a proven equivalence:
 `sphere-part` (a partly-in sphere taken as wholly in), as both callers
 test only for out.
+
+Harness lessons from the last opcodes. Each one first showed up as a
+false difference:
+
+- **Memory outside the image differs, so the generator must not reach
+  it.** A runaway facet loop (0x27 relies on its points leaving ecx's high
+  half 0, and the earth, +0x2c, draws over those points) and a season that
+  a variable write had set high (a tile reads names by it) both read past
+  the image, where retail finds its own code and OpenFS98 finds something
+  else. The harness re-seeds the facet's points before a program when
+  they no longer qualify, and keeps variables off GLOBAL `+0x248` and
+  `+0xb60`.
+- **Retail rounds some addresses, not lengths.** 0x90 steps to an even
+  address. Once 0x19 made odd lengths possible, the generator's own step
+  for 0x90 had to round the address too.
+- **Harness state that one side changes must be reset before the other
+  side runs.** The window record's `+0x84` (the runways' detail range) is
+  the harness's, shared between the sides.
+- **Steering reads state at generation time**, so it holds only while
+  nothing earlier in the program has changed that state. For example, 0x72
+  turns the eye unless the words over the angles are clear.
 
 Left out as dead, with no reference in code or `.data`: `0x206e11c8` (a
 string copy), `0x206e11d8` (a per-axis step divided by `cx`), the

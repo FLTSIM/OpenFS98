@@ -75,9 +75,12 @@ make analysisdiff-run    # whole-module ANALYSIS, landing/manoeuvre/course -> 20
 make analysis-breaks     # ANALYSIS broken on purpose -> 103 breaks, 93 caught, 10 proven equivalent (~20 min)
 make controlsdiff-run    # whole-module CONTROLS: commands, joysticks, key bindings, force feedback, the dialog -> 20000 scenarios, 0 differ (~40 min)
 make controls-breaks     # CONTROLS broken on purpose -> 81 breaks, 78 caught, 3 proven equivalent (~20 min)
+make g3ddiff-run         # whole-module G3D, the 3D pipeline -> 20000 scenarios, 0 differ (~5 min)
+make g3d-breaks N=1000   # G3D broken on purpose -> G3D_BREAKS_RESULT
+make g3dmeshdiff-run     # the mesh compiler: instructions vs portable C, x87 and soft float -> 100000 polygons, 0 differ
 make difftest-run        # whole-module SLEW         -> 0/2000 vectors differ
 make ofstest-run         # in-process, via the host  -> passed 68, failed 0
-make smoke               # ACONTAIN, ADVDRV, ANALYSIS, ATC, BOOSTER, CHAIN, CONTROLS, DEMO, DYNAMIC, FACIL, FE, GLOBAL, LANDME, NUMERIC, REALITY, SLEW, SOUND, UTIL, WEATHERM, WINDOW, WINMSG installed -> 27/27, 95 gauges, PASS
+make smoke               # ACONTAIN, ADVDRV, ANALYSIS, ATC, BOOSTER, CHAIN, CONTROLS, DEMO, DYNAMIC, FACIL, FE, G3D, GLOBAL, LANDME, NUMERIC, REALITY, SLEW, SOUND, UTIL, WEATHERM, WINDOW, WINMSG installed -> 27/27, 95 gauges, PASS
 make util-trace          # which UTIL services the game calls, counted in-game
 ```
 
@@ -240,11 +243,24 @@ Two harness lessons: a fault that skips a cleanup leaves heap pointers whose
 values depend on the other side's leak (compare them as null or not), and a
 break "caught" by a harness artifact is not caught (every break run stopped
 at that artifact until it was fixed). See
-[docs/modules/controls.md](docs/modules/controls.md). Next come MULTIP
-(DirectPlay through COM, a worker thread) with MPCHAT behind it, then G3D.
-G3D's open question is settled: it supplies its own span routines (traced in
-the preflight), so HG2D can be a logging stub for it. PANELS waits on HG2D,
-and MAIN comes last before HG2D. The CHAIN ecx fix, proven in `chaindiff`,
+[docs/modules/controls.md](docs/modules/controls.md).
+
+**G3D is done, verified and running in-game**, and in `MODULES`: the
+scenery bytecode machine (all 148 opcodes), the transform and the four
+clippers, the depth queue, every Linkage service and the nine CHAIN
+callbacks (the scene built from FE's stream, the ground, the frame's draw).
+`make g3ddiff-run`: 20,000 scenarios, 0 differences, against stubs of HG2D
+(it supplies its own span routines, so HG2D can stay a logging stub), FE,
+CHAIN and the host, with retail UTIL and WINDOW. Retail's bugs are
+reproduced; its four crash-only bugs are fixed on purpose and listed in
+[docs/modules/g3d.md](docs/modules/g3d.md). The mesh compiler (`0x38`,
+x87 compiled C whose decisions turn on rounding) runs as retail's own
+instructions (`g3d_mesh.S`) on x86; `g3d_mesh.c` is its portable C over a
+software 80-bit float, checked against them (`make g3dmeshdiff-run`). Which
+x87 precision the game runs G3D under is not established; a native build
+has to set `g3d_mesh_precision` to match. Next comes MULTIP (in progress)
+with MPCHAT behind it. PANELS waits on HG2D, and MAIN comes last before
+HG2D. The CHAIN ecx fix, proven in `chaindiff`,
 is still open.
 
 FE's `+0x40` calling-convention break is now confirmed by `fediff`: the

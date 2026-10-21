@@ -107,6 +107,8 @@ else's 1997 build, and it should read that way.
 | `make realitydiff-run` | whole-module REALITY, crashes and damage: retail and OpenFS98 in turn through every crash gate, the countdown, the reload and the crash analysis (a stand-in for its dialog, retail UTIL and NUMERIC), the stress rolls and the cracked windscreen; HG2D's lines logged with their colour and view; compares the transcript, the whole `.data` image, the arena, GLOBAL and UTIL's and NUMERIC's state. `make reality-breaks` breaks it on purpose |
 | `make analysisdiff-run` | whole-module ANALYSIS, landing and manoeuvre analysis and course tracking: retail and OpenFS98 in turn over the frames, the landing thresholds, the compaction, the trail and all three dialogs (a stand-in for the dialog engine, retail UTIL and NUMERIC), with the register leftovers retail reads (CHAIN's, memset's, the CD MSVCRT memmove's) modelled; HG2D's lines and G3D's display list logged; compares the transcript, the whole `.data` image, the arena, GLOBAL and UTIL's and NUMERIC's state. `make analysis-breaks` breaks it on purpose |
 | `make controlsdiff-run` | whole-module CONTROLS: retail and OpenFS98 side by side over commands (through the dispatcher and CHAIN list 0xb), the axis, engine and pilot-event entries, the CHAIN frames, the joystick poll and watcher over scripted sticks, the key bindings, force feedback and the key-assignment dialog; the host's profile services passed through to fixture CFG files, models of its accelerator tables and joysticks, a DirectInput 5 stand-in and a stand-in for Options.DLL's dialog; compares GLOBAL, the whole `.data` image, the import-call transcript and the profile files. `make controls-breaks` breaks it on purpose |
+| `make g3ddiff-run` | whole-module G3D, the 3D pipeline: retail and OpenFS98 in turn over generated scenery programs (every opcode, with operands steered onto the boundaries they are compared with), the depth queue, the Linkage services and the CHAIN callbacks run frame after frame over FE's scene stream (stubs of FE, HG2D, CHAIN, WINDOW and the host; retail UTIL and WINDOW), the host's divide repair modelled; compares every import call, every register, the whole `.data` image, GLOBAL and the arena after every operation. 20,000 scenarios, 0 differ (~5 min). `make g3d-breaks` breaks it on purpose |
+| `make g3dmeshdiff-run` | the mesh compiler (`0x38`) three ways -- retail's instructions, the portable C on the x87, the C on its software 80-bit float -- over generated polygons under 24-, 53- and 64-bit precision: 100,000 polygons, 0 differ. `make g3ddiff-meshc-run` runs `g3ddiff` with the portable compiler in the module |
 | `make multipdiff-run` | current MULTIP checkpoint only: compare public slots `+0x24`..`+0x38` and `+0x20` enqueue against retail over six suites of 20,000 scenarios: queries, enqueue, send/drain/flush, receive/dequeue, DirectPlay loader/lifetime, and controlled worker lifecycles; this is not yet a whole-module result |
 | `make multip-breaks` | verify the transport harness catches forty-two deliberate mutations, using isolated DLLs in `/tmp`; send, receive, worker and DirectPlay slice targets are also available; crashes and fixture errors do not count |
 | `make demodiff-run` | whole-module DEMO: retail and OpenFS98 in turn over the CD's six videos and synthetic ones with every record class, recording, playback, instant replay and the four dialogs' callbacks (retail UTIL's catalogue, a stand-in for the host's dialog engine); faults compared as outcomes, runaway ops cut at a fixed count; compares the transcript, the whole `.data` image (code pointers through a learnt pairing), the arena, GLOBAL and the trees |
@@ -334,8 +336,11 @@ DirectPlay loader/interface lifetime each pass 20,000 differential scenarios.
 Session/lobby handling, message dispatch and remaining public entries are
 still pending. The
 restartable handoff and acceptance boundary are in
-[docs/modules/multip.md](docs/modules/multip.md). `MPCHAT` follows it, then
-`G3D`.
+[docs/modules/multip.md](docs/modules/multip.md). `MPCHAT` follows it.
+**`G3D` is done, verified and running in-game**: the whole bytecode machine,
+its depth queue, services and CHAIN callbacks, 20,000 `g3ddiff` scenarios
+with zero differences, and a portable C mesh compiler checked against
+retail's instructions (see [docs/modules/g3d.md](docs/modules/g3d.md)).
 
 Other useful work, in no particular order:
 
@@ -376,10 +381,10 @@ nothing in it imports anything interesting:
     ~~**`REALITY`** (4,822 bytes)~~ — done, verified and running in-game.
     ~~**`ANALYSIS`** (8,086 bytes)~~ — done, verified and running in-game.
     ~~**`CONTROLS`** (48,406 bytes)~~ — done, verified and running in-game.
+    ~~**`G3D`** (92,518 bytes)~~ — done, verified and running in-game.
     Round 9 of the [preflight](docs/preflight.md) surveyed what is left.
-    Next: `MULTIP` (43,318) with `MPCHAT` (3,104) behind it, then `G3D`
-    (92,518; G3D supplies its own span routines, so HG2D can be a logging
-    stub for it), `PANELS` (50,038) and `MAIN` (119,648).
+    Next: `MULTIP` (43,318, in progress) with `MPCHAT` (3,104) behind it,
+    `PANELS` (50,038) and `MAIN` (119,648).
 13. `HG2D` (390 KB, the 2D rasteriser) last. It is 26% of the project on its
    own.
 

@@ -7,13 +7,16 @@ opcodes share, a depth-sorted queue of objects, and its own built-in
 scenery (the world's land classes, coasts, runways, the sky). It draws
 through HG2D.
 
-**Status: in progress.** Stages 1 to 3 of the plan (at the end of this
-file) are done and verified: the image, the harness, the transform core,
-init and deinit, the interpreter and the 50 opcodes that draw nothing, the
-drawing core (the line and polygon clippers, the projection, points) with
-the dozen opcodes that use it directly, and the services that need nothing
-more (see *Progress*). See [../preflight.md](../preflight.md#g3d-id-14)
-for the survey that chose it.
+**Status: done, verified and running in-game.** Every opcode, every
+Linkage service, init, deinit and the nine CHAIN callbacks are
+transliterated (all 193 code addresses in the image map to a routine), and
+`make g3ddiff-run` compares the whole module with retail: **20,000
+scenarios, 0 differences** (about 4.5 minutes). The mesh compiler is
+retail's instructions on x86 and has a portable C version checked against
+them (`make g3dmeshdiff-run`, 100,000 polygons, 0 differences). G3D is in
+`MODULES`, and `make smoke` passes with it installed. See *Progress* for
+the stages, [../preflight.md](../preflight.md#g3d-id-14) for the survey
+that chose it.
 
 ## Shape
 
@@ -748,8 +751,9 @@ false difference:
   nothing earlier in the program has changed that state. For example, 0x72
   turns the eye unless the words over the angles are clear.
 
-**Stage 6: the CHAIN callbacks**, the nine init registers on seven lists,
-which make G3D's frame:
+**Stage 6: the CHAIN callbacks, verified**: 20,000 scenarios, 0
+differences, with the frames below in them. They are the nine init
+registers on seven lists, which make G3D's frame:
 
 | list | retail | what |
 | --- | --- | --- |
@@ -822,6 +826,27 @@ that fills the areas block to within a few bytes). Lessons:
 - **A break can exhaust the arena** (one that leaks a `0x40000` block a
   frame). Inside G3D that now ends the scenario as a fault would, rather
   than the run.
+- **What is made once a scenario must survive what is made each
+  operation.** Each program's generation filled the whole programs buffer
+  with random words round the models, so the libraries, the scene's pieces
+  and records, and the models' case defaults (read `0x20006` on) were
+  garbage after the first program -- the same garbage on both sides, so it
+  showed once in 20,000 scenarios, when a case jumped into the middle of
+  another model and its index reached memory below the image, mapped on
+  ours' side only. The fill now spares `0x10000..0x17000` and
+  `0x30000..0x37000`.
+- **Steering can undo steering.** A variable steered for a later
+  instruction could land on the eye or the view's matrix (GLOBAL
+  `+0xcdc..+0xcf9`) or `+0xd42`, which `0x36`'s landing had been worked
+  out from; its counter then went off past the program into process
+  memory. Those fields are no longer mapped as variables. Nor had stage
+  5's scenery opcodes (`0x3d`, `0x7f`, `0x42`/`0x44`, `0x72`, `0x49`, and
+  `0x63`'s libraries) been marked as moving the eye or turning the view,
+  which they do; they are now.
+
+List 3's season letter is read by GLOBAL `+0x248` without a bound, so a
+season past 3 reads on through the image, its pointers included, which
+`retail_byte()` gives as retail's.
 
 Left out as dead, with no reference in code or `.data`: `0x206e11c8` (a
 string copy), `0x206e11d8` (a per-axis step divided by `cx`), the

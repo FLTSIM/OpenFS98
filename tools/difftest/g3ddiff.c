@@ -3207,6 +3207,13 @@ static void emit_one(struct gen *g)
         g->p += 2;
         break;
     }
+    /* the scenery opcodes move the eye or turn the view (the tile's and
+     * the building's eye in the object, the approach lights' and runways'
+     * heading), and a library may hold any of them: nothing after them
+     * can count on the plain scene (0x36's landing) */
+    if (op == 0x3d || op == 0x7f || op == 0x42 || op == 0x44 || op == 0x72 || op == 0x49 ||
+        op == 0x63)
+        scene_plain = scene_steady = 0;
 }
 
 static void emit_block(struct gen *g, uint32_t n)

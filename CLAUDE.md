@@ -77,6 +77,9 @@ make controlsdiff-run    # whole-module CONTROLS: commands, joysticks, key bindi
 make controls-breaks     # CONTROLS broken on purpose -> 81 breaks, 78 caught, 3 proven equivalent (~20 min)
 make g3ddiff-run         # whole-module G3D, the 3D pipeline -> 20000 scenarios, 0 differ (~5 min)
 make g3d-breaks N=1000   # G3D broken on purpose -> 317 breaks, 279 caught, 7 proven equivalent, 31 missed (19 at N=4000; ~4 h)
+make panelsdiff-run      # whole-module PANELS through the CD's gauges -> 3000 scenarios, 0 differ (~15 min)
+make panelsunit-run      # PANELS's image routines alone -> 20000 cases each, 0 differ (~3 min)
+make panels-breaks       # PANELS broken on purpose -> 200 sampled, 164 caught, rest triaged in panels.md
 make g3dmeshdiff-run     # the mesh compiler: instructions vs portable C, x87 and soft float -> 100000 polygons, 0 differ
 make difftest-run        # whole-module SLEW         -> 0/2000 vectors differ
 make ofstest-run         # in-process, via the host  -> passed 68, failed 0
@@ -259,7 +262,7 @@ instructions (`g3d_mesh.S`) on x86; `g3d_mesh.c` is its portable C over a
 software 80-bit float, checked against them (`make g3dmeshdiff-run`). Which
 x87 precision the game runs G3D under is not established; a native build
 has to set `g3d_mesh_precision` to match. Next comes MULTIP (in progress)
-with MPCHAT behind it. PANELS waits on HG2D, and MAIN comes last before
+with MPCHAT behind it. PANELS is done (docs/modules/panels.md), and MAIN comes last before
 HG2D. The CHAIN ecx fix is done: OpenFS98's CHAIN enters callbacks with
 all of retail's registers and returns its ecx/edx, and `chaindiff` now
 compares them (see [docs/modules/chain.md](docs/modules/chain.md)).

@@ -1,0 +1,5 @@
+LIBRARY PANELS.DLL
+EXPORTS
+    Linkage DATA
+    ImportTable DATA
+    panels_unit DATA

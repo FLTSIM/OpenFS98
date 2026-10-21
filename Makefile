@@ -60,7 +60,7 @@ BASE_CONTROLS := 0x20670000
 BASE_G3D    := 0x206e0000
 BASE_MULTIP := 0x20850000
 
-MODULES := ACONTAIN ADVDRV ANALYSIS ATC BOOSTER CHAIN CONTROLS DEMO DYNAMIC FACIL FE G3D GLOBAL LANDME NUMERIC REALITY SLEW SOUND UTIL WEATHERM WINDOW WINMSG
+MODULES := ACONTAIN ADVDRV ANALYSIS ATC BOOSTER CHAIN CONTROLS DEMO DYNAMIC FACIL FE G3D GLOBAL LANDME NUMERIC PANELS REALITY SLEW SOUND UTIL WEATHERM WINDOW WINMSG
 
 # MULTIP is in progress and intentionally is not in MODULES yet.  Its
 # recovered portions are built explicitly and differential-tested below.
@@ -312,6 +312,28 @@ src/g3d/g3d_mesh.S: $(ORIG)/Modules/G3D.DLL tools/gen_g3d_mesh.py
 	@python3 tools/gen_g3d_mesh.py $< $@
 
 $(BIN)/g3d.res: src/g3d/g3d.rc
+	@mkdir -p $(BIN)
+	$(RC) $< -O coff -o $@
+
+# PANELS: its own image base (0x10000000, as retail's), and the MSVCRT and GDI
+# calls retail makes.
+BASE_PANELS := 0x10000000
+
+$(BIN)/PANELS.DLL: src/panels/panels.c src/panels/panels.h src/panels/panels.def \
+                   src/panels/panels_data.inc src/panels/panels_rdata.inc \
+                   src/panels/panels_pointers.inc $(BIN)/panels.res
+	@mkdir -p $(BIN)
+	$(CC) $(CFLAGS) -fno-delete-null-pointer-checks -fno-ipa-icf -Isrc/panels $(LDFLAGS) \
+	      -Wl,--image-base=$(BASE_PANELS) \
+	      -o $@ src/panels/panels.c $(BIN)/panels.res src/panels/panels.def \
+	      -lmsvcrt -lgdi32 -luser32 -lkernel32 -lgcc
+
+src/panels/panels_data.inc src/panels/panels_rdata.inc src/panels/panels_pointers.inc: \
+    $(ORIG)/Modules/PANELS.DLL tools/gen_panels_data.py
+	@python3 tools/gen_panels_data.py $< src/panels/panels_data.inc \
+	      src/panels/panels_rdata.inc src/panels/panels_pointers.inc
+
+$(BIN)/panels.res: src/panels/panels.rc
 	@mkdir -p $(BIN)
 	$(RC) $< -O coff -o $@
 
@@ -1036,6 +1058,50 @@ winmsg-breaks: winmsgdiff
 winmsgdiff-run: winmsgdiff
 	@cd $(DIFFDIR) && WINEDEBUG=-all timeout 3600 wine winmsgdiff.exe $(if $(N),$(N),20000)
 
+# PANELS, whole-module: retail and OpenFS98 driven through Linkage and CHAIN
+# over random scripts, against stubs of the host, GLOBAL, CHAIN, ACONTAIN,
+# MAIN, SOUND and WINDOW, the HG2D model, and the CD's own gauges.
+# N=... sets the scenario count, START=... the first.
+$(DIFFDIR)/panelsdiff.exe: tools/difftest/panelsdiff.c tools/difftest/hg2d_model.inc \
+                           tools/difftest/divfix.h
+	@mkdir -p $(DIFFDIR)
+	$(CC) -std=gnu99 -O1 -Wall -Wextra -DGAME_DIR='"..\\..\\game"' \
+	      -o $@ tools/difftest/panelsdiff.c -lgdi32 -luser32
+
+panelsdiff: $(DIFFDIR)/panelsdiff.exe $(BIN)/PANELS.DLL
+	@cp $(ORIG)/Modules/PANELS.DLL $(DIFFDIR)/PANELS_retail.dll
+	@cp $(BIN)/PANELS.DLL          $(DIFFDIR)/PANELS_ours.dll
+
+# PANELS's image routines one at a time (panelsdiff's unit mode): PANELS.DLL
+# built again with a table of them exported.
+$(DIFFDIR)/PANELS_unit.dll: src/panels/panels.c src/panels/panels.h src/panels/panels_unit.def \
+                            src/panels/panels_data.inc src/panels/panels_rdata.inc \
+                            src/panels/panels_pointers.inc $(BIN)/panels.res
+	@mkdir -p $(DIFFDIR)
+	$(CC) $(CFLAGS) -DPANELS_UNIT -fno-delete-null-pointer-checks -fno-ipa-icf -Isrc/panels $(LDFLAGS) \
+	      -Wl,--image-base=$(BASE_PANELS) \
+	      -o $@ src/panels/panels.c $(BIN)/panels.res src/panels/panels_unit.def \
+	      -lmsvcrt -lgdi32 -luser32 -lkernel32 -lgcc
+
+panelsunit: $(DIFFDIR)/panelsdiff.exe $(DIFFDIR)/PANELS_unit.dll
+	@cp $(ORIG)/Modules/PANELS.DLL $(DIFFDIR)/PANELS_retail.dll
+
+panelsunit-run: panelsunit
+	@cd $(DIFFDIR) && WINEDEBUG=-all timeout 3600 wine panelsdiff.exe unit $(if $(N),$(N),300) $(START)
+
+# A deliberately broken copy of panels.c as the harness's "ours" (for
+# tools/panels_breaks.py, which makes the copies and runs the harness).
+panels-break-build:
+	$(CC) $(CFLAGS) $(PANELS_BREAK_FLAGS) -fno-delete-null-pointer-checks -fno-ipa-icf -Isrc/panels $(LDFLAGS) \
+	      -Wl,--image-base=$(BASE_PANELS) -o $(PANELS_OUT) $(PANELS_SRC) $(BIN)/panels.res \
+	      $(PANELS_DEF) -lmsvcrt -lgdi32 -luser32 -lkernel32 -lgcc
+
+panels-breaks: panelsdiff panelsunit
+	@python3 tools/panels_breaks.py $(if $(N),$(N),150) $(if $(COUNT),$(COUNT),200) $(if $(SEED),$(SEED),1)
+
+panelsdiff-run: panelsdiff
+	@cd $(DIFFDIR) && WINEDEBUG=-all timeout 7200 wine panelsdiff.exe $(if $(N),$(N),200) $(START)
+
 # CHAIN, whole-module: both DLLs driven through Linkage over random scripts
 # whose callbacks re-enter the module.  N=... sets the scenario count.
 $(DIFFDIR)/chaindiff.exe: tools/difftest/chaindiff.c
@@ -1321,4 +1387,4 @@ smoke: all
 clean:
 	rm -rf $(BIN)
 
-.PHONY: multip-directplay-breaks multip-worker-breaks multip-breaks multip-receive-breaks multip-send-breaks all stage setup-map graph hostmap compare run trace trace-render trace-ddraw kill window-reset wm-unmanaged wm-managed vd-on vd-off mode8 mode16 ddraw-gdi ddraw-default smoke difftest difftest-run utildiff utildiff-run utildiff-portable numericdiff numericdiff-run chaindiff chaindiff-run atcdiff atcdiff-run weathermdiff weathermdiff-run acontaindiff acontaindiff-run sounddiff sounddiff-run dynamicdiff dynamicdiff-run fegriddiff fegriddiff-run fediff fediff-run fesldiff fesldiff-run boosterdiff boosterdiff-run demodiff demodiff-run windowdiff windowdiff-run g3ddiff g3ddiff-run multipdiff multipdiff-run g3d-break-build g3d-breaks g3dmeshdiff g3dmeshdiff-run g3ddiff-meshc-run hg2dmodeldiff-run window-breaks window-break-build winmsgdiff winmsgdiff-run winmsg-breaks winmsg-break-build realitydiff realitydiff-run reality-breaks reality-break-build analysisdiff analysisdiff-run analysis-breaks analysis-break-build controlsdiff controlsdiff-run controls-breaks controls-break-build advdrvdiff advdrvdiff-run advdrv-cover landmediff landmediff-run facildiff facildiff-run facildiff-fe-run ofstest ofstest-run ofstest-remove sehfix sehfix-install sehfix-remove sehfix-log util-trace install revert installed-name-of orig-module-of clean
+.PHONY: multip-directplay-breaks multip-worker-breaks multip-breaks multip-receive-breaks multip-send-breaks all stage setup-map graph hostmap compare run trace trace-render trace-ddraw kill window-reset wm-unmanaged wm-managed vd-on vd-off mode8 mode16 ddraw-gdi ddraw-default smoke difftest difftest-run utildiff utildiff-run utildiff-portable numericdiff numericdiff-run chaindiff chaindiff-run atcdiff atcdiff-run weathermdiff weathermdiff-run acontaindiff acontaindiff-run sounddiff sounddiff-run dynamicdiff dynamicdiff-run fegriddiff fegriddiff-run fediff fediff-run fesldiff fesldiff-run boosterdiff boosterdiff-run demodiff demodiff-run windowdiff windowdiff-run g3ddiff g3ddiff-run multipdiff multipdiff-run g3d-break-build g3d-breaks g3dmeshdiff g3dmeshdiff-run g3ddiff-meshc-run hg2dmodeldiff-run panelsdiff panelsdiff-run panelsunit panelsunit-run panels-breaks panels-break-build window-breaks window-break-build winmsgdiff winmsgdiff-run winmsg-breaks winmsg-break-build realitydiff realitydiff-run reality-breaks reality-break-build analysisdiff analysisdiff-run analysis-breaks analysis-break-build controlsdiff controlsdiff-run controls-breaks controls-break-build advdrvdiff advdrvdiff-run advdrv-cover landmediff landmediff-run facildiff facildiff-run facildiff-fe-run ofstest ofstest-run ofstest-remove sehfix sehfix-install sehfix-remove sehfix-log util-trace install revert installed-name-of orig-module-of clean

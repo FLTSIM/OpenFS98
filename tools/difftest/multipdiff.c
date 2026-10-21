@@ -491,6 +491,8 @@ int main(int argc, char **argv)
             return test_local(&retail, &ours, scenarios) != 0;
         if (strcmp(argv[2], "frame") == 0)
             return test_frame(&retail, &ours, scenarios) != 0;
+        if (strcmp(argv[2], "control_callback") == 0)
+            return test_control_callback(&retail, &ours, scenarios) != 0;
         if (strcmp(argv[2], "control_updates") == 0)
             return test_control_updates(&retail, &ours, scenarios) != 0;
         if (strcmp(argv[2], "state_messages") == 0)
@@ -608,6 +610,7 @@ int main(int argc, char **argv)
     bad += test_title_receive(&retail, &ours, scenarios);
     bad += test_state_messages(&retail, &ours, scenarios);
     bad += test_control_updates(&retail, &ours, scenarios);
+    bad += test_control_callback(&retail, &ours, scenarios);
     multip_test_context("workers", "unknown", 0);
     bad += test_workers(&retail, &ours, scenarios);
     return bad != 0;

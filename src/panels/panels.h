@@ -51,7 +51,7 @@ extern const uint8_t panels_rdata[PN_RDATA_SIZE];
 
 #define IMPORT(i)  M32(D + 8 * (i) + 4)
 #define HOST       IMPORT(0)
-#define G          IMPORT(1)
+#define GLOBAL     IMPORT(1)
 #define ACONTAIN   IMPORT(2)
 #define CHAIN      IMPORT(3)
 #define HG2D       IMPORT(4)
@@ -60,9 +60,9 @@ extern const uint8_t panels_rdata[PN_RDATA_SIZE];
 #define SOUND      IMPORT(7)
 #define WINDOW     IMPORT(8)
 
-#define G8(o)  M8(G + (o))
-#define G16(o) M16(G + (o))
-#define G32(o) M32(G + (o))
+#define G8(o)  M8(GLOBAL + (o))
+#define G16(o) M16(GLOBAL + (o))
+#define G32(o) M32(GLOBAL + (o))
 
 typedef uint32_t (FS98_STDCALL *f0)(void);
 typedef uint32_t (FS98_STDCALL *f1)(uint32_t);

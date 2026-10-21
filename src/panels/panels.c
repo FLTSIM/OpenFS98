@@ -59,6 +59,14 @@ static long double pn_fcos(long double x)
     return r;
 }
 
+/* fpatan: atan2(y, x) */
+static long double pn_fpatan(long double y, long double x)
+{
+    long double r;
+    __asm__ ("fpatan" : "=t" (r) : "0" (x), "u" (y) : "st(1)");
+    return r;
+}
+
 /* idiv of edx:eax by d, as retail does it (a quotient that overflows faults
  * into the host's divide repair, as retail's does) */
 static int32_t pn_idiv64(int32_t hi, uint32_t lo, int32_t d)
@@ -67,6 +75,36 @@ static int32_t pn_idiv64(int32_t hi, uint32_t lo, int32_t d)
     __asm__ volatile ("idivl %4" : "=a" (q), "=d" (r) : "a" (lo), "d" (hi), "rm" (d));
     (void)r;
     return q;
+}
+
+/* div and idiv of a 32-bit by a 32-bit as retail does them: a divisor that
+ * is zero faults into the host's divide repair, so the compiler must not
+ * be told it cannot happen */
+static uint32_t pn_div(uint32_t a, uint32_t b)
+{
+    uint32_t q, r;
+
+    __asm__ volatile ("divl %4" : "=a" (q), "=d" (r) : "a" (a), "d" (0), "rm" (b));
+    (void)r;
+    return q;
+}
+
+static int32_t pn_idiv(int32_t a, int32_t b)
+{
+    int32_t q, r;
+
+    __asm__ volatile ("cltd; idivl %3" : "=a" (q), "=&d" (r) : "a" (a), "rm" (b));
+    (void)r;
+    return q;
+}
+
+static int32_t pn_imod(int32_t a, int32_t b)
+{
+    int32_t q, r;
+
+    __asm__ volatile ("cltd; idivl %3" : "=a" (q), "=&d" (r) : "a" (a), "rm" (b));
+    (void)q;
+    return r;
 }
 
 /* imul's 64-bit product shifted down 16 (shrd), its low half */
@@ -176,10 +214,14 @@ static uint32_t FS98_STDCALL surface_convert(uint32_t e, uint32_t pair, uint32_t
                                              uint32_t flags);    /* 0x100060d0 */
 static void FS98_STDCALL blit(uint32_t dst, uint32_t src, uint32_t at_dst, uint32_t at_src,
                               uint32_t size, uint32_t flags);    /* 0x10006dc0 */
+static void failures_reset_one(uint32_t rec);                    /* 0x10008db0 */
 static void failures_reset(uint32_t list);                       /* 0x10009060 */
 static uint32_t failure_state(uint32_t list);                    /* 0x10009090 */
 static void trim(uint32_t s);                                    /* 0x100090d0 */
 static uint32_t token(uint32_t src, uint32_t dst, uint32_t delim);   /* 0x10009120 */
+static uint32_t resource_bitmap(uint32_t hmod, uint32_t id, uint32_t out, uint32_t el,
+                                uint32_t a5, uint32_t pt, uint32_t a7,
+                                uint32_t scaled);                /* 0x100091a0 */
 static uint32_t surfaces_free(uint32_t p);                       /* 0x10009400 */
 static void rotate(uint32_t pt, double angle, uint32_t out);     /* 0x10009460 */
 static uint32_t panel_children_reset(uint32_t e, uint32_t x);    /* 0x10009570 */
@@ -859,7 +901,7 @@ static uint32_t FS98_STDCALL panel_rebuild(uint32_t e, uint32_t ctx)
     s = R32(e, 0xc);
     R32(e, 8) = s;
     width = R32(e, 0x18);
-    R32(e, 0x1c) = (uint32_t)width * R32(bmp, 8) / R32(bmp, 4);
+    R32(e, 0x1c) = pn_div((uint32_t)width * R32(bmp, 8), R32(bmp, 4));
     RFL(e, 0x20) = FI(R32(w, 0x84)) / FI(R32(bmp, 4));
     RFL(e, 0x24) = FI(R32(w, 0x88)) / FI(R32(bmp, 8));
     RFL(e, 0x28) = FI(R32(w, 0x84)) / FI(width);
@@ -1475,7 +1517,7 @@ static void scale_24(uint32_t info, uint32_t bits, uint32_t dst)
 {
     int32_t dw = R32(dst, 4), dh = R32(dst, 8);
     int32_t sw = R32(info, 4), sh = R32(info, 8);
-    int32_t xs = sw / dw, ys = sh / dh, yr = sh % dh, xr = sw % dw;
+    int32_t xs = pn_idiv(sw, dw), ys = pn_idiv(sh, dh), yr = pn_imod(sh, dh), xr = pn_imod(sw, dw);
     uint32_t stride = ((sw + 1) * 3) & ~3u, step, src, row = bits, d;
     int32_t yacc = 0, xacc, k, r = dh - 1;
 
@@ -1515,7 +1557,7 @@ static void scale_8(uint32_t info, uint32_t bits, uint32_t dst)
     uint32_t pal = info + R32(info, 0);
     int32_t sw = R32(info, 4), sh = R32(info, 8);
     int32_t dw = R32(dst, 4), dh = R32(dst, 8);
-    int32_t xs = sw / dw, ys = sh / dh, yr = sh % dh, xr = sw % dw;
+    int32_t xs = pn_idiv(sw, dw), ys = pn_idiv(sh, dh), yr = pn_imod(sh, dh), xr = pn_imod(sw, dw);
     uint32_t stride = (sw + 3) & ~3u, step, src, row = bits, d;
     int32_t yacc = 0, xacc, k, r = dh - 1;
 
@@ -1570,8 +1612,8 @@ static void smooth_8(uint32_t info, uint32_t bits, uint32_t dst)
         ystep = 0x20000;
         x0 = 0x8000;
     } else {
-        xstep = ((sw << 16) - 0x10000) / (dw - 1);
-        ystep = ((sh << 16) - 0x10000) / (dh - 1);
+        xstep = pn_idiv((sw << 16) - 0x10000, dw - 1);
+        ystep = pn_idiv((sh << 16) - 0x10000, dh - 1);
         x0 = 0;
     }
     ypos = x0;
@@ -1642,8 +1684,8 @@ static void smooth_24(uint32_t info, uint32_t bits, uint32_t dst)
         ystep = 0x20000;
         x0 = 0x8000;
     } else {
-        xstep = ((sw << 16) - 0x10000) / (dw - 1);
-        ystep = ((sh << 16) - 0x10000) / (dh - 1);
+        xstep = pn_idiv((sw << 16) - 0x10000, dw - 1);
+        ystep = pn_idiv((sh << 16) - 0x10000, dh - 1);
         x0 = 0;
     }
     ypos = x0;
@@ -1713,8 +1755,8 @@ static void shrink_24(uint32_t info, uint32_t bits, uint32_t dst)
     uint32_t r, c;
 
     h_palette_copy(palette);
-    xs = ((int32_t)R32(info, 4) << 16) / (int32_t)dw;
-    ys = ((int32_t)R32(info, 8) << 16) / (int32_t)dh;
+    xs = pn_idiv((int32_t)R32(info, 4) << 16, (int32_t)dw);
+    ys = pn_idiv((int32_t)R32(info, 8) << 16, (int32_t)dh);
     inv = MUL16(xs, ys);
     inv = pn_idiv64(1, 0, inv);
     stride = ((R32(info, 4) + 1) * 3) & ~3u;
@@ -1760,9 +1802,9 @@ static void shrink_24(uint32_t info, uint32_t bits, uint32_t dst)
                     y = ny;
                 } while (yrem > 0x147);
             }
-            R = (int32_t)pr / (int32_t)n;
-            G = (int32_t)pg / (int32_t)n;
-            B = (int32_t)pb / (int32_t)n;
+            R = pn_idiv((int32_t)pr, (int32_t)n);
+            G = pn_idiv((int32_t)pg, (int32_t)n);
+            B = pn_idiv((int32_t)pb, (int32_t)n);
             if (R == 1 && G == 1 && B == 1) {
                 M8(out + 2) = 1;
                 M8(out) = 1;
@@ -1797,8 +1839,8 @@ static void shrink_8(uint32_t info, uint32_t bits, uint32_t dst)
     int32_t xs, ys, inv;
     uint32_t r, c;
 
-    xs = ((int32_t)R32(info, 4) << 16) / (int32_t)dw;
-    ys = ((int32_t)R32(info, 8) << 16) / (int32_t)dh;
+    xs = pn_idiv((int32_t)R32(info, 4) << 16, (int32_t)dw);
+    ys = pn_idiv((int32_t)R32(info, 8) << 16, (int32_t)dh);
     inv = MUL16(xs, ys);
     inv = pn_idiv64(1, 0, inv);
     stride = (R32(info, 4) + 3) & ~3u;
@@ -1845,9 +1887,9 @@ static void shrink_8(uint32_t info, uint32_t bits, uint32_t dst)
                     y = ny;
                 } while (yrem > 0x147);
             }
-            R = (int32_t)pr / (int32_t)n;
-            G = (int32_t)pg / (int32_t)n;
-            B = (int32_t)pb / (int32_t)n;
+            R = pn_idiv((int32_t)pr, (int32_t)n);
+            G = pn_idiv((int32_t)pg, (int32_t)n);
+            B = pn_idiv((int32_t)pb, (int32_t)n);
             if (R == 1 && G == 1 && B == 1) {
                 M8(out + 2) = 1;
                 M8(out) = 1;
@@ -1950,8 +1992,8 @@ static void shrink_8_to_8(uint32_t info, uint32_t bits, uint32_t dst, uint32_t b
     }
     dw = R16(dst, 4);
     dh = R16(dst, 8);
-    xs = ((int32_t)R32(info, 4) << 16) / (int32_t)dw;
-    ys = ((int32_t)R32(info, 8) << 16) / (int32_t)dh;
+    xs = pn_idiv((int32_t)R32(info, 4) << 16, (int32_t)dw);
+    ys = pn_idiv((int32_t)R32(info, 8) << 16, (int32_t)dh);
     if (xs == 0 || ys == 0)
         return;
     inv = pn_idiv64(1, 0, MUL16(xs, ys));
@@ -2037,9 +2079,9 @@ static void shrink_8_to_8(uint32_t info, uint32_t bits, uint32_t dst, uint32_t b
                     y = ny;
                 } while (yrem > 0x147);
             }
-            if ((int32_t)(nbk / n) > 0xe8) {
+            if ((int32_t)pn_div(nbk, n) > 0xe8) {
                 B = G = R = 0;
-            } else if ((int32_t)(ngr / n) > 0xe8) {
+            } else if ((int32_t)pn_div(ngr, n) > 0xe8) {
                 B = G = R = 1;
             } else {
                 if (back != 0 && sbk != 0) {
@@ -2104,8 +2146,8 @@ static void shrink_8_to_8_plain(uint32_t info, uint32_t bits, uint32_t dst, uint
     }
     dw = R16(dst, 4);
     dh = R16(dst, 8);
-    xs = ((int32_t)R32(info, 4) << 16) / (int32_t)dw;
-    ys = ((int32_t)R32(info, 8) << 16) / (int32_t)dh;
+    xs = pn_idiv((int32_t)R32(info, 4) << 16, (int32_t)dw);
+    ys = pn_idiv((int32_t)R32(info, 8) << 16, (int32_t)dh);
     if (xs == 0 || ys == 0)
         return;
     inv = pn_idiv64(1, 0, MUL16(xs, ys));
@@ -2180,9 +2222,9 @@ static void shrink_8_to_8_plain(uint32_t info, uint32_t bits, uint32_t dst, uint
                     y = ny;
                 } while (yrem > 0x147);
             }
-            if ((int32_t)(nbk / n) > 0x80) {
+            if ((int32_t)pn_div(nbk, n) > 0x80) {
                 B = G = R = 0;
-            } else if ((int32_t)(ngr / n) > 0x80) {
+            } else if ((int32_t)pn_div(ngr, n) > 0x80) {
                 B = G = R = 1;
             } else {
                 R = (uint8_t)(((sr >> 16) * (uint32_t)inv) >> 16);
@@ -2851,7 +2893,7 @@ static uint32_t FS98_STDCALL surface_over_free(uint32_t rec)
  * pointer, op 1 works its value out. */
 #define VAR_INIT(v) do { R32(v, 4) = 0; R32(v, 8) = 0x21; } while (0)
 #define VAL(v) RDB(v, 0xc)
-#define GD(o) MD(G + (o))
+#define GD(o) MD(GLOBAL + (o))
 
 /* the angle, in degrees, stepped into (0, 360] as retail steps it: by
  * stores above, in the x87 below */
@@ -3162,10 +3204,11 @@ static uint32_t FS98_STDCALL v_7ff0(uint32_t v, uint32_t op)
 
 /* 0x10008070 -- the active view's zoom (GLOBAL +0x11a0's view block: the
  * map's, or the mode's), in 1/64ths; nothing without a view.  For a mode
- * past 4 retail scales the op's slot, 1. */
+ * past 4 retail scales the variable's own address (its first argument's
+ * slot, which it reads for the op's). */
 static uint32_t FS98_STDCALL v_8070(uint32_t v, uint32_t op)
 {
-    uint32_t w, x = op;
+    uint32_t w, x = v;
 
     if (op == 0) {
         VAR_INIT(v);
@@ -3392,7 +3435,7 @@ static uint32_t FS98_STDCALL var_init(uint32_t v)
         return 0;
     }
     R32(v, 4) = p + VT(id, 4);
-    if (VT(id, 0) == G)
+    if (VT(id, 0) == GLOBAL)
         R32(v, 4) = M32(p + VT(id, 4));
     R32(v, 8) = VT(id, 8);
     return VT(id, 8);
@@ -3493,3 +3536,2280 @@ static void FS98_STDCALL named_clear(void)
         p = D32(0x10010e88);
     }
 }
+
+/* 0x10008db0 -- one failure record {key, ?, flag pointer}: keys 1..19 point
+ * the record at that failure's byte in GLOBAL and set its bit in GLOBAL's
+ * flags; key 0 and keys above 19 clear the pointer; a negative key leaves
+ * the record alone.  Keys 13..16 share one byte (13 sets nothing). */
+static void failures_reset_one(uint32_t rec)
+{
+    static const struct { uint16_t at, flags; uint8_t bits; } f[19] = {
+        { 0xb6a, 0xb02, 0x10 }, { 0xb6b, 0xb02, 0x08 }, { 0xb71, 0xb02, 0x01 },
+        { 0xb73, 0xb02, 0x04 }, { 0xb64, 0xb04, 0x04 }, { 0xb65, 0xb04, 0x40 },
+        { 0xb66, 0xb05, 0x01 }, { 0xb67, 0xb04, 0x80 }, { 0xb68, 0xb04, 0x08 },
+        { 0xb6c, 0xb02, 0x02 }, { 0xb6d, 0xb05, 0x02 }, { 0xb69, 0xb04, 0x20 },
+        { 0xb70, 0,     0x00 }, { 0xb70, 0xb04, 0x01 }, { 0xb70, 0xb04, 0x02 },
+        { 0xb70, 0xb04, 0x03 }, { 0xb6f, 0xb04, 0x10 }, { 0xb72, 0xb05, 0x04 },
+        { 0xb6e, 0xb05, 0x08 },
+    };
+    uint32_t key = R32(rec, 0);
+
+    if (key == 0 || (int32_t)key >= 0x14) {
+        R32(rec, 8) = 0;
+        return;
+    }
+    if (key - 1 > 0x12)
+        return;
+    R32(rec, 8) = GLOBAL + f[key - 1].at;
+    if (f[key - 1].flags != 0)
+        G8(f[key - 1].flags) |= f[key - 1].bits;
+}
+
+/* 0x10009060 */
+static void failures_reset(uint32_t list)
+{
+    if (list == 0 || R32(list, 0) == 0)
+        return;
+    do {
+        failures_reset_one(list);
+        list += 0xc;
+    } while (R32(list, 0) != 0);
+}
+
+/* 0x10009090 -- a failure list's state: the first record whose pointer
+ * names a byte of 2 gives 4, of 1 gives that record's +4; else 0 */
+static uint32_t failure_state(uint32_t list)
+{
+    uint32_t p;
+
+    if (list == 0 || R32(list, 8) == 0)
+        return 0;
+    p = R32(list, 8);
+    for (;;) {
+        if (R8(p, 0) == 2)
+            return 4;
+        if (R8(p, 0) == 1)
+            return R32(list, 4);
+        p = R32(list, 0x14);
+        list += 0xc;
+        if (p == 0)
+            return 0;
+    }
+}
+
+/* 0x100090d0 -- strip a string's leading blanks and tabs in place and its
+ * trailing blanks, tabs and commas.  An empty result reads one byte before
+ * the string, as retail does, and strips from there if that is blank. */
+static void trim(uint32_t s)
+{
+    uint32_t in, out;
+    uint8_t c;
+
+    if (s == 0)
+        return;
+    in = s;
+    while ((c = R8(in, 0)) == 0x20 || c == 0x09)
+        in++;
+    out = s;
+    c = R8(in, 0);
+    if (c != 0) {
+        do {
+            R8(out, 0) = c;
+            c = R8(in, 1);
+            out++;
+            in++;
+        } while (c != 0);
+    }
+    for (;;) {
+        R8(out, 0) = 0;
+        c = R8(out, (uint32_t)-1);
+        out--;
+        if (c != 0x20 && c != 0x09 && c != 0x2c)
+            return;
+    }
+}
+
+/* 0x10009120 -- split off a token: src is trimmed, then up to `delim` is
+ * copied (trimmed) into dst and the rest's address returned; with no delim
+ * all of it goes to dst and 0 comes back */
+static uint32_t token(uint32_t src, uint32_t dst, uint32_t delim)
+{
+    uint32_t at, from, to;
+
+    trim(src);
+    if (src == 0)
+        return 0;
+    at = ADDR(strchr((const char *)(uintptr_t)src, (int)(delim & 0xff)));
+    if (at == 0) {
+        h_strcpy(dst, src);
+        trim(dst);
+        return 0;
+    }
+    if (dst == 0)
+        return at + 1;
+    to = dst;
+    for (from = src; from != at; from++)
+        R8(to++, 0) = R8(from, 0);
+    R8(to, 0) = 0;
+    trim(dst);
+    return at + 1;
+}
+
+/* 0x100091a0 -- make the surface for a bitmap resource: find IDB `id` in
+ * `hmod`, work out the size the gauge's scale gives it (and the scale
+ * itself, kept in the gauge's header when it has none) and hand it to
+ * surface_from_bitmap.  The resource 0x30 higher, when there is one and the
+ * panel is narrow (< 700), supplies the scale instead.  `pt`, when given, is
+ * an {x, y} moved and scaled to match.  A bitmap that is not 8 or 24 bits,
+ * or that fails, gets a blank surface of the size. */
+static uint32_t resource_bitmap(uint32_t hmod, uint32_t id, uint32_t out, uint32_t g,
+                                uint32_t a5, uint32_t pt, uint32_t a7, uint32_t scaled)
+{
+    uint32_t type = R32(R32(g, 0x3c), 0x80);
+    uint32_t info, wide = 0, high = g;    /* retail reuses arg 4's slot for the height */
+    long double sx;
+    float sy;
+    HRSRC res;
+
+    res = FindResourceA((HMODULE)(uintptr_t)hmod, MAKEINTRESOURCEA(id & 0xffff), RT_BITMAP);
+    info = P(LockResource(LoadResource((HMODULE)(uintptr_t)hmod, res)));
+    if (scaled == 0) {
+        sx = RF(0x1000e124);
+        sy = 1.0f;
+        wide = 0x3f800000;
+    } else {
+        if (R32(g, 0x30) == 0)
+            R32(g, 0x30) = FTOL(FIU(R32(g, 0x2c)) * FI(R32(info, 8)) / FI(R32(info, 4)));
+        wide = FTOL(FIU(R32(g, 0x2c)) * RFL(R32(g, 0x40), 0x28));
+        high = FTOL(FIU(R32(g, 0x30)) * RFL(R32(g, 0x40), 0x2c));
+        if (!(RFL(g, 0x34) < RF(0x1000e120) || RFL(g, 0x34) > RF(0x1000e120))) {
+            RFL(g, 0x34) = (float)(FIU(wide) / FI(R32(info, 4)));
+            RFL(g, 0x38) = (float)(FIU(high) / FI(R32(info, 8)));
+        }
+        sx = RFL(g, 0x34);
+        sy = RFL(g, 0x38);
+        if ((int32_t)R32(R32(g, 0x3c), 0x84) < 0x2bc) {
+            res = FindResourceA((HMODULE)(uintptr_t)hmod,
+                                MAKEINTRESOURCEA((id + 0x30) & 0xffff), RT_BITMAP);
+            if (res != 0) {
+                info = P(LockResource(LoadResource((HMODULE)(uintptr_t)hmod, res)));
+                sx = FIU(wide) / FI(R32(info, 4));
+                sy = (float)(FIU(high) / FI(R32(info, 8)));
+            }
+        }
+    }
+    if (pt != 0) {
+        long double x = FI(R32(pt, 0)), y;
+        uint32_t nx = FTOL(x * RFL(g, 0x34) - RD(0x1000e128)) + R32(g, 0x44);
+
+        y = FI(R32(pt, 4));
+        R32(pt, 0) = nx;
+        R32(pt, 4) = FTOL(y * RFL(g, 0x38) - RD(0x1000e128)) + R32(g, 0x48);
+    }
+    if (info == 0)
+        return 0;
+    if (R16(info, 0xe) == 0x18 || R16(info, 0xe) == 8) {
+        wide = FTOL(FI(R32(info, 4)) * sx);
+        high = FTOL(FI(R32(info, 8)) * sy);
+        surface_from_bitmap(info, 0, (int32_t)wide, (int32_t)high, out + 4, a5, pt, a7);
+    }
+    if (R32(R32(out, 4), 0) == 1) {
+        R32(out, 0) = R32(out, 4);
+        return R32(out, 4);
+    }
+    return h_surface_new(out, wide, high, type);
+}
+
+/* 0x10009400 -- free a surface group {a, b, c, d}: b is a itself when only
+ * one was made */
+static uint32_t surfaces_free(uint32_t p)
+{
+    h_surface_free(R32(p, 0));
+    if (R32(p, 4) != R32(p, 0))
+        h_surface_free(R32(p, 4));
+    h_surface_free(R32(p, 8));
+    h_surface_free(R32(p, 0xc));
+    R32(p, 0) = R32(p, 4) = R32(p, 8) = R32(p, 0xc) = 0;
+    return 0;
+}
+
+/* 0x10009460 -- rotate the {x, y} at pt by `angle` degrees (put in 1..360)
+ * about the origin into out, rounding away from zero by .99.  Retail keeps
+ * the first coordinate's sine and cosine at x87 precision and the second's
+ * at double. */
+static void rotate(uint32_t pt, double angle, uint32_t out)
+{
+    long double a = angle, x, y, s, c, X;
+    double sd, cd, xd, yd, Yd;
+
+    if (a > RD(0x1000e0a8))
+        do
+            a -= RD(0x1000e0a8);
+        while (a > RD(0x1000e0a8));
+    if (a < RD(0x1000e130))
+        do
+            a -= RD(0x1000e0b8);
+        while (a < RD(0x1000e130));
+    a *= RD(0x1000e138);
+    x = FI(R32(pt, 0));
+    y = FI(R32(pt, 4));
+    s = pn_fsin(a);
+    c = pn_fcos(a);
+    sd = (double)s;
+    cd = (double)c;
+    xd = (double)x;
+    yd = (double)y;
+    X = c * xd - s * yd;
+    Yd = (double)((long double)cd * yd + (long double)sd * xd);
+    R32(out, 0) = FTOL(X > RD(0x1000e0b0) ? X - RD(0x1000e140) : X - RD(0x1000e148));
+    R32(out, 4) = FTOL((long double)Yd > RD(0x1000e0b0) ? (long double)Yd - RD(0x1000e140)
+                                                      : (long double)Yd - RD(0x1000e148));
+}
+
+/* 0x10009570 */
+static uint32_t panel_children_reset(uint32_t e, uint32_t x)
+{
+    (void)x;
+    h_list_reset(e + 0x30);
+    return 0;
+}
+
+/* 0x10009590 -- the flags a panel raises in GLOBAL: 1 and 2 */
+static void dirty_set(uint32_t flags)
+{
+    if (flags & 1)
+        G32(0xb10) = 1;
+    if (flags & 2)
+        G32(0xb14) = 1;
+}
+
+/* 0x100095c0 -- a gauge walk: set which situation the gauges run in (D32
+ * 0x10010e8c) from GLOBAL +0x288's byte, then, for a gauge whose window is
+ * shown, call its header's +0x18 and +0x20 */
+static uint32_t FS98_STDCALL gauges_situation(uint32_t p, uint32_t x)
+{
+    uint32_t g = R32(p, 0), hdr;
+    uint32_t v = 0;
+    int set = 1;
+
+    (void)x;
+    switch (G8(0x288)) {
+    case 0: case 1: case 2: case 3: case 4: case 5:
+        v = G8(0x288);
+        break;
+    case 6: v = 6 + 2 * (G8(0x375) != 1); break;
+    case 7: v = 7 + 2 * (G8(0x375) != 1); break;
+    case 8:  v = 0xa; break;
+    case 9:  v = 0xb; break;
+    case 10: v = 0xc; break;
+    case 11: v = 0xd; break;
+    case 12: v = 0xe + (G8(0x376) != 1); break;
+    case 13: v = 0x10; break;
+    case 14: v = 0x11 + (G32(0x378) != 1); break;
+    case 15: v = 0x13; break;
+    case 16: v = 0x14; break;
+    case 17: v = 0x15; break;
+    case 18: set = 0; break;
+    case 19: case 20: case 21: case 22: case 23: case 24:
+    case 25: case 26: case 27: case 28: case 29: case 30:
+        v = G8(0x288) + 3;              /* 0x16..0x21 */
+        break;
+    default:
+        set = 0;
+        break;
+    }
+    if (set)
+        D32(0x10010e8c) = v;
+    hdr = R32(g, 0x18);
+    if (R32(R32(hdr, 0x3c), 8) & 0x80000000)
+        CALL(hdr, 0x18, f0)();
+    hdr = R32(g, 0x18);
+    if (R32(R32(hdr, 0x3c), 8) & 0x80000000)
+        CALL(hdr, 0x20, f0)();
+    return 0;
+}
+
+/* 0x10009860 -- list 2 (every frame) */
+static uint32_t FS98_STDCALL cb_frame(uint32_t a, uint32_t b)
+{
+    (void)a; (void)b;
+    if (D32(0x10010e90) == 0)
+        h_list_walk(GAUGE_LIST, 0, gauges_situation);
+    return 0;
+}
+
+/* 0x10009890 -- a gauge walk: header +0x14, then +0x18 */
+static uint32_t FS98_STDCALL gauge_walk_update(uint32_t p, uint32_t x)
+{
+    (void)x;
+    CALL(R32(R32(p, 0), 0x18), 0x14, f0)();
+    CALL(R32(R32(p, 0), 0x18), 0x18, f0)();
+    return 0;
+}
+
+/* 0x100098b0 -- a gauge walk: header +0x1c (2) */
+static uint32_t FS98_STDCALL gauge_walk_refresh(uint32_t p, uint32_t x)
+{
+    (void)x;
+    CALL(R32(R32(p, 0), 0x18), 0x1c, f1)(2);
+    return 0;
+}
+
+/* 0x100098d0 -- a panel walk: redraw the panel's window to its 0xf7-filled
+ * surface from the panel's bitmap and invalidate the whole of it */
+static uint32_t FS98_STDCALL panel_walk_redraw(uint32_t p, uint32_t x)
+{
+    uint32_t local[2], w, bmp;
+
+    (void)x;
+    w = R32(p, 4);
+    bmp = R32(p, 8);
+    local[0] = R32(p, 8);
+    local[1] = R32(p, 0xc);
+    surface_convert(p, ADDR(local), DA(0x10010e60), 0);
+    h_memset(R32(w, 0x98), 0xf7, R32(w, 0x94));
+    blit(w + 0x80, bmp, DA(0x10010e60), DA(0x10010e60), bmp + 4, 1);
+    if (R8(R32(HG2D, 0x90), 0) != 0xa)
+        R32(R32(p, 4), 8) |= 0x200;
+    else
+        R32(R32(p, 4), 8) &= ~0x200u;
+    D32(0x10025570) = 0;
+    D32(0x10025574) = 0;
+    D32(0x10025578) = R32(R32(p, 8), 4);
+    D32(0x1002557c) = R32(R32(p, 8), 8);
+    h_window_invalidate(R32(p, 4), DA(0x10025570));
+    return 0;
+}
+
+/* 0x100099b0 -- a gauge walk: header +0x20 */
+static uint32_t FS98_STDCALL gauge_walk_close(uint32_t p, uint32_t x)
+{
+    (void)x;
+    CALL(R32(R32(p, 0), 0x18), 0x20, f0)();
+    return 0;
+}
+
+/* 0x100099d0 -- list 1 (a new flight): once, redraw everything */
+static uint32_t FS98_STDCALL cb_reset(uint32_t a, uint32_t b)
+{
+    (void)a; (void)b;
+    if (D32(0x10010e90) == 0)
+        return 0;
+    h_busy(1);
+    D8(0x10025565) = G8(0xcbb);
+    h_list_walk(GAUGE_LIST, 0, gauge_walk_update);
+    h_list_walk(GAUGE_LIST, 0, gauge_walk_refresh);
+    h_list_walk(PANEL_LIST, 0, panel_walk_redraw);
+    h_list_walk(GAUGE_LIST, 0, gauge_walk_close);
+    if (!(G8(0xc46) & 4))
+        G16(0xc3e) = 0;
+    D32(0x10010e90) = 0;
+    h_busy(0);
+    return 0;
+}
+
+/* 0x10009b60 -- list 3 (engines): when GLOBAL's flag 4 is up, trim the
+ * heading by what the engines' pull gives */
+static uint32_t FS98_STDCALL cb_engines(uint32_t a, uint32_t b)
+{
+    long double t;
+
+    (void)a; (void)b;
+    if (!(G8(0xc46) & 4))
+        return 0;
+    t = RD(0x1000e158) - FI(100 - (uint32_t)G16(0x372)) * RD(0x1000e150);
+    t = t * FI((uint32_t)G16(0xc44) - 0x32);
+    t = t * RD(0x1000e160);
+    t = t * FI((uint32_t)G16(0xc1a));
+    t = t * RD(0x1000e168);
+    G16(0xc3e) = (uint16_t)(G16(0xc3e) + (uint16_t)FTOL(t));
+    return 0;
+}
+
+/* 0x10009be0 -- list 0xc (commands 0x10172..0x1017a): toggle that window */
+static uint32_t FS98_STDCALL cb_command(uint32_t m, uint32_t p)
+{
+    uint32_t w;
+
+    (void)p;
+    if (m < 0x10172 || m > 0x1017a)
+        return 0;
+    w = WN(0x8c, f2)(m + 0xffff008fu, 2);
+    if (w == 0)
+        return 0;
+    if (R32(w, 8) & 0x80000000)
+        window_hide(w);
+    else
+        window_show(w);
+    return 0;
+}
+
+/* 0x10009c30, 0x10009c60 */
+static void chain_register(void)
+{
+    CH(0x18, f2)(2, ADDR(cb_frame));
+    CH(0x18, f2)(1, ADDR(cb_reset));
+    CH(0x18, f2)(0xc, ADDR(cb_command));
+}
+
+static void chain_unregister(void)
+{
+    CH(0x1c, f2)(2, ADDR(cb_frame));
+    CH(0x1c, f2)(1, ADDR(cb_reset));
+    CH(0x1c, f2)(0xc, ADDR(cb_command));
+}
+
+/* 0x10009cb0 -- a situation record: 0x320 sets the saved mode byte, 0x321
+ * adds a saved window layout (ten dwords) */
+static void situation_record(uint32_t rec)
+{
+    uint32_t src = R32(rec, 0xc), dst, i;
+
+    if (R32(rec, 0) == 0x320) {
+        G8(0x280) = R8(src, 0);
+        return;
+    }
+    if (R32(rec, 0) != 0x321)
+        return;
+    dst = h_list_add(LAYOUT_LIST);
+    D32(0x10010e94) = 1;
+    for (i = 0; i < 10; i++)
+        R32(dst, 4 * i) = R32(src, 4 * i);
+}
+
+/* 0x10009d30 -- save the situation: each of the windows of kind 2 as a
+ * 0x321 record (its rectangle and saved rectangle, its shown/maximised
+ * bits, its identity), then GLOBAL's mode byte as a 0x320 */
+static void layouts_save(void)
+{
+    uint32_t count, array, i, w, rec[10], mode;
+
+    WN(0x80, f3)(ADDR(&array), ADDR(&count), 2);
+    for (i = 0; i < count; i++) {
+        w = M32(array + 4 * i);
+        rec[0] = R32(w, 0x20);
+        rec[1] = R32(w, 0x24);
+        rec[2] = R32(w, 0x28);
+        rec[3] = R32(w, 0x2c);
+        rec[4] = R32(w, 0x50);
+        rec[5] = R32(w, 0x54);
+        rec[6] = R32(w, 0x58);
+        rec[7] = R32(w, 0x5c);
+        rec[8] = R32(w, 8) & 0xc0000001u;
+        rec[9] = window_ident(w);
+        MN(0x5c, f2)(0x321, 0x28);
+        MN(0x60, f3)(ADDR(rec), 0x28, 0);
+        MN(0x64, f0)();
+    }
+    h_free(ADDR(&array));
+    mode = G8(0x280);
+    MN(0x5c, f2)(0x320, 4);
+    MN(0x60, f3)(ADDR(&mode), 4, 0);
+    MN(0x64, f0)();
+}
+
+/* 0x10009a90 -- list 0x14 (the situation): 0x20 reset the layouts, 0x22
+ * a record, 0x23 save; 0x33, 0x34 and 0x70 hold the gauges back (D32
+ * 0x10010e90); 0x37 unloads the panels */
+static uint32_t FS98_STDCALL cb_situation(uint32_t m, uint32_t p)
+{
+    switch (m) {
+    case 0x20: h_list_reset(LAYOUT_LIST); break;
+    case 0x22: situation_record(p); break;
+    case 0x23: layouts_save(); break;
+    case 0x33: case 0x34: case 0x70: D32(0x10010e90) = 1; break;
+    case 0x37: panels_unload(); break;
+    default: break;
+    }
+    return 0;
+}
+
+/* ---- the element types ---------------------------------------------------------------
+ *
+ * An element is 0x50 bytes at least, made by its type's op 5c (the type in
+ * +0).  +0x04 the bitmap's resource, +0x08/+0x0c where it sits, +0x20 its
+ * gauge's header, +0x24 its parent, +0x2c its failures, +0x30 its flags
+ * (bit 0 transparent, bit 1 keeps what it covers, 0x40000000 off,
+ * 0x80000000 drawn), +0x34 dirty flags, +0x3c the bitmap's surface group and
+ * +0x4c the saved background; the types add their own after those.  The
+ * handlers' returns are whatever retail left in eax; they return 0 here. */
+
+typedef double (FS98_STDCALL *pn_fd1)(uint32_t);
+typedef double (FS98_STDCALL *pn_fd2)(double);
+
+/* ---- type 0: a still bitmap ---- */
+
+/* 0x10009e70 -- op 40: load the bitmap (2: also its background's surface) */
+static uint32_t FS98_STDCALL e_9e70(uint32_t e, uint32_t hmod)
+{
+    uint32_t keep = 0, img;
+
+    if (R32(e, 0x24) != 0)
+        return 0;
+    dirty_set(R32(e, 0x34));
+    failures_reset(R32(e, 0x2c));
+    if (!(R32(e, 0x30) & 0x10) && (R32(e, 0x30) & 1) && R32(e, 0x24) == 0)
+        keep = R32(R32(R32(e, 0x20), 0x40), 0xc);
+    resource_bitmap(hmod, R32(e, 4), e + 0x3c, R32(e, 0x20), keep, e + 8, R32(e, 0x30), 1);
+    if (R32(e, 0x30) & 2) {
+        img = R32(e, 0x3c);
+        h_surface_new(e + 0x4c, R32(img, 4), R32(img, 8), R32(img, 0));
+    } else {
+        R32(e, 0x4c) = 0;
+    }
+    R32(e, 0x30) &= 0x7fffffff;
+    return 0;
+}
+
+/* 0x10009f20 -- the no-op of every type that has nothing to do */
+static uint32_t FS98_STDCALL e_9f20(uint32_t e)
+{
+    (void)e;
+    return 0;
+}
+
+/* 0x10009f30 -- op 4c: the bitmap converted for the window's surface type */
+static uint32_t FS98_STDCALL e_9f30(uint32_t e, uint32_t a)
+{
+    (void)a;
+    if (failure_state(R32(e, 0x2c)) == 4) {
+        mask_make(e + 0x3c);
+        R32(e, 0x30) &= 0x7fffffff;
+        return 0;
+    }
+    surface_convert(R32(R32(e, 0x20), 0x40), e + 0x3c, e + 8, R32(e, 0x30));
+    R32(e, 0x30) &= 0x7fffffff;
+    return 0;
+}
+
+/* 0x10009f80 -- op 50: draw it (saving what it covers first, for flag 2);
+ * an element that is off, and drawn, is taken down instead */
+static uint32_t FS98_STDCALL e_9f80(uint32_t e)
+{
+    uint32_t f = R32(e, 0x30), img, win;
+
+    if (f & 0x40000000) {
+        if (f & 0x80000000)
+            tree_op17e0(e);
+        return 0;
+    }
+    if (R32(e, 0x40) == 0 || (f & 0x80000000))
+        return 0;
+    tree_op17e0(e);
+    win = R32(R32(e, 0x20), 0x3c);
+    if (R32(e, 0x30) & 2)
+        blit(R32(e, 0x4c), win + 0x80, DA(0x10010e60), e + 8, R32(e, 0x4c) + 4,
+             R32(e, 0x30) & ~1u);
+    img = R32(e, 0x3c);
+    blit(R32(R32(e, 0x20), 0x3c) + 0x80, img, e + 8, DA(0x10010e60), img + 4, R32(e, 0x30));
+    D32(0x10025570) = R32(e, 8);
+    D32(0x10025578) = R32(img, 4) + R32(e, 8);
+    D32(0x10025574) = R32(e, 0xc);
+    D32(0x1002557c) = R32(img, 8) + R32(e, 0xc);
+    h_window_invalidate(R32(R32(e, 0x20), 0x3c), DA(0x10025570));
+    R32(e, 0x30) |= 0x80000000;
+    return 0;
+}
+
+/* 0x1000a070 -- op 17e0: take it down, putting back what it covered */
+static uint32_t FS98_STDCALL e_a070(uint32_t e)
+{
+    uint32_t f = R32(e, 0x30), keep;
+
+    R32(e, 0x30) = f & 0x7fffffff;
+    if ((f & 0x80000000) && (R32(e, 0x30) & 2) && R32(e, 0x4c) != 0) {
+        keep = R32(e, 0x4c);
+        blit(R32(R32(e, 0x20), 0x3c) + 0x80, keep, e + 8, DA(0x10010e60), keep + 4,
+             R32(e, 0x30) & ~1u);
+        D32(0x10025570) = R32(e, 8);
+        D32(0x10025578) = R32(R32(e, 0x4c), 4) + R32(e, 8);
+        D32(0x10025574) = R32(e, 0xc);
+        D32(0x1002557c) = R32(R32(e, 0x4c), 8) + R32(e, 0xc);
+        h_window_invalidate(R32(R32(e, 0x20), 0x3c), DA(0x10025570));
+    }
+    return 0;
+}
+
+/* 0x1000a110 -- op 58: free its surfaces */
+static uint32_t FS98_STDCALL e_a110(uint32_t e)
+{
+    surfaces_free(e + 0x3c);
+    if (R32(e, 0x4c) != 0)
+        h_surface_free(R32(e, 0x4c));
+    return 0;
+}
+
+/* 0x1000a140 -- op 5c: a new element of type 0 */
+static uint32_t e_a140(void)
+{
+    uint32_t e;
+
+    h_alloc(1, 0x50, ADDR(&e), 0);
+    R32(e, 0) = 0;
+    return e;
+}
+
+/* ---- type 1: a needle ----
+ * +0x18/+0x1c the pivot, +0x68/+0x6c the other point, +0x70 a table of
+ * {x, y, value, angle}s (0x18 bytes each, +0x74 of them) that turns a
+ * variable's value into an angle, +0x78 the most it moves a frame, +0x58
+ * .. +0x64 functions run on the value on its way, +0x3c the variable
+ * (var_init'd), +0x48 its value, +0x7c the angle, +0x84 and +0x8c the
+ * angle after the functions and the one shown; +0xbc the needle's bitmap,
+ * +0xcc/+0xd0 a 256-square surface and the host's handle for it, +0xd4
+ * what it covers. */
+
+/* 0x1000a170 -- op 40 */
+static uint32_t FS98_STDCALL e_a170(uint32_t e, uint32_t hmod)
+{
+    uint32_t img, g, tbl, i, off, n, mem;
+    int32_t a, b, c, d;
+    float sx, sy;
+    dirty_set(R32(e, 0x34));
+    failures_reset(R32(e, 0x2c));
+    resource_bitmap(hmod, R32(e, 4), e + 0xbc, R32(e, 0x20), 0, 0, R32(e, 0x30), 0);
+    g = R32(e, 0x20);
+    sx = RFL(g, 0x34);
+    sy = RFL(g, 0x38);
+    h_surface_new(e + 0xcc, 0x100, 0x100, 1);
+    if (R32(e, 0x30) & 2) {
+        img = R32(e, 0xbc);
+        h_surface_new(e + 0xd4, R32(img, 4), R32(img, 8), R32(img, 0));
+    } else {
+        R32(e, 0xd4) = 0;
+    }
+    var_init(e + 0x3c);
+    img = R32(e, 0xbc);
+    a = (int32_t)R32(e, 0x18);
+    b = (int32_t)R32(e, 0x1c);
+    R32(e, 0x9c) = R32(img, 4) - a;
+    c = -b;                       /* edx */
+    a = -a;                       /* eax */
+    R32(e, 0xa0) = c;
+    R32(e, 0xa4) = a;
+    R32(e, 0xa8) = c;
+    R32(e, 0xac) = a;
+    R32(e, 0xb0) = R32(img, 8) - b;
+    R32(e, 0xb4) = R32(img, 4) - R32(e, 0x18);
+    R32(e, 0xb8) = R32(img, 8) - R32(e, 0x1c);
+    d = (int32_t)R32(e, 0x9c);
+    if (d == a) {
+        R32(e, 0x9c) = d - 1;
+        R32(e, 0xa4) = a + 1;
+    }
+    R32(e, 0xa0) = c - 1;
+    d = (int32_t)R32(e, 0xb4);
+    R32(e, 0xa8) = c + 1;
+    if (a == d) {
+        R32(e, 0xac) = a - 1;
+        R32(e, 0xb4) = d + 1;
+    }
+    a = (int32_t)R32(e, 0xb0);
+    d = (int32_t)R32(e, 0xb8);
+    if (a == d) {
+        R32(e, 0xb0) = a - 1;
+        R32(e, 0xb8) = d + 1;
+    }
+    R32(e, 8) = FTOL(FI(R32(e, 8)) * sx);
+    R32(e, 0xc) = FTOL(FI(R32(e, 0xc)) * sy);
+    R32(e, 0x18) = R32(g, 0x44) + R32(e, 8);
+    R32(e, 0x1c) = R32(g, 0x48) + R32(e, 0xc);
+    R32(e, 0x68) = FTOL(FI(R32(e, 0x68)) * sx) - R32(e, 0x18);
+    R32(e, 0x6c) = FTOL(FI(R32(e, 0x6c)) * sy) - R32(e, 0x1c);
+    R32(e, 0x30) &= 0x7fffffff;
+    tbl = R32(e, 0x70);
+    n = R32(e, 0x74);
+    if (tbl != 0 && n != 0 && (int32_t)n > 0) {
+        for (i = 0, off = 0; (int32_t)i < (int32_t)R32(e, 0x74); i++, off += 0x18) {
+            tbl = R32(e, 0x70);
+            R32(tbl + off, 0) = FTOL(FI(R32(tbl + off, 0)) * sx - RD(0x1000e170));
+            tbl = R32(e, 0x70);
+            R32(tbl + off, 4) = FTOL(FI(R32(tbl + off, 4)) * sy - RD(0x1000e170));
+            tbl = R32(e, 0x70);
+            R32(tbl + off, 0) = R32(tbl + off, 0) - R32(e, 8);
+            tbl = R32(e, 0x70);
+            R32(tbl + off, 4) = R32(tbl + off, 4) - R32(e, 0xc);
+            tbl = R32(e, 0x70);
+            mem = tbl + off;
+            RDB(mem, 0x10) = (double)pn_fpatan(FI(R32(mem, 4)), FI(R32(mem, 0)));
+            RDB(mem, 0x10) = (double)((long double)RDB(mem, 0x10) * RD(0x1000e178));
+            if ((long double)RDB(mem, 0x10) < RD(0x1000e180))
+                RDB(mem, 0x10) = (double)((long double)RDB(mem, 0x10) - RD(0x1000e188));
+            if (off != 0 && (long double)RDB(mem, 0x10) < (long double)RDB(mem, 0x10 - 0x18))
+                RDB(mem, 0x10) = (double)((long double)RDB(mem, 0x10) - RD(0x1000e188));
+        }
+    }
+    e_a470(e);
+    R32(e, 0x8c) = R32(e, 0x84);
+    R32(e, 0x90) = R32(e, 0x88);
+    return 0;
+}
+
+/* 0x1000a470 -- op 48: the variable's value to the needle's angle: the
+ * variable, the function at +0x58 over it, the one at +0x5c over that, the
+ * table's interpolation (either direction), the one at +0x60, then the
+ * function at +0x64 or the rate limit at +0x78 */
+static uint32_t FS98_STDCALL e_a470(uint32_t e)
+{
+    uint32_t k = failure_state(R32(e, 0x2c)), tbl, n, i;
+    uint32_t fn;
+    long double v, t, p;
+    int32_t lim, q;
+
+    if (k == 4 || k == 1)
+        return 0;
+    if (k == 2) {
+        R32(e, 0x48) = 0;
+        R32(e, 0x4c) = 0;
+    } else {
+        var_lookup(e + 0x3c);
+    }
+    fn = R32(e, 0x58);
+    if (fn != 0)
+        RDB(e, 0x48) = ((pn_fd1)(uintptr_t)fn)(e + 0x3c);
+    fn = R32(e, 0x5c);
+    if (fn != 0) {
+        RDB(e, 0x7c) = ((pn_fd2)(uintptr_t)fn)(RDB(e, 0x48));
+    } else {
+        R32(e, 0x7c) = R32(e, 0x48);
+        R32(e, 0x80) = R32(e, 0x4c);
+    }
+    tbl = R32(e, 0x70);
+    if (tbl != 0) {
+#define TV(i) ((long double)RDB(tbl + 0x18 * (i), 8))
+#define TA(i) ((long double)RDB(tbl + 0x18 * (i), 0x10))
+        if (TV(1) > TV(0)) {
+            n = R32(e, 0x74);
+            for (i = 1; (int32_t)i < (int32_t)n; i++) {
+                v = RDB(e, 0x7c);
+                if (v < TV(i - 1))
+                    continue;
+                if (!(v > TV(i))) {
+                    v = RDB(e, 0x7c);
+                    t = (v - TV(i - 1)) / (TV(i) - TV(i - 1));
+                    RDB(e, 0x7c) = (double)t;
+                    p = t * (TA(i) - TA(i - 1));
+                    RDB(e, 0x7c) = (double)p;
+                    RDB(e, 0x7c) = (double)(p + TA(i - 1));
+                    break;
+                }
+            }
+        } else {
+            int32_t c = (int32_t)R32(e, 0x74) - 2;
+
+            for (; c >= 0; c--) {
+                v = RDB(e, 0x7c);
+                if (v < TV(c + 1))
+                    continue;
+                if (!(v > TV(c))) {
+                    v = RDB(e, 0x7c);
+                    t = (v - TV(c + 1)) / (TV(c) - TV(c + 1));
+                    RDB(e, 0x7c) = (double)t;
+                    p = t * (TA(c) - TA(c + 1));
+                    RDB(e, 0x7c) = (double)p;
+                    RDB(e, 0x7c) = (double)(p + TA(c + 1));
+                    break;
+                }
+            }
+        }
+#undef TV
+#undef TA
+    }
+    fn = R32(e, 0x60);
+    if (fn != 0) {
+        RDB(e, 0x84) = ((pn_fd2)(uintptr_t)fn)(RDB(e, 0x7c));
+    } else {
+        R32(e, 0x84) = R32(e, 0x7c);
+        R32(e, 0x88) = R32(e, 0x80);
+    }
+    lim = (int32_t)R32(e, 0x78);
+    if (lim > 0 && (R32(e, 0x30) & 0x80000000)) {
+        v = (long double)RDB(e, 0x8c) - (long double)RDB(e, 0x84);
+        q = (int32_t)FTOL(v);
+        q = q < 0 ? -q : q;
+        if (q > lim) {
+            if (v < RD(0x1000e180))
+                RDB(e, 0x8c) = (double)((long double)lim + RDB(e, 0x8c));
+            else
+                RDB(e, 0x8c) = (double)((long double)RDB(e, 0x8c) - (long double)lim);
+        } else {
+            R32(e, 0x8c) = R32(e, 0x84);
+            R32(e, 0x90) = R32(e, 0x88);
+        }
+        return 0;
+    }
+    fn = R32(e, 0x64);
+    if (fn != 0) {
+        RDB(e, 0x8c) = ((pn_fd2)(uintptr_t)fn)(RDB(e, 0x84));
+    } else {
+        R32(e, 0x8c) = R32(e, 0x84);
+        R32(e, 0x90) = R32(e, 0x88);
+    }
+    return 0;
+}
+
+/* 0x1000a6f0 -- op 4c: the needle's bitmap converted, then drawn into the
+ * 256-square surface and the host's handle for that re-made */
+static uint32_t FS98_STDCALL e_a6f0(uint32_t e, uint32_t a)
+{
+    uint32_t img = e + 0xbc;
+
+    (void)a;
+    if (failure_state(R32(e, 0x2c)) == 4)
+        mask_make(img);
+    else
+        surface_convert(R32(R32(e, 0x20), 0x40), img, e + 8, R32(e, 0x30));
+    HG(0xb0, f2)(R32(e, 0xd0), 1);
+    blit(R32(e, 0xcc), R32(img, 0), DA(0x10010e60), DA(0x10010e60), R32(img, 0) + 4, 0);
+    R32(e, 0xd0) = HG(0xac, f2)(R32(e, 0xcc), 0);
+    R32(e, 0x30) &= 0x7fffffff;
+    return 0;
+}
+
+/* 0x1000a790 -- op 50: draw the needle.  Its four corners (relative to the
+ * pivot) are turned by the angle, scaled and placed; the bounding box is
+ * what it covers (saved first for flag 2); the four go to HG2D as a
+ * textured quad of the bitmap, the corners held inside the window (the
+ * second corner's x has no lower bound, as in retail). */
+static uint32_t FS98_STDCALL e_a790(uint32_t e)
+{
+    uint32_t g = R32(e, 0x20), win;
+    float sx = RFL(g, 0x34), sy = RFL(g, 0x38);
+    int32_t rx, ry, p[4][2], minx, miny, maxx, maxy, size[2], at[2], i, k, lim;
+    uint32_t f;
+    double ang;
+
+    if (R32(e, 0xbc) == 0)
+        return 0;
+    f = R32(e, 0x30);
+    if (f & 0x40000000) {
+        if (f & 0x80000000)
+            tree_op17e0(e);
+        return 0;
+    }
+    ang = RDB(e, 0x8c);
+    {
+        int32_t o[2];
+
+        rotate(e + 0x68, ang, ADDR(o));
+        rx = o[0];
+        ry = o[1];
+    }
+    if ((R32(e, 0x30) & 0x80000000) && (int32_t)R32(e, 0x94) == rx && (int32_t)R32(e, 0x98) == ry)
+        return 0;
+    R32(e, 0x94) = rx;
+    R32(e, 0x98) = ry;
+    rotate(e + 0x9c, ang, ADDR(p[0]));
+    rotate(e + 0xa4, ang, ADDR(p[1]));
+    rotate(e + 0xac, ang, ADDR(p[2]));
+    rotate(e + 0xb4, ang, ADDR(p[3]));
+    for (i = 0; i < 4; i++) {
+        p[i][0] = FTOL(FI(p[i][0]) * sx - RD(0x1000e170)) + R32(e, 0x18);
+        p[i][1] = FTOL(FI(p[i][1]) * sy - RD(0x1000e170)) + R32(e, 0x1c);
+    }
+    minx = maxx = p[0][0];
+    miny = maxy = p[0][1];
+    for (i = 1; i < 4; i++) {
+        if (p[i][0] < minx) minx = p[i][0];
+        if (p[i][1] < miny) miny = p[i][1];
+        if (p[i][0] > maxx) maxx = p[i][0];
+        if (p[i][1] > maxy) maxy = p[i][1];
+    }
+    tree_op17e0(e);
+    win = R32(R32(e, 0x20), 0x3c);
+    if (R32(e, 0x30) & 2) {
+        size[0] = maxx - minx + 1;
+        size[1] = maxy - miny + 1;
+        at[0] = minx;
+        at[1] = miny;
+        HC(0x1bc, f3)(R32(e, 0xd4), size[0], size[1]);
+        blit(R32(e, 0xd4), R32(R32(e, 0x20), 0x3c) + 0x80, DA(0x10010e60), ADDR(at),
+             ADDR(size), R32(e, 0x30) & ~1u);
+        R32(e, 0xd8) = at[0];
+        R32(e, 0xdc) = at[1];
+    }
+    /* x of the corners 0, 2, 3 and y of all four are held in the window; x of
+     * corner 1 only against its far edge */
+    win = R32(R32(e, 0x20), 0x3c);
+    for (k = 0; k < 4; k++) {
+        lim = (int32_t)R32(win, 0x84);
+        if (k != 1 && p[k][0] < 0)
+            p[k][0] = 0;
+        if (p[k][0] >= lim)
+            p[k][0] = lim - 1;
+    }
+    for (k = 0; k < 4; k++) {
+        lim = (int32_t)R32(win, 0x88);
+        if (p[k][1] < 0)
+            p[k][1] = 0;
+        if (p[k][1] >= lim)
+            p[k][1] = lim - 1;
+    }
+    G32(0xc8c) = R32(e, 0xd0);
+    G16(0xcb6) = 1;
+    G32(0xd4c) = 0;
+    G16(0xca0) = (R32(e, 0x30) & 1) ? 1 : 0;
+    G32(0xc14) = G32(0xc10);
+    G32(0x2f0) = 0xffffffff;
+    win = R32(R32(e, 0x20), 0x3c);
+    HG(0x48, f6)(win, (uint32_t)p[0][0] << 16, (uint32_t)p[0][1] << 16, 0x10000,
+                 R32(R32(e, 0xbc), 4) << 16, 0);
+    win = R32(R32(e, 0x20), 0x3c);
+    HG(0x48, f6)(win, (uint32_t)p[1][0] << 16, (uint32_t)p[1][1] << 16, 0x10000, 0, 0);
+    win = R32(R32(e, 0x20), 0x3c);
+    HG(0x48, f6)(win, (uint32_t)p[2][0] << 16, (uint32_t)p[2][1] << 16, 0x10000, 0,
+                 R32(R32(e, 0xbc), 8) << 16);
+    win = R32(R32(e, 0x20), 0x3c);
+    HG(0x48, f6)(win, (uint32_t)p[3][0] << 16, (uint32_t)p[3][1] << 16, 0x10000,
+                 R32(R32(e, 0xbc), 4) << 16, R32(R32(e, 0xbc), 8) << 16);
+    HG(0x4c, f1)(R32(R32(e, 0x20), 0x3c) + 0x80);
+    D32(0x10025578) = maxx;
+    D32(0x10025570) = minx;
+    D32(0x1002557c) = maxy;
+    D32(0x10025574) = miny;
+    h_window_invalidate(R32(R32(e, 0x20), 0x3c), DA(0x10025570));
+    R32(e, 0x30) |= 0x80000000;
+    return 0;
+}
+
+/* 0x1000acf0 -- op 17e0: take it down, putting back what it covered */
+static uint32_t FS98_STDCALL e_acf0(uint32_t e)
+{
+    uint32_t f = R32(e, 0x30), keep;
+
+    R32(e, 0x30) = f & 0x7fffffff;
+    if ((f & 0x80000000) && (R32(e, 0x30) & 2) && R32(e, 0xd4) != 0) {
+        keep = R32(e, 0xd4);
+        blit(R32(R32(e, 0x20), 0x3c) + 0x80, keep, e + 0xd8, DA(0x10010e60), keep + 4,
+             R32(e, 0x30) & ~1u);
+        D32(0x10025570) = R32(e, 0xd8);
+        D32(0x10025578) = R32(R32(e, 0xd4), 4) + R32(e, 0xd8);
+        D32(0x10025574) = R32(e, 0xdc);
+        D32(0x1002557c) = R32(R32(e, 0xd4), 8) + R32(e, 0xdc);
+        h_window_invalidate(R32(R32(e, 0x20), 0x3c), DA(0x10025570));
+    }
+    return 0;
+}
+
+/* 0x1000adb0 -- op 58 */
+static uint32_t FS98_STDCALL e_adb0(uint32_t e)
+{
+    HG(0xb0, f2)(R32(e, 0xd0), 1);
+    surfaces_free(e + 0xbc);
+    h_surface_free(R32(e, 0xcc));
+    if (R32(e, 0xd4) != 0)
+        h_surface_free(R32(e, 0xd4));
+    return 0;
+}
+
+/* 0x1000ae10 -- op 5c: a new element of type 1 (0xe0 bytes) */
+static uint32_t e_ae10(void)
+{
+    uint32_t e;
+
+    h_alloc(1, 0xe0, ADDR(&e), 0);
+    R32(e, 0) = 1;
+    return e;
+}
+
+/* ---- type 2: a string of digits ----
+ * Up to three variables (+0x3c, +0x58, +0x74, 0x1c bytes each; values at
+ * +0x48, +0x64, +0x80, the last drawn at +0x90, +0x98, +0xa0), a function on
+ * each (+0xa8..+0xb0) and one over the first (+0xb4) that makes the text
+ * (+0xb8, +0x124 digits).  It is drawn by GDI into a DIB section (+0xe8, in
+ * the memory DC +0xdc) one digit to a +0x126-wide cell, the digits from
+ * +0x128 to +0x12a in the second colour (+0xd8) -- the range the table at
+ * +0x12c gives for the situation (D32 0x10010e8c) -- and the DIB's bits
+ * (+0xc8, a surface_over record) blitted into the window. */
+
+#define HGDI(x) ((void *)(uintptr_t)(x))
+
+/* 0x1000ae40 -- op 40 */
+static uint32_t FS98_STDCALL e_ae40(uint32_t e, uint32_t hmod)
+{
+    uint32_t g = R32(e, 0x20), bits = 0, i, v, dc, font, n, win;
+    float sx = RFL(g, 0x34), sy = RFL(g, 0x38);
+    int32_t h;
+    RECT rc;
+
+    (void)hmod;
+    dirty_set(R32(e, 0x34));
+    failures_reset(R32(e, 0x2c));
+    R16(e, 0x12a) = 0xffff;
+    R16(e, 0x128) = 0xffff;
+    R32(e, 8) = FTOL(FI(R32(e, 8)) * sx) + R32(g, 0x44);
+    R32(e, 0xc) = FTOL(FI(R32(e, 0xc)) * sy) + R32(g, 0x48);
+    R32(e, 0xc0) = FTOL(FI(R32(e, 0xc0)) * sx);
+    R32(e, 0xc4) = FTOL(FI(R32(e, 0xc4)) * sy);
+    for (i = 0, v = e + 0x3c; i < 3; i++, v += 0x1c)
+        var_init(v);
+    win = R32(g, 0x3c);
+    R32(e, 0xe8) = dib_new(R32(win, 0x80), R32(e, 0xc0), R32(e, 0xc4), ADDR(&bits),
+                           R32(e, 0x30));
+    dc = P(CreateCompatibleDC(NULL));
+    R32(e, 0xdc) = dc;
+    R32(e, 0xec) = P(SelectObject(HGDI(dc), HGDI(R32(e, 0xe8))));
+    if (R32(e, 0xdc) != 0) {
+        D32(0x10010ea0) = 0;
+        D32(0x10010ea4) = 0;
+        D32(0x10010ea8) = R32(e, 0xc0);
+        D32(0x10010eac) = R32(e, 0xc4);
+        SetBkMode(HGDI(R32(e, 0xdc)), 1);
+        SetBkColor(HGDI(R32(e, 0xdc)), R32(e, 0xd4));
+        SetTextColor(HGDI(R32(e, 0xdc)), R32(e, 0xd0));
+        R32(e, 0xf0) = P(CreateSolidBrush(R32(e, 0xd4)));
+        R32(e, 0xf4) = P(SelectObject(HGDI(R32(e, 0xdc)), HGDI(R32(e, 0xf0))));
+        h = (int32_t)R32(e, 0xc4);
+        n = R16(e, 0x124);
+        h_alloc(1, 4 * n + 1, e + 0xb8, 0);
+        if (R32(e, 0xb8) == 0)
+            return 0;
+        i = 0;
+        if (R16(e, 0x124) > 0)
+            do
+                M8(R32(e, 0xb8) + i++) = 0x30;
+            while ((int32_t)i < (int32_t)R16(e, 0x124));
+        M8(R32(e, 0xb8) + i) = 0;
+        /* shrink the font until the digits fit */
+        i = (uint32_t)-h;
+        rc.left = rc.top = 0;
+        rc.right = rc.bottom = 0;
+        do {
+            rc.left = rc.top = 0;
+            if (R32(e, 0xe4) != 0)
+                SelectObject(HGDI(R32(e, 0xdc)), HGDI(R32(e, 0xe4)));
+            if (R32(e, 0xe0) != 0)
+                DeleteObject(HGDI(R32(e, 0xe0)));
+            font = P(CreateFontA((int)i, 0, 0, 0, (int)R32(e, 0x118), 0, 0, 0, M8(e + 0x11c),
+                                 0, 0, 0, 0, (LPCSTR)(uintptr_t)(e + 0xf8)));
+            R32(e, 0xe0) = font;
+            if (font == 0)
+                break;
+            R32(e, 0xe4) = P(SelectObject(HGDI(R32(e, 0xdc)), HGDI(font)));
+            DrawTextA(HGDI(R32(e, 0xdc)), (LPCSTR)(uintptr_t)R32(e, 0xb8), -1, &rc,
+                      R32(e, 0x120) | 0x400);
+            h--;
+            i++;
+            if ((int32_t)R32(e, 0xc0) >= rc.right)
+                break;
+        } while (h > 1);
+        R16(e, 0x126) = (uint16_t)pn_idiv64((int32_t)R32(e, 0xc0) >> 31, R32(e, 0xc0),
+                                            (int32_t)R16(e, 0x124));
+        M8(R32(e, 0xb8)) = 0;
+        PatBlt(HGDI(R32(e, 0xdc)), 0, 0, (int)R32(e, 0xc0), (int)R32(e, 0xc4), 0xf00021);
+    }
+    surface_over(e + 0xc8, R32(e, 0xc0), R32(e, 0xc4), R32(win, 0x80), ADDR(&bits));
+    if (R32(e, 0x30) & 2) {
+        i = R32(e, 0xc8);
+        h_surface_new(e + 0xcc, R32(i, 4), R32(i, 8), R32(i, 0));
+    } else {
+        R32(e, 0xcc) = 0;
+    }
+    R32(e, 0x30) &= 0x7fffffff;
+    return 0;
+}
+
+/* 0x1000b1a0 -- op 48: the three variables, each through its function, the
+ * first then through the one over it */
+static uint32_t FS98_STDCALL e_b1a0(uint32_t e)
+{
+    uint32_t k = failure_state(R32(e, 0x2c)), i, fn;
+
+    if (k == 4 || k == 1)
+        return 0;
+    for (i = 0; i < 3; i++) {
+        uint32_t var = e + 0x3c + 0x1c * i;
+
+        if (k == 2) {
+            R32(var, 0xc) = 0;
+            R32(var, 0x10) = 0;
+        } else {
+            var_lookup(var);
+        }
+        fn = R32(e, 0xa8 + 4 * i);
+        if (fn != 0)
+            RDB(var, 0xc) = ((pn_fd1)(uintptr_t)fn)(var);
+    }
+    fn = R32(e, 0xb4);
+    if (fn != 0)
+        RDB(e, 0x48) = ((pn_fd2)(uintptr_t)fn)(RDB(e, 0x48));
+    return 0;
+}
+
+/* 0x1000b250 -- op 4c: a blanked element (4) is off, else on */
+static uint32_t FS98_STDCALL e_b250(uint32_t e, uint32_t a)
+{
+    (void)a;
+    if (failure_state(R32(e, 0x2c)) == 4)
+        R32(e, 0x30) |= 0x40000000;
+    else
+        R32(e, 0x30) &= 0xbfffffff;
+    return 0;
+}
+
+/* 0x1000b280 -- op 50: draw it when a value, or the situation, has changed */
+static uint32_t FS98_STDCALL e_b280(uint32_t e)
+{
+    uint32_t f = R32(e, 0x30), tbl, sit, idx, k, i, n, bg, text;
+    int32_t from, to;
+
+    if (f & 0x40000000) {
+        if (f & 0x80000000)
+            tree_op17e0(e);
+        return 0;
+    }
+    for (i = 0; i < 3; i++) {
+        long double was = RDB(e, 0x90 + 8 * i), now = RDB(e, 0x48 + 0x1c * i);
+
+        if (was < now || was > now)
+            break;
+    }
+    sit = D32(0x10010e8c);
+    if ((f & 0x80000000) && i == 3) {
+        if (R32(e, 0x12c) == 0)
+            return 0;
+        if (R32(e, 0x130) == sit)
+            return 0;
+    }
+    tbl = R32(e, 0x12c);
+    if (tbl != 0) {
+        k = R32(tbl, 0);
+        idx = 0;
+        if (k != 0) {
+            uint32_t p = tbl;
+
+            for (;;) {
+                if (k == sit) {
+                    R16(e, 0x128) = R16(tbl, 12 * idx + 4);
+                    R16(e, 0x12a) = R16(tbl, 12 * idx + 8);
+                    break;
+                }
+                k = R32(p, 0xc);
+                p += 0xc;
+                idx++;
+                if (k == 0)
+                    break;
+            }
+        }
+        if (R32(tbl, 12 * idx) == 0) {
+            R16(e, 0x128) = 0xffff;
+            R16(e, 0x12a) = 0xffff;
+        }
+    }
+    tree_op17e0(e);
+    if (R32(e, 0x30) & 2)
+        blit(R32(e, 0xcc), R32(R32(e, 0x20), 0x3c) + 0x80, DA(0x10010e60), e + 8,
+             R32(e, 0xcc) + 4, R32(e, 0x30) & ~1u);
+    if (R32(e, 0xdc) != 0) {
+        RECT *rc = (RECT *)(uintptr_t)DA(0x10010ea0);
+
+        D32(0x10010ea0) = 0;
+        D32(0x10010ea4) = 0;
+        D32(0x10010ea8) = R32(R32(e, 0xc8), 4);
+        D32(0x10010eac) = R32(R32(e, 0xc8), 8);
+        FillRect(HGDI(R32(e, 0xdc)), rc, HGDI(R32(e, 0xf0)));
+        n = R16(e, 0x124);
+        D32(0x10010ea0) = R32(R32(e, 0xc8), 4) - n * R16(e, 0x126);
+        D32(0x10010ea8) = D32(0x10010ea0) + R16(e, 0x126);
+        if (R16(e, 0x124) != 0) {
+            text = R32(e, 0xb8);
+            for (i = 0; M8(text) != 0; i++, text++) {
+                from = (int16_t)R16(e, 0x128);
+                to = (int16_t)R16(e, 0x12a);
+                if ((int32_t)i >= from && (int32_t)i <= to)
+                    SetTextColor(HGDI(R32(e, 0xdc)), R32(e, 0xd8));
+                else
+                    SetTextColor(HGDI(R32(e, 0xdc)), R32(e, 0xd0));
+                DrawTextA(HGDI(R32(e, 0xdc)), (LPCSTR)(uintptr_t)text, 1, rc, 0x25);
+                D32(0x10010ea0) = D32(0x10010ea0) + R16(e, 0x126);
+                D32(0x10010ea8) = D32(0x10010ea8) + R16(e, 0x126);
+                if ((int32_t)(i + 1) >= (int32_t)R16(e, 0x124))
+                    break;
+            }
+        }
+    }
+    bg = R32(e, 0xc8);
+    blit(R32(R32(e, 0x20), 0x3c) + 0x80, bg, e + 8, DA(0x10010e60), bg + 4, R32(e, 0x30) & ~1u);
+    D32(0x10025570) = R32(e, 8);
+    D32(0x10025578) = R32(R32(e, 0xc8), 4) + R32(e, 8);
+    D32(0x10025574) = R32(e, 0xc);
+    D32(0x1002557c) = R32(R32(e, 0xc8), 8) + R32(e, 0xc);
+    h_window_invalidate(R32(R32(e, 0x20), 0x3c), DA(0x10025570));
+    for (i = 0; i < 3; i++) {
+        R32(e, 0x90 + 8 * i) = R32(e, 0x48 + 0x1c * i);
+        R32(e, 0x94 + 8 * i) = R32(e, 0x4c + 0x1c * i);
+    }
+    R32(e, 0x130) = D32(0x10010e8c);
+    R32(e, 0x30) |= 0x80000000;
+    return 0;
+}
+
+/* 0x1000b580 -- op 17e0: take it down, putting back what it covered */
+static uint32_t FS98_STDCALL e_b580(uint32_t e)
+{
+    uint32_t f = R32(e, 0x30), keep;
+
+    R32(e, 0x30) = f & 0x7fffffff;
+    if ((f & 0x80000000) && (R32(e, 0x30) & 2) && R32(e, 0xcc) != 0) {
+        keep = R32(e, 0xcc);
+        blit(R32(R32(e, 0x20), 0x3c) + 0x80, keep, e + 8, DA(0x10010e60), keep + 4,
+             R32(e, 0x30) & ~1u);
+        D32(0x10025570) = R32(e, 8);
+        D32(0x10025578) = R32(R32(e, 0xcc), 4) + R32(e, 8);
+        D32(0x10025574) = R32(e, 0xc);
+        D32(0x1002557c) = R32(R32(e, 0xcc), 8) + R32(e, 0xc);
+        h_window_invalidate(R32(R32(e, 0x20), 0x3c), DA(0x10025570));
+    }
+    return 0;
+}
+
+/* 0x1000b630 -- op 58: the surfaces, the GDI objects (the brush only if
+ * there was a font, as in retail), the DC and the text */
+static uint32_t FS98_STDCALL e_b630(uint32_t e)
+{
+    uint32_t dc;
+
+    if (R32(e, 0xc8) != 0)
+        surface_over_free(R32(e, 0xc8));
+    R32(e, 0xc8) = 0;
+    if (R32(e, 0xcc) != 0)
+        h_surface_free(R32(e, 0xcc));
+    dc = R32(e, 0xdc);
+    if (dc != 0 && R32(e, 0xe4) != 0)
+        SelectObject(HGDI(dc), HGDI(R32(e, 0xe4)));
+    if (R32(e, 0xdc) != 0 && R32(e, 0xec) != 0)
+        SelectObject(HGDI(R32(e, 0xdc)), HGDI(R32(e, 0xec)));
+    if (R32(e, 0xdc) != 0 && R32(e, 0xf4) != 0)
+        SelectObject(HGDI(R32(e, 0xdc)), HGDI(R32(e, 0xf4)));
+    if (R32(e, 0xe8) != 0)
+        DeleteObject(HGDI(R32(e, 0xe8)));
+    if (R32(e, 0xe0) != 0)
+        DeleteObject(HGDI(R32(e, 0xe0)));
+    if (R32(e, 0xe0) != 0)
+        DeleteObject(HGDI(R32(e, 0xf0)));
+    if (R32(e, 0xdc) != 0)
+        DeleteDC(HGDI(R32(e, 0xdc)));
+    if (R32(e, 0xb8) != 0)
+        h_free(e + 0xb8);
+    R32(e, 0xb8) = 0;
+    R32(e, 0xe4) = 0;
+    R32(e, 0xf4) = 0;
+    R32(e, 0xe8) = 0;
+    R32(e, 0xe0) = 0;
+    R32(e, 0xdc) = 0;
+    return 0;
+}
+
+/* 0x1000b740 -- op 5c: a new element of type 2 (0x134 bytes) */
+static uint32_t e_b740(void)
+{
+    uint32_t e;
+
+    h_alloc(1, 0x134, ADDR(&e), 0);
+    R32(e, 0) = 2;
+    return e;
+}
+
+/* ---- type 3: a bitmap that slides ----
+ * Two variables (+0x3c and +0x68, values at +0x48 and +0x74) with a
+ * function each (+0x58, +0x84) and another over that (+0x64, +0x90) and
+ * a multiplier each (+0x5c, +0x88), the bitmap
+ * at +0x94, what it covers at +0xa4, the origin at +0x18/+0x1c and where it
+ * was last drawn at +0x10/+0x14.  The multipliers are scaled by the gauge's
+ * x and y scales. */
+
+/* 0x1000b770 -- op 40 */
+static uint32_t FS98_STDCALL e_b770(uint32_t e, uint32_t hmod)
+{
+    uint32_t g, img;
+    float sx, sy;
+    int32_t x, y;
+
+    dirty_set(R32(e, 0x34));
+    failures_reset(R32(e, 0x2c));
+    resource_bitmap(hmod, R32(e, 4), e + 0x94, R32(e, 0x20), 0, 0, R32(e, 0x30), 1);
+    g = R32(e, 0x20);
+    sx = RFL(g, 0x34);
+    sy = RFL(g, 0x38);
+    if (R8(e, 0x30) & 1) {
+        img = R32(e, 0x94);
+        h_surface_new(e + 0xa4, R32(img, 4), R32(img, 8), R32(img, 0));
+    } else {
+        R32(e, 0xa4) = 0;
+    }
+    var_init(e + 0x3c);
+    var_init(e + 0x68);
+    x = FTOL(FI(R32(e, 8)) * sx) + R32(g, 0x44);
+    y = FTOL(FI(R32(e, 0xc)) * sy);
+    R32(e, 0x18) = x;
+    R32(e, 0x1c) = y + R32(g, 0x48);
+    RDB(e, 0x5c) = (double)((long double)sx * RDB(e, 0x5c));
+    R32(e, 0x30) &= 0x7fffffff;
+    RDB(e, 0x88) = (double)((long double)sy * RDB(e, 0x88));
+    return 0;
+}
+
+/* 0x1000b860 -- op 48 */
+static uint32_t FS98_STDCALL e_b860(uint32_t e)
+{
+    uint32_t k = failure_state(R32(e, 0x2c)), fn;
+    double v;
+
+    if (k == 4 || k == 1)
+        return 0;
+    if (k == 2) {
+        R32(e, 0x48) = 0;
+        R32(e, 0x74) = 0;
+        R32(e, 0x4c) = 0;
+        R32(e, 0x78) = 0;
+    } else {
+        var_lookup(e + 0x3c);
+        var_lookup(e + 0x68);
+    }
+    fn = R32(e, 0x58);
+    if (fn != 0)
+        RDB(e, 0x48) = ((pn_fd1)(uintptr_t)fn)(e + 0x3c);
+    v = (double)((long double)RDB(e, 0x5c) * RDB(e, 0x48));
+    fn = R32(e, 0x64);
+    RDB(e, 0x48) = v;
+    if (fn != 0)
+        RDB(e, 0x48) = ((pn_fd2)(uintptr_t)fn)(v);
+    fn = R32(e, 0x84);
+    if (fn != 0)
+        RDB(e, 0x74) = ((pn_fd1)(uintptr_t)fn)(e + 0x68);
+    v = (double)((long double)RDB(e, 0x88) * RDB(e, 0x74));
+    fn = R32(e, 0x90);
+    RDB(e, 0x74) = v;
+    if (fn != 0)
+        RDB(e, 0x74) = ((pn_fd2)(uintptr_t)fn)(v);
+    return 0;
+}
+
+/* 0x1000b940 -- op 4c */
+static uint32_t FS98_STDCALL e_b940(uint32_t e, uint32_t a)
+{
+    (void)a;
+    if (failure_state(R32(e, 0x2c)) == 4) {
+        mask_make(e + 0x94);
+        R32(e, 0x30) &= 0x7fffffff;
+        return 0;
+    }
+    surface_convert(R32(R32(e, 0x20), 0x40), e + 0x94, e + 8, R32(e, 0x30));
+    R32(e, 0x30) &= 0x7fffffff;
+    return 0;
+}
+
+/* 0x1000b9a0 -- op 50: put it where the variables say, moving it from where
+ * it was */
+static uint32_t FS98_STDCALL e_b9a0(uint32_t e)
+{
+    uint32_t f = R32(e, 0x30), img, bg;
+    int32_t x, y;
+
+    if (f & 0x40000000) {
+        if (f & 0x80000000)
+            tree_op17e0(e);
+        return 0;
+    }
+    if (R32(e, 0x94) == 0)
+        return 0;
+    x = FTOL(RDB(e, 0x48)) + R32(e, 0x18);
+    R32(e, 8) = x;
+    y = FTOL(RDB(e, 0x74)) + R32(e, 0x1c);
+    R32(e, 0xc) = y;
+    if ((f & 0x80000000) && (uint32_t)x == R32(e, 0x10) && (uint32_t)y == R32(e, 0x14))
+        return 0;
+    tree_op17e0(e);
+    if (R32(e, 0x30) & 2) {
+        bg = R32(e, 0xa4);
+        blit(bg, R32(R32(e, 0x20), 0x3c) + 0x80, DA(0x10010e60), e + 8, bg + 4,
+             R32(e, 0x30) & ~1u);
+    }
+    img = R32(e, 0x94);
+    blit(R32(R32(e, 0x20), 0x3c) + 0x80, img, e + 8, DA(0x10010e60), img + 4, R32(e, 0x30));
+    D32(0x10025570) = R32(e, 8);
+    D32(0x10025578) = R32(R32(e, 0x94), 4) + R32(e, 8);
+    D32(0x10025574) = R32(e, 0xc);
+    D32(0x1002557c) = R32(R32(e, 0x94), 8) + R32(e, 0xc);
+    h_window_invalidate(R32(R32(e, 0x20), 0x3c), DA(0x10025570));
+    R32(e, 0x14) = R32(e, 0xc);
+    R32(e, 0x10) = R32(e, 8);
+    R32(e, 0x30) |= 0x80000000;
+    return 0;
+}
+
+/* 0x1000bae0 -- op 17e0: put back what it covered, where it was */
+static uint32_t FS98_STDCALL e_bae0(uint32_t e)
+{
+    uint32_t f = R32(e, 0x30), keep;
+
+    R32(e, 0x30) = f & 0x7fffffff;
+    if ((f & 0x80000000) && (R32(e, 0x30) & 2) && R32(e, 0xa4) != 0) {
+        keep = R32(e, 0xa4);
+        blit(R32(R32(e, 0x20), 0x3c) + 0x80, keep, e + 0x10, DA(0x10010e60), keep + 4,
+             R32(e, 0x30) & ~1u);
+        D32(0x10025570) = R32(e, 0x10);
+        D32(0x10025578) = R32(R32(e, 0xa4), 4) + R32(e, 0x10);
+        D32(0x10025574) = R32(e, 0x14);
+        D32(0x1002557c) = R32(R32(e, 0xa4), 8) + R32(e, 0x14);
+        h_window_invalidate(R32(R32(e, 0x20), 0x3c), DA(0x10025570));
+    }
+    return 0;
+}
+
+/* 0x1000bb90 -- op 58 */
+static uint32_t FS98_STDCALL e_bb90(uint32_t e)
+{
+    surfaces_free(e + 0x94);
+    if (R32(e, 0xa4) != 0)
+        h_surface_free(R32(e, 0xa4));
+    return 0;
+}
+
+/* 0x1000bbc0 -- op 5c: a new element of type 3 (0xa8 bytes) */
+static uint32_t e_bbc0(void)
+{
+    uint32_t e;
+
+    h_alloc(1, 0xa8, ADDR(&e), 0);
+    R32(e, 0) = 3;
+    return e;
+}
+
+/* ---- type 4: an icon with frames ----
+ * +0x70 frames' bitmaps (a surface group each, 16 bytes, from +0x7c; frame
+ * i is resource id + 3 * i), +0x74 the one shown, +0x78 the one wanted
+ * (mode 2 and 3 step to it a frame a time), the variable at +0x3c (value
+ * +0x48, function +0x58), +0x5c the mode (0 the value is the frame, 1 it is
+ * (value + +0x6c) / +0x64, 2 and 3 the same stepping), +0x80 what it covers. */
+
+/* 0x1000bbf0 -- op 40 */
+static uint32_t FS98_STDCALL e_bbf0(uint32_t e, uint32_t hmod)
+{
+    uint32_t keep = 0, x, y, i;
+    int32_t n;
+
+    if (R32(e, 0x70) == 0)
+        return 0;
+    if (h_alloc(1, R32(e, 0x70) << 4, e + 0x7c, 1) != 0)
+        return 0;
+    dirty_set(R32(e, 0x34));
+    failures_reset(R32(e, 0x2c));
+    if (!(R32(e, 0x30) & 0x10) && (R32(e, 0x30) & 1) && R32(e, 0x24) == 0)
+        keep = R32(R32(R32(e, 0x20), 0x40), 0xc);
+    x = R32(e, 8);
+    y = R32(e, 0xc);
+    n = (int32_t)R32(e, 0x70);
+    if (n > 0) {
+        for (i = 0; (int32_t)i < (int32_t)R32(e, 0x70); i++) {
+            R32(e, 8) = x;
+            R32(e, 0xc) = y;
+            resource_bitmap(hmod, R32(e, 4) + 3 * i, R32(e, 0x7c) + 16 * i, R32(e, 0x20),
+                            keep, e + 8, R32(e, 0x30), 1);
+        }
+    }
+    if (R32(e, 0x7c) != 0 && (R32(e, 0x30) & 2)) {
+        uint32_t s = R32(R32(e, 0x7c), 4);
+
+        h_surface_new(e + 0x80, R32(s, 4), R32(s, 8), 1);
+    } else {
+        R32(e, 0x80) = 0;
+    }
+    var_init(e + 0x3c);
+    R32(e, 0x30) &= 0x7fffffff;
+    RDB(e, 0x64) = (double)(RDB(e, 0x64) / FI(R32(e, 0x70)));
+    return 0;
+}
+
+/* 0x1000bd30 -- op 48 */
+static uint32_t FS98_STDCALL e_bd30(uint32_t e)
+{
+    uint32_t k = failure_state(R32(e, 0x2c)), fn;
+
+    if (k == 4 || k == 1)
+        return 0;
+    if (k == 2) {
+        R32(e, 0x48) = 0;
+        R32(e, 0x4c) = 0;
+    } else {
+        var_lookup(e + 0x3c);
+    }
+    fn = R32(e, 0x58);
+    if (fn != 0)
+        RDB(e, 0x48) = ((pn_fd1)(uintptr_t)fn)(e + 0x3c);
+    return 0;
+}
+
+/* 0x1000bd80 -- op 4c: every frame converted */
+static uint32_t FS98_STDCALL e_bd80(uint32_t e, uint32_t a)
+{
+    int32_t i;
+
+    (void)a;
+    if (failure_state(R32(e, 0x2c)) == 4) {
+        for (i = 0; i < (int32_t)R32(e, 0x70); i++)
+            mask_make(R32(e, 0x7c) + 16 * i);
+    } else {
+        for (i = 0; i < (int32_t)R32(e, 0x70); i++)
+            surface_convert(R32(R32(e, 0x20), 0x40), R32(e, 0x7c) + 16 * i, e + 8,
+                            R32(e, 0x30));
+    }
+    R32(e, 0x30) &= 0x7fffffff;
+    return 0;
+}
+
+/* 0x1000be10 -- op 50: show the frame the value says (modes 3 and 4 a frame
+ * nearer a time, to +0x78) */
+static uint32_t FS98_STDCALL e_be10(uint32_t e)
+{
+    uint32_t frames = R32(e, 0x7c), f, bg, fr, cur, want, latch;
+    int32_t n;
+
+    if (frames == 0)
+        return 0;
+    switch (R32(e, 0x5c)) {
+    case 0:
+        want = FTOL(RDB(e, 0x48));
+        latch = 0;
+        break;
+    case 1:
+        want = FTOL((FI(R32(e, 0x6c)) + RDB(e, 0x48)) / RDB(e, 0x64));
+        latch = 0;
+        break;
+    case 3:
+        want = FTOL(RDB(e, 0x48));
+        latch = 1;
+        break;
+    case 4:
+        want = FTOL((FI(R32(e, 0x6c)) + RDB(e, 0x48)) / RDB(e, 0x64));
+        latch = 1;
+        break;
+    default:                     /* 2 and past 4: retail leaves its argument in both */
+        want = latch = e;
+        break;
+    }
+    f = R32(e, 0x30);
+    if ((f & 0x40000000) || want == 0xffffffff) {
+        if (f & 0x80000000)
+            tree_op17e0(e);
+        return 0;
+    }
+    if (latch) {
+        R32(e, 0x78) = want;
+        if ((f & 0x80000000) && want == R32(e, 0x74))
+            return 0;
+        cur = R32(e, 0x74);
+        want = (int32_t)want > (int32_t)cur ? cur + 1 : cur - 1;
+    } else if ((f & 0x80000000) && want == R32(e, 0x74)) {
+        return 0;
+    }
+    n = (int32_t)R32(e, 0x70);
+    R32(e, 0x74) = want;
+    if ((int32_t)want >= n)
+        R32(e, 0x74) = n - 1;
+    if ((int32_t)R32(e, 0x74) < 0)
+        R32(e, 0x74) = 0;
+    fr = frames + 16 * R32(e, 0x74);
+    if (R32(fr, 4) == 0)
+        return 0;
+    tree_op17e0(e);
+    if (R32(e, 0x30) & 2) {
+        bg = R32(e, 0x80);
+        blit(bg, R32(R32(e, 0x20), 0x3c) + 0x80, DA(0x10010e60), e + 8, bg + 4,
+             R32(e, 0x30) & ~1u);
+    }
+    fr = R32(e, 0x7c) + 16 * R32(e, 0x74);
+    blit(R32(R32(e, 0x20), 0x3c) + 0x80, R32(fr, 0), e + 8, DA(0x10010e60), R32(fr, 4) + 4,
+         R32(e, 0x30));
+    D32(0x10025570) = R32(e, 8);
+    fr = R32(e, 0x7c) + 16 * R32(e, 0x74);
+    D32(0x10025578) = R32(R32(fr, 4), 4) + R32(e, 8);
+    D32(0x10025574) = R32(e, 0xc);
+    fr = R32(e, 0x7c) + 16 * R32(e, 0x74);
+    D32(0x1002557c) = R32(R32(fr, 4), 8) + R32(e, 0xc);
+    h_window_invalidate(R32(R32(e, 0x20), 0x3c), DA(0x10025570));
+    R32(e, 0x30) |= 0x80000000;
+    return 0;
+}
+
+/* 0x1000bff0 -- op 17e0 */
+static uint32_t FS98_STDCALL e_bff0(uint32_t e)
+{
+    uint32_t f = R32(e, 0x30), keep;
+
+    R32(e, 0x30) = f & 0x7fffffff;
+    if ((f & 0x80000000) && (R32(e, 0x30) & 2) && R32(e, 0x80) != 0) {
+        keep = R32(e, 0x80);
+        blit(R32(R32(e, 0x20), 0x3c) + 0x80, keep, e + 8, DA(0x10010e60), keep + 4,
+             R32(e, 0x30) & ~1u);
+        D32(0x10025570) = R32(e, 8);
+        D32(0x10025578) = R32(R32(e, 0x80), 4) + R32(e, 8);
+        D32(0x10025574) = R32(e, 0xc);
+        D32(0x1002557c) = R32(R32(e, 0x80), 8) + R32(e, 0xc);
+        h_window_invalidate(R32(R32(e, 0x20), 0x3c), DA(0x10025570));
+    }
+    return 0;
+}
+
+/* 0x1000c0a0 -- op 58 */
+static uint32_t FS98_STDCALL e_c0a0(uint32_t e)
+{
+    int32_t i;
+
+    for (i = 0; i < (int32_t)R32(e, 0x70); i++)
+        surfaces_free(R32(e, 0x7c) + 16 * i);
+    h_free(e + 0x7c);
+    R32(e, 0x7c) = 0;
+    h_surface_free(R32(e, 0x80));
+    R32(e, 0x80) = 0;
+    return 0;
+}
+
+/* 0x1000c100 -- op 5c: a new element of type 4 (0x84 bytes) */
+static uint32_t e_c100(void)
+{
+    uint32_t e;
+
+    h_alloc(1, 0x84, ADDR(&e), 0);
+    R32(e, 0) = 4;
+    return e;
+}
+
+/* ---- type 5: a strip seen through a window ----
+ * Two bitmaps, a larger strip (+0xcc) and a smaller (+0xdc, resource id +
+ * 3) that gives the size seen; +0xec is the smaller drawn over what is
+ * behind it, made once.  Two variables (+0x3c and +0x70, values at +0x48 and
+ * +0x7c) say where the window sits on the strip, each from its range
+ * (+0x5c..+0x64, +0x90..+0x98) scaled to the strip's excess over the
+ * window (+0xa4, +0xac), the offset in (+0xb4, +0xbc); +0xc4/+0xc8 is where
+ * it was last drawn and +0xf0 what it covers. */
+
+/* 0x1000c130 -- op 40 */
+static uint32_t FS98_STDCALL e_c130(uint32_t e, uint32_t hmod)
+{
+    uint32_t g = R32(e, 0x20), s;
+    float sx, sy;
+    int32_t d;
+    long double range;
+
+    dirty_set(R32(e, 0x34));
+    failures_reset(R32(e, 0x2c));
+    resource_bitmap(hmod, R32(e, 4), e + 0xcc, g, 0, 0, R32(e, 0x30), 1);
+    resource_bitmap(hmod, R32(e, 4) + 3, e + 0xdc, g, 0, 0, R32(e, 0x30), 1);
+    sx = RFL(R32(e, 0x20), 0x34);
+    sy = RFL(R32(e, 0x20), 0x38);
+    h_surface_new(e + 0xec, R32(R32(e, 0xe0), 4), R32(R32(e, 0xe0), 8),
+                  R32(R32(R32(e, 0x20), 0x3c), 0x80));
+    g = R32(e, 0x20);
+    R32(e, 8) = FTOL(FI(R32(e, 8)) * sx) + R32(g, 0x44);
+    R32(e, 0xc) = FTOL(FI(R32(e, 0xc)) * sy) + R32(g, 0x48);
+    var_init(e + 0x3c);
+    var_init(e + 0x70);
+    range = (long double)RDB(e, 0x64) - (long double)RDB(e, 0x5c);
+    if (!(range < RD(0x1000e190) || range > RD(0x1000e190))) {
+        R32(e, 0xa4) = 0;
+        R32(e, 0xa8) = 0;
+    } else {
+        d = (int32_t)(R32(R32(e, 0xcc), 4) - R32(R32(e, 0xdc), 4));
+        RDB(e, 0xa4) = (double)(FI(d) / range);
+    }
+    range = (long double)RDB(e, 0x98) - (long double)RDB(e, 0x90);
+    if (!(range < RD(0x1000e190) || range > RD(0x1000e190))) {
+        R32(e, 0xac) = 0;
+        R32(e, 0xb0) = 0;
+    } else {
+        d = (int32_t)(R32(R32(e, 0xcc), 8) - R32(R32(e, 0xdc), 8));
+        RDB(e, 0xac) = (double)(FI(d) / range);
+    }
+    RDB(e, 0xb4) = -(long double)RDB(e, 0x5c);
+    RDB(e, 0xbc) = -(long double)RDB(e, 0x90);
+    if (R8(e, 0x30) & 2) {
+        s = R32(e, 0xdc);
+        h_surface_new(e + 0xf0, R32(s, 4), R32(s, 8), R32(s, 0));
+    } else {
+        R32(e, 0xf0) = 0;
+    }
+    R32(e, 0x30) &= 0x7fffffff;
+    return 0;
+}
+
+/* 0x1000c300 -- op 48: both variables, each through its functions, then
+ * moved to the strip's offset and scaled to it */
+static uint32_t FS98_STDCALL e_c300(uint32_t e)
+{
+    uint32_t k = failure_state(R32(e, 0x2c)), fn;
+
+    if (k == 4 || k == 1)
+        return 0;
+    if (k == 2) {
+        R32(e, 0x48) = 0;
+        R32(e, 0x7c) = 0;
+        R32(e, 0x4c) = 0;
+        R32(e, 0x80) = 0;
+    } else {
+        var_lookup(e + 0x3c);
+        var_lookup(e + 0x70);
+    }
+    fn = R32(e, 0x58);
+    if (fn != 0)
+        RDB(e, 0x48) = ((pn_fd1)(uintptr_t)fn)(e + 0x3c);
+    fn = R32(e, 0x6c);
+    if (fn != 0)
+        RDB(e, 0x48) = ((pn_fd2)(uintptr_t)fn)(RDB(e, 0x48));
+    fn = R32(e, 0x8c);
+    RDB(e, 0x48) = (double)(((long double)RDB(e, 0xb4) + RDB(e, 0x48)) * RDB(e, 0xa4));
+    if (fn != 0)
+        RDB(e, 0x7c) = ((pn_fd1)(uintptr_t)fn)(e + 0x70);
+    fn = R32(e, 0xa0);
+    if (fn != 0)
+        RDB(e, 0x7c) = ((pn_fd2)(uintptr_t)fn)(RDB(e, 0x7c));
+    RDB(e, 0x7c) = (double)(((long double)RDB(e, 0xbc) + RDB(e, 0x7c)) * RDB(e, 0xac));
+    return 0;
+}
+
+/* 0x1000c3e0 -- op 4c: both bitmaps converted */
+static uint32_t FS98_STDCALL e_c3e0(uint32_t e, uint32_t a)
+{
+    (void)a;
+    if (failure_state(R32(e, 0x2c)) == 4) {
+        mask_make(e + 0xcc);
+        mask_make(e + 0xdc);
+        R32(e, 0x30) &= 0x7fffffff;
+        return 0;
+    }
+    surface_convert(R32(R32(e, 0x20), 0x40), e + 0xcc, e + 8, R32(e, 0x30));
+    surface_convert(R32(R32(e, 0x20), 0x40), e + 0xdc, e + 8, R32(e, 0x30));
+    R32(e, 0x30) &= 0x7fffffff;
+    return 0;
+}
+
+/* 0x1000c460 -- op 50: show the strip at the offset the variables say */
+static uint32_t FS98_STDCALL e_c460(uint32_t e)
+{
+    uint32_t f = R32(e, 0x30), bg, small;
+    int32_t x, y;
+
+    if (f & 0x40000000) {
+        if (f & 0x80000000)
+            tree_op17e0(e);
+        return 0;
+    }
+    x = FTOL(RDB(e, 0x48)) + R32(e, 0x18);
+    y = FTOL(RDB(e, 0x7c)) + R32(e, 0x1c);
+    if ((f & 0x80000000) && R32(e, 0xc4) == (uint32_t)x && R32(e, 0xc8) == (uint32_t)y)
+        return 0;
+    tree_op17e0(e);
+    if (R32(e, 0x30) & 2) {
+        bg = R32(e, 0xf0);
+        blit(bg, R32(R32(e, 0x20), 0x3c) + 0x80, DA(0x10010e60), e + 8, bg + 4,
+             R32(e, 0x30) & ~1u);
+    }
+    if (!(R32(e, 0x30) & 0x80000000))
+        compose(R32(e, 0xec), R32(e, 0xdc), R32(R32(e, 0x20), 0x3c) + 0x80, e + 8);
+    small = R32(e, 0xdc);
+    R32(e, 0xc4) = x;
+    R32(e, 0xc8) = y;
+    blit(R32(R32(e, 0x20), 0x3c) + 0x80, R32(e, 0xcc), e + 8, e + 0xc4, small + 4,
+         R32(e, 0x30));
+    blit(R32(R32(e, 0x20), 0x3c) + 0x80, R32(e, 0xec), e + 8, DA(0x10010e60),
+         R32(e, 0xdc) + 4, R32(e, 0x30) | 1);
+    D32(0x10025570) = R32(e, 8);
+    D32(0x10025578) = R32(R32(e, 0xec), 4) + R32(e, 8);
+    D32(0x10025574) = R32(e, 0xc);
+    D32(0x1002557c) = R32(R32(e, 0xec), 8) + R32(e, 0xc);
+    h_window_invalidate(R32(R32(e, 0x20), 0x3c), DA(0x10025570));
+    R32(e, 0x30) |= 0x80000000;
+    return 0;
+}
+
+/* 0x1000c5f0 -- op 17e0 */
+static uint32_t FS98_STDCALL e_c5f0(uint32_t e)
+{
+    uint32_t f = R32(e, 0x30), keep;
+
+    R32(e, 0x30) = f & 0x7fffffff;
+    if ((f & 0x80000000) && (R32(e, 0x30) & 2) && R32(e, 0xf0) != 0) {
+        keep = R32(e, 0xf0);
+        blit(R32(R32(e, 0x20), 0x3c) + 0x80, keep, e + 8, DA(0x10010e60), keep + 4,
+             R32(e, 0x30) & ~1u);
+        D32(0x10025570) = R32(e, 8);
+        D32(0x10025578) = R32(R32(e, 0xec), 4) + R32(e, 8);
+        D32(0x10025574) = R32(e, 0xc);
+        D32(0x1002557c) = R32(R32(e, 0xec), 8) + R32(e, 0xc);
+        h_window_invalidate(R32(R32(e, 0x20), 0x3c), DA(0x10025570));
+    }
+    return 0;
+}
+
+/* 0x1000c6a0 -- op 58 */
+static uint32_t FS98_STDCALL e_c6a0(uint32_t e)
+{
+    surfaces_free(e + 0xcc);
+    surfaces_free(e + 0xdc);
+    if (R32(e, 0xec) != 0)
+        h_surface_free(R32(e, 0xec));
+    if (R32(e, 0xf0) != 0)
+        h_surface_free(R32(e, 0xf0));
+    return 0;
+}
+
+/* 0x1000c6f0 -- op 5c: a new element of type 5 (0xf4 bytes) */
+static uint32_t e_c6f0(void)
+{
+    uint32_t e;
+
+    h_alloc(1, 0xf4, ADDR(&e), 0);
+    R32(e, 0) = 5;
+    return e;
+}
+
+/* ---- type 6: a shape turned on its pivot ----
+ * Three variables (+0x3c, +0x64, +0x8c), two bitmaps (+0x10c, and its
+ * companion +0x124 whose size is the rectangle drawn) and a 256-square
+ * surface to turn them in (+0x11c); +0xcc..+0xe8 the companion's four
+ * corners in unscaled coordinates, +0xec..+0x108 the four corners of the
+ * rectangle it is drawn in, held in the window (16.16), +0x138 what it
+ * covers. */
+
+/* 0x1000c720 -- op 40 */
+static uint32_t FS98_STDCALL e_c720(uint32_t e, uint32_t hmod)
+{
+    uint32_t g, img2, win;
+    float sx, sy;
+    int32_t pivx, pivy, posx, posy, dx, dxw, dy, dyh, ww, hh, x0, y0, w2, h2;
+
+    dirty_set(R32(e, 0x34));
+    failures_reset(R32(e, 0x2c));
+    resource_bitmap(hmod, R32(e, 4), e + 0x10c, R32(e, 0x20), 0, 0, R32(e, 0x30), 0);
+    resource_bitmap(hmod, R32(e, 4) + 3, e + 0x124, R32(e, 0x20), 0, 0, R32(e, 0x30), 1);
+    g = R32(e, 0x20);
+    sx = RFL(g, 0x34);
+    sy = RFL(g, 0x38);
+    img2 = R32(e, 0x124);
+    h_surface_new(e + 0x134, R32(img2, 4), R32(img2, 8), R32(img2, 0));
+    h_surface_new(e + 0x11c, 0x100, 0x100, 1);
+    var_init(e + 0x3c);
+    var_init(e + 0x64);
+    var_init(e + 0x8c);
+    pivx = FTOL(FI(R32(e, 0x18)) * sx - RD(0x1000e198));
+    R32(e, 0x18) = pivx;
+    pivy = FTOL(FI(R32(e, 0x1c)) * sy - RD(0x1000e198));
+    R32(e, 0x1c) = pivy;
+    posx = FTOL(FI(R32(e, 8)) * sx - RD(0x1000e198));
+    R32(e, 8) = posx;
+    posy = FTOL(FI(R32(e, 0xc)) * sy - RD(0x1000e198));
+    R32(e, 0xc) = posy;
+    img2 = R32(e, 0x124);
+    w2 = (int32_t)R32(img2, 4);
+    h2 = (int32_t)R32(img2, 8);
+    dx = posx - pivx;
+    dxw = dx + w2;
+    R32(e, 0xcc) = FTOL(FI(dxw) / sx - RD(0x1000e198));
+    dy = posy - pivy;
+    dyh = h2 + dy;
+    R32(e, 0xd0) = FTOL(FI(dyh) / sy - RD(0x1000e198));
+    R32(e, 0xd4) = FTOL(FI(dx) / sx - RD(0x1000e198));
+    R32(e, 0xd8) = FTOL(FI(h2 + dy) / sy - RD(0x1000e198));
+    R32(e, 0xdc) = R32(e, 0xd4);
+    R32(e, 0xe0) = FTOL(FI(dy) / sy - RD(0x1000e198));
+    R32(e, 0xe4) = FTOL(FI(dx + w2) / sx - RD(0x1000e198));
+    R32(e, 0xe8) = R32(e, 0xe0);
+    g = R32(e, 0x20);
+    R32(e, 8) = R32(g, 0x44) + posx;
+    R32(e, 0xc) = R32(g, 0x48) + posy;
+    R32(e, 0xbc) = FTOL(FI(R32(e, 0xbc)) * sx - FI(pivx));
+    R32(e, 0xc0) = FTOL(FI(R32(e, 0xc0)) * sy - FI(pivy));
+    R32(e, 0x18) = (int32_t)R32(R32(e, 0x11c), 4) / 2;
+    R32(e, 0x1c) = (int32_t)R32(R32(e, 0x11c), 8) / 2;
+    x0 = (int32_t)R32(e, 8);
+    y0 = (int32_t)R32(e, 0xc);
+    w2 = (int32_t)R32(R32(e, 0x134), 4);
+    h2 = (int32_t)R32(R32(e, 0x134), 8);
+    R32(e, 0xec) = x0 + w2 - 1;
+    R32(e, 0xf4) = x0;
+    R32(e, 0xf0) = y0 + h2 - 1;
+    R32(e, 0xfc) = x0;
+    R32(e, 0x100) = y0;
+    R32(e, 0xf8) = y0 + h2 - 1;
+    R32(e, 0x108) = y0;
+    R32(e, 0x104) = x0 + w2 - 1;
+    win = R32(g, 0x3c);
+    ww = (int32_t)R32(win, 0x84);
+    hh = (int32_t)R32(win, 0x88);
+    if ((int32_t)R32(e, 0xec) < 0) R32(e, 0xec) = 0;
+    if ((int32_t)R32(e, 0xec) >= ww) R32(e, 0xec) = ww - 1;
+    if (x0 >= ww) R32(e, 0xf4) = ww - 1;
+    if (x0 < 0) R32(e, 0xfc) = 0;
+    if ((int32_t)R32(e, 0xfc) >= ww) R32(e, 0xfc) = ww - 1;
+    if ((int32_t)R32(e, 0x104) < 0) R32(e, 0x104) = 0;
+    if ((int32_t)R32(e, 0x104) >= ww) R32(e, 0x104) = ww - 1;
+    if ((int32_t)R32(e, 0xf0) < 0) R32(e, 0xf0) = 0;
+    if ((int32_t)R32(e, 0xf0) >= hh) R32(e, 0xf0) = hh - 1;
+    if ((int32_t)R32(e, 0xf8) < 0) R32(e, 0xf8) = 0;
+    if ((int32_t)R32(e, 0xf8) >= hh) R32(e, 0xf8) = hh - 1;
+    if (y0 < 0) R32(e, 0x100) = 0;
+    if ((int32_t)R32(e, 0x100) >= hh) R32(e, 0x100) = hh - 1;
+    if (y0 < 0) R32(e, 0x108) = 0;
+    if ((int32_t)R32(e, 0x108) >= hh) R32(e, 0x108) = hh - 1;
+    R32(e, 0xec) <<= 16;
+    R32(e, 0xf0) <<= 16;
+    R32(e, 0xf4) <<= 16;
+    R32(e, 0xf8) <<= 16;
+    R32(e, 0xfc) <<= 16;
+    R32(e, 0x100) <<= 16;
+    R32(e, 0x104) <<= 16;
+    R32(e, 0x108) <<= 16;
+    if (R8(e, 0x30) & 2) {
+        img2 = R32(e, 0x124);
+        h_surface_new(e + 0x138, R32(img2, 4), R32(img2, 8), R32(img2, 0));
+    } else {
+        R32(e, 0x138) = 0;
+    }
+    R32(e, 0x30) &= 0x7fffffff;
+    return 0;
+}
+
+/* 0x1000cbf0 -- op 48: the three variables, each through its function and
+ * its multiplier */
+static uint32_t FS98_STDCALL e_cbf0(uint32_t e)
+{
+    uint32_t k = failure_state(R32(e, 0x2c)), fn;
+
+    if (k == 4 || k == 1)
+        return 0;
+    if (k == 2) {
+        R32(e, 0x48) = 0;
+        R32(e, 0x70) = 0;
+        R32(e, 0x98) = 0;
+        R32(e, 0x4c) = 0;
+        R32(e, 0x74) = 0;
+        R32(e, 0x9c) = 0;
+    } else {
+        var_lookup(e + 0x3c);
+        var_lookup(e + 0x64);
+        var_lookup(e + 0x8c);
+    }
+    fn = R32(e, 0x58);
+    if (fn != 0)
+        RDB(e, 0x48) = ((pn_fd1)(uintptr_t)fn)(e + 0x3c);
+    RDB(e, 0x48) = (double)((long double)RDB(e, 0x5c) * RDB(e, 0x48));
+    fn = R32(e, 0x80);
+    if (fn != 0)
+        RDB(e, 0x70) = ((pn_fd1)(uintptr_t)fn)(e + 0x64);
+    RDB(e, 0x70) = (double)((long double)RDB(e, 0x84) * RDB(e, 0x70));
+    fn = R32(e, 0xa8);
+    if (fn != 0)
+        RDB(e, 0x98) = ((pn_fd1)(uintptr_t)fn)(e + 0x8c);
+    RDB(e, 0x98) = (double)((long double)RDB(e, 0xac) * RDB(e, 0x98));
+    return 0;
+}
+
+/* 0x1000ccd0 -- op 4c: both bitmaps converted, the first drawn into the
+ * 256-square surface and the host's handle for it re-made */
+static uint32_t FS98_STDCALL e_ccd0(uint32_t e, uint32_t a)
+{
+    uint32_t img = e + 0x10c;
+
+    (void)a;
+    if (failure_state(R32(e, 0x2c)) == 4) {
+        mask_make(img);
+        mask_make(e + 0x124);
+    } else {
+        surface_convert(R32(R32(e, 0x20), 0x40), img, e + 8, R32(e, 0x30));
+        surface_convert(R32(R32(e, 0x20), 0x40), e + 0x124, e + 8, R32(e, 0x30));
+    }
+    HG(0xb0, f2)(R32(e, 0x120), 1);
+    blit(R32(e, 0x11c), R32(img, 0), DA(0x10010e60), DA(0x10010e60), R32(img, 0) + 4, 0);
+    R32(e, 0x120) = HG(0xac, f2)(R32(e, 0x11c), 0);
+    R32(e, 0x30) &= 0x7fffffff;
+    return 0;
+}
+
+/* 0x1000cda0 -- op 50: the shape turned by the angle (+0x98) about its
+ * pivot, its corners placed by the variables, the quad drawn through HG2D
+ * and the companion (the composite of it and the window) blitted over */
+static uint32_t FS98_STDCALL e_cda0(uint32_t e)
+{
+    uint32_t f = R32(e, 0x30), win, bg, comp, i;
+    int32_t c[2], q[4][2], px, py, bx, by;
+
+    if (f & 0x40000000) {
+        if (f & 0x80000000)
+            tree_op17e0(e);
+        return 0;
+    }
+    rotate(e + 0xbc, RDB(e, 0x98), ADDR(c));
+    c[0] += FTOL(RDB(e, 0x48));
+    c[1] += FTOL(RDB(e, 0x70));
+    px = c[0];
+    py = c[1];
+    if ((R32(e, 0x30) & 0x80000000) && R32(e, 0xc4) == (uint32_t)px && R32(e, 0xc8) == (uint32_t)py)
+        return 0;
+    tree_op17e0(e);
+    if (R32(e, 0x30) & 2) {
+        bg = R32(e, 0x138);
+        blit(bg, R32(R32(e, 0x20), 0x3c) + 0x80, DA(0x10010e60), e + 8, bg + 4,
+             R32(e, 0x30) & ~1u);
+    }
+    if (!(R32(e, 0x30) & 0x80000000))
+        compose(R32(e, 0x134), R32(e, 0x124), R32(R32(e, 0x20), 0x3c) + 0x80, e + 8);
+    R32(e, 0xc4) = px;
+    R32(e, 0xc8) = py;
+    rotate(e + 0xcc, RDB(e, 0x98), ADDR(q[0]));
+    rotate(e + 0xd4, RDB(e, 0x98), ADDR(q[1]));
+    rotate(e + 0xdc, RDB(e, 0x98), ADDR(q[2]));
+    rotate(e + 0xe4, RDB(e, 0x98), ADDR(q[3]));
+    bx = R32(e, 0x18) + FTOL(RDB(e, 0x48));
+    by = R32(e, 0x1c) + FTOL(RDB(e, 0x70));
+    for (i = 0; i < 4; i++) {
+        q[i][0] = FTOL(FI(q[i][0]) * RFL(e, 0xb4)) + bx;
+        q[i][1] = FTOL(FI(q[i][1]) * RFL(e, 0xb8)) + by;
+    }
+    G32(0xc8c) = R32(e, 0x120);
+    G16(0xcb6) = 1;
+    G16(0xca0) = (R8(e, 0x30) & 1) ? 1 : 0;
+    G32(0xc14) = G32(0xc10);
+    G32(0x2f0) = 0xffffffff;
+    G32(0xd4c) = 0;
+    win = R32(R32(e, 0x20), 0x3c);
+    HG(0x48, f6)(win, R32(e, 0xec), R32(e, 0xf0), 0x10000, (uint32_t)q[0][0] << 16,
+                 (uint32_t)q[0][1] << 16);
+    win = R32(R32(e, 0x20), 0x3c);
+    HG(0x48, f6)(win, R32(e, 0xf4), R32(e, 0xf8), 0x10000, (uint32_t)q[1][0] << 16,
+                 (uint32_t)q[1][1] << 16);
+    win = R32(R32(e, 0x20), 0x3c);
+    HG(0x48, f6)(win, R32(e, 0xfc), R32(e, 0x100), 0x10000, (uint32_t)q[2][0] << 16,
+                 (uint32_t)q[2][1] << 16);
+    win = R32(R32(e, 0x20), 0x3c);
+    HG(0x48, f6)(win, R32(e, 0x104), R32(e, 0x108), 0x10000, (uint32_t)q[3][0] << 16,
+                 (uint32_t)q[3][1] << 16);
+    HG(0x4c, f1)(R32(R32(e, 0x20), 0x3c) + 0x80);
+    comp = R32(e, 0x134);
+    blit(R32(R32(e, 0x20), 0x3c) + 0x80, comp, e + 8, DA(0x10010e60), comp + 4,
+         R32(e, 0x30) | 1);
+    D32(0x10025570) = R32(e, 8);
+    D32(0x10025578) = R32(R32(e, 0x134), 4) + R32(e, 8);
+    D32(0x10025574) = R32(e, 0xc);
+    D32(0x1002557c) = R32(R32(e, 0x134), 8) + R32(e, 0xc);
+    h_window_invalidate(R32(R32(e, 0x20), 0x3c), DA(0x10025570));
+    R32(e, 0x30) |= 0x80000000;
+    return 0;
+}
+
+/* 0x1000d1d0 -- op 17e0 */
+static uint32_t FS98_STDCALL e_d1d0(uint32_t e)
+{
+    uint32_t f = R32(e, 0x30), keep;
+
+    R32(e, 0x30) = f & 0x7fffffff;
+    if ((f & 0x80000000) && (R32(e, 0x30) & 2) && R32(e, 0x138) != 0) {
+        keep = R32(e, 0x138);
+        blit(R32(R32(e, 0x20), 0x3c) + 0x80, keep, e + 8, DA(0x10010e60), keep + 4,
+             R32(e, 0x30) & ~1u);
+        D32(0x10025570) = R32(e, 8);
+        D32(0x10025578) = R32(R32(e, 0x134), 4) + R32(e, 8);
+        D32(0x10025574) = R32(e, 0xc);
+        D32(0x1002557c) = R32(R32(e, 0x134), 8) + R32(e, 0xc);
+        h_window_invalidate(R32(R32(e, 0x20), 0x3c), DA(0x10025570));
+    }
+    return 0;
+}
+
+/* 0x1000d280 -- op 58 */
+static uint32_t FS98_STDCALL e_d280(uint32_t e)
+{
+    HG(0xb0, f2)(R32(e, 0x120), 1);
+    surfaces_free(e + 0x10c);
+    surfaces_free(e + 0x124);
+    h_surface_free(R32(e, 0x11c));
+    h_surface_free(R32(e, 0x134));
+    if (R32(e, 0x138) != 0)
+        h_surface_free(R32(e, 0x138));
+    return 0;
+}
+
+/* 0x1000d300 -- op 5c: a new element of type 6 (0x13c bytes) */
+static uint32_t e_d300(void)
+{
+    uint32_t e;
+
+    h_alloc(1, 0x13c, ADDR(&e), 0);
+    R32(e, 0) = 6;
+    return e;
+}
+
+/* ---- type 7: nothing but a place to hang children ---- */
+
+/* 0x1000d330 -- ops 40 and 4c */
+static uint32_t FS98_STDCALL e_d330(uint32_t e, uint32_t a)
+{
+    (void)e; (void)a;
+    return 0;
+}
+
+/* 0x1000d340 -- op 5c: a new element of type 7 (0xc8 bytes) */
+static uint32_t e_d340(void)
+{
+    uint32_t e;
+
+    h_alloc(1, 0xc8, ADDR(&e), 0);
+    R32(e, 0) = 7;
+    return e;
+}
+
+/* 0x10009e60 -- Linkage +0x1c: nothing */
+static void FS98_STDCALL panels_nop(void)
+{
+}
+
+/* ---- the image ---------------------------------------------------------------------- */
+
+struct panels_image panels_image = {{
+#include "panels_data.inc"
+}};
+
+const uint8_t panels_rdata[PN_RDATA_SIZE] = {
+#include "panels_rdata.inc"
+};
+
+__asm__(".globl _ImportTable\n\t.set _ImportTable, _panels_image + 0x0\n\t"
+        ".globl _Linkage\n\t.set _Linkage, _panels_image + 0x50");
+
+/* the code at a retail .text address, as ours */
+static uint32_t routine(uint32_t a)
+{
+    switch (a) {
+    case 0x10001020: return (uint32_t)(uintptr_t)panels_init;
+    case 0x10001140: return (uint32_t)(uintptr_t)panels_deinit;
+    case 0x100011b0: return (uint32_t)(uintptr_t)panels_aircraft;
+    case 0x10009e60: return (uint32_t)(uintptr_t)panels_nop;
+    case 0x100012e0: return (uint32_t)(uintptr_t)window_show;
+    case 0x10001300: return (uint32_t)(uintptr_t)window_hide;
+    case 0x10001320: return (uint32_t)(uintptr_t)windows_show_all;
+    case 0x100013a0: return (uint32_t)(uintptr_t)windows_hide_all;
+    case 0x10001420: return (uint32_t)(uintptr_t)windows_toggle;
+    case 0x10001440: return (uint32_t)(uintptr_t)windows_options;
+    case 0x10001510: return (uint32_t)(uintptr_t)windows_any_shown;
+    case 0x10001950: return (uint32_t)(uintptr_t)element_failures;
+    case 0x10001580: return (uint32_t)(uintptr_t)element_install;
+    case 0x10001610: return (uint32_t)(uintptr_t)element_unmark;
+    case 0x10001630: return (uint32_t)(uintptr_t)element_op48;
+    case 0x100016b0: return (uint32_t)(uintptr_t)element_op4c;
+    case 0x10001760: return (uint32_t)(uintptr_t)element_op50;
+    case 0x10001b50: return (uint32_t)(uintptr_t)tree_op17e0_entry;
+    case 0x10001860: return (uint32_t)(uintptr_t)element_op58;
+    case 0x100018e0: return (uint32_t)(uintptr_t)element_op5c;
+    case 0x10001970: return (uint32_t)(uintptr_t)tree_failures;
+    case 0x100019b0: return (uint32_t)(uintptr_t)tree_install;
+    case 0x10001a30: return (uint32_t)(uintptr_t)tree_unmark_entry;
+    case 0x10001a50: return (uint32_t)(uintptr_t)tree_op48;
+    case 0x10001a80: return (uint32_t)(uintptr_t)tree_op4c;
+    case 0x10001ac0: return (uint32_t)(uintptr_t)tree_op50;
+    case 0x10001b10: return (uint32_t)(uintptr_t)tree_op17e0;
+    case 0x10001b60: return (uint32_t)(uintptr_t)tree_op58;
+    case 0x10001ba0: return (uint32_t)(uintptr_t)mouse_place;
+    case 0x10001c40: return (uint32_t)(uintptr_t)mouse_add;
+    case 0x10001c70: return (uint32_t)(uintptr_t)mouse_remove;
+    case 0x10001c90: return (uint32_t)(uintptr_t)window_toggle;
+    case 0x10001d20: return (uint32_t)(uintptr_t)post_command;
+    case 0x10008830: return (uint32_t)(uintptr_t)named_add;
+    case 0x100088b0: return (uint32_t)(uintptr_t)var_init;
+    case 0x10008920: return (uint32_t)(uintptr_t)named_find;
+    case 0x10008980: return (uint32_t)(uintptr_t)var_lookup;
+    case 0x10008ce0: return (uint32_t)(uintptr_t)named_remove;
+    case 0x10008d70: return (uint32_t)(uintptr_t)named_clear;
+    case 0x10008550: return (uint32_t)(uintptr_t)v_8550;
+    case 0x100085b0: return (uint32_t)(uintptr_t)v_85b0;
+    case 0x10008740: return (uint32_t)(uintptr_t)v_8740;
+    case 0x100086a0: return (uint32_t)(uintptr_t)v_86a0;
+    case 0x100086f0: return (uint32_t)(uintptr_t)v_86f0;
+    case 0x10007b70: return (uint32_t)(uintptr_t)v_7b70;
+    case 0x10007c70: return (uint32_t)(uintptr_t)v_7c70;
+    case 0x10008790: return (uint32_t)(uintptr_t)v_8790;
+    case 0x10007bf0: return (uint32_t)(uintptr_t)v_7bf0;
+    case 0x10007cd0: return (uint32_t)(uintptr_t)v_7cd0;
+    case 0x100087e0: return (uint32_t)(uintptr_t)v_87e0;
+    case 0x10008620: return (uint32_t)(uintptr_t)v_8620;
+    case 0x10008210: return (uint32_t)(uintptr_t)v_8210;
+    case 0x10008270: return (uint32_t)(uintptr_t)v_8270;
+    case 0x100082d0: return (uint32_t)(uintptr_t)v_82d0;
+    case 0x10008340: return (uint32_t)(uintptr_t)v_8340;
+    case 0x100083b0: return (uint32_t)(uintptr_t)v_83b0;
+    case 0x10008410: return (uint32_t)(uintptr_t)v_8410;
+    case 0x10008470: return (uint32_t)(uintptr_t)v_8470;
+    case 0x100084e0: return (uint32_t)(uintptr_t)v_84e0;
+    case 0x10007a50: return (uint32_t)(uintptr_t)v_7a50;
+    case 0x10007d30: return (uint32_t)(uintptr_t)v_7d30;
+    case 0x10007da0: return (uint32_t)(uintptr_t)v_7da0;
+    case 0x100075a0: return (uint32_t)(uintptr_t)v_75a0;
+    case 0x10007620: return (uint32_t)(uintptr_t)v_7620;
+    case 0x10007670: return (uint32_t)(uintptr_t)v_7670;
+    case 0x100076c0: return (uint32_t)(uintptr_t)v_76c0;
+    case 0x10007700: return (uint32_t)(uintptr_t)v_7700;
+    case 0x10007750: return (uint32_t)(uintptr_t)v_7750;
+    case 0x100077a0: return (uint32_t)(uintptr_t)v_77a0;
+    case 0x100077f0: return (uint32_t)(uintptr_t)v_77f0;
+    case 0x100078c0: return (uint32_t)(uintptr_t)v_78c0;
+    case 0x100079a0: return (uint32_t)(uintptr_t)v_79a0;
+    case 0x10008130: return (uint32_t)(uintptr_t)v_8130;
+    case 0x100081a0: return (uint32_t)(uintptr_t)v_81a0;
+    case 0x10007420: return (uint32_t)(uintptr_t)v_7420;
+    case 0x10007480: return (uint32_t)(uintptr_t)v_7480;
+    case 0x100074e0: return (uint32_t)(uintptr_t)v_74e0;
+    case 0x10007540: return (uint32_t)(uintptr_t)v_7540;
+    case 0x10007e00: return (uint32_t)(uintptr_t)v_7e00;
+    case 0x10007ec0: return (uint32_t)(uintptr_t)v_7ec0;
+    case 0x10007f80: return (uint32_t)(uintptr_t)v_7f80;
+    case 0x10008070: return (uint32_t)(uintptr_t)v_8070;
+    case 0x10007ff0: return (uint32_t)(uintptr_t)v_7ff0;
+    default:
+        return 0;
+    }
+}
+
+/* .data's pointers: the Linkage's and the variables' functions to ours, the
+ * links to GLOBAL to the ImportTable's (which the host fills in) */
+static void panels_install(void)
+{
+    static const struct { uint16_t at, to; } code[] = {
+#define C(at, to) { at, to },
+#define L(at)
+#include "panels_pointers.inc"
+#undef C
+#undef L
+    };
+    static const uint16_t link[] = {
+#define C(at, to)
+#define L(at) at,
+#include "panels_pointers.inc"
+#undef C
+#undef L
+    };
+    uint32_t i;
+
+    for (i = 0; i < sizeof code / sizeof code[0]; i++)
+        M32(D + code[i].at) = routine(0x10001000u + code[i].to);
+    for (i = 0; i < sizeof link / sizeof link[0]; i++)
+        M32(D + link[i]) = DA(0x1000f00c);
+}
+
+BOOL WINAPI DllMain(HINSTANCE instance, DWORD reason, LPVOID reserved)
+{
+    (void)reserved;
+    if (reason == DLL_PROCESS_ATTACH) {
+        DisableThreadLibraryCalls(instance);
+        panels_install();
+    }
+    return TRUE;
+}
+
+#ifdef PANELS_UNIT
+/* the image routines, for tools/difftest/panelsdiff.c's unit mode (make
+ * panelsunit); in the order of its table */
+void *const panels_unit[] = {
+    scale_24, scale_8, smooth_8, smooth_24, shrink_24, shrink_8, shrink_8_to_8,
+    shrink_8_to_8_plain, surface_from_bitmap, to_8, to_8_host, to_555, to_565, light_24,
+    light_32, mask_make, copy_8, surface_convert, clip, edges_24, blit, compose, dib_new,
+    surface_over, surface_over_free, bitmap_size, bitmap_load, bounds_build,
+};
+#endif

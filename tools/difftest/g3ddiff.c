@@ -3366,8 +3366,11 @@ static uint32_t make_program(int contextual)
     struct gen g;
     uint32_t i;
 
+    /* random words round it, but not over what make_models made for the
+     * whole scenario (the models, libraries, scene pieces and records at
+     * 0x10000..0x16600) nor those blocks' case defaults 0x20006 on */
     for (i = 0; i < PROGRAM_SIZE; i += 4)
-        if (i < 0x10000 || i >= 0x10000 + 0x100 * NMODELS)
+        if (!(i >= 0x10000 && i < 0x17000) && !(i >= 0x30000 && i < 0x37000))
             w32(programs + i, rnd());
     g.p = programs + 0x10;
     g.end = programs + 0x8000;

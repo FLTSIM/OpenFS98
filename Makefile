@@ -813,18 +813,48 @@ g3ddiff: $(DIFFDIR)/g3ddiff.exe $(BIN)/G3D.DLL
 g3ddiff-run: g3ddiff
 	@cd $(DIFFDIR) && WINEDEBUG=-all timeout 7200 wine g3ddiff.exe $(if $(N),$(N),20000)
 
-# MULTIP in progress: the public player-list, lookup, status and active-range
-# queries. The transport-heavy slots are not exercised and it is not installed.
-$(DIFFDIR)/multipdiff.exe: tools/difftest/multipdiff.c
+# MULTIP in progress: public queries, transport, workers and DirectPlay lifetime.
+# Session setup and message dispatch remain pending; no installation.
+$(DIFFDIR)/multipdiff.exe: tools/difftest/multipdiff.c tools/difftest/multip_send.inc tools/difftest/multip_receive.inc tools/difftest/multip_workers.inc tools/difftest/multip_directplay.inc
 	@mkdir -p $(DIFFDIR)
 	$(CC) -std=c99 -O1 -Wall -Wextra -Iinclude -o $@ tools/difftest/multipdiff.c
 
-multipdiff: $(DIFFDIR)/multipdiff.exe $(BIN)/MULTIP.DLL
-	@cp $(ORIG)/Modules/multip.dll $(DIFFDIR)/MULTIP_retail.dll
-	@cp $(BIN)/MULTIP.DLL          $(DIFFDIR)/MULTIP_ours.dll
+# Internal transport/worker routines have no public Linkage slots. Expose their addresses
+# only in the differential build, alongside the unchanged retail exports.
+$(DIFFDIR)/MULTIP_test.dll: src/multip/multip.c src/multip/multip.def $(BIN)/multip.res
+	@mkdir -p $(DIFFDIR)
+	$(CC) $(CFLAGS) -DMULTIP_DIFFTEST $(LDFLAGS) -Wl,--image-base=$(BASE_MULTIP) \
+	      -o $@ src/multip/multip.c $(BIN)/multip.res src/multip/multip.def -lkernel32
+
+# Replace staged files atomically: Wine may still have the prior DLL mapped.
+$(DIFFDIR)/MULTIP_retail.dll: $(ORIG)/Modules/multip.dll
+	@mkdir -p $(DIFFDIR)
+	@cp $< $@.tmp
+	@mv -f $@.tmp $@
+
+$(DIFFDIR)/MULTIP_ours.dll: $(DIFFDIR)/MULTIP_test.dll
+	@cp $< $@.tmp
+	@mv -f $@.tmp $@
+
+multipdiff: $(DIFFDIR)/multipdiff.exe $(BIN)/MULTIP.DLL $(DIFFDIR)/MULTIP_retail.dll $(DIFFDIR)/MULTIP_ours.dll
 
 multipdiff-run: multipdiff
 	@cd $(DIFFDIR) && WINEDEBUG=-all wine multipdiff.exe $(if $(N),$(N),20000)
+
+multip-breaks: multipdiff
+	@python3 tools/multip_breaks.py
+
+multip-directplay-breaks: multipdiff
+	@python3 tools/multip_breaks.py --slice directplay
+
+multip-worker-breaks: multipdiff
+	@python3 tools/multip_breaks.py --slice workers
+
+multip-receive-breaks: multipdiff
+	@python3 tools/multip_breaks.py --slice receive
+
+multip-send-breaks: multipdiff
+	@python3 tools/multip_breaks.py --slice send
 
 # G3D broken on purpose, a place at a time (tools/g3d_breaks.py).
 G3D_SRC ?= src/g3d/g3d.c
@@ -1266,4 +1296,4 @@ smoke: all
 clean:
 	rm -rf $(BIN)
 
-.PHONY: all stage setup-map graph hostmap compare run trace trace-render trace-ddraw kill window-reset wm-unmanaged wm-managed vd-on vd-off mode8 mode16 ddraw-gdi ddraw-default smoke difftest difftest-run utildiff utildiff-run utildiff-portable numericdiff numericdiff-run chaindiff chaindiff-run atcdiff atcdiff-run weathermdiff weathermdiff-run acontaindiff acontaindiff-run sounddiff sounddiff-run dynamicdiff dynamicdiff-run fegriddiff fegriddiff-run fediff fediff-run fesldiff fesldiff-run boosterdiff boosterdiff-run demodiff demodiff-run windowdiff windowdiff-run g3ddiff g3ddiff-run multipdiff multipdiff-run g3d-break-build g3d-breaks g3dmeshdiff g3dmeshdiff-run g3ddiff-meshc-run window-breaks window-break-build winmsgdiff winmsgdiff-run winmsg-breaks winmsg-break-build realitydiff realitydiff-run reality-breaks reality-break-build analysisdiff analysisdiff-run analysis-breaks analysis-break-build controlsdiff controlsdiff-run controls-breaks controls-break-build advdrvdiff advdrvdiff-run advdrv-cover landmediff landmediff-run facildiff facildiff-run facildiff-fe-run ofstest ofstest-run ofstest-remove sehfix sehfix-install sehfix-remove sehfix-log util-trace install revert installed-name-of orig-module-of clean
+.PHONY: multip-directplay-breaks multip-worker-breaks multip-breaks multip-receive-breaks multip-send-breaks all stage setup-map graph hostmap compare run trace trace-render trace-ddraw kill window-reset wm-unmanaged wm-managed vd-on vd-off mode8 mode16 ddraw-gdi ddraw-default smoke difftest difftest-run utildiff utildiff-run utildiff-portable numericdiff numericdiff-run chaindiff chaindiff-run atcdiff atcdiff-run weathermdiff weathermdiff-run acontaindiff acontaindiff-run sounddiff sounddiff-run dynamicdiff dynamicdiff-run fegriddiff fegriddiff-run fediff fediff-run fesldiff fesldiff-run boosterdiff boosterdiff-run demodiff demodiff-run windowdiff windowdiff-run g3ddiff g3ddiff-run multipdiff multipdiff-run g3d-break-build g3d-breaks g3dmeshdiff g3dmeshdiff-run g3ddiff-meshc-run window-breaks window-break-build winmsgdiff winmsgdiff-run winmsg-breaks winmsg-break-build realitydiff realitydiff-run reality-breaks reality-break-build analysisdiff analysisdiff-run analysis-breaks analysis-break-build controlsdiff controlsdiff-run controls-breaks controls-break-build advdrvdiff advdrvdiff-run advdrv-cover landmediff landmediff-run facildiff facildiff-run facildiff-fe-run ofstest ofstest-run ofstest-remove sehfix sehfix-install sehfix-remove sehfix-log util-trace install revert installed-name-of orig-module-of clean

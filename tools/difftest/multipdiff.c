@@ -1,8 +1,9 @@
-/* Differential test for MULTIP's recovered public query slice.
+/* Differential test for MULTIP's recovered public queries and transport units.
  *
  * The retail and OpenFS98 DLLs are loaded together. Their private runtime
  * fields and imported GLOBAL/UTIL pointers are seeded identically, then slots
  * +0x24..+0x38 are compared after normalising pointers to record indexes.
+ * multip_send.inc and multip_receive.inc add deterministic transport scenarios.
  * This is intentionally slice coverage, not a whole-module claim.
  */
 #include <windows.h>
@@ -401,6 +402,11 @@ static void print_difference(uint32_t scenario_number,
                    (unsigned long)our_words[index]);
 }
 
+#include "multip_send.inc"
+#include "multip_receive.inc"
+#include "multip_workers.inc"
+#include "multip_directplay.inc"
+
 int main(int argc, char **argv)
 {
     struct multip_module retail;
@@ -452,5 +458,10 @@ int main(int argc, char **argv)
            (unsigned long)collision_overrides, (unsigned long)range_calls);
     printf("MULTIP +0x24..+0x38: %lu scenarios, %lu differ\n",
            (unsigned long)scenarios, (unsigned long)bad);
+    bad += test_send(&retail, &ours, scenarios, 0);
+    bad += test_send(&retail, &ours, scenarios, 1);
+    bad += test_receive(&retail, &ours, scenarios);
+    bad += test_directplay(&retail, &ours, scenarios);
+    bad += test_workers(&retail, &ours, scenarios);
     return bad != 0;
 }

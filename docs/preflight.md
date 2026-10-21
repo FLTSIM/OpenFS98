@@ -150,9 +150,9 @@ options are named in `.data` (`CONNECTION_TYPE`, `MAX_SEGMENTS_PER_SEC`,
   and a message queue.
   The other side of a session is then a script, which is better than a
   second machine.
-- **A worker thread** (`CreateThread`, `WaitForMultipleObjects`, events,
-  critical sections), so BOOSTER's pattern applies: run the sides in turn
-  and drain the thread after every operation.
+- **Two worker threads**, one each for receive and send (`CreateThread`,
+  `WaitForMultipleObjects`, events, critical sections), so BOOSTER's pattern
+  applies: run the sides in turn and drain both workers after every operation.
 - Unfinished imports are minimal: MAIN `+0x74` (fire-and-forget) and G3D
   `+0x38` ×2 and `+0x64`. Only `+0x64`'s value is read.
 - `ShellExecuteA` is called once, on a path MULTIP builds at run time in
@@ -163,9 +163,11 @@ than a fixture: it is a written-down account of exactly what MULTIP
 expects from a transport, which a native build will need to provide.
 
 **Status: in progress.** The public `+0x24`..`+0x38` player-list, lookup,
-status and active-range slice is transliterated and differential-tested
-against retail. It is kept out of the normal module list until session setup
-and transport exist. See [modules/multip.md](modules/multip.md).
+status and active-range slice, `+0x20` send enqueue, and internal send-one,
+drain/flush, receive/dequeue, worker lifecycles and DirectPlay loader/interface
+lifetime are tested against retail (six suites of 20,000 scenarios each). It
+is kept out of the normal module list until session setup, message handling
+and CHAIN callbacks exist. See [modules/multip.md](modules/multip.md).
 
 **MPCHAT** (3,104 bytes) is the chat window. Its id is `0xffffffff`, so no
 module can import it. It hooks itself onto CHAIN lists `0x1d`, `0x14`, `0xb`

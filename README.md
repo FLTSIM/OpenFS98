@@ -107,6 +107,8 @@ else's 1997 build, and it should read that way.
 | `make realitydiff-run` | whole-module REALITY, crashes and damage: retail and OpenFS98 in turn through every crash gate, the countdown, the reload and the crash analysis (a stand-in for its dialog, retail UTIL and NUMERIC), the stress rolls and the cracked windscreen; HG2D's lines logged with their colour and view; compares the transcript, the whole `.data` image, the arena, GLOBAL and UTIL's and NUMERIC's state. `make reality-breaks` breaks it on purpose |
 | `make analysisdiff-run` | whole-module ANALYSIS, landing and manoeuvre analysis and course tracking: retail and OpenFS98 in turn over the frames, the landing thresholds, the compaction, the trail and all three dialogs (a stand-in for the dialog engine, retail UTIL and NUMERIC), with the register leftovers retail reads (CHAIN's, memset's, the CD MSVCRT memmove's) modelled; HG2D's lines and G3D's display list logged; compares the transcript, the whole `.data` image, the arena, GLOBAL and UTIL's and NUMERIC's state. `make analysis-breaks` breaks it on purpose |
 | `make controlsdiff-run` | whole-module CONTROLS: retail and OpenFS98 side by side over commands (through the dispatcher and CHAIN list 0xb), the axis, engine and pilot-event entries, the CHAIN frames, the joystick poll and watcher over scripted sticks, the key bindings, force feedback and the key-assignment dialog; the host's profile services passed through to fixture CFG files, models of its accelerator tables and joysticks, a DirectInput 5 stand-in and a stand-in for Options.DLL's dialog; compares GLOBAL, the whole `.data` image, the import-call transcript and the profile files. `make controls-breaks` breaks it on purpose |
+| `make multipdiff-run` | current MULTIP checkpoint only: compare public slots `+0x24`..`+0x38` and `+0x20` enqueue against retail over six suites of 20,000 scenarios: queries, enqueue, send/drain/flush, receive/dequeue, DirectPlay loader/lifetime, and controlled worker lifecycles; this is not yet a whole-module result |
+| `make multip-breaks` | verify the transport harness catches forty-two deliberate mutations, using isolated DLLs in `/tmp`; send, receive, worker and DirectPlay slice targets are also available; crashes and fixture errors do not count |
 | `make demodiff-run` | whole-module DEMO: retail and OpenFS98 in turn over the CD's six videos and synthetic ones with every record class, recording, playback, instant replay and the four dialogs' callbacks (retail UTIL's catalogue, a stand-in for the host's dialog engine); faults compared as outcomes, runaway ops cut at a fixed count; compares the transcript, the whole `.data` image (code pointers through a learnt pairing), the arena, GLOBAL and the trees |
 | `make fesldiff-run` | FE's `+0x78`, the Scenery Library, retail against OpenFS98 over a writable fixture with sandboxed drive letters, driven by a stand-in for World.DLL's nine dialogs; compares the call transcript (with string comparisons and the world files left on disk), FE's `.data`, GLOBAL and the heap; faults are compared as outcomes |
 | `make facildiff-fe-run` | the same harness with OpenFS98 FE behind OpenFS98 FACIL, against retail FE behind retail FACIL: both reimplementations together over the real CD index and the dialogs (`Q=`/`D=` set the phase sizes, 2,000 each by default) |
@@ -326,7 +328,14 @@ them against retail over 20,000 scenarios with zero differences. The
 dialog, `English\Options.DLL`'s `0x140a`, calls back into CONTROLS through a
 parameter block, so it is verified against a stand-in for that dialog built
 from its listing (see [docs/modules/controls.md](docs/modules/controls.md)).
-`MULTIP` and `MPCHAT` follow it, then `G3D`.
+`MULTIP` is now in progress: its public player-list/status queries, send
+enqueue, send-one/drain/flush, receive/dequeue, both worker lifecycles, and
+DirectPlay loader/interface lifetime each pass 20,000 differential scenarios.
+Session/lobby handling, message dispatch and remaining public entries are
+still pending. The
+restartable handoff and acceptance boundary are in
+[docs/modules/multip.md](docs/modules/multip.md). `MPCHAT` follows it, then
+`G3D`.
 
 Other useful work, in no particular order:
 

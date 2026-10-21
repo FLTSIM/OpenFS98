@@ -630,6 +630,7 @@ static uint32_t FS98_STDCALL multip_send(uint32_t to_id, const void *payload,
 #include "multip_control_updates.inc"
 #include "multip_lifecycle.inc"
 #include "multip_dispatch.inc"
+#include "multip_providers.inc"
 
 /* Private entry access for the differential DLL only. Normal builds retain
  * the retail export surface; session and worker code use internal calls. */
@@ -742,7 +743,9 @@ __declspec(dllexport) void *const multip_test_entries[] = {
     (void *)multip_handle_1005, (void *)multip_handle_1006, (void *)multip_handle_1016,
     (void *)multip_system_lost, (void *)multip_system_dispatch,
     (void *)multip_app_dispatch, (void *)multip_receive_dispatch,
-    (void *)multip_receive_expire, (void *)multip_receive_callback
+    (void *)multip_receive_expire, (void *)multip_receive_callback,
+    (void *)multip_provider_clear, (void *)multip_provider_callback,
+    (void *)multip_provider_enumerate
 };
 #endif
 

@@ -607,6 +607,21 @@ DISPATCH_MUTATIONS = [
 ]
 
 
+PROVIDER_MUTATIONS = [
+    ("provider cleanup advances", "        count--;\n    }\n    HOST_FN(0x304", "        count--; record = (void **)((uint8_t *)record + 28);\n    }\n    HOST_FN(0x304"),
+    ("provider cleanup failure consumed", "    if (multip_provider_clear() != 0)\n        return 0;", "    if (multip_provider_clear() != 0)\n        return -1;"),
+    ("provider cleanup preserves count", "    HOST_FN(0x304, multip_list_clear_fn)((void *)(uintptr_t)(D + 0x348));", "    /* deliberately retain provider count */"),
+    ("provider enumeration hresult", "        multip_provider_callback, NULL) != 0 ? -1 : 0;", "        multip_provider_callback, NULL) < 0 ? -1 : 0;"),
+    ("provider callback context", "        multip_provider_callback, NULL) != 0 ? -1 : 0;", "        multip_provider_callback, (void *)1) != 0 ? -1 : 0;"),
+    ("provider allocation terminator", "multip_strlen_fn)(description) + 1;", "multip_strlen_fn)(description) + 2;"),
+    ("provider allocation zero flag", "multip_alloc_fn)(1, size, (void **)record, 1)", "multip_alloc_fn)(1, size, (void **)record, 0)"),
+    ("provider allocation failure continues", "multip_alloc_fn)(1, size, (void **)record, 1) != 0)\n        return 0;", "multip_alloc_fn)(1, size, (void **)record, 1) != 0)\n        return 1;"),
+    ("provider GUID copy length", "multip_copy_fn)(record + 4, provider, 16);", "multip_copy_fn)(record + 4, provider, 12);"),
+    ("provider major version", "A32(record, 0x14) = major_version;", "A32(record, 0x14) = minor_version;"),
+    ("provider minor version", "A32(record, 0x18) = minor_version;", "A32(record, 0x18) = major_version;"),
+]
+
+
 def check_variant(directory, source, slice_name):
     source_path = directory / "multip.c"
     source_path.write_text(source)
@@ -623,7 +638,7 @@ def check_variant(directory, source, slice_name):
     ]
     subprocess.run(command, check=True, capture_output=True, text=True)
     result = subprocess.run(
-        ["wine", "multipdiff.exe", "1200"] + ([slice_name] if slice_name in ("local", "frame", "players", "messages", "draw", "motion", "commands", "weather", "tick", "system", "app_players", "updates", "textures", "texture_receive", "transfer_messages", "texture_send", "model_send", "model_cache", "model_receive", "title_receive", "state_messages", "control_updates", "control_callback", "dispatch", "lifecycle") else []), cwd=directory,
+        ["wine", "multipdiff.exe", "1200"] + ([slice_name] if slice_name in ("local", "frame", "players", "messages", "draw", "motion", "commands", "weather", "tick", "system", "app_players", "updates", "textures", "texture_receive", "transfer_messages", "texture_send", "model_send", "model_cache", "model_receive", "title_receive", "state_messages", "control_updates", "control_callback", "dispatch", "lifecycle", "providers") else []), cwd=directory,
         env={**os.environ, "WINEDEBUG": "-all"}, capture_output=True,
         text=True, timeout=180 if slice_name == "send" else 60,
     )
@@ -635,7 +650,7 @@ def check_variant(directory, source, slice_name):
              "aircraft": "aircraft select/release",
              "records": "aircraft copy/session browser records",
              "tracking": "track-name display", "messages": "application message constructors",
-             "players": "player lifecycle helpers", "local": "local player creation/start", "frame": "session CHAIN 0x14", "draw": "player drawing/CHAIN 0x10", "motion": "aircraft extrapolation/CHAIN 0x13", "commands": "view commands/CHAIN 0x0c", "weather": "weather/sync messages", "tick": "tick callbacks/CHAIN 0x02", "system": "DirectPlay system notifications", "app_players": "application player types", "updates": "aircraft state receive/timing", "textures": "texture catalogue/file services", "texture_receive": "multipart texture receive", "transfer_messages": "multipart transfer messages", "texture_send": "multipart texture sender", "model_send": "multipart model sender", "model_cache": "aircraft cache files", "model_receive": "multipart model receive", "title_receive": "aircraft title receive", "state_messages": "aircraft state message constructors", "control_updates": "control/collision/state publishing", "control_callback": "control CHAIN 0x01", "dispatch": "application receive dispatch", "lifecycle": "receive/session lifecycle"}[slice_name]
+             "players": "player lifecycle helpers", "local": "local player creation/start", "frame": "session CHAIN 0x14", "draw": "player drawing/CHAIN 0x10", "motion": "aircraft extrapolation/CHAIN 0x13", "commands": "view commands/CHAIN 0x0c", "weather": "weather/sync messages", "tick": "tick callbacks/CHAIN 0x02", "system": "DirectPlay system notifications", "app_players": "application player types", "updates": "aircraft state receive/timing", "textures": "texture catalogue/file services", "texture_receive": "multipart texture receive", "transfer_messages": "multipart transfer messages", "texture_send": "multipart texture sender", "model_send": "multipart model sender", "model_cache": "aircraft cache files", "model_receive": "multipart model receive", "title_receive": "aircraft title receive", "state_messages": "aircraft state message constructors", "control_updates": "control/collision/state publishing", "control_callback": "control CHAIN 0x01", "dispatch": "application receive dispatch", "lifecycle": "receive/session lifecycle", "providers": "provider catalogue"}[slice_name]
     prefix = f"MULTIP {label}: 1200 scenarios, "
     lines = [line for line in result.stdout.splitlines() if line.startswith(prefix)]
     if len(lines) != 1 or result.returncode not in (0, 1):
@@ -648,7 +663,7 @@ def check_variant(directory, source, slice_name):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--slice", choices=("send", "receive", "workers", "directplay", "profile", "groups", "metadata", "aircraft", "records", "tracking", "messages", "players", "local", "frame", "draw", "motion", "commands", "weather", "tick", "system", "app_players", "updates", "textures", "texture_receive", "transfer_messages", "texture_send", "model_send", "model_cache", "model_receive", "title_receive", "state_messages", "control_updates", "control_callback", "dispatch", "lifecycle", "all"), default="all")
+    parser.add_argument("--slice", choices=("send", "receive", "workers", "directplay", "profile", "groups", "metadata", "aircraft", "records", "tracking", "messages", "players", "local", "frame", "draw", "motion", "commands", "weather", "tick", "system", "app_players", "updates", "textures", "texture_receive", "transfer_messages", "texture_send", "model_send", "model_cache", "model_receive", "title_receive", "state_messages", "control_updates", "control_callback", "dispatch", "lifecycle", "providers", "all"), default="all")
     args = parser.parse_args()
     variants = []
     if args.slice in ("send", "all"):
@@ -689,12 +704,13 @@ def main():
                                   ("control_updates", CONTROL_UPDATE_MUTATIONS),
                                   ("control_callback", CONTROL_CALLBACK_MUTATIONS),
                                   ("dispatch", DISPATCH_MUTATIONS),
-                                  ("lifecycle", LIFECYCLE_MUTATIONS)):
+                                  ("lifecycle", LIFECYCLE_MUTATIONS),
+                                  ("providers", PROVIDER_MUTATIONS)):
         if args.slice in (slice_name, "all"):
             variants.extend((slice_name, *mutation) for mutation in mutations)
     source = (ROOT / "src/multip/multip.c").read_text()
     for include in ("multip_profile.inc", "multip_session.inc",
-                    "multip_aircraft.inc", "multip_records.inc", "multip_tracking.inc", "multip_messages.inc", "multip_players.inc", "multip_callbacks.inc", "multip_motion.inc", "multip_commands.inc", "multip_weather.inc", "multip_tick.inc", "multip_system.inc", "multip_app_players.inc", "multip_updates.inc", "multip_textures.inc", "multip_texture_receive.inc", "multip_transfer_messages.inc", "multip_texture_send.inc", "multip_model_send.inc", "multip_model_cache.inc", "multip_model_receive.inc", "multip_title_receive.inc", "multip_state_messages.inc", "multip_control_updates.inc", "multip_lifecycle.inc", "multip_dispatch.inc", "multip_dispatch_cases.inc"):
+                    "multip_aircraft.inc", "multip_records.inc", "multip_tracking.inc", "multip_messages.inc", "multip_players.inc", "multip_callbacks.inc", "multip_motion.inc", "multip_commands.inc", "multip_weather.inc", "multip_tick.inc", "multip_system.inc", "multip_app_players.inc", "multip_updates.inc", "multip_textures.inc", "multip_texture_receive.inc", "multip_transfer_messages.inc", "multip_texture_send.inc", "multip_model_send.inc", "multip_model_cache.inc", "multip_model_receive.inc", "multip_title_receive.inc", "multip_state_messages.inc", "multip_control_updates.inc", "multip_lifecycle.inc", "multip_dispatch.inc", "multip_dispatch_cases.inc", "multip_providers.inc"):
         source = source.replace('#include "' + include + '"',
                                 (ROOT / "src/multip" / include).read_text())
     for slice_name, name, before, after in variants:

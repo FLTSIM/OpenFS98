@@ -289,18 +289,12 @@ scalers' weights are the coordinates.
 `make panels-breaks [N=150 COUNT=200 SEED=1]` applies generated one-place
 mutations (an offset four out, a comparison, `&&`/`||`, a sign, a shift, a
 constant) to copies of `panels.c` and runs the unit mode for the routine, then
-the whole-module mode. Of 200 sampled, 164 were caught, 2 did not build and
-34 were missed. They are not all triaged; those looked at are:
-
-- equivalent: an index clamp `< 0` on a value that is then 0 (`e_be10`), array
-  sizes `0x300`/`0x100` of locals, zeroing a field the install already finds
-  zero (`e_cbf0`, `e_a170`, `e_c300`), `var_sound`'s unused word;
-- unreachable: `smooth_8`'s centre case (`i == j == 0x8000`);
-- boundaries the data never hits exactly (`e_c720`'s `>=` clamps, the
-  shrinkers' `>` on exact box edges);
-- sampling: `e_b630` is caught at N=400 (2 scenarios in 400).
-
-Still open as possible gaps: a flags word that reaches `surface_convert` with
-bit 2 (the host palette) from the elements (`e_a6f0`, `e_ccd0`), `panels_refresh`'s
-HG2D remap test, `dib_new`'s palette bytes, `e_bd80`/`e_c6a0` frame and surface
-counts.
+the whole-module mode. Of 200 sampled, 164 were caught at N=150 and 2 did not build; the 34 missed,
+rerun at N=800, left two: `e_be10` mode 1 and 4's `+0x6c` offset (an icon whose
+frame is `(value + offset) / range`: the CD's gauges probably leave `+0x6c` and `+0x70` (not checked)
+alike, so the CD cannot tell them apart) and `e_c720`'s `>=` clamp on a
+corner exactly at the window's edge (no gauge sits there). The ones the
+larger run did not need to catch were equivalent or unreachable before:
+an index clamp `< 0` on a 0, `smooth_8`'s centre case (`i == j == 0x8000`),
+sampling (`e_b630`, 2 scenarios in 400). The harness's gap is data: a gauge
+the CD does not have.

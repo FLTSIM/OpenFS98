@@ -29,18 +29,21 @@ and untracked files. Preserve the entire working tree; do not stage, commit,
 push or install MULTIP. A fresh context in this workspace can use these files
 immediately; a separate checkout also needs the uncommitted changes.
 
-- **Verified:** 37 top-level differential suites, 20,000 scenarios each, zero
+- **Verified:** 38 top-level differential suites, 20,000 scenarios each, zero
   differences. The final host-fixture correction was also rechecked at 20,000
   scenarios in `players`, `system`, `lifecycle` and `dispatch`.
-- **Latest implementation:** `src/multip/multip_dispatch.inc`,
-  `multip_lifecycle.inc`, generated `multip_dispatch_cases.inc`, matching
-  fixtures under `tools/difftest/`, and `tools/gen_multip_dispatch.py`.
-  Private test entries 206–220 map to retail RVAs in `multip_send.inc`.
-- **Mutation status:** all 19 lifecycle and four dispatch mutations caught;
-  all 382 targets match exactly once. The full 382-target sweep is unfinished;
-  an earlier sweep stopped on a Wine timeout. Crashes, timeouts and fixture
-  failures do not count as catches.
-- **Next:** recover lobby/provider and configuration/dialog wiring, starting
+- **Latest implementation:** `src/multip/multip_providers.inc` and the matching
+  `tools/difftest/multip_providers.inc` recover provider enumeration/cleanup
+  at `+0x41f0`, `+0x4210`, and `+0x42a0`. Private test entries 221–223 map
+  to retail RVAs in `multip_send.inc`; see
+  [the provider checkpoint](#provider-catalogue-checkpoint). The previous
+  receive/lifecycle owners remain in `multip_dispatch.inc` and
+  `multip_lifecycle.inc`, with private entries 206–220.
+- **Mutation status:** all 11 provider, 19 lifecycle and four dispatch
+  mutations caught; all 393 targets match exactly once. The full 393-target
+  sweep is unfinished; an earlier sweep stopped on a Wine timeout. Crashes,
+  timeouts and fixture failures do not count as catches.
+- **Next:** recover the remaining lobby/provider and configuration/dialog wiring, starting
   from public session toggle `.text+0x8e60` and configuration `+0x3d60`.
   Reuse the verified completion `+0x9c70` and disconnect `+0x8cf0`; their
   receive/control registration group is already implemented. Continue with
@@ -124,7 +127,7 @@ The following internal paths are now implemented and compared against retail:
   an extra packet and leak it on enqueue failure. The unused tails of retail's
   1000-byte stack buffers are omitted because they are never sent.
 
-The private test table now has entries 0–220; `send_internal` in
+The private test table now has entries 0–223; `send_internal` in
 `tools/difftest/multip_send.inc` maps each to its retail RVA. Entries 25–33
 are profile and group/session helpers, 34–41 description/name/counter helpers,
 42–44 aircraft ownership, 45–50 browser records/enumeration, 51–58 tracking
@@ -161,7 +164,7 @@ bytes reach all type characters. Constructor snapshots must be saved before
 later enumeration resets the embedded list; a stride mutation exposed this
 fixture gap and now fails the comparison.
 
-The current thirty-seven-suite differential run passes 20,000 scenarios per suite
+The current thirty-eight-suite differential run passes 20,000 scenarios per suite
 with zero differences. `make multipdiff` builds both production and test DLLs
 without warnings; the production export table contains only ImportTable and
 Linkage. These remain slice results, not whole-module acceptance. The earlier
@@ -359,7 +362,7 @@ The x86 callback has the retail stack layout needed for packet padding;
 the non-x86 C callback is implemented but is not covered by this x86 fixture.
 
 The full mutation sweep remains incomplete: the 324-case run stopped on a
-Wine timeout in the drawing slice. The current 382 mutation targets all
+Wine timeout in the drawing slice. The current 393 mutation targets all
 match exactly once, but the full sweep still needs completion. The earlier
 154-case sweep and individual new owner slices passed before the naming
 cleanup. Do not count a timeout or fixture abort as a catch.
@@ -1097,3 +1100,48 @@ Before installation, also require a clean `make all`, `git diff --check`, the
 whole-module differential run with zero differences, and a game smoke test.
 Only after those pass should MULTIP be added to `MODULES`; its installed name
 must remain `MULTIPLAYER.DLL` through the existing Makefile mapping.
+
+## Provider catalogue checkpoint
+
+`multip_providers.inc` recovers DirectPlay provider enumeration (`.text+0x41f0`),
+its five-argument callback (`+0x4210`), and catalogue cleanup (`+0x42a0`).
+Private test entries 221–223 map to cleanup, callback and enumeration respectively.
+These are configuration `+0x3d60` dependencies; public entries remain guarded.
+
+The callback appends a zeroed 28-byte record before allocating a zero-filled
+name of `strlen(description) + 1` bytes. Allocation failure returns false and
+leaves that record appended. String and 16-byte GUID copy failures are ignored;
+major/minor version writes still happen and the callback returns true. The
+callback ignores its context.
+
+Cleanup never advances its record pointer: it frees the first name, then
+rechecks that now-null field for every remaining iteration. Other names leak.
+A failed free returns -1 before clearing the list count. Enumeration consumes
+that cleanup failure as success (zero), without calling DirectPlayEnumerateA.
+Otherwise any nonzero enumeration HRESULT, including positive values, becomes
+-1. HOST `+0x304` clears only the count and retains the backing array.
+
+The synthetic `providers` fixture compares five successive actions, ordered
+host calls, callback identity/context, returns, descriptor state, GUID/version
+bytes, name heap bytes and ownership, and partial records. It varies empty and
+multi-provider catalogues, null first names hiding later names, empty and long
+descriptions, positive/error HRESULTs and allocation/free/copy failures. Known
+retail outcomes independently assert the first-name leak, swallowed cleanup
+failure, version fields and positive-HRESULT normalization. List append is a
+successful fixed-capacity host model; fatal host growth failures and real
+DirectPlay/network behavior are outside this slice.
+
+`make multipdiff-run N=20000` passes all 38 top-level suites with zero
+differences, including the retail boundary assertions in the provider fixture.
+All eleven provider mutations are caught at 1,200 scenarios. The production
+DLL builds without warnings and still exports only ImportTable and Linkage;
+`git diff --check` passes. This remains slice coverage, not whole-module
+acceptance. MULTIP has not been installed or added to `MODULES`.
+
+Focused verification: `make multipdiff`, then from `bin/difftest`,
+`WINEDEBUG=-all wine multipdiff.exe 20000 providers`. Mutation checks:
+`python3 -B tools/multip_breaks.py --slice providers`. The earlier 382-target
+full mutation sweep remains unfinished; the provider mutations extend that
+set to 393 targets, all matching exactly once. Continue with lobby creation and session-browser
+refresh/cleanup (`+0x42f0`, `+0x44c0`) and the configuration callback owners
+before enabling public session toggle `+0x18`.

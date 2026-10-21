@@ -122,7 +122,12 @@ with a zero operand ends it.
   `ebx`, so retail reads the offset at `+0x20006`. Reproduced.
 - **`0x8c` calls an absolute code address from the program**, which is why
   the built-in bytecode embeds G3D's own addresses. Ours maps them through
-  `routine()`.
+  `routine()`. The sky program also names code in MAIN (`0x207e9d47`, which
+  sets two words of the context at `edi`): `routine()` sends an address
+  outside the image to `native_thunk`, which calls it with the registers
+  the transliteration holds and keeps what it leaves. Without this, the
+  in-game view was a black sky over flat green (`unmapped` trapped; SEHFIX
+  had nothing to repair). The harness stubs MAIN, so only the game showed it.
 - **Some opcodes write into the program they run**: `0x3a`/`0x3c` exchange a
   one-shot word at `+8`, `0x18` rewrites a texture name.
 - Opcode `0x47`'s scale stores the eye unshifted for operands above 32 (it

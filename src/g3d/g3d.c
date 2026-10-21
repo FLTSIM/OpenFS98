@@ -15199,6 +15199,22 @@ static void unmapped(void)
     __builtin_trap();
 }
 
+/* Code outside the image that a program's 0x8c names (MAIN's, in retail's
+ * built-in programs): called as itself, with the registers the
+ * transliteration holds, and what it leaves in them kept. */
+uint32_t g3d_native_target;
+void native_thunk(void);
+__asm__(".text\n\t.p2align 4\n_native_thunk:\n\t"
+        "pushl %ebp\n\tpushl %ebx\n\tpushl %esi\n\tpushl %edi\n\t"
+        "movl _g3d_ebx, %ebx\n\tmovl _g3d_esi, %esi\n\tmovl _g3d_edi, %edi\n\t"
+        "movl _g3d_ebp, %ebp\n\tmovl _g3d_ecx, %ecx\n\tmovl _g3d_edx, %edx\n\t"
+        "movl _g3d_eax, %eax\n\t"
+        "call *_g3d_native_target\n\t"
+        "movl %eax, _g3d_eax\n\tmovl %ebx, _g3d_ebx\n\tmovl %ecx, _g3d_ecx\n\t"
+        "movl %edx, _g3d_edx\n\tmovl %esi, _g3d_esi\n\tmovl %edi, _g3d_edi\n\t"
+        "movl %ebp, _g3d_ebp\n\t"
+        "popl %edi\n\tpopl %esi\n\tpopl %ebx\n\tpopl %ebp\n\tret\n");
+
 static routine_fn routine(uint32_t a)
 {
     switch (a) {
@@ -15399,6 +15415,10 @@ static routine_fn routine(uint32_t a)
     case 0x206ec310: return op_st_facet;
     case 0x206ec545: return op_st_face;
     default:
+        if (a - 0x206e0000u >= 0x38000u) {
+            g3d_native_target = a;
+            return native_thunk;
+        }
         g3d_unmapped = a;
         return unmapped;
     }

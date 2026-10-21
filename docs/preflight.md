@@ -165,9 +165,11 @@ expects from a transport, which a native build will need to provide.
 **Status: in progress.** The public `+0x24`..`+0x38` player-list, lookup,
 status and active-range slice, `+0x20` send enqueue, and internal send-one,
 drain/flush, receive/dequeue, worker lifecycles and DirectPlay loader/interface
-lifetime are tested against retail (six suites of 20,000 scenarios each). It
-is kept out of the normal module list until session setup, message handling
-and CHAIN callbacks exist. See [modules/multip.md](modules/multip.md).
+lifetime, profile round-trip, session/group primitives, metadata, aircraft
+ownership, browser records, tracking/selection and fourteen message
+constructors and remote-player lifecycle are tested against retail (fourteen suites of 20,000 scenarios
+each). It remains outside the normal module list while local-player creation,
+receive dispatch, lobby/dialog handling and public lifecycle paths are pending. See [modules/multip.md](modules/multip.md).
 
 **MPCHAT** (3,104 bytes) is the chat window. Its id is `0xffffffff`, so no
 module can import it. It hooks itself onto CHAIN lists `0x1d`, `0x14`, `0xb`
@@ -263,10 +265,10 @@ host's DirectDraw, video and audio-compression code.
 
 ## Also open
 
-- **The CHAIN ecx fix** from round 8: retail CHAIN calls each callback with
-  ecx set to the dispatch's first argument, and OpenFS98's CHAIN does not.
-  It is independent of this round and should be proven in `chaindiff`
-  first.
+- ~~**The CHAIN ecx fix** from round 8~~ -- done: OpenFS98's CHAIN enters
+  callbacks with all of retail's registers (ecx the dispatch's first
+  argument among them) and returns its ecx/edx, proven in `chaindiff`
+  ([modules/chain.md](modules/chain.md)).
 
 # Round 8: ANALYSIS
 

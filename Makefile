@@ -64,10 +64,16 @@ MODULES := ACONTAIN ADVDRV ANALYSIS ATC BOOSTER CHAIN CONTROLS DEMO DYNAMIC FACI
 
 # MULTIP is in progress and intentionally is not in MODULES yet.  The first
 # recovered slice is built explicitly and differential-tested below.
-$(BIN)/MULTIP.DLL: src/multip/multip.c src/multip/multip.def $(BIN)/multip.res
+$(BIN)/MULTIP.DLL: src/multip/multip.c src/multip/multip_players.inc src/multip/multip_nametag.inc src/multip/multip_messages.inc src/multip/multip_tracking.inc src/multip/multip_records.inc src/multip/multip_aircraft.inc src/multip/multip_session.inc src/multip/multip_profile.inc src/multip/multip_profile_fields.inc src/multip/multip.def src/multip/multip_data.inc src/multip/multip_rdata.inc src/multip/multip_pointers.inc $(BIN)/multip.res
 	@mkdir -p $(BIN)
 	$(CC) $(CFLAGS) $(LDFLAGS) -Wl,--image-base=$(BASE_MULTIP) \
 	      -o $@ src/multip/multip.c $(BIN)/multip.res src/multip/multip.def -lkernel32
+
+src/multip/multip_data.inc src/multip/multip_rdata.inc src/multip/multip_pointers.inc src/multip/multip_nametag.inc &: $(ORIG)/Modules/multip.dll tools/gen_multip_data.py
+	@python3 tools/gen_multip_data.py
+
+src/multip/multip_profile_fields.inc: $(ORIG)/Modules/multip.dll tools/gen_multip_profile.py
+	@python3 tools/gen_multip_profile.py
 
 $(BIN)/multip.res: src/multip/multip.rc
 	@mkdir -p $(BIN)
@@ -815,13 +821,13 @@ g3ddiff-run: g3ddiff
 
 # MULTIP in progress: public queries, transport, workers and DirectPlay lifetime.
 # Session setup and message dispatch remain pending; no installation.
-$(DIFFDIR)/multipdiff.exe: tools/difftest/multipdiff.c tools/difftest/multip_send.inc tools/difftest/multip_receive.inc tools/difftest/multip_workers.inc tools/difftest/multip_directplay.inc
+$(DIFFDIR)/multipdiff.exe: tools/difftest/multipdiff.c tools/difftest/multip_send.inc tools/difftest/multip_receive.inc tools/difftest/multip_workers.inc tools/difftest/multip_directplay.inc tools/difftest/multip_profile.inc tools/difftest/multip_session.inc tools/difftest/multip_aircraft.inc tools/difftest/multip_tracking.inc tools/difftest/multip_messages.inc tools/difftest/multip_players.inc
 	@mkdir -p $(DIFFDIR)
 	$(CC) -std=c99 -O1 -Wall -Wextra -Iinclude -o $@ tools/difftest/multipdiff.c
 
 # Internal transport/worker routines have no public Linkage slots. Expose their addresses
 # only in the differential build, alongside the unchanged retail exports.
-$(DIFFDIR)/MULTIP_test.dll: src/multip/multip.c src/multip/multip.def $(BIN)/multip.res
+$(DIFFDIR)/MULTIP_test.dll: src/multip/multip.c src/multip/multip_players.inc src/multip/multip_nametag.inc src/multip/multip_messages.inc src/multip/multip_tracking.inc src/multip/multip_records.inc src/multip/multip_aircraft.inc src/multip/multip_session.inc src/multip/multip_profile.inc src/multip/multip_profile_fields.inc src/multip/multip.def src/multip/multip_data.inc src/multip/multip_rdata.inc src/multip/multip_pointers.inc $(BIN)/multip.res
 	@mkdir -p $(DIFFDIR)
 	$(CC) $(CFLAGS) -DMULTIP_DIFFTEST $(LDFLAGS) -Wl,--image-base=$(BASE_MULTIP) \
 	      -o $@ src/multip/multip.c $(BIN)/multip.res src/multip/multip.def -lkernel32
@@ -883,6 +889,17 @@ g3dmeshdiff: $(DIFFDIR)/g3dmeshdiff.exe
 
 g3dmeshdiff-run: g3dmeshdiff
 	@cd $(DIFFDIR) && WINEDEBUG=-all wine g3dmeshdiff.exe $(if $(N),$(N),100000)
+
+# The HG2D model (tools/difftest/hg2d_model.inc) that harnesses of modules
+# drawing through HG2D use, against retail HG2D where it is exact: the
+# texture pool, +0xac and +0xb0.
+$(DIFFDIR)/hg2dmodeldiff.exe: tools/difftest/hg2dmodeldiff.c tools/difftest/hg2d_model.inc
+	@mkdir -p $(DIFFDIR)
+	$(CC) -std=c99 -O1 -Wall -Wextra -o $@ tools/difftest/hg2dmodeldiff.c
+
+hg2dmodeldiff-run: $(DIFFDIR)/hg2dmodeldiff.exe
+	@cp $(ORIG)/Modules/HG2D.DLL $(DIFFDIR)/HG2D_retail.dll
+	@cd $(DIFFDIR) && WINEDEBUG=-all timeout 1800 wine hg2dmodeldiff.exe $(if $(N),$(N),20000)
 
 g3ddiff-meshc-run: $(DIFFDIR)/g3ddiff.exe $(BIN)/g3d.res
 	$(CC) $(CFLAGS) -DFS98_PORTABLE_FP -c -o $(DIFFDIR)/g3d_mesh_portable.o src/g3d/g3d_mesh.c
@@ -1296,4 +1313,4 @@ smoke: all
 clean:
 	rm -rf $(BIN)
 
-.PHONY: multip-directplay-breaks multip-worker-breaks multip-breaks multip-receive-breaks multip-send-breaks all stage setup-map graph hostmap compare run trace trace-render trace-ddraw kill window-reset wm-unmanaged wm-managed vd-on vd-off mode8 mode16 ddraw-gdi ddraw-default smoke difftest difftest-run utildiff utildiff-run utildiff-portable numericdiff numericdiff-run chaindiff chaindiff-run atcdiff atcdiff-run weathermdiff weathermdiff-run acontaindiff acontaindiff-run sounddiff sounddiff-run dynamicdiff dynamicdiff-run fegriddiff fegriddiff-run fediff fediff-run fesldiff fesldiff-run boosterdiff boosterdiff-run demodiff demodiff-run windowdiff windowdiff-run g3ddiff g3ddiff-run multipdiff multipdiff-run g3d-break-build g3d-breaks g3dmeshdiff g3dmeshdiff-run g3ddiff-meshc-run window-breaks window-break-build winmsgdiff winmsgdiff-run winmsg-breaks winmsg-break-build realitydiff realitydiff-run reality-breaks reality-break-build analysisdiff analysisdiff-run analysis-breaks analysis-break-build controlsdiff controlsdiff-run controls-breaks controls-break-build advdrvdiff advdrvdiff-run advdrv-cover landmediff landmediff-run facildiff facildiff-run facildiff-fe-run ofstest ofstest-run ofstest-remove sehfix sehfix-install sehfix-remove sehfix-log util-trace install revert installed-name-of orig-module-of clean
+.PHONY: multip-directplay-breaks multip-worker-breaks multip-breaks multip-receive-breaks multip-send-breaks all stage setup-map graph hostmap compare run trace trace-render trace-ddraw kill window-reset wm-unmanaged wm-managed vd-on vd-off mode8 mode16 ddraw-gdi ddraw-default smoke difftest difftest-run utildiff utildiff-run utildiff-portable numericdiff numericdiff-run chaindiff chaindiff-run atcdiff atcdiff-run weathermdiff weathermdiff-run acontaindiff acontaindiff-run sounddiff sounddiff-run dynamicdiff dynamicdiff-run fegriddiff fegriddiff-run fediff fediff-run fesldiff fesldiff-run boosterdiff boosterdiff-run demodiff demodiff-run windowdiff windowdiff-run g3ddiff g3ddiff-run multipdiff multipdiff-run g3d-break-build g3d-breaks g3dmeshdiff g3dmeshdiff-run g3ddiff-meshc-run hg2dmodeldiff-run window-breaks window-break-build winmsgdiff winmsgdiff-run winmsg-breaks winmsg-break-build realitydiff realitydiff-run reality-breaks reality-break-build analysisdiff analysisdiff-run analysis-breaks analysis-break-build controlsdiff controlsdiff-run controls-breaks controls-break-build advdrvdiff advdrvdiff-run advdrv-cover landmediff landmediff-run facildiff facildiff-run facildiff-fe-run ofstest ofstest-run ofstest-remove sehfix sehfix-install sehfix-remove sehfix-log util-trace install revert installed-name-of orig-module-of clean

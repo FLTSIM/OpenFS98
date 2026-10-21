@@ -163,8 +163,9 @@ All reproduced unless said otherwise.
   anyway. ecx there is what the path left: the frame's entry ecx, 0 after a
   reset (the host's `rep stos`), or a CHAIN add's (the list's new count).
   Retail CHAIN calls a callback with ecx set to the dispatch's first
-  argument, and MAIN dispatches list 5 with (0, 0), so in the retail game
-  the top half is always 0. The defect is latent. The reimplementation takes
+  argument (OpenFS98's CHAIN now does too, with the rest of retail's
+  registers: [chain.md](chain.md)), and MAIN dispatches list 5 with (0, 0),
+  so in the retail game the top half is always 0. The defect is latent. The reimplementation takes
   ecx through an entry stub, and those calls go through thunks that hand ecx
   back.
 - **The landing height's borrow is bit 7 of the ground's low byte.** `sub
@@ -271,8 +272,3 @@ The other ten are equivalences, each shown:
 
 - **In-game.** `make smoke` proves only that it loads and the sim starts;
   the analysis needs flight, which wine does not reach.
-- **OpenFS98's CHAIN does not set ecx for a callback.** Retail's passes the
-  dispatch's first argument; ours leaves whatever the loop had. With both
-  ANALYSIS builds that only matters through the change test's top half,
-  but a module that reads it more directly would see it. A CHAIN fix, to
-  prove in `chaindiff`.

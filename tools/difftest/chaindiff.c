@@ -14,7 +14,11 @@
  *
  * A scenario is a random script run once against each module.  Compared: the
  * transcript of every host call, callback and return value, and the bytes of
- * every live list block; then deinit's frees.  CHAIN keeps its state in its
+ * every live list block; then deinit's frees.  Callbacks are asm thunks that
+ * log every register they are entered with (retail's ebx points into its own
+ * .data, logged as an offset from the ImportTable) and return a scripted edx,
+ * which the next callback receives; dispatch's ecx and edx are logged as it
+ * returns them.  CHAIN keeps its state in its
  * own .data, which differs between the two builds, so state is compared
  * through what is observable: blocks, calls and returns.
  *
@@ -137,9 +141,41 @@ static int32_t STDCALL h_memmove(void *d, const void *s, uint32_t n)
 static unsigned char host_blob[0x320];
 static unsigned char global_blob[0x1300];
 
-/* ---- callbacks that act on the module under test ---------------------------- */
+/* ---- calling with registers seen ---------------------------------------------- */
 
 static struct chain_linkage *cur;   /* the module being driven */
+static uint32_t cur_imports;         /* its ImportTable, which its .data starts at */
+
+/* dispatch, its ecx and edx as it returns them */
+uint32_t disp_ecx, disp_edx;
+uint32_t call_dispatch(void *fn, uint32_t i, uint32_t a, uint32_t b) __asm__("_call_dispatch");
+__asm__(".text\n_call_dispatch:\n\t"
+        "pushl %ebx\n\tpushl %esi\n\tpushl %edi\n\tpushl %ebp\n\t"
+        "pushl 32(%esp)\n\tpushl 32(%esp)\n\tpushl 32(%esp)\n\t"
+        "call *32(%esp)\n\t"
+        "movl %ecx, _disp_ecx\n\tmovl %edx, _disp_edx\n\t"
+        "popl %ebp\n\tpopl %edi\n\tpopl %esi\n\tpopl %ebx\n\tret");
+
+static void put_ptr(const void *p);
+
+/* a register that may point into a block, as a block offset; else raw */
+static void put_reg(uint32_t v)
+{
+    put_ptr((const void *)(uintptr_t)v);
+}
+
+static uint32_t dispatch(uint32_t i, uint32_t a, uint32_t b)
+{
+    uint32_t r = call_dispatch((void *)cur->dispatch, i, a, b);
+
+    put("[ecx ");
+    put_reg(disp_ecx);
+    put(" edx %#x]", disp_edx);
+    return r;
+}
+
+/* ---- callbacks that act on the module under test ---------------------------- */
+
 static unsigned depth, max_depth = 3;
 /* A callback that adds to the list being dispatched is called by that same
  * dispatch -- retail rereads the count -- so adds can chain without end.
@@ -180,7 +216,7 @@ static void act_on(unsigned k, uint32_t a, uint32_t b)
             uint32_t l = x->act == A_DISPATCH ? x->list : a;
             depth++;
             put("[disp %u{ ", l);
-            r = cur->dispatch(l, l, b + 1);
+            r = dispatch(l, l, b + 1);
             put("}=");
             if (r > 0x10000) put_ptr((void *)(uintptr_t)r); else put("%u", r);
             put("] ");
@@ -191,8 +227,31 @@ static void act_on(unsigned k, uint32_t a, uint32_t b)
     (void)b;
 }
 
-#define CB(k) static void STDCALL cb##k(uint32_t a, uint32_t b) \
-    { put("cb%d(%u,%u) ", k, a, b); act_on(k, a, b); }
+/* The callbacks: thunks that keep the registers they were entered with and
+ * come back with junk in eax and ecx and the scenario's edx for them. */
+uint32_t cap[7], ret_edx[8];
+void STDCALL cb_body(uint32_t k, uint32_t a, uint32_t b) __asm__("_cb_body@12");
+void STDCALL cb_body(uint32_t k, uint32_t a, uint32_t b)
+{
+    uint32_t r[7];
+
+    memcpy(r, cap, sizeof r);
+    put("cb%u(%u,%u) eax ", k, a, b);
+    put_reg(r[0]);
+    put(" ecx %#x edx %#x ebx .data+%#x esi %#x edi %#x ebp %#x ", r[1], r[2],
+        r[3] - cur_imports, r[4], r[5], r[6]);
+    act_on(k, a, b);
+}
+#define CB(k) void STDCALL cb##k(uint32_t a, uint32_t b) __asm__("_cbt" #k); \
+    __asm__(".text\n_cbt" #k ":\n\t"                                           \
+            "movl %eax, _cap\n\tmovl %ecx, _cap+4\n\tmovl %edx, _cap+8\n\t"     \
+            "movl %ebx, _cap+12\n\tmovl %esi, _cap+16\n\tmovl %edi, _cap+20\n\t" \
+            "movl %ebp, _cap+24\n\t"                                              \
+            "pushl 8(%esp)\n\tpushl 8(%esp)\n\tpushl $" #k "\n\t"               \
+            "call _cb_body@12\n\t"                                                \
+            "movl $0xdead000" #k ", %eax\n\tmovl $0xbeef000" #k ", %ecx\n\t"     \
+            "movl _ret_edx+4*" #k ", %edx\n\t"                                    \
+            "ret $8");
 CB(0) CB(1) CB(2) CB(3) CB(4) CB(5) CB(6) CB(7)
 
 /* ---- scripts ---------------------------------------------------------------- */
@@ -211,6 +270,7 @@ struct scenario {
     unsigned char fill;
     unsigned fail_at;
     struct beh beh[8];
+    uint32_t ret_edx[8];
 };
 
 static void make_scenario(struct scenario *s, unsigned v)
@@ -228,6 +288,7 @@ static void make_scenario(struct scenario *s, unsigned v)
             : (unsigned char)(rng() % 3);
     s->fail_at = (v % 11 == 5) ? 1 + rng() % 6 : 0;
     for (k = 0; k < 8; k++) {
+        s->ret_edx[k] = rng();
         s->beh[k].act = (rng() % 3 == 0) ? A_NONE : (int)(rng() % A_NACTS);
         s->beh[k].other = rng() % 8;
         s->beh[k].list = s->lists[rng() % s->nlists];
@@ -271,6 +332,7 @@ static void run(struct chain_linkage *m, const struct scenario *s)
     unsigned i;
     reset_host(s);
     memcpy(beh, s->beh, sizeof beh);
+    memcpy(ret_edx, s->ret_edx, sizeof ret_edx);
     cur = m; depth = 0; budget = 40;
     m->init();
     for (i = 0; i < s->nops; i++) {
@@ -285,7 +347,7 @@ static void run(struct chain_linkage *m, const struct scenario *s)
             break;
         case OP_DISPATCH:
             put("\nDISP %u{ ", o->list);
-            r = m->dispatch(o->list, o->list, o->b);
+            r = dispatch(o->list, o->list, o->b);
             put("}=");
             if (r > 0x10000) put_ptr((void *)(uintptr_t)r); else put("%u", r);
             break;
@@ -323,7 +385,9 @@ static LONG WINAPI on_fault(EXCEPTION_POINTERS *e)
     return EXCEPTION_CONTINUE_SEARCH;
 }
 
-static struct chain_linkage *load(const char *path)
+static uint32_t imports_of[2];
+
+static struct chain_linkage *load(const char *path, int which)
 {
     HMODULE h = LoadLibraryA(path);
     struct import *im;
@@ -332,6 +396,7 @@ static struct chain_linkage *load(const char *path)
     im = (struct import *)GetProcAddress(h, "ImportTable");
     l  = (struct chain_linkage *)GetProcAddress(h, "Linkage");
     if (!im || !l || l->id != 4) { printf("%s: not CHAIN\n", path); return NULL; }
+    imports_of[which] = (uint32_t)(uintptr_t)im;
     for (; im->id; im++) {
         if (im->id == 1) im->link = host_blob;
         if (im->id == 2) im->link = global_blob;
@@ -362,8 +427,8 @@ int main(int argc, char **argv)
     cbs[0] = cb0; cbs[1] = cb1; cbs[2] = cb2; cbs[3] = cb3;
     cbs[4] = cb4; cbs[5] = cb5; cbs[6] = cb6; cbs[7] = cb7;
 
-    r = load("CHAIN_retail.dll");
-    o = load("CHAIN_ours.dll");
+    r = load("CHAIN_retail.dll", 0);
+    o = load("CHAIN_ours.dll", 1);
     if (!r || !o) return 2;
     if (r->r10 != o->r10 || r->r0c != o->r0c || r->dialogs != o->dialogs) {
         printf("Linkage constants differ\n");
@@ -374,6 +439,7 @@ int main(int argc, char **argv)
         make_scenario(&s, v);
         fault_scenario = v;
         fault_where_retail = 1;
+        cur_imports = imports_of[0];
         run(r, &s);
         memcpy(rlog, tlog, tlen + 1);
         {
@@ -385,6 +451,7 @@ int main(int argc, char **argv)
             garbage_depth += s.fill != 0;
         }
         fault_where_retail = 0;
+        cur_imports = imports_of[1];
         run(o, &s);
         if (strcmp(rlog, tlog) && bad++ < 4) {
             unsigned at = 0;

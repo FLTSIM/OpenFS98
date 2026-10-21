@@ -40,6 +40,7 @@ struct multip_module {
     HMODULE module_handle;
     uint8_t *data;
     uint8_t *linkage;
+    uint8_t initial_data[0x1000];
 };
 
 struct multip_scenario {
@@ -290,6 +291,7 @@ static int load_module(struct multip_module *module, const char *path)
         printf("%s: invalid MULTIP image layout\n", path);
         return 0;
     }
+    memcpy(module->initial_data, module->data, sizeof(module->initial_data));
     return 1;
 }
 
@@ -406,6 +408,12 @@ static void print_difference(uint32_t scenario_number,
 #include "multip_receive.inc"
 #include "multip_workers.inc"
 #include "multip_directplay.inc"
+#include "multip_profile.inc"
+#include "multip_session.inc"
+#include "multip_aircraft.inc"
+#include "multip_tracking.inc"
+#include "multip_messages.inc"
+#include "multip_players.inc"
 
 int main(int argc, char **argv)
 {
@@ -462,6 +470,14 @@ int main(int argc, char **argv)
     bad += test_send(&retail, &ours, scenarios, 1);
     bad += test_receive(&retail, &ours, scenarios);
     bad += test_directplay(&retail, &ours, scenarios);
+    bad += test_profile(&retail, &ours, scenarios);
+    bad += test_session(&retail, &ours, scenarios);
+    bad += test_metadata(&retail, &ours, scenarios);
+    bad += test_aircraft(&retail, &ours, scenarios);
+    bad += test_aircraft_copy(&retail, &ours, scenarios);
+    bad += test_tracking(&retail, &ours, scenarios);
+    bad += test_messages(&retail, &ours, scenarios);
+    bad += test_players(&retail, &ours, scenarios);
     bad += test_workers(&retail, &ours, scenarios);
     return bad != 0;
 }

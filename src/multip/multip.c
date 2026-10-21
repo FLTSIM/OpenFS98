@@ -1,11 +1,10 @@
 /* MULTIP.DLL -- module id 35: multiplayer sessions and remote aircraft.
  *
- * This is the first, deliberately limited slice of the module.  It implements
- * public send enqueue at +0x20, its internal delivery/drain helpers, and six
- * queries at +0x24..+0x38, receive/queue helpers, both worker lifecycles, and
- * DirectPlay loading/interface lifetime. Session setup and per-frame work
- * remain unimplemented. MULTIP is intentionally
- * not part of MODULES yet and must not be installed in-game.
+ * In-progress transliteration: transport/workers, DirectPlay lifetime,
+ * profiles, session/group primitives, aircraft and player ownership, browser
+ * records, tracking/selection and message constructors. Public lifecycle,
+ * session/dialog wiring and receive dispatch remain incomplete. MULTIP is
+ * intentionally outside MODULES and must not be installed in-game yet.
  *
  * The retail module keeps its runtime state in the uninitialised tail of its
  * .data page.  Keeping a page here, with ImportTable at +0x000 and Linkage at
@@ -65,23 +64,29 @@ struct multip_image {
 };
 
 static struct multip_image s_multip_image = {{
-    [0x000] = FS98_MOD_HOST,
-    [0x008] = FS98_MOD_GLOBAL,
-    [0x010] = FS98_MOD_ACONTAIN,
-    [0x018] = FS98_MOD_CHAIN,
-    [0x020] = FS98_MOD_HG2D,
-    [0x028] = FS98_MOD_G3D,
-    [0x030] = FS98_MOD_MAIN,
-    [0x038] = FS98_MOD_NUMERIC,
-    [0x040] = FS98_MOD_UTIL,
-    [0x048] = FS98_MOD_WEATHERM,
-    [0x538] = 12,
-    [0x548] = 12,
-    [MULTIP_LINKAGE] = FS98_MOD_MULTIP
+#include "multip_data.inc"
 }};
+
+static uint8_t s_multip_rdata[] = {
+#include "multip_rdata.inc"
+};
+
+struct multip_data_pointer {
+    uint32_t owner;
+    uint32_t offset;
+    uint32_t kind;
+    uint32_t target;
+};
+
+static const struct multip_data_pointer s_multip_data_pointers[] = {
+#include "multip_pointers.inc"
+};
 
 #define D       ((uint32_t)(uintptr_t)s_multip_image.data)
 #define M32(o)  (*(volatile uint32_t *)(uintptr_t)(D + (o)))
+#define M8(o)   (*(uint8_t *)(uintptr_t)(D + (o)))
+#define M16(o)  (*(uint16_t *)(uintptr_t)(D + (o)))
+#define MD(o)   (*(double *)(uintptr_t)(D + (o)))
 #define ADDR(p) ((uint32_t)(uintptr_t)(p))
 
 __asm__(".globl _ImportTable\n\t.set _ImportTable, _s_multip_image\n\t"
@@ -595,6 +600,17 @@ int32_t FS98_STDCALL multip_directplay_create(const GUID *provider)
     return 0;
 }
 
+#include "multip_profile.inc"
+#include "multip_session.inc"
+#include "multip_aircraft.inc"
+#include "multip_records.inc"
+static uint8_t *FS98_STDCALL multip_find_player(uint32_t player_id);
+#include "multip_tracking.inc"
+static uint32_t FS98_STDCALL multip_send(uint32_t to_id, const void *payload,
+                                        uint32_t size, uint32_t flags);
+#include "multip_messages.inc"
+#include "multip_players.inc"
+
 /* Private entry access for the differential DLL only. Normal builds retain
  * the retail export surface; session and worker code use internal calls. */
 #ifdef MULTIP_DIFFTEST
@@ -613,7 +629,35 @@ __declspec(dllexport) void *const multip_test_entries[] = {
     (void *)multip_workers_setup, (void *)multip_workers_teardown,
     (void *)multip_workers_start, (void *)multip_workers_stop,
     (void *)multip_directplay_load, (void *)multip_directplay_unload,
-    (void *)multip_directplay_create
+    (void *)multip_directplay_create,
+    (void *)multip_profile_load, (void *)multip_profile_save,
+    (void *)multip_session_open_join, (void *)multip_session_enum_groups,
+    (void *)multip_session_join, (void *)multip_session_create_groups,
+    (void *)multip_session_host, (void *)multip_session_set_player,
+    (void *)multip_session_set_observer,
+    (void *)multip_session_get_description, (void *)multip_session_set_capacity,
+    (void *)multip_session_get_capacity, (void *)multip_player_decode_name,
+    (void *)multip_player_encode_name, (void *)multip_player_publish_name,
+    (void *)multip_player_reset_collision, (void *)multip_player_count_types,
+    (void *)multip_aircraft_select, (void *)multip_aircraft_release,
+    (void *)multip_aircraft_copy, (void *)multip_session_record_init,
+    (void *)multip_player_name_record_init, (void *)multip_player_name_record_copy,
+    (void *)multip_player_name_record_free, (void *)multip_player_names_clear,
+    (void *)multip_session_enumerate_players, (void *)multip_track_clear,
+    (void *)multip_selection_reset, (void *)multip_track_show,
+    (void *)multip_track_callback, (void *)multip_selection_get,
+    (void *)multip_selection_view_blocked, (void *)multip_player_refresh_local,
+    (void *)multip_selection_apply,
+    (void *)multip_message_1001, (void *)multip_message_1008,
+    (void *)multip_message_1002, (void *)multip_message_1009,
+    (void *)multip_message_1003, (void *)multip_message_1004,
+    (void *)multip_message_1005, (void *)multip_message_1006,
+    (void *)multip_message_100f, (void *)multip_message_1010,
+    (void *)multip_message_1011, (void *)multip_message_100a,
+    (void *)multip_message_100c, (void *)multip_message_100e,
+    (void *)multip_player_append, (void *)multip_player_mark_unknown,
+    (void *)multip_player_add_remote, (void *)multip_player_remove_local,
+    (void *)multip_player_remove, (void *)multip_player_remove_all
 };
 #endif
 
@@ -802,10 +846,26 @@ static void multip_install(void)
         FS98_MOD_UTIL, FS98_MOD_WEATHERM
     };
     uint32_t index;
+    const struct multip_data_pointer *pointer;
+    uint8_t *owner;
+    uint32_t target;
+
+    for (index = 0; index < sizeof(s_multip_data_pointers) /
+                                 sizeof(s_multip_data_pointers[0]); index++) {
+        pointer = &s_multip_data_pointers[index];
+        if (pointer->kind == 1)
+            continue; /* Each recovered callback is installed by its owner. */
+        owner = pointer->owner == 0 ? s_multip_image.data : s_multip_rdata;
+        target = pointer->kind == 2 ? D + pointer->target :
+            ADDR(s_multip_rdata + pointer->target);
+        *(uint32_t *)(void *)(owner + pointer->offset) = target;
+    }
 
     for (index = 0; index < sizeof(s_imports) / sizeof(s_imports[0]); index++)
         M32(index * 8) = s_imports[index];
 
+    M32(0x538) = 12;
+    M32(0x548) = 12;
     M32(M_DIRECTPLAY_EXPORTS + 0x00) = D + M_DIRECTPLAY_CREATE;
     M32(M_DIRECTPLAY_EXPORTS + 0x04) = D + M_DIRECTPLAY_ENUMERATE;
     M32(M_DIRECTPLAY_EXPORTS + 0x08) = D + M_DIRECTPLAY_LOBBY;

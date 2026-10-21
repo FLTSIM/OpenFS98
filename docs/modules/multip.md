@@ -35,6 +35,100 @@ slots, both worker lifecycles, and the CHAIN callbacks are implemented and a
 smoke test passes. The present failure stubs return `0xffffffff`; they are a
 development guard, not plausible retail behavior.
 
+## Session, aircraft and message continuation
+
+Additional implementation lives in `multip_profile.inc`, `multip_session.inc`,
+`multip_aircraft.inc`, `multip_records.inc`, `multip_tracking.inc`,
+`multip_messages.inc` and `multip_players.inc` under `src/multip/`.
+The differential fixtures with the same names live under `tools/difftest/` (record enumeration shares the aircraft
+copy fixture). The generated profile field order comes from
+`tools/gen_multip_profile.py`; initialized image data and pointer fixups come
+from `tools/gen_multip_data.py`. Neither generator embeds executable code.
+
+The following internal paths are now implemented and compared against retail:
+
+- Profile read/write at `.text+0x8f30/+0x93e0`: 33 reads and 25 writes, with
+  unsigned clamps and the derived packet interval. Retail spells the key
+  `ALLOW_EXTURE_RECEIVE`; its player-list update key writes `+0x174` while
+  validation changes `+0x178`. Both behaviors are retained.
+- Host/join and named groups at `+0x2340/+0x2380/+0x23c0/+0x2400`,
+  `+0x3890/+0x3940`, membership swaps at `+0x97a0/+0x97f0`. Enumeration treats
+  only three specific HRESULTs as failure; membership changes ignore errors.
+- Session-description allocation at `+0xa7a0`, capacity packing/unpacking
+  at `+0x9f40/+0xa020`, name type/host encoding at `+0xa050/+0xa100`, local
+  name publication at `+0xa1a0`, collision timer at `+0xa590`, and type counts
+  at `+0xa8d0`. Name publication leaks its allocation on success as retail does.
+- Aircraft selection/release/copy at `+0x8a20/+0x8aa0/+0x8b30`. Copy preserves
+  partial reallocations, a zero-filled replacement header, and separately
+  allocated model title. ACONTAIN uses nonzero success, host memory services
+  use zero success. The fixtures include both ownership modes and failures.
+- Browser record construction/copy/free, name-list cleanup and player
+  enumeration at `+0xa2a0` through `+0xa540`. An invalid final name leaves
+  its appended record in the list; EnumPlayers errors still publish partial
+  results. Cleanup ignores a walker error and frees through a temporary.
+- Track-name display and CHAIN `0x19` callback at `+0x96b0/+0x9710/+0x9740`,
+  selection reset/get/apply at `+0x8cb0/+0xa830/+0xa6b0`, view guard at
+  `+0xa680`, and local model references at `+0x9ea0`. The callback preserves
+  the argument as its return when it skips drawing. View application preserves
+  the different state destinations, word writes, and copy-error boundaries.
+- Fourteen message constructors at `+0x5a80` through `+0x5f30`:
+  tags `1001,1008,1002,1009,1003,1004,1005,1006,100f,1010,1011,100a,100c,100e`.
+  Tag `100e` carries a variable title, its terminator, and a visibility byte.
+  Four set request-pending/time only after successful enqueue; three allocate
+  an extra packet and leak it on enqueue failure. The unused tails of retail's
+  1000-byte stack buffers are omitted because they are never sent.
+
+The private test table now has entries 0–78; `send_internal` in
+`tools/difftest/multip_send.inc` maps each to its retail RVA. Entries 25–33
+are profile and group/session helpers, 34–41 description/name/counter helpers,
+42–44 aircraft ownership, 45–50 browser records/enumeration, 51–58 tracking
+and selection, 59–72 message constructors, and 73–78 player ownership
+helpers. Production exports still contain only ImportTable and Linkage.
+
+New comparison labels are `profile load/save`, `session/group primitives`,
+`session descriptors/name metadata`, `aircraft select/release`,
+`aircraft copy/session browser records`, `track-name display`,
+`application message constructors`, and `player lifecycle helpers`. They compare
+ordered callbacks/imports, outputs,
+partial state, heap bytes, failure leaks and queue contents as applicable.
+Real critical sections/events are used for message enqueueing; the worker
+suite runs last because it replaces the Win32 import cells.
+
+Mutation checking accepts `--slice profile`, `groups`, `metadata`, `aircraft`,
+`records`, `tracking`, `messages`, and `players` in addition to the original
+slices. Each variant runs 1,200 scenarios so independently generated invalid/valid name
+bytes reach all type characters. Constructor snapshots must be saved before
+later enumeration resets the embedded list; a stride mutation exposed this
+fixture gap and now fails the comparison.
+
+The expanded fourteen-suite differential run passes 20,000 scenarios per suite
+with zero differences. `make multipdiff` builds both production and test DLLs
+without warnings; the production export table contains only ImportTable and
+Linkage. These remain slice results, not whole-module acceptance. The
+106-mutation full sweep passed before adding the player helpers; all nine
+additional player mutations then passed their isolated checks (115 caught
+mutations across those runs). No crash or fixture error counts as a catch.
+
+Remote creation/removal and list ownership at `+0x82c0/+0x84b0/+0x8930`,
+unknown-type initialization at `+0x8980`, local entry removal at `+0xa8a0`,
+and remove-all at `+0x8f00` now pass the fourteenth suite. The small name-label
+model at RVA `0x2cf4` is extracted by the data generator into
+`multip_nametag.inc`. The fixture retains moving-array banks so retail's stale
+local pointer is observable, and checks per-action live-record hashes, heap
+bytes/ownership, partial setup, duplicate IDs, model failures, host capacity
+updates, selected-player reset, and CHAIN list publications. Local creation
+at `+0x8820` remains pending.
+
+Public init/deinit, session toggle, and dialog entries remain disabled. The
+next dependencies are local record creation (`+0x8820`), variable-size
+application messages (starting `+0x59d0`; `+0x5d20` is implemented), receive
+dispatch and multipart traffic,
+lobby/provider/dialog callbacks, and the main CHAIN callbacks. Local creation
+leaves DPNAME's reserved flags word uninitialized; inspect that boundary when
+building the CreatePlayer fixture. Do not claim whole-module coverage or
+install this DLL until those paths are recovered and the acceptance gates
+below pass.
+
 ## Image and public interface
 
 Retail is based at `0x20850000`.  It has 43,318 bytes of `.text`, 0xa00 bytes

@@ -143,6 +143,33 @@ Four behaviours the preflight did not record, all reproduced:
 - **A list that empties keeps its pending flag.** Compaction skips a list with
   a count of zero before it clears the flag.
 
+**The registers a callback is entered with**, and dispatch's ecx and edx
+on return, are retail's (`0x2066125c`). Asm modules read what the C
+convention leaves undefined: ANALYSIS's sample test counts with ecx's top
+half, which is the dispatch's first argument. At each call:
+
+| register | value |
+| --- | --- |
+| eax | the list's block |
+| ecx | the dispatch's first argument |
+| edx | the list's depth after the increment, for the first callback; after that, what the callback before left in edx (it is not reloaded) |
+| ebx | the list's slot in `.data` (`+0x40 + 4 * index`) |
+| esi | `0x10 + 8 * i` |
+| edi | `i` |
+| ebp | the second argument |
+
+Dispatch comes back with ecx and edx as follows: b and a with no list (the
+`+0x20` wrapper loads them for the inner routine); the count (0) and a for an
+empty one; otherwise the depth after the decrement and the last callback's
+edx. A compaction then leaves edx at the count of the highest-numbered
+allocated list, and ecx, for the last list it walked, pointing at the
+removed-flag one past its last remaining entry (the host memmove's
+leftovers never reach either: both are reloaded after it). For ebx to point
+where retail's does, the module's data is laid out as retail's `.data`:
+the ImportTable, the Linkage at `+0x18`, a zero word, the lists at `+0x40`,
+the flag at `+0xcc`, with `ImportTable` and `Linkage` exported as names into
+it. The add and remove services' leftover registers are not reproduced.
+
 Both move sizes are computed as `((i+1)·0x1fffffff + count) << 3`, which wraps
 to `(count − i − 1)·8`; transliterated as the latter. No caller in the retail
 modules reads any of the three services' return values -- every one overwrites
@@ -171,9 +198,20 @@ Two things it needed:
   caught in 4 scenarios of 20,000. Rare, but it is now covered rather than
   assumed.
 
-Coverage over the 20,000 scripts: 8,512 reallocs, 770 injected allocation
-failures, 14,434 memmoves, 99,520 nested dispatches, 17,690 double
-self-removals, 13,363 scenarios with a non-zero initial depth. Six
+Coverage over the 20,000 scripts: 8,579 reallocs, 820 injected allocation
+failures, 14,387 memmoves, 97,873 nested dispatches, 17,085 double
+self-removals, 13,341 scenarios with a non-zero initial depth. Six
 deliberate breaks are each caught: initialising the depth, skipping removed
 entries, caching the count in dispatch, clearing the pending flag in init,
 clearing it for an emptied list, and growing by 20.
+
+The callbacks are asm thunks: each logs every register it was entered with
+(ebx as an offset from the module's ImportTable, eax as a block offset),
+returns with junk in eax and ecx and a scripted edx, which the next callback
+on the list receives; and dispatch is called through a thunk that logs the
+ecx and edx it returns. The CHAIN before this fix, which entered callbacks
+with whatever its loop had, differs in 1,977 scenarios of 2,000, and eleven
+breaks of the register rules are each caught: eax, ebx, esi and edi each
+off, edx not passed on between callbacks, the no-list and empty-list exits,
+the depth before the decrement, the compaction's ecx a field off, its edx
+only for compacted lists, and its walk taken for a list of one.

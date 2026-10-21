@@ -260,8 +260,9 @@ software 80-bit float, checked against them (`make g3dmeshdiff-run`). Which
 x87 precision the game runs G3D under is not established; a native build
 has to set `g3d_mesh_precision` to match. Next comes MULTIP (in progress)
 with MPCHAT behind it. PANELS waits on HG2D, and MAIN comes last before
-HG2D. The CHAIN ecx fix, proven in `chaindiff`,
-is still open.
+HG2D. The CHAIN ecx fix is done: OpenFS98's CHAIN enters callbacks with
+all of retail's registers and returns its ecx/edx, and `chaindiff` now
+compares them (see [docs/modules/chain.md](docs/modules/chain.md)).
 
 FE's `+0x40` calling-convention break is now confirmed by `fediff`: the
 one-byte probe writes through the caller's edi and returns with ebx/esi/edi

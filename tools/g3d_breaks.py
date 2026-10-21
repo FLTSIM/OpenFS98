@@ -423,7 +423,7 @@ def main():
         # lands backwards): that is caught, and the run is cut at the limit.
         try:
             run = subprocess.run(["wine", "g3ddiff_break.exe", str(N)], cwd="bin/difftest",
-                                 capture_output=True, text=True, timeout=LIMIT,
+                                 capture_output=True, text=True, errors="replace", timeout=LIMIT,
                                  env=dict(os.environ, WINEDEBUG="-all"))
             caught = run.returncode != 0
             last = [l for l in run.stdout.splitlines() if l.startswith("g3ddiff:")]

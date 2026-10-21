@@ -31,7 +31,7 @@ struct directplay_results {
 
 static struct directplay_trace s_directplay_trace;
 static const struct multip_module *s_directplay_module;
-static void *s_directplay_vtable[3];
+static void *s_directplay_vtable[32];
 static struct directplay_object s_directplay_objects[4];
 
 static const GUID s_test_iid_directplay2a = {

@@ -130,100 +130,100 @@ typedef int32_t (FS98_STDCALL *multip_dp_set_description_fn)(void *, void *, uin
 
 /* .text+0xa7a0 -- the first query must return BUFFERTOOSMALL exactly.
  * The allocated descriptor remains owned by the caller even on read failure. */
-int32_t FS98_STDCALL multip_session_get_description(void **ppDescription)
+int32_t FS98_STDCALL multip_session_get_description(void **description_out)
 {
-    uint32_t uiSize = 0;
+    uint32_t size = 0;
 
-    *ppDescription = NULL;
+    *description_out = NULL;
     if (M32(M_CONNECTED) == 0)
         return 0;
     if ((uint32_t)DP_FN(0x58, multip_dp_get_description_fn)(
-        (void *)(uintptr_t)M32(M_DIRECTPLAY), NULL, &uiSize) != 0x8877001eu)
+        (void *)(uintptr_t)M32(M_DIRECTPLAY), NULL, &size) != 0x8877001eu)
         return -1;
-    if (HOST_FN(0x20c, multip_alloc_fn)(1, uiSize, ppDescription, 0) != 0)
+    if (HOST_FN(0x20c, multip_alloc_fn)(1, size, description_out, 0) != 0)
         return -1;
-    *(uint32_t *)*ppDescription = uiSize;
+    *(uint32_t *)*description_out = size;
     return DP_FN(0x58, multip_dp_get_description_fn)(
-        (void *)(uintptr_t)M32(M_DIRECTPLAY), *ppDescription, &uiSize) != 0 ? -1 : 0;
+        (void *)(uintptr_t)M32(M_DIRECTPLAY), *description_out, &size) != 0 ? -1 : 0;
 }
 
 /* .text+0x9f40 -- the four byte counts use player/observer order on input,
  * and max-player/current-player/max-observer/current-observer on the wire. */
-int32_t FS98_STDCALL multip_session_set_capacity(const uint32_t *puiCounts)
+int32_t FS98_STDCALL multip_session_set_capacity(const uint32_t *counts)
 {
-    void *pDescription;
-    uint32_t uiResult;
+    void *description;
+    uint32_t result;
 
     if (M32(M_DIRECTPLAY) == 0 || M32(0xaa8) == 0)
         return 0;
-    if (multip_session_get_description(&pDescription) != 0)
+    if (multip_session_get_description(&description) != 0)
         return -1;
-    *(uint32_t *)((uint8_t *)pDescription + 0x40) =
-        (puiCounts[0] << 24) | ((puiCounts[2] & 255) << 16) |
-        ((puiCounts[1] & 255) << 8) | (puiCounts[3] & 255);
-    uiResult = (uint32_t)DP_FN(0x7c, multip_dp_set_description_fn)(
-        (void *)(uintptr_t)M32(M_DIRECTPLAY), pDescription, 0);
-    if (uiResult != 0 && uiResult != 0x80004001u)
+    *(uint32_t *)((uint8_t *)description + 0x40) =
+        (counts[0] << 24) | ((counts[2] & 255) << 16) |
+        ((counts[1] & 255) << 8) | (counts[3] & 255);
+    result = (uint32_t)DP_FN(0x7c, multip_dp_set_description_fn)(
+        (void *)(uintptr_t)M32(M_DIRECTPLAY), description, 0);
+    if (result != 0 && result != 0x80004001u)
         return -1;
-    return HOST_FN(0x214, multip_free_fn)(&pDescription) != 0 ? -1 : 0;
+    return HOST_FN(0x214, multip_free_fn)(&description) != 0 ? -1 : 0;
 }
 
 /* .text+0xa020 */
-int32_t FS98_STDCALL multip_session_get_capacity(uint32_t *puiCounts,
-                                                const void *pDescription)
+int32_t FS98_STDCALL multip_session_get_capacity(uint32_t *counts,
+                                                const void *description)
 {
-    uint32_t uiPacked = *(const uint32_t *)((const uint8_t *)pDescription + 0x40);
+    uint32_t packed = *(const uint32_t *)((const uint8_t *)description + 0x40);
 
-    puiCounts[0] = uiPacked >> 24;
-    puiCounts[2] = (uiPacked >> 16) & 255;
-    puiCounts[1] = (uiPacked >> 8) & 255;
-    puiCounts[3] = uiPacked & 255;
+    counts[0] = packed >> 24;
+    counts[2] = (packed >> 16) & 255;
+    counts[1] = (packed >> 8) & 255;
+    counts[3] = packed & 255;
     return 0;
 }
 
 /* .text+0xa050 -- a valid host byte is published before validating type. */
-int32_t FS98_STDCALL multip_player_decode_name(const void *pName,
-    uint32_t *puiType, uint32_t *puiHost)
+int32_t FS98_STDCALL multip_player_decode_name(const void *name,
+    uint32_t *type, uint32_t *host)
 {
-    const char *pcName = *(const char *const *)((const uint8_t *)pName + 12);
+    const char *name_text = *(const char *const *)((const uint8_t *)name + 12);
 
-    if (pcName == NULL)
+    if (name_text == NULL)
         return -1;
-    if (pcName[0] == 'C')
-        *puiHost = 0;
-    else if (pcName[0] == 'H')
-        *puiHost = 1;
+    if (name_text[0] == 'C')
+        *host = 0;
+    else if (name_text[0] == 'H')
+        *host = 1;
     else
         return -1;
-    switch (pcName[1]) {
-    case 'N': *puiType = 0; break;
-    case 'P': *puiType = 1; break;
-    case 'O': *puiType = 2; break;
-    case 'U': *puiType = 4; break;
+    switch (name_text[1]) {
+    case 'N': *type = 0; break;
+    case 'P': *type = 1; break;
+    case 'O': *type = 2; break;
+    case 'U': *type = 4; break;
     default: return -1;
     }
     return 0;
 }
 
 /* .text+0xa100 -- invalid type leaves the host byte changed. */
-int32_t FS98_STDCALL multip_player_encode_name(void *pName,
-    uint32_t uiType, uint32_t uiHost)
+int32_t FS98_STDCALL multip_player_encode_name(void *name,
+    uint32_t type, uint32_t host)
 {
-    char *pcName = *(char **)((uint8_t *)pName + 12);
-    char cType;
+    char *name_text = *(char **)((uint8_t *)name + 12);
+    char type_code;
 
-    if (pcName == NULL)
+    if (name_text == NULL)
         return -1;
-    pcName[0] = uiHost != 0 ? 'H' : 'C';
-    switch (uiType) {
-    case 0: cType = 'N'; break;
-    case 1: cType = 'P'; break;
-    case 2: cType = 'O'; break;
-    case 4: cType = 'U'; break;
+    name_text[0] = host != 0 ? 'H' : 'C';
+    switch (type) {
+    case 0: type_code = 'N'; break;
+    case 1: type_code = 'P'; break;
+    case 2: type_code = 'O'; break;
+    case 4: type_code = 'U'; break;
     default: return -1;
     }
-    pcName[1] = cType;
-    pcName[2] = 0;
+    name_text[1] = type_code;
+    name_text[2] = 0;
     return 0;
 }
 
@@ -234,55 +234,55 @@ typedef int32_t (FS98_STDCALL *multip_dp_set_player_name_fn)(void *, uint32_t, v
  * is never freed, including on successful publication. */
 int32_t multip_player_publish_name(void)
 {
-    char acName[10];
-    void *pName = NULL;
-    uint32_t uiSize = 0;
-    uint8_t *pbyLocal;
+    char name_text[10];
+    void *name = NULL;
+    uint32_t size = 0;
+    uint8_t *local;
 
-    if (HOST_FN(0x218, multip_memset_fn)(acName, 0, sizeof(acName)) != 0)
+    if (HOST_FN(0x218, multip_memset_fn)(name_text, 0, sizeof(name_text)) != 0)
         return -1;
-    pbyLocal = (uint8_t *)(uintptr_t)M32(M_LOCAL_PLAYER);
+    local = (uint8_t *)(uintptr_t)M32(M_LOCAL_PLAYER);
     DP_FN(0x54, multip_dp_get_player_name_fn)((void *)(uintptr_t)M32(M_DIRECTPLAY),
-        *(uint32_t *)(void *)(pbyLocal + 4), pName, &uiSize);
-    if (HOST_FN(0x20c, multip_alloc_fn)(1, uiSize, &pName, 1) != 0)
+        *(uint32_t *)(void *)(local + 4), name, &size);
+    if (HOST_FN(0x20c, multip_alloc_fn)(1, size, &name, 1) != 0)
         return -1;
-    pbyLocal = (uint8_t *)(uintptr_t)M32(M_LOCAL_PLAYER);
+    local = (uint8_t *)(uintptr_t)M32(M_LOCAL_PLAYER);
     if (DP_FN(0x54, multip_dp_get_player_name_fn)((void *)(uintptr_t)M32(M_DIRECTPLAY),
-        *(uint32_t *)(void *)(pbyLocal + 4), pName, &uiSize) != 0)
+        *(uint32_t *)(void *)(local + 4), name, &size) != 0)
         return -1;
-    *(char **)((uint8_t *)pName + 12) = acName;
-    pbyLocal = (uint8_t *)(uintptr_t)M32(M_LOCAL_PLAYER);
-    if (multip_player_encode_name(pName, *(uint32_t *)(void *)(pbyLocal + 8),
+    *(char **)((uint8_t *)name + 12) = name_text;
+    local = (uint8_t *)(uintptr_t)M32(M_LOCAL_PLAYER);
+    if (multip_player_encode_name(name, *(uint32_t *)(void *)(local + 8),
                                  M32(0xaa8)) != 0)
         return -1;
-    pbyLocal = (uint8_t *)(uintptr_t)M32(M_LOCAL_PLAYER);
+    local = (uint8_t *)(uintptr_t)M32(M_LOCAL_PLAYER);
     return DP_FN(0x78, multip_dp_set_player_name_fn)((void *)(uintptr_t)M32(M_DIRECTPLAY),
-        *(uint32_t *)(void *)(pbyLocal + 4), pName, 2) != 0 ? -1 : 0;
+        *(uint32_t *)(void *)(local + 4), name, 2) != 0 ? -1 : 0;
 }
 
 /* .text+0xa590 -- fixed-point countdown, with the high bits discarded. */
-int32_t FS98_STDCALL multip_player_reset_collision(void *pPlayer)
+int32_t FS98_STDCALL multip_player_reset_collision(void *player)
 {
-    if (pPlayer != NULL)
-        *(uint32_t *)((uint8_t *)pPlayer + 0xcc) = M32(0x160) << 16;
+    if (player != NULL)
+        *(uint32_t *)((uint8_t *)player + 0xcc) = M32(0x160) << 16;
     return 0;
 }
 
 /* .text+0xa8d0 -- count includes the local record; unknown types are skipped. */
 int32_t multip_player_count_types(void)
 {
-    uint32_t uiCount = M32(M_PLAYER_COUNT);
-    uint8_t *pbyPlayers = (uint8_t *)(uintptr_t)M32(M_PLAYERS);
-    uint32_t uiType;
+    uint32_t count = M32(M_PLAYER_COUNT);
+    uint8_t *players = (uint8_t *)(uintptr_t)M32(M_PLAYERS);
+    uint32_t type;
 
     M32(0x9a0) = 0;
     M32(0x9a4) = 0;
-    while (uiCount != 0) {
-        uiCount--;
-        uiType = *(uint32_t *)(void *)(pbyPlayers + uiCount * 0x100 + 8);
-        if (uiType == 1)
+    while (count != 0) {
+        count--;
+        type = *(uint32_t *)(void *)(players + count * 0x100 + 8);
+        if (type == 1)
             M32(0x9a0)++;
-        else if (uiType == 2)
+        else if (type == 2)
             M32(0x9a4)++;
     }
     return 0;

@@ -610,6 +610,7 @@ static uint32_t FS98_STDCALL multip_send(uint32_t to_id, const void *payload,
                                         uint32_t size, uint32_t flags);
 #include "multip_messages.inc"
 #include "multip_players.inc"
+#include "multip_callbacks.inc"
 
 /* Private entry access for the differential DLL only. Normal builds retain
  * the retail export surface; session and worker code use internal calls. */
@@ -657,7 +658,14 @@ __declspec(dllexport) void *const multip_test_entries[] = {
     (void *)multip_message_100c, (void *)multip_message_100e,
     (void *)multip_player_append, (void *)multip_player_mark_unknown,
     (void *)multip_player_add_remote, (void *)multip_player_remove_local,
-    (void *)multip_player_remove, (void *)multip_player_remove_all
+    (void *)multip_player_remove, (void *)multip_player_remove_all,
+    (void *)multip_player_create_local, (void *)multip_player_start,
+    (void *)multip_player_enumerate, (void *)multip_session_apply_receive_option,
+    (void *)multip_message_1007, (void *)multip_message_1012,
+    (void *)multip_session_frame_callback, (void *)multip_session_frame_start,
+    (void *)multip_session_frame_stop,
+    (void *)multip_players_draw, (void *)multip_players_draw_callback,
+    (void *)multip_players_draw_start, (void *)multip_players_draw_stop
 };
 #endif
 

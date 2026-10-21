@@ -14,7 +14,7 @@ cannot replace the retail multiplayer module prematurely.
 ## Continuation contract
 
 This section is the handoff for a fresh context. The current project decision
-for new MULTIP code is **snake_case**, the standard `<stdint.h>` types
+for all MULTIP code is **snake_case**, the standard `<stdint.h>` types
 (`uint32_t`, `int16_t`, and so on), and **no `types.h`**. This supersedes stale
 instructions that request Hungarian names or the old typedefs. Preserve the
 retail offsets and ABI, but use descriptive snake-case names where semantics
@@ -39,7 +39,7 @@ development guard, not plausible retail behavior.
 
 Additional implementation lives in `multip_profile.inc`, `multip_session.inc`,
 `multip_aircraft.inc`, `multip_records.inc`, `multip_tracking.inc`,
-`multip_messages.inc` and `multip_players.inc` under `src/multip/`.
+`multip_messages.inc`, `multip_players.inc` and `multip_callbacks.inc` under `src/multip/`.
 The differential fixtures with the same names live under `tools/difftest/` (record enumeration shares the aircraft
 copy fixture). The generated profile field order comes from
 `tools/gen_multip_profile.py`; initialized image data and pointer fixups come
@@ -71,43 +71,49 @@ The following internal paths are now implemented and compared against retail:
   `+0xa680`, and local model references at `+0x9ea0`. The callback preserves
   the argument as its return when it skips drawing. View application preserves
   the different state destinations, word writes, and copy-error boundaries.
-- Fourteen message constructors at `+0x5a80` through `+0x5f30`:
-  tags `1001,1008,1002,1009,1003,1004,1005,1006,100f,1010,1011,100a,100c,100e`.
+- Sixteen message constructors at `+0x5a80` through `+0x6060`:
+  tags `1001,1008,1002,1009,1003,1004,1005,1006,100f,1010,1011,100a,100c,100e,1007,1012`.
   Tag `100e` carries a variable title, its terminator, and a visibility byte.
-  Four set request-pending/time only after successful enqueue; three allocate
+  Four set request-pending/time only after successful enqueue; four allocate
   an extra packet and leak it on enqueue failure. The unused tails of retail's
   1000-byte stack buffers are omitted because they are never sent.
 
-The private test table now has entries 0–78; `send_internal` in
+The private test table now has entries 0–91; `send_internal` in
 `tools/difftest/multip_send.inc` maps each to its retail RVA. Entries 25–33
 are profile and group/session helpers, 34–41 description/name/counter helpers,
 42–44 aircraft ownership, 45–50 browser records/enumeration, 51–58 tracking
 and selection, 59–72 message constructors, and 73–78 player ownership
-helpers. Production exports still contain only ImportTable and Linkage.
+helpers. Entries 79–80 are local creation/start, 81–84 are peer enumeration,
+receive membership, ping and host departure; 85–87 own the session CHAIN
+`0x14` callback, and 88–91 own drawing/CHAIN `0x10`. Production exports
+still contain only ImportTable and Linkage.
 
 New comparison labels are `profile load/save`, `session/group primitives`,
 `session descriptors/name metadata`, `aircraft select/release`,
 `aircraft copy/session browser records`, `track-name display`,
-`application message constructors`, and `player lifecycle helpers`. They compare
+`application message constructors`, `player lifecycle helpers`,
+`local player creation/start`, `session CHAIN 0x14`, and
+`player drawing/CHAIN 0x10`. They compare
 ordered callbacks/imports, outputs,
 partial state, heap bytes, failure leaks and queue contents as applicable.
 Real critical sections/events are used for message enqueueing; the worker
 suite runs last because it replaces the Win32 import cells.
 
 Mutation checking accepts `--slice profile`, `groups`, `metadata`, `aircraft`,
-`records`, `tracking`, `messages`, and `players` in addition to the original
+`records`, `tracking`, `messages`, `players`, `local`, `frame`, and `draw` in addition to the original
 slices. Each variant runs 1,200 scenarios so independently generated invalid/valid name
 bytes reach all type characters. Constructor snapshots must be saved before
 later enumeration resets the embedded list; a stride mutation exposed this
 fixture gap and now fails the comparison.
 
-The expanded fourteen-suite differential run passes 20,000 scenarios per suite
+The expanded seventeen-suite differential run passes 20,000 scenarios per suite
 with zero differences. `make multipdiff` builds both production and test DLLs
 without warnings; the production export table contains only ImportTable and
-Linkage. These remain slice results, not whole-module acceptance. The
-106-mutation full sweep passed before adding the player helpers; all nine
-additional player mutations then passed their isolated checks (115 caught
-mutations across those runs). No crash or fixture error counts as a catch.
+Linkage. These remain slice results, not whole-module acceptance. The full
+154-mutation sweep passes, including after the snake_case cleanup across
+all MULTIP sources, generated symbols and matching fixtures. All five data
+includes reproduce exactly from the updated generator. No crash or fixture
+error counts as a catch.
 
 Remote creation/removal and list ownership at `+0x82c0/+0x84b0/+0x8930`,
 unknown-type initialization at `+0x8980`, local entry removal at `+0xa8a0`,
@@ -116,18 +122,61 @@ model at RVA `0x2cf4` is extracted by the data generator into
 `multip_nametag.inc`. The fixture retains moving-array banks so retail's stale
 local pointer is observable, and checks per-action live-record hashes, heap
 bytes/ownership, partial setup, duplicate IDs, model failures, host capacity
-updates, selected-player reset, and CHAIN list publications. Local creation
-at `+0x8820` remains pending.
+updates, selected-player reset, and CHAIN list publications. Local creation at `+0x8820` and startup at `+0x8700` are now recovered too;
+see the additional boundary notes below.
 
-Public init/deinit, session toggle, and dialog entries remain disabled. The
-next dependencies are local record creation (`+0x8820`), variable-size
-application messages (starting `+0x59d0`; `+0x5d20` is implemented), receive
-dispatch and multipart traffic,
-lobby/provider/dialog callbacks, and the main CHAIN callbacks. Local creation
-leaves DPNAME's reserved flags word uninitialized; inspect that boundary when
-building the CreatePlayer fixture. Do not claim whole-module coverage or
-install this DLL until those paths are recovered and the acceptance gates
-below pass.
+Local creation/start has a separate fixture (`multip_local.inc`) that paints
+the unwritten DPNAME reserved word. Retail reads it at entry ESP-0x400 in
+`+0x8820`, or ESP-0x404 through `+0x8700`; the C bodies receive it through
+small x86 entry shims. Adjacent slots are painted differently so a wrong
+read cannot pass. Non-x86 entries use zero because there is no x86 caller
+stack. Startup preserves the initial CHAIN list publication, local marker,
+host counts (including wrap), join requests, name/capacity publication,
+collision timer and second publication, with partial failures retained.
+CreatePlayer's result, hosting flag and requested type are independently
+seeded; correlated values initially hid every successful host path.
+
+Peer enumeration at `+0x86b0/+0x86d0` skips non-player records before inspecting
+their names, stops on add failure, and returns the raw EnumPlayers HRESULT.
+`+0x9960` applies descriptive-receive group membership. Message `1007` at
+`+0x6010` updates a matching peer's `+0xfc` timestamp before enqueue, uses
+flags zero before the guaranteed-message policy, and still sends for absent
+IDs. Message `1012` at `+0x6060` is the allocated host-departure broadcast.
+Those paths extend the player/message fixtures.
+
+The session CHAIN `0x14` callback at `+0x2c10` and registration at
+`+0x2bc0/+0x2be0` are in `multip_callbacks.inc`. The compressed event switch
+is extracted into `multip_frame_actions.inc` by the data generator. Its
+fixture exhausts codes 0–255 plus wrapped/high codes, checking aircraft
+reference refresh and title messages, collision reset, view flags, and raw
+code-0x21 returns on default/flag-only paths. Registration sets `+0x954`
+before calling CHAIN, retaining it on failure.
+
+The CHAIN `0x10` renderer at `+0x2d20/+0x2d30` and registration at
+`+0x2cd0/+0x2cf0` are recovered in the same source include. It captures the
+list before reading the clock, initializes the previous time to now-200,
+walks peers in reverse, gates on local/type/state/visibility/display flags,
+uses ACONTAIN for owned models and G3D for received models, and optionally
+adds the name-label vector through UTIL before drawing it. The renderer
+results are ignored. Its fixture mutates state/options inside the draw stubs
+to prove reloads, covers first/repeated timestamps and wrap, and self-checks
+that owned, direct and label draws are all reached. A 20,000-scenario run
+observed 1,878 ACONTAIN draws, 2,781 direct draws, and 2,403 labels.
+
+The harness exits immediately on an unhandled exception, printing suite,
+scenario, side and fault address. A fault or timeout remains a fixture/owner
+finding and never counts as a mutation catch. Selected self-contained suites
+can run alone: `multipdiff.exe 1200 local`, `frame`, `draw`, `players`, or
+`messages`. The mutation runner uses those selectors where available.
+
+Public init/deinit, session toggle, and dialog entries remain disabled.
+Completion at `+0x9c70` still depends on all six callback-registration groups
+at `+0x8220`; only the frame and renderer owners above are ready. The remaining
+groups start at `+0x2460`, `+0x27c0`, `+0x2e30`, and `+0x2ea0` (reverse
+teardown is `+0x8270`). Variable messages starting at `+0x59d0`, receive
+system/application dispatch, multipart traffic, extrapolation, lobby/provider
+and dialog callbacks still need recovery. Keep MULTIP outside `MODULES`
+until the whole-module acceptance gates below pass.
 
 ## Image and public interface
 
@@ -598,7 +647,8 @@ each receive, dequeue pointers and flags, the complete call transcript, live
 allocations, leaked partial records, and held locks. The fake heap records
 freed storage for comparison but does not reuse it within a scenario.
 
-`make multip-breaks` checks all forty-two transport/worker/DirectPlay mutations; the send-only
+`make multip-breaks` includes the forty-two transport/worker/DirectPlay mutations
+and the additional owner checks described above; the send-only
 alias is `make multip-send-breaks` and the receive-only alias is
 `make multip-receive-breaks`. The six receive mutations cover retry, flags,
 timestamp, successful-receive flag, error cleanup, and dequeue flag behavior.
@@ -674,6 +724,17 @@ MULTIP +0x20 enqueue: 20000 scenarios, 0 differ
 MULTIP send-one/drain/flush: 20000 scenarios, 0 differ
 MULTIP receive-one/dequeue: 20000 scenarios, 0 differ
 MULTIP DirectPlay loader/lifetime: 20000 scenarios, 0 differ
+MULTIP profile load/save: 20000 scenarios, 0 differ
+MULTIP session/group primitives: 20000 scenarios, 0 differ
+MULTIP session descriptors/name metadata: 20000 scenarios, 0 differ
+MULTIP aircraft select/release: 20000 scenarios, 0 differ
+MULTIP aircraft copy/session browser records: 20000 scenarios, 0 differ
+MULTIP track-name display: 20000 scenarios, 0 differ
+MULTIP application message constructors: 20000 scenarios, 0 differ
+MULTIP player lifecycle helpers: 20000 scenarios, 0 differ
+MULTIP local player creation/start: 20000 scenarios, 0 differ
+MULTIP session CHAIN 0x14: 20000 scenarios, 0 differ
+MULTIP player drawing/CHAIN 0x10: 20000 scenarios, 0 differ
 MULTIP worker lifecycles: 20000 scenarios, 0 differ
 ```
 
@@ -681,15 +742,16 @@ MULTIP worker lifecycles: 20000 scenarios, 0 differ
 
 The transport units and worker lifecycles in stages 1–4 are complete, including
 queue construction/clear/destruction and the combined subsystem wrappers.
-DirectPlay load/unload/create/query/release helpers are also verified. Next
-merge the lifetime and transport fakes into a session-capable `IDirectPlay3A`,
-then recover host/join/open/close, session descriptions, player/group creation
-and cleanup edges. Begin with the internal helpers called by public `+0x18`;
-keep that slot disabled until its full path is ready. The loader flag alone
-does not prove the required factory is available, and create's first-query
-failure leaks a reference: preserve those boundaries in integrated scenarios.
-Public init/deinit remain disabled until their CHAIN callbacks have the
-required lobby, profile, session, and message-dispatch paths.
+DirectPlay lifetime, profiles, host/join/group primitives, session descriptions,
+player creation/removal, and the two session callbacks described above are
+also verified. Next recover the other four callback owners, receive dispatch
+and extrapolation, then integrate registration/teardown with the workers in
+common completion `+0x9c70` and disconnect `+0x8cf0`. Keep public `+0x18`
+disabled until its configuration and complete session paths are ready. The
+loader flag alone does not prove the factory is available, and create's first
+query failure leaks a reference; retain those boundaries in integrated cases.
+Public init/deinit still depend on lobby/provider/dialog handling and the
+remaining callbacks.
 
 The next public-entry boundaries are confirmed in `.text+0x8e60`: load first;
 when connected, UTIL `+0xa4` supplies confirmation before disconnect
@@ -699,6 +761,12 @@ unloads and `== 3` returns 1. Otherwise data `+0xaa8` chooses host helper
 Disconnect includes CHAIN messages, send flush, receive queue clear, worker
 stop, player destruction, `IDirectPlay3A::Close`, and unloader calls. These
 are boundaries for recovery, not implemented session coverage.
+Disconnect's wait is `Sleep((int32_t)(now - start + 3000))` when that signed
+value is positive: retail **adds** elapsed time. Preserve that arithmetic.
+The view-command callback at `+0x2ef0` dispatches `0x1016c`–`0x1016f` into
+`+0x3200/+0x2f40/+0x3020/+0x3250`; the cycle helpers can loop forever when
+no record is eligible and can read record zero even when count is zero.
+Their fixture will need fault/hang outcome comparison, not input filtering.
 
 Each stage should extend the harness before the corresponding Linkage slot
 is enabled. Keep the test output labeled with the exact covered slice until

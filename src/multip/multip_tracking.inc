@@ -5,29 +5,29 @@ typedef uint32_t (FS98_STDCALL *multip_draw_name_fn)(uint32_t, uint32_t, uint32_
 
 #define CHAIN_FN(offset, type) (*(type *)(uintptr_t)(M32(0x1c) + (offset)))
 
-uint32_t FS98_STDCALL multip_track_callback(uint32_t uiCode, uint32_t uiArgument)
+uint32_t FS98_STDCALL multip_track_callback(uint32_t code, uint32_t argument)
 {
-    uint32_t uiResult;
+    uint32_t result;
 
-    (void)uiCode;
+    (void)code;
     if (M32(0xf1c) == 0) {
-        uiResult = (uint32_t)CHAIN_FN(0x1c, multip_chain_register_fn)(0x19, multip_track_callback);
-        if (uiResult == 0)
+        result = (uint32_t)CHAIN_FN(0x1c, multip_chain_register_fn)(0x19, multip_track_callback);
+        if (result == 0)
             M32(0xf20) = 0;
-        return uiResult;
+        return result;
     }
-    uiResult = uiArgument;
-    if (uiArgument == *(uint32_t *)(uintptr_t)(M32(IMPORT_GLOBAL) + 0x119c))
-        uiResult = HOST_FN(0x8c, multip_draw_name_fn)(uiArgument, 1, 0x6a,
+    result = argument;
+    if (argument == *(uint32_t *)(uintptr_t)(M32(IMPORT_GLOBAL) + 0x119c))
+        result = HOST_FN(0x8c, multip_draw_name_fn)(argument, 1, 0x6a,
             (const char *)(uintptr_t)(D + 0xf08), 0);
-    return uiResult;
+    return result;
 }
 
-int32_t FS98_STDCALL multip_track_show(uint32_t uiId)
+int32_t FS98_STDCALL multip_track_show(uint32_t id)
 {
-    uint8_t *pbyPlayer = multip_find_player(uiId);
+    uint8_t *player = multip_find_player(id);
 
-    HOST_FN(0x2a8, multip_strcpy_fn)((char *)(uintptr_t)(D + 0xf08), *(const char **)pbyPlayer);
+    HOST_FN(0x2a8, multip_strcpy_fn)((char *)(uintptr_t)(D + 0xf08), *(const char **)player);
     M32(0xf1c) = M32(0xa10) * 18;
     if (M32(0xf20) == 0) {
         if (CHAIN_FN(0x18, multip_chain_register_fn)(0x19, multip_track_callback) != 0)
@@ -71,46 +71,46 @@ uint32_t multip_selection_view_blocked(void)
  * into the local network record. */
 int32_t multip_player_refresh_local(void)
 {
-    uint8_t *pbyGlobal = (uint8_t *)(uintptr_t)M32(IMPORT_GLOBAL);
-    uint8_t *pbyObject = (uint8_t *)(uintptr_t)A32(pbyGlobal, 0x11e0);
-    uint8_t *pbyLocal = (uint8_t *)(uintptr_t)M32(M_LOCAL_PLAYER);
+    uint8_t *global = (uint8_t *)(uintptr_t)M32(IMPORT_GLOBAL);
+    uint8_t *object = (uint8_t *)(uintptr_t)A32(global, 0x11e0);
+    uint8_t *local = (uint8_t *)(uintptr_t)M32(M_LOCAL_PLAYER);
 
-    A32(pbyLocal, 0x20) = A32(pbyObject, 4);
-    A32(pbyLocal, 0x24) = A32(pbyObject, 8);
-    A32(pbyLocal, 0x28) = A32(pbyGlobal, 0x11e4);
-    A32(pbyLocal, 0x2c) = A32(pbyObject, 0x18);
-    A32(pbyLocal, 0x30) = A32(pbyObject, 0xc);
-    A32(pbyLocal, 0x34) = 1;
-    A32(pbyLocal, 0x38) = pbyGlobal[0x609];
+    A32(local, 0x20) = A32(object, 4);
+    A32(local, 0x24) = A32(object, 8);
+    A32(local, 0x28) = A32(global, 0x11e4);
+    A32(local, 0x2c) = A32(object, 0x18);
+    A32(local, 0x30) = A32(object, 0xc);
+    A32(local, 0x34) = 1;
+    A32(local, 0x38) = global[0x609];
     return 0;
 }
 
 /* .text+0xa6b0 -- the two view modes copy different state and flags. */
 int32_t multip_selection_apply(void)
 {
-    uint8_t *pbyPlayer;
-    void *pState;
-    uint8_t *pbyGlobal;
+    uint8_t *player;
+    void *state;
+    uint8_t *global;
 
     if (M32(M_PLAYER_COUNT) == 0)
         return 0;
-    pbyPlayer = multip_selection_get();
-    if (pbyPlayer == NULL)
+    player = multip_selection_get();
+    if (player == NULL)
         return multip_selection_reset() != 0 ? -1 : 0;
-    pState = *(void **)(void *)(pbyPlayer + 0x28);
-    pbyGlobal = (uint8_t *)(uintptr_t)M32(IMPORT_GLOBAL);
+    state = *(void **)(void *)(player + 0x28);
+    global = (uint8_t *)(uintptr_t)M32(IMPORT_GLOBAL);
     if (M32(0xa58) == 1) {
-        *(uint16_t *)(void *)(pbyGlobal + 0x5dc) = 1;
-        *(uint16_t *)(void *)(pbyGlobal + 0xdc2) = 0;
-        if (pState != NULL && HOST_FN(0x21c, multip_copy_fn)(pbyGlobal + 0x560,
-            (uint8_t *)pState + 4, 36) != 0)
+        *(uint16_t *)(void *)(global + 0x5dc) = 1;
+        *(uint16_t *)(void *)(global + 0xdc2) = 0;
+        if (state != NULL && HOST_FN(0x21c, multip_copy_fn)(global + 0x560,
+            (uint8_t *)state + 4, 36) != 0)
             return -1;
     } else if (M32(0xa58) == 0) {
-        *(uint16_t *)(void *)(pbyGlobal + 0xdc2) = 1;
-        if (pState != NULL && HOST_FN(0x21c, multip_copy_fn)(pbyGlobal + 0x588,
-            (uint8_t *)pState + 4, 36) != 0)
+        *(uint16_t *)(void *)(global + 0xdc2) = 1;
+        if (state != NULL && HOST_FN(0x21c, multip_copy_fn)(global + 0x588,
+            (uint8_t *)state + 4, 36) != 0)
             return -1;
-        if (HOST_FN(0x21c, multip_copy_fn)(pbyGlobal + 0xd74, pbyGlobal + 0x560, 24) != 0)
+        if (HOST_FN(0x21c, multip_copy_fn)(global + 0xd74, global + 0x560, 24) != 0)
             return -1;
     }
     return 0;

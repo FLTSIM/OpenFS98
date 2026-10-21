@@ -250,113 +250,113 @@ static uint32_t test_session(const struct multip_module *retail,
 
 /* Descriptor ownership and name metadata, isolated from the group fixture. */
 struct session_metadata_state {
-    uint32_t uiProbeResult;
-    uint32_t uiReadResult;
-    uint32_t uiWriteResult;
-    uint32_t uiAllocResult;
-    uint32_t uiFreeResult;
-    uint32_t uiMemsetResult;
-    uint32_t uiCalls;
-    uint32_t auiLog[16][6];
-    uint32_t uiBlocks;
-    uint32_t auiLive[4];
-    uint8_t abyHeap[4][128];
-    uint32_t auiResults[32];
-    uint8_t abyNames[8][8];
+    uint32_t probe_result;
+    uint32_t read_result;
+    uint32_t write_result;
+    uint32_t alloc_result;
+    uint32_t free_result;
+    uint32_t memset_result;
+    uint32_t call_count;
+    uint32_t log[16][6];
+    uint32_t block_count;
+    uint32_t live[4];
+    uint8_t heap[4][128];
+    uint32_t results[32];
+    uint8_t names[8][8];
 };
 static struct session_metadata_state s_metadata;
 
-static uint32_t *metadata_log(uint32_t uiTag)
+static uint32_t *metadata_log(uint32_t tag)
 {
-    uint32_t *puiEntry;
-    if (s_metadata.uiCalls >= 16) {
+    uint32_t *entry;
+    if (s_metadata.call_count >= 16) {
         puts("metadata fixture log exhausted"); exit(2);
     }
-    puiEntry = s_metadata.auiLog[s_metadata.uiCalls++];
-    puiEntry[0] = uiTag;
-    return puiEntry;
+    entry = s_metadata.log[s_metadata.call_count++];
+    entry[0] = tag;
+    return entry;
 }
 
-static int32_t STDCALL metadata_alloc(int32_t iKind, uint32_t uiSize,
-                                      void **ppOut, int32_t iZero)
+static int32_t STDCALL metadata_alloc(int32_t kind, uint32_t size,
+                                      void **out, int32_t zero)
 {
-    uint32_t *puiEntry = metadata_log(1);
-    puiEntry[1] = iKind; puiEntry[2] = uiSize; puiEntry[3] = iZero;
-    if (s_metadata.uiAllocResult != 0)
-        return (int32_t)s_metadata.uiAllocResult;
-    if (uiSize > 128 || s_metadata.uiBlocks >= 4) exit(2);
-    *ppOut = s_metadata.abyHeap[s_metadata.uiBlocks];
-    s_metadata.auiLive[s_metadata.uiBlocks++] = 1;
+    uint32_t *entry = metadata_log(1);
+    entry[1] = kind; entry[2] = size; entry[3] = zero;
+    if (s_metadata.alloc_result != 0)
+        return (int32_t)s_metadata.alloc_result;
+    if (size > 128 || s_metadata.block_count >= 4) exit(2);
+    *out = s_metadata.heap[s_metadata.block_count];
+    s_metadata.live[s_metadata.block_count++] = 1;
     return 0;
 }
 
-static int32_t STDCALL metadata_free(void **ppBlock)
+static int32_t STDCALL metadata_free(void **block_out)
 {
-    uint32_t uiIndex;
-    uint32_t *puiEntry = metadata_log(2);
-    for (uiIndex = 0; uiIndex < s_metadata.uiBlocks; uiIndex++)
-        if (*ppBlock == s_metadata.abyHeap[uiIndex]) break;
-    puiEntry[1] = uiIndex;
-    if (uiIndex == s_metadata.uiBlocks) exit(2);
-    if (s_metadata.uiFreeResult == 0) {
-        s_metadata.auiLive[uiIndex] = 0;
-        *ppBlock = NULL;
+    uint32_t index;
+    uint32_t *entry = metadata_log(2);
+    for (index = 0; index < s_metadata.block_count; index++)
+        if (*block_out == s_metadata.heap[index]) break;
+    entry[1] = index;
+    if (index == s_metadata.block_count) exit(2);
+    if (s_metadata.free_result == 0) {
+        s_metadata.live[index] = 0;
+        *block_out = NULL;
     }
-    return (int32_t)s_metadata.uiFreeResult;
+    return (int32_t)s_metadata.free_result;
 }
 
-static int32_t STDCALL metadata_get(void *pObject, void *pDescription, uint32_t *puiSize)
+static int32_t STDCALL metadata_get(void *object, void *description, uint32_t *size)
 {
-    uint32_t *puiEntry = metadata_log(3);
-    puiEntry[1] = directplay_identity(pObject);
-    puiEntry[2] = pDescription != NULL;
-    puiEntry[3] = *puiSize;
-    if (pDescription != NULL) {
-        puiEntry[4] = get_u32(pDescription, 0);
-        memset((uint8_t *)pDescription + 4, 0x65, 76);
+    uint32_t *entry = metadata_log(3);
+    entry[1] = directplay_identity(object);
+    entry[2] = description != NULL;
+    entry[3] = *size;
+    if (description != NULL) {
+        entry[4] = get_u32(description, 0);
+        memset((uint8_t *)description + 4, 0x65, 76);
     }
-    *puiSize = 80;
-    return (int32_t)(pDescription != NULL ? s_metadata.uiReadResult : s_metadata.uiProbeResult);
+    *size = 80;
+    return (int32_t)(description != NULL ? s_metadata.read_result : s_metadata.probe_result);
 }
 
-static int32_t STDCALL metadata_memset(void *pDest, int32_t iValue, uint32_t uiSize)
+static int32_t STDCALL metadata_memset(void *dest, int32_t value, uint32_t size)
 {
-    uint32_t *puiEntry = metadata_log(5);
-    puiEntry[1] = iValue; puiEntry[2] = uiSize;
-    memset(pDest, iValue, uiSize);
-    return (int32_t)s_metadata.uiMemsetResult;
+    uint32_t *entry = metadata_log(5);
+    entry[1] = value; entry[2] = size;
+    memset(dest, value, size);
+    return (int32_t)s_metadata.memset_result;
 }
 
-static int32_t STDCALL metadata_get_name(void *pObject, uint32_t uiId,
-                                        void *pName, uint32_t *puiSize)
+static int32_t STDCALL metadata_get_name(void *object, uint32_t id,
+                                        void *name, uint32_t *size)
 {
-    uint32_t *puiEntry = metadata_log(6);
-    puiEntry[1] = directplay_identity(pObject);
-    puiEntry[2] = uiId; puiEntry[3] = pName != NULL; puiEntry[4] = *puiSize;
-    *puiSize = 32;
-    if (pName != NULL) memset(pName, 0, 32);
-    return (int32_t)(pName != NULL ? s_metadata.uiReadResult : s_metadata.uiProbeResult);
+    uint32_t *entry = metadata_log(6);
+    entry[1] = directplay_identity(object);
+    entry[2] = id; entry[3] = name != NULL; entry[4] = *size;
+    *size = 32;
+    if (name != NULL) memset(name, 0, 32);
+    return (int32_t)(name != NULL ? s_metadata.read_result : s_metadata.probe_result);
 }
 
-static int32_t STDCALL metadata_set_name(void *pObject, uint32_t uiId,
-                                        void *pName, uint32_t uiFlags)
+static int32_t STDCALL metadata_set_name(void *object, uint32_t id,
+                                        void *name, uint32_t flags)
 {
-    uint32_t *puiEntry = metadata_log(7);
-    const uint8_t *pbyName = (const uint8_t *)(uintptr_t)get_u32(pName, 12);
-    puiEntry[1] = directplay_identity(pObject); puiEntry[2] = uiId;
-    puiEntry[3] = get_u32(pName, 0); puiEntry[4] = uiFlags;
-    puiEntry[5] = pbyName[0] | (pbyName[1] << 8) | (pbyName[2] << 16);
-    return (int32_t)s_metadata.uiWriteResult;
+    uint32_t *entry = metadata_log(7);
+    const uint8_t *name_text = (const uint8_t *)(uintptr_t)get_u32(name, 12);
+    entry[1] = directplay_identity(object); entry[2] = id;
+    entry[3] = get_u32(name, 0); entry[4] = flags;
+    entry[5] = name_text[0] | (name_text[1] << 8) | (name_text[2] << 16);
+    return (int32_t)s_metadata.write_result;
 }
 
-static int32_t STDCALL metadata_set(void *pObject, void *pDescription, uint32_t uiFlags)
+static int32_t STDCALL metadata_set(void *object, void *description, uint32_t flags)
 {
-    uint32_t *puiEntry = metadata_log(4);
-    puiEntry[1] = directplay_identity(pObject);
-    puiEntry[2] = get_u32(pDescription, 0);
-    puiEntry[3] = get_u32(pDescription, 0x40);
-    puiEntry[4] = uiFlags;
-    return (int32_t)s_metadata.uiWriteResult;
+    uint32_t *entry = metadata_log(4);
+    entry[1] = directplay_identity(object);
+    entry[2] = get_u32(description, 0);
+    entry[3] = get_u32(description, 0x40);
+    entry[4] = flags;
+    return (int32_t)s_metadata.write_result;
 }
 
 typedef int32_t (STDCALL *metadata_description_fn)(void **);
@@ -366,127 +366,127 @@ typedef int32_t (STDCALL *metadata_decode_fn)(const void *, uint32_t *, uint32_t
 typedef int32_t (STDCALL *metadata_encode_fn)(void *, uint32_t, uint32_t);
 typedef int32_t (STDCALL *metadata_collision_fn)(void *);
 
-static void run_metadata(const struct multip_module *pModule, uint32_t uiNumber,
-                         struct session_metadata_state *pResults)
+static void run_metadata(const struct multip_module *module, uint32_t number,
+                         struct session_metadata_state *results)
 {
-    static const uint32_t s_auiErrors[] = {0, 1, 0x80004001u, 0x80070057u,
+    static const uint32_t s_errors[] = {0, 1, 0x80004001u, 0x80070057u,
         0x8877001eu, 0xffffffffu};
-    uint8_t abyHost[0x2c0] = {0};
-    uint8_t abyDescription[80] = {0};
-    uint32_t auiCounts[4];
-    uint32_t auiName[4] = {16, 0, 0, 0};
-    uint8_t abyPlayers[8][0x100];
-    uint32_t uiState = uiNumber ^ 0x91283745u;
-    uint32_t uiIndex;
-    uint32_t uiType;
-    uint32_t uiHost;
-    void *pFunction;
-    void *pDescription = (void *)1;
+    uint8_t host[0x2c0] = {0};
+    uint8_t description[80] = {0};
+    uint32_t counts[4];
+    uint32_t name_fields[4] = {16, 0, 0, 0};
+    uint8_t players[8][0x100];
+    uint32_t random_state = number ^ 0x91283745u;
+    uint32_t index;
+    uint32_t type;
+    uint32_t is_host;
+    void *function;
+    void *description_result = (void *)1;
 
-    s_directplay_module = pModule;
+    s_directplay_module = module;
     memset(&s_metadata, 0, sizeof(s_metadata));
-    memcpy(pModule->data, pModule->initial_data, 0x1000);
+    memcpy(module->data, module->initial_data, 0x1000);
     s_directplay_objects[0].vtable = s_directplay_vtable;
-    put_u32(pModule->data, 0x988, (uint32_t)(uintptr_t)&s_directplay_objects[0]);
-    put_u32(pModule->data, M_CONNECTED, 1);
-    put_u32(pModule->data, 0xaa8, 1);
-    put_u32(pModule->data, 4, (uint32_t)(uintptr_t)abyHost);
-    pFunction = metadata_alloc; memcpy(abyHost + 0x20c, &pFunction, 4);
-    pFunction = metadata_free; memcpy(abyHost + 0x214, &pFunction, 4);
-    pFunction = metadata_memset; memcpy(abyHost + 0x218, &pFunction, 4);
-    s_metadata.uiProbeResult = uiNumber % 7 == 0 ? s_auiErrors[(uiNumber / 7) % 6] : 0x8877001eu;
-    s_metadata.uiReadResult = uiNumber % 5 == 0 ? s_auiErrors[(uiNumber / 5) % 6] : 0;
-    s_metadata.uiWriteResult = s_auiErrors[uiNumber % 6];
-    s_metadata.uiAllocResult = uiNumber % 11 == 0 ? 1 : 0;
-    s_metadata.uiFreeResult = uiNumber % 13 == 0 ? 1 : 0;
-    s_metadata.uiMemsetResult = uiNumber % 17 == 0 ? 1 : 0;
-    s_metadata.auiResults[0] = ((metadata_description_fn)send_internal(pModule, 34))(&pDescription);
-    s_metadata.auiResults[1] = pDescription == NULL ? 0 : 1;
-    for (uiIndex = 0; uiIndex < 4; uiIndex++) auiCounts[uiIndex] = random_u32(&uiState);
-    s_metadata.auiResults[2] = ((metadata_capacity_set_fn)send_internal(pModule, 35))(auiCounts);
-    put_u32(abyDescription, 0x40, random_u32(&uiState));
-    s_metadata.auiResults[3] = ((metadata_capacity_get_fn)send_internal(pModule, 36))(
-        &s_metadata.auiResults[4], abyDescription);
-    put_u32(pModule->data, M_CONNECTED, 0);
-    pDescription = (void *)1;
-    s_metadata.auiResults[8] = ((metadata_description_fn)send_internal(pModule, 34))(&pDescription);
-    s_metadata.auiResults[9] = pDescription != NULL;
-    put_u32(pModule->data, 0xaa8, 0);
-    s_metadata.auiResults[10] = ((metadata_capacity_set_fn)send_internal(pModule, 35))(NULL);
-    put_u32(pModule->data, 0x988, 0);
-    put_u32(pModule->data, 0xaa8, 1);
-    s_metadata.auiResults[11] = ((metadata_capacity_set_fn)send_internal(pModule, 35))(NULL);
-    for (uiIndex = 0; uiIndex < 8; uiIndex++) {
-        uint8_t *pbyName = s_metadata.abyNames[uiIndex];
-        pbyName[0] = (uint8_t)random_u32(&uiState);
-        pbyName[1] = (uint8_t)random_u32(&uiState);
-        pbyName[2] = 0x73;
-        auiName[3] = uiIndex == 7 ? 0 : (uint32_t)(uintptr_t)pbyName;
-        uiType = uiIndex == 6 ? 0xffffffffu : uiIndex;
-        uiHost = uiNumber % 3 == 0 ? 0 : random_u32(&uiState) | 1;
-        pbyName[4] = (uint8_t)((metadata_encode_fn)send_internal(pModule, 38))(auiName, uiType, uiHost);
+    put_u32(module->data, 0x988, (uint32_t)(uintptr_t)&s_directplay_objects[0]);
+    put_u32(module->data, M_CONNECTED, 1);
+    put_u32(module->data, 0xaa8, 1);
+    put_u32(module->data, 4, (uint32_t)(uintptr_t)host);
+    function = metadata_alloc; memcpy(host + 0x20c, &function, 4);
+    function = metadata_free; memcpy(host + 0x214, &function, 4);
+    function = metadata_memset; memcpy(host + 0x218, &function, 4);
+    s_metadata.probe_result = number % 7 == 0 ? s_errors[(number / 7) % 6] : 0x8877001eu;
+    s_metadata.read_result = number % 5 == 0 ? s_errors[(number / 5) % 6] : 0;
+    s_metadata.write_result = s_errors[number % 6];
+    s_metadata.alloc_result = number % 11 == 0 ? 1 : 0;
+    s_metadata.free_result = number % 13 == 0 ? 1 : 0;
+    s_metadata.memset_result = number % 17 == 0 ? 1 : 0;
+    s_metadata.results[0] = ((metadata_description_fn)send_internal(module, 34))(&description_result);
+    s_metadata.results[1] = description_result == NULL ? 0 : 1;
+    for (index = 0; index < 4; index++) counts[index] = random_u32(&random_state);
+    s_metadata.results[2] = ((metadata_capacity_set_fn)send_internal(module, 35))(counts);
+    put_u32(description, 0x40, random_u32(&random_state));
+    s_metadata.results[3] = ((metadata_capacity_get_fn)send_internal(module, 36))(
+        &s_metadata.results[4], description);
+    put_u32(module->data, M_CONNECTED, 0);
+    description_result = (void *)1;
+    s_metadata.results[8] = ((metadata_description_fn)send_internal(module, 34))(&description_result);
+    s_metadata.results[9] = description_result != NULL;
+    put_u32(module->data, 0xaa8, 0);
+    s_metadata.results[10] = ((metadata_capacity_set_fn)send_internal(module, 35))(NULL);
+    put_u32(module->data, 0x988, 0);
+    put_u32(module->data, 0xaa8, 1);
+    s_metadata.results[11] = ((metadata_capacity_set_fn)send_internal(module, 35))(NULL);
+    for (index = 0; index < 8; index++) {
+        uint8_t *name = s_metadata.names[index];
+        name[0] = (uint8_t)random_u32(&random_state);
+        name[1] = (uint8_t)random_u32(&random_state);
+        name[2] = 0x73;
+        name_fields[3] = index == 7 ? 0 : (uint32_t)(uintptr_t)name;
+        type = index == 6 ? 0xffffffffu : index;
+        is_host = number % 3 == 0 ? 0 : random_u32(&random_state) | 1;
+        name[4] = (uint8_t)((metadata_encode_fn)send_internal(module, 38))(name_fields, type, is_host);
         /* Alternate encoded values with independently generated valid and invalid names. */
-        if (uiNumber & 1) {
-            pbyName[0] = "CHx"[(uiNumber / 2) % 3];
-            pbyName[1] = (uint8_t)(uiNumber / 6);
+        if (number & 1) {
+            name[0] = "CHx"[(number / 2) % 3];
+            name[1] = (uint8_t)(number / 6);
         }
-        uiType = 0x87654321u; uiHost = 0x12345678u;
-        pbyName[5] = (uint8_t)((metadata_decode_fn)send_internal(pModule, 37))(auiName, &uiType, &uiHost);
-        pbyName[6] = (uint8_t)uiType; pbyName[7] = (uint8_t)uiHost;
+        type = 0x87654321u; is_host = 0x12345678u;
+        name[5] = (uint8_t)((metadata_decode_fn)send_internal(module, 37))(name_fields, &type, &is_host);
+        name[6] = (uint8_t)type; name[7] = (uint8_t)is_host;
     }
-    memset(abyPlayers, 0, sizeof(abyPlayers));
-    for (uiIndex = 0; uiIndex < 8; uiIndex++)
-        put_u32(abyPlayers[uiIndex], 8, (uiNumber + uiIndex) % 7);
-    put_u32(abyPlayers[0], 4, random_u32(&uiState));
-    put_u32(pModule->data, 0x988, (uint32_t)(uintptr_t)&s_directplay_objects[0]);
-    put_u32(pModule->data, M_LOCAL_PLAYER, (uint32_t)(uintptr_t)abyPlayers[0]);
-    put_u32(pModule->data, 0xaa8, uiNumber & 1);
-    s_metadata.auiResults[12] = ((multip_worker_fn)send_internal(pModule, 39))();
+    memset(players, 0, sizeof(players));
+    for (index = 0; index < 8; index++)
+        put_u32(players[index], 8, (number + index) % 7);
+    put_u32(players[0], 4, random_u32(&random_state));
+    put_u32(module->data, 0x988, (uint32_t)(uintptr_t)&s_directplay_objects[0]);
+    put_u32(module->data, M_LOCAL_PLAYER, (uint32_t)(uintptr_t)players[0]);
+    put_u32(module->data, 0xaa8, number & 1);
+    s_metadata.results[12] = ((multip_worker_fn)send_internal(module, 39))();
     /* The long-name pointer dangles into the callee's stack in both images.
      * The SetPlayerName stub captures its bytes while it is valid. */
-    for (uiIndex = 0; uiIndex < s_metadata.uiBlocks; uiIndex++)
-        if (s_metadata.abyHeap[uiIndex][0] == 0)
-            put_u32(s_metadata.abyHeap[uiIndex], 12, 0);
-    put_u32(pModule->data, 0x160, random_u32(&uiState));
-    s_metadata.auiResults[13] = ((metadata_collision_fn)send_internal(pModule, 40))(abyPlayers[0]);
-    s_metadata.auiResults[14] = get_u32(abyPlayers[0], 0xcc);
-    s_metadata.auiResults[15] = ((metadata_collision_fn)send_internal(pModule, 40))(NULL);
-    put_u32(pModule->data, M_PLAYER_COUNT, uiNumber % 9);
-    put_u32(pModule->data, M_PLAYERS, (uint32_t)(uintptr_t)abyPlayers);
-    s_metadata.auiResults[16] = ((multip_worker_fn)send_internal(pModule, 41))();
-    s_metadata.auiResults[17] = get_u32(pModule->data, 0x9a0);
-    s_metadata.auiResults[18] = get_u32(pModule->data, 0x9a4);
-    memcpy(pResults, &s_metadata, sizeof(*pResults));
+    for (index = 0; index < s_metadata.block_count; index++)
+        if (s_metadata.heap[index][0] == 0)
+            put_u32(s_metadata.heap[index], 12, 0);
+    put_u32(module->data, 0x160, random_u32(&random_state));
+    s_metadata.results[13] = ((metadata_collision_fn)send_internal(module, 40))(players[0]);
+    s_metadata.results[14] = get_u32(players[0], 0xcc);
+    s_metadata.results[15] = ((metadata_collision_fn)send_internal(module, 40))(NULL);
+    put_u32(module->data, M_PLAYER_COUNT, number % 9);
+    put_u32(module->data, M_PLAYERS, (uint32_t)(uintptr_t)players);
+    s_metadata.results[16] = ((multip_worker_fn)send_internal(module, 41))();
+    s_metadata.results[17] = get_u32(module->data, 0x9a0);
+    s_metadata.results[18] = get_u32(module->data, 0x9a4);
+    memcpy(results, &s_metadata, sizeof(*results));
 }
 
-static uint32_t test_metadata(const struct multip_module *pRetail,
-                              const struct multip_module *pOurs, uint32_t uiScenarios)
+static uint32_t test_metadata(const struct multip_module *retail,
+                              const struct multip_module *ours, uint32_t scenarios)
 {
-    static struct session_metadata_state s_Retail;
-    static struct session_metadata_state s_Ours;
-    uint32_t uiNumber;
-    uint32_t uiBad = 0;
+    static struct session_metadata_state s_retail;
+    static struct session_metadata_state s_ours;
+    uint32_t number;
+    uint32_t bad = 0;
     s_directplay_vtable[0x58 / 4] = (void *)metadata_get;
     s_directplay_vtable[0x7c / 4] = (void *)metadata_set;
     s_directplay_vtable[0x54 / 4] = (void *)metadata_get_name;
     s_directplay_vtable[0x78 / 4] = (void *)metadata_set_name;
-    for (uiNumber = 0; uiNumber < uiScenarios; uiNumber++) {
-        run_metadata(pRetail, uiNumber, &s_Retail);
-        run_metadata(pOurs, uiNumber, &s_Ours);
-        if (memcmp(&s_Retail, &s_Ours, sizeof(s_Ours)) != 0) {
-            if (uiBad < 4) {
-                uint32_t uiByte;
-                printf("metadata scenario %lu differs\n", (unsigned long)uiNumber);
-                for (uiByte = 0; uiByte < sizeof(s_Ours); uiByte++)
-                    if (((uint8_t *)&s_Retail)[uiByte] != ((uint8_t *)&s_Ours)[uiByte]) {
-                        printf("  first byte %lu: retail %u ours %u\n", (unsigned long)uiByte,
-                            ((uint8_t *)&s_Retail)[uiByte], ((uint8_t *)&s_Ours)[uiByte]); break;
+    for (number = 0; number < scenarios; number++) {
+        run_metadata(retail, number, &s_retail);
+        run_metadata(ours, number, &s_ours);
+        if (memcmp(&s_retail, &s_ours, sizeof(s_ours)) != 0) {
+            if (bad < 4) {
+                uint32_t byte;
+                printf("metadata scenario %lu differs\n", (unsigned long)number);
+                for (byte = 0; byte < sizeof(s_ours); byte++)
+                    if (((uint8_t *)&s_retail)[byte] != ((uint8_t *)&s_ours)[byte]) {
+                        printf("  first byte %lu: retail %u ours %u\n", (unsigned long)byte,
+                            ((uint8_t *)&s_retail)[byte], ((uint8_t *)&s_ours)[byte]); break;
                     }
             }
-            uiBad++;
+            bad++;
         }
     }
     printf("MULTIP session descriptors/name metadata: %lu scenarios, %lu differ\n",
-           (unsigned long)uiScenarios, (unsigned long)uiBad);
-    return uiBad;
+           (unsigned long)scenarios, (unsigned long)bad);
+    return bad;
 }

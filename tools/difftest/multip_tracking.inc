@@ -1,18 +1,18 @@
 /* The CHAIN 0x19 display callback, including its leftover return value. */
 struct track_fixture {
-    uint32_t uiCalls;
-    uint32_t uiChainResult;
-    uint32_t uiCopyResult;
-    uint32_t uiDrawResult;
-    uint32_t uiMemoryCalls;
-    uint32_t uiNumber;
-    uint32_t auiLog[32][6];
-    uint32_t auiResults[16];
-    uint32_t auiState[16][8];
-    uint8_t abyNames[16][20];
-    uint8_t abyView[0x60];
-    uint8_t abyPosition[24];
-    uint32_t auiLocal[7];
+    uint32_t call_count;
+    uint32_t chain_result;
+    uint32_t copy_result;
+    uint32_t draw_result;
+    uint32_t memory_calls;
+    uint32_t number;
+    uint32_t log[32][6];
+    uint32_t results[16];
+    uint32_t state[16][8];
+    uint8_t names[16][20];
+    uint8_t view[0x60];
+    uint8_t position[24];
+    uint32_t local[7];
 };
 static struct track_fixture s_track;
 static const struct multip_module *s_track_module;
@@ -21,195 +21,195 @@ static uint8_t *s_track_global;
 typedef uint32_t (STDCALL *track_callback_fn)(uint32_t, uint32_t);
 typedef uint32_t (STDCALL *track_show_fn)(uint32_t);
 
-static uint32_t *track_log(uint32_t uiTag)
+static uint32_t *track_log(uint32_t tag)
 {
-    uint32_t *puiEntry;
-    if (s_track.uiCalls >= 32) exit(2);
-    puiEntry = s_track.auiLog[s_track.uiCalls++];
-    puiEntry[0] = uiTag;
-    return puiEntry;
+    uint32_t *entry;
+    if (s_track.call_count >= 32) exit(2);
+    entry = s_track.log[s_track.call_count++];
+    entry[0] = tag;
+    return entry;
 }
 
-static int32_t STDCALL track_copy(char *pcDest, const char *pcSource)
+static int32_t STDCALL track_copy(char *dest, const char *source)
 {
-    uint32_t *puiEntry = track_log(1);
-    puiEntry[1] = pcDest == (char *)s_track_module->data + 0xf08;
-    puiEntry[2] = profile_hash(pcSource);
-    strcpy(pcDest, pcSource);
-    return (int32_t)s_track.uiCopyResult;
+    uint32_t *entry = track_log(1);
+    entry[1] = dest == (char *)s_track_module->data + 0xf08;
+    entry[2] = profile_hash(source);
+    strcpy(dest, source);
+    return (int32_t)s_track.copy_result;
 }
 
-static int32_t track_registration(uint32_t uiTag, uint32_t uiCode, track_callback_fn pCallback)
+static int32_t track_registration(uint32_t tag, uint32_t code, track_callback_fn callback)
 {
-    uint32_t *puiEntry = track_log(uiTag);
-    puiEntry[1] = uiCode;
-    puiEntry[2] = (void *)pCallback == send_internal(s_track_module, 54);
-    puiEntry[3] = get_u32(s_track_module->data, 0xf20);
-    puiEntry[4] = get_u32(s_track_module->data, 0xf1c);
-    return (int32_t)s_track.uiChainResult;
+    uint32_t *entry = track_log(tag);
+    entry[1] = code;
+    entry[2] = (void *)callback == send_internal(s_track_module, 54);
+    entry[3] = get_u32(s_track_module->data, 0xf20);
+    entry[4] = get_u32(s_track_module->data, 0xf1c);
+    return (int32_t)s_track.chain_result;
 }
 
-static int32_t STDCALL track_add(uint32_t uiCode, track_callback_fn pCallback)
+static int32_t STDCALL track_add(uint32_t code, track_callback_fn callback)
 {
-    return track_registration(2, uiCode, pCallback);
+    return track_registration(2, code, callback);
 }
-static int32_t STDCALL track_remove(uint32_t uiCode, track_callback_fn pCallback)
+static int32_t STDCALL track_remove(uint32_t code, track_callback_fn callback)
 {
-    return track_registration(3, uiCode, pCallback);
+    return track_registration(3, code, callback);
 }
-static uint32_t STDCALL track_draw(uint32_t uiWindow, uint32_t uiA,
-    uint32_t uiB, const char *pcName, uint32_t uiC)
+static uint32_t STDCALL track_draw(uint32_t window, uint32_t a,
+    uint32_t b, const char *name_text, uint32_t c)
 {
-    uint32_t *puiEntry = track_log(4);
-    puiEntry[1] = uiWindow; puiEntry[2] = uiA;
-    puiEntry[3] = uiB; puiEntry[4] = profile_hash(pcName); puiEntry[5] = uiC;
-    return s_track.uiDrawResult;
-}
-
-static int32_t STDCALL track_memory(void *pDest, const void *pSource, uint32_t uiSize)
-{
-    uint32_t *puiEntry = track_log(5);
-    uintptr_t uiSource = (uintptr_t)pSource;
-    uintptr_t uiGlobal = (uintptr_t)s_track_global;
-    uint32_t uiIndex;
-    puiEntry[1] = (uint8_t *)pDest - s_track_global;
-    puiEntry[2] = uiSource >= uiGlobal && uiSource < uiGlobal + 0x1200 ?
-        uiSource - uiGlobal : 0x80000000u;
-    puiEntry[3] = uiSize;
-    puiEntry[4] = 2166136261u;
-    for (uiIndex = 0; uiIndex < uiSize; uiIndex++)
-        puiEntry[4] = (puiEntry[4] ^ ((const uint8_t *)pSource)[uiIndex]) * 16777619u;
-    memmove(pDest, pSource, uiSize);
-    s_track.uiMemoryCalls++;
-    return s_track.uiNumber % 7 == s_track.uiMemoryCalls;
+    uint32_t *entry = track_log(4);
+    entry[1] = window; entry[2] = a;
+    entry[3] = b; entry[4] = profile_hash(name_text); entry[5] = c;
+    return s_track.draw_result;
 }
 
-static void track_snapshot(const struct multip_module *pModule,
-    const uint8_t *pbyGlobal, uint32_t uiStep, uint32_t uiReturn)
+static int32_t STDCALL track_memory(void *dest, const void *source, uint32_t size)
 {
-    uint32_t *puiState = s_track.auiState[uiStep];
-    s_track.auiResults[uiStep] = uiReturn;
-    puiState[0] = get_u32(pModule->data, 0xf1c);
-    puiState[1] = get_u32(pModule->data, 0xf20);
-    puiState[2] = get_u32(pModule->data, M_PLAYER_MODE);
-    puiState[3] = get_u32(pModule->data, M_ACTIVE_PLAYER_ID);
-    puiState[4] = get_u32(pbyGlobal, 0x11b0);
-    puiState[5] = get_u32(pbyGlobal, 0x11dc);
-    puiState[6] = get_u32(pbyGlobal, 0x5dc);
-    puiState[7] = get_u32(pbyGlobal, 0xdc2);
-    memcpy(s_track.abyNames[uiStep], pModule->data + 0xf08, 20);
+    uint32_t *entry = track_log(5);
+    uintptr_t source_address = (uintptr_t)source;
+    uintptr_t global_address = (uintptr_t)s_track_global;
+    uint32_t index;
+    entry[1] = (uint8_t *)dest - s_track_global;
+    entry[2] = source_address >= global_address && source_address < global_address + 0x1200 ?
+        source_address - global_address : 0x80000000u;
+    entry[3] = size;
+    entry[4] = 2166136261u;
+    for (index = 0; index < size; index++)
+        entry[4] = (entry[4] ^ ((const uint8_t *)source)[index]) * 16777619u;
+    memmove(dest, source, size);
+    s_track.memory_calls++;
+    return s_track.number % 7 == s_track.memory_calls;
 }
 
-static void run_tracking(const struct multip_module *pModule, uint32_t uiNumber,
-                         struct track_fixture *pResult)
+static void track_snapshot(const struct multip_module *module,
+    const uint8_t *global, uint32_t step, uint32_t return_value)
 {
-    uint8_t abyHost[0x320] = {0};
-    void *apChain[9] = {0};
-    uint8_t abyGlobal[0x1200];
-    uint8_t abyLocal[0x100] = {0};
-    uint8_t abyObject[32];
-    uint8_t abyModel[40];
-    void *pFunction;
-    uint32_t uiState = uiNumber ^ 0x18234567u;
-    uint32_t uiIndex;
-    uint32_t uiWindow = random_u32(&uiState);
-    uint32_t uiResult;
-    track_callback_fn pCallback = (track_callback_fn)send_internal(pModule, 54);
+    uint32_t *state_fields = s_track.state[step];
+    s_track.results[step] = return_value;
+    state_fields[0] = get_u32(module->data, 0xf1c);
+    state_fields[1] = get_u32(module->data, 0xf20);
+    state_fields[2] = get_u32(module->data, M_PLAYER_MODE);
+    state_fields[3] = get_u32(module->data, M_ACTIVE_PLAYER_ID);
+    state_fields[4] = get_u32(global, 0x11b0);
+    state_fields[5] = get_u32(global, 0x11dc);
+    state_fields[6] = get_u32(global, 0x5dc);
+    state_fields[7] = get_u32(global, 0xdc2);
+    memcpy(s_track.names[step], module->data + 0xf08, 20);
+}
+
+static void run_tracking(const struct multip_module *module, uint32_t number,
+                         struct track_fixture *results)
+{
+    uint8_t host[0x320] = {0};
+    void *chain[9] = {0};
+    uint8_t global[0x1200];
+    uint8_t local[0x100] = {0};
+    uint8_t object[32];
+    uint8_t model[40];
+    void *function;
+    uint32_t random_state = number ^ 0x18234567u;
+    uint32_t index;
+    uint32_t window = random_u32(&random_state);
+    uint32_t result;
+    track_callback_fn callback = (track_callback_fn)send_internal(module, 54);
 
     memset(&s_track, 0, sizeof(s_track));
-    s_track.uiNumber = uiNumber;
-    s_track_module = pModule;
-    s_track_global = abyGlobal;
-    memcpy(pModule->data, pModule->initial_data, 0x1000);
-    for (uiIndex = 0; uiIndex < sizeof(abyGlobal); uiIndex += 4)
-        put_u32(abyGlobal, uiIndex, random_u32(&uiState));
-    put_u32(abyGlobal, 0x119c, uiWindow);
-    put_u32(pModule->data, 4, (uint32_t)(uintptr_t)abyHost);
-    put_u32(pModule->data, 0xc, (uint32_t)(uintptr_t)abyGlobal);
-    put_u32(pModule->data, 0x1c, (uint32_t)(uintptr_t)apChain);
-    put_u32(pModule->data, M_LOCAL_PLAYER, (uint32_t)(uintptr_t)abyLocal);
-    put_u32(abyLocal, 0, (uint32_t)(uintptr_t)"local track name");
-    put_u32(abyLocal, 4, 0x1234);
-    put_u32(pModule->data, M_PLAYER_MODE, random_u32(&uiState));
-    put_u32(pModule->data, M_ACTIVE_PLAYER_ID, random_u32(&uiState));
-    put_u32(pModule->data, 0xf20, uiNumber % 3);
-    put_u32(pModule->data, 0xa10, uiNumber & 4 ? random_u32(&uiState) : uiNumber % 3);
-    pFunction = track_copy; memcpy(abyHost + 0x2a8, &pFunction, 4);
-    pFunction = track_draw; memcpy(abyHost + 0x8c, &pFunction, 4);
-    pFunction = track_memory; memcpy(abyHost + 0x21c, &pFunction, 4);
-    apChain[0x18 / 4] = (void *)track_add;
-    apChain[0x1c / 4] = (void *)track_remove;
-    s_track.uiChainResult = uiNumber & 1 ? random_u32(&uiState) | 1 : 0;
-    s_track.uiCopyResult = random_u32(&uiState);
-    s_track.uiDrawResult = random_u32(&uiState);
-    uiResult = ((track_show_fn)send_internal(pModule, 53))(0x1234);
-    track_snapshot(pModule, abyGlobal, 0, uiResult);
-    uiResult = ((track_show_fn)send_internal(pModule, 53))(0x1234);
-    track_snapshot(pModule, abyGlobal, 1, uiResult);
-    track_snapshot(pModule, abyGlobal, 2, pCallback(0x19, uiWindow));
-    track_snapshot(pModule, abyGlobal, 3, pCallback(0x7777, uiWindow ^ 1));
-    uiResult = ((multip_worker_fn)send_internal(pModule, 51))();
-    track_snapshot(pModule, abyGlobal, 4, uiResult);
-    track_snapshot(pModule, abyGlobal, 5, pCallback(0x19, uiWindow));
-    s_track.uiChainResult = 0;
-    track_snapshot(pModule, abyGlobal, 6, pCallback(0x19, uiWindow));
-    uiResult = ((multip_worker_fn)send_internal(pModule, 52))();
-    track_snapshot(pModule, abyGlobal, 7, uiResult);
-    track_snapshot(pModule, abyGlobal, 8, pCallback(0x19, uiWindow));
-    for (uiIndex = 0; uiIndex < sizeof(abyObject); uiIndex += 4)
-        put_u32(abyObject, uiIndex, random_u32(&uiState));
-    for (uiIndex = 0; uiIndex < sizeof(abyModel); uiIndex += 4)
-        put_u32(abyModel, uiIndex, random_u32(&uiState));
-    put_u32(abyGlobal, 0x11e0, (uint32_t)(uintptr_t)abyObject);
-    put_u32(abyGlobal, 0x11e4, uiNumber & 16 ? (uint32_t)(uintptr_t)abyModel : 0);
-    uiResult = ((multip_worker_fn)send_internal(pModule, 57))();
-    track_snapshot(pModule, abyGlobal, 9, uiResult);
-    for (uiIndex = 0; uiIndex < 7; uiIndex++)
-        s_track.auiLocal[uiIndex] = uiIndex == 2 ? get_u32(abyLocal, 0x28) != 0 :
-            get_u32(abyLocal, 0x20 + uiIndex * 4);
-    put_u32(pModule->data, M_PLAYER_COUNT, uiNumber & 8 ? 0 : 1);
-    put_u32(pModule->data, M_PLAYERS, (uint32_t)(uintptr_t)abyLocal);
-    put_u32(pModule->data, M_PLAYER_MODE, uiNumber % 3);
-    put_u32(pModule->data, M_ACTIVE_PLAYER_ID, uiNumber & 2 ? 0x1234 : 0xdead);
-    put_u32(pModule->data, 0xa58, (uiNumber / 3) % 3);
-    uiResult = ((multip_local_fn)send_internal(pModule, 55))() == abyLocal;
-    track_snapshot(pModule, abyGlobal, 10, uiResult);
-    put_u32(abyGlobal, 0x5dc, (uiNumber & 1 ? 0x10000 : 0) | (uiNumber & 4 ? 1 : 0));
-    put_u32(abyGlobal, 0x268, uiNumber & 2);
-    put_u32(pModule->data, 0xad4, uiNumber & 8);
-    uiResult = ((multip_worker_fn)send_internal(pModule, 56))();
-    track_snapshot(pModule, abyGlobal, 11, uiResult);
-    uiResult = ((multip_worker_fn)send_internal(pModule, 58))();
-    track_snapshot(pModule, abyGlobal, 12, uiResult);
-    memcpy(s_track.abyView, abyGlobal + 0x560, sizeof(s_track.abyView));
-    memcpy(s_track.abyPosition, abyGlobal + 0xd74, sizeof(s_track.abyPosition));
-    memcpy(pResult, &s_track, sizeof(*pResult));
+    s_track.number = number;
+    s_track_module = module;
+    s_track_global = global;
+    memcpy(module->data, module->initial_data, 0x1000);
+    for (index = 0; index < sizeof(global); index += 4)
+        put_u32(global, index, random_u32(&random_state));
+    put_u32(global, 0x119c, window);
+    put_u32(module->data, 4, (uint32_t)(uintptr_t)host);
+    put_u32(module->data, 0xc, (uint32_t)(uintptr_t)global);
+    put_u32(module->data, 0x1c, (uint32_t)(uintptr_t)chain);
+    put_u32(module->data, M_LOCAL_PLAYER, (uint32_t)(uintptr_t)local);
+    put_u32(local, 0, (uint32_t)(uintptr_t)"local track name");
+    put_u32(local, 4, 0x1234);
+    put_u32(module->data, M_PLAYER_MODE, random_u32(&random_state));
+    put_u32(module->data, M_ACTIVE_PLAYER_ID, random_u32(&random_state));
+    put_u32(module->data, 0xf20, number % 3);
+    put_u32(module->data, 0xa10, number & 4 ? random_u32(&random_state) : number % 3);
+    function = track_copy; memcpy(host + 0x2a8, &function, 4);
+    function = track_draw; memcpy(host + 0x8c, &function, 4);
+    function = track_memory; memcpy(host + 0x21c, &function, 4);
+    chain[0x18 / 4] = (void *)track_add;
+    chain[0x1c / 4] = (void *)track_remove;
+    s_track.chain_result = number & 1 ? random_u32(&random_state) | 1 : 0;
+    s_track.copy_result = random_u32(&random_state);
+    s_track.draw_result = random_u32(&random_state);
+    result = ((track_show_fn)send_internal(module, 53))(0x1234);
+    track_snapshot(module, global, 0, result);
+    result = ((track_show_fn)send_internal(module, 53))(0x1234);
+    track_snapshot(module, global, 1, result);
+    track_snapshot(module, global, 2, callback(0x19, window));
+    track_snapshot(module, global, 3, callback(0x7777, window ^ 1));
+    result = ((multip_worker_fn)send_internal(module, 51))();
+    track_snapshot(module, global, 4, result);
+    track_snapshot(module, global, 5, callback(0x19, window));
+    s_track.chain_result = 0;
+    track_snapshot(module, global, 6, callback(0x19, window));
+    result = ((multip_worker_fn)send_internal(module, 52))();
+    track_snapshot(module, global, 7, result);
+    track_snapshot(module, global, 8, callback(0x19, window));
+    for (index = 0; index < sizeof(object); index += 4)
+        put_u32(object, index, random_u32(&random_state));
+    for (index = 0; index < sizeof(model); index += 4)
+        put_u32(model, index, random_u32(&random_state));
+    put_u32(global, 0x11e0, (uint32_t)(uintptr_t)object);
+    put_u32(global, 0x11e4, number & 16 ? (uint32_t)(uintptr_t)model : 0);
+    result = ((multip_worker_fn)send_internal(module, 57))();
+    track_snapshot(module, global, 9, result);
+    for (index = 0; index < 7; index++)
+        s_track.local[index] = index == 2 ? get_u32(local, 0x28) != 0 :
+            get_u32(local, 0x20 + index * 4);
+    put_u32(module->data, M_PLAYER_COUNT, number & 8 ? 0 : 1);
+    put_u32(module->data, M_PLAYERS, (uint32_t)(uintptr_t)local);
+    put_u32(module->data, M_PLAYER_MODE, number % 3);
+    put_u32(module->data, M_ACTIVE_PLAYER_ID, number & 2 ? 0x1234 : 0xdead);
+    put_u32(module->data, 0xa58, (number / 3) % 3);
+    result = ((multip_local_fn)send_internal(module, 55))() == local;
+    track_snapshot(module, global, 10, result);
+    put_u32(global, 0x5dc, (number & 1 ? 0x10000 : 0) | (number & 4 ? 1 : 0));
+    put_u32(global, 0x268, number & 2);
+    put_u32(module->data, 0xad4, number & 8);
+    result = ((multip_worker_fn)send_internal(module, 56))();
+    track_snapshot(module, global, 11, result);
+    result = ((multip_worker_fn)send_internal(module, 58))();
+    track_snapshot(module, global, 12, result);
+    memcpy(s_track.view, global + 0x560, sizeof(s_track.view));
+    memcpy(s_track.position, global + 0xd74, sizeof(s_track.position));
+    memcpy(results, &s_track, sizeof(*results));
 }
 
-static uint32_t test_tracking(const struct multip_module *pRetail,
-                              const struct multip_module *pOurs, uint32_t uiScenarios)
+static uint32_t test_tracking(const struct multip_module *retail,
+                              const struct multip_module *ours, uint32_t scenarios)
 {
-    static struct track_fixture s_Retail;
-    static struct track_fixture s_Ours;
-    uint32_t uiNumber;
-    uint32_t uiBad = 0;
-    for (uiNumber = 0; uiNumber < uiScenarios; uiNumber++) {
-        run_tracking(pRetail, uiNumber, &s_Retail);
-        run_tracking(pOurs, uiNumber, &s_Ours);
-        if (memcmp(&s_Retail, &s_Ours, sizeof(s_Ours)) != 0) {
-            if (uiBad < 4) {
-                uint32_t uiByte;
-                printf("tracking scenario %lu differs\n", (unsigned long)uiNumber);
-                for (uiByte = 0; uiByte < sizeof(s_Ours); uiByte++)
-                    if (((uint8_t *)&s_Retail)[uiByte] != ((uint8_t *)&s_Ours)[uiByte]) {
-                        printf("  first byte %lu: retail %u ours %u\n", (unsigned long)uiByte,
-                            ((uint8_t *)&s_Retail)[uiByte], ((uint8_t *)&s_Ours)[uiByte]); break;
+    static struct track_fixture s_retail;
+    static struct track_fixture s_ours;
+    uint32_t number;
+    uint32_t bad = 0;
+    for (number = 0; number < scenarios; number++) {
+        run_tracking(retail, number, &s_retail);
+        run_tracking(ours, number, &s_ours);
+        if (memcmp(&s_retail, &s_ours, sizeof(s_ours)) != 0) {
+            if (bad < 4) {
+                uint32_t byte;
+                printf("tracking scenario %lu differs\n", (unsigned long)number);
+                for (byte = 0; byte < sizeof(s_ours); byte++)
+                    if (((uint8_t *)&s_retail)[byte] != ((uint8_t *)&s_ours)[byte]) {
+                        printf("  first byte %lu: retail %u ours %u\n", (unsigned long)byte,
+                            ((uint8_t *)&s_retail)[byte], ((uint8_t *)&s_ours)[byte]); break;
                     }
             }
-            uiBad++;
+            bad++;
         }
     }
     printf("MULTIP track-name display: %lu scenarios, %lu differ\n",
-           (unsigned long)uiScenarios, (unsigned long)uiBad);
-    return uiBad;
+           (unsigned long)scenarios, (unsigned long)bad);
+    return bad;
 }

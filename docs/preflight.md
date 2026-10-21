@@ -166,9 +166,9 @@ expects from a transport, which a native build will need to provide.
 status and active-range slice, `+0x20` send enqueue, and internal send-one,
 drain/flush, receive/dequeue, worker lifecycles and DirectPlay loader/interface
 lifetime, profile round-trip, session/group primitives, metadata, aircraft
-ownership, browser records, tracking/selection and fourteen message
-constructors and remote-player lifecycle are tested against retail (fourteen suites of 20,000 scenarios
-each). It remains outside the normal module list while local-player creation,
+ownership, browser records, tracking/selection and message constructors,
+player startup/lifecycle and session frame/draw callbacks are tested against
+retail (seventeen suites of 20,000 scenarios each). It remains outside the normal module list while extrapolation,
 receive dispatch, lobby/dialog handling and public lifecycle paths are pending. See [modules/multip.md](modules/multip.md).
 
 **MPCHAT** (3,104 bytes) is the chat window. Its id is `0xffffffff`, so no

@@ -62,14 +62,14 @@ BASE_MULTIP := 0x20850000
 
 MODULES := ACONTAIN ADVDRV ANALYSIS ATC BOOSTER CHAIN CONTROLS DEMO DYNAMIC FACIL FE G3D GLOBAL LANDME NUMERIC REALITY SLEW SOUND UTIL WEATHERM WINDOW WINMSG
 
-# MULTIP is in progress and intentionally is not in MODULES yet.  The first
-# recovered slice is built explicitly and differential-tested below.
-$(BIN)/MULTIP.DLL: src/multip/multip.c src/multip/multip_players.inc src/multip/multip_nametag.inc src/multip/multip_messages.inc src/multip/multip_tracking.inc src/multip/multip_records.inc src/multip/multip_aircraft.inc src/multip/multip_session.inc src/multip/multip_profile.inc src/multip/multip_profile_fields.inc src/multip/multip.def src/multip/multip_data.inc src/multip/multip_rdata.inc src/multip/multip_pointers.inc $(BIN)/multip.res
+# MULTIP is in progress and intentionally is not in MODULES yet.  Its
+# recovered portions are built explicitly and differential-tested below.
+$(BIN)/MULTIP.DLL: src/multip/multip.c src/multip/multip_callbacks.inc src/multip/multip_frame_actions.inc src/multip/multip_players.inc src/multip/multip_nametag.inc src/multip/multip_messages.inc src/multip/multip_tracking.inc src/multip/multip_records.inc src/multip/multip_aircraft.inc src/multip/multip_session.inc src/multip/multip_profile.inc src/multip/multip_profile_fields.inc src/multip/multip.def src/multip/multip_data.inc src/multip/multip_rdata.inc src/multip/multip_pointers.inc $(BIN)/multip.res
 	@mkdir -p $(BIN)
 	$(CC) $(CFLAGS) $(LDFLAGS) -Wl,--image-base=$(BASE_MULTIP) \
 	      -o $@ src/multip/multip.c $(BIN)/multip.res src/multip/multip.def -lkernel32
 
-src/multip/multip_data.inc src/multip/multip_rdata.inc src/multip/multip_pointers.inc src/multip/multip_nametag.inc &: $(ORIG)/Modules/multip.dll tools/gen_multip_data.py
+src/multip/multip_data.inc src/multip/multip_rdata.inc src/multip/multip_pointers.inc src/multip/multip_nametag.inc src/multip/multip_frame_actions.inc &: $(ORIG)/Modules/multip.dll tools/gen_multip_data.py
 	@python3 tools/gen_multip_data.py
 
 src/multip/multip_profile_fields.inc: $(ORIG)/Modules/multip.dll tools/gen_multip_profile.py
@@ -821,13 +821,13 @@ g3ddiff-run: g3ddiff
 
 # MULTIP in progress: public queries, transport, workers and DirectPlay lifetime.
 # Session setup and message dispatch remain pending; no installation.
-$(DIFFDIR)/multipdiff.exe: tools/difftest/multipdiff.c tools/difftest/multip_send.inc tools/difftest/multip_receive.inc tools/difftest/multip_workers.inc tools/difftest/multip_directplay.inc tools/difftest/multip_profile.inc tools/difftest/multip_session.inc tools/difftest/multip_aircraft.inc tools/difftest/multip_tracking.inc tools/difftest/multip_messages.inc tools/difftest/multip_players.inc
+$(DIFFDIR)/multipdiff.exe: tools/difftest/multipdiff.c tools/difftest/multip_send.inc tools/difftest/multip_receive.inc tools/difftest/multip_workers.inc tools/difftest/multip_directplay.inc tools/difftest/multip_profile.inc tools/difftest/multip_session.inc tools/difftest/multip_aircraft.inc tools/difftest/multip_tracking.inc tools/difftest/multip_messages.inc tools/difftest/multip_players.inc tools/difftest/multip_local.inc tools/difftest/multip_frame.inc tools/difftest/multip_draw.inc
 	@mkdir -p $(DIFFDIR)
 	$(CC) -std=c99 -O1 -Wall -Wextra -Iinclude -o $@ tools/difftest/multipdiff.c
 
 # Internal transport/worker routines have no public Linkage slots. Expose their addresses
 # only in the differential build, alongside the unchanged retail exports.
-$(DIFFDIR)/MULTIP_test.dll: src/multip/multip.c src/multip/multip_players.inc src/multip/multip_nametag.inc src/multip/multip_messages.inc src/multip/multip_tracking.inc src/multip/multip_records.inc src/multip/multip_aircraft.inc src/multip/multip_session.inc src/multip/multip_profile.inc src/multip/multip_profile_fields.inc src/multip/multip.def src/multip/multip_data.inc src/multip/multip_rdata.inc src/multip/multip_pointers.inc $(BIN)/multip.res
+$(DIFFDIR)/MULTIP_test.dll: src/multip/multip.c src/multip/multip_callbacks.inc src/multip/multip_frame_actions.inc src/multip/multip_players.inc src/multip/multip_nametag.inc src/multip/multip_messages.inc src/multip/multip_tracking.inc src/multip/multip_records.inc src/multip/multip_aircraft.inc src/multip/multip_session.inc src/multip/multip_profile.inc src/multip/multip_profile_fields.inc src/multip/multip.def src/multip/multip_data.inc src/multip/multip_rdata.inc src/multip/multip_pointers.inc $(BIN)/multip.res
 	@mkdir -p $(DIFFDIR)
 	$(CC) $(CFLAGS) -DMULTIP_DIFFTEST $(LDFLAGS) -Wl,--image-base=$(BASE_MULTIP) \
 	      -o $@ src/multip/multip.c $(BIN)/multip.res src/multip/multip.def -lkernel32

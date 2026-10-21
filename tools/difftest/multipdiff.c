@@ -12,6 +12,28 @@
 #include <stdlib.h>
 #include <string.h>
 
+static const char *s_fault_suite = "load";
+static const char *s_fault_side = "unknown";
+static uint32_t s_fault_scenario;
+
+static void multip_test_context(const char *suite, const char *side, uint32_t scenario)
+{
+    s_fault_suite = suite;
+    s_fault_side = side;
+    s_fault_scenario = scenario;
+}
+
+static LONG WINAPI multip_test_fault(EXCEPTION_POINTERS *exception)
+{
+    fprintf(stderr, "MULTIP fault %#lx at %p: %s scenario %lu (%s)\n",
+        (unsigned long)exception->ExceptionRecord->ExceptionCode,
+        exception->ExceptionRecord->ExceptionAddress, s_fault_suite,
+        (unsigned long)s_fault_scenario, s_fault_side);
+    fflush(stderr);
+    ExitProcess(2);
+    return EXCEPTION_EXECUTE_HANDLER;
+}
+
 #define STDCALL __attribute__((stdcall))
 
 #define MULTIP_LINKAGE          0x0058
@@ -414,6 +436,9 @@ static void print_difference(uint32_t scenario_number,
 #include "multip_tracking.inc"
 #include "multip_messages.inc"
 #include "multip_players.inc"
+#include "multip_local.inc"
+#include "multip_frame.inc"
+#include "multip_draw.inc"
 
 int main(int argc, char **argv)
 {
@@ -431,6 +456,8 @@ int main(int argc, char **argv)
     uint32_t range_calls = 0;
     void *range_function = fake_range48;
 
+    SetUnhandledExceptionFilter(multip_test_fault);
+
     if (argc > 1)
         scenarios = (uint32_t)strtoul(argv[1], NULL, 0);
     if (scenarios == 0)
@@ -442,9 +469,27 @@ int main(int argc, char **argv)
         !load_module(&ours, "MULTIP_ours.dll"))
         return 2;
 
+    /* Local creation owns its fixture setup, so mutations can run it alone. */
+    if (argc > 2) {
+        if (strcmp(argv[2], "local") == 0)
+            return test_local(&retail, &ours, scenarios) != 0;
+        if (strcmp(argv[2], "frame") == 0)
+            return test_frame(&retail, &ours, scenarios) != 0;
+        if (strcmp(argv[2], "draw") == 0)
+            return test_draw(&retail, &ours, scenarios) != 0;
+        if (strcmp(argv[2], "players") == 0)
+            return test_players(&retail, &ours, scenarios) != 0;
+        if (strcmp(argv[2], "messages") == 0)
+            return test_messages(&retail, &ours, scenarios) != 0;
+        fprintf(stderr, "unknown MULTIP suite: %s\n", argv[2]);
+        return 2;
+    }
+
     for (number = 0; number < scenarios; number++) {
         make_scenario(&scenario, number);
+        multip_test_context("queries", "retail", number);
         run_module(&retail, &scenario, &retail_results);
+        multip_test_context("queries", "ours", number);
         run_module(&ours, &scenario, &our_results);
         if (memcmp(&retail_results, &our_results, sizeof(retail_results)) != 0) {
             if (bad < 8)
@@ -466,18 +511,37 @@ int main(int argc, char **argv)
            (unsigned long)collision_overrides, (unsigned long)range_calls);
     printf("MULTIP +0x24..+0x38: %lu scenarios, %lu differ\n",
            (unsigned long)scenarios, (unsigned long)bad);
+    multip_test_context("send", "unknown", 0);
     bad += test_send(&retail, &ours, scenarios, 0);
+    multip_test_context("send", "unknown", 0);
     bad += test_send(&retail, &ours, scenarios, 1);
+    multip_test_context("receive", "unknown", 0);
     bad += test_receive(&retail, &ours, scenarios);
+    multip_test_context("directplay", "unknown", 0);
     bad += test_directplay(&retail, &ours, scenarios);
+    multip_test_context("profile", "unknown", 0);
     bad += test_profile(&retail, &ours, scenarios);
+    multip_test_context("session", "unknown", 0);
     bad += test_session(&retail, &ours, scenarios);
+    multip_test_context("metadata", "unknown", 0);
     bad += test_metadata(&retail, &ours, scenarios);
+    multip_test_context("aircraft", "unknown", 0);
     bad += test_aircraft(&retail, &ours, scenarios);
+    multip_test_context("aircraft_copy", "unknown", 0);
     bad += test_aircraft_copy(&retail, &ours, scenarios);
+    multip_test_context("tracking", "unknown", 0);
     bad += test_tracking(&retail, &ours, scenarios);
+    multip_test_context("messages", "unknown", 0);
     bad += test_messages(&retail, &ours, scenarios);
+    multip_test_context("players", "unknown", 0);
     bad += test_players(&retail, &ours, scenarios);
+    multip_test_context("local", "unknown", 0);
+    bad += test_local(&retail, &ours, scenarios);
+    multip_test_context("frame", "unknown", 0);
+    bad += test_frame(&retail, &ours, scenarios);
+    multip_test_context("draw", "unknown", 0);
+    bad += test_draw(&retail, &ours, scenarios);
+    multip_test_context("workers", "unknown", 0);
     bad += test_workers(&retail, &ours, scenarios);
     return bad != 0;
 }

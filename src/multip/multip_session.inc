@@ -77,6 +77,8 @@ int32_t multip_session_host(void)
 {
     const uint32_t *application = (const uint32_t *)(uintptr_t)M32(0xa38);
     uint32_t index;
+    void *directplay;
+    uint8_t *vtable;
 
     if (HOST_FN(0x218, multip_memset_fn)((void *)(uintptr_t)(D + 0x9c0), 0, 0x50) != 0)
         return -1;
@@ -84,9 +86,13 @@ int32_t multip_session_host(void)
     M32(0x9c4) = M32(0x190);
     for (index = 0; index < 4; index++)
         M32(0x9d8 + index * 4) = application[index];
+    /* Retail reads the interface vtable before publishing these final two
+     * fields. A NULL interface faults with capacity/name still untouched. */
+    directplay = (void *)(uintptr_t)M32(M_DIRECTPLAY);
+    vtable = *(uint8_t *volatile *)directplay;
     M32(0x9e8) = M32(0x998) + M32(0x99c);
     M32(0x9f0) = D + 0xae0;
-    if (DP_FN(0x60, multip_dp_open_fn)((void *)(uintptr_t)M32(M_DIRECTPLAY),
+    if ((*(multip_dp_open_fn *)(void *)(vtable + 0x60))(directplay,
         (void *)(uintptr_t)(D + 0x9c0), 2) != 0)
         return -1;
     M32(0xaa8) = 1;

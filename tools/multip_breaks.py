@@ -35,7 +35,7 @@ MUTATIONS = [
      "    if (queue->head == NULL)\n        queue->tail = node;"),
     ("flush priority", "for (offset = M_SEND_QUEUE_PLAIN; ; offset = M_SEND_QUEUE_FLAGS)",
      "for (offset = M_SEND_QUEUE_FLAGS; ; offset = M_SEND_QUEUE_PLAIN)"),
-    ("node free failure", "    return result != 0 ? -1 : 0;", "    (void)result;\n    return 0;"),
+    ("node free failure", "    LeaveCriticalSection(&queue->lock);\n    return result != 0 ? -1 : 0;", "    LeaveCriticalSection(&queue->lock);\n    (void)result;\n    return 0;"),
 ]
 
 RECEIVE_MUTATIONS = [
@@ -107,8 +107,8 @@ DIRECTPLAY_MUTATIONS = [
     ("export descriptor order",
      "M32(M_DIRECTPLAY_EXPORTS + 0x04) = D + M_DIRECTPLAY_ENUMERATE;",
      "M32(M_DIRECTPLAY_EXPORTS + 0x04) = D + M_DIRECTPLAY_LOBBY;"),
-    ("unload status retention", "    M32(M_DIRECTPLAY) = 0;",
-     "    M32(M_DIRECTPLAY) = 0;\n    M32(M_DIRECTPLAY_LOADED) = 0;"),
+    ("unload status retention", "    M32(M_DIRECTPLAY) = 0;\n    return HOST_FN(0x128",
+     "    M32(M_DIRECTPLAY) = 0;\n    M32(M_DIRECTPLAY_LOADED) = 0;\n    return HOST_FN(0x128"),
     ("unload release state", "    void *directplay = (void *)(uintptr_t)M32(M_DIRECTPLAY);",
      "    void *directplay = (void *)(uintptr_t)M32(M_DIRECTPLAY);\n    M32(M_DIRECTPLAY) = 0;"),
     ("first query leak",
@@ -147,8 +147,8 @@ PROFILE_MUTATIONS = [
 
 GROUP_MUTATIONS = [
     ("enum consumes generic errors", "result == 0x88770082u ? -1 : 0", "result != 0 ? -1 : 0"),
-    ("join retains host flag", "M32(0xaa8) = 0;", "M32(0xaa8) = 1;"),
-    ("host counts wrap", "M32(0x998) + M32(0x99c)", "M32(0x998)"),
+    ("join retains host flag", "M32(0xaa8) = 0;\n    M32(M_CONNECTED) = 1;", "M32(0xaa8) = 1;\n    M32(M_CONNECTED) = 1;"),
+    ("host counts wrap", "    M32(0x9e8) = M32(0x998) + M32(0x99c);", "    M32(0x9e8) = M32(0x998);"),
     ("observer membership destination", "M32(0xaa4), *(uint32_t *)(void *)(local + 4));\n    }\n    return 0;", "M32(0xaa0), *(uint32_t *)(void *)(local + 4));\n    }\n    return 0;"),
 ]
 
@@ -622,6 +622,46 @@ PROVIDER_MUTATIONS = [
 ]
 
 
+DIALOG_MUTATIONS = [
+    ("browser stale marker", "A32(record, 0x1c) = 0;", "A32(record, 0x1c) = 1;"),
+    ("browser timeout callback", "if (flags & 1) return 0;", "if (flags & 1) return 1;"),
+    ("browser GUID lookup offset", "        4, (const uint8_t *)description + 8, 16, NULL);", "        8, (const uint8_t *)description + 8, 16, NULL);"),
+    ("browser session presence flag", "    A32(record, 0x1c) = 1;", "    A32(record, 0x1c) = 0;"),
+    ("browser enumeration flags", "        description, 0, multip_browser_session_callback, NULL, 1);", "        description, 0, multip_browser_session_callback, NULL, 0);"),
+    ("browser player enumeration flags", "return multip_session_enumerate_players(record, (const GUID *)(record + 4), 0x80) != 0", "return multip_session_enumerate_players(record, (const GUID *)(record + 4), 0x10) != 0"),
+    ("configuration cleanup reverse", "uint32_t index = M32(0x430) - 1;", "uint32_t index = 0;"),
+    ("configuration local-name error", "A32(dialog, 0x28) = 0x1003; result = -1;", "A32(dialog, 0x28) = 0; result = -1;"),
+    ("configuration observer default", "M32(0x390) = A32(dialog, 0x40) != 1;", "M32(0x390) = A32(dialog, 0x40) == 1;"),
+    ("configuration launch choice", "if (M32(0x3cc) == 2)", "if (M32(0x3cc) == 1)"),
+    ("configuration cancelled host flag", "} else { M32(0xaa8) = 0; M32(0x1a4) = 0; }", "} else { M32(0x1a4) = 0; }"),
+    ("configuration external mode", "if (mode == 2) { M32(0x1a4) = 3; return 0; }", "if (mode == 2) { M32(0x1a4) = 2; return 0; }"),
+    ("configuration joined name allocation", "(void **)(uintptr_t)(D + 0x9f0), 1) != 0", "(void **)(uintptr_t)(D + 0x9f0), 0) != 0"),
+    ("options prior receive flag", "M32(0x1e0) = 0; M32(0xc08) = M32(0xac0);", "M32(0x1e0) = 0; M32(0xc08) = 0;"),
+    ("options global eligibility", "A32((void *)(uintptr_t)M32(IMPORT_GLOBAL), 0x84c) == 0;", "A32((void *)(uintptr_t)M32(IMPORT_GLOBAL), 0x84c) != 0;"),
+    ("options dialog return", "    return (int32_t)M32(0x1e0);", "    return 0;"),
+    ("details maximum clamp", "if (M32(0x578) < 2) M32(0x578) = 2;", "if (M32(0x578) < 3) M32(0x578) = 3;"),
+    ("details refresh interval", "M32(0x178) * 1000) return 0;", "M32(0x178) * 1001) return 0;"),
+    ("details kick delay", "M32(0xe8c) = HOST_FN(0x38, multip_ticks_fn)() + 2000;", "M32(0xe8c) = HOST_FN(0x38, multip_ticks_fn)() + 1000;"),
+    ("details copied player count", "if (A32(record, 0x18) == 0) return -1;\n    *count_out = A32(record, 0x30);", "if (A32(record, 0x18) == 0) return -1;\n    *count_out = 0;"),
+    ("options weather caller tail", '"pushl $0\\n\\tcall _multip_message_1014@4', '"subl $4, %esp\\n\\tpushl $0\\n\\tcall _multip_message_1014@4\\n\\taddl $4, %esp'),
+]
+
+LOBBY_MUTATIONS = [
+    ("host null-interface write ordering", "vtable = *(uint8_t *volatile *)directplay;\n    M32(0x9e8) = M32(0x998) + M32(0x99c);\n    M32(0x9f0) = D + 0xae0;", "M32(0x9e8) = M32(0x998) + M32(0x99c);\n    M32(0x9f0) = D + 0xae0;\n    vtable = *(uint8_t *volatile *)directplay;"),
+    ("lobby connect query flag", "== 0) M32(M_DIRECTPLAY_QUERIED) = 1;", "== 0) M32(M_DIRECTPLAY_QUERIED) = 0;"),
+    ("lobby descriptor copy size", "        (void *)(uintptr_t)(D + 0x9c0), 80) != 0", "        (void *)(uintptr_t)(D + 0x9c0), 76) != 0"),
+    ("lobby connection flag merge", "A32(description, 4) |= M32(0x190);", "A32(description, 4) = M32(0x190);"),
+    ("lobby host type flag", '"movl %eax, _s_multip_image+0xaac\\n\\tmovl %eax, _s_multip_image+0x1a4', '"movl %eax, _s_multip_image+0xaac\\n\\tmovl $2, _s_multip_image+0x1a4'),
+    ("lobby connection host priority", '"testb $2, %al\\n\\tjz 2f', '"testb $1, %al\\n\\tjz 2f'),
+    ("lobby join hosting flag", '"movl $0, _s_multip_image+0xaa8\\n\\tmovl $1, _s_multip_image+0xaac', '"movl $1, _s_multip_image+0xaa8\\n\\tmovl $1, _s_multip_image+0xaac'),
+    ("lobby argument always fails", '"1: orl $-1, %eax\\n\\tpopl %esi\\n\\tret $4', '"1: xorl %eax, %eax\\n\\tpopl %esi\\n\\tret $4'),
+    ("lobby host completion nesting", '"call _multip_session_complete\\n\\tnegl %eax\\n\\tsbbl %eax, %eax\\n\\tret $8', '"subl $4, %esp\\n\\tcall _multip_session_complete\\n\\taddl $4, %esp\\n\\tnegl %eax\\n\\tsbbl %eax, %eax\\n\\tret $8'),
+    ("toggle decline return", '"5: movl $1, %eax\\n\\tret', '"5: xorl %eax, %eax\\n\\tret'),
+    ("toggle failure after open", '"call _multip_session_host\\n\\ttestl %eax, %eax\\n\\tjz 7f\\n\\txorl %eax, %eax', '"call _multip_session_host\\n\\ttestl %eax, %eax\\n\\tjz 7f\\n\\torl $-1, %eax'),
+    ("toggle completion nesting", '"7: call _multip_session_complete', '"7: subl $4, %esp\\n\\tcall _multip_session_complete\\n\\taddl $4, %esp'),
+]
+
+
 def check_variant(directory, source, slice_name):
     source_path = directory / "multip.c"
     source_path.write_text(source)
@@ -634,11 +674,11 @@ def check_variant(directory, source, slice_name):
         "-Wl,--disable-dynamicbase", "-Wl,--disable-nxcompat",
         "-Wl,--image-base=0x20850000", "-o", str(directory / "MULTIP_ours.dll"),
         str(source_path), str(ROOT / "bin/multip.res"),
-        str(ROOT / "src/multip/multip.def"), "-lkernel32",
+        str(ROOT / "src/multip/multip.def"), "-lkernel32", "-lshell32", "-luser32",
     ]
     subprocess.run(command, check=True, capture_output=True, text=True)
     result = subprocess.run(
-        ["wine", "multipdiff.exe", "1200"] + ([slice_name] if slice_name in ("local", "frame", "players", "messages", "draw", "motion", "commands", "weather", "tick", "system", "app_players", "updates", "textures", "texture_receive", "transfer_messages", "texture_send", "model_send", "model_cache", "model_receive", "title_receive", "state_messages", "control_updates", "control_callback", "dispatch", "lifecycle", "providers") else []), cwd=directory,
+        ["wine", "multipdiff.exe", "1200"] + ([slice_name] if slice_name in ("local", "frame", "players", "messages", "draw", "motion", "commands", "weather", "tick", "system", "app_players", "updates", "textures", "texture_receive", "transfer_messages", "texture_send", "model_send", "model_cache", "model_receive", "title_receive", "state_messages", "control_updates", "control_callback", "dispatch", "lifecycle", "providers", "dialogs", "lobby") else []), cwd=directory,
         env={**os.environ, "WINEDEBUG": "-all"}, capture_output=True,
         text=True, timeout=180 if slice_name == "send" else 60,
     )
@@ -650,7 +690,7 @@ def check_variant(directory, source, slice_name):
              "aircraft": "aircraft select/release",
              "records": "aircraft copy/session browser records",
              "tracking": "track-name display", "messages": "application message constructors",
-             "players": "player lifecycle helpers", "local": "local player creation/start", "frame": "session CHAIN 0x14", "draw": "player drawing/CHAIN 0x10", "motion": "aircraft extrapolation/CHAIN 0x13", "commands": "view commands/CHAIN 0x0c", "weather": "weather/sync messages", "tick": "tick callbacks/CHAIN 0x02", "system": "DirectPlay system notifications", "app_players": "application player types", "updates": "aircraft state receive/timing", "textures": "texture catalogue/file services", "texture_receive": "multipart texture receive", "transfer_messages": "multipart transfer messages", "texture_send": "multipart texture sender", "model_send": "multipart model sender", "model_cache": "aircraft cache files", "model_receive": "multipart model receive", "title_receive": "aircraft title receive", "state_messages": "aircraft state message constructors", "control_updates": "control/collision/state publishing", "control_callback": "control CHAIN 0x01", "dispatch": "application receive dispatch", "lifecycle": "receive/session lifecycle", "providers": "provider catalogue"}[slice_name]
+             "players": "player lifecycle helpers", "local": "local player creation/start", "frame": "session CHAIN 0x14", "draw": "player drawing/CHAIN 0x10", "motion": "aircraft extrapolation/CHAIN 0x13", "commands": "view commands/CHAIN 0x0c", "weather": "weather/sync messages", "tick": "tick callbacks/CHAIN 0x02", "system": "DirectPlay system notifications", "app_players": "application player types", "updates": "aircraft state receive/timing", "textures": "texture catalogue/file services", "texture_receive": "multipart texture receive", "transfer_messages": "multipart transfer messages", "texture_send": "multipart texture sender", "model_send": "multipart model sender", "model_cache": "aircraft cache files", "model_receive": "multipart model receive", "title_receive": "aircraft title receive", "state_messages": "aircraft state message constructors", "control_updates": "control/collision/state publishing", "control_callback": "control CHAIN 0x01", "dispatch": "application receive dispatch", "lifecycle": "receive/session lifecycle", "providers": "provider catalogue", "dialogs": "configuration/options dialogs", "lobby": "lobby connection owners"}[slice_name]
     prefix = f"MULTIP {label}: 1200 scenarios, "
     lines = [line for line in result.stdout.splitlines() if line.startswith(prefix)]
     if len(lines) != 1 or result.returncode not in (0, 1):
@@ -663,7 +703,7 @@ def check_variant(directory, source, slice_name):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--slice", choices=("send", "receive", "workers", "directplay", "profile", "groups", "metadata", "aircraft", "records", "tracking", "messages", "players", "local", "frame", "draw", "motion", "commands", "weather", "tick", "system", "app_players", "updates", "textures", "texture_receive", "transfer_messages", "texture_send", "model_send", "model_cache", "model_receive", "title_receive", "state_messages", "control_updates", "control_callback", "dispatch", "lifecycle", "providers", "all"), default="all")
+    parser.add_argument("--slice", choices=("send", "receive", "workers", "directplay", "profile", "groups", "metadata", "aircraft", "records", "tracking", "messages", "players", "local", "frame", "draw", "motion", "commands", "weather", "tick", "system", "app_players", "updates", "textures", "texture_receive", "transfer_messages", "texture_send", "model_send", "model_cache", "model_receive", "title_receive", "state_messages", "control_updates", "control_callback", "dispatch", "lifecycle", "providers", "dialogs", "lobby", "all"), default="all")
     args = parser.parse_args()
     variants = []
     if args.slice in ("send", "all"):
@@ -705,12 +745,14 @@ def main():
                                   ("control_callback", CONTROL_CALLBACK_MUTATIONS),
                                   ("dispatch", DISPATCH_MUTATIONS),
                                   ("lifecycle", LIFECYCLE_MUTATIONS),
-                                  ("providers", PROVIDER_MUTATIONS)):
+                                  ("providers", PROVIDER_MUTATIONS),
+                                  ("dialogs", DIALOG_MUTATIONS),
+                                  ("lobby", LOBBY_MUTATIONS)):
         if args.slice in (slice_name, "all"):
             variants.extend((slice_name, *mutation) for mutation in mutations)
     source = (ROOT / "src/multip/multip.c").read_text()
     for include in ("multip_profile.inc", "multip_session.inc",
-                    "multip_aircraft.inc", "multip_records.inc", "multip_tracking.inc", "multip_messages.inc", "multip_players.inc", "multip_callbacks.inc", "multip_motion.inc", "multip_commands.inc", "multip_weather.inc", "multip_tick.inc", "multip_system.inc", "multip_app_players.inc", "multip_updates.inc", "multip_textures.inc", "multip_texture_receive.inc", "multip_transfer_messages.inc", "multip_texture_send.inc", "multip_model_send.inc", "multip_model_cache.inc", "multip_model_receive.inc", "multip_title_receive.inc", "multip_state_messages.inc", "multip_control_updates.inc", "multip_lifecycle.inc", "multip_dispatch.inc", "multip_dispatch_cases.inc", "multip_providers.inc"):
+                    "multip_aircraft.inc", "multip_records.inc", "multip_tracking.inc", "multip_messages.inc", "multip_players.inc", "multip_callbacks.inc", "multip_motion.inc", "multip_commands.inc", "multip_weather.inc", "multip_tick.inc", "multip_system.inc", "multip_app_players.inc", "multip_updates.inc", "multip_textures.inc", "multip_texture_receive.inc", "multip_transfer_messages.inc", "multip_texture_send.inc", "multip_model_send.inc", "multip_model_cache.inc", "multip_model_receive.inc", "multip_title_receive.inc", "multip_state_messages.inc", "multip_control_updates.inc", "multip_lifecycle.inc", "multip_dispatch.inc", "multip_dispatch_cases.inc", "multip_providers.inc", "multip_browser.inc", "multip_configuration.inc", "multip_details.inc", "multip_options.inc", "multip_lobby.inc", "multip_toggle.inc"):
         source = source.replace('#include "' + include + '"',
                                 (ROOT / "src/multip" / include).read_text())
     for slice_name, name, before, after in variants:

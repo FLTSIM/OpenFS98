@@ -848,7 +848,7 @@ g3ddiff-run: g3ddiff
 	@cd $(DIFFDIR) && WINEDEBUG=-all timeout 7200 wine g3ddiff.exe $(if $(N),$(N),20000)
 
 # MULTIP in progress: public queries, transport, workers and DirectPlay lifetime.
-# Public session/dialog lifecycle remains guarded; no installation.
+# Public init/deinit remain guarded; no installation.
 $(DIFFDIR)/multipdiff.exe: tools/difftest/multipdiff.c tools/difftest/multip_send.inc tools/difftest/multip_receive.inc tools/difftest/multip_workers.inc tools/difftest/multip_directplay.inc tools/difftest/multip_profile.inc tools/difftest/multip_session.inc tools/difftest/multip_aircraft.inc tools/difftest/multip_tracking.inc tools/difftest/multip_messages.inc tools/difftest/multip_players.inc tools/difftest/multip_local.inc tools/difftest/multip_frame.inc tools/difftest/multip_draw.inc tools/difftest/multip_motion.inc tools/difftest/multip_commands.inc tools/difftest/multip_weather.inc tools/difftest/multip_tick.inc tools/difftest/multip_system.inc tools/difftest/multip_app_players.inc tools/difftest/multip_updates.inc tools/difftest/multip_textures.inc tools/difftest/multip_texture_receive.inc tools/difftest/multip_transfer_messages.inc tools/difftest/multip_texture_send.inc tools/difftest/multip_model_send.inc tools/difftest/multip_model_cache.inc tools/difftest/multip_model_receive.inc tools/difftest/multip_state_messages.inc tools/difftest/multip_control_updates.inc tools/difftest/multip_dispatch.inc tools/difftest/multip_lifecycle.inc tools/difftest/multip_providers.inc tools/difftest/multip_dialogs.inc tools/difftest/multip_lobby.inc
 	@mkdir -p $(DIFFDIR)
 	$(CC) -std=c99 -O1 -Wall -Wextra -Iinclude -o $@ tools/difftest/multipdiff.c

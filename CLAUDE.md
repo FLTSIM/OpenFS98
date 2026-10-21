@@ -79,7 +79,7 @@ make g3ddiff-run         # whole-module G3D, the 3D pipeline -> 20000 scenarios,
 make g3d-breaks N=1000   # G3D broken on purpose -> 317 breaks, 279 caught, 7 proven equivalent, 31 missed (19 at N=4000; ~4 h)
 make panelsdiff-run      # whole-module PANELS through the CD's gauges -> 3000 scenarios, 0 differ (~15 min)
 make panelsunit-run      # PANELS's image routines alone -> 20000 cases each, 0 differ (~3 min)
-make panels-breaks       # PANELS broken on purpose -> 200 sampled, 198 caught at N=800 (the other 2 need gauges the CD lacks)
+make panels-breaks       # PANELS broken on purpose -> 200 sampled, 2 do not build, the rest caught (two of them only at N=3000)
 make g3dmeshdiff-run     # the mesh compiler: instructions vs portable C, x87 and soft float -> 100000 polygons, 0 differ
 make difftest-run        # whole-module SLEW         -> 0/2000 vectors differ
 make ofstest-run         # in-process, via the host  -> passed 68, failed 0

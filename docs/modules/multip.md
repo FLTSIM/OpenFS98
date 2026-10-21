@@ -7,7 +7,9 @@ the extrapolated aircraft state handed to the rest of the simulator.
 This module is in progress. The source verifies public send enqueue (`+0x20`),
 internal send/drain/flush, receive/dequeue, both worker lifecycles, DirectPlay
 loading/interface lifetime, and player-list/status/range queries (`+0x24`
-through `+0x38`). It builds explicitly with
+through `+0x38`). Session toggle `+0x18`, options `+0x1c`, and the lobby/
+configuration/browser/player-details callbacks are now implemented; the latest
+verification is recorded in [the dialog checkpoint](#lobby-and-configuration-dialog-checkpoint). It builds explicitly with
 `make bin/MULTIP.DLL` and remains absent from `MODULES`, so `make install`
 cannot replace the retail multiplayer module prematurely.
 
@@ -32,23 +34,19 @@ immediately; a separate checkout also needs the uncommitted changes.
 - **Verified:** 38 top-level differential suites, 20,000 scenarios each, zero
   differences. The final host-fixture correction was also rechecked at 20,000
   scenarios in `players`, `system`, `lifecycle` and `dispatch`.
-- **Latest implementation:** `src/multip/multip_providers.inc` and the matching
-  `tools/difftest/multip_providers.inc` recover provider enumeration/cleanup
-  at `+0x41f0`, `+0x4210`, and `+0x42a0`. Private test entries 221–223 map
-  to retail RVAs in `multip_send.inc`; see
-  [the provider checkpoint](#provider-catalogue-checkpoint). The previous
-  receive/lifecycle owners remain in `multip_dispatch.inc` and
-  `multip_lifecycle.inc`, with private entries 206–220.
-- **Mutation status:** all 11 provider, 19 lifecycle and four dispatch
-  mutations caught; all 393 targets match exactly once. The full 393-target
-  sweep is unfinished; an earlier sweep stopped on a Wine timeout. Crashes,
-  timeouts and fixture failures do not count as catches.
-- **Next:** recover the remaining lobby/provider and configuration/dialog wiring, starting
-  from public session toggle `.text+0x8e60` and configuration `+0x3d60`.
-  Reuse the verified completion `+0x9c70` and disconnect `+0x8cf0`; their
-  receive/control registration group is already implemented. Continue with
-  public dialog `+0x1c`, then init/deinit. Public slots `+0x04`, `+0x08`,
-  `+0x18` and `+0x1c` remain guarded, and MULTIP stays outside `MODULES`.
+- **Latest implementation:** `multip_browser.inc`, `multip_configuration.inc`,
+  `multip_details.inc`, `multip_options.inc`, `multip_lobby.inc` and
+  `multip_toggle.inc`, plus the `dialogs` and `lobby` fixtures. Private test
+  entries 224–265 map to retail RVAs in `multip_send.inc`. Existing provider
+  entries 221–223 and receive/lifecycle entries 206–220 remain unchanged.
+- **Mutation status:** 426 targets match exactly once. The new dialog/lobby
+  mutation checks are recorded in the checkpoint below. The full mutation
+  sweep remains unfinished; crashes, timeouts and fixture failures are not catches.
+- **Next:** recover public init/deinit `+0x04/+0x08` and their entry callbacks
+  (`.text+0x20`, `+0x70`, `+0x110`, `+0x220`). Reuse the verified lobby,
+  configuration, session toggle, workers, callback owners and disconnect.
+  Public `+0x18/+0x1c` are now enabled; `+0x04/+0x08` remain guarded.
+  MULTIP stays outside `MODULES` until whole-module acceptance and smoke testing.
 - **Limits:** x86 comparisons do not validate the non-x86 C fallbacks or OS
   thread scheduling races. Whole-module acceptance and game smoke testing
   remain ahead.
@@ -127,7 +125,7 @@ The following internal paths are now implemented and compared against retail:
   an extra packet and leak it on enqueue failure. The unused tails of retail's
   1000-byte stack buffers are omitted because they are never sent.
 
-The private test table now has entries 0–223; `send_internal` in
+The private test table now has entries 0–265; `send_internal` in
 `tools/difftest/multip_send.inc` maps each to its retail RVA. Entries 25–33
 are profile and group/session helpers, 34–41 description/name/counter helpers,
 42–44 aircraft ownership, 45–50 browser records/enumeration, 51–58 tracking
@@ -1020,11 +1018,12 @@ DirectPlay lifetime, profiles, host/join/group primitives, session descriptions,
 player creation/removal, and all six session callback owners described above
 are also verified, including receive/control ownership at `+0x27c0`, receive
 dispatch, and integration of all callback owners and workers in common
-completion `+0x9c70` and disconnect `+0x8cf0`. Next recover lobby/provider and
-configuration/dialog wiring for public `+0x18`. The loader flag alone does
+completion `+0x9c70` and disconnect `+0x8cf0`. Lobby/provider and
+configuration/dialog wiring for public `+0x18/+0x1c` is now recovered in the
+checkpoint below. Next recover public init/deinit and their callbacks. The loader flag alone does
 not prove the factory is available, and create's first query failure leaks a
 reference; retain those boundaries in integrated cases. Public init/deinit
-still depend on lobby/provider/dialog handling.
+still need their own callback/ownership integration coverage.
 
 The next public-entry boundaries are confirmed in `.text+0x8e60`: load first;
 when connected, UTIL `+0xa4` supplies confirmation before disconnect
@@ -1033,8 +1032,8 @@ unloads and `== 3` returns 1. Otherwise data `+0xaa8` chooses host helper
 `+0x3890` or join helper `+0x2340`, followed by common completion `+0x9c70`.
 Disconnect includes CHAIN messages, send flush, receive queue clear, worker
 stop, player destruction, `IDirectPlay3A::Close`, and unloader calls. These
-are implemented internal session coverage; the public toggle and its
-configuration flow remain guarded.
+are now also exercised through the public session toggle and its
+configuration flow in the lobby fixture.
 Disconnect's wait is `Sleep((int32_t)(now - start + 3000))` when that signed
 value is positive: retail **adds** elapsed time. Preserve that arithmetic.
 The view-command callback at `+0x2ef0` dispatches `0x1016c`–`0x1016f` into
@@ -1145,3 +1144,94 @@ full mutation sweep remains unfinished; the provider mutations extend that
 set to 393 targets, all matching exactly once. Continue with lobby creation and session-browser
 refresh/cleanup (`+0x42f0`, `+0x44c0`) and the configuration callback owners
 before enabling public session toggle `+0x18`.
+
+## Lobby and configuration dialog checkpoint
+
+`multip_configuration.inc` recovers setup, validation, provider selection,
+reset, acceptance, options and external launch for dialog `0x110a`
+(`.text+0x3d60`–`+0x41e0`). `multip_browser.inc` covers session discovery,
+matching/stale-record pruning, nested player lists, deep-copy callbacks and
+cleanup (`+0x42f0`–`+0x47ec`). `multip_options.inc` recovers public `+0x1c`
+and dialog `0x110b` (`+0x39a0`–`+0x3d57`). The shared player-details dialog
+`0x110c`, including capacity edits, periodic refresh, removal confirmation and
+cleanup (`+0x7b10`–`+0x805d`), is in `multip_details.inc`. The callback pointers
+in generated data are bound to these owners at DLL attachment.
+
+`multip_lobby.inc` recovers startup with host-supplied or explicit connection
+settings, lobby creation/application, host/join and interface connection
+(`+0x9990`–`+0x9c60`). `multip_toggle.inc` implements public session toggle
+`+0x18` (`+0x8e60`). Both public entries are enabled. Init/deinit remain failure
+guards, and MULTIP remains outside `MODULES`.
+
+Preserved behavior includes:
+
+- Configuration setup/dialog failures return cancellation (zero) without
+  cleanup. Cancellation clears host/type state. Accepted launch mode calls
+  ShellExecuteA only for mode 2 and ignores its result. Reverse name cleanup
+  decrements the published count before freeing and ignores browser-clear errors.
+- Session refresh marks old records stale, reinitializes matching records
+  without freeing their previous name/list, and publishes only after successful
+  EnumSessions. TIMEOUT returns false without inspecting a descriptor. Failed
+  record setup returns -1, which DirectPlay treats as a true callback result.
+  Marker/prune walker errors are consumed. Browser cleanup ignores walker errors,
+  then frees its backing array through a temporary and resets fields only on success.
+- Options save publishes the local name before swapping receive-group membership.
+  Both name validations and both numeric parses run where retail runs them;
+  invalid fields retain their individual control error codes. The weather-button
+  entry retains the four caller-stack bytes transmitted at the end of message 1014.
+- Player-details refresh uses unsigned elapsed time and a strict greater-than
+  comparison to `period * 1000`, including wrap. Removing a player sends only
+  after confirmation; early send/free errors leak the allocated strings.
+  Success moves the next refresh time forward by 2000 ms. Capacity edits preserve
+  the minimum-two clamp and per-control parse results.
+- Lobby creation and SetConnectionSettings HRESULTs are ignored. Host takes
+  priority when both connection bits are set. Connect's second QueryInterface
+  failure is consumed and leaves the queried flag unchanged; its temporary
+  interface is still released. Later failure leaks the lobby interface.
+  Explicit-connection startup returns -1 even after successful completion.
+- Public toggle loads first, confirms before disconnect, and retains retail's
+  mix of cancellation, zero, one and failure returns. It also proceeds from a
+  nonzero configuration failure according to the retained type/host fields.
+
+The integrated toggle fixture found an ordering gap in the previously recovered
+`multip_session_host`: retail reads the interface's vtable before writing the
+final capacity and name-pointer fields. A null interface faults before those
+writes. The owner now preserves that ordering with a volatile vtable read.
+Scenarios 7419 and 13537 exposed this gap in the 20,000-case lobby run.
+
+The `dialogs` fixture drives the real callback blocks over deterministic host,
+UTIL exchange and NUMERIC boundaries, session/player enumerators, and a stable
+heap. It visits all three dialogs, repeated refresh/prune, valid/invalid fields,
+allocation/copy/free failures, capacity publication, weather traffic and player
+removal. ShellExecuteA is patched on both DLLs before any callback runs, so the
+fixture cannot launch an external program. The only real UI-formatting import
+used by the fixture is wsprintfA.
+
+The `lobby` fixture drives all six lobby owners and public `+0x18` through real
+completion, options `+0x1c` and repeated disconnect. COM, CHAIN, thread creation,
+events, waits and Sleep are scripted; no network, OS worker threads or real
+sleep are used. Distinct deep stack words and a word changed by registration
+check completion's unwritten DPNAME field through host/join/apply/start/toggle
+nesting. Heap ownership/bytes, input session settings, queue metadata, returns,
+module state and ordered calls are compared after actions. Coverage assertions
+require all dialog families, pruning, shell interception, player removal,
+lobby creation/release and painted completion words to occur.
+
+The host list stand-in follows `0x4102a0`/`0x410470`: iteration increments the
+nesting depth and defers removals, then applies queued indexes in reverse even
+when a visitor returned an error. Growth uses the descriptor's actual growth
+step. Valid memory-copy/set/string operations write before reporting injected
+failure, preventing artificial uninitialized stack strings. List growth remains
+fatal rather than a fallible callback boundary.
+
+Faults caused by retained partial records are compared as outcomes. A failed
+local CreatePlayer can leave `+0x0c` clear and its name pointing at `.data+0x9a8`;
+disconnect then tries to free module memory. That exact invalid-free boundary is
+modeled without calling the process allocator. Other invalid fixture frees
+remain harness errors. These x86 comparisons do not validate native fallbacks,
+real DirectPlay providers, Windows dialog rendering, or OS thread scheduling.
+
+Focused commands from `bin/difftest`: `WINEDEBUG=-all wine multipdiff.exe 20000
+dialogs` and `WINEDEBUG=-all wine multipdiff.exe 20000 lobby`. Mutations run from
+the repository root with `python3 -B tools/multip_breaks.py --slice dialogs`
+or `--slice lobby`. Run Wine serially.

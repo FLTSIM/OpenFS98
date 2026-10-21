@@ -291,10 +291,10 @@ mutations (an offset four out, a comparison, `&&`/`||`, a sign, a shift, a
 constant) to copies of `panels.c` and runs the unit mode for the routine, then
 the whole-module mode. Of 200 sampled, 164 were caught at N=150 and 2 did not build; the 34 missed,
 rerun at N=800, left two: `e_be10` mode 1 and 4's `+0x6c` offset (an icon whose
-frame is `(value + offset) / range`: the CD's gauges probably leave `+0x6c` and `+0x70` (not checked)
-alike, so the CD cannot tell them apart) and `e_c720`'s `>=` clamp on a
-corner exactly at the window's edge (no gauge sits there). The ones the
+frame is `(value + offset) / range`) and `e_c720`'s `>=` clamp on a corner
+exactly at the window's edge. Both are caught at N=3000, in the same four
+scenarios (1, 311, 1531, 2821), so the CD's gauges do reach them; the
+unmutated build has 0 differ over the same 3,000. Every mutant that builds (198 of the 200) is caught. The ones the
 larger run did not need to catch were equivalent or unreachable before:
 an index clamp `< 0` on a 0, `smooth_8`'s centre case (`i == j == 0x8000`),
-sampling (`e_b630`, 2 scenarios in 400). The harness's gap is data: a gauge
-the CD does not have.
+sampling (`e_b630`, 2 scenarios in 400).

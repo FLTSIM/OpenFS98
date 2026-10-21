@@ -2,8 +2,9 @@
  *
  * In-progress transliteration: transport/workers, DirectPlay lifetime,
  * profiles, session/group primitives, aircraft and player ownership, browser
- * records, tracking/selection, message dispatch and session completion/close.
- * Public lifecycle and session/dialog wiring remain incomplete. MULTIP is
+ * records, tracking/selection, message dispatch, session completion/close,
+ * lobby connections and configuration/options/player-detail dialogs.
+ * Public init/deinit remain incomplete. MULTIP is
  * intentionally outside MODULES and must not be installed in-game yet.
  *
  * The retail module keeps its runtime state in the uninitialised tail of its
@@ -631,6 +632,54 @@ static uint32_t FS98_STDCALL multip_send(uint32_t to_id, const void *payload,
 #include "multip_lifecycle.inc"
 #include "multip_dispatch.inc"
 #include "multip_providers.inc"
+#include "multip_browser.inc"
+#include "multip_configuration.inc"
+#include "multip_details.inc"
+#include "multip_options.inc"
+#include "multip_lobby.inc"
+#include "multip_toggle.inc"
+
+static uint32_t multip_dialog_code(uint32_t offset)
+{
+    switch (offset) {
+    case 0x44c0: return ADDR(multip_browser_clear);
+    case 0x4540: return ADDR(multip_browser_record_free);
+    case 0x4570: return ADDR(multip_browser_mark_stale);
+    case 0x4580: return ADDR(multip_browser_prune);
+    case 0x4430: return ADDR(multip_browser_session_callback);
+    case 0x42f0: return ADDR(multip_browser_refresh);
+    case 0x4660: return ADDR(multip_browser_refresh_players);
+    case 0x45c0: return ADDR(multip_browser_refresh_all);
+    case 0x46a0: return ADDR(multip_browser_player_copy);
+    case 0x47a0: return ADDR(multip_configuration_clear);
+    case 0x3f70: return ADDR(multip_configuration_provider);
+    case 0x3fc0: return ADDR(multip_configuration_reset);
+    case 0x3e80: return ADDR(multip_configuration_validate);
+    case 0x4000: return ADDR(multip_configuration_accept);
+    case 0x41b0: return ADDR(multip_configuration_options);
+    case 0x4620: return ADDR(multip_browser_details);
+    case 0x3dc0: return ADDR(multip_configuration_init);
+    case 0x41c0: return ADDR(multip_configuration_launch);
+    case 0x3d60: return ADDR(multip_configuration_dialog);
+    case 0x39e0: return ADDR(multip_options_init);
+    case 0x39b0: return ADDR(multip_options_dialog);
+    case 0x3a40: return ADDR(multip_options_accept);
+    case 0x3ac0: return ADDR(multip_options_weather);
+    case 0x3ad0: return ADDR(multip_options_sync);
+    case 0x3ae0: return ADDR(multip_options_details);
+    case 0x3b70: return ADDR(multip_options_read);
+    case 0x3b90: return ADDR(multip_options_player_copy);
+    case 0x7b10: return ADDR(multip_details_dialog);
+    case 0x7b60: return ADDR(multip_details_init);
+    case 0x7c10: return ADDR(multip_details_accept);
+    case 0x7c80: return ADDR(multip_details_kick);
+    case 0x7dc0: return ADDR(multip_details_refresh);
+    case 0x7e60: return ADDR(multip_details_write);
+    case 0x7f90: return ADDR(multip_details_read);
+    case 0x8010: return ADDR(multip_details_clear);
+    default: return 0;
+    }
+}
 
 /* Private entry access for the differential DLL only. Normal builds retain
  * the retail export surface; session and worker code use internal calls. */
@@ -745,7 +794,46 @@ __declspec(dllexport) void *const multip_test_entries[] = {
     (void *)multip_app_dispatch, (void *)multip_receive_dispatch,
     (void *)multip_receive_expire, (void *)multip_receive_callback,
     (void *)multip_provider_clear, (void *)multip_provider_callback,
-    (void *)multip_provider_enumerate
+    (void *)multip_provider_enumerate,
+    (void *)multip_browser_clear,
+    (void *)multip_browser_record_free,
+    (void *)multip_browser_mark_stale,
+    (void *)multip_browser_prune,
+    (void *)multip_browser_session_callback,
+    (void *)multip_browser_refresh,
+    (void *)multip_browser_refresh_players,
+    (void *)multip_browser_refresh_all,
+    (void *)multip_browser_player_copy,
+    (void *)multip_configuration_clear,
+    (void *)multip_configuration_provider,
+    (void *)multip_configuration_reset,
+    (void *)multip_configuration_validate,
+    (void *)multip_configuration_accept,
+    (void *)multip_configuration_options,
+    (void *)multip_browser_details,
+    (void *)multip_configuration_init,
+    (void *)multip_configuration_launch,
+    (void *)multip_configuration_dialog,
+    (void *)multip_options_init,
+    (void *)multip_options_dialog,
+    (void *)multip_options_accept,
+    (void *)multip_options_weather,
+    (void *)multip_options_sync,
+    (void *)multip_options_details,
+    (void *)multip_options_read,
+    (void *)multip_options_player_copy,
+    (void *)multip_details_dialog,
+    (void *)multip_details_init,
+    (void *)multip_details_accept,
+    (void *)multip_details_kick,
+    (void *)multip_details_refresh,
+    (void *)multip_details_write,
+    (void *)multip_details_read,
+    (void *)multip_details_clear,
+    (void *)multip_lobby_connect, (void *)multip_lobby_host,
+    (void *)multip_lobby_join, (void *)multip_lobby_apply,
+    (void *)multip_lobby_start, (void *)multip_lobby_start_connection,
+    (void *)multip_session_toggle
 };
 #endif
 
@@ -941,8 +1029,14 @@ static void multip_install(void)
     for (index = 0; index < sizeof(s_multip_data_pointers) /
                                  sizeof(s_multip_data_pointers[0]); index++) {
         pointer = &s_multip_data_pointers[index];
-        if (pointer->kind == 1)
-            continue; /* Each recovered callback is installed by its owner. */
+        if (pointer->kind == 1) {
+            target = multip_dialog_code(pointer->target);
+            if (target != 0) {
+                owner = pointer->owner == 0 ? s_multip_image.data : s_multip_rdata;
+                *(uint32_t *)(void *)(owner + pointer->offset) = target;
+            }
+            continue;
+        }
         owner = pointer->owner == 0 ? s_multip_image.data : s_multip_rdata;
         target = pointer->kind == 2 ? D + pointer->target :
             ADDR(s_multip_rdata + pointer->target);
@@ -961,8 +1055,8 @@ static void multip_install(void)
     M32(MULTIP_LINKAGE + 0x00) = FS98_MOD_MULTIP;
     M32(MULTIP_LINKAGE + 0x04) = ADDR(multip_unimplemented);
     M32(MULTIP_LINKAGE + 0x08) = ADDR(multip_unimplemented);
-    M32(MULTIP_LINKAGE + 0x18) = ADDR(multip_unimplemented);
-    M32(MULTIP_LINKAGE + 0x1c) = ADDR(multip_unimplemented);
+    M32(MULTIP_LINKAGE + 0x18) = ADDR(multip_session_toggle);
+    M32(MULTIP_LINKAGE + 0x1c) = ADDR(multip_options_dialog);
     M32(MULTIP_LINKAGE + 0x20) = ADDR(multip_send);
     M32(MULTIP_LINKAGE + 0x24) = ADDR(multip_get_players);
     M32(MULTIP_LINKAGE + 0x28) = ADDR(multip_get_player);

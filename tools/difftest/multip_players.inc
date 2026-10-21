@@ -11,12 +11,16 @@ static const struct multip_module *s_players_module;
 static uint32_t *player_log(uint32_t tag)
 {
     uint32_t *entry;
-    if (s_players.call_count >= 256) exit(2);
+    if (s_players.call_count >= 256) {
+        fprintf(stderr, "player fixture call budget exhausted\n");
+        exit(2);
+    }
     entry = s_players.log[s_players.call_count++];
     entry[0] = tag;
     return entry;
 }
-static int player_fail(void) { return s_players.number % 67 == s_players.call_count; }
+static uint32_t s_player_fail_modulus = 67;
+static int player_fail(void) { return s_players.number % s_player_fail_modulus == s_players.call_count; }
 static uint32_t player_address(const void *address)
 {
     uintptr_t address_value = (uintptr_t)address, base = (uintptr_t)s_players_module->data;
@@ -28,7 +32,11 @@ static int32_t STDCALL player_alloc(int32_t kind, uint32_t size, void **out, int
     uint32_t *entry = player_log(1), block_index = s_players.block_count;
     entry[1] = kind; entry[2] = size; entry[3] = zero;
     if (player_fail()) { *out = NULL; return 1; }
-    if (block_index >= 32 || size > 128) exit(2);
+    if (block_index >= 32 || size > 128) {
+        fprintf(stderr, "player fixture heap exhausted: block %lu size %lu scenario %lu\n",
+            (unsigned long)block_index, (unsigned long)size, (unsigned long)s_players.number);
+        exit(2);
+    }
     *out = s_players.heap[block_index];
     memset(*out, zero ? 0 : 0x97, size);
     s_players.sizes[block_index] = size; s_players.live[block_index] = 1;
@@ -64,7 +72,10 @@ static void *STDCALL player_append(void *list)
 {
     uint32_t *entry = player_log(5), count = get_u32(list, 0);
     uint32_t next_bank = s_players.bank ^ 1;
-    if (count >= 6) exit(2);
+    if (count >= 6) {
+        fprintf(stderr, "player list fixture exhausted\n");
+        exit(2);
+    }
     entry[1] = player_address(list); entry[2] = count;
     memcpy(s_players.banks[next_bank], s_players.banks[s_players.bank], count * 256);
     memset(s_players.banks[next_bank][count], 0, 256);
@@ -77,11 +88,13 @@ static void STDCALL player_remove(void *list, void *record)
 {
     uint32_t *entry = player_log(6), count = get_u32(list, 0);
     uint8_t *data = (uint8_t *)(uintptr_t)get_u32(list, 0x18);
-    uint32_t index = ((uint8_t *)record - data) / 256;
+    uint32_t index = ((uint32_t)(uintptr_t)record - (uint32_t)(uintptr_t)data) / 256;
     entry[1] = count; entry[2] = index;
-    if (index >= count) exit(2);
-    memmove(record, (uint8_t *)record + 256, (count - index - 1) * 256);
+    /* HOST +0x300/+0x410470 decrements even for a stale out-of-range
+     * element. Its signed index check skips copying at or beyond the end. */
     put_u32(list, 0, count - 1);
+    if ((int32_t)index < (int32_t)(count - 1))
+        memmove(record, (uint8_t *)record + 256, (count - index - 1) * 256);
 }
 static int32_t STDCALL player_title(void *aircraft, uint32_t kind, char *title, uint32_t size)
 {
@@ -92,7 +105,10 @@ static int32_t STDCALL player_title(void *aircraft, uint32_t kind, char *title, 
 static int32_t STDCALL player_select(void *aircraft, const char *title)
 {
     uint32_t *entry = player_log(8), index = s_players.model_count++;
-    if (index >= 12) exit(2);
+    if (index >= 12) {
+        fprintf(stderr, "player model fixture exhausted\n");
+        exit(2);
+    }
     entry[1] = profile_hash(title);
     put_u32(aircraft, 0, (uint32_t)(uintptr_t)s_players.headers[index]);
     put_u32(aircraft, 4, (uint32_t)(uintptr_t)s_players.models[index]);

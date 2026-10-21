@@ -170,8 +170,9 @@ ownership, browser records, tracking/selection and message constructors,
 player startup/lifecycle, session frame/draw callbacks, extrapolation, view
 commands, weather/tick guidance, system/player/state messages, texture
 files and multipart model/texture transfers are tested against retail
-(thirty-four suites of 20,000 scenarios each). It remains outside the normal
-module list while receive dispatch, lobby/dialog handling and public lifecycle paths are pending. See [modules/multip.md](modules/multip.md).
+alongside receive dispatch and session completion/disconnect integration
+(thirty-seven suites of 20,000 scenarios each). It remains outside the normal
+module list while lobby/dialog handling and public lifecycle paths are pending. See [modules/multip.md](modules/multip.md).
 
 **MPCHAT** (3,104 bytes) is the chat window. Its id is `0xffffffff`, so no
 module can import it. It hooks itself onto CHAIN lists `0x1d`, `0x14`, `0xb`

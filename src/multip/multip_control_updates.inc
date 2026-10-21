@@ -157,11 +157,43 @@ __attribute__((naked)) uint32_t FS98_STDCALL multip_control_callback(
         "cmpl $0, _s_multip_image+0x984\n\tjz 8f\n\tmovl _s_multip_image+4, %eax\n\t"
         "call *0x38(%eax)\n\tsubl _s_multip_image+0xadc, %eax\n\t"
         "cmpl _s_multip_image+0x194, %eax\n\tjbe 8f\n\tmovl _s_multip_image+0x1a4, %eax\n\t"
-        "decl %eax\n\tjz 2f\n\tdecl %eax\n\tjnz 8f\n\tcall _multip_message_1008\n\tjmp 8f\n\t"
-        "2: call _multip_message_1001\n\t8: popl %ecx\n\tret $8");
+        "decl %eax\n\tjz 2f\n\tdecl %eax\n\tjnz 8f\n\tcall _multip_message_1009\n\tjmp 8f\n\t"
+        "2: call _multip_message_1008\n\t8: popl %ecx\n\tret $8");
 }
 #else
 int32_t multip_control_publish(void) { return multip_state_publish() != 0 ? -1 : 0; }
-/* The portable callback can use the same arithmetic once its flight-model
- * interface is exposed by the native host. The x86 ABI owner is above. */
+uint32_t FS98_STDCALL multip_control_callback(uint32_t code, uint32_t argument)
+{
+    typedef int32_t (FS98_STDCALL *rate_fn)(double *);
+    typedef int32_t (FS98_STDCALL *velocity_fn)(double *, double *, double *);
+    uint8_t *global;
+    uint32_t table, elapsed, type;
+    int32_t result;
+    (void)code; (void)argument;
+    M32(0xad8) = HOST_FN(0x38, multip_ticks_fn)();
+    global = (uint8_t *)(uintptr_t)M32(IMPORT_GLOBAL);
+    table = A32(global, 0x11d4);
+    result = (*(rate_fn *)(uintptr_t)(table + 0x2c))(&MD(0xa78));
+    if (result != 0) return (uint32_t)result;
+    global = (uint8_t *)(uintptr_t)M32(IMPORT_GLOBAL);
+    MD(0xa80) = (long double)*(int16_t *)(void *)(global + 0x2aa) *
+        *(double *)(void *)(s_multip_rdata + 0x18) - MD(0xa78);
+    if (multip_motion_is_blocked()) MD(0xa78) = MD(0xa80);
+    global = (uint8_t *)(uintptr_t)M32(IMPORT_GLOBAL);
+    table = A32(global, 0x11d4);
+    result = (*(velocity_fn *)(uintptr_t)(table + 0x30))(&MD(0xa88), &MD(0xa90), &MD(0xa98));
+    if (result != 0) return (uint32_t)result;
+    result = multip_control_changes();
+    if (result != 0) return (uint32_t)result;
+    result = multip_control_publish();
+    if (result != 0) return (uint32_t)result;
+    result = multip_control_collisions();
+    if (result != 0 || M32(0x984) == 0) return (uint32_t)result;
+    elapsed = HOST_FN(0x38, multip_ticks_fn)() - M32(0xadc);
+    if (elapsed <= M32(0x194)) return elapsed;
+    type = M32(0x1a4) - 1;
+    if (type == 0) return (uint32_t)multip_message_1008();
+    type--;
+    return type == 0 ? (uint32_t)multip_message_1009() : type;
+}
 #endif

@@ -20,13 +20,53 @@ instructions that request Hungarian names or the old typedefs. Preserve the
 retail offsets and ABI, but use descriptive snake-case names where semantics
 are known and offset-based names where they are not.
 
+### Restart here
+
+Read `CLAUDE.md`, `README.md`, `docs/method.md`, `src/multip/AGENTS.md`, then
+this section and [the receive/lifecycle checkpoint](#receive-dispatch-and-session-lifecycle-checkpoint).
+Check `git status --short` before editing: this checkpoint includes modified
+and untracked files. Preserve the entire working tree; do not stage, commit,
+push or install MULTIP. A fresh context in this workspace can use these files
+immediately; a separate checkout also needs the uncommitted changes.
+
+- **Verified:** 37 top-level differential suites, 20,000 scenarios each, zero
+  differences. The final host-fixture correction was also rechecked at 20,000
+  scenarios in `players`, `system`, `lifecycle` and `dispatch`.
+- **Latest implementation:** `src/multip/multip_dispatch.inc`,
+  `multip_lifecycle.inc`, generated `multip_dispatch_cases.inc`, matching
+  fixtures under `tools/difftest/`, and `tools/gen_multip_dispatch.py`.
+  Private test entries 206–220 map to retail RVAs in `multip_send.inc`.
+- **Mutation status:** all 19 lifecycle and four dispatch mutations caught;
+  all 382 targets match exactly once. The full 382-target sweep is unfinished;
+  an earlier sweep stopped on a Wine timeout. Crashes, timeouts and fixture
+  failures do not count as catches.
+- **Next:** recover lobby/provider and configuration/dialog wiring, starting
+  from public session toggle `.text+0x8e60` and configuration `+0x3d60`.
+  Reuse the verified completion `+0x9c70` and disconnect `+0x8cf0`; their
+  receive/control registration group is already implemented. Continue with
+  public dialog `+0x1c`, then init/deinit. Public slots `+0x04`, `+0x08`,
+  `+0x18` and `+0x1c` remain guarded, and MULTIP stays outside `MODULES`.
+- **Limits:** x86 comparisons do not validate the non-x86 C fallbacks or OS
+  thread scheduling races. Whole-module acceptance and game smoke testing
+  remain ahead.
+
+Build with `make multipdiff`; run `make multipdiff-run N=20000` for the full
+checkpoint. From `bin/difftest`, run `WINEDEBUG=-all wine multipdiff.exe 1200
+lifecycle` or replace `lifecycle` with `dispatch` for focused comparisons.
+Run mutations from the repository root with
+`python3 -B tools/multip_breaks.py --slice lifecycle` or `--slice dispatch`.
+Run Wine tests serially: concurrent runs previously produced timeouts.
+The generator reads the retail `orig/Modules/multip.dll`; do not depend on
+scratch disassembly under `/tmp` surviving a restart. `.text` offsets are
+relative to VA `0x20851000`; fixture RVAs are relative to `0x20850000`.
+
 The working files are:
 
 - `src/multip/multip.c`, `.def`, and `.rc`: the in-progress DLL;
 - `tools/difftest/multipdiff.c`, `multip_send.inc`, `multip_receive.inc`, and
   `multip_workers.inc` and `multip_directplay.inc`: query, transport, controlled
   worker, and loader/interface-lifetime harness;
-- `tools/multip_breaks.py`: isolated transport, worker, and DirectPlay mutations;
+- `tools/multip_breaks.py`: isolated mutation checks for recovered owners;
 - the `multipdiff`, `multipdiff-run`, and explicit `bin/MULTIP.DLL` targets in
   the top-level `Makefile`.
 
@@ -84,7 +124,7 @@ The following internal paths are now implemented and compared against retail:
   an extra packet and leak it on enqueue failure. The unused tails of retail's
   1000-byte stack buffers are omitted because they are never sent.
 
-The private test table now has entries 0–205; `send_internal` in
+The private test table now has entries 0–220; `send_internal` in
 `tools/difftest/multip_send.inc` maps each to its retail RVA. Entries 25–33
 are profile and group/session helpers, 34–41 description/name/counter helpers,
 42–44 aircraft ownership, 45–50 browser records/enumeration, 51–58 tracking
@@ -99,8 +139,8 @@ updates, 141–152 texture files/catalogues, 153–162 texture reception,
 163–167 multipart packet constructors, 168–177 texture sending, 178–185 model
 sending, 186–189 cache files/replacement, 190–194 model reception, and
 195–196 title lookup/announcements, 197–200 state constructors, and
-201–205 control/publication helpers and the in-progress control callback.
-The control callback itself still needs its owner fixture. Production exports
+201–205 control/publication helpers and the verified control callback.
+The callback fixture drives real publication and collision helpers. Production exports
 still contain only ImportTable and Linkage.
 
 New comparison labels are `profile load/save`, `session/group primitives`,
@@ -121,12 +161,11 @@ bytes reach all type characters. Constructor snapshots must be saved before
 later enumeration resets the embedded list; a stride mutation exposed this
 fixture gap and now fails the comparison.
 
-The expanded thirty-four-suite differential run passes 20,000 scenarios per suite
+The current thirty-seven-suite differential run passes 20,000 scenarios per suite
 with zero differences. `make multipdiff` builds both production and test DLLs
 without warnings; the production export table contains only ImportTable and
-Linkage. These remain slice results, not whole-module acceptance. The full
-154-mutation sweep passes, including after the snake_case cleanup across
-all MULTIP sources, generated symbols and matching fixtures. All five data
+Linkage. These remain slice results, not whole-module acceptance. The earlier
+154-mutation sweep passed; the current larger sweep status is recorded below. All five data
 includes reproduce exactly from the updated generator. No crash or fixture
 error counts as a catch.
 
@@ -185,13 +224,11 @@ can run alone: `multipdiff.exe 1200 local`, `frame`, `draw`, `players`, or
 `messages`. The mutation runner uses those selectors where available.
 
 Public init/deinit, session toggle, and dialog entries remain disabled.
-Completion at `+0x9c70` still depends on all six callback-registration groups
-at `+0x8220`; five are now recovered. The remaining group at `+0x27c0`
-registers receive processing (`+0x47f0`) and controls/collision updates
-(`+0x2870`). Reverse teardown is `+0x8270`. State message constructors starting at
-`+0x59d0`, receive system/application dispatch, lobby/provider
-and dialog callbacks still need recovery. Keep MULTIP outside `MODULES`
-until the whole-module acceptance gates below pass.
+All six callback-registration groups, aggregate start/stop, common completion
+at `+0x9c70` and disconnect at `+0x8cf0` are now recovered and tested together.
+Lobby/provider and configuration/dialog callbacks still need recovery before
+those public entries can be enabled. Keep MULTIP outside `MODULES` until the
+whole-module acceptance gates below pass.
 
 ## Extrapolation, commands, weather and tick checkpoint
 
@@ -296,8 +333,8 @@ outcomes from retained retail failure paths; all twelve mutations are caught.
 The completion fixture currently uses an empty texture catalogue; nonempty
 catalogues are covered independently by the texture suite.
 
-The last full run, after the naming cleanup, has 34 suites of 20,000
-scenarios with zero differences.
+The previous full checkpoint had 35 suites of 20,000 scenarios with zero
+differences. The receive/lifecycle checkpoint below adds two top-level suites.
 `multip_title_receive.inc` adds title announcements (100e), local ACONTAIN
 selection, UTIL +0xa0 cache probing, cache replacement and optional 1010
 requests. Its 20,000-scenario suite and seven mutations pass. Outgoing full
@@ -306,16 +343,28 @@ state and compact position constructors in `multip_state_messages.inc` pass
 padding words and the full-state packet's 0x6c-byte uninitialized tail through
 painted caller-stack fixtures. `multip_control_updates.inc` adds control
 change detection, collision cooldowns and state throttling; its helper suite
-passes 20,000 scenarios and twelve mutations. The new control callback ABI
-entry remains under development and is not covered by that helper claim.
+passes 20,000 scenarios and twelve mutations. The complete control callback
+at +0x2870 now has a separate 20,000-scenario fixture. It drives flight-model
++0x2c/+0x30 services, raw failure returns,
+signed timesteps, wrapped clock arithmetic, state publication and collisions.
+Retry dispatch uses messages 1008 and 1009 for configured types 1 and 2;
+the first integration comparison exposed and corrected the wrong retry tags.
+The fixture varies all three x87 precision modes and four rounding modes,
+paints the flight model's callee-left padding word, and compares per-action
+rate/velocity state, timestamps, retries, queues, heap and GLOBAL. All thirteen
+deliberate errors are caught by `--slice control_callback`; the serial rerun
+completed after an earlier concurrent Wine timeout.
+
+The x86 callback has the retail stack layout needed for packet padding;
+the non-x86 C callback is implemented but is not covered by this x86 fixture.
 
 The full mutation sweep remains incomplete: the 324-case run stopped on a
-Wine timeout in the drawing slice. The current 346 mutation targets all
+Wine timeout in the drawing slice. The current 382 mutation targets all
 match exactly once, but the full sweep still needs completion. The earlier
 154-case sweep and individual new owner slices passed before the naming
 cleanup. Do not count a timeout or fixture abort as a catch.
 
-The naming audit covers all 70 MULTIP source/include/resource, generator,
+The earlier naming audit covered 70 MULTIP source/include/resource, generator,
 fixture and mutation files. The cleanup renamed 119 identifiers across 18
 files and retained standard `<stdint.h>` types. All project-owned identifiers
 are snake_case; external Windows/COM names and required exports are preserved.
@@ -835,9 +884,10 @@ zero/positive/error HRESULTs, partial outputs on failed calls, query failure
 that clears or preserves its destination, and arbitrary Release returns.
 Factory availability is seeded independently before calling create, so a
 missing factory export is compared as loader state rather than executed as
-null code. The lifetime fake is separate from the send/receive fixtures; the
-next integrated session fake must combine those methods and add the session,
-player, group and lobby contracts. No real DirectPlay DLL or network is used.
+null code. The original lifetime fake is separate from the send/receive fixtures. The
+receive/lifecycle fixture now combines session, player, group and transport
+contracts; integrating lobby/provider creation with that lifetime coverage
+remains ahead. No real DirectPlay DLL or network is used.
 
 `make multip-directplay-breaks` checks eleven mutations: loader export
 selection, loaded-flag retention, export descriptor order, unload flag and
@@ -846,9 +896,10 @@ temporary release order, factory outer argument, and query-flag reset. As with
 the other slices, a mutation counts only when its comparison completes with
 differences; a crash or fixture error is not a catch.
 
-This is not a whole-module 20k result. Init/deinit and their CHAIN callbacks,
-session configuration, lobby handling, message dispatch, and public slots
-`+0x18` and `+0x1c` remain unimplemented. Worker lifecycles are verified through
+This is not a whole-module 20k result. Init/deinit and their entry callbacks,
+session configuration, lobby handling, and public slots `+0x18` and `+0x1c`
+remain unimplemented. Receive dispatch and internal session integration are
+verified in the later checkpoint below. Worker lifecycles are verified through
 controlled internal entry calls; no public init/session entry is enabled yet.
 
 Run the current checkpoint with:
@@ -886,20 +937,91 @@ MULTIP tick callbacks/CHAIN 0x02: 20000 scenarios, 0 differ
 MULTIP worker lifecycles: 20000 scenarios, 0 differ
 ```
 
+## Receive dispatch and session lifecycle checkpoint
+
+`multip_dispatch.inc` implements the receive callback (`+0x47f0`), top-level
+sender split (`+0x4890`), DirectPlay system dispatch (`+0x48e0`), application
+dispatch (`+0x4960`), and reverse-order unknown-peer expiry (`+0x89a0`).
+The application switch reaches all 31 handlers in `1000`–`101f`; `100b` and
+unknown tags forward `{sender, packet, size}` to CHAIN `0x1d/5`, ignoring its
+return. `tools/gen_multip_dispatch.py` extracts and checks the retail jump
+table before emitting named C/assembly calls, rather than executable bytes.
+There is no added minimum-packet-size check. Only 1017 receives the timestamp.
+The x86 app dispatcher retains its 12-byte frame and handler nesting, including
+1013 weather-reply and 1019 position padding below the entry stack. The top
+sender dispatcher normalizes nonzero handler results to -1; the app/system
+switches preserve their raw returns.
+
+Receive pumping expires unknown peers before dequeuing. It frees payload then
+record only after successful dispatch. A NULL payload leaks its record;
+failed dispatch, node free, payload free or record free preserves retail's
+partial state. The callback propagates host-free failures unchanged.
+
+`multip_lifecycle.inc` adds receive/control registration (`+0x27c0/+0x2810`),
+aggregate registration/removal (`+0x8220/+0x8270`), common completion
+(`+0x9c70`) and disconnect (`+0x8cf0`). Owner flags survive partial failures,
+registration order is preserved, and there is no added rollback. Completion
+starts workers, registers callbacks, creates/publishes the local player,
+applies receive membership, sets the started-local flag, enumerates peers,
+then sends the initial ping/type queries. Disconnect broadcasts host departure,
+flushes sends, clears receive records, closes its progress display, removes
+callbacks, stops workers, resets selection, destroys players, closes DirectPlay
+and unloads it. Its positive signed delay is `now - start + 3000`, preserving
+retail's addition of elapsed time. Progress calls are void and DestroyPlayer errors are
+ignored; Close's raw HRESULT is retained unless a later unload fails.
+
+Handlers 1005, 1006, 1016 and system 31 now use that disconnect path. Rejected
+1005 calls DirectPlay Close before clearing the connected flag; its following
+disconnect then does nothing. Their confirmation ordering and error boundaries
+are compared with active and already disconnected sessions.
+
+The `dispatch` fixture runs the existing player, timing/state, weather, system,
+model/texture receive, title and model-send scenarios through the recovered
+switches. The `lifecycle` fixture runs repeated registration/removal, completion,
+queued receive processing, expiry, notification-triggered disconnect and
+repeated close over deterministic COM, CHAIN and worker services. It compares
+ordered calls, callback identities, packet hashes, return values, flags, GLOBAL,
+heap ownership and queue states. Failure injection reaches late teardown;
+clock steps include zero and wrap, with positive and negative signed sleep
+delays.
+The completion entry keeps retail's nesting so local startup reads its
+reserved DPNAME word after earlier CHAIN/worker calls. The fixture paints the
+slot, changes it during registration, and paints its neighbors differently.
+No real threads, networking or sleep are used by this integrated fixture.
+Failed completion can leave no local player: subsequent send flushing can
+fault in retail, and those faults are compared as outcomes before the scenario
+ends. Fixture errors and process crashes remain verification failures.
+
+The integrated fixture exposed a host-stub error: HOST `+0x300` at `0x410210`
+computes an unsigned element index, then `0x410470` unconditionally decrements
+the count and skips copying when the signed index is at or beyond the new end.
+It does not reject a stale out-of-range record pointer. The player fixture now
+models that behavior; MULTIP's stale-local-pointer behavior is retained.
+
+`make multipdiff-run N=20000` passes all 37 top-level suites with zero
+differences; the dispatch suite additionally repeats eight handler families
+through their real switches. `--slice dispatch` catches all four mutations;
+`--slice lifecycle` catches all nineteen, including both completion stack-word
+checks. The full 382-target mutation sweep remains pending.
+
+The private test entries 206–220 cover these owners, handlers and switches.
+The non-x86 C fallbacks are implemented but are not validated by the x86 fixture.
+Public lifecycle/dialog slots remain guarded; this is internal integration,
+not whole-module acceptance.
+
 ## Recommended continuation order
 
 The transport units and worker lifecycles in stages 1–4 are complete, including
 queue construction/clear/destruction and the combined subsystem wrappers.
 DirectPlay lifetime, profiles, host/join/group primitives, session descriptions,
-player creation/removal, and five session callback owners described above are
-also verified. Next recover the `+0x27c0` callback owner and receive dispatch,
-then integrate registration/teardown with the workers in
-common completion `+0x9c70` and disconnect `+0x8cf0`. Keep public `+0x18`
-disabled until its configuration and complete session paths are ready. The
-loader flag alone does not prove the factory is available, and create's first
-query failure leaks a reference; retain those boundaries in integrated cases.
-Public init/deinit still depend on lobby/provider/dialog handling and the
-remaining callbacks.
+player creation/removal, and all six session callback owners described above
+are also verified, including receive/control ownership at `+0x27c0`, receive
+dispatch, and integration of all callback owners and workers in common
+completion `+0x9c70` and disconnect `+0x8cf0`. Next recover lobby/provider and
+configuration/dialog wiring for public `+0x18`. The loader flag alone does
+not prove the factory is available, and create's first query failure leaks a
+reference; retain those boundaries in integrated cases. Public init/deinit
+still depend on lobby/provider/dialog handling.
 
 The next public-entry boundaries are confirmed in `.text+0x8e60`: load first;
 when connected, UTIL `+0xa4` supplies confirmation before disconnect
@@ -908,13 +1030,15 @@ unloads and `== 3` returns 1. Otherwise data `+0xaa8` chooses host helper
 `+0x3890` or join helper `+0x2340`, followed by common completion `+0x9c70`.
 Disconnect includes CHAIN messages, send flush, receive queue clear, worker
 stop, player destruction, `IDirectPlay3A::Close`, and unloader calls. These
-are boundaries for recovery, not implemented session coverage.
+are implemented internal session coverage; the public toggle and its
+configuration flow remain guarded.
 Disconnect's wait is `Sleep((int32_t)(now - start + 3000))` when that signed
 value is positive: retail **adds** elapsed time. Preserve that arithmetic.
 The view-command callback at `+0x2ef0` dispatches `0x1016c`–`0x1016f` into
 `+0x3200/+0x2f40/+0x3020/+0x3250`; the cycle helpers can loop forever when
 no record is eligible and can read record zero even when count is zero.
-Their fixture will need fault/hang outcome comparison, not input filtering.
+Their existing command fixture compares fault/hang outcomes rather than
+filtering those inputs.
 
 Each stage should extend the harness before the corresponding Linkage slot
 is enabled. Keep the test output labeled with the exact covered slice until

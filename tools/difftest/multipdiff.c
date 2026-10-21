@@ -455,6 +455,8 @@ static void print_difference(uint32_t scenario_number,
 #include "multip_model_receive.inc"
 #include "multip_state_messages.inc"
 #include "multip_control_updates.inc"
+#include "multip_dispatch.inc"
+#include "multip_lifecycle.inc"
 
 int main(int argc, char **argv)
 {
@@ -525,6 +527,10 @@ int main(int argc, char **argv)
             return test_weather(&retail, &ours, scenarios) != 0;
         if (strcmp(argv[2], "commands") == 0)
             return test_commands(&retail, &ours, scenarios) != 0;
+        if (strcmp(argv[2], "lifecycle") == 0)
+            return test_lifecycle(&retail, &ours, scenarios) != 0;
+        if (strcmp(argv[2], "dispatch") == 0)
+            return test_dispatch(&retail, &ours, scenarios) != 0;
         if (strcmp(argv[2], "motion") == 0)
             return test_motion(&retail, &ours, scenarios) != 0;
         if (strcmp(argv[2], "draw") == 0)
@@ -611,6 +617,8 @@ int main(int argc, char **argv)
     bad += test_state_messages(&retail, &ours, scenarios);
     bad += test_control_updates(&retail, &ours, scenarios);
     bad += test_control_callback(&retail, &ours, scenarios);
+    bad += test_dispatch(&retail, &ours, scenarios);
+    bad += test_lifecycle(&retail, &ours, scenarios);
     multip_test_context("workers", "unknown", 0);
     bad += test_workers(&retail, &ours, scenarios);
     return bad != 0;

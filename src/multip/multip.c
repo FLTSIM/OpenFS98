@@ -2,8 +2,8 @@
  *
  * In-progress transliteration: transport/workers, DirectPlay lifetime,
  * profiles, session/group primitives, aircraft and player ownership, browser
- * records, tracking/selection and message constructors. Public lifecycle,
- * session/dialog wiring and receive dispatch remain incomplete. MULTIP is
+ * records, tracking/selection, message dispatch and session completion/close.
+ * Public lifecycle and session/dialog wiring remain incomplete. MULTIP is
  * intentionally outside MODULES and must not be installed in-game yet.
  *
  * The retail module keeps its runtime state in the uninitialised tail of its
@@ -628,6 +628,8 @@ static uint32_t FS98_STDCALL multip_send(uint32_t to_id, const void *payload,
 #include "multip_title_receive.inc"
 #include "multip_state_messages.inc"
 #include "multip_control_updates.inc"
+#include "multip_lifecycle.inc"
+#include "multip_dispatch.inc"
 
 /* Private entry access for the differential DLL only. Normal builds retain
  * the retail export surface; session and worker code use internal calls. */
@@ -733,7 +735,14 @@ __declspec(dllexport) void *const multip_test_entries[] = {
     (void *)multip_motion_is_blocked, (void *)multip_message_1000,
     (void *)multip_message_1018, (void *)multip_message_1019,
     (void *)multip_control_changes, (void *)multip_control_collisions, (void *)multip_state_publish,
-    (void *)multip_control_publish, (void *)multip_control_callback
+    (void *)multip_control_publish, (void *)multip_control_callback,
+    (void *)multip_receive_callbacks_start, (void *)multip_receive_callbacks_stop,
+    (void *)multip_callbacks_start, (void *)multip_callbacks_stop,
+    (void *)multip_session_disconnect, (void *)multip_session_complete,
+    (void *)multip_handle_1005, (void *)multip_handle_1006, (void *)multip_handle_1016,
+    (void *)multip_system_lost, (void *)multip_system_dispatch,
+    (void *)multip_app_dispatch, (void *)multip_receive_dispatch,
+    (void *)multip_receive_expire, (void *)multip_receive_callback
 };
 #endif
 

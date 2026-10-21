@@ -558,6 +558,55 @@ CONTROL_UPDATE_MUTATIONS = [
 ]
 
 
+CONTROL_CALLBACK_MUTATIONS = [
+    ('control callback timestamp', 'movl %eax, _s_multip_image+0xad8', 'movl $0, _s_multip_image+0xad8'),
+    ('control callback signed timestep', 'movswl 0x2aa(%eax), %ecx', 'movzwl 0x2aa(%eax), %ecx'),
+    ('control callback rate factor', 'fmull _s_multip_rdata+0x18', 'fmull _s_multip_rdata+0x170'),
+    ('control callback rate difference', 'fsubl _s_multip_image+0xa78', 'faddl _s_multip_image+0xa78'),
+    ('control callback velocity destination', 'pushl $_s_multip_image+0xa98', 'pushl $_s_multip_image+0xa90'),
+    ('control callback pending guard', 'cmpl $0, _s_multip_image+0x984', 'cmpl $1, _s_multip_image+0x984'),
+    ('control callback retry period', 'cmpl _s_multip_image+0x194, %eax', 'cmpl $0, %eax'),
+    ('control callback player retry', '2: call _multip_message_1008', '2: call _multip_message_1001'),
+    ('control callback observer retry', 'call _multip_message_1009', 'call _multip_message_1002'),
+    ('control callback rate failure', 'testl %eax, %eax\\n\\tjnz 8f\\n\\tmovl _s_multip_image+0xc', 'testl %eax, %eax\\n\\tjz 8f\\n\\tmovl _s_multip_image+0xc'),
+    ('control callback velocity failure', 'call *0x30(%edx)\\n\\ttestl %eax, %eax\\n\\tjnz 8f', 'call *0x30(%edx)\\n\\ttestl %eax, %eax\\n\\tjz 8f'),
+    ('control callback wrapped elapsed', 'subl _s_multip_image+0xadc, %eax', 'addl _s_multip_image+0xadc, %eax'),
+    ('control callback blocked rate', 'movl %eax, _s_multip_image+0xa7c', 'movl $0, _s_multip_image+0xa7c'),
+]
+
+
+LIFECYCLE_MUTATIONS = [
+    ("completion callee-left startup word", "call _multip_player_start\\n\\ttestl %eax, %eax", "movl $0x6739c15a, -0x408(%esp)\\n\\tcall _multip_player_start\\n\\ttestl %eax, %eax"),
+    ("completion startup stack", "call _multip_player_start\\n\\ttestl %eax, %eax", "subl $4, %esp\\n\\tcall _multip_player_start\\n\\taddl $4, %esp\\n\\ttestl %eax, %eax"),
+    ("system lost disconnect", "case 0x31: return multip_system_lost(packet, size);", "case 0x31: return 0;"),
+
+    ("disconnect notification", "(2, 1, 0xf538, 0, 0, 0, 0, 0);", "(2, 1, 0xf533, 0, 0, 0, 0, 0);"),
+
+    ("receive registration order", "CHAIN_FN(0x18, multip_chain_register_fn)(1, multip_receive_callback)", "CHAIN_FN(0x18, multip_chain_register_fn)(9, multip_receive_callback)"),
+    ("receive removal flag", "        M32(0x950) = 0;", "        M32(0x950) = 1;"),
+    ("disconnect already closed", "if (M32(M_CONNECTED) == 0) return 0;\n    CHAIN_FN", "if (M32(M_CONNECTED) == 0) return -1;\n    CHAIN_FN"),
+    ("disconnect departure", "multip_message_1012() != 0) return -1;", "multip_message_1013() != 0) return -1;"),
+    ("disconnect elapsed wait", "multip_ticks_fn)() - start + 3000", "multip_ticks_fn)() - start - 3000"),
+    ("disconnect close result", "    return result;\n}\n\n/* .text+0x9c70", "    return result != 0 ? -1 : 0;\n}\n\n/* .text+0x9c70"),
+    ("disconnect player destroy", "if (M32(0xa40) != 0)\n        DP_FN", "if (M32(0xa40) == 0)\n        DP_FN"),
+    ("disconnect cleanup counter", "M32(0x9a0) = 0; M32(0x9a4) = 0;", "M32(0x9a0) = 0; M32(0x9a4) = 1;"),
+    ("completion local flag", "movl $1, _s_multip_image+0xa40", "movl $0, _s_multip_image+0xa40"),
+    ("completion ping target", "jnz 1f\\n\\tpushl $0\\n\\tcall _multip_message_1007@4", "jnz 1f\\n\\tpushl $1\\n\\tcall _multip_message_1007@4"),
+    ("join rejection connected flag", "M32(0x984) = 0; M32(M_CONNECTED) = 0;", "M32(0x984) = 0; M32(M_CONNECTED) = 1;"),
+    ("unknown application return", "xorl %eax, %eax\\n\\taddl $12, %esp\\n\\tret $16", "movl $-1, %eax\\n\\taddl $12, %esp\\n\\tret $16"),
+    ("receive expiry boundary", "A32(player, 0xfc) > M32(0x17c)", "A32(player, 0xfc) >= M32(0x17c)"),
+    ("receive expiry type", "if (A32(player, 8) == 4 && HOST_FN", "if (A32(player, 8) == 1 && HOST_FN"),
+    ("receive raw failure", "3: popl %esi\\n\\taddl $8, %esp", "3: negl %eax\\n\\tsbbl %eax, %eax\\n\\tpopl %esi\\n\\taddl $8, %esp"),
+]
+
+DISPATCH_MUTATIONS = [
+    ("system created route", "case 3: return multip_system_created(packet, size);", "case 3: return multip_system_destroyed(packet, size);"),
+    ("system destroyed raw failure", "case 5: return multip_system_destroyed(packet, size);", "case 5: return 0;"),
+    ("system player data timestamp", "case 0x102: return multip_system_player_data(packet, size, timestamp);", "case 0x102: return 0;"),
+    ("application position dispatch frame", "movl 8(%esp), %eax\\n\\tsubl $12, %esp", "movl 8(%esp), %eax\\n\\tsubl $12, %esp\\n\\tmovw $0, -0x34(%esp)"),
+]
+
+
 def check_variant(directory, source, slice_name):
     source_path = directory / "multip.c"
     source_path.write_text(source)
@@ -574,7 +623,7 @@ def check_variant(directory, source, slice_name):
     ]
     subprocess.run(command, check=True, capture_output=True, text=True)
     result = subprocess.run(
-        ["wine", "multipdiff.exe", "1200"] + ([slice_name] if slice_name in ("local", "frame", "players", "messages", "draw", "motion", "commands", "weather", "tick", "system", "app_players", "updates", "textures", "texture_receive", "transfer_messages", "texture_send", "model_send", "model_cache", "model_receive", "title_receive", "state_messages", "control_updates") else []), cwd=directory,
+        ["wine", "multipdiff.exe", "1200"] + ([slice_name] if slice_name in ("local", "frame", "players", "messages", "draw", "motion", "commands", "weather", "tick", "system", "app_players", "updates", "textures", "texture_receive", "transfer_messages", "texture_send", "model_send", "model_cache", "model_receive", "title_receive", "state_messages", "control_updates", "control_callback", "dispatch", "lifecycle") else []), cwd=directory,
         env={**os.environ, "WINEDEBUG": "-all"}, capture_output=True,
         text=True, timeout=180 if slice_name == "send" else 60,
     )
@@ -586,7 +635,7 @@ def check_variant(directory, source, slice_name):
              "aircraft": "aircraft select/release",
              "records": "aircraft copy/session browser records",
              "tracking": "track-name display", "messages": "application message constructors",
-             "players": "player lifecycle helpers", "local": "local player creation/start", "frame": "session CHAIN 0x14", "draw": "player drawing/CHAIN 0x10", "motion": "aircraft extrapolation/CHAIN 0x13", "commands": "view commands/CHAIN 0x0c", "weather": "weather/sync messages", "tick": "tick callbacks/CHAIN 0x02", "system": "DirectPlay system notifications", "app_players": "application player types", "updates": "aircraft state receive/timing", "textures": "texture catalogue/file services", "texture_receive": "multipart texture receive", "transfer_messages": "multipart transfer messages", "texture_send": "multipart texture sender", "model_send": "multipart model sender", "model_cache": "aircraft cache files", "model_receive": "multipart model receive", "title_receive": "aircraft title receive", "state_messages": "aircraft state message constructors", "control_updates": "control/collision/state publishing"}[slice_name]
+             "players": "player lifecycle helpers", "local": "local player creation/start", "frame": "session CHAIN 0x14", "draw": "player drawing/CHAIN 0x10", "motion": "aircraft extrapolation/CHAIN 0x13", "commands": "view commands/CHAIN 0x0c", "weather": "weather/sync messages", "tick": "tick callbacks/CHAIN 0x02", "system": "DirectPlay system notifications", "app_players": "application player types", "updates": "aircraft state receive/timing", "textures": "texture catalogue/file services", "texture_receive": "multipart texture receive", "transfer_messages": "multipart transfer messages", "texture_send": "multipart texture sender", "model_send": "multipart model sender", "model_cache": "aircraft cache files", "model_receive": "multipart model receive", "title_receive": "aircraft title receive", "state_messages": "aircraft state message constructors", "control_updates": "control/collision/state publishing", "control_callback": "control CHAIN 0x01", "dispatch": "application receive dispatch", "lifecycle": "receive/session lifecycle"}[slice_name]
     prefix = f"MULTIP {label}: 1200 scenarios, "
     lines = [line for line in result.stdout.splitlines() if line.startswith(prefix)]
     if len(lines) != 1 or result.returncode not in (0, 1):
@@ -599,7 +648,7 @@ def check_variant(directory, source, slice_name):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--slice", choices=("send", "receive", "workers", "directplay", "profile", "groups", "metadata", "aircraft", "records", "tracking", "messages", "players", "local", "frame", "draw", "motion", "commands", "weather", "tick", "system", "app_players", "updates", "textures", "texture_receive", "transfer_messages", "texture_send", "model_send", "model_cache", "model_receive", "title_receive", "state_messages", "control_updates", "all"), default="all")
+    parser.add_argument("--slice", choices=("send", "receive", "workers", "directplay", "profile", "groups", "metadata", "aircraft", "records", "tracking", "messages", "players", "local", "frame", "draw", "motion", "commands", "weather", "tick", "system", "app_players", "updates", "textures", "texture_receive", "transfer_messages", "texture_send", "model_send", "model_cache", "model_receive", "title_receive", "state_messages", "control_updates", "control_callback", "dispatch", "lifecycle", "all"), default="all")
     args = parser.parse_args()
     variants = []
     if args.slice in ("send", "all"):
@@ -637,12 +686,15 @@ def main():
                                   ("model_receive", MODEL_RECEIVE_MUTATIONS),
                                   ("title_receive", TITLE_RECEIVE_MUTATIONS),
                                   ("state_messages", STATE_MESSAGE_MUTATIONS),
-                                  ("control_updates", CONTROL_UPDATE_MUTATIONS)):
+                                  ("control_updates", CONTROL_UPDATE_MUTATIONS),
+                                  ("control_callback", CONTROL_CALLBACK_MUTATIONS),
+                                  ("dispatch", DISPATCH_MUTATIONS),
+                                  ("lifecycle", LIFECYCLE_MUTATIONS)):
         if args.slice in (slice_name, "all"):
             variants.extend((slice_name, *mutation) for mutation in mutations)
     source = (ROOT / "src/multip/multip.c").read_text()
     for include in ("multip_profile.inc", "multip_session.inc",
-                    "multip_aircraft.inc", "multip_records.inc", "multip_tracking.inc", "multip_messages.inc", "multip_players.inc", "multip_callbacks.inc", "multip_motion.inc", "multip_commands.inc", "multip_weather.inc", "multip_tick.inc", "multip_system.inc", "multip_app_players.inc", "multip_updates.inc", "multip_textures.inc", "multip_texture_receive.inc", "multip_transfer_messages.inc", "multip_texture_send.inc", "multip_model_send.inc", "multip_model_cache.inc", "multip_model_receive.inc", "multip_title_receive.inc", "multip_state_messages.inc", "multip_control_updates.inc"):
+                    "multip_aircraft.inc", "multip_records.inc", "multip_tracking.inc", "multip_messages.inc", "multip_players.inc", "multip_callbacks.inc", "multip_motion.inc", "multip_commands.inc", "multip_weather.inc", "multip_tick.inc", "multip_system.inc", "multip_app_players.inc", "multip_updates.inc", "multip_textures.inc", "multip_texture_receive.inc", "multip_transfer_messages.inc", "multip_texture_send.inc", "multip_model_send.inc", "multip_model_cache.inc", "multip_model_receive.inc", "multip_title_receive.inc", "multip_state_messages.inc", "multip_control_updates.inc", "multip_lifecycle.inc", "multip_dispatch.inc", "multip_dispatch_cases.inc"):
         source = source.replace('#include "' + include + '"',
                                 (ROOT / "src/multip" / include).read_text())
     for slice_name, name, before, after in variants:

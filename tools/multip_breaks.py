@@ -204,11 +204,11 @@ MESSAGE_MUTATIONS = [
     ("aircraft title terminator length", "size = HOST_FN(0x2b8, multip_strlen_fn)(title) + 1;\n    packet[1] = size;", "size = HOST_FN(0x2b8, multip_strlen_fn)(title);\n    packet[1] = size;"),
     ("aircraft title visibility", "packet[2] = *(uint8_t *)", "packet[2] = 0 * *(uint8_t *)"),
     ("request reliable flag", "multip_send(0, packet, sizeof(packet), 1)", "multip_send(0, packet, sizeof(packet), 0)"),
-    ("request pending state", "M32(0x984) = 1;", "M32(0x984) = 0;"),
+    ("request pending state", "M32(0x984) = 1;\n    M32(0xadc)", "M32(0x984) = 0;\n    M32(0xadc)"),
     ("request timestamp", "M32(0xadc) = HOST_FN(0x38, multip_ticks_fn)();", "M32(0xadc) = 0;"),
     ("value payload length", "{tag, 4, value}", "{tag, 8, value}"),
     ("allocated packet initialization", "(1, 8, (void **)&packet, 1)", "(1, 8, (void **)&packet, 0)"),
-    ("allocated packet cleanup", "return HOST_FN(0x214, multip_free_fn)((void **)&packet) != 0 ? -1 : 0;", "return 0;"),
+    ("allocated packet cleanup", "if (multip_send(id, packet, 8, 1) != 0)\n        return -1;\n    return HOST_FN(0x214, multip_free_fn)((void **)&packet) != 0 ? -1 : 0;", "if (multip_send(id, packet, 8, 1) != 0)\n        return -1;\n    return 0;"),
 ]
 for message_tag, call in (
     (0x1001, "multip_message_request(0x1001)"),
@@ -253,7 +253,7 @@ LOCAL_MUTATIONS = [
     ("host player count", "if (type == 1) M32(0x9a0)++;", "if (type == 1) M32(0x9a4)++;"),
     ("join player request", "if (multip_message_1001() != 0) return -1;", "if (multip_message_1002() != 0) return -1;"),
     ("join observer request", "if (multip_message_1002() != 0) return -1;", "if (multip_message_1001() != 0) return -1;"),
-    ("startup name publication", "if (multip_player_publish_name() != 0)", "if (0)"),
+    ("startup name publication", "if (multip_message_1002() != 0) return -1;\n        }\n    }\n    if (multip_player_publish_name() != 0)", "if (multip_message_1002() != 0) return -1;\n        }\n    }\n    if (0)"),
     ("startup capacity publication", "if (multip_session_set_capacity((const uint32_t *)(uintptr_t)(D + 0x998)) != 0)\n        return -1;\n    local", "if (0)\n        return -1;\n    local"),
 ]
 
@@ -274,13 +274,13 @@ PLAYER_MUTATIONS.extend([
     ("peer enumeration raw HRESULT", "multip_player_enumerate_callback, NULL, 16);", "multip_player_enumerate_callback, NULL, 16) != 0 ? -1 : 0;"),
     ("receive option membership", "if (M32(0xac0) != 0)", "if (M32(0xac0) == 0)"),
     ("ping timestamp field", "A32(player, 0xfc) = HOST_FN", "A32(player, 0xf8) = HOST_FN"),
-    ("ping reliable flag", "multip_send(id, packet, sizeof(packet), 0)", "multip_send(id, packet, sizeof(packet), 1)"),
+    ("ping reliable flag", "A32(player, 0xfc) = HOST_FN(0x38, multip_ticks_fn)();\n    return multip_send(id, packet, sizeof(packet), 0)", "A32(player, 0xfc) = HOST_FN(0x38, multip_ticks_fn)();\n    return multip_send(id, packet, sizeof(packet), 1)"),
 ])
 MESSAGE_MUTATIONS.append(("host departure tag", "multip_message_allocated(0, 0x1012)", "multip_message_allocated(0, 0x9999)"))
 
 
 DRAW_MUTATIONS = [
-    ("drawing pending guard", "if (M32(0x984) != 0)", "if (0)"),
+    ("drawing pending guard", "    void *state;\n\n    if (M32(0x984) != 0)", "    void *state;\n\n    if (0)"),
     ("drawing first interval", "M32(0x960) - 200;", "M32(0x960) - 199;"),
     ("drawing captured count", "M32(0x960) = HOST_FN(0x38, multip_ticks_fn)();", "M32(0x960) = HOST_FN(0x38, multip_ticks_fn)(); count = M32(M_PLAYER_COUNT);"),
     ("drawing local guard", "A32(player, 0xc) != 0 || state == NULL", "state == NULL"),
@@ -292,6 +292,269 @@ DRAW_MUTATIONS = [
     ("drawing label option", "if (M32(0x188) != 0) {", "if (M32(0x188) == 0) {"),
     ("drawing registration flag", "M32(0x958) = 1;", "M32(0x958) = 0;"),
     ("drawing removal flag", "M32(0x958) = 0;", "M32(0x958) = 1;"),
+]
+
+
+MOTION_MUTATIONS = [
+    ("prediction elapsed timestamp", "timestamp = A32(player, 0x94)", "timestamp = A32(player, 0x90)"),
+    ("prediction elapsed scale", "s_multip_rdata + 0x38", "s_multip_rdata + 0x30"),
+    ("prediction feedback gate", "if (A32(player, 0x98) != 0)", "if (0)"),
+    ("prediction feedback correction", '"m"(MD(0x130))', '"m"(MD(0x118))'),
+    ("prediction heading lower edge", "A32(state, 0x10) >= 0x4000", "A32(state, 0x10) > 0x4000"),
+    ("prediction heading upper edge", "A32(state, 0x10) <= 0xc000", "A32(state, 0x10) < 0xc000"),
+    ("prediction heading format", "unsigned_heading ? 0xbc : 0xc4", "0xc4"),
+    ("prediction orientation copy", "(uint8_t *)player + 0x6c, 12", "(uint8_t *)player + 0x6c, 8"),
+    ("prediction feedback clear", "A32(player, 0x98) = 0;", "A32(player, 0x98) = 1;"),
+    ("prediction first interval", "M32(0x978) = M32(0x974) - 200", "M32(0x978) = M32(0x974) - 199"),
+    ("selection frame registration", "M32(0x968) = 1;", "M32(0x968) = 0;"),
+    ("selection frame removal", "M32(0x968) = 0;", "M32(0x968) = 1;"),
+]
+# The three feedback branches have identical predicates: select the first.
+MOTION_MUTATIONS[2] = ("prediction feedback gate", "if (A32(player, 0x98) != 0) {\n        UTIL_FN(0xc8, multip_fixed_to_double_fn)(&anchor, (uint8_t *)player + 0x54);", "if (0) {\n        UTIL_FN(0xc8, multip_fixed_to_double_fn)(&anchor, (uint8_t *)player + 0x54);")
+
+
+COMMAND_MUTATIONS = [
+    ("observer view mode guard", "M32(M_LOCAL_PLAYER), 8) == 2", "M32(M_LOCAL_PLAYER), 8) == 1"),
+    ("observer view enabled flag", "M32(0xa58) = 1;", "M32(0xa58) = 2;"),
+    ("cycle first candidate", "        index++;\n        if (index >= count)", "        index += 2;\n        if (index >= count)"),
+    ("cycle local eligibility", "A32(player, 0xc) == 1)", "A32(player, 0xc) == 0)"),
+    ("cycle view word width", "*(uint16_t *)(uintptr_t)(M32(IMPORT_GLOBAL) + 0x11b0) = 1;", "*(uint32_t *)(uintptr_t)(M32(IMPORT_GLOBAL) + 0x11b0) = 1;"),
+    ("observer confirmation result", "& 0x40) == 0", "& 0x20) == 0"),
+    ("observer pending flag", "M32(0xa64) = 1;", "M32(0xa64) = 0;"),
+    ("observer capacity increment", "if (M32(0x9a4) == M32(0x99c)) M32(0x99c)++;", "M32(0x99c)++;"),
+    ("observer player decrement", "        M32(0x9a0)--;\n        M32(0x9a4)++;", "        M32(0x9a0)++;\n        M32(0x9a4)++;"),
+    ("follow stack latitude padding", '"movzwl -0x1c(%esp), %edx\\n\\tmovzwl -0x24(%esp), %eax', '"movzwl -0x1c(%esp), %edx\\n\\tmovzwl -0x20(%esp), %eax'),
+    ("follow heading copy", "position + 32,\n        (void *)(uintptr_t)(A32(player, 0x28) + 0x24), 4", "position + 32,\n        (void *)(uintptr_t)(A32(player, 0x28) + 0x20), 4"),
+    ("follow radius source", "peer_radius = A32(player, 0x30);", "peer_radius = A32(player, 0x2c);"),
+    ("commands registration flag", "M32(0x96c) = 1;", "M32(0x96c) = 0;"),
+    ("commands removal flag", "M32(0x96c) = 0;", "M32(0x96c) = 1;"),
+]
+
+
+WEATHER_MUTATIONS = [
+    ("weather payload length", "A32(packet, 4) = 0x254;", "A32(packet, 4) = 0x250;"),
+    ("weather trailing padding", "A32(packet, 0x258) = padding;", "A32(packet, 0x258) = 0;"),
+    ("weather stack slot", '"movl -0xa8(%esp), %eax', '"movl -0xa4(%esp), %eax'),
+    ("weather first source", "(const void *)(uintptr_t)(M32(IMPORT_GLOBAL) + field->source)", "(const void *)(uintptr_t)(M32(IMPORT_GLOBAL) + field->source + 1)"),
+    ("weather request tag", "multip_message_allocated(0, 0x1013)", "multip_message_allocated(0, 0x1012)"),
+    ("sync message wire tag", "packet[0] = 0x1017;", "packet[0] = 0x1016;"),
+    ("sync message reliability", "multip_send(A32(player, 4), packet, 20, 0)", "multip_send(A32(player, 4), packet, 20, 1)"),
+    ("sync peer field", "packet[3] = A32(player, 0x40);", "packet[3] = A32(player, 0x3c);"),
+]
+WEATHER_MUTATIONS.extend([
+    ("weather receive source", "(const uint8_t *)packet + field->dest, field->size", "(const uint8_t *)packet + field->dest + 1, field->size"),
+    ("weather MAIN notification", "1, *(uint16_t *)(uintptr_t)(M32(IMPORT_GLOBAL) + 0x23e)", "0, *(uint16_t *)(uintptr_t)(M32(IMPORT_GLOBAL) + 0x23e)"),
+    ("weather host reply guard", "if (M32(0xaa8) != 0 && multip_message_1014_impl(id, padding) != 0)", "if (M32(0xaa8) == 0 && multip_message_1014_impl(id, padding) != 0)"),
+    ("weather request stack slot", '"movl -0xb0(%esp), %eax\\n\\tpushl %eax\\n\\tpushl 8(%esp)', '"movl -0xac(%esp), %eax\\n\\tpushl %eax\\n\\tpushl 8(%esp)'),
+])
+
+TICK_MUTATIONS = [
+    ("tick sync zero incoming register", "if (M32(0x164) == 0) return incoming;", "if (M32(0x164) == 0) return 0;"),
+    ("tick sync strict period", "if (result <= M32(0x164)) return result;", "if (result < M32(0x164)) return result;"),
+    ("tick sync counter reset", "M32(0x944) = 0;", "M32(0x944) = 1;"),
+    ("tick weather pending clear", "M32(0xa68) = 0;", "M32(0xa68) = 1;"),
+    ("tick track countdown", "if (M32(0xf1c) != 0) M32(0xf1c)--;", "M32(0xf1c)--;"),
+    ("tick accumulator clamp", "MD(0xa50) = 100.0;", "MD(0xa50) = 99.0;"),
+    ("tick accumulator return", "return (incoming & 0xffff0000u) | status;", "return (incoming & 0xffff0000u);"),
+    ("guidance disable condition", "if (A32(global, 0x84c) != 0) M32(0xab8) = 0;", "if (A32(global, 0x84c) == 0) M32(0xab8) = 0;"),
+    ("guidance panel bit", "global[0x389] |= 0x40;", "global[0x389] |= 0x20;"),
+    ("guidance ADF bearing subtraction", "(uint16_t)(bearing - own_heading)", "(uint16_t)(bearing + own_heading)"),
+    ("guidance autopilot bearing width", "*(uint16_t *)(uintptr_t)(M32(IMPORT_GLOBAL) + 0x7cc)", "*(uint32_t *)(uintptr_t)(M32(IMPORT_GLOBAL) + 0x7cc)"),
+    ("guidance panel enable value", "A32(global, 0x384), 8) + 0x18) = 1;", "A32(global, 0x384), 8) + 0x18) = 2;"),
+    ("tick registration flag", "M32(0x940) = 1;", "M32(0x940) = 0;"),
+    ("tick removal flag", "M32(0x940) = 0;", "M32(0x940) = 1;"),
+]
+
+
+SYSTEM_MUTATIONS = [
+    ("system created player filter", "    if (type == 1) {\n        if (multip_player_add_remote", "    if (type == 1 && id == 0) {\n        if (multip_player_add_remote"),
+    ("system created peer ping", "if (multip_message_1007(id) != 0) return -1;", "if (multip_message_1005(id) != 0) return -1;"),
+    ("system created type query", "if (multip_message_100f(id) != 0) return -1;", "if (multip_message_1006(id) != 0) return -1;"),
+    ("system destroyed failure result", "        multip_player_remove(A32(message, 8));\n    return -1;", "        multip_player_remove(A32(message, 8));\n    return 0;"),
+    ("system destroyed local guard", "if (A32(message, 4) == 1 && A32(message, 8) !=\n        A32((void *)(uintptr_t)M32(M_LOCAL_PLAYER), 4))", "if (A32(message, 4) == 1)"),
+    ("system data unknown peer", "multip_find_player(A32(message, 8)) == NULL", "multip_find_player(A32(message, 8)) != NULL"),
+    ("system host transition", "    M32(0xaa8) = 1;\n    if (multip_session_get_description", "    M32(0xaa8) = 0;\n    if (multip_session_get_description"),
+    ("system host notification", "(2, 1, 0xf536, 0xf537, 0, 0, 0, 0)", "(2, 1, 0xf537, 0xf536, 0, 0, 0, 0)"),
+]
+
+
+APP_PLAYER_MUTATIONS = [
+    ("type request capacity equality", "M32(count_offset) == M32(limit_offset)", "M32(count_offset) >= M32(limit_offset)"),
+    ("type query existing member", "already_member = A32(player, 8) == type;", "already_member = 0;"),
+    ("type request denied reply", "type == 1 ? multip_message_1005(id) : multip_message_1006(id)", "type == 1 ? multip_message_1006(id) : multip_message_1005(id)"),
+    ("type grant target", "multip_find_player(A32(packet, 8));", "multip_find_player(A32(packet, 12));"),
+    ("type grant sender fallback", "if (A32(player, 4) == id) {", "if (A32(player, 4) == A32(packet, 8)) {"),
+    ("type grant ignored publication", "multip_player_publish_name(); /* This fallback ignores publication failure. */", "if (multip_player_publish_name() != 0) return -1;"),
+    ("observer grant pending clear", "    M32(0xa64) = 0;\n    if (multip_message_1004", "    M32(0xa64) = 1;\n    if (multip_message_1004"),
+    ("observer host player count", "if (multip_player_publish_name() != 0) return -1;\n    M32(0x9a0)--;", "if (multip_player_publish_name() != 0) return -1;\n    M32(0x9a0)++;"),
+    ("observer rejected wire tag", "multip_message_allocated(id, 0x100d)", "multip_message_allocated(id, 0x100c)"),
+    ("type query local ID", "multip_message_1003(id, A32(local, 4))", "multip_message_1003(id, id)"),
+    ("collision message word width", "*(uint16_t *)(uintptr_t)(M32(IMPORT_GLOBAL) + 0x832) = 0x10;", "*(uint32_t *)(uintptr_t)(M32(IMPORT_GLOBAL) + 0x832) = 0x10;"),
+    ("observer rejection notification", "(2, 1, 0xf535, 0, 0, 0, 0, 0)", "(2, 1, 0xf534, 0, 0, 0, 0, 0)"),
+]
+
+
+UPDATE_MUTATIONS = [
+    ("full-state payload source", "(const uint8_t *)packet + 0x14, A32(packet, 0x10) - 0x6c", "(const uint8_t *)packet + 0x18, A32(packet, 0x10) - 0x6c"),
+    ("full-state mismatched-size sequence", "}\n        A32(player, 0x50) = A32(packet, 0xc);", "}\n        if (A32(player, 0x2c) == A32(packet, 0x10)) A32(player, 0x50) = A32(packet, 0xc);"),
+    ("motion initialization residual", "AD(player, 0xb4) = 0;", "AD(player, 0xb4) = 1;"),
+    ("compact missing peer", "if (player == NULL) return 0;\n    if (HOST_FN(0x218, multip_memset_fn)(position", "if (player == NULL) return -1;\n    if (HOST_FN(0x218, multip_memset_fn)(position"),
+    ("compact angle unpack", "A32(position, 24) = packed & 0xffc00000u;", "A32(position, 24) = packed & 0xff800000u;"),
+    ("compact zero anchor copy", "if (A32(packet, 0xc) > A32(player, 0x50)) {\n        if (HOST_FN(0x21c, multip_copy_fn)(player + 0x7c, player + 0x54, 0)", "if (A32(packet, 0xc) > A32(player, 0x50)) {\n        if (HOST_FN(0x21c, multip_copy_fn)(player + 0x7c, player + 0x54, 24)"),
+    ("velocity stack altitude", "movzwl -0x14(%eax), %edx", "movzwl -0x18(%eax), %edx"),
+    ("velocity scaling", '"m"(*(double *)(void *)(s_multip_rdata + 8))', '"m"(*(double *)(void *)(s_multip_rdata + 0))'),
+    ("velocity feedback pending", "A32(player, 0x98) = 1;", "A32(player, 0x98) = 0;"),
+    ("timing count signedness", "uint64_t old_count = A32(player, 0x48), new_count;", "int64_t old_count = (int32_t)A32(player, 0x48), new_count;"),
+    ("timing half rounding", "int32_t half = (int32_t)delta / 2;", "int32_t half = (int32_t)delta >> 1;"),
+    ("timing receive timestamp", "A32(player, 0x40) = timestamp;", "A32(player, 0x40) = 0;"),
+    ("timing sender timestamp", "A32(player, 0x3c) = A32(packet, 0x10);", "A32(player, 0x3c) = A32(packet, 0xc);"),
+]
+
+
+TEXTURE_MUTATIONS = [
+    ("texture trim spaces", "while (*end == ' ') *end-- = 0;", "while (*end == ' ') { *end-- = 0; break; }"),
+    ("texture extension dot", "multip_strcpy_fn)(extension, dot);", "multip_strcpy_fn)(extension, dot + 1);"),
+    ("texture directory resource", "multip_string_resource_fn)(0x9006, directory", "multip_string_resource_fn)(0x9007, directory"),
+    ("texture name comparison width", "multip_compare_fn)(name, names + --count * 15, 14)", "multip_compare_fn)(name, names + --count * 15, 13)"),
+    ("texture exists sense", "multip_file_exists_fn)(path, 0) == 0 ? 1 : 0", "multip_file_exists_fn)(path, 0) != 0 ? 1 : 0"),
+    ("texture catalogue opcode", "*(const uint16_t *)(const void *)record == 0x18", "*(const uint16_t *)(const void *)record == 0x17"),
+    ("texture catalogue zeroing", "multip_memset_fn)(entry, 0, 15)", "multip_memset_fn)(entry, 1, 15)"),
+    ("texture list wire stride", "bytes = count * 15", "bytes = count * 14"),
+    ("texture read zeroing", "(1, length, data, 1)", "(1, length, data, 0)"),
+    ("texture short read", "if (length != read) return -1;", "if (0) return -1;"),
+    ("texture short write", "if (size != written) return -1;", "if (0) return -1;"),
+    ("texture write registry width", "multip_copy_fn)(entry, name, 15)", "multip_copy_fn)(entry, name, 14)"),
+    ("texture cleanup extension", "multip_file_exists_fn)(path, 0) != 0", "multip_file_exists_fn)(path, 1) != 0"),
+    ("texture failure pending flag", "if (multip_message_empty(id, 0x1016) != 0) return -1;\n    M32(0x984) = 1;", "if (multip_message_empty(id, 0x1016) != 0) return -1;\n    M32(0x984) = 0;"),
+]
+
+
+TEXTURE_RECEIVE_MUTATIONS = [
+    ("receive owner duplicate", "owner == NULL) {\n        if (HOST_FN(0x20c, multip_alloc_fn)(1, 12", "1) {\n        if (HOST_FN(0x20c, multip_alloc_fn)(1, 12"),
+    ("receive buffer zeroing", "(1, size, (void **)((uint8_t *)file + 0x18), 1)", "(1, size, (void **)((uint8_t *)file + 0x18), 0)"),
+    ("receive texture name width", "multip_copy_fn)((uint8_t *)file + 4, name, 15)", "multip_copy_fn)((uint8_t *)file + 4, name, 14)"),
+    ("receive segment count", "A32(file, 0x1c) = segments;", "A32(file, 0x1c) = segments + 1;"),
+    ("receive outer head bug", "M32(0xdec) = A32(owner, 8);", "if (M32(0xdec) == ADDR(owner)) M32(0xdec) = A32(owner, 8); else { void *previous = (void *)(uintptr_t)M32(0xdec); while (previous && A32(previous, 8) != ADDR(owner)) previous = (void *)(uintptr_t)A32(previous, 8); if (previous) A32(previous, 8) = A32(owner, 8); }"),
+    ("receive missing file return", "if (file == NULL) return -1;\n    if (HOST_FN", "if (file == NULL) return 0;\n    if (HOST_FN"),
+    ("receive chunk offset", "A32(file, 0x18) + A32(packet, 0x10)", "A32(file, 0x18) + 0"),
+    ("receive chunk decrement", "A32(file, 0x1c)--;", "A32(file, 0x1c)++;"),
+    ("receive completed size", "(const void *)(uintptr_t)A32(file, 0x18), A32(file, 0x14)", "(const void *)(uintptr_t)A32(file, 0x18), 0"),
+    ("receive unknown owner cancellation", "if (owner == NULL) return -1;\n    return multip_texture_receive_remove", "if (owner == NULL) return 0;\n    return multip_texture_receive_remove"),
+]
+
+
+TRANSFER_MESSAGE_MUTATIONS = [
+    ("model header wire tag", "A32(packet, 0) = 0x101a;", "A32(packet, 0) = 0x101b;"),
+    ("model header current total", "A32(packet, 8) = A32(aircraft, 8) + A32(aircraft, 0x18);", "A32(packet, 8) = total;"),
+    ("model header record width", "M32(0xa3c) + 0x10, 44)", "M32(0xa3c) + 0x10, 43)"),
+    ("model header title length", "A32(packet, 0x3c) = HOST_FN(0x2b8, multip_strlen_fn)(title) + 1;", "A32(packet, 0x3c) = HOST_FN(0x2b8, multip_strlen_fn)(title);"),
+    ("model header segment count", "A32(packet, 0xc) = segments;", "A32(packet, 0xc) = segments + 1;"),
+    ("model cancellation tag", "multip_message_allocated(id, 0x101c)", "multip_message_allocated(id, 0x101f)"),
+    ("model chunk wire tag", "A32(packet, 0) = 0x101b;", "A32(packet, 0) = 0x101e;"),
+    ("model chunk offset", "A32(packet, 0xc) = offset;", "A32(packet, 0xc) = 0;"),
+    ("texture chunk ID", "A32(packet, 8) = texture;", "A32(packet, 8) = texture + 1;"),
+    ("texture chunk offset", "A32(packet, 0x10) = offset;", "A32(packet, 0x10) = 0;"),
+    ("texture header raw name", "multip_copy_fn)(packet + 8, name, 15)", "multip_copy_fn)(packet + 8, name, 14)"),
+    ("texture header size", "A32(packet, 0x18) = size;", "A32(packet, 0x18) = size + 1;"),
+]
+
+
+TEXTURE_SEND_MUTATIONS = [
+    ("sender name comparison width", "multip_compare_fn)(name, file, 15) == 0) break;\n        file =", "multip_compare_fn)(name, file, 14) == 0) break;\n        file ="),
+    ("sender segment rounding", "if (size % M32(0x16c) != 0) A32(file, 0x14)++;", "if (0) A32(file, 0x14)++;"),
+    ("sender texture ID increment", "A32(file, 0x10) = M32(0xe40); M32(0xe40)++;", "A32(file, 0x10) = M32(0xe40); M32(0xe40)--;"),
+    ("sender duplicate recipient", "if (recipient != NULL) return -1;", "if (recipient != NULL) return 0;"),
+    ("sender missing recipient", "if (recipient == NULL) return -1;", "if (recipient == NULL) return 0;"),
+    ("sender timer rate", "s_multip_rdata + 0x198", "s_multip_rdata + 0x188"),
+    ("sender CHAIN start code", "(2, multip_texture_send_callback) != 0) return -1;\n        M32(0xe38) = 1;", "(3, multip_texture_send_callback) != 0) return -1;\n        M32(0xe38) = 1;"),
+    ("sender CHAIN stop flag", "M32(0xe38) = 0;\n    }\n    return 0;", "M32(0xe38) = 1;\n    }\n    return 0;"),
+    ("sender chunk cap", "if (size > M32(0x16c)) size = M32(0x16c);", "if (size > M32(0x16c)) size = 0;"),
+    ("sender threshold comparison", "if (status & 0x100) return result;\n    MD(0xe50)", "if (status & 0x4100) return result;\n    MD(0xe50)"),
+    ("sender request enable", "if (M32(0xac4) != 0) {", "if (M32(0xac4) == 0) {"),
+    ("sender request reverse index", "packet + 12 + A32(packet, 8) * 15", "packet + 12"),
+]
+
+
+MODEL_SEND_MUTATIONS = [
+    ("model send total size", "M32(0xe18) = A32(local, 0x24) + A32(local, 0x2c);", "M32(0xe18) = A32(local, 0x24);"),
+    ("model send timer rate", "s_multip_rdata + 0x178", "s_multip_rdata + 0x188"),
+    ("model send segment rounding", "if (M32(0xe18) % M32(0x16c) != 0) M32(0xe1c)++;", "if (0) M32(0xe1c)++;"),
+    ("model send missing ID", "if (recipient == NULL) return 0;", "if (recipient == NULL) return -1;"),
+    ("model send initial data zeroing", "M32(0xe18), (void **)(uintptr_t)(D + 0xe14), 1)", "M32(0xe18), (void **)(uintptr_t)(D + 0xe14), 0)"),
+    ("model send chunk cap", "if (size >= M32(0x16c)) size = M32(0x16c);", "if (size >= M32(0x16c)) size = 0;"),
+    ("model send elapsed reset", "MD(0xe30) = -1.0;", "MD(0xe30) = 0.0;"),
+    ("model send remove stop", "if (M32(0xe10) == 0 && multip_model_send_stop() != 0)", "if (0 && multip_model_send_stop() != 0)"),
+    ("model send request enable", "if (M32(0xacc) != 0) {", "if (M32(0xacc) == 0) {"),
+    ("model send callback registration", "(2, multip_model_send_callback) != 0) return -1;\n        M32(0xe20) = 1;", "(3, multip_model_send_callback) != 0) return -1;\n        M32(0xe20) = 1;"),
+]
+
+
+MODEL_CACHE_MUTATIONS = [
+    ("cache scalar order", "{0x20, 0x28, 0x14, 0x1c}", "{0x28, 0x20, 0x14, 0x1c}"),
+    ("cache model folder ID", "(0x9006, folder, 260);\n    if (HOST_FN", "(0x9007, folder, 260);\n    if (HOST_FN"),
+    ("cache mkdir skipped", "multip_directory_create_fn)(path) != 0) return -1;", "multip_directory_create_fn)(path) != 0) return 0;"),
+    ("cache write scalar short count", "if (written != 4) return -1;", "if (written != 4) return 1;"),
+    ("cache read scalar short count", "if (read != 4) return -1;", "if (read != 4) return 1;"),
+    ("cache header short read", "if (read != A32(aircraft, 0x14)) return -1;", "if (read != A32(aircraft, 0x14)) return 1;"),
+    ("cache model short write", "if (written != A32(aircraft, 0x1c)) return -1;", "if (written != A32(aircraft, 0x1c)) return 1;"),
+    ("cache title allocation zeroing", "(void **)(uintptr_t)(A32(aircraft, 0x18) + 0x64), 0)", "(void **)(uintptr_t)(A32(aircraft, 0x18) + 0x64), 1)"),
+]
+
+
+MODEL_RECEIVE_MUTATIONS = [
+    ("model receive duplicate", "if (transfer != NULL) return -1;", "if (transfer != NULL) return 0;"),
+    ("model receive metadata width", "(const uint8_t *)packet + 0x10, 44)", "(const uint8_t *)packet + 0x10, 43)"),
+    ("model receive title source", "(const char *)packet + 0x40)", "(const char *)packet + 0x41)"),
+    ("model receive buffer zeroing", "(void **)((uint8_t *)transfer + 0x34), 1)", "(void **)((uint8_t *)transfer + 0x34), 0)"),
+    ("model receive split offset", "A32(transfer, 0x34) + A32(transfer, 0x1c)", "A32(transfer, 0x34) + A32(transfer, 0x1c) + 1"),
+    ("model receive missing transfer", "if (transfer == NULL) return -1;", "if (transfer == NULL) return 0;"),
+    ("model receive chunk offset", "A32(transfer, 0x34) + A32(packet, 0xc)", "A32(transfer, 0x34) + 0"),
+    ("model receive segment decrement", "A32(transfer, 4)--;", "A32(transfer, 4)++;"),
+    ("model receive absent peer cleanup", "            multip_model_receive_remove(id);", "            /* skip cleanup */"),
+    ("model receive saved position width", "(const uint8_t *)(uintptr_t)A32(aircraft, 0x18) + 4, 36)", "(const uint8_t *)(uintptr_t)A32(aircraft, 0x18) + 4, 35)"),
+    ("model receive restored position width", "(uint8_t *)(uintptr_t)A32(aircraft, 0x18) + 4,\n        saved, 36)", "(uint8_t *)(uintptr_t)A32(aircraft, 0x18) + 4,\n        saved, 35)"),
+    ("model receive temporary path cleanup", "if (HOST_FN(0x214, multip_free_fn)((void **)(uintptr_t)(A32(temporary, 0x18) + 0x64)) != 0)", "if (0)"),
+]
+
+
+TITLE_RECEIVE_MUTATIONS = [
+    ("title cache raw return", "return UTIL_FN(0xa0, multip_aircraft_cache_exists_fn)(path);", "return UTIL_FN(0xa0, multip_aircraft_cache_exists_fn)(path) != 0;"),
+    ("title visibility source", "A32(player, 0x38) = A32(packet, 8);", "A32(player, 0x38) = A32(packet, 4);"),
+    ("title temporary zero width", "multip_memset_fn)(temporary, 0, 12)", "multip_memset_fn)(temporary, 0, 11)"),
+    ("title local aircraft selection", "multip_aircraft_select_fn)(temporary, title) != 0", "multip_aircraft_select_fn)(temporary, title) == 0"),
+    ("title saved position width", "(const uint8_t *)(uintptr_t)A32(player, 0x28) + 4, 36)", "(const uint8_t *)(uintptr_t)A32(player, 0x28) + 4, 35)"),
+    ("title restored position width", "(uint8_t *)(uintptr_t)A32(player, 0x28) + 4,\n            saved, 36)", "(uint8_t *)(uintptr_t)A32(player, 0x28) + 4,\n            saved, 35)"),
+    ("title model request setting", "else if (M32(0xad0) != 0)", "else if (M32(0xad0) == 0)"),
+]
+
+
+STATE_MESSAGE_MUTATIONS = [
+    ("state blocked word width", "*(const uint16_t *)(const void *)(global + 0x5dc)", "*(const uint32_t *)(const void *)(global + 0x5dc)"),
+    ("state full trailing bytes", "packet[index] = stack[index];", "packet[index] = stack[index] ^ 1;"),
+    ("state full sent size", "multip_send(id, packet, size + 20, 0)", "multip_send(id, packet, size + 19, 0)"),
+    ("state compact angle mask", "(A32(global, 0x578) & 0xffc00000u)", "(A32(global, 0x578) & 0xff800000u)"),
+    ("state compact padding slot", "movzwl -0x3c2(%esp), %eax", "movzwl -0x3c4(%esp), %eax"),
+    ("state velocity padding slot", "movzwl -2(%esp), %eax", "movzwl -4(%esp), %eax"),
+    ("state velocity scaling", "s_multip_rdata + 0x170", "s_multip_rdata + 0x188"),
+    ("state velocity count", "A32(packet, 8) = M32(0xe08); M32(0xe08)++;", "A32(packet, 8) = M32(0xe08); M32(0xe08)--;"),
+    ("state velocity extra field", "A32(packet, 0x1c) = A32(global, 0x2b4);", "A32(packet, 0x1c) = A32(global, 0x2b0);"),
+    ("state velocity blocked guard", "if (multip_motion_is_blocked()) {", "if (!multip_motion_is_blocked()) {"),
+]
+
+
+CONTROL_UPDATE_MUTATIONS = [
+    ("control initialization flag", "M32(0x948) = state; M32(0x94c) = A32(global, 0x268); M32(0xfc) = 0;", "M32(0x948) = state; M32(0x94c) = A32(global, 0x268); M32(0xfc) = 1;"),
+    ("control cached word compare", "if (M32(0x948) != state)", "if (M32(0x948) == state)"),
+    ("control local timer clamp", "A32(local, 0xcc) = (int32_t)timer < 0 ? 0 : timer;", "A32(local, 0xcc) = timer;"),
+    ("control remote timer clamp", "A32(player, 0xcc) = (int32_t)timer < 0 ? 0 : timer;", "A32(player, 0xcc) = timer;"),
+    ("control collision peer filter", "if (A32(player, 0xc) != 0 || A32(player, 8) != 1)", "if (A32(player, 0xc) == 0 || A32(player, 8) != 1)"),
+    ("control collision distance boundary", "if (separation > 0) continue;", "if (separation >= 0) continue;"),
+    ("control collision notification ID", "multip_message_1011(A32(player, 4))", "multip_message_1011(0)"),
+    ("publish timer threshold", "if (status & 0x100) return 0;", "if (status & 0x4100) return 0;"),
+    ("publish checksum saved byte", "M8(0xf28) = sum;", "M8(0xf28) = sum ^ 1;"),
+    ("publish checksum start", "A32(global, 0x11e4) + 0x28;", "A32(global, 0x11e4) + 0x29;"),
+    ("publish compact padding", "stack + 0x26)", "stack + 0x24)"),
+    ("publish velocity padding", "stack + 0x3e6)", "stack + 0x3e4)"),
 ]
 
 
@@ -311,9 +574,9 @@ def check_variant(directory, source, slice_name):
     ]
     subprocess.run(command, check=True, capture_output=True, text=True)
     result = subprocess.run(
-        ["wine", "multipdiff.exe", "1200"] + ([slice_name] if slice_name in ("local", "frame", "players", "messages", "draw") else []), cwd=directory,
+        ["wine", "multipdiff.exe", "1200"] + ([slice_name] if slice_name in ("local", "frame", "players", "messages", "draw", "motion", "commands", "weather", "tick", "system", "app_players", "updates", "textures", "texture_receive", "transfer_messages", "texture_send", "model_send", "model_cache", "model_receive", "title_receive", "state_messages", "control_updates") else []), cwd=directory,
         env={**os.environ, "WINEDEBUG": "-all"}, capture_output=True,
-        text=True, timeout=60,
+        text=True, timeout=180 if slice_name == "send" else 60,
     )
     label = {"send": "send-one/drain/flush", "receive": "receive-one/dequeue",
              "workers": "worker lifecycles",
@@ -323,7 +586,7 @@ def check_variant(directory, source, slice_name):
              "aircraft": "aircraft select/release",
              "records": "aircraft copy/session browser records",
              "tracking": "track-name display", "messages": "application message constructors",
-             "players": "player lifecycle helpers", "local": "local player creation/start", "frame": "session CHAIN 0x14", "draw": "player drawing/CHAIN 0x10"}[slice_name]
+             "players": "player lifecycle helpers", "local": "local player creation/start", "frame": "session CHAIN 0x14", "draw": "player drawing/CHAIN 0x10", "motion": "aircraft extrapolation/CHAIN 0x13", "commands": "view commands/CHAIN 0x0c", "weather": "weather/sync messages", "tick": "tick callbacks/CHAIN 0x02", "system": "DirectPlay system notifications", "app_players": "application player types", "updates": "aircraft state receive/timing", "textures": "texture catalogue/file services", "texture_receive": "multipart texture receive", "transfer_messages": "multipart transfer messages", "texture_send": "multipart texture sender", "model_send": "multipart model sender", "model_cache": "aircraft cache files", "model_receive": "multipart model receive", "title_receive": "aircraft title receive", "state_messages": "aircraft state message constructors", "control_updates": "control/collision/state publishing"}[slice_name]
     prefix = f"MULTIP {label}: 1200 scenarios, "
     lines = [line for line in result.stdout.splitlines() if line.startswith(prefix)]
     if len(lines) != 1 or result.returncode not in (0, 1):
@@ -336,7 +599,7 @@ def check_variant(directory, source, slice_name):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--slice", choices=("send", "receive", "workers", "directplay", "profile", "groups", "metadata", "aircraft", "records", "tracking", "messages", "players", "local", "frame", "draw", "all"), default="all")
+    parser.add_argument("--slice", choices=("send", "receive", "workers", "directplay", "profile", "groups", "metadata", "aircraft", "records", "tracking", "messages", "players", "local", "frame", "draw", "motion", "commands", "weather", "tick", "system", "app_players", "updates", "textures", "texture_receive", "transfer_messages", "texture_send", "model_send", "model_cache", "model_receive", "title_receive", "state_messages", "control_updates", "all"), default="all")
     args = parser.parse_args()
     variants = []
     if args.slice in ("send", "all"):
@@ -357,12 +620,29 @@ def main():
                                   ("players", PLAYER_MUTATIONS),
                                   ("local", LOCAL_MUTATIONS),
                                   ("frame", FRAME_MUTATIONS),
-                                  ("draw", DRAW_MUTATIONS)):
+                                  ("draw", DRAW_MUTATIONS),
+                                  ("motion", MOTION_MUTATIONS),
+                                  ("commands", COMMAND_MUTATIONS),
+                                  ("weather", WEATHER_MUTATIONS),
+                                  ("tick", TICK_MUTATIONS),
+                                  ("system", SYSTEM_MUTATIONS),
+                                  ("app_players", APP_PLAYER_MUTATIONS),
+                                  ("updates", UPDATE_MUTATIONS),
+                                  ("textures", TEXTURE_MUTATIONS),
+                                  ("texture_receive", TEXTURE_RECEIVE_MUTATIONS),
+                                  ("transfer_messages", TRANSFER_MESSAGE_MUTATIONS),
+                                  ("texture_send", TEXTURE_SEND_MUTATIONS),
+                                  ("model_send", MODEL_SEND_MUTATIONS),
+                                  ("model_cache", MODEL_CACHE_MUTATIONS),
+                                  ("model_receive", MODEL_RECEIVE_MUTATIONS),
+                                  ("title_receive", TITLE_RECEIVE_MUTATIONS),
+                                  ("state_messages", STATE_MESSAGE_MUTATIONS),
+                                  ("control_updates", CONTROL_UPDATE_MUTATIONS)):
         if args.slice in (slice_name, "all"):
             variants.extend((slice_name, *mutation) for mutation in mutations)
     source = (ROOT / "src/multip/multip.c").read_text()
     for include in ("multip_profile.inc", "multip_session.inc",
-                    "multip_aircraft.inc", "multip_records.inc", "multip_tracking.inc", "multip_messages.inc", "multip_players.inc", "multip_callbacks.inc"):
+                    "multip_aircraft.inc", "multip_records.inc", "multip_tracking.inc", "multip_messages.inc", "multip_players.inc", "multip_callbacks.inc", "multip_motion.inc", "multip_commands.inc", "multip_weather.inc", "multip_tick.inc", "multip_system.inc", "multip_app_players.inc", "multip_updates.inc", "multip_textures.inc", "multip_texture_receive.inc", "multip_transfer_messages.inc", "multip_texture_send.inc", "multip_model_send.inc", "multip_model_cache.inc", "multip_model_receive.inc", "multip_title_receive.inc", "multip_state_messages.inc", "multip_control_updates.inc"):
         source = source.replace('#include "' + include + '"',
                                 (ROOT / "src/multip" / include).read_text())
     for slice_name, name, before, after in variants:
@@ -370,7 +650,7 @@ def main():
             raise RuntimeError(f"Mutation {name!r} matches {source.count(before)} times; expected one")
     with tempfile.TemporaryDirectory(prefix="multip-breaks-", dir="/tmp") as temp:
         directory = Path(temp)
-        for name in ("multipdiff.exe", "MULTIP_retail.dll"):
+        for name in ("multipdiff.exe", "MULTIP_retail.dll", "UTIL_retail.dll", "G3D_retail.dll"):
             shutil.copy2(ROOT / "bin/difftest" / name, directory / name)
         if check_variant(directory, source, "send") != 0:
             raise RuntimeError("Unmodified baseline differs")

@@ -39,7 +39,13 @@ development guard, not plausible retail behavior.
 
 Additional implementation lives in `multip_profile.inc`, `multip_session.inc`,
 `multip_aircraft.inc`, `multip_records.inc`, `multip_tracking.inc`,
-`multip_messages.inc`, `multip_players.inc` and `multip_callbacks.inc` under `src/multip/`.
+`multip_messages.inc`, `multip_players.inc`, `multip_callbacks.inc`,
+`multip_motion.inc`, `multip_commands.inc`, `multip_weather.inc` and
+`multip_tick.inc`, `multip_system.inc`, `multip_app_players.inc`,
+`multip_updates.inc`, `multip_textures.inc`, `multip_texture_receive.inc`,
+`multip_transfer_messages.inc`, `multip_texture_send.inc`, `multip_model_send.inc`,
+`multip_model_cache.inc`, `multip_model_receive.inc`, and `multip_title_receive.inc`
+under `src/multip/`.
 The differential fixtures with the same names live under `tools/difftest/` (record enumeration shares the aircraft
 copy fixture). The generated profile field order comes from
 `tools/gen_multip_profile.py`; initialized image data and pointer fixups come
@@ -78,14 +84,23 @@ The following internal paths are now implemented and compared against retail:
   an extra packet and leak it on enqueue failure. The unused tails of retail's
   1000-byte stack buffers are omitted because they are never sent.
 
-The private test table now has entries 0–91; `send_internal` in
+The private test table now has entries 0–205; `send_internal` in
 `tools/difftest/multip_send.inc` maps each to its retail RVA. Entries 25–33
 are profile and group/session helpers, 34–41 description/name/counter helpers,
 42–44 aircraft ownership, 45–50 browser records/enumeration, 51–58 tracking
 and selection, 59–72 message constructors, and 73–78 player ownership
 helpers. Entries 79–80 are local creation/start, 81–84 are peer enumeration,
 receive membership, ping and host departure; 85–87 own the session CHAIN
-`0x14` callback, and 88–91 own drawing/CHAIN `0x10`. Production exports
+`0x14` callback, and 88–91 own drawing/CHAIN `0x10`. Entries 92–96 own
+extrapolation/CHAIN `0x13`, 97–103 view commands/CHAIN `0x0c`, 104–106 weather
+and sync messages, and 107–114 tick callbacks/CHAIN `0x02`. Entries 115–119
+are system notifications, 120–135 weather/player handlers, 136–140 state
+updates, 141–152 texture files/catalogues, 153–162 texture reception,
+163–167 multipart packet constructors, 168–177 texture sending, 178–185 model
+sending, 186–189 cache files/replacement, 190–194 model reception, and
+195–196 title lookup/announcements, 197–200 state constructors, and
+201–205 control/publication helpers and the in-progress control callback.
+The control callback itself still needs its owner fixture. Production exports
 still contain only ImportTable and Linkage.
 
 New comparison labels are `profile load/save`, `session/group primitives`,
@@ -106,7 +121,7 @@ bytes reach all type characters. Constructor snapshots must be saved before
 later enumeration resets the embedded list; a stride mutation exposed this
 fixture gap and now fails the comparison.
 
-The expanded seventeen-suite differential run passes 20,000 scenarios per suite
+The expanded thirty-four-suite differential run passes 20,000 scenarios per suite
 with zero differences. `make multipdiff` builds both production and test DLLs
 without warnings; the production export table contains only ImportTable and
 Linkage. These remain slice results, not whole-module acceptance. The full
@@ -171,12 +186,141 @@ can run alone: `multipdiff.exe 1200 local`, `frame`, `draw`, `players`, or
 
 Public init/deinit, session toggle, and dialog entries remain disabled.
 Completion at `+0x9c70` still depends on all six callback-registration groups
-at `+0x8220`; only the frame and renderer owners above are ready. The remaining
-groups start at `+0x2460`, `+0x27c0`, `+0x2e30`, and `+0x2ea0` (reverse
-teardown is `+0x8270`). Variable messages starting at `+0x59d0`, receive
-system/application dispatch, multipart traffic, extrapolation, lobby/provider
+at `+0x8220`; five are now recovered. The remaining group at `+0x27c0`
+registers receive processing (`+0x47f0`) and controls/collision updates
+(`+0x2870`). Reverse teardown is `+0x8270`. State message constructors starting at
+`+0x59d0`, receive system/application dispatch, lobby/provider
 and dialog callbacks still need recovery. Keep MULTIP outside `MODULES`
 until the whole-module acceptance gates below pass.
+
+## Extrapolation, commands, weather and tick checkpoint
+
+`multip_motion.inc` recovers `+0x3330/+0x33f0` and the CHAIN `0x13` owner
+at `+0x2e30/+0x2e50/+0x2e80`. Its feedback retains x87 intermediate stores,
+heading-dependent signed/unsigned conversion, longitude/metres conversion
+at the saved latitude, and partial model updates on copy failure. The fixture
+uses retail UTIL's stateless conversions. Its unsigned DIV overflow is repaired
+exactly as the host does: quotient UINT32_MAX, remainder zero. This is required
+for normal negative longitude steps, not a filtered input domain.
+
+`multip_commands.inc` recovers `+0x2f40`, `+0x3020`, `+0x3200`, `+0x3250`
+and CHAIN `0x0c` at `+0x2ea0/+0x2ec0/+0x2ef0`. Cycling preserves retail's
+empty/no-eligible spin and invalid-pointer outcomes; a main-thread watchdog
+and vectored exception boundary compare these outcomes. The 20k run observes
+79 spins and 78 pointer faults. Follow placement keeps its two caller-stack
+padding words (entry ESP-0x24 and ESP-0x1c; through the command callback,
+ESP-0x28 and ESP-0x20) via entry shims. Observer conversion preserves capacity
+wrap, counts, name publication, request-pending state and failure ordering.
+
+`multip_weather.inc` adds messages `1013`, `1014`, and `1017` at
+`+0x60d0/+0x6140/+0x67e0`. The 28 weather fields are extracted in call order by
+`tools/gen_multip_weather.py` into `multip_weather_fields.inc`. They initialize
+bytes +8 through +0x257, while retail sends 0x25c bytes: the last four bytes
+are caller stack at entry ESP-0xa8, preserved by a shim. The tick maintenance
+caller contributes another eight bytes, so its shim reads entry ESP-0xb0.
+Both fixtures paint adjacent slots differently. Sync timestamps are read after
+allocation and before peer fields, and sync traffic starts with flags zero.
+
+`multip_tick.inc` adds all four CHAIN `0x02` callbacks and their
+`+0x2460/+0x24d0` owner. Sync at `+0x2590` runs after the counter exceeds the
+period, includes wrapping counters, and preserves incoming EAX when disabled.
+Interval accumulation at `+0x2550` retains upper incoming EAX and returns the
+raw x87 status word in AX; tests vary precision/rounding and include NaN and
+infinite values. Maintenance at `+0x25f0` decrements the track countdown and
+clears weather-pending before sending. Guidance at `+0x2630` plus
+`+0x2730/+0x2790` preserves panel word writes, ADF bearing, autopilot heading,
+GLOBAL+0x84c's disabling side effect, and state reloads after range calls.
+
+These four new suites pass 20,000 scenarios each. Extrapolation's 12,
+commands' 14, weather's 12 and tick's 14 deliberate errors are caught.
+Crashes, fixture exhaustion and timeouts are not catches.
+
+## Multipart traffic and receive checkpoint
+
+System notifications (`multip_system.inc`) cover player/group creation,
+player destruction/data and host migration. Destruction returns -1 even after
+successful removal. Host migration publishes its flag before querying the
+session and retains partial changes and leaks on failure. Application player
+handlers in `multip_app_players.inc` preserve capacity equality checks,
+reverse lookup, local-name publication for remote grants and the ignored
+publication failure in the sender-ID fallback. These suites catch 8 and 12
+mutations respectively.
+
+`multip_updates.inc` covers messages 1000, 1017, 1018 and 1019, including
+sequence wrapping, the zero-byte anchor copy, signed velocity conversions,
+caller-stack padding and the running timing average. Thirteen mutations are
+caught. Malformed matching lengths below 0x6c still need explicit guarded
+coverage before whole-module acceptance.
+
+`multip_textures.inc` covers catalogue/path/read/write/cleanup and messages
+1015/1016. The fixture uses real retail G3D record stepping and a memory
+filesystem; guarded path inputs produce 34,958 pointer-fault outcomes in
+20,000 scenarios. All fourteen mutations are caught. Host +0x304 clears only
+the list count and returns the original list pointer; it does not free or
+reset the backing array.
+
+`multip_texture_receive.inc` covers 101d/e/f and both linked-list levels.
+The 101d wire fields are size at +0x18, texture ID at +0x1c, and segments at
++0x20. The internal add signature is owner/name/size/ID/segments. Removing a
+non-head owner still replaces the global head with that owner's successor,
+detaching earlier owners without freeing them. Ten mutations are caught;
+the alternative unlink mutation repairs both links so it completes rather
+than crashing on a dangling owner.
+
+`multip_transfer_messages.inc` builds 101a/b/c/d/e, including raw fifteen-byte
+names, ignored title/strcpy results, and initial packet leaks on enqueue
+failure. The model header ignores its second argument and reads the current
+GLOBAL aircraft total after callbacks. Twelve mutations are caught.
+
+`multip_texture_send.inc` covers the file cache, recipient lists, CHAIN 2
+registration and timed chunks plus the mutable 1015 request. Cached file data
+is retained when a file node is removed. It subtracts 1.0 after reaching the
+timer threshold; `multip_model_send.inc` instead resets its accumulator to
+-1.0. Both compare the extended sum before the double store and retain raw
+FNSTSW returns and pointer returns. Texture tests compare all fifteen name
+bytes, including after NUL. The suites catch twelve and ten mutations.
+
+`multip_model_cache.inc` serializes four fields in order 0x20, 0x28, 0x14,
+0x1c, then header and model bytes. Path-join failure on the initial path
+returns success, as retail does. Loading reallocates both buffers, closes the
+file, then allocates the model's path string. Replacement retains the old
+position and frees the temporary path/model/header in that order. Eight file
+mutations are caught. The fixture has byte cursors and independently chosen
+short-transfer stages, so later short reads/writes are reachable.
+
+`multip_model_receive.inc` covers 101a/b/c and the transfer list. Tests include
+duplicate announcements, out-of-order chunks, wrapped segment counts,
+missing peers, failed frees and completion through cache publication and
+peer replacement. Twenty thousand scenarios match, with 57 pointer-fault
+outcomes from retained retail failure paths; all twelve mutations are caught.
+The completion fixture currently uses an empty texture catalogue; nonempty
+catalogues are covered independently by the texture suite.
+
+The last full run, after the naming cleanup, has 34 suites of 20,000
+scenarios with zero differences.
+`multip_title_receive.inc` adds title announcements (100e), local ACONTAIN
+selection, UTIL +0xa0 cache probing, cache replacement and optional 1010
+requests. Its 20,000-scenario suite and seven mutations pass. Outgoing full
+state and compact position constructors in `multip_state_messages.inc` pass
+20,000 scenarios and ten mutations. They preserve both compact two-byte
+padding words and the full-state packet's 0x6c-byte uninitialized tail through
+painted caller-stack fixtures. `multip_control_updates.inc` adds control
+change detection, collision cooldowns and state throttling; its helper suite
+passes 20,000 scenarios and twelve mutations. The new control callback ABI
+entry remains under development and is not covered by that helper claim.
+
+The full mutation sweep remains incomplete: the 324-case run stopped on a
+Wine timeout in the drawing slice. The current 346 mutation targets all
+match exactly once, but the full sweep still needs completion. The earlier
+154-case sweep and individual new owner slices passed before the naming
+cleanup. Do not count a timeout or fixture abort as a catch.
+
+The naming audit covers all 70 MULTIP source/include/resource, generator,
+fixture and mutation files. The cleanup renamed 119 identifiers across 18
+files and retained standard `<stdint.h>` types. All project-owned identifiers
+are snake_case; external Windows/COM names and required exports are preserved.
+`src/multip/AGENTS.md` records the user's naming correction for future work.
+
 
 ## Image and public interface
 
@@ -735,6 +879,10 @@ MULTIP player lifecycle helpers: 20000 scenarios, 0 differ
 MULTIP local player creation/start: 20000 scenarios, 0 differ
 MULTIP session CHAIN 0x14: 20000 scenarios, 0 differ
 MULTIP player drawing/CHAIN 0x10: 20000 scenarios, 0 differ
+MULTIP aircraft extrapolation/CHAIN 0x13: 20000 scenarios, 0 differ
+MULTIP view commands/CHAIN 0x0c: 20000 scenarios, 0 differ
+MULTIP weather/sync messages: 20000 scenarios, 0 differ
+MULTIP tick callbacks/CHAIN 0x02: 20000 scenarios, 0 differ
 MULTIP worker lifecycles: 20000 scenarios, 0 differ
 ```
 
@@ -743,9 +891,9 @@ MULTIP worker lifecycles: 20000 scenarios, 0 differ
 The transport units and worker lifecycles in stages 1–4 are complete, including
 queue construction/clear/destruction and the combined subsystem wrappers.
 DirectPlay lifetime, profiles, host/join/group primitives, session descriptions,
-player creation/removal, and the two session callbacks described above are
-also verified. Next recover the other four callback owners, receive dispatch
-and extrapolation, then integrate registration/teardown with the workers in
+player creation/removal, and five session callback owners described above are
+also verified. Next recover the `+0x27c0` callback owner and receive dispatch,
+then integrate registration/teardown with the workers in
 common completion `+0x9c70` and disconnect `+0x8cf0`. Keep public `+0x18`
 disabled until its configuration and complete session paths are ready. The
 loader flag alone does not prove the factory is available, and create's first

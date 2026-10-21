@@ -64,10 +64,13 @@ MODULES := ACONTAIN ADVDRV ANALYSIS ATC BOOSTER CHAIN CONTROLS DEMO DYNAMIC FACI
 
 # MULTIP is in progress and intentionally is not in MODULES yet.  Its
 # recovered portions are built explicitly and differential-tested below.
-$(BIN)/MULTIP.DLL: src/multip/multip.c src/multip/multip_callbacks.inc src/multip/multip_frame_actions.inc src/multip/multip_players.inc src/multip/multip_nametag.inc src/multip/multip_messages.inc src/multip/multip_tracking.inc src/multip/multip_records.inc src/multip/multip_aircraft.inc src/multip/multip_session.inc src/multip/multip_profile.inc src/multip/multip_profile_fields.inc src/multip/multip.def src/multip/multip_data.inc src/multip/multip_rdata.inc src/multip/multip_pointers.inc $(BIN)/multip.res
+$(BIN)/MULTIP.DLL: src/multip/multip.c src/multip/multip_callbacks.inc src/multip/multip_motion.inc src/multip/multip_commands.inc src/multip/multip_weather.inc src/multip/multip_tick.inc src/multip/multip_system.inc src/multip/multip_app_players.inc src/multip/multip_updates.inc src/multip/multip_textures.inc src/multip/multip_texture_receive.inc src/multip/multip_transfer_messages.inc src/multip/multip_texture_send.inc src/multip/multip_model_send.inc src/multip/multip_model_cache.inc src/multip/multip_model_receive.inc src/multip/multip_title_receive.inc src/multip/multip_state_messages.inc src/multip/multip_control_updates.inc src/multip/multip_weather_fields.inc src/multip/multip_frame_actions.inc src/multip/multip_players.inc src/multip/multip_nametag.inc src/multip/multip_messages.inc src/multip/multip_tracking.inc src/multip/multip_records.inc src/multip/multip_aircraft.inc src/multip/multip_session.inc src/multip/multip_profile.inc src/multip/multip_profile_fields.inc src/multip/multip.def src/multip/multip_data.inc src/multip/multip_rdata.inc src/multip/multip_pointers.inc $(BIN)/multip.res
 	@mkdir -p $(BIN)
 	$(CC) $(CFLAGS) $(LDFLAGS) -Wl,--image-base=$(BASE_MULTIP) \
 	      -o $@ src/multip/multip.c $(BIN)/multip.res src/multip/multip.def -lkernel32
+
+src/multip/multip_weather_fields.inc: $(ORIG)/Modules/multip.dll tools/gen_multip_weather.py
+	@python3 tools/gen_multip_weather.py
 
 src/multip/multip_data.inc src/multip/multip_rdata.inc src/multip/multip_pointers.inc src/multip/multip_nametag.inc src/multip/multip_frame_actions.inc &: $(ORIG)/Modules/multip.dll tools/gen_multip_data.py
 	@python3 tools/gen_multip_data.py
@@ -821,13 +824,13 @@ g3ddiff-run: g3ddiff
 
 # MULTIP in progress: public queries, transport, workers and DirectPlay lifetime.
 # Session setup and message dispatch remain pending; no installation.
-$(DIFFDIR)/multipdiff.exe: tools/difftest/multipdiff.c tools/difftest/multip_send.inc tools/difftest/multip_receive.inc tools/difftest/multip_workers.inc tools/difftest/multip_directplay.inc tools/difftest/multip_profile.inc tools/difftest/multip_session.inc tools/difftest/multip_aircraft.inc tools/difftest/multip_tracking.inc tools/difftest/multip_messages.inc tools/difftest/multip_players.inc tools/difftest/multip_local.inc tools/difftest/multip_frame.inc tools/difftest/multip_draw.inc
+$(DIFFDIR)/multipdiff.exe: tools/difftest/multipdiff.c tools/difftest/multip_send.inc tools/difftest/multip_receive.inc tools/difftest/multip_workers.inc tools/difftest/multip_directplay.inc tools/difftest/multip_profile.inc tools/difftest/multip_session.inc tools/difftest/multip_aircraft.inc tools/difftest/multip_tracking.inc tools/difftest/multip_messages.inc tools/difftest/multip_players.inc tools/difftest/multip_local.inc tools/difftest/multip_frame.inc tools/difftest/multip_draw.inc tools/difftest/multip_motion.inc tools/difftest/multip_commands.inc tools/difftest/multip_weather.inc tools/difftest/multip_tick.inc tools/difftest/multip_system.inc tools/difftest/multip_app_players.inc tools/difftest/multip_updates.inc tools/difftest/multip_textures.inc tools/difftest/multip_texture_receive.inc tools/difftest/multip_transfer_messages.inc tools/difftest/multip_texture_send.inc tools/difftest/multip_model_send.inc tools/difftest/multip_model_cache.inc tools/difftest/multip_model_receive.inc tools/difftest/multip_state_messages.inc tools/difftest/multip_control_updates.inc
 	@mkdir -p $(DIFFDIR)
 	$(CC) -std=c99 -O1 -Wall -Wextra -Iinclude -o $@ tools/difftest/multipdiff.c
 
 # Internal transport/worker routines have no public Linkage slots. Expose their addresses
 # only in the differential build, alongside the unchanged retail exports.
-$(DIFFDIR)/MULTIP_test.dll: src/multip/multip.c src/multip/multip_callbacks.inc src/multip/multip_frame_actions.inc src/multip/multip_players.inc src/multip/multip_nametag.inc src/multip/multip_messages.inc src/multip/multip_tracking.inc src/multip/multip_records.inc src/multip/multip_aircraft.inc src/multip/multip_session.inc src/multip/multip_profile.inc src/multip/multip_profile_fields.inc src/multip/multip.def src/multip/multip_data.inc src/multip/multip_rdata.inc src/multip/multip_pointers.inc $(BIN)/multip.res
+$(DIFFDIR)/MULTIP_test.dll: src/multip/multip.c src/multip/multip_callbacks.inc src/multip/multip_motion.inc src/multip/multip_commands.inc src/multip/multip_weather.inc src/multip/multip_tick.inc src/multip/multip_system.inc src/multip/multip_app_players.inc src/multip/multip_updates.inc src/multip/multip_textures.inc src/multip/multip_texture_receive.inc src/multip/multip_transfer_messages.inc src/multip/multip_texture_send.inc src/multip/multip_model_send.inc src/multip/multip_model_cache.inc src/multip/multip_model_receive.inc src/multip/multip_title_receive.inc src/multip/multip_state_messages.inc src/multip/multip_control_updates.inc src/multip/multip_weather_fields.inc src/multip/multip_frame_actions.inc src/multip/multip_players.inc src/multip/multip_nametag.inc src/multip/multip_messages.inc src/multip/multip_tracking.inc src/multip/multip_records.inc src/multip/multip_aircraft.inc src/multip/multip_session.inc src/multip/multip_profile.inc src/multip/multip_profile_fields.inc src/multip/multip.def src/multip/multip_data.inc src/multip/multip_rdata.inc src/multip/multip_pointers.inc $(BIN)/multip.res
 	@mkdir -p $(DIFFDIR)
 	$(CC) $(CFLAGS) -DMULTIP_DIFFTEST $(LDFLAGS) -Wl,--image-base=$(BASE_MULTIP) \
 	      -o $@ src/multip/multip.c $(BIN)/multip.res src/multip/multip.def -lkernel32
@@ -842,7 +845,12 @@ $(DIFFDIR)/MULTIP_ours.dll: $(DIFFDIR)/MULTIP_test.dll
 	@cp $< $@.tmp
 	@mv -f $@.tmp $@
 
-multipdiff: $(DIFFDIR)/multipdiff.exe $(BIN)/MULTIP.DLL $(DIFFDIR)/MULTIP_retail.dll $(DIFFDIR)/MULTIP_ours.dll
+$(DIFFDIR)/G3D_retail.dll: $(ORIG)/Modules/G3D.DLL
+	@mkdir -p $(DIFFDIR)
+	@cp $< $@.tmp
+	@mv -f $@.tmp $@
+
+multipdiff: $(DIFFDIR)/G3D_retail.dll $(DIFFDIR)/UTIL_retail.dll $(DIFFDIR)/multipdiff.exe $(BIN)/MULTIP.DLL $(DIFFDIR)/MULTIP_retail.dll $(DIFFDIR)/MULTIP_ours.dll
 
 multipdiff-run: multipdiff
 	@cd $(DIFFDIR) && WINEDEBUG=-all wine multipdiff.exe $(if $(N),$(N),20000)

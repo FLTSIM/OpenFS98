@@ -611,6 +611,23 @@ static uint32_t FS98_STDCALL multip_send(uint32_t to_id, const void *payload,
 #include "multip_messages.inc"
 #include "multip_players.inc"
 #include "multip_callbacks.inc"
+#include "multip_motion.inc"
+#include "multip_commands.inc"
+#include "multip_weather.inc"
+#include "multip_tick.inc"
+#include "multip_system.inc"
+#include "multip_app_players.inc"
+#include "multip_updates.inc"
+#include "multip_textures.inc"
+#include "multip_texture_receive.inc"
+#include "multip_transfer_messages.inc"
+#include "multip_texture_send.inc"
+#include "multip_model_send.inc"
+#include "multip_model_cache.inc"
+#include "multip_model_receive.inc"
+#include "multip_title_receive.inc"
+#include "multip_state_messages.inc"
+#include "multip_control_updates.inc"
 
 /* Private entry access for the differential DLL only. Normal builds retain
  * the retail export surface; session and worker code use internal calls. */
@@ -665,7 +682,58 @@ __declspec(dllexport) void *const multip_test_entries[] = {
     (void *)multip_session_frame_callback, (void *)multip_session_frame_start,
     (void *)multip_session_frame_stop,
     (void *)multip_players_draw, (void *)multip_players_draw_callback,
-    (void *)multip_players_draw_start, (void *)multip_players_draw_stop
+    (void *)multip_players_draw_start, (void *)multip_players_draw_stop,
+    (void *)multip_player_predict, (void *)multip_players_predict,
+    (void *)multip_selection_frame_callback, (void *)multip_selection_frame_start,
+    (void *)multip_selection_frame_stop,
+    (void *)multip_selection_toggle_mode, (void *)multip_selection_cycle,
+    (void *)multip_player_become_observer, (void *)multip_selection_follow,
+    (void *)multip_command_callback, (void *)multip_commands_start,
+    (void *)multip_commands_stop,
+    (void *)multip_message_1013, (void *)multip_message_1014, (void *)multip_message_1017,
+    (void *)multip_interval_callback, (void *)multip_sync_callback,
+    (void *)multip_maintenance_callback, (void *)multip_guidance_callback,
+    (void *)multip_guidance_adf, (void *)multip_guidance_autopilot,
+    (void *)multip_tick_start, (void *)multip_tick_stop,
+    (void *)multip_system_group, (void *)multip_system_created,
+    (void *)multip_system_destroyed, (void *)multip_system_player_data,
+    (void *)multip_system_host,
+    (void *)multip_handle_1014, (void *)multip_handle_1013,
+    (void *)multip_handle_1001, (void *)multip_handle_1002,
+    (void *)multip_handle_1008, (void *)multip_handle_1009,
+    (void *)multip_handle_1003, (void *)multip_handle_1004,
+    (void *)multip_handle_1007, (void *)multip_handle_100a,
+    (void *)multip_handle_100c, (void *)multip_handle_100d,
+    (void *)multip_handle_100f, (void *)multip_handle_1011,
+    (void *)multip_handle_1012, (void *)multip_message_100d,
+    (void *)multip_handle_1000, (void *)multip_player_motion_init,
+    (void *)multip_handle_1018, (void *)multip_handle_1019, (void *)multip_handle_1017,
+    (void *)multip_trim_spaces, (void *)multip_filename_extension, (void *)multip_texture_path,
+    (void *)multip_texture_list_contains, (void *)multip_texture_exists, (void *)multip_texture_catalogue,
+    (void *)multip_message_1015, (void *)multip_textures_request, (void *)multip_texture_read,
+    (void *)multip_texture_write, (void *)multip_textures_cleanup, (void *)multip_message_1016,
+    (void *)multip_texture_receive_owner, (void *)multip_texture_receive_file,
+    (void *)multip_texture_receive_ensure, (void *)multip_texture_receive_add,
+    (void *)multip_texture_receive_remove, (void *)multip_texture_receive_remove_owner,
+    (void *)multip_texture_receive_clear, (void *)multip_handle_101d,
+    (void *)multip_handle_101e, (void *)multip_handle_101f,
+    (void *)multip_message_101a, (void *)multip_message_101b, (void *)multip_message_101c,
+    (void *)multip_message_101d, (void *)multip_message_101e,
+    (void *)multip_texture_send_find, (void *)multip_texture_send_cache,
+    (void *)multip_texture_send_uncache, (void *)multip_texture_send_add, (void *)multip_texture_send_remove,
+    (void *)multip_texture_send_stop, (void *)multip_texture_send_start, (void *)multip_texture_send,
+    (void *)multip_texture_send_callback, (void *)multip_handle_1015,
+    (void *)multip_model_send_stop, (void *)multip_model_send_add, (void *)multip_model_send,
+    (void *)multip_model_send_clear, (void *)multip_model_send_cancel, (void *)multip_model_send_remove,
+    (void *)multip_model_send_callback, (void *)multip_handle_1010,
+    (void *)multip_model_cache_prepare, (void *)multip_model_cache_write, (void *)multip_model_cache_read,
+    (void *)multip_model_cache_select, (void *)multip_model_receive_find, (void *)multip_model_receive_remove,
+    (void *)multip_handle_101a, (void *)multip_handle_101b, (void *)multip_handle_101c,
+    (void *)multip_model_cache_exists, (void *)multip_handle_100e,
+    (void *)multip_motion_is_blocked, (void *)multip_message_1000,
+    (void *)multip_message_1018, (void *)multip_message_1019,
+    (void *)multip_control_changes, (void *)multip_control_collisions, (void *)multip_state_publish,
+    (void *)multip_control_publish, (void *)multip_control_callback
 };
 #endif
 

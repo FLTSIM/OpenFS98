@@ -854,3 +854,33 @@ string copy), `0x206e11d8` (a per-axis step divided by `cx`), the
 only one of those stubs calls; the `call`/`ret` wrappers at
 `0x206e1742`..`0x206e1773`; and `0x206e3cc8`/`0x206e3ce6` (reached only
 from themselves) and `0x206e3db5`.
+
+## The breaks
+
+`make g3d-breaks N=1000` applies the 317 deliberate breaks in
+`tools/g3d_breaks.py` one at a time and runs `g3ddiff` on each: **279
+caught, 7 proven equivalent, 31 missed** at 1,000 scenarios (about 4
+hours). Run again at 4,000 scenarios, 12 of the 31 were caught (`bld-inside`,
+`al-bar-one`, `tile-diag`, `tile-lit`, `tile-floor-height`, `tile-uv-offset`,
+`tile-33-kind`, `rw-presence`, `rw-threshold-wide`, `rw-aiming-narrow`,
+`rw-number-narrow`, `sc-take-pad`): those boundaries are reached, rarely.
+**19 are still missed at 4,000**, all from steering not yet reaching an
+exact value:
+
+- the ground tiles: `tile-whole-one` and `tile-sub4` (a tile split into
+  four), `tile-scatter-eye` (the eye inside a scattered building),
+  `tile-cofactor-heading`;
+- the runways: `rw-short` (a length of exactly 3000), `rw-heading-op`,
+  `rw-stripes-room`, `rw-bar-near`, `rw-threshold-max`, `rw-di16`,
+  `rw-dash-near`, `rw-dash-max`, `rw-zone-left`, `rw-number-eleven`,
+  `rw-number-swap`, `rw-reciprocal`, `rw-light-bar-side`, `rw-zone-lights`
+  -- most need a displacement, a number or an eye position exactly on a
+  boundary;
+- `dr-c90`, the frame's draw of the second queue: reachable, but the
+  models the probes put in it were rejected by their view test.
+
+The 7 equivalences are marked in the script with their reasons:
+`norm-clamp-edge`, `move-unsigned`, `scale-equal`, `sphere-part`,
+`bld-wall-len`, `bld-colour-none`, `bld-1174`. Each missed break is a gap
+in the fixture, not a known difference. The code it covers matches retail
+wherever 20,000 scenarios reach it.

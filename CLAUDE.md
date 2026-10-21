@@ -76,7 +76,7 @@ make analysis-breaks     # ANALYSIS broken on purpose -> 103 breaks, 93 caught, 
 make controlsdiff-run    # whole-module CONTROLS: commands, joysticks, key bindings, force feedback, the dialog -> 20000 scenarios, 0 differ (~40 min)
 make controls-breaks     # CONTROLS broken on purpose -> 81 breaks, 78 caught, 3 proven equivalent (~20 min)
 make g3ddiff-run         # whole-module G3D, the 3D pipeline -> 20000 scenarios, 0 differ (~5 min)
-make g3d-breaks N=1000   # G3D broken on purpose -> G3D_BREAKS_RESULT
+make g3d-breaks N=1000   # G3D broken on purpose -> 317 breaks, 279 caught, 7 proven equivalent, 31 missed (19 at N=4000; ~4 h)
 make g3dmeshdiff-run     # the mesh compiler: instructions vs portable C, x87 and soft float -> 100000 polygons, 0 differ
 make difftest-run        # whole-module SLEW         -> 0/2000 vectors differ
 make ofstest-run         # in-process, via the host  -> passed 68, failed 0

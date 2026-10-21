@@ -439,6 +439,22 @@ static void print_difference(uint32_t scenario_number,
 #include "multip_local.inc"
 #include "multip_frame.inc"
 #include "multip_draw.inc"
+#include "multip_motion.inc"
+#include "multip_commands.inc"
+#include "multip_weather.inc"
+#include "multip_tick.inc"
+#include "multip_system.inc"
+#include "multip_app_players.inc"
+#include "multip_updates.inc"
+#include "multip_textures.inc"
+#include "multip_texture_receive.inc"
+#include "multip_transfer_messages.inc"
+#include "multip_texture_send.inc"
+#include "multip_model_send.inc"
+#include "multip_model_cache.inc"
+#include "multip_model_receive.inc"
+#include "multip_state_messages.inc"
+#include "multip_control_updates.inc"
 
 int main(int argc, char **argv)
 {
@@ -475,6 +491,40 @@ int main(int argc, char **argv)
             return test_local(&retail, &ours, scenarios) != 0;
         if (strcmp(argv[2], "frame") == 0)
             return test_frame(&retail, &ours, scenarios) != 0;
+        if (strcmp(argv[2], "control_updates") == 0)
+            return test_control_updates(&retail, &ours, scenarios) != 0;
+        if (strcmp(argv[2], "state_messages") == 0)
+            return test_state_messages(&retail, &ours, scenarios) != 0;
+        if (strcmp(argv[2], "title_receive") == 0)
+            return test_title_receive(&retail, &ours, scenarios) != 0;
+        if (strcmp(argv[2], "model_receive") == 0)
+            return test_model_receive(&retail, &ours, scenarios) != 0;
+        if (strcmp(argv[2], "model_cache") == 0)
+            return test_model_cache(&retail, &ours, scenarios) != 0;
+        if (strcmp(argv[2], "model_send") == 0)
+            return test_model_send(&retail, &ours, scenarios) != 0;
+        if (strcmp(argv[2], "texture_send") == 0)
+            return test_texture_send(&retail, &ours, scenarios) != 0;
+        if (strcmp(argv[2], "transfer_messages") == 0)
+            return test_transfer_messages(&retail, &ours, scenarios) != 0;
+        if (strcmp(argv[2], "texture_receive") == 0)
+            return test_texture_receive(&retail, &ours, scenarios) != 0;
+        if (strcmp(argv[2], "textures") == 0)
+            return test_textures(&retail, &ours, scenarios) != 0;
+        if (strcmp(argv[2], "updates") == 0)
+            return test_updates(&retail, &ours, scenarios) != 0;
+        if (strcmp(argv[2], "app_players") == 0)
+            return test_app_players(&retail, &ours, scenarios) != 0;
+        if (strcmp(argv[2], "system") == 0)
+            return test_system(&retail, &ours, scenarios) != 0;
+        if (strcmp(argv[2], "tick") == 0)
+            return test_tick(&retail, &ours, scenarios) != 0;
+        if (strcmp(argv[2], "weather") == 0)
+            return test_weather(&retail, &ours, scenarios) != 0;
+        if (strcmp(argv[2], "commands") == 0)
+            return test_commands(&retail, &ours, scenarios) != 0;
+        if (strcmp(argv[2], "motion") == 0)
+            return test_motion(&retail, &ours, scenarios) != 0;
         if (strcmp(argv[2], "draw") == 0)
             return test_draw(&retail, &ours, scenarios) != 0;
         if (strcmp(argv[2], "players") == 0)
@@ -541,6 +591,23 @@ int main(int argc, char **argv)
     bad += test_frame(&retail, &ours, scenarios);
     multip_test_context("draw", "unknown", 0);
     bad += test_draw(&retail, &ours, scenarios);
+    bad += test_motion(&retail, &ours, scenarios);
+    bad += test_commands(&retail, &ours, scenarios);
+    bad += test_weather(&retail, &ours, scenarios);
+    bad += test_tick(&retail, &ours, scenarios);
+    bad += test_system(&retail, &ours, scenarios);
+    bad += test_app_players(&retail, &ours, scenarios);
+    bad += test_updates(&retail, &ours, scenarios);
+    bad += test_textures(&retail, &ours, scenarios);
+    bad += test_texture_receive(&retail, &ours, scenarios);
+    bad += test_transfer_messages(&retail, &ours, scenarios);
+    bad += test_texture_send(&retail, &ours, scenarios);
+    bad += test_model_send(&retail, &ours, scenarios);
+    bad += test_model_cache(&retail, &ours, scenarios);
+    bad += test_model_receive(&retail, &ours, scenarios);
+    bad += test_title_receive(&retail, &ours, scenarios);
+    bad += test_state_messages(&retail, &ours, scenarios);
+    bad += test_control_updates(&retail, &ours, scenarios);
     multip_test_context("workers", "unknown", 0);
     bad += test_workers(&retail, &ours, scenarios);
     return bad != 0;

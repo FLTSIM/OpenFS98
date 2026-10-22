@@ -295,6 +295,18 @@ typedef int32_t (FS98_STDCALL *fs98_host_file_read_fn)(struct fs98_host_file *f,
                                                        void *buf, uint32_t n,
                                                        uint32_t *got);
 
+/* +0x1b0 -- WriteFile.  *wrote (if the pointer is non-null) is zeroed first,
+ * then set to the count written.  0, or -1 if WriteFile failed or `f` is
+ * null (0x40a1f0). */
+typedef int32_t (FS98_STDCALL *fs98_host_file_write_fn)(struct fs98_host_file *f,
+                                                        const void *buf, uint32_t n,
+                                                        uint32_t *wrote);
+
+/* +0x1a4 -- GetFileSize(handle, NULL) into *size.  0, or -1 with *size
+ * untouched if `f` is null (0x40a400). */
+typedef int32_t (FS98_STDCALL *fs98_host_file_size_fn)(struct fs98_host_file *f,
+                                                       uint32_t *size);
+
 /* +0x218 -- memset(dst, byte, n) by rep stosd/stosb.  Always 0. */
 typedef int32_t (FS98_STDCALL *fs98_host_memset_fn)(void *dst, int32_t byte, uint32_t n);
 

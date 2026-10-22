@@ -4,15 +4,13 @@
 DirectPlay session, the local and remote player records, network messages and
 the extrapolated aircraft state handed to the rest of the simulator.
 
-This module is in progress. The source verifies public send enqueue (`+0x20`),
-internal send/drain/flush, receive/dequeue, both worker lifecycles, DirectPlay
-loading/interface lifetime, and player-list/status/range queries (`+0x24`
-through `+0x38`). Session toggle `+0x18`, options `+0x1c`, and the lobby/
-configuration/browser/player-details callbacks, public init/deinit and both
-entry callbacks are implemented. The latest verification is recorded in
-[the init checkpoint](#initdeinit-checkpoint). It builds explicitly with
-`make bin/MULTIP.DLL` and remains absent from `MODULES`, so `make install`
-cannot replace the retail multiplayer module prematurely.
+MULTIP has passed x86 whole-module acceptance and startup smoke testing.
+All eleven public entries, worker lifecycles, protocols, dialogs and CHAIN
+callbacks are implemented and compared with retail. The latest evidence is in
+[the acceptance checkpoint](#whole-module-acceptance-checkpoint). It is included
+in `MODULES`; `make install` maps `bin/MULTIP.DLL` to `MULTIPLAYER.DLL`.
+The temporary smoke test restores the previous game DLL rather than deploying
+this build permanently.
 
 ## Continuation contract
 
@@ -32,25 +30,27 @@ and untracked files. Preserve the entire working tree; do not stage, commit,
 push or install MULTIP. A fresh context in this workspace can use these files
 immediately; a separate checkout also needs the uncommitted changes.
 
-- **Verified:** all 41 top-level suites pass 20,000 scenarios each, zero
-  differences. The new `init` suite covers public `+0x04/+0x08` and both entry
-  callbacks; the earlier dialog/lobby suites cover public `+0x18/+0x1c`.
+- **Verified:** all 43 top-level suites pass 20,000 scenarios each, zero
+  differences, plus eight dispatch-family reruns. The acceptance checkpoint
+  adds a mixed public lifecycle and guarded malformed packet boundaries.
   The earlier host-fixture correction remains covered by `players`, `system`,
   `lifecycle` and `dispatch`.
-- **Latest implementation:** `multip_init.inc` and its matching fixture. Private
-  entries 266–269 map init, deinit, startup and shutdown to retail RVAs
-  `0x1020`, `0x1070`, `0x1090`, `0x1220`. Entries 0–265 remain unchanged.
-- **Mutation status:** all 450 targets match exactly once. The init slice
-  catches all 23 mutations at 1,200 scenarios each; the earlier dialog/lobby
-  slices catch all 21 dialog and 13 lobby/toggle mutations. The full sweep
-  remains unfinished; crashes, timeouts and fixture failures are not catches.
-- **Next:** close the whole-module acceptance gaps: malformed matching motion
-  lengths below `0x6c`, a unified action stream with worker draining after each
-  action, and the complete mutation sweep. All eleven public entries are now
-  enabled. MULTIP stays outside `MODULES` until acceptance and game smoke testing.
-- **Limits:** x86 comparisons do not validate the non-x86 C fallbacks or OS
-  thread scheduling races. Whole-module acceptance and game smoke testing
-  remain ahead.
+- **Latest acceptance work:** `multip_whole.inc` and `multip_bounds.inc` in
+  the harness, isolated mutation selectors, and `tools/multip_smoke.sh`.
+  Private entries 0–269 remain unchanged; init/deinit and their two callbacks
+  occupy 266–269, mapping retail RVAs `0x1020/0x1070/0x1090/0x1220`.
+- **Mutation status:** all 456 targets match exactly once and all 456 are caught
+  at 1,200 scenarios. The command slice also passes all 14 checks with the
+  compiler idle during watchdog measurements. Interrupted attempts and fixture
+  failures were excluded from the completed-result ledger.
+- **Smoke/build:** forced `make -B all` is warning-free. Startup with the exact
+  replacement passes 27/27 modules and 95 gauges; the previous DLL is restored
+  and its checksum verified. MULTIP is now in `MODULES` with the existing
+  `MULTIPLAYER.DLL` mapping.
+- **Next:** MPCHAT is the next module. Further MULTIP validation can cover real
+  provider interoperability, live multiplayer sessions and non-x86 fallbacks.
+- **Limits:** scripted x86 comparisons and startup smoke do not validate native
+  non-x86 behavior, real network providers or OS thread scheduling races.
 
 Build with `make multipdiff`; run `make multipdiff-run N=20000` for the full
 checkpoint. From `bin/difftest`, run `WINEDEBUG=-all wine multipdiff.exe 1200
@@ -75,8 +75,7 @@ The working files are:
 
 Do not add MULTIP to `MODULES` or install it into the game until all public
 slots, both worker lifecycles, and the CHAIN callbacks are implemented and a
-smoke test passes. All public entries now have recovered owners; this alone
-is not whole-module acceptance.
+smoke test passes. These gates are now satisfied; see the acceptance checkpoint.
 
 ## Session, aircraft and message continuation
 
@@ -1264,8 +1263,9 @@ or `--slice lobby`. Run Wine serially.
 
 `multip_init.inc` implements public init `+0x04` (`.text+0x20`), deinit
 `+0x08` (`+0x70`), and their two CHAIN callbacks (`+0x90`, `+0x220`). All
-eleven public entries now have recovered owners. MULTIP remains outside
-`MODULES`; unified whole-module acceptance and game smoke testing remain ahead.
+eleven public entries now have recovered owners. At this checkpoint MULTIP
+remained outside `MODULES`; the later acceptance checkpoint completes the
+remaining gates and promotes it.
 
 Init ignores the host registration result, saves the application GUID pointer,
 and returns CHAIN registration's raw result. Only a zero registration result
@@ -1318,3 +1318,92 @@ compared. All **23 init mutations** are caught at 1,200 scenarios each;
 all **450 mutation targets** match exactly once. The complete 450-target
 sweep remains unfinished. Both DLL builds are warning-free, production
 exports remain ImportTable and Linkage, and `git diff --check` passes.
+
+## Whole-module acceptance checkpoint
+
+The harness now combines the specialized protocol, profile, player, dialog,
+worker and dispatch suites with two additional acceptance suites:
+
+- `whole` retains one module state across public init, CHAIN startup,
+  host/join completion, peer additions, all public queries, sending, receiving,
+  options, repeated startup, public toggle, shutdown and deinit. Eligible
+  receive/dispatch/send work runs synchronously after every action. Failures
+  retain their queues, leaks and partial state; the scheduler does not repair
+  those outcomes. It compares ordered calls, normalized pointers, heap bytes,
+  module state, and complete sent packet bytes, including retry attempts.
+- `bounds` drives message `1000` both directly and through the actual
+  application dispatcher, with matching lengths `0..0x6b`, `0x6c`, `0x6d`,
+  `0xffffffff` and `0x80000000`. Readable pages followed by `PAGE_NOACCESS`
+  expose wrapped copy lengths and bound real copy accesses. Both source and
+  destination boundaries are exercised, along with missing peers/models,
+  stale/equal/new sequences and mismatching lengths. Partial writes, requested
+  counts, sequence state and guard faults are compared. Retail's unchecked
+  subtraction remains intact.
+
+The 20,000-case mixed trace passes with zero differences: 235,815 actions,
+128,462 send attempts, 11,892 received packets and 5,880 traces reaching all
+eleven public entries. Coverage assertions require disconnected, hosting,
+joining and closing states and at least eight player records. Repeated startup
+can retain eleven records, matching retail. Its 551 fault outcomes are compared.
+The boundary suite also passes 20,000 scenarios: 1,090 wrapped copies and
+1,100 guard faults. The complete initialized-pointer catalogue was audited:
+all 31 code targets have recovered bindings.
+
+The complete regression passes all **43 top-level suites at 20,000 scenarios
+each**, plus eight dispatch-family reruns, and reports `MULTIP whole module:
+20000 scenarios per suite, 0 differences`.
+
+Mutation slices now select their own fixtures instead of running unrelated
+suites after a deliberate error. Each selected slice first checks an unmodified
+baseline. Standalone receive installs its own allocator callbacks, and the
+group/metadata fixtures initialize their own COM objects; they no longer
+depend on preceding suites. An early full sweep exposed these dependencies
+and an unrelated lifecycle heap exhaustion; neither was counted as a catch.
+`--start-index` supports resuming an explicitly reviewed contiguous prefix
+without treating interrupted attempts as completed comparisons.
+The baseline DLL is built once. Two compiler jobs prepare independent mutant
+DLLs; installation and Wine comparisons remain serial, with the previous
+process finished before the next DLL is copied into the test directory.
+
+`make multip-smoke` builds the module, temporarily swaps it into the staged
+game as `Modules/MULTIPLAYER.DLL`, and uses the existing startup assertions.
+It additionally requires the smoke log to confirm the exact OpenFS98 MULTIP
+build, and restores the previous DLL with a bytewise check on exit. The smoke
+run passed: **27/27 modules, 95 gauges, SEHFIX present**, with the replacement
+MULTIP confirmed. The prior DLL's SHA-256 was also verified after restoration.
+The other installed game modules were retained; a forced rebuild changes PE
+timestamps, so differing DLL bytes alone do not establish retail provenance.
+The generic smoke diagnostic now states that the exact build was not tested
+instead of claiming the installed DLL must be retail.
+
+`make -B all` completes without warnings. `make multip-acceptance` reproduces
+the full 20,000-case harness, all mutation checks, whitespace checks and the
+temporary game smoke test in sequence. Focused selectors are `whole` and
+`bounds`; their new mutation slices contain four and two checks respectively.
+Run Wine serially. These checks do not validate non-x86 fallbacks, real provider
+interoperability or OS thread scheduling races.
+
+The complete **456-target mutation sweep passes**, with each target matched
+exactly once and every comparison finishing normally with differences. The
+reviewed first 37 catches were preserved across a deliberate interruption;
+the resumed run completed the remaining 419 in corpus order, including the
+six new checks. The combined ledger was checked against the exact ordered
+corpus. All 14 command mutations were additionally rechecked with compiler
+jobs idle during watchdog measurements. Crashes, exhausted fixtures and
+interrupted attempts did not count.
+
+With the acceptance gates passed, MULTIP is included in `MODULES`. The install
+mapping remains `MULTIP.DLL` to `MULTIPLAYER.DLL`. Startup smoke verifies this
+replacement temporarily and restores the exact previous DLL; normal deployment
+is through `make install`. Non-x86 behavior, OS scheduling races and live
+provider interoperability remain outside the automated claim.
+
+After promotion, `make all` rebuilds MULTIP without warnings and the install
+mapping check returns `MULTIPLAYER.DLL`. The rebuilt production `.text` is
+byte-identical to the accepted implementation; the source edit only updates
+the status comment. Startup smoke was repeated with this final production
+build and again passed **27/27 modules, 95 gauges**, with the exact replacement
+confirmed and the original game DLL's SHA-256 verified after restoration.
+Production exports remain only ImportTable and Linkage. The 14 quiet command
+rechecks reproduce the same differing-scenario counts as the full sweep.
+`git diff --check` passes. Changes remain uncommitted.

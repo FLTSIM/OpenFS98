@@ -301,6 +301,17 @@ static void run_directplay(const struct multip_module *module, uint32_t number,
     memcpy(&results->trace, &s_directplay_trace, sizeof(s_directplay_trace));
 }
 
+static void directplay_fixture_init(void)
+{
+    uint32_t index;
+    s_directplay_vtable[0] = (void *)directplay_query;
+    s_directplay_vtable[2] = (void *)directplay_release;
+    for (index = 0; index < 4; index++) {
+        s_directplay_objects[index].vtable = s_directplay_vtable;
+        s_directplay_objects[index].identity = index + 1;
+    }
+}
+
 static uint32_t test_directplay(const struct multip_module *retail,
                                 const struct multip_module *ours, uint32_t scenarios)
 {
@@ -311,12 +322,7 @@ static uint32_t test_directplay(const struct multip_module *retail,
     uint32_t index;
     uint32_t shown;
 
-    s_directplay_vtable[0] = (void *)directplay_query;
-    s_directplay_vtable[2] = (void *)directplay_release;
-    for (index = 0; index < 4; index++) {
-        s_directplay_objects[index].vtable = s_directplay_vtable;
-        s_directplay_objects[index].identity = index + 1;
-    }
+    directplay_fixture_init();
     for (number = 0; number < scenarios; number++) {
         run_directplay(retail, number, &retail_results);
         run_directplay(ours, number, &our_results);

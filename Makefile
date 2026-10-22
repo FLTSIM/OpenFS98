@@ -60,10 +60,9 @@ BASE_CONTROLS := 0x20670000
 BASE_G3D    := 0x206e0000
 BASE_MULTIP := 0x20850000
 
-MODULES := ACONTAIN ADVDRV ANALYSIS ATC BOOSTER CHAIN CONTROLS DEMO DYNAMIC FACIL FE G3D GLOBAL LANDME NUMERIC PANELS REALITY SLEW SOUND UTIL WEATHERM WINDOW WINMSG
+MODULES := ACONTAIN ADVDRV ANALYSIS ATC BOOSTER CHAIN CONTROLS DEMO DYNAMIC FACIL FE G3D GLOBAL LANDME MULTIP NUMERIC PANELS REALITY SLEW SOUND UTIL WEATHERM WINDOW WINMSG
 
-# MULTIP is in progress and intentionally is not in MODULES yet.  Its
-# recovered portions are built explicitly and differential-tested below.
+# MULTIP installs as MULTIPLAYER.DLL; its acceptance harness is below.
 $(BIN)/MULTIP.DLL: src/multip/multip.c src/multip/multip_callbacks.inc src/multip/multip_motion.inc src/multip/multip_commands.inc src/multip/multip_weather.inc src/multip/multip_tick.inc src/multip/multip_system.inc src/multip/multip_app_players.inc src/multip/multip_updates.inc src/multip/multip_textures.inc src/multip/multip_texture_receive.inc src/multip/multip_transfer_messages.inc src/multip/multip_texture_send.inc src/multip/multip_model_send.inc src/multip/multip_model_cache.inc src/multip/multip_model_receive.inc src/multip/multip_title_receive.inc src/multip/multip_state_messages.inc src/multip/multip_control_updates.inc src/multip/multip_lifecycle.inc src/multip/multip_dispatch.inc src/multip/multip_dispatch_cases.inc src/multip/multip_weather_fields.inc src/multip/multip_frame_actions.inc src/multip/multip_players.inc src/multip/multip_nametag.inc src/multip/multip_messages.inc src/multip/multip_tracking.inc src/multip/multip_records.inc src/multip/multip_aircraft.inc src/multip/multip_session.inc src/multip/multip_profile.inc src/multip/multip_profile_fields.inc src/multip/multip.def src/multip/multip_data.inc src/multip/multip_rdata.inc src/multip/multip_pointers.inc $(BIN)/multip.res src/multip/multip_providers.inc src/multip/multip_browser.inc src/multip/multip_configuration.inc src/multip/multip_details.inc src/multip/multip_options.inc src/multip/multip_lobby.inc src/multip/multip_toggle.inc src/multip/multip_init.inc
 	@mkdir -p $(BIN)
 	$(CC) $(CFLAGS) $(LDFLAGS) -Wl,--image-base=$(BASE_MULTIP) \
@@ -847,9 +846,8 @@ g3ddiff: $(DIFFDIR)/g3ddiff.exe $(BIN)/G3D.DLL
 g3ddiff-run: g3ddiff
 	@cd $(DIFFDIR) && WINEDEBUG=-all timeout 7200 wine g3ddiff.exe $(if $(N),$(N),20000)
 
-# MULTIP in progress: public queries, transport, workers and DirectPlay lifetime.
-# All public entries have owners; whole-module acceptance and installation remain pending.
-$(DIFFDIR)/multipdiff.exe: tools/difftest/multipdiff.c tools/difftest/multip_send.inc tools/difftest/multip_receive.inc tools/difftest/multip_workers.inc tools/difftest/multip_directplay.inc tools/difftest/multip_profile.inc tools/difftest/multip_session.inc tools/difftest/multip_aircraft.inc tools/difftest/multip_tracking.inc tools/difftest/multip_messages.inc tools/difftest/multip_players.inc tools/difftest/multip_local.inc tools/difftest/multip_frame.inc tools/difftest/multip_draw.inc tools/difftest/multip_motion.inc tools/difftest/multip_commands.inc tools/difftest/multip_weather.inc tools/difftest/multip_tick.inc tools/difftest/multip_system.inc tools/difftest/multip_app_players.inc tools/difftest/multip_updates.inc tools/difftest/multip_textures.inc tools/difftest/multip_texture_receive.inc tools/difftest/multip_transfer_messages.inc tools/difftest/multip_texture_send.inc tools/difftest/multip_model_send.inc tools/difftest/multip_model_cache.inc tools/difftest/multip_model_receive.inc tools/difftest/multip_state_messages.inc tools/difftest/multip_control_updates.inc tools/difftest/multip_dispatch.inc tools/difftest/multip_lifecycle.inc tools/difftest/multip_providers.inc tools/difftest/multip_dialogs.inc tools/difftest/multip_lobby.inc tools/difftest/multip_init.inc
+# MULTIP whole-module acceptance: protocols, workers, dialogs and mixed lifecycle.
+$(DIFFDIR)/multipdiff.exe: tools/difftest/multipdiff.c tools/difftest/multip_send.inc tools/difftest/multip_receive.inc tools/difftest/multip_workers.inc tools/difftest/multip_directplay.inc tools/difftest/multip_profile.inc tools/difftest/multip_session.inc tools/difftest/multip_aircraft.inc tools/difftest/multip_tracking.inc tools/difftest/multip_messages.inc tools/difftest/multip_players.inc tools/difftest/multip_local.inc tools/difftest/multip_frame.inc tools/difftest/multip_draw.inc tools/difftest/multip_motion.inc tools/difftest/multip_commands.inc tools/difftest/multip_weather.inc tools/difftest/multip_tick.inc tools/difftest/multip_system.inc tools/difftest/multip_app_players.inc tools/difftest/multip_updates.inc tools/difftest/multip_textures.inc tools/difftest/multip_texture_receive.inc tools/difftest/multip_transfer_messages.inc tools/difftest/multip_texture_send.inc tools/difftest/multip_model_send.inc tools/difftest/multip_model_cache.inc tools/difftest/multip_model_receive.inc tools/difftest/multip_state_messages.inc tools/difftest/multip_control_updates.inc tools/difftest/multip_dispatch.inc tools/difftest/multip_lifecycle.inc tools/difftest/multip_providers.inc tools/difftest/multip_dialogs.inc tools/difftest/multip_lobby.inc tools/difftest/multip_init.inc tools/difftest/multip_bounds.inc tools/difftest/multip_whole.inc
 	@mkdir -p $(DIFFDIR)
 	$(CC) -std=c99 -O1 -Wall -Wextra -Iinclude -o $@ tools/difftest/multipdiff.c
 
@@ -880,8 +878,18 @@ multipdiff: $(DIFFDIR)/G3D_retail.dll $(DIFFDIR)/UTIL_retail.dll $(DIFFDIR)/mult
 multipdiff-run: multipdiff
 	@cd $(DIFFDIR) && WINEDEBUG=-all wine multipdiff.exe $(if $(N),$(N),20000)
 
+multip-smoke: all $(BIN)/MULTIP.DLL
+	@tools/multip_smoke.sh
+
+multip-acceptance: all multipdiff
+	@cd $(DIFFDIR) && WINEDEBUG=-all wine multipdiff.exe 20000
+	@python3 -B tools/multip_breaks.py
+	@git diff --check
+	@tools/multip_smoke.sh
+	@echo "MULTIP acceptance: PASS"
+
 multip-breaks: multipdiff
-	@python3 tools/multip_breaks.py
+	@python3 -B tools/multip_breaks.py
 
 multip-directplay-breaks: multipdiff
 	@python3 tools/multip_breaks.py --slice directplay
@@ -1390,4 +1398,4 @@ smoke: all
 clean:
 	rm -rf $(BIN)
 
-.PHONY: multip-directplay-breaks multip-worker-breaks multip-breaks multip-receive-breaks multip-send-breaks all stage setup-map graph hostmap compare run trace trace-render trace-ddraw kill window-reset wm-unmanaged wm-managed vd-on vd-off mode8 mode16 ddraw-gdi ddraw-default smoke difftest difftest-run utildiff utildiff-run utildiff-portable numericdiff numericdiff-run chaindiff chaindiff-run atcdiff atcdiff-run weathermdiff weathermdiff-run acontaindiff acontaindiff-run sounddiff sounddiff-run dynamicdiff dynamicdiff-run fegriddiff fegriddiff-run fediff fediff-run fesldiff fesldiff-run boosterdiff boosterdiff-run demodiff demodiff-run windowdiff windowdiff-run g3ddiff g3ddiff-run multipdiff multipdiff-run g3d-break-build g3d-breaks g3dmeshdiff g3dmeshdiff-run g3ddiff-meshc-run hg2dmodeldiff-run panelsdiff panelsdiff-run panelsunit panelsunit-run panels-breaks panels-break-build window-breaks window-break-build winmsgdiff winmsgdiff-run winmsg-breaks winmsg-break-build realitydiff realitydiff-run reality-breaks reality-break-build analysisdiff analysisdiff-run analysis-breaks analysis-break-build controlsdiff controlsdiff-run controls-breaks controls-break-build advdrvdiff advdrvdiff-run advdrv-cover landmediff landmediff-run facildiff facildiff-run facildiff-fe-run ofstest ofstest-run ofstest-remove sehfix sehfix-install sehfix-remove sehfix-log util-trace install revert installed-name-of orig-module-of clean
+.PHONY: multip-acceptance multip-smoke multip-directplay-breaks multip-worker-breaks multip-breaks multip-receive-breaks multip-send-breaks all stage setup-map graph hostmap compare run trace trace-render trace-ddraw kill window-reset wm-unmanaged wm-managed vd-on vd-off mode8 mode16 ddraw-gdi ddraw-default smoke difftest difftest-run utildiff utildiff-run utildiff-portable numericdiff numericdiff-run chaindiff chaindiff-run atcdiff atcdiff-run weathermdiff weathermdiff-run acontaindiff acontaindiff-run sounddiff sounddiff-run dynamicdiff dynamicdiff-run fegriddiff fegriddiff-run fediff fediff-run fesldiff fesldiff-run boosterdiff boosterdiff-run demodiff demodiff-run windowdiff windowdiff-run g3ddiff g3ddiff-run multipdiff multipdiff-run g3d-break-build g3d-breaks g3dmeshdiff g3dmeshdiff-run g3ddiff-meshc-run hg2dmodeldiff-run panelsdiff panelsdiff-run panelsunit panelsunit-run panels-breaks panels-break-build window-breaks window-break-build winmsgdiff winmsgdiff-run winmsg-breaks winmsg-break-build realitydiff realitydiff-run reality-breaks reality-break-build analysisdiff analysisdiff-run analysis-breaks analysis-break-build controlsdiff controlsdiff-run controls-breaks controls-break-build advdrvdiff advdrvdiff-run advdrv-cover landmediff landmediff-run facildiff facildiff-run facildiff-fe-run ofstest ofstest-run ofstest-remove sehfix sehfix-install sehfix-remove sehfix-log util-trace install revert installed-name-of orig-module-of clean

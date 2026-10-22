@@ -5,6 +5,7 @@ Run after `make multipdiff`. Crashes, timeouts and fixture failures do not
 count as catches. All generated sources and DLLs live in /tmp.
 """
 import argparse
+from concurrent.futures import ThreadPoolExecutor
 import os
 from pathlib import Path
 import shutil
@@ -690,7 +691,24 @@ INIT_MUTATIONS = [
 ]
 
 
-def check_variant(directory, source, slice_name):
+BOUNDS_MUTATIONS = [
+    ("matching short model length guard",
+     "    if (player == NULL || A32(player, 0x28) == 0) return -1;\n    if (A32(packet, 0xc) > A32(player, 0x50)) {",
+     "    if (player == NULL || A32(player, 0x28) == 0) return -1;\n    if (A32(packet, 0x10) < 0x6c) return -1;\n    if (A32(packet, 0xc) > A32(player, 0x50)) {"),
+    ("motion packet size guard",
+     "multip_handle_1000(uint32_t id, const void *packet, uint32_t size)\n{\n    uint8_t *player = multip_find_player(id);\n    (void)size;",
+     "multip_handle_1000(uint32_t id, const void *packet, uint32_t size)\n{\n    uint8_t *player = multip_find_player(id);\n    if (size < 0x14) return -1;"),
+]
+
+WHOLE_MUTATIONS = [
+    ("integrated public player count", "M32(M_PLAYERS_RESULT + 0x00) = M32(M_PLAYER_COUNT);", "M32(M_PLAYERS_RESULT + 0x00) = 0;"),
+    ("integrated public loaded status", "        status |= 1;", "        status |= 8;"),
+    ("integrated send destination", "    record->to_id = to_id;", "    record->to_id = 0;"),
+    ("integrated receive signal", "    *received = 1;\n    record->timestamp", "    *received = 0;\n    record->timestamp"),
+]
+
+
+def build_variant(directory, source):
     source_path = directory / "multip.c"
     source_path.write_text(source)
     command = [
@@ -705,8 +723,13 @@ def check_variant(directory, source, slice_name):
         str(ROOT / "src/multip/multip.def"), "-lkernel32", "-lshell32", "-luser32",
     ]
     subprocess.run(command, check=True, capture_output=True, text=True)
+
+
+def check_variant(directory, source, slice_name, build=True):
+    if build:
+        build_variant(directory, source)
     result = subprocess.run(
-        ["wine", "multipdiff.exe", "1200"] + ([slice_name] if slice_name in ("local", "frame", "players", "messages", "draw", "motion", "commands", "weather", "tick", "system", "app_players", "updates", "textures", "texture_receive", "transfer_messages", "texture_send", "model_send", "model_cache", "model_receive", "title_receive", "state_messages", "control_updates", "control_callback", "dispatch", "lifecycle", "providers", "dialogs", "lobby", "init") else []), cwd=directory,
+        ["wine", "multipdiff.exe", "1200", slice_name], cwd=directory,
         env={**os.environ, "WINEDEBUG": "-all"}, capture_output=True,
         text=True, timeout=180 if slice_name == "send" else 60,
     )
@@ -718,7 +741,7 @@ def check_variant(directory, source, slice_name):
              "aircraft": "aircraft select/release",
              "records": "aircraft copy/session browser records",
              "tracking": "track-name display", "messages": "application message constructors",
-             "players": "player lifecycle helpers", "local": "local player creation/start", "frame": "session CHAIN 0x14", "draw": "player drawing/CHAIN 0x10", "motion": "aircraft extrapolation/CHAIN 0x13", "commands": "view commands/CHAIN 0x0c", "weather": "weather/sync messages", "tick": "tick callbacks/CHAIN 0x02", "system": "DirectPlay system notifications", "app_players": "application player types", "updates": "aircraft state receive/timing", "textures": "texture catalogue/file services", "texture_receive": "multipart texture receive", "transfer_messages": "multipart transfer messages", "texture_send": "multipart texture sender", "model_send": "multipart model sender", "model_cache": "aircraft cache files", "model_receive": "multipart model receive", "title_receive": "aircraft title receive", "state_messages": "aircraft state message constructors", "control_updates": "control/collision/state publishing", "control_callback": "control CHAIN 0x01", "dispatch": "application receive dispatch", "lifecycle": "receive/session lifecycle", "providers": "provider catalogue", "dialogs": "configuration/options dialogs", "lobby": "lobby connection owners", "init": "init/deinit owners"}[slice_name]
+             "players": "player lifecycle helpers", "local": "local player creation/start", "frame": "session CHAIN 0x14", "draw": "player drawing/CHAIN 0x10", "motion": "aircraft extrapolation/CHAIN 0x13", "commands": "view commands/CHAIN 0x0c", "weather": "weather/sync messages", "tick": "tick callbacks/CHAIN 0x02", "system": "DirectPlay system notifications", "app_players": "application player types", "updates": "aircraft state receive/timing", "textures": "texture catalogue/file services", "texture_receive": "multipart texture receive", "transfer_messages": "multipart transfer messages", "texture_send": "multipart texture sender", "model_send": "multipart model sender", "model_cache": "aircraft cache files", "model_receive": "multipart model receive", "title_receive": "aircraft title receive", "state_messages": "aircraft state message constructors", "control_updates": "control/collision/state publishing", "control_callback": "control CHAIN 0x01", "dispatch": "application receive dispatch", "lifecycle": "receive/session lifecycle", "providers": "provider catalogue", "dialogs": "configuration/options dialogs", "lobby": "lobby connection owners", "init": "init/deinit owners", "bounds": "guarded packet boundaries", "whole": "mixed lifecycle"}[slice_name]
     prefix = f"MULTIP {label}: 1200 scenarios, "
     lines = [line for line in result.stdout.splitlines() if line.startswith(prefix)]
     if len(lines) != 1 or result.returncode not in (0, 1):
@@ -731,7 +754,9 @@ def check_variant(directory, source, slice_name):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--slice", choices=("send", "receive", "workers", "directplay", "profile", "groups", "metadata", "aircraft", "records", "tracking", "messages", "players", "local", "frame", "draw", "motion", "commands", "weather", "tick", "system", "app_players", "updates", "textures", "texture_receive", "transfer_messages", "texture_send", "model_send", "model_cache", "model_receive", "title_receive", "state_messages", "control_updates", "control_callback", "dispatch", "lifecycle", "providers", "dialogs", "lobby", "init", "all"), default="all")
+    parser.add_argument("--slice", choices=("send", "receive", "workers", "directplay", "profile", "groups", "metadata", "aircraft", "records", "tracking", "messages", "players", "local", "frame", "draw", "motion", "commands", "weather", "tick", "system", "app_players", "updates", "textures", "texture_receive", "transfer_messages", "texture_send", "model_send", "model_cache", "model_receive", "title_receive", "state_messages", "control_updates", "control_callback", "dispatch", "lifecycle", "providers", "dialogs", "lobby", "init", "bounds", "whole", "all"), default="all")
+    parser.add_argument("--start-index", type=int, default=0,
+                        help="resume at this zero-based index after reviewing completed catches")
     args = parser.parse_args()
     variants = []
     if args.slice in ("send", "all"):
@@ -776,7 +801,9 @@ def main():
                                   ("providers", PROVIDER_MUTATIONS),
                                   ("dialogs", DIALOG_MUTATIONS),
                                   ("lobby", LOBBY_MUTATIONS),
-                                  ("init", INIT_MUTATIONS)):
+                                  ("init", INIT_MUTATIONS),
+                                  ("bounds", BOUNDS_MUTATIONS),
+                                  ("whole", WHOLE_MUTATIONS)):
         if args.slice in (slice_name, "all"):
             variants.extend((slice_name, *mutation) for mutation in mutations)
     source = (ROOT / "src/multip/multip.c").read_text()
@@ -787,21 +814,46 @@ def main():
     for slice_name, name, before, after in variants:
         if source.count(before) != 1:
             raise RuntimeError(f"Mutation {name!r} matches {source.count(before)} times; expected one")
+    if not 0 <= args.start_index <= len(variants):
+        parser.error("start index is outside the selected mutation list")
+    variants = variants[args.start_index:]
     with tempfile.TemporaryDirectory(prefix="multip-breaks-", dir="/tmp") as temp:
         directory = Path(temp)
         for name in ("multipdiff.exe", "MULTIP_retail.dll", "UTIL_retail.dll", "G3D_retail.dll"):
             shutil.copy2(ROOT / "bin/difftest" / name, directory / name)
-        baseline_slice = args.slice if args.slice in ("dialogs", "lobby", "init") else "send"
-        if check_variant(directory, source, baseline_slice) != 0:
-            raise RuntimeError("Unmodified baseline differs")
-        print("baseline: 0 differences", flush=True)
-        for slice_name, name, before, after in variants:
-            if source.count(before) != 1:
-                raise RuntimeError(f"Mutation {name!r} no longer matches exactly once")
-            differences = check_variant(directory, source.replace(before, after), slice_name)
-            if differences == 0:
-                raise RuntimeError(f"Mutation {name!r} was not caught")
-            print(f"{name}: caught ({differences} differing scenarios)", flush=True)
+        build_variant(directory, source)
+        for baseline_slice in dict.fromkeys(variant[0] for variant in variants):
+            if check_variant(directory, source, baseline_slice, build=False) != 0:
+                raise RuntimeError(f"Unmodified {baseline_slice} baseline differs")
+            print(f"{baseline_slice} baseline: 0 differences", flush=True)
+        def prepare_variant(index):
+            _, _, before, after = variants[index]
+            build_directory = directory / f"build-{index}"
+            build_directory.mkdir()
+            build_variant(build_directory, source.replace(before, after))
+            return build_directory
+
+        # Only compilation overlaps. Install the next completed DLL after the
+        # preceding Wine process exits, so no comparison shares mutable files.
+        with ThreadPoolExecutor(max_workers=2) as compiler:
+            pending = {}
+            next_index = 0
+            for index, (slice_name, name, before, after) in enumerate(variants):
+                while next_index < min(len(variants), index + 3):
+                    pending[next_index] = compiler.submit(prepare_variant, next_index)
+                    next_index += 1
+                build_directory = pending.pop(index).result()
+                # Command spin outcomes use a wall-clock watchdog. Keep the
+                # compiler idle while that fixture measures either DLL.
+                if slice_name == "commands":
+                    for build in pending.values():
+                        build.result()
+                shutil.copy2(build_directory / "MULTIP_ours.dll", directory / "MULTIP_ours.dll")
+                differences = check_variant(directory, source, slice_name, build=False)
+                shutil.rmtree(build_directory)
+                if differences == 0:
+                    raise RuntimeError(f"Mutation {name!r} was not caught")
+                print(f"{name}: caught ({differences} differing scenarios)", flush=True)
     print(f"MULTIP {args.slice} mutations: {len(variants)}/{len(variants)} caught")
 
 

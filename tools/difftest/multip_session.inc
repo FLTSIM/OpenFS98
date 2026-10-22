@@ -218,6 +218,7 @@ static uint32_t test_session(const struct multip_module *retail,
     uint32_t index;
     uint32_t shown;
 
+    directplay_fixture_init();
     s_directplay_vtable[0x60 / 4] = (void *)session_open;
     s_directplay_vtable[0x2c / 4] = (void *)session_enum_groups;
     s_directplay_vtable[0x14 / 4] = (void *)session_create_group;
@@ -466,6 +467,7 @@ static uint32_t test_metadata(const struct multip_module *retail,
     static struct session_metadata_state s_ours;
     uint32_t number;
     uint32_t bad = 0;
+    directplay_fixture_init();
     s_directplay_vtable[0x58 / 4] = (void *)metadata_get;
     s_directplay_vtable[0x7c / 4] = (void *)metadata_set;
     s_directplay_vtable[0x54 / 4] = (void *)metadata_get_name;

@@ -1,8 +1,8 @@
 /* Host dialog/COM stand-ins execute the recovered callbacks. Stable-address
  * heap blocks retain leaks and partial writes; ShellExecuteA is always patched. */
-#define DIALOG_BLOCKS 128
+#define DIALOG_BLOCKS 256
 #define DIALOG_BLOCK_SIZE 8192
-#define DIALOG_LOGS 1024
+#define DIALOG_LOGS 4096
 #define DIALOG_STEPS 64
 struct dialog_results {
     uint32_t calls, blocks, log[DIALOG_LOGS][8], live[DIALOG_BLOCKS], sizes[DIALOG_BLOCKS];
@@ -170,7 +170,7 @@ static void *STDCALL dialog_add(void *list)
     uint32_t *entry = dialog_log(8), count = get_u32(list, 0), size = get_u32(list, 12);
     uint8_t *data = (uint8_t *)(uintptr_t)get_u32(list, 24);
     entry[1] = dialog_address(list); entry[2] = count; entry[3] = size;
-    if (size == 0 || count >= 8 || size > 256) { fprintf(stderr, "dialog list limit\n"); exit(2); }
+    if (size == 0 || count >= 24 || size > 256) { fprintf(stderr, "dialog list limit\n"); exit(2); }
     if (count == get_u32(list, 4)) {
         uint8_t *next;
         uint32_t capacity = count + get_u32(list, 8);

@@ -110,8 +110,10 @@ else's 1997 build, and it should read that way.
 | `make panelsdiff-run` | whole-module PANELS: retail and OpenFS98 in turn through the CD's own gauges and panel files over scripts of aircraft loaded, frames, resets, situations, commands, windows and paints, against stubs of the host, GLOBAL, CHAIN, MAIN, WINDOW and the HG2D model, with GDI virtualised; compares the transcript, the `.data` image, every block and each gauge's data. `make panelsunit-run` calls its 28 image routines alone; `make panels-breaks` breaks it on purpose |
 | `make g3ddiff-run` | whole-module G3D, the 3D pipeline: retail and OpenFS98 in turn over generated scenery programs (every opcode, with operands steered onto the boundaries they are compared with), the depth queue, the Linkage services and the CHAIN callbacks run frame after frame over FE's scene stream (stubs of FE, HG2D, CHAIN, WINDOW and the host; retail UTIL and WINDOW), the host's divide repair modelled; compares every import call, every register, the whole `.data` image, GLOBAL and the arena after every operation. 20,000 scenarios, 0 differ (~5 min). `make g3d-breaks` breaks it on purpose |
 | `make g3dmeshdiff-run` | the mesh compiler (`0x38`) three ways -- retail's instructions, the portable C on the x87, the C on its software 80-bit float -- over generated polygons under 24-, 53- and 64-bit precision: 100,000 polygons, 0 differ. `make g3ddiff-meshc-run` runs `g3ddiff` with the portable compiler in the module |
-| `make multipdiff-run` | current MULTIP checkpoint only: compare public slots `+0x18`..`+0x38` and internal owners against retail over forty suites of 20,000 scenarios: transport/workers, DirectPlay lifetime, profiles, session/group primitives, metadata, aircraft ownership, browser records, tracking/selection, message constructors, player startup/lifecycle, session frame/draw callbacks, extrapolation, view commands, weather/tick guidance, system/player/state messages, texture files, multipart model/texture transfers, receive dispatch, session completion/disconnect, provider enumeration, lobby connections and configuration/options/player-details dialogs; this is not yet a whole-module result |
+| `make multipdiff-run` | whole MULTIP harness: all eleven public entries, transport/workers, profiles, protocols, dialogs and CHAIN callbacks; 43 suites of 20,000 scenarios plus dispatch-family reruns, guarded packet boundaries and mixed lifecycle scheduling |
 | `make multip-breaks` | verify MULTIP differential coverage with deliberate mutations in isolated DLLs in `/tmp`; send, receive, worker and DirectPlay slice targets are also available; crashes and fixture errors do not count |
+| `make multip-smoke` | temporarily boot FS98 with the rebuilt MULTIP as `MULTIPLAYER.DLL`, require module/gauge loading and the exact replacement, then restore the previous DLL |
+| `make multip-acceptance` | run the 20,000-case harness, all 456 mutations, whitespace check and temporary game smoke test serially |
 | `make demodiff-run` | whole-module DEMO: retail and OpenFS98 in turn over the CD's six videos and synthetic ones with every record class, recording, playback, instant replay and the four dialogs' callbacks (retail UTIL's catalogue, a stand-in for the host's dialog engine); faults compared as outcomes, runaway ops cut at a fixed count; compares the transcript, the whole `.data` image (code pointers through a learnt pairing), the arena, GLOBAL and the trees |
 | `make fesldiff-run` | FE's `+0x78`, the Scenery Library, retail against OpenFS98 over a writable fixture with sandboxed drive letters, driven by a stand-in for World.DLL's nine dialogs; compares the call transcript (with string comparisons and the world files left on disk), FE's `.data`, GLOBAL and the heap; faults are compared as outcomes |
 | `make facildiff-fe-run` | the same harness with OpenFS98 FE behind OpenFS98 FACIL, against retail FE behind retail FACIL: both reimplementations together over the real CD index and the dialogs (`Q=`/`D=` set the phase sizes, 2,000 each by default) |
@@ -332,22 +334,14 @@ them against retail over 20,000 scenarios with zero differences. The
 dialog, `English\Options.DLL`'s `0x140a`, calls back into CONTROLS through a
 parameter block, so it is verified against a stand-in for that dialog built
 from its listing (see [docs/modules/controls.md](docs/modules/controls.md)).
-`MULTIP` is now in progress: its public player-list/status queries, send
-enqueue, send-one/drain/flush, receive/dequeue, both worker lifecycles, and
-DirectPlay loader/interface lifetime are verified. Profile round-trip, session/group
-primitives, description/name metadata, aircraft ownership, browser enumeration,
-tracking/selection, message constructors, player startup/lifecycle and session
-frame/draw callbacks, extrapolation, view commands, weather/tick guidance,
-system/player/state messages, texture files, multipart transfers, aircraft
-title selection, control/collision publishing, receive dispatch and session
-completion/disconnect now include provider enumeration, lobby startup,
-configuration/browser/player-details dialogs and public session toggle/options
-(`+0x18/+0x1c`), plus public init/deinit and both entry callbacks. All 41
-suites pass 20,000 scenarios each with zero differences; all 23 new lifecycle
-mutations and the earlier 34 dialog/lobby mutations are caught. Whole-module
-acceptance and game smoke testing remain; MULTIP is not installed or included
-in `MODULES`. The restartable handoff and acceptance boundary are in
-[docs/modules/multip.md](docs/modules/multip.md). `MPCHAT` follows it.
+**`MULTIP` has passed whole-module acceptance and startup smoke testing**:
+all eleven public entries, workers, protocols, CHAIN callbacks and dialogs
+are covered by 43 suites of 20,000 scenarios each, plus eight dispatch-family
+reruns, with zero differences. All 456 mutations are caught. The game smoke
+test confirms the replacement, 27/27 modules and 95 gauges; it restores the
+previous game DLL afterward. MULTIP is now in `MODULES` and `make install`
+maps it to `MULTIPLAYER.DLL`. See [docs/modules/multip.md](docs/modules/multip.md)
+for the evidence and remaining portability/provider limits. `MPCHAT` follows it.
 **`G3D` is done, verified and running in-game**: the whole bytecode machine,
 its depth queue, services and CHAIN callbacks, 20,000 `g3ddiff` scenarios
 with zero differences, and a portable C mesh compiler checked against
@@ -393,9 +387,9 @@ nothing in it imports anything interesting:
     ~~**`ANALYSIS`** (8,086 bytes)~~ — done, verified and running in-game.
     ~~**`CONTROLS`** (48,406 bytes)~~ — done, verified and running in-game.
     ~~**`G3D`** (92,518 bytes)~~ — done, verified and running in-game.
+    ~~**`MULTIP`** (43,318 bytes)~~ — done, whole-module acceptance and startup smoke passed.
     Round 9 of the [preflight](docs/preflight.md) surveyed what is left.
-    Next: `MULTIP` (43,318, in progress) with `MPCHAT` (3,104) behind it,
-    `PANELS` (50,038) and `MAIN` (119,648).
+    Next: `MPCHAT` (3,104), `PANELS` (50,038) and `MAIN` (119,648).
 13. `HG2D` (390 KB, the 2D rasteriser) last. It is 26% of the project on its
    own.
 

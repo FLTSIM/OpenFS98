@@ -171,6 +171,12 @@ static uint32_t test_receive(const struct multip_module *retail,
     void *realloc_function = receive_realloc;
     void *ticks_function = receive_ticks;
 
+    {
+        void *alloc_function = send_alloc, *free_function = send_free, *copy_function = send_copy;
+        memcpy(s_send_host + 0x20c, &alloc_function, 4);
+        memcpy(s_send_host + 0x214, &free_function, 4);
+        memcpy(s_send_host + 0x21c, &copy_function, 4);
+    }
     s_send_vtable[0x64 / 4] = (void *)fake_dp_receive;
     memcpy(s_send_host + 0x210, &realloc_function, sizeof(realloc_function));
     memcpy(s_send_host + 0x38, &ticks_function, sizeof(ticks_function));

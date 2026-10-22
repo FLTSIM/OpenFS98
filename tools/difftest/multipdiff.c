@@ -4,7 +4,8 @@
  * fields and imported GLOBAL/UTIL pointers are seeded identically, then slots
  * +0x24..+0x38 are compared after normalising pointers to record indexes.
  * multip_send.inc and multip_receive.inc add deterministic transport scenarios.
- * This is intentionally slice coverage, not a whole-module claim.
+ * Specialized boundary suites accompany the mixed public lifecycle, whose
+ * transport scheduler runs eligible work after every action.
  */
 #include <windows.h>
 #include <stdint.h>
@@ -461,6 +462,8 @@ static void print_difference(uint32_t scenario_number,
 #include "multip_dialogs.inc"
 #include "multip_lobby.inc"
 #include "multip_init.inc"
+#include "multip_bounds.inc"
+#include "multip_whole.inc"
 
 int main(int argc, char **argv)
 {
@@ -493,6 +496,30 @@ int main(int argc, char **argv)
 
     /* Local creation owns its fixture setup, so mutations can run it alone. */
     if (argc > 2) {
+        if (strcmp(argv[2], "whole") == 0)
+            return test_whole(&retail, &ours, scenarios) != 0;
+        if (strcmp(argv[2], "bounds") == 0)
+            return test_bounds(&retail, &ours, scenarios) != 0;
+        if (strcmp(argv[2], "send") == 0)
+            return test_send(&retail, &ours, scenarios, 1) != 0;
+        if (strcmp(argv[2], "receive") == 0)
+            return test_receive(&retail, &ours, scenarios) != 0;
+        if (strcmp(argv[2], "workers") == 0)
+            return test_workers(&retail, &ours, scenarios) != 0;
+        if (strcmp(argv[2], "directplay") == 0)
+            return test_directplay(&retail, &ours, scenarios) != 0;
+        if (strcmp(argv[2], "profile") == 0)
+            return test_profile(&retail, &ours, scenarios) != 0;
+        if (strcmp(argv[2], "groups") == 0)
+            return test_session(&retail, &ours, scenarios) != 0;
+        if (strcmp(argv[2], "metadata") == 0)
+            return test_metadata(&retail, &ours, scenarios) != 0;
+        if (strcmp(argv[2], "aircraft") == 0)
+            return test_aircraft(&retail, &ours, scenarios) != 0;
+        if (strcmp(argv[2], "records") == 0)
+            return test_aircraft_copy(&retail, &ours, scenarios) != 0;
+        if (strcmp(argv[2], "tracking") == 0)
+            return test_tracking(&retail, &ours, scenarios) != 0;
         if (strcmp(argv[2], "init") == 0)
             return test_init(&retail, &ours, scenarios) != 0;
         if (strcmp(argv[2], "lobby") == 0)
@@ -635,7 +662,11 @@ int main(int argc, char **argv)
     bad += test_dialogs(&retail, &ours, scenarios);
     bad += test_lobby(&retail, &ours, scenarios);
     bad += test_init(&retail, &ours, scenarios);
+    bad += test_bounds(&retail, &ours, scenarios);
+    bad += test_whole(&retail, &ours, scenarios);
     multip_test_context("workers", "unknown", 0);
     bad += test_workers(&retail, &ours, scenarios);
+    printf("MULTIP whole module: %lu scenarios per suite, %lu differences\n",
+        (unsigned long)scenarios, (unsigned long)bad);
     return bad != 0;
 }

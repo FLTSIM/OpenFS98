@@ -1,11 +1,11 @@
 /* MULTIP.DLL -- module id 35: multiplayer sessions and remote aircraft.
  *
- * In-progress transliteration: transport/workers, DirectPlay lifetime,
+ * Verified transliteration: transport/workers, DirectPlay lifetime,
  * profiles, session/group primitives, aircraft and player ownership, browser
  * records, tracking/selection, message dispatch, session completion/close,
  * lobby connections, configuration/options/player-detail dialogs, and public
- * init/deinit with their CHAIN startup/shutdown callbacks. MULTIP is
- * intentionally outside MODULES and must not be installed in-game yet.
+ * init/deinit with their CHAIN startup/shutdown callbacks. Whole-module
+ * differential, mutation and startup smoke checks pass on x86.
  *
  * The retail module keeps its runtime state in the uninitialised tail of its
  * .data page.  Keeping a page here, with ImportTable at +0x000 and Linkage at

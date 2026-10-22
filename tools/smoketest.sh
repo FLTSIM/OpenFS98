@@ -78,7 +78,7 @@ for f in bin/*.DLL; do
     if cmp -s "$f" "$GAME/Modules/$installed"; then
         echo "  running the OpenFS98 build of $m"
     else
-        echo "  NOTE: $m is built but not installed -- the game ran retail's."
+        echo "  NOTE: $m differs from the installed DLL -- this exact build was not tested."
         echo "        run 'make install' to test what you just built."
     fi
 done

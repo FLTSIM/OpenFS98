@@ -647,6 +647,7 @@ DIALOG_MUTATIONS = [
 ]
 
 LOBBY_MUTATIONS = [
+    ("lobby temporary release identity", "LOBBY_FN(connected, 8, multip_dp_release_fn)(connected);", "LOBBY_FN((void *)(uintptr_t)M32(M_DIRECTPLAY), 8, multip_dp_release_fn)((void *)(uintptr_t)M32(M_DIRECTPLAY));"),
     ("host null-interface write ordering", "vtable = *(uint8_t *volatile *)directplay;\n    M32(0x9e8) = M32(0x998) + M32(0x99c);\n    M32(0x9f0) = D + 0xae0;", "M32(0x9e8) = M32(0x998) + M32(0x99c);\n    M32(0x9f0) = D + 0xae0;\n    vtable = *(uint8_t *volatile *)directplay;"),
     ("lobby connect query flag", "== 0) M32(M_DIRECTPLAY_QUERIED) = 1;", "== 0) M32(M_DIRECTPLAY_QUERIED) = 0;"),
     ("lobby descriptor copy size", "        (void *)(uintptr_t)(D + 0x9c0), 80) != 0", "        (void *)(uintptr_t)(D + 0x9c0), 76) != 0"),
@@ -762,7 +763,8 @@ def main():
         directory = Path(temp)
         for name in ("multipdiff.exe", "MULTIP_retail.dll", "UTIL_retail.dll", "G3D_retail.dll"):
             shutil.copy2(ROOT / "bin/difftest" / name, directory / name)
-        if check_variant(directory, source, "send") != 0:
+        baseline_slice = args.slice if args.slice in ("dialogs", "lobby") else "send"
+        if check_variant(directory, source, baseline_slice) != 0:
             raise RuntimeError("Unmodified baseline differs")
         print("baseline: 0 differences", flush=True)
         for slice_name, name, before, after in variants:

@@ -31,16 +31,17 @@ and untracked files. Preserve the entire working tree; do not stage, commit,
 push or install MULTIP. A fresh context in this workspace can use these files
 immediately; a separate checkout also needs the uncommitted changes.
 
-- **Verified:** 38 top-level differential suites, 20,000 scenarios each, zero
-  differences. The final host-fixture correction was also rechecked at 20,000
-  scenarios in `players`, `system`, `lifecycle` and `dispatch`.
+- **Verified:** 40 top-level differential suites, 20,000 scenarios each, zero
+  differences, including `dialogs` and `lobby` through public `+0x18/+0x1c`.
+  The earlier host-fixture correction remains covered by `players`, `system`,
+  `lifecycle` and `dispatch`.
 - **Latest implementation:** `multip_browser.inc`, `multip_configuration.inc`,
   `multip_details.inc`, `multip_options.inc`, `multip_lobby.inc` and
   `multip_toggle.inc`, plus the `dialogs` and `lobby` fixtures. Private test
   entries 224–265 map to retail RVAs in `multip_send.inc`. Existing provider
   entries 221–223 and receive/lifecycle entries 206–220 remain unchanged.
-- **Mutation status:** 426 targets match exactly once. The new dialog/lobby
-  mutation checks are recorded in the checkpoint below. The full mutation
+- **Mutation status:** 427 targets match exactly once. The new dialog/lobby
+  slices catch all 21 dialog and 13 lobby/toggle mutations. The full mutation
   sweep remains unfinished; crashes, timeouts and fixture failures are not catches.
 - **Next:** recover public init/deinit `+0x04/+0x08` and their entry callbacks
   (`.text+0x20`, `+0x70`, `+0x110`, `+0x220`). Reuse the verified lobby,
@@ -162,7 +163,7 @@ bytes reach all type characters. Constructor snapshots must be saved before
 later enumeration resets the embedded list; a stride mutation exposed this
 fixture gap and now fails the comparison.
 
-The current thirty-eight-suite differential run passes 20,000 scenarios per suite
+The current forty-suite differential run passes 20,000 scenarios per suite
 with zero differences. `make multipdiff` builds both production and test DLLs
 without warnings; the production export table contains only ImportTable and
 Linkage. These remain slice results, not whole-module acceptance. The earlier
@@ -224,11 +225,12 @@ finding and never counts as a mutation catch. Selected self-contained suites
 can run alone: `multipdiff.exe 1200 local`, `frame`, `draw`, `players`, or
 `messages`. The mutation runner uses those selectors where available.
 
-Public init/deinit, session toggle, and dialog entries remain disabled.
+Public init/deinit remain disabled. Session toggle and dialog entries are
+now recovered in the lobby/configuration checkpoint below.
 All six callback-registration groups, aggregate start/stop, common completion
 at `+0x9c70` and disconnect at `+0x8cf0` are now recovered and tested together.
-Lobby/provider and configuration/dialog callbacks still need recovery before
-those public entries can be enabled. Keep MULTIP outside `MODULES` until the
+Lobby/provider and configuration/dialog callbacks are also now recovered;
+init/deinit still need their own integration coverage. Keep MULTIP outside `MODULES` until the
 whole-module acceptance gates below pass.
 
 ## Extrapolation, commands, weather and tick checkpoint
@@ -360,7 +362,7 @@ The x86 callback has the retail stack layout needed for packet padding;
 the non-x86 C callback is implemented but is not covered by this x86 fixture.
 
 The full mutation sweep remains incomplete: the 324-case run stopped on a
-Wine timeout in the drawing slice. The current 393 mutation targets all
+Wine timeout in the drawing slice. The current 427 mutation targets all
 match exactly once, but the full sweep still needs completion. The earlier
 154-case sweep and individual new owner slices passed before the naming
 cleanup. Do not count a timeout or fixture abort as a catch.
@@ -396,8 +398,8 @@ The imports and their pointer cells are:
 | --- | --- | --- | --- |
 | `+0x04` | `.text+0x0020` | no arguments; register module and first CHAIN `0x14` callback | stub |
 | `+0x08` | `.text+0x0070` | no arguments; unregister the host module handle | stub |
-| `+0x18` | `.text+0x8e60` | no arguments; load transport and start/join/stop a session | stub |
-| `+0x1c` | `.text+0x39a0` | no arguments; options/session dialog entry | stub |
+| `+0x18` | `.text+0x8e60` | no arguments; load transport and start/join/stop a session | verified toggle |
+| `+0x1c` | `.text+0x39a0` | no arguments; options/session dialog entry | verified dialog |
 | `+0x20` | `.text+0x9840` | stdcall `(to_id, payload, size, flags)`; enqueue an application message | exact enqueue |
 | `+0x24` | `.text+0x9de0` | no arguments; return `{count, records}` | exact |
 | `+0x28` | `.text+0x8680` | stdcall `(player_id)`; return a player record | exact |
@@ -689,8 +691,8 @@ send, and `+0x9e20` tears down send then receive. `+0x9e40` starts send then
 receive only while data `+0xf24` is zero, and sets that shared flag after both
 calls. `+0x9e70` stops receive then send while the flag is nonzero, and clears
 it only after both calls succeed. They do not roll back failures. Public
-init/session entries remain stubs, so these workers are not yet started by
-normal game calls.
+session entries now reach the workers through completion, but init/deinit and
+their subsystem setup/teardown ownership still need recovery.
 
 The observed Win32 imports are `InitializeCriticalSection`,
 `DeleteCriticalSection`, `EnterCriticalSection`, `LeaveCriticalSection`,
@@ -887,8 +889,8 @@ Factory availability is seeded independently before calling create, so a
 missing factory export is compared as loader state rather than executed as
 null code. The original lifetime fake is separate from the send/receive fixtures. The
 receive/lifecycle fixture now combines session, player, group and transport
-contracts; integrating lobby/provider creation with that lifetime coverage
-remains ahead. No real DirectPlay DLL or network is used.
+contracts; the later lobby fixture also exercises creation and connection
+through completion and disconnect. No real DirectPlay DLL or network is used.
 
 `make multip-directplay-breaks` checks eleven mutations: loader export
 selection, loaded-flag retention, export descriptor order, unload flag and
@@ -897,11 +899,11 @@ temporary release order, factory outer argument, and query-flag reset. As with
 the other slices, a mutation counts only when its comparison completes with
 differences; a crash or fixture error is not a catch.
 
-This is not a whole-module 20k result. Init/deinit and their entry callbacks,
-session configuration, lobby handling, and public slots `+0x18` and `+0x1c`
-remain unimplemented. Receive dispatch and internal session integration are
-verified in the later checkpoint below. Worker lifecycles are verified through
-controlled internal entry calls; no public init/session entry is enabled yet.
+This loader/lifetime slice is not a whole-module 20k result. Receive dispatch,
+session integration, lobby/configuration callbacks and public `+0x18/+0x1c`
+are verified in the later checkpoints below. Init/deinit and their entry
+callbacks remain unimplemented. Worker lifecycles are verified through
+controlled internal calls and the later completion/lobby fixtures.
 
 Run the current checkpoint with:
 
@@ -1007,8 +1009,8 @@ checks. The full 382-target mutation sweep remains pending.
 
 The private test entries 206–220 cover these owners, handlers and switches.
 The non-x86 C fallbacks are implemented but are not validated by the x86 fixture.
-Public lifecycle/dialog slots remain guarded; this is internal integration,
-not whole-module acceptance.
+This receive checkpoint is internal integration, not whole-module acceptance.
+The later dialog checkpoint enables public `+0x18/+0x1c`; init/deinit stay guarded.
 
 ## Recommended continuation order
 
@@ -1105,7 +1107,8 @@ must remain `MULTIPLAYER.DLL` through the existing Makefile mapping.
 `multip_providers.inc` recovers DirectPlay provider enumeration (`.text+0x41f0`),
 its five-argument callback (`+0x4210`), and catalogue cleanup (`+0x42a0`).
 Private test entries 221–223 map to cleanup, callback and enumeration respectively.
-These are configuration `+0x3d60` dependencies; public entries remain guarded.
+These are configuration `+0x3d60` dependencies; their original checkpoint kept
+public entries guarded until the later lobby/configuration work below.
 
 The callback appends a zeroed 28-byte record before allocating a zero-filled
 name of `strlen(description) + 1` bytes. Allocation failure returns false and
@@ -1141,9 +1144,8 @@ Focused verification: `make multipdiff`, then from `bin/difftest`,
 `WINEDEBUG=-all wine multipdiff.exe 20000 providers`. Mutation checks:
 `python3 -B tools/multip_breaks.py --slice providers`. The earlier 382-target
 full mutation sweep remains unfinished; the provider mutations extend that
-set to 393 targets, all matching exactly once. Continue with lobby creation and session-browser
-refresh/cleanup (`+0x42f0`, `+0x44c0`) and the configuration callback owners
-before enabling public session toggle `+0x18`.
+set to 393 targets at that checkpoint. The later lobby/configuration work below
+recovers the remaining browser/dialog owners and enables public `+0x18/+0x1c`.
 
 ## Lobby and configuration dialog checkpoint
 
@@ -1210,10 +1212,15 @@ used by the fixture is wsprintfA.
 The `lobby` fixture drives all six lobby owners and public `+0x18` through real
 completion, options `+0x1c` and repeated disconnect. COM, CHAIN, thread creation,
 events, waits and Sleep are scripted; no network, OS worker threads or real
-sleep are used. Distinct deep stack words and a word changed by registration
+sleep are used. Lobby, temporary connected and queried global interfaces have
+distinct fixture identities, and settings start with nonzero flags independent
+of MULTIP's configured session flags. Open failures are scripted independently
+of memory/callback failures. Distinct deep stack words and a word changed by registration
 check completion's unwritten DPNAME field through host/join/apply/start/toggle
 nesting. Heap ownership/bytes, input session settings, queue metadata, returns,
-module state and ordered calls are compared after actions. Coverage assertions
+module state and ordered calls are compared after actions. A deliberate null-interface
+host call also targets the capacity/name write ordering directly, and refresh
+inputs are aimed at each side's published timer boundary. Coverage assertions
 require all dialog families, pruning, shell interception, player removal,
 lobby creation/release and painted completion words to occur.
 
@@ -1230,6 +1237,21 @@ disconnect then tries to free module memory. That exact invalid-free boundary is
 modeled without calling the process allocator. Other invalid fixture frees
 remain harness errors. These x86 comparisons do not validate native fallbacks,
 real DirectPlay providers, Windows dialog rendering, or OS thread scheduling.
+
+`make multipdiff-run N=20000` passes all **40 top-level suites**, zero
+differences. The new dialog suite observes 19,219 configuration dialogs,
+56,406 options dialogs, 37,203 player-details dialogs, 18,867 prune calls,
+36,959 player-removal confirmations and 22,484 intercepted shell calls.
+The lobby suite observes 3,317 lobby creations, 2,526 releases, 10,657 checked
+completion stack words and 457 public-toggle completions. The 980 dialog and
+1,809 lobby fault outcomes are compared, not filtered away. Production and
+fixture DLLs compile without warnings; the production export table still has
+only ImportTable and Linkage. `git diff --check` passes.
+
+All 21 dialog mutations and all 13 lobby/toggle mutations are caught at
+1,200 scenarios each. All 427 targets match exactly once; the full 427-target
+sweep remains unfinished. The mutation runner uses each new slice's own
+unmodified baseline, while the full regression still exercises all owners.
 
 Focused commands from `bin/difftest`: `WINEDEBUG=-all wine multipdiff.exe 20000
 dialogs` and `WINEDEBUG=-all wine multipdiff.exe 20000 lobby`. Mutations run from

@@ -25,6 +25,7 @@ static uint8_t s_dialog_global[0x1200], s_dialog_local[256];
 static uint8_t s_dialog_host[0x320], s_dialog_util[0xb0], s_dialog_numeric[0x24];
 static void *s_dialog_vtable[40];
 static void **s_dialog_object = s_dialog_vtable;
+static void **s_dialog_connected_object = s_dialog_vtable;
 static uint32_t s_dialog_application[4] = {0x12345678,0x9abcdef0,0x87654321,0xabcdef01};
 static const char s_dialog_player_name[] = "fixture player";
 static const char s_dialog_name_code[] = "CP";
@@ -371,11 +372,11 @@ static int32_t STDCALL dialog_factory(const GUID *guid, void **out, void *outer)
 static int32_t STDCALL dialog_query(void *object, const GUID *iid, void **out)
 {
     uint32_t *entry = dialog_log(22);
-    entry[1] = object == &s_dialog_object; entry[2] = dialog_hash(iid, 16); entry[3] = dialog_address(out);
+    entry[1] = object == &s_dialog_object ? 1 : object == &s_dialog_connected_object ? 2 : 0; entry[2] = dialog_hash(iid, 16); entry[3] = dialog_address(out);
     *out = &s_dialog_object; return dialog_fail() ? -1 : 0;
 }
 static uint32_t STDCALL dialog_release(void *object)
-{ dialog_log(23)[1] = object == &s_dialog_object; return 0xabcdef01; }
+{ dialog_log(23)[1] = object == &s_dialog_object ? 1 : object == &s_dialog_connected_object ? 2 : 0; return 0xabcdef01; }
 static int32_t STDCALL dialog_provider_enum(provider_callback_fn callback, void *context)
 {
     uint32_t *entry = dialog_log(24), index;

@@ -18,7 +18,7 @@ static int32_t STDCALL lobby_connect(void *object, uint32_t flags, void **out, v
 {
     uint32_t *entry = dialog_log(41);
     entry[1] = object == &s_lobby_object; entry[2] = flags; entry[3] = outer != NULL;
-    *out = &s_dialog_object; return dialog_fail() ? -1 : 0;
+    *out = &s_dialog_connected_object; return dialog_fail() ? -1 : 0;
 }
 static uint32_t STDCALL lobby_release(void *object)
 { dialog_log(42)[1] = object == &s_lobby_object; return 0x76543210; }
@@ -89,7 +89,8 @@ static int32_t STDCALL lobby_open(void *object, void *description, uint32_t flag
 {
     uint32_t *entry = dialog_log(64);
     entry[1] = object == &s_dialog_object; entry[2] = dialog_hash(description, 80); entry[3] = flags;
-    return dialog_fail() ? -1 : 0;
+    /* Open failures are independent of the allocator/callback fail index. */
+    return s_dialog_number % 3 == 0 ? 1 : dialog_fail() ? -1 : 0;
 }
 static int32_t STDCALL lobby_enum_groups(void *object, const GUID *instance,
     session_enum_callback callback, void *context, uint32_t flags)
@@ -148,6 +149,7 @@ static void lobby_setup(const struct multip_module *module, uint32_t number)
     s_lobby_threads = 0; s_lobby_models = 0;
     memset(s_lobby_connection, 0, sizeof(s_lobby_connection));
     memcpy(s_lobby_session, s_dialog_description, 80);
+    put_u32(s_lobby_session, 4, number & 1 ? 0x80000080u : 0x40000100u);
     s_lobby_connection[0] = 32; s_lobby_connection[1] = s_flags[number / 6 % 6];
     s_lobby_connection[2] = (uint32_t)(uintptr_t)s_lobby_session;
     s_lobby_connection[3] = (uint32_t)(uintptr_t)s_lobby_name;
@@ -229,7 +231,7 @@ finish:
 static uint32_t test_lobby(const struct multip_module *retail, const struct multip_module *ours, uint32_t scenarios)
 {
     static struct dialog_results s_retail, s_ours;
-    uint32_t number, bad = 0, faults = 0, creates = 0, releases = 0, padded = 0, switches = 0;
+    uint32_t number, bad = 0, faults = 0, creates = 0, releases = 0, padded = 0, switches = 0, toggle_padded = 0;
     void *handler = AddVectoredExceptionHandler(1, dialog_fault);
     if (handler == NULL) exit(2);
     for (number = 0; number < scenarios; number++) {
@@ -241,6 +243,7 @@ static uint32_t test_lobby(const struct multip_module *retail, const struct mult
                 uint32_t tag = s_retail.log[index][0];
                 creates += tag == 43; releases += tag == 42;
                 padded += tag == 52 && s_retail.log[index][3] == 0x89abcdef;
+                toggle_padded += number % 7 == 6 && tag == 52 && s_retail.log[index][3] == 0x89abcdef;
                 switches += tag == 38 && s_retail.log[index][1] == 0x110a;
             }
         }
@@ -259,11 +262,11 @@ static uint32_t test_lobby(const struct multip_module *retail, const struct mult
         }
     }
     RemoveVectoredExceptionHandler(handler);
-    if (scenarios >= 1200 && (creates == 0 || releases == 0 || padded == 0 || switches == 0)) {
+    if (scenarios >= 1200 && (creates == 0 || releases == 0 || padded == 0 || switches == 0 || toggle_padded == 0)) {
         fprintf(stderr, "lobby fixture missed a required startup boundary\n"); exit(2);
     }
-    printf("lobby coverage: creates %lu, releases %lu, completion stack words %lu, public configuration %lu\n",
-        (unsigned long)creates, (unsigned long)releases, (unsigned long)padded, (unsigned long)switches);
+    printf("lobby coverage: creates %lu, releases %lu, completion stack words %lu, public configuration %lu, toggle completions %lu\n",
+        (unsigned long)creates, (unsigned long)releases, (unsigned long)padded, (unsigned long)switches, (unsigned long)toggle_padded);
     printf("lobby outcomes: %lu fault outcomes\n", (unsigned long)faults);
     printf("MULTIP lobby connection owners: %lu scenarios, %lu differ\n", (unsigned long)scenarios, (unsigned long)bad);
     return bad;

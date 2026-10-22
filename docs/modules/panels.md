@@ -9,7 +9,7 @@ Linkage of 43 entries (`+0x04`..`+0x08` init and deinit, `+0x18`..`+0xa8`).
 `src/panels/panels.c` carries all 201 functions; `make panelsdiff-run` drives
 it and retail side by side through the CD's own gauges (3,000 scenarios, 0 differ), `make
 panelsunit-run` drives each of its 28 image routines alone (20,000 cases each, 0 differ), and `make
-panels-breaks` breaks it on purpose (164 of 200 sampled mutants caught; the rest below). The HG2D model the harness
+panels-breaks` breaks it on purpose (198 of the 200 sampled mutants that build are caught; see below). The HG2D model the harness
 needs is checked against retail HG2D (`make hg2dmodeldiff-run`).
 
 ## Imports
@@ -170,8 +170,17 @@ flags (bit 0 transparent, bit 1 keeps what it covers, `0x40000000` off,
 | 6 | a shape turned on its pivot with three variables | `c720`, `cbf0`, `ccd0`, `cda0`, `d1d0`, `d280`, `d300` |
 | 7 | nothing, a node for children | `d330`, -, `d330`, -, -, -, `d340` |
 
-The returns of the handlers are whatever retail leaves in eax and are not
-reproduced (they return 0); the harness never compares them.
+The returns of the handlers (and of `surface_convert`, `named_find` and
+`named_remove`) are whatever retail leaves in eax and are not reproduced (they
+return 0); the harness never compares them. Nothing reads them: every
+caller inside PANELS discards them (only the tree walkers pass an element
+op's value on, to callers that discard it); no caller in another module reads
+a PANELS service's eax (ACONTAIN's attach and detach are void, CONTROLS'
+`+0x30` and WINDOW's `+0x28`/`+0x2c` are called for effect); and none of the
+CD's 120 gauges reads eax after a call into PANELS (checked by scanning
+each call site's following instructions: the sites fall to a `ret` and hand
+eax to the gauge's own caller, and the variable functions PANELS calls
+return doubles in `st(0)`, not eax). A gauge the CD lacks could differ.
 
 ### Retail's bugs, kept
 

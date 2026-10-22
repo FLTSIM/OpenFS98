@@ -8,8 +8,9 @@ This module is in progress. The source verifies public send enqueue (`+0x20`),
 internal send/drain/flush, receive/dequeue, both worker lifecycles, DirectPlay
 loading/interface lifetime, and player-list/status/range queries (`+0x24`
 through `+0x38`). Session toggle `+0x18`, options `+0x1c`, and the lobby/
-configuration/browser/player-details callbacks are now implemented; the latest
-verification is recorded in [the dialog checkpoint](#lobby-and-configuration-dialog-checkpoint). It builds explicitly with
+configuration/browser/player-details callbacks, public init/deinit and both
+entry callbacks are implemented. The latest verification is recorded in
+[the init checkpoint](#initdeinit-checkpoint). It builds explicitly with
 `make bin/MULTIP.DLL` and remains absent from `MODULES`, so `make install`
 cannot replace the retail multiplayer module prematurely.
 
@@ -31,32 +32,32 @@ and untracked files. Preserve the entire working tree; do not stage, commit,
 push or install MULTIP. A fresh context in this workspace can use these files
 immediately; a separate checkout also needs the uncommitted changes.
 
-- **Verified:** 40 top-level differential suites, 20,000 scenarios each, zero
-  differences, including `dialogs` and `lobby` through public `+0x18/+0x1c`.
+- **Verified:** all 41 top-level suites pass 20,000 scenarios each, zero
+  differences. The new `init` suite covers public `+0x04/+0x08` and both entry
+  callbacks; the earlier dialog/lobby suites cover public `+0x18/+0x1c`.
   The earlier host-fixture correction remains covered by `players`, `system`,
   `lifecycle` and `dispatch`.
-- **Latest implementation:** `multip_browser.inc`, `multip_configuration.inc`,
-  `multip_details.inc`, `multip_options.inc`, `multip_lobby.inc` and
-  `multip_toggle.inc`, plus the `dialogs` and `lobby` fixtures. Private test
-  entries 224–265 map to retail RVAs in `multip_send.inc`. Existing provider
-  entries 221–223 and receive/lifecycle entries 206–220 remain unchanged.
-- **Mutation status:** 427 targets match exactly once. The new dialog/lobby
-  slices catch all 21 dialog and 13 lobby/toggle mutations. The full mutation
-  sweep remains unfinished; crashes, timeouts and fixture failures are not catches.
-- **Next:** recover public init/deinit `+0x04/+0x08` and their entry callbacks
-  (`.text+0x20`, `+0x70`, `+0x110`, `+0x220`). Reuse the verified lobby,
-  configuration, session toggle, workers, callback owners and disconnect.
-  Public `+0x18/+0x1c` are now enabled; `+0x04/+0x08` remain guarded.
-  MULTIP stays outside `MODULES` until whole-module acceptance and smoke testing.
+- **Latest implementation:** `multip_init.inc` and its matching fixture. Private
+  entries 266–269 map init, deinit, startup and shutdown to retail RVAs
+  `0x1020`, `0x1070`, `0x1090`, `0x1220`. Entries 0–265 remain unchanged.
+- **Mutation status:** all 450 targets match exactly once. The init slice
+  catches all 23 mutations at 1,200 scenarios each; the earlier dialog/lobby
+  slices catch all 21 dialog and 13 lobby/toggle mutations. The full sweep
+  remains unfinished; crashes, timeouts and fixture failures are not catches.
+- **Next:** close the whole-module acceptance gaps: malformed matching motion
+  lengths below `0x6c`, a unified action stream with worker draining after each
+  action, and the complete mutation sweep. All eleven public entries are now
+  enabled. MULTIP stays outside `MODULES` until acceptance and game smoke testing.
 - **Limits:** x86 comparisons do not validate the non-x86 C fallbacks or OS
   thread scheduling races. Whole-module acceptance and game smoke testing
   remain ahead.
 
 Build with `make multipdiff`; run `make multipdiff-run N=20000` for the full
 checkpoint. From `bin/difftest`, run `WINEDEBUG=-all wine multipdiff.exe 1200
-lifecycle` or replace `lifecycle` with `dispatch` for focused comparisons.
+init` or replace `init` with `lifecycle`, `dispatch`, `dialogs` or `lobby`
+for focused comparisons.
 Run mutations from the repository root with
-`python3 -B tools/multip_breaks.py --slice lifecycle` or `--slice dispatch`.
+`python3 -B tools/multip_breaks.py --slice init` (or another named slice).
 Run Wine tests serially: concurrent runs previously produced timeouts.
 The generator reads the retail `orig/Modules/multip.dll`; do not depend on
 scratch disassembly under `/tmp` surviving a restart. `.text` offsets are
@@ -74,8 +75,8 @@ The working files are:
 
 Do not add MULTIP to `MODULES` or install it into the game until all public
 slots, both worker lifecycles, and the CHAIN callbacks are implemented and a
-smoke test passes. The present failure stubs return `0xffffffff`; they are a
-development guard, not plausible retail behavior.
+smoke test passes. All public entries now have recovered owners; this alone
+is not whole-module acceptance.
 
 ## Session, aircraft and message continuation
 
@@ -225,12 +226,12 @@ finding and never counts as a mutation catch. Selected self-contained suites
 can run alone: `multipdiff.exe 1200 local`, `frame`, `draw`, `players`, or
 `messages`. The mutation runner uses those selectors where available.
 
-Public init/deinit remain disabled. Session toggle and dialog entries are
-now recovered in the lobby/configuration checkpoint below.
+Public init/deinit, session toggle and dialog entries are now recovered in
+the later lobby/configuration and init checkpoints below.
 All six callback-registration groups, aggregate start/stop, common completion
 at `+0x9c70` and disconnect at `+0x8cf0` are now recovered and tested together.
 Lobby/provider and configuration/dialog callbacks are also now recovered;
-init/deinit still need their own integration coverage. Keep MULTIP outside `MODULES` until the
+init/deinit now have integration coverage in the final checkpoint. Keep MULTIP outside `MODULES` until the
 whole-module acceptance gates below pass.
 
 ## Extrapolation, commands, weather and tick checkpoint
@@ -549,9 +550,9 @@ paths and therefore must not be implemented with a dummy callback.
   tears down supporting state, and calls `.text+0x9e20`.
 
 Those message numbers and call boundaries are confirmed; descriptive event
-names are intentionally deferred until the CHAIN producer is traced. A first
-init test should log registration, dispatch `0x36`, `0x37`, and `0x3a`, and
-compare every host/CHAIN call and modified state block with retail.
+names are intentionally deferred until the CHAIN producer is traced. The
+`init` fixture now logs registration, dispatches `0x36`, `0x37`, and `0x3a`,
+and compares host/CHAIN calls, heap ownership and modified state with retail.
 
 The profile section name is `MULTIPLAYER`. The loader at `.text+0x8f30` and
 saver at `.text+0x93e0` cover these keys:
@@ -691,8 +692,8 @@ send, and `+0x9e20` tears down send then receive. `+0x9e40` starts send then
 receive only while data `+0xf24` is zero, and sets that shared flag after both
 calls. `+0x9e70` stops receive then send while the flag is nonzero, and clears
 it only after both calls succeed. They do not roll back failures. Public
-session entries now reach the workers through completion, but init/deinit and
-their subsystem setup/teardown ownership still need recovery.
+session entries reach the workers through completion; the init checkpoint
+also covers subsystem setup/teardown through both entry callbacks.
 
 The observed Win32 imports are `InitializeCriticalSection`,
 `DeleteCriticalSection`, `EnterCriticalSection`, `LeaveCriticalSection`,
@@ -902,7 +903,7 @@ differences; a crash or fixture error is not a catch.
 This loader/lifetime slice is not a whole-module 20k result. Receive dispatch,
 session integration, lobby/configuration callbacks and public `+0x18/+0x1c`
 are verified in the later checkpoints below. Init/deinit and their entry
-callbacks remain unimplemented. Worker lifecycles are verified through
+callbacks are implemented in the final checkpoint. Worker lifecycles are verified through
 controlled internal calls and the later completion/lobby fixtures.
 
 Run the current checkpoint with:
@@ -1010,7 +1011,8 @@ checks. The full 382-target mutation sweep remains pending.
 The private test entries 206–220 cover these owners, handlers and switches.
 The non-x86 C fallbacks are implemented but are not validated by the x86 fixture.
 This receive checkpoint is internal integration, not whole-module acceptance.
-The later dialog checkpoint enables public `+0x18/+0x1c`; init/deinit stay guarded.
+The later dialog checkpoint enables public `+0x18/+0x1c`; the init checkpoint
+enables `+0x04/+0x08`.
 
 ## Recommended continuation order
 
@@ -1022,10 +1024,10 @@ are also verified, including receive/control ownership at `+0x27c0`, receive
 dispatch, and integration of all callback owners and workers in common
 completion `+0x9c70` and disconnect `+0x8cf0`. Lobby/provider and
 configuration/dialog wiring for public `+0x18/+0x1c` is now recovered in the
-checkpoint below. Next recover public init/deinit and their callbacks. The loader flag alone does
+checkpoint below. Init/deinit and their callbacks follow in the final
+checkpoint. The loader flag alone does
 not prove the factory is available, and create's first query failure leaks a
-reference; retain those boundaries in integrated cases. Public init/deinit
-still need their own callback/ownership integration coverage.
+reference; retain those boundaries in integrated cases.
 
 The next public-entry boundaries are confirmed in `.text+0x8e60`: load first;
 when connected, UTIL `+0xa4` supplies confirmation before disconnect
@@ -1162,8 +1164,8 @@ in generated data are bound to these owners at DLL attachment.
 `multip_lobby.inc` recovers startup with host-supplied or explicit connection
 settings, lobby creation/application, host/join and interface connection
 (`+0x9990`–`+0x9c60`). `multip_toggle.inc` implements public session toggle
-`+0x18` (`+0x8e60`). Both public entries are enabled. Init/deinit remain failure
-guards, and MULTIP remains outside `MODULES`.
+`+0x18` (`+0x8e60`). Both public entries are enabled. The later init checkpoint
+enables init/deinit as well; MULTIP remains outside `MODULES`.
 
 Preserved behavior includes:
 
@@ -1257,3 +1259,62 @@ Focused commands from `bin/difftest`: `WINEDEBUG=-all wine multipdiff.exe 20000
 dialogs` and `WINEDEBUG=-all wine multipdiff.exe 20000 lobby`. Mutations run from
 the repository root with `python3 -B tools/multip_breaks.py --slice dialogs`
 or `--slice lobby`. Run Wine serially.
+
+## Init/deinit checkpoint
+
+`multip_init.inc` implements public init `+0x04` (`.text+0x20`), deinit
+`+0x08` (`+0x70`), and their two CHAIN callbacks (`+0x90`, `+0x220`). All
+eleven public entries now have recovered owners. MULTIP remains outside
+`MODULES`; unified whole-module acceptance and game smoke testing remain ahead.
+
+Init ignores the host registration result, saves the application GUID pointer,
+and returns CHAIN registration's raw result. Only a zero registration result
+clears the three DirectPlay export addresses. Deinit returns the raw host
+unregistration result and performs no session cleanup.
+
+The first callback returns an unrecognized event's code. Event `0x36` loads
+the profile, ignores the resource-path result, merges flag `0x40` when
+`+0x18c` is nonzero, resets four startup fields, registers the shutdown
+callback, constructs the worker subsystems and starts the lobby path. Each
+failure retains the work already done; repeated startup can retain old queues.
+
+Event `0x3a` reads the compound connection size at payload `+0x110`, copies
+the bytes at `+0x114`, and relocates session, session-name, name-descriptor,
+short-name, long-name and address offsets against the allocation. It clears
+the session password pointer. Offset zero is still relocated. Allocation,
+copy and free results remain raw. Copy failure leaks the block; a loaded
+DirectPlay instance also retains it because explicit lobby startup always
+returns `-1`, even after successful completion. No pointer validation was added.
+
+The second callback handles `0x37` by disconnecting, saving the profile,
+deleting catalogued texture files and tearing down workers, stopping at the
+first failure. Other events preserve incoming EAX. The x86 wrappers retain
+the retail frame depth and use the first callback's caller-owned code cell
+as allocation scratch. The portable fallback cannot express incoming EAX
+and is not validated by these x86 comparisons.
+
+The `init` fixture drives registration, repeated startup, compound connections,
+unrecognized events and repeated shutdown. It compares returns, ordered calls,
+module state, heap bytes, liveness, retained allocations and fault outcomes.
+Host/CHAIN returns include positive and negative values independent of memory
+failure injection. A mutation removing the worker-setup error branch initially
+survived the generic failure schedule. Targeted failures now cover each startup
+queue allocation, and that mutation is caught.
+Scripted texture paths and deletion failures test shutdown ordering without
+filesystem writes. Win32 events and critical sections are deterministic stand-ins;
+thread creation, waits, COM and ShellExecuteA reuse the controlled lobby backend.
+Painted stack words check completion through both entry-callback paths. Faults
+from null events and malformed relative offsets remain compared outcomes.
+
+Run the focused fixture from `bin/difftest` with `WINEDEBUG=-all wine
+multipdiff.exe 20000 init`; run its mutations from the repository root with
+`python3 -B tools/multip_breaks.py --slice init`. Run Wine serially.
+
+`make multipdiff-run N=20000` passes all **41 top-level suites**, zero
+differences. The init suite observes 6,248 startup registrations, 301,415
+integer-profile writes, 6,877 compound copies, 3,569 checked completion stack
+words and 1,075 queue allocation failures. All 3,755 fault outcomes are
+compared. All **23 init mutations** are caught at 1,200 scenarios each;
+all **450 mutation targets** match exactly once. The complete 450-target
+sweep remains unfinished. Both DLL builds are warning-free, production
+exports remain ImportTable and Linkage, and `git diff --check` passes.

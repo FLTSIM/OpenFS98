@@ -33,7 +33,7 @@ static uint8_t s_dialog_description[80];
 static uint32_t dialog_code_id(const void *pointer)
 {
     uint32_t index;
-    for (index = 0; index <= 265; index++)
+    for (index = 0; index <= 269; index++)
         if (pointer == send_internal(s_dialog_module, index)) return index;
     return 0;
 }

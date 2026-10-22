@@ -342,9 +342,11 @@ system/player/state messages, texture files, multipart transfers, aircraft
 title selection, control/collision publishing, receive dispatch and session
 completion/disconnect now include provider enumeration, lobby startup,
 configuration/browser/player-details dialogs and public session toggle/options
-(`+0x18/+0x1c`). All forty suites pass 20,000 scenarios each with zero
-differences; all 34 new dialog/lobby mutations are caught. Public init/deinit
-remain pending; MULTIP is not installed or included in `MODULES`. The restartable handoff and acceptance boundary are in
+(`+0x18/+0x1c`), plus public init/deinit and both entry callbacks. All 41
+suites pass 20,000 scenarios each with zero differences; all 23 new lifecycle
+mutations and the earlier 34 dialog/lobby mutations are caught. Whole-module
+acceptance and game smoke testing remain; MULTIP is not installed or included
+in `MODULES`. The restartable handoff and acceptance boundary are in
 [docs/modules/multip.md](docs/modules/multip.md). `MPCHAT` follows it.
 **`G3D` is done, verified and running in-game**: the whole bytecode machine,
 its depth queue, services and CHAIN callbacks, 20,000 `g3ddiff` scenarios

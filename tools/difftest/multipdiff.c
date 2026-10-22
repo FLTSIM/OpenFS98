@@ -460,6 +460,7 @@ static void print_difference(uint32_t scenario_number,
 #include "multip_providers.inc"
 #include "multip_dialogs.inc"
 #include "multip_lobby.inc"
+#include "multip_init.inc"
 
 int main(int argc, char **argv)
 {
@@ -492,6 +493,8 @@ int main(int argc, char **argv)
 
     /* Local creation owns its fixture setup, so mutations can run it alone. */
     if (argc > 2) {
+        if (strcmp(argv[2], "init") == 0)
+            return test_init(&retail, &ours, scenarios) != 0;
         if (strcmp(argv[2], "lobby") == 0)
             return test_lobby(&retail, &ours, scenarios) != 0;
         if (strcmp(argv[2], "dialogs") == 0)
@@ -631,6 +634,7 @@ int main(int argc, char **argv)
     bad += test_providers(&retail, &ours, scenarios);
     bad += test_dialogs(&retail, &ours, scenarios);
     bad += test_lobby(&retail, &ours, scenarios);
+    bad += test_init(&retail, &ours, scenarios);
     multip_test_context("workers", "unknown", 0);
     bad += test_workers(&retail, &ours, scenarios);
     return bad != 0;

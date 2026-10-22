@@ -663,6 +663,33 @@ LOBBY_MUTATIONS = [
 ]
 
 
+INIT_MUTATIONS = [
+    ("init ignores host registration status", "    HOST_FN(0x298, multip_module_register_fn)((void *)(uintptr_t)(D + MULTIP_LINKAGE),\n        (uint32_t *)(uintptr_t)(D + 0xa34));", "    result = HOST_FN(0x298, multip_module_register_fn)((void *)(uintptr_t)(D + MULTIP_LINKAGE),\n        (uint32_t *)(uintptr_t)(D + 0xa34));\n    if (result != 0) return result;"),
+    ("init callback chain code", "        0x14, (void *)multip_init_callback);", "        0x13, (void *)multip_init_callback);"),
+    ("init clears exports on failure", "    if (result == 0) {\n        M32(M_DIRECTPLAY_ENUMERATE)", "    if (result != 0) {\n        M32(M_DIRECTPLAY_ENUMERATE)"),
+    ("init enumerate export reset", "        M32(M_DIRECTPLAY_ENUMERATE) = 0;", "        M32(M_DIRECTPLAY_ENUMERATE) = 1;"),
+    ("init create export reset", "        M32(M_DIRECTPLAY_CREATE) = 0;", "        M32(M_DIRECTPLAY_CREATE) = 1;"),
+    ("init lobby export reset", "        M32(M_DIRECTPLAY_LOBBY) = 0;", "        M32(M_DIRECTPLAY_LOBBY) = 1;"),
+    ("init raw chain return", "    return result;\n}\n\nstatic int32_t multip_deinit", "    return result != 0 ? -1 : 0;\n}\n\nstatic int32_t multip_deinit"),
+    ("deinit token identity", "multip_module_unregister_fn)(M32(0xa34));", "multip_module_unregister_fn)(M32(0xa38));"),
+    ("startup shutdown registration code", '"3: movl _s_multip_image+0x1c, %eax\\n\\tpushl $_multip_shutdown_callback@8\\n\\tpushl $0x14', '"3: movl _s_multip_image+0x1c, %eax\\n\\tpushl $_multip_shutdown_callback@8\\n\\tpushl $0x13'),
+    ("startup flag merge", '"movl _s_multip_image+0x190, %eax\\n\\torb $0x40, %al', '"movl _s_multip_image+0x190, %eax\\n\\torb $0x80, %al'),
+    ("startup pending reset", 'movl %edi, _s_multip_image+0x984\\n', 'movl $1, _s_multip_image+0x984\\n'),
+    ("startup worker failure propagation", '"testl %eax, %eax\\n\\tjnz 9f\\n\\tcall _multip_workers_setup\\n\\ttestl %eax, %eax\\n\\tjnz 9f\\n\\tcall _multip_lobby_start', '"testl %eax, %eax\\n\\tjnz 9f\\n\\tcall _multip_workers_setup\\n\\tcall _multip_lobby_start'),
+    ("startup completion nesting", 'jnz 9f\\n\\tcall _multip_lobby_start\\n', 'jnz 9f\\n\\tsubl $4, %esp\\n\\tcall _multip_lobby_start\\n\\taddl $4, %esp\\n'),
+    ("compound session relocation", 'addl %eax, %esi\\n\\tmovl %esi, 8(%eax)', 'addl $4, %esi\\n\\taddl %eax, %esi\\n\\tmovl %esi, 8(%eax)'),
+    ("compound password reset", 'movl %edi, 0x34(%ecx)', 'movl $1, 0x34(%ecx)'),
+    ("compound session name relocation", 'addl %ecx, %edx\\n\\tmovl %edx, 0x30(%eax)', 'addl $4, %edx\\n\\taddl %ecx, %edx\\n\\tmovl %edx, 0x30(%eax)'),
+    ("compound short name relocation", 'addl %ecx, %esi\\n\\tmovl %esi, 8(%eax)', 'addl $4, %esi\\n\\taddl %ecx, %esi\\n\\tmovl %esi, 8(%eax)'),
+    ("compound long name relocation", 'addl %ecx, %edx\\n\\tmovl %edx, 12(%eax)', 'addl $4, %edx\\n\\taddl %ecx, %edx\\n\\tmovl %edx, 12(%eax)'),
+    ("compound address relocation", 'addl %eax, %ecx\\n\\tmovl %ecx, 0x20(%eax)', 'addl $4, %ecx\\n\\taddl %eax, %ecx\\n\\tmovl %ecx, 0x20(%eax)'),
+    ("compound loaded gate", '"movl _s_multip_image+0xa48, %eax\\n\\ttestl %eax, %eax\\n\\tjz 1f', '"movl _s_multip_image+0xa48, %eax\\n\\ttestl %eax, %eax\\n\\tjnz 1f'),
+    ("compound retained allocation", 'call _multip_lobby_start_connection@4\\n\\ttestl %eax, %eax\\n\\tjnz 9f', 'call _multip_lobby_start_connection@4\\n\\ttestl %eax, %eax\\n\\tjz 9f'),
+    ("shutdown ignored event EAX", '"cmpl $0x37, 4(%esp)\\n\\tjne 1f', '"xorl %eax, %eax\\n\\tcmpl $0x37, 4(%esp)\\n\\tjne 1f'),
+    ("shutdown stops after texture failure", '"testl %eax, %eax\\n\\tjnz 1f\\n\\tcall _multip_workers_teardown\\n\\t1: ret $8', '"call _multip_workers_teardown\\n\\t1: ret $8'),
+]
+
+
 def check_variant(directory, source, slice_name):
     source_path = directory / "multip.c"
     source_path.write_text(source)
@@ -679,7 +706,7 @@ def check_variant(directory, source, slice_name):
     ]
     subprocess.run(command, check=True, capture_output=True, text=True)
     result = subprocess.run(
-        ["wine", "multipdiff.exe", "1200"] + ([slice_name] if slice_name in ("local", "frame", "players", "messages", "draw", "motion", "commands", "weather", "tick", "system", "app_players", "updates", "textures", "texture_receive", "transfer_messages", "texture_send", "model_send", "model_cache", "model_receive", "title_receive", "state_messages", "control_updates", "control_callback", "dispatch", "lifecycle", "providers", "dialogs", "lobby") else []), cwd=directory,
+        ["wine", "multipdiff.exe", "1200"] + ([slice_name] if slice_name in ("local", "frame", "players", "messages", "draw", "motion", "commands", "weather", "tick", "system", "app_players", "updates", "textures", "texture_receive", "transfer_messages", "texture_send", "model_send", "model_cache", "model_receive", "title_receive", "state_messages", "control_updates", "control_callback", "dispatch", "lifecycle", "providers", "dialogs", "lobby", "init") else []), cwd=directory,
         env={**os.environ, "WINEDEBUG": "-all"}, capture_output=True,
         text=True, timeout=180 if slice_name == "send" else 60,
     )
@@ -691,7 +718,7 @@ def check_variant(directory, source, slice_name):
              "aircraft": "aircraft select/release",
              "records": "aircraft copy/session browser records",
              "tracking": "track-name display", "messages": "application message constructors",
-             "players": "player lifecycle helpers", "local": "local player creation/start", "frame": "session CHAIN 0x14", "draw": "player drawing/CHAIN 0x10", "motion": "aircraft extrapolation/CHAIN 0x13", "commands": "view commands/CHAIN 0x0c", "weather": "weather/sync messages", "tick": "tick callbacks/CHAIN 0x02", "system": "DirectPlay system notifications", "app_players": "application player types", "updates": "aircraft state receive/timing", "textures": "texture catalogue/file services", "texture_receive": "multipart texture receive", "transfer_messages": "multipart transfer messages", "texture_send": "multipart texture sender", "model_send": "multipart model sender", "model_cache": "aircraft cache files", "model_receive": "multipart model receive", "title_receive": "aircraft title receive", "state_messages": "aircraft state message constructors", "control_updates": "control/collision/state publishing", "control_callback": "control CHAIN 0x01", "dispatch": "application receive dispatch", "lifecycle": "receive/session lifecycle", "providers": "provider catalogue", "dialogs": "configuration/options dialogs", "lobby": "lobby connection owners"}[slice_name]
+             "players": "player lifecycle helpers", "local": "local player creation/start", "frame": "session CHAIN 0x14", "draw": "player drawing/CHAIN 0x10", "motion": "aircraft extrapolation/CHAIN 0x13", "commands": "view commands/CHAIN 0x0c", "weather": "weather/sync messages", "tick": "tick callbacks/CHAIN 0x02", "system": "DirectPlay system notifications", "app_players": "application player types", "updates": "aircraft state receive/timing", "textures": "texture catalogue/file services", "texture_receive": "multipart texture receive", "transfer_messages": "multipart transfer messages", "texture_send": "multipart texture sender", "model_send": "multipart model sender", "model_cache": "aircraft cache files", "model_receive": "multipart model receive", "title_receive": "aircraft title receive", "state_messages": "aircraft state message constructors", "control_updates": "control/collision/state publishing", "control_callback": "control CHAIN 0x01", "dispatch": "application receive dispatch", "lifecycle": "receive/session lifecycle", "providers": "provider catalogue", "dialogs": "configuration/options dialogs", "lobby": "lobby connection owners", "init": "init/deinit owners"}[slice_name]
     prefix = f"MULTIP {label}: 1200 scenarios, "
     lines = [line for line in result.stdout.splitlines() if line.startswith(prefix)]
     if len(lines) != 1 or result.returncode not in (0, 1):
@@ -704,7 +731,7 @@ def check_variant(directory, source, slice_name):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--slice", choices=("send", "receive", "workers", "directplay", "profile", "groups", "metadata", "aircraft", "records", "tracking", "messages", "players", "local", "frame", "draw", "motion", "commands", "weather", "tick", "system", "app_players", "updates", "textures", "texture_receive", "transfer_messages", "texture_send", "model_send", "model_cache", "model_receive", "title_receive", "state_messages", "control_updates", "control_callback", "dispatch", "lifecycle", "providers", "dialogs", "lobby", "all"), default="all")
+    parser.add_argument("--slice", choices=("send", "receive", "workers", "directplay", "profile", "groups", "metadata", "aircraft", "records", "tracking", "messages", "players", "local", "frame", "draw", "motion", "commands", "weather", "tick", "system", "app_players", "updates", "textures", "texture_receive", "transfer_messages", "texture_send", "model_send", "model_cache", "model_receive", "title_receive", "state_messages", "control_updates", "control_callback", "dispatch", "lifecycle", "providers", "dialogs", "lobby", "init", "all"), default="all")
     args = parser.parse_args()
     variants = []
     if args.slice in ("send", "all"):
@@ -748,12 +775,13 @@ def main():
                                   ("lifecycle", LIFECYCLE_MUTATIONS),
                                   ("providers", PROVIDER_MUTATIONS),
                                   ("dialogs", DIALOG_MUTATIONS),
-                                  ("lobby", LOBBY_MUTATIONS)):
+                                  ("lobby", LOBBY_MUTATIONS),
+                                  ("init", INIT_MUTATIONS)):
         if args.slice in (slice_name, "all"):
             variants.extend((slice_name, *mutation) for mutation in mutations)
     source = (ROOT / "src/multip/multip.c").read_text()
     for include in ("multip_profile.inc", "multip_session.inc",
-                    "multip_aircraft.inc", "multip_records.inc", "multip_tracking.inc", "multip_messages.inc", "multip_players.inc", "multip_callbacks.inc", "multip_motion.inc", "multip_commands.inc", "multip_weather.inc", "multip_tick.inc", "multip_system.inc", "multip_app_players.inc", "multip_updates.inc", "multip_textures.inc", "multip_texture_receive.inc", "multip_transfer_messages.inc", "multip_texture_send.inc", "multip_model_send.inc", "multip_model_cache.inc", "multip_model_receive.inc", "multip_title_receive.inc", "multip_state_messages.inc", "multip_control_updates.inc", "multip_lifecycle.inc", "multip_dispatch.inc", "multip_dispatch_cases.inc", "multip_providers.inc", "multip_browser.inc", "multip_configuration.inc", "multip_details.inc", "multip_options.inc", "multip_lobby.inc", "multip_toggle.inc"):
+                    "multip_aircraft.inc", "multip_records.inc", "multip_tracking.inc", "multip_messages.inc", "multip_players.inc", "multip_callbacks.inc", "multip_motion.inc", "multip_commands.inc", "multip_weather.inc", "multip_tick.inc", "multip_system.inc", "multip_app_players.inc", "multip_updates.inc", "multip_textures.inc", "multip_texture_receive.inc", "multip_transfer_messages.inc", "multip_texture_send.inc", "multip_model_send.inc", "multip_model_cache.inc", "multip_model_receive.inc", "multip_title_receive.inc", "multip_state_messages.inc", "multip_control_updates.inc", "multip_lifecycle.inc", "multip_dispatch.inc", "multip_dispatch_cases.inc", "multip_providers.inc", "multip_browser.inc", "multip_configuration.inc", "multip_details.inc", "multip_options.inc", "multip_lobby.inc", "multip_toggle.inc", "multip_init.inc"):
         source = source.replace('#include "' + include + '"',
                                 (ROOT / "src/multip" / include).read_text())
     for slice_name, name, before, after in variants:
@@ -763,7 +791,7 @@ def main():
         directory = Path(temp)
         for name in ("multipdiff.exe", "MULTIP_retail.dll", "UTIL_retail.dll", "G3D_retail.dll"):
             shutil.copy2(ROOT / "bin/difftest" / name, directory / name)
-        baseline_slice = args.slice if args.slice in ("dialogs", "lobby") else "send"
+        baseline_slice = args.slice if args.slice in ("dialogs", "lobby", "init") else "send"
         if check_variant(directory, source, baseline_slice) != 0:
             raise RuntimeError("Unmodified baseline differs")
         print("baseline: 0 differences", flush=True)

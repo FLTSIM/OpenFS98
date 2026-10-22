@@ -3,8 +3,8 @@
  * In-progress transliteration: transport/workers, DirectPlay lifetime,
  * profiles, session/group primitives, aircraft and player ownership, browser
  * records, tracking/selection, message dispatch, session completion/close,
- * lobby connections and configuration/options/player-detail dialogs.
- * Public init/deinit remain incomplete. MULTIP is
+ * lobby connections, configuration/options/player-detail dialogs, and public
+ * init/deinit with their CHAIN startup/shutdown callbacks. MULTIP is
  * intentionally outside MODULES and must not be installed in-game yet.
  *
  * The retail module keeps its runtime state in the uninitialised tail of its
@@ -92,11 +92,6 @@ static const struct multip_data_pointer s_multip_data_pointers[] = {
 
 __asm__(".globl _ImportTable\n\t.set _ImportTable, _s_multip_image\n\t"
         ".globl _Linkage\n\t.set _Linkage, _s_multip_image + 0x58");
-
-static uint32_t FS98_STDCALL multip_unimplemented(void)
-{
-    return 0xffffffffu;
-}
 
 /* Queue ABI shared with retail's receive and send workers. */
 struct multip_queue_node {
@@ -638,6 +633,7 @@ static uint32_t FS98_STDCALL multip_send(uint32_t to_id, const void *payload,
 #include "multip_options.inc"
 #include "multip_lobby.inc"
 #include "multip_toggle.inc"
+#include "multip_init.inc"
 
 static uint32_t multip_dialog_code(uint32_t offset)
 {
@@ -833,7 +829,9 @@ __declspec(dllexport) void *const multip_test_entries[] = {
     (void *)multip_lobby_connect, (void *)multip_lobby_host,
     (void *)multip_lobby_join, (void *)multip_lobby_apply,
     (void *)multip_lobby_start, (void *)multip_lobby_start_connection,
-    (void *)multip_session_toggle
+    (void *)multip_session_toggle,
+    (void *)multip_init, (void *)multip_deinit,
+    (void *)multip_init_callback, (void *)multip_shutdown_callback
 };
 #endif
 
@@ -1053,8 +1051,8 @@ static void multip_install(void)
     M32(M_DIRECTPLAY_EXPORTS + 0x08) = D + M_DIRECTPLAY_LOBBY;
 
     M32(MULTIP_LINKAGE + 0x00) = FS98_MOD_MULTIP;
-    M32(MULTIP_LINKAGE + 0x04) = ADDR(multip_unimplemented);
-    M32(MULTIP_LINKAGE + 0x08) = ADDR(multip_unimplemented);
+    M32(MULTIP_LINKAGE + 0x04) = ADDR(multip_init);
+    M32(MULTIP_LINKAGE + 0x08) = ADDR(multip_deinit);
     M32(MULTIP_LINKAGE + 0x18) = ADDR(multip_session_toggle);
     M32(MULTIP_LINKAGE + 0x1c) = ADDR(multip_options_dialog);
     M32(MULTIP_LINKAGE + 0x20) = ADDR(multip_send);

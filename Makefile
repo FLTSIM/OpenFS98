@@ -59,8 +59,9 @@ BASE_ANALYSIS := 0x20630000
 BASE_CONTROLS := 0x20670000
 BASE_G3D    := 0x206e0000
 BASE_MULTIP := 0x20850000
+BASE_MPCHAT := 0x20840000
 
-MODULES := ACONTAIN ADVDRV ANALYSIS ATC BOOSTER CHAIN CONTROLS DEMO DYNAMIC FACIL FE G3D GLOBAL LANDME MULTIP NUMERIC PANELS REALITY SLEW SOUND UTIL WEATHERM WINDOW WINMSG
+MODULES := ACONTAIN ADVDRV ANALYSIS ATC BOOSTER CHAIN CONTROLS DEMO DYNAMIC FACIL FE G3D GLOBAL LANDME MPCHAT MULTIP NUMERIC PANELS REALITY SLEW SOUND UTIL WEATHERM WINDOW WINMSG
 
 # MULTIP installs as MULTIPLAYER.DLL; its acceptance harness is below.
 $(BIN)/MULTIP.DLL: src/multip/multip.c src/multip/multip_callbacks.inc src/multip/multip_motion.inc src/multip/multip_commands.inc src/multip/multip_weather.inc src/multip/multip_tick.inc src/multip/multip_system.inc src/multip/multip_app_players.inc src/multip/multip_updates.inc src/multip/multip_textures.inc src/multip/multip_texture_receive.inc src/multip/multip_transfer_messages.inc src/multip/multip_texture_send.inc src/multip/multip_model_send.inc src/multip/multip_model_cache.inc src/multip/multip_model_receive.inc src/multip/multip_title_receive.inc src/multip/multip_state_messages.inc src/multip/multip_control_updates.inc src/multip/multip_lifecycle.inc src/multip/multip_dispatch.inc src/multip/multip_dispatch_cases.inc src/multip/multip_weather_fields.inc src/multip/multip_frame_actions.inc src/multip/multip_players.inc src/multip/multip_nametag.inc src/multip/multip_messages.inc src/multip/multip_tracking.inc src/multip/multip_records.inc src/multip/multip_aircraft.inc src/multip/multip_session.inc src/multip/multip_profile.inc src/multip/multip_profile_fields.inc src/multip/multip.def src/multip/multip_data.inc src/multip/multip_rdata.inc src/multip/multip_pointers.inc $(BIN)/multip.res src/multip/multip_providers.inc src/multip/multip_browser.inc src/multip/multip_configuration.inc src/multip/multip_details.inc src/multip/multip_options.inc src/multip/multip_lobby.inc src/multip/multip_toggle.inc src/multip/multip_init.inc
@@ -89,12 +90,14 @@ $(BIN)/multip.res: src/multip/multip.rc
 # sit there unloaded, so installs go through this map.
 installed_name = $(strip \
   $(if $(filter FACIL,$(1)),FACILITIES.DLL,\
-  $(if $(filter MULTIP,$(1)),MULTIPLAYER.DLL,$(1).DLL)))
+  $(if $(filter MULTIP,$(1)),MULTIPLAYER.DLL,\
+  $(if $(filter MPCHAT,$(1)),mpchat.DLL,$(1).DLL))))
 
 # The CD's own file names are not all upper case either: facil.dll, multip.dll.
 orig_module = $(ORIG)/Modules/$(strip \
   $(if $(filter FACIL,$(1)),facil.dll,\
-  $(if $(filter MULTIP,$(1)),multip.dll,$(1).DLL)))
+  $(if $(filter MULTIP,$(1)),multip.dll,\
+  $(if $(filter MPCHAT,$(1)),mpchat.DLL,$(1).DLL))))
 
 all: $(addprefix $(BIN)/,$(addsuffix .DLL,$(MODULES)))
 
@@ -399,6 +402,23 @@ $(BIN)/analysis.res: src/analysis/analysis.rc
 
 src/analysis/analysis_data.inc src/analysis/analysis_rdata.inc: $(ORIG)/Modules/ANALYSIS.DLL tools/gen_analysis_data.py
 	@python3 tools/gen_analysis_data.py $< src/analysis/analysis_data.inc src/analysis/analysis_rdata.inc
+
+# MPCHAT, the multiplayer chat window: MSVC C.  The CD names it mpchat.DLL,
+# and setup installs it under that name.
+$(BIN)/MPCHAT.DLL: src/mpchat/mpchat.c src/mpchat/mpchat.def src/mpchat/mpchat_data.inc \
+                   $(BIN)/mpchat.res
+	@mkdir -p $(BIN)
+	$(CC) $(CFLAGS) -fno-delete-null-pointer-checks -Isrc/mpchat $(LDFLAGS) \
+	      -Wl,--image-base=$(BASE_MPCHAT) \
+	      -o $@ src/mpchat/mpchat.c $(BIN)/mpchat.res src/mpchat/mpchat.def \
+	      -lkernel32 -luser32 -lgdi32 -lgcc
+
+$(BIN)/mpchat.res: src/mpchat/mpchat.rc
+	@mkdir -p $(BIN)
+	$(RC) $< -O coff -o $@
+
+src/mpchat/mpchat_data.inc: $(ORIG)/Modules/mpchat.DLL tools/gen_mpchat_data.py
+	@python3 tools/gen_mpchat_data.py $< $@
 
 # WINMSG, the on-screen message window: MSVC C.
 $(BIN)/WINMSG.DLL: src/winmsg/winmsg.c src/winmsg/winmsg.def src/winmsg/winmsg_data.inc \
@@ -1044,6 +1064,32 @@ analysis-breaks: analysisdiff
 analysisdiff-run: analysisdiff
 	@cd $(DIFFDIR) && WINEDEBUG=-all timeout 3600 wine analysisdiff.exe $(if $(N),$(N),20000)
 
+# MPCHAT, whole-module: the chat window, retail and OpenFS98 in turn over the
+# same scripts, against a model of the window system (hooked into both DLLs'
+# import tables), the host's dialog runner and strings, MULTIP's player lists
+# and WINMSG.  N=... sets the scenario count.
+$(DIFFDIR)/mpchatdiff.exe: tools/difftest/mpchatdiff.c
+	@mkdir -p $(DIFFDIR)
+	$(CC) -std=c99 -O1 -Wall -Wextra -o $@ tools/difftest/mpchatdiff.c
+
+mpchatdiff: $(DIFFDIR)/mpchatdiff.exe $(BIN)/MPCHAT.DLL
+	@cp $(ORIG)/Modules/mpchat.DLL $(DIFFDIR)/MPCHAT_retail.dll
+	@cp $(BIN)/MPCHAT.DLL          $(DIFFDIR)/MPCHAT_ours.dll
+
+# A deliberately broken copy of mpchat.c as the harness's "ours" (for
+# tools/mpchat_breaks.py, which makes the copies and runs the harness).
+mpchat-break-build:
+	$(CC) $(CFLAGS) -fno-delete-null-pointer-checks -Isrc/mpchat $(LDFLAGS) \
+	      -Wl,--image-base=$(BASE_MPCHAT) -o $(DIFFDIR)/MPCHAT_ours.dll \
+	      $(MPCHAT_SRC) $(BIN)/mpchat.res src/mpchat/mpchat.def \
+	      -lkernel32 -luser32 -lgdi32 -lgcc
+
+mpchat-breaks: mpchatdiff
+	@python3 tools/mpchat_breaks.py $(if $(N),$(N),2000)
+
+mpchatdiff-run: mpchatdiff
+	@cd $(DIFFDIR) && WINEDEBUG=-all timeout 3600 wine mpchatdiff.exe $(if $(N),$(N),20000)
+
 # WINMSG, whole-module: the message window, retail and OpenFS98 in turn over
 # the same scripts, with a model of the host's window and heap, stand-ins for
 # WINDOW's record and MAIN's situation writer, and a CHAIN that answers the
@@ -1398,4 +1444,4 @@ smoke: all
 clean:
 	rm -rf $(BIN)
 
-.PHONY: multip-acceptance multip-smoke multip-directplay-breaks multip-worker-breaks multip-breaks multip-receive-breaks multip-send-breaks all stage setup-map graph hostmap compare run trace trace-render trace-ddraw kill window-reset wm-unmanaged wm-managed vd-on vd-off mode8 mode16 ddraw-gdi ddraw-default smoke difftest difftest-run utildiff utildiff-run utildiff-portable numericdiff numericdiff-run chaindiff chaindiff-run atcdiff atcdiff-run weathermdiff weathermdiff-run acontaindiff acontaindiff-run sounddiff sounddiff-run dynamicdiff dynamicdiff-run fegriddiff fegriddiff-run fediff fediff-run fesldiff fesldiff-run boosterdiff boosterdiff-run demodiff demodiff-run windowdiff windowdiff-run g3ddiff g3ddiff-run multipdiff multipdiff-run g3d-break-build g3d-breaks g3dmeshdiff g3dmeshdiff-run g3ddiff-meshc-run hg2dmodeldiff-run panelsdiff panelsdiff-run panelsunit panelsunit-run panels-breaks panels-break-build window-breaks window-break-build winmsgdiff winmsgdiff-run winmsg-breaks winmsg-break-build realitydiff realitydiff-run reality-breaks reality-break-build analysisdiff analysisdiff-run analysis-breaks analysis-break-build controlsdiff controlsdiff-run controls-breaks controls-break-build advdrvdiff advdrvdiff-run advdrv-cover landmediff landmediff-run facildiff facildiff-run facildiff-fe-run ofstest ofstest-run ofstest-remove sehfix sehfix-install sehfix-remove sehfix-log util-trace install revert installed-name-of orig-module-of clean
+.PHONY: multip-acceptance multip-smoke multip-directplay-breaks multip-worker-breaks multip-breaks multip-receive-breaks multip-send-breaks all stage setup-map graph hostmap compare run trace trace-render trace-ddraw kill window-reset wm-unmanaged wm-managed vd-on vd-off mode8 mode16 ddraw-gdi ddraw-default smoke difftest difftest-run utildiff utildiff-run utildiff-portable numericdiff numericdiff-run chaindiff chaindiff-run atcdiff atcdiff-run weathermdiff weathermdiff-run acontaindiff acontaindiff-run sounddiff sounddiff-run dynamicdiff dynamicdiff-run fegriddiff fegriddiff-run fediff fediff-run fesldiff fesldiff-run boosterdiff boosterdiff-run demodiff demodiff-run windowdiff windowdiff-run g3ddiff g3ddiff-run multipdiff multipdiff-run g3d-break-build g3d-breaks g3dmeshdiff g3dmeshdiff-run g3ddiff-meshc-run hg2dmodeldiff-run panelsdiff panelsdiff-run panelsunit panelsunit-run panels-breaks panels-break-build window-breaks window-break-build mpchatdiff mpchatdiff-run mpchat-breaks mpchat-break-build winmsgdiff winmsgdiff-run winmsg-breaks winmsg-break-build realitydiff realitydiff-run reality-breaks reality-break-build analysisdiff analysisdiff-run analysis-breaks analysis-break-build controlsdiff controlsdiff-run controls-breaks controls-break-build advdrvdiff advdrvdiff-run advdrv-cover landmediff landmediff-run facildiff facildiff-run facildiff-fe-run ofstest ofstest-run ofstest-remove sehfix sehfix-install sehfix-remove sehfix-log util-trace install revert installed-name-of orig-module-of clean

@@ -510,6 +510,23 @@ typedef int32_t (FS98_STDCALL *fs98_host_menu_add_fn)(uint32_t command, uint32_t
 typedef int32_t (FS98_STDCALL *fs98_host_menu_remove_fn)(uint32_t id);
 typedef int32_t (FS98_STDCALL *fs98_host_menu_text_fn)(uint32_t id, const char *text);
 
+/* +0x254 -- a menu item's state, by the whole 32 bits of `id`: flag 1
+ * checks it, flag 2 greys it (CheckMenuItem / EnableMenuItem by position,
+ * 0x40d3c0).  0, or -1 if there is no such item. */
+typedef int32_t (FS98_STDCALL *fs98_host_menu_state_fn)(uint32_t id, uint32_t flags);
+
+/* +0x054 -- the main window and the instance through the two pointers
+ * (0x41880c, 0x418828).  Returns the instance. */
+typedef uint32_t (FS98_STDCALL *fs98_host_window_instance_fn)(uint32_t *wnd,
+                                                              uint32_t *instance);
+
+/* +0x298 -- the module whose Linkage is `linkage` onto the host's stack of
+ * running modules (0x4182e0), and its HMODULE through `out`.  -1 with *out
+ * null if it is not loaded.  +0x29c pops the stack (its argument is
+ * overwritten by the pop and otherwise unused); -1 if it was empty. */
+typedef int32_t (FS98_STDCALL *fs98_host_module_enter_fn)(const void *linkage, uint32_t *out);
+typedef int32_t (FS98_STDCALL *fs98_host_module_leave_fn)(uint32_t unused);
+
 /* +0x2a4 -- string `id` (up to 0x400 bytes) as a host copy through `out`
  * (null if there is no such string); returns its length. */
 typedef int32_t (FS98_STDCALL *fs98_host_string_fn)(uint32_t id, char **out);

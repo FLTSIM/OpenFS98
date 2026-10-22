@@ -103,6 +103,7 @@ else's 1997 build, and it should read that way.
 | `make facildiff-run` | whole-module FACIL against retail, each side backed by a separate retail FE: a synthetic five-level rebuild, 20,000 seeded synthetic caches through the `+0x18`/`+0x1c`/`+0x20` queries, then the real CD index (with all sixteen boosters) and 10,000 dialog scenarios driven by a stand-in for World.DLL; compares the caches, call transcript (with string comparisons), returned records, GLOBAL, heap and both modules' state |
 | `make boosterdiff-run` | whole-module BOOSTER, worker thread included: retail and OpenFS98 run in turn over identical cache trees (four CD boosters, synthetic ones with every record type), the thread drained after every operation by counting posted 0x401s against SetEvents; MessageBoxA and the file calls hooked and logged; compares the transcript, the whole `.data` image, both heaps, GLOBAL, FE's records and the cache trees |
 | `make windowdiff-run` | whole-module WINDOW: retail and OpenFS98 in turn over scripts of windows created, closed, maximised, painted frame after frame through every eye mode and transition, and laid out in situations; a model of the host's window services and z-order, and of its filter that repairs integer divide faults; compares the transcript (with each frame's eye), the whole `.data` image, the arena and GLOBAL. `make window-breaks` breaks the module on purpose, one place at a time, and checks the harness notices |
+| `make mpchatdiff-run` | whole-module MPCHAT, the chat window: retail and OpenFS98 in turn over scripts of sessions begun and ended, player lists, chat lines sent and received, the menu command and keys, window messages and the user's typing and selection, against a model of USER32 (windows, ListBox, Edit, RichEdit, scroll state) hooked into both import tables; compares every call, the whole `.data` image, the heap and the model. `make mpchat-breaks` breaks it on purpose |
 | `make winmsgdiff-run` | whole-module WINMSG, the message bar: retail and OpenFS98 in turn over scripts of messages shown, appended, cleared and run frame after frame (plain and scrolling, split to fit), with a model of the host's window record and heap, a CHAIN that answers the done message and re-enters, and situation records; compares the transcript with every string drawn, the whole `.data` image, the arena and GLOBAL. `make winmsg-breaks` breaks it on purpose |
 | `make realitydiff-run` | whole-module REALITY, crashes and damage: retail and OpenFS98 in turn through every crash gate, the countdown, the reload and the crash analysis (a stand-in for its dialog, retail UTIL and NUMERIC), the stress rolls and the cracked windscreen; HG2D's lines logged with their colour and view; compares the transcript, the whole `.data` image, the arena, GLOBAL and UTIL's and NUMERIC's state. `make reality-breaks` breaks it on purpose |
 | `make analysisdiff-run` | whole-module ANALYSIS, landing and manoeuvre analysis and course tracking: retail and OpenFS98 in turn over the frames, the landing thresholds, the compaction, the trail and all three dialogs (a stand-in for the dialog engine, retail UTIL and NUMERIC), with the register leftovers retail reads (CHAIN's, memset's, the CD MSVCRT memmove's) modelled; HG2D's lines and G3D's display list logged; compares the transcript, the whole `.data` image, the arena, GLOBAL and UTIL's and NUMERIC's state. `make analysis-breaks` breaks it on purpose |
@@ -230,6 +231,7 @@ emulate 80-bit arithmetic to preserve a rounding artefact. See
 | `FACIL` | 37 | 23,045 | **done** — verified (index, queries and the three dialogs' callbacks) and running in-game — see [docs/modules/facil.md](docs/modules/facil.md) |
 | `NUMERIC` | 17 | 14,684 | **reimplemented, verified, and running in-game** — 545,778 differential comparisons, zero mismatches — see [docs/modules/numeric.md](docs/modules/numeric.md) |
 | `WINDOW` | 10 | 24,992 | **reimplemented, verified, and running in-game** — the view windows, their titles, status lines and layout, and the eyepoint for every view mode with the transitions between them; 20,000 whole-module scenarios against a model of the host's window services, zero differences — see [docs/modules/window.md](docs/modules/window.md) |
+| `MPCHAT` | -1 | 3,104 | **reimplemented, verified, and running in-game** — the multiplayer chat window: transcript, player list, line and Send, driven by MULTIP on CHAIN list 0x1d; 20,000 whole-module scenarios against a model of the window system, zero differences — see [docs/modules/mpchat.md](docs/modules/mpchat.md) |
 | `WINMSG` | 22 | 4,416 | **reimplemented, verified, and running in-game** — the message bar: queued messages in seven slots, plain or scrolling, split to fit, appended to; 20,000 whole-module scenarios against a model of the host's window record, zero differences — see [docs/modules/winmsg.md](docs/modules/winmsg.md) |
 | `REALITY` | 32 | 4,822 | **reimplemented, verified, and running in-game** — crashes, stress damage, the cracked windscreen and the crash analysis's graph; 20,000 whole-module scenarios, zero differences — see [docs/modules/reality.md](docs/modules/reality.md) |
 | `ANALYSIS` | 29 | 8,086 | **reimplemented, verified, and running in-game** — landing and manoeuvre analysis and course tracking: the samples, the trail's display list, the three dialogs; 20,000 whole-module scenarios, zero differences — see [docs/modules/analysis.md](docs/modules/analysis.md) |
@@ -341,7 +343,10 @@ reruns, with zero differences. All 456 mutations are caught. The game smoke
 test confirms the replacement, 27/27 modules and 95 gauges; it restores the
 previous game DLL afterward. MULTIP is now in `MODULES` and `make install`
 maps it to `MULTIPLAYER.DLL`. See [docs/modules/multip.md](docs/modules/multip.md)
-for the evidence and remaining portability/provider limits. `MPCHAT` follows it.
+for the evidence and remaining portability/provider limits.
+**`MPCHAT` is done, verified and running in-game**: the chat window, against
+a model of the window system hooked into its import table, 20,000 scenarios
+with zero differences (see [docs/modules/mpchat.md](docs/modules/mpchat.md)).
 **`G3D` is done, verified and running in-game**: the whole bytecode machine,
 its depth queue, services and CHAIN callbacks, 20,000 `g3ddiff` scenarios
 with zero differences, and a portable C mesh compiler checked against
@@ -389,7 +394,9 @@ nothing in it imports anything interesting:
     ~~**`G3D`** (92,518 bytes)~~ — done, verified and running in-game.
     ~~**`MULTIP`** (43,318 bytes)~~ — done, whole-module acceptance and startup smoke passed.
     Round 9 of the [preflight](docs/preflight.md) surveyed what is left.
-    Next: `MPCHAT` (3,104), `PANELS` (50,038) and `MAIN` (119,648).
+    ~~**`PANELS`** (50,038 bytes)~~ — done, verified and running in-game.
+    ~~**`MPCHAT`** (3,104 bytes)~~ — done, verified and running in-game.
+    Next: `MAIN` (119,648).
 13. `HG2D` (390 KB, the 2D rasteriser) last. It is 26% of the project on its
    own.
 

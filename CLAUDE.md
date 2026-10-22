@@ -67,6 +67,8 @@ make demodiff-run        # whole-module DEMO, videos and instant replay -> 20000
 make advdrvdiff-run      # whole-module ADVDRV, adventures and lessons -> 20000 scenarios, 0 differ (~40 min)
 make windowdiff-run      # whole-module WINDOW, windows and the eye -> 20000 scenarios, 0 differ (~2 min)
 make window-breaks       # WINDOW broken on purpose -> 109 breaks, 106 caught, 3 proven equivalent (~25 min)
+make mpchatdiff-run      # whole-module MPCHAT, the chat window -> 20000 scenarios, 0 differ (~20 s)
+make mpchat-breaks       # MPCHAT broken on purpose -> 117 breaks, 113 caught, 4 proven equivalent (~8 min)
 make winmsgdiff-run      # whole-module WINMSG, the message bar -> 20000 scenarios, 0 differ (~2 min)
 make winmsg-breaks       # WINMSG broken on purpose -> 64 breaks, 60 caught, 4 proven equivalent (~13 min)
 make realitydiff-run     # whole-module REALITY, crashes and the analysis -> 20000 scenarios, 0 differ (~1 min)
@@ -83,7 +85,7 @@ make panels-breaks       # PANELS broken on purpose -> 200 sampled, 2 do not bui
 make g3dmeshdiff-run     # the mesh compiler: instructions vs portable C, x87 and soft float -> 100000 polygons, 0 differ
 make difftest-run        # whole-module SLEW         -> 0/2000 vectors differ
 make ofstest-run         # in-process, via the host  -> passed 68, failed 0
-make smoke               # ACONTAIN, ADVDRV, ANALYSIS, ATC, BOOSTER, CHAIN, CONTROLS, DEMO, DYNAMIC, FACIL, FE, G3D, GLOBAL, LANDME, NUMERIC, REALITY, SLEW, SOUND, UTIL, WEATHERM, WINDOW, WINMSG installed -> 27/27, 95 gauges, PASS
+make smoke               # ACONTAIN, ADVDRV, ANALYSIS, ATC, BOOSTER, CHAIN, CONTROLS, DEMO, DYNAMIC, FACIL, FE, G3D, GLOBAL, LANDME, MPCHAT, NUMERIC, REALITY, SLEW, SOUND, UTIL, WEATHERM, WINDOW, WINMSG installed -> 27/27, 95 gauges, PASS
 make util-trace          # which UTIL services the game calls, counted in-game
 ```
 
@@ -261,9 +263,10 @@ x87 compiled C whose decisions turn on rounding) runs as retail's own
 instructions (`g3d_mesh.S`) on x86; `g3d_mesh.c` is its portable C over a
 software 80-bit float, checked against them (`make g3dmeshdiff-run`). Which
 x87 precision the game runs G3D under is not established; a native build
-has to set `g3d_mesh_precision` to match. Next comes MULTIP (in progress)
-with MPCHAT behind it. PANELS is done (docs/modules/panels.md), and MAIN comes last before
-HG2D. The CHAIN ecx fix is done: OpenFS98's CHAIN enters callbacks with
+has to set `g3d_mesh_precision` to match. MULTIP, PANELS
+(docs/modules/panels.md) and **MPCHAT are done**; MPCHAT, the chat window,
+is verified against a model of the window system hooked into its import
+table (docs/modules/mpchat.md). MAIN comes next, last before HG2D. The CHAIN ecx fix is done: OpenFS98's CHAIN enters callbacks with
 all of retail's registers and returns its ecx/edx, and `chaindiff` now
 compares them (see [docs/modules/chain.md](docs/modules/chain.md)).
 

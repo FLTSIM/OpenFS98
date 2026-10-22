@@ -123,8 +123,9 @@ Three things to read off that:
 
 Reproduce with `make graph`. Id 1 is the host; id 19 is imported by `PANELS`
 but is not a file in `Modules\` — most likely the gauge host, unconfirmed.
-`MPCHAT` reports its id as `0xffffffff`, which is either dynamic assignment or
-a parser bug in `tools/modgraph.py`. Ids 5, 8, 11, 12, 25, 28, 30, 31, 33, 36
+`MPCHAT`'s id really is `0xffffffff`: nothing imports it, the host registers
+its one dialog from Linkage `+0x14`, and MULTIP reaches it on CHAIN list 0x1d
+(see [modules/mpchat.md](modules/mpchat.md)). Ids 5, 8, 11, 12, 25, 28, 30, 31, 33, 36
 and 38 are unused by the retail set — probably modules that existed in FS95 or
 during development.
 

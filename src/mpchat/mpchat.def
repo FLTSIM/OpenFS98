@@ -1,0 +1,4 @@
+LIBRARY MPCHAT.DLL
+EXPORTS
+    Linkage DATA
+    ImportTable DATA

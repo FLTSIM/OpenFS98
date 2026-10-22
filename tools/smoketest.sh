@@ -73,6 +73,7 @@ for f in bin/*.DLL; do
     case "$m" in
         FACIL.DLL)  installed=FACILITIES.DLL ;;
         MULTIP.DLL) installed=MULTIPLAYER.DLL ;;
+        MPCHAT.DLL) installed=mpchat.DLL ;;
         *)          installed="$m" ;;
     esac
     if cmp -s "$f" "$GAME/Modules/$installed"; then

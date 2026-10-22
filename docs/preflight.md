@@ -186,6 +186,11 @@ points into `.data+0x30`, at a record that starts with `0xff00`. That is
 the dialog id MPCHAT passes to host `+0x110`. What reads that record is
 not yet known.
 
+**Status: done, verified and running in-game.** The record is the dialog
+table the host's scanner registers. `make mpchatdiff-run`: 20,000
+scenarios, 0 differences; 113 of 117 deliberate breaks caught, 4 proven
+equivalent. See [modules/mpchat.md](modules/mpchat.md).
+
 ## G3D (id 14)
 
 The 3D pipeline: transforms, clipping and the scene from FE's stream, into

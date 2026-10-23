@@ -1,5 +1,5 @@
 /* Basic software projective spans through public +0x44/+0x40. */
-static int projective_key_mode;
+static int projective_key_mode, projective_fog_mode;
 
 static void projective_case(uint32_t selector, int sharp)
 {
@@ -30,6 +30,10 @@ static void projective_case(uint32_t selector, int sharp)
         GLOBAL_HALF(0xcb4) = scenario & 1 ? 2 : 0;
         GLOBAL_HALF(0x1172) = GLOBAL_HALF(0x324) = 1;
     }
+    if (projective_fog_mode) {
+        GLOBAL_HALF(0xdce) = 0; GLOBAL_HALF(0xe88) = 1000;
+        GLOBAL_HALF(0x30c) = 0;
+    }
 }
 
 static void projective_point(uint32_t x, uint32_t y)
@@ -42,7 +46,9 @@ static void projective_finish(void)
     polygon_compare = WORD(global, 0x1298) ? 2 : 1;
     drawing(0x40, draw_surface(), 0, 0, 0, 0, 0);
     CHECK(!draw_fault_code);
-    if (projective_key_mode)
+    if (projective_fog_mode)
+        CHECK(WORD(images[side], 0x4200) == 0x207352a4 || WORD(images[side], 0x4200) == 0x20738c03);
+    else if (projective_key_mode)
         CHECK(WORD(images[side], 0x4200) == 0x2073ae7b || WORD(images[side], 0x4200) == 0x2073e1ec);
     else
         CHECK(WORD(images[side], 0x4200) == 0x20733bbb || WORD(images[side], 0x4200) == 0x2073751e);
@@ -53,6 +59,8 @@ static void run_projective(void)
     static const uint32_t widths[] = {0,1,2,3,4,7,8,15,16,31,32,33,61,62,63,64,65,66,95,127,128,129,159};
     uint32_t index, selector, alignment, width, x, y;
     matrix_reset();
+    if (projective_fog_mode)
+        for (index = 0; index < 0x1000; index++) images[side][0xd70 + index] = (uint8_t)index;
     memset(matrix_pixels, 0xa5, sizeof matrix_pixels);
     for (selector = 0; selector < 2; selector++) {
         projective_case(selector, 0);
@@ -213,4 +221,80 @@ static void run_projective_keyed(void)
         }
     }
     projective_key_mode = 0;
+}
+
+static void run_projective_fog(void)
+{
+    static const uint32_t distances[] = {0, 1020, 1024, 4096, 15356, 15360, 16384};
+    uint32_t index, selector, variant, x, y, row, distance, level;
+    projective_fog_mode = 1;
+    run_projective();
+    for (index = 0; index < 0x1000; index++)
+        images[side][0xd70 + index] = (uint8_t)(index * 13 + (index >> 8) * 19 + scenario);
+    for (selector = 0; selector < 4; selector++) for (variant = 0; variant < 7; variant++) {
+        projective_case(selector, variant & 1);
+        GLOBAL_HALF(0xe88) = variant < 4 ? 1 : variant == 4 ? 3000 : variant == 5 ? 6000 : 1000;
+        if (variant & 2) WORD(global, 0xce0) = 0u - WORD(global, 0xce0);
+        if (variant == 6) WORD(global, 0xd10) = random_word();
+        projective_point(3 + (scenario & 3), 4); projective_point(7 + scenario % 160, 4);
+        projective_point(7 + scenario % 160, 8); projective_point(3 + (scenario & 3), 8);
+        projective_finish();
+    }
+    /* Constant B gives an exact factor. Setup scale 64 makes positive levels
+     * distance/4; a negative factor uses complement magnitude and loses one. */
+    memset(matrix_pixels, 0xa5, sizeof matrix_pixels);
+    for (selector = 0; selector < 2; selector++) for (index = 0; index < 14; index++) {
+        projective_case(selector, 0);
+        distance = distances[index % 7];
+        WORD(global, 0xce0) = index < 7 ? 0u - distance : distance;
+        GLOBAL_HALF(0xe88) = 2048;
+        GLOBAL_HALF(0xcfc) = GLOBAL_HALF(0xd02) = 0; WORD(global, 0xd10) = 0;
+        WORD(global, 0x1298) = scenario & 1;
+        row = scenario & 2 ? 50 : 12;
+        memcpy(fill_expected, canvas, CANVAS_SIZE);
+        projective_point(4, row); projective_point(12, row);
+        projective_point(12, row + 1); projective_point(4, row + 1);
+        projective_finish();
+        level = distance ? distance / 4 - (index >= 7) : 0;
+        if (level > 4095) level = 4095;
+        CHECK(WORD(images[side], 0x41c4) == level);
+        if ((level >> 8) != 15 || row < surface[2])
+            for (y = row; y <= row + 1; y++) for (x = 4; x <= 12 + ((level >> 8) != 15); x++) {
+                uint32_t address = row_storage[16 + y] - ADDRESS(canvas) + x;
+                fill_expected[address] = (level >> 8) == 15 ?
+                    (scenario & 1 ? images[side][0xd70 + 256 + fill_expected[address]] : images[side][0x1d06]) :
+                    level < 256 ? 0xa5 : images[side][0xd70 + (level >> 8) * 256 + 0xa5];
+            }
+        CHECK(!memcmp(canvas, fill_expected, CANVAS_SIZE));
+    }
+    /* Exact starting levels 260/280 and gentle B gradients produce block
+     * shade steps -1/-2. Retail suppresses both, retaining row 1 for 32 samples. */
+    for (variant = 0; variant < 2; variant++) {
+        projective_case(1, 0);
+        GLOBAL_HALF(0xe88) = 2048;
+        WORD(global, 0xce0) = 0u - (variant ? 287840 : 267280);
+        GLOBAL_HALF(0xcfc) = variant ? 32 : 1; GLOBAL_HALF(0xd02) = 0;
+        WORD(global, 0xd10) = 0x10000;
+        memcpy(fill_expected, canvas, CANVAS_SIZE);
+        projective_point(0, 9); projective_point(64, 9);
+        projective_finish();
+        CHECK(WORD(images[side], 0x41c0) == (variant ? 280u : 260u));
+        for (x = 0; x <= 65; x++)
+            fill_expected[row_storage[16 + 9] - ADDRESS(canvas) + x] =
+                images[side][0xd70 + (variant && x >= 64 ? 0 : 256) + 0xa5];
+        CHECK(!memcmp(canvas, fill_expected, CANVAS_SIZE));
+    }
+    /* Destination aliases the visible shade step. Its first stores change
+     * the next increment, making the row-byte mask observable. */
+    projective_case(1, 0);
+    GLOBAL_HALF(0xe88) = 2048;
+    WORD(global, 0xce0) = (uint32_t)-0x1000;
+    GLOBAL_HALF(0xcfc) = GLOBAL_HALF(0xd02) = 0; WORD(global, 0xd10) = 0;
+    uint32_t saved_row = row_storage[16 + 9];
+    row_storage[16 + 9] = ADDRESS(images[side] + 0x4354);
+    projective_point(4, 9); projective_point(12, 9);
+    projective_finish();
+    row_storage[16 + 9] = saved_row;
+    polygon_compare = 0;
+    projective_fog_mode = 0;
 }

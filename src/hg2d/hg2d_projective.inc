@@ -1,5 +1,5 @@
 /* Basic doubled-pixel software spans: selectors 0/3 (right to left) and
- * 1/2 (left to right), plus raw keyed variants. No fog or dithering. */
+ * 1/2 (left to right), plus raw keyed and unkeyed fog variants. No dithering. */
 #include "hg2d_projective_tables.inc"
 
 uint32_t hg2d_polygon_entry_sp;
@@ -89,6 +89,31 @@ static void projective_pixels(uint32_t pixel_address, uint32_t count, uint32_t s
     }
 }
 
+static void matrix_far_span(uint32_t *left, uint32_t *right, uint32_t y);
+
+static uint32_t projective_fog_level(uint32_t factor)
+{
+    uint32_t magnitude = factor ^ ((int32_t)factor < 0 ? 0xffffffffu : 0);
+    uint32_t level = (uint32_t)(((uint64_t)magnitude * WORD(0x41f8)) >> 16);
+    return level < 0xfff ? level : 0xfff;
+}
+
+static void projective_fog_pixels(uint32_t address, uint32_t count, uint32_t start, uint32_t shade, int direction)
+{
+    uint32_t u_bits = WORD(start) << 16, v_bits = WORD(start + 4) << 16;
+    uint8_t x_byte = (uint8_t)(WORD(start) >> 16), y_byte = (uint8_t)(WORD(start + 4) >> 16);
+    uint8_t x_step = (uint8_t)(WORD(0x41a8) >> 16), y_step = (uint8_t)(WORD(0x41ac) >> 16);
+    WORD(0x41a8) = WORD(0x41a8) << 16; WORD(0x41ac) = WORD(0x41ac) << 16;
+    while (count--) {
+        uint8_t raw = projective_sample(&u_bits, &v_bits, &x_byte, &y_byte, x_step, y_step);
+        uint8_t colour = BYTE(0xd70 + ((shade >> 8) & 255) * 256 + raw);
+        uint8_t *destination = POINTER(address);
+        shade = (shade + WORD(0x4358)) & 0xffff0fffu;
+        destination[0] = colour; destination[1] = colour;
+        address += direction * 2;
+    }
+}
+
 static void projective_span(uint32_t *left, uint32_t *right, uint32_t y, int flat)
 {
     uint32_t first_x = left[2] & 0xfffeffffu, last_x = right[2] & 0xfffeffffu;
@@ -96,6 +121,8 @@ static void projective_span(uint32_t *left, uint32_t *right, uint32_t y, int fla
     uint32_t pixel_address, shift, block, remaining;
     int forward = WORD(0x4200) == 0x2073751e;
     int keyed = WORD(0x4200) == 0x2073ae7b || WORD(0x4200) == 0x2073e1ec;
+    int fog = WORD(0x4200) == 0x207352a4 || WORD(0x4200) == 0x20738c03;
+    forward |= WORD(0x4200) == 0x20738c03;
     forward |= WORD(0x4200) == 0x2073e1ec;
     int direction = forward ? 1 : -1;
     if (first_x > last_x) {
@@ -108,7 +135,15 @@ static void projective_span(uint32_t *left, uint32_t *right, uint32_t y, int fla
     WORD(0x41f0) = forward ? first_x : last_x; WORD(0x41f4) = y;
     count = (uint32_t)((int32_t)(last_x - first_x) >> 17) + 1;
     right_factor = projective_project(0x4178, 0x4190);
+    if (fog) WORD(0x41bc) = projective_fog_level(right_factor);
     left_factor = projective_project(0x4184, 0x41a0);
+    if (fog) {
+        WORD(0x41c4) = projective_fog_level(left_factor);
+        if (BYTE(0x41c5) == BYTE(0x41bd)) {
+            if (!BYTE(0x41c5)) fog = 0;
+            else if (BYTE(0x41c5) == 15) { matrix_far_span(left, right, y); return; }
+        }
+    }
     minimum = (int32_t)right_factor < 0 ? 0u - right_factor : right_factor;
     maximum = (int32_t)left_factor < 0 ? 0u - left_factor : left_factor;
     if (minimum > maximum) { uint32_t swap = minimum; minimum = maximum; maximum = swap; }
@@ -124,16 +159,29 @@ static void projective_span(uint32_t *left, uint32_t *right, uint32_t y, int fla
     while ((int32_t)remaining >= (int32_t)block) {
         for (component = 0; component < 3; component++) WORD(0x4178 + component * 4) += WORD(0x41b0 + component * 4);
         WORD(0x4198) = WORD(0x4190); WORD(0x419c) = WORD(0x4194);
-        projective_project(0x4178, 0x4190);
+        if (fog) WORD(0x41c0) = WORD(0x41bc);
+        uint32_t factor = projective_project(0x4178, 0x4190);
+        if (fog) {
+            WORD(0x41bc) = projective_fog_level(factor);
+            WORD(0x4358) = (uint32_t)((int32_t)(WORD(0x41bc) - WORD(0x41c0)) >> shift);
+            if (WORD(0x4358) >= 0xfffffffeu) WORD(0x4358) = 0;
+        }
         WORD(0x41a8) = (uint32_t)((int32_t)(WORD(0x4190) - WORD(0x4198)) >> shift);
         WORD(0x41ac) = (uint32_t)((int32_t)(WORD(0x4194) - WORD(0x419c)) >> shift);
         WORD(0x4160) = remaining;
-        projective_pixels(pixel_address, block, 0x4198, direction, 0, keyed);
+        if (fog) projective_fog_pixels(pixel_address, block, 0x4198, WORD(0x41c0), direction);
+        else projective_pixels(pixel_address, block, 0x4198, direction, 0, keyed);
         pixel_address += direction * block * 2; remaining -= block;
     }
     if ((int32_t)remaining <= 0) return;
     WORD(0x41a8) = projective_divide((int32_t)(WORD(0x41a0) - WORD(0x4190)), remaining);
     WORD(0x41ac) = projective_divide((int32_t)(WORD(0x41a4) - WORD(0x4194)), remaining);
+    if (fog) {
+        WORD(0x4358) = projective_divide((int32_t)(WORD(0x41c4) - WORD(0x41bc)), remaining);
+        WORD(0x4354) = projective_fog_tails[forward][shift == 4][remaining];
+        projective_fog_pixels(pixel_address, remaining, 0x4190, WORD(0x41bc), direction);
+        return;
+    }
     WORD(0x4354) = keyed ? projective_key_tails[forward][shift == 4][remaining] :
                          projective_tails[forward][shift == 4][remaining];
     projective_pixels(pixel_address, remaining, 0x4190, direction, 1, keyed);

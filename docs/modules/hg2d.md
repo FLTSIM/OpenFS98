@@ -5,7 +5,7 @@ texture storage/loading, software palettes, primitives and text, plain polygon
 fills, affine texture rendering (all 32 span selectors), Gouraud shading,
 scanline texture blits, table-shaped discs, perspective vertex submission,
 the matching three-attribute textured closer, matrix-derived texture edges,
-far-depth texture fills, basic and keyed doubled-pixel projective spans, and teardown.
+far-depth texture fills, basic, keyed and fogged doubled-pixel projective spans, and teardown.
 Some service branches remain explicitly unfinished below.
 HG2D uses snake_case and `<stdint.h>`; there is no `types.h` dependency.
 
@@ -29,6 +29,7 @@ make -f tools/hg2d.mk hg2ddiff-run N=20000 SUITE=matrix_vertices
 make -f tools/hg2d.mk hg2ddiff-run N=20000 SUITE=matrix_fills
 make -f tools/hg2d.mk hg2ddiff-run N=20000 SUITE=projective
 make -f tools/hg2d.mk hg2ddiff-run N=20000 SUITE=projective_keyed
+make -f tools/hg2d.mk hg2ddiff-run N=20000 SUITE=projective_fog
 make -f tools/hg2d.mk hg2ddiff-run N=20000 SUITE=textured
 make -f tools/hg2d.mk hg2ddiff-run N=20000 SUITE=affine
 make -f tools/hg2d.mk hg2ddiff-run N=20000 SUITE=optimized
@@ -813,7 +814,65 @@ Per-scenario snapshots grow from 256 to 512 operations for the expanded
 337-operation script; all image, GLOBAL, canvas and register comparisons remain.
 Fog, dithering and actual device rendering are still deferred.
 
+## Slice 16: unkeyed fogged projective spans
+
+Targets `0x207352a4` and `0x20738c03` now render through the existing matrix
++0x44/+0x40 path. Selectors 4/7 draw right to left and 5/6 draw left to right.
+Six of the 24 ordinary projective targets are implemented; 18 remain deferred.
+The Linkage service count stays 33.
+
+Fog level uses the signed factor's complement magnitude, omitting the +1 of
+true absolute value for a negative factor. An unsigned product with +0x41f8
+is shifted right 16 and truncated to a dword before clamping to 0xfff. Start,
+old-block and final levels remain at +0x41bc/+0x41c0/+0x41c4. Matching endpoint
+shade rows shortcut before homogeneous stepping: row zero uses the basic
+texture span, retaining the fog endpoint scratch; row 15 uses the existing
+solid far fill with original endpoint coverage, surface-height rejection and
+optional existing-pixel remapping. The selected numeric fog target stays in
++0x4200. The far shortcut retains the previous saved ESP and UV steps.
+
+Intermediate spans project again per correction block and interpolate shade
+alongside U/V. Full blocks use arithmetic shifts, then replace steps -1 and
+-2 with zero using an unsigned comparison. Tails use signed division and keep
+those small negative steps. Each sample indexes the 16-row map at +0xd70,
+advances shade, masks only the upper nibble of its row byte, and stores a
+doubled pair before fetching the next sample. This differs from the basic
+renderer's pair prefetch and is visible when canvas and texture alias. The
+four fog tail-address tables are extracted from retail `.text` data.
+
+The `projective_fog` suite reuses geometry, projection, clipping, signed repair
+and alias cases with an identity map, then varies shade maps, fog strengths,
+factor signs and middle attributes. Independent whole-canvas checks cover
+levels just below/at row 1 and row 15, both factor signs, zero level, clamp,
+height rejection and remapping. Two exact gradient cases independently check
+the -1/-2 suppression. A destination row aliases the visible shade step at
++0x4358 so pixel stores change subsequent increments and expose the row-byte
+mask. Both directions, both correction sizes and all tail residues are
+compared, including literal scratch and tail addresses.
+Keyed fog, dithering and actual device rendering remain deferred.
+
 ## Verification and limits
+
+The expanded fog suite passes **20,000 scenarios / 10,120,000 operations**,
+with zero differences and zero faults. All 160,000 retail host divide repairs
+resume and complete. The final 506-operation script includes the independent
+suppression and destination-to-step alias checks, with full image, GLOBAL,
+guarded canvas, literal saved ESP/tail addresses and seven-register comparisons.
+
+The fog slice catches **38 new mutations** at 64 scenarios, with zero
+unresolved mutations. The initial family missed six mutations: identity
+shade maps and shortcut-only random attributes hid changes to shade evolution;
+exact -1/-2 gradients and a destination-to-step alias were needed to expose
+suppression and row masking. Nonidentity gradient cases and those directed
+fixtures close those gaps, and the full 38-mutant rerun passes. All **596**
+anchors pass the separate audit. The preceding **69** basic/keyed projective
+mutations were also rerun and all caught; the other 489 were not all rerun.
+
+The complete combined regression passes 2,000 scenarios per suite with fog
+dispatch enabled, including the existing basic/keyed projective paths and all
+matrix, affine, palette, primitive and three-attribute suites. The standalone
+fog fixtures were then strengthened for shade gradients, suppression and
+scratch aliasing; those additions pass the 64-scenario baseline too.
 
 The keyed suite passes **20,000 scenarios / 6,740,000 operations**, with zero
 differences and zero faults. All 320,000 retail host divide repairs resume and
@@ -1029,6 +1088,6 @@ loading, and device-backed +0x9c/+0xa0/+0xa4/+0xbc.
 The remaining projective/plane spans through +0x44/+0x40, device palette
 realization and the negative-length shadow corrupt-stack return also remain
 unfinished. Next are the remaining software projective spans selected at data
-+0x4200 (fog and dithering), then the plane, resource/device and
++0x4200 (keyed fog and dithering), then the plane, resource/device and
 initialization paths. The verified subsets do not
 establish whole-module rendering equivalence or readiness to run in-game.

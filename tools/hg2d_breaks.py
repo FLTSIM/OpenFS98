@@ -493,6 +493,47 @@ keyed_mutations = [
     ('keyed tail family', 'keyed ? projective_key_tails', 'keyed ? projective_tails'),
 ]
 mutations += [(*mutation, 'projective_keyed') for mutation in keyed_mutations]
+fog_mutations = [
+    ('fog reverse target', 'fog = WORD(0x4200) == 0x207352a4', 'fog = WORD(0x4200) == 0x20733bbb'),
+    ('fog forward target', '|| WORD(0x4200) == 0x20738c03;', '|| WORD(0x4200) == 0x2073751e;'),
+    ('fog traversal direction', 'forward |= WORD(0x4200) == 0x20738c03;', 'forward |= WORD(0x4200) == 0x207352a4;'),
+    ('fog complement magnitude', 'factor ^ ((int32_t)factor < 0 ? 0xffffffffu : 0)', '(int32_t)factor < 0 ? 0u - factor : factor'),
+    ('fog signed magnitude test', '(int32_t)factor < 0 ? 0xffffffffu : 0', '0'),
+    ('fog scale source', 'magnitude * WORD(0x41f8)', 'magnitude * WORD(0x41fc)'),
+    ('fog wide scale product', '((uint64_t)magnitude * WORD(0x41f8)) >> 16', '(uint32_t)(magnitude * WORD(0x41f8)) >> 16'),
+    ('fog scale shift', 'magnitude * WORD(0x41f8)) >> 16', 'magnitude * WORD(0x41f8)) >> 15'),
+    ('fog level clamp', 'return level < 0xfff ? level : 0xfff;', 'return level < 0xfff ? level : 0xffe;'),
+    ('fog initial endpoint level', 'if (fog) WORD(0x41bc) = projective_fog_level(right_factor);', 'if (fog) WORD(0x41bc) = 0;'),
+    ('fog final endpoint level', 'WORD(0x41c4) = projective_fog_level(left_factor);', 'WORD(0x41c4) = WORD(0x41bc);'),
+    ('fog shortcut row equality', 'if (BYTE(0x41c5) == BYTE(0x41bd))', 'if (1)'),
+    ('fog zero row shortcut', 'if (!BYTE(0x41c5)) fog = 0;', 'if (!BYTE(0x41c5)) fog = 1;'),
+    ('fog maximum row shortcut', 'else if (BYTE(0x41c5) == 15)', 'else if (BYTE(0x41c5) == 14)'),
+    ('fog old block level', 'if (fog) WORD(0x41c0) = WORD(0x41bc);', 'if (fog) WORD(0x41c0) = WORD(0x41c4);'),
+    ('fog block projection level', 'WORD(0x41bc) = projective_fog_level(factor);', 'WORD(0x41bc) = projective_fog_level(left_factor);'),
+    ('fog block step sign', '(int32_t)(WORD(0x41bc) - WORD(0x41c0)) >> shift', '(int32_t)(WORD(0x41c0) - WORD(0x41bc)) >> shift'),
+    ('fog block rounding', '(uint32_t)((int32_t)(WORD(0x41bc) - WORD(0x41c0)) >> shift)', '(uint32_t)((int32_t)(WORD(0x41bc) - WORD(0x41c0)) / (int32_t)(1u << shift))'),
+    ('fog small negative suppression', 'if (WORD(0x4358) >= 0xfffffffeu)', 'if (0)'),
+    ('fog minus two suppression', 'WORD(0x4358) >= 0xfffffffeu', 'WORD(0x4358) >= 0xffffffffu'),
+    ('fog suppression unsigned test', 'WORD(0x4358) >= 0xfffffffeu', '(int32_t)WORD(0x4358) >= -2'),
+    ('fog block starting level', 'block, 0x4198, WORD(0x41c0), direction', 'block, 0x4198, WORD(0x41bc), direction'),
+    ('fog tail level division', 'projective_divide((int32_t)(WORD(0x41c4) - WORD(0x41bc)), remaining)', 'projective_divide((int32_t)(WORD(0x41c4) - WORD(0x41bc)), remaining + 1)'),
+    ('fog tail starting level', 'remaining, 0x4190, WORD(0x41bc), direction', 'remaining, 0x4190, WORD(0x41c4), direction'),
+    ('fog lookup row byte', '((shade >> 8) & 255) * 256 + raw', '((shade >> 9) & 255) * 256 + raw'),
+    ('fog lookup source', '256 + raw);', '256 + (raw ^ 1));'),
+    ('fog shade wrap', '(shade + WORD(0x4358)) & 0xffff0fffu', '(shade + WORD(0x4358)) & 0xffffffffu'),
+    ('fog shade step', 'shade + WORD(0x4358)', 'shade - WORD(0x4358)'),
+    ('fog first doubled pixel', 'destination[0] = colour; destination[1] = colour;', 'destination[1] = colour;'),
+    ('fog second doubled pixel', 'destination[0] = colour; destination[1] = colour;', 'destination[0] = colour;'),
+    ('fog doubled spacing', '        address += direction * 2;', '        address += direction;'),
+    ('fog shifted u step', 'WORD(0x41a8) = WORD(0x41a8) << 16;', 'WORD(0x41a8) = WORD(0x41a8) << 15;'),
+    ('fog shifted v step', 'WORD(0x41ac) = WORD(0x41ac) << 16;', 'WORD(0x41ac) = WORD(0x41ac) << 15;'),
+    ('fog tail target direction', 'projective_fog_tails[forward]', 'projective_fog_tails[!forward]'),
+    ('fog tail target block', 'projective_fog_tails[forward][shift == 4]', 'projective_fog_tails[forward][shift != 4]'),
+    ('fog tail target count', 'projective_fog_tails[forward][shift == 4][remaining]', 'projective_fog_tails[forward][shift == 4][(remaining + 1) & 31]'),
+    ('fog tail target family', 'WORD(0x4354) = projective_fog_tails', 'WORD(0x4354) = projective_tails'),
+    ('fog sample store ordering', 'while (count--) {\n        uint8_t raw = projective_sample(&u_bits, &v_bits, &x_byte, &y_byte, x_step, y_step);', 'uint8_t pending = projective_sample(&u_bits, &v_bits, &x_byte, &y_byte, x_step, y_step);\n    while (count--) {\n        uint8_t raw = pending; if (count) pending = projective_sample(&u_bits, &v_bits, &x_byte, &y_byte, x_step, y_step);'),
+]
+mutations += [(*mutation, 'projective_fog') for mutation in fog_mutations]
 affine_mutations = [
     ('affine low dividend shift', '(uint32_t)(delta << 7)', '(uint32_t)(delta << 6)'),
     ('affine signed high dividend', 'delta & 0x80000000u ? -0x100000000LL : 0', 'delta & 0x80000000u ? 0 : 0'),
@@ -650,7 +691,7 @@ for name, old, new, suite in mutations:
         continue
     tested += 1
     owner = {'colours': 'palette', 'palette': 'palette', 'drawing': 'draw',
-             'polygons': 'polygon', 'fills': 'fill', 'textured': 'textured', 'affine': 'affine', 'gouraud': 'gouraud', 'blits': 'blit', 'optimized': 'affine', 'perspective': 'perspective', 'discs': 'disc', 'perspective_fill': 'perspective_fill', 'matrix_vertices': 'matrix', 'matrix_fills': 'matrix', 'projective': 'projective', 'projective_keyed': 'projective'}.get(suite)
+             'polygons': 'polygon', 'fills': 'fill', 'textured': 'textured', 'affine': 'affine', 'gouraud': 'gouraud', 'blits': 'blit', 'optimized': 'affine', 'perspective': 'perspective', 'discs': 'disc', 'perspective_fill': 'perspective_fill', 'matrix_vertices': 'matrix', 'matrix_fills': 'matrix', 'projective': 'projective', 'projective_keyed': 'projective', 'projective_fog': 'projective'}.get(suite)
     if source.count(old) != 1 and owner:
         scope = sections[owner]
         assert scope.count(old) == 1 and source.count(scope) == 1, (name, scope.count(old))

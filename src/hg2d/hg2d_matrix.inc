@@ -130,14 +130,20 @@ static void matrix_setup(void)
 
 static void matrix_span(uint32_t *left, uint32_t *right, uint32_t y, int flat)
 {
-    uint32_t first = left[2], last = right[2], temporary;
-    void *surface = POINTER(WORD(0x8c4));
     if (WORD(0x4200) == 0x20733bbb || WORD(0x4200) == 0x2073751e ||
-        WORD(0x4200) == 0x2073ae7b || WORD(0x4200) == 0x2073e1ec) {
+        WORD(0x4200) == 0x2073ae7b || WORD(0x4200) == 0x2073e1ec ||
+        WORD(0x4200) == 0x207352a4 || WORD(0x4200) == 0x20738c03) {
         projective_span(left, right, y, flat);
         return;
     }
     if (WORD(0x4200) != 0x20784d41) __builtin_trap(); /* Other projective spans remain deferred. */
+    matrix_far_span(left, right, y);
+}
+
+static void matrix_far_span(uint32_t *left, uint32_t *right, uint32_t y)
+{
+    uint32_t first = left[2], last = right[2], temporary;
+    void *surface = POINTER(WORD(0x8c4));
     BYTE(0x90c) = BYTE(0x1d06);
     if (first > last) { temporary = first; first = last; last = temporary; }
     first = (uint32_t)((int32_t)first >> 16); last = (uint32_t)((int32_t)last >> 16);

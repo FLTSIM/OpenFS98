@@ -39,7 +39,11 @@ static LONG WINAPI draw_exception(EXCEPTION_POINTERS *exception)
         exception->ExceptionRecord->ExceptionCode == EXCEPTION_INT_OVERFLOW) {
         CONTEXT *context = exception->ContextRecord;
         const uint8_t *instruction = (const uint8_t *)(uintptr_t)context->Eip;
-        if (context->Eip == 0x20733426 || context->Eip == 0x20733457 ||
+        if (context->Eip == 0x20733c3a || context->Eip == 0x20733cd0 ||
+            context->Eip == 0x20733e3b || context->Eip == 0x20734a66 ||
+            context->Eip == 0x2073759b || context->Eip == 0x20737631 ||
+            context->Eip == 0x2073779c || context->Eip == 0x207383c6 ||
+            context->Eip == 0x20733426 || context->Eip == 0x20733457 ||
             context->Eip == 0x20733488 || context->Eip == 0x207334b9 ||
             context->Eip == 0x2073374c || context->Eip == 0x2073377d ||
             context->Eip == 0x207337ae || context->Eip == 0x207337df ||
@@ -55,6 +59,10 @@ static LONG WINAPI draw_exception(EXCEPTION_POINTERS *exception)
         }
         {
             static const uint32_t affine_divides[] = {
+                0x20733d81, 0x20733d9b, 0x20733db5, 0x20734597, 0x207345aa,
+                0x207349ac, 0x207349c6, 0x207349e0, 0x20734ea2, 0x20734eb5,
+                0x207376e2, 0x207376fc, 0x20737716, 0x20737ef7, 0x20737f0a,
+                0x2073830c, 0x20738326, 0x20738340, 0x20738801, 0x20738814,
                 0x20785970, 0x20785985, 0x20785b5a, 0x20785b6f,
                 0x20785dcf, 0x20785de4, 0x20786005, 0x2078601a,
                 0x207862b5, 0x207862ca, 0x20786559, 0x2078656e,

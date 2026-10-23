@@ -154,6 +154,7 @@ EAX_ENTRY(texture_update, texture_update_body);
 
 #include "hg2d_palette.inc"
 #include "hg2d_draw.inc"
+#include "hg2d_projective.inc"
 #include "hg2d_matrix.inc"
 #include "hg2d_polygon.inc"
 #include "hg2d_fill.inc"

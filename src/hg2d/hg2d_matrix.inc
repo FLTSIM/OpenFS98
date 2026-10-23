@@ -1,5 +1,5 @@
 /* +0x44/+0x40 alternate texture edges, 0x20733386, and setup 0x20733130.
- * The projective span family is deferred; its far-depth fill is implemented. */
+ * Basic projective spans and the far-depth fill are implemented; other spans trap. */
 static uint32_t matrix_signed_divide(uint32_t value, uint32_t denominator)
 {
     int64_t quotient;
@@ -128,11 +128,15 @@ static void matrix_setup(void)
     WORD(0x948) = texture[0];
 }
 
-static void matrix_span(uint32_t *left, uint32_t *right, uint32_t y)
+static void matrix_span(uint32_t *left, uint32_t *right, uint32_t y, int flat)
 {
     uint32_t first = left[2], last = right[2], temporary;
     void *surface = POINTER(WORD(0x8c4));
-    if (WORD(0x4200) != 0x20784d41) __builtin_trap(); /* Projective spans remain deferred. */
+    if (WORD(0x4200) == 0x20733bbb || WORD(0x4200) == 0x2073751e) {
+        projective_span(left, right, y, flat);
+        return;
+    }
+    if (WORD(0x4200) != 0x20784d41) __builtin_trap(); /* Other projective spans remain deferred. */
     BYTE(0x90c) = BYTE(0x1d06);
     if (first > last) { temporary = first; first = last; last = temporary; }
     first = (uint32_t)((int32_t)first >> 16); last = (uint32_t)((int32_t)last >> 16);
@@ -166,7 +170,7 @@ static uint32_t *matrix_find(uint32_t y, uint32_t *other)
             WORD(0x430c) = edge[2]; WORD(0x4314) = edge[4]; WORD(0x4318) = edge[5]; WORD(0x431c) = edge[6];
             WORD(0x4334) = edge[2] + edge[3]; WORD(0x433c) = edge[4] + edge[7];
             WORD(0x4340) = edge[5] + edge[8]; WORD(0x4344) = edge[6] + edge[9];
-            matrix_span((uint32_t *)(hg2d_image + 0x4304), (uint32_t *)(hg2d_image + 0x432c), y);
+            matrix_span((uint32_t *)(hg2d_image + 0x4304), (uint32_t *)(hg2d_image + 0x432c), y, 1);
         }
         edge[0] = 0xffffffffu;
     }
@@ -196,7 +200,7 @@ static void matrix_close(void)
         if ((int32_t)y >= (int32_t)right[1]) {
             right[0] = 0xffffffffu; right = matrix_find(y, left); if (!right) return;
         }
-        matrix_span(left, right, y);
+        matrix_span(left, right, y, 0);
         left[2] += left[3]; right[2] += right[3];
         for (component = 0; component < 3; component++) {
             left[4 + component] += left[7 + component]; right[4 + component] += right[7 + component];

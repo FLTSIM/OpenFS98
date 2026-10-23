@@ -251,4 +251,10 @@ void STDCALL __attribute__((used)) polygon_close_body(void *surface)
         y++;
     } while (WORD(0x4020) >= y);
 }
-DRAW_ENTRY(polygon_close, polygon_close_body, 1, 4, "");
+/* Capture the public entry stack for projective spans' visible saved ESP.
+ * Keep the ordinary DRAW_ENTRY register/argument contract unchanged. */
+void polygon_close(void);
+__asm__(".text\n_polygon_close:\n\tmovl %esp,_hg2d_polygon_entry_sp\n\t"
+        "pushl %eax\n\tpushl %ecx\n\tpushl %edx\n\t"
+        "movl $0,_hg2d_draw_colour_used\n\tpushl 16(%esp)\n\t"
+        "call _polygon_close_body@4\n\tpopl %edx\n\tpopl %ecx\n\tpopl %eax\n\tret $4\n");

@@ -5,8 +5,8 @@ texture storage/loading, software palettes, primitives and text, plain polygon
 fills, affine texture rendering (all 32 span selectors), Gouraud shading,
 scanline texture blits, table-shaped discs, perspective vertex submission,
 the matching three-attribute textured closer, matrix-derived texture edges,
-far-depth texture fills, and teardown. Some service
-branches remain explicitly unfinished below.
+far-depth texture fills, basic doubled-pixel projective spans, and teardown.
+Some service branches remain explicitly unfinished below.
 HG2D uses snake_case and `<stdint.h>`; there is no `types.h` dependency.
 
 HG2D is not in `MODULES` and must not be installed yet. Initialization, the
@@ -27,6 +27,7 @@ make -f tools/hg2d.mk hg2ddiff-run N=20000 SUITE=polygons
 make -f tools/hg2d.mk hg2ddiff-run N=20000 SUITE=fills
 make -f tools/hg2d.mk hg2ddiff-run N=20000 SUITE=matrix_vertices
 make -f tools/hg2d.mk hg2ddiff-run N=20000 SUITE=matrix_fills
+make -f tools/hg2d.mk hg2ddiff-run N=20000 SUITE=projective
 make -f tools/hg2d.mk hg2ddiff-run N=20000 SUITE=textured
 make -f tools/hg2d.mk hg2ddiff-run N=20000 SUITE=affine
 make -f tools/hg2d.mk hg2ddiff-run N=20000 SUITE=optimized
@@ -379,8 +380,8 @@ every canvas byte independently, including untouched padding and rows. Row
 tables retain negative pitch and nonlinear addressing from the drawing suite.
 
 The joint nonzero +0xc90/+0x2f4 path now supports matrix edges and far-depth
-fills (slice 13). Its projective spans and the separate +0xc90-only path
-remain deferred and trap when entered. The
+fills (slice 13) and basic projective spans (slice 14). Other projective spans
+and the separate +0xc90-only path remain deferred and trap when entered. The
 shadow span's corrupt-stack return for a negative low-word length also
 remains deferred and traps explicitly; these ordered, bounded fixtures do
 not reach it. Closing an exhausted vertex buffer, arbitrary invalid row
@@ -740,7 +741,64 @@ production, setup selection and far fill; it does not claim near-texture or
 device rendering equivalence. Arbitrary malformed views/surfaces and negative
 scanline intervals remain outside these bounded raster fixtures.
 
+## Slice 14: basic software projective spans
+
+`src/hg2d/hg2d_projective.inc` implements targets `0x20733bbb` and
+`0x2073751e` through the existing public +0x44/+0x40 matrix path. Selectors
+0/3 draw right to left; 1/2 draw left to right. These are raw texture spans
+with two destination pixels per texture sample. The service count remains 33.
+The remaining 22 ordinary span targets still trap explicitly.
+
+Endpoints clear bit 16 while retaining the fractional x bits, sort as unsigned
+fixed-point values, and select attributes according to drawing direction.
+Projection divides the signed matrix-row difference by the middle attribute
+shifted arithmetically by eight and ORed with one. Signed 64-bit products
+produce U/V, then add/subtract the copied matrix bases and clamp with ordered
+signed lower/upper comparisons. A reversed pair of bounds therefore retains
+retail's lower-bound-first behavior. Valid INT32_MIN quotients and the host's
+overflow saturation are distinct cases.
+
+The ratio of the absolute endpoint factors selects 16-sample correction blocks
+strictly below 1/16 and 32-sample blocks otherwise. Each full block advances all
+three homogeneous attributes, projects again, and uses arithmetic shifts for
+its U/V increments. A partial tail instead uses signed division. Integer U/V
+bytes advance independently using their fractional carries; they do not carry
+between texture-index bytes. Scratch fields, including shifted step words,
+block counters, and the last tail jump address, retain their retail values.
+The four 32-entry tail tables are extracted from data embedded in retail's
+`.text` section by `gen_hg2d_data.py`; no executable bytes are copied.
+
+Full blocks align their four-byte stores with a direction-dependent prefix.
+Each pair of samples is read before either doubled pixel is stored. Tails
+store one doubled sample at a time. This ordering matters when the texture
+aliases the canvas. These spans ignore logical surface height and the
+existing-pixel remap flag, and may cover one extra pixel at an even right
+endpoint. The +0x40 shim captures its entry stack pointer to reproduce the
+visible saved ESP at +0x4164, including the extra call frame for flat edges;
+the harness compares that value literally and still checks all seven registers.
+
+The `projective` suite exercises all four selectors, both windings, all tail
+lengths, both correction sizes and the exact threshold, fractional endpoints,
+flat/point/crossing geometry, signed factors, random matrix coefficients,
+clamp order, division repairs, aliasing and independent whole-canvas fills.
+Fog, raw keying, dithering and hardware rendering remain outside this slice.
+
 ## Verification and limits
+
+The projective suite passes **20,000 scenarios / 4,340,000 operations**, with
+zero differences and zero faults. Its 320,000 resumed retail divide repairs
+complete successfully. These comparisons include the literal saved stack
+pointer, full scratch image, GLOBAL, guarded canvas and all seven registers.
+
+The projective slice catches **50 new mutations** at 64 scenarios with zero
+unresolved mutations. Three initial misses exposed fixture gaps: equal matrix
+base rows hid an incorrect axis stride, while repeated flat-edge drawing and
+already-doubled source pixels hid changes to alignment and sample/store order.
+Distinct nonzero base rows and a seeded canvas alias rendered once per row
+close those gaps. The complete 50-mutation family then passes. All **539**
+anchors pass the separate audit; the preceding 489 mutants were not all rerun
+for this slice. The complete combined regression passes 2,000 scenarios per
+suite, including the new projective path and all existing suites.
 
 Both matrix suites pass 20,000 scenarios: 1,256,250 vertex operations with
 1,560,888 resumed retail divide repairs, and 4,600,000 setup/fill operations
@@ -753,8 +811,8 @@ The matrix slice catches **61 new mutations** at 64 scenarios: 26 matrix-edge
 and 35 setup/fill mutations. The setup family initially missed numerator
 reduction because its large input scales all produced zero quotients. A
 midrange scale closed that fixture gap and the focused recheck catches it.
-The combined evidence has zero unresolved mutations. All 489 current mutation
-anchors pass the separate audit; the preceding 428 mutations were not all
+The combined evidence has zero unresolved mutations. All 489 mutation
+anchors then defined pass the separate audit; the preceding 428 mutations were not all
 rerun for this slice.
 
 
@@ -807,7 +865,7 @@ vertex, 43 fill, 35 affine vertex, 30 affine rasterizer, 19 optimized spans,
 An interrupted full sweep completed 285 checks; its resumed 90 checks exposed
 two disc coverage gaps. Focused reruns catch both after adding a wide clip
 that distinguishes the final profiles and a negative right endpoint. The
-full union has zero unresolved mutations. All 489 current anchors also pass the
+full union has zero unresolved mutations. All 489 anchors then defined also pass the
 separate audit; that audit does not count as executing the mutants.
 
 Other gaps found and closed during these slices: horizontal UVs needed an
@@ -922,6 +980,7 @@ Remaining Linkage services: +0x04 initialization, +0x58/+0x68 palette/resource
 loading, and device-backed +0x9c/+0xa0/+0xa4/+0xbc.
 The remaining projective/plane spans through +0x44/+0x40, device palette
 realization and the negative-length shadow corrupt-stack return also remain
-unfinished. Next are the software projective spans selected at data +0x4200,
-then the plane, resource/device and initialization paths. The verified subsets do not
+unfinished. Next are the remaining software projective spans selected at data
++0x4200 (keying, fog and dithering), then the plane, resource/device and
+initialization paths. The verified subsets do not
 establish whole-module rendering equivalence or readiness to run in-game.

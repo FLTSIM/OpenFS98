@@ -13,7 +13,7 @@ import sys
 root = Path(__file__).resolve().parent.parent
 source = (root / 'src/hg2d/hg2d.c').read_text()
 sections = {}
-for section in ('palette', 'draw', 'matrix', 'polygon', 'fill', 'textured', 'perspective', 'perspective_fill', 'affine', 'gouraud', 'blit', 'disc'):
+for section in ('palette', 'draw', 'projective', 'matrix', 'polygon', 'fill', 'textured', 'perspective', 'perspective_fill', 'affine', 'gouraud', 'blit', 'disc'):
     sections[section] = (root / ('src/hg2d/hg2d_%s.inc' % section)).read_text()
     source = source.replace('#include "hg2d_%s.inc"' % section, sections[section])
 build = root / os.environ.get('HG2D_BREAKS_DIR', 'bin/hg2d-breaks')
@@ -407,6 +407,59 @@ matrix_fill_mutations = [
     ('matrix closing bounds arithmetic', '(int32_t)WORD(0x8c8) >> 16', '(int32_t)(WORD(0x8c8) >> 16)'),
 ]
 mutations += [(*mutation, 'matrix_fills') for mutation in matrix_fill_mutations]
+projective_mutations = [
+    ('projective signed denominator', 'quotient = dividend / (int32_t)denominator;', 'quotient = dividend / denominator;'),
+    ('projective valid minimum quotient', 'quotient >= -2147483648LL', 'quotient > -2147483648LL'),
+    ('projective repaired sign', '((dividend < 0) != ((int32_t)denominator < 0))', '((dividend < 0) == ((int32_t)denominator < 0))'),
+    ('projective product high bits', '(uint32_t)(((int64_t)(int32_t)attribute * (int32_t)factor) >> 16)', '((uint32_t)((int64_t)(int32_t)attribute * (int32_t)factor) >> 16)'),
+    ('projective first base row', 'WORD(0x41c8 + axis * 8)', 'WORD(0x41c8 + axis * 4)'),
+    ('projective second base row', 'WORD(0x41d4 + axis * 8)', 'WORD(0x41d4 + axis * 4)'),
+    ('projective lower clip sign', '(int32_t)value < (int32_t)WORD(0x41e0 + axis * 4)', 'value < WORD(0x41e0 + axis * 4)'),
+    ('projective upper clip sign', '(int32_t)value > (int32_t)WORD(0x41e8 + axis * 4)', 'value > WORD(0x41e8 + axis * 4)'),
+    ('projective clip gate order', 'else if ((int32_t)value > (int32_t)WORD(0x41e8 + axis * 4))', 'if ((int32_t)value > (int32_t)WORD(0x41e8 + axis * 4))'),
+    ('projective numerator shift', '(WORD(0x41cc) - WORD(0x41d8)) * 256', '(WORD(0x41cc) - WORD(0x41d8)) * 128'),
+    ('projective denominator shift sign', '(uint32_t)((int32_t)WORD(attributes + 4) >> 8)', '(WORD(attributes + 4) >> 8)'),
+    ('projective odd denominator', 'WORD(attributes + 4) >> 8) | 1;', 'WORD(attributes + 4) >> 8) | 0;'),
+    ('projective factor negation', 'factor = 0u - projective_divide', 'factor = projective_divide'),
+    ('projective texel channel order', 'WORD(0x948) + *u + ((uint32_t)*v << 8)', 'WORD(0x948) + *v + ((uint32_t)*u << 8)'),
+    ('projective u fractional carry', '*u + u_step + (uint32_t)(sum >> 32)', '*u + u_step'),
+    ('projective v fractional carry', '*v + v_step + (uint32_t)(sum >> 32)', '*v + v_step'),
+    ('projective initial u fraction', 'u_fraction = WORD(start) << 16', 'u_fraction = WORD(start) << 15'),
+    ('projective initial v fraction', 'v_fraction = WORD(start + 4) << 16', 'v_fraction = WORD(start + 4) << 15'),
+    ('projective u step byte', 'u_step = (uint8_t)(WORD(0x41a8) >> 16)', 'u_step = (uint8_t)(WORD(0x41a8) >> 8)'),
+    ('projective v step byte', 'v_step = (uint8_t)(WORD(0x41ac) >> 16)', 'v_step = (uint8_t)(WORD(0x41ac) >> 8)'),
+    ('projective shifted u scratch', 'WORD(0x41a8) <<= 16;', 'WORD(0x41a8) <<= 15;'),
+    ('projective shifted v scratch', 'WORD(0x41ac) <<= 16;', 'WORD(0x41ac) <<= 15;'),
+    ('projective alignment prefix', '((pixel_address & 2) != 0) == (direction > 0)', '((pixel_address & 2) != 0) != (direction > 0)'),
+    ('projective batch read ordering', 'uint8_t second = projective_sample', '*(uint16_t *)POINTER(pixel_address) = first * 0x101u; uint8_t second = projective_sample'),
+    ('projective forward pair order', 'pixel[0] = pixel[1] = first; pixel[2] = pixel[3] = second;', 'pixel[0] = pixel[1] = second; pixel[2] = pixel[3] = first;'),
+    ('projective reverse pair order', 'pixel[0] = pixel[1] = second; pixel[2] = pixel[3] = first;', 'pixel[0] = pixel[1] = first; pixel[2] = pixel[3] = second;'),
+    ('projective doubled spacing', 'pixel_address += direction * 4;', 'pixel_address += direction * 2;'),
+    ('projective even endpoints', 'first_x = left[2] & 0xfffeffffu', 'first_x = left[2] & 0xfffdffffu'),
+    ('projective traversal direction', 'direction = forward ? 1 : -1;', 'direction = forward ? -1 : 1;'),
+    ('projective endpoint swap', 'if (!forward) { uint32_t *swap', 'if (forward) { uint32_t *swap'),
+    ('projective initial attribute endpoint', 'WORD(0x4178 + component * 4) = left[4 + component];', 'WORD(0x4178 + component * 4) = right[4 + component];'),
+    ('projective saved row', 'WORD(0x41f4) = y;', 'WORD(0x41f4) = y + 1;'),
+    ('projective sample count', '(int32_t)(last_x - first_x) >> 17', '(int32_t)(last_x - first_x) >> 16'),
+    ('projective negative ratio magnitude', 'minimum = (int32_t)right_factor < 0 ? 0u - right_factor : right_factor;', 'minimum = right_factor;'),
+    ('projective ratio denominator guard', '(maximum + 1)', '(maximum)'),
+    ('projective strict correction threshold', 'ratio < 0x10000000', 'ratio <= 0x10000000'),
+    ('projective block selection', 'shift = ratio < 0x10000000 ? 4 : 5;', 'shift = ratio < 0x10000000 ? 5 : 4;'),
+    ('projective wide homogeneous step', '(int64_t)(int32_t)(WORD(0x4184 + component * 4) - WORD(0x4178 + component * 4)) * block', '(int64_t)(int32_t)((WORD(0x4184 + component * 4) - WORD(0x4178 + component * 4)) * block)'),
+    ('projective stack call depth', '(flat ? 68 : 64)', '(flat ? 64 : 68)'),
+    ('projective block homogeneous advance', 'WORD(0x4178 + component * 4) += WORD(0x41b0 + component * 4);', 'WORD(0x4178 + component * 4) -= WORD(0x41b0 + component * 4);'),
+    ('projective block old u scratch', 'WORD(0x4198) = WORD(0x4190);', 'WORD(0x4198) = WORD(0x41a0);'),
+    ('projective block u slope rounding', '(uint32_t)((int32_t)(WORD(0x4190) - WORD(0x4198)) >> shift)', '(uint32_t)((int32_t)(WORD(0x4190) - WORD(0x4198)) / (int32_t)(1u << shift))'),
+    ('projective block saved count', 'WORD(0x4160) = remaining;', 'WORD(0x4160) = remaining - block;'),
+    ('projective block destination advance', 'pixel_address += direction * block * 2;', 'pixel_address += direction * block;'),
+    ('projective zero tail return', 'if ((int32_t)remaining <= 0) return;', 'if ((int32_t)remaining < 0) return;'),
+    ('projective tail u division', 'projective_divide((int32_t)(WORD(0x41a0) - WORD(0x4190)), remaining)', 'projective_divide((int32_t)(WORD(0x41a0) - WORD(0x4190)), remaining + 1)'),
+    ('projective tail target direction', 'projective_tails[forward]', 'projective_tails[!forward]'),
+    ('projective tail target block', '[shift == 4][remaining]', '[shift != 4][remaining]'),
+    ('projective height clipping', 'int forward = WORD(0x4200) == 0x2073751e;', 'int forward = WORD(0x4200) == 0x2073751e; if (y >= SURFACE_WORD(POINTER(WORD(0x8c4)), 8)) return;'),
+    ('projective unwanted pixel remap', 'return value;\n}\n\nstatic void projective_pixels', 'if (GLOBAL_WORD(0x1298)) value = *(uint8_t *)POINTER(WORD(0x1d88) + value); return value;\n}\n\nstatic void projective_pixels'),
+]
+mutations += [(*mutation, 'projective') for mutation in projective_mutations]
 affine_mutations = [
     ('affine low dividend shift', '(uint32_t)(delta << 7)', '(uint32_t)(delta << 6)'),
     ('affine signed high dividend', 'delta & 0x80000000u ? -0x100000000LL : 0', 'delta & 0x80000000u ? 0 : 0'),
@@ -564,7 +617,7 @@ for name, old, new, suite in mutations:
         continue
     tested += 1
     owner = {'colours': 'palette', 'palette': 'palette', 'drawing': 'draw',
-             'polygons': 'polygon', 'fills': 'fill', 'textured': 'textured', 'affine': 'affine', 'gouraud': 'gouraud', 'blits': 'blit', 'optimized': 'affine', 'perspective': 'perspective', 'discs': 'disc', 'perspective_fill': 'perspective_fill', 'matrix_vertices': 'matrix', 'matrix_fills': 'matrix'}.get(suite)
+             'polygons': 'polygon', 'fills': 'fill', 'textured': 'textured', 'affine': 'affine', 'gouraud': 'gouraud', 'blits': 'blit', 'optimized': 'affine', 'perspective': 'perspective', 'discs': 'disc', 'perspective_fill': 'perspective_fill', 'matrix_vertices': 'matrix', 'matrix_fills': 'matrix', 'projective': 'projective'}.get(suite)
     if source.count(old) != 1 and owner:
         scope = sections[owner]
         assert scope.count(old) == 1 and source.count(scope) == 1, (name, scope.count(old))

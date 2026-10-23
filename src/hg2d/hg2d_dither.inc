@@ -55,3 +55,24 @@ static void dither_pixels(uint32_t address, uint32_t count, uint32_t start,
         dither_advance(&u, &v, u_integer, v_integer);
     }
 }
+
+/* Fog variants use individual byte stores, before both coordinate and shade
+ * advances. They do not prefetch the next texel as the plain paired loop does. */
+static void dither_fog_pixels(uint32_t address, uint32_t count, uint32_t start,
+                              uint32_t y, int direction, int tail, uint32_t level)
+{
+    uint32_t texture = WORD(0x948);
+    uint64_t sample_u = ((uint64_t)(uint8_t)(WORD(start) >> 16) << 32) | (uint32_t)(WORD(start) << 16);
+    uint64_t sample_v = ((uint64_t)(uint8_t)(WORD(start + 4) >> 16) << 32) | (uint32_t)(WORD(start + 4) << 16);
+    uint8_t u_integer = (uint8_t)(WORD(0x41a8) >> 16), v_integer = (uint8_t)(WORD(0x41ac) >> 16);
+    WORD(0x41a8) *= 65536u;
+    WORD(0x41ac) *= 65536u;
+    for (uint32_t pixel = 0; pixel < count; pixel++) {
+        if (tail && pixel + 1 == count && WORD(0x45d5)) return;
+        uint8_t texel = dither_texel(texture, sample_u, sample_v, dither_bias(address, y));
+        *(uint8_t *)POINTER(address) = BYTE(0xd70 + texel + ((level >> 8) & 255) * 256);
+        dither_advance(&sample_u, &sample_v, u_integer, v_integer);
+        level = (level + WORD(0x4358)) & 0xffff0fffu;
+        address += direction;
+    }
+}

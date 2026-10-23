@@ -6,7 +6,7 @@ fills, affine texture rendering (all 32 span selectors), Gouraud shading,
 scanline texture blits, table-shaped discs, perspective vertex submission,
 the matching three-attribute textured closer, matrix-derived texture edges,
 far-depth texture fills, basic/keyed/fogged doubled-pixel projective spans,
-unkeyed dithered spans, and teardown. Some service branches remain explicitly
+unkeyed dithered spans with and without fog, and teardown. Some service branches remain explicitly
 unfinished below.
 HG2D uses snake_case and `<stdint.h>`; there is no `types.h` dependency.
 
@@ -33,6 +33,7 @@ make -f tools/hg2d.mk hg2ddiff-run N=20000 SUITE=projective_keyed
 make -f tools/hg2d.mk hg2ddiff-run N=20000 SUITE=projective_fog
 make -f tools/hg2d.mk hg2ddiff-run N=20000 SUITE=projective_key_fog
 make -f tools/hg2d.mk hg2ddiff-run N=20000 SUITE=projective_dither
+make -f tools/hg2d.mk hg2ddiff-run N=20000 SUITE=projective_dither_fog
 make -f tools/hg2d.mk hg2ddiff-run N=20000 SUITE=textured
 make -f tools/hg2d.mk hg2ddiff-run N=20000 SUITE=affine
 make -f tools/hg2d.mk hg2ddiff-run N=20000 SUITE=optimized
@@ -940,7 +941,65 @@ canvas texture alias that distinguishes pair prefetch from immediate stores.
 Dithered fog/keyed variants, hardware, plane, resource and init paths remain
 deferred.
 
+## Slice 19: unkeyed dithered fog spans
+
+Targets `0x2074e49d` and `0x207588f0` now render through +0x44/+0x40.
+Selectors 36/39 draw right to left and 37/38 draw left to right. Twelve of the
+24 ordinary projective targets are implemented. The Linkage service count
+remains 33 of 40, with unfinished branches still listed below.
+
+The new path combines the dither renderer's one-pixel coverage and four U/V
+biases with the fog renderer's complement magnitude, 12-bit level, correction
+blocks and -1/-2 step suppression. It uses individual byte stores throughout:
+each texel is shaded and stored before reading the fractional U/V steps and
+fog increment for the next sample. Plain dither instead prefetches paired
+samples before its word store. Destination/step and canvas/texture aliases
+make that distinction observable. Mapped zero remains opaque.
+
+Shortcut order matters. If both endpoint complement magnitudes meet the
+distance threshold, retail first masks the endpoints and enters the existing
+doubled-pixel fog path. Otherwise matching zero shade rows use plain dither,
+and matching maximum rows use the solid far primitive. Fog level and endpoint
+magnitude scratch remain literal across these jumps. The far shortcut keeps
+its height rejection, original integer endpoint coverage and optional remap.
+It can therefore draw where the masked doubled-pixel count would be zero.
+
+Dither tails retain the padded count, starting parity, live final-skip flag
+and saved count from the preceding slice, with an additional signed shade
+step. Eight new 33-entry numeric tail tables are extracted from retail `.text`
+data. Shade advances and masks its row byte after the store, including when
+the destination aliases its increment. There is no separate dither bias on
+the shade index: the four phases apply to U/V sampling.
+
+The 761-operation `projective_dither_fog` script has two phases within the
+existing 512-operation snapshot capacity. It reuses the fog geometry, repair,
+clamp, gradient and alias fixtures, then independently checks shaded whole
+canvases for four selectors, both row parities, two physical alignments and
+four U/V fractions. Additional cases cover exact signed distance thresholds,
+all three shortcuts, fractional endpoint masking, and aliases into the U step,
+shade increment, tail flag and canvas texture. Expected coverage distinguishes
+single-pixel sampling, doubled fog and solid far fill.
+Keyed dither variants, hardware, plane, resource and initialization paths remain
+deferred. These service/target counts are not a whole-module completion
+percentage, and HG2D remains outside `MODULES`.
+
 ## Verification and limits
+
+The dithered-fog suite passes **20,000 scenarios / 15,220,000 operations**,
+with zero differences and zero faults. All 160,000 retail host divide repairs
+resume and complete. Both phases compare the full image, GLOBAL, guarded
+canvas, literal saved ESP/tail addresses and all seven drawing registers.
+
+The complete combined regression passes 2,000 scenarios per suite, including
+**1,522,000 dithered-fog operations** with zero differences and zero faults
+and 16,000 resumed retail host divide repairs. All earlier projective,
+affine, three-attribute, palette and primitive suites pass in the same run.
+
+The dithered-fog family catches **27 new mutations** at 64 scenarios with zero
+unresolved mutations. The preceding **177** projective mutations were rerun
+and all caught: **204 caught** in this slice. All **693** mutation anchors
+pass the separate audit; the other 489 mutants were not all rerun.
+
 
 The dither suite passes **20,000 scenarios / 13,280,000 operations**, with
 zero differences and zero faults. All 800,000 retail host divide repairs
@@ -1218,6 +1277,6 @@ loading, and device-backed +0x9c/+0xa0/+0xa4/+0xbc.
 The remaining projective/plane spans through +0x44/+0x40, device palette
 realization and the negative-length shadow corrupt-stack return also remain
 unfinished. Next are the remaining software projective spans selected at data
-+0x4200 (dithered fog/keying), then the plane, resource/device and
++0x4200 (keyed dithering with/without fog), then the plane, resource/device and
 initialization paths. The verified subsets do not
 establish whole-module rendering equivalence or readiness to run in-game.

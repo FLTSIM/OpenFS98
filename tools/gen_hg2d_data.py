@@ -83,21 +83,29 @@ with open('src/hg2d/hg2d_projective_tables.inc', 'w') as output:
             output.write('    },\n')
         output.write('};\n')
 
-    output.write('static const uint32_t projective_dither_tails[2][2][2][33] = {\n')
-    for directions in (
-        ((0x2074c11e, 0x2074ac87), (0x2074de1a, 0x2074cf93)),
-        ((0x20756573, 0x207550dd), (0x2075826d, 0x207573e7)),
-    ):
-        output.write('    {\n')
-        for phases in directions:
-            output.write('        {\n')
-            for address in phases:
-                values = struct.unpack_from('<33I', blob, text_raw + address - 0x20730000 - text_rva)
-                assert all(0x20731000 <= value < 0x20790266 for value in values)
-                output.write('            {\n')
-                for index in range(0, 33, 4):
-                    output.write('                ' + ', '.join('0x%08xu' % value for value in values[index:index+4]) + ',\n')
-                output.write('            },\n')
-            output.write('        },\n')
-        output.write('    },\n')
-    output.write('};\n')
+    dither_tables = (
+        ('projective_dither_tails', (
+            ((0x2074c11e, 0x2074ac87), (0x2074de1a, 0x2074cf93)),
+            ((0x20756573, 0x207550dd), (0x2075826d, 0x207573e7)),
+        )),
+        ('projective_dither_fog_tails', (
+            ((0x20751357, 0x2074f844), (0x2075394b, 0x20752648)),
+            ((0x2075b7a8, 0x20759c95), (0x2075dd9c, 0x2075ca99)),
+        )),
+    )
+    for name, tables in dither_tables:
+        output.write('static const uint32_t %s[2][2][2][33] = {\n' % name)
+        for directions in tables:
+            output.write('    {\n')
+            for phases in directions:
+                output.write('        {\n')
+                for address in phases:
+                    values = struct.unpack_from('<33I', blob, text_raw + address - 0x20730000 - text_rva)
+                    assert all(0x20731000 <= value < 0x20790266 for value in values)
+                    output.write('            {\n')
+                    for index in range(0, 33, 4):
+                        output.write('                ' + ', '.join('0x%08xu' % value for value in values[index:index+4]) + ',\n')
+                    output.write('            },\n')
+                output.write('        },\n')
+            output.write('    },\n')
+        output.write('};\n')

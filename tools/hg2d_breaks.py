@@ -453,7 +453,7 @@ projective_mutations = [
     ('projective block homogeneous advance', 'WORD(0x4178 + component * 4) += WORD(0x41b0 + component * 4);', 'WORD(0x4178 + component * 4) -= WORD(0x41b0 + component * 4);'),
     ('projective block old u scratch', 'WORD(0x4198) = WORD(0x4190);', 'WORD(0x4198) = WORD(0x41a0);'),
     ('projective block u slope rounding', '(uint32_t)((int32_t)(WORD(0x4190) - WORD(0x4198)) >> shift)', '(uint32_t)((int32_t)(WORD(0x4190) - WORD(0x4198)) / (int32_t)(1u << shift))'),
-    ('projective block saved count', 'WORD(0x4160) = remaining;\n        if (dither)', 'WORD(0x4160) = remaining - block;\n        if (dither)'),
+    ('projective block saved count', 'WORD(0x4160) = remaining;\n        if (dither && fog)', 'WORD(0x4160) = remaining - block;\n        if (dither && fog)'),
     ('projective block destination advance', 'pixel_address += direction * block * (dither ? 1 : 2);', 'pixel_address += direction * block;'),
     ('projective zero tail return', 'if ((int32_t)remaining <= 0) return;', 'if ((int32_t)remaining < 0) return;'),
     ('projective tail u division', 'projective_divide((int32_t)(WORD(0x41a0) - WORD(0x4190)), remaining)', 'projective_divide((int32_t)(WORD(0x41a0) - WORD(0x4190)), remaining + 1)'),
@@ -532,7 +532,7 @@ fog_mutations = [
     ('fog minus two suppression', 'WORD(0x4358) >= 0xfffffffeu', 'WORD(0x4358) >= 0xffffffffu'),
     ('fog suppression unsigned test', 'WORD(0x4358) >= 0xfffffffeu', '(int32_t)WORD(0x4358) >= -2'),
     ('fog block starting level', 'block, 0x4198, WORD(0x41c0), direction', 'block, 0x4198, WORD(0x41bc), direction'),
-    ('fog tail level division', 'projective_divide((int32_t)(WORD(0x41c4) - WORD(0x41bc)), remaining)', 'projective_divide((int32_t)(WORD(0x41c4) - WORD(0x41bc)), remaining + 1)'),
+    ('fog tail level division', '        WORD(0x4358) = projective_divide((int32_t)(WORD(0x41c4) - WORD(0x41bc)), remaining);\n        WORD(0x4354)', '        WORD(0x4358) = projective_divide((int32_t)(WORD(0x41c4) - WORD(0x41bc)), remaining + 1);\n        WORD(0x4354)'),
     ('fog tail starting level', 'remaining, 0x4190, WORD(0x41bc), direction', 'remaining, 0x4190, WORD(0x41c4), direction'),
     ('fog lookup row byte', '((shade >> 8) & 255) * 256 + raw', '((shade >> 9) & 255) * 256 + raw'),
     ('fog lookup source', '256 + raw);', '256 + (raw ^ 1));'),
@@ -643,10 +643,53 @@ dither_mutations = [
     ('dither tail live skip', dither_tail_prefix, dither_tail_prefix.replace('for (uint32_t index', 'uint32_t saved_skip = WORD(0x45d5);\n        for (uint32_t index').replace('count && WORD(0x45d5)', 'count && saved_skip')),
     ('dither tail target direction', 'projective_dither_tails[forward]', 'projective_dither_tails[!forward]'),
     ('dither tail target block', 'projective_dither_tails[forward][shift == 4]', 'projective_dither_tails[forward][shift != 4]'),
-    ('dither tail target row', '[shift == 4][y & 1]', '[shift == 4][(y ^ 1) & 1]'),
-    ('dither tail target count', '[y & 1][WORD(0x45d9)]', '[y & 1][(WORD(0x45d9) + 1) % 33]'),
+    ('dither tail target row', 'projective_dither_tails[forward][shift == 4][y & 1]', 'projective_dither_tails[forward][shift == 4][(y ^ 1) & 1]'),
+    ('dither tail target count', 'projective_dither_tails[forward][shift == 4][y & 1][WORD(0x45d9)]', 'projective_dither_tails[forward][shift == 4][y & 1][(WORD(0x45d9) + 1) % 33]'),
 ]
 mutations += [(*mutation, 'projective_dither') for mutation in dither_mutations]
+dither_fog_store = '        *(uint8_t *)POINTER(address) = BYTE(0xd70 + texel + ((level >> 8) & 255) * 256);\n'
+dither_fog_advance = '        dither_advance(&sample_u, &sample_v, u_integer, v_integer);\n'
+dither_fog_level = '        level = (level + WORD(0x4358)) & 0xffff0fffu;\n'
+dither_fog_loop = """    for (uint32_t pixel = 0; pixel < count; pixel++) {
+        if (tail && pixel + 1 == count && WORD(0x45d5)) return;
+        uint8_t texel = dither_texel(texture, sample_u, sample_v, dither_bias(address, y));"""
+dither_fog_prefetch = """    uint8_t pending = dither_texel(texture, sample_u, sample_v, dither_bias(address, y));
+    for (uint32_t pixel = 0; pixel < count; pixel++) {
+        if (tail && pixel + 1 == count && WORD(0x45d5)) return;
+        uint8_t texel = pending;
+        uint64_t next_u = sample_u, next_v = sample_v;
+        dither_advance(&next_u, &next_v, u_integer, v_integer);
+        pending = dither_texel(texture, next_u, next_v, dither_bias(address + direction, y));"""
+dither_fog_mutations = [
+    ('dither fog shade gate', 'fog |= WORD(0x4200) == 0x2074e49d || WORD(0x4200) == 0x207588f0;', 'fog |= 0;'),
+    ('dither fog dither gate', 'dither |= WORD(0x4200) == 0x2074e49d || WORD(0x4200) == 0x207588f0;', 'dither |= 0;'),
+    ('dither fog direction', 'forward |= WORD(0x4200) == 0x207588f0;', 'forward |= WORD(0x4200) == 0x2074e49d;'),
+    ('dither fog block starting level', 'block, 0x4198, y, direction, 0, WORD(0x41c0)', 'block, 0x4198, y, direction, 0, WORD(0x41bc)'),
+    ('dither fog tail starting level', 'WORD(0x45d9), 0x4190, y, direction, 1, WORD(0x41bc)', 'WORD(0x45d9), 0x4190, y, direction, 1, WORD(0x41c4)'),
+    ('dither fog shade row', '((level >> 8) & 255) * 256', '((level >> 9) & 255) * 256'),
+    ('dither fog lookup', '0xd70 + texel +', '0xd71 + texel +'),
+    ('dither fog opaque zero', dither_fog_store, '        if (BYTE(0xd70 + texel + ((level >> 8) & 255) * 256))' + dither_fog_store.lstrip()),
+    ('dither fog doubled store', dither_fog_store, '        *(uint16_t *)POINTER(address) = BYTE(0xd70 + texel + ((level >> 8) & 255) * 256) * 0x101u;\n'),
+    ('dither fog coordinate order', dither_fog_store + dither_fog_advance, dither_fog_advance + dither_fog_store),
+    ('dither fog shade order', dither_fog_store + dither_fog_advance + dither_fog_level, '        uint32_t next_level = (level + WORD(0x4358)) & 0xffff0fffu;\n' + dither_fog_store + dither_fog_advance + '        level = next_level;\n'),
+    ('dither fog shade step', dither_fog_level, '        level = (level - WORD(0x4358)) & 0xffff0fffu;\n'),
+    ('dither fog shade wrap', dither_fog_level, '        level = level + WORD(0x4358);\n'),
+    ('dither fog u step shift', 'WORD(0x41a8) *= 65536u;', 'WORD(0x41a8) *= 32768u;'),
+    ('dither fog v step shift', 'WORD(0x41ac) *= 65536u;', 'WORD(0x41ac) *= 32768u;'),
+    ('dither fog destination spacing', 'level = (level + WORD(0x4358)) & 0xffff0fffu;\n        address += direction;', 'level = (level + WORD(0x4358)) & 0xffff0fffu;\n        address += direction * 2;'),
+    ('dither fog sample prefetch', dither_fog_loop, dither_fog_prefetch),
+    ('dither fog live tail flag', dither_fog_loop, dither_fog_loop.replace('for (uint32_t pixel', 'uint32_t saved_skip = WORD(0x45d5);\n    for (uint32_t pixel').replace('count && WORD(0x45d5)', 'count && saved_skip')),
+    ('dither fog tail level division', 'if (fog) WORD(0x4358) = projective_divide((int32_t)(WORD(0x41c4) - WORD(0x41bc)), remaining);', 'if (fog) WORD(0x4358) = projective_divide((int32_t)(WORD(0x41c4) - WORD(0x41bc)), remaining + 1);'),
+    ('dither fog zero shortcut', 'if (!BYTE(0x41c5)) fog = 0;', 'if (!BYTE(0x41c5)) { fog = 0; dither = 0; }'),
+    ('dither fog far shortcut', 'else if (BYTE(0x41c5) == 15)', 'else if (BYTE(0x41c5) == 15 && !dither)'),
+    ('dither fog distance shortcut', 'dither = 0;\n            first_x', 'dither = fog = 0;\n            first_x'),
+    ('dither fog tail target direction', 'projective_dither_fog_tails[forward]', 'projective_dither_fog_tails[!forward]'),
+    ('dither fog tail target block', 'projective_dither_fog_tails[forward][shift == 4]', 'projective_dither_fog_tails[forward][shift != 4]'),
+    ('dither fog tail target row', 'projective_dither_fog_tails[forward][shift == 4][y & 1]', 'projective_dither_fog_tails[forward][shift == 4][(y ^ 1) & 1]'),
+    ('dither fog tail target count', 'projective_dither_fog_tails[forward][shift == 4][y & 1][WORD(0x45d9)]', 'projective_dither_fog_tails[forward][shift == 4][y & 1][(WORD(0x45d9) + 1) % 33]'),
+    ('dither fog tail target family', 'fog ? projective_dither_fog_tails', 'fog ? projective_dither_tails'),
+]
+mutations += [(*mutation, 'projective_dither_fog') for mutation in dither_fog_mutations]
 affine_mutations = [
     ('affine low dividend shift', '(uint32_t)(delta << 7)', '(uint32_t)(delta << 6)'),
     ('affine signed high dividend', 'delta & 0x80000000u ? -0x100000000LL : 0', 'delta & 0x80000000u ? 0 : 0'),
@@ -804,7 +847,7 @@ for name, old, new, suite in mutations:
         continue
     tested += 1
     owner = {'colours': 'palette', 'palette': 'palette', 'drawing': 'draw',
-             'polygons': 'polygon', 'fills': 'fill', 'textured': 'textured', 'affine': 'affine', 'gouraud': 'gouraud', 'blits': 'blit', 'optimized': 'affine', 'perspective': 'perspective', 'discs': 'disc', 'perspective_fill': 'perspective_fill', 'matrix_vertices': 'matrix', 'matrix_fills': 'matrix', 'projective': 'projective', 'projective_keyed': 'projective', 'projective_fog': 'projective', 'projective_key_fog': 'projective', 'projective_dither': 'projective'}.get(suite)
+             'polygons': 'polygon', 'fills': 'fill', 'textured': 'textured', 'affine': 'affine', 'gouraud': 'gouraud', 'blits': 'blit', 'optimized': 'affine', 'perspective': 'perspective', 'discs': 'disc', 'perspective_fill': 'perspective_fill', 'matrix_vertices': 'matrix', 'matrix_fills': 'matrix', 'projective': 'projective', 'projective_keyed': 'projective', 'projective_fog': 'projective', 'projective_key_fog': 'projective', 'projective_dither': 'projective', 'projective_dither_fog': 'projective'}.get(suite)
     if source.count(old) != 1 and owner:
         scope = sections[owner]
         assert scope.count(old) == 1 and source.count(scope) == 1, (name, scope.count(old))

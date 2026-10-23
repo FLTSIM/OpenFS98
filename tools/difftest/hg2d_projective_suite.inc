@@ -50,7 +50,9 @@ static void projective_finish(void)
     polygon_compare = WORD(global, 0x1298) ? 2 : 1;
     drawing(0x40, draw_surface(), 0, 0, 0, 0, 0);
     CHECK(!draw_fault_code);
-    if (projective_dither_mode)
+    if (projective_dither_mode && projective_fog_mode)
+        CHECK(WORD(images[side], 0x4200) == 0x2074e49d || WORD(images[side], 0x4200) == 0x207588f0);
+    else if (projective_dither_mode)
         CHECK(WORD(images[side], 0x4200) == 0x20749d95 || WORD(images[side], 0x4200) == 0x207541ee);
     else if (projective_fog_mode && projective_key_mode)
         CHECK(WORD(images[side], 0x4200) == 0x2073c402 || WORD(images[side], 0x4200) == 0x2073f771);
@@ -279,7 +281,7 @@ static void run_projective_fog(void)
         if (level > 4095) level = 4095;
         CHECK(WORD(images[side], 0x41c4) == level);
         if ((level >> 8) != 15 || row < surface[2])
-            for (y = row; y <= row + 1; y++) for (x = 4; x <= 12 + ((level >> 8) != 15); x++) {
+            for (y = row; y <= row + 1; y++) for (x = 4; x <= 12u + ((level >> 8) != 15 && (!projective_dither_mode || (uint64_t)distance * 256 >= 0x3e00000u / 39)); x++) {
                 uint32_t address = row_storage[16 + y] - ADDRESS(canvas) + x;
                 fill_expected[address] = (level >> 8) == 15 ?
                     (scenario & 1 ? images[side][0xd70 + 256 + fill_expected[address]] : images[side][0x1d06]) :
@@ -298,10 +300,10 @@ static void run_projective_fog(void)
         memcpy(fill_expected, canvas, CANVAS_SIZE);
         projective_point(0, 9); projective_point(64, 9);
         projective_finish();
-        CHECK(WORD(images[side], 0x41c0) == (variant ? 280u : 260u));
-        for (x = 0; x <= 65; x++)
+        CHECK(WORD(images[side], 0x41c0) == (variant ? (projective_dither_mode ? 250u : 280u) : 260u));
+        for (x = 0; x <= (projective_dither_mode ? 64u : 65u); x++)
             fill_expected[row_storage[16 + 9] - ADDRESS(canvas) + x] =
-                images[side][0xd70 + (variant && x >= 64 ? 0 : 256) + 0xa5];
+                images[side][0xd70 + (variant && x >= (projective_dither_mode ? 32u : 64u) ? 0 : 256) + 0xa5];
         CHECK(!memcmp(canvas, fill_expected, CANVAS_SIZE));
     }
     /* Destination aliases the visible shade step. Its first stores change
@@ -397,10 +399,13 @@ static void run_projective_dither(uint32_t phase)
     projective_dither_mode = 1;
     if (!phase) { run_projective(); projective_dither_mode = 0; return; }
     matrix_reset();
+    if (projective_fog_mode)
+        for (index = 0; index < 0x1000; index++)
+            images[side][0xd70 + index] = (uint8_t)(index * 13 + (index >> 8) * 19 + scenario);
     for (index = 0; index < sizeof matrix_pixels; index++)
         matrix_pixels[index] = (uint8_t)(index * 13 + (index >> 8) * 7 + scenario);
     for (selector = 0; selector < 4; selector++) for (parity = 0; parity < 2; parity++)
-        for (alignment = 0; alignment < 4; alignment++) for (fraction = 0; fraction < 4; fraction++) {
+        for (alignment = 0; alignment < (projective_fog_mode ? 2u : 4u); alignment++) for (fraction = 0; fraction < 4; fraction++) {
             projective_case(selector, 0);
             GLOBAL_HALF(0xcfa) = GLOBAL_HALF(0xd00) = 0;
             GLOBAL_HALF(0xcfc) = GLOBAL_HALF(0xd02) = 0;
@@ -423,7 +428,8 @@ static void run_projective_dither(uint32_t phase)
                 bias = (address & 1 ? 2 : 0) + (parity ? 0 : 1);
                 column = 16 + (fraction + bias) / 4;
                 row = 32 + (((fraction + 1) & 3) + bias) / 4;
-                fill_expected[address] = (uint8_t)((row * 256 + column) * 13 + row * 7 + scenario);
+                uint8_t raw = (uint8_t)((row * 256 + column) * 13 + row * 7 + scenario);
+                fill_expected[address] = projective_fog_mode ? (uint8_t)(raw * 13 + 8 * 19 + scenario) : raw;
             }
             CHECK(!memcmp(canvas, fill_expected, CANVAS_SIZE));
         }
@@ -442,7 +448,8 @@ static void run_projective_dither(uint32_t phase)
         projective_finish();
         CHECK(WORD(images[side], 0x4361) == magnitude && WORD(images[side], 0x4365) == magnitude);
         for (x = 4; x <= 12 + (boundary != 0); x++)
-            fill_expected[row_storage[16 + 8] - ADDRESS(canvas) + x] = 0xa5;
+            fill_expected[row_storage[16 + 8] - ADDRESS(canvas) + x] = projective_fog_mode ?
+                (uint8_t)(0xa5 * 13 + ((((uint64_t)magnitude * 131) >> 24) & 15) * 19 + scenario) : 0xa5;
         CHECK(!memcmp(canvas, fill_expected, CANVAS_SIZE));
     }
     /* Masking fallback endpoints can reverse their fractional ordering. The
@@ -454,13 +461,16 @@ static void run_projective_dither(uint32_t phase)
         memcpy(fill_expected, canvas, CANVAS_SIZE);
         polygon_submit(4, 20, 0x5000); polygon_submit(6, 20, 0x5000);
         projective_finish();
+        if (projective_fog_mode)
+            for (x = 0; x <= 1; x++)
+                fill_expected[row_storage[16 + 4] - ADDRESS(canvas) + x] = (uint8_t)(0x96 * 13 + 15 * 19 + scenario);
         CHECK(!memcmp(canvas, fill_expected, CANVAS_SIZE));
     }
     for (index = 0; index < sizeof matrix_pixels; index++)
         matrix_pixels[index] = (uint8_t)(index * 13 + (index >> 8) * 7 + scenario);
     for (uint32_t alias = 0; alias < 3; alias++) {
         projective_case(1, 0);
-        WORD(global, 0xce0) = (uint32_t)-0x80;
+        WORD(global, 0xce0) = projective_fog_mode ? (uint32_t)-0x1000 : (uint32_t)-0x80;
         GLOBAL_HALF(0xcfc) = GLOBAL_HALF(0xd02) = 0; WORD(global, 0xd10) = 0;
         uint32_t saved_row = row_storage[16 + 8];
         row_storage[16 + 8] = ADDRESS(images[side] + (alias == 2 ? 0x45d5 : 0x41ab) - 5);
@@ -483,4 +493,12 @@ static void run_projective_dither(uint32_t phase)
     projective_finish();
     matrix_texture[0] = ADDRESS(matrix_pixels);
     projective_dither_mode = polygon_compare = 0;
+}
+
+static void run_projective_dither_fog(uint32_t phase)
+{
+    projective_dither_mode = projective_fog_mode = 1;
+    if (!phase) run_projective_fog();
+    else run_projective_dither(1);
+    projective_dither_mode = projective_fog_mode = 0;
 }

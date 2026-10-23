@@ -39,7 +39,19 @@ static LONG WINAPI draw_exception(EXCEPTION_POINTERS *exception)
         exception->ExceptionRecord->ExceptionCode == EXCEPTION_INT_OVERFLOW) {
         CONTEXT *context = exception->ContextRecord;
         const uint8_t *instruction = (const uint8_t *)(uintptr_t)context->Eip;
-        if (context->Eip == 0x20749e08 ||
+        if (context->Eip == 0x2074e510 ||
+            context->Eip == 0x2074e5d5 ||
+            context->Eip == 0x2074e7dd ||
+            context->Eip == 0x207500ae ||
+            context->Eip == 0x20751ce1 ||
+            context->Eip == 0x20752eb2 ||
+            context->Eip == 0x20758961 ||
+            context->Eip == 0x20758a26 ||
+            context->Eip == 0x20758c2e ||
+            context->Eip == 0x2075a4ff ||
+            context->Eip == 0x2075c132 ||
+            context->Eip == 0x2075d303 ||
+            context->Eip == 0x20749e08 ||
             context->Eip == 0x20749eb0 ||
             context->Eip == 0x2074a072 ||
             context->Eip == 0x2074b2c7 ||
@@ -83,6 +95,15 @@ static LONG WINAPI draw_exception(EXCEPTION_POINTERS *exception)
         }
         {
             static const uint32_t affine_divides[] = {
+                0x2074e719, 0x2074e733, 0x2074e74d, 0x2074f7a2, 0x2074f7b5, 0x2074f7ca,
+                0x2074ffea, 0x20750004, 0x2075001e, 0x207512a4, 0x207512b7, 0x207512cc,
+                0x20751c1d, 0x20751c37, 0x20751c51, 0x207525a6, 0x207525b9, 0x207525ce,
+                0x20752dee, 0x20752e08, 0x20752e22, 0x20753898, 0x207538ab, 0x207538c0,
+                0x20758b6a, 0x20758b84, 0x20758b9e, 0x20759bf3, 0x20759c06, 0x20759c1b,
+                0x2075a43b, 0x2075a455, 0x2075a46f, 0x2075b6f5, 0x2075b708, 0x2075b71d,
+                0x2075c06e, 0x2075c088, 0x2075c0a2, 0x2075c9f7, 0x2075ca0a, 0x2075ca1f,
+                0x2075d23f, 0x2075d259, 0x2075d273, 0x2075dce9, 0x2075dcfc, 0x2075dd11,
+
                 0x20749fb8, 0x20749fd2, 0x20749fec, 0x2074abfa, 0x2074ac0d, 0x2074b20d,
                 0x2074b227, 0x2074b241, 0x2074c080, 0x2074c093, 0x2074c7c4, 0x2074c7de,
                 0x2074c7f8, 0x2074cf06, 0x2074cf19, 0x2074d519, 0x2074d533, 0x2074d54d,

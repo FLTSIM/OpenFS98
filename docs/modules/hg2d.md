@@ -1,15 +1,15 @@
 # HG2D.DLL — module id 13
 
-In progress, one slice at a time. Twenty-five Linkage entries now have
-implementations:
-texture storage and access, loading through FE, palette remapping, hardware
-texture release, colour conversion, software palette realization, points,
-lines, frames, depth shading, text, plain polygon vertex submission and
-untextured polygon filling, plus affine textured vertex submission. It uses
-snake_case and `<stdint.h>`; there is no `types.h` dependency.
-HG2D is not in `MODULES` and must not be installed yet: initialization,
-textured drawing, device-backed palette realization and the other services
-are incomplete.
+In progress. Thirty-two Linkage services now have implementations covering
+texture storage/loading, software palettes, primitives and text, plain polygon
+fills, affine texture rendering (all 32 span selectors), Gouraud shading,
+scanline texture blits, table-shaped discs, perspective vertex submission,
+and teardown. Some service branches remain explicitly unfinished below.
+HG2D uses snake_case and `<stdint.h>`; there is no `types.h` dependency.
+
+HG2D is not in `MODULES` and must not be installed yet. Initialization,
+perspective polygon rasterization, the alternate +0x44 attribute builder,
+device-backed palette realization and the Direct3D services remain incomplete.
 
 The implementation and tests occupy HG2D-specific files. The shared Makefile,
 README and MAIN files are untouched so MAIN can proceed independently.
@@ -24,6 +24,12 @@ make -f tools/hg2d.mk hg2ddiff-run N=20000 SUITE=drawing
 make -f tools/hg2d.mk hg2ddiff-run N=20000 SUITE=polygons
 make -f tools/hg2d.mk hg2ddiff-run N=20000 SUITE=fills
 make -f tools/hg2d.mk hg2ddiff-run N=20000 SUITE=textured
+make -f tools/hg2d.mk hg2ddiff-run N=20000 SUITE=affine
+make -f tools/hg2d.mk hg2ddiff-run N=20000 SUITE=optimized
+make -f tools/hg2d.mk hg2ddiff-run N=20000 SUITE=gouraud
+make -f tools/hg2d.mk hg2ddiff-run N=20000 SUITE=blits
+make -f tools/hg2d.mk hg2ddiff-run N=20000 SUITE=perspective
+make -f tools/hg2d.mk hg2ddiff-run N=20000 SUITE=discs
 python3 tools/hg2d_breaks.py
 ```
 
@@ -39,7 +45,7 @@ Retail image base `0x20730000`, `.text` at `0x20731000`, 0x5f266 bytes.
 `.data` at `0x20792000`: 0x28cd0 mapped bytes, 0x6000 initialized.
 ImportTable is at data +0, with host (1), GLOBAL (2), CHAIN (4), FE (18),
 UTIL (20), G3D (14), then the zero terminator. Linkage is at data +0x38,
-0xc0 bytes, ending with the hit test at +0xbc (`0x2078b760`). It has forty
+0xc0 bytes, ending with device-format selection at +0xbc (`0x2078b760`). It has forty
 function entries and four data pointers:
 
 | Linkage | retail address | data |
@@ -264,7 +270,7 @@ dither boundaries, saturated divides, all text clipping gates, wrapped glyph
 codes, centering and substitutions, dirty/clean palette flushes, aliased
 remapping, and both guard faults and the retail null read. Other arbitrary
 32-bit coordinate overflows and malformed surface pointers are not a claim
-of this suite. DirectDraw paths and polygons remain unfinished.
+of this suite. DirectDraw paths remain unfinished; polygon support is described below.
 
 ## Slice 4: plain polygon vertices
 
@@ -423,11 +429,164 @@ scenarios submits 61 vertices, writing 60 edges up to data +0x884, to prove
 the capacity branch has no effect without overwriting the adjacent scratch.
 Thirty-five new mutations cover these paths and the returned registers.
 
-Textured close/fill +0x4c is not installed yet. The separate attribute builder
+Textured close/fill +0x4c is implemented in the next slice. The separate attribute builder
 selected by +0x44 when GLOBAL +0xc90 and +0x2f4 are both nonzero remains
 deferred, including through +0x48's plain fallback. Writes beyond the actual
 60-edge storage, invalid view pointers and exception register contexts remain
 outside this slice. No in-game installation is made.
+
+## Slice 7: affine textured close and spans
+
+`src/hg2d/hg2d_affine.inc` installs +0x4c (`0x20787bbe`). It closes a
+32-byte edge with unsigned y ordering, logically shifts the y bounds, and
+walks pairs of active edges. Flat edges draw only on the final row, using
+synthetic records at data +0x4638/+0x4658. Edges become inactive by replacing
+their start row with -1. The texture record comes from GLOBAL +0xc8c.
+
+The software selector combines distance shading, a raw-texel key threshold,
+GLOBAL +0xcce dithering, and the quality word at +0xc92. Keyed spans and
+low-quality spans sample once per two pixels; other spans sample every pixel.
+The key comparison precedes shade mapping. The two coordinates occupy the
+high bytes of separate accumulators, and wrapping arithmetic is retained.
+Dither phases depend on row parity and alignment. Widths above 1,500 return
+without drawing in this backend. Its divide is unusual: CDQ runs **before**
+SHL EAX,7, so the original sign remains in the high dividend dword. The
+signed quotient is doubled after dividing. Host saturation, partial EAX
+writes on skipped keys, batched texture reads, tail counters, and scratch
+words +0x4618..+0x4634 are reproduced.
+
+Backend bit 16 at data +0x4678 selects the optimized spans. All sixteen upper
+selectors are implemented as C, including both dithered versions. Retail's
+setup routines patch texture and shade addresses into instructions; C reads
+the same bases directly. Code-pointer selector words retain their retail
+numeric values for image comparison. The harness makes retail `.text`
+writable for this suite, modeling the initialization step required by its
+self-modifying code. The replacement does not copy executable retail code.
+
+The optimized backend divides true signed deltas by inclusive pixel count,
+keeps the second coordinate unshifted, and has no software width cap. Plain
+spans add packed coordinate fields; keyed spans OR them. Four samples are
+read before their four destination bytes are written, including when texture
+storage aliases the canvas. The shaded-key path increments the destination
+**before** writing and therefore writes one pixel to the right. That bug is
+preserved. The original saved-stack value at data +0x5e04 is reproduced from
+the entry shim's register storage and the regular/flat call depth; it is not
+masked out of comparison. The block-loop residue at +0x5e08 is also compared.
+
+Distance bucket 15 bypasses texturing and fills with data +0x1c7a. Its remap
+path uses the shared raw mapper and restores EBP, avoiding the primitive
+entry's null read. A zero low word at GLOBAL +0xcb6 delegates to plain fill,
+but retail's fallback epilogue rotates the saved registers: EBX gets incoming
+ESI, ESI gets incoming EDI, and EDI gets the entry frame pointer. The assembly
+shim reproduces that rotation. All seven returned registers are compared.
+
+The `affine` suite checks all sixteen software selectors, winding orders,
+alignment and width boundaries, triangles, crossings, flat/singleton shapes,
+large attributes and repaired divides, distance fallback and its remap path.
+`optimized` adds all sixteen upper selectors, random fractional coordinates,
+negative deltas, packed-coordinate overlap, destination aliasing, setup-only
+returns and the saved-stack state. Both include independently checked constant
+texture rectangles over the entire canvas. Edge-stride fixtures deliberately
+put plausible records halfway through real records so an incorrect stride
+cannot pass merely because it finds no edge.
+
+## Slice 8: Gouraud vertices and fill
+
+`src/hg2d/hg2d_gouraud.inc` implements +0x74 (`0x20785375`, five arguments)
+and +0x78 (`0x20785472`, one surface argument). Vertex shades use only the low
+word, stored at unaligned data words +0x90d/+0x90f. Edges occupy 24 bytes:
+row endpoints, x and slope, then shade shifted by eight and its slope. Flat
+edges add half a pixel to x. Like textured edges, the apparent capacity
+comparison has no effect; bounded fixtures reach the actual end of storage.
+
+The closer walks edge pairs, including synthetic flat endpoints and signed
+x ordering on the final row. It exposes the bucket-shaded colour in EAX
+without replacing the current-colour byte. Span interpolation subtracts word
+shades, shifts the word delta by sixteen, divides signed, then doubles the
+quotient. Two row-dependent phases use the original tables at +0x45e4/+0x45f4.
+An odd-address prefix uses the second phase; four-pixel blocks store the
+sample pairs in their original reversed order. Word-count wrap, divide repair,
+partial EAX writes and the final ECX/EDX state are compared.
+
+`gouraud` covers independent edge records, shade-word masking, projection,
+capacity, winding and flat shapes, random shade words, stride traps and an
+independently checked constant-shade rectangle. It compares all seven
+registers, the canvas, GLOBAL and the complete image.
+
+## Slice 9: scanline blits and teardown
+
+`src/hg2d/hg2d_blit.inc` installs +0x80 (`0x2078aff0`), nine arguments:
+record, packed row/mode, x endpoints, two starting texture coordinates,
+two ending coordinates, and texture pixels. The host record differs from
+primitive surfaces: height is at +0x88 and its row table at +0x90. Only the
+row/mode low word survives; bits 0..11 select the row and bits 12..15 the mode.
+Height rejection uses a signed dword comparison. Coordinates use their low
+words; both signed texture steps are calculated before dispatch, including
+no-op modes and zero/reversed spans. Zero denominators resume with the host's
+signed saturation.
+
+Modes 0, 1, 2, 4 and 8 are implemented: mapped texture, constant fill, two
+coordinate-threshold bands, and raw-zero transparency followed by remapping.
+Other modes return without drawing after computing the steps. Mode 1 indexes
+the byte remap with the **full word** at data +0x34ca. Mode 0 preserves the
+four-sample read-before-write ordering. The packed coordinate update uses
+addition, retaining carries between its two halves. ECX returns the original
+row/mode low word because retail overwrites its saved stack slot. Partial EAX
+and mode-specific EDX leftovers are compared on every branch.
+
+The `blits` suite exercises all sixteen modes, four destination alignments,
+block/tail widths, row-mask boundaries, signed heights, reversed/zero spans,
+negative steps, threshold equality, full-word mapping and canvas/texture
+aliasing. A constant-fill fixture independently checks every canvas byte.
+
+Linkage +0x08 (`0x2073104a`) is a register-preserving no-op. Its assembly shim
+and lifecycle fixture preserve and compare all seven registers and all state.
+The fixture runs before every selected suite, including `SUITE=lifecycle`.
+
+## Slice 10: perspective textured vertices
+
+`src/hg2d/hg2d_perspective.inc` adds +0x50 (`0x20788680`), seven arguments.
+Projection, fallback, unsigned bounds/order, and the first two attributes
+follow +0x48. The seventh argument supplies a third interpolated attribute,
+kept at data +0x934/+0x938 for first/previous vertices. Edges are 40 bytes;
+the third base and slope occupy +0x20/+0x24. All four slopes use the same
+signed-complement arithmetic and fractional advance. The capacity branch is
+again a zero-distance branch and is omitted.
+
+First submission returns the third attribute in ECX and projected y in EAX;
+nonflat edges return their third slope in ECX and third fractional advance
+in EDX. Flat edges retain the +0x48 register behavior. The `perspective` suite
+checks independent records, all attributes, projection/saturation/remainders,
+scratch aliasing, signed/unsigned boundaries and 48 edges up to data +0x884.
+The corresponding +0x54 close/rasterizer is still unimplemented.
+
+## Slice 11: table-shaped discs
+
+`src/hg2d/hg2d_disc.inc` installs +0x84 (`0x20787ce0`), four arguments:
+record, profile selector, center x, center y. Its surface is embedded at
+record +0x80 and its view pointer at +0x1c. The 48 profile pointers and profile
+bytes are extracted from retail with the existing data generator, not retyped.
+Selectors use only the low word. Values at least 48 halve the selector, clamp
+it to 47, and double profile widths and rows. The repeated-row pointer steps
+retain retail's mixture of word SI and full ESI arithmetic.
+
+Clipping bounds wrap as words. The two vertical bounds are twice offset plus
+or minus y scale, so a conventional on-screen interval uses a negative y
+scale. Rows are compared signed before the span helper zero-extends and
+halves the row word. The forward half adds one to each width; the reverse
+half does not. Solid spans check surface height; checkerboard spans do not,
+and retain the singleton right-neighbour write. The colour helper converts
+mode 0x68 to direct colour plus a separate stipple flag. Pixel remapping saves
+and restores the frame pointer and exposes the mapper's EAX/ECX/EDX leftovers.
+The shared mapper now optionally records those values while preserving its
+original load/store order; primitive callers still reproduce their null read.
+
+`discs` covers all profiles, doubled and clamped selectors, upper argument
+words, signed clipping, reversed vertical intervals, zero-width clips,
+solid/stipple/gradient colours, height equality and remapping. An independent
+profile-zero fixture checks each affected and unaffected canvas byte. Inputs
+that allow negative rows through a stippled clip interval can read an invalid
+row pointer; those malformed intervals are outside these bounded fixtures.
 
 ## Verification and limits
 
@@ -451,8 +610,7 @@ The combined regression run passes 2,000 scenarios each for textures,
 palettes, drawing, vertices (157,625 operations) and fills (272,000), plus
 the 263,680 finite colour/layout comparisons. Three existing drawing mutation
 anchors now include their primitive's surrounding code to distinguish the
-similar expressions in the new fill code. All 214 mutation anchors match
-exactly once in the expanded source.
+similar expressions in the new fill code. The earlier 214 mutation anchors remain checked in their owning source sections.
 
 The final `polygons` run passes 20,000 scenarios and 1,576,250 operations,
 with zero differences and zero unrepaired faults. Retail resumes after 673,201
@@ -525,7 +683,10 @@ FE loader, DirectDraw objects, arbitrary malformed COM pointers, accounting
 indices outside 0..8, and initialization are outside this slice. The existing
 PANELS model and its verified harness remain unchanged.
 
-Next: affine textured close/fill +0x4c and its span selection, then the
-remaining texture paths, clipping and rasterizer.
-Completion of these slices does not establish
-rendering equivalence or readiness to run in-game.
+Remaining Linkage services: +0x04 initialization, +0x54 perspective close,
++0x58/+0x68 palette/resource loading, and device-backed +0x9c/+0xa0/+0xa4/+0xbc.
+The alternate textured builder/closer through +0x44/+0x40, device palette
+realization and the negative-length shadow corrupt-stack return also remain
+unfinished. Next is perspective close and its spans, followed by those
+resource/device paths and initialization. The verified subsets do not
+establish whole-module rendering equivalence or readiness to run in-game.

@@ -12,11 +12,13 @@ import sys
 
 root = Path(__file__).resolve().parent.parent
 source = (root / 'src/hg2d/hg2d.c').read_text()
-for section in ('palette', 'draw', 'polygon', 'fill', 'textured'):
-    source = source.replace('#include "hg2d_%s.inc"' % section, (root / ('src/hg2d/hg2d_%s.inc' % section)).read_text())
-build = root / 'bin/hg2d-breaks'
+sections = {}
+for section in ('palette', 'draw', 'polygon', 'fill', 'textured', 'perspective', 'affine', 'gouraud', 'blit', 'disc'):
+    sections[section] = (root / ('src/hg2d/hg2d_%s.inc' % section)).read_text()
+    source = source.replace('#include "hg2d_%s.inc"' % section, sections[section])
+build = root / os.environ.get('HG2D_BREAKS_DIR', 'bin/hg2d-breaks')
 build.mkdir(parents=True, exist_ok=True)
-shutil.copyfile(root / 'bin/hg2d-diff/hg2ddiff.exe', build / 'hg2ddiff.exe')
+shutil.copyfile(root / os.environ.get('HG2D_BASELINE_DIR', 'bin/hg2d-diff') / 'hg2ddiff.exe', build / 'hg2ddiff.exe')
 shutil.copyfile(root / 'orig/Modules/HG2D.DLL', build / 'HG2D_retail.dll')
 shutil.copyfile(root / 'orig/Modules/UTIL.DLL', build / 'UTIL_retail.dll')
 mutations = [
@@ -256,6 +258,166 @@ textured_mutations = [
     ('textured edge stride', 'GLOBAL_WORD(0xc14) = ADDRESS(edge) + 32;', 'GLOBAL_WORD(0xc14) = ADDRESS(edge) + 16;'),
 ]
 mutations += [(*mutation, 'textured') for mutation in textured_mutations]
+# The perspective entry shares projection and two attributes with +0x48;
+# target its owning section while checking those same obligations.
+perspective_mutations = []
+for name, old, new in textured_mutations:
+    if name == 'textured first ecx':
+        old, new = 'registers[1] = third_attribute;', 'registers[1] = first_attribute;'
+    elif name == 'textured fractional advance':
+        old, new = 'advance = (low_y & 0xffff) ^ 0xffff;', 'advance = low_y & 0xffff;'
+    elif name == 'textured nonflat ecx':
+        old, new = 'registers[1] = edge[9];', 'registers[1] = edge[7];'
+    elif name == 'textured edge stride':
+        old, new = 'GLOBAL_WORD(0xc14) = ADDRESS(edge) + 40;', 'GLOBAL_WORD(0xc14) = ADDRESS(edge) + 32;'
+    perspective_mutations.append((name.replace('textured', 'perspective'), old, new))
+perspective_mutations += [
+    ('perspective first third', 'WORD(0x934) = WORD(0x938) = third_attribute;', 'WORD(0x934) = WORD(0x938) = first_attribute;'),
+    ('perspective current third', 'WORD(0x93c) = third_attribute;', 'WORD(0x93c) = first_attribute;'),
+    ('perspective previous third', 'WORD(0x940) = WORD(0x938);', 'WORD(0x940) = WORD(0x934);'),
+    ('perspective exchange third', 'WORD(0x940) = WORD(0x93c); WORD(0x93c) = temporary;', 'WORD(0x940) = WORD(0x93c); WORD(0x93c) = 0;'),
+    ('perspective edge third base', 'edge[8] = WORD(0x940);', 'edge[8] = WORD(0x93c);'),
+    ('perspective flat third delta', 'edge[9] = WORD(0x93c) - WORD(0x940);', 'edge[9] = WORD(0x940) - WORD(0x93c);'),
+    ('perspective slope third delta', 'draw_slope(WORD(0x93c) - WORD(0x940), height)', 'draw_slope(WORD(0x940) - WORD(0x93c), height)'),
+    ('perspective third advance', 'edge[8] += adjustment;', 'edge[8] -= adjustment;'),
+]
+mutations += [(*mutation, 'perspective') for mutation in perspective_mutations]
+affine_mutations = [
+    ('affine low dividend shift', '(uint32_t)(delta << 7)', '(uint32_t)(delta << 6)'),
+    ('affine signed high dividend', 'delta & 0x80000000u ? -0x100000000LL : 0', 'delta & 0x80000000u ? 0 : 0'),
+    ('affine quotient doubling', 'return (uint32_t)quotient * 2;', 'return (uint32_t)quotient;'),
+    ('affine texel channel order', '(((first + bias) >> 24) << 8) | ((second + bias) >> 24)', '(((second + bias) >> 24) << 8) | ((first + bias) >> 24)'),
+    ('affine key equality', 'value < BYTE(0x946)', 'value <= BYTE(0x946)'),
+    ('affine key shade order', 'if ((selector & 2) && value < BYTE(0x946))', 'if ((selector & 2) && BYTE(0xd70 + WORD(0x100) * 256 + value) < BYTE(0x946))'),
+    ('affine second channel advance', 'two = affine_texel(*first, *second, bias);\n    *first += WORD(0x4618); *second += WORD(0x461c);', 'two = affine_texel(*first, *second, bias);\n    *first += WORD(0x4618); *second -= WORD(0x461c);'),
+    ('affine dither row parity', 'selector & 4 ? (y & 1 ? 0 : 0x400000) : 0', 'selector & 4 ? (y & 1 ? 0x400000 : 0) : 0'),
+    ('affine dither second sample', 'bias += 0x800000;', 'bias += 0x400000;'),
+    ('affine doubled selection', '(selector & 2) || !(selector & 8)', '(selector & 2) && !(selector & 8)'),
+    ('affine doubled alignment', 'first_x &= ~1u; last_x &= ~1u;', 'first_x &= ~0u; last_x &= ~0u;'),
+    ('affine width bound', 'if (count > 1500) return;', 'if (count >= 1500) return;'),
+    ('affine low count denominator', 'affine_divide(right[4] - left[4], doubled ? count / 2 : count)', 'affine_divide(right[4] - left[4], count)'),
+    ('affine step first subtraction', 'affine_divide(right[4] - left[4], doubled ? count / 2 : count)', 'affine_divide(left[4] - right[4], doubled ? count / 2 : count)'),
+    ('affine step second subtraction', 'affine_divide(right[5] - left[5], doubled ? count / 2 : count)', 'affine_divide(left[5] - right[5], doubled ? count / 2 : count)'),
+    ('affine first channel shift', 'first = left[4] << 8; second = left[5] << 8;', 'first = left[4] << 7; second = left[5] << 8;'),
+    ('affine second channel shift', 'second = left[5] << 8;', 'second = left[5] << 7;'),
+    ('affine block eax leftover', 'registers[2] = saved_eax;', 'registers[2] = saved_eax ^ 1;'),
+    ('affine tail signed count', 'if ((int32_t)WORD(0x4630) >= 0)', 'if ((int32_t)WORD(0x4630) > 0)'),
+    ('affine find stride', 'edge += 8;', 'edge += 4;'),
+    ('affine final flat row', 'if (y == WORD(0x8cc)) {', 'if (y != WORD(0x8cc)) {'),
+    ('affine flat first channel', 'WORD(0x4668) = edge[4] + edge[6];', 'WORD(0x4668) = edge[4];'),
+    ('affine flat second channel', 'WORD(0x466c) = edge[5] + edge[7];', 'WORD(0x466c) = edge[5];'),
+    ('affine texture handle', '*(uint32_t *)POINTER(GLOBAL_WORD(0xc8c))', 'GLOBAL_WORD(0xc8c)'),
+    ('affine threshold word', 'HALF(0x946) = GLOBAL_HALF(0xca0);', 'HALF(0x946) = 0;'),
+    ('affine distance selector', '(WORD(0x100) != 0)', '(WORD(0x100) == 0)'),
+    ('affine quality selector', 'GLOBAL_HALF(0xc92) >= 1', 'GLOBAL_HALF(0xc92) > 1'),
+    ('affine walker first channel', 'left[4] += left[6];', 'left[4] -= left[6];'),
+    ('affine walker second channel', 'right[5] += right[7];', 'right[5] -= right[7];'),
+    ('affine bounds logical shift', 'WORD(0x8c8) >>= 16;', 'WORD(0x8c8) >>= 15;'),
+]
+mutations += [(*mutation, 'affine') for mutation in affine_mutations]
+gouraud_mutations = [
+    ('gouraud low colour scale', 'WORD(0x4604) = (uint32_t)low_colour << 8;', 'WORD(0x4604) = (uint32_t)low_colour << 7;'),
+    ('gouraud flat rounding', 'edge[2] = low_x + 0x8000;', 'edge[2] = low_x;'),
+    ('gouraud colour slope', 'draw_slope(difference, high_y - low_y)', 'draw_slope(0u - difference, high_y - low_y)'),
+    ('gouraud colour advance', 'edge[4] += difference;', 'edge[4] -= difference;'),
+    ('gouraud edge stride', 'GLOBAL_WORD(0xc14) = ADDRESS(edge) + 24;', 'GLOBAL_WORD(0xc14) = ADDRESS(edge) + 32;'),
+    ('gouraud first colour', 'HALF(0x90d) = HALF(0x90f) = (uint16_t)colour;', 'HALF(0x90d) = HALF(0x910) = (uint16_t)colour;'),
+    ('gouraud first register', 'registers[2] = y; registers[1] = x;', 'registers[2] = x; registers[1] = y;'),
+    ('gouraud capacity no-op', 'if (y < WORD(0x8c8)) WORD(0x8c8) = y;', 'if (GLOBAL_WORD(0xc14) + 0x60 >= ADDRESS(hg2d_image + 0x884)) return; if (y < WORD(0x8c8)) WORD(0x8c8) = y;'),
+    ('gouraud y maximum unsigned', 'if (y > WORD(0x8cc))', 'if ((int32_t)y > (int32_t)WORD(0x8cc))'),
+    ('gouraud current colour', 'HALF(0x90d) = (uint16_t)colour;', 'HALF(0x90d) = previous_colour;'),
+    ('gouraud ordering unsigned', 'if (y < previous_y)', 'if ((int32_t)y < (int32_t)previous_y)'),
+    ('gouraud exchanged colour', 'colour = previous_colour; previous_colour = (uint16_t)swap;', 'colour = (uint16_t)swap; previous_colour = (uint16_t)swap;'),
+    ('gouraud shift register sample', '*phase >> 24', '*phase >> 23'),
+    ('gouraud sample increment', '*phase += increment;', '*phase -= increment;'),
+    ('gouraud distance map', '(BYTE(0x100) << 8)', '(BYTE(0x100) << 7)'),
+    ('gouraud pixel count', '(uint16_t)(count + 1)', '(uint16_t)(count + 2)'),
+    ('gouraud horizontal slope', 'increment *= 2;', 'increment *= 1;'),
+    ('gouraud first phase', 'one += WORD(0x45e4 + ((y << 2) & 15));', 'one += WORD(0x45f4 + ((y << 2) & 15));'),
+    ('gouraud pair order', 'pixel[0] = (uint8_t)registers[2]; pixel[1] = (uint8_t)(registers[2] >> 8);', 'pixel[1] = (uint8_t)registers[2]; pixel[0] = (uint8_t)(registers[2] >> 8);'),
+    ('gouraud first shade byte', '(uint16_t)(left[4] >> 8)', '(uint16_t)(left[4] >> 7)'),
+    ('gouraud flat shade end', '(left[5] >> 8)', '(left[5] >> 7)'),
+    ('gouraud shade swap', 'first_colour = (uint16_t)registers[0]; last_colour = (uint16_t)registers[1];', 'first_colour = (uint16_t)registers[1]; last_colour = (uint16_t)registers[0];'),
+    ('gouraud find stride', 'edge += 6;', 'edge += 3;'),
+    ('gouraud closing first colour', 'high_colour = HALF(0x90f)', 'high_colour = HALF(0x90d)'),
+    ('gouraud walker colour', 'left[4] += left[5];', 'left[4] -= left[5];'),
+]
+mutations += [(*mutation, 'gouraud') for mutation in gouraud_mutations]
+blit_mutations = [
+    ('blit row mask', 'row = row_mode & 0xfff,', 'row = row_mode & 0xff,'),
+    ('blit row signed comparison', '(int32_t)row >= (int32_t)registers[2]', 'row >= registers[2]'),
+    ('blit saved ecx', 'registers[1] = row_mode & 0xffff;', 'registers[1] = row_mode;'),
+    ('blit first x mask', 'first_x &= 0xffff;', 'first_x &= 0xfffe;'),
+    ('blit source row', '(coordinate & 0xff00)', '(coordinate & 0xff)'),
+    ('blit source column', '(coordinate >> 24)', '(coordinate >> 23)'),
+    ('blit packed initial', '(first_u << 16) + first_v', '(first_u << 15) + first_v'),
+    ('blit packed step', '(blit_divide((int32_t)last_u - first_u, count) << 16)', '(blit_divide((int32_t)last_u - first_u, count) << 15)'),
+    ('blit inclusive count', '(int32_t)last_x - first_x + 1', '(int32_t)last_x - first_x'),
+    ('blit zero divisor', 'if (!denominator) return numerator < 0 ? 0x80000001u : 0x7fffffffu;', 'if (!denominator) return 0;'),
+    ('blit solid full word', 'colour = HALF(0x34ca)', 'colour = BYTE(0x34ca)'),
+    ('blit solid eax', 'registers[2] = value * 0x1010101u;', 'registers[2] = value;'),
+    ('blit band threshold', '(int32_t)first_v <= 0x7f00', '(int32_t)first_v < 0x7f00'),
+    ('blit band second palette', 'mode == 2 ? 0x29a0 : 0x29a2', 'mode == 2 ? 0x29a2 : 0x29a0'),
+    ('blit transparent raw key', 'if (value) *pixel = mapped;', 'if (mapped) *pixel = mapped;'),
+    ('blit transparent ecx mask', 'if (count <= 0) { registers[0] = (uint32_t)count; return; }', 'if (count <= 0) { registers[0] = 1; return; }'),
+    ('blit block threshold', 'if (count > 4) {', 'if (count >= 4) {'),
+    ('blit block register', '(uint32_t)values[3] << 24', '(uint32_t)values[2] << 24'),
+]
+mutations += [(*mutation, 'blits') for mutation in blit_mutations]
+optimized_mutations = [
+    ('optimized row dither', 'bias = (y & 1 ? 0 : 0x400000)', 'bias = (y & 1 ? 0x400000 : 0)'),
+    ('optimized column dither', '(address & 1 ? 0x800000 : 0)', '(address & 1 ? 0 : 0x800000)'),
+    ('optimized coordinate mask', '((first + bias) & 0xff000000u)', '((first + bias) & 0xffff0000u)'),
+    ('optimized second bias', 'second + (bias >> 8)', 'second + (bias >> 9)'),
+    ('optimized stack state', '32 - (flat ? 44 : 40)', '32 - (flat ? 40 : 44)'),
+    ('optimized x order', 'if (left[2] > right[2])', 'if (left[2] < right[2])'),
+    ('optimized inclusive width', '(right[2] >> 16) - (left[2] >> 16) + 1', '(right[2] >> 16) - (left[2] >> 16) + 2'),
+    ('optimized signed first delta', '(int64_t)(int32_t)(right[4] - left[4]) / count', '(int64_t)(uint32_t)(right[4] - left[4]) / count'),
+    ('optimized signed second delta', '(int64_t)(int32_t)(right[5] - left[5]) / count', '(int64_t)(uint32_t)(right[5] - left[5]) / count'),
+    ('optimized first step shift', 'step_first <<= 8;', 'step_first <<= 7;'),
+    ('optimized keyed coordinate or', '((first & 0xff000000u) | second)', '((first & 0xff000000u) + second)'),
+    ('optimized key equality', 'value >= BYTE(0x946)', 'value > BYTE(0x946)'),
+    ('optimized shaded key pixel', 'pixel[1] = value; /* Retail', 'pixel[0] = value; /* Retail'),
+    ('optimized unshaded key pixel', 'pixel[0] = value;\n                }', 'pixel[1] = value;\n                }'),
+    ('optimized key remainder', '(remainder & 0xffffff00u) | BYTE(0x946)', 'BYTE(0x946)'),
+    ('optimized block count scratch', 'WORD(0x5e08) = count - 4;', 'WORD(0x5e08) = count;'),
+    ('optimized final coordinate', 'registers[1] = second;', 'registers[1] = first;'),
+    ('optimized block read ordering', 'values[index] = BYTE(0xd70 + WORD(0x100) * 256 + values[index]);', 'values[index] = BYTE(0xd70 + WORD(0x100) * 256 + values[index]); pixel[index] = values[index];'),
+    ('optimized setup eax', 'if (registers[1]) registers[2] = WORD(0x948);', 'if (registers[1]) registers[2] = 0;'),
+]
+mutations += [(*mutation, 'optimized') for mutation in optimized_mutations]
+disc_mutations = [
+    ('disc radius low word', 'radius &= 0xffff;', 'radius &= 0xffffffff;'),
+    ('disc double threshold', 'if (radius >= 48) {', 'if (radius > 48) {'),
+    ('disc radius halve', 'radius >>= 1;', 'radius >>= 2;'),
+    ('disc radius clamp', 'radius = 47;', 'radius = 46;'),
+    ('disc profile pointer', 'WORD(0x4784 + radius * 4)', 'WORD(0x4784 + (radius ? radius - 1 : 0) * 4)'),
+    ('disc initial row', 'rows * (BYTE(0x4d48) ? 2 : 1)', 'rows * (BYTE(0x4d48) ? 1 : 1)'),
+    ('disc first half width', 'if (!pass) width++;', 'if (pass) width++;'),
+    ('disc reverse initial byte', 'if (pass) profile--;\n        remaining', 'if (pass) profile -= 2;\n        remaining'),
+    ('disc doubled width', 'width = (uint8_t)(width * 2);', 'width = (uint8_t)(width * 1);'),
+    ('disc signed left clip', '(int16_t)first < (int16_t)HALF(0x4d40)', 'first < HALF(0x4d40)'),
+    ('disc signed right clip', '(int16_t)last > (int16_t)HALF(0x4d42)', 'last > HALF(0x4d42)'),
+    ('disc inclusive x clip', '(int16_t)first <= (int16_t)last', '(int16_t)first < (int16_t)last'),
+    ('disc lower y bound', '(int16_t)row >= (int16_t)HALF(0x4d44)', '(int16_t)row > (int16_t)HALF(0x4d44)'),
+    ('disc upper y bound', '(int16_t)row > (int16_t)HALF(0x4d46)', '(int16_t)row >= (int16_t)HALF(0x4d46)'),
+    ('disc doubled y', 'y = doubled_y >> 1', 'y = doubled_y >> 2'),
+    ('disc row advance', 'row += 2;', 'row += 4;'),
+    ('disc repeat count', 'if (--BYTE(0x4d49)) continue;', 'if (0) continue;'),
+    ('disc colour pair', 'GLOBAL_HALF(0xcc8), &mapped_pair', 'GLOBAL_HALF(0xcc2), &mapped_pair'),
+    ('disc stipple mode', '== 0x68;', '== 0x69;'),
+    ('disc stipple phase', '(y ^ first) & 1', '(y ^ first ^ 1) & 1'),
+    ('disc stipple singleton', 'do { *pixel = BYTE(0x90c); pixel += 2; count -= 2; } while ((int32_t)count > 0);', 'while ((int32_t)count > 0) { *pixel = BYTE(0x90c); pixel += 2; count -= 2; }'),
+    ('disc height equality', 'y >= SURFACE_WORD(surface, 8)', 'y > SURFACE_WORD(surface, 8)'),
+    ('disc remap frame', 'draw_map_pixels_state(pixel, count, POINTER(WORD(0x1d88)), registers);', 'draw_map_span(pixel, count);'),
+    ('disc map leftover edx', 'registers[0] = values[6];', 'registers[0] = values[7];'),
+]
+mutations += [(*mutation, 'discs') for mutation in disc_mutations]
+lifecycle_mutations = [
+    ('teardown eax', r'_module_deinit:\n\tpushl %ebx', r'_module_deinit:\n\txorl %eax,%eax\n\tpushl %ebx'),
+    ('teardown ecx', r'_module_deinit:\n\tpushl %ebx', r'_module_deinit:\n\txorl %ecx,%ecx\n\tpushl %ebx'),
+]
+mutations += [(*mutation, 'lifecycle') for mutation in lifecycle_mutations]
 if len(sys.argv) > 2 and sys.argv[2] not in {suite for _, _, _, suite in mutations}:
     raise SystemExit('Unknown mutation family: ' + sys.argv[2])
 missed = []
@@ -264,9 +426,19 @@ for name, old, new, suite in mutations:
     if len(sys.argv) > 2 and sys.argv[2] != suite:
         continue
     tested += 1
-    assert source.count(old) == 1, (name, source.count(old))
+    owner = {'colours': 'palette', 'palette': 'palette', 'drawing': 'draw',
+             'polygons': 'polygon', 'fills': 'fill', 'textured': 'textured', 'affine': 'affine', 'gouraud': 'gouraud', 'blits': 'blit', 'optimized': 'affine', 'perspective': 'perspective', 'discs': 'disc'}.get(suite)
+    if source.count(old) != 1 and owner:
+        scope = sections[owner]
+        assert scope.count(old) == 1 and source.count(scope) == 1, (name, scope.count(old))
+        mutant = source.replace(scope, scope.replace(old, new))
+    else:
+        assert source.count(old) == 1, (name, source.count(old))
+        mutant = source.replace(old, new)
+    if os.environ.get('HG2D_AUDIT_ONLY'):
+        continue
     variant = build / 'hg2d_mutant.c'
-    variant.write_text(source.replace(old, new))
+    variant.write_text(mutant)
     library = build / 'HG2D_ours.dll'
     library.unlink(missing_ok=True)
     subprocess.run([
@@ -286,5 +458,8 @@ for name, old, new, suite in mutations:
     if not caught:
         print(result.stdout + result.stderr, flush=True)
         missed.append(name)
-print('%d mutations, %d caught, %d unresolved' % (tested, tested - len(missed), len(missed)))
+if os.environ.get('HG2D_AUDIT_ONLY'):
+    print('%d mutation anchors verified; no mutants executed' % tested)
+else:
+    print('%d mutations, %d caught, %d unresolved' % (tested, tested - len(missed), len(missed)))
 sys.exit(bool(missed))

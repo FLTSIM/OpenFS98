@@ -1,4 +1,4 @@
-/* Affine +0x48 vertex records; textured close/fill +0x4c is still deferred. */
+/* Affine +0x48 vertex records; +0x4c has its own rasterization suite. */
 static uint32_t textured_submit(uint32_t x, uint32_t y, uint32_t depth,
                                uint32_t first_attribute, uint32_t second_attribute)
 {

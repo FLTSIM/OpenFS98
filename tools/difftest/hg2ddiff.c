@@ -294,6 +294,11 @@ static void run_textures(void)
 #include "hg2d_polygon_suite.inc"
 #include "hg2d_fill_suite.inc"
 #include "hg2d_textured_suite.inc"
+#include "hg2d_perspective_suite.inc"
+#include "hg2d_affine_suite.inc"
+#include "hg2d_gouraud_suite.inc"
+#include "hg2d_blit_suite.inc"
+#include "hg2d_disc_suite.inc"
 
 static LONG WINAPI fault(EXCEPTION_POINTERS *exception)
 {
@@ -308,7 +313,7 @@ int main(int argc, char **argv)
     uint32_t count = argc > 1 ? (uint32_t)strtoul(argv[1], NULL, 0) : 20000;
     HMODULE modules[2], util;
     const char *suite = argc > 2 ? argv[2] : "all";
-    CHECK(!strcmp(suite, "all") || !strcmp(suite, "textures") || !strcmp(suite, "palette") || !strcmp(suite, "colours") || !strcmp(suite, "drawing") || !strcmp(suite, "polygons") || !strcmp(suite, "fills") || !strcmp(suite, "textured"));
+    CHECK(!strcmp(suite, "all") || !strcmp(suite, "textures") || !strcmp(suite, "palette") || !strcmp(suite, "colours") || !strcmp(suite, "drawing") || !strcmp(suite, "polygons") || !strcmp(suite, "fills") || !strcmp(suite, "textured") || !strcmp(suite, "affine") || !strcmp(suite, "gouraud") || !strcmp(suite, "blits") || !strcmp(suite, "lifecycle") || !strcmp(suite, "optimized") || !strcmp(suite, "perspective") || !strcmp(suite, "discs"));
     SetUnhandledExceptionFilter(fault);
     CHECK(AddVectoredExceptionHandler(1, draw_exception));
     {
@@ -345,6 +350,13 @@ int main(int argc, char **argv)
     vtable[2] = ADDRESS(com_release);
     object[0] = ADDRESS(vtable);
     host[0x290 / 4] = ADDRESS(host_realize);
+    active_suite = "lifecycle";
+    for (side = 0; side < 2; side++) {
+        draw_reset();
+        CHECK(drawing(0x08,0,0,0,0,0,0) == 0xaabbccdd);
+    }
+    printf("hg2ddiff lifecycle: register-preserving teardown, 0 differ\n");
+    operations = 0;
     if (!strcmp(suite, "all") || !strcmp(suite, "textures")) {
         active_suite = "textures";
         for (scenario = 0; scenario < count; scenario++)
@@ -396,6 +408,60 @@ int main(int argc, char **argv)
         printf("hg2ddiff textured: %u scenarios, %u operations, %u faults, 0 differ\n",
                count, operations / 2, draw_faults / 2);
         printf("retail host divide repairs: %u\n", draw_div_repairs);
+    }
+    if (!strcmp(suite, "all") || !strcmp(suite, "affine")) {
+        active_suite = "affine";
+        operations = draw_div_repairs = draw_faults = 0;
+        for (scenario = 0; scenario < count; scenario++)
+            for (side = 0; side < 2; side++) run_affine();
+        printf("hg2ddiff affine: %u scenarios, %u operations, %u faults, 0 differ\n",
+               count, operations / 2, draw_faults / 2);
+        printf("retail host divide repairs: %u\n", draw_div_repairs);
+    }
+    if (!strcmp(suite, "all") || !strcmp(suite, "gouraud")) {
+        active_suite = "gouraud";
+        operations = draw_div_repairs = draw_faults = 0;
+        for (scenario = 0; scenario < count; scenario++)
+            for (side = 0; side < 2; side++) run_gouraud();
+        printf("hg2ddiff gouraud: %u scenarios, %u operations, %u faults, 0 differ\n",
+               count, operations / 2, draw_faults / 2);
+        printf("retail host divide repairs: %u\n", draw_div_repairs);
+    }
+    if (!strcmp(suite, "all") || !strcmp(suite, "blits")) {
+        active_suite = "blits";
+        operations = draw_div_repairs = draw_faults = 0;
+        for (scenario = 0; scenario < count; scenario++)
+            for (side = 0; side < 2; side++) run_blits();
+        printf("hg2ddiff blits: %u scenarios, %u operations, %u faults, 0 differ\n",
+               count, operations / 2, draw_faults / 2);
+        printf("retail host divide repairs: %u\n", draw_div_repairs);
+    }
+    if (!strcmp(suite, "all") || !strcmp(suite, "discs")) {
+        active_suite = "discs";
+        operations = draw_div_repairs = draw_faults = 0;
+        for (scenario = 0; scenario < count; scenario++)
+            for (side = 0; side < 2; side++) run_discs();
+        printf("hg2ddiff discs: %u scenarios, %u operations, %u faults, 0 differ\n",
+               count, operations / 2, draw_faults / 2);
+    }
+    if (!strcmp(suite, "all") || !strcmp(suite, "perspective")) {
+        active_suite = "perspective";
+        operations = draw_div_repairs = draw_faults = 0;
+        for (scenario = 0; scenario < count; scenario++)
+            for (side = 0; side < 2; side++) run_perspective();
+        printf("hg2ddiff perspective: %u scenarios, %u operations, %u faults, 0 differ\n",
+               count, operations / 2, draw_faults / 2);
+        printf("retail host divide repairs: %u\n", draw_div_repairs);
+    }
+    if (!strcmp(suite, "all") || !strcmp(suite, "optimized")) {
+        DWORD old_protection;
+        CHECK(VirtualProtect((uint8_t *)modules[0] + 0x1000, 0x5f266, PAGE_EXECUTE_READWRITE, &old_protection));
+        active_suite = "optimized";
+        operations = draw_div_repairs = draw_faults = 0;
+        for (scenario = 0; scenario < count; scenario++)
+            for (side = 0; side < 2; side++) run_optimized();
+        printf("hg2ddiff optimized: %u scenarios, %u operations, %u faults, 0 differ\n",
+               count, operations / 2, draw_faults / 2);
     }
     return 0;
 }

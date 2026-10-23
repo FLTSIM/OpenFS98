@@ -7,7 +7,7 @@ static uint32_t surface[5], row_storage[160];
 static const uint8_t *text_pointer;
 static uint32_t draw_fault_code, draw_fault_address, draw_fault_access;
 static volatile uint32_t draw_active;
-static uint32_t draw_faults, draw_div_repairs, draw_calls[13];
+static uint32_t draw_faults, draw_div_repairs, draw_calls[42];
 uint32_t draw_recover_sp, draw_entry_function;
 uint32_t draw_registers[7];
 static uint32_t register_states[256][7];
@@ -39,9 +39,37 @@ static LONG WINAPI draw_exception(EXCEPTION_POINTERS *exception)
         CONTEXT *context = exception->ContextRecord;
         const uint8_t *instruction = (const uint8_t *)(uintptr_t)context->Eip;
         if (context->Eip == 0x20732aea || context->Eip == 0x20732af6 ||
-            context->Eip == 0x20787a98 || context->Eip == 0x20787aa4) {
+            context->Eip == 0x20787a98 || context->Eip == 0x20787aa4 || context->Eip == 0x207853b7 || context->Eip == 0x207853c3 || context->Eip == 0x207886ec || context->Eip == 0x207886f8) {
             int negative = ((int32_t)context->Edx < 0) != ((int32_t)context->Ebx < 0);
             CHECK(instruction[0] == 0xf7 && instruction[1] == 0xfb);
+            context->Eax = negative ? 0x80000001u : 0x7fffffffu;
+            context->Edx = 0x7fffffffu;
+            context->Eip += 2;
+            draw_div_repairs++;
+            return EXCEPTION_CONTINUE_EXECUTION;
+        }
+        {
+            static const uint32_t affine_divides[] = {
+                0x20785970, 0x20785985, 0x20785b5a, 0x20785b6f,
+                0x20785dcf, 0x20785de4, 0x20786005, 0x2078601a,
+                0x207862b5, 0x207862ca, 0x20786559, 0x2078656e,
+                0x2078690f, 0x20786924, 0x20786fa3, 0x20786fb8, 0x20785679
+            };
+            uint32_t index;
+            for (index = 0; index < sizeof affine_divides / sizeof affine_divides[0]; index++)
+                if (context->Eip == affine_divides[index]) {
+                    int negative = ((int32_t)context->Edx < 0) != ((int32_t)context->Ebp < 0);
+                    CHECK(instruction[0] == 0xf7 && instruction[1] == 0xfd);
+                    context->Eax = negative ? 0x80000001u : 0x7fffffffu;
+                    context->Edx = 0x7fffffffu;
+                    context->Eip += 2;
+                    draw_div_repairs++;
+                    return EXCEPTION_CONTINUE_EXECUTION;
+                }
+        }
+        if (context->Eip == 0x2078b052 || context->Eip == 0x2078b079) {
+            int negative = ((int32_t)context->Edx < 0) != ((int32_t)context->Esi < 0);
+            CHECK(instruction[0] == 0xf7 && instruction[1] == 0xfe);
             context->Eax = negative ? 0x80000001u : 0x7fffffffu;
             context->Edx = 0x7fffffffu;
             context->Eip += 2;
@@ -78,17 +106,9 @@ static LONG WINAPI draw_exception(EXCEPTION_POINTERS *exception)
     return EXCEPTION_CONTINUE_EXECUTION;
 }
 
-static uint32_t drawing(uint32_t slot, uint32_t a, uint32_t b, uint32_t c, uint32_t d, uint32_t e, uint32_t f)
+static uint32_t drawing_arguments(uint32_t slot, const uint32_t *arguments, uint32_t count)
 {
-    uint32_t arguments[6] = {a, b, c, d, e, f}, count, result, reg;
-    switch (slot) {
-    case 0x18: count = 0; break;
-    case 0x40: count = 1; break;
-    case 0x1c: case 0x20: count = 3; break;
-    case 0x24: case 0x2c: case 0x30: case 0x44: count = 4; break;
-    case 0x28: case 0x48: count = 6; break;
-    default: count = 5; break;
-    }
+    uint32_t result, reg;
     draw_fault_code = draw_fault_address = draw_fault_access = 0;
     touched = canvas;
     check_carry = 0;
@@ -110,9 +130,23 @@ static uint32_t drawing(uint32_t slot, uint32_t a, uint32_t b, uint32_t c, uint3
         }
     }
     compare(result);
-    draw_calls[(slot - 0x18) / 4]++;
+    if (slot >= 0x18) draw_calls[(slot - 0x18) / 4]++;
     if (draw_fault_code) draw_faults++;
     return result;
+}
+
+static uint32_t drawing(uint32_t slot, uint32_t a, uint32_t b, uint32_t c, uint32_t d, uint32_t e, uint32_t f)
+{
+    uint32_t arguments[6] = {a, b, c, d, e, f}, count;
+    switch (slot) {
+    case 0x08: case 0x18: count = 0; break;
+    case 0x40: case 0x4c: case 0x78: count = 1; break;
+    case 0x1c: case 0x20: count = 3; break;
+    case 0x24: case 0x2c: case 0x30: case 0x44: count = 4; break;
+    case 0x28: case 0x48: count = 6; break;
+    default: count = 5; break;
+    }
+    return drawing_arguments(slot, arguments, count);
 }
 
 static uint32_t draw_surface(void) { return ADDRESS(surface); }

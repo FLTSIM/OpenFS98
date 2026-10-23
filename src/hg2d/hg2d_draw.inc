@@ -90,12 +90,15 @@ static uint32_t STDCALL draw_depth_point(void *surface, uint32_t x, uint32_t y, 
 
 /* The eight-pixel mapper reads both words before looking up/storing bytes.
  * Preserve that ordering even if a caller aliases the map and pixels. */
-static void draw_map_pixels(uint8_t *pixel, uint32_t count, const uint8_t *map)
+static void draw_map_pixels_state(uint8_t *pixel, uint32_t count, const uint8_t *map,
+                                  uint32_t *registers)
 {
     int short_span = count < 16;
+    if (registers) registers[0] = 0;
     if (count >= 16) {
         while (ADDRESS(pixel) & 3) {
             *pixel = map[*pixel];
+            if (registers) registers[2] = (registers[2] & 0xffffff00u) | *pixel;
             pixel++;
             count--;
         }
@@ -103,6 +106,7 @@ static void draw_map_pixels(uint8_t *pixel, uint32_t count, const uint8_t *map)
             uint8_t values[8];
             uint32_t index;
             for (index = 0; index < 8; index++) values[index] = pixel[index];
+            if (registers) registers[0] = values[6];
             values[0] = map[values[0]];
             values[4] = map[values[4]];
             values[1] = map[values[1]];
@@ -111,6 +115,12 @@ static void draw_map_pixels(uint8_t *pixel, uint32_t count, const uint8_t *map)
             values[7] = map[values[7]];
             values[2] = map[values[2]];
             values[6] = map[values[6]];
+            if (registers) {
+                registers[2] = values[0] | ((uint32_t)values[1] << 8) |
+                    ((uint32_t)values[2] << 16) | ((uint32_t)values[3] << 24);
+                registers[1] = values[4] | ((uint32_t)values[5] << 8) |
+                    ((uint32_t)values[6] << 16) | ((uint32_t)values[7] << 24);
+            }
             for (index = 0; index < 8; index++) pixel[index] = values[index];
             pixel += 8;
             count -= 8;
@@ -119,8 +129,14 @@ static void draw_map_pixels(uint8_t *pixel, uint32_t count, const uint8_t *map)
     if (count || short_span)
         do {
             *pixel = map[*pixel];
+            if (registers) registers[2] = (registers[2] & 0xffffff00u) | *pixel;
             pixel++;
         } while (--count);
+}
+
+static void draw_map_pixels(uint8_t *pixel, uint32_t count, const uint8_t *map)
+{
+    draw_map_pixels_state(pixel, count, map, 0);
 }
 
 static void draw_map_span(uint8_t *pixel, uint32_t count)

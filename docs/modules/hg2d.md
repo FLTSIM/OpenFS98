@@ -5,8 +5,9 @@ texture storage/loading, software palettes, primitives and text, plain polygon
 fills, affine texture rendering (all 32 span selectors), Gouraud shading,
 scanline texture blits, table-shaped discs, perspective vertex submission,
 the matching three-attribute textured closer, matrix-derived texture edges,
-far-depth texture fills, basic, keyed and fogged doubled-pixel projective spans, and teardown.
-Some service branches remain explicitly unfinished below.
+far-depth texture fills, basic/keyed/fogged doubled-pixel projective spans,
+unkeyed dithered spans, and teardown. Some service branches remain explicitly
+unfinished below.
 HG2D uses snake_case and `<stdint.h>`; there is no `types.h` dependency.
 
 HG2D is not in `MODULES` and must not be installed yet. Initialization, the
@@ -31,6 +32,7 @@ make -f tools/hg2d.mk hg2ddiff-run N=20000 SUITE=projective
 make -f tools/hg2d.mk hg2ddiff-run N=20000 SUITE=projective_keyed
 make -f tools/hg2d.mk hg2ddiff-run N=20000 SUITE=projective_fog
 make -f tools/hg2d.mk hg2ddiff-run N=20000 SUITE=projective_key_fog
+make -f tools/hg2d.mk hg2ddiff-run N=20000 SUITE=projective_dither
 make -f tools/hg2d.mk hg2ddiff-run N=20000 SUITE=textured
 make -f tools/hg2d.mk hg2ddiff-run N=20000 SUITE=affine
 make -f tools/hg2d.mk hg2ddiff-run N=20000 SUITE=optimized
@@ -894,7 +896,72 @@ per scenario. The expanded raw `projective_keyed` script now has 340 operations.
 Dithering, actual device rendering and the remaining plane/resource/init paths
 are still deferred.
 
+## Slice 18: unkeyed dithered projective spans
+
+`src/hg2d/hg2d_dither.inc` implements pixel sampling for `0x20749d95` and
+`0x207541ee`, selected through the shared matrix +0x44/+0x40 path. Selectors
+32/35 draw right to left and 33/34 draw left to right. Ten of the 24 ordinary
+projective targets are implemented; 14 remain deferred. The Linkage service
+count stays 33.
+
+Dithered spans retain unmasked fixed-point endpoints and sample once per
+pixel. Both U and V receive a fractional bias based on row parity and the
+physical destination address: odd rows use 0/0.5 texel at even/odd addresses;
+even rows use 0.25/0.75. Each coordinate retains its own wrapped integer byte
+and fractional carry. Full blocks align paired stores with a direction-specific
+single-pixel prefix, then fetch and advance two samples before storing the
+pair. Prefixes, final single pixels and tails store before advancing. These
+orders are compared with texture/canvas and destination/step aliases.
+
+The initial endpoint complement magnitudes are exposed at +0x4365/+0x4361.
+Unlike the correction ratio's true absolute values, negative factors omit the
+final +1. If **both** magnitudes are at least +0x436d, retail enters the old
+doubled-pixel span after clearing endpoint bit 16, retaining the already
+projected attributes and UVs. It does not sort again after masking. Fractional
+endpoints can therefore yield a zero sample count, repaired homogeneous divides
+and no drawing. Exact threshold and negative-factor cases check that behavior.
+
+Dither tails expose the starting address parity at +0x45d1, a final-pixel skip
+flag at +0x45d5 and the padded jump count at +0x45d9. The jump count can be 32,
+so all eight direction/block-size/row tables contain 33 numeric entries,
+extracted from retail `.text` data. Tails update +0x4160 even without a full
+block. The final skip flag is read after earlier stores; an alias into that
+flag makes caching it incorrect. The odd-row parity comparison branches to
+the next instruction and has no effect; that dead branch is omitted. Even-row
+tails apply their initial quarter bias, preserving the same four phases.
+
+The two-phase `projective_dither` script has 664 operations per scenario. It
+reuses the projection/geometry cases, then checks whole canvases independently
+for four selectors, both row parities, four alignments and four U/V fractional
+positions. Counts cover both correction sizes, full blocks and all tails.
+Additional cases check exact fallback bounds, fractional mask reversal,
+destination aliases into a fractional step and the live tail flag, and a
+canvas texture alias that distinguishes pair prefetch from immediate stores.
+Dithered fog/keyed variants, hardware, plane, resource and init paths remain
+deferred.
+
 ## Verification and limits
+
+The dither suite passes **20,000 scenarios / 13,280,000 operations**, with
+zero differences and zero faults. All 800,000 retail host divide repairs
+resume and complete. Both phases compare the full image, GLOBAL, guarded
+canvas, literal saved ESP/tail addresses and all seven drawing registers.
+
+The complete combined regression passes 2,000 scenarios per suite, including
+**1,328,000 dither operations** with zero differences and zero faults and
+80,000 resumed retail divide repairs. All preceding projective, affine,
+three-attribute, palette and primitive suites pass in the same run.
+
+The dither family catches **40 new mutations** at 64 scenarios, with zero
+unresolved mutations. The preceding **137** projective mutations were rerun
+and all caught, giving **177 caught** in this slice. All **666** mutation
+anchors pass the separate audit; the other 489 mutants were not all rerun.
+The mutation runner now captures output in files: Wine helpers can retain
+inherited pipe handles after a test exits. The first pipe-based attempt timed
+out; the full 40-mutant file-based rerun passes. Detection still requires exit
+status 1 and a differential mismatch on stdout; fixture errors and crashes do
+not count.
+
 
 The keyed-fog suite passes **20,000 scenarios / 13,580,000 operations**, with
 zero differences and zero faults. All 160,000 retail host divide repairs
@@ -1151,6 +1218,6 @@ loading, and device-backed +0x9c/+0xa0/+0xa4/+0xbc.
 The remaining projective/plane spans through +0x44/+0x40, device palette
 realization and the negative-length shadow corrupt-stack return also remain
 unfinished. Next are the remaining software projective spans selected at data
-+0x4200 (dithering), then the plane, resource/device and
++0x4200 (dithered fog/keying), then the plane, resource/device and
 initialization paths. The verified subsets do not
 establish whole-module rendering equivalence or readiness to run in-game.

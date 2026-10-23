@@ -9,12 +9,15 @@ from pathlib import Path
 import shutil
 import subprocess
 import sys
+import tempfile
 
 root = Path(__file__).resolve().parent.parent
 source = (root / 'src/hg2d/hg2d.c').read_text()
 sections = {}
-for section in ('palette', 'draw', 'projective', 'matrix', 'polygon', 'fill', 'textured', 'perspective', 'perspective_fill', 'affine', 'gouraud', 'blit', 'disc'):
+for section in ('palette', 'draw', 'dither', 'projective', 'matrix', 'polygon', 'fill', 'textured', 'perspective', 'perspective_fill', 'affine', 'gouraud', 'blit', 'disc'):
     sections[section] = (root / ('src/hg2d/hg2d_%s.inc' % section)).read_text()
+    if section == 'projective':
+        sections[section] = sections[section].replace('#include "hg2d_dither.inc"', sections['dither'])
     source = source.replace('#include "hg2d_%s.inc"' % section, sections[section])
 build = root / os.environ.get('HG2D_BREAKS_DIR', 'bin/hg2d-breaks')
 build.mkdir(parents=True, exist_ok=True)
@@ -440,7 +443,7 @@ projective_mutations = [
     ('projective endpoint swap', 'if (!forward) { uint32_t *swap', 'if (forward) { uint32_t *swap'),
     ('projective initial attribute endpoint', 'WORD(0x4178 + component * 4) = left[4 + component];', 'WORD(0x4178 + component * 4) = right[4 + component];'),
     ('projective saved row', 'WORD(0x41f4) = y;', 'WORD(0x41f4) = y + 1;'),
-    ('projective sample count', '(int32_t)(last_x - first_x) >> 17', '(int32_t)(last_x - first_x) >> 16'),
+    ('projective sample count', 'count = (uint32_t)((int32_t)(last_x - first_x) >> 17) + 1;\n    if (dither)', 'count = (uint32_t)((int32_t)(last_x - first_x) >> 16) + 1;\n    if (dither)'),
     ('projective negative ratio magnitude', 'minimum = (int32_t)right_factor < 0 ? 0u - right_factor : right_factor;', 'minimum = right_factor;'),
     ('projective ratio denominator guard', '(maximum + 1)', '(maximum)'),
     ('projective strict correction threshold', 'ratio < 0x10000000', 'ratio <= 0x10000000'),
@@ -450,8 +453,8 @@ projective_mutations = [
     ('projective block homogeneous advance', 'WORD(0x4178 + component * 4) += WORD(0x41b0 + component * 4);', 'WORD(0x4178 + component * 4) -= WORD(0x41b0 + component * 4);'),
     ('projective block old u scratch', 'WORD(0x4198) = WORD(0x4190);', 'WORD(0x4198) = WORD(0x41a0);'),
     ('projective block u slope rounding', '(uint32_t)((int32_t)(WORD(0x4190) - WORD(0x4198)) >> shift)', '(uint32_t)((int32_t)(WORD(0x4190) - WORD(0x4198)) / (int32_t)(1u << shift))'),
-    ('projective block saved count', 'WORD(0x4160) = remaining;', 'WORD(0x4160) = remaining - block;'),
-    ('projective block destination advance', 'pixel_address += direction * block * 2;', 'pixel_address += direction * block;'),
+    ('projective block saved count', 'WORD(0x4160) = remaining;\n        if (dither)', 'WORD(0x4160) = remaining - block;\n        if (dither)'),
+    ('projective block destination advance', 'pixel_address += direction * block * (dither ? 1 : 2);', 'pixel_address += direction * block;'),
     ('projective zero tail return', 'if ((int32_t)remaining <= 0) return;', 'if ((int32_t)remaining < 0) return;'),
     ('projective tail u division', 'projective_divide((int32_t)(WORD(0x41a0) - WORD(0x4190)), remaining)', 'projective_divide((int32_t)(WORD(0x41a0) - WORD(0x4190)), remaining + 1)'),
     ('projective tail target direction', 'projective_tails[forward]', 'projective_tails[!forward]'),
@@ -537,7 +540,7 @@ fog_mutations = [
     ('fog shade step', 'shade = (shade + WORD(0x4358)) & 0xffff0fffu;\n        destination[0]', 'shade = (shade - WORD(0x4358)) & 0xffff0fffu;\n        destination[0]'),
     ('fog first doubled pixel', 'destination[0] = colour; destination[1] = colour;', 'destination[1] = colour;'),
     ('fog second doubled pixel', 'destination[0] = colour; destination[1] = colour;', 'destination[0] = colour;'),
-    ('fog doubled spacing', '        address += direction * 2;', '        address += direction;'),
+    ('fog doubled spacing', 'destination[0] = colour; destination[1] = colour;\n        address += direction * 2;', 'destination[0] = colour; destination[1] = colour;\n        address += direction;'),
     ('fog shifted u step', 'WORD(0x41a8) = WORD(0x41a8) << 16;', 'WORD(0x41a8) = WORD(0x41a8) << 15;'),
     ('fog shifted v step', 'WORD(0x41ac) = WORD(0x41ac) << 16;', 'WORD(0x41ac) = WORD(0x41ac) << 15;'),
     ('fog tail target direction', 'projective_fog_tails[forward]', 'projective_fog_tails[!forward]'),
@@ -598,6 +601,52 @@ key_fog_mutations = [
     ('key fog tail family', 'keyed ? projective_key_fog_tails', 'keyed ? projective_fog_tails'),
 ]
 mutations += [(*mutation, 'projective_key_fog') for mutation in key_fog_mutations]
+dither_tail_prefix = """if (tail) {
+        for (uint32_t index = 0; index < count; index++) {
+            if (index + 1 == count && WORD(0x45d5)) return;"""
+dither_mutations = [
+    ('dither reverse target', 'dither = WORD(0x4200) == 0x20749d95', 'dither = WORD(0x4200) == 0x20733bbb'),
+    ('dither forward target', '|| WORD(0x4200) == 0x207541ee;', '|| WORD(0x4200) == 0x2073751e;'),
+    ('dither direction', 'forward |= WORD(0x4200) == 0x207541ee;', 'forward |= WORD(0x4200) == 0x20749d95;'),
+    ('dither endpoint fractions', 'if (dither) { first_x = left[2]; last_x = right[2]; }', 'if (dither) { first_x = left[2] & 0xfffeffffu; last_x = right[2] & 0xfffeffffu; }'),
+    ('dither full pixel count', 'if (dither) count = (uint32_t)((int32_t)(last_x - first_x) >> 16) + 1;', 'if (dither) count = (uint32_t)((int32_t)(last_x - first_x) >> 17) + 1;'),
+    ('dither start complement', 'right_factor ^ ((int32_t)right_factor < 0 ? 0xffffffffu : 0)', '(int32_t)right_factor < 0 ? 0u - right_factor : right_factor'),
+    ('dither end complement', 'left_factor ^ ((int32_t)left_factor < 0 ? 0xffffffffu : 0)', '(int32_t)left_factor < 0 ? 0u - left_factor : left_factor'),
+    ('dither saved factor', 'WORD(0x4365) = WORD(0x4361);', 'WORD(0x4365) = 0;'),
+    ('dither threshold equality', 'WORD(0x4361) >= WORD(0x436d) && WORD(0x4365) >= WORD(0x436d)', 'WORD(0x4361) > WORD(0x436d) && WORD(0x4365) > WORD(0x436d)'),
+    ('dither both endpoints', 'WORD(0x4361) >= WORD(0x436d) && WORD(0x4365) >= WORD(0x436d)', 'WORD(0x4361) >= WORD(0x436d) || WORD(0x4365) >= WORD(0x436d)'),
+    ('dither threshold source', 'WORD(0x4361) >= WORD(0x436d) && WORD(0x4365) >= WORD(0x436d)', 'WORD(0x4361) >= WORD(0x4371) && WORD(0x4365) >= WORD(0x4371)'),
+    ('dither fallback mask', 'first_x &= 0xfffeffffu; last_x &= 0xfffeffffu;', 'first_x &= 0xfffdffffu; last_x &= 0xfffdffffu;'),
+    ('dither fallback reordering', 'first_x &= 0xfffeffffu; last_x &= 0xfffeffffu;', 'first_x &= 0xfffeffffu; last_x &= 0xfffeffffu; if (first_x > last_x) { uint32_t swap = first_x; first_x = last_x; last_x = swap; }'),
+    ('dither row phase', '(y & 1 ? 0 : 0x40000000u)', '(y & 1 ? 0x40000000u : 0)'),
+    ('dither address phase', 'address & 1 ? 0x80000000u : 0', 'address & 2 ? 0x80000000u : 0'),
+    ('dither half texel', 'address & 1 ? 0x80000000u : 0', 'address & 1 ? 0x40000000u : 0'),
+    ('dither quarter texel', 'y & 1 ? 0 : 0x40000000u', 'y & 1 ? 0 : 0'),
+    ('dither v bias', '(v + bias) >> 32', '(v + 0) >> 32'),
+    ('dither u bias', '(u + bias) >> 32', '(u + 0) >> 32'),
+    ('dither texture byte order', 'texture + column + row * 256', 'texture + row + column * 256'),
+    ('dither u integer step', '((uint64_t)u_integer << 32)', '((uint64_t)u_integer << 31)'),
+    ('dither v integer step', '((uint64_t)v_integer << 32)', '((uint64_t)v_integer << 31)'),
+    ('dither u fractional step', '+ WORD(0x41a8)) & 0xffffffffffULL', '+ 0) & 0xffffffffffULL'),
+    ('dither v fractional step', '+ WORD(0x41ac)) & 0xffffffffffULL', '+ 0) & 0xffffffffffULL'),
+    ('dither shifted u scratch', 'WORD(0x41a8) = WORD(0x41a8) * 65536u;', 'WORD(0x41a8) = WORD(0x41a8) * 32768u;'),
+    ('dither shifted v scratch', 'WORD(0x41ac) = WORD(0x41ac) * 65536u;', 'WORD(0x41ac) = WORD(0x41ac) * 32768u;'),
+    ('dither alignment prefix', '((address & 1) != 0) == (direction > 0)', '((address & 1) != 0) != (direction > 0)'),
+    ('dither pair read ordering', 'uint8_t second = dither_texel', '*(uint8_t *)POINTER(address) = first; uint8_t second = dither_texel'),
+    ('dither pair first byte', 'output[0] = direction > 0 ? first : second;', 'output[0] = direction > 0 ? second : first;'),
+    ('dither pair second byte', 'output[1] = direction > 0 ? second : first;', 'output[1] = direction > 0 ? first : second;'),
+    ('dither block destination', 'block * (dither ? 1 : 2)', 'block * 2'),
+    ('dither tail address flag', 'WORD(0x45d1) = pixel_address & 1;', 'WORD(0x45d1) = (pixel_address ^ 1) & 1;'),
+    ('dither tail skip flag', 'WORD(0x45d5) = (pixel_address ^ remaining) & 1;', 'WORD(0x45d5) = (pixel_address ^ remaining ^ 1) & 1;'),
+    ('dither tail padded count', 'WORD(0x45d9) = remaining + WORD(0x45d5);', 'WORD(0x45d9) = remaining;'),
+    ('dither tail saved count', 'WORD(0x4160) = remaining;\n        WORD(0x4354)', 'WORD(0x4160) = remaining + 1;\n        WORD(0x4354)'),
+    ('dither tail live skip', dither_tail_prefix, dither_tail_prefix.replace('for (uint32_t index', 'uint32_t saved_skip = WORD(0x45d5);\n        for (uint32_t index').replace('count && WORD(0x45d5)', 'count && saved_skip')),
+    ('dither tail target direction', 'projective_dither_tails[forward]', 'projective_dither_tails[!forward]'),
+    ('dither tail target block', 'projective_dither_tails[forward][shift == 4]', 'projective_dither_tails[forward][shift != 4]'),
+    ('dither tail target row', '[shift == 4][y & 1]', '[shift == 4][(y ^ 1) & 1]'),
+    ('dither tail target count', '[y & 1][WORD(0x45d9)]', '[y & 1][(WORD(0x45d9) + 1) % 33]'),
+]
+mutations += [(*mutation, 'projective_dither') for mutation in dither_mutations]
 affine_mutations = [
     ('affine low dividend shift', '(uint32_t)(delta << 7)', '(uint32_t)(delta << 6)'),
     ('affine signed high dividend', 'delta & 0x80000000u ? -0x100000000LL : 0', 'delta & 0x80000000u ? 0 : 0'),
@@ -755,7 +804,7 @@ for name, old, new, suite in mutations:
         continue
     tested += 1
     owner = {'colours': 'palette', 'palette': 'palette', 'drawing': 'draw',
-             'polygons': 'polygon', 'fills': 'fill', 'textured': 'textured', 'affine': 'affine', 'gouraud': 'gouraud', 'blits': 'blit', 'optimized': 'affine', 'perspective': 'perspective', 'discs': 'disc', 'perspective_fill': 'perspective_fill', 'matrix_vertices': 'matrix', 'matrix_fills': 'matrix', 'projective': 'projective', 'projective_keyed': 'projective', 'projective_fog': 'projective', 'projective_key_fog': 'projective'}.get(suite)
+             'polygons': 'polygon', 'fills': 'fill', 'textured': 'textured', 'affine': 'affine', 'gouraud': 'gouraud', 'blits': 'blit', 'optimized': 'affine', 'perspective': 'perspective', 'discs': 'disc', 'perspective_fill': 'perspective_fill', 'matrix_vertices': 'matrix', 'matrix_fills': 'matrix', 'projective': 'projective', 'projective_keyed': 'projective', 'projective_fog': 'projective', 'projective_key_fog': 'projective', 'projective_dither': 'projective'}.get(suite)
     if source.count(old) != 1 and owner:
         scope = sections[owner]
         assert scope.count(old) == 1 and source.count(scope) == 1, (name, scope.count(old))
@@ -775,16 +824,21 @@ for name, old, new, suite in mutations:
         '-Wl,--image-base=0x30000000', '-Wl,--disable-dynamicbase',
         '-I' + str(root / 'src/hg2d'), '-o', str(library), str(variant),
         str(root / 'src/hg2d/hg2d.def'), '-lgcc'], check=True)
-    result = subprocess.run(['wine', 'hg2ddiff.exe', sys.argv[1] if len(sys.argv) > 1 else '64',
-                             suite, 'full' if suite == 'colours' else 'scripts'],
-                            cwd=build, env={**os.environ, 'WINEDEBUG': '-all'},
-                            capture_output=True, text=True, timeout=120)
+    # Wine helpers can inherit pipe handles after the test process exits.
+    # Files let wait() use the actual process status without waiting for EOF.
+    with tempfile.TemporaryFile(mode='w+t') as stdout, tempfile.TemporaryFile(mode='w+t') as stderr:
+        result = subprocess.run(['wine', 'hg2ddiff.exe', sys.argv[1] if len(sys.argv) > 1 else '64',
+                                 suite, 'full' if suite == 'colours' else 'scripts'],
+                                cwd=build, env={**os.environ, 'WINEDEBUG': '-all'},
+                                stdout=stdout, stderr=stderr, timeout=120)
+        stdout.seek(0); stderr.seek(0)
+        result_stdout, result_stderr = stdout.read(), stderr.read()
     # Only a reported differential mismatch counts; a broken fixture or a
     # harness crash must be investigated, not counted as a caught mutation.
-    caught = result.returncode == 1 and ' differs:' in result.stdout
+    caught = result.returncode == 1 and ' differs:' in result_stdout
     print(('%s: ' % name) + ('caught' if caught else 'MISSED / ERROR'), flush=True)
     if not caught:
-        print(result.stdout + result.stderr, flush=True)
+        print(result_stdout + result_stderr, flush=True)
         missed.append(name)
 if os.environ.get('HG2D_AUDIT_ONLY'):
     print('%d mutation anchors verified; no mutants executed' % tested)

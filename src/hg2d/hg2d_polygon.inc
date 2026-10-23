@@ -1,5 +1,5 @@
-/* Plain polygon submission, +0x44 (0x20732aa5), and edge builder
- * 0x207329dc. Filling is in hg2d_fill.inc; affine vertices are in hg2d_textured.inc. */
+/* Polygon submission, +0x44 (0x20732aa5), and plain edge builder
+ * 0x207329dc. Matrix edges are in hg2d_matrix.inc; filling is in hg2d_fill.inc. */
 static uint32_t polygon_project(uint32_t coordinate, uint32_t scale, uint32_t depth, uint32_t *remainder)
 {
     int64_t product = (int64_t)(int32_t)coordinate * (int32_t)(scale << 16);
@@ -71,7 +71,10 @@ void STDCALL __attribute__((used)) polygon_vertex_body(void *record, uint32_t x,
         temporary = x; x = previous_x; previous_x = temporary;
         temporary = y; y = previous_y; previous_y = temporary;
     }
-    if (GLOBAL_HALF(0xc90) && GLOBAL_HALF(0x2f4)) __builtin_trap();
+    if (GLOBAL_HALF(0xc90) && GLOBAL_HALF(0x2f4)) {
+        matrix_edge(previous_x, previous_y, x, y);
+        return;
+    }
     polygon_edge(previous_x, previous_y, x, y);
 }
 DRAW_ENTRY(polygon_vertex, polygon_vertex_body, 4, 16, "");

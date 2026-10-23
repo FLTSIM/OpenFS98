@@ -213,6 +213,10 @@ void STDCALL __attribute__((used)) polygon_close_body(void *surface)
                 WORD(0x1d88) = ADDRESS(hg2d_image + 0x1d8c) + (mode << 8);
         }
     }
+    if (GLOBAL_HALF(0xc90) && GLOBAL_HALF(0x2f4)) {
+        matrix_close();
+        return;
+    }
     if (GLOBAL_HALF(0xc90)) __builtin_trap();
     colour = (uint16_t)GLOBAL_WORD(0x3c0);
     stipple = colour >> 8 == 0x68;

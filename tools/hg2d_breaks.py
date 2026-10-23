@@ -13,7 +13,7 @@ import sys
 root = Path(__file__).resolve().parent.parent
 source = (root / 'src/hg2d/hg2d.c').read_text()
 sections = {}
-for section in ('palette', 'draw', 'polygon', 'fill', 'textured', 'perspective', 'perspective_fill', 'affine', 'gouraud', 'blit', 'disc'):
+for section in ('palette', 'draw', 'matrix', 'polygon', 'fill', 'textured', 'perspective', 'perspective_fill', 'affine', 'gouraud', 'blit', 'disc'):
     sections[section] = (root / ('src/hg2d/hg2d_%s.inc' % section)).read_text()
     source = source.replace('#include "hg2d_%s.inc"' % section, sections[section])
 build = root / os.environ.get('HG2D_BREAKS_DIR', 'bin/hg2d-breaks')
@@ -340,6 +340,73 @@ perspective_fill_mutations += [
     ('shaded partial eax preservation', 'value = BYTE(0xd70 + (BYTE(0x100) << 8) + value);\n    *one = (*one & ~mask) | ((uint32_t)value << shift);', 'value = BYTE(0xd70 + (BYTE(0x100) << 8) + value);\n    *one = (uint32_t)value << shift;'),
 ]
 mutations += [(*mutation, 'perspective_fill') for mutation in perspective_fill_mutations]
+matrix_vertex_mutations = [
+    ('matrix normalization offset', 'position - (offset << 16)', 'position - (offset << 15)'),
+    ('matrix normalization divisor', 'scale << 1', 'scale << 2'),
+    ('matrix signed quotient', '(int64_t)(int32_t)value / (int32_t)denominator', '(int64_t)value / denominator'),
+    ('matrix repaired sign', '(((int32_t)value < 0) != ((int32_t)denominator < 0))', '(((int32_t)value < 0) == ((int32_t)denominator < 0))'),
+    ('matrix negative normalization restore', 'return value ^ sign;', 'return (value ^ sign) - sign;'),
+    ('matrix normalization clamp', 'if (value > 0x7fff) value = 0x7fff;', 'if (value > 0x7ffe) value = 0x7ffe;'),
+    ('matrix signed x coefficient', '(int16_t)GLOBAL_HALF(0xcfa + component * 2)', '(uint16_t)GLOBAL_HALF(0xcfa + component * 2)'),
+    ('matrix signed y coefficient', '(int16_t)GLOBAL_HALF(0xd00 + component * 2)', '(uint16_t)GLOBAL_HALF(0xd00 + component * 2)'),
+    ('matrix addition before shift', '(int32_t)(first + second)', '((int64_t)(int32_t)first + (int32_t)second)'),
+    ('matrix shift mask', 'GLOBAL[0xd42] & 31', 'GLOBAL[0xd42] & 15'),
+    ('matrix attribute offset', 'GLOBAL_WORD(0xd0c + component * 4)', 'GLOBAL_WORD(0xd10 + component * 4)'),
+    ('matrix slope complement magnitude', 'magnitude = delta ^ sign;', 'magnitude = (delta ^ sign) - sign;'),
+    ('matrix slope fraction', '(uint64_t)remainder << 32', '(uint64_t)remainder << 31'),
+    ('matrix slope integer clamp', 'if (quotient > 0x7fff) quotient = 0x7fff;', 'if (quotient > 0x7ffe) quotient = 0x7ffe;'),
+    ('matrix slope sign adjustment', 'return ((quotient << 16) | (fraction >> 16)) ^ sign;', 'return (((quotient << 16) | (fraction >> 16)) ^ sign) - sign;'),
+    ('matrix edge flat rounding', 'edge[2] = low_x;', 'edge[2] = low_x + 0x8000;'),
+    ('matrix low normalized x', 'matrix_coordinate(low_x, WORD(0x8d8)', 'matrix_coordinate(high_x, WORD(0x8d8)'),
+    ('matrix high normalized y', 'matrix_coordinate(high_y, WORD(0x8dc)', 'matrix_coordinate(low_y, WORD(0x8dc)'),
+    ('matrix component count', 'component < 3; component++)\n        edge[4 + component]', 'component < 2; component++)\n        edge[4 + component]'),
+    ('matrix flat raw deltas', 'edge[7 + component] = WORD(0x4184 + component * 4) - edge[4 + component];', 'edge[7 + component] = edge[7 + component];'),
+    ('matrix fractional advance', 'advance = (low_y & 0xffff) ^ 0xffff;', 'advance = low_y & 0xffff;'),
+    ('matrix x advance', 'edge[2] += (uint32_t)', 'edge[2] -= (uint32_t)'),
+    ('matrix attribute advance', 'edge[4 + component] += (uint32_t)', 'edge[4 + component] -= (uint32_t)'),
+    ('matrix signed start row', '(uint32_t)((int32_t)low_y >> 16)', 'low_y >> 16'),
+    ('matrix edge stride', 'GLOBAL_WORD(0xc14) = ADDRESS(edge) + 40;', 'GLOBAL_WORD(0xc14) = ADDRESS(edge) + 32;'),
+    ('matrix vertex capacity reservation', '+ 0x60 >= ADDRESS(hg2d_image + 0x884)', '+ 0x28 >= ADDRESS(hg2d_image + 0x884)'),
+]
+mutations += [(*mutation, 'matrix_vertices') for mutation in matrix_vertex_mutations]
+matrix_fill_mutations = [
+    ('matrix setup base multiplier', '(uint64_t)0xd00 * GLOBAL_WORD(0x320)', '(uint64_t)0xc00 * GLOBAL_WORD(0x320)'),
+    ('matrix setup numerator scaling', 'while (denominator >> 32) { denominator >>= 1; numerator >>= 1; }\n    ratio', 'while (denominator >> 32) { denominator >>= 1; numerator >>= 2; }\n    ratio'),
+    ('matrix setup first ratio', 'numerator << 16', 'numerator << 15'),
+    ('matrix setup horizontal ratio', 'matrix_unsigned_divide(0x3e00000, ratio)', 'matrix_unsigned_divide(0x3c00000, ratio)'),
+    ('matrix setup vertical ratio', 'matrix_unsigned_divide(0x2400000, ratio)', 'matrix_unsigned_divide(0x2200000, ratio)'),
+    ('matrix setup first row copy', 'GLOBAL_WORD(0xcdc + index * 4)', 'GLOBAL_WORD(0xce0 + index * 4)'),
+    ('matrix setup second row copy', 'GLOBAL_WORD(0xc94 + index * 4)', 'GLOBAL_WORD(0xc98 + index * 4)'),
+    ('matrix setup tail copy', 'index < 4; index++) WORD(0x41e0', 'index < 3; index++) WORD(0x41e0'),
+    ('matrix fog cutoff equality', 'GLOBAL_HALF(0xe88) < 0x7d00', 'GLOBAL_HALF(0xe88) <= 0x7d00'),
+    ('matrix fog depth sign', '(int32_t)WORD(0x8d4) > 0', 'WORD(0x8d4) > 0'),
+    ('matrix far depth test', 'WORD(0x8d0) == 0x7fffffffu', 'WORD(0x8d0) >= 0x7ffffffeu'),
+    ('matrix fog threshold multiplication', '(uint64_t)GLOBAL_HALF(0xe88) * GLOBAL_WORD(0x320)', '(uint64_t)(GLOBAL_HALF(0xe88) + 1) * GLOBAL_WORD(0x320)'),
+    ('matrix fog absolute scale', '-(int32_t)(int16_t)GLOBAL_HALF(0x30c)', '(int32_t)(int16_t)GLOBAL_HALF(0x30c)'),
+    ('matrix fog reduction numerator', '(uint64_t)maximum << 21', '(uint64_t)maximum << 20'),
+    ('matrix fog final ratio', '(uint64_t)WORD(0x41f8) << 16', '(uint64_t)WORD(0x41f8) << 15'),
+    ('matrix selector signed mode', '(int16_t)GLOBAL_HALF(0x2e8) > 0', 'GLOBAL_HALF(0x2e8) > 0'),
+    ('matrix selector plane row', '(int32_t)WORD(0x41cc) > (int32_t)GLOBAL_WORD(0xc98)', '(int32_t)WORD(0x41cc) < (int32_t)GLOBAL_WORD(0xc98)'),
+    ('matrix selector key byte', 'BYTE(0x435c) = GLOBAL[0xca0];', 'BYTE(0x435c) = GLOBAL_HALF(0xca0) != 0;'),
+    ('matrix selector hardware feature bit', '(GLOBAL_HALF(0x1172) & 1)', '(GLOBAL_HALF(0x1172) != 0)'),
+    ('matrix selector hardware enable', '&& GLOBAL_HALF(0x324)', '&& 1'),
+    ('matrix selector dither sign', '(int16_t)GLOBAL_HALF(0xcb4) >= 1', 'GLOBAL_HALF(0xcb4) >= 1'),
+    ('matrix selector dither word', 'GLOBAL_HALF(0xcce) != 0', 'GLOBAL_WORD(0xcce) != 0'),
+    ('matrix selector table index', 'WORD(0x4204 + selector * 4)', 'WORD(0x4204 + (selector ^ 1) * 4)'),
+    ('matrix setup pixels word', 'WORD(0x948) = texture[0];', 'WORD(0x948) = ADDRESS(texture);'),
+    ('matrix far colour', 'BYTE(0x90c) = BYTE(0x1d06);', 'BYTE(0x90c) = BYTE(0x1d07);'),
+    ('matrix far remap frame', 'draw_map_pixels(draw_address(surface, first, y), last - first + 1, POINTER(WORD(0x1d88)));', 'draw_map_span(draw_address(surface, first, y), last - first + 1);'),
+    ('matrix walker stride', 'edge += 10;', 'edge += 5;'),
+    ('matrix walker end rows', '(int32_t)y >= (int32_t)left[1]', '(int32_t)y > (int32_t)left[1]'),
+    ('matrix walker left attributes', 'left[4 + component] += left[7 + component];', 'left[4 + component] -= left[7 + component];'),
+    ('matrix walker right attributes', 'right[4 + component] += right[7 + component];', 'right[4 + component] -= right[7 + component];'),
+    ('matrix final flat row', 'if (y == WORD(0x8cc))', 'if (y != WORD(0x8cc))'),
+    ('matrix flat last coordinate', 'WORD(0x4334) = edge[2] + edge[3];', 'WORD(0x4334) = edge[2];'),
+    ('matrix flat last attributes', 'WORD(0x4344) = edge[6] + edge[9];', 'WORD(0x4344) = edge[6];'),
+    ('matrix closing x', 'high_x = WORD(0x8f8)', 'high_x = WORD(0x900)'),
+    ('matrix closing bounds arithmetic', '(int32_t)WORD(0x8c8) >> 16', '(int32_t)(WORD(0x8c8) >> 16)'),
+]
+mutations += [(*mutation, 'matrix_fills') for mutation in matrix_fill_mutations]
 affine_mutations = [
     ('affine low dividend shift', '(uint32_t)(delta << 7)', '(uint32_t)(delta << 6)'),
     ('affine signed high dividend', 'delta & 0x80000000u ? -0x100000000LL : 0', 'delta & 0x80000000u ? 0 : 0'),
@@ -497,7 +564,7 @@ for name, old, new, suite in mutations:
         continue
     tested += 1
     owner = {'colours': 'palette', 'palette': 'palette', 'drawing': 'draw',
-             'polygons': 'polygon', 'fills': 'fill', 'textured': 'textured', 'affine': 'affine', 'gouraud': 'gouraud', 'blits': 'blit', 'optimized': 'affine', 'perspective': 'perspective', 'discs': 'disc', 'perspective_fill': 'perspective_fill'}.get(suite)
+             'polygons': 'polygon', 'fills': 'fill', 'textured': 'textured', 'affine': 'affine', 'gouraud': 'gouraud', 'blits': 'blit', 'optimized': 'affine', 'perspective': 'perspective', 'discs': 'disc', 'perspective_fill': 'perspective_fill', 'matrix_vertices': 'matrix', 'matrix_fills': 'matrix'}.get(suite)
     if source.count(old) != 1 and owner:
         scope = sections[owner]
         assert scope.count(old) == 1 and source.count(scope) == 1, (name, scope.count(old))

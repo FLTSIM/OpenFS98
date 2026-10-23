@@ -39,7 +39,11 @@ static LONG WINAPI draw_exception(EXCEPTION_POINTERS *exception)
         exception->ExceptionRecord->ExceptionCode == EXCEPTION_INT_OVERFLOW) {
         CONTEXT *context = exception->ContextRecord;
         const uint8_t *instruction = (const uint8_t *)(uintptr_t)context->Eip;
-        if (context->Eip == 0x20732aea || context->Eip == 0x20732af6 ||
+        if (context->Eip == 0x20733426 || context->Eip == 0x20733457 ||
+            context->Eip == 0x20733488 || context->Eip == 0x207334b9 ||
+            context->Eip == 0x2073374c || context->Eip == 0x2073377d ||
+            context->Eip == 0x207337ae || context->Eip == 0x207337df ||
+            context->Eip == 0x20732aea || context->Eip == 0x20732af6 ||
             context->Eip == 0x20787a98 || context->Eip == 0x20787aa4 || context->Eip == 0x207853b7 || context->Eip == 0x207853c3 || context->Eip == 0x207886ec || context->Eip == 0x207886f8) {
             int negative = ((int32_t)context->Edx < 0) != ((int32_t)context->Ebx < 0);
             CHECK(instruction[0] == 0xf7 && instruction[1] == 0xfb);
@@ -73,6 +77,14 @@ static LONG WINAPI draw_exception(EXCEPTION_POINTERS *exception)
             CHECK(instruction[0] == 0xf7 && instruction[1] == 0xfe);
             context->Eax = negative ? 0x80000001u : 0x7fffffffu;
             context->Edx = 0x7fffffffu;
+            context->Eip += 2;
+            draw_div_repairs++;
+            return EXCEPTION_CONTINUE_EXECUTION;
+        }
+        if (context->Eip == 0x20733161 || context->Eip == 0x20733171 ||
+            context->Eip == 0x2073317f || context->Eip == 0x207332a2) {
+            CHECK(instruction[0] == 0xf7 && instruction[1] == 0xf3);
+            context->Eax = context->Edx = 0xffffffffu;
             context->Eip += 2;
             draw_div_repairs++;
             return EXCEPTION_CONTINUE_EXECUTION;

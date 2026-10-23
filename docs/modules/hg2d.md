@@ -4,12 +4,13 @@ In progress. Thirty-three Linkage services now have implementations covering
 texture storage/loading, software palettes, primitives and text, plain polygon
 fills, affine texture rendering (all 32 span selectors), Gouraud shading,
 scanline texture blits, table-shaped discs, perspective vertex submission,
-the matching three-attribute textured closer, and teardown. Some service
+the matching three-attribute textured closer, matrix-derived texture edges,
+far-depth texture fills, and teardown. Some service
 branches remain explicitly unfinished below.
 HG2D uses snake_case and `<stdint.h>`; there is no `types.h` dependency.
 
 HG2D is not in `MODULES` and must not be installed yet. Initialization, the
-alternate +0x44 attribute builder, device-backed palette realization and the
+remaining projective spans, device-backed palette realization and the
 Direct3D services remain incomplete.
 
 The implementation and tests occupy HG2D-specific files. The shared Makefile,
@@ -24,6 +25,8 @@ make -f tools/hg2d.mk hg2ddiff-run SUITE=colours       # finite sweeps
 make -f tools/hg2d.mk hg2ddiff-run N=20000 SUITE=drawing
 make -f tools/hg2d.mk hg2ddiff-run N=20000 SUITE=polygons
 make -f tools/hg2d.mk hg2ddiff-run N=20000 SUITE=fills
+make -f tools/hg2d.mk hg2ddiff-run N=20000 SUITE=matrix_vertices
+make -f tools/hg2d.mk hg2ddiff-run N=20000 SUITE=matrix_fills
 make -f tools/hg2d.mk hg2ddiff-run N=20000 SUITE=textured
 make -f tools/hg2d.mk hg2ddiff-run N=20000 SUITE=affine
 make -f tools/hg2d.mk hg2ddiff-run N=20000 SUITE=optimized
@@ -310,7 +313,7 @@ including when the supplied view aliases that scratch. The dead `lea` of
 record +0x80 is omitted; its destination is overwritten before use.
 
 The conjunction of nonzero low words at GLOBAL +0xc90 and +0x2f4 selects the
-unfinished textured-attribute edge builder and deliberately traps. Either
+matrix-derived texture edge builder, now verified in slice 13. Either
 flag alone, including nonzero upper words, still selects plain edges. Polygon
 close/fill +0x40 and affine textured submission +0x48 are implemented in the
 following slices.
@@ -375,7 +378,9 @@ remap selectors -1, 1, 15, 16, 17, 19, 20 and 31. A rectangle fixture checks
 every canvas byte independently, including untouched padding and rows. Row
 tables retain negative pitch and nonlinear addressing from the drawing suite.
 
-Textured polygons still trap when GLOBAL +0xc90's low word is nonzero. The
+The joint nonzero +0xc90/+0x2f4 path now supports matrix edges and far-depth
+fills (slice 13). Its projective spans and the separate +0xc90-only path
+remain deferred and trap when entered. The
 shadow span's corrupt-stack return for a negative low-word length also
 remains deferred and traps explicitly; these ordered, bounded fixtures do
 not reach it. Closing an exhausted vertex buffer, arbitrary invalid row
@@ -433,9 +438,9 @@ scenarios submits 61 vertices, writing 60 edges up to data +0x884, to prove
 the capacity branch has no effect without overwriting the adjacent scratch.
 Thirty-five new mutations cover these paths and the returned registers.
 
-Textured close/fill +0x4c is implemented in the next slice. The separate attribute builder
-selected by +0x44 when GLOBAL +0xc90 and +0x2f4 are both nonzero remains
-deferred, including through +0x48's plain fallback. Writes beyond the actual
+Textured close/fill +0x4c is implemented in the next slice. The matrix attribute
+builder selected by +0x44 when GLOBAL +0xc90 and +0x2f4 are both nonzero is
+implemented in slice 13; +0x48's plain fallback reaches that same builder. Writes beyond the actual
 60-edge storage, invalid view pointers and exception register contexts remain
 outside this slice. No in-game installation is made.
 
@@ -656,7 +661,102 @@ unchecked lookup arithmetic without depending on different DLL pointer bytes.
 They do not establish behavior for arbitrary invalid surface or view pointers,
 negative rows, or unbounded/malformed scanline walks.
 
+## Slice 13: matrix-derived texture edges, setup and far fill
+
+`src/hg2d/hg2d_matrix.inc` implements the alternate +0x44 edge builder at
+`0x20733386`, setup at `0x20733130`, and the far-depth +0x40 fill. This adds
+branches to the existing services; the Linkage implementation count stays 33.
+Both GLOBAL +0xc90 and +0x2f4 must have nonzero low words for matrix edges.
+Projection, first-vertex state, depth bounds and the existing 0x60-byte
+reservation check remain in the owning +0x44 body. Forty-byte edges allow
+46 submissions before that reservation check rejects further edges. Rejected
+vertices still update count/depth bounds, as for plain vertices.
+
+Edges contain row endpoints, x and x slope, three matrix attributes, then
+three attribute slopes. Both endpoints are normalized from screen coordinates
+by subtracting the shifted view offset and dividing by twice the unshifted
+view scale, with dword wrapping, signed division repair and a signed-word
+clamp. Signed-word x/y and signed-word coefficients at GLOBAL +0xcfa/+0xd00
+form three dot products. Their sum wraps to a dword **before** arithmetic
+shifting by +0xd42 masked to five bits; dword offsets at +0xd0c are added last.
+The low/high normalized positions and high attributes remain in their retail
+scratch fields at +0x4168..+0x418c.
+
+Nonflat x slopes keep the existing signed-complement division. Attribute
+slopes omit the final sign subtraction after XOR, which changes negative
+rounding by one bit. An independent case yields a slope of -1 where adding
+that subtraction would produce zero. Fractional advance uses the complement
+of the initial y fraction. Flat x omits half-pixel rounding; flat attributes
+retain raw deltas. Retail also calculates three clamped slopes for a flat
+edge with denominator 1 before overwriting them; those stores and final raw
+deltas are reproduced. No observable scratch survives from the overwritten
+slope calculations.
+
+Setup computes three fixed-point scale ratios and copies three GLOBAL matrix
+rows into data +0x41c8..+0x41ec. Products are reduced by shifting both dividend
+and divisor, retaining the original truncation and unsigned divide repair.
+Fog scaling uses the absolute signed word at +0x30c and unsigned +0xcd4, with
+paired reduction of two 64-bit quantities. The helper at `0x20787fb9` returns
+only zero/INT32_MAX or carry plus INT32_MAX on this entry path; its multiply
+block has no incoming control-flow path from this call. Consequently the
+far shortcut is selected when the signed minimum depth is INT32_MAX and the
+normal fog gates admit the depth range. The implementation omits that dead
+multiply block and reproduces the actual gates.
+
+The 64 setup indices combine signed mode, matrix-row ordering, fog scaling,
+raw-texel keying, hardware eligibility, and word-sized dithering. Their table
+at +0x4204 contains 24 distinct span targets. C retains the selected retail
+numeric code address at +0x4200. All 64 selections are checked through +0x40
+with an empty starting row, so setup returns before invoking the unfinished
+span bodies. Hardware eligibility is checked using already-uploaded textures
+or the keyed bypass; actual upload/failure fallback remains deferred and
+traps explicitly. The normal texture pointer is published at +0x948. The far
+shortcut returns earlier, retaining the previous texture/key scratch; its
+fixtures supply a null texture handle to verify that it is never dereferenced.
+
+The far target (`0x20784d41`) fills with data +0x1d06. Its walker advances
+40-byte edges and all three attributes, using synthetic final-row records at
++0x4304/+0x432c. It sorts fixed x as unsigned, shifts x arithmetically, and
+uses the primitive's word clipping and height rejection. Existing-pixel
+remapping uses the map selected by +0x40's original preprocessor and restores
+the frame pointer. The public +0x44/+0x40 shims still preserve all seven
+registers; no new return normalization is required.
+
+`matrix_vertices` checks independent flat records, the negative-slope bit,
+wrapping dot-product addition, integer slope saturation, random full-width
+projection/transform inputs, shift counts 0/1/13/31/32/33/63/255, normalization
+repairs, and capacity/rejected submissions. `matrix_fills` checks all selector
+indices, signed/word flag boundaries, zero/overflow divides, the maximum-depth
+boundary, retained far scratch, an independent whole-canvas rectangle, both
+windings, flat/interior records, remapping, negative-x clipping and height
+rejection. A plausible half-record makes an incorrect 20-byte search visible.
+A midrange scale exercises reduction with a nonzero quotient; extreme scales
+alone hid that mutation by making both calculations round to zero.
+
+The ordinary 24 projective span bodies are **not** implemented in this slice.
+They trap if actual drawing reaches them. GLOBAL +0xc90 with a zero +0x2f4
+still uses the deferred plane-span path. This slice verifies matrix-edge
+production, setup selection and far fill; it does not claim near-texture or
+device rendering equivalence. Arbitrary malformed views/surfaces and negative
+scanline intervals remain outside these bounded raster fixtures.
+
 ## Verification and limits
+
+Both matrix suites pass 20,000 scenarios: 1,256,250 vertex operations with
+1,560,888 resumed retail divide repairs, and 4,600,000 setup/fill operations
+with 280,000 repairs. Both have zero differences and zero faults. The complete
+combined regression passes 2,000 scenarios per suite, including the existing
+software/optimized affine, three-attribute and primitive suites, plus all
+263,680 finite colour/layout comparisons.
+
+The matrix slice catches **61 new mutations** at 64 scenarios: 26 matrix-edge
+and 35 setup/fill mutations. The setup family initially missed numerator
+reduction because its large input scales all produced zero quotients. A
+midrange scale closed that fixture gap and the focused recheck catches it.
+The combined evidence has zero unresolved mutations. All 489 current mutation
+anchors pass the separate audit; the preceding 428 mutations were not all
+rerun for this slice.
+
 
 The +0x54 suite passes 20,000 scenarios and 3,900,000 operations, with zero
 differences and zero faults. Its 100,000 retail divide repairs resume and
@@ -670,8 +770,9 @@ pair ordering and aliasing, block/tail counters, the uncapped width, edge
 stride/advancement, flat synthetic records, setup returns and all three
 closing attributes. The flags used only by other affine paths are deliberately
 mutated into this path to prove the fixtures observe their absence. Together
-with the preceding 375, there are 428 defined and detected mutations; the old
-375 were not all rerun for this slice. Their anchors were audited again.
+with the preceding 375, that slice brought the count to 428 defined and
+detected mutations; the old 375 were not all rerun for that slice. Their
+anchors were audited again.
 
 
 The expanded combined regression passes 2,000 scenarios for every selected
@@ -690,6 +791,8 @@ Final large runs for the added rendering services:
 | blits | 20,000 | 2,460,000 | 0 / 0 |
 | perspective | 20,000 | 1,321,250 | 0 / 0 |
 | perspective_fill | 20,000 | 3,900,000 | 0 / 0 |
+| matrix_vertices | 20,000 | 1,256,250 | 0 / 0 |
+| matrix_fills | 20,000 | 4,600,000 | 0 / 0 |
 | discs | 20,000 | 3,100,000 | 0 / 0 |
 
 The affine run includes 80,000 resumed retail divide repairs, Gouraud 359,645,
@@ -704,7 +807,7 @@ vertex, 43 fill, 35 affine vertex, 30 affine rasterizer, 19 optimized spans,
 An interrupted full sweep completed 285 checks; its resumed 90 checks exposed
 two disc coverage gaps. Focused reruns catch both after adding a wide clip
 that distinguishes the final profiles and a negative right endpoint. The
-full union has zero unresolved mutations. All 428 current anchors also pass the
+full union has zero unresolved mutations. All 489 current anchors also pass the
 separate audit; that audit does not count as executing the mutants.
 
 Other gaps found and closed during these slices: horizontal UVs needed an
@@ -769,7 +872,8 @@ were rechecked in the full mutation run; the final drawing family includes
 the two extra zero-count loop breaks. `python3 tools/hg2d_breaks.py` runs all
 families, or its second argument selects `textures`, `colours`, `palette` or
 `drawing`, `polygons`, `fills`, `textured`, `affine`, `optimized`, `gouraud`,
-`blits`, `perspective`, `perspective_fill`, `discs` or `lifecycle`. Only a reported differential mismatch
+`blits`, `perspective`, `perspective_fill`, `matrix_vertices`, `matrix_fills`,
+`discs` or `lifecycle`. Only a reported differential mismatch
 counts as detection; a build
 failure, fixture error or harness crash does not.
 The generated files reproduce exactly when re-extracted from retail.
@@ -816,8 +920,8 @@ PANELS model and its verified harness remain unchanged.
 
 Remaining Linkage services: +0x04 initialization, +0x58/+0x68 palette/resource
 loading, and device-backed +0x9c/+0xa0/+0xa4/+0xbc.
-The alternate textured builder/closer through +0x44/+0x40, device palette
+The remaining projective/plane spans through +0x44/+0x40, device palette
 realization and the negative-length shadow corrupt-stack return also remain
-unfinished. Next is the alternate textured attribute builder/closer, then
-resource/device paths and initialization. The verified subsets do not
+unfinished. Next are the software projective spans selected at data +0x4200,
+then the plane, resource/device and initialization paths. The verified subsets do not
 establish whole-module rendering equivalence or readiness to run in-game.

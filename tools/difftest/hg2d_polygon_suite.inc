@@ -1,4 +1,4 @@
-/* +0x44 projection and plain edges. No rasterizer or textured attributes yet. */
+/* +0x44 projection and plain edges; matrix attributes have their own suite. */
 static uint32_t polygon_record[8], polygon_view[4];
 
 static void polygon_begin(void)

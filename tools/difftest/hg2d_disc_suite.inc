@@ -65,4 +65,16 @@ static void run_discs(void)
     WORD(global, 0x1298) = 1; WORD(global, 0x3c0) = 0x6917;
     disc_submit(47, 32, 64);
 
+    /* A wide clip exposes the difference between the final two profiles;
+     * narrow windows can be completely covered by either clamped selector. */
+    for (index = 0; index < CANVAS_SIZE; index++) canvas[index] = (uint8_t)(index * 13 + scenario * 7);
+    for (index = 0; index < 160; index++) {
+        int32_t row = (int32_t)index - 16;
+        row_storage[index] = ADDRESS(canvas) + (scenario & 1 ? 50000 - row * 320 : 4096 + row * 320);
+    }
+    disc_view[0] = disc_view[1] = 160;
+    WORD(global, 0x1298) = 0;
+    disc_submit(0xffff, 160, 64);
+    disc_submit(0, (uint32_t)-10, 64);
+
 }

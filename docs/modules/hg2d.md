@@ -33,7 +33,9 @@ make -f tools/hg2d.mk hg2ddiff-run N=20000 SUITE=discs
 python3 tools/hg2d_breaks.py
 ```
 
-The standalone makefile builds into `bin/hg2d-diff/`. The replacement is based
+The standalone makefile builds into `bin/hg2d-diff/`. `HG2D_DIR` selects an
+isolated output directory, and `HG2D_TIMEOUT` sets the run timeout in seconds
+(default 7200 for the expanded combined suite). The replacement is based
 at `0x30000000` for testing beside retail; this is a test build, not the final
 replacement DLL. The mutation runner uses its own `bin/hg2d-breaks/` directory
 and leaves both the source and the baseline DLL alone. Nothing is installed
@@ -583,12 +585,52 @@ original load/store order; primitive callers still reproduce their null read.
 
 `discs` covers all profiles, doubled and clamped selectors, upper argument
 words, signed clipping, reversed vertical intervals, zero-width clips,
-solid/stipple/gradient colours, height equality and remapping. An independent
+solid/stipple/gradient colours, height equality and remapping, plus a wide
+viewport that distinguishes selectors 46/47 and a fully negative x interval. An independent
 profile-zero fixture checks each affected and unaffected canvas byte. Inputs
 that allow negative rows through a stippled clip interval can read an invalid
 row pointer; those malformed intervals are outside these bounded fixtures.
 
 ## Verification and limits
+
+The expanded combined regression passes 2,000 scenarios for every selected
+suite, plus 263,680 exhaustive colour/layout comparisons, with zero differences.
+The drawing suite intentionally matches 14,000 retail access faults in this
+run; the new rendering suites have zero faults. The two final disc fixtures
+are also checked in the final standalone 20,000-scenario run below.
+
+Final large runs for the added rendering services:
+
+| Suite | Scenarios | Operations | Differences / faults |
+| --- | ---: | ---: | --- |
+| affine | 20,000 | 3,120,000 | 0 / 0 |
+| optimized | 20,000 | 4,120,000 | 0 / 0 |
+| gouraud | 20,000 | 1,821,250 | 0 / 0 |
+| blits | 20,000 | 2,460,000 | 0 / 0 |
+| perspective | 20,000 | 1,321,250 | 0 / 0 |
+| discs | 20,000 | 3,100,000 | 0 / 0 |
+
+The affine run includes 80,000 resumed retail divide repairs, Gouraud 359,645,
+blits 360,000, and perspective vertices 808,843. Those repairs finish their
+operations and are distinct from unrepaired faults. Teardown's independent
+register/state fixture passes before every suite.
+
+The current sweep and focused fixture rechecks catch all **375 distinct
+mutations**: 19 texture, 18 colour/layout, 27 palette, 50 drawing, 22 plain
+vertex, 43 fill, 35 affine vertex, 30 affine rasterizer, 19 optimized spans,
+25 Gouraud, 18 blit, 43 perspective vertex, 24 disc and 2 teardown mutations.
+An interrupted full sweep completed 285 checks; its resumed 90 checks exposed
+two disc coverage gaps. Focused reruns catch both after adding a wide clip
+that distinguishes the final profiles and a negative right endpoint. The
+full union has zero unresolved mutations. All 375 anchors also pass the
+separate audit; that audit does not count as executing the mutants.
+
+Other gaps found and closed during these slices: horizontal UVs needed an
+x component to expose an incorrect second-coordinate advance; stride checks
+needed plausible records between real records; packed keyed coordinates
+needed distinct sampled texels rather than a constant texture. These are
+fixture corrections, not accepted equivalences.
+
 
 `make -f tools/hg2d.mk hg2ddiff-run N=20000 SUITE=textured` passes 20,000
 scenarios and 1,336,250 operations: zero differences and zero faults, including
@@ -644,10 +686,17 @@ The first three slices' mutation checks caught all 114 distinct breaks, zero unr
 were rechecked in the full mutation run; the final drawing family includes
 the two extra zero-count loop breaks. `python3 tools/hg2d_breaks.py` runs all
 families, or its second argument selects `textures`, `colours`, `palette` or
-`drawing`, `polygons`, `fills` or `textured`. Only a reported differential mismatch
+`drawing`, `polygons`, `fills`, `textured`, `affine`, `optimized`, `gouraud`,
+`blits`, `perspective`, `discs` or `lifecycle`. Only a reported differential mismatch
 counts as detection; a build
 failure, fixture error or harness crash does not.
 The generated files reproduce exactly when re-extracted from retail.
+The mutation runner can audit anchors with `HG2D_AUDIT_ONLY=1`; it reports
+anchor checks separately from executed mutations. `HG2D_BREAKS_DIR` and
+`HG2D_BASELINE_DIR` select isolated test directories. An interrupted sweep
+can continue after an already verified mutation using `HG2D_RESUME_AFTER`
+with its exact name; its report counts only the resumed portion.
+`HG2D_MUTATION_NAME` selects one exact mutation for a focused recheck.
 
 `tools/difftest/hg2ddiff.c` loads two distinct DLLs and checks retail's base,
 both exported tables, and module ids. It restores each side's complete

@@ -422,8 +422,20 @@ if len(sys.argv) > 2 and sys.argv[2] not in {suite for _, _, _, suite in mutatio
     raise SystemExit('Unknown mutation family: ' + sys.argv[2])
 missed = []
 tested = 0
+resume_after = os.environ.get('HG2D_RESUME_AFTER')
+mutation_name = os.environ.get('HG2D_MUTATION_NAME')
+if mutation_name and mutation_name not in {name for name, _, _, _ in mutations}:
+    raise SystemExit('Unknown mutation: ' + mutation_name)
+if resume_after and resume_after not in {name for name, _, _, _ in mutations}:
+    raise SystemExit('Unknown resume mutation: ' + resume_after)
 for name, old, new, suite in mutations:
+    if resume_after:
+        if name == resume_after:
+            resume_after = None
+        continue
     if len(sys.argv) > 2 and sys.argv[2] != suite:
+        continue
+    if mutation_name and mutation_name != name:
         continue
     tested += 1
     owner = {'colours': 'palette', 'palette': 'palette', 'drawing': 'draw',

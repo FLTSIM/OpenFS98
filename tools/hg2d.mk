@@ -3,6 +3,7 @@ CC := i686-w64-mingw32-gcc
 HG2D_DIR := bin/hg2d-diff
 N ?= 20000
 SUITE ?= all
+HG2D_TIMEOUT ?= 7200
 .PHONY: hg2d hg2ddiff-run
 hg2d: $(HG2D_DIR)/HG2D_ours.dll $(HG2D_DIR)/hg2ddiff.exe
 src/hg2d/hg2d_data.inc src/hg2d/hg2d_pointers.inc &: tools/gen_hg2d_data.py orig/Modules/HG2D.DLL
@@ -16,7 +17,7 @@ $(HG2D_DIR)/hg2ddiff.exe: tools/difftest/hg2ddiff.c tools/difftest/hg2d_palette_
 $(HG2D_DIR)/HG2D_retail.dll: orig/Modules/HG2D.DLL | $(HG2D_DIR)
 	cp $< $@
 hg2ddiff-run: hg2d $(HG2D_DIR)/HG2D_retail.dll $(HG2D_DIR)/UTIL_retail.dll
-	cd $(HG2D_DIR) && WINEDEBUG=-all timeout 1800 wine hg2ddiff.exe $(N) $(SUITE)
+	cd $(HG2D_DIR) && WINEDEBUG=-all timeout $(HG2D_TIMEOUT) wine hg2ddiff.exe $(N) $(SUITE)
 
 $(HG2D_DIR)/UTIL_retail.dll: orig/Modules/UTIL.DLL | $(HG2D_DIR)
 	cp $< $@

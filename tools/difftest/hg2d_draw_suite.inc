@@ -10,7 +10,7 @@ static volatile uint32_t draw_active;
 static uint32_t draw_faults, draw_div_repairs, draw_calls[42];
 uint32_t draw_recover_sp, draw_entry_function;
 uint32_t draw_registers[7];
-static uint32_t register_states[256][7];
+static uint32_t register_states[STATE_CAPACITY][7];
 static uint32_t draw_ecx_pointer;
 void draw_resume(void);
 uint32_t invoke_draw(uint32_t function, const uint32_t *arguments, uint32_t count, uint32_t entry_eax);
@@ -39,7 +39,11 @@ static LONG WINAPI draw_exception(EXCEPTION_POINTERS *exception)
         exception->ExceptionRecord->ExceptionCode == EXCEPTION_INT_OVERFLOW) {
         CONTEXT *context = exception->ContextRecord;
         const uint8_t *instruction = (const uint8_t *)(uintptr_t)context->Eip;
-        if (context->Eip == 0x20733c3a || context->Eip == 0x20733cd0 ||
+        if (context->Eip == 0x2073aefa || context->Eip == 0x2073af90 ||
+            context->Eip == 0x2073b0fb || context->Eip == 0x2073bbed ||
+            context->Eip == 0x2073e269 || context->Eip == 0x2073e2ff ||
+            context->Eip == 0x2073e46a || context->Eip == 0x2073ef5c ||
+            context->Eip == 0x20733c3a || context->Eip == 0x20733cd0 ||
             context->Eip == 0x20733e3b || context->Eip == 0x20734a66 ||
             context->Eip == 0x2073759b || context->Eip == 0x20737631 ||
             context->Eip == 0x2073779c || context->Eip == 0x207383c6 ||
@@ -59,6 +63,10 @@ static LONG WINAPI draw_exception(EXCEPTION_POINTERS *exception)
         }
         {
             static const uint32_t affine_divides[] = {
+                0x2073b041, 0x2073b05b, 0x2073b075, 0x2073b626, 0x2073b639,
+                0x2073bb33, 0x2073bb4d, 0x2073bb67, 0x2073bf08, 0x2073bf1b,
+                0x2073e3b0, 0x2073e3ca, 0x2073e3e4, 0x2073e995, 0x2073e9a8,
+                0x2073eea2, 0x2073eebc, 0x2073eed6, 0x2073f277, 0x2073f28a,
                 0x20733d81, 0x20733d9b, 0x20733db5, 0x20734597, 0x207345aa,
                 0x207349ac, 0x207349c6, 0x207349e0, 0x20734ea2, 0x20734eb5,
                 0x207376e2, 0x207376fc, 0x20737716, 0x20737ef7, 0x20737f0a,

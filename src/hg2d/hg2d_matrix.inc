@@ -132,7 +132,8 @@ static void matrix_span(uint32_t *left, uint32_t *right, uint32_t y, int flat)
 {
     uint32_t first = left[2], last = right[2], temporary;
     void *surface = POINTER(WORD(0x8c4));
-    if (WORD(0x4200) == 0x20733bbb || WORD(0x4200) == 0x2073751e) {
+    if (WORD(0x4200) == 0x20733bbb || WORD(0x4200) == 0x2073751e ||
+        WORD(0x4200) == 0x2073ae7b || WORD(0x4200) == 0x2073e1ec) {
         projective_span(left, right, y, flat);
         return;
     }

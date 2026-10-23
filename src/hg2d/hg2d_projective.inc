@@ -1,5 +1,5 @@
 /* Basic doubled-pixel software spans: selectors 0/3 (right to left) and
- * 1/2 (left to right), 0x20733bbb / 0x2073751e. No fog, keying or dithering. */
+ * 1/2 (left to right), plus raw keyed variants. No fog or dithering. */
 #include "hg2d_projective_tables.inc"
 
 uint32_t hg2d_polygon_entry_sp;
@@ -45,13 +45,25 @@ static uint8_t projective_sample(uint32_t *u_fraction, uint32_t *v_fraction,
     return value;
 }
 
-static void projective_pixels(uint32_t pixel_address, uint32_t count, uint32_t start, int direction, int tail)
+static void projective_pixels(uint32_t pixel_address, uint32_t count, uint32_t start, int direction, int tail, int keyed)
 {
     uint32_t u_fraction = WORD(start) << 16, v_fraction = WORD(start + 4) << 16;
     uint8_t u = (uint8_t)(WORD(start) >> 16), v = (uint8_t)(WORD(start + 4) >> 16);
     uint8_t u_step = (uint8_t)(WORD(0x41a8) >> 16), v_step = (uint8_t)(WORD(0x41ac) >> 16);
     uint32_t remaining = count;
     WORD(0x41a8) <<= 16; WORD(0x41ac) <<= 16;
+    /* Keyed blocks and tails store each sample before reading the next one. */
+    if (keyed) {
+        while (remaining--) {
+            uint8_t value = projective_sample(&u_fraction, &v_fraction, &u, &v, u_step, v_step);
+            if (value >= BYTE(0x435c)) {
+                uint8_t *pixel = POINTER(pixel_address);
+                pixel[0] = value; pixel[1] = value;
+            }
+            pixel_address += direction * 2;
+        }
+        return;
+    }
     if (!tail && remaining && ((pixel_address & 2) != 0) == (direction > 0)) {
         uint8_t value = projective_sample(&u_fraction, &v_fraction, &u, &v, u_step, v_step);
         uint8_t *pixel = POINTER(pixel_address);
@@ -83,6 +95,8 @@ static void projective_span(uint32_t *left, uint32_t *right, uint32_t y, int fla
     uint32_t component, count, right_factor, left_factor, minimum, maximum, ratio;
     uint32_t pixel_address, shift, block, remaining;
     int forward = WORD(0x4200) == 0x2073751e;
+    int keyed = WORD(0x4200) == 0x2073ae7b || WORD(0x4200) == 0x2073e1ec;
+    forward |= WORD(0x4200) == 0x2073e1ec;
     int direction = forward ? 1 : -1;
     if (first_x > last_x) {
         uint32_t *swap = left; left = right; right = swap;
@@ -114,12 +128,13 @@ static void projective_span(uint32_t *left, uint32_t *right, uint32_t y, int fla
         WORD(0x41a8) = (uint32_t)((int32_t)(WORD(0x4190) - WORD(0x4198)) >> shift);
         WORD(0x41ac) = (uint32_t)((int32_t)(WORD(0x4194) - WORD(0x419c)) >> shift);
         WORD(0x4160) = remaining;
-        projective_pixels(pixel_address, block, 0x4198, direction, 0);
+        projective_pixels(pixel_address, block, 0x4198, direction, 0, keyed);
         pixel_address += direction * block * 2; remaining -= block;
     }
     if ((int32_t)remaining <= 0) return;
     WORD(0x41a8) = projective_divide((int32_t)(WORD(0x41a0) - WORD(0x4190)), remaining);
     WORD(0x41ac) = projective_divide((int32_t)(WORD(0x41a4) - WORD(0x4194)), remaining);
-    WORD(0x4354) = projective_tails[forward][shift == 4][remaining];
-    projective_pixels(pixel_address, remaining, 0x4190, direction, 1);
+    WORD(0x4354) = keyed ? projective_key_tails[forward][shift == 4][remaining] :
+                         projective_tails[forward][shift == 4][remaining];
+    projective_pixels(pixel_address, remaining, 0x4190, direction, 1, keyed);
 }

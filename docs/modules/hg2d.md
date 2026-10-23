@@ -5,7 +5,7 @@ texture storage/loading, software palettes, primitives and text, plain polygon
 fills, affine texture rendering (all 32 span selectors), Gouraud shading,
 scanline texture blits, table-shaped discs, perspective vertex submission,
 the matching three-attribute textured closer, matrix-derived texture edges,
-far-depth texture fills, basic doubled-pixel projective spans, and teardown.
+far-depth texture fills, basic and keyed doubled-pixel projective spans, and teardown.
 Some service branches remain explicitly unfinished below.
 HG2D uses snake_case and `<stdint.h>`; there is no `types.h` dependency.
 
@@ -28,6 +28,7 @@ make -f tools/hg2d.mk hg2ddiff-run N=20000 SUITE=fills
 make -f tools/hg2d.mk hg2ddiff-run N=20000 SUITE=matrix_vertices
 make -f tools/hg2d.mk hg2ddiff-run N=20000 SUITE=matrix_fills
 make -f tools/hg2d.mk hg2ddiff-run N=20000 SUITE=projective
+make -f tools/hg2d.mk hg2ddiff-run N=20000 SUITE=projective_keyed
 make -f tools/hg2d.mk hg2ddiff-run N=20000 SUITE=textured
 make -f tools/hg2d.mk hg2ddiff-run N=20000 SUITE=affine
 make -f tools/hg2d.mk hg2ddiff-run N=20000 SUITE=optimized
@@ -783,7 +784,54 @@ flat/point/crossing geometry, signed factors, random matrix coefficients,
 clamp order, division repairs, aliasing and independent whole-canvas fills.
 Fog, raw keying, dithering and hardware rendering remain outside this slice.
 
+## Slice 15: raw keyed projective spans
+
+The same projective implementation now also dispatches `0x2073ae7b` and
+`0x2073e1ec`. Selectors 8/11 draw right to left and 9/10 draw left to right;
+24..27 select the same software targets even when hardware eligibility is set.
+The existing keyed setup bypasses upload, including for a texture without the
+hardware-resident flag. Four of the 24 ordinary projective targets are now
+implemented. The Linkage service count remains 33.
+
+A raw unsigned texel below BYTE +0x435c leaves both destination pixels alone.
+Equality draws. Coordinates and destination position advance for skipped
+texels too. Keyed full blocks and tails read one texel, conditionally store its
+doubled pair, then read the next texel. They have no alignment prefix or paired
+sample prefetch. Canvas/texture aliasing therefore exposes a different order
+from the basic full blocks. Both paths retain the same projection, clamp,
+16/32-sample correction, saved stack and scratch semantics. Four additional
+tail-address tables are extracted from retail data embedded in `.text`.
+
+`projective_keyed` reuses the projection, geometry, signed division, clamp,
+threshold and alias fixtures from `projective`, then independently checks
+whole-canvas fills for raw texels immediately below, equal to and above keys
+1/128/255 and a scenario-dependent key in 1..255. Key 255 also checks wrapped
+zero texels. Both directions cover full blocks and every tail length. Seeded
+nonzero bytes above the key verify byte-sized reads/stores, and alternate
+scenarios exercise the hardware-eligible selector aliases without uploading.
+Per-scenario snapshots grow from 256 to 512 operations for the expanded
+337-operation script; all image, GLOBAL, canvas and register comparisons remain.
+Fog, dithering and actual device rendering are still deferred.
+
 ## Verification and limits
+
+The keyed suite passes **20,000 scenarios / 6,740,000 operations**, with zero
+differences and zero faults. All 320,000 retail host divide repairs resume and
+complete. Comparisons include literal saved ESP and tail addresses, the full
+scratch image, GLOBAL, guarded canvas and all seven drawing registers.
+
+The complete combined regression passes 2,000 scenarios per suite with the
+keyed renderer enabled: 674,000 keyed operations and 434,000 basic projective
+operations have zero differences and zero faults, alongside all existing
+matrix, affine, three-attribute, palette and primitive suites.
+
+The keyed slice catches **19 new mutations** at 64 scenarios, with zero
+unresolved mutations. They cover target/direction selection, unsigned byte key
+comparison and equality, both destination bytes, skipped coordinate advance,
+immediate sample/store order, block/tail gates, and the keyed tail-table
+family/direction/size/count. All **558** mutation anchors pass the separate
+audit. The preceding 50 basic-projective mutations were also rerun and all
+caught; the other 489 mutants were not all rerun for this slice.
 
 The projective suite passes **20,000 scenarios / 4,340,000 operations**, with
 zero differences and zero faults. Its 320,000 resumed retail divide repairs
@@ -981,6 +1029,6 @@ loading, and device-backed +0x9c/+0xa0/+0xa4/+0xbc.
 The remaining projective/plane spans through +0x44/+0x40, device palette
 realization and the negative-length shadow corrupt-stack return also remain
 unfinished. Next are the remaining software projective spans selected at data
-+0x4200 (keying, fog and dithering), then the plane, resource/device and
++0x4200 (fog and dithering), then the plane, resource/device and
 initialization paths. The verified subsets do not
 establish whole-module rendering equivalence or readiness to run in-game.

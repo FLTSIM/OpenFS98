@@ -63,15 +63,20 @@ print('HG2D: %#x data bytes, %d data pointers' % (size, len(pointers)))
 _, text_rva, _, text_raw = sections['.text']
 with open('src/hg2d/hg2d_projective_tables.inc', 'w') as output:
     output.write(header)
-    output.write('static const uint32_t projective_tails[2][2][32] = {\n')
-    for pair in ((0x2073460b, 0x20734f16), (0x20737f6b, 0x20738875)):
-        output.write('    {\n')
-        for address in pair:
-            values = struct.unpack_from('<32I', blob, text_raw + address - 0x20730000 - text_rva)
-            assert all(0x20731000 <= value < 0x20790266 for value in values)
-            output.write('        {\n')
-            for index in range(0, 32, 4):
-                output.write('            ' + ', '.join('0x%08xu' % value for value in values[index:index+4]) + ',\n')
-            output.write('        },\n')
-        output.write('    },\n')
-    output.write('};\n')
+    tables = (
+        ('projective_tails', ((0x2073460b, 0x20734f16), (0x20737f6b, 0x20738875))),
+        ('projective_key_tails', ((0x2073b69a, 0x2073bf7c), (0x2073ea09, 0x2073f2eb))),
+    )
+    for name, pairs in tables:
+        output.write('static const uint32_t %s[2][2][32] = {\n' % name)
+        for pair in pairs:
+            output.write('    {\n')
+            for address in pair:
+                values = struct.unpack_from('<32I', blob, text_raw + address - 0x20730000 - text_rva)
+                assert all(0x20731000 <= value < 0x20790266 for value in values)
+                output.write('        {\n')
+                for index in range(0, 32, 4):
+                    output.write('            ' + ', '.join('0x%08xu' % value for value in values[index:index+4]) + ',\n')
+                output.write('        },\n')
+            output.write('    },\n')
+        output.write('};\n')

@@ -455,11 +455,44 @@ projective_mutations = [
     ('projective zero tail return', 'if ((int32_t)remaining <= 0) return;', 'if ((int32_t)remaining < 0) return;'),
     ('projective tail u division', 'projective_divide((int32_t)(WORD(0x41a0) - WORD(0x4190)), remaining)', 'projective_divide((int32_t)(WORD(0x41a0) - WORD(0x4190)), remaining + 1)'),
     ('projective tail target direction', 'projective_tails[forward]', 'projective_tails[!forward]'),
-    ('projective tail target block', '[shift == 4][remaining]', '[shift != 4][remaining]'),
+    ('projective tail target block', 'projective_tails[forward][shift == 4][remaining]', 'projective_tails[forward][shift != 4][remaining]'),
     ('projective height clipping', 'int forward = WORD(0x4200) == 0x2073751e;', 'int forward = WORD(0x4200) == 0x2073751e; if (y >= SURFACE_WORD(POINTER(WORD(0x8c4)), 8)) return;'),
     ('projective unwanted pixel remap', 'return value;\n}\n\nstatic void projective_pixels', 'if (GLOBAL_WORD(0x1298)) value = *(uint8_t *)POINTER(WORD(0x1d88) + value); return value;\n}\n\nstatic void projective_pixels'),
 ]
 mutations += [(*mutation, 'projective') for mutation in projective_mutations]
+keyed_loop = 'if (keyed) {\n        while (remaining--) {'
+keyed_batch = keyed_loop + """
+            if (remaining) {
+                uint8_t first = projective_sample(&u_fraction, &v_fraction, &u, &v, u_step, v_step);
+                uint8_t second = projective_sample(&u_fraction, &v_fraction, &u, &v, u_step, v_step);
+                uint8_t *pixel = POINTER(pixel_address);
+                if (first >= BYTE(0x435c)) pixel[0] = pixel[1] = first;
+                pixel = POINTER(pixel_address + direction * 2);
+                if (second >= BYTE(0x435c)) pixel[0] = pixel[1] = second;
+                pixel_address += direction * 4; remaining--; continue;
+            }"""
+keyed_mutations = [
+    ('keyed reverse target', 'keyed = WORD(0x4200) == 0x2073ae7b', 'keyed = WORD(0x4200) == 0x20733bbb'),
+    ('keyed forward target', '|| WORD(0x4200) == 0x2073e1ec;', '|| WORD(0x4200) == 0x2073751e;'),
+    ('keyed traversal direction', 'forward |= WORD(0x4200) == 0x2073e1ec;', 'forward |= WORD(0x4200) == 0x2073ae7b;'),
+    ('keyed equality', 'if (value >= BYTE(0x435c))', 'if (value > BYTE(0x435c))'),
+    ('keyed unsigned comparison', 'if (value >= BYTE(0x435c))', 'if ((int8_t)value >= (int8_t)BYTE(0x435c))'),
+    ('keyed threshold direction', 'if (value >= BYTE(0x435c))', 'if (value <= BYTE(0x435c))'),
+    ('keyed threshold address', 'if (value >= BYTE(0x435c))', 'if (value >= BYTE(0x435d))'),
+    ('keyed threshold width', 'if (value >= BYTE(0x435c))', 'if (value >= HALF(0x435c))'),
+    ('keyed first pixel', 'pixel[0] = value; pixel[1] = value;\n            }', 'pixel[1] = value;\n            }'),
+    ('keyed second pixel', 'pixel[0] = value; pixel[1] = value;\n            }', 'pixel[0] = value;\n            }'),
+    ('keyed destination spacing', 'pixel_address += direction * 2;\n        }\n        return;', 'pixel_address += direction;\n        }\n        return;'),
+    ('keyed skipped coordinate advance', 'uint64_t sum = (uint64_t)*u_fraction + WORD(0x41a8);', 'if ((WORD(0x4200) == 0x2073ae7b || WORD(0x4200) == 0x2073e1ec) && value < BYTE(0x435c)) return value; uint64_t sum = (uint64_t)*u_fraction + WORD(0x41a8);'),
+    ('keyed immediate sample store', keyed_loop, keyed_batch),
+    ('keyed full block gate', 'projective_pixels(pixel_address, block, 0x4198, direction, 0, keyed);', 'projective_pixels(pixel_address, block, 0x4198, direction, 0, 0);'),
+    ('keyed tail gate', 'projective_pixels(pixel_address, remaining, 0x4190, direction, 1, keyed);', 'projective_pixels(pixel_address, remaining, 0x4190, direction, 1, 0);'),
+    ('keyed tail direction', 'projective_key_tails[forward]', 'projective_key_tails[!forward]'),
+    ('keyed tail block', 'projective_key_tails[forward][shift == 4]', 'projective_key_tails[forward][shift != 4]'),
+    ('keyed tail count', 'projective_key_tails[forward][shift == 4][remaining]', 'projective_key_tails[forward][shift == 4][(remaining + 1) & 31]'),
+    ('keyed tail family', 'keyed ? projective_key_tails', 'keyed ? projective_tails'),
+]
+mutations += [(*mutation, 'projective_keyed') for mutation in keyed_mutations]
 affine_mutations = [
     ('affine low dividend shift', '(uint32_t)(delta << 7)', '(uint32_t)(delta << 6)'),
     ('affine signed high dividend', 'delta & 0x80000000u ? -0x100000000LL : 0', 'delta & 0x80000000u ? 0 : 0'),
@@ -617,7 +650,7 @@ for name, old, new, suite in mutations:
         continue
     tested += 1
     owner = {'colours': 'palette', 'palette': 'palette', 'drawing': 'draw',
-             'polygons': 'polygon', 'fills': 'fill', 'textured': 'textured', 'affine': 'affine', 'gouraud': 'gouraud', 'blits': 'blit', 'optimized': 'affine', 'perspective': 'perspective', 'discs': 'disc', 'perspective_fill': 'perspective_fill', 'matrix_vertices': 'matrix', 'matrix_fills': 'matrix', 'projective': 'projective'}.get(suite)
+             'polygons': 'polygon', 'fills': 'fill', 'textured': 'textured', 'affine': 'affine', 'gouraud': 'gouraud', 'blits': 'blit', 'optimized': 'affine', 'perspective': 'perspective', 'discs': 'disc', 'perspective_fill': 'perspective_fill', 'matrix_vertices': 'matrix', 'matrix_fills': 'matrix', 'projective': 'projective', 'projective_keyed': 'projective'}.get(suite)
     if source.count(old) != 1 and owner:
         scope = sections[owner]
         assert scope.count(old) == 1 and source.count(scope) == 1, (name, scope.count(old))

@@ -1,4 +1,6 @@
 /* Basic software projective spans through public +0x44/+0x40. */
+static int projective_key_mode;
+
 static void projective_case(uint32_t selector, int sharp)
 {
     int negative = (selector & 2) != 0;
@@ -22,6 +24,12 @@ static void projective_case(uint32_t selector, int sharp)
     WORD(global, 0xcac) = WORD(global, 0xcb0) = 0xffffff;
     GLOBAL_HALF(0x2e8) = selector & 1;
     GLOBAL_HALF(0xca0) = 0; GLOBAL_HALF(0xcb4) = 0; GLOBAL_HALF(0xcce) = 0;
+    if (projective_key_mode) {
+        images[side][0x435d] = 0xa5;
+        WORD(global, 0xca0) = 0xaabbcc01;
+        GLOBAL_HALF(0xcb4) = scenario & 1 ? 2 : 0;
+        GLOBAL_HALF(0x1172) = GLOBAL_HALF(0x324) = 1;
+    }
 }
 
 static void projective_point(uint32_t x, uint32_t y)
@@ -34,7 +42,10 @@ static void projective_finish(void)
     polygon_compare = WORD(global, 0x1298) ? 2 : 1;
     drawing(0x40, draw_surface(), 0, 0, 0, 0, 0);
     CHECK(!draw_fault_code);
-    CHECK(WORD(images[side], 0x4200) == 0x20733bbb || WORD(images[side], 0x4200) == 0x2073751e);
+    if (projective_key_mode)
+        CHECK(WORD(images[side], 0x4200) == 0x2073ae7b || WORD(images[side], 0x4200) == 0x2073e1ec);
+    else
+        CHECK(WORD(images[side], 0x4200) == 0x20733bbb || WORD(images[side], 0x4200) == 0x2073751e);
 }
 
 static void run_projective(void)
@@ -173,4 +184,33 @@ static void run_projective(void)
         projective_finish();
     }
     polygon_compare = 0;
+}
+
+static void run_projective_keyed(void)
+{
+    uint32_t selector, level, boundary, x, y, last_x;
+    uint8_t key, value;
+    projective_key_mode = 1;
+    run_projective();
+    /* Independently check skipped, equal and greater raw texels across both
+     * directions, full blocks and every possible tail residue. */
+    for (selector = 0; selector < 2; selector++) for (level = 0; level < 4; level++) {
+        key = level == 0 ? 1 : level == 1 ? 128 : level == 2 ? 255 : 1 + scenario % 255;
+        for (boundary = 0; boundary < 3; boundary++) {
+            projective_case(selector, scenario & 1);
+            global[0xca0] = key;
+            value = (uint8_t)(key + boundary - 1);
+            memset(matrix_pixels, value, sizeof matrix_pixels);
+            memcpy(fill_expected, canvas, CANVAS_SIZE);
+            last_x = 4 + 2 * (scenario % 81);
+            projective_point(4, 12); projective_point(last_x, 12);
+            projective_point(last_x, 13); projective_point(4, 13);
+            projective_finish();
+            if (value >= key)
+                for (y = 12; y <= 13; y++) for (x = 4; x <= last_x + 1; x++)
+                    fill_expected[row_storage[16 + y] - ADDRESS(canvas) + x] = value;
+            CHECK(!memcmp(canvas, fill_expected, CANVAS_SIZE));
+        }
+    }
+    projective_key_mode = 0;
 }

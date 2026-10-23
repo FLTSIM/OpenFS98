@@ -18,9 +18,10 @@
 #define CHECK(condition) do { if (!(condition)) { printf("fixture failed at %s:%d, scenario %u side %u step %u\n", __FILE__, __LINE__, scenario, side, step); exit(2); } } while (0)
 
 static uint8_t *images[2], initial[2][DATA_SIZE];
-static uint8_t states[256][DATA_SIZE], normalized[DATA_SIZE];
-static uint32_t results[256], events[256], pixel_addresses[256];
-static uint8_t pixel_states[256][0x10000], saved_arena[220][0x10000], saved_supplied[0x10000];
+#define STATE_CAPACITY 512
+static uint8_t states[STATE_CAPACITY][DATA_SIZE], normalized[DATA_SIZE];
+static uint32_t results[STATE_CAPACITY], events[STATE_CAPACITY], pixel_addresses[STATE_CAPACITY];
+static uint8_t pixel_states[STATE_CAPACITY][0x10000], saved_arena[220][0x10000], saved_supplied[0x10000];
 static uint8_t *touched;
 static uint8_t arena[220][0x10000], supplied[0x10000];
 static uint32_t side, step, scenario, random_state, block_count, alloc_count;
@@ -28,8 +29,8 @@ static uint32_t fail_every, load_success, event_hash, operations;
 static uint32_t allocations, failures, loads, releases, full_pools, unaligned;
 static uint32_t polygon_compare, shaded_map_compare;
 static uint8_t normalized_global[0x2000];
-static uint8_t global[0x2000], global_states[256][0x2000];
-static uint32_t carries[256], check_carry, palette_calls, notifications;
+static uint8_t global[0x2000], global_states[STATE_CAPACITY][0x2000];
+static uint32_t carries[STATE_CAPACITY], check_carry, palette_calls, notifications;
 static uint32_t layout_entry[2], util_linkage;
 uint32_t returned_flags;
 static const char *active_suite;
@@ -124,7 +125,7 @@ static uint32_t normalize_result(uint32_t result)
 static void compare(uint32_t result)
 {
     uint32_t index;
-    CHECK(step < 256);
+    CHECK(step < STATE_CAPACITY);
     memcpy(normalized, images[side], DATA_SIZE);
 /* The shaded-span fixture deliberately fills its entire 32-row lookup
      * window. Two normally relocated words in its upper half are then bytes,
@@ -319,7 +320,7 @@ int main(int argc, char **argv)
     uint32_t count = argc > 1 ? (uint32_t)strtoul(argv[1], NULL, 0) : 20000;
     HMODULE modules[2], util;
     const char *suite = argc > 2 ? argv[2] : "all";
-    CHECK(!strcmp(suite, "all") || !strcmp(suite, "textures") || !strcmp(suite, "palette") || !strcmp(suite, "colours") || !strcmp(suite, "drawing") || !strcmp(suite, "polygons") || !strcmp(suite, "fills") || !strcmp(suite, "textured") || !strcmp(suite, "affine") || !strcmp(suite, "gouraud") || !strcmp(suite, "blits") || !strcmp(suite, "lifecycle") || !strcmp(suite, "optimized") || !strcmp(suite, "perspective") || !strcmp(suite, "discs") || !strcmp(suite, "perspective_fill") || !strcmp(suite, "matrix_vertices") || !strcmp(suite, "matrix_fills") || !strcmp(suite, "projective"));
+    CHECK(!strcmp(suite, "all") || !strcmp(suite, "textures") || !strcmp(suite, "palette") || !strcmp(suite, "colours") || !strcmp(suite, "drawing") || !strcmp(suite, "polygons") || !strcmp(suite, "fills") || !strcmp(suite, "textured") || !strcmp(suite, "affine") || !strcmp(suite, "gouraud") || !strcmp(suite, "blits") || !strcmp(suite, "lifecycle") || !strcmp(suite, "optimized") || !strcmp(suite, "perspective") || !strcmp(suite, "discs") || !strcmp(suite, "perspective_fill") || !strcmp(suite, "matrix_vertices") || !strcmp(suite, "matrix_fills") || !strcmp(suite, "projective") || !strcmp(suite, "projective_keyed"));
     SetUnhandledExceptionFilter(fault);
     CHECK(AddVectoredExceptionHandler(1, draw_exception));
     {
@@ -430,6 +431,15 @@ int main(int argc, char **argv)
         for (scenario = 0; scenario < count; scenario++)
             for (side = 0; side < 2; side++) run_projective();
         printf("hg2ddiff projective: %u scenarios, %u operations, %u faults, 0 differ\n",
+               count, operations / 2, draw_faults / 2);
+        printf("retail host divide repairs: %u\n", draw_div_repairs);
+    }
+    if (!strcmp(suite, "all") || !strcmp(suite, "projective_keyed")) {
+        active_suite = "projective_keyed";
+        operations = draw_div_repairs = draw_faults = 0;
+        for (scenario = 0; scenario < count; scenario++)
+            for (side = 0; side < 2; side++) run_projective_keyed();
+        printf("hg2ddiff projective_keyed: %u scenarios, %u operations, %u faults, 0 differ\n",
                count, operations / 2, draw_faults / 2);
         printf("retail host divide repairs: %u\n", draw_div_repairs);
     }

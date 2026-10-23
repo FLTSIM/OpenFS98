@@ -13,7 +13,7 @@ import sys
 root = Path(__file__).resolve().parent.parent
 source = (root / 'src/hg2d/hg2d.c').read_text()
 sections = {}
-for section in ('palette', 'draw', 'polygon', 'fill', 'textured', 'perspective', 'affine', 'gouraud', 'blit', 'disc'):
+for section in ('palette', 'draw', 'polygon', 'fill', 'textured', 'perspective', 'perspective_fill', 'affine', 'gouraud', 'blit', 'disc'):
     sections[section] = (root / ('src/hg2d/hg2d_%s.inc' % section)).read_text()
     source = source.replace('#include "hg2d_%s.inc"' % section, sections[section])
 build = root / os.environ.get('HG2D_BREAKS_DIR', 'bin/hg2d-breaks')
@@ -282,6 +282,64 @@ perspective_mutations += [
     ('perspective third advance', 'edge[8] += adjustment;', 'edge[8] -= adjustment;'),
 ]
 mutations += [(*mutation, 'perspective') for mutation in perspective_mutations]
+perspective_fill_mutations = [
+    ('shaded texel channel order', '(((first + bias) >> 24) << 8) | ((second + bias) >> 24)', '(((second + bias) >> 24) << 8) | ((first + bias) >> 24)'),
+    ('shaded first phase advance', '*one += WORD(0x4dc4);', '*one -= WORD(0x4dc4);'),
+    ('shaded second phase advance', '*two += WORD(0x4dc4);', '*two -= WORD(0x4dc4);'),
+    ('shaded lookup phase bits', '(phase >> 19) & 0xff00', '(phase >> 18) & 0xff00'),
+    ('shaded lookup column', '((phase >> 19) & 0xff00) | value', '((phase >> 19) & 0xff00) | (uint8_t)(value + 1)'),
+    ('shaded lookup table base', 'value = BYTE(0x4e00 + index);', 'value = BYTE(0x4e01 + index);'),
+    ('shaded distance row', '(BYTE(0x100) << 8) + value', '((BYTE(0x100) ^ 1) << 8) + value'),
+    ('shaded pair first coordinate advance', 'perspective_sample(*first, *second, bias, one, two, 0, 0);\n    *first += WORD(0x4dd0);', 'perspective_sample(*first, *second, bias, one, two, 0, 0);\n    *first -= WORD(0x4dd0);'),
+    ('shaded pair second coordinate advance', '*second += WORD(0x4dd4);\n    perspective_sample(*first', '*second -= WORD(0x4dd4);\n    perspective_sample(*first'),
+    ('shaded pair second dither', 'bias + (HALF(0x944) ? 0x800000 : 0)', 'bias + (HALF(0x944) ? 0x400000 : 0)'),
+    ('shaded pair store order', 'pixel[0] = (uint8_t)*one; pixel[1] = (uint8_t)(*one >> 8);', 'pixel[1] = (uint8_t)*one; pixel[0] = (uint8_t)(*one >> 8);'),
+    ('shaded pair read ordering', 'perspective_sample(*first, *second, bias, one, two, 0, 0);', 'perspective_sample(*first, *second, bias, one, two, 0, 0); pixel[0] = (uint8_t)*one;'),
+    ('shaded inclusive width', 'count = last_x - first_x + 1;', 'count = last_x - first_x + 2;'),
+    ('shaded software width cap', 'WORD(0x4ddc) = count;', 'WORD(0x4ddc) = count; if (count > 1500) return;'),
+    ('shaded third slope doubling', '(int32_t)(right[8] - left[8]) / count) * 2)', '(int32_t)(right[8] - left[8]) / count) * 1)'),
+    ('shaded third slope low word', '& 0xffff0000u;', '& 0xffffffffu;'),
+    ('shaded third base scratch', 'WORD(0x4dc8) = left[8];', 'WORD(0x4dc8) = right[8];'),
+    ('shaded uv first slope', 'affine_divide(right[4] - left[4], count)', 'affine_divide(left[4] - right[4], count)'),
+    ('shaded uv second slope', 'affine_divide(right[5] - left[5], count)', 'affine_divide(left[5] - right[5], count)'),
+    ('shaded first coordinate shift', 'first = left[4] << 8;', 'first = left[4] << 7;'),
+    ('shaded second coordinate shift', 'second = left[5] << 8;', 'second = left[5] << 7;'),
+    ('shaded phase bias', 'left[8] - 0x06000000u', 'left[8] - 0x04000000u'),
+    ('shaded first phase row', 'WORD(0x4de0 + (y & 3) * 4)', 'WORD(0x4de0 + (y & 1) * 4)'),
+    ('shaded second phase row', 'WORD(0x4df0 + (y & 3) * 4)', 'WORD(0x4df0 + (y & 1) * 4)'),
+    ('shaded first phase predecrement', 'one += WORD(0x4de0 + (y & 3) * 4) - WORD(0x4dcc);', 'one += WORD(0x4de0 + (y & 3) * 4);'),
+    ('shaded second phase predecrement', 'two = one + WORD(0x4df0 + (y & 3) * 4) - WORD(0x4dcc);', 'two = one + WORD(0x4df0 + (y & 3) * 4);'),
+    ('shaded dither row parity', 'HALF(0x944) && !(y & 1)', 'HALF(0x944) && (y & 1)'),
+    ('shaded odd prefix phase', '&one, &two, 1, 0);', '&one, &two, 0, 0);'),
+    ('shaded block pointer advance', 'WORD(0x4dd8) += 8;', 'WORD(0x4dd8) += 4;'),
+    ('shaded block count', 'WORD(0x4ddc) -= 8;', 'WORD(0x4ddc) -= 4;'),
+    ('shaded tail singleton equality', 'if ((int32_t)WORD(0x4ddc) >= 0)', 'if ((int32_t)WORD(0x4ddc) > 0)'),
+    ('shaded final eax', 'registers[2] = one;', 'registers[2] = two;'),
+    ('shaded final ecx', 'registers[1] = first;', 'registers[1] = second;'),
+    ('shaded final edx', 'registers[0] = WORD(0x4dd0);', 'registers[0] = WORD(0x4dd4);'),
+    ('shaded edge search stride', 'edge += 10;', 'edge += 5;'),
+    ('shaded final flat row', 'if (y == WORD(0x8cc))', 'if (y != WORD(0x8cc))'),
+    ('shaded flat third attribute', 'WORD(0x4dbc) = edge[8] + edge[9];', 'WORD(0x4dbc) = edge[8];'),
+    ('shaded flat first attribute', 'WORD(0x4dac) = edge[4] + edge[6];', 'WORD(0x4dac) = edge[4];'),
+    ('shaded flat second attribute', 'WORD(0x4db0) = edge[5] + edge[7];', 'WORD(0x4db0) = edge[5];'),
+    ('shaded dither word', 'HALF(0x944) = GLOBAL_HALF(0xcce);', 'HALF(0x944) = GLOBAL_WORD(0xcce) != 0;'),
+    ('shaded texture record', '*(uint32_t *)POINTER(GLOBAL_WORD(0xc8c))', 'GLOBAL_WORD(0xc8c)'),
+    ('shaded setup return', 'registers[2] = WORD(0x948);', 'registers[2] = 0;'),
+    ('shaded left third advance', 'left[8] += left[9];', 'left[8] -= left[9];'),
+    ('shaded right third advance', 'right[8] += right[9];', 'right[8] -= right[9];'),
+    ('shaded close third first', 'WORD(0x93c) = WORD(0x934);', 'WORD(0x93c) = WORD(0x938);'),
+    ('shaded close third previous', 'WORD(0x940) = WORD(0x938);', 'WORD(0x940) = WORD(0x934);'),
+    ('shaded close third exchange', 'WORD(0x940) = WORD(0x93c); WORD(0x93c) = temporary;', 'WORD(0x940) = WORD(0x93c); WORD(0x93c) = 0;'),
+    ('shaded close bounds shift', 'WORD(0x8c8) >>= 16;', 'WORD(0x8c8) >>= 15;'),
+]
+perspective_fill_mutations += [
+    ('shaded upper lookup rows', '(phase >> 19) & 0xff00', '(phase >> 19) & 0x0f00'),
+    ('shaded unwanted raw key', 'uint8_t value = *(uint8_t *)POINTER(WORD(0x948) + index);', 'uint8_t value = *(uint8_t *)POINTER(WORD(0x948) + index); if (value < GLOBAL_HALF(0xca0)) return;'),
+    ('shaded unwanted quality reduction', 'count = last_x - first_x + 1;', 'count = last_x - first_x + 1; if (!GLOBAL_HALF(0xc92)) count = (count + 1) / 2;'),
+    ('shaded unwanted pixel remap', 'value = BYTE(0xd70 + (BYTE(0x100) << 8) + value);', 'value = BYTE(0xd70 + (BYTE(0x100) << 8) + value); if (GLOBAL_WORD(0x1298)) value = *(uint8_t *)POINTER(WORD(0x1d88) + value);'),
+    ('shaded partial eax preservation', 'value = BYTE(0xd70 + (BYTE(0x100) << 8) + value);\n    *one = (*one & ~mask) | ((uint32_t)value << shift);', 'value = BYTE(0xd70 + (BYTE(0x100) << 8) + value);\n    *one = (uint32_t)value << shift;'),
+]
+mutations += [(*mutation, 'perspective_fill') for mutation in perspective_fill_mutations]
 affine_mutations = [
     ('affine low dividend shift', '(uint32_t)(delta << 7)', '(uint32_t)(delta << 6)'),
     ('affine signed high dividend', 'delta & 0x80000000u ? -0x100000000LL : 0', 'delta & 0x80000000u ? 0 : 0'),
@@ -439,7 +497,7 @@ for name, old, new, suite in mutations:
         continue
     tested += 1
     owner = {'colours': 'palette', 'palette': 'palette', 'drawing': 'draw',
-             'polygons': 'polygon', 'fills': 'fill', 'textured': 'textured', 'affine': 'affine', 'gouraud': 'gouraud', 'blits': 'blit', 'optimized': 'affine', 'perspective': 'perspective', 'discs': 'disc'}.get(suite)
+             'polygons': 'polygon', 'fills': 'fill', 'textured': 'textured', 'affine': 'affine', 'gouraud': 'gouraud', 'blits': 'blit', 'optimized': 'affine', 'perspective': 'perspective', 'discs': 'disc', 'perspective_fill': 'perspective_fill'}.get(suite)
     if source.count(old) != 1 and owner:
         scope = sections[owner]
         assert scope.count(old) == 1 and source.count(scope) == 1, (name, scope.count(old))

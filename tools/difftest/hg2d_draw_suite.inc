@@ -11,6 +11,7 @@ static uint32_t draw_faults, draw_div_repairs, draw_calls[42];
 uint32_t draw_recover_sp, draw_entry_function;
 uint32_t draw_registers[7];
 static uint32_t register_states[256][7];
+static uint32_t draw_ecx_pointer;
 void draw_resume(void);
 uint32_t invoke_draw(uint32_t function, const uint32_t *arguments, uint32_t count, uint32_t entry_eax);
 __asm__(".text\n_invoke_draw:\n\tpushl %ebp\n\tmovl %esp,%ebp\n\t"
@@ -53,7 +54,7 @@ static LONG WINAPI draw_exception(EXCEPTION_POINTERS *exception)
                 0x20785970, 0x20785985, 0x20785b5a, 0x20785b6f,
                 0x20785dcf, 0x20785de4, 0x20786005, 0x2078601a,
                 0x207862b5, 0x207862ca, 0x20786559, 0x2078656e,
-                0x2078690f, 0x20786924, 0x20786fa3, 0x20786fb8, 0x20785679
+                0x2078690f, 0x20786924, 0x20786fa3, 0x20786fb8, 0x20785679, 0x20788d62, 0x20788d80, 0x20788d95
             };
             uint32_t index;
             for (index = 0; index < sizeof affine_divides / sizeof affine_divides[0]; index++)
@@ -122,9 +123,13 @@ static uint32_t drawing_arguments(uint32_t slot, const uint32_t *arguments, uint
         else for (reg = 0; reg < 7; reg++) {
             /* These three entries expose unspecified caller-saved leftovers. */
             if ((slot == 0x18 || slot == 0x24 || slot == 0x28) && (reg == 2 || reg == 3)) continue;
-            if (register_states[step][reg] != draw_registers[reg]) {
+            uint32_t expected = register_states[step][reg], actual = draw_registers[reg];
+            if (draw_ecx_pointer && reg == 2) {
+                expected -= ADDRESS(images[0]); actual -= ADDRESS(images[1]);
+            }
+            if (expected != actual) {
                 printf("drawing scenario %u step %u slot %x differs: register %u %08x/%08x\n",
-                       scenario, step, slot, reg, register_states[step][reg], draw_registers[reg]);
+                       scenario, step, slot, reg, expected, actual);
                 exit(1);
             }
         }
@@ -140,7 +145,7 @@ static uint32_t drawing(uint32_t slot, uint32_t a, uint32_t b, uint32_t c, uint3
     uint32_t arguments[6] = {a, b, c, d, e, f}, count;
     switch (slot) {
     case 0x08: case 0x18: count = 0; break;
-    case 0x40: case 0x4c: case 0x78: count = 1; break;
+    case 0x40: case 0x4c: case 0x54: case 0x78: count = 1; break;
     case 0x1c: case 0x20: count = 3; break;
     case 0x24: case 0x2c: case 0x30: case 0x44: count = 4; break;
     case 0x28: case 0x48: count = 6; break;

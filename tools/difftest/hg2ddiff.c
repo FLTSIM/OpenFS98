@@ -26,7 +26,7 @@ static uint8_t arena[220][0x10000], supplied[0x10000];
 static uint32_t side, step, scenario, random_state, block_count, alloc_count;
 static uint32_t fail_every, load_success, event_hash, operations;
 static uint32_t allocations, failures, loads, releases, full_pools, unaligned;
-static uint32_t polygon_compare;
+static uint32_t polygon_compare, shaded_map_compare;
 static uint8_t normalized_global[0x2000];
 static uint8_t global[0x2000], global_states[256][0x2000];
 static uint32_t carries[256], check_carry, palette_calls, notifications;
@@ -126,7 +126,10 @@ static void compare(uint32_t result)
     uint32_t index;
     CHECK(step < 256);
     memcpy(normalized, images[side], DATA_SIZE);
-#define HG2D_DATA_POINTER(at, target) WORD(normalized, at) -= ADDRESS(images[side]) - 0x20792000u;
+/* The shaded-span fixture deliberately fills its entire 32-row lookup
+     * window. Two normally relocated words in its upper half are then bytes,
+     * and must be compared literally rather than normalized as pointers. */
+#define HG2D_DATA_POINTER(at, target) if (!(shaded_map_compare && (at) >= 0x4e00 && (at) < 0x6e00)) WORD(normalized, at) -= ADDRESS(images[side]) - 0x20792000u;
 #include "../../src/hg2d/hg2d_pointers.inc"
 #undef HG2D_DATA_POINTER
     memcpy(normalized_global, global, sizeof global);
@@ -296,6 +299,7 @@ static void run_textures(void)
 #include "hg2d_textured_suite.inc"
 #include "hg2d_perspective_suite.inc"
 #include "hg2d_affine_suite.inc"
+#include "hg2d_perspective_fill_suite.inc"
 #include "hg2d_gouraud_suite.inc"
 #include "hg2d_blit_suite.inc"
 #include "hg2d_disc_suite.inc"
@@ -313,7 +317,7 @@ int main(int argc, char **argv)
     uint32_t count = argc > 1 ? (uint32_t)strtoul(argv[1], NULL, 0) : 20000;
     HMODULE modules[2], util;
     const char *suite = argc > 2 ? argv[2] : "all";
-    CHECK(!strcmp(suite, "all") || !strcmp(suite, "textures") || !strcmp(suite, "palette") || !strcmp(suite, "colours") || !strcmp(suite, "drawing") || !strcmp(suite, "polygons") || !strcmp(suite, "fills") || !strcmp(suite, "textured") || !strcmp(suite, "affine") || !strcmp(suite, "gouraud") || !strcmp(suite, "blits") || !strcmp(suite, "lifecycle") || !strcmp(suite, "optimized") || !strcmp(suite, "perspective") || !strcmp(suite, "discs"));
+    CHECK(!strcmp(suite, "all") || !strcmp(suite, "textures") || !strcmp(suite, "palette") || !strcmp(suite, "colours") || !strcmp(suite, "drawing") || !strcmp(suite, "polygons") || !strcmp(suite, "fills") || !strcmp(suite, "textured") || !strcmp(suite, "affine") || !strcmp(suite, "gouraud") || !strcmp(suite, "blits") || !strcmp(suite, "lifecycle") || !strcmp(suite, "optimized") || !strcmp(suite, "perspective") || !strcmp(suite, "discs") || !strcmp(suite, "perspective_fill"));
     SetUnhandledExceptionFilter(fault);
     CHECK(AddVectoredExceptionHandler(1, draw_exception));
     {
@@ -450,6 +454,15 @@ int main(int argc, char **argv)
         for (scenario = 0; scenario < count; scenario++)
             for (side = 0; side < 2; side++) run_perspective();
         printf("hg2ddiff perspective: %u scenarios, %u operations, %u faults, 0 differ\n",
+               count, operations / 2, draw_faults / 2);
+        printf("retail host divide repairs: %u\n", draw_div_repairs);
+    }
+    if (!strcmp(suite, "all") || !strcmp(suite, "perspective_fill")) {
+        active_suite = "perspective_fill";
+        operations = draw_div_repairs = draw_faults = 0;
+        for (scenario = 0; scenario < count; scenario++)
+            for (side = 0; side < 2; side++) run_perspective_fill();
+        printf("hg2ddiff perspective_fill: %u scenarios, %u operations, %u faults, 0 differ\n",
                count, operations / 2, draw_faults / 2);
         printf("retail host divide repairs: %u\n", draw_div_repairs);
     }

@@ -159,6 +159,7 @@ EAX_ENTRY(texture_update, texture_update_body);
 #include "hg2d_textured.inc"
 #include "hg2d_perspective.inc"
 #include "hg2d_affine.inc"
+#include "hg2d_perspective_fill.inc"
 #include "hg2d_gouraud.inc"
 #include "hg2d_blit.inc"
 #include "hg2d_disc.inc"
@@ -195,6 +196,7 @@ BOOL WINAPI DllMain(HINSTANCE instance, DWORD reason, LPVOID reserved)
         WORD(0x38 + 0x48) = ADDRESS(textured_vertex);
         WORD(0x38 + 0x4c) = ADDRESS(affine_close);
         WORD(0x38 + 0x50) = ADDRESS(perspective_vertex);
+        WORD(0x38 + 0x54) = ADDRESS(perspective_close);
         WORD(0x38 + 0x5c) = ADDRESS(palette_realize);
         WORD(0x38 + 0x60) = ADDRESS(palette_refresh_entry);
         WORD(0x38 + 0x64) = ADDRESS(palette_force);

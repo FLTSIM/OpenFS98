@@ -1,15 +1,16 @@
 # HG2D.DLL — module id 13
 
-In progress. Thirty-two Linkage services now have implementations covering
+In progress. Thirty-three Linkage services now have implementations covering
 texture storage/loading, software palettes, primitives and text, plain polygon
 fills, affine texture rendering (all 32 span selectors), Gouraud shading,
 scanline texture blits, table-shaped discs, perspective vertex submission,
-and teardown. Some service branches remain explicitly unfinished below.
+the matching three-attribute textured closer, and teardown. Some service
+branches remain explicitly unfinished below.
 HG2D uses snake_case and `<stdint.h>`; there is no `types.h` dependency.
 
-HG2D is not in `MODULES` and must not be installed yet. Initialization,
-perspective polygon rasterization, the alternate +0x44 attribute builder,
-device-backed palette realization and the Direct3D services remain incomplete.
+HG2D is not in `MODULES` and must not be installed yet. Initialization, the
+alternate +0x44 attribute builder, device-backed palette realization and the
+Direct3D services remain incomplete.
 
 The implementation and tests occupy HG2D-specific files. The shared Makefile,
 README and MAIN files are untouched so MAIN can proceed independently.
@@ -29,6 +30,7 @@ make -f tools/hg2d.mk hg2ddiff-run N=20000 SUITE=optimized
 make -f tools/hg2d.mk hg2ddiff-run N=20000 SUITE=gouraud
 make -f tools/hg2d.mk hg2ddiff-run N=20000 SUITE=blits
 make -f tools/hg2d.mk hg2ddiff-run N=20000 SUITE=perspective
+make -f tools/hg2d.mk hg2ddiff-run N=20000 SUITE=perspective_fill
 make -f tools/hg2d.mk hg2ddiff-run N=20000 SUITE=discs
 python3 tools/hg2d_breaks.py
 ```
@@ -560,7 +562,9 @@ nonflat edges return their third slope in ECX and third fractional advance
 in EDX. Flat edges retain the +0x48 register behavior. The `perspective` suite
 checks independent records, all attributes, projection/saturation/remainders,
 scratch aliasing, signed/unsigned boundaries and 48 edges up to data +0x884.
-The corresponding +0x54 close/rasterizer is still unimplemented.
+The corresponding +0x54 closer and the third attribute's shading behavior are
+verified in slice 12. The existing perspective entry names were provisional;
+this path interpolates UVs affinely and applies the third attribute as shading.
 
 ## Slice 11: table-shaped discs
 
@@ -591,7 +595,84 @@ profile-zero fixture checks each affected and unaffected canvas byte. Inputs
 that allow negative rows through a stippled clip interval can read an invalid
 row pointer; those malformed intervals are outside these bounded fixtures.
 
+## Slice 12: three-attribute textured close and fill
+
+`src/hg2d/hg2d_perspective_fill.inc` implements +0x54 (`0x20788851`), one
+surface argument. It closes a 40-byte edge through the existing +0x50 edge
+builder, exchanges all three attributes on unsigned y reversal, logically
+shifts the y bounds, and computes distance shading. Its pair walker and two
+edge searches follow `0x20788b5b`/`0x20788c09`/`0x20788c99`. They advance x,
+both UVs and the third attribute. Flat edges draw on the final row through
+synthetic records at data +0x4d74/+0x4d9c. The span selector at +0x4d70 keeps
+its retail numeric address (`0x20788d29`); C calls the implementation directly.
+
+The third attribute is a **shade coordinate**, not a perspective denominator.
+UV steps use the software affine path's CDQ-before-SHL signed dividend and
+host saturation. The shade step divides a true signed dword delta, doubles
+it, then clears its low word. Clearing after division/doubling retains the
+original negative rounding behavior. Two shade accumulators subtract
+0x06000000 and use the extracted row tables at +0x4de0/+0x4df0. Each phase
+advances before its lookup. AL/AH are replaced by the sampled and shaded
+bytes inside EAX, preserving the other phase bits exactly.
+
+The raw texel and phase bits select a byte at +0x4e00; the resulting byte
+then selects the distance row at +0xd70. Normal initialization builds sixteen
+256-byte rows, but the unchecked five-bit phase can address thirty-two rows.
+The implementation retains those reads into adjacent module state. Dithering
+uses the **low word** of GLOBAL +0xcce, unlike +0x4c's byte selector. Even rows
+use UV biases 0x400000/0xc00000 and odd rows 0/0x800000. An odd-address prefix
+uses the second shade phase and a single-pixel tail uses the first. Each pair
+reads both texels and both shade lookups before writing the two bytes. The
+8-pixel blocks retain their pointer update order and signed count residue.
+There is no 1,500-pixel width rejection, raw-texel key, low-quality doubling,
+or existing-pixel remap in this path.
+
+The closer's zero-low-word +0xcb6 fallback has the same saved-register
+rotation as +0x4c. Active returns expose EAX's partial phase/pixel value,
+ECX's first UV accumulator and EDX's first UV step; the regular walker then
+replaces EAX with the right edge's third slope. If no edge starts on the
+chosen row, setup returns the texture pointer in EAX and the edge-buffer end
+pointer in ECX. The fixture explicitly marks that latter ECX as a pointer
+for module-relative comparison and checks it against GLOBAL +0xc14. Numeric
+UV results remain literal scalars.
+
+The `perspective_fill` suite exercises public submission and closing, both
+windings, all row phases and destination alignments, widths around block/tail
+boundaries, crossings, concave polygons, flat/vertical/single-point shapes,
+fractional projection, random wrapped attributes, distance rows including 15,
+zero threshold repair, and UV quotient overflow. It includes an independently
+checked constant lookup rectangle, 1,501-pixel spans, and texture/canvas aliasing
+one pixel apart to expose read-before-write order. A deliberately plausible
+half-record catches an incorrect 20-byte edge stride. An independent sweep
+over 1,024 scenarios checks every combination of 32 phase rows and 256 texels.
+
+For the wrapped-attribute fixtures the entire 8 KB lookup window is filled
+with deterministic bytes. This intentionally replaces two normally relocated
+words at +0x5ee0/+0x5ee4. The harness compares those words literally as lookup
+bytes during this suite, rather than subtracting a module base from them.
+They remain part of the full image comparison. The ordinary pointer
+normalization resumes for the other suites. These vectors verify the
+unchecked lookup arithmetic without depending on different DLL pointer bytes.
+They do not establish behavior for arbitrary invalid surface or view pointers,
+negative rows, or unbounded/malformed scanline walks.
+
 ## Verification and limits
+
+The +0x54 suite passes 20,000 scenarios and 3,900,000 operations, with zero
+differences and zero faults. Its 100,000 retail divide repairs resume and
+finish their operations. The complete combined regression also passes 2,000
+scenarios per suite, including +0x54 and the existing optimized affine backend.
+
+The +0x54 slice adds **53 mutations**, all caught at 64 scenarios by
+`python3 tools/hg2d_breaks.py 64 perspective_fill`. They cover shading rows,
+UV/phase stepping, partial EAX writes, word-only dithering, both lookup stages,
+pair ordering and aliasing, block/tail counters, the uncapped width, edge
+stride/advancement, flat synthetic records, setup returns and all three
+closing attributes. The flags used only by other affine paths are deliberately
+mutated into this path to prove the fixtures observe their absence. Together
+with the preceding 375, there are 428 defined and detected mutations; the old
+375 were not all rerun for this slice. Their anchors were audited again.
+
 
 The expanded combined regression passes 2,000 scenarios for every selected
 suite, plus 263,680 exhaustive colour/layout comparisons, with zero differences.
@@ -608,21 +689,22 @@ Final large runs for the added rendering services:
 | gouraud | 20,000 | 1,821,250 | 0 / 0 |
 | blits | 20,000 | 2,460,000 | 0 / 0 |
 | perspective | 20,000 | 1,321,250 | 0 / 0 |
+| perspective_fill | 20,000 | 3,900,000 | 0 / 0 |
 | discs | 20,000 | 3,100,000 | 0 / 0 |
 
 The affine run includes 80,000 resumed retail divide repairs, Gouraud 359,645,
-blits 360,000, and perspective vertices 808,843. Those repairs finish their
+blits 360,000, perspective vertices 808,843, and the +0x54 suite 100,000. Those repairs finish their
 operations and are distinct from unrepaired faults. Teardown's independent
 register/state fixture passes before every suite.
 
-The current sweep and focused fixture rechecks catch all **375 distinct
+The preceding slice's sweep and focused fixture rechecks caught **375 distinct
 mutations**: 19 texture, 18 colour/layout, 27 palette, 50 drawing, 22 plain
 vertex, 43 fill, 35 affine vertex, 30 affine rasterizer, 19 optimized spans,
 25 Gouraud, 18 blit, 43 perspective vertex, 24 disc and 2 teardown mutations.
 An interrupted full sweep completed 285 checks; its resumed 90 checks exposed
 two disc coverage gaps. Focused reruns catch both after adding a wide clip
 that distinguishes the final profiles and a negative right endpoint. The
-full union has zero unresolved mutations. All 375 anchors also pass the
+full union has zero unresolved mutations. All 428 current anchors also pass the
 separate audit; that audit does not count as executing the mutants.
 
 Other gaps found and closed during these slices: horizontal UVs needed an
@@ -687,7 +769,7 @@ were rechecked in the full mutation run; the final drawing family includes
 the two extra zero-count loop breaks. `python3 tools/hg2d_breaks.py` runs all
 families, or its second argument selects `textures`, `colours`, `palette` or
 `drawing`, `polygons`, `fills`, `textured`, `affine`, `optimized`, `gouraud`,
-`blits`, `perspective`, `discs` or `lifecycle`. Only a reported differential mismatch
+`blits`, `perspective`, `perspective_fill`, `discs` or `lifecycle`. Only a reported differential mismatch
 counts as detection; a build
 failure, fixture error or harness crash does not.
 The generated files reproduce exactly when re-extracted from retail.
@@ -732,10 +814,10 @@ FE loader, DirectDraw objects, arbitrary malformed COM pointers, accounting
 indices outside 0..8, and initialization are outside this slice. The existing
 PANELS model and its verified harness remain unchanged.
 
-Remaining Linkage services: +0x04 initialization, +0x54 perspective close,
-+0x58/+0x68 palette/resource loading, and device-backed +0x9c/+0xa0/+0xa4/+0xbc.
+Remaining Linkage services: +0x04 initialization, +0x58/+0x68 palette/resource
+loading, and device-backed +0x9c/+0xa0/+0xa4/+0xbc.
 The alternate textured builder/closer through +0x44/+0x40, device palette
 realization and the negative-length shadow corrupt-stack return also remain
-unfinished. Next is perspective close and its spans, followed by those
+unfinished. Next is the alternate textured attribute builder/closer, then
 resource/device paths and initialization. The verified subsets do not
 establish whole-module rendering equivalence or readiness to run in-game.

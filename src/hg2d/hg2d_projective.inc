@@ -1,4 +1,4 @@
-/* Shared projection/correction for basic, keyed, fogged and unkeyed dither
+/* Shared projection/correction for basic, keyed, fogged and dithered
  * spans. Pixel helpers retain each retail variant's fetch/store ordering. */
 #include "hg2d_projective_tables.inc"
 
@@ -151,6 +151,9 @@ static void projective_span(uint32_t *left, uint32_t *right, uint32_t y, int fla
     int keyed = WORD(0x4200) == 0x2073ae7b || WORD(0x4200) == 0x2073e1ec;
     int fog = WORD(0x4200) == 0x207352a4 || WORD(0x4200) == 0x20738c03;
     int dither = WORD(0x4200) == 0x20749d95 || WORD(0x4200) == 0x207541ee;
+    keyed |= WORD(0x4200) == 0x2075e63f || WORD(0x4200) == 0x20766058;
+    dither |= WORD(0x4200) == 0x2075e63f || WORD(0x4200) == 0x20766058;
+    forward |= WORD(0x4200) == 0x20766058;
     fog |= WORD(0x4200) == 0x2074e49d || WORD(0x4200) == 0x207588f0;
     dither |= WORD(0x4200) == 0x2074e49d || WORD(0x4200) == 0x207588f0;
     forward |= WORD(0x4200) == 0x207588f0;
@@ -221,6 +224,7 @@ static void projective_span(uint32_t *left, uint32_t *right, uint32_t y, int fla
         WORD(0x41ac) = (uint32_t)((int32_t)(WORD(0x4194) - WORD(0x419c)) >> shift);
         WORD(0x4160) = remaining;
         if (dither && fog) dither_fog_pixels(pixel_address, block, 0x4198, y, direction, 0, WORD(0x41c0));
+        else if (dither && keyed) dither_key_pixels(pixel_address, block, 0x4198, y, direction, 0);
         else if (dither) dither_pixels(pixel_address, block, 0x4198, y, direction, 0);
         else if (fog) projective_fog_pixels(pixel_address, block, 0x4198, WORD(0x41c0), direction, keyed);
         else projective_pixels(pixel_address, block, 0x4198, direction, 0, keyed);
@@ -236,8 +240,10 @@ static void projective_span(uint32_t *left, uint32_t *right, uint32_t y, int fla
         WORD(0x45d9) = remaining + WORD(0x45d5);
         WORD(0x4160) = remaining;
         WORD(0x4354) = fog ? projective_dither_fog_tails[forward][shift == 4][y & 1][WORD(0x45d9)] :
+                            keyed ? projective_dither_key_tails[forward][shift == 4][y & 1][WORD(0x45d9)] :
                             projective_dither_tails[forward][shift == 4][y & 1][WORD(0x45d9)];
         if (fog) dither_fog_pixels(pixel_address, WORD(0x45d9), 0x4190, y, direction, 1, WORD(0x41bc));
+        else if (keyed) dither_key_pixels(pixel_address, WORD(0x45d9), 0x4190, y, direction, 1);
         else dither_pixels(pixel_address, WORD(0x45d9), 0x4190, y, direction, 1);
         return;
     }

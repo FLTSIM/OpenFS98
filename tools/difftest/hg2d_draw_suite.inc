@@ -39,7 +39,19 @@ static LONG WINAPI draw_exception(EXCEPTION_POINTERS *exception)
         exception->ExceptionRecord->ExceptionCode == EXCEPTION_INT_OVERFLOW) {
         CONTEXT *context = exception->ContextRecord;
         const uint8_t *instruction = (const uint8_t *)(uintptr_t)context->Eip;
-        if (context->Eip == 0x2074e510 ||
+        if (context->Eip == 0x2075e6b2 ||
+            context->Eip == 0x2075e75a ||
+            context->Eip == 0x2075e91c ||
+            context->Eip == 0x2075f622 ||
+            context->Eip == 0x20760459 ||
+            context->Eip == 0x20760f7f ||
+            context->Eip == 0x207660c9 ||
+            context->Eip == 0x20766171 ||
+            context->Eip == 0x20766333 ||
+            context->Eip == 0x20767039 ||
+            context->Eip == 0x20767e70 ||
+            context->Eip == 0x20768996 ||
+            context->Eip == 0x2074e510 ||
             context->Eip == 0x2074e5d5 ||
             context->Eip == 0x2074e7dd ||
             context->Eip == 0x207500ae ||
@@ -95,6 +107,14 @@ static LONG WINAPI draw_exception(EXCEPTION_POINTERS *exception)
         }
         {
             static const uint32_t affine_divides[] = {
+                0x2075e862, 0x2075e87c, 0x2075e896, 0x2075ee55, 0x2075ee68, 0x2075f568,
+                0x2075f582, 0x2075f59c, 0x2075fb5b, 0x2075fb6e, 0x2076039f, 0x207603b9,
+                0x207603d3, 0x207607b2, 0x207607c5, 0x20760ec5, 0x20760edf, 0x20760ef9,
+                0x207612d8, 0x207612eb, 0x20766279, 0x20766293, 0x207662ad, 0x2076686c,
+                0x2076687f, 0x20766f7f, 0x20766f99, 0x20766fb3, 0x20767572, 0x20767585,
+                0x20767db6, 0x20767dd0, 0x20767dea, 0x207681c9, 0x207681dc, 0x207688dc,
+                0x207688f6, 0x20768910, 0x20768cef, 0x20768d02,
+
                 0x2074e719, 0x2074e733, 0x2074e74d, 0x2074f7a2, 0x2074f7b5, 0x2074f7ca,
                 0x2074ffea, 0x20750004, 0x2075001e, 0x207512a4, 0x207512b7, 0x207512cc,
                 0x20751c1d, 0x20751c37, 0x20751c51, 0x207525a6, 0x207525b9, 0x207525ce,

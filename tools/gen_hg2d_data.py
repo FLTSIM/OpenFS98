@@ -84,6 +84,10 @@ with open('src/hg2d/hg2d_projective_tables.inc', 'w') as output:
         output.write('};\n')
 
     dither_tables = (
+        ('projective_dither_key_tails', (
+            ((0x2075fbf9, 0x2075eee2), (0x20761376, 0x2076083f)),
+            ((0x20767610, 0x207668f9), (0x20768d8d, 0x20768256)),
+        )),
         ('projective_dither_tails', (
             ((0x2074c11e, 0x2074ac87), (0x2074de1a, 0x2074cf93)),
             ((0x20756573, 0x207550dd), (0x2075826d, 0x207573e7)),

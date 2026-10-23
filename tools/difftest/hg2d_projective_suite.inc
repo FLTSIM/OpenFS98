@@ -35,8 +35,10 @@ static void projective_case(uint32_t selector, int sharp)
         GLOBAL_HALF(0x30c) = 0;
     }
     if (projective_dither_mode) {
-        GLOBAL_HALF(0xcb4) = GLOBAL_HALF(0xcce) = 1;
-        GLOBAL_HALF(0x1172) = 0;
+        GLOBAL_HALF(0xcb4) = projective_key_mode && (scenario & 1) ? 2 : 1;
+        GLOBAL_HALF(0xcce) = 1;
+        GLOBAL_HALF(0x1172) = projective_key_mode ? 1 : 0;
+        if (projective_key_mode) matrix_texture[1] = 0;
     }
 }
 
@@ -50,7 +52,9 @@ static void projective_finish(void)
     polygon_compare = WORD(global, 0x1298) ? 2 : 1;
     drawing(0x40, draw_surface(), 0, 0, 0, 0, 0);
     CHECK(!draw_fault_code);
-    if (projective_dither_mode && projective_fog_mode)
+    if (projective_dither_mode && projective_key_mode && !projective_fog_mode)
+        CHECK(WORD(images[side], 0x4200) == 0x2075e63f || WORD(images[side], 0x4200) == 0x20766058);
+    else if (projective_dither_mode && projective_fog_mode)
         CHECK(WORD(images[side], 0x4200) == 0x2074e49d || WORD(images[side], 0x4200) == 0x207588f0);
     else if (projective_dither_mode)
         CHECK(WORD(images[side], 0x4200) == 0x20749d95 || WORD(images[side], 0x4200) == 0x207541ee);
@@ -225,7 +229,7 @@ static void run_projective_keyed(void)
             projective_point(last_x, 13); projective_point(4, 13);
             projective_finish();
             if (value >= key)
-                for (y = 12; y <= 13; y++) for (x = 4; x <= last_x + 1; x++)
+                for (y = 12; y <= 13; y++) for (x = 4; x <= last_x + (!projective_dither_mode || ((scenario & 1) && last_x == 4)); x++)
                     fill_expected[row_storage[16 + y] - ADDRESS(canvas) + x] = value;
             CHECK(!memcmp(canvas, fill_expected, CANVAS_SIZE));
         }
@@ -393,7 +397,7 @@ static void run_projective_key_fog(uint32_t phase)
 
 static void run_projective_dither(uint32_t phase)
 {
-    uint32_t selector, parity, alignment, fraction, count, index, address, start_address, x, y;
+    uint32_t selector, parity, alignment, fraction, count, full, index, address, start_address, x, y;
     uint32_t column, row, bias;
     int direction;
     projective_dither_mode = 1;
@@ -416,6 +420,7 @@ static void run_projective_dither(uint32_t phase)
             WORD(global, 0xce0) = selector & 2 ? 0x1000 : (uint32_t)-0x1000;
             WORD(global, 0xce4) = WORD(global, 0xc9c) = 0;
             count = 1 + (scenario + selector * 7 + alignment * 17 + fraction * 3) % 81;
+            full = count / 32 * 32;
             x = 4 + alignment; y = 8 + parity;
             direction = selector == 1 || selector == 2 ? 1 : -1;
             start_address = row_storage[16 + y] - ADDRESS(canvas) + x + (direction < 0 ? count - 1 : 0);
@@ -426,10 +431,11 @@ static void run_projective_dither(uint32_t phase)
             for (index = 0; index < count; index++) {
                 address = start_address + direction * index;
                 bias = (address & 1 ? 2 : 0) + (parity ? 0 : 1);
+                if (projective_key_mode && index < full) bias = 0;
                 column = 16 + (fraction + bias) / 4;
                 row = 32 + (((fraction + 1) & 3) + bias) / 4;
                 uint8_t raw = (uint8_t)((row * 256 + column) * 13 + row * 7 + scenario);
-                fill_expected[address] = projective_fog_mode ? (uint8_t)(raw * 13 + 8 * 19 + scenario) : raw;
+                if (!projective_key_mode || raw >= 1) fill_expected[address] = projective_fog_mode ? (uint8_t)(raw * 13 + 8 * 19 + scenario) : raw;
             }
             CHECK(!memcmp(canvas, fill_expected, CANVAS_SIZE));
         }
@@ -468,12 +474,23 @@ static void run_projective_dither(uint32_t phase)
     }
     for (index = 0; index < sizeof matrix_pixels; index++)
         matrix_pixels[index] = (uint8_t)(index * 13 + (index >> 8) * 7 + scenario);
-    for (uint32_t alias = 0; alias < 3; alias++) {
+    if (projective_key_mode)
+        for (selector = 0; selector < 4; selector++) for (uint32_t sharp = 0; sharp < 2; sharp++) {
+            projective_case(selector, sharp);
+            global[0xca0] = 128;
+            projective_point(3, 3); projective_point(126 + scenario % 33, 3);
+            projective_point(126 + scenario % 33, 6); projective_point(3, 6);
+            projective_finish();
+        }
+    for (uint32_t alias = 0; alias < (projective_key_mode ? 4u : 3u); alias++) {
         projective_case(1, 0);
+        if (alias == 3)
+            for (index = 0; index < sizeof matrix_pixels; index++)
+                matrix_pixels[index] = (uint8_t)(255 - (index * 13 + (index >> 8) * 7 + scenario));
         WORD(global, 0xce0) = projective_fog_mode ? (uint32_t)-0x1000 : (uint32_t)-0x80;
         GLOBAL_HALF(0xcfc) = GLOBAL_HALF(0xd02) = 0; WORD(global, 0xd10) = 0;
         uint32_t saved_row = row_storage[16 + 8];
-        row_storage[16 + 8] = ADDRESS(images[side] + (alias == 2 ? 0x45d5 : 0x41ab) - 5);
+        row_storage[16 + 8] = ADDRESS(images[side] + (alias == 2 ? 0x45d5 : alias == 3 ? 0x435c : 0x41ab) - 5);
         projective_point(5, 8); projective_point(alias == 0 ? 36 : 9, 8);
         projective_finish();
         row_storage[16 + 8] = saved_row;
@@ -501,4 +518,12 @@ static void run_projective_dither_fog(uint32_t phase)
     if (!phase) run_projective_fog();
     else run_projective_dither(1);
     projective_dither_mode = projective_fog_mode = 0;
+}
+
+static void run_projective_dither_key(uint32_t phase)
+{
+    projective_dither_mode = projective_key_mode = 1;
+    if (!phase) run_projective_keyed();
+    else run_projective_dither(1);
+    projective_dither_mode = projective_key_mode = 0;
 }

@@ -6,7 +6,7 @@ fills, affine texture rendering (all 32 span selectors), Gouraud shading,
 scanline texture blits, table-shaped discs, perspective vertex submission,
 the matching three-attribute textured closer, matrix-derived texture edges,
 far-depth texture fills, basic/keyed/fogged doubled-pixel projective spans,
-unkeyed dithered spans with and without fog, and teardown. Some service branches remain explicitly
+dithered spans with fog or keying, and teardown. Some service branches remain explicitly
 unfinished below.
 HG2D uses snake_case and `<stdint.h>`; there is no `types.h` dependency.
 
@@ -34,6 +34,7 @@ make -f tools/hg2d.mk hg2ddiff-run N=20000 SUITE=projective_fog
 make -f tools/hg2d.mk hg2ddiff-run N=20000 SUITE=projective_key_fog
 make -f tools/hg2d.mk hg2ddiff-run N=20000 SUITE=projective_dither
 make -f tools/hg2d.mk hg2ddiff-run N=20000 SUITE=projective_dither_fog
+make -f tools/hg2d.mk hg2ddiff-run N=20000 SUITE=projective_dither_key
 make -f tools/hg2d.mk hg2ddiff-run N=20000 SUITE=textured
 make -f tools/hg2d.mk hg2ddiff-run N=20000 SUITE=affine
 make -f tools/hg2d.mk hg2ddiff-run N=20000 SUITE=optimized
@@ -983,7 +984,51 @@ Keyed dither variants, hardware, plane, resource and initialization paths remain
 deferred. These service/target counts are not a whole-module completion
 percentage, and HG2D remains outside `MODULES`.
 
+## Slice 20: keyed dithered projective spans
+
+Targets `0x2075e63f` and `0x20766058` now render through +0x44/+0x40.
+Selectors 40/43 draw right to left and 41/42 draw left to right; 56..59 use
+the same keyed software targets even with hardware eligibility. Fixtures clear
+the texture's resident flag to check that the keyed upload bypass still holds.
+Fourteen of the 24 ordinary projective targets are implemented; the service
+count remains 33 of 40. The last software projective pair is keyed dithered fog.
+
+The raw unsigned texel is compared with BYTE +0x435c. Equality draws one byte;
+rejected texels retain the destination but still advance U/V and destination
+position. Every accepted store precedes the fractional-step reads for the next
+sample. There is no pair prefetch or alignment prefix. Tests cover accepted/
+rejected mixtures and live key changes caused by destination stores.
+
+Retail's full 16/32-sample blocks use **no dither bias**, for either row parity.
+Only the tails apply the usual 0/0.5 and 0.25/0.75 U/V phases. Independent
+whole-canvas fixtures distinguish full blocks from their tails and preserve
+that discontinuity. The existing complement-magnitude distance gate still
+selects the doubled-pixel raw keyed renderer when both endpoints meet the
+threshold. Keying remains enabled across that jump; masked fractional endpoints
+retain the preceding slice's zero-count behavior.
+
+Tails retain starting parity, padded count and the live final-skip flag, with
+eight new 33-entry numeric tables extracted from retail `.text` data. A pixel
+store can change the key or final-skip flag before a later sample. Caching
+either changes the output. Captured integer U/V step bytes stay separate from
+the fractional words that stores may overwrite.
+
+The two-phase `projective_dither_key` script has 830 operations per scenario.
+It reuses the raw-keyed geometry and key-boundary cases, then checks four
+selectors, both row parities, four alignments, four fractional U/V positions,
+full blocks, every tail residue, exact signed distance thresholds and masked
+endpoint reversal. Additional mixed-key gradients exercise both correction
+sizes. Destination aliases target the U step, tail flag and key byte; an
+inverse texture pattern makes stale key reads visible. A canvas texture alias
+distinguishes immediate stores from pair prefetch.
+Keyed dithered fog, hardware, plane, resource and initialization paths remain
+deferred; HG2D is still outside `MODULES`.
+
 ## Verification and limits
+
+The keyed-dither family catches **25 new mutations** at 64 scenarios with zero
+unresolved mutations. All **718** mutation anchors pass the separate audit.
+
 
 The dithered-fog suite passes **20,000 scenarios / 15,220,000 operations**,
 with zero differences and zero faults. All 160,000 retail host divide repairs
@@ -1277,6 +1322,6 @@ loading, and device-backed +0x9c/+0xa0/+0xa4/+0xbc.
 The remaining projective/plane spans through +0x44/+0x40, device palette
 realization and the negative-length shadow corrupt-stack return also remain
 unfinished. Next are the remaining software projective spans selected at data
-+0x4200 (keyed dithering with/without fog), then the plane, resource/device and
++0x4200 (keyed dithered fog), then the plane, resource/device and
 initialization paths. The verified subsets do not
 establish whole-module rendering equivalence or readiness to run in-game.

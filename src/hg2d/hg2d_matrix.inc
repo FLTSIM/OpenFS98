@@ -135,7 +135,8 @@ static void matrix_span(uint32_t *left, uint32_t *right, uint32_t y, int flat)
         WORD(0x4200) == 0x207352a4 || WORD(0x4200) == 0x20738c03 ||
         WORD(0x4200) == 0x2073c402 || WORD(0x4200) == 0x2073f771 ||
         WORD(0x4200) == 0x20749d95 || WORD(0x4200) == 0x207541ee ||
-        WORD(0x4200) == 0x2074e49d || WORD(0x4200) == 0x207588f0) {
+        WORD(0x4200) == 0x2074e49d || WORD(0x4200) == 0x207588f0 ||
+        WORD(0x4200) == 0x2075e63f || WORD(0x4200) == 0x20766058) {
         projective_span(left, right, y, flat);
         return;
     }

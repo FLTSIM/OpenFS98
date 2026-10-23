@@ -1,4 +1,4 @@
-/* HG2D, module 13. Incomplete: only the texture slice is installed.
+/* HG2D, module 13. Incomplete: texture and software palette slices are installed.
  * Keep the retail .data layout for whole-image differential testing.
  * See docs/modules/hg2d.md. */
 #include <windows.h>
@@ -152,6 +152,8 @@ uint32_t STDCALL __attribute__((used)) texture_update_body(uint32_t handle, uint
 EAX_ENTRY(texture_destroy, texture_destroy_body);
 EAX_ENTRY(texture_update, texture_update_body);
 
+#include "hg2d_palette.inc"
+
 __asm__(".globl _ImportTable\n.set _ImportTable, _hg2d_image\n"
         ".globl _Linkage\n.set _Linkage, _hg2d_image + 0x38\n");
 
@@ -163,6 +165,12 @@ BOOL WINAPI DllMain(HINSTANCE instance, DWORD reason, LPVOID reserved)
 #define HG2D_DATA_POINTER(at, target) WORD(at) = ADDRESS(hg2d_image + (target));
 #include "hg2d_pointers.inc"
 #undef HG2D_DATA_POINTER
+        WORD(0x38 + 0x5c) = ADDRESS(palette_realize);
+        WORD(0x38 + 0x60) = ADDRESS(palette_refresh_entry);
+        WORD(0x38 + 0x64) = ADDRESS(palette_force);
+        WORD(0x38 + 0x70) = ADDRESS(colour_convert);
+        WORD(0x38 + 0x7c) = ADDRESS(palette_select);
+        WORD(0x38 + 0x88) = ADDRESS(colour_remap);
         WORD(0x38 + 0x6c) = ADDRESS(texture_remap);
         WORD(0x38 + 0xa8) = ADDRESS(texture_load);
         WORD(0x38 + 0xac) = ADDRESS(texture_create);

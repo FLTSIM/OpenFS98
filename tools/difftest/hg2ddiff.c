@@ -1,4 +1,4 @@
-/* HG2D texture slice against retail, independently of the PANELS model.
+/* HG2D texture, palette and colour slices against retail, independently of the PANELS model.
  * Compare eax, host/FE/COM calls, entire .data after each operation, and
  * pixel bytes whenever touched. Deterministic boundary cases precede scripts.
  * In-range unaligned handles are intentionally tested with zero pixels/hw;
@@ -26,6 +26,11 @@ static uint8_t arena[220][0x10000], supplied[0x10000];
 static uint32_t side, step, scenario, random_state, block_count, alloc_count;
 static uint32_t fail_every, load_success, event_hash, operations;
 static uint32_t allocations, failures, loads, releases, full_pools, unaligned;
+static uint8_t global[0x2000], global_states[256][0x2000];
+static uint32_t carries[256], check_carry, palette_calls, notifications;
+static uint32_t layout_entry[2], util_linkage;
+uint32_t returned_flags;
+static const char *active_suite;
 static uint32_t host[0x300 / 4], fe[0x20 / 4], object[1], vtable[3];
 
 /* eax comes from a scripted caller. Three arguments allow +0xa8 too. */
@@ -37,8 +42,9 @@ __asm__(".text\n_invoke:\n\t"
         "movl 28(%ebp),%ecx\n\t"
         "cmpl $3,%ecx\n\tjne 1f\n\tpushl 20(%ebp)\n"
         "1:\n\tcmpl $2,%ecx\n\tjb 2f\n\tpushl 16(%ebp)\n"
-        "2:\n\tpushl 12(%ebp)\n\tmovl 24(%ebp),%eax\n\t"
-        "call *8(%ebp)\n\t"
+        "2:\n\ttestl %ecx,%ecx\n\tjz 3f\n\tpushl 12(%ebp)\n"
+        "3:\n\tmovl 24(%ebp),%eax\n\t"
+        "call *8(%ebp)\n\tpushfl\n\tpopl _returned_flags\n\t"
         "popl %edi\n\tpopl %esi\n\tpopl %ebx\n\tpopl %ebp\n\tret\n");
 
 static uint32_t random_word(void)
@@ -125,6 +131,8 @@ static void compare(uint32_t result)
     memset(normalized + 0x38, 0, 0xc0);
     if (side == 0) {
         memcpy(states[step], normalized, DATA_SIZE);
+        memcpy(global_states[step], global, sizeof global);
+        carries[step] = check_carry ? returned_flags & 1 : 0;
         results[step] = result;
         events[step] = event_hash;
         pixel_addresses[step] = ADDRESS(touched);
@@ -132,12 +140,20 @@ static void compare(uint32_t result)
     } else if (results[step] != result || events[step] != event_hash ||
                pixel_addresses[step] != ADDRESS(touched) ||
                (touched && memcmp(pixel_states[step], touched, 0x10000)) ||
-               memcmp(states[step], normalized, DATA_SIZE)) {
-        printf("scenario %u step %u differs: eax %08x/%08x events %08x/%08x\n",
-               scenario, step, results[step], result, events[step], event_hash);
+               memcmp(states[step], normalized, DATA_SIZE) ||
+               memcmp(global_states[step], global, sizeof global) ||
+               carries[step] != (check_carry ? returned_flags & 1 : 0)) {
+        printf("%s scenario %u step %u differs: eax %08x/%08x events %08x/%08x\n",
+               active_suite, scenario, step, results[step], result, events[step], event_hash);
         for (index = 0; index < DATA_SIZE; index++)
             if (states[step][index] != normalized[index]) {
                 printf("first data byte +%x: %02x/%02x\n", index, states[step][index], normalized[index]);
+                break;
+            }
+        if (check_carry) printf("carry %u/%u\n", carries[step], returned_flags & 1);
+        for (index = 0; index < sizeof global; index++)
+            if (global_states[step][index] != global[index]) {
+                printf("first GLOBAL byte +%x: %02x/%02x\n", index, global_states[step][index], global[index]);
                 break;
             }
         exit(1);
@@ -148,19 +164,23 @@ static void compare(uint32_t result)
 
 static uint32_t call(uint32_t slot, uint32_t first, uint32_t second, uint32_t third)
 {
-    uint32_t result;
+    uint32_t result, count = 2;
+    check_carry = slot == 0x60 || slot == 0x64 || slot == 0x7c;
+    if (slot == 0xa8 || slot == 0x70) count = 3;
+    if (slot == 0xb4 || slot == 0x6c || slot == 0x7c) count = 1;
+    if (slot == 0x5c || slot == 0x60 || slot == 0x64) count = 0;
     touched = NULL;
     if (slot == 0x6c)
         touched = (uint8_t *)(uintptr_t)first;
     else if (slot == 0xb8 && (second & 2) && first >= pool_handle(0) && first < pool_handle(0x28a0))
         touched = (uint8_t *)(uintptr_t)*(uint32_t *)(uintptr_t)first;
     result = invoke(WORD(images[side], 0x38 + slot), first, second, third,
-                             0xaabbccdd, slot == 0xa8 ? 3 : (slot == 0xb4 || slot == 0x6c) ? 1 : 2);
-    compare(slot == 0xa8 || slot == 0xac ? normalize_result(result) : result);
+                             0xaabbccdd, count);
+    compare(slot == 0xa8 || slot == 0xac || slot == 0x7c ? normalize_result(result) : result);
     return result;
 }
 
-static void run(void)
+static void run_textures(void)
 {
     uint32_t index, descriptor[8] = {1, 0x100, 0, 0, 0, 0, 0, 0};
     uint32_t name, handle, choice;
@@ -253,6 +273,8 @@ static void run(void)
     compare(0);
 }
 
+#include "hg2d_palette_suite.inc"
+
 static LONG WINAPI fault(EXCEPTION_POINTERS *exception)
 {
     printf("fault scenario %u side %u step %u at %p code %lx\n", scenario, side, step,
@@ -264,12 +286,21 @@ static LONG WINAPI fault(EXCEPTION_POINTERS *exception)
 int main(int argc, char **argv)
 {
     uint32_t count = argc > 1 ? (uint32_t)strtoul(argv[1], NULL, 0) : 20000;
-    HMODULE modules[2];
+    HMODULE modules[2], util;
+    const char *suite = argc > 2 ? argv[2] : "all";
+    CHECK(!strcmp(suite, "all") || !strcmp(suite, "textures") || !strcmp(suite, "palette") || !strcmp(suite, "colours"));
     SetUnhandledExceptionFilter(fault);
     modules[0] = LoadLibraryA("HG2D_retail.dll");
     modules[1] = LoadLibraryA("HG2D_ours.dll");
     CHECK(count > 0 && modules[0] && modules[1] && modules[0] != modules[1]);
     CHECK(ADDRESS(modules[0]) == 0x20730000);
+    util = LoadLibraryA("UTIL_retail.dll");
+    CHECK(util);
+    util_linkage = ADDRESS(GetProcAddress(util, "Linkage"));
+    CHECK(util_linkage);
+    layout_entry[0] = 0x20731c42;
+    layout_entry[1] = ADDRESS(GetProcAddress(modules[1], "hg2d_palette_layout"));
+    CHECK(layout_entry[1]);
     for (side = 0; side < 2; side++) {
         images[side] = (uint8_t *)GetProcAddress(modules[side], "ImportTable");
         CHECK(images[side] && (uint8_t *)GetProcAddress(modules[side], "Linkage") == images[side] + 0x38);
@@ -285,10 +316,23 @@ int main(int argc, char **argv)
     fe[0x1c / 4] = ADDRESS(fe_load);
     vtable[2] = ADDRESS(com_release);
     object[0] = ADDRESS(vtable);
-    for (scenario = 0; scenario < count; scenario++)
-        for (side = 0; side < 2; side++) run();
-    printf("hg2ddiff textures: %u scenarios, %u operations, 0 differ\n", count, operations / 2);
-    printf("per side: allocations %u, failures %u, FE loads %u, COM releases %u, full pools %u, unaligned %u\n",
-           allocations / 2, failures / 2, loads / 2, releases / 2, full_pools / 2, unaligned / 2);
+    host[0x290 / 4] = ADDRESS(host_realize);
+    if (!strcmp(suite, "all") || !strcmp(suite, "textures")) {
+        active_suite = "textures";
+        for (scenario = 0; scenario < count; scenario++)
+            for (side = 0; side < 2; side++) run_textures();
+        printf("hg2ddiff textures: %u scenarios, %u operations, 0 differ\n", count, operations / 2);
+        printf("per side: allocations %u, failures %u, FE loads %u, COM releases %u, full pools %u, unaligned %u\n",
+               allocations / 2, failures / 2, loads / 2, releases / 2, full_pools / 2, unaligned / 2);
+    }
+    if (!strcmp(suite, "all") || !strcmp(suite, "palette")) {
+        active_suite = "palette";
+        operations = 0;
+        for (scenario = 0; scenario < count; scenario++)
+            for (side = 0; side < 2; side++) run_palette();
+        printf("hg2ddiff palette: %u scenarios, %u operations, 0 differ\n", count, operations / 2);
+        printf("per side: %u realizations, %u CHAIN notifications\n", palette_calls / 2, notifications / 2);
+    }
+    if (strcmp(suite, "textures") && (argc < 4 || strcmp(argv[3], "scripts"))) run_colour_vectors();
     return 0;
 }

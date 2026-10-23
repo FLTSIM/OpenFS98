@@ -2,3 +2,4 @@ LIBRARY HG2D.DLL
 EXPORTS
     Linkage DATA
     ImportTable DATA
+    hg2d_palette_layout

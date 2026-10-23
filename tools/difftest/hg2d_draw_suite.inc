@@ -7,7 +7,7 @@ static uint32_t surface[5], row_storage[160];
 static const uint8_t *text_pointer;
 static uint32_t draw_fault_code, draw_fault_address, draw_fault_access;
 static volatile uint32_t draw_active;
-static uint32_t draw_faults, draw_div_repairs, draw_calls[10];
+static uint32_t draw_faults, draw_div_repairs, draw_calls[12];
 uint32_t draw_recover_sp, draw_entry_function;
 uint32_t draw_registers[7];
 static uint32_t register_states[256][7];
@@ -38,6 +38,15 @@ static LONG WINAPI draw_exception(EXCEPTION_POINTERS *exception)
         exception->ExceptionRecord->ExceptionCode == EXCEPTION_INT_OVERFLOW) {
         CONTEXT *context = exception->ContextRecord;
         const uint8_t *instruction = (const uint8_t *)(uintptr_t)context->Eip;
+        if (context->Eip == 0x20732aea || context->Eip == 0x20732af6) {
+            int negative = ((int32_t)context->Edx < 0) != ((int32_t)context->Ebx < 0);
+            CHECK(instruction[0] == 0xf7 && instruction[1] == 0xfb);
+            context->Eax = negative ? 0x80000001u : 0x7fffffffu;
+            context->Edx = 0x7fffffffu;
+            context->Eip += 2;
+            draw_div_repairs++;
+            return EXCEPTION_CONTINUE_EXECUTION;
+        }
         if (context->Eip == 0x207880da || context->Eip == 0x207880f3) {
             CHECK(instruction[0] == 0x66 && instruction[1] == 0xf7 && instruction[2] == 0xf1);
             context->Eax |= 0xffff;
@@ -74,7 +83,7 @@ static uint32_t drawing(uint32_t slot, uint32_t a, uint32_t b, uint32_t c, uint3
     switch (slot) {
     case 0x18: count = 0; break;
     case 0x1c: case 0x20: count = 3; break;
-    case 0x24: case 0x2c: case 0x30: count = 4; break;
+    case 0x24: case 0x2c: case 0x30: case 0x44: count = 4; break;
     case 0x28: count = 6; break;
     default: count = 5; break;
     }

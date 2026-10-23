@@ -12,7 +12,7 @@ import sys
 
 root = Path(__file__).resolve().parent.parent
 source = (root / 'src/hg2d/hg2d.c').read_text()
-for section in ('palette', 'draw'):
+for section in ('palette', 'draw', 'polygon'):
     source = source.replace('#include "hg2d_%s.inc"' % section, (root / ('src/hg2d/hg2d_%s.inc' % section)).read_text())
 build = root / 'bin/hg2d-breaks'
 build.mkdir(parents=True, exist_ok=True)
@@ -147,6 +147,31 @@ draw_mutations += [
     ('distance threshold boundary', 'threshold < 0x7d00 &&', 'threshold <= 0x7d00 &&'),
 ]
 mutations += [(*mutation, 'drawing') for mutation in draw_mutations]
+polygon_mutations = [
+    ('projection view load order', 'polygon_project(x, scale_x, depth) + (offset_x << 16)', 'polygon_project(x, view[0], depth) + (view[1] << 16)'),
+    ('projection scale shift', '(int32_t)(scale << 16)', '(int32_t)(scale << 15)'),
+    ('projection signed depth', 'product / (int32_t)depth', 'product / depth'),
+    ('projection zero repair sign', '((product < 0) != ((int32_t)depth < 0))', '((product < 0) == ((int32_t)depth < 0))'),
+    ('projection minimum quotient', 'quotient >= -2147483648LL', 'quotient > -2147483648LL'),
+    ('projection positive saturation', '? 0x80000001u : 0x7fffffffu', '? 0x80000001u : 0x7ffffffeu'),
+    ('projection x offset', '(offset_x << 16)', '(offset_x << 15)'),
+    ('projection y offset', '(offset_y << 16)', '(offset_y << 15)'),
+    ('vertex count', 'GLOBAL_WORD(0x2f0)++;', 'GLOBAL_WORD(0x2f0) += 2;'),
+    ('vertex first position', 'WORD(0x8f8) = WORD(0x900) = x;', 'WORD(0x8f8) = WORD(0x900) = x + 1;'),
+    ('vertex depth minimum', '(int32_t)depth < (int32_t)WORD(0x8d0)', 'depth < WORD(0x8d0)'),
+    ('vertex depth maximum', '(int32_t)depth > (int32_t)WORD(0x8d4)', 'depth > WORD(0x8d4)'),
+    ('vertex capacity equality', '+ 0x60 >= ADDRESS(hg2d_image + 0x884)', '+ 0x60 > ADDRESS(hg2d_image + 0x884)'),
+    ('vertex capacity reservation', '+ 0x60 >= ADDRESS(hg2d_image + 0x884)', '+ 0x10 >= ADDRESS(hg2d_image + 0x884)'),
+    ('vertex minimum y unsigned', 'if (y < WORD(0x8c8))', 'if ((int32_t)y < (int32_t)WORD(0x8c8))'),
+    ('vertex maximum y signed', '(int32_t)y > (int32_t)WORD(0x8cc)', 'y > WORD(0x8cc)'),
+    ('vertex edge ordering', '(int32_t)y < (int32_t)previous_y', 'y < previous_y'),
+    ('vertex texture flag width', 'GLOBAL_HALF(0xc90) && GLOBAL_HALF(0x2f4)', 'GLOBAL_WORD(0xc90) && GLOBAL_WORD(0x2f4)'),
+    ('edge flat rounding', 'edge[2] = low_x + 0x8000;', 'edge[2] = low_x;'),
+    ('edge flat delta', 'edge[3] = high_x - low_x;', 'edge[3] = low_x - high_x;'),
+    ('edge scanline fraction', '(low_y & 0xffff) ^ 0xffff', '(low_y & 0xffff) ^ 0xfffe'),
+    ('edge pointer advance', 'GLOBAL_WORD(0xc14) = ADDRESS(edge) + 16;', 'GLOBAL_WORD(0xc14) = ADDRESS(edge) + 20;'),
+]
+mutations += [(*mutation, 'polygons') for mutation in polygon_mutations]
 if len(sys.argv) > 2 and sys.argv[2] not in {suite for _, _, _, suite in mutations}:
     raise SystemExit('Unknown mutation family: ' + sys.argv[2])
 missed = []

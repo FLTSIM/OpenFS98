@@ -26,6 +26,8 @@ static uint8_t arena[220][0x10000], supplied[0x10000];
 static uint32_t side, step, scenario, random_state, block_count, alloc_count;
 static uint32_t fail_every, load_success, event_hash, operations;
 static uint32_t allocations, failures, loads, releases, full_pools, unaligned;
+static uint32_t polygon_compare;
+static uint8_t normalized_global[0x2000];
 static uint8_t global[0x2000], global_states[256][0x2000];
 static uint32_t carries[256], check_carry, palette_calls, notifications;
 static uint32_t layout_entry[2], util_linkage;
@@ -127,11 +129,14 @@ static void compare(uint32_t result)
 #define HG2D_DATA_POINTER(at, target) WORD(normalized, at) -= ADDRESS(images[side]) - 0x20792000u;
 #include "../../src/hg2d/hg2d_pointers.inc"
 #undef HG2D_DATA_POINTER
+    memcpy(normalized_global, global, sizeof global);
+    if (polygon_compare)
+        WORD(normalized_global, 0xc14) -= ADDRESS(images[side]) - 0x20792000u;
     /* Service pointers differ by implementation; import links share stubs. */
     memset(normalized + 0x38, 0, 0xc0);
     if (side == 0) {
         memcpy(states[step], normalized, DATA_SIZE);
-        memcpy(global_states[step], global, sizeof global);
+        memcpy(global_states[step], normalized_global, sizeof global);
         carries[step] = check_carry ? returned_flags & 1 : 0;
         results[step] = result;
         events[step] = event_hash;
@@ -141,7 +146,7 @@ static void compare(uint32_t result)
                pixel_addresses[step] != ADDRESS(touched) ||
                (touched && memcmp(pixel_states[step], touched, 0x10000)) ||
                memcmp(states[step], normalized, DATA_SIZE) ||
-               memcmp(global_states[step], global, sizeof global) ||
+               memcmp(global_states[step], normalized_global, sizeof global) ||
                carries[step] != (check_carry ? returned_flags & 1 : 0)) {
         printf("%s scenario %u step %u differs: eax %08x/%08x events %08x/%08x\n",
                active_suite, scenario, step, results[step], result, events[step], event_hash);
@@ -152,8 +157,8 @@ static void compare(uint32_t result)
             }
         if (check_carry) printf("carry %u/%u\n", carries[step], returned_flags & 1);
         for (index = 0; index < sizeof global; index++)
-            if (global_states[step][index] != global[index]) {
-                printf("first GLOBAL byte +%x: %02x/%02x\n", index, global_states[step][index], global[index]);
+            if (global_states[step][index] != normalized_global[index]) {
+                printf("first GLOBAL byte +%x: %02x/%02x\n", index, global_states[step][index], normalized_global[index]);
                 break;
             }
         exit(1);
@@ -275,6 +280,7 @@ static void run_textures(void)
 
 #include "hg2d_palette_suite.inc"
 #include "hg2d_draw_suite.inc"
+#include "hg2d_polygon_suite.inc"
 
 static LONG WINAPI fault(EXCEPTION_POINTERS *exception)
 {
@@ -289,7 +295,7 @@ int main(int argc, char **argv)
     uint32_t count = argc > 1 ? (uint32_t)strtoul(argv[1], NULL, 0) : 20000;
     HMODULE modules[2], util;
     const char *suite = argc > 2 ? argv[2] : "all";
-    CHECK(!strcmp(suite, "all") || !strcmp(suite, "textures") || !strcmp(suite, "palette") || !strcmp(suite, "colours") || !strcmp(suite, "drawing"));
+    CHECK(!strcmp(suite, "all") || !strcmp(suite, "textures") || !strcmp(suite, "palette") || !strcmp(suite, "colours") || !strcmp(suite, "drawing") || !strcmp(suite, "polygons"));
     SetUnhandledExceptionFilter(fault);
     CHECK(AddVectoredExceptionHandler(1, draw_exception));
     {
@@ -349,6 +355,15 @@ int main(int argc, char **argv)
         for (scenario = 0; scenario < count; scenario++)
             for (side = 0; side < 2; side++) run_drawing();
         printf("hg2ddiff drawing: %u scenarios, %u operations, %u matching faults, 0 differ\n",
+               count, operations / 2, draw_faults / 2);
+        printf("retail host divide repairs: %u\n", draw_div_repairs);
+    }
+    if (!strcmp(suite, "all") || !strcmp(suite, "polygons")) {
+        active_suite = "polygons";
+        operations = draw_div_repairs = draw_faults = 0;
+        for (scenario = 0; scenario < count; scenario++)
+            for (side = 0; side < 2; side++) run_polygons();
+        printf("hg2ddiff polygons: %u scenarios, %u operations, %u faults, 0 differ\n",
                count, operations / 2, draw_faults / 2);
         printf("retail host divide repairs: %u\n", draw_div_repairs);
     }

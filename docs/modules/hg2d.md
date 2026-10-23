@@ -1,11 +1,14 @@
 # HG2D.DLL — module id 13
 
-In progress, one slice at a time. Twenty-two Linkage services are implemented:
+In progress, one slice at a time. Twenty-three Linkage entries now have
+implementations:
 texture storage and access, loading through FE, palette remapping, hardware
 texture release, colour conversion, software palette realization, points,
-lines, frames, depth shading and text. It uses snake_case and `<stdint.h>`; there is no `types.h` dependency.
+lines, frames, depth shading, text and plain polygon vertex submission. It
+uses snake_case and `<stdint.h>`; there is no `types.h` dependency.
 HG2D is not in `MODULES` and must not be installed yet: initialization,
-polygons, device-backed palette realization and the other services are incomplete.
+polygon filling, textured attributes, device-backed palette realization and
+the other services are incomplete.
 
 The implementation and tests occupy HG2D-specific files. The shared Makefile,
 README and MAIN files are untouched so MAIN can proceed independently.
@@ -17,6 +20,7 @@ make -f tools/hg2d.mk hg2ddiff-run N=20000 SUITE=palette
 make -f tools/hg2d.mk hg2ddiff-run N=20000 SUITE=textures
 make -f tools/hg2d.mk hg2ddiff-run SUITE=colours       # finite sweeps
 make -f tools/hg2d.mk hg2ddiff-run N=20000 SUITE=drawing
+make -f tools/hg2d.mk hg2ddiff-run N=20000 SUITE=polygons
 python3 tools/hg2d_breaks.py
 ```
 
@@ -259,7 +263,64 @@ remapping, and both guard faults and the retail null read. Other arbitrary
 32-bit coordinate overflows and malformed surface pointers are not a claim
 of this suite. DirectDraw paths and polygons remain unfinished.
 
+## Slice 4: plain polygon vertices
+
+`src/hg2d/hg2d_polygon.inc` implements the plain path of +0x44
+(`0x20732aa5`) and its 16-byte edge builder (`0x207329dc`). The four arguments
+are a host record, signed x and y, and signed depth. The record's +0x1c points
+to four dwords: x scale, x offset, y scale, y offset. Projection shifts each
+scale by 16 with dword wrapping, multiplies signed dwords into a signed
+64-bit product, divides by signed depth, and adds the shifted offset.
+The entry preserves eax, ebx, ecx, edx, esi, edi and ebp.
+
+The host repairs signed division by zero and quotient overflow to positive
+or negative `INT32_MAX`, determining the sign from the dividend's high dword
+and the divisor. A valid `INT32_MIN` quotient remains valid. The harness
+repairs only the two known retail IDIV sites and checks their instruction
+bytes. The implementation calculates the same results without raising.
+
+GLOBAL +0x2f0 starts at -1: its first increment initializes the first and
+previous positions, y bounds and signed depth bounds. Subsequent vertices
+increment the count and update depth bounds even when the edge buffer is
+full. Retail rejects an edge when its pointer plus **0x60** reaches the limit
+at data +0x884, despite a plain edge occupying only 16 bytes. Starting at
++0x104, this allows 114 edges; rejected vertices leave previous coordinates
+and y bounds unchanged. The minimum-y comparison is unsigned, maximum-y is
+signed, and endpoint ordering is signed.
+
+Edges contain start row, end row, fixed-point x and slope. Equal integer
+rows take the flat path, adding 0x8000 to x and retaining the full horizontal
+delta. Other edges use the existing signed-complement division, clamp the
+integer slope to 0x7fff, and advance x by the complement of the starting y
+fraction. The original read/write order of projection scratch is retained,
+including when the supplied view aliases that scratch. The dead `lea` of
+record +0x80 is omitted; its destination is overwritten before use.
+
+The conjunction of nonzero low words at GLOBAL +0xc90 and +0x2f4 selects the
+unfinished textured-attribute edge builder and deliberately traps. Either
+flag alone, including nonzero upper words, still selects plain edges. Polygon
+close/fill +0x40 and textured submission +0x48 are not installed yet.
+
+The `polygons` suite compares the complete image, GLOBAL, canvas and the seven
+registers after every submission. It normalizes only the known edge pointer
+at GLOBAL +0xc14 in addition to the original data pointer list. Directed
+fixtures independently check first-vertex projection, flat and vertical
+edges, valid minimum quotient, scratch aliasing and buffer capacity. Mixed
+scripts cover fractional coordinates, negative slopes, wraparound, signed
+depths, saturation, steep slopes and both flag widths. Deliberate mutation
+checks cover projection, bounds, capacity, edge records and pointer advance.
+
 ## Verification and limits
+
+The final `polygons` run passes 20,000 scenarios and 1,576,250 operations,
+with zero differences and zero unrepaired faults. Retail resumes after 673,201
+signed divide repairs. The existing suites also pass a regression run of
+2,000 scenarios each for textures (115,500 operations), palettes (112,000) and drawing (420,000,
+including 14,000 matching retail faults), plus all 263,680 finite colour/layout
+comparisons.
+
+The full mutation run catches all 136 deliberate breaks: the original 114
+plus 22 for polygon projection and edges, with zero unresolved.
 
 `make -f tools/hg2d.mk hg2ddiff-run N=20000 SUITE=drawing`: 20,000 scenarios,
 4,200,000 operations, zero differences. This includes 140,000 matching access
@@ -281,12 +342,12 @@ scenarios, 1,120,000 operations, 40,000 realizations and 53,297 CHAIN
 notifications per side, with zero differences. The colour and layout sweeps
 pass all 263,680 operations plus the seven directed fixtures.
 
-The expanded mutation checks catch all 114 distinct breaks, zero unresolved:
+The first three slices' mutation checks caught all 114 distinct breaks, zero unresolved:
 19 texture, 18 colour/layout, 27 palette, and 50 drawing. The earlier families
 were rechecked in the full mutation run; the final drawing family includes
 the two extra zero-count loop breaks. `python3 tools/hg2d_breaks.py` runs all
 families, or its second argument selects `textures`, `colours`, `palette` or
-`drawing`. Only a reported differential mismatch counts as detection; a build
+`drawing` (plus `polygons` for the fourth slice). Only a reported differential mismatch counts as detection; a build
 failure, fixture error or harness crash does not.
 The generated files reproduce exactly when re-extracted from retail.
 
@@ -311,7 +372,7 @@ and hardware releases with accounting indices 0..8 are exercised. Mutation
 checks reject fixture errors and crashes: only a reported differential
 mismatch counts as a caught break.
 
-Only texture-handle returns (+0xa8 and +0xac) and the shade-map pointer
+Among return values, only texture handles (+0xa8 and +0xac) and the shade-map pointer
 (+0x7c) receive address normalization.
 A larger run caught a harness bug here: scenario 16,552 returned numeric
 hardware accounting that happened to fall inside the replacement DLL's address
@@ -324,6 +385,6 @@ FE loader, DirectDraw objects, arbitrary malformed COM pointers, accounting
 indices outside 0..8, and initialization are outside this slice. The existing
 PANELS model and its verified harness remain unchanged.
 
-Next: polygon submission, clipping and the rasterizer behind the same owning harness.
+Next: polygon close/fill, textured attributes, clipping and the remaining rasterizer.
 Completion of these slices does not establish
 rendering equivalence or readiness to run in-game.

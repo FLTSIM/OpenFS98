@@ -471,7 +471,20 @@ keyed_batch = keyed_loop + """
                 if (second >= BYTE(0x435c)) pixel[0] = pixel[1] = second;
                 pixel_address += direction * 4; remaining--; continue;
             }"""
+keyed_store = """            if (value >= BYTE(0x435c)) {
+                uint8_t *pixel = POINTER(pixel_address);
+                pixel[0] = value; pixel[1] = value;
+            }
+"""
+keyed_advance = """            uint64_t step_sum = (uint64_t)u_fraction + WORD(0x41a8);
+            u_fraction = (uint32_t)step_sum;
+            u = (uint8_t)(u + u_step + (uint32_t)(step_sum >> 32));
+            step_sum = (uint64_t)v_fraction + WORD(0x41ac);
+            v_fraction = (uint32_t)step_sum;
+            v = (uint8_t)(v + v_step + (uint32_t)(step_sum >> 32));
+"""
 keyed_mutations = [
+    ('keyed advance before store', keyed_store + keyed_advance, keyed_advance + keyed_store),
     ('keyed reverse target', 'keyed = WORD(0x4200) == 0x2073ae7b', 'keyed = WORD(0x4200) == 0x20733bbb'),
     ('keyed forward target', '|| WORD(0x4200) == 0x2073e1ec;', '|| WORD(0x4200) == 0x2073751e;'),
     ('keyed traversal direction', 'forward |= WORD(0x4200) == 0x2073e1ec;', 'forward |= WORD(0x4200) == 0x2073ae7b;'),
@@ -483,7 +496,7 @@ keyed_mutations = [
     ('keyed first pixel', 'pixel[0] = value; pixel[1] = value;\n            }', 'pixel[1] = value;\n            }'),
     ('keyed second pixel', 'pixel[0] = value; pixel[1] = value;\n            }', 'pixel[0] = value;\n            }'),
     ('keyed destination spacing', 'pixel_address += direction * 2;\n        }\n        return;', 'pixel_address += direction;\n        }\n        return;'),
-    ('keyed skipped coordinate advance', 'uint64_t sum = (uint64_t)*u_fraction + WORD(0x41a8);', 'if ((WORD(0x4200) == 0x2073ae7b || WORD(0x4200) == 0x2073e1ec) && value < BYTE(0x435c)) return value; uint64_t sum = (uint64_t)*u_fraction + WORD(0x41a8);'),
+    ('keyed skipped coordinate advance', 'uint64_t step_sum = (uint64_t)u_fraction + WORD(0x41a8);', 'if (value < BYTE(0x435c)) { pixel_address += direction * 2; continue; } uint64_t step_sum = (uint64_t)u_fraction + WORD(0x41a8);'),
     ('keyed immediate sample store', keyed_loop, keyed_batch),
     ('keyed full block gate', 'projective_pixels(pixel_address, block, 0x4198, direction, 0, keyed);', 'projective_pixels(pixel_address, block, 0x4198, direction, 0, 0);'),
     ('keyed tail gate', 'projective_pixels(pixel_address, remaining, 0x4190, direction, 1, keyed);', 'projective_pixels(pixel_address, remaining, 0x4190, direction, 1, 0);'),
@@ -520,8 +533,8 @@ fog_mutations = [
     ('fog tail starting level', 'remaining, 0x4190, WORD(0x41bc), direction', 'remaining, 0x4190, WORD(0x41c4), direction'),
     ('fog lookup row byte', '((shade >> 8) & 255) * 256 + raw', '((shade >> 9) & 255) * 256 + raw'),
     ('fog lookup source', '256 + raw);', '256 + (raw ^ 1));'),
-    ('fog shade wrap', '(shade + WORD(0x4358)) & 0xffff0fffu', '(shade + WORD(0x4358)) & 0xffffffffu'),
-    ('fog shade step', 'shade + WORD(0x4358)', 'shade - WORD(0x4358)'),
+    ('fog shade wrap', 'shade = (shade + WORD(0x4358)) & 0xffff0fffu;\n        destination[0]', 'shade = (shade + WORD(0x4358)) & 0xffffffffu;\n        destination[0]'),
+    ('fog shade step', 'shade = (shade + WORD(0x4358)) & 0xffff0fffu;\n        destination[0]', 'shade = (shade - WORD(0x4358)) & 0xffff0fffu;\n        destination[0]'),
     ('fog first doubled pixel', 'destination[0] = colour; destination[1] = colour;', 'destination[1] = colour;'),
     ('fog second doubled pixel', 'destination[0] = colour; destination[1] = colour;', 'destination[0] = colour;'),
     ('fog doubled spacing', '        address += direction * 2;', '        address += direction;'),
@@ -530,10 +543,61 @@ fog_mutations = [
     ('fog tail target direction', 'projective_fog_tails[forward]', 'projective_fog_tails[!forward]'),
     ('fog tail target block', 'projective_fog_tails[forward][shift == 4]', 'projective_fog_tails[forward][shift != 4]'),
     ('fog tail target count', 'projective_fog_tails[forward][shift == 4][remaining]', 'projective_fog_tails[forward][shift == 4][(remaining + 1) & 31]'),
-    ('fog tail target family', 'WORD(0x4354) = projective_fog_tails', 'WORD(0x4354) = projective_tails'),
+    ('fog tail target family', 'projective_fog_tails[forward][shift == 4][remaining];', 'projective_tails[forward][shift == 4][remaining];'),
     ('fog sample store ordering', 'while (count--) {\n        uint8_t raw = projective_sample(&u_bits, &v_bits, &x_byte, &y_byte, x_step, y_step);', 'uint8_t pending = projective_sample(&u_bits, &v_bits, &x_byte, &y_byte, x_step, y_step);\n    while (count--) {\n        uint8_t raw = pending; if (count) pending = projective_sample(&u_bits, &v_bits, &x_byte, &y_byte, x_step, y_step);'),
 ]
 mutations += [(*mutation, 'projective_fog') for mutation in fog_mutations]
+key_fog_store = """            if (texel >= BYTE(0x435c)) {
+                uint8_t mapped = BYTE(0xd70 + ((shade >> 8) & 255) * 256 + texel);
+                uint8_t *output = POINTER(address);
+                output[0] = mapped; output[1] = mapped;
+            }
+"""
+key_fog_comment = '            /* Retail stores before advancing; a destination may alias steps. */\n'
+key_fog_advance = """            uint64_t carry_sum = (uint64_t)u_bits + WORD(0x41a8);
+            u_bits = (uint32_t)carry_sum;
+            x_byte = (uint8_t)(x_byte + x_step + (uint32_t)(carry_sum >> 32));
+            carry_sum = (uint64_t)v_bits + WORD(0x41ac);
+            v_bits = (uint32_t)carry_sum;
+            y_byte = (uint8_t)(y_byte + y_step + (uint32_t)(carry_sum >> 32));
+"""
+key_fog_shade = '            shade = (shade + WORD(0x4358)) & 0xffff0fffu;\n'
+key_fog_prefix = """if (keyed) {
+        while (count--) {
+            uint8_t texel = *(uint8_t *)POINTER(WORD(0x948) + x_byte + ((uint32_t)y_byte << 8));
+            if (texel >= BYTE(0x435c))"""
+key_fog_mutations = [
+    ('key fog key gate', 'keyed |= WORD(0x4200) == 0x2073c402 || WORD(0x4200) == 0x2073f771;', 'keyed |= 0;'),
+    ('key fog shade gate', 'fog |= WORD(0x4200) == 0x2073c402 || WORD(0x4200) == 0x2073f771;', 'fog |= 0;'),
+    ('key fog direction', 'forward |= WORD(0x4200) == 0x2073f771;', 'forward |= WORD(0x4200) == 0x2073c402;'),
+    ('key fog equality', 'if (texel >= BYTE(0x435c))', 'if (texel > BYTE(0x435c))'),
+    ('key fog unsigned comparison', 'if (texel >= BYTE(0x435c))', 'if ((int8_t)texel >= (int8_t)BYTE(0x435c))'),
+    ('key fog raw comparison', 'if (texel >= BYTE(0x435c))', 'if (BYTE(0xd70 + ((shade >> 8) & 255) * 256 + texel) >= BYTE(0x435c))'),
+    ('key fog mapped zero', 'output[0] = mapped; output[1] = mapped;', 'if (mapped) { output[0] = mapped; output[1] = mapped; }'),
+    ('key fog threshold width', 'if (texel >= BYTE(0x435c))', 'if (texel >= HALF(0x435c))'),
+    ('key fog cached threshold', key_fog_prefix, key_fog_prefix.replace('while (count--)', 'uint8_t saved_key = BYTE(0x435c);\n        while (count--)').replace('texel >= BYTE(0x435c)', 'texel >= saved_key')),
+    ('key fog first pixel', 'output[0] = mapped; output[1] = mapped;', 'output[1] = mapped;'),
+    ('key fog second pixel', 'output[0] = mapped; output[1] = mapped;', 'output[0] = mapped;'),
+    ('key fog texel byte order', 'WORD(0x948) + x_byte + ((uint32_t)y_byte << 8)', 'WORD(0x948) + y_byte + ((uint32_t)x_byte << 8)'),
+    ('key fog lookup', '* 256 + texel);', '* 256 + (texel ^ 1));'),
+    ('key fog u carry', 'x_byte + x_step + (uint32_t)(carry_sum >> 32)', 'x_byte + x_step'),
+    ('key fog v carry', 'y_byte + y_step + (uint32_t)(carry_sum >> 32)', 'y_byte + y_step'),
+    ('key fog u fraction width', 'u_bits = (uint32_t)carry_sum;', 'u_bits = (uint16_t)carry_sum;'),
+    ('key fog v step', 'carry_sum = (uint64_t)v_bits + WORD(0x41ac);', 'carry_sum = (uint64_t)v_bits + WORD(0x41a8);'),
+    ('key fog advance before store', key_fog_store + key_fog_comment + key_fog_advance, key_fog_advance + key_fog_store),
+    ('key fog shade before store', key_fog_store + key_fog_comment + key_fog_advance + key_fog_shade, '            uint32_t next_shade = (shade + WORD(0x4358)) & 0xffff0fffu;\n' + key_fog_store + key_fog_advance + '            shade = next_shade;\n'),
+    ('key fog skipped coordinates', key_fog_comment, '            if (texel < BYTE(0x435c)) { shade = (shade + WORD(0x4358)) & 0xffff0fffu; address += direction * 2; continue; }\n' + key_fog_comment),
+    ('key fog skipped shade', key_fog_shade, '            if (texel >= BYTE(0x435c)) shade = (shade + WORD(0x4358)) & 0xffff0fffu;\n'),
+    ('key fog shade wrap', key_fog_shade, '            shade = shade + WORD(0x4358);\n'),
+    ('key fog destination spacing', 'address = address + direction * 2;', 'address = address + direction;'),
+    ('key fog zero shortcut key', 'if (!BYTE(0x41c5)) fog = 0;', 'if (!BYTE(0x41c5)) { fog = 0; keyed = 0; }'),
+    ('key fog far shortcut key', 'else if (BYTE(0x41c5) == 15)', 'else if (BYTE(0x41c5) == 15 && !keyed)'),
+    ('key fog tail direction', 'projective_key_fog_tails[forward]', 'projective_key_fog_tails[!forward]'),
+    ('key fog tail block', 'projective_key_fog_tails[forward][shift == 4]', 'projective_key_fog_tails[forward][shift != 4]'),
+    ('key fog tail count', 'projective_key_fog_tails[forward][shift == 4][remaining]', 'projective_key_fog_tails[forward][shift == 4][(remaining + 1) & 31]'),
+    ('key fog tail family', 'keyed ? projective_key_fog_tails', 'keyed ? projective_fog_tails'),
+]
+mutations += [(*mutation, 'projective_key_fog') for mutation in key_fog_mutations]
 affine_mutations = [
     ('affine low dividend shift', '(uint32_t)(delta << 7)', '(uint32_t)(delta << 6)'),
     ('affine signed high dividend', 'delta & 0x80000000u ? -0x100000000LL : 0', 'delta & 0x80000000u ? 0 : 0'),
@@ -691,7 +755,7 @@ for name, old, new, suite in mutations:
         continue
     tested += 1
     owner = {'colours': 'palette', 'palette': 'palette', 'drawing': 'draw',
-             'polygons': 'polygon', 'fills': 'fill', 'textured': 'textured', 'affine': 'affine', 'gouraud': 'gouraud', 'blits': 'blit', 'optimized': 'affine', 'perspective': 'perspective', 'discs': 'disc', 'perspective_fill': 'perspective_fill', 'matrix_vertices': 'matrix', 'matrix_fills': 'matrix', 'projective': 'projective', 'projective_keyed': 'projective', 'projective_fog': 'projective'}.get(suite)
+             'polygons': 'polygon', 'fills': 'fill', 'textured': 'textured', 'affine': 'affine', 'gouraud': 'gouraud', 'blits': 'blit', 'optimized': 'affine', 'perspective': 'perspective', 'discs': 'disc', 'perspective_fill': 'perspective_fill', 'matrix_vertices': 'matrix', 'matrix_fills': 'matrix', 'projective': 'projective', 'projective_keyed': 'projective', 'projective_fog': 'projective', 'projective_key_fog': 'projective'}.get(suite)
     if source.count(old) != 1 and owner:
         scope = sections[owner]
         assert scope.count(old) == 1 and source.count(scope) == 1, (name, scope.count(old))

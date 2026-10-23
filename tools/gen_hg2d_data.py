@@ -65,6 +65,7 @@ with open('src/hg2d/hg2d_projective_tables.inc', 'w') as output:
     output.write(header)
     tables = (
         ('projective_tails', ((0x2073460b, 0x20734f16), (0x20737f6b, 0x20738875))),
+        ('projective_key_fog_tails', ((0x2073cefb, 0x2073db57), (0x20740268, 0x20740ec4))),
         ('projective_fog_tails', ((0x207361ed, 0x20736f81), (0x20739b4a, 0x2073a8de))),
         ('projective_key_tails', ((0x2073b69a, 0x2073bf7c), (0x2073ea09, 0x2073f2eb))),
     )

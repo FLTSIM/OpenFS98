@@ -30,6 +30,7 @@ make -f tools/hg2d.mk hg2ddiff-run N=20000 SUITE=matrix_fills
 make -f tools/hg2d.mk hg2ddiff-run N=20000 SUITE=projective
 make -f tools/hg2d.mk hg2ddiff-run N=20000 SUITE=projective_keyed
 make -f tools/hg2d.mk hg2ddiff-run N=20000 SUITE=projective_fog
+make -f tools/hg2d.mk hg2ddiff-run N=20000 SUITE=projective_key_fog
 make -f tools/hg2d.mk hg2ddiff-run N=20000 SUITE=textured
 make -f tools/hg2d.mk hg2ddiff-run N=20000 SUITE=affine
 make -f tools/hg2d.mk hg2ddiff-run N=20000 SUITE=optimized
@@ -851,7 +852,69 @@ mask. Both directions, both correction sizes and all tail residues are
 compared, including literal scratch and tail addresses.
 Keyed fog, dithering and actual device rendering remain deferred.
 
+## Slice 17: keyed fogged projective spans
+
+Targets `0x2073c402` and `0x2073f771` now render through +0x44/+0x40.
+Selectors 12/15 draw right to left and 13/14 draw left to right; 28..31 use
+the same keyed software paths while bypassing hardware upload. Eight of the
+24 ordinary projective targets are implemented, with 16 deferred. The
+Linkage service count remains 33.
+
+The raw unsigned texel is tested against BYTE +0x435c before shade lookup.
+Equality draws, including when the mapped result is zero. A rejected raw
+texel cannot become opaque because the map would produce a bright value.
+U/V, shade and destination position advance even for rejected texels. Accepted
+samples store their doubled pair before reading the fractional steps and fog
+increment for the next sample. This ordering is visible when a destination
+aliases the U step, key or shade increment. The unkeyed fog loop advances
+before its store, so the two paths retain distinct order.
+
+The fog projection, levels, correction sizes and -1/-2 block suppression are
+shared with the preceding slice. Matching zero shade rows jump into the raw
+keyed renderer; matching maximum rows jump into the solid far fill and bypass
+the key entirely, retaining ordinary far coverage, height rejection and
+existing-pixel remapping. Four additional numeric tail tables are extracted
+from data embedded in retail `.text`.
+
+A new alias into the high half of the shifted U step exposed a bug in the
+previous raw keyed implementation: its helper advanced before storing. The
+raw keyed loop now stores first, matching retail. The old canvas/texture alias
+had verified inter-sample fetch/store order but could not expose the timing
+of reads from the separate step scratch. This slice adds a directed raw-keyed
+regression fixture and a mutation that reverses that corrected order.
+
+`projective_key_fog` compares two phases per scenario within the existing
+512-operation snapshot capacity. Phase one reuses the complete 506-operation
+fog suite with keying enabled. Phase two independently checks keys 1/128/255
+and a scenario-dependent key, values below/equal/above each key, zero/middle/
+maximum fog, mapped zero versus bright rejected texels, height/remap behavior,
+mixed skipped/accepted gradients, and destination aliases into the U step and
+key for both the fogged and zero-row fallback paths. It totals 679 operations
+per scenario. The expanded raw `projective_keyed` script now has 340 operations.
+Dithering, actual device rendering and the remaining plane/resource/init paths
+are still deferred.
+
 ## Verification and limits
+
+The keyed-fog suite passes **20,000 scenarios / 13,580,000 operations**, with
+zero differences and zero faults. All 160,000 retail host divide repairs
+resume and complete. Both phases compare the full image, GLOBAL, guarded
+canvas, literal saved ESP/tail addresses and all seven drawing registers.
+
+The corrected raw-keyed suite passes **20,000 scenarios / 6,800,000
+operations**, with zero differences and zero faults; its 320,000 retail host
+divide repairs resume and complete. The complete combined regression passes
+2,000 scenarios per suite, including 1,358,000 keyed-fog operations, 680,000
+raw-keyed operations, the existing unkeyed fog path, and every previous suite.
+
+This slice catches **29 new keyed-fog mutations** plus **one new raw-keyed
+ordering regression mutation**, with zero unresolved mutations. All **107**
+preceding basic/keyed/fog projective mutations were rerun too: **137 caught**
+in this slice. They include raw-versus-mapped key comparison, opaque mapped
+zero, skipped U/V and shade advances, live versus cached key bytes, stores
+before U/V/shade advancement, both shortcuts, and tail metadata. All **626**
+mutation anchors pass the separate audit; the other 489 mutants were not all
+rerun for this slice.
 
 The expanded fog suite passes **20,000 scenarios / 10,120,000 operations**,
 with zero differences and zero faults. All 160,000 retail host divide repairs
@@ -1088,6 +1151,6 @@ loading, and device-backed +0x9c/+0xa0/+0xa4/+0xbc.
 The remaining projective/plane spans through +0x44/+0x40, device palette
 realization and the negative-length shadow corrupt-stack return also remain
 unfinished. Next are the remaining software projective spans selected at data
-+0x4200 (keyed fog and dithering), then the plane, resource/device and
++0x4200 (dithering), then the plane, resource/device and
 initialization paths. The verified subsets do not
 establish whole-module rendering equivalence or readiness to run in-game.

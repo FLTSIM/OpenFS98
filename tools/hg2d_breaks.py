@@ -12,7 +12,7 @@ import sys
 
 root = Path(__file__).resolve().parent.parent
 source = (root / 'src/hg2d/hg2d.c').read_text()
-for section in ('palette', 'draw', 'polygon', 'fill'):
+for section in ('palette', 'draw', 'polygon', 'fill', 'textured'):
     source = source.replace('#include "hg2d_%s.inc"' % section, (root / ('src/hg2d/hg2d_%s.inc' % section)).read_text())
 build = root / 'bin/hg2d-breaks'
 build.mkdir(parents=True, exist_ok=True)
@@ -148,7 +148,7 @@ draw_mutations += [
 ]
 mutations += [(*mutation, 'drawing') for mutation in draw_mutations]
 polygon_mutations = [
-    ('projection view load order', 'polygon_project(x, scale_x, depth) + (offset_x << 16)', 'polygon_project(x, view[0], depth) + (view[1] << 16)'),
+    ('projection view load order', 'polygon_project(x, scale_x, depth, 0) + (offset_x << 16)', 'polygon_project(x, view[0], depth, 0) + (view[1] << 16)'),
     ('projection scale shift', '(int32_t)(scale << 16)', '(int32_t)(scale << 15)'),
     ('projection signed depth', 'product / (int32_t)depth', 'product / depth'),
     ('projection zero repair sign', '((product < 0) != ((int32_t)depth < 0))', '((product < 0) == ((int32_t)depth < 0))'),
@@ -167,8 +167,8 @@ polygon_mutations = [
     ('vertex edge ordering', '(int32_t)y < (int32_t)previous_y', 'y < previous_y'),
     ('vertex texture flag width', 'GLOBAL_HALF(0xc90) && GLOBAL_HALF(0x2f4)', 'GLOBAL_WORD(0xc90) && GLOBAL_WORD(0x2f4)'),
     ('edge flat rounding', 'edge[2] = low_x + 0x8000;', 'edge[2] = low_x;'),
-    ('edge flat delta', 'edge[3] = high_x - low_x;', 'edge[3] = low_x - high_x;'),
-    ('edge scanline fraction', '(low_y & 0xffff) ^ 0xffff', '(low_y & 0xffff) ^ 0xfffe'),
+    ('edge flat delta', 'edge[2] = low_x + 0x8000;\n        edge[3] = high_x - low_x;', 'edge[2] = low_x + 0x8000;\n        edge[3] = low_x - high_x;'),
+    ('edge scanline fraction', 'edge[3] = draw_slope(high_x - low_x, high_y - low_y);\n        advance = (low_y & 0xffff) ^ 0xffff', 'edge[3] = draw_slope(high_x - low_x, high_y - low_y);\n        advance = (low_y & 0xffff) ^ 0xfffe'),
     ('edge pointer advance', 'GLOBAL_WORD(0xc14) = ADDRESS(edge) + 16;', 'GLOBAL_WORD(0xc14) = ADDRESS(edge) + 20;'),
 ]
 mutations += [(*mutation, 'polygons') for mutation in polygon_mutations]
@@ -218,6 +218,44 @@ fill_mutations = [
     ('fill remap frame preservation', 'draw_map_pixels(draw_address(surface, first, y), last - first + 1, POINTER(WORD(0x1d88)));', 'draw_map_span(draw_address(surface, first, y), last - first + 1);'),
 ]
 mutations += [(*mutation, 'fills') for mutation in fill_mutations]
+textured_mutations = [
+    ('textured enable word', 'if (!GLOBAL_HALF(0xcb6))', 'if (!GLOBAL_WORD(0xcb6))'),
+    ('textured fallback depth', 'polygon_vertex_body(record, x, y, depth);', 'polygon_vertex_body(record, x, y, depth + 1);'),
+    ('textured first attribute order', 'WORD(0x914) = WORD(0x92c) = second_attribute;', 'WORD(0x914) = WORD(0x92c) = first_attribute;'),
+    ('textured second attribute order', 'WORD(0x918) = WORD(0x930) = first_attribute;', 'WORD(0x918) = WORD(0x930) = second_attribute;'),
+    ('textured first eax', 'registers[2] = screen_y;', 'registers[2] = screen_x;'),
+    ('textured first ecx', 'registers[1] = WORD(0x8dc) << 16;', 'registers[1] = WORD(0x8d8) << 16;'),
+    ('textured projection remainder', '*remainder = (uint32_t)(product % (int32_t)depth);', '*remainder = 0;'),
+    ('textured repaired remainder', '*remainder = 0x7fffffff;', '*remainder = 0xffffffff;'),
+    ('textured counter', 'GLOBAL_WORD(0x2f0) += 1;', 'GLOBAL_WORD(0x2f0) += 2;'),
+    ('textured capacity no-op', 'if (screen_y < WORD(0x8c8))', 'if (GLOBAL_WORD(0xc14) + 0x60 >= ADDRESS(hg2d_image + 0x884)) return; if (screen_y < WORD(0x8c8))'),
+    ('textured minimum unsigned', 'screen_y < WORD(0x8c8)', '(int32_t)screen_y < (int32_t)WORD(0x8c8)'),
+    ('textured maximum unsigned', 'screen_y > WORD(0x8cc)', '(int32_t)screen_y > (int32_t)WORD(0x8cc)'),
+    ('textured previous attribute', 'WORD(0x924) = WORD(0x92c);', 'WORD(0x924) = WORD(0x930);'),
+    ('textured previous second attribute', 'WORD(0x928) = WORD(0x930);', 'WORD(0x928) = WORD(0x92c);'),
+    ('textured current attribute', 'WORD(0x91c) = second_attribute;', 'WORD(0x91c) = first_attribute;'),
+    ('textured ordering unsigned', 'if (screen_y < previous_y)', 'if ((int32_t)screen_y < (int32_t)previous_y)'),
+    ('textured exchanged attribute', 'WORD(0x924) = WORD(0x91c); WORD(0x91c) = temporary;', 'WORD(0x924) = WORD(0x91c); WORD(0x91c) = 0;'),
+    ('textured exchanged second attribute', 'WORD(0x928) = WORD(0x920); WORD(0x920) = temporary;', 'WORD(0x928) = WORD(0x920); WORD(0x920) = 0;'),
+    ('textured edge attribute base', 'edge[4] = WORD(0x924);', 'edge[4] = WORD(0x91c);'),
+    ('textured edge second base', 'edge[5] = WORD(0x928);', 'edge[5] = WORD(0x920);'),
+    ('textured flat x rounding', 'edge[2] = low_x;', 'edge[2] = low_x + 0x8000;'),
+    ('textured flat first delta', 'edge[6] = WORD(0x91c) - WORD(0x924);', 'edge[6] = WORD(0x924) - WORD(0x91c);'),
+    ('textured flat second delta', 'edge[7] = WORD(0x920) - WORD(0x928);', 'edge[7] = WORD(0x928) - WORD(0x920);'),
+    ('textured flat ecx', 'registers[1] = (uint32_t)((int32_t)low_x >> 16);', 'registers[1] = low_x;'),
+    ('textured flat edx', 'registers[0] = (uint32_t)((int32_t)low_y >> 16);', 'registers[0] = low_y;'),
+    ('textured slope first delta', 'draw_slope(WORD(0x91c) - WORD(0x924), height)', 'draw_slope(WORD(0x924) - WORD(0x91c), height)'),
+    ('textured slope second delta', 'draw_slope(WORD(0x920) - WORD(0x928), height)', 'draw_slope(WORD(0x928) - WORD(0x920), height)'),
+    ('textured slope x', 'draw_slope(high_x - low_x, height)', 'draw_slope(low_x - high_x, height)'),
+    ('textured fractional advance', 'edge[7] = draw_slope(WORD(0x920) - WORD(0x928), height);\n        advance = (low_y & 0xffff) ^ 0xffff;', 'edge[7] = draw_slope(WORD(0x920) - WORD(0x928), height);\n        advance = low_y & 0xffff;'),
+    ('textured first advance', 'edge[4] += (uint32_t)', 'edge[4] -= (uint32_t)'),
+    ('textured second advance', 'edge[5] += adjustment;', 'edge[5] -= adjustment;'),
+    ('textured nonflat ecx', 'registers[1] = edge[7];', 'registers[1] = edge[6];'),
+    ('textured nonflat edx', 'registers[0] = adjustment;', 'registers[0] = edge[5];'),
+    ('textured edge eax', 'registers[2] = ADDRESS(GLOBAL);', 'registers[2] = 0;'),
+    ('textured edge stride', 'GLOBAL_WORD(0xc14) = ADDRESS(edge) + 32;', 'GLOBAL_WORD(0xc14) = ADDRESS(edge) + 16;'),
+]
+mutations += [(*mutation, 'textured') for mutation in textured_mutations]
 if len(sys.argv) > 2 and sys.argv[2] not in {suite for _, _, _, suite in mutations}:
     raise SystemExit('Unknown mutation family: ' + sys.argv[2])
 missed = []

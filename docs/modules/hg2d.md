@@ -1,13 +1,15 @@
 # HG2D.DLL — module id 13
 
-In progress, one slice at a time. Twenty-four Linkage entries now have
+In progress, one slice at a time. Twenty-five Linkage entries now have
 implementations:
 texture storage and access, loading through FE, palette remapping, hardware
 texture release, colour conversion, software palette realization, points,
 lines, frames, depth shading, text, plain polygon vertex submission and
-untextured polygon filling. It uses snake_case and `<stdint.h>`; there is no `types.h` dependency.
+untextured polygon filling, plus affine textured vertex submission. It uses
+snake_case and `<stdint.h>`; there is no `types.h` dependency.
 HG2D is not in `MODULES` and must not be installed yet: initialization,
-textured attributes, device-backed palette realization and the other services are incomplete.
+textured drawing, device-backed palette realization and the other services
+are incomplete.
 
 The implementation and tests occupy HG2D-specific files. The shared Makefile,
 README and MAIN files are untouched so MAIN can proceed independently.
@@ -21,6 +23,7 @@ make -f tools/hg2d.mk hg2ddiff-run SUITE=colours       # finite sweeps
 make -f tools/hg2d.mk hg2ddiff-run N=20000 SUITE=drawing
 make -f tools/hg2d.mk hg2ddiff-run N=20000 SUITE=polygons
 make -f tools/hg2d.mk hg2ddiff-run N=20000 SUITE=fills
+make -f tools/hg2d.mk hg2ddiff-run N=20000 SUITE=textured
 python3 tools/hg2d_breaks.py
 ```
 
@@ -276,7 +279,7 @@ The entry preserves eax, ebx, ecx, edx, esi, edi and ebp.
 The host repairs signed division by zero and quotient overflow to positive
 or negative `INT32_MAX`, determining the sign from the dividend's high dword
 and the divisor. A valid `INT32_MIN` quotient remains valid. The harness
-repairs only the two known retail IDIV sites and checks their instruction
+repairs only the known projection IDIV sites and checks their instruction
 bytes. The implementation calculates the same results without raising.
 
 GLOBAL +0x2f0 starts at -1: its first increment initializes the first and
@@ -299,8 +302,8 @@ record +0x80 is omitted; its destination is overwritten before use.
 The conjunction of nonzero low words at GLOBAL +0xc90 and +0x2f4 selects the
 unfinished textured-attribute edge builder and deliberately traps. Either
 flag alone, including nonzero upper words, still selects plain edges. Polygon
-close/fill +0x40 is implemented in the next slice; textured submission +0x48
-is not installed yet.
+close/fill +0x40 and affine textured submission +0x48 are implemented in the
+following slices.
 
 The `polygons` suite compares the complete image, GLOBAL, canvas and the seven
 registers after every submission. It normalizes the known edge pointer
@@ -369,7 +372,75 @@ not reach it. Closing an exhausted vertex buffer, arbitrary invalid row
 pointers, and polygons that produce unbounded scanline loops are outside
 this verification. This slice does not install HG2D in-game.
 
+## Slice 6: affine textured vertex submission
+
+`src/hg2d/hg2d_textured.inc` adds +0x48 (`0x20787a2c`): six arguments,
+record, x, y, signed depth and two texture attributes. A zero **low word** at
+GLOBAL +0xcb6 delegates to the existing plain +0x44 path and preserves the
+incoming registers. Otherwise it projects with the same signed division and
+scratch read/write ordering, increments the vertex count, and keeps unsigned
+minimum and maximum y bounds. It does not update the depth bounds. The first
+vertex stores both first/previous positions and attributes; later vertices
+order endpoints with an unsigned y comparison and exchange the attributes
+alongside their coordinates. The fifth argument becomes the edge's second
+attribute at +0x14; the sixth becomes its first at +0x10.
+
+The edge builder at `0x20785780` appends 32-byte records: integer start/end
+rows, fixed x, x slope, two attributes and their slopes. Flat edges retain
+the exact x and raw attribute deltas, omitting the plain edge's half-pixel
+rounding. Nonflat edges independently divide the three deltas with the same
+signed-complement arithmetic and 0x7fff integer clamp, then advance all three
+values by the complement of the starting y fraction. No additional clamp is
+applied to the attributes. Retail's apparent capacity check branches to the
+next instruction; that dead cmp/jb pair is omitted. The textured path keeps
+appending after the plain path's reservation threshold.
+
+This entry exposes EAX, ECX and EDX as outputs while preserving EBX, ESI, EDI
+and EBP. The entry shim passes incoming volatile registers through local
+storage to the C body, then restores the calculated outputs:
+
+| path | EAX | ECX | EDX |
+| --- | --- | --- | --- |
+| plain fallback | incoming | incoming | incoming |
+| first affine vertex | projected y | y offset shifted by 16 | signed y-division remainder |
+| flat edge | GLOBAL pointer | low x shifted arithmetically by 16 | low y shifted arithmetically by 16 |
+| nonflat edge | GLOBAL pointer | second attribute slope | second attribute's fractional advance |
+
+The shared projection helper now optionally returns the remainder: a valid
+signed divide keeps the dividend's remainder sign; the host's overflow/zero
+repair sets EDX to 0x7fffffff independently of the saturated quotient's sign.
+The harness repairs the two extra retail IDIV sites and checks instruction
+bytes. Returns remain literal scalars, including projected coordinates whose
+numeric values could fall in a module's address range.
+
+The `textured` suite compares the entire image, GLOBAL, unchanged guarded
+canvas, and all seven registers after each public call. Directed fixtures
+check fallback word masking, attribute order, exact flat and vertical edge
+records, quotient/remainder boundaries, aliased projection scratch and the
+unchanged depth bounds. Random scripts mix wrapped coordinates and attributes,
+negative depths, signed quotient saturation and steep slopes. One in sixteen
+scenarios submits 61 vertices, writing 60 edges up to data +0x884, to prove
+the capacity branch has no effect without overwriting the adjacent scratch.
+Thirty-five new mutations cover these paths and the returned registers.
+
+Textured close/fill +0x4c is not installed yet. The separate attribute builder
+selected by +0x44 when GLOBAL +0xc90 and +0x2f4 are both nonzero remains
+deferred, including through +0x48's plain fallback. Writes beyond the actual
+60-edge storage, invalid view pointers and exception register contexts remain
+outside this slice. No in-game installation is made.
+
 ## Verification and limits
+
+`make -f tools/hg2d.mk hg2ddiff-run N=20000 SUITE=textured` passes 20,000
+scenarios and 1,336,250 operations: zero differences and zero faults, including
+808,843 repaired retail divides. All 35 textured-vertex mutations are caught
+(`python3 tools/hg2d_breaks.py 64 textured`), and all 22 plain-vertex mutations
+pass their recheck after the projection helper gained its optional remainder.
+A combined regression passes 2,000 scenarios for every suite, including
+133,625 affine vertex operations, plus the 263,680 finite colour/layout
+comparisons. The three plain-vertex mutation anchors affected by the helper
+signature and duplicated edge expressions now target their original code.
+
 
 `make -f tools/hg2d.mk hg2ddiff-run N=20000 SUITE=fills` passes 20,000
 scenarios and 2,720,000 operations: zero differences and zero faults. All
@@ -380,7 +451,7 @@ The combined regression run passes 2,000 scenarios each for textures,
 palettes, drawing, vertices (157,625 operations) and fills (272,000), plus
 the 263,680 finite colour/layout comparisons. Three existing drawing mutation
 anchors now include their primitive's surrounding code to distinguish the
-similar expressions in the new fill code. All 179 mutation anchors match
+similar expressions in the new fill code. All 214 mutation anchors match
 exactly once in the expanded source.
 
 The final `polygons` run passes 20,000 scenarios and 1,576,250 operations,
@@ -415,7 +486,7 @@ The first three slices' mutation checks caught all 114 distinct breaks, zero unr
 were rechecked in the full mutation run; the final drawing family includes
 the two extra zero-count loop breaks. `python3 tools/hg2d_breaks.py` runs all
 families, or its second argument selects `textures`, `colours`, `palette` or
-`drawing`, `polygons` or `fills`. Only a reported differential mismatch
+`drawing`, `polygons`, `fills` or `textured`. Only a reported differential mismatch
 counts as detection; a build
 failure, fixture error or harness crash does not.
 The generated files reproduce exactly when re-extracted from retail.
@@ -454,6 +525,7 @@ FE loader, DirectDraw objects, arbitrary malformed COM pointers, accounting
 indices outside 0..8, and initialization are outside this slice. The existing
 PANELS model and its verified harness remain unchanged.
 
-Next: textured vertex attributes and polygon spans, clipping and the remaining rasterizer.
+Next: affine textured close/fill +0x4c and its span selection, then the
+remaining texture paths, clipping and rasterizer.
 Completion of these slices does not establish
 rendering equivalence or readiness to run in-game.

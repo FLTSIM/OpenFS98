@@ -1,6 +1,6 @@
 /* Plain polygon submission, +0x44 (0x20732aa5), and edge builder
- * 0x207329dc. Filling is in hg2d_fill.inc; textured attributes are deferred. */
-static uint32_t polygon_project(uint32_t coordinate, uint32_t scale, uint32_t depth)
+ * 0x207329dc. Filling is in hg2d_fill.inc; affine vertices are in hg2d_textured.inc. */
+static uint32_t polygon_project(uint32_t coordinate, uint32_t scale, uint32_t depth, uint32_t *remainder)
 {
     int64_t product = (int64_t)(int32_t)coordinate * (int32_t)(scale << 16);
     int64_t quotient;
@@ -8,9 +8,12 @@ static uint32_t polygon_project(uint32_t coordinate, uint32_t scale, uint32_t de
      * INT64_MIN / -1 cannot occur: both multiplicands are signed dwords. */
     if (depth) {
         quotient = product / (int32_t)depth;
-        if (quotient >= -2147483648LL && quotient <= 2147483647LL)
+        if (quotient >= -2147483648LL && quotient <= 2147483647LL) {
+            if (remainder) *remainder = (uint32_t)(product % (int32_t)depth);
             return (uint32_t)quotient;
+        }
     }
+    if (remainder) *remainder = 0x7fffffff;
     return ((product < 0) != ((int32_t)depth < 0)) ? 0x80000001u : 0x7fffffffu;
 }
 
@@ -43,8 +46,8 @@ void STDCALL __attribute__((used)) polygon_vertex_body(void *record, uint32_t x,
     offset_y = view[3]; WORD(0x8dc) = offset_y;
     scale_x = view[0]; WORD(0x8e0) = scale_x;
     scale_y = view[2]; WORD(0x8e4) = scale_y;
-    x = polygon_project(x, scale_x, depth) + (offset_x << 16);
-    y = polygon_project(y, scale_y, depth) + (offset_y << 16);
+    x = polygon_project(x, scale_x, depth, 0) + (offset_x << 16);
+    y = polygon_project(y, scale_y, depth, 0) + (offset_y << 16);
     GLOBAL_WORD(0x2f0)++;
     if (!GLOBAL_WORD(0x2f0)) {
         WORD(0x8f8) = WORD(0x900) = x;

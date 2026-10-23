@@ -156,6 +156,7 @@ EAX_ENTRY(texture_update, texture_update_body);
 #include "hg2d_draw.inc"
 #include "hg2d_polygon.inc"
 #include "hg2d_fill.inc"
+#include "hg2d_textured.inc"
 
 __asm__(".globl _ImportTable\n.set _ImportTable, _hg2d_image\n"
         ".globl _Linkage\n.set _Linkage, _hg2d_image + 0x38\n");
@@ -180,6 +181,7 @@ BOOL WINAPI DllMain(HINSTANCE instance, DWORD reason, LPVOID reserved)
         WORD(0x38 + 0x3c) = ADDRESS(draw_frame);
         WORD(0x38 + 0x40) = ADDRESS(polygon_close);
         WORD(0x38 + 0x44) = ADDRESS(polygon_vertex);
+        WORD(0x38 + 0x48) = ADDRESS(textured_vertex);
         WORD(0x38 + 0x5c) = ADDRESS(palette_realize);
         WORD(0x38 + 0x60) = ADDRESS(palette_refresh_entry);
         WORD(0x38 + 0x64) = ADDRESS(palette_force);

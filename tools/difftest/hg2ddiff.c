@@ -1,4 +1,4 @@
-/* HG2D texture, palette and colour slices against retail, independently of the PANELS model.
+/* HG2D services against retail, independently of the PANELS model.
  * Compare eax, host/FE/COM calls, entire .data after each operation, and
  * pixel bytes whenever touched. Deterministic boundary cases precede scripts.
  * In-range unaligned handles are intentionally tested with zero pixels/hw;
@@ -293,6 +293,7 @@ static void run_textures(void)
 #include "hg2d_draw_suite.inc"
 #include "hg2d_polygon_suite.inc"
 #include "hg2d_fill_suite.inc"
+#include "hg2d_textured_suite.inc"
 
 static LONG WINAPI fault(EXCEPTION_POINTERS *exception)
 {
@@ -307,7 +308,7 @@ int main(int argc, char **argv)
     uint32_t count = argc > 1 ? (uint32_t)strtoul(argv[1], NULL, 0) : 20000;
     HMODULE modules[2], util;
     const char *suite = argc > 2 ? argv[2] : "all";
-    CHECK(!strcmp(suite, "all") || !strcmp(suite, "textures") || !strcmp(suite, "palette") || !strcmp(suite, "colours") || !strcmp(suite, "drawing") || !strcmp(suite, "polygons") || !strcmp(suite, "fills"));
+    CHECK(!strcmp(suite, "all") || !strcmp(suite, "textures") || !strcmp(suite, "palette") || !strcmp(suite, "colours") || !strcmp(suite, "drawing") || !strcmp(suite, "polygons") || !strcmp(suite, "fills") || !strcmp(suite, "textured"));
     SetUnhandledExceptionFilter(fault);
     CHECK(AddVectoredExceptionHandler(1, draw_exception));
     {
@@ -386,6 +387,15 @@ int main(int argc, char **argv)
             for (side = 0; side < 2; side++) run_fills();
         printf("hg2ddiff fills: %u scenarios, %u operations, %u matching faults, 0 differ\n",
                count, operations / 2, draw_faults / 2);
+    }
+    if (!strcmp(suite, "all") || !strcmp(suite, "textured")) {
+        active_suite = "textured";
+        operations = draw_div_repairs = draw_faults = 0;
+        for (scenario = 0; scenario < count; scenario++)
+            for (side = 0; side < 2; side++) run_textured();
+        printf("hg2ddiff textured: %u scenarios, %u operations, %u faults, 0 differ\n",
+               count, operations / 2, draw_faults / 2);
+        printf("retail host divide repairs: %u\n", draw_div_repairs);
     }
     return 0;
 }

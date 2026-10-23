@@ -1,10 +1,11 @@
 # HG2D.DLL — module id 13
 
-In progress, one slice at a time. Twelve Linkage services are implemented:
+In progress, one slice at a time. Twenty-two Linkage services are implemented:
 texture storage and access, loading through FE, palette remapping, hardware
-texture release, colour conversion, and software palette realization. It uses snake_case and `<stdint.h>`; there is no `types.h` dependency.
+texture release, colour conversion, software palette realization, points,
+lines, frames, depth shading and text. It uses snake_case and `<stdint.h>`; there is no `types.h` dependency.
 HG2D is not in `MODULES` and must not be installed yet: initialization,
-drawing, device-backed palette realization and the other services are incomplete.
+polygons, device-backed palette realization and the other services are incomplete.
 
 The implementation and tests occupy HG2D-specific files. The shared Makefile,
 README and MAIN files are untouched so MAIN can proceed independently.
@@ -15,6 +16,7 @@ make -f tools/hg2d.mk hg2ddiff-run N=20000              # all suites
 make -f tools/hg2d.mk hg2ddiff-run N=20000 SUITE=palette
 make -f tools/hg2d.mk hg2ddiff-run N=20000 SUITE=textures
 make -f tools/hg2d.mk hg2ddiff-run SUITE=colours       # finite sweeps
+make -f tools/hg2d.mk hg2ddiff-run N=20000 SUITE=drawing
 python3 tools/hg2d_breaks.py
 ```
 
@@ -162,7 +164,113 @@ Realization is tested only on the safe packing layouts, not on the layout
 values that fault or run out of bounds. The real host and DirectDraw device
 path are outside this slice.
 
+## Slice 3: drawing primitives and text
+
+`src/hg2d/hg2d_draw.inc` adds all ten entries from +0x18 through +0x3c.
+
+| Linkage | retail `.text` offset | behavior |
+| --- | --- | --- |
+| +0x18 | +0x57 | realize a dirty palette; otherwise preserve incoming eax |
+| +0x1c | +0xde | integer point, no clipping |
+| +0x20 | +0x3a9 | retail no-op, three arguments |
+| +0x24 | +0x3c3 | depth-shaded point, with optional right/upper neighbours |
+| +0x28 | +0x480 | packed bitmap text, optional centering |
+| +0x2c | +0x10d | horizontal inclusive span, or pixel remapping |
+| +0x30 | +0x240 | vertical inclusive span |
+| +0x34 | +0x28b | integer line, excludes the final endpoint |
+| +0x38 | +0x1f28 | 16.16 line, distance shading and fractional stepping |
+| +0x3c | +0x6e | rectangular frame as four inclusive edges |
+
+The host-owned surface is a 32-bit record: width at +4, height at +8,
+signed pitch at +0xc, and a pointer to row pointers at +0x10. A primitive
+looks up its initial row; vertical and general lines then advance by pitch,
+not by looking up each subsequent row. The harness tests negative pitch and
+nonlinear row tables to make that distinction observable. Points do not
+check surface bounds; a vertical span orders its y endpoints and includes
+both. A zero frame dimension skips drawing and colour selection entirely.
+
+Horizontal spans reject y with an unsigned comparison against height. They
+clamp negative **low words** of x to zero; only that clamping path can swap
+the low words. There is no right-edge clipping. Reversed nonnegative x
+endpoints can produce a zero or wrapped count; the short loops execute once
+before decrementing it, so these inputs write past the row. Guarded canvas
+fixtures compare the resulting bytes and the access violation at the guard.
+These are retail behaviors, not bounds checks added by the port.
+
+Integer lines reorder by x, select the major axis and use the original
+half-length error accumulator. Nondegenerate lines omit the final endpoint;
+a coincident pair draws one point. The 16.16 entry instead draws nothing for
+an exactly coincident pair, but a nonzero subpixel length draws once. Its
+loop decrements a signed **word** count. Negative slopes divide the bitwise
+complement of their numerator before restoring the sign, not its absolute
+value. The y-major path advances its initial x by the complement of the
+starting y fraction. Directed fixtures land on the one-bit differences in
+both computations.
+
+Depth and distance shading use the 16-by-256 byte table at `0x20792d70`.
+Depth comparisons and rescaling tests are signed words; distance rescaling
+uses zero-extended words. Dithering examines only the low byte of GLOBAL
++0x127e, then conditionally writes the right pixel and the pixel above it.
+The host's `0x4119a0` repairs unsigned division faults with an all-ones
+quotient and remainder. The implementation computes that saturation without
+trapping, and the harness repairs the four retail division sites before
+resuming them. Zero thresholds, overflowing word quotients, negative scales,
+and the distance cutoff 0x7d00 are checked through the resulting pixels.
+
+Text uses an 11-byte glyph record: a width/flags byte and ten bitmap rows.
+Header bit 7 shifts the bitmap down two rows; bits are drawn high bit first.
+Centering measures the original byte codes and subtracts half the total
+advance and six rows. Rendering then substitutes 0xe1 with 0xa6 and 0xfd with
+0xbd, so the measured widths can differ from the widths actually advanced.
+Codes below 0x20 wrap the glyph index as a byte, reaching beyond the usual
+font records. Glyphs draw only if x and y are nonnegative, x+8 is strictly
+less than width, and y+12 is strictly less than height. The depth argument
+is saved but not applied to bitmap pixels. Glyph metadata and the advancing
+text pointer are compared along with the pixels.
+
+When GLOBAL +0x1298 is nonzero, a horizontal span remaps existing pixels
+through the pointer at `0x20793d88`. Retail's helper at `0x207311b9` replaces
+EBP with its count and leaves it zero. After a positive span completes, the
+outer routine's `leave` faults reading address zero. This is verified against
+retail, including an aliased map and destination: the eight-pixel path reads
+both words before writing the mapped bytes. The replacement deliberately
+raises the same read fault after remapping. Fault-time register contexts
+are not reproduced; the harness compares fault code, read/write access,
+address, modified pixels, and module/GLOBAL state. For zero counts the map
+loop reaches the canvas guard before that frame fault.
+
+`tools/difftest/hg2d_draw_suite.inc` adds a drawing suite to the owning harness.
+A 64 KB shared canvas has inaccessible pages before and after it. Every
+operation compares the complete canvas, including padding outside the logical
+surface, plus HG2D's image and GLOBAL. A vectored handler repairs the known
+retail divides and returns access faults to an assembly recovery point.
+Normal returns compare eax and the callee-preserved registers, including ebp.
+The point/span/frame wrappers also match ecx and the low-byte edx change from
+colour selection; the two line entries match the preserved ecx/edx pair.
+Caller-saved ecx/edx of +0x18, +0x24 and +0x28 are outside the comparison.
+
+Scenarios include point writes outside logical bounds, the no-op entry,
+negative word coordinates, span lengths around 4, 8, 16 and 32 at every byte
+alignment, reversed vertical endpoints, all line octants and both endpoint
+orders, coincident and subpixel lines, zero-sized frames, signed depth and
+dither boundaries, saturated divides, all text clipping gates, wrapped glyph
+codes, centering and substitutions, dirty/clean palette flushes, aliased
+remapping, and both guard faults and the retail null read. Other arbitrary
+32-bit coordinate overflows and malformed surface pointers are not a claim
+of this suite. DirectDraw paths and polygons remain unfinished.
+
 ## Verification and limits
+
+`make -f tools/hg2d.mk hg2ddiff-run N=20000 SUITE=drawing`: 20,000 scenarios,
+4,200,000 operations, zero differences. This includes 140,000 matching access
+faults (five completed-remap null reads and two guarded zero-count spans per
+scenario), plus 206,670 repaired retail divides that resume and finish drawing.
+The final drawing mutation family catches all 50 breaks:
+`python3 tools/hg2d_breaks.py 64 drawing`.
+
+The texture, palette and colour baselines below still pass with the drawing
+entries installed. Drawing validation is recorded separately so matching
+retail faults are not mistaken for scenarios skipped before drawing.
 
 `make -f tools/hg2d.mk hg2ddiff-run N=20000 SUITE=textures`: 20,000 scenarios,
 1,155,000 operations, zero differences. Per side: 113,970 allocations,
@@ -173,8 +281,13 @@ scenarios, 1,120,000 operations, 40,000 realizations and 53,297 CHAIN
 notifications per side, with zero differences. The colour and layout sweeps
 pass all 263,680 operations plus the seven directed fixtures.
 
-`python3 tools/hg2d_breaks.py`: 64 mutations, all 64 caught, zero unresolved
-(19 texture, 18 colour/layout, 27 palette).
+The expanded mutation checks catch all 114 distinct breaks, zero unresolved:
+19 texture, 18 colour/layout, 27 palette, and 50 drawing. The earlier families
+were rechecked in the full mutation run; the final drawing family includes
+the two extra zero-count loop breaks. `python3 tools/hg2d_breaks.py` runs all
+families, or its second argument selects `textures`, `colours`, `palette` or
+`drawing`. Only a reported differential mismatch counts as detection; a build
+failure, fixture error or harness crash does not.
 The generated files reproduce exactly when re-extracted from retail.
 
 `tools/difftest/hg2ddiff.c` loads two distinct DLLs and checks retail's base,
@@ -205,11 +318,12 @@ hardware accounting that happened to fall inside the replacement DLL's address
 range. Treating every such value as a pointer invented a mismatch. Scalar
 returns now remain literal, and that scenario passes in the full baseline.
 
-The harness compares eax and the palette cache carry, not every caller-saved register. The real host,
+The harness compares eax, palette cache carry, and the drawing registers
+described above. It does not compare every caller-saved register. The real host,
 FE loader, DirectDraw objects, arbitrary malformed COM pointers, accounting
 indices outside 0..8, and initialization are outside this slice. The existing
 PANELS model and its verified harness remain unchanged.
 
-Next: drawing primitives and the rasterizer behind the same owning harness.
+Next: polygon submission, clipping and the rasterizer behind the same owning harness.
 Completion of these slices does not establish
 rendering equivalence or readiness to run in-game.

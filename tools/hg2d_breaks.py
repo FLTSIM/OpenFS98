@@ -12,7 +12,8 @@ import sys
 
 root = Path(__file__).resolve().parent.parent
 source = (root / 'src/hg2d/hg2d.c').read_text()
-source = source.replace('#include "hg2d_palette.inc"', (root / 'src/hg2d/hg2d_palette.inc').read_text())
+for section in ('palette', 'draw'):
+    source = source.replace('#include "hg2d_%s.inc"' % section, (root / ('src/hg2d/hg2d_%s.inc' % section)).read_text())
 build = root / 'bin/hg2d-breaks'
 build.mkdir(parents=True, exist_ok=True)
 shutil.copyfile(root / 'bin/hg2d-diff/hg2ddiff.exe', build / 'hg2ddiff.exe')
@@ -36,12 +37,12 @@ mutations = [
     ('update clear hardware', '(texture[1] & ~0x40000u) | 0x20000', '(texture[1] & ~0x80000u) | 0x20000'),
     ('update low eax', '(flags & 0xff);', '(flags & 0xffff);'),
     ('hardware accounting', 'WORD(0x8800 + index * 4)--;', 'WORD(0x8800 + index * 4)++;'),
-    ('hardware scratch', 'index < 8; index++', 'index < 7; index++'),
+    ('hardware scratch', 'index < 8; index++)\n            WORD(0x8820', 'index < 7; index++)\n            WORD(0x8820'),
     ('hardware tail', 'texture[3] = texture[2] = texture[7] = 0;', 'texture[3] = texture[2] = 0;'),
 ]
 mutations = [(*mutation, 'textures') for mutation in mutations]
 colour_mutations = [
-    ('direct colour 69', 'mode != 0x69 &&', 'mode != 0x68 &&'),
+    ('direct colour 69', 'else if (mode != 0x69 &&', 'else if (mode != 0x68 &&'),
     ('direct colour e0', 'mode != 0xe0)', 'mode != 0xe1)'),
     ('legacy colour bank', 'mode == 0x67 ? 0x34af : 0x349f', 'mode == 0x67 ? 0x349f : 0x34af'),
     ('colour nibble', 'index = colour & 15;', 'index = colour & 7;'),
@@ -91,8 +92,69 @@ palette_mutations = [
     ('palette selector low word', 'HALF(0x3fc2) != (uint16_t)selector', 'HALF(0x3fc2) != selector'),
 ]
 mutations += [(*mutation, 'palette') for mutation in palette_mutations]
+draw_mutations = [
+    ('point pixel', '*pixel = draw_colour();', '(void)draw_colour();'),
+    ('point row table', 'rows + y * 4', 'rows + y * 8'),
+    ('drawing colour mode', 'colour = (uint16_t)(0x6700 | (colour & 0xff));', 'colour = (uint16_t)(0x6900 | (colour & 0xff));'),
+    ('horizontal row boundary', 'if (y >= SURFACE_WORD(surface, 8))', 'if (y > SURFACE_WORD(surface, 8))'),
+    ('horizontal negative word', '(int16_t)first < 0 || (int16_t)last < 0', '(int32_t)first < 0 || (int32_t)last < 0'),
+    ('horizontal negative clamp', 'if ((int16_t)last < 0) last = 0;', 'if ((int16_t)last < 0) last = 1;'),
+    ('horizontal endpoint', 'count = last - first + 1;', 'count = last - first;'),
+    ('vertical direction', 'start = last;', 'start = first;'),
+    ('vertical endpoint', 'count = delta + 1;', 'count = delta;'),
+    ('line endpoint', 'index < length; index++', 'index <= length; index++'),
+    ('line error half', 'error = -(int32_t)(length >> 1);', 'error = -(int32_t)(length >> 2);'),
+    ('line negative x order', 'if ((int32_t)width < 0) {', 'if ((int32_t)width > 0) {'),
+    ('line coincident point', 'draw_point_body(surface, x, y);', '(void)surface;'),
+    ('line error tie', 'if (error >= 0)', 'if (error > 0)'),
+    ('frame zero dimensions', 'if (!width || !height) return;', 'if (!width && !height) return;'),
+    ('frame right edge', 'draw_vertical_body(surface, x + width - 1, y, y + height - 1);', 'draw_vertical_body(surface, x + width, y, y + height - 1);'),
+    ('depth signed threshold', '(int16_t)depth < (int16_t)threshold', 'depth < threshold'),
+    ('depth threshold equality', '(int16_t)depth < (int16_t)threshold', '(int16_t)depth <= (int16_t)threshold'),
+    ('depth bucket maximum', 'if (value >= 15) value = 15;', 'if (value >= 15) value = 14;'),
+    ('depth scale', 'draw_divide_word((uint32_t)value * maximum, scale)', 'draw_divide_word((uint32_t)value * scale, maximum)'),
+    ('depth dither low byte', 'GLOBAL_HALF(0x127e) & 0xff', 'GLOBAL_HALF(0x127e) & 0xffff'),
+    ('depth dither right edge', '(int16_t)(x + 1) < (int16_t)SURFACE_WORD(surface, 4)', '(int16_t)(x + 1) <= (int16_t)SURFACE_WORD(surface, 4)'),
+    ('depth dither above', '(int16_t)(y - 1) >= 0', '(int16_t)(y - 1) > 0'),
+    ('distance bucket', 'if (value > 15) value = 15;', 'if (value > 15) value = 14;'),
+    ('fixed complement division', 'magnitude = minor ^ sign;', 'magnitude = (minor ^ sign) - sign;'),
+    ('fixed first y fraction', '(y & 0xffff) ^ 0xffff', '(y & 0xffff) ^ 0xfffe'),
+    ('fixed count word', 'count = (count - 1) & 0xffff;', 'count = (count + 1) & 0xffff;'),
+    ('fixed small count', 'if ((int16_t)count <= 0) break;', 'if ((int16_t)count < 0) break;'),
+    ('fixed negative carry', 'if ((int32_t)slope < 0) step_y--;', 'if ((int32_t)slope < 0) step_y++;'),
+    ('text substitution', 'if (code == 0xe1) code = 0xa6;', 'if (code == 0xe1) code = 0xa7;'),
+    ('text second substitution', 'if (code == 0xfd) code = 0xbd;', 'if (code == 0xfd) code = 0xbc;'),
+    ('text centering', 'WORD(0x29b0) -= total >> 1;', 'WORD(0x29b0) -= total >> 2;'),
+    ('text vertical centering', 'WORD(0x29b4) -= 6;', 'WORD(0x29b4) -= 5;'),
+    ('text horizontal gate', '(int32_t)(x + 8) < (int32_t)WORD(0x29b8)', '(int32_t)(x + 8) <= (int32_t)WORD(0x29b8)'),
+    ('text vertical gate', '(int32_t)(y + 12) < (int32_t)WORD(0x29bc)', '(int32_t)(y + 12) <= (int32_t)WORD(0x29bc)'),
+    ('text descender', 'if (BYTE(glyph) & 0x80)', 'if (BYTE(glyph) & 0x40)'),
+    ('text last row', 'row < 10; row++', 'row < 9; row++'),
+    ('text bitmap direction', 'bits & (0x80 >> column)', 'bits & (1 << column)'),
+    ('text advance', 'WORD(0x29b0) += width + 1;', 'WORD(0x29b0) += width;'),
+    ('text pointer', 'WORD(0x29cc)++;', 'WORD(0x29cc) += 2;'),
+    ('flush dirty flag', 'HALF(0x36c0) ? palette_realize() : entry_eax', 'HALF(0x36c0) ? entry_eax : entry_eax'),
+    ('span remap frame fault', '__asm__ volatile("movl 0, %%eax" ::: "eax", "memory");', '(void)map;'),
+    ('span block load ordering', 'values[0] = map[values[0]];', 'values[0] = map[values[0]]; pixel[0] = values[0];'),
+    ('draw edx leftover', 'movb 0xcc6(%eax),%dl', 'movb 0xcc5(%eax),%dl'),
+]
+draw_mutations += [
+    ('span zero fill count', 'do { *pixel++ = BYTE(0x90c); } while (--count);', 'while (count--) *pixel++ = BYTE(0x90c);'),
+    ('span zero map count', 'int short_span = count < 16;', 'int short_span = count && count < 16;'),
+    ('depth divide saturation', 'quotient > 0xffff ? 0xffff : quotient', 'quotient > 0xffff ? 0 : quotient'),
+    ('depth zero divide', 'if (!denominator) return 0xffff;', 'if (!denominator) return 0;'),
+    ('distance zero divide', 'threshold ? distance / threshold : 0xffffffffu', 'threshold ? distance / threshold : 0'),
+    ('distance threshold boundary', 'threshold < 0x7d00 &&', 'threshold <= 0x7d00 &&'),
+]
+mutations += [(*mutation, 'drawing') for mutation in draw_mutations]
+if len(sys.argv) > 2 and sys.argv[2] not in {suite for _, _, _, suite in mutations}:
+    raise SystemExit('Unknown mutation family: ' + sys.argv[2])
 missed = []
+tested = 0
 for name, old, new, suite in mutations:
+    if len(sys.argv) > 2 and sys.argv[2] != suite:
+        continue
+    tested += 1
     assert source.count(old) == 1, (name, source.count(old))
     variant = build / 'hg2d_mutant.c'
     variant.write_text(source.replace(old, new))
@@ -103,7 +165,7 @@ for name, old, new, suite in mutations:
         '-fno-strict-aliasing', '-shared', '-nostdlib', '-Wl,--entry=_DllMain@12',
         '-Wl,--image-base=0x30000000', '-Wl,--disable-dynamicbase',
         '-I' + str(root / 'src/hg2d'), '-o', str(library), str(variant),
-        str(root / 'src/hg2d/hg2d.def')], check=True)
+        str(root / 'src/hg2d/hg2d.def'), '-lgcc'], check=True)
     result = subprocess.run(['wine', 'hg2ddiff.exe', sys.argv[1] if len(sys.argv) > 1 else '64',
                              suite, 'full' if suite == 'colours' else 'scripts'],
                             cwd=build, env={**os.environ, 'WINEDEBUG': '-all'},
@@ -115,5 +177,5 @@ for name, old, new, suite in mutations:
     if not caught:
         print(result.stdout + result.stderr, flush=True)
         missed.append(name)
-print('%d mutations, %d caught, %d unresolved' % (len(mutations), len(mutations) - len(missed), len(missed)))
+print('%d mutations, %d caught, %d unresolved' % (tested, tested - len(missed), len(missed)))
 sys.exit(bool(missed))

@@ -406,7 +406,7 @@ src/analysis/analysis_data.inc src/analysis/analysis_rdata.inc: $(ORIG)/Modules/
 
 # MAIN, the sim's controller: MSVC C and assembly.  In progress, a slice at a
 # time (docs/modules/main.md); not in MODULES until every slot is done.
-MAIN_SOURCES := src/main/main.c src/main/main_records.inc
+MAIN_SOURCES := src/main/main.c src/main/main_records.inc src/main/main_situation.inc src/main/main_text_tail.inc
 $(BIN)/MAIN.DLL: $(MAIN_SOURCES) src/main/main.def src/main/main_data.inc \
                  src/main/main_pointers.inc $(BIN)/main.res
 	@mkdir -p $(BIN)
@@ -419,7 +419,7 @@ $(BIN)/main.res: src/main/main.rc
 	@mkdir -p $(BIN)
 	$(RC) $< -O coff -o $@
 
-src/main/main_data.inc src/main/main_pointers.inc &: $(ORIG)/Modules/MAIN.DLL tools/gen_main_data.py
+src/main/main_data.inc src/main/main_pointers.inc src/main/main_text_tail.inc &: $(ORIG)/Modules/MAIN.DLL tools/gen_main_data.py
 	@python3 tools/gen_main_data.py
 
 # MPCHAT, the multiplayer chat window: MSVC C.  The CD names it mpchat.DLL,

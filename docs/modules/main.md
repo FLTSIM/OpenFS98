@@ -10,7 +10,7 @@ slot is done MAIN is not in `MODULES` and is never installed.
 | slice | services | suite | status |
 | --- | --- | --- | --- |
 | 1, situation records | `+0x54`..`+0x6c`, and `.text+0x15c80`/`+0x15d50` | `records` | verified: 20,000 scenarios, 0 differ; 38 of 40 breaks caught, 2 proven equivalent |
-| 2, the situation reader and writer | `+0x38`..`+0x4c` (assembly, `.text+0x11e3d`..`+0x12f69`) | | next |
+| 2, the situation reader and writer | `+0x38`..`+0x4c` (assembly, `.text+0x11cd2`..`+0x13104`) | `situations` | verified: SITUATIONS_RESULT |
 
 ## Binary and linkage
 
@@ -137,14 +137,82 @@ only by `+0x5c`, which needs a file, and the save zeroes it before it clears
 the file), and its clamp taken as `<=` (at `n` equal to what is owed both
 branches leave nothing owed).
 
-## Next: slice 2
+## Slice 2: the situation reader and writer
 
-The situation reader and writer, `+0x38`..`+0x4c`, is assembly. Every call
-in it goes through a stack-alignment shim: `mov [esp-7], 0x04050607`,
-`and esp, -4`, `sub esp, 4`, `and dword [esp], 7`, the call, then
-`add esp, [esp]`. With esp already aligned, as it always is, that is a call
-and nothing else. Its table at `.data+0x4456` (0x12-byte entries: tag,
-kind, GLOBAL offset...) decides which records MAIN takes into GLOBAL itself.
-When the default flight's file is missing it puts up an alert (UTIL `+0xa4`,
-string `0xf461`) and then spins forever at `.text+0x1207c`: the sim stops
-there.
+`src/main/main_situation.inc`, `.text+0x11cd2`..`+0x13104`, assembly. The
+entry points:
+
+| slot | retail | |
+| --- | --- | --- |
+| `+0x38` | `.text+0x11eeb` | the default flight: GLOBAL `+0x24`'s file, or the one strings `0x9004` (a directory) and `0x9016` name |
+| `+0x3c` | `.text+0x11e3d` | the flight `{ ext, path }`, or the default if it is not there; WEATHERM `+0x24` afterwards |
+| `+0x40` | `.text+0x120aa` | save as `(title, description)` into string `0x9002`'s directory |
+| `+0x44` | `.text+0x127b3` | the current flight again; if it will not open, an alert (string `0xf462`) and the default |
+| `+0x48` | `.text+0x12f50` | a situation in memory (DEMO's videos) |
+| `+0x4c` | `.text+0x12f6a` | `length` bytes of an open file |
+
+Every call it makes goes through a stack-alignment shim:
+`mov [esp-7], 0x04050607`, `and esp, -4`, `sub esp, 4`, `and dword [esp], 7`,
+the call, then `add esp, [esp]`. With esp already aligned, as it always is,
+that is a plain call.
+
+**The table at `.data+0x4456`** lists the 77 records MAIN takes itself, in
+0x12-byte entries:
+
+| | |
+| --- | --- |
+| `+0x0` | u16 tag; `0xffff` ends the table |
+| `+0x2` | u8 mode: 0, `0xa` and `0xb` taken in; `0xc`, `0xd` and `0xe` only while GLOBAL `+0x1248`, `+0x124c` or `+0x1250` (in that order) is set, `0xe` then clearing `.data+0x4213`; 1 and anything else skipped. A save leaves mode `0xa` records out altogether |
+| `+0x3` | u8 where: 0 GLOBAL plus the offset; 1 the absolute address (MAIN's own `.data`); 5 through a pointer (unused); 2, 3 and 4 the address, at the record's own length |
+| `+0x4` | u16 length, or `0xffff` for a list of five-byte fields `{ u32 offset, u8 size code }` after the entry (codes `0x80` 1, `0x81` 2, `0x83` 3, `0x82` 4, otherwise the low seven bits) |
+| `+0x6` | u32 offset or address |
+| `+0xa` | u32 the next entry, after a list of fields |
+| `+0xe` | u32 a routine, called `(tag, 1)` before a save, when a non-zero answer stops the save, and `(tag, 0)` after a load |
+
+Six entries have routines, all just before the reader (`.text+0x11cd2`..
+`+0x11e3a`): records `0x59`, `0x92`, `0x93` (which of a pair of flags they
+set), `0x35`, `0x5e` and `0x5f` (clouds: 0 or `0x3fff`, or halved). Our table
+keeps retail's code addresses, as G3D's does, and `table_call()` maps them to
+ours.
+
+**Loading** (`.text+0x1295e`): list 0x14 hears `0x20`, SOUND event 1, a
+dozen GLOBAL fields are reset; the records are walked; then what they left
+is made consistent. A season with no day of the year takes one from the
+table at `.text+0x13093`. Clouds of `0x7f0000` become `0x7fffff`. CONTROLS
+are told, and the aircraft is loaded through ACONTAIN. Host command
+`0x100c2` or `0x100c3` is posted, and list 0x14 hears `0x70` and then `0x21`.
+**Saving** writes every entry of the table, then every module's records
+(slice 1), then the end tag.
+
+Retail behaviour worth knowing, all reproduced:
+
+- **A load copies the table entry's length, not the record's.** A record of
+  another length leaves the walk out of step with the file from there on.
+  With a damaged situation the walk reads its next tag from wherever that
+  leads, and usually faults there (`.text+0x1251b`).
+- **When neither default flight file is there, the sim stops.** An alert
+  (UTIL `+0xa4`, string `0xf461`), then a spin at `.text+0x1207c` that never
+  ends.
+- **The day of the year comes from a table in `.text`**, the days each
+  season starts on (355, 81, 172, 264 for seasons 0 to 3, winter first), indexed by GLOBAL
+  `+0x248` without a bound. Past 3 it reads on through MAIN's code, the gap
+  and `.rdata` (`src/main/main_text_tail.inc`, generated), and far enough,
+  its live `.data` (self-pointers as retail's), as G3D's season letter does.
+- **A save leaves a stack pointer in the table.** Record 2 (the description)
+  is written from a buffer on `+0x40`'s stack, whose address goes into its
+  entry at `.data+0x4480` and stays there. Record 2 is mode 1, so a load
+  never writes through it.
+- **ACONTAIN `+0x30` is asked only when GLOBAL `+0x1244` is clear**, but the
+  aircraft at `.data+0x4217` is loaded (`+0x28`) whenever it is not empty.
+  The branch lands on the alignment shim before the `strlen`. (The first
+  transliteration put both under the test; the harness caught it.)
+- **The load leaves `.data+0x41e1` naming a file it has closed.**
+
+MAIN `+0x74` (the season and date) and `+0xa4`, which loading calls, are
+not done yet. They are seams for now: retail's two call sites
+(`.text+0x12b5f`, `+0x130fe`) are patched in the harness to stubs, and ours
+calls them through its Linkage, which the harness points at the same stubs.
+`+0x74` is pushed the day as a word over two stale bytes; the stub logs the
+word, and `+0x74`'s slice must show that it reads only that.
+
+SITUATIONS_DETAIL

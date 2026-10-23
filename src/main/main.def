@@ -2,3 +2,4 @@ LIBRARY MAIN.DLL
 EXPORTS
     Linkage DATA
     ImportTable DATA
+    main_text_tail DATA

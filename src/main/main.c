@@ -68,30 +68,50 @@ typedef uint32_t (FS98_STDCALL *f4)(uint32_t, uint32_t, uint32_t, uint32_t);
 
 #define CHAIN_SEND    CALL(CHAIN, 0x20, f3)   /* (list, a, b) */
 
-#include "main_records.inc"
-
 /* ---- the image -------------------------------------------------------------- */
 
 struct main_image main_image = {{
 #include "main_data.inc"
 }};
 
-__asm__(".globl _ImportTable\n\t.set _ImportTable, _main_image + 0x0\n\t"
-        ".globl _Linkage\n\t.set _Linkage, _main_image + 0xc0");
-
 static const struct { uint32_t at, to; } data_pointers[] = {
 #define MAIN_DATA_POINTER(at, to) { at, to },
 #define MAIN_CODE_TARGET(a)
+#define MAIN_LINKAGE_RETAIL(at, v)
 #include "main_pointers.inc"
 #undef MAIN_DATA_POINTER
 #undef MAIN_CODE_TARGET
+#undef MAIN_LINKAGE_RETAIL
 };
+
+/* Retail's Linkage, as an unbounded read of the image sees it. */
+static const uint32_t retail_linkage[] = {
+#define MAIN_DATA_POINTER(at, to)
+#define MAIN_CODE_TARGET(a)
+#define MAIN_LINKAGE_RETAIL(at, v) v,
+#include "main_pointers.inc"
+#undef MAIN_DATA_POINTER
+#undef MAIN_CODE_TARGET
+#undef MAIN_LINKAGE_RETAIL
+};
+
+#include "main_records.inc"
+#include "main_situation.inc"
+
+__asm__(".globl _ImportTable\n\t.set _ImportTable, _main_image + 0x0\n\t"
+        ".globl _Linkage\n\t.set _Linkage, _main_image + 0xc0");
 
 /* The Linkage's slots that are done, by offset; the rest stay null until
  * their slice is. */
 static void main_install(void)
 {
     static const struct { uint32_t slot; void *fn; } services[] = {
+        { 0x38, (void *)load_default },
+        { 0x3c, (void *)load_flight },
+        { 0x40, (void *)save_flight },
+        { 0x44, (void *)reload_flight },
+        { 0x48, (void *)load_memory },
+        { 0x4c, (void *)load_file },
         { 0x54, (void *)record_current },
         { 0x58, (void *)record_read },
         { 0x5c, (void *)record_begin },

@@ -1,0 +1,4 @@
+LIBRARY HG2D.DLL
+EXPORTS
+    Linkage DATA
+    ImportTable DATA

@@ -1,5 +1,5 @@
 /* Plain polygon submission, +0x44 (0x20732aa5), and edge builder
- * 0x207329dc. Textured attributes and polygon filling are later slices. */
+ * 0x207329dc. Filling is in hg2d_fill.inc; textured attributes are deferred. */
 static uint32_t polygon_project(uint32_t coordinate, uint32_t scale, uint32_t depth)
 {
     int64_t product = (int64_t)(int32_t)coordinate * (int32_t)(scale << 16);

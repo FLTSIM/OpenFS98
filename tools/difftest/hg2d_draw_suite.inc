@@ -82,6 +82,7 @@ static uint32_t drawing(uint32_t slot, uint32_t a, uint32_t b, uint32_t c, uint3
     uint32_t arguments[6] = {a, b, c, d, e, f}, count, result, reg;
     switch (slot) {
     case 0x18: count = 0; break;
+    case 0x40: count = 1; break;
     case 0x1c: case 0x20: count = 3; break;
     case 0x24: case 0x2c: case 0x30: case 0x44: count = 4; break;
     case 0x28: count = 6; break;

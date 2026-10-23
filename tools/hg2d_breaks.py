@@ -12,7 +12,7 @@ import sys
 
 root = Path(__file__).resolve().parent.parent
 source = (root / 'src/hg2d/hg2d.c').read_text()
-for section in ('palette', 'draw', 'polygon'):
+for section in ('palette', 'draw', 'polygon', 'fill'):
     source = source.replace('#include "hg2d_%s.inc"' % section, (root / ('src/hg2d/hg2d_%s.inc' % section)).read_text())
 build = root / 'bin/hg2d-breaks'
 build.mkdir(parents=True, exist_ok=True)
@@ -96,9 +96,9 @@ draw_mutations = [
     ('point pixel', '*pixel = draw_colour();', '(void)draw_colour();'),
     ('point row table', 'rows + y * 4', 'rows + y * 8'),
     ('drawing colour mode', 'colour = (uint16_t)(0x6700 | (colour & 0xff));', 'colour = (uint16_t)(0x6900 | (colour & 0xff));'),
-    ('horizontal row boundary', 'if (y >= SURFACE_WORD(surface, 8))', 'if (y > SURFACE_WORD(surface, 8))'),
-    ('horizontal negative word', '(int16_t)first < 0 || (int16_t)last < 0', '(int32_t)first < 0 || (int32_t)last < 0'),
-    ('horizontal negative clamp', 'if ((int16_t)last < 0) last = 0;', 'if ((int16_t)last < 0) last = 1;'),
+    ('horizontal row boundary', '\n    if (y >= SURFACE_WORD(surface, 8)) return;', '\n    if (y > SURFACE_WORD(surface, 8)) return;'),
+    ('horizontal negative word', '    uint8_t *pixel;\n    if (y >= SURFACE_WORD(surface, 8)) return;\n    if ((int16_t)first < 0 || (int16_t)last < 0) {\n        if ((int16_t)first < 0) first = 0;\n        if ((int16_t)last < 0) last = 0;', '    uint8_t *pixel;\n    if (y >= SURFACE_WORD(surface, 8)) return;\n    if ((int32_t)first < 0 || (int32_t)last < 0) {\n        if ((int16_t)first < 0) first = 0;\n        if ((int16_t)last < 0) last = 0;'),
+    ('horizontal negative clamp', '    uint8_t *pixel;\n    if (y >= SURFACE_WORD(surface, 8)) return;\n    if ((int16_t)first < 0 || (int16_t)last < 0) {\n        if ((int16_t)first < 0) first = 0;\n        if ((int16_t)last < 0) last = 0;', '    uint8_t *pixel;\n    if (y >= SURFACE_WORD(surface, 8)) return;\n    if ((int16_t)first < 0 || (int16_t)last < 0) {\n        if ((int16_t)first < 0) first = 0;\n        if ((int16_t)last < 0) last = 1;'),
     ('horizontal endpoint', 'count = last - first + 1;', 'count = last - first;'),
     ('vertical direction', 'start = last;', 'start = first;'),
     ('vertical endpoint', 'count = delta + 1;', 'count = delta;'),
@@ -172,6 +172,52 @@ polygon_mutations = [
     ('edge pointer advance', 'GLOBAL_WORD(0xc14) = ADDRESS(edge) + 16;', 'GLOBAL_WORD(0xc14) = ADDRESS(edge) + 20;'),
 ]
 mutations += [(*mutation, 'polygons') for mutation in polygon_mutations]
+fill_mutations = [
+    ('fill remap threshold', '(int32_t)mode < 16', '(int32_t)mode <= 16'),
+    ('fill remap signed mode', '(int32_t)mode < 16', 'mode < 16'),
+    ('fill remap limit equality', '(int32_t)mode > (int32_t)WORD(0x298c)', '(int32_t)mode >= (int32_t)WORD(0x298c)'),
+    ('fill remap fallback bank', '0xd70 + 3 * 256', '0xd70 + 2 * 256'),
+    ('fill remap alternate bank', 'hg2d_image + 0x1d8c', 'hg2d_image + 0x1d88'),
+    ('fill remap colour override', 'GLOBAL_WORD(0x3c0) = 0x6900;', 'GLOBAL_WORD(0x3c0) = 0x6901;'),
+    ('fill stipple selector', 'stipple = colour >> 8 == 0x68;', 'stipple = colour >> 8 == 0x67;'),
+    ('fill stipple direct colour', 'if (stipple) colour += 0x100;', 'if (stipple) colour += 0x200;'),
+    ('fill colour pair', 'colour_translate(colour, GLOBAL_HALF(0xcc8), &pair)', 'colour_translate(colour, GLOBAL_HALF(0xcc2), &pair)'),
+    ('fill distance shade', 'BYTE(0x90c) = draw_distance((uint8_t)colour);', 'BYTE(0x90c) = (uint8_t)colour;'),
+    ('fill shadow sign', '(int16_t)GLOBAL_HALF(0xb34) < 0', '(int16_t)GLOBAL_HALF(0xb34) > 0'),
+    ('fill shadow map selector', 'HALF(0x94c) = GLOBAL_HALF(0xdce);', 'HALF(0x94c) = 0;'),
+    ('fill closing order', 'if (first_y < last_y)', 'if ((int32_t)first_y < (int32_t)last_y)'),
+    ('fill closing x', 'polygon_edge(last_x, last_y, first_x, first_y);', 'polygon_edge(first_x, last_y, last_x, first_y);'),
+    ('fill min row shift', '(int32_t)WORD(0x8c8) >> 16', '(int32_t)WORD(0x8c8) >> 15'),
+    ('fill max row shift', '(int32_t)WORD(0x8cc) >> 16', '(int32_t)WORD(0x8cc) >> 15'),
+    ('fill slow flag width', 'GLOBAL_HALF(0x2f4) ||', 'GLOBAL_WORD(0x2f4) ||'),
+    ('fill triangle cutoff', '(int32_t)GLOBAL_WORD(0x2f0) < 3', '(int32_t)GLOBAL_WORD(0x2f0) < 2'),
+    ('fill last scanline', 'while (WORD(0x4020) >= y);', 'while (WORD(0x4020) > y);'),
+    ('fill extra edge record', 'index < WORD(0x4028) + 2;', 'index < WORD(0x4028) + 1;'),
+    ('fill edge starting row', '(uint16_t)edge[0] > (uint16_t)y', '(uint16_t)edge[0] >= (uint16_t)y'),
+    ('fill intersection word', '(uint16_t)(edge[2] >> 16)', '(uint16_t)(edge[2] >> 15)'),
+    ('fill fast edge advance', 'edge[2] += edge[3];', 'edge[2] -= edge[3];'),
+    ('fill fast negative clamp', 'if ((int32_t)edge[2] < 0) edge[2] = 0;', 'if ((int32_t)edge[2] < 0) edge[2] = 1;'),
+    ('fill pair count', 'pairs = used / 2;', 'pairs = (used + 1) / 2;'),
+    ('fill large signed sort', 'value <= (int16_t)intersections[index]', 'value >= (int16_t)intersections[index]'),
+    ('fill large sort tail', 'end = pairs * 2 - 1;', 'end = pairs * 2 - 2;'),
+    ('fill flat negative sum', 'if ((int32_t)last < 0) last = 0;', 'if ((int32_t)last < 0) last = 0x10000;'),
+    ('fill flat endpoint', 'first >> 16, last >> 16, y', '(first >> 16) + 1, last >> 16, y'),
+    ('fill walker max row flat', 'if (y == WORD(0x8cc)) polygon_flat_span', 'if (y != WORD(0x8cc)) polygon_flat_span'),
+    ('fill walker left end', '(int32_t)y >= (int32_t)left[1]', '(int32_t)y > (int32_t)left[1]'),
+    ('fill walker right end', '(int32_t)y >= (int32_t)right[1]', '(int32_t)y > (int32_t)right[1]'),
+    ('fill walker left advance', 'left[2] += left[3];', 'left[2] -= left[3];'),
+    ('fill walker right advance', 'right[2] += right[3];', 'right[2] -= right[3];'),
+    ('fill stipple parity', '(y ^ first) & 1', '(y ^ first ^ 1) & 1'),
+    ('fill stipple sole sample', 'count -= phase;', 'count -= phase; if (!count) return;'),
+    ('fill shadow cache', 'if (factor == BYTE(0x4034)) return;', 'if (factor == BYTE(0x4034)) {}'),
+    ('fill shadow byte factor', '(int8_t)factor * 2', '(uint8_t)factor * 2'),
+    ('fill shadow ramp cutoff', 'if (value < 32) {', 'if (value <= 32) {'),
+    ('fill shadow ramp doubling', '(int8_t)factor * 2', '(int8_t)factor'),
+    ('fill shadow last pixel', 'if ((int32_t)count > 0) *pixel = map[*pixel];', 'if ((int32_t)count >= 0) *pixel = map[*pixel];'),
+    ('fill shadow odd singleton', 'if ((int32_t)count <= 0) goto shadow_tail;', 'if ((int32_t)count <= 0) return;'),
+    ('fill remap frame preservation', 'draw_map_pixels(draw_address(surface, first, y), last - first + 1, POINTER(WORD(0x1d88)));', 'draw_map_span(draw_address(surface, first, y), last - first + 1);'),
+]
+mutations += [(*mutation, 'fills') for mutation in fill_mutations]
 if len(sys.argv) > 2 and sys.argv[2] not in {suite for _, _, _, suite in mutations}:
     raise SystemExit('Unknown mutation family: ' + sys.argv[2])
 missed = []

@@ -1,14 +1,13 @@
 # HG2D.DLL — module id 13
 
-In progress, one slice at a time. Twenty-three Linkage entries now have
+In progress, one slice at a time. Twenty-four Linkage entries now have
 implementations:
 texture storage and access, loading through FE, palette remapping, hardware
 texture release, colour conversion, software palette realization, points,
-lines, frames, depth shading, text and plain polygon vertex submission. It
-uses snake_case and `<stdint.h>`; there is no `types.h` dependency.
+lines, frames, depth shading, text, plain polygon vertex submission and
+untextured polygon filling. It uses snake_case and `<stdint.h>`; there is no `types.h` dependency.
 HG2D is not in `MODULES` and must not be installed yet: initialization,
-polygon filling, textured attributes, device-backed palette realization and
-the other services are incomplete.
+textured attributes, device-backed palette realization and the other services are incomplete.
 
 The implementation and tests occupy HG2D-specific files. The shared Makefile,
 README and MAIN files are untouched so MAIN can proceed independently.
@@ -21,6 +20,7 @@ make -f tools/hg2d.mk hg2ddiff-run N=20000 SUITE=textures
 make -f tools/hg2d.mk hg2ddiff-run SUITE=colours       # finite sweeps
 make -f tools/hg2d.mk hg2ddiff-run N=20000 SUITE=drawing
 make -f tools/hg2d.mk hg2ddiff-run N=20000 SUITE=polygons
+make -f tools/hg2d.mk hg2ddiff-run N=20000 SUITE=fills
 python3 tools/hg2d_breaks.py
 ```
 
@@ -299,28 +299,96 @@ record +0x80 is omitted; its destination is overwritten before use.
 The conjunction of nonzero low words at GLOBAL +0xc90 and +0x2f4 selects the
 unfinished textured-attribute edge builder and deliberately traps. Either
 flag alone, including nonzero upper words, still selects plain edges. Polygon
-close/fill +0x40 and textured submission +0x48 are not installed yet.
+close/fill +0x40 is implemented in the next slice; textured submission +0x48
+is not installed yet.
 
 The `polygons` suite compares the complete image, GLOBAL, canvas and the seven
-registers after every submission. It normalizes only the known edge pointer
-at GLOBAL +0xc14 in addition to the original data pointer list. Directed
+registers after every submission. It normalizes the known edge pointer
+at GLOBAL +0xc14 in addition to the original data pointer list. The fill
+suite also normalizes the dynamic intersection-sort and selected-map pointers. Directed
 fixtures independently check first-vertex projection, flat and vertical
 edges, valid minimum quotient, scratch aliasing and buffer capacity. Mixed
 scripts cover fractional coordinates, negative slopes, wraparound, signed
 depths, saturation, steep slopes and both flag widths. Deliberate mutation
 checks cover projection, bounds, capacity, edge records and pointer advance.
 
+## Slice 5: untextured polygon close and fill
+
+`src/hg2d/hg2d_fill.inc` adds +0x40 (`0x20732697`), taking one surface
+argument and preserving the same seven registers as vertex submission. It
+closes the last edge to the first vertex with **unsigned** y ordering, shifts
+the y bounds to scanline rows in place, selects the polygon colour from
+GLOBAL +0x3c0 using the pair at +0xcc8, and applies distance shading.
+
+There are two rasterizers. A nonzero low word at GLOBAL +0x2f4, or a vertex
+count below three (the count is submitted vertices minus one), chooses the
+edge-pair walker at `0x20732834`. It searches for edges beginning exactly on
+the current row, replaces them at their end rows, and draws flat edges only
+when encountered on the final row. Other polygons use the scanner at
+`0x20732be8`: it reads count+2 records, including one beyond the closing edge,
+compares row endpoints as unsigned words, updates fixed-point x with a
+negative-result clamp, and collects intersections as words at data +0x888.
+An odd final intersection is ignored. One or two pairs are sorted in
+registers; larger sets are sorted as signed words in place. The exact final
+scratch contents and the extra record's x advance are compared.
+
+The span selector at data +0x402c retains the retail code address as state;
+C dispatches on it. Supported spans are:
+
+- Solid: inclusive horizontal drawing with the primitive's height check.
+- Stippled (colour mode 0x68): checkerboard parity comes from x XOR y, without
+  a height check. A one-pixel span with the opposite parity still writes the
+  right neighbour.
+- Shadow (mode 0x68 and a negative word at GLOBAL +0xb34): either the inverse
+  remap or a cached shadow map transforms existing pixels. The cached map
+  uses the negated word's high byte as a **signed** multiplier and doubles
+  the word product before indexing the ramp. Its cache ignores changes to
+  the source table when the generation byte is unchanged. The span's tail
+  leaves pixels unmapped; an odd-address singleton instead maps the same
+  pixel twice. Both behaviours are retained.
+- Palette remap: GLOBAL +0x1298 chooses a primary or alternate 256-byte map,
+  with signed comparisons and the original fallback bank. This forces the
+  polygon colour to 0x6900. The pixel mapper is shared with primitives, but
+  polygon callers save and restore EBP, so their remapping completes without
+  the primitive entry's null-read fault.
+
+The `fills` suite submits vertices and closes through the public entries,
+then compares the full image, GLOBAL, canvas and all seven registers. It
+covers both winding orders, triangles, convex and concave shapes, crossings,
+six simultaneous intersection pairs, repeated points, flat polygons,
+singletons, subpixel projections, negative x and y, height rejection, both
+shadow maps, cache hits with changed source bytes, signed factor 0x80, and
+remap selectors -1, 1, 15, 16, 17, 19, 20 and 31. A rectangle fixture checks
+every canvas byte independently, including untouched padding and rows. Row
+tables retain negative pitch and nonlinear addressing from the drawing suite.
+
+Textured polygons still trap when GLOBAL +0xc90's low word is nonzero. The
+shadow span's corrupt-stack return for a negative low-word length also
+remains deferred and traps explicitly; these ordered, bounded fixtures do
+not reach it. Closing an exhausted vertex buffer, arbitrary invalid row
+pointers, and polygons that produce unbounded scanline loops are outside
+this verification. This slice does not install HG2D in-game.
+
 ## Verification and limits
+
+`make -f tools/hg2d.mk hg2ddiff-run N=20000 SUITE=fills` passes 20,000
+scenarios and 2,720,000 operations: zero differences and zero faults. All
+43 new fill mutations are caught (`python3 tools/hg2d_breaks.py 64 fills`),
+and all 50 existing drawing mutations pass their recheck after the mapper
+refactor.
+The combined regression run passes 2,000 scenarios each for textures,
+palettes, drawing, vertices (157,625 operations) and fills (272,000), plus
+the 263,680 finite colour/layout comparisons. Three existing drawing mutation
+anchors now include their primitive's surrounding code to distinguish the
+similar expressions in the new fill code. All 179 mutation anchors match
+exactly once in the expanded source.
 
 The final `polygons` run passes 20,000 scenarios and 1,576,250 operations,
 with zero differences and zero unrepaired faults. Retail resumes after 673,201
-signed divide repairs. The existing suites also pass a regression run of
-2,000 scenarios each for textures (115,500 operations), palettes (112,000) and drawing (420,000,
-including 14,000 matching retail faults), plus all 263,680 finite colour/layout
-comparisons.
+signed divide repairs.
 
-The full mutation run catches all 136 deliberate breaks: the original 114
-plus 22 for polygon projection and edges, with zero unresolved.
+The vertex slice's full mutation run caught all 136 deliberate breaks: the
+original 114 plus 22 for polygon projection and edges, with zero unresolved.
 
 `make -f tools/hg2d.mk hg2ddiff-run N=20000 SUITE=drawing`: 20,000 scenarios,
 4,200,000 operations, zero differences. This includes 140,000 matching access
@@ -347,7 +415,8 @@ The first three slices' mutation checks caught all 114 distinct breaks, zero unr
 were rechecked in the full mutation run; the final drawing family includes
 the two extra zero-count loop breaks. `python3 tools/hg2d_breaks.py` runs all
 families, or its second argument selects `textures`, `colours`, `palette` or
-`drawing` (plus `polygons` for the fourth slice). Only a reported differential mismatch counts as detection; a build
+`drawing`, `polygons` or `fills`. Only a reported differential mismatch
+counts as detection; a build
 failure, fixture error or harness crash does not.
 The generated files reproduce exactly when re-extracted from retail.
 
@@ -385,6 +454,6 @@ FE loader, DirectDraw objects, arbitrary malformed COM pointers, accounting
 indices outside 0..8, and initialization are outside this slice. The existing
 PANELS model and its verified harness remain unchanged.
 
-Next: polygon close/fill, textured attributes, clipping and the remaining rasterizer.
+Next: textured vertex attributes and polygon spans, clipping and the remaining rasterizer.
 Completion of these slices does not establish
 rendering equivalence or readiness to run in-game.

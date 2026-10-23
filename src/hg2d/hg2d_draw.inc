@@ -90,9 +90,8 @@ static uint32_t STDCALL draw_depth_point(void *surface, uint32_t x, uint32_t y, 
 
 /* The eight-pixel mapper reads both words before looking up/storing bytes.
  * Preserve that ordering even if a caller aliases the map and pixels. */
-static void draw_map_span(uint8_t *pixel, uint32_t count)
+static void draw_map_pixels(uint8_t *pixel, uint32_t count, const uint8_t *map)
 {
-    uint8_t *map = POINTER(WORD(0x1d88));
     int short_span = count < 16;
     if (count >= 16) {
         while (ADDRESS(pixel) & 3) {
@@ -122,6 +121,12 @@ static void draw_map_span(uint8_t *pixel, uint32_t count)
             *pixel = map[*pixel];
             pixel++;
         } while (--count);
+}
+
+static void draw_map_span(uint8_t *pixel, uint32_t count)
+{
+    uint8_t *map = POINTER(WORD(0x1d88));
+    draw_map_pixels(pixel, count, map);
     /* Retail's mapper overwrites EBP with its count, ends with EBP zero,
      * then its caller's leave reads address zero. Preserve the fault after
      * the pixels are mapped; exception register contexts are not modelled. */

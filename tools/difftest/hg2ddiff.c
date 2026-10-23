@@ -15,7 +15,7 @@
 #define POOL 0x5f60u
 #define ADDRESS(pointer) ((uint32_t)(uintptr_t)(pointer))
 #define WORD(image, offset) (*(uint32_t *)((image) + (offset)))
-#define CHECK(condition) do { if (!(condition)) { printf("fixture failed at line %d\n", __LINE__); exit(2); } } while (0)
+#define CHECK(condition) do { if (!(condition)) { printf("fixture failed at %s:%d, scenario %u side %u step %u\n", __FILE__, __LINE__, scenario, side, step); exit(2); } } while (0)
 
 static uint8_t *images[2], initial[2][DATA_SIZE];
 static uint8_t states[256][DATA_SIZE], normalized[DATA_SIZE];
@@ -130,8 +130,13 @@ static void compare(uint32_t result)
 #include "../../src/hg2d/hg2d_pointers.inc"
 #undef HG2D_DATA_POINTER
     memcpy(normalized_global, global, sizeof global);
-    if (polygon_compare)
+    if (polygon_compare) {
         WORD(normalized_global, 0xc14) -= ADDRESS(images[side]) - 0x20792000u;
+        if (WORD(normalized, 0x4030))
+            WORD(normalized, 0x4030) -= ADDRESS(images[side]) - 0x20792000u;
+        if (polygon_compare == 2)
+            WORD(normalized, 0x1d88) -= ADDRESS(images[side]) - 0x20792000u;
+    }
     /* Service pointers differ by implementation; import links share stubs. */
     memset(normalized + 0x38, 0, 0xc0);
     if (side == 0) {
@@ -155,6 +160,12 @@ static void compare(uint32_t result)
                 printf("first data byte +%x: %02x/%02x\n", index, states[step][index], normalized[index]);
                 break;
             }
+        if (touched)
+            for (index = 0; index < 0x10000; index++)
+                if (pixel_states[step][index] != touched[index]) {
+                    printf("first pixel byte +%x: %02x/%02x\n", index, pixel_states[step][index], touched[index]);
+                    break;
+                }
         if (check_carry) printf("carry %u/%u\n", carries[step], returned_flags & 1);
         for (index = 0; index < sizeof global; index++)
             if (global_states[step][index] != normalized_global[index]) {
@@ -281,6 +292,7 @@ static void run_textures(void)
 #include "hg2d_palette_suite.inc"
 #include "hg2d_draw_suite.inc"
 #include "hg2d_polygon_suite.inc"
+#include "hg2d_fill_suite.inc"
 
 static LONG WINAPI fault(EXCEPTION_POINTERS *exception)
 {
@@ -295,7 +307,7 @@ int main(int argc, char **argv)
     uint32_t count = argc > 1 ? (uint32_t)strtoul(argv[1], NULL, 0) : 20000;
     HMODULE modules[2], util;
     const char *suite = argc > 2 ? argv[2] : "all";
-    CHECK(!strcmp(suite, "all") || !strcmp(suite, "textures") || !strcmp(suite, "palette") || !strcmp(suite, "colours") || !strcmp(suite, "drawing") || !strcmp(suite, "polygons"));
+    CHECK(!strcmp(suite, "all") || !strcmp(suite, "textures") || !strcmp(suite, "palette") || !strcmp(suite, "colours") || !strcmp(suite, "drawing") || !strcmp(suite, "polygons") || !strcmp(suite, "fills"));
     SetUnhandledExceptionFilter(fault);
     CHECK(AddVectoredExceptionHandler(1, draw_exception));
     {
@@ -366,6 +378,14 @@ int main(int argc, char **argv)
         printf("hg2ddiff polygons: %u scenarios, %u operations, %u faults, 0 differ\n",
                count, operations / 2, draw_faults / 2);
         printf("retail host divide repairs: %u\n", draw_div_repairs);
+    }
+    if (!strcmp(suite, "all") || !strcmp(suite, "fills")) {
+        active_suite = "fills";
+        operations = draw_div_repairs = draw_faults = 0;
+        for (scenario = 0; scenario < count; scenario++)
+            for (side = 0; side < 2; side++) run_fills();
+        printf("hg2ddiff fills: %u scenarios, %u operations, %u matching faults, 0 differ\n",
+               count, operations / 2, draw_faults / 2);
     }
     return 0;
 }

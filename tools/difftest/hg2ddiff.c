@@ -124,6 +124,8 @@ static uint32_t normalize_result(uint32_t result)
     return result;
 }
 
+static uint32_t device_flush_compare;
+
 static void compare(uint32_t result)
 {
     uint32_t index;
@@ -140,6 +142,7 @@ static void compare(uint32_t result)
         WORD(normalized, 0x4d68) = normalize_result(WORD(normalized, 0x4d68));
         WORD(normalized, 0x4d6c) = normalize_result(WORD(normalized, 0x4d6c));
     }
+    if (device_flush_compare) WORD(normalized, 0x885c) = normalize_result(WORD(normalized, 0x885c));
     memcpy(normalized_global, global, sizeof global);
     if (mip_build_compare) WORD(normalized_global, 0xc8c) = normalize_result(WORD(normalized_global, 0xc8c));
     if (resource_compare) {
@@ -316,6 +319,13 @@ static void run_textures(void)
 #include "hg2d_device_palette_suite.inc"
 #include "hg2d_draw_suite.inc"
 #include "hg2d_device_pixels_suite.inc"
+#include "hg2d_device_states_suite.inc"
+#include "hg2d_device_shutdown_suite.inc"
+#include "hg2d_device_config_suite.inc"
+#include "hg2d_device_formats_suite.inc"
+#include "hg2d_device_select_format_suite.inc"
+#include "hg2d_device_flush_suite.inc"
+#include "hg2d_device_colour_suite.inc"
 #include "hg2d_polygon_suite.inc"
 #include "hg2d_fill_suite.inc"
 #include "hg2d_resource_suite.inc"
@@ -345,7 +355,7 @@ int main(int argc, char **argv)
     uint32_t count = argc > 1 ? (uint32_t)strtoul(argv[1], NULL, 0) : 20000;
     HMODULE modules[2], util;
     const char *suite = argc > 2 ? argv[2] : "all";
-    CHECK(!strcmp(suite, "all") || !strcmp(suite, "textures") || !strcmp(suite, "palette") || !strcmp(suite, "colours") || !strcmp(suite, "drawing") || !strcmp(suite, "polygons") || !strcmp(suite, "fills") || !strcmp(suite, "textured") || !strcmp(suite, "affine") || !strcmp(suite, "gouraud") || !strcmp(suite, "blits") || !strcmp(suite, "lifecycle") || !strcmp(suite, "optimized") || !strcmp(suite, "perspective") || !strcmp(suite, "discs") || !strcmp(suite, "perspective_fill") || !strcmp(suite, "matrix_vertices") || !strcmp(suite, "matrix_fills") || !strcmp(suite, "projective") || !strcmp(suite, "projective_keyed") || !strcmp(suite, "projective_fog") || !strcmp(suite, "projective_key_fog") || !strcmp(suite, "projective_dither") || !strcmp(suite, "projective_dither_fog") || !strcmp(suite, "projective_dither_key") || !strcmp(suite, "projective_dither_key_fog") || !strcmp(suite, "projective_plane") || !strcmp(suite, "projective_mip") || !strcmp(suite, "projective_mip_fog") || !strcmp(suite, "projective_mip_dither") || !strcmp(suite, "projective_mip_dither_fog") || !strcmp(suite, "resources") || !strcmp(suite, "initialization") || !strcmp(suite, "projective_mip_build") || !strcmp(suite, "fans") || !strcmp(suite, "device_palettes") || !strcmp(suite, "device_pixels"));
+    CHECK(!strcmp(suite, "all") || !strcmp(suite, "textures") || !strcmp(suite, "palette") || !strcmp(suite, "colours") || !strcmp(suite, "drawing") || !strcmp(suite, "polygons") || !strcmp(suite, "fills") || !strcmp(suite, "textured") || !strcmp(suite, "affine") || !strcmp(suite, "gouraud") || !strcmp(suite, "blits") || !strcmp(suite, "lifecycle") || !strcmp(suite, "optimized") || !strcmp(suite, "perspective") || !strcmp(suite, "discs") || !strcmp(suite, "perspective_fill") || !strcmp(suite, "matrix_vertices") || !strcmp(suite, "matrix_fills") || !strcmp(suite, "projective") || !strcmp(suite, "projective_keyed") || !strcmp(suite, "projective_fog") || !strcmp(suite, "projective_key_fog") || !strcmp(suite, "projective_dither") || !strcmp(suite, "projective_dither_fog") || !strcmp(suite, "projective_dither_key") || !strcmp(suite, "projective_dither_key_fog") || !strcmp(suite, "projective_plane") || !strcmp(suite, "projective_mip") || !strcmp(suite, "projective_mip_fog") || !strcmp(suite, "projective_mip_dither") || !strcmp(suite, "projective_mip_dither_fog") || !strcmp(suite, "resources") || !strcmp(suite, "initialization") || !strcmp(suite, "projective_mip_build") || !strcmp(suite, "fans") || !strcmp(suite, "device_palettes") || !strcmp(suite, "device_pixels") || !strcmp(suite, "device_states") || !strcmp(suite, "device_shutdown") || !strcmp(suite, "device_config") || !strcmp(suite, "device_formats") || !strcmp(suite, "device_select_format") || !strcmp(suite, "device_flush") || !strcmp(suite, "device_colour"));
     SetUnhandledExceptionFilter(fault);
     CHECK(AddVectoredExceptionHandler(1, draw_exception));
     {
@@ -381,6 +391,35 @@ int main(int argc, char **argv)
     device_format_entry[1] = ADDRESS(GetProcAddress(modules[1], "hg2d_device_format"));
     device_convert_entry[1] = ADDRESS(GetProcAddress(modules[1], "hg2d_device_convert"));
     CHECK(device_format_entry[1] && device_convert_entry[1]);
+    device_states_entry[0] = 0x2078c400; device_state_entry[0] = 0x2078c680; device_draw_state_entry[0] = 0x2078cc80;
+    device_states_entry[1] = ADDRESS(GetProcAddress(modules[1], "hg2d_device_states"));
+    device_state_entry[1] = ADDRESS(GetProcAddress(modules[1], "hg2d_device_state"));
+    device_draw_state_entry[1] = ADDRESS(GetProcAddress(modules[1], "hg2d_device_draw_state"));
+    CHECK(device_states_entry[1] && device_state_entry[1] && device_draw_state_entry[1]);
+    device_shutdown_entry[0] = 0x2078c370;
+    device_shutdown_entry[1] = ADDRESS(GetProcAddress(modules[1], "hg2d_device_shutdown"));
+    CHECK(device_shutdown_entry[1]);
+    device_formats_entry[0] = 0x2078fb00;
+    device_formats_entry[1] = ADDRESS(GetProcAddress(modules[1], "hg2d_device_formats"));
+    CHECK(device_formats_entry[1]);
+    device_select_format_entry[0] = 0x2078bd30;
+    device_select_format_entry[1] = ADDRESS(GetProcAddress(modules[1], "hg2d_device_select_format"));
+    CHECK(device_select_format_entry[1]);
+    device_flush_entry[0] = 0x2078c800;
+    device_flush_entry[1] = ADDRESS(GetProcAddress(modules[1], "hg2d_device_flush"));
+    CHECK(device_flush_entry[1]);
+    device_colour_entry[0] = 0x2078cd50;
+    device_colour_entry[1] = ADDRESS(GetProcAddress(modules[1], "hg2d_device_colour"));
+    CHECK(device_colour_entry[1]);
+    {
+        const char *names[] = {"hg2d_device_blend", "hg2d_device_mipmap", "hg2d_device_filter", "hg2d_device_fog"};
+        uint32_t entries[] = {0x2078bdf0, 0x2078bf80, 0x2078bf10, 0x2078be50};
+        for (uint32_t index = 0; index < 4; index++) {
+            device_config_entry[index][0] = entries[index];
+            device_config_entry[index][1] = ADDRESS(GetProcAddress(modules[1], names[index]));
+            CHECK(device_config_entry[index][1]);
+        }
+    }
     for (side = 0; side < 2; side++) init_imports(modules[side]);
     host[0x20c / 4] = ADDRESS(host_alloc);
     host[0x214 / 4] = ADDRESS(host_free);
@@ -439,6 +478,55 @@ int main(int argc, char **argv)
         for (scenario = 0; scenario < count; scenario++)
             for (side = 0; side < 2; side++) run_device_pixels();
         printf("hg2ddiff device_pixels: %u scenarios, %u operations, 0 differ\n", count, operations / 2);
+    }
+    if (!strcmp(suite, "all") || !strcmp(suite, "device_states")) {
+        active_suite = "device_states";
+        operations = 0;
+        for (scenario = 0; scenario < count; scenario++)
+            for (side = 0; side < 2; side++) run_device_states();
+        printf("hg2ddiff device_states: %u scenarios, %u operations, 0 differ\n", count, operations / 2);
+    }
+    if (!strcmp(suite, "all") || !strcmp(suite, "device_shutdown")) {
+        active_suite = "device_shutdown";
+        operations = 0;
+        for (scenario = 0; scenario < count; scenario++)
+            for (side = 0; side < 2; side++) run_device_shutdown();
+        printf("hg2ddiff device_shutdown: %u scenarios, %u operations, 0 differ\n", count, operations / 2);
+    }
+    if (!strcmp(suite, "all") || !strcmp(suite, "device_config")) {
+        active_suite = "device_config";
+        operations = 0;
+        for (scenario = 0; scenario < count; scenario++)
+            for (side = 0; side < 2; side++) run_device_config();
+        printf("hg2ddiff device_config: %u scenarios, %u operations, 0 differ\n", count, operations / 2);
+    }
+    if (!strcmp(suite, "all") || !strcmp(suite, "device_formats")) {
+        active_suite = "device_formats";
+        operations = 0;
+        for (scenario = 0; scenario < count; scenario++)
+            for (side = 0; side < 2; side++) run_device_formats();
+        printf("hg2ddiff device_formats: %u scenarios, %u operations, 0 differ\n", count, operations / 2);
+    }
+    if (!strcmp(suite, "all") || !strcmp(suite, "device_select_format")) {
+        active_suite = "device_select_format";
+        operations = 0;
+        for (scenario = 0; scenario < count; scenario++)
+            for (side = 0; side < 2; side++) run_device_select_format();
+        printf("hg2ddiff device_select_format: %u scenarios, %u operations, 0 differ\n", count, operations / 2);
+    }
+    if (!strcmp(suite, "all") || !strcmp(suite, "device_flush")) {
+        active_suite = "device_flush";
+        operations = 0;
+        for (scenario = 0; scenario < count; scenario++)
+            for (side = 0; side < 2; side++) run_device_flush();
+        printf("hg2ddiff device_flush: %u scenarios, %u operations, 0 differ\n", count, operations / 2);
+    }
+    if (!strcmp(suite, "all") || !strcmp(suite, "device_colour")) {
+        active_suite = "device_colour";
+        operations = 0;
+        for (scenario = 0; scenario < count; scenario++)
+            for (side = 0; side < 2; side++) run_device_colour();
+        printf("hg2ddiff device_colour: %u scenarios, %u operations, 0 differ\n", count, operations / 2);
     }
     if (!strcmp(suite, "all") || !strcmp(suite, "drawing")) {
         active_suite = "drawing";

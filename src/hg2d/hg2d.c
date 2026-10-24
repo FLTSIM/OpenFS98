@@ -1,4 +1,4 @@
-/* HG2D, module 13. Incomplete: texture, palette and drawing slices are installed.
+/* HG2D, module 13. Incomplete: texture, palette and drawing slices are implemented.
  * Keep the retail .data layout for whole-image differential testing.
  * See docs/modules/hg2d.md. */
 #include <windows.h>
@@ -173,6 +173,13 @@ EAX_ENTRY(texture_update, texture_update_body);
 #include "hg2d_init.inc"
 #include "hg2d_device_palette.inc"
 #include "hg2d_device_pixels.inc"
+#include "hg2d_device_states.inc"
+#include "hg2d_device_shutdown.inc"
+#include "hg2d_device_config.inc"
+#include "hg2d_device_formats.inc"
+#include "hg2d_device_select_format.inc"
+#include "hg2d_device_flush.inc"
+#include "hg2d_device_colour.inc"
 
 __asm__(".globl _ImportTable\n.set _ImportTable, _hg2d_image\n"
         ".globl _Linkage\n.set _Linkage, _hg2d_image + 0x38\n");

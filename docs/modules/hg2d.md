@@ -3,12 +3,14 @@
 In progress. Thirty-seven of forty Linkage services have implementations.
 The software renderer now includes all 24 ordinary projective targets,
 plain polygon plane spans, software triangle fans, affine and perspective textures, Gouraud shading,
-primitives, text, blits and discs. Palette/resource loading and initialization
+primitives, text, blits and discs. Device palette, conversion, state setup,
+teardown, format selection and batch submission helpers have standalone coverage.
+Palette/resource loading and initialization
 are implemented too. Some service branches remain unfinished below.
 HG2D uses snake_case and `<stdint.h>`; there is no `types.h` dependency.
 
-HG2D is not in `MODULES` and must not be installed yet. Device-backed palette
-realization, Direct3D services and their rendering dispatch remain incomplete.
+HG2D is not in `MODULES` and must not be installed yet. Direct3D services
+and their rendering dispatch remain incomplete.
 The negative-length shadow corrupt-stack return is also deferred.
 
 The implementation and tests occupy HG2D-specific files. The shared Makefile,
@@ -17,6 +19,15 @@ For now build and verify from the repository root with:
 
 ```sh
 make -f tools/hg2d.mk hg2ddiff-run N=20000              # all suites
+make -f tools/hg2d.mk hg2ddiff-run N=20000 SUITE=device_palettes
+make -f tools/hg2d.mk hg2ddiff-run N=20000 SUITE=device_pixels
+make -f tools/hg2d.mk hg2ddiff-run N=20000 SUITE=device_states
+make -f tools/hg2d.mk hg2ddiff-run N=20000 SUITE=device_shutdown
+make -f tools/hg2d.mk hg2ddiff-run N=20000 SUITE=device_config
+make -f tools/hg2d.mk hg2ddiff-run N=20000 SUITE=device_formats
+make -f tools/hg2d.mk hg2ddiff-run N=20000 SUITE=device_select_format
+make -f tools/hg2d.mk hg2ddiff-run N=20000 SUITE=device_flush
+make -f tools/hg2d.mk hg2ddiff-run N=20000 SUITE=device_colour
 make -f tools/hg2d.mk hg2ddiff-run N=20000 SUITE=palette
 make -f tools/hg2d.mk hg2ddiff-run N=20000 SUITE=textures
 make -f tools/hg2d.mk hg2ddiff-run SUITE=colours       # finite sweeps
@@ -1044,7 +1055,7 @@ The 64-scenario baseline passes 62,528 operations, zero differences/faults
 and 512 repaired divides. All 23 new mutations are caught. All preceding 229
 projective mutations were re-executed and caught. The large run passes **20,000 scenarios / 19,540,000 operations**, zero
 differences/faults and 160,000 repaired divides. Its combined 2,000-scenario
-regression was launched separately; final results are recorded below when complete.
+regression passes all included suites with zero differences.
 
 ## Slice 22: ordinary polygon plane spans
 
@@ -1058,8 +1069,8 @@ edges, sorted intersections and the four-intersection register path.
 The baseline passes 64 scenarios / 92,928 operations, zero differences and
 faults, with 9,216 repaired divides. All 20 new mutations are caught. One
 initially survived because the fixtures had two and six intersections but
-no four-intersection polygon; the new five-vertex fixture catches it. A
-20,000-scenario sweep uses the expanded fixtures.
+no four-intersection polygon; the new five-vertex fixture catches it. The expanded sweep passes **20,000 scenarios / 29,040,000 operations**,
+zero differences/faults and 2,880,000 repaired divides.
 
 ## Slices 23–26: mipmapped projective targets
 
@@ -1098,7 +1109,13 @@ scratch word was replaced before use; its replacement changes the saved
 initial magnitude, and is caught. The raw-mip large run passes **20,000 scenarios / 8,360,000 operations**,
 zero differences/faults and 500,000 repaired divides. Its directed fixtures
 were strengthened after that run began and pass separately at 64 scenarios.
-The other large runs were launched independently.
+Mip fog passes **20,000 scenarios / 14,940,000 operations**, zero differences/faults
+and 160,000 repaired divides; its all-level fog fixtures were strengthened
+after launch and pass separately at 64 scenarios. Mip dither passes
+**20,000 scenarios / 18,160,000 operations**, zero differences/faults and
+800,000 repaired divides. Mip dither fog passes **20,000 scenarios /
+20,100,000 operations**, zero differences/faults and 160,000 repaired divides.
+The combined regression through slice 26 passes 2,000 scenarios in every suite.
 
 ## Slice 27: palette and haze resources
 
@@ -1157,7 +1174,9 @@ operations, zero differences/faults. All 20 mutations are caught. One cache
 mutation initially survived because fixtures omitted the unrelated 0x80000
 metadata bit; a new uncached texture with that bit catches it. The final
 baseline also explicitly reaches the last pool slot, aligned and unaligned.
-The large sweep is in progress.
+The large sweep passes **20,000 scenarios / 3,220,000 operations**, zero
+differences/faults. The final directed cache and last-slot fixtures were added
+after launch and pass separately at 64 scenarios.
 
 ## Slice 30: optional software triangle fans
 
@@ -1179,14 +1198,199 @@ plus the full canvas/image/GLOBAL and callee-saved registers. ECX/EDX are
 unspecified caller-saved leftovers for this compiled-C service and are not
 compared. Non-x86 floating status/precision still needs native validation.
 
-The baseline passes 64 scenarios / 43,264 operations with zero differences.
+The baseline passes 64 scenarios / 44,544 operations with zero differences.
 There are 256 matching read faults at texture pointer 255. Independent
 constant-fill pixels, all vertex permutations, flat/vertical/fractional
 triangles, negative coordinates, fans of 3..8 vertices, unsigned UV wraps,
-texture/destination aliases and early returns are covered. Mutation and
-20,000-scenario sweeps are in progress.
+texture/destination aliases and early returns are covered. All 30 mutations
+are caught. One Y-sort mutation required all six negative-coordinate vertex
+permutations to expose a branch later sorts had hidden. The large run passes
+**20,000 scenarios / 13,520,000 operations**, 80,000 matching pointer-255
+faults, zero differences. The expanded negative permutations pass separately
+in the final 64-scenario baseline.
+
+## Slice 31: bound-device palette realization
+
+Linkage +0x5c now realizes the palette with a bound device. Eight-bit devices
+release texture handles and accounting, create a 256-entry palette and replace
+the old palette even when creation fails. Other formats mark existing device
+textures dirty. The fog colour keeps the signed angle, depth and intensity
+boundaries, stores the render-state cache before the COM call, and retains its
+HRESULT. Twenty-eight ARGB colours scale RGB by brightness while preserving alpha.
+
+The COM fixture records palette bytes, release order, cache values during calls
+and render-state arguments, alongside full image/GLOBAL comparisons. The baseline
+passes **20,000 scenarios / 1,140,000 operations**, zero differences. All **30
+mutations** are caught at 64 scenarios. Fixtures initialize the palette layout,
+as normal module initialization does; arbitrary zero-layout internals are outside
+this result.
+
+## Slice 32: device pixel formats and conversion
+
+Internal helpers at `0x2078e7d0` and `0x2078e890` recognize indexed 8-bit,
+555, 565, 444 and 32-bit formats, and convert indexed texture rows. The indexed
+key comparison uses the full unsigned argument; the other alpha paths use its
+low byte. Sixteen-bit pitches divide signed values by two toward zero. The
+32-bit path writes blue before reading green and red, observable when output
+aliases the live palette. Named test exports expose these internal helpers
+without installing a device service or copying executable code.
+
+The baseline passes **64 scenarios / 11,840 operations**, zero differences,
+with independent packed-colour constants, negative/odd pitches, no-op dimensions,
+in-place expansion and palette aliases. All **25 mutations** are caught. The
+large sweep passes **20,000 scenarios / 3,700,000 operations**, zero differences.
+
+## Slice 33: device render-state initialization and caches
+
+The device initializer at `0x2078c400` queries states 1 through 63, ignores
+query failures, then sets the default states in retail order. Initialization
+and drawing setters share the cache but retain separate HRESULT words at
++0x5f20 and +0x5f34. Cache hits leave those words untouched; changes publish
+the cached value before invoking COM.
+
+The final baseline passes **64 scenarios / 25,344 operations**, zero
+differences, covering successful, partial and failed queries, states already
+at defaults, both setters across all 64 cache cells, high-bit values and
+repeated writes. All **29 mutations** are caught. An earlier callback asserted
+cache equality inside the COM fixture; three mutations then caused fixture
+errors. The callback now records the observed cache in the transcript, and
+all three produce differential mismatches. The large sweep passes **20,000 scenarios / 7,920,000 operations**, zero differences.
+
+The combined regression through slice 33 passes 64 scenarios in every suite,
+including the expanded fan and software mip fixtures. This supplements the
+2,000-scenario regression through slice 26; it does not establish device
+selection or live rendering equivalence.
+
+## Slice 34: device teardown
+
+The selection teardown helper at `0x2078c370` clears cached textures, releases
+each device texture with its accounting, resets the totals, then releases six
+device interfaces in order. Each interface field is cleared after its Release
+call, including aliased interface pointers. Repeated teardown is inert.
+
+The baseline passes **20,000 scenarios / 640,000 operations**, zero differences.
+Callbacks record interface fields and accounting during each release. Dense
+and sparse pools, the last texture slot, absent interfaces, aliases and repeated
+calls are covered. All **14 mutations** are caught at 64 scenarios.
+
+## Slice 35: device options
+
+Helpers at `0x2078bdf0`..`0x2078c01e` now apply blend capabilities and the
+configuration override, mipmap eligibility and texture-size overrides, the
+four filter fields, and fog flags plus cached render states. Configuration
+failures preserve the initialized default; unknown values retain the derived
+option. The fog capability failure path clears eligibility without changing
+the cached render states.
+
+The baseline passes **64 scenarios / 16,384 operations**, zero differences.
+All **22 mutations** are caught (13 in the initial run, nine after narrowing
+an ambiguous mutation anchor). Tests cover all combinations of the four option
+flags, capability bits, ignored high bits, eight configuration values and
+configuration calls that leave output untouched. The large sweep passes
+**20,000 scenarios / 5,120,000 operations**, zero differences.
+
+## Slice 36: texture-format enumeration
+
+The internal `0x2078fb00` helper normalizes legacy format numbers and enumerates
+every candidate through the native translation of callback `0x2078f9f0`.
+The callback checks indexed/true-colour flags, alpha mask population, signed
+RGB-bit comparisons, palette alpha capability and exact indexed depth. It
+keeps the smallest acceptable bit depth and retains the first equal candidate.
+The enumeration HRESULT is ignored. Failed selection copies eight zero words.
+
+The baseline passes **64 scenarios / 17,472 operations**, zero differences.
+Fixtures enumerate forwards/backwards, expose the normalized request and each
+intermediate best descriptor, distinguish duplicate candidates with serials,
+and check known selections, malformed descriptors and empty enumeration.
+All **25 mutations** are caught. The large sweep passes **20,000 scenarios /
+5,460,000 operations**, zero differences.
+
+## Slice 37: configured texture-format selection
+
+The chooser at `0x2078bd30` tries the configured format, optional indexed
+alpha, 555 alpha, 444 alpha, then opaque 565. Each attempt enumerates afresh.
+Failures clear the descriptor before the next attempt. Indexed alpha needs
+the capability bit even when explicitly configured.
+
+The baseline passes **20,000 scenarios / 2,560,000 operations**, zero
+differences. Fixtures include only one available format, all formats, no
+formats and invalid flags, configuration failures and legacy values. All
+**11 mutations** are caught at 64 scenarios.
+
+## Slice 38: buffered Direct3D submission
+
+The flush helper at `0x2078c800` now submits the queued transformed vertices,
+with cached fog/key states and all nine dispatch modes. It preserves distinct
+point, line, flat, textured, alpha and filter state order, including the
+point-filter texture flag. The mode is captured before callbacks that can
+change scratch state. Primitive HRESULTs are ignored while render-state
+HRESULTs update +0x5f34. Successful or unsupported nonempty modes reset the
+queue and binding fields. Empty flushes retain them.
+
+Every call selects x87 53-bit precision, even when empty, and leaves it set.
+The final baseline passes **64 scenarios / 15,360 operations**, zero differences.
+Callbacks compare primitive parameters, vertex bytes, cache state and control
+word. Fixtures cover negative counts without dereferencing them in the COM
+stand-in, unaligned cursor offsets, cache hits, all precision/rounding modes
+and callbacks changing the live mode. All **27 mutations** are caught: the
+precision mutation needed the post-call control word added to the transcript
+so it reports a differential mismatch instead of a fixture assertion. The
+large sweep passes **20,000 scenarios / 4,800,000 operations**, zero
+differences. Its final post-call control-word transcript was added after
+launch and passes separately at 64 scenarios. This validates submission against COM stand-ins;
+live device rendering remains unverified.
+
+## Slice 39: vertex colour and alpha
+
+The device colour helper at `0x2078cd50` retains the original precedence for
+special visibility, shadow key, texture metadata, translucent fill, colour
+override and water colouring. Word gates remain word gates; overrides use the
+full unsigned index and the original fallback entry. Palette reads remain
+live, and ordinary RGB leaves alpha zero. The helper updates +0x5f38 without
+claiming a scalar return contract.
+
+The baseline passes **64 scenarios / 24,576 operations**, zero differences.
+Fixtures cover the early precedence constants, high-byte-only flags, exact
+0x8000 boundary, override entries 27/28 and high unsigned indices, both water
+branches and independently checked RGB packing. All **21 mutations** are caught (five before narrowing an ambiguous anchor,
+sixteen in the resumed run). The large sweep passes **20,000 scenarios /
+7,680,000 operations**, zero differences.
+
+## Next device work
+
+The verified helpers are not yet wired into public device selection +0xbc or
+scene begin/end +0x9c/+0xa0. Selection still needs the `0x2078c030` interface
+creation/capability/viewport sequence and the public wrapper at `0x2078b760`.
+Before switching Linkage, translate its eighteen device drawing entries and
+texture upload (`0x2078f7d0`), and the batch initializer at `0x2078cce0`.
+The native flush uses the 32-byte vertex queue at data +0x8860; +0x18860 is
+inside that queue, not its start. No partial device dispatch table is installed.
+
+The creation helper first queries IDirectDrawSurface2, obtains its DirectDraw
+interface, releases the temporary surface interface, and queries IDirect3D2.
+It compares the host-selected device label with `lstrcmpA` (case-sensitive)
+against `(Direct3D MMX)`, `(Direct3D RGB)` and `(Direct3D)`, using the matching
+device GUID. The host +0x31c selector 1 always zeros all 0xe8 output bytes first
+(`FLTSIM98.EXE` `0x414510`), so a faithful fixture need not invent stack bytes
+for that descriptor. Its +0xd0 flags drive the verified option helpers.
+Hardware capabilities are preferred; a zero hardware flags word copies the
+software descriptor and sets +0x28cc8. Both empty descriptors fail with teardown.
+The viewport constants include clip Y = 2; preserve that literal.
+
+Standalone COM fixtures establish call/state equivalence for the helpers,
+not equivalence with a live graphics device or modern host. The negative-length
+shadow corrupt-stack return and non-x86 floating precision/status remain
+separate validation limits.
 
 ## Verification and limits
+
+The latest combined regression through slice 39 passes **64 scenarios in
+every suite**, including all device helpers, with zero differences. This pass
+adds **174 caught mutations** across device conversion and the seven following
+helper slices. The complete **1,151 mutation-anchor audit** passes. All eight device-helper suites added here pass **20,000 scenarios each /
+37,880,000 operations combined**, zero differences. These results extend the
+older software regressions below without claiming whole-module completion.
+
 
 The keyed-dither suite passes **20,000 scenarios / 16,600,000 operations**,
 with zero differences and zero faults. All 800,000 retail host divide repairs
@@ -1487,6 +1691,6 @@ indices outside 0..8, and initialization are outside this slice. The existing
 PANELS model and its verified harness remain unchanged.
 
 Remaining Linkage services: device-backed +0x9c/+0xa0/+0xbc.
-Device palette realization, live Direct3D dispatch and the negative-length
+Live Direct3D dispatch and the negative-length
 shadow corrupt-stack return remain unfinished. The verified subsets do not
 establish whole-module equivalence or readiness to run in-game.

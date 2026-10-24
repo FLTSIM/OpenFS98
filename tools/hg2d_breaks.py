@@ -14,7 +14,7 @@ import tempfile
 root = Path(__file__).resolve().parent.parent
 source = (root / 'src/hg2d/hg2d.c').read_text()
 sections = {}
-for section in ('palette', 'draw', 'mip_build', 'mip', 'dither', 'projective', 'mip_dither', 'matrix', 'polygon', 'fill', 'textured', 'perspective', 'perspective_fill', 'affine', 'gouraud', 'blit', 'disc', 'fan', 'resource', 'init', 'device_palette', 'device_pixels'):
+for section in ('palette', 'draw', 'mip_build', 'mip', 'dither', 'projective', 'mip_dither', 'matrix', 'polygon', 'fill', 'textured', 'perspective', 'perspective_fill', 'affine', 'gouraud', 'blit', 'disc', 'fan', 'resource', 'init', 'device_palette', 'device_pixels', 'device_states', 'device_shutdown', 'device_config', 'device_formats', 'device_select_format', 'device_flush', 'device_colour'):
     sections[section] = (root / ('src/hg2d/hg2d_%s.inc' % section)).read_text()
     if section == 'projective':
         sections[section] = sections[section].replace('#include "hg2d_dither.inc"', sections['dither'])
@@ -763,6 +763,204 @@ dither_key_fog_mutations = [
     ('dither key fog table family', 'fog && keyed ? projective_dither_key_fog_tails', 'fog && keyed ? projective_dither_key_tails'),
 ]
 mutations += [(*mutation, 'projective_dither_key_fog') for mutation in dither_key_fog_mutations]
+device_colour_mutations = [
+    ('vertex colour early gate', 'GLOBAL_HALF(0xf10) &&', 'GLOBAL[0xf10] &&'),
+    ('vertex colour dce gate', '!GLOBAL_HALF(0xdce)', '!GLOBAL[0xdce]'),
+    ('vertex colour visibility gate', 'GLOBAL_WORD(0x398) &&', '1 &&'),
+    ('vertex colour mode equality', 'GLOBAL_HALF(0x1172) == 1', 'GLOBAL_HALF(0x1172) != 0'),
+    ('vertex colour early alpha', '0xeeffffff', '0xedffffff'),
+    ('vertex colour texture word', 'GLOBAL_HALF(0xc90) && GLOBAL_HALF(0xca0)', 'GLOBAL[0xc90] && GLOBAL_HALF(0xca0)'),
+    ('vertex colour shadow key', 'GLOBAL_HALF(0xca0) == 0x98', 'GLOBAL[0xca0] == 0x98'),
+    ('vertex colour shadow e82', '!GLOBAL_HALF(0xe82)', '!GLOBAL[0xe82]'),
+    ('vertex colour shadow alpha', '0xccffffff', '0xcbffffff'),
+    ('vertex colour texture metadata', 'GLOBAL_WORD(0xc8c)))[2]', 'GLOBAL_WORD(0xc8c)))[1]'),
+    ('vertex colour translucent gate', 'GLOBAL_HALF(0xdca)', 'GLOBAL[0xdca]'),
+    ('vertex colour half equality', 'GLOBAL_HALF(0xb34) < 0x8000', 'GLOBAL_HALF(0xb34) <= 0x8000'),
+    ('vertex colour half black', '0x80000000 : 0x80ffffff', '0x80000001 : 0x80ffffff'),
+    ('vertex colour override last', 'index < 28 ? index : 3', 'index < 27 ? index : 3'),
+    ('vertex colour override fallback', 'index < 28 ? index : 3', 'index < 28 ? index : 2'),
+    ('vertex colour water equality', 'GLOBAL_HALF(0xb34) >= 0x8000', 'GLOBAL_HALF(0xb34) > 0x8000'),
+    ('vertex colour water dce', 'GLOBAL_HALF(0xdce) ? 0x80ff3f00', 'GLOBAL[0xdce] ? 0x80ff3f00'),
+    ('vertex colour water constant', '0x80ff3f00', '0x80ff3f01'),
+    ('vertex colour red', 'BYTE(0x39c2 + index * 3)', 'BYTE(0x39c4 + index * 3)'),
+    ('vertex colour green', 'BYTE(0x39c3 + index * 3)', 'BYTE(0x39c2 + index * 3)'),
+    ('vertex colour palette index', 'index = BYTE(0x90c)', 'index = BYTE(0x90d)'),
+]
+mutations += [(*mutation, 'device_colour') for mutation in device_colour_mutations]
+device_flush_mutations = [
+    ('flush vertex count', '>> 5', '>> 4'),
+    ('flush precision', 'control = (control & ~0x100u) | 0x200u;', 'control = (control & ~0x300u);'),
+    ('flush empty path', 'if (!count) return;', 'if (0) return;'),
+    ('flush fog gate', 'if (WORD(0x5f24))', 'if (1)'),
+    ('flush fog boolean', 'WORD(0x884c) != 0', 'WORD(0x884c) == 1'),
+    ('flush fog clear', 'WORD(0x884c) = 0;', 'WORD(0x884c) = 1;'),
+    ('flush key boolean', 'WORD(0x8844) != 0', 'WORD(0x8844) == 1'),
+    ('flush key clear', 'WORD(0x8844) = 0;', 'WORD(0x8844) = 1;'),
+    ('flush points live mode', 'device_primitive(mode,', 'device_primitive(WORD(0x8850),'),
+    ('flush points type', 'device_primitive(mode,', 'device_primitive(mode + 1,'),
+    ('flush flat alpha state', 'mode == 4 ? 1 : 0', 'mode != 4 ? 1 : 0'),
+    ('flush flat shade state', 'mode == 8 ? 2 : 1', 'mode == 8 ? 1 : 2'),
+    ('flush texture flags', 'texture[1] & 0x100000', 'texture[1] & 0x200000'),
+    ('flush texture flag mode', 'mode == 5 && texture', 'mode != 5 && texture'),
+    ('flush texture min filter', 'hg2d_device_draw_state(17, 1);', 'hg2d_device_draw_state(17, 2);'),
+    ('flush texture mag filter', 'hg2d_device_draw_state(18, 1);', 'hg2d_device_draw_state(18, 2);'),
+    ('flush default min filter', 'WORD(0x289e4)', 'WORD(0x289e8)'),
+    ('flush alpha mask', 'WORD(0x8858) & 0xff000000u', 'WORD(0x8858) & 0x00ff0000u'),
+    ('flush alpha clear', 'WORD(0x8858) = 0;', 'WORD(0x8858) = 1;'),
+    ('flush texture blend', 'mode == 6 ? 4 : 2', 'mode == 6 ? 2 : 4'),
+    ('flush shade ordering', 'if (mode != 7) hg2d_device_draw_state(9, 2);', 'hg2d_device_draw_state(9, 2);'),
+    ('flush cached alpha mode', 'hg2d_device_draw_state(27, mode == 6 ? 1 : 0);', 'hg2d_device_draw_state(27, WORD(0x8850) == 6 ? 1 : 0);'),
+    ('flush primitive type', '(instance, kind, 3, vertices, count, 0xd)', '(instance, kind, 2, vertices, count, 0xd)'),
+    ('flush primitive flags', '(instance, kind, 3, vertices, count, 0xd)', '(instance, kind, 3, vertices, count, 0xc)'),
+    ('flush capacity reset', 'WORD(0x5ee8) = 0x1000;', 'WORD(0x5ee8) = 0xfff;'),
+    ('flush first cursor reset', 'WORD(0x5ee0) = WORD(0x5ee4) = ADDRESS(hg2d_image + 0x8860);', 'WORD(0x5ee4) = ADDRESS(hg2d_image + 0x8860);'),
+    ('flush texture reset', 'WORD(0x8840) = WORD(0x885c) = WORD(0x8850) = 0;', 'WORD(0x8840) = WORD(0x8850) = 0;'),
+]
+mutations += [(*mutation, 'device_flush') for mutation in device_flush_mutations]
+device_select_format_mutations = [
+    ('select format configured default', 'configured = 0xffffffffu', 'configured = 0'),
+    ('select format config key', 'hg2d_image + 0x5e8c', 'hg2d_image + 0x5e9c'),
+    ('select format configured gate', 'configured != 0xffffffffu', 'configured == 0xffffffffu'),
+    ('select format requested alpha', 'configured, 1, out', 'configured, 0, out'),
+    ('select format indexed flag', 'flags & 0x400', 'flags & 0x200'),
+    ('select format indexed alpha', '8, 1, out', '8, 0, out'),
+    ('select format first fallback', '15, 1, out', '16, 0, out'),
+    ('select format alpha fallback', '12, 4, out', '12, 0, out'),
+    ('select format final fallback', '16, 0, out', '15, 0, out'),
+    ('select format order', 'if (hg2d_device_formats(WORD(0x289d0), 15, 1, out)) return 1;\n    if (hg2d_device_formats(WORD(0x289d0), 12, 4, out)) return 1;', 'if (hg2d_device_formats(WORD(0x289d0), 12, 4, out)) return 1;\n    if (hg2d_device_formats(WORD(0x289d0), 15, 1, out)) return 1;'),
+    ('select format destination', 'hg2d_image + 0x28ae0', 'hg2d_image + 0x28ae4'),
+]
+mutations += [(*mutation, 'device_select_format') for mutation in device_select_format_mutations]
+device_formats_mutations = [
+    ('formats mask popcount', 'bits += mask & 1', 'bits += mask & 3'),
+    ('formats alpha capability', 'BYTE(0x28a84) & 8', 'BYTE(0x28a84) & 4'),
+    ('formats indexed alpha', 'context[1] != 1', 'context[1] != 0'),
+    ('formats signed alpha', '(int32_t)device_mask_bits(format[7]) < (int32_t)context[1]', 'device_mask_bits(format[7]) < context[1]'),
+    ('formats alpha equality', '(int32_t)device_mask_bits(format[7]) < (int32_t)context[1]', '(int32_t)device_mask_bits(format[7]) <= (int32_t)context[1]'),
+    ('formats indexed minimum', 'if (format[3] < requested)', 'if (format[3] <= requested)'),
+    ('formats colour minimum', 'if ((int32_t)bits < (int32_t)requested)', 'if ((int32_t)bits <= (int32_t)requested)'),
+    ('formats signed minimum', 'if ((int32_t)bits < (int32_t)requested)', 'if (bits < requested)'),
+    ('formats exact indexed', 'if (requested == 8 && format[3] != requested) return 1;', 'if (0) return 1;'),
+    ('formats recognition', 'if (!hg2d_device_format(format)) return 1;', 'if (0) return 1;'),
+    ('formats candidate tie', 'format[3] - requested >= context[5] - requested', 'format[3] - requested > context[5] - requested'),
+    ('formats candidate priority', 'format[3] - requested >= context[5] - requested', 'format[3] - requested <= context[5] - requested'),
+    ('formats selected descriptor', '__builtin_memcpy(context + 2, format, sizeof format);', '__builtin_memcpy(context + 2, format, sizeof format - 4);'),
+    ('formats initialized output', '__builtin_memcpy(out, context + 2, 32);', '__builtin_memcpy(out, context + 2, 28);'),
+    ('formats boolean result', 'return context[3] != 0;', 'return context[3];'),
+    ('formats query HRESULT', '((call_three)(uintptr_t)vtable[9])(instance, ADDRESS(device_format_match), ADDRESS(context));', 'if (((call_three)(uintptr_t)vtable[9])(instance, ADDRESS(device_format_match), ADDRESS(context))) context[3] = 0;'),
+    ('formats depth 16 alpha', 'if (bits == 16 && alpha == 1) bits = 15;', 'if (bits == 16 && alpha == 1) bits = 16;'),
+    ('formats depth 12 alpha', 'if (bits == 12 && alpha == 1) alpha = 4;', 'if (bits == 12 && alpha == 1) alpha = 1;'),
+    ('formats legacy 22b', 'if (bits == 0x22b) { bits = 15; alpha = 0; }', 'if (bits == 0x22b) { bits = 16; alpha = 0; }'),
+    ('formats legacy 15af', 'if (bits == 0x15af) { bits = 15; alpha = 1; }', 'if (bits == 0x15af) { bits = 16; alpha = 1; }'),
+    ('formats legacy 235', 'if (bits == 0x235) { bits = 16; alpha = 0; }', 'if (bits == 0x235) { bits = 17; alpha = 0; }'),
+    ('formats legacy 1bc', 'if (bits == 0x1bc) { bits = 12; alpha = 0; }', 'if (bits == 0x1bc) { bits = 13; alpha = 0; }'),
+    ('formats legacy 115c', 'if (bits == 0x115c) { bits = 12; alpha = 4; }', 'if (bits == 0x115c) { bits = 13; alpha = 4; }'),
+    ('formats legacy 378', 'if (bits == 0x378) { bits = 24; alpha = 0; }', 'if (bits == 0x378) { bits = 25; alpha = 0; }'),
+    ('formats legacy 22b8', 'if (bits == 0x22b8) { bits = 24; alpha = 8; }', 'if (bits == 0x22b8) { bits = 25; alpha = 8; }'),
+]
+mutations += [(*mutation, 'device_formats') for mutation in device_formats_mutations]
+device_shutdown_mutations = [
+    ('shutdown last interface', 'index < sizeof interfaces / sizeof interfaces[0]', 'index + 1 < sizeof interfaces / sizeof interfaces[0]'),
+    ('shutdown release order', '{0x28940, 0x28ccc,', '{0x28ccc, 0x28940,'),
+    ('shutdown cache count', 'index < 8; index++', 'index < 7; index++'),
+    ('shutdown last texture', 'offset < POOL_END', 'offset + 0x34 < POOL_END'),
+    ('shutdown textures skipped', 'if (texture[3]) texture_release(texture);', 'if (0) texture_release(texture);'),
+    ('shutdown clear object', 'WORD(offset) = 0;', 'WORD(offset) = instance;'),
+    ('shutdown publish release', '((call_one)(uintptr_t)vtable[2])(instance);\n            WORD(offset) = 0;', 'WORD(offset) = 0;\n            ((call_one)(uintptr_t)vtable[2])(instance);'),
+    ('shutdown accounting', 'WORD(0x289ec) = WORD(0x289d4) = WORD(0x5f40) = 0;', 'WORD(0x289ec) = WORD(0x289d4) = WORD(0x5f40) = 1;'),
+    ('shutdown interface 28940', '0x28940', '0x289d8'),
+    ('shutdown interface 28ccc', '0x28ccc', '0x289d8'),
+    ('shutdown interface 289f4', '0x289f4', '0x289d8'),
+    ('shutdown interface 289d0', '0x289d0', '0x289d8'),
+    ('shutdown interface 28cc0', '0x28cc0', '0x289d8'),
+    ('shutdown interface 289f0', '0x289f0', '0x289d8'),
+]
+mutations += [(*mutation, 'device_shutdown') for mutation in device_shutdown_mutations]
+device_config_mutations = [
+    ('config blend default', 'WORD(0x289e0) = 0xffffffffu;', 'WORD(0x289e0) = 0;'),
+    ('config blend disabled', 'if (WORD(0x289e0))', 'if (1)'),
+    ('config blend alpha cap', 'capabilities & 0x200 ? 1', 'capabilities & 0x100 ? 1'),
+    ('config blend second cap', '((capabilities & 255) >> 6) & 2', '((capabilities & 255) >> 6) & 1'),
+    ('config fog flag', 'flags & 0x1000', 'flags & 0x800'),
+    ('config fog capability', 'BYTE(0x28a6c) & 0x80', 'BYTE(0x28a6c) & 0x40'),
+    ('config fog enabled', 'WORD(0x5f24) = 1;', 'WORD(0x5f24) = 0;'),
+    ('config fog table state', 'hg2d_device_state(35, 0);', 'hg2d_device_state(35, 1);'),
+    ('config filter selector', 'flags & 0x10 ? 2 : 1', 'flags & 0x20 ? 2 : 1'),
+    ('config filter min slot', 'WORD(0x289d8) = WORD(0x289dc) = filter;', 'WORD(0x289d8) = filter;'),
+    ('config filter mip scale', 'filter + 2 : filter', 'filter + 1 : filter'),
+    ('config filter mag slot', 'WORD(0x289e4) = filter;', 'WORD(0x289e4) = filter + 1;'),
+    ('config mip capability', 'BYTE(0x28a88) & 0x18', 'BYTE(0x28a88) & 0x8'),
+    ('config mip flag', '&& (flags & 0x80)', '&& (flags & 0x40)'),
+    ('config texture format', 'WORD(0x28aec) != 8', 'WORD(0x28aec) == 8'),
+    ('config texture flag', 'flags & 0x800', 'flags & 0x400'),
+    ('config mip default', 'WORD(0x5f30) = 0xffffffffu;', 'WORD(0x5f30) = 0x40;'),
+    ('config override 256', 'WORD(0x5f30) == 0x100', 'WORD(0x5f30) == 0x101'),
+    ('config override 128', 'WORD(0x5f30) == 0x80', 'WORD(0x5f30) == 0x81'),
+    ('config override 64', 'WORD(0x5f30) == 0x40', 'WORD(0x5f30) == 0x41'),
+    ('config mip key', 'ADDRESS(hg2d_image + 0x5ea8)', 'ADDRESS(hg2d_image + 0x5e9c)'),
+    ('config blend key', 'ADDRESS(hg2d_image + 0x5e9c)', 'ADDRESS(hg2d_image + 0x5ea8)'),
+]
+mutations += [(*mutation, 'device_config') for mutation in device_config_mutations]
+device_states_mutations = [
+    ('state cache equality', 'if (WORD(0x28b00 + state * 4) != value)', 'if (1)'),
+    ('state cache index', 'WORD(0x28b00 + state * 4) = value;', 'WORD(0x28b00 + state * 4 + 4) = value;'),
+    ('state cache ordering', 'WORD(0x28b00 + state * 4) = value;\n        WORD(result_offset) = ((call_three)(uintptr_t)vtable[23])(instance, state, value);', 'WORD(result_offset) = ((call_three)(uintptr_t)vtable[23])(instance, state, value);\n        WORD(0x28b00 + state * 4) = value;'),
+    ('state method value', '(instance, state, value);', '(instance, state, value ^ 1);'),
+    ('state init HRESULT', 'device_state_set(state, value, 0x5f20);', 'device_state_set(state, value, 0x5f34);'),
+    ('state draw HRESULT', 'device_state_set(state, value, 0x5f34);', 'device_state_set(state, value, 0x5f20);'),
+    ('state first query', 'state = 1; state < 64', 'state = 2; state < 64'),
+    ('state last query', 'state < 64; state++', 'state < 63; state++'),
+    ('state query order', 'state = 1; state < 64; state++', 'state = 63; state > 0; state--'),
+    ('state failed query', '((call_three)(uintptr_t)vtable[22])(instance, state, ADDRESS(hg2d_image + 0x28b00 + state * 4));', 'WORD(0x28b00 + state * 4) = 0;\n        ((call_three)(uintptr_t)vtable[22])(instance, state, ADDRESS(hg2d_image + 0x28b00 + state * 4));'),
+    ('state query result discarded', '((call_three)(uintptr_t)vtable[22])', 'WORD(0x5f20) = ((call_three)(uintptr_t)vtable[22])'),
+    ('state default 7', 'hg2d_device_state(7, 0);', 'hg2d_device_state(7, 1);'),
+    ('state default 14', 'hg2d_device_state(14, 0);', 'hg2d_device_state(14, 1);'),
+    ('state default 9', 'hg2d_device_state(9, 1);', 'hg2d_device_state(9, 0);'),
+    ('state default 22', 'hg2d_device_state(22, 1);', 'hg2d_device_state(22, 0);'),
+    ('state default 28', 'hg2d_device_state(28, 0);', 'hg2d_device_state(28, 1);'),
+    ('state default 4', 'hg2d_device_state(4, 1);', 'hg2d_device_state(4, 0);'),
+    ('state default 1', 'hg2d_device_state(1, 0);', 'hg2d_device_state(1, 1);'),
+    ('state default 21', 'hg2d_device_state(21, 2);', 'hg2d_device_state(21, 3);'),
+    ('state default 3', 'hg2d_device_state(3, 1);', 'hg2d_device_state(3, 0);'),
+    ('state default 27', 'hg2d_device_state(27, 0);', 'hg2d_device_state(27, 1);'),
+    ('state default 41', 'hg2d_device_state(41, 1);', 'hg2d_device_state(41, 0);'),
+    ('state default 39', 'hg2d_device_state(39, 0);', 'hg2d_device_state(39, 1);'),
+    ('state default 19', 'hg2d_device_state(19, 5);', 'hg2d_device_state(19, 4);'),
+    ('state default 20', 'hg2d_device_state(20, 6);', 'hg2d_device_state(20, 7);'),
+    ('state flag selector', '(flags & 0x20) != 0', '(flags & 0x10) != 0'),
+    ('state flag value', '(flags & 0x20) != 0', 'flags & 0x20'),
+    ('state source 17', 'hg2d_device_state(17, WORD(0x289e4));', 'hg2d_device_state(17, WORD(0x289e8));'),
+    ('state source 18', 'hg2d_device_state(18, WORD(0x289e8));', 'hg2d_device_state(18, WORD(0x289e4));'),
+]
+mutations += [(*mutation, 'device_states') for mutation in device_states_mutations]
+device_pixels_mutations = [
+    ('format indexed flag', '(format[1] & 0x20)', '(format[1] & 0x10)'),
+    ('format indexed depth', 'format[3] == 8', 'format[3] == 9'),
+    ('format 555 red mask', 'format[4] == 0x7c00', 'format[4] == 0x7c01'),
+    ('format 565 green mask', 'format[5] == 0x7e0', 'format[5] == 0x7e1'),
+    ('format 444 blue mask', 'format[6] == 0xf)', 'format[6] == 0xe)'),
+    ('format 32 masks', 'format[6] == 0xff', 'format[6] == 0xfe'),
+    ('format unsupported', 'return 0;\n}', 'return 1;\n}'),
+    ('convert odd pitch', '((int32_t)destination_pitch / 2) * 2', '((int32_t)destination_pitch >> 1) * 2'),
+    ('convert pitch bytes', 'stride = (uint32_t)(((int32_t)destination_pitch / 2) * 2);', 'stride = destination_pitch;'),
+    ('convert last row', '(int32_t)y < (int32_t)height', '(int32_t)y < (int32_t)height - 1'),
+    ('convert full key', 'indexed < key', 'indexed < (key & 255)'),
+    ('convert unsigned key', 'indexed < key', '(int32_t)indexed < (int32_t)key'),
+    ('convert key equality', 'indexed < key', 'indexed <= key'),
+    ('convert special key', '(uint8_t)key == 0x98 ? 0x96', '(uint8_t)key == 0x98 ? 0x97'),
+    ('convert other key', '(uint8_t)(key - 1)', '(uint8_t)key'),
+    ('convert 32 blue', 'destination[x * 4] = BYTE(0x39c4 + indexed * 3);', 'destination[x * 4] = BYTE(0x39c2 + indexed * 3);'),
+    ('convert 32 live palette', 'destination[x * 4] = BYTE(0x39c4 + indexed * 3);\n                destination[x * 4 + 1] = BYTE(0x39c3 + indexed * 3);\n                destination[x * 4 + 2] = BYTE(0x39c2 + indexed * 3);', 'uint8_t saved_red = BYTE(0x39c2 + indexed * 3), saved_green = BYTE(0x39c3 + indexed * 3);\n                destination[x * 4] = BYTE(0x39c4 + indexed * 3);\n                destination[x * 4 + 1] = saved_green;\n                destination[x * 4 + 2] = saved_red;'),
+    ('convert 32 alpha', 'indexed >= (key & 255) ? 255 : 0', 'indexed > (key & 255) ? 255 : 0'),
+    ('convert 555 red', '((red >> 3) << 10)', '((red >> 3) << 11)'),
+    ('convert 555 alpha', 'packed |= 0x8000', 'packed |= 0x4000'),
+    ('convert 565 green', '((green >> 2) << 5)', '((green >> 3) << 5)'),
+    ('convert 444 red', '((red >> 4) << 8)', '((red >> 3) << 8)'),
+    ('convert 444 alpha', 'packed |= 0xf000', 'packed |= 0x8000'),
+    ('convert source rows', 'ADDRESS(source) + source_pitch', 'ADDRESS(source) + source_pitch + 1'),
+    ('convert destination rows', 'ADDRESS(destination) + stride', 'ADDRESS(destination) + stride + 1'),
+]
+mutations += [(*mutation, 'device_pixels') for mutation in device_pixels_mutations]
 device_palette_mutations = [
     ('device palette binding gate', 'if (!WORD(0x28940)) return 0;', 'if (0) return 0;'),
     ('device palette cache count', 'for (index = 0; index < 8; index++) WORD(0x8820 + index * 4) = 0;', 'for (index = 0; index < 7; index++) WORD(0x8820 + index * 4) = 0;'),
@@ -1186,7 +1384,7 @@ for name, old, new, suite in mutations:
         continue
     tested += 1
     owner = {'colours': 'palette', 'palette': 'palette', 'drawing': 'draw',
-             'polygons': 'polygon', 'fills': 'fill', 'textured': 'textured', 'affine': 'affine', 'gouraud': 'gouraud', 'blits': 'blit', 'optimized': 'affine', 'perspective': 'perspective', 'discs': 'disc', 'perspective_fill': 'perspective_fill', 'matrix_vertices': 'matrix', 'matrix_fills': 'matrix', 'projective': 'projective', 'projective_keyed': 'projective', 'projective_fog': 'projective', 'projective_key_fog': 'projective', 'projective_dither': 'projective', 'projective_dither_fog': 'projective', 'projective_dither_key': 'projective', 'projective_dither_key_fog': 'projective', 'projective_plane': 'matrix', 'projective_mip': 'mip', 'projective_mip_fog': 'mip', 'projective_mip_dither': 'mip_dither', 'projective_mip_dither_fog': 'mip_dither', 'resources': 'resource', 'initialization': 'init', 'projective_mip_build': 'mip_build', 'fans': 'fan', 'device_palettes': 'device_palette'}.get(suite)
+             'polygons': 'polygon', 'fills': 'fill', 'textured': 'textured', 'affine': 'affine', 'gouraud': 'gouraud', 'blits': 'blit', 'optimized': 'affine', 'perspective': 'perspective', 'discs': 'disc', 'perspective_fill': 'perspective_fill', 'matrix_vertices': 'matrix', 'matrix_fills': 'matrix', 'projective': 'projective', 'projective_keyed': 'projective', 'projective_fog': 'projective', 'projective_key_fog': 'projective', 'projective_dither': 'projective', 'projective_dither_fog': 'projective', 'projective_dither_key': 'projective', 'projective_dither_key_fog': 'projective', 'projective_plane': 'matrix', 'projective_mip': 'mip', 'projective_mip_fog': 'mip', 'projective_mip_dither': 'mip_dither', 'projective_mip_dither_fog': 'mip_dither', 'resources': 'resource', 'initialization': 'init', 'projective_mip_build': 'mip_build', 'fans': 'fan', 'device_palettes': 'device_palette', 'device_pixels': 'device_pixels', 'device_states': 'device_states', 'device_shutdown': 'device_shutdown', 'device_config': 'device_config', 'device_formats': 'device_formats', 'device_select_format': 'device_select_format', 'device_flush': 'device_flush', 'device_colour': 'device_colour'}.get(suite)
     if source.count(old) != 1 and owner:
         scope = sections[owner]
         assert scope.count(old) == 1 and source.count(scope) == 1, (name, scope.count(old))

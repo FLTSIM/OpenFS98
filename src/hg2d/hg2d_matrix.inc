@@ -1,5 +1,5 @@
 /* +0x44/+0x40 alternate texture edges, 0x20733386, and setup 0x20733130.
- * Basic projective spans and the far-depth fill are implemented; other spans trap. */
+ * All 24 ordinary projective targets and the far-depth fill are implemented. */
 static uint32_t matrix_signed_divide(uint32_t value, uint32_t denominator)
 {
     int64_t quotient;
@@ -147,7 +147,7 @@ static void matrix_span(uint32_t *left, uint32_t *right, uint32_t y, int flat)
         projective_span(left, right, y, flat);
         return;
     }
-    if (WORD(0x4200) != 0x20784d41) __builtin_trap(); /* Other projective spans remain deferred. */
+    if (WORD(0x4200) != 0x20784d41) __builtin_trap(); /* Reject an unknown selector. */
     matrix_far_span(left, right, y);
 }
 

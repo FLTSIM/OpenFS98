@@ -5,3 +5,15 @@ EXPORTS
     hg2d_palette_layout
     hg2d_device_format=hg2d_device_format@4
     hg2d_device_convert=hg2d_device_convert@36
+    hg2d_device_state=hg2d_device_state@8
+    hg2d_device_draw_state=hg2d_device_draw_state@8
+    hg2d_device_states=hg2d_device_states@4
+    hg2d_device_shutdown=hg2d_device_shutdown@0
+    hg2d_device_blend=hg2d_device_blend@0
+    hg2d_device_mipmap=hg2d_device_mipmap@4
+    hg2d_device_filter=hg2d_device_filter@4
+    hg2d_device_fog=hg2d_device_fog@4
+    hg2d_device_formats=hg2d_device_formats@16
+    hg2d_device_select_format=hg2d_device_select_format@4
+    hg2d_device_flush=hg2d_device_flush@0
+    hg2d_device_colour=hg2d_device_colour@0

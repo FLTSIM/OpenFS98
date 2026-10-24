@@ -1,5 +1,5 @@
 /* Bound-device palette callbacks, texture invalidation and fog render state. */
-static uint32_t device_objects[5][2], device_vtables[5][24];
+static uint32_t device_objects[5][2], device_vtables[5][40];
 static uint32_t device_factory_success, device_render_result, device_palette_calls, device_state_calls;
 static uint8_t device_palette_entries[1024];
 

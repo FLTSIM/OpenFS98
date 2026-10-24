@@ -17,3 +17,16 @@ EXPORTS
     hg2d_device_select_format=hg2d_device_select_format@4
     hg2d_device_flush=hg2d_device_flush@0
     hg2d_device_colour=hg2d_device_colour@0
+    hg2d_device_create=hg2d_device_create@4
+    hg2d_device_surface=hg2d_device_surface@20
+    hg2d_device_allocate=hg2d_device_allocate@8
+    hg2d_device_reuse=hg2d_device_reuse@8
+    hg2d_device_reduce=hg2d_device_reduce@36
+    hg2d_device_upload=hg2d_device_upload@12
+    hg2d_device_prepare=hg2d_device_prepare@8
+    hg2d_device_texture=hg2d_device_texture@8
+    hg2d_device_batch=hg2d_device_batch@8
+    hg2d_device_point
+    hg2d_device_depth_point
+    hg2d_device_commit
+    hg2d_device_nop

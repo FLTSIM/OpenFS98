@@ -36,7 +36,7 @@ static uint32_t carries[STATE_CAPACITY], check_carry, palette_calls, notificatio
 static uint32_t layout_entry[2], util_linkage;
 uint32_t returned_flags;
 static const char *active_suite;
-static uint32_t host[0x300 / 4], fe[0x20 / 4], object[1], vtable[3];
+static uint32_t host[0x320 / 4], fe[0x20 / 4], object[1], vtable[3];
 
 /* eax comes from a scripted caller. Three arguments allow +0xa8 too. */
 uint32_t invoke(uint32_t function, uint32_t first, uint32_t second,
@@ -124,7 +124,7 @@ static uint32_t normalize_result(uint32_t result)
     return result;
 }
 
-static uint32_t device_flush_compare;
+static uint32_t device_flush_compare, device_points_compare;
 
 static void compare(uint32_t result)
 {
@@ -142,6 +142,7 @@ static void compare(uint32_t result)
         WORD(normalized, 0x4d68) = normalize_result(WORD(normalized, 0x4d68));
         WORD(normalized, 0x4d6c) = normalize_result(WORD(normalized, 0x4d6c));
     }
+    if (device_points_compare) WORD(normalized, 0x8848) = normalize_result(WORD(normalized, 0x8848));
     if (device_flush_compare) WORD(normalized, 0x885c) = normalize_result(WORD(normalized, 0x885c));
     memcpy(normalized_global, global, sizeof global);
     if (mip_build_compare) WORD(normalized_global, 0xc8c) = normalize_result(WORD(normalized_global, 0xc8c));
@@ -326,6 +327,13 @@ static void run_textures(void)
 #include "hg2d_device_select_format_suite.inc"
 #include "hg2d_device_flush_suite.inc"
 #include "hg2d_device_colour_suite.inc"
+#include "hg2d_device_create_suite.inc"
+#include "hg2d_device_surfaces_suite.inc"
+#include "hg2d_device_reduce_suite.inc"
+#include "hg2d_device_upload_suite.inc"
+#include "hg2d_device_prepare_suite.inc"
+#include "hg2d_device_points_suite.inc"
+#include "hg2d_device_commit_suite.inc"
 #include "hg2d_polygon_suite.inc"
 #include "hg2d_fill_suite.inc"
 #include "hg2d_resource_suite.inc"
@@ -355,7 +363,7 @@ int main(int argc, char **argv)
     uint32_t count = argc > 1 ? (uint32_t)strtoul(argv[1], NULL, 0) : 20000;
     HMODULE modules[2], util;
     const char *suite = argc > 2 ? argv[2] : "all";
-    CHECK(!strcmp(suite, "all") || !strcmp(suite, "textures") || !strcmp(suite, "palette") || !strcmp(suite, "colours") || !strcmp(suite, "drawing") || !strcmp(suite, "polygons") || !strcmp(suite, "fills") || !strcmp(suite, "textured") || !strcmp(suite, "affine") || !strcmp(suite, "gouraud") || !strcmp(suite, "blits") || !strcmp(suite, "lifecycle") || !strcmp(suite, "optimized") || !strcmp(suite, "perspective") || !strcmp(suite, "discs") || !strcmp(suite, "perspective_fill") || !strcmp(suite, "matrix_vertices") || !strcmp(suite, "matrix_fills") || !strcmp(suite, "projective") || !strcmp(suite, "projective_keyed") || !strcmp(suite, "projective_fog") || !strcmp(suite, "projective_key_fog") || !strcmp(suite, "projective_dither") || !strcmp(suite, "projective_dither_fog") || !strcmp(suite, "projective_dither_key") || !strcmp(suite, "projective_dither_key_fog") || !strcmp(suite, "projective_plane") || !strcmp(suite, "projective_mip") || !strcmp(suite, "projective_mip_fog") || !strcmp(suite, "projective_mip_dither") || !strcmp(suite, "projective_mip_dither_fog") || !strcmp(suite, "resources") || !strcmp(suite, "initialization") || !strcmp(suite, "projective_mip_build") || !strcmp(suite, "fans") || !strcmp(suite, "device_palettes") || !strcmp(suite, "device_pixels") || !strcmp(suite, "device_states") || !strcmp(suite, "device_shutdown") || !strcmp(suite, "device_config") || !strcmp(suite, "device_formats") || !strcmp(suite, "device_select_format") || !strcmp(suite, "device_flush") || !strcmp(suite, "device_colour"));
+    CHECK(!strcmp(suite, "all") || !strcmp(suite, "textures") || !strcmp(suite, "palette") || !strcmp(suite, "colours") || !strcmp(suite, "drawing") || !strcmp(suite, "polygons") || !strcmp(suite, "fills") || !strcmp(suite, "textured") || !strcmp(suite, "affine") || !strcmp(suite, "gouraud") || !strcmp(suite, "blits") || !strcmp(suite, "lifecycle") || !strcmp(suite, "optimized") || !strcmp(suite, "perspective") || !strcmp(suite, "discs") || !strcmp(suite, "perspective_fill") || !strcmp(suite, "matrix_vertices") || !strcmp(suite, "matrix_fills") || !strcmp(suite, "projective") || !strcmp(suite, "projective_keyed") || !strcmp(suite, "projective_fog") || !strcmp(suite, "projective_key_fog") || !strcmp(suite, "projective_dither") || !strcmp(suite, "projective_dither_fog") || !strcmp(suite, "projective_dither_key") || !strcmp(suite, "projective_dither_key_fog") || !strcmp(suite, "projective_plane") || !strcmp(suite, "projective_mip") || !strcmp(suite, "projective_mip_fog") || !strcmp(suite, "projective_mip_dither") || !strcmp(suite, "projective_mip_dither_fog") || !strcmp(suite, "resources") || !strcmp(suite, "initialization") || !strcmp(suite, "projective_mip_build") || !strcmp(suite, "fans") || !strcmp(suite, "device_palettes") || !strcmp(suite, "device_pixels") || !strcmp(suite, "device_states") || !strcmp(suite, "device_shutdown") || !strcmp(suite, "device_config") || !strcmp(suite, "device_formats") || !strcmp(suite, "device_select_format") || !strcmp(suite, "device_flush") || !strcmp(suite, "device_colour") || !strcmp(suite, "device_create") || !strcmp(suite, "device_surfaces") || !strcmp(suite, "device_reduce") || !strcmp(suite, "device_upload") || !strcmp(suite, "device_prepare") || !strcmp(suite, "device_texture") || !strcmp(suite, "device_batch") || !strcmp(suite, "device_points") || !strcmp(suite, "device_commit"));
     SetUnhandledExceptionFilter(fault);
     CHECK(AddVectoredExceptionHandler(1, draw_exception));
     {
@@ -411,6 +419,37 @@ int main(int argc, char **argv)
     device_colour_entry[0] = 0x2078cd50;
     device_colour_entry[1] = ADDRESS(GetProcAddress(modules[1], "hg2d_device_colour"));
     CHECK(device_colour_entry[1]);
+    device_create_entry[0] = 0x2078c030;
+    device_create_entry[1] = ADDRESS(GetProcAddress(modules[1], "hg2d_device_create"));
+    CHECK(device_create_entry[1]);
+    device_surface_entry[0] = 0x2078e550; device_allocate_entry[0] = 0x2078e640; device_reuse_entry[0] = 0x2078e400;
+    device_surface_entry[1] = ADDRESS(GetProcAddress(modules[1], "hg2d_device_surface"));
+    device_allocate_entry[1] = ADDRESS(GetProcAddress(modules[1], "hg2d_device_allocate"));
+    device_reuse_entry[1] = ADDRESS(GetProcAddress(modules[1], "hg2d_device_reuse"));
+    CHECK(device_surface_entry[1] && device_allocate_entry[1] && device_reuse_entry[1]);
+    device_reduce_entry[0] = 0x2078ebd0;
+    device_reduce_entry[1] = ADDRESS(GetProcAddress(modules[1], "hg2d_device_reduce"));
+    CHECK(device_reduce_entry[1]);
+    device_upload_entry[0] = 0x2078f460;
+    device_upload_entry[1] = ADDRESS(GetProcAddress(modules[1], "hg2d_device_upload"));
+    CHECK(device_upload_entry[1]);
+    device_prepare_entry[0] = 0x2078f600;
+    device_prepare_entry[1] = ADDRESS(GetProcAddress(modules[1], "hg2d_device_prepare"));
+    CHECK(device_prepare_entry[1]);
+    device_texture_entry[0] = 0x2078f7d0;
+    device_texture_entry[1] = ADDRESS(GetProcAddress(modules[1], "hg2d_device_texture"));
+    CHECK(device_texture_entry[1]);
+    device_batch_entry[0] = 0x2078cce0;
+    device_batch_entry[1] = ADDRESS(GetProcAddress(modules[1], "hg2d_device_batch"));
+    CHECK(device_batch_entry[1]);
+    device_point_entry[0][0] = 0x2078ced0; device_point_entry[1][0] = 0x2078cf90;
+    device_point_entry[0][1] = ADDRESS(GetProcAddress(modules[1], "hg2d_device_point"));
+    device_point_entry[1][1] = ADDRESS(GetProcAddress(modules[1], "hg2d_device_depth_point"));
+    CHECK(device_point_entry[0][1] && device_point_entry[1][1]);
+    device_commit_entry[0] = 0x2078da30; device_nop_entry[0] = 0x2078d060;
+    device_commit_entry[1] = ADDRESS(GetProcAddress(modules[1], "hg2d_device_commit"));
+    device_nop_entry[1] = ADDRESS(GetProcAddress(modules[1], "hg2d_device_nop"));
+    CHECK(device_commit_entry[1] && device_nop_entry[1]);
     {
         const char *names[] = {"hg2d_device_blend", "hg2d_device_mipmap", "hg2d_device_filter", "hg2d_device_fog"};
         uint32_t entries[] = {0x2078bdf0, 0x2078bf80, 0x2078bf10, 0x2078be50};
@@ -527,6 +566,69 @@ int main(int argc, char **argv)
         for (scenario = 0; scenario < count; scenario++)
             for (side = 0; side < 2; side++) run_device_colour();
         printf("hg2ddiff device_colour: %u scenarios, %u operations, 0 differ\n", count, operations / 2);
+    }
+    if (!strcmp(suite, "all") || !strcmp(suite, "device_create")) {
+        active_suite = "device_create";
+        operations = 0;
+        for (scenario = 0; scenario < count; scenario++)
+            for (side = 0; side < 2; side++) run_device_create();
+        printf("hg2ddiff device_create: %u scenarios, %u operations, 0 differ\n", count, operations / 2);
+    }
+    if (!strcmp(suite, "all") || !strcmp(suite, "device_surfaces")) {
+        active_suite = "device_surfaces";
+        operations = 0;
+        for (scenario = 0; scenario < count; scenario++)
+            for (side = 0; side < 2; side++) run_device_surfaces();
+        printf("hg2ddiff device_surfaces: %u scenarios, %u operations, 0 differ\n", count, operations / 2);
+    }
+    if (!strcmp(suite, "all") || !strcmp(suite, "device_reduce")) {
+        active_suite = "device_reduce";
+        operations = 0;
+        for (scenario = 0; scenario < count; scenario++)
+            for (side = 0; side < 2; side++) run_device_reduce();
+        printf("hg2ddiff device_reduce: %u scenarios, %u operations, 0 differ\n", count, operations / 2);
+    }
+    if (!strcmp(suite, "all") || !strcmp(suite, "device_upload")) {
+        active_suite = "device_upload";
+        operations = 0;
+        for (scenario = 0; scenario < count; scenario++)
+            for (side = 0; side < 2; side++) run_device_upload();
+        printf("hg2ddiff device_upload: %u scenarios, %u operations, 0 differ\n", count, operations / 2);
+    }
+    if (!strcmp(suite, "all") || !strcmp(suite, "device_prepare")) {
+        active_suite = "device_prepare";
+        operations = 0;
+        for (scenario = 0; scenario < count; scenario++)
+            for (side = 0; side < 2; side++) run_device_prepare();
+        printf("hg2ddiff device_prepare: %u scenarios, %u operations, 0 differ\n", count, operations / 2);
+    }
+    if (!strcmp(suite, "all") || !strcmp(suite, "device_texture")) {
+        active_suite = "device_texture";
+        operations = 0;
+        for (scenario = 0; scenario < count; scenario++)
+            for (side = 0; side < 2; side++) run_device_texture();
+        printf("hg2ddiff device_texture: %u scenarios, %u operations, 0 differ\n", count, operations / 2);
+    }
+    if (!strcmp(suite, "all") || !strcmp(suite, "device_batch")) {
+        active_suite = "device_batch";
+        operations = 0;
+        for (scenario = 0; scenario < count; scenario++)
+            for (side = 0; side < 2; side++) run_device_batch();
+        printf("hg2ddiff device_batch: %u scenarios, %u operations, 0 differ\n", count, operations / 2);
+    }
+    if (!strcmp(suite, "all") || !strcmp(suite, "device_points")) {
+        active_suite = "device_points";
+        operations = 0;
+        for (scenario = 0; scenario < count; scenario++)
+            for (side = 0; side < 2; side++) run_device_points();
+        printf("hg2ddiff device_points: %u scenarios, %u operations, 0 differ\n", count, operations / 2);
+    }
+    if (!strcmp(suite, "all") || !strcmp(suite, "device_commit")) {
+        active_suite = "device_commit";
+        operations = 0;
+        for (scenario = 0; scenario < count; scenario++)
+            for (side = 0; side < 2; side++) run_device_commit();
+        printf("hg2ddiff device_commit: %u scenarios, %u operations, 0 differ\n", count, operations / 2);
     }
     if (!strcmp(suite, "all") || !strcmp(suite, "drawing")) {
         active_suite = "drawing";

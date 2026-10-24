@@ -3,8 +3,9 @@
 In progress. Thirty-seven of forty Linkage services have implementations.
 The software renderer now includes all 24 ordinary projective targets,
 plain polygon plane spans, software triangle fans, affine and perspective textures, Gouraud shading,
-primitives, text, blits and discs. Device palette, conversion, state setup,
-teardown, format selection and batch submission helpers have standalone coverage.
+primitives, text, blits and discs. Device creation, palettes, texture conversion,
+surface allocation/reuse, mip upload, texture policy, batch setup/submission,
+points and writer commits now have standalone differential coverage.
 Palette/resource loading and initialization
 are implemented too. Some service branches remain unfinished below.
 HG2D uses snake_case and `<stdint.h>`; there is no `types.h` dependency.
@@ -28,6 +29,15 @@ make -f tools/hg2d.mk hg2ddiff-run N=20000 SUITE=device_formats
 make -f tools/hg2d.mk hg2ddiff-run N=20000 SUITE=device_select_format
 make -f tools/hg2d.mk hg2ddiff-run N=20000 SUITE=device_flush
 make -f tools/hg2d.mk hg2ddiff-run N=20000 SUITE=device_colour
+make -f tools/hg2d.mk hg2ddiff-run N=20000 SUITE=device_texture
+make -f tools/hg2d.mk hg2ddiff-run N=20000 SUITE=device_commit
+make -f tools/hg2d.mk hg2ddiff-run N=20000 SUITE=device_points
+make -f tools/hg2d.mk hg2ddiff-run N=20000 SUITE=device_batch
+make -f tools/hg2d.mk hg2ddiff-run N=20000 SUITE=device_prepare
+make -f tools/hg2d.mk hg2ddiff-run N=20000 SUITE=device_upload
+make -f tools/hg2d.mk hg2ddiff-run N=20000 SUITE=device_reduce
+make -f tools/hg2d.mk hg2ddiff-run N=20000 SUITE=device_surfaces
+make -f tools/hg2d.mk hg2ddiff-run N=20000 SUITE=device_create
 make -f tools/hg2d.mk hg2ddiff-run N=20000 SUITE=palette
 make -f tools/hg2d.mk hg2ddiff-run N=20000 SUITE=textures
 make -f tools/hg2d.mk hg2ddiff-run SUITE=colours       # finite sweeps
@@ -1356,13 +1366,166 @@ branches and independently checked RGB packing. All **21 mutations** are caught 
 sixteen in the resumed run). The large sweep passes **20,000 scenarios /
 7,680,000 operations**, zero differences.
 
+## Slice 40: device creation and capability setup
+
+Internal `0x2078c030` now binds the surface, queries DirectDraw/Direct3D,
+creates the named device and viewport, selects hardware or software caps,
+then composes the verified format, option, render-state and palette helpers.
+The same-surface path only clears textures, even for a null surface equal to
+the cached null pointer. Unknown device labels retain an existing device;
+failed methods run the original teardown. GUIDs are extracted as data by
+`tools/gen_hg2d_data.py`, without copying executable code.
+
+The final baseline passes **20,000 scenarios / 2,900,000 operations**, zero
+differences. It covers each failure stage, failed methods publishing objects,
+null successful device output, exact/case-mismatched labels, prior devices,
+software caps, dense/sparse texture pools and palette creation failures.
+All **28 mutations** are caught. A shortened software-capability copy initially
+survived because both descriptor tails matched; independently generated
+hardware/software descriptors expose it. The strengthened large baseline
+passes separately. The harness host table now spans its actual 0x320 bytes;
+the new +0x31c stub must not write beyond the former 0x300-byte array.
+
+## Slice 41: texture surfaces, accounting and reuse
+
+`0x2078e550` builds DirectDraw texture surface descriptors with signed dimensions,
+masked shifts, memory caps and mip counts. Palette binding uses the descriptor
+after the factory returns. `0x2078e640` caches per-level failures, publishes the
+surface and level, and retains signed peak accounting. `0x2078e400` transfers
+a surface from the most distant eligible texture in three passes, preserving
+frame comparisons, first-on-tie priority and self-transfer clearing.
+
+The baseline passes **20,000 scenarios / 6,780,000 operations**, zero differences.
+All **29 mutations** are caught. Directed fixtures distinguish age equality,
+exact-level priority, ties and a destination that aliases its selected source.
+Other cases cover level 31/32 shifts, signed dimensions and overflowed accounting.
+
+## Slice 42: device mip reduction
+
+`0x2078ebd0` implements only indexed-to-16-bit and same-format 16-bit reduction.
+Unsupported output formats are no-ops, including 8 and 32 bits. Odd dimensions
+still read a padded 2×2 block. Both 16-bit pitches truncate signed halves toward
+zero. Indexed alpha uses a two-of-four threshold; packed 555 alpha survives only
+four-of-four opaque inputs. Packed 444 averages the alpha nibble.
+
+The baseline passes **20,000 scenarios / 5,520,000 operations**, zero differences.
+All **21 mutations** are caught. It covers every format pair, signed/odd pitches,
+negative/zero dimensions, odd padded dimensions, source/output and palette aliases,
+and independently checked packing plus every 555 alpha input count.
+
+## Slice 43: locked mip-chain upload
+
+`0x2078f460` converts or reduces each level, unlocks it, then follows attached
+surfaces. Retail releases an attached surface before traversing it; its lifetime
+is held by the chain. Previous-level lock, description, unlock and attachment
+HRESULTs are ignored; current-level lock failure stops and stores its HRESULT.
+Only the base descriptor selects the format. Existing software mip generation
+is used for indexed levels or an initial level beyond one.
+
+The baseline passes **64 scenarios / 1,536 operations**, zero differences.
+All **16 mutations** are caught. Four guarded surface buffers are compared exactly
+after every operation, alongside the complete image and COM transcript. Fixtures
+include all formats, levels 0..3, current-lock failures, failing previous locks
+that fill their descriptors, null/self/next attachments and release-before-lock
+order. Source textures have resident software mips; uncached generation remains
+covered by its separate suite. The large baseline passes **20,000 scenarios /
+480,000 operations**, zero differences.
+
+## Slice 44: device texture preparation
+
+`0x2078f600` composes allocation/reuse, loss checks, staging upload, texture
+interfaces, colour keys and handle lookup. It preserves partial state: a failed
+staging allocation leaks the already queried texture interface; a failed upload
+can still proceed to handle lookup. Colour-key zero, 1..25, 152 and full unsigned
+values retain their original meanings. The stored HRESULT is the final handle
+lookup result, when that path is reached.
+
+The baseline passes **64 scenarios / 1,536 operations**, zero differences. All
+**19 mutations** are caught. Its large baseline passes **20,000 scenarios /
+480,000 operations**, zero differences. It checks exact pixel buffers plus COM/state order,
+existing and replaced surfaces, cached failures, staging failure, lost surfaces,
+palette binding and handle failures that still publish output. The fixture seeds
+accounting before the failure cache because index-eight accounting overlaps cache
+cell zero.
+
+## Slice 45: resolution, pressure and key policy
+
+`0x2078f7d0` now maintains frame demand, pressure expiry, distance history and
+resolution choice, normalizes equivalent keys 1..25, refreshes dirty textures,
+and returns their device handle. The frame/age comparisons, signed pressure
+counter and wrapped three-quarter threshold follow retail, including pressure
+clears and resolution retention within the same frame.
+
+The baseline passes **64 scenarios / 1,536 operations**, zero differences. It
+composes the real translated preparation/upload helpers with COM stand-ins,
+covering distance boundaries, frame wrap, signed peak arithmetic, pressure ages
+30/31 and equivalent/zero keys. All **24 mutations** are caught. Its large
+sweep passes **20,000 scenarios / 480,000 operations**, zero differences.
+
+## Slice 46: device batch initialization
+
+`0x2078cce0` flushes the previous batch, resets the vertex queue, publishes its
+mode/texture, requests the translated device texture handle, and leaves x87
+precision at 24 bits. The texture key is a full GLOBAL word. The final baseline
+passes **64 scenarios / 1,536 operations**, zero differences. All **nine mutations**
+are caught. It covers null and actual textures, nonempty previous batches,
+precision/rounding controls and the complete texture preparation/upload chain.
+The large baseline passes **20,000 scenarios / 480,000 operations**, zero
+differences.
+
+## Slice 47: device ordinary and depth-shaded points
+
+Native entries `0x2078ced0` / `0x2078cf90` now append transformed vertices to
+the point batch. They retain capability gates, signed remaining-capacity tests,
+integer-to-single conversion under caller rounding, palette colour, constant
+Z/RHW/specular, untouched U/V fields and cursor/count updates. Entry shims
+reproduce EAX/ECX/EDX results and preserve inactive-path registers.
+
+A retail ABI bug was confirmed at the owner: depth helper `0x207880ac` leaves
+its lookup index in EBX, and the compiled device point does not save EBX. The
+native depth-point shim reproduces that result only when depth shading takes
+the lookup path. The software callers' existing register handling is unchanged.
+
+The baseline passes **64 scenarios / 12,352 operations**, zero differences,
+with all seven register results and x87 control/status compared. Integer float
+rounding boundaries, negative/extreme positions, batch changes, capacity
+boundaries, depth-map edges and disabled paths are covered. All **15 mutations**
+are caught. The large baseline passes **20,000 scenarios / 3,860,000 operations**,
+zero differences. The entries are independently
+exported for tests; no incomplete device table is activated.
+
+## Slice 48: device writer close and no-op
+
+The shared target `0x2078da30` is a writer commit, not a no-op: it publishes
++0x8848 as the batch cursor, computes a signed 32-byte vertex delta, updates
+capacity and returns EAX/ECX/EDX. `0x2078d060` is the three-argument no-op and
+preserves all seven registers. Both have native entries and ABI checks.
+
+The baseline passes **64 scenarios / 6,144 operations**, zero differences.
+All **five mutations** are caught. Cases include unaligned deltas, negative
+counts, both 32-bit wrap boundaries and arbitrary remaining capacity. Known
+cursor fields are normalized relative to the image even outside its range;
+scalar returns elsewhere retain their existing normalization rules. The
+large baseline passes **20,000 scenarios / 1,920,000 operations**, zero differences.
+
 ## Next device work
 
 The verified helpers are not yet wired into public device selection +0xbc or
-scene begin/end +0x9c/+0xa0. Selection still needs the `0x2078c030` interface
-creation/capability/viewport sequence and the public wrapper at `0x2078b760`.
-Before switching Linkage, translate its eighteen device drawing entries and
-texture upload (`0x2078f7d0`), and the batch initializer at `0x2078cce0`.
+scene begin/end +0x9c/+0xa0. Selection still needs the public wrapper at
+`0x2078b760` and Linkage switching. Before activating the device table,
+complete the remaining eleven device table entries. Seven of eighteen cells
+now have native targets: ordinary/depth points, the no-op and the four shared
+writer-commit entries. Batch initialization and texture upload are implemented;
+the public wrappers and Linkage switching still remain.
+
+The remaining device slots/targets are +0x28 `0x2078e2e0`, +0x2c
+`0x2078d070`, +0x30 `0x2078d090`, +0x34 `0x2078d0b0`, +0x38
+`0x2078d0e0`, +0x3c `0x2078d2b0`, +0x44 `0x2078d370`, +0x48
+`0x2078d7a0`, +0x50 `0x2078da60`, +0x74 `0x2078dcd0`, and +0x84
+`0x2078ded0`. The shared line kernel at `0x2078d0e0` is the next useful
+slice: its fixed-point float conversion and fog alpha feed the integer,
+horizontal, vertical and frame wrappers. Verify their register results at
+the owner, as the depth-point EBX bug demonstrated.
 The native flush uses the 32-byte vertex queue at data +0x8860; +0x18860 is
 inside that queue, not its start. No partial device dispatch table is installed.
 
@@ -1383,6 +1546,20 @@ shadow corrupt-stack return and non-x86 floating precision/status remain
 separate validation limits.
 
 ## Verification and limits
+
+The combined regression through **slice 48** passes **64 scenarios in every
+suite**, zero differences. The new slices catch **166 additional mutations**;
+the complete audit checks **1,317 anchors**. All fourteen teardown mutations
+were also rerun after extracting its shared texture-clear helper, and are caught.
+All nine large suites for slices 40–48 pass **20,000 scenarios each /
+22,900,000 operations combined**, zero differences.
+
+Upload fixture initialization now grows exact 256-byte periodic patterns by
+copies. A startup self-check compares every generated byte with the original
+formula, and 64-scenario upload/preparation/policy/batch reruns all pass. This
+changes setup cost, not vectors or native code. Earlier long runs retain the
+same byte patterns and remain valid.
+
 
 The latest combined regression through slice 39 passes **64 scenarios in
 every suite**, including all device helpers, with zero differences. This pass

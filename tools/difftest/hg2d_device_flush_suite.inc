@@ -15,7 +15,7 @@ static uint32_t STDCALL device_draw_primitive(uint32_t instance, uint32_t kind, 
     __asm__ volatile("fnstcw %0" : "=m"(control)); event(control);
     if (count <= 17) for (uint32_t index = 0; index < count * 8; index++) event(vertices[index]);
     for (uint32_t index = 0; index < 64; index++) event(WORD(images[side], 0x28b00 + index * 4));
-    for (uint32_t index = 0; index < 8; index++) event(WORD(images[side], 0x8840 + index * 4) == ADDRESS(images[side] + POOL) ? 0x20797f60 : WORD(images[side], 0x8840 + index * 4));
+    for (uint32_t index = 0; index < 8; index++) event(index == 2 || index == 7 ? normalize_result(WORD(images[side], 0x8840 + index * 4)) : WORD(images[side], 0x8840 + index * 4));
     device_draw_calls++;
     return device_draw_result;
 }

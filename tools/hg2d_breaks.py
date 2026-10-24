@@ -14,7 +14,7 @@ import tempfile
 root = Path(__file__).resolve().parent.parent
 source = (root / 'src/hg2d/hg2d.c').read_text()
 sections = {}
-for section in ('palette', 'draw', 'mip_build', 'mip', 'dither', 'projective', 'mip_dither', 'matrix', 'polygon', 'fill', 'textured', 'perspective', 'perspective_fill', 'affine', 'gouraud', 'blit', 'disc', 'fan', 'resource', 'init', 'device_palette', 'device_pixels', 'device_states', 'device_shutdown', 'device_config', 'device_formats', 'device_select_format', 'device_flush', 'device_colour'):
+for section in ('palette', 'draw', 'mip_build', 'mip', 'dither', 'projective', 'mip_dither', 'matrix', 'polygon', 'fill', 'textured', 'perspective', 'perspective_fill', 'affine', 'gouraud', 'blit', 'disc', 'fan', 'resource', 'init', 'device_palette', 'device_pixels', 'device_states', 'device_shutdown', 'device_config', 'device_formats', 'device_select_format', 'device_flush', 'device_colour', 'device_create', 'device_surfaces', 'device_reduce', 'device_upload', 'device_prepare', 'device_texture', 'device_batch', 'device_points', 'device_commit'):
     sections[section] = (root / ('src/hg2d/hg2d_%s.inc' % section)).read_text()
     if section == 'projective':
         sections[section] = sections[section].replace('#include "hg2d_dither.inc"', sections['dither'])
@@ -763,6 +763,199 @@ dither_key_fog_mutations = [
     ('dither key fog table family', 'fog && keyed ? projective_dither_key_fog_tails', 'fog && keyed ? projective_dither_key_tails'),
 ]
 mutations += [(*mutation, 'projective_dither_key_fog') for mutation in dither_key_fog_mutations]
+device_commit_mutations = [
+    ('commit publish cursor', 'WORD(0x5ee4) = next;', 'WORD(0x5ee4) = previous;'),
+    ('commit signed count', '(int32_t)(next - previous) >> 5', '(int32_t)(next - previous) / 32'),
+    ('commit capacity', 'WORD(0x5ee8) -=', 'WORD(0x5ee8) +='),
+    ('commit returned cursor', 'return next;', 'return previous;'),
+    ('device nop EAX', '_hg2d_device_nop:\\n\\tret $12', '_hg2d_device_nop:\\n\\txorl %eax,%eax\\n\\tret $12'),
+]
+mutations += [(*mutation, 'device_commit') for mutation in device_commit_mutations]
+device_points_mutations = [
+    ('device point capability', 'BYTE(0x28a04) & 0x20', 'BYTE(0x28a04) & 0x10'),
+    ('device point batch mode', 'WORD(0x8850) != 1', 'WORD(0x8850) != 2'),
+    ('device point remaining equality', '(int32_t)WORD(0x5ee8) < 1', '(int32_t)WORD(0x5ee8) <= 1'),
+    ('device point integer x', '"m"(x)', '"m"(y)'),
+    ('device point z', 'vertex[2] = vertex[3] = 0x3f800000', 'vertex[2] = vertex[3] = 0'),
+    ('device point RGB red', 'BYTE(0x39c2 + colour * 3)', 'BYTE(0x39c4 + colour * 3)'),
+    ('device point specular', 'vertex[5] = 0xff000000', 'vertex[5] = 0x00ffffff'),
+    ('device point unused UV', 'vertex[5] = 0xff000000;', 'vertex[5] = 0xff000000; vertex[6] = 0;'),
+    ('device point depth gate', 'if (shaded) {', 'if (0) {'),
+    ('device point depth colour', 'BYTE(0x90c) = draw_depth', 'BYTE(0x90d) = draw_depth'),
+    ('device point EBX publish', 'hg2d_device_point_ebx_active = depth_active', 'hg2d_device_point_ebx_active = 0'),
+    ('device point EBX lookup', '((uint32_t)value << 8) | BYTE(0x90c)', '((uint32_t)value << 8) | (BYTE(0x90c) ^ 1)'),
+    ('device point cursor', 'WORD(0x8848) += 32', 'WORD(0x8848) += 64'),
+    ('device point capacity', 'WORD(0x5ee8) -=', 'WORD(0x5ee8) +='),
+    ('device point EAX gate', 'hg2d_device_point_active = 1', 'hg2d_device_point_active = 0'),
+]
+mutations += [(*mutation, 'device_points') for mutation in device_points_mutations]
+device_batch_mutations = [
+    ('batch previous flush', 'hg2d_device_flush();', '(void)0;'),
+    ('batch capacity', 'WORD(0x5ee8) = 0x1000', 'WORD(0x5ee8) = 0xfff'),
+    ('batch first cursor', 'WORD(0x5ee0) = WORD(0x5ee4) =', 'WORD(0x5ee4) ='),
+    ('batch handle clear', 'WORD(0x8840) = 0;', 'WORD(0x8840) = 1;'),
+    ('batch mode', 'WORD(0x8850) = mode', 'WORD(0x8850) = mode + 1'),
+    ('batch texture publication', 'WORD(0x885c) = texture', 'WORD(0x885c) = 0'),
+    ('batch key word', 'GLOBAL_HALF(0xca0)', 'GLOBAL[0xca0]'),
+    ('batch handle binding', 'WORD(0x8840) = hg2d_device_texture', 'WORD(0x8858) = hg2d_device_texture'),
+    ('batch precision', 'control &= ~0x300u', 'control &= ~0x100u'),
+]
+mutations += [(*mutation, 'device_batch') for mutation in device_batch_mutations]
+device_texture_mutations = [
+    ('texture frame cache', 'WORD(0x5f48) != frame', 'WORD(0x5f48) == frame'),
+    ('texture frame store', 'WORD(0x5f48) = frame', 'WORD(0x5f48) = frame + 1'),
+    ('texture pressure signed division', '(int32_t)(WORD(0x289d4) * 3) / 4', '(int32_t)(WORD(0x289d4) * 3) >> 2'),
+    ('texture pressure equality', '(int32_t)WORD(0x28cc4) <= threshold', '(int32_t)WORD(0x28cc4) < threshold'),
+    ('texture pressure expiry', '(int32_t)old > 30', '(int32_t)old >= 30'),
+    ('texture pressure signed age', '(int32_t)old > 30', 'old > 30'),
+    ('texture clear pressure', 'device_textures_clear();', '(void)0;'),
+    ('texture frame demand reset', 'WORD(0x28cc4) = 0', 'WORD(0x28cc4) = 1'),
+    ('texture flags distance', 'flags & 0x10ff00', 'flags & 0x100000'),
+    ('texture previous frame', 'GLOBAL_WORD(0x2ac) - 2', 'GLOBAL_WORD(0x2ac) - 1'),
+    ('texture distance min', 'GLOBAL_WORD(0xd4c) < texture[5]', 'GLOBAL_WORD(0xd4c) > texture[5]'),
+    ('texture first resolution', 'distance < 0xbb800', 'distance <= 0xbb800'),
+    ('texture second resolution', 'distance < 0x3a9800', 'distance <= 0x3a9800'),
+    ('texture demand units', '((8u - level) * 2)', '((8u - level) * 1)'),
+    ('texture pressure extra level', '(int32_t)level < 2', '(int32_t)level < 1'),
+    ('texture same frame level', 'level = texture[7];', 'level = 0;'),
+    ('texture key zero reuse', 'key || texture[6] >= 26', 'key || texture[6] >= 25'),
+    ('texture new key normalize', '? 1 : key', '? key : key'),
+    ('texture old key normalize', 'previous_key = 1', 'previous_key = texture[6]'),
+    ('texture clearing key format', 'WORD(0x28aec) == 8', 'WORD(0x28aec) != 8'),
+    ('texture dirty clear', 'texture[1] &= ~0x20000u', 'texture[1] &= ~0x10000u'),
+    ('texture current timestamp', 'texture[4] = GLOBAL_WORD(0x2ac)', 'texture[4] = GLOBAL_WORD(0x2ac) + 1'),
+    ('texture handle return', 'return texture[2]', 'return texture[3]'),
+    ('texture key dirty mark', 'texture[6] = key; texture[1] |= 0x20000', 'texture[6] = key; texture[1] |= 0x10000'),
+]
+mutations += [(*mutation, 'device_texture') for mutation in device_texture_mutations]
+device_prepare_mutations = [
+    ('prepare counter', 'WORD(0x5f44)++;', 'WORD(0x5f44) += 2;'),
+    ('prepare resolution change', 'texture[3] && texture[7] != level', 'texture[3] && texture[7] == level'),
+    ('prepare clear handle', 'texture[2] = 0;', 'texture[2] = 1;'),
+    ('prepare lost test', 'if (((call_one)device_method(surface, 27))(surface)) return;', 'if (0) return;'),
+    ('prepare descriptor size', 'description[0] = 0x6c;', 'description[0] = 0x6b;'),
+    ('prepare staging caps', 'description[26] & 0x4000', 'description[26] & 0x8000'),
+    ('prepare staging flags', 'level, 0x800, &stage', 'level, 0x4000, &stage'),
+    ('prepare staging HRESULT', 'WORD(0x5f3c) = result;', 'WORD(0x5f3c) = 0;'),
+    ('prepare failure interface leak', 'if (result) return;', 'if (result) { ((call_one)device_method(texture_interface, 2))(texture_interface); return; }'),
+    ('prepare stage interface release', '((call_one)device_method(stage_interface, 2))(stage_interface);', '(void)0;'),
+    ('prepare stage release', '((call_one)device_method(stage, 2))(stage);', '(void)0;'),
+    ('prepare palette condition', 'description[21] == 8', 'description[21] != 8'),
+    ('prepare key special', 'texture[6] == 0x98 ? 0x96', 'texture[6] == 0x98 ? 0x97'),
+    ('prepare key decrement', 'texture[6] - 1', 'texture[6]'),
+    ('prepare key high bound', 'key[0] = key[1] =', 'key[0] ='),
+    ('prepare key flags', '(surface, 8, ADDRESS(key))', '(surface, 9, ADDRESS(key))'),
+    ('prepare key disable flags', '(surface, 8, 0)', '(surface, 9, 0)'),
+    ('prepare final release', '((call_one)device_method(texture_interface, 2))(texture_interface);\n}', '(void)0;\n}'),
+    ('prepare texture GUID', '(surface, ADDRESS(device_guids[5]), ADDRESS(&texture_interface))', '(surface, ADDRESS(device_guids[4]), ADDRESS(&texture_interface))'),
+]
+mutations += [(*mutation, 'device_prepare') for mutation in device_prepare_mutations]
+device_upload_mutations = [
+    ('upload lock flags', 'ADDRESS(description), 1, 0', 'ADDRESS(description), 0, 0'),
+    ('upload previous lock flags', 'ADDRESS(previous_description), 1, 0', 'ADDRESS(previous_description), 0, 0'),
+    ('upload current lock result', 'WORD(0x5f3c) = result;', 'WORD(0x5f3c) = 0;'),
+    ('upload previous branch', 'previous && format != 8', 'previous && format == 8'),
+    ('upload first reduction', 'level == 1 && format != 8', 'level == 2 && format != 8'),
+    ('upload previous dimensions', '(level - 1) & 31', 'level & 31'),
+    ('upload first source pitch', 'POINTER(texture[0]), 256, 8, 256, 256', 'POINTER(texture[0]), 255, 8, 256, 256'),
+    ('upload attached caps', 'caps = 0x401000', 'caps = 0x400000'),
+    ('upload attached initial', 'next = 0', 'next = surface'),
+    ('upload next release', '((call_one)device_method(next, 2))(next);', '(void)0;'),
+    ('upload level advance', 'surface = next; level++', 'surface = next; level += 2'),
+    ('upload previous unlock', '((call_two)device_method(previous, 32))(previous, 0);', '(void)0;'),
+    ('upload current unlock', '((call_two)device_method(surface, 32))(surface, 0);', '(void)0;'),
+    ('upload initial size', 'description[0] = 0x6c;\n    ((call_two)', 'description[0] = 0x6b;\n    ((call_two)'),
+    ('upload current key', 'POINTER(pixels), 256, 8, size, size, texture[6]', 'POINTER(pixels), 256, 8, size, size, texture[5]'),
+    ('upload source dimensions', 'POINTER(pixels), 256, 8, size, size, texture[6]', 'POINTER(pixels), 256, 8, size - 1, size, texture[6]'),
+]
+mutations += [(*mutation, 'device_upload') for mutation in device_upload_mutations]
+device_reduce_mutations = [
+    ('reduce unsupported output', 'format != 0x22b && format != 0x235 && format != 0x1bc', 'format != 0x22b && format != 0x235'),
+    ('reduce source pair', 'source_format != 8 && source_format != format', 'source_format != 8'),
+    ('reduce odd height', 'rows = (height + 1) >> 1', 'rows = height >> 1'),
+    ('reduce destination pitch', '((int32_t)destination_pitch / 2) * 2', '((int32_t)destination_pitch >> 1) * 2'),
+    ('reduce source pitch', '((int32_t)source_pitch / 2) * 2', '((int32_t)source_pitch >> 1) * 2'),
+    ('reduce last column', '(int32_t)x < (int32_t)width', '(int32_t)x < (int32_t)width - 1'),
+    ('reduce bottom row', '(sample >> 1) * source_stride', '(sample >> 1) * 0'),
+    ('reduce fourth sample', 'sample < 4', 'sample < 3'),
+    ('reduce key byte', 'key & 255', 'key'),
+    ('reduce key equality', 'indexed >= (key & 255)', 'indexed > (key & 255)'),
+    ('reduce indexed red', 'red += BYTE(0x39c2 + indexed * 3)', 'red += BYTE(0x39c3 + indexed * 3)'),
+    ('reduce 555 red', '(value >> 7) & 0xf8', '(value >> 8) & 0xf8'),
+    ('reduce 555 alpha input', '(value >> 8) & 0x80', '(value >> 7) & 0x80'),
+    ('reduce 565 green', '(value >> 3) & 0xfc', '(value >> 3) & 0xf8'),
+    ('reduce 444 alpha input', '(value >> 8) & 0xf0', '(value >> 8) & 0x80'),
+    ('reduce indexed rounding', 'red /= 4; green /= 4; blue /= 4;', 'red = (red + 16) / 4; green /= 4; blue /= 4;'),
+    ('reduce 555 alpha output', '(((alpha + 2) / 4) & 0x80) != 0', 'alpha >= 256'),
+    ('reduce majority alpha', 'source_format == 8 ? alpha >= 2', 'source_format == 8 ? alpha >= 3'),
+    ('reduce 444 alpha output', '(((alpha + 2) / 4) & 0xf0) << 8', '(((alpha + 2) / 4) & 0xf0) << 7'),
+    ('reduce output stride', '__builtin_memcpy(destination + x,', '__builtin_memcpy(destination + x * 2,'),
+    ('reduce source rows', 'source_stride * 2', 'source_stride * 1'),
+]
+mutations += [(*mutation, 'device_reduce') for mutation in device_reduce_mutations]
+device_surfaces_mutations = [
+    ('surface size', 'description[0] = 0x6c', 'description[0] = 0x6b'),
+    ('surface flags', 'description[1] = 0x1007', 'description[1] = 0x1006'),
+    ('surface last format word', 'hg2d_image + 0x28ae0, 32', 'hg2d_image + 0x28ae0, 28'),
+    ('surface masked shift', 'level & 31', 'level & 15'),
+    ('surface width signed', '(int32_t)width / divisor', '(uint32_t)width / (uint32_t)divisor'),
+    ('surface height signed', '(int32_t)height / divisor', '(uint32_t)height / (uint32_t)divisor'),
+    ('surface software memory', '!WORD(0x28cc8)', 'WORD(0x28cc8)'),
+    ('surface cap selector', 'flags & 0x4000', 'flags & 0x2000'),
+    ('surface mip capability', 'if (WORD(0x5f28))', 'if (0)'),
+    ('surface mip count', 'description[6] = 8u - level', 'description[6] = 8u - (level & 31)'),
+    ('surface factory outer', 'ADDRESS(out), 0', 'ADDRESS(out), 1'),
+    ('surface post descriptor', 'description[21] == 8', 'WORD(0x28aec) == 8'),
+    ('surface palette HRESULT', '((call_two)device_method(instance, 31))', 'result = ((call_two)device_method(instance, 31))'),
+    ('allocate cached failure', 'if (WORD(0x8820 + level * 4))', 'if (0)'),
+    ('allocate failure mark', 'WORD(0x8820 + level * 4) = 1', 'WORD(0x8820 + level * 4) = 0'),
+    ('allocate output initial', 'output = level', 'output = 0'),
+    ('allocate accounting increment', 'WORD(0x8800 + level * 4)++', 'WORD(0x8800 + level * 4)--'),
+    ('allocate clear handle', 'texture[2] = 0', 'texture[2] = output'),
+    ('allocate memory shift', '((8u - level) * 2)', '((8u - level) * 1)'),
+    ('allocate signed peak', '(int32_t)total > (int32_t)WORD(0x289d4)', 'total > WORD(0x289d4)'),
+    ('reuse live handle', '!candidate[2]', '!candidate[3]'),
+    ('reuse exact level', 'candidate[7] != level', 'candidate[7] > level'),
+    ('reuse signed level', '(int32_t)candidate[7] > (int32_t)level', 'candidate[7] > level'),
+    ('reuse age equality', 'candidate[4] >= frame', 'candidate[4] > frame'),
+    ('reuse metric tie', 'candidate[5] <= distance', 'candidate[5] < distance'),
+    ('reuse previous frame', 'pass == 2 ? 0u : 1u', 'pass == 2 ? 1u : 1u'),
+    ('reuse pressure flag', 'if (!WORD(0x5f40)) WORD(0x5f40) = 1', 'if (1) WORD(0x5f40) = 1'),
+    ('reuse surface transfer', 'texture[3] = candidate[3]', 'texture[3] = candidate[2]'),
+    ('reuse clear source', 'candidate[3] = candidate[2] = candidate[7] = 0', 'candidate[3] = candidate[2] = 0'),
+]
+mutations += [(*mutation, 'device_surfaces') for mutation in device_surfaces_mutations]
+device_create_mutations = [
+    ('create reuse textures', 'device_textures_clear();', '(void)0;'),
+    ('create surface GUID', 'device_guids[4]', 'device_guids[3]'),
+    ('create direct3d GUID', 'device_guids[3]', 'device_guids[4]'),
+    ('create temporary release', 'if (temporary) ((call_one)device_method(temporary, 2))(temporary);', 'if (0) ((call_one)device_method(temporary, 2))(temporary);'),
+    ('create dd failure', 'if (result) goto failed;\n    instance = WORD(0x289f0);', 'if (0) goto failed;\n    instance = WORD(0x289f0);'),
+    ('create surface reference', '((call_one)device_method(surface, 1))(surface);', '(void)0;'),
+    ('create case sensitive label', '!lstrcmpA(', '!lstrcmpiA('),
+    ('create device GUID order', 'device_guids[2 - index]', 'device_guids[index]'),
+    ('create labels count', 'index < 3; index++', 'index < 2; index++'),
+    ('create viewport aggregation', 'ADDRESS(hg2d_image + 0x28ccc), 0', 'ADDRESS(hg2d_image + 0x28ccc), 1'),
+    ('create description size', 'description[0] = 0x6c;', 'description[0] = 0x6b;'),
+    ('create viewport size', '{0x2c, 0, 0,', '{0x2b, 0, 0,'),
+    ('create viewport clip y', '0xbf800000, 0x40000000,', '0xbf800000, 0x3f800000,'),
+    ('create viewport width', 'viewport[3] = description[3]', 'viewport[3] = description[2]'),
+    ('create viewport height', 'viewport[4] = description[2]', 'viewport[4] = description[3]'),
+    ('create caps clear', '__builtin_memset(hg2d_image + 0x28a00, 0, 0xcc);', '__builtin_memset(hg2d_image + 0x28a00, 0, 0xc8);'),
+    ('create caps size', 'WORD(0x28a00) = software[0] = 0xcc;', 'WORD(0x28a00) = software[0] = 0xc8;'),
+    ('create software fallback', 'if (!WORD(0x28a04)) {', 'if (0) {'),
+    ('create software flag', 'WORD(0x28cc8) = 1;', 'WORD(0x28cc8) = 0;'),
+    ('create software descriptor', '__builtin_memcpy(hg2d_image + 0x28a00, software, 0xcc);', '__builtin_memcpy(hg2d_image + 0x28a00, software, 0xc8);'),
+    ('create option flags', 'flags = host_info[0xd0 / 4];', 'flags = host_info[0xcc / 4];'),
+    ('create mip options', 'hg2d_device_mipmap(flags);', '(void)0;'),
+    ('create filter options', 'hg2d_device_filter(flags);', '(void)0;'),
+    ('create states', 'hg2d_device_states(flags);', '(void)0;'),
+    ('create blend', 'hg2d_device_blend();', '(void)0;'),
+    ('create fog', 'hg2d_device_fog(flags);', '(void)0;'),
+    ('create palette', 'device_palette_realize();', '(void)0;'),
+    ('create failed cleanup', 'hg2d_device_shutdown();', '(void)0;'),
+]
+mutations += [(*mutation, 'device_create') for mutation in device_create_mutations]
 device_colour_mutations = [
     ('vertex colour early gate', 'GLOBAL_HALF(0xf10) &&', 'GLOBAL[0xf10] &&'),
     ('vertex colour dce gate', '!GLOBAL_HALF(0xdce)', '!GLOBAL[0xdce]'),
@@ -1384,7 +1577,7 @@ for name, old, new, suite in mutations:
         continue
     tested += 1
     owner = {'colours': 'palette', 'palette': 'palette', 'drawing': 'draw',
-             'polygons': 'polygon', 'fills': 'fill', 'textured': 'textured', 'affine': 'affine', 'gouraud': 'gouraud', 'blits': 'blit', 'optimized': 'affine', 'perspective': 'perspective', 'discs': 'disc', 'perspective_fill': 'perspective_fill', 'matrix_vertices': 'matrix', 'matrix_fills': 'matrix', 'projective': 'projective', 'projective_keyed': 'projective', 'projective_fog': 'projective', 'projective_key_fog': 'projective', 'projective_dither': 'projective', 'projective_dither_fog': 'projective', 'projective_dither_key': 'projective', 'projective_dither_key_fog': 'projective', 'projective_plane': 'matrix', 'projective_mip': 'mip', 'projective_mip_fog': 'mip', 'projective_mip_dither': 'mip_dither', 'projective_mip_dither_fog': 'mip_dither', 'resources': 'resource', 'initialization': 'init', 'projective_mip_build': 'mip_build', 'fans': 'fan', 'device_palettes': 'device_palette', 'device_pixels': 'device_pixels', 'device_states': 'device_states', 'device_shutdown': 'device_shutdown', 'device_config': 'device_config', 'device_formats': 'device_formats', 'device_select_format': 'device_select_format', 'device_flush': 'device_flush', 'device_colour': 'device_colour'}.get(suite)
+             'polygons': 'polygon', 'fills': 'fill', 'textured': 'textured', 'affine': 'affine', 'gouraud': 'gouraud', 'blits': 'blit', 'optimized': 'affine', 'perspective': 'perspective', 'discs': 'disc', 'perspective_fill': 'perspective_fill', 'matrix_vertices': 'matrix', 'matrix_fills': 'matrix', 'projective': 'projective', 'projective_keyed': 'projective', 'projective_fog': 'projective', 'projective_key_fog': 'projective', 'projective_dither': 'projective', 'projective_dither_fog': 'projective', 'projective_dither_key': 'projective', 'projective_dither_key_fog': 'projective', 'projective_plane': 'matrix', 'projective_mip': 'mip', 'projective_mip_fog': 'mip', 'projective_mip_dither': 'mip_dither', 'projective_mip_dither_fog': 'mip_dither', 'resources': 'resource', 'initialization': 'init', 'projective_mip_build': 'mip_build', 'fans': 'fan', 'device_palettes': 'device_palette', 'device_pixels': 'device_pixels', 'device_states': 'device_states', 'device_shutdown': 'device_shutdown', 'device_config': 'device_config', 'device_formats': 'device_formats', 'device_select_format': 'device_select_format', 'device_flush': 'device_flush', 'device_colour': 'device_colour', 'device_create': 'device_create', 'device_surfaces': 'device_surfaces', 'device_reduce': 'device_reduce', 'device_upload': 'device_upload', 'device_prepare': 'device_prepare', 'device_texture': 'device_texture', 'device_batch': 'device_batch', 'device_points': 'device_points', 'device_commit': 'device_commit'}.get(suite)
     if source.count(old) != 1 and owner:
         scope = sections[owner]
         assert scope.count(old) == 1 and source.count(scope) == 1, (name, scope.count(old))

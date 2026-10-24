@@ -39,7 +39,19 @@ static LONG WINAPI draw_exception(EXCEPTION_POINTERS *exception)
         exception->ExceptionRecord->ExceptionCode == EXCEPTION_INT_OVERFLOW) {
         CONTEXT *context = exception->ContextRecord;
         const uint8_t *instruction = (const uint8_t *)(uintptr_t)context->Eip;
-        if (context->Eip == 0x2075e6b2 ||
+        if (context->Eip == 0x20761b6c ||
+            context->Eip == 0x20761c31 ||
+            context->Eip == 0x20761e39 ||
+            context->Eip == 0x20762fda ||
+            context->Eip == 0x207642ac ||
+            context->Eip == 0x2076515d ||
+            context->Eip == 0x20769581 ||
+            context->Eip == 0x20769646 ||
+            context->Eip == 0x2076984e ||
+            context->Eip == 0x2076a9ef ||
+            context->Eip == 0x2076bcc1 ||
+            context->Eip == 0x2076cb72 ||
+            context->Eip == 0x2075e6b2 ||
             context->Eip == 0x2075e75a ||
             context->Eip == 0x2075e91c ||
             context->Eip == 0x2075f622 ||
@@ -87,6 +99,47 @@ static LONG WINAPI draw_exception(EXCEPTION_POINTERS *exception)
             context->Eip == 0x2073b0fb || context->Eip == 0x2073bbed ||
             context->Eip == 0x2073e269 || context->Eip == 0x2073e2ff ||
             context->Eip == 0x2073e46a || context->Eip == 0x2073ef5c ||
+            context->Eip == 0x20784d97 || context->Eip == 0x20784dc8 || context->Eip == 0x20784df9 ||
+            context->Eip == 0x207415d8 ||
+            context->Eip == 0x20741680 ||
+            context->Eip == 0x20741812 ||
+            context->Eip == 0x20742733 ||
+            context->Eip == 0x207459f7 ||
+            context->Eip == 0x20745a9f ||
+            context->Eip == 0x20745c31 ||
+            context->Eip == 0x20746b51 ||
+            context->Eip == 0x20743226 ||
+            context->Eip == 0x207432eb ||
+            context->Eip == 0x207434c3 ||
+            context->Eip == 0x20744a8a ||
+            context->Eip == 0x20747641 ||
+            context->Eip == 0x20747706 ||
+            context->Eip == 0x207478de ||
+            context->Eip == 0x20748ea5 ||
+            context->Eip == 0x2076dae0 ||
+            context->Eip == 0x2076db88 ||
+            context->Eip == 0x2076dd69 ||
+            context->Eip == 0x2076f2ba ||
+            context->Eip == 0x20770b6d ||
+            context->Eip == 0x20771afe ||
+            context->Eip == 0x20779449 ||
+            context->Eip == 0x207794f1 ||
+            context->Eip == 0x207796d2 ||
+            context->Eip == 0x2077ac22 ||
+            context->Eip == 0x2077c4d4 ||
+            context->Eip == 0x2077d464 ||
+            context->Eip == 0x20772c77 ||
+            context->Eip == 0x20772d3c ||
+            context->Eip == 0x20772f63 ||
+            context->Eip == 0x20774b2d ||
+            context->Eip == 0x20776a59 ||
+            context->Eip == 0x20777e63 ||
+            context->Eip == 0x2077e5da ||
+            context->Eip == 0x2077e69f ||
+            context->Eip == 0x2077e8c6 ||
+            context->Eip == 0x20780490 ||
+            context->Eip == 0x207823bc ||
+            context->Eip == 0x207837c6 ||
             context->Eip == 0x20733c3a || context->Eip == 0x20733cd0 ||
             context->Eip == 0x20733e3b || context->Eip == 0x20734a66 ||
             context->Eip == 0x2073759b || context->Eip == 0x20737631 ||
@@ -107,6 +160,15 @@ static LONG WINAPI draw_exception(EXCEPTION_POINTERS *exception)
         }
         {
             static const uint32_t affine_divides[] = {
+                0x20761d75, 0x20761d8f, 0x20761da9, 0x207625ce, 0x207625e1, 0x207625f6,
+                0x20762f16, 0x20762f30, 0x20762f4a, 0x2076376f, 0x20763782, 0x20763797,
+                0x207641e8, 0x20764202, 0x2076421c, 0x20764751, 0x20764764, 0x20764779,
+                0x20765099, 0x207650b3, 0x207650cd, 0x20765602, 0x20765615, 0x2076562a,
+                0x2076978a, 0x207697a4, 0x207697be, 0x20769fe3, 0x20769ff6, 0x2076a00b,
+                0x2076a92b, 0x2076a945, 0x2076a95f, 0x2076b184, 0x2076b197, 0x2076b1ac,
+                0x2076bbfd, 0x2076bc17, 0x2076bc31, 0x2076c166, 0x2076c179, 0x2076c18e,
+                0x2076caae, 0x2076cac8, 0x2076cae2, 0x2076d017, 0x2076d02a, 0x2076d03f,
+
                 0x2075e862, 0x2075e87c, 0x2075e896, 0x2075ee55, 0x2075ee68, 0x2075f568,
                 0x2075f582, 0x2075f59c, 0x2075fb5b, 0x2075fb6e, 0x2076039f, 0x207603b9,
                 0x207603d3, 0x207607b2, 0x207607c5, 0x20760ec5, 0x20760edf, 0x20760ef9,
@@ -144,6 +206,138 @@ static LONG WINAPI draw_exception(EXCEPTION_POINTERS *exception)
                 0x2073bb33, 0x2073bb4d, 0x2073bb67, 0x2073bf08, 0x2073bf1b,
                 0x2073e3b0, 0x2073e3ca, 0x2073e3e4, 0x2073e995, 0x2073e9a8,
                 0x2073eea2, 0x2073eebc, 0x2073eed6, 0x2073f277, 0x2073f28a,
+                0x20741758,
+                0x20741772,
+                0x2074178c,
+                0x20742150,
+                0x20742163,
+                0x20742679,
+                0x20742693,
+                0x207426ad,
+                0x20742c91,
+                0x20742ca4,
+                0x20745b77,
+                0x20745b91,
+                0x20745bab,
+                0x2074656e,
+                0x20746581,
+                0x20746a97,
+                0x20746ab1,
+                0x20746acb,
+                0x207470ae,
+                0x207470c1,
+                0x207433ff,
+                0x20743419,
+                0x20743433,
+                0x20744279,
+                0x2074428c,
+                0x207442c6,
+                0x207449c6,
+                0x207449e0,
+                0x207449fa,
+                0x20745240,
+                0x20745253,
+                0x2074528d,
+                0x2074781a,
+                0x20747834,
+                0x2074784e,
+                0x20748694,
+                0x207486a7,
+                0x207486e1,
+                0x20748de1,
+                0x20748dfb,
+                0x20748e15,
+                0x2074965b,
+                0x2074966e,
+                0x207496a8,
+                0x2076dcaf,
+                0x2076dcc9,
+                0x2076dce3,
+                0x2076ead3,
+                0x2076eae6,
+                0x2076f200,
+                0x2076f21a,
+                0x2076f234,
+                0x20770255,
+                0x20770268,
+                0x20770ab3,
+                0x20770acd,
+                0x20770ae7,
+                0x20771317,
+                0x2077132a,
+                0x20771a44,
+                0x20771a5e,
+                0x20771a78,
+                0x207723c9,
+                0x207723dc,
+                0x20779618,
+                0x20779632,
+                0x2077964c,
+                0x2077a43b,
+                0x2077a44e,
+                0x2077ab68,
+                0x2077ab82,
+                0x2077ab9c,
+                0x2077bbbc,
+                0x2077bbcf,
+                0x2077c41a,
+                0x2077c434,
+                0x2077c44e,
+                0x2077cc7d,
+                0x2077cc90,
+                0x2077d3aa,
+                0x2077d3c4,
+                0x2077d3de,
+                0x2077dd2e,
+                0x2077dd41,
+                0x20772e9f,
+                0x20772eb9,
+                0x20772ed3,
+                0x20774107,
+                0x2077411a,
+                0x20774154,
+                0x20774a69,
+                0x20774a83,
+                0x20774a9d,
+                0x20775f02,
+                0x20775f15,
+                0x20775f4f,
+                0x20776995,
+                0x207769af,
+                0x207769c9,
+                0x2077743d,
+                0x20777450,
+                0x2077748a,
+                0x20777d9f,
+                0x20777db9,
+                0x20777dd3,
+                0x20778968,
+                0x2077897b,
+                0x207789b5,
+                0x2077e802,
+                0x2077e81c,
+                0x2077e836,
+                0x2077fa6a,
+                0x2077fa7d,
+                0x2077fab7,
+                0x207803cc,
+                0x207803e6,
+                0x20780400,
+                0x20781865,
+                0x20781878,
+                0x207818b2,
+                0x207822f8,
+                0x20782312,
+                0x2078232c,
+                0x20782da0,
+                0x20782db3,
+                0x20782ded,
+                0x20783702,
+                0x2078371c,
+                0x20783736,
+                0x207842cb,
+                0x207842de,
+                0x20784318,
                 0x20733d81, 0x20733d9b, 0x20733db5, 0x20734597, 0x207345aa,
                 0x207349ac, 0x207349c6, 0x207349e0, 0x20734ea2, 0x20734eb5,
                 0x207376e2, 0x207376fc, 0x20737716, 0x20737ef7, 0x20737f0a,
@@ -221,13 +415,18 @@ static uint32_t drawing_arguments(uint32_t slot, const uint32_t *arguments, uint
     draw_active = 1;
     result = invoke_draw(WORD(images[side], 0x38 + slot), arguments, count, 0xaabbccdd);
     draw_active = 0;
+    if (slot == 0xa4) {
+        uint16_t control, status;
+        __asm__ volatile("fnstcw %0; fnstsw %1" : "=m"(control), "=m"(status));
+        event(control); event(status & 0x3f);
+    }
     event(draw_fault_code); event(draw_fault_access); event(draw_fault_address);
     if (!draw_fault_code) {
         if (side == 0)
             memcpy(register_states[step], draw_registers, sizeof draw_registers);
         else for (reg = 0; reg < 7; reg++) {
             /* These three entries expose unspecified caller-saved leftovers. */
-            if ((slot == 0x18 || slot == 0x24 || slot == 0x28) && (reg == 2 || reg == 3)) continue;
+            if ((slot == 0x18 || slot == 0x24 || slot == 0x28 || slot == 0xa4) && (reg == 2 || reg == 3)) continue;
             uint32_t expected = register_states[step][reg], actual = draw_registers[reg];
             if (draw_ecx_pointer && reg == 2) {
                 expected -= ADDRESS(images[0]); actual -= ADDRESS(images[1]);
@@ -253,7 +452,7 @@ static uint32_t drawing(uint32_t slot, uint32_t a, uint32_t b, uint32_t c, uint3
     case 0x40: case 0x4c: case 0x54: case 0x78: count = 1; break;
     case 0x1c: case 0x20: count = 3; break;
     case 0x24: case 0x2c: case 0x30: case 0x44: count = 4; break;
-    case 0x28: case 0x48: count = 6; break;
+    case 0x28: case 0x48: case 0xa4: count = 6; break;
     default: count = 5; break;
     }
     return drawing_arguments(slot, arguments, count);

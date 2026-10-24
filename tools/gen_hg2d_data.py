@@ -64,6 +64,8 @@ _, text_rva, _, text_raw = sections['.text']
 with open('src/hg2d/hg2d_projective_tables.inc', 'w') as output:
     output.write(header)
     tables = (
+        ('projective_mip_fog_tails', ((0x2074435c, 0x20745323), (0x20748777, 0x2074973e))),
+        ('projective_mip_tails', ((0x2074221e, 0x20742d5f), (0x2074663c, 0x2074717c))),
         ('projective_tails', ((0x2073460b, 0x20734f16), (0x20737f6b, 0x20738875))),
         ('projective_key_fog_tails', ((0x2073cefb, 0x2073db57), (0x20740268, 0x20740ec4))),
         ('projective_fog_tails', ((0x207361ed, 0x20736f81), (0x20739b4a, 0x2073a8de))),
@@ -84,6 +86,18 @@ with open('src/hg2d/hg2d_projective_tables.inc', 'w') as output:
         output.write('};\n')
 
     dither_tables = (
+        ('projective_mip_dither_fog_tails', (
+            ((0x2077600f, 0x20774203), (0x20778a75, 0x20777539)),
+            ((0x20781972, 0x2077fb66), (0x207843d8, 0x20782e9c)),
+        )),
+        ('projective_mip_dither_tails', (
+            ((0x2077034d, 0x2076ebba), (0x207724c1, 0x207713fe)),
+            ((0x2077bcb4, 0x2077a522), (0x2077de26, 0x2077cd64)),
+        )),
+        ('projective_dither_key_fog_tails', (
+            ((0x20763822, 0x20762670), (0x207656b5, 0x207647f3)),
+            ((0x2076b237, 0x2076a085), (0x2076d0ca, 0x2076c208)),
+        )),
         ('projective_dither_key_tails', (
             ((0x2075fbf9, 0x2075eee2), (0x20761376, 0x2076083f)),
             ((0x20767610, 0x207668f9), (0x20768d8d, 0x20768256)),

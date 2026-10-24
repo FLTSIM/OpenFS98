@@ -154,7 +154,10 @@ EAX_ENTRY(texture_update, texture_update_body);
 
 #include "hg2d_palette.inc"
 #include "hg2d_draw.inc"
+#include "hg2d_mip_build.inc"
+#include "hg2d_mip.inc"
 #include "hg2d_projective.inc"
+#include "hg2d_mip_dither.inc"
 #include "hg2d_matrix.inc"
 #include "hg2d_polygon.inc"
 #include "hg2d_fill.inc"
@@ -165,6 +168,11 @@ EAX_ENTRY(texture_update, texture_update_body);
 #include "hg2d_gouraud.inc"
 #include "hg2d_blit.inc"
 #include "hg2d_disc.inc"
+#include "hg2d_fan.inc"
+#include "hg2d_resource.inc"
+#include "hg2d_init.inc"
+#include "hg2d_device_palette.inc"
+#include "hg2d_device_pixels.inc"
 
 __asm__(".globl _ImportTable\n.set _ImportTable, _hg2d_image\n"
         ".globl _Linkage\n.set _Linkage, _hg2d_image + 0x38\n");
@@ -182,6 +190,7 @@ BOOL WINAPI DllMain(HINSTANCE instance, DWORD reason, LPVOID reserved)
 #define HG2D_DATA_POINTER(at, target) WORD(at) = ADDRESS(hg2d_image + (target));
 #include "hg2d_pointers.inc"
 #undef HG2D_DATA_POINTER
+        WORD(0x38 + 0x04) = ADDRESS(module_init);
         WORD(0x38 + 0x08) = ADDRESS(module_deinit);
         WORD(0x38 + 0x18) = ADDRESS(draw_flush);
         WORD(0x38 + 0x1c) = ADDRESS(draw_point);
@@ -199,6 +208,8 @@ BOOL WINAPI DllMain(HINSTANCE instance, DWORD reason, LPVOID reserved)
         WORD(0x38 + 0x4c) = ADDRESS(affine_close);
         WORD(0x38 + 0x50) = ADDRESS(perspective_vertex);
         WORD(0x38 + 0x54) = ADDRESS(perspective_close);
+        WORD(0x38 + 0x58) = ADDRESS(resource_palette_default);
+        WORD(0x38 + 0x68) = ADDRESS(resource_palette_load);
         WORD(0x38 + 0x5c) = ADDRESS(palette_realize);
         WORD(0x38 + 0x60) = ADDRESS(palette_refresh_entry);
         WORD(0x38 + 0x64) = ADDRESS(palette_force);
@@ -210,6 +221,7 @@ BOOL WINAPI DllMain(HINSTANCE instance, DWORD reason, LPVOID reserved)
         WORD(0x38 + 0x84) = ADDRESS(disc);
         WORD(0x38 + 0x88) = ADDRESS(colour_remap);
         WORD(0x38 + 0x6c) = ADDRESS(texture_remap);
+        WORD(0x38 + 0xa4) = ADDRESS(fan_draw);
         WORD(0x38 + 0xa8) = ADDRESS(texture_load);
         WORD(0x38 + 0xac) = ADDRESS(texture_create);
         WORD(0x38 + 0xb0) = ADDRESS(texture_destroy);

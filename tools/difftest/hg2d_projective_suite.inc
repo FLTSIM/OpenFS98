@@ -1,4 +1,6 @@
 /* Basic software projective spans through public +0x44/+0x40. */
+static uint8_t projective_mip_pixels[0x20000];
+static int projective_mip_mode, projective_mip_base_only;
 static int projective_key_mode, projective_fog_mode, projective_dither_mode;
 
 static void projective_case(uint32_t selector, int sharp)
@@ -40,6 +42,16 @@ static void projective_case(uint32_t selector, int sharp)
         GLOBAL_HALF(0x1172) = projective_key_mode ? 1 : 0;
         if (projective_key_mode) matrix_texture[1] = 0;
     }
+    if (projective_mip_mode) {
+        GLOBAL_HALF(0xcb4) = 2; GLOBAL_HALF(0xcce) = projective_dither_mode;
+        GLOBAL_HALF(0x1172) = GLOBAL_HALF(0x324) = 1;
+        matrix_texture[0] = ADDRESS(projective_mip_pixels); matrix_texture[1] = 0x40000;
+        if (projective_mip_base_only)
+            for (uint32_t index = 0; index < 128; index++) WORD(images[side], 0x439d + index * 4) = 0;
+        memcpy(projective_mip_pixels, matrix_pixels, sizeof matrix_pixels);
+        memcpy(projective_mip_pixels + sizeof matrix_pixels, matrix_pixels, sizeof matrix_pixels);
+    }
+
 }
 
 static void projective_point(uint32_t x, uint32_t y)
@@ -49,10 +61,26 @@ static void projective_point(uint32_t x, uint32_t y)
 
 static void projective_finish(void)
 {
+    if (projective_mip_mode && matrix_texture[0] == ADDRESS(projective_mip_pixels)) {
+        memcpy(projective_mip_pixels, matrix_pixels, sizeof matrix_pixels);
+        memcpy(projective_mip_pixels + sizeof matrix_pixels, matrix_pixels, sizeof matrix_pixels);
+    }
+    if (projective_mip_mode && matrix_texture[0] == ADDRESS(canvas))
+        for (uint32_t index = 0; index < 128; index++) WORD(images[side], 0x439d + index * 4) = 0;
     polygon_compare = WORD(global, 0x1298) ? 2 : 1;
     drawing(0x40, draw_surface(), 0, 0, 0, 0, 0);
     CHECK(!draw_fault_code);
-    if (projective_dither_mode && projective_key_mode && !projective_fog_mode)
+    if (projective_mip_mode && projective_dither_mode && projective_fog_mode)
+        CHECK(WORD(images[side], 0x4200) == 0x20772c04 || WORD(images[side], 0x4200) == 0x2077e569);
+    else if (projective_mip_mode && projective_dither_mode)
+        CHECK(WORD(images[side], 0x4200) == 0x2076da6d || WORD(images[side], 0x4200) == 0x207793d8);
+    else if (projective_mip_mode && projective_fog_mode)
+        CHECK(WORD(images[side], 0x4200) == 0x207431a7 || WORD(images[side], 0x4200) == 0x207475c4);
+    else if (projective_mip_mode)
+        CHECK(WORD(images[side], 0x4200) == 0x20741559 || WORD(images[side], 0x4200) == 0x2074597a);
+    else if (projective_dither_mode && projective_key_mode && projective_fog_mode)
+        CHECK(WORD(images[side], 0x4200) == 0x20761af9 || WORD(images[side], 0x4200) == 0x20769510);
+    else if (projective_dither_mode && projective_key_mode && !projective_fog_mode)
         CHECK(WORD(images[side], 0x4200) == 0x2075e63f || WORD(images[side], 0x4200) == 0x20766058);
     else if (projective_dither_mode && projective_fog_mode)
         CHECK(WORD(images[side], 0x4200) == 0x2074e49d || WORD(images[side], 0x4200) == 0x207588f0);
@@ -362,7 +390,7 @@ static void run_projective_key_fog(uint32_t phase)
             projective_point(last_x, row + 1); projective_point(4, row + 1);
             projective_finish();
             if (index == 2 ? row < surface[2] : texel >= key)
-                for (y = row; y <= row + 1; y++) for (x = 4; x <= last_x + (index != 2); x++) {
+                for (y = row; y <= row + 1; y++) for (x = 4; x <= last_x + (index != 2 && !projective_dither_mode); x++) {
                     uint32_t offset = row_storage[16 + y] - ADDRESS(canvas) + x;
                     fill_expected[offset] = index == 2 ?
                         (scenario & 1 ? images[side][0xd70 + 256 + fill_expected[offset]] : images[side][0x1d06]) :
@@ -526,4 +554,201 @@ static void run_projective_dither_key(uint32_t phase)
     if (!phase) run_projective_keyed();
     else run_projective_dither(1);
     projective_dither_mode = projective_key_mode = 0;
+}
+
+static void run_projective_dither_key_fog(uint32_t phase)
+{
+    projective_dither_mode = projective_key_mode = projective_fog_mode = 1;
+    if (phase < 2) run_projective_key_fog(phase);
+    else run_projective_dither(1);
+    projective_dither_mode = projective_key_mode = projective_fog_mode = 0;
+}
+
+/* Plane spans use 16-byte edges and synthesize matrix endpoints per row. */
+static void run_projective_plane(uint32_t phase)
+{
+    uint32_t selector, keyed, shape, index, x, y, width;
+    matrix_reset();
+    for (index = 0; index < sizeof matrix_pixels; index++)
+        matrix_pixels[index] = (uint8_t)(index * 17 + (index >> 8) * 29 + scenario);
+    for (keyed = 0; keyed < 2; keyed++) for (selector = 0; selector < 4; selector++) {
+        for (shape = 0; shape < 9; shape++) {
+            projective_key_mode = keyed;
+            projective_fog_mode = phase & 1;
+            projective_dither_mode = phase >> 1;
+            projective_case(selector, (scenario + shape) & 1);
+            GLOBAL_HALF(0x2f4) = 0;
+            /* Unkeyed plane kernels require the ordinary software selector. */
+            if (!keyed) GLOBAL_HALF(0x1172) = 0;
+            x = 2 + scenario % 4; y = 3 + (scenario % 3);
+            width = (scenario * 7 + selector * 17 + shape * 3) % 130;
+            if (shape == 0) {
+                projective_point(x, y); projective_point(x + width, y);
+                projective_point(x + width, y + 3); projective_point(x, y + 3);
+            } else if (shape == 1) {
+                projective_point(x, y + 3); projective_point(x + width, y + 3);
+                projective_point(x + width, y); projective_point(x, y);
+            } else if (shape == 2) {
+                projective_point(x, y); projective_point(x + width, y);
+            } else if (shape == 3) {
+                projective_point(x, y);
+            } else if (shape == 4) {
+                projective_point(x, y); projective_point(x + 20, y + 10);
+                projective_point(x, y + 10); projective_point(x + 20, y);
+            } else if (shape == 5) {
+                /* Six simultaneous intersections exercise the in-place sort. */
+                projective_point(x, y); projective_point(x + 6, y + 8);
+                projective_point(x + 12, y); projective_point(x + 18, y + 8);
+                projective_point(x + 24, y); projective_point(x + 30, y + 8);
+            } else if (shape == 6) {
+                polygon_submit(x * 2 + 1, y * 2 + 1, 0x2000);
+                polygon_submit((x + width) * 2 + 1, y * 2 + 1, 0x2000);
+                polygon_submit((x + width) * 2 + 1, (y + 3) * 2 + 1, 0x2000);
+                polygon_submit(x * 2 + 1, (y + 3) * 2 + 1, 0x2000);
+            } else if (shape == 8) {
+                projective_point(x, y); projective_point(x + 6, y + 8);
+                projective_point(x + 12, y); projective_point(x + 18, y + 8);
+                projective_point(x + 24, y);
+            } else {
+                projective_point((uint32_t)-3, y); projective_point(x + 20, y + 3);
+                projective_point(x, y + 6);
+            }
+            if (shape & 1) WORD(global, 0x1298) = 1 + scenario % 15;
+            projective_finish();
+            CHECK(WORD(images[side], 0x402c) == 0x20784d69);
+        }
+    }
+    /* Force coordinate division repairs after ordinary vertex projection. */
+    for (index = 0; index < 4; index++) {
+        projective_case(index, 0);
+        GLOBAL_HALF(0x2f4) = 0;
+        projective_point(4, 4); projective_point(16, 4); projective_point(12, 7);
+        WORD(images[side], 0x8e0) = index & 1 ? 0x80000000 : 0;
+        WORD(images[side], 0x8e4) = index & 2 ? 0x80000000 : 0;
+        projective_finish();
+    }
+    projective_key_mode = projective_fog_mode = projective_dither_mode = 0;
+    memset(matrix_pixels, 0xa5, sizeof matrix_pixels);
+    for (selector = 0; selector < 2; selector++) {
+        projective_case(selector, 0);
+        GLOBAL_HALF(0x2f4) = 0;
+        memcpy(fill_expected, canvas, CANVAS_SIZE);
+        projective_point(4, 4); projective_point(12, 4); projective_point(12, 8); projective_point(4, 8);
+        projective_finish();
+        for (y = 4; y <= 8; y++) for (x = 4; x <= 13; x++)
+            fill_expected[row_storage[16 + y] - ADDRESS(canvas) + x] = 0xa5;
+        CHECK(!memcmp(canvas, fill_expected, CANVAS_SIZE));
+    }
+    projective_key_mode = projective_fog_mode = projective_dither_mode = 0;
+    polygon_compare = 0;
+}
+
+static void run_projective_mip(uint32_t phase)
+{
+    uint32_t level, selector, index, width;
+    projective_mip_mode = 1;
+    if (!phase) run_projective();
+    else {
+        matrix_reset();
+        for (index = 0; index < sizeof matrix_pixels; index++)
+            matrix_pixels[index] = (uint8_t)(index * 13 + (index >> 8) * 23 + scenario);
+        for (level = 0; level < 9; level++) for (selector = 0; selector < 4; selector++) {
+            projective_case(selector, (level + scenario) & 1);
+            for (index = 0; index < 128; index++) WORD(images[side], 0x439d + index * 4) = level;
+            /* Defeat the near fallback, then cover full blocks and every tail. */
+            WORD(images[side], 0x4371) = 0; /* Setup overwrites this; use distant attributes. */
+            WORD(global, 0xce0) = selector & 2 ? 0x40000000 : 0xc0000000;
+            WORD(global, 0xcac) = WORD(global, 0xcb0) = 0xffffff;
+            if (projective_dither_mode || projective_fog_mode) {
+                WORD(global, 0xce0) = selector & 2 ? 5000 : 0u - 5000;
+                GLOBAL_HALF(0xcfc) = GLOBAL_HALF(0xd02) = 0; WORD(global, 0xd10) = 0;
+            }
+            width = 60 + (scenario + level * 3 + selector) % 69;
+            projective_point(2 + (selector & 1), 3); projective_point(2 + width, 3);
+            projective_point(2 + width, 6); projective_point(2 + (selector & 1), 6);
+            projective_finish();
+        }
+        for (index = 0; index < 3; index++) {
+            projective_case(index & 1, 0);
+            WORD(global, 0x320) = 161000;
+            WORD(global, 0xce0) = 0u - (575 + index);
+            GLOBAL_HALF(0xcfc) = GLOBAL_HALF(0xd02) = 0; WORD(global, 0xd10) = 0;
+            images[side][0x435d] = 0xa5;
+            projective_point(4, 4); projective_point(84, 4); projective_point(84, 6); projective_point(4, 6);
+            projective_finish();
+            CHECK(WORD(images[side], 0x4369) == 256 && WORD(images[side], 0x4371) == 0x24000);
+            if (index < 2) CHECK(images[side][0x435d] == 0xa5);
+            else CHECK(WORD(images[side], 0x435d) == 8);
+        }
+        for (level = 1; level < 9; level++) {
+            projective_case(level & 1, 0);
+            for (index = 0; index < 128; index++) WORD(images[side], 0x439d + index * 4) = level;
+            WORD(global, 0xce0) = 0u - 5000;
+            GLOBAL_HALF(0xcfc) = GLOBAL_HALF(0xd02) = 0; WORD(global, 0xd10) = 0;
+            GLOBAL_HALF(0xcfe) = GLOBAL_HALF(0xd04) = 0;
+            WORD(global, 0xd14) = 0xffff0000; WORD(global, 0xca8) = 0xff000000;
+            projective_point(4, 4); projective_point(84, 4); projective_point(84, 6); projective_point(4, 6);
+            projective_finish();
+        }
+        projective_case(1, 0);
+        WORD(global, 0xce0) = 0u - 430186;
+        GLOBAL_HALF(0xcfc) = GLOBAL_HALF(0xd02) = 0; WORD(global, 0xd10) = 0;
+        WORD(images[side], 0x439d) = 2;
+        WORD(images[side], 0x439d + 126 * 4) = 3;
+        WORD(images[side], 0x439d + 127 * 4) = 8;
+        projective_point(4, 4); projective_point(84, 4); projective_point(84, 6); projective_point(4, 6);
+        projective_finish();
+        CHECK(WORD(images[side], 0x435d) == 8);
+        if (projective_dither_mode) {
+            for (index = 0; index < sizeof matrix_pixels; index++)
+                matrix_pixels[index] = (uint8_t)(index ^ (index >> 8) ^ 0x80);
+            projective_case(1, 0);
+            for (index = 0; index < 128; index++) WORD(images[side], 0x439d + index * 4) = 1;
+            WORD(global, 0xce0) = 0u - 5000;
+            for (index = 0; index < 3; index++) GLOBAL_HALF(0xcfa + index * 2) = GLOBAL_HALF(0xd00 + index * 2) = 0;
+            WORD(global, 0xd0c) = WORD(global, 0xd14) = 0xffff0000;
+            WORD(global, 0xd10) = 0;
+            WORD(global, 0xca4) = WORD(global, 0xca8) = 0xff000000;
+            index = row_storage[16 + 9];
+            row_storage[16 + 9] = ADDRESS(images[side] + 0x4375) - 4;
+            projective_point(4, 9); projective_point(7, 9);
+            projective_finish();
+            row_storage[16 + 9] = index;
+        }
+    }
+    projective_mip_mode = 0;
+}
+
+static void run_projective_mip_fog(uint32_t phase)
+{
+    projective_mip_mode = projective_fog_mode = 1;
+    if (!phase) run_projective_fog();
+    else run_projective_mip(1);
+    projective_mip_mode = projective_fog_mode = 0;
+}
+
+static void run_projective_mip_dither(uint32_t phase)
+{
+    projective_mip_mode = projective_dither_mode = 1;
+    if (!phase) run_projective_dither(0);
+    else if (phase == 1) run_projective_mip(1);
+    else {
+        projective_mip_base_only = 1;
+        run_projective_dither(1);
+        projective_mip_base_only = 0;
+    }
+    projective_mip_mode = projective_dither_mode = 0;
+}
+
+static void run_projective_mip_dither_fog(uint32_t phase)
+{
+    projective_mip_mode = projective_dither_mode = projective_fog_mode = 1;
+    if (!phase) run_projective_dither_fog(0);
+    else if (phase == 1) run_projective_mip(1);
+    else {
+        projective_mip_base_only = 1;
+        run_projective_dither_fog(1);
+        projective_mip_base_only = 0;
+    }
+    projective_mip_mode = projective_dither_mode = projective_fog_mode = 0;
 }

@@ -27,7 +27,9 @@ static uint8_t arena[220][0x10000], supplied[0x10000];
 static uint32_t side, step, scenario, random_state, block_count, alloc_count;
 static uint32_t fail_every, load_success, event_hash, operations;
 static uint32_t allocations, failures, loads, releases, full_pools, unaligned;
-static uint32_t polygon_compare, shaded_map_compare;
+static uint32_t polygon_compare, shaded_map_compare, resource_compare;
+static uint32_t mip_build_compare;
+static uint8_t mip_build_heap[0x18000], mip_build_states[STATE_CAPACITY][0x18000];
 static uint8_t normalized_global[0x2000];
 static uint8_t global[0x2000], global_states[STATE_CAPACITY][0x2000];
 static uint32_t carries[STATE_CAPACITY], check_carry, palette_calls, notifications;
@@ -133,7 +135,17 @@ static void compare(uint32_t result)
 #define HG2D_DATA_POINTER(at, target) if (!(shaded_map_compare && (at) >= 0x4e00 && (at) < 0x6e00)) WORD(normalized, at) -= ADDRESS(images[side]) - 0x20792000u;
 #include "../../src/hg2d/hg2d_pointers.inc"
 #undef HG2D_DATA_POINTER
+    if (resource_compare) {
+        WORD(normalized, 0xd58) = normalize_result(WORD(normalized, 0xd58));
+        WORD(normalized, 0x4d68) = normalize_result(WORD(normalized, 0x4d68));
+        WORD(normalized, 0x4d6c) = normalize_result(WORD(normalized, 0x4d6c));
+    }
     memcpy(normalized_global, global, sizeof global);
+    if (mip_build_compare) WORD(normalized_global, 0xc8c) = normalize_result(WORD(normalized_global, 0xc8c));
+    if (resource_compare) {
+        WORD(normalized_global, 0xc10) = normalize_result(WORD(normalized_global, 0xc10));
+        WORD(normalized_global, 0xc14) = normalize_result(WORD(normalized_global, 0xc14));
+    }
     if (polygon_compare) {
         WORD(normalized_global, 0xc14) -= ADDRESS(images[side]) - 0x20792000u;
         if (WORD(normalized, 0x4030))
@@ -143,6 +155,13 @@ static void compare(uint32_t result)
     }
     /* Service pointers differ by implementation; import links share stubs. */
     memset(normalized + 0x38, 0, 0xc0);
+    if (mip_build_compare) {
+        if (!side) memcpy(mip_build_states[step], mip_build_heap, sizeof mip_build_heap);
+        else if (memcmp(mip_build_states[step], mip_build_heap, sizeof mip_build_heap)) {
+            printf("%s scenario %u step %u differs: mip heap\n", active_suite, scenario, step);
+            ExitProcess(1);
+        }
+    }
     if (side == 0) {
         memcpy(states[step], normalized, DATA_SIZE);
         memcpy(global_states[step], normalized_global, sizeof global);
@@ -188,7 +207,7 @@ static uint32_t call(uint32_t slot, uint32_t first, uint32_t second, uint32_t th
     check_carry = slot == 0x60 || slot == 0x64 || slot == 0x7c;
     if (slot == 0xa8 || slot == 0x70) count = 3;
     if (slot == 0xb4 || slot == 0x6c || slot == 0x7c) count = 1;
-    if (slot == 0x5c || slot == 0x60 || slot == 0x64) count = 0;
+    if (slot == 0x04 || slot == 0x58 || slot == 0x5c || slot == 0x60 || slot == 0x64) count = 0;
     touched = NULL;
     if (slot == 0x6c)
         touched = (uint8_t *)(uintptr_t)first;
@@ -294,11 +313,16 @@ static void run_textures(void)
 }
 
 #include "hg2d_palette_suite.inc"
+#include "hg2d_device_palette_suite.inc"
 #include "hg2d_draw_suite.inc"
+#include "hg2d_device_pixels_suite.inc"
 #include "hg2d_polygon_suite.inc"
 #include "hg2d_fill_suite.inc"
+#include "hg2d_resource_suite.inc"
+#include "hg2d_init_suite.inc"
 #include "hg2d_matrix_suite.inc"
 #include "hg2d_projective_suite.inc"
+#include "hg2d_mip_build_suite.inc"
 #include "hg2d_textured_suite.inc"
 #include "hg2d_perspective_suite.inc"
 #include "hg2d_affine_suite.inc"
@@ -306,6 +330,7 @@ static void run_textures(void)
 #include "hg2d_gouraud_suite.inc"
 #include "hg2d_blit_suite.inc"
 #include "hg2d_disc_suite.inc"
+#include "hg2d_fan_suite.inc"
 
 static LONG WINAPI fault(EXCEPTION_POINTERS *exception)
 {
@@ -320,7 +345,7 @@ int main(int argc, char **argv)
     uint32_t count = argc > 1 ? (uint32_t)strtoul(argv[1], NULL, 0) : 20000;
     HMODULE modules[2], util;
     const char *suite = argc > 2 ? argv[2] : "all";
-    CHECK(!strcmp(suite, "all") || !strcmp(suite, "textures") || !strcmp(suite, "palette") || !strcmp(suite, "colours") || !strcmp(suite, "drawing") || !strcmp(suite, "polygons") || !strcmp(suite, "fills") || !strcmp(suite, "textured") || !strcmp(suite, "affine") || !strcmp(suite, "gouraud") || !strcmp(suite, "blits") || !strcmp(suite, "lifecycle") || !strcmp(suite, "optimized") || !strcmp(suite, "perspective") || !strcmp(suite, "discs") || !strcmp(suite, "perspective_fill") || !strcmp(suite, "matrix_vertices") || !strcmp(suite, "matrix_fills") || !strcmp(suite, "projective") || !strcmp(suite, "projective_keyed") || !strcmp(suite, "projective_fog") || !strcmp(suite, "projective_key_fog") || !strcmp(suite, "projective_dither") || !strcmp(suite, "projective_dither_fog") || !strcmp(suite, "projective_dither_key"));
+    CHECK(!strcmp(suite, "all") || !strcmp(suite, "textures") || !strcmp(suite, "palette") || !strcmp(suite, "colours") || !strcmp(suite, "drawing") || !strcmp(suite, "polygons") || !strcmp(suite, "fills") || !strcmp(suite, "textured") || !strcmp(suite, "affine") || !strcmp(suite, "gouraud") || !strcmp(suite, "blits") || !strcmp(suite, "lifecycle") || !strcmp(suite, "optimized") || !strcmp(suite, "perspective") || !strcmp(suite, "discs") || !strcmp(suite, "perspective_fill") || !strcmp(suite, "matrix_vertices") || !strcmp(suite, "matrix_fills") || !strcmp(suite, "projective") || !strcmp(suite, "projective_keyed") || !strcmp(suite, "projective_fog") || !strcmp(suite, "projective_key_fog") || !strcmp(suite, "projective_dither") || !strcmp(suite, "projective_dither_fog") || !strcmp(suite, "projective_dither_key") || !strcmp(suite, "projective_dither_key_fog") || !strcmp(suite, "projective_plane") || !strcmp(suite, "projective_mip") || !strcmp(suite, "projective_mip_fog") || !strcmp(suite, "projective_mip_dither") || !strcmp(suite, "projective_mip_dither_fog") || !strcmp(suite, "resources") || !strcmp(suite, "initialization") || !strcmp(suite, "projective_mip_build") || !strcmp(suite, "fans") || !strcmp(suite, "device_palettes") || !strcmp(suite, "device_pixels"));
     SetUnhandledExceptionFilter(fault);
     CHECK(AddVectoredExceptionHandler(1, draw_exception));
     {
@@ -352,6 +377,11 @@ int main(int argc, char **argv)
               WORD(images[side], 0x30) == 0);
         memcpy(initial[side], images[side], DATA_SIZE);
     }
+    device_format_entry[0] = 0x2078e7d0; device_convert_entry[0] = 0x2078e890;
+    device_format_entry[1] = ADDRESS(GetProcAddress(modules[1], "hg2d_device_format"));
+    device_convert_entry[1] = ADDRESS(GetProcAddress(modules[1], "hg2d_device_convert"));
+    CHECK(device_format_entry[1] && device_convert_entry[1]);
+    for (side = 0; side < 2; side++) init_imports(modules[side]);
     host[0x20c / 4] = ADDRESS(host_alloc);
     host[0x214 / 4] = ADDRESS(host_free);
     fe[0x1c / 4] = ADDRESS(fe_load);
@@ -382,6 +412,34 @@ int main(int argc, char **argv)
         printf("per side: %u realizations, %u CHAIN notifications\n", palette_calls / 2, notifications / 2);
     }
     if ((!strcmp(suite, "all") || !strcmp(suite, "palette") || !strcmp(suite, "colours")) && (argc < 4 || strcmp(argv[3], "scripts"))) run_colour_vectors();
+    if (!strcmp(suite, "all") || !strcmp(suite, "resources")) {
+        active_suite = "resources";
+        operations = 0;
+        for (scenario = 0; scenario < count; scenario++)
+            for (side = 0; side < 2; side++) run_resources();
+        printf("hg2ddiff resources: %u scenarios, %u operations, 0 differ\n", count, operations / 2);
+    }
+    if (!strcmp(suite, "all") || !strcmp(suite, "initialization")) {
+        active_suite = "initialization";
+        operations = 0;
+        for (scenario = 0; scenario < count; scenario++)
+            for (side = 0; side < 2; side++) run_initialization();
+        printf("hg2ddiff initialization: %u scenarios, %u operations, 0 differ\n", count, operations / 2);
+    }
+    if (!strcmp(suite, "all") || !strcmp(suite, "device_palettes")) {
+        active_suite = "device_palettes";
+        operations = 0;
+        for (scenario = 0; scenario < count; scenario++)
+            for (side = 0; side < 2; side++) run_device_palettes();
+        printf("hg2ddiff device_palettes: %u scenarios, %u operations, 0 differ\n", count, operations / 2);
+    }
+    if (!strcmp(suite, "all") || !strcmp(suite, "device_pixels")) {
+        active_suite = "device_pixels";
+        operations = 0;
+        for (scenario = 0; scenario < count; scenario++)
+            for (side = 0; side < 2; side++) run_device_pixels();
+        printf("hg2ddiff device_pixels: %u scenarios, %u operations, 0 differ\n", count, operations / 2);
+    }
     if (!strcmp(suite, "all") || !strcmp(suite, "drawing")) {
         active_suite = "drawing";
         operations = 0;
@@ -493,6 +551,75 @@ int main(int argc, char **argv)
                count, operations / 2, draw_faults / 2);
         printf("retail host divide repairs: %u\n", draw_div_repairs);
     }
+    if (!strcmp(suite, "all") || !strcmp(suite, "projective_dither_key_fog")) {
+        active_suite = "projective_dither_key_fog";
+        operations = draw_div_repairs = draw_faults = 0;
+        for (scenario = 0; scenario < count; scenario++)
+            for (uint32_t phase = 0; phase < 3; phase++)
+                for (side = 0; side < 2; side++) run_projective_dither_key_fog(phase);
+        printf("hg2ddiff projective_dither_key_fog: %u scenarios, %u operations, %u faults, 0 differ\n",
+               count, operations / 2, draw_faults / 2);
+        printf("retail host divide repairs: %u\n", draw_div_repairs);
+    }
+    if (!strcmp(suite, "all") || !strcmp(suite, "projective_plane")) {
+        active_suite = "projective_plane";
+        operations = draw_div_repairs = draw_faults = 0;
+        for (scenario = 0; scenario < count; scenario++)
+            for (uint32_t phase = 0; phase < 4; phase++)
+                for (side = 0; side < 2; side++) run_projective_plane(phase);
+        printf("hg2ddiff projective_plane: %u scenarios, %u operations, %u faults, 0 differ\n",
+               count, operations / 2, draw_faults / 2);
+        printf("retail host divide repairs: %u\n", draw_div_repairs);
+    }
+    if (!strcmp(suite, "all") || !strcmp(suite, "projective_mip")) {
+        active_suite = "projective_mip";
+        operations = draw_div_repairs = draw_faults = 0;
+        for (scenario = 0; scenario < count; scenario++)
+            for (uint32_t phase = 0; phase < 2; phase++)
+                for (side = 0; side < 2; side++) run_projective_mip(phase);
+        printf("hg2ddiff projective_mip: %u scenarios, %u operations, %u faults, 0 differ\n",
+               count, operations / 2, draw_faults / 2);
+        printf("retail host divide repairs: %u\n", draw_div_repairs);
+    }
+    if (!strcmp(suite, "all") || !strcmp(suite, "projective_mip_fog")) {
+        active_suite = "projective_mip_fog";
+        operations = draw_div_repairs = draw_faults = 0;
+        for (scenario = 0; scenario < count; scenario++)
+            for (uint32_t phase = 0; phase < 2; phase++)
+                for (side = 0; side < 2; side++) run_projective_mip_fog(phase);
+        printf("hg2ddiff projective_mip_fog: %u scenarios, %u operations, %u faults, 0 differ\n",
+               count, operations / 2, draw_faults / 2);
+        printf("retail host divide repairs: %u\n", draw_div_repairs);
+    }
+    if (!strcmp(suite, "all") || !strcmp(suite, "projective_mip_dither")) {
+        active_suite = "projective_mip_dither";
+        operations = draw_div_repairs = draw_faults = 0;
+        for (scenario = 0; scenario < count; scenario++)
+            for (uint32_t phase = 0; phase < 3; phase++)
+                for (side = 0; side < 2; side++) run_projective_mip_dither(phase);
+        printf("hg2ddiff projective_mip_dither: %u scenarios, %u operations, %u faults, 0 differ\n",
+               count, operations / 2, draw_faults / 2);
+        printf("retail host divide repairs: %u\n", draw_div_repairs);
+    }
+    if (!strcmp(suite, "all") || !strcmp(suite, "projective_mip_dither_fog")) {
+        active_suite = "projective_mip_dither_fog";
+        operations = draw_div_repairs = draw_faults = 0;
+        for (scenario = 0; scenario < count; scenario++)
+            for (uint32_t phase = 0; phase < 3; phase++)
+                for (side = 0; side < 2; side++) run_projective_mip_dither_fog(phase);
+        printf("hg2ddiff projective_mip_dither_fog: %u scenarios, %u operations, %u faults, 0 differ\n",
+               count, operations / 2, draw_faults / 2);
+        printf("retail host divide repairs: %u\n", draw_div_repairs);
+    }
+    if (!strcmp(suite, "all") || !strcmp(suite, "projective_mip_build")) {
+        active_suite = "projective_mip_build";
+        operations = draw_div_repairs = draw_faults = 0;
+        for (scenario = 0; scenario < count; scenario++)
+            for (side = 0; side < 2; side++) run_projective_mip_build();
+        printf("hg2ddiff projective_mip_build: %u scenarios, %u operations, %u faults, 0 differ\n",
+               count, operations / 2, draw_faults / 2);
+        printf("retail host divide repairs: %u\n", draw_div_repairs);
+    }
     if (!strcmp(suite, "all") || !strcmp(suite, "textured")) {
         active_suite = "textured";
         operations = draw_div_repairs = draw_faults = 0;
@@ -554,6 +681,14 @@ int main(int argc, char **argv)
         printf("hg2ddiff perspective_fill: %u scenarios, %u operations, %u faults, 0 differ\n",
                count, operations / 2, draw_faults / 2);
         printf("retail host divide repairs: %u\n", draw_div_repairs);
+    }
+    if (!strcmp(suite, "all") || !strcmp(suite, "fans")) {
+        active_suite = "fans";
+        operations = draw_div_repairs = draw_faults = 0;
+        for (scenario = 0; scenario < count; scenario++)
+            for (uint32_t rounding = 0; rounding < 4; rounding++)
+                for (side = 0; side < 2; side++) run_fans(rounding);
+        printf("hg2ddiff fans: %u scenarios, %u operations, %u faults, 0 differ\n", count, operations / 2, draw_faults / 2);
     }
     if (!strcmp(suite, "all") || !strcmp(suite, "optimized")) {
         DWORD old_protection;

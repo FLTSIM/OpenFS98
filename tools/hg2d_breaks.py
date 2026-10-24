@@ -14,7 +14,7 @@ import tempfile
 root = Path(__file__).resolve().parent.parent
 source = (root / 'src/hg2d/hg2d.c').read_text()
 sections = {}
-for section in ('palette', 'draw', 'dither', 'projective', 'matrix', 'polygon', 'fill', 'textured', 'perspective', 'perspective_fill', 'affine', 'gouraud', 'blit', 'disc'):
+for section in ('palette', 'draw', 'mip_build', 'mip', 'dither', 'projective', 'mip_dither', 'matrix', 'polygon', 'fill', 'textured', 'perspective', 'perspective_fill', 'affine', 'gouraud', 'blit', 'disc', 'fan', 'resource', 'init', 'device_palette', 'device_pixels'):
     sections[section] = (root / ('src/hg2d/hg2d_%s.inc' % section)).read_text()
     if section == 'projective':
         sections[section] = sections[section].replace('#include "hg2d_dither.inc"', sections['dither'])
@@ -28,10 +28,10 @@ mutations = [
     ('descriptor width', 'descriptor[1] != 0x100', 'descriptor[1] != 0xff'),
     ('descriptor kind', 'descriptor[0] != 1', 'descriptor[0] != 0'),
     ('create flags', 'flags != 0)', 'flags > 1)'),
-    ('last pool slot', 'offset < POOL_END;', 'offset < POOL_END - 0x34;'),
+    ('last pool slot', 'for (offset = POOL; offset < POOL_END; offset += 0x34)\n        if (WORD(offset) == 0)', 'for (offset = POOL; offset < POOL_END - 0x34; offset += 0x34)\n        if (WORD(offset) == 0)'),
     ('palette byte', 'pixels[index] * 2]', 'pixels[index] * 2 + 1]'),
     ('palette last pixel', 'index < 0x10000;', 'index < 0xffff;'),
-    ('FE result', 'if (!load(', 'if (load('),
+    ('FE result', 'if (!load(texture[0],', 'if (load(texture[0],'),
     ('side texture flag', 'texture[1] |= 0x100000;', 'texture[1] |= 0x200000;'),
     ('load flags byte', '(flags ? 0xff00u : 0)', '(flags ? 0xfe00u : 0)'),
     ('destroy ownership', '!(flags & 1)', '!(flags & 2)'),
@@ -42,7 +42,7 @@ mutations = [
     ('update clear hardware', '(texture[1] & ~0x40000u) | 0x20000', '(texture[1] & ~0x80000u) | 0x20000'),
     ('update low eax', '(flags & 0xff);', '(flags & 0xffff);'),
     ('hardware accounting', 'WORD(0x8800 + index * 4)--;', 'WORD(0x8800 + index * 4)++;'),
-    ('hardware scratch', 'index < 8; index++)\n            WORD(0x8820', 'index < 7; index++)\n            WORD(0x8820'),
+    ('hardware scratch', '        for (index = 0; index < 8; index++)\n            WORD(0x8820', '        for (index = 0; index < 7; index++)\n            WORD(0x8820'),
     ('hardware tail', 'texture[3] = texture[2] = texture[7] = 0;', 'texture[3] = texture[2] = 0;'),
 ]
 mutations = [(*mutation, 'textures') for mutation in mutations]
@@ -453,7 +453,7 @@ projective_mutations = [
     ('projective block homogeneous advance', 'WORD(0x4178 + component * 4) += WORD(0x41b0 + component * 4);', 'WORD(0x4178 + component * 4) -= WORD(0x41b0 + component * 4);'),
     ('projective block old u scratch', 'WORD(0x4198) = WORD(0x4190);', 'WORD(0x4198) = WORD(0x41a0);'),
     ('projective block u slope rounding', '(uint32_t)((int32_t)(WORD(0x4190) - WORD(0x4198)) >> shift)', '(uint32_t)((int32_t)(WORD(0x4190) - WORD(0x4198)) / (int32_t)(1u << shift))'),
-    ('projective block saved count', 'WORD(0x4160) = remaining;\n        if (dither && fog)', 'WORD(0x4160) = remaining - block;\n        if (dither && fog)'),
+    ('projective block saved count', 'WORD(0x4160) = remaining;\n        if (mip && fog)', 'WORD(0x4160) = remaining - block;\n        if (mip && fog)'),
     ('projective block destination advance', 'pixel_address += direction * block * (dither ? 1 : 2);', 'pixel_address += direction * block;'),
     ('projective zero tail return', 'if ((int32_t)remaining <= 0) return;', 'if ((int32_t)remaining < 0) return;'),
     ('projective tail u division', 'projective_divide((int32_t)(WORD(0x41a0) - WORD(0x4190)), remaining)', 'projective_divide((int32_t)(WORD(0x41a0) - WORD(0x4190)), remaining + 1)'),
@@ -532,7 +532,7 @@ fog_mutations = [
     ('fog minus two suppression', 'WORD(0x4358) >= 0xfffffffeu', 'WORD(0x4358) >= 0xffffffffu'),
     ('fog suppression unsigned test', 'WORD(0x4358) >= 0xfffffffeu', '(int32_t)WORD(0x4358) >= -2'),
     ('fog block starting level', 'block, 0x4198, WORD(0x41c0), direction', 'block, 0x4198, WORD(0x41bc), direction'),
-    ('fog tail level division', '        WORD(0x4358) = projective_divide((int32_t)(WORD(0x41c4) - WORD(0x41bc)), remaining);\n        WORD(0x4354)', '        WORD(0x4358) = projective_divide((int32_t)(WORD(0x41c4) - WORD(0x41bc)), remaining + 1);\n        WORD(0x4354)'),
+    ('fog tail level division', '        WORD(0x4358) = projective_divide((int32_t)(WORD(0x41c4) - WORD(0x41bc)), remaining);\n        WORD(0x4354) = keyed', '        WORD(0x4358) = projective_divide((int32_t)(WORD(0x41c4) - WORD(0x41bc)), remaining + 1);\n        WORD(0x4354) = keyed'),
     ('fog tail starting level', 'remaining, 0x4190, WORD(0x41bc), direction', 'remaining, 0x4190, WORD(0x41c4), direction'),
     ('fog lookup row byte', '((shade >> 8) & 255) * 256 + raw', '((shade >> 9) & 255) * 256 + raw'),
     ('fog lookup source', '256 + raw);', '256 + (raw ^ 1));'),
@@ -666,7 +666,7 @@ dither_fog_mutations = [
     ('dither fog direction', 'forward |= WORD(0x4200) == 0x207588f0;', 'forward |= WORD(0x4200) == 0x2074e49d;'),
     ('dither fog block starting level', 'block, 0x4198, y, direction, 0, WORD(0x41c0)', 'block, 0x4198, y, direction, 0, WORD(0x41bc)'),
     ('dither fog tail starting level', 'WORD(0x45d9), 0x4190, y, direction, 1, WORD(0x41bc)', 'WORD(0x45d9), 0x4190, y, direction, 1, WORD(0x41c4)'),
-    ('dither fog shade row', '((level >> 8) & 255) * 256', '((level >> 9) & 255) * 256'),
+    ('dither fog shade row', '0xd70 + texel + ((level >> 8) & 255) * 256', '0xd70 + texel + ((level >> 9) & 255) * 256'),
     ('dither fog lookup', '0xd70 + texel +', '0xd71 + texel +'),
     ('dither fog opaque zero', dither_fog_store, '        if (BYTE(0xd70 + texel + ((level >> 8) & 255) * 256))' + dither_fog_store.lstrip()),
     ('dither fog doubled store', dither_fog_store, '        *(uint16_t *)POINTER(address) = BYTE(0xd70 + texel + ((level >> 8) & 255) * 256) * 0x101u;\n'),
@@ -676,7 +676,7 @@ dither_fog_mutations = [
     ('dither fog shade wrap', dither_fog_level, '        level = level + WORD(0x4358);\n'),
     ('dither fog u step shift', 'WORD(0x41a8) *= 65536u;\n    WORD(0x41ac) *= 65536u;\n    for (uint32_t pixel', 'WORD(0x41a8) *= 32768u;\n    WORD(0x41ac) *= 65536u;\n    for (uint32_t pixel'),
     ('dither fog v step shift', 'WORD(0x41ac) *= 65536u;\n    for (uint32_t pixel', 'WORD(0x41ac) *= 32768u;\n    for (uint32_t pixel'),
-    ('dither fog destination spacing', 'level = (level + WORD(0x4358)) & 0xffff0fffu;\n        address += direction;', 'level = (level + WORD(0x4358)) & 0xffff0fffu;\n        address += direction * 2;'),
+    ('dither fog destination spacing', '        level = (level + WORD(0x4358)) & 0xffff0fffu;\n        address += direction;', '        level = (level + WORD(0x4358)) & 0xffff0fffu;\n        address += direction * 2;'),
     ('dither fog sample prefetch', dither_fog_loop, dither_fog_prefetch),
     ('dither fog live tail flag', dither_fog_loop, dither_fog_loop.replace('for (uint32_t pixel', 'uint32_t saved_skip = WORD(0x45d5);\n    for (uint32_t pixel').replace('count && WORD(0x45d5)', 'count && saved_skip')),
     ('dither fog tail level division', 'if (fog) WORD(0x4358) = projective_divide((int32_t)(WORD(0x41c4) - WORD(0x41bc)), remaining);', 'if (fog) WORD(0x4358) = projective_divide((int32_t)(WORD(0x41c4) - WORD(0x41bc)), remaining + 1);'),
@@ -690,7 +690,11 @@ dither_fog_mutations = [
     ('dither fog tail target family', 'fog ? projective_dither_fog_tails', 'fog ? projective_dither_tails'),
 ]
 mutations += [(*mutation, 'projective_dither_fog') for mutation in dither_fog_mutations]
-dither_key_store = '        if (indexed >= BYTE(0x435c)) *(uint8_t *)POINTER(address) = indexed;\n'
+dither_key_store = """        if (indexed >= BYTE(0x435c)) {
+            uint8_t painted = fog ? BYTE(0xd70 + indexed + ((level >> 8) & 255) * 256) : indexed;
+            *(uint8_t *)POINTER(address) = painted;
+        }
+"""
 dither_key_advance = '        dither_advance(&key_u, &key_v, u_integer, v_integer);\n'
 dither_key_loop = """    for (uint32_t key_pixel = 0; key_pixel < count; key_pixel++) {
         if (tail && key_pixel + 1 == count && WORD(0x45d5)) return;
@@ -717,10 +721,10 @@ dither_key_mutations = [
     ('dither key doubled store', dither_key_store, '        if (indexed >= BYTE(0x435c)) *(uint16_t *)POINTER(address) = indexed * 0x101u;\n'),
     ('dither key unconditional store', dither_key_store, '        *(uint8_t *)POINTER(address) = indexed;\n'),
     ('dither key skip coordinate advance', dither_key_advance, '        if (indexed >= BYTE(0x435c)) dither_advance(&key_u, &key_v, u_integer, v_integer);\n'),
-    ('dither key skip destination advance', dither_key_advance + '        address += direction;', dither_key_advance + '        if (indexed >= BYTE(0x435c)) address += direction;'),
+    ('dither key skip destination advance', dither_key_advance + '        if (fog) level = (level + WORD(0x4358)) & 0xffff0fffu;\n        address += direction;', dither_key_advance + '        if (fog) level = (level + WORD(0x4358)) & 0xffff0fffu;\n        if (indexed >= BYTE(0x435c)) address += direction;'),
     ('dither key coordinate order', dither_key_store + dither_key_advance, dither_key_advance + dither_key_store),
     ('dither key sample prefetch', dither_key_loop, dither_key_prefetch),
-    ('dither key destination spacing', dither_key_advance + '        address += direction;', dither_key_advance + '        address += direction * 2;'),
+    ('dither key destination spacing', dither_key_advance + '        if (fog) level = (level + WORD(0x4358)) & 0xffff0fffu;\n        address += direction;', dither_key_advance + '        if (fog) level = (level + WORD(0x4358)) & 0xffff0fffu;\n        address += direction * 2;'),
     ('dither key live tail flag', dither_key_loop, dither_key_loop.replace('for (uint32_t key_pixel', 'uint32_t saved_skip = WORD(0x45d5);\n    for (uint32_t key_pixel').replace('count && WORD(0x45d5)', 'count && saved_skip')),
     ('dither key u step shift', 'WORD(0x41a8) *= 65536u;\n    WORD(0x41ac) *= 65536u;\n    for (uint32_t key_pixel', 'WORD(0x41a8) *= 32768u;\n    WORD(0x41ac) *= 65536u;\n    for (uint32_t key_pixel'),
     ('dither key v step shift', 'WORD(0x41ac) *= 65536u;\n    for (uint32_t key_pixel', 'WORD(0x41ac) *= 32768u;\n    for (uint32_t key_pixel'),
@@ -732,6 +736,299 @@ dither_key_mutations = [
     ('dither key tail target family', 'keyed ? projective_dither_key_tails', 'keyed ? projective_dither_tails'),
 ]
 mutations += [(*mutation, 'projective_dither_key') for mutation in dither_key_mutations]
+dither_key_fog_level = '        if (fog) level = (level + WORD(0x4358)) & 0xffff0fffu;\n'
+dither_key_fog_mutations = [
+    ('dither key fog key gate', 'keyed |= WORD(0x4200) == 0x20761af9 || WORD(0x4200) == 0x20769510;', 'keyed |= 0;'),
+    ('dither key fog shade gate', 'fog |= WORD(0x4200) == 0x20761af9 || WORD(0x4200) == 0x20769510;', 'fog |= 0;'),
+    ('dither key fog dither gate', 'dither |= WORD(0x4200) == 0x20761af9 || WORD(0x4200) == 0x20769510;', 'dither |= 0;'),
+    ('dither key fog direction', 'forward |= WORD(0x4200) == 0x20769510;', 'forward |= WORD(0x4200) == 0x20761af9;'),
+    ('dither key fog block dispatch', 'if (dither && keyed) dither_key_pixels', 'if (dither && keyed && !fog) dither_key_pixels'),
+    ('dither key fog tail dispatch', 'if (keyed) dither_key_pixels', 'if (keyed && !fog) dither_key_pixels'),
+    ('dither key fog raw key', 'indexed >= BYTE(0x435c)', '(fog ? BYTE(0xd70 + indexed + ((level >> 8) & 255) * 256) : indexed) >= BYTE(0x435c)'),
+    ('dither key fog opaque zero', '*(uint8_t *)POINTER(address) = painted;', 'if (painted) *(uint8_t *)POINTER(address) = painted;'),
+    ('dither key fog row byte', '0xd70 + indexed + ((level >> 8) & 255) * 256', '0xd70 + indexed + ((level >> 9) & 255) * 256'),
+    ('dither key fog lookup', '0xd70 + indexed +', '0xd71 + indexed +'),
+    ('dither key fog block level', '0, fog, WORD(0x41c0)', '0, fog, WORD(0x41bc)'),
+    ('dither key fog tail level', 'dither_key_pixels(pixel_address, WORD(0x45d9), 0x4190, y, direction, 1, fog, WORD(0x41bc))', 'dither_key_pixels(pixel_address, WORD(0x45d9), 0x4190, y, direction, 1, fog, WORD(0x41c4))'),
+    ('dither key fog skipped shade', dither_key_fog_level, '        if (fog && indexed >= BYTE(0x435c)) level = (level + WORD(0x4358)) & 0xffff0fffu;\n'),
+    ('dither key fog shade step', dither_key_fog_level, '        if (fog) level = (level - WORD(0x4358)) & 0xffff0fffu;\n'),
+    ('dither key fog shade wrap', dither_key_fog_level, '        if (fog) level = level + WORD(0x4358);\n'),
+    ('dither key fog shade order', dither_key_store + dither_key_advance + dither_key_fog_level, '        uint32_t next_level = (level + WORD(0x4358)) & 0xffff0fffu;\n' + dither_key_store + dither_key_advance + '        if (fog) level = next_level;\n'),
+    ('dither key fog full bias', 'tail ? dither_bias(address, y) : 0', '(tail || fog) ? dither_bias(address, y) : 0'),
+    ('dither key fog tail bias', 'tail ? dither_bias(address, y) : 0', 'tail && !fog ? dither_bias(address, y) : 0'),
+    ('dither key fog table direction', 'projective_dither_key_fog_tails[forward]', 'projective_dither_key_fog_tails[!forward]'),
+    ('dither key fog table block', 'projective_dither_key_fog_tails[forward][shift == 4]', 'projective_dither_key_fog_tails[forward][shift != 4]'),
+    ('dither key fog table row', 'projective_dither_key_fog_tails[forward][shift == 4][y & 1]', 'projective_dither_key_fog_tails[forward][shift == 4][(y ^ 1) & 1]'),
+    ('dither key fog table count', 'projective_dither_key_fog_tails[forward][shift == 4][y & 1][WORD(0x45d9)]', 'projective_dither_key_fog_tails[forward][shift == 4][y & 1][(WORD(0x45d9) + 1) % 33]'),
+    ('dither key fog table family', 'fog && keyed ? projective_dither_key_fog_tails', 'fog && keyed ? projective_dither_key_tails'),
+]
+mutations += [(*mutation, 'projective_dither_key_fog') for mutation in dither_key_fog_mutations]
+device_palette_mutations = [
+    ('device palette binding gate', 'if (!WORD(0x28940)) return 0;', 'if (0) return 0;'),
+    ('device palette cache count', 'for (index = 0; index < 8; index++) WORD(0x8820 + index * 4) = 0;', 'for (index = 0; index < 7; index++) WORD(0x8820 + index * 4) = 0;'),
+    ('device palette release guard', 'if (texture[3]) texture_release(texture);', 'texture_release(texture);'),
+    ('device palette accounting reset', 'WORD(0x289ec) = WORD(0x289d4) = WORD(0x5f40) = 0;', 'WORD(0x289ec) = WORD(0x289d4) = WORD(0x5f40) = 1;'),
+    ('device palette dirty ownership', 'if (WORD(offset + 12)) WORD(offset + 4) |= 0x20000;', 'if (WORD(offset + 8)) WORD(offset + 4) |= 0x20000;'),
+    ('device palette dirty flag', 'WORD(offset + 4) |= 0x20000;', 'WORD(offset + 4) |= 0x80000;'),
+    ('device palette red channel', 'entries[index * 4] = BYTE(0x39c2 + index * 3);', 'entries[index * 4] = BYTE(0x39c3 + index * 3);'),
+    ('device palette alpha', 'entries[index * 4 + 3] = 0;', 'entries[index * 4 + 3] = 1;'),
+    ('device palette factory flags', '(instance, 4, ADDRESS(entries), ADDRESS(&palette), 0)', '(instance, 5, ADDRESS(entries), ADDRESS(&palette), 0)'),
+    ('device palette output initialization', 'index, palette = 0, instance', 'index, palette = 1, instance'),
+    ('device palette release on failure', 'if (instance) {', 'if (instance && palette) {'),
+    ('device palette zero replacement', 'WORD(0x289f4) = palette;', 'if (palette) WORD(0x289f4) = palette;'),
+    ('device fog base scale', 'GLOBAL_HALF(0xcba) * 180u >> 16', 'GLOBAL_HALF(0xcba) * 181u >> 16'),
+    ('device fog intensity equality', 'intensity >= 100', 'intensity > 100'),
+    ('device fog lower depth equality', 'depth >= 0x1c52', 'depth > 0x1c52'),
+    ('device fog upper depth equality', 'depth < 0x7d00', 'depth <= 0x7d00'),
+    ('device fog time boundary', 'GLOBAL[0x238] < 12', 'GLOBAL[0x238] <= 12'),
+    ('device fog angle offset', 'angle -= 0x40000000u;', 'angle -= 0x20000000u;'),
+    ('device fog signed magnitude', '(int32_t)magnitude <= 0x30000000', 'magnitude <= 0x30000000'),
+    ('device fog visibility flag', 'WORD(0x28860) = 1;', 'WORD(0x28860) = 0;'),
+    ('device fog signed division', '(int32_t)product / 12288', '(int32_t)product / 12289'),
+    ('device fog blend scale', '(uint32_t)amount * 850u', '(uint32_t)amount * 849u'),
+    ('device fog blend divisor', '(int32_t)scaled / 1024', '(int32_t)scaled / 1023'),
+    ('device fog render state cache', 'if (WORD(0x28b88) != packed)', 'if (1)'),
+    ('device fog render state id', '(instance, 0x22, packed)', '(instance, 0x23, packed)'),
+    ('device fog HRESULT', 'WORD(0x5f20) = ((call_three)', 'WORD(0x5f20) = 0x100 + ((call_three)'),
+    ('device scaled last colour', 'index < 28;', 'index < 27;'),
+    ('device scaled alpha', 'value = source & 0xff000000u;', 'value = source & 0xffff0000u;'),
+    ('device scaled red fraction', '((source >> 16) & 255) * brightness >> 16', '((source >> 16) & 255) * brightness >> 15'),
+    ('device scaled return', 'return value;', 'return 0;'),
+]
+mutations += [(*mutation, 'device_palettes') for mutation in device_palette_mutations]
+fan_mutations = [
+    ('fan kind gate', 'if (kind != 6 || format != 100)', 'if (kind != 7 || format != 100)'),
+    ('fan format gate', 'format != 100', 'format != 99'),
+    ('fan enable word', '!GLOBAL_HALF(0xcb6)', '!GLOBAL[0xcb6]'),
+    ('fan key word', '|| GLOBAL_HALF(0xca0)', '|| GLOBAL[0xca0]'),
+    ('fan early eax', 'return entry_eax;', 'return 0;'),
+    ('fan global eax', 'return ADDRESS(GLOBAL);', 'return 0;'),
+    ('fan short count', '(int32_t)(count - 1) <= 1', '(int32_t)(count - 1) <= 0'),
+    ('fan last vertex return', 'return ADDRESS(vertices + (count - 1) * 5);', 'return ADDRESS(vertices + (count - 2) * 5);'),
+    ('fan triangle count', 'index < count - 1;', 'index < count - 2;'),
+    ('fan first vertex anchor', 'fan_triangle(surface, vertices,', 'fan_triangle(surface, vertices + 5,'),
+    ('fan slope floating arithmetic', '(long double)numerator * 65536.0L / (int32_t)height', '(long double)(height ? numerator * 65536 / (int32_t)height : 0)'),
+    ('fan slope truncation', 'orl $0xc00,%%eax', 'andl $0xf3ff,%%eax'),
+    ('fan slope control restore', 'fistpq %0\\n\\tfldcw %1', 'fistpq %0\\n\\tfldcw %2'),
+    ('fan long u unsigned delta', 'fan_slope(bottom[3] - top[3], height, 1)', 'fan_slope(bottom[3] - top[3], height, 0)'),
+    ('fan short v unsigned delta', 'fan_slope(middle[4] - top[4], height, 1)', 'fan_slope(middle[4] - top[4], height, 0)'),
+    ('fan span signed x sort', '(int32_t)first[0] > (int32_t)last[0]', 'first[0] > last[0]'),
+    ('fan span inclusive count', '(high_x - low_x + 1)', '(high_x - low_x)'),
+    ('fan span signed u delta', '(int64_t)(int32_t)(last[2] - u)', '(int64_t)(uint32_t)(last[2] - u)'),
+    ('fan span v start', 'v = first[4];', 'v = first[2];'),
+    ('fan colour threshold equality', '(int32_t)texture < 255', '(int32_t)texture <= 255'),
+    ('fan colour threshold sign', '(int32_t)texture < 255', 'texture < 255'),
+    ('fan texture u byte', '((u >> 16) & 255)', '((u >> 15) & 255)'),
+    ('fan texture row stride', '((v >> 16) & 255) * 256', '((v >> 16) & 255) * 128'),
+    ('fan vertex signed y sort', 'if ((int32_t)top[1] > (int32_t)middle[1]) { swap = top; top = middle; middle = swap; }\n    if ((int32_t)middle[1]', 'if (top[1] > middle[1]) { swap = top; top = middle; middle = swap; }\n    if ((int32_t)middle[1]'),
+    ('fan flat row rejection', 'if (!((top[1] ^ bottom[1]) & 0xffff0000u)) return;', 'if (((top[1] ^ bottom[1]) & 0xffff0000u)) return;'),
+    ('fan long edge unsigned x', 'fan_slope(bottom[0] - top[0], height, 0)', 'fan_slope(bottom[0] - top[0], height, 1)'),
+    ('fan fixed row stride', 'row += stride;', 'row += stride + 1;'),
+    ('fan short edge advance', 'short_edge[component] += short_edge[component + 1];', 'short_edge[component] -= short_edge[component + 1];'),
+    ('fan long edge advance', 'long_edge[component] += long_edge[component + 1];', 'long_edge[component] -= long_edge[component + 1];'),
+    ('fan second half', 'top = middle; middle = bottom;', 'return;'),
+]
+mutations += [(*mutation, 'fans') for mutation in fan_mutations]
+mip_build_mutations = [
+    ('mip build tie order', 'if (distance < minimum)', 'if (distance <= minimum)'),
+    ('mip build RGB source', 'average[channel] += BYTE(0x39c2 + samples[index] * 3 + channel)', 'average[channel] += BYTE(0x36c2 + samples[index] * 3 + channel)'),
+    ('mip build average divide', 'average[channel] >>= 2;', 'average[channel] >>= 1;'),
+    ('mip build distance metric', '(uint32_t)(difference * difference)', '(uint32_t)(difference < 0 ? -difference : difference)'),
+    ('mip build RGB average channels', 'channel < 3; channel++) average[channel] +=', 'channel < 2; channel++) average[channel] +='),
+    ('mip build RGB distance channels', 'for (channel = 0; channel < 3; channel++) {', 'for (channel = 0; channel < 2; channel++) {'),
+    ('mip build candidate count', 'for (index = 0; index < 4; index++) {', 'for (index = 0; index < 3; index++) {'),
+    ('mip build range check', '!texture_inside(ADDRESS(texture))', '0'),
+    ('mip build resident cache', '!(texture[1] & 0x40000)', '!(texture[1] & 0x80000)'),
+    ('mip build growth result', 'if (grow(4, 0x18000, ADDRESS(texture))) return 0;', 'if (!grow(4, 0x18000, ADDRESS(texture))) return 0;'),
+    ('mip build zero padding', '*(uint8_t *)POINTER(destination + index) = 0;', '*(uint8_t *)POINTER(destination + index) = 0x5a;'),
+    ('mip build final level', 'size > 1; size >>= 1', 'size > 2; size >>= 1'),
+    ('mip build width', 'x < size; x += 2', 'x < size; x += 4'),
+    ('mip build height', 'y < size; y += 2', 'y < size; y += 4'),
+    ('mip build source pitch', 'source + y * 256 + x', 'source + y * 128 + x'),
+    ('mip build destination pitch', 'destination + (y >> 1) * 256', 'destination + (y >> 1) * 128'),
+    ('mip build packed offsets', 'destination += size >> 1;', 'destination += size >> 2;'),
+    ('mip build resident flag', 'texture[1] |= 0x40000;', 'texture[1] |= 0x80000;'),
+    ('mip build fallback test', '&& !texture_mip_build(texture, 1)', '&& texture_mip_build(texture, 1)'),
+    ('mip build fallback selector', 'selector &= ~16u;', 'selector = (selector & ~16u) | 8;'),
+]
+mutations += [(*mutation, 'projective_mip_build') for mutation in mip_build_mutations]
+init_mutations = [
+    ('init edge base', 'GLOBAL_WORD(0xc10) = GLOBAL_WORD(0xc14) = ADDRESS(hg2d_image + 0x104);', 'GLOBAL_WORD(0xc10) = GLOBAL_WORD(0xc14) = ADDRESS(hg2d_image + 0x108);'),
+    ('init shadow count', 'index < 33;', 'index < 32;'),
+    ('init glyph base', 'resource_remap_rows(0x4e00);', 'resource_remap_rows(0x4f00);'),
+    ('init colour count', 'index < 0x29a4;', 'index < 0x29a3;'),
+    ('init initial haze update', 'resource_haze_tick_body(0, 0, result);', 'result = result;'),
+    ('init architecture', '!information.wProcessorArchitecture && result >= 586', 'information.wProcessorArchitecture == 1 && result >= 586'),
+    ('init processor equality', 'result >= 586', 'result > 586'),
+    ('init cached protection', 'if (!result) {', 'if (1) {'),
+    ('init protection result', 'WORD(0x5e00) = result;', 'WORD(0x5e00) = 0;'),
+    ('init optimized selector', 'if (result) WORD(0x4678) = 16;', 'if (result) WORD(0x4678) = 8;'),
+    ('haze enabled target', 'GLOBAL_HALF(0xcd2) &&', '0 &&'),
+    ('haze signed target', '(int16_t)GLOBAL_HALF(0xe8a) < 0x12f3', 'GLOBAL_HALF(0xe8a) < 0x12f3'),
+    ('haze target ceiling', '? GLOBAL_HALF(0xe8a) : 0x12f3', '? GLOBAL_HALF(0xe8a) : 0x12f2'),
+    ('haze previous target', 'HALF(0xd56) = previous;', 'HALF(0xd56) = target;'),
+    ('haze immediate flag', 'GLOBAL[0x365] & 8', 'GLOBAL[0x365] & 4'),
+    ('haze unchanged return', 'if (!delta) return', 'if (delta == 1) return'),
+    ('haze elapsed multiplier', '300u * GLOBAL_HALF(0x2aa)', '301u * GLOBAL_HALF(0x2aa)'),
+    ('haze signed current', '(int64_t)(int16_t)HALF(0xd54)', '(int64_t)(uint16_t)HALF(0xd54)'),
+    ('haze doubled movement', '* elapsed * 2;', '* elapsed;'),
+    ('haze movement fraction', '(uint64_t)product >> 8', '(uint64_t)product >> 9'),
+    ('haze maximum step', '(change >> 4) + 1', '(change >> 3) + 1'),
+    ('haze step cap', 'if (movement_integer > change) movement_integer = change;', 'if (movement_integer > change) movement_integer = (uint16_t)(change + 1);'),
+    ('haze arrival equality', '(int16_t)movement_integer <= (int16_t)distance', '(int16_t)movement_integer < (int16_t)distance'),
+    ('haze movement integer', '(uint32_t)movement_integer << 16', '(uint32_t)movement_integer << 15'),
+    ('haze movement direction', 'WORD(0xd52) += (int16_t)delta < 0', 'WORD(0xd52) += (int16_t)delta > 0'),
+    ('haze breakpoint signed overflow', '(int16_t)current > (int16_t)HALF(index)', '(int16_t)difference > 0'),
+    ('haze breakpoint last record', 'index == 0x1d6c', 'index == 0x1d70'),
+    ('haze breakpoint accumulation', 'accumulated + (uint32_t)difference * HALF(index + 2)', 'accumulated + difference'),
+    ('haze fog scale', 'GLOBAL_HALF(0xe88) = accumulated >> 1;', 'GLOBAL_HALF(0xe88) = accumulated >> 2;'),
+    ('haze early eax upper', '(entry_eax & 0xffff0000u) | previous', 'previous'),
+]
+mutations += [(*mutation, 'initialization') for mutation in init_mutations]
+resource_mutations = [
+    ('resource row count', 'row < 16;', 'row < 15;'),
+    ('resource clear byte', 'BYTE(source + index) = 0;', 'BYTE(source + index) = 1;'),
+    ('resource destination word', 'BYTE(source + HALF(0x34c0 + index * 2))', 'BYTE(source + BYTE(0x34c0 + index * 2))'),
+    ('resource source remap', 'BYTE(0x34c0 + BYTE(0xc4e + index) * 2)', 'BYTE(0xc4e + index)'),
+    ('resource scratch copy', 'BYTE(0xc4e + index) = BYTE(source + index);', 'BYTE(0xc4e + index) = 0;'),
+    ('resource neutral red equality', 'red - green <= tolerance', 'red - green < tolerance'),
+    ('resource neutral blue equality', 'blue - green <= tolerance', 'blue - green < tolerance'),
+    ('resource neutral cross equality', 'red - blue <= tolerance', 'red - blue < tolerance'),
+    ('resource neutral darkness', '(int32_t)brightness <= (int32_t)WORD(0x4d64)', '(int32_t)brightness < (int32_t)WORD(0x4d64)'),
+    ('resource neutral brightness', 'uint32_t brightness = red + green + blue;', 'uint32_t brightness = red + green;'),
+    ('resource neutral search equality', '(int16_t)brightness <= (int16_t)sum', '(int16_t)brightness < (int16_t)sum'),
+    ('resource neutral ramp start', 'result = WORD(0x4d58);', 'result = WORD(0x4d5c);'),
+    ('resource neutral start bounds', 'WORD(0x4d58) = HALF(0x34c0 + WORD(0x4d50) * 2);', 'WORD(0x4d58) = WORD(0x4d50);'),
+    ('resource neutral last row', 'index < 12;', 'index < 11;'),
+    ('resource neutral secondary source', 'index < 8 ? 0xd70 : 0xe70', 'index < 8 ? 0xd70 : 0xd70'),
+    ('resource neutral secondary tolerance', 'index < 8 ? 256 : 130', 'index < 8 ? 256 : 129'),
+    ('resource haze clamp', 'if ((int16_t)quotient > 6) quotient = 6;', 'if ((int16_t)quotient > 5) quotient = 5;'),
+    ('resource haze divisor', 'GLOBAL_HALF(0xe88) / divisor', 'GLOBAL_HALF(0xe88) / (divisor + 1)'),
+    ('resource haze source row', '0xa00 - ((quotient & 255) << 8)', '0x900 - ((quotient & 255) << 8)'),
+    ('resource haze final row', 'row < 0xf00;', 'row < 0xe00;'),
+    ('resource haze final colour', 'colour < 0x150;', 'colour < 0x14e;'),
+    ('resource palette load failure', 'if (!load(ADDRESS(hg2d_image + 0x32e0), ADDRESS(name), selector, 9)) return 0;', 'load(ADDRESS(hg2d_image + 0x32e0), ADDRESS(name), selector, 9);'),
+    ('resource haze extension', 'HALF(destination) = 0x6168;', 'HALF(destination) = 0x6167;'),
+    ('resource haze selector', 'resource_haze_load(ADDRESS(hg2d_image + 0x3fd8), selector);', 'resource_haze_load(ADDRESS(hg2d_image + 0x3fd8), 0);'),
+    ('resource palette success', 'palette_refresh();\n    return 1;', 'palette_refresh();\n    return 0;'),
+    ('resource default dirty flag', 'HALF(0x36c0) = 1;\n    palette_force_body();', 'HALF(0x36c0) = 0;\n    palette_refresh();'),
+    ('resource default haze name', 'resource_haze_load(ADDRESS(hg2d_image + 0x3fd0), 0)', 'resource_haze_load(ADDRESS(hg2d_image + 0x3fd8), 0)'),
+]
+mutations += [(*mutation, 'resources') for mutation in resource_mutations]
+mip_dither_fog_mutations = [
+    ('mip dither fog mip gate', 'mip |= WORD(0x4200) == 0x20772c04 || WORD(0x4200) == 0x2077e569;', 'mip |= 0;'),
+    ('mip dither fog dither gate', 'dither |= WORD(0x4200) == 0x20772c04 || WORD(0x4200) == 0x2077e569;', 'dither |= 0;'),
+    ('mip dither fog shade gate', 'fog |= WORD(0x4200) == 0x20772c04 || WORD(0x4200) == 0x2077e569;', 'fog |= 0;'),
+    ('mip dither fog direction', 'forward |= WORD(0x4200) == 0x2077e569;', 'forward |= 0;'),
+    ('mip dither fog lookup', 'BYTE(0xd70 + texel + ((shade >> 8) & 255) * 256)', 'BYTE(0xd71 + texel + ((shade >> 8) & 255) * 256)'),
+    ('mip dither fog shade row', 'BYTE(0xd70 + texel + ((shade >> 8) & 255) * 256)', 'BYTE(0xd70 + texel + ((shade >> 9) & 255) * 256)'),
+    ('mip dither fog opaque zero', '*(uint8_t *)POINTER(address) = BYTE(0xd70 + texel + ((shade >> 8) & 255) * 256);', 'if (BYTE(0xd70 + texel + ((shade >> 8) & 255) * 256)) *(uint8_t *)POINTER(address) = BYTE(0xd70 + texel + ((shade >> 8) & 255) * 256);'),
+    ('mip dither fog shade step', 'shade = (shade + WORD(0x4358)) & 0xffff0fffu;', 'shade = (shade - WORD(0x4358)) & 0xffff0fffu;'),
+    ('mip dither fog shade wrap', 'shade = (shade + WORD(0x4358)) & 0xffff0fffu;', 'shade += WORD(0x4358);'),
+    ('mip dither fog block level', 'projective_mip_dither_pixels(pixel_address, block, 0x4198, y, direction, 0, 1, WORD(0x41c0))', 'projective_mip_dither_pixels(pixel_address, block, 0x4198, y, direction, 0, 1, WORD(0x41bc))'),
+    ('mip dither fog tail skip', 'if (tail && index + 1 == count && WORD(0x45d5)) return;', 'if (tail && index + 1 == count && WORD(0x45d1)) return;'),
+    ('mip dither fog tail direction', 'projective_mip_dither_fog_tails[forward][shift == 4][y & 1][WORD(0x45d9)]', 'projective_mip_dither_fog_tails[!forward][shift == 4][y & 1][WORD(0x45d9)]'),
+    ('mip dither fog tail block', 'projective_mip_dither_fog_tails[forward][shift == 4][y & 1][WORD(0x45d9)]', 'projective_mip_dither_fog_tails[forward][shift != 4][y & 1][WORD(0x45d9)]'),
+    ('mip dither fog tail row', 'projective_mip_dither_fog_tails[forward][shift == 4][y & 1][WORD(0x45d9)]', 'projective_mip_dither_fog_tails[forward][shift == 4][(y ^ 1) & 1][WORD(0x45d9)]'),
+    ('mip dither fog tail count', 'projective_mip_dither_fog_tails[forward][shift == 4][y & 1][WORD(0x45d9)]', 'projective_mip_dither_fog_tails[forward][shift == 4][y & 1][WORD(0x45d9) - 1]'),
+    ('mip dither fog tail family', 'projective_mip_dither_fog_tails[forward][shift == 4][y & 1][WORD(0x45d9)]', 'projective_dither_fog_tails[forward][shift == 4][y & 1][WORD(0x45d9)]'),
+]
+mutations += [(*mutation, 'projective_mip_dither_fog') for mutation in mip_dither_fog_mutations]
+mip_dither_mutations = [
+    ('mip dither mip gate', 'mip |= WORD(0x4200) == 0x2076da6d || WORD(0x4200) == 0x207793d8;', 'mip |= 0;'),
+    ('mip dither dither gate', 'dither |= WORD(0x4200) == 0x2076da6d || WORD(0x4200) == 0x207793d8;', 'dither |= 0;'),
+    ('mip dither direction', 'forward |= WORD(0x4200) == 0x207793d8;', 'forward |= 0;'),
+    ('mip dither u mask', '(uint8_t)WORD(0x4375) << 32', '(uint8_t)255 << 32'),
+    ('mip dither v mask', '(uint8_t)(WORD(0x4375) >> 8) << 32', '(uint8_t)255 << 32'),
+    ('mip dither u bias removal', '*u = (sampled_u - bias)', '*u = sampled_u'),
+    ('mip dither v bias removal', '*v = (sampled_v - bias)', '*v = sampled_v'),
+    ('mip dither u persistent mask', '*u = (sampled_u - bias) & 0xffffffffffULL;', '*u = *u;'),
+    ('mip dither v persistent mask', '*v = (sampled_v - bias) & 0xffffffffffULL;', '*v = *v;'),
+    ('mip dither u fraction', '(uint32_t)(WORD(start) << 16)', '(uint32_t)(WORD(start) << 15)'),
+    ('mip dither u step', 'WORD(0x41a8) = WORD(0x41a8) * 65536u;', 'WORD(0x41a8) = WORD(0x41a8) * 32768u;'),
+    ('mip dither v step', 'WORD(0x41ac) = WORD(0x41ac) * 65536u;', 'WORD(0x41ac) = WORD(0x41ac) * 32768u;'),
+    ('mip dither prefix', '((address & 1) != 0) == (direction > 0)', '((address & 1) != 0) != (direction > 0)'),
+    ('mip dither pair direction', 'direction > 0 ? first : second;', 'direction > 0 ? second : first;'),
+    ('mip dither pair spacing', 'address += direction * 2; remaining -= 2;', 'address += direction; remaining -= 2;'),
+    ('mip dither live skip', 'if (index + 1 == count && WORD(0x45d5)) return;', 'if (index + 1 == count && WORD(0x45d1)) return;'),
+    ('mip dither tail direction', 'projective_mip_dither_tails[forward][shift == 4][y & 1][WORD(0x45d9)]', 'projective_mip_dither_tails[!forward][shift == 4][y & 1][WORD(0x45d9)]'),
+    ('mip dither tail block', 'projective_mip_dither_tails[forward][shift == 4][y & 1][WORD(0x45d9)]', 'projective_mip_dither_tails[forward][shift != 4][y & 1][WORD(0x45d9)]'),
+    ('mip dither tail row', 'projective_mip_dither_tails[forward][shift == 4][y & 1][WORD(0x45d9)]', 'projective_mip_dither_tails[forward][shift == 4][(y ^ 1) & 1][WORD(0x45d9)]'),
+    ('mip dither tail count', 'projective_mip_dither_tails[forward][shift == 4][y & 1][WORD(0x45d9)]', 'projective_mip_dither_tails[forward][shift == 4][y & 1][WORD(0x45d9) - 1]'),
+    ('mip dither tail family', 'projective_mip_dither_tails[forward][shift == 4][y & 1][WORD(0x45d9)]', 'projective_dither_tails[forward][shift == 4][y & 1][WORD(0x45d9)]'),
+]
+mutations += [(*mutation, 'projective_mip_dither') for mutation in mip_dither_mutations]
+mip_fog_mutations = [
+    ('mip fog mip gate', 'mip |= WORD(0x4200) == 0x207431a7 || WORD(0x4200) == 0x207475c4;', 'mip |= 0;'),
+    ('mip fog shade gate', 'fog |= WORD(0x4200) == 0x207431a7 || WORD(0x4200) == 0x207475c4;', 'fog |= 0;'),
+    ('mip fog direction', 'forward |= WORD(0x4200) == 0x207475c4;', 'forward |= 0;'),
+    ('mip fog row', 'BYTE(0xd70 + texel + ((shade >> 8) & 255) * 256)', 'BYTE(0xd70 + texel + ((shade >> 9) & 255) * 256)'),
+    ('mip fog lookup', 'BYTE(0xd70 + texel + ((shade >> 8) & 255) * 256)', 'BYTE(0xd71 + texel + ((shade >> 8) & 255) * 256)'),
+    ('mip fog doubled byte', 'pixel[0] = pixel[1] = painted;', 'pixel[0] = painted; pixel[1] = 0;'),
+    ('mip fog opaque zero', 'pixel[0] = pixel[1] = painted;', 'if (painted) pixel[0] = pixel[1] = painted;'),
+    ('mip fog shade step', 'shade = (shade + WORD(0x4358)) & 0xffff0fffu;', 'shade = (shade - WORD(0x4358)) & 0xffff0fffu;'),
+    ('mip fog shade wrap', 'shade = (shade + WORD(0x4358)) & 0xffff0fffu;', 'shade += WORD(0x4358);'),
+    ('mip fog block level', 'projective_mip_fog_pixels(pixel_address, block, 0x4198, direction, WORD(0x41c0))', 'projective_mip_fog_pixels(pixel_address, block, 0x4198, direction, WORD(0x41bc))'),
+    ('mip fog tail level', 'projective_mip_fog_pixels(pixel_address, remaining, 0x4190, direction, WORD(0x41bc))', 'projective_mip_fog_pixels(pixel_address, remaining, 0x4190, direction, WORD(0x41c4))'),
+    ('mip fog tail direction', 'projective_mip_fog_tails[forward][shift == 4][remaining]', 'projective_mip_fog_tails[!forward][shift == 4][remaining]'),
+    ('mip fog tail block', 'projective_mip_fog_tails[forward][shift == 4][remaining]', 'projective_mip_fog_tails[forward][shift != 4][remaining]'),
+    ('mip fog tail count', 'projective_mip_fog_tails[forward][shift == 4][remaining]', 'projective_mip_fog_tails[forward][shift == 4][remaining - 1]'),
+    ('mip fog tail family', 'projective_mip_fog_tails[forward][shift == 4][remaining]', 'projective_mip_tails[forward][shift == 4][remaining]'),
+]
+mutations += [(*mutation, 'projective_mip_fog') for mutation in mip_fog_mutations]
+mip_mutations = [
+    ('mip dispatch gate', 'int mip = WORD(0x4200) == 0x20741559 || WORD(0x4200) == 0x2074597a;', 'int mip = 0;'),
+    ('mip forward direction', 'forward |= WORD(0x4200) == 0x2074597a;', 'forward |= 0;'),
+    ('mip initial complement', 'WORD(0x4365) = projective_mip_magnitude(right_factor);', 'WORD(0x4365) = 0;'),
+    ('mip final complement', 'WORD(0x4361) = projective_mip_magnitude(left_factor);', 'WORD(0x4361) = 0;'),
+    ('mip near equality', 'WORD(0x4361) <= WORD(0x4371) && WORD(0x4365) <= WORD(0x4371)', 'WORD(0x4361) < WORD(0x4371) && WORD(0x4365) < WORD(0x4371)'),
+    ('mip near both endpoints', 'WORD(0x4361) <= WORD(0x4371) && WORD(0x4365) <= WORD(0x4371)', 'WORD(0x4361) <= WORD(0x4371) || WORD(0x4365) <= WORD(0x4371)'),
+    ('mip block magnitude', 'if (mip) WORD(0x4361) = projective_mip_magnitude(factor);', 'if (mip) WORD(0x4361) = WORD(0x4365);'),
+    ('mip distance product', '((uint64_t)WORD(0x4361) * WORD(0x4369)) >> 21', '((uint32_t)(WORD(0x4361) * WORD(0x4369))) >> 21'),
+    ('mip distance shift', '* WORD(0x4369)) >> 21', '* WORD(0x4369)) >> 20'),
+    ('mip distance clamp', 'if (distance >= 127) distance = 127;', 'if (distance >= 126) distance = 126;'),
+    ('mip lookup', 'WORD(0x439d + distance * 4)', 'WORD(0x439d + (distance ? distance - 1 : 0) * 4)'),
+    ('mip scratch level', 'WORD(0x435d) = level;', 'WORD(0x435d) = 0;'),
+    ('mip packed base', 'WORD(0x948) + WORD(0x4379 + level * 4)', 'WORD(0x948)'),
+    ('mip coordinate mask', 'WORD(0x4375) = WORD(0x45ad + level * 4);', 'WORD(0x4375) = 0xffff;'),
+    ('mip u coordinate shift', 'WORD(start) >>= shift;', 'WORD(start) >>= (shift + 1);'),
+    ('mip v coordinate shift', 'WORD(start + 4) >>= shift;', 'WORD(start + 4) >>= (shift + 1);'),
+    ('mip u step shift', '(uint32_t)((int32_t)WORD(0x41a8) >> shift)', '(uint32_t)((int32_t)WORD(0x41a8) >> (shift + 1))'),
+    ('mip v step shift', '(uint32_t)((int32_t)WORD(0x41ac) >> shift)', '(uint32_t)((int32_t)WORD(0x41ac) >> (shift + 1))'),
+    ('mip u sample mask', '*u &= (uint8_t)WORD(0x4375);', '*u &= 255;'),
+    ('mip v sample mask', '*v &= (uint8_t)(WORD(0x4375) >> 8);', '*v &= 255;'),
+    ('mip u carry', '*u = (uint8_t)(*u + u_step + (uint32_t)(carry >> 32));', '*u = (uint8_t)(*u + u_step);'),
+    ('mip alignment prefix', '((pixel_address & 2) != 0) == (direction > 0)', '((pixel_address & 2) != 0) != (direction > 0)'),
+    ('mip pair spacing', 'pixel_address += direction * 4; remaining -= 2;', 'pixel_address += direction * 2; remaining -= 2;'),
+    ('mip doubled byte', 'pixel[0] = pixel[1] = first; pixel[2] = pixel[3] = second;', 'pixel[0] = first; pixel[1] = 0; pixel[2] = pixel[3] = second;'),
+    ('mip tail direction', 'projective_mip_tails[forward][shift == 4][remaining]', 'projective_mip_tails[!forward][shift == 4][remaining]'),
+    ('mip tail block', 'projective_mip_tails[forward][shift == 4][remaining]', 'projective_mip_tails[forward][shift != 4][remaining]'),
+    ('mip tail count', 'projective_mip_tails[forward][shift == 4][remaining]', 'projective_mip_tails[forward][shift == 4][remaining - 1]'),
+]
+mutations += [(*mutation, 'projective_mip') for mutation in mip_mutations]
+plane_mutations = [
+    ('plane first fraction', 'HALF(0x8ea) = (uint16_t)first;', 'WORD(0x8e8) = first << 16;'),
+    ('plane last fraction', 'HALF(0x8f2) = (uint16_t)last;', 'WORD(0x8f0) = last << 16;'),
+    ('plane row fraction', 'HALF(0x8ee) = (uint16_t)y;', 'WORD(0x8ec) = y << 16;'),
+    ('plane first coordinate', 'WORD(0x4168) = matrix_coordinate(WORD(0x8e8),', 'WORD(0x4168) = matrix_coordinate(WORD(0x8f0),'),
+    ('plane last coordinate', 'WORD(0x4170) = matrix_coordinate(WORD(0x8f0),', 'WORD(0x4170) = matrix_coordinate(WORD(0x8e8),'),
+    ('plane row coordinate', 'WORD(0x416c) = matrix_coordinate(WORD(0x8ec),', 'WORD(0x416c) = matrix_coordinate(WORD(0x8ec) + 0x10000,'),
+    ('plane first attributes', 'WORD(0x4314 + component * 4) = matrix_attribute(WORD(0x4168),', 'WORD(0x4314 + component * 4) = matrix_attribute(WORD(0x4170),'),
+    ('plane last attributes', 'WORD(0x433c + component * 4) = matrix_attribute(WORD(0x4170),', 'WORD(0x433c + component * 4) = matrix_attribute(WORD(0x4168),'),
+    ('plane component count', 'WORD(0x4314 + component * 4) = matrix_attribute(WORD(0x4168), WORD(0x416c), component);', 'WORD(0x4314 + component * 4) = matrix_attribute(WORD(0x4168), WORD(0x416c), component ^ 1);'),
+    ('plane first endpoint', 'WORD(0x430c) = WORD(0x8e8);', 'WORD(0x430c) = WORD(0x8f0);'),
+    ('plane last endpoint', 'WORD(0x4334) = WORD(0x8f0);', 'WORD(0x4334) = WORD(0x8e8);'),
+    ('plane stack depth', 'entry_sp + 64 - stack_depth;', 'entry_sp + 68 - stack_depth;'),
+    ('plane dispatch row', '(uint16_t)y, 0);', '(uint16_t)(y + 1), 0);'),
+    ('plane span selector', 'if (WORD(0x402c) == 0x20784d69)', 'if (WORD(0x402c) == 0x20784d68)'),
+    ('plane setup selector', 'WORD(0x402c) = 0x20784d69;', 'WORD(0x402c) = 0x20731134;'),
+    ('plane flat scan stack', 'polygon_flat_span(edge, y, 1, 72);', 'polygon_flat_span(edge, y, 1, 68);'),
+    ('plane flat walker stack', 'polygon_flat_span(edge, y, 0, 64);', 'polygon_flat_span(edge, y, 0, 60);'),
+    ('plane pair stack', 'pairs == 2 && !index ? 68 : 64', 'pairs == 2 && !index ? 64 : 68'),
+    ('plane walker stack', 'polygon_span(first, last, y, 60);', 'polygon_span(first, last, y, 64);'),
+    ('plane full coordinate clamp', 'if (value > 0x7fff) value = 0x7fff;', 'if (value > 0x7ffe) value = 0x7ffe;'),
+]
+mutations += [(*mutation, 'projective_plane') for mutation in plane_mutations]
 affine_mutations = [
     ('affine low dividend shift', '(uint32_t)(delta << 7)', '(uint32_t)(delta << 6)'),
     ('affine signed high dividend', 'delta & 0x80000000u ? -0x100000000LL : 0', 'delta & 0x80000000u ? 0 : 0'),
@@ -889,7 +1186,7 @@ for name, old, new, suite in mutations:
         continue
     tested += 1
     owner = {'colours': 'palette', 'palette': 'palette', 'drawing': 'draw',
-             'polygons': 'polygon', 'fills': 'fill', 'textured': 'textured', 'affine': 'affine', 'gouraud': 'gouraud', 'blits': 'blit', 'optimized': 'affine', 'perspective': 'perspective', 'discs': 'disc', 'perspective_fill': 'perspective_fill', 'matrix_vertices': 'matrix', 'matrix_fills': 'matrix', 'projective': 'projective', 'projective_keyed': 'projective', 'projective_fog': 'projective', 'projective_key_fog': 'projective', 'projective_dither': 'projective', 'projective_dither_fog': 'projective', 'projective_dither_key': 'projective'}.get(suite)
+             'polygons': 'polygon', 'fills': 'fill', 'textured': 'textured', 'affine': 'affine', 'gouraud': 'gouraud', 'blits': 'blit', 'optimized': 'affine', 'perspective': 'perspective', 'discs': 'disc', 'perspective_fill': 'perspective_fill', 'matrix_vertices': 'matrix', 'matrix_fills': 'matrix', 'projective': 'projective', 'projective_keyed': 'projective', 'projective_fog': 'projective', 'projective_key_fog': 'projective', 'projective_dither': 'projective', 'projective_dither_fog': 'projective', 'projective_dither_key': 'projective', 'projective_dither_key_fog': 'projective', 'projective_plane': 'matrix', 'projective_mip': 'mip', 'projective_mip_fog': 'mip', 'projective_mip_dither': 'mip_dither', 'projective_mip_dither_fog': 'mip_dither', 'resources': 'resource', 'initialization': 'init', 'projective_mip_build': 'mip_build', 'fans': 'fan', 'device_palettes': 'device_palette'}.get(suite)
     if source.count(old) != 1 and owner:
         scope = sections[owner]
         assert scope.count(old) == 1 and source.count(scope) == 1, (name, scope.count(old))
@@ -908,7 +1205,7 @@ for name, old, new, suite in mutations:
         '-fno-strict-aliasing', '-shared', '-nostdlib', '-Wl,--entry=_DllMain@12',
         '-Wl,--image-base=0x30000000', '-Wl,--disable-dynamicbase',
         '-I' + str(root / 'src/hg2d'), '-o', str(library), str(variant),
-        str(root / 'src/hg2d/hg2d.def'), '-lgcc'], check=True)
+        str(root / 'src/hg2d/hg2d.def'), '-lgcc', '-lkernel32'], check=True)
     # Wine helpers can inherit pipe handles after the test process exits.
     # Files let wait() use the actual process status without waiting for EOF.
     with tempfile.TemporaryFile(mode='w+t') as stdout, tempfile.TemporaryFile(mode='w+t') as stderr:

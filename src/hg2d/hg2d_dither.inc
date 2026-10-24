@@ -79,7 +79,7 @@ static void dither_fog_pixels(uint32_t address, uint32_t count, uint32_t start,
 
 /* Keyed full blocks omit the dither bias; only their tail code applies it. */
 static void dither_key_pixels(uint32_t address, uint32_t count, uint32_t start,
-                              uint32_t y, int direction, int tail)
+                              uint32_t y, int direction, int tail, int fog, uint32_t level)
 {
     uint32_t texture = WORD(0x948);
     uint64_t key_u = ((uint64_t)(uint8_t)(WORD(start) >> 16) << 32) | (uint32_t)(WORD(start) << 16);
@@ -90,8 +90,12 @@ static void dither_key_pixels(uint32_t address, uint32_t count, uint32_t start,
     for (uint32_t key_pixel = 0; key_pixel < count; key_pixel++) {
         if (tail && key_pixel + 1 == count && WORD(0x45d5)) return;
         uint8_t indexed = dither_texel(texture, key_u, key_v, tail ? dither_bias(address, y) : 0);
-        if (indexed >= BYTE(0x435c)) *(uint8_t *)POINTER(address) = indexed;
+        if (indexed >= BYTE(0x435c)) {
+            uint8_t painted = fog ? BYTE(0xd70 + indexed + ((level >> 8) & 255) * 256) : indexed;
+            *(uint8_t *)POINTER(address) = painted;
+        }
         dither_advance(&key_u, &key_v, u_integer, v_integer);
+        if (fog) level = (level + WORD(0x4358)) & 0xffff0fffu;
         address += direction;
     }
 }

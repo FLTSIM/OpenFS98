@@ -1,18 +1,15 @@
 # HG2D.DLL — module id 13
 
-In progress. Thirty-three Linkage services now have implementations covering
-texture storage/loading, software palettes, primitives and text, plain polygon
-fills, affine texture rendering (all 32 span selectors), Gouraud shading,
-scanline texture blits, table-shaped discs, perspective vertex submission,
-the matching three-attribute textured closer, matrix-derived texture edges,
-far-depth texture fills, basic/keyed/fogged doubled-pixel projective spans,
-dithered spans with fog or keying, and teardown. Some service branches remain explicitly
-unfinished below.
+In progress. Thirty-seven of forty Linkage services have implementations.
+The software renderer now includes all 24 ordinary projective targets,
+plain polygon plane spans, software triangle fans, affine and perspective textures, Gouraud shading,
+primitives, text, blits and discs. Palette/resource loading and initialization
+are implemented too. Some service branches remain unfinished below.
 HG2D uses snake_case and `<stdint.h>`; there is no `types.h` dependency.
 
-HG2D is not in `MODULES` and must not be installed yet. Initialization, the
-remaining projective spans, device-backed palette realization and the
-Direct3D services remain incomplete.
+HG2D is not in `MODULES` and must not be installed yet. Device-backed palette
+realization, Direct3D services and their rendering dispatch remain incomplete.
+The negative-length shadow corrupt-stack return is also deferred.
 
 The implementation and tests occupy HG2D-specific files. The shared Makefile,
 README and MAIN files are untouched so MAIN can proceed independently.
@@ -35,6 +32,16 @@ make -f tools/hg2d.mk hg2ddiff-run N=20000 SUITE=projective_key_fog
 make -f tools/hg2d.mk hg2ddiff-run N=20000 SUITE=projective_dither
 make -f tools/hg2d.mk hg2ddiff-run N=20000 SUITE=projective_dither_fog
 make -f tools/hg2d.mk hg2ddiff-run N=20000 SUITE=projective_dither_key
+make -f tools/hg2d.mk hg2ddiff-run N=20000 SUITE=projective_dither_key_fog
+make -f tools/hg2d.mk hg2ddiff-run N=20000 SUITE=projective_plane
+make -f tools/hg2d.mk hg2ddiff-run N=20000 SUITE=projective_mip
+make -f tools/hg2d.mk hg2ddiff-run N=20000 SUITE=projective_mip_fog
+make -f tools/hg2d.mk hg2ddiff-run N=20000 SUITE=projective_mip_dither
+make -f tools/hg2d.mk hg2ddiff-run N=20000 SUITE=projective_mip_dither_fog
+make -f tools/hg2d.mk hg2ddiff-run N=20000 SUITE=projective_mip_build
+make -f tools/hg2d.mk hg2ddiff-run N=20000 SUITE=resources
+make -f tools/hg2d.mk hg2ddiff-run N=20000 SUITE=initialization
+make -f tools/hg2d.mk hg2ddiff-run N=20000 SUITE=fans
 make -f tools/hg2d.mk hg2ddiff-run N=20000 SUITE=textured
 make -f tools/hg2d.mk hg2ddiff-run N=20000 SUITE=affine
 make -f tools/hg2d.mk hg2ddiff-run N=20000 SUITE=optimized
@@ -1024,7 +1031,169 @@ distinguishes immediate stores from pair prefetch.
 Keyed dithered fog, hardware, plane, resource and initialization paths remain
 deferred; HG2D is still outside `MODULES`.
 
+## Slice 21: keyed dithered fog
+
+Targets `0x20761af9` / `0x20769510` complete the sixteen software-only
+projective targets. Selectors 44/47 reverse and 45/46 forward have the same
+60..63 keying aliases that bypass mip creation. Raw key comparison precedes
+shade lookup; mapped zero remains opaque. Skipped texels still advance UV and
+shade. Full blocks omit the dither bias, while tails use the four phases.
+All eight 33-entry tail tables are extracted from retail.
+
+The 64-scenario baseline passes 62,528 operations, zero differences/faults
+and 512 repaired divides. All 23 new mutations are caught. All preceding 229
+projective mutations were re-executed and caught. The large run passes **20,000 scenarios / 19,540,000 operations**, zero
+differences/faults and 160,000 repaired divides. Its combined 2,000-scenario
+regression was launched separately; final results are recorded below when complete.
+
+## Slice 22: ordinary polygon plane spans
+
+GLOBAL +0xc90 with a zero +0x2f4 now uses `0x20784d69`. Ordinary 16-byte
+polygon edges produce matrix endpoints per span, using the same coordinate
+and transform arithmetic as matrix edges. Three high-word stores retain the
+fractional scratch words left by edge construction. Plane spans preserve
+retail's saved-stack values for the walker, its flat edges, scanned flat
+edges, sorted intersections and the four-intersection register path.
+
+The baseline passes 64 scenarios / 92,928 operations, zero differences and
+faults, with 9,216 repaired divides. All 20 new mutations are caught. One
+initially survived because the fixtures had two and six intersections but
+no four-intersection polygon; the new five-vertex fixture catches it. A
+20,000-scenario sweep uses the expanded fixtures.
+
+## Slices 23–26: mipmapped projective targets
+
+The other eight projective targets are software mip renderers. A hardware
+eligibility bit selects them, but the span loops sample an indexed packed
+pyramid directly. They are independent of actual Direct3D draw submission.
+All 24 ordinary targets selected through data +0x4200 now have native paths:
+
+| Family | Reverse | Forward | New mutations caught |
+| --- | --- | --- | --- |
+| Mip | `0x20741559` | `0x2074597a` | 27 |
+| Mip fog | `0x207431a7` | `0x207475c4` | 15 |
+| Mip dither | `0x2076da6d` | `0x207793d8` | 21 |
+| Mip dither fog | `0x20772c04` | `0x2077e569` | 16 |
+
+Distance uses a 64-bit multiply followed by SHRD 21, truncation, a clamp to
+127, and the retail level table. Coordinate shifts, signed increments,
+packed level offsets and live coordinate masks retain the assembly order.
+Near endpoints fall back to the ordinary software kernels; distant dither
+spans become doubled mip spans. Fog retains its row-zero and row-fifteen
+shortcuts. Tail tables are extracted as data, not copied executable code.
+
+Mip dither masks the biased coordinate register before each fetch, then
+removes the bias. A destination aliasing +0x4375 changes that mask during
+sampling; the fixture catches discarding this history. Plain full blocks
+prefetch pairs, while fog variants store individual pixels. Direct fixtures
+cover all nine levels, exact near thresholds, signed coordinates, high product
+bits, palette-zero opacity and aliased texture reads.
+
+All four 64-scenario baselines pass with zero differences or faults. The
+final directed raw-mip baseline has 29,312 operations; mip fog has 47,808,
+mip dither 58,112, and mip dither fog 64,320. Raw mip mutations initially
+missed the high-product and V-mask cases; corrected directed fixtures catch
+both. An initial complement mutation was equivalent because its overwritten
+scratch word was replaced before use; its replacement changes the saved
+initial magnitude, and is caught. The raw-mip large run passes **20,000 scenarios / 8,360,000 operations**,
+zero differences/faults and 500,000 repaired divides. Its directed fixtures
+were strengthened after that run began and pass separately at 64 scenarios.
+The other large runs were launched independently.
+
+## Slice 27: palette and haze resources
+
+Linkage +0x58 and +0x68 load the default palette/haze resources and custom
+palettes. The FE boundary uses the verified FE loader's actual sizes: 192
+bytes for kind 9 and 4 KB for kind 10. The default path ignores file-service
+return values, while the custom path exits on the initial FE failure. It
+copies through the first period and appends `haz`, then refreshes the palette.
+
+The native haze builder remaps sixteen rows through full palette-word output
+indices, copies the eight special fog colours in rows ten through fourteen,
+and builds twelve neutral-colour maps. RGB tolerance, darkness and ramp
+search equality retain the original signed comparisons and first match.
+
+The resource baseline passes **20,000 scenarios / 340,000 operations**, zero
+differences, with full image/GLOBAL comparison and host/FE event digests.
+It covers partial reads, FE failures, repeated cache hits, palette words over
+255 and independently checked neutral-map boundaries. All **27 mutations**
+are caught at 64 scenarios.
+
+## Slice 28: initialization and haze transition
+
+Linkage +0x04 now builds the palette layout, loads defaults, installs edge
+pointers, remaps the glyph/shadow/colour tables, registers the CHAIN haze
+callback and performs the processor/protection capability probe. The C
+renderer has no patched instructions; the probe retains its result and
+optimized-selector state. The harness replaces GetSystemInfo and
+VirtualProtect for both DLLs, covering architecture/type boundaries,
+protection failure and repeated initialization with a cached result.
+
+The haze callback retains its 16-bit target history, fractional movement,
+change cap, immediate-update flag and seven breakpoint records, including
+the extra record preceding the nominal table. A differential failure at
+current value 0x8000 exposed a signed-overflow error in the breakpoint test:
+retail's JLE compares signed operands even when subtraction overflows. The
+corrected signed comparison passes the full callback script.
+
+The baseline passes 64 scenarios / 3,008 operations with zero differences.
+All **30 mutations** are caught. The large run passes **20,000 scenarios /
+940,000 operations**, zero differences.
+
+## Slice 29: software mip creation
+
+The missing preparation path is a host allocation and software filter at
+`0x207900e0`, not a device upload. It grows a pooled texture to 96 KB, clears
+the new 32 KB, and creates all eight packed levels using fixed 256-byte
+row strides. Each 2×2 block averages the realized RGB triplets and selects
+the nearest of its four original indices, retaining the earlier candidate
+on ties. Resident textures skip growth; failed growth or out-of-pool handles
+clear the mip selector bit and use the ordinary renderer.
+
+The new harness compares the entire 96 KB heap after every operation, with
+reallocation failures, cached levels, out-of-pool and unaligned handles,
+and all fog/dither combinations. The baseline passes 64 scenarios / 10,304
+operations, zero differences/faults. All 20 mutations are caught. One cache
+mutation initially survived because fixtures omitted the unrelated 0x80000
+metadata bit; a new uncached texture with that bit catches it. The final
+baseline also explicitly reaches the last pool slot, aligned and unaligned.
+The large sweep is in progress.
+
+## Slice 30: optional software triangle fans
+
+Linkage +0xa4 is a software fallback gated by kind 6, format 100, a nonzero
+GLOBAL +0xcb6 word and a zero +0xca0 word. It sorts each fan triangle by
+signed fixed-point Y, walks both halves with the original floating slopes,
+and draws inclusive horizontal spans. The initial row comes from the row
+table; later rows use the saved pitch. It does not clip to logical width or
+height. Signed pixel pointers below 255 mean constant colours; 255 itself
+is a texture pointer and faults on the directed null-page fixture.
+
+U/V edge deltas are zero-extended before floating conversion, while X and
+horizontal span deltas are signed. The slope conversion retains x87 caller
+precision and reproduces __ftol truncation/indefinite results. Two apparently
+unused horizontal-gradient calculations are retained because degenerate
+triangles set floating exception status. The harness checks all three x87
+precision modes and four rounding modes, control words and exception status,
+plus the full canvas/image/GLOBAL and callee-saved registers. ECX/EDX are
+unspecified caller-saved leftovers for this compiled-C service and are not
+compared. Non-x86 floating status/precision still needs native validation.
+
+The baseline passes 64 scenarios / 43,264 operations with zero differences.
+There are 256 matching read faults at texture pointer 255. Independent
+constant-fill pixels, all vertex permutations, flat/vertical/fractional
+triangles, negative coordinates, fans of 3..8 vertices, unsigned UV wraps,
+texture/destination aliases and early returns are covered. Mutation and
+20,000-scenario sweeps are in progress.
+
 ## Verification and limits
+
+The keyed-dither suite passes **20,000 scenarios / 16,600,000 operations**,
+with zero differences and zero faults. All 800,000 retail host divide repairs
+resume and complete. The full combined regression passes 2,000 scenarios per
+suite. The preceding **204** projective mutations were rerun and all caught:
+**229 caught** including the 25 new keyed-dither mutations. The other 489
+mutants were not all rerun.
 
 The keyed-dither family catches **25 new mutations** at 64 scenarios with zero
 unresolved mutations. All **718** mutation anchors pass the separate audit.
@@ -1317,11 +1486,7 @@ FE loader, DirectDraw objects, arbitrary malformed COM pointers, accounting
 indices outside 0..8, and initialization are outside this slice. The existing
 PANELS model and its verified harness remain unchanged.
 
-Remaining Linkage services: +0x04 initialization, +0x58/+0x68 palette/resource
-loading, and device-backed +0x9c/+0xa0/+0xa4/+0xbc.
-The remaining projective/plane spans through +0x44/+0x40, device palette
-realization and the negative-length shadow corrupt-stack return also remain
-unfinished. Next are the remaining software projective spans selected at data
-+0x4200 (keyed dithered fog), then the plane, resource/device and
-initialization paths. The verified subsets do not
-establish whole-module rendering equivalence or readiness to run in-game.
+Remaining Linkage services: device-backed +0x9c/+0xa0/+0xbc.
+Device palette realization, live Direct3D dispatch and the negative-length
+shadow corrupt-stack return remain unfinished. The verified subsets do not
+establish whole-module equivalence or readiness to run in-game.

@@ -1,5 +1,5 @@
-/* Palette and colour services. Addresses are retail .text addresses.
- * Hardware realization (0x2078bd00 with a device bound) is a later slice. */
+/* Palette and colour services. Addresses are retail .text addresses. */
+static uint32_t device_palette_realize(void);
 #define HALF(offset) (*(uint16_t *)(hg2d_image + (offset)))
 #define BYTE(offset) (hg2d_image[(offset)])
 #define GLOBAL ((uint8_t *)POINTER(WORD(0x0c)))
@@ -330,9 +330,7 @@ static uint32_t STDCALL palette_realize(void)
     palette_pack(0x36c2, 0x39c2);
     palette_pack(0x30a0, 0x3cc2);
     realize(ADDRESS(hg2d_image + 0x39c2), ADDRESS(hg2d_image + 0x3cc2));
-    if (WORD(0x28940))
-        __builtin_trap(); /* Device-backed realization belongs to rendering. */
-    return 0;
+    return device_palette_realize();
 }
 
 /* The assembly cache API returns the changed bit in carry as well as eax. */

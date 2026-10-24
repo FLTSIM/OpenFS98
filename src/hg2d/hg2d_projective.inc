@@ -142,6 +142,8 @@ static void projective_fog_pixels(uint32_t address, uint32_t count, uint32_t sta
 
 #include "hg2d_dither.inc"
 
+static void projective_mip_dither_pixels(uint32_t address, uint32_t count, uint32_t start, uint32_t y, int direction, int tail, int fog, uint32_t shade);
+
 static void projective_span(uint32_t *left, uint32_t *right, uint32_t y, int flat)
 {
     uint32_t first_x = left[2] & 0xfffeffffu, last_x = right[2] & 0xfffeffffu;
@@ -151,6 +153,10 @@ static void projective_span(uint32_t *left, uint32_t *right, uint32_t y, int fla
     int keyed = WORD(0x4200) == 0x2073ae7b || WORD(0x4200) == 0x2073e1ec;
     int fog = WORD(0x4200) == 0x207352a4 || WORD(0x4200) == 0x20738c03;
     int dither = WORD(0x4200) == 0x20749d95 || WORD(0x4200) == 0x207541ee;
+    keyed |= WORD(0x4200) == 0x20761af9 || WORD(0x4200) == 0x20769510;
+    fog |= WORD(0x4200) == 0x20761af9 || WORD(0x4200) == 0x20769510;
+    dither |= WORD(0x4200) == 0x20761af9 || WORD(0x4200) == 0x20769510;
+    forward |= WORD(0x4200) == 0x20769510;
     keyed |= WORD(0x4200) == 0x2075e63f || WORD(0x4200) == 0x20766058;
     dither |= WORD(0x4200) == 0x2075e63f || WORD(0x4200) == 0x20766058;
     forward |= WORD(0x4200) == 0x20766058;
@@ -163,6 +169,18 @@ static void projective_span(uint32_t *left, uint32_t *right, uint32_t y, int fla
     forward |= WORD(0x4200) == 0x2073f771;
     forward |= WORD(0x4200) == 0x20738c03;
     forward |= WORD(0x4200) == 0x2073e1ec;
+    int mip = WORD(0x4200) == 0x20741559 || WORD(0x4200) == 0x2074597a;
+    forward |= WORD(0x4200) == 0x2074597a;
+    mip |= WORD(0x4200) == 0x207431a7 || WORD(0x4200) == 0x207475c4;
+    fog |= WORD(0x4200) == 0x207431a7 || WORD(0x4200) == 0x207475c4;
+    forward |= WORD(0x4200) == 0x207475c4;
+    mip |= WORD(0x4200) == 0x2076da6d || WORD(0x4200) == 0x207793d8;
+    dither |= WORD(0x4200) == 0x2076da6d || WORD(0x4200) == 0x207793d8;
+    forward |= WORD(0x4200) == 0x207793d8;
+    mip |= WORD(0x4200) == 0x20772c04 || WORD(0x4200) == 0x2077e569;
+    dither |= WORD(0x4200) == 0x20772c04 || WORD(0x4200) == 0x2077e569;
+    fog |= WORD(0x4200) == 0x20772c04 || WORD(0x4200) == 0x2077e569;
+    forward |= WORD(0x4200) == 0x2077e569;
     int direction = forward ? 1 : -1;
     if (dither) { first_x = left[2]; last_x = right[2]; }
     if (first_x > last_x) {
@@ -176,6 +194,10 @@ static void projective_span(uint32_t *left, uint32_t *right, uint32_t y, int fla
     count = (uint32_t)((int32_t)(last_x - first_x) >> 17) + 1;
     if (dither) count = (uint32_t)((int32_t)(last_x - first_x) >> 16) + 1;
     right_factor = projective_project(0x4178, 0x4190);
+    if (mip) {
+        WORD(0x4361) = projective_mip_magnitude(right_factor);
+        WORD(0x4365) = projective_mip_magnitude(right_factor);
+    }
     if (dither) {
         WORD(0x4361) = right_factor ^ ((int32_t)right_factor < 0 ? 0xffffffffu : 0);
         WORD(0x4365) = WORD(0x4361);
@@ -190,6 +212,10 @@ static void projective_span(uint32_t *left, uint32_t *right, uint32_t y, int fla
             WORD(0x41f0) = forward ? first_x : last_x;
             count = (uint32_t)((int32_t)(last_x - first_x) >> 17) + 1;
         }
+    }
+    if (mip) {
+        WORD(0x4361) = projective_mip_magnitude(left_factor);
+        if (WORD(0x4361) <= WORD(0x4371) && WORD(0x4365) <= WORD(0x4371)) mip = 0;
     }
     if (fog) {
         WORD(0x41c4) = projective_fog_level(left_factor);
@@ -215,6 +241,7 @@ static void projective_span(uint32_t *left, uint32_t *right, uint32_t y, int fla
         WORD(0x4198) = WORD(0x4190); WORD(0x419c) = WORD(0x4194);
         if (fog) WORD(0x41c0) = WORD(0x41bc);
         uint32_t factor = projective_project(0x4178, 0x4190);
+        if (mip) WORD(0x4361) = projective_mip_magnitude(factor);
         if (fog) {
             WORD(0x41bc) = projective_fog_level(factor);
             WORD(0x4358) = (uint32_t)((int32_t)(WORD(0x41bc) - WORD(0x41c0)) >> shift);
@@ -223,8 +250,14 @@ static void projective_span(uint32_t *left, uint32_t *right, uint32_t y, int fla
         WORD(0x41a8) = (uint32_t)((int32_t)(WORD(0x4190) - WORD(0x4198)) >> shift);
         WORD(0x41ac) = (uint32_t)((int32_t)(WORD(0x4194) - WORD(0x419c)) >> shift);
         WORD(0x4160) = remaining;
-        if (dither && fog) dither_fog_pixels(pixel_address, block, 0x4198, y, direction, 0, WORD(0x41c0));
-        else if (dither && keyed) dither_key_pixels(pixel_address, block, 0x4198, y, direction, 0);
+        if (mip && fog) {
+            if (dither) projective_mip_dither_pixels(pixel_address, block, 0x4198, y, direction, 0, 1, WORD(0x41c0));
+            else projective_mip_fog_pixels(pixel_address, block, 0x4198, direction, WORD(0x41c0));
+        }
+        else if (mip && dither) projective_mip_dither_pixels(pixel_address, block, 0x4198, y, direction, 0, 0, 0);
+        else if (mip) projective_mip_pixels(pixel_address, block, 0x4198, direction, 0);
+        else if (dither && keyed) dither_key_pixels(pixel_address, block, 0x4198, y, direction, 0, fog, WORD(0x41c0));
+        else if (dither && fog) dither_fog_pixels(pixel_address, block, 0x4198, y, direction, 0, WORD(0x41c0));
         else if (dither) dither_pixels(pixel_address, block, 0x4198, y, direction, 0);
         else if (fog) projective_fog_pixels(pixel_address, block, 0x4198, WORD(0x41c0), direction, keyed);
         else projective_pixels(pixel_address, block, 0x4198, direction, 0, keyed);
@@ -233,17 +266,32 @@ static void projective_span(uint32_t *left, uint32_t *right, uint32_t y, int fla
     if ((int32_t)remaining <= 0) return;
     WORD(0x41a8) = projective_divide((int32_t)(WORD(0x41a0) - WORD(0x4190)), remaining);
     WORD(0x41ac) = projective_divide((int32_t)(WORD(0x41a4) - WORD(0x4194)), remaining);
+    if (mip && fog && !dither) {
+        WORD(0x4358) = projective_divide((int32_t)(WORD(0x41c4) - WORD(0x41bc)), remaining);
+        WORD(0x4354) = projective_mip_fog_tails[forward][shift == 4][remaining];
+        projective_mip_fog_pixels(pixel_address, remaining, 0x4190, direction, WORD(0x41bc));
+        return;
+    }
+    if (mip && !dither) {
+        WORD(0x4354) = projective_mip_tails[forward][shift == 4][remaining];
+        projective_mip_pixels(pixel_address, remaining, 0x4190, direction, 1);
+        return;
+    }
     if (dither) {
         if (fog) WORD(0x4358) = projective_divide((int32_t)(WORD(0x41c4) - WORD(0x41bc)), remaining);
         WORD(0x45d1) = pixel_address & 1;
         WORD(0x45d5) = (pixel_address ^ remaining) & 1;
         WORD(0x45d9) = remaining + WORD(0x45d5);
         WORD(0x4160) = remaining;
-        WORD(0x4354) = fog ? projective_dither_fog_tails[forward][shift == 4][y & 1][WORD(0x45d9)] :
+        WORD(0x4354) = mip && fog ? projective_mip_dither_fog_tails[forward][shift == 4][y & 1][WORD(0x45d9)] :
+                            mip ? projective_mip_dither_tails[forward][shift == 4][y & 1][WORD(0x45d9)] :
+                            fog && keyed ? projective_dither_key_fog_tails[forward][shift == 4][y & 1][WORD(0x45d9)] :
+                            fog ? projective_dither_fog_tails[forward][shift == 4][y & 1][WORD(0x45d9)] :
                             keyed ? projective_dither_key_tails[forward][shift == 4][y & 1][WORD(0x45d9)] :
                             projective_dither_tails[forward][shift == 4][y & 1][WORD(0x45d9)];
-        if (fog) dither_fog_pixels(pixel_address, WORD(0x45d9), 0x4190, y, direction, 1, WORD(0x41bc));
-        else if (keyed) dither_key_pixels(pixel_address, WORD(0x45d9), 0x4190, y, direction, 1);
+        if (mip) projective_mip_dither_pixels(pixel_address, WORD(0x45d9), 0x4190, y, direction, 1, fog, WORD(0x41bc));
+        else if (keyed) dither_key_pixels(pixel_address, WORD(0x45d9), 0x4190, y, direction, 1, fog, WORD(0x41bc));
+        else if (fog) dither_fog_pixels(pixel_address, WORD(0x45d9), 0x4190, y, direction, 1, WORD(0x41bc));
         else dither_pixels(pixel_address, WORD(0x45d9), 0x4190, y, direction, 1);
         return;
     }

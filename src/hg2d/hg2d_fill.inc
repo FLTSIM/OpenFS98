@@ -16,7 +16,7 @@ static void polygon_shadow_map(void)
     }
 }
 
-static void polygon_span(uint32_t first, uint32_t last, uint32_t y)
+static void polygon_span(uint32_t first, uint32_t last, uint32_t y, uint32_t stack_depth)
 {
     void *surface = POINTER(WORD(0x8c4));
     uint8_t *pixel, *map;
@@ -29,6 +29,10 @@ static void polygon_span(uint32_t first, uint32_t last, uint32_t y)
             first = (first & 0xffff0000u) | (uint16_t)last;
             last = (last & 0xffff0000u) | temporary;
         }
+    }
+    if (WORD(0x402c) == 0x20784d69) {
+        matrix_plane_span(first, last, y, stack_depth);
+        return;
     }
     if (WORD(0x402c) == 0x20731134) {
         if (GLOBAL_WORD(0x1298)) {
@@ -82,14 +86,14 @@ shadow_tail:
     if ((int32_t)count > 0) *pixel = map[*pixel];
 }
 
-static void polygon_flat_span(uint32_t *edge, uint32_t y, int unsigned_order)
+static void polygon_flat_span(uint32_t *edge, uint32_t y, int unsigned_order, uint32_t stack_depth)
 {
     uint32_t first = edge[2], last = first + edge[3], temporary;
     if ((int32_t)last < 0) last = 0;
     if (unsigned_order ? first > last : (int32_t)first > (int32_t)last) {
         temporary = first; first = last; last = temporary;
     }
-    polygon_span(first >> 16, last >> 16, y);
+    polygon_span(first >> 16, last >> 16, y, stack_depth);
 }
 
 /* 0x20732be8: scan count+2 records, including the unused trailing record. */
@@ -107,7 +111,7 @@ static void polygon_scan(uint32_t y)
         } else if ((uint16_t)edge[0] == (uint16_t)edge[1]) {
             /* Publish inactivity before the span accesses surface memory. */
             edge[0] = 0xffffffffu;
-            polygon_flat_span(edge, y, 1);
+            polygon_flat_span(edge, y, 1, 72);
         } else {
             edge[0] = 0xffffffffu;
         }
@@ -124,7 +128,7 @@ static void polygon_scan(uint32_t y)
                     temporary = values[index - 1]; values[index - 1] = values[index]; values[index] = temporary;
                 }
         for (index = 0; index < pairs; index++)
-            polygon_span((uint16_t)values[index * 2], (uint16_t)values[index * 2 + 1], y);
+            polygon_span((uint16_t)values[index * 2], (uint16_t)values[index * 2 + 1], y, pairs == 2 && !index ? 68 : 64);
         return;
     }
     WORD(0x4030) = ADDRESS(intersections);
@@ -141,7 +145,7 @@ static void polygon_scan(uint32_t y)
     }
     for (index = 0; index < pairs; index++)
         polygon_span((uint32_t)(int32_t)(int16_t)intersections[index * 2],
-                     (uint32_t)(int32_t)(int16_t)intersections[index * 2 + 1], y);
+                     (uint32_t)(int32_t)(int16_t)intersections[index * 2 + 1], y, 64);
 }
 
 /* 0x207328e2 / 0x2073295f: find an edge beginning exactly on this row. */
@@ -156,7 +160,7 @@ static uint32_t *polygon_find_edge(uint32_t y, uint32_t *other)
             if (ADDRESS(edge) >= WORD(0x884)) return 0;
         }
         if (edge[1] != y) return edge;
-        if (y == WORD(0x8cc)) polygon_flat_span(edge, y, 0);
+        if (y == WORD(0x8cc)) polygon_flat_span(edge, y, 0, 64);
         edge[0] = 0xffffffffu;
     }
 }
@@ -185,7 +189,7 @@ static void polygon_walk(void)
         if ((int32_t)first > (int32_t)last) {
             temporary = first; first = last; last = temporary;
         }
-        polygon_span(first, last, y);
+        polygon_span(first, last, y, 60);
         left[2] += left[3];
         if ((int32_t)left[2] < 0) left[2] = 0;
         right[2] += right[3];
@@ -217,7 +221,6 @@ void STDCALL __attribute__((used)) polygon_close_body(void *surface)
         matrix_close();
         return;
     }
-    if (GLOBAL_HALF(0xc90)) __builtin_trap();
     colour = (uint16_t)GLOBAL_WORD(0x3c0);
     stipple = colour >> 8 == 0x68;
     if (stipple) colour += 0x100;
@@ -228,6 +231,10 @@ void STDCALL __attribute__((used)) polygon_close_body(void *surface)
         HALF(0x94c) = GLOBAL_HALF(0xdce);
         WORD(0x402c) = 0x20732e1a;
         polygon_shadow_map();
+    }
+    if (GLOBAL_HALF(0xc90)) {
+        WORD(0x402c) = 0x20784d69;
+        matrix_setup();
     }
     first_x = WORD(0x8f8); first_y = WORD(0x8fc);
     last_x = WORD(0x900); last_y = WORD(0x904);

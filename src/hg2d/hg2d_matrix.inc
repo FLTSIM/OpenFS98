@@ -123,8 +123,10 @@ static void matrix_setup(void)
     selector |= ((int16_t)GLOBAL_HALF(0xcb4) >= 1 && GLOBAL_HALF(0xcce) != 0) << 5;
     WORD(0x4200) = WORD(0x4204 + selector * 4);
     texture = POINTER(GLOBAL_WORD(0xc8c));
-    if ((selector & 16) && !(selector & 8) && !(texture[1] & 0x40000))
-        __builtin_trap(); /* Hardware upload/fallback belongs to the device slice. */
+    if ((selector & 16) && !(selector & 8) && !(texture[1] & 0x40000) && !texture_mip_build(texture, 1)) {
+        selector &= ~16u;
+        WORD(0x4200) = WORD(0x4204 + 4 * selector);
+    }
     WORD(0x948) = texture[0];
 }
 
@@ -136,7 +138,12 @@ static void matrix_span(uint32_t *left, uint32_t *right, uint32_t y, int flat)
         WORD(0x4200) == 0x2073c402 || WORD(0x4200) == 0x2073f771 ||
         WORD(0x4200) == 0x20749d95 || WORD(0x4200) == 0x207541ee ||
         WORD(0x4200) == 0x2074e49d || WORD(0x4200) == 0x207588f0 ||
-        WORD(0x4200) == 0x2075e63f || WORD(0x4200) == 0x20766058) {
+        WORD(0x4200) == 0x2075e63f || WORD(0x4200) == 0x20766058 ||
+        WORD(0x4200) == 0x20761af9 || WORD(0x4200) == 0x20769510 ||
+        WORD(0x4200) == 0x20741559 || WORD(0x4200) == 0x2074597a ||
+        WORD(0x4200) == 0x207431a7 || WORD(0x4200) == 0x207475c4 ||
+        WORD(0x4200) == 0x2076da6d || WORD(0x4200) == 0x207793d8 ||
+        WORD(0x4200) == 0x20772c04 || WORD(0x4200) == 0x2077e569) {
         projective_span(left, right, y, flat);
         return;
     }
@@ -218,4 +225,27 @@ static void matrix_close(void)
         }
         y++;
     }
+}
+
+/* 0x20784d69: ordinary polygon spans synthesize two matrix records.
+ * The three stores replace only high words, retaining edge scratch fractions. */
+static void matrix_plane_span(uint32_t first, uint32_t last, uint32_t y, uint32_t stack_depth)
+{
+    uint32_t component, entry_sp = hg2d_polygon_entry_sp;
+    HALF(0x8ea) = (uint16_t)first;
+    HALF(0x8f2) = (uint16_t)last;
+    HALF(0x8ee) = (uint16_t)y;
+    WORD(0x4168) = matrix_coordinate(WORD(0x8e8), WORD(0x8d8), WORD(0x8e0));
+    WORD(0x4170) = matrix_coordinate(WORD(0x8f0), WORD(0x8d8), WORD(0x8e0));
+    WORD(0x416c) = matrix_coordinate(WORD(0x8ec), WORD(0x8dc), WORD(0x8e4));
+    for (component = 0; component < 3; component++)
+        WORD(0x4314 + component * 4) = matrix_attribute(WORD(0x4168), WORD(0x416c), component);
+    for (component = 0; component < 3; component++)
+        WORD(0x433c + component * 4) = matrix_attribute(WORD(0x4170), WORD(0x416c), component);
+    WORD(0x430c) = WORD(0x8e8);
+    WORD(0x4334) = WORD(0x8f0);
+    /* Callers have different saved words beneath the projective entry. */
+    hg2d_polygon_entry_sp = entry_sp + 64 - stack_depth;
+    matrix_span((uint32_t *)(hg2d_image + 0x4304), (uint32_t *)(hg2d_image + 0x432c), (uint16_t)y, 0);
+    hg2d_polygon_entry_sp = entry_sp;
 }

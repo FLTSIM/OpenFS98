@@ -14,7 +14,7 @@ import tempfile
 root = Path(__file__).resolve().parent.parent
 source = (root / 'src/hg2d/hg2d.c').read_text()
 sections = {}
-for section in ('palette', 'draw', 'mip_build', 'mip', 'dither', 'projective', 'mip_dither', 'matrix', 'polygon', 'fill', 'textured', 'perspective', 'perspective_fill', 'affine', 'gouraud', 'blit', 'disc', 'fan', 'resource', 'init', 'device_palette', 'device_pixels', 'device_states', 'device_shutdown', 'device_config', 'device_formats', 'device_select_format', 'device_flush', 'device_colour', 'device_create', 'device_surfaces', 'device_reduce', 'device_upload', 'device_prepare', 'device_texture', 'device_batch', 'device_points', 'device_commit'):
+for section in ('palette', 'draw', 'mip_build', 'mip', 'dither', 'projective', 'mip_dither', 'matrix', 'polygon', 'fill', 'textured', 'perspective', 'perspective_fill', 'affine', 'gouraud', 'blit', 'disc', 'fan', 'resource', 'init', 'device_palette', 'device_pixels', 'device_states', 'device_shutdown', 'device_config', 'device_formats', 'device_select_format', 'device_flush', 'device_colour', 'device_create', 'device_surfaces', 'device_reduce', 'device_upload', 'device_prepare', 'device_texture', 'device_batch', 'device_points', 'device_commit', 'device_lines'):
     sections[section] = (root / ('src/hg2d/hg2d_%s.inc' % section)).read_text()
     if section == 'projective':
         sections[section] = sections[section].replace('#include "hg2d_dither.inc"', sections['dither'])
@@ -763,6 +763,43 @@ dither_key_fog_mutations = [
     ('dither key fog table family', 'fog && keyed ? projective_dither_key_fog_tails', 'fog && keyed ? projective_dither_key_tails'),
 ]
 mutations += [(*mutation, 'projective_dither_key_fog') for mutation in dither_key_fog_mutations]
+device_lines_mutations = [
+    ('line capability', 'if (!(BYTE(0x28a04) & 0x20)) return;\n    if (WORD', 'if (!(BYTE(0x28a04) & 0x10)) return;\n    if (WORD'),
+    ('line batch mode', 'WORD(0x8850) != 2', 'WORD(0x8850) != 1'),
+    ('line capacity equality', '(int32_t)WORD(0x5ee8) < 2', '(int32_t)WORD(0x5ee8) <= 2'),
+    ('line batch origin', 'WORD(0x5ee0) = WORD(0x5ee4);', 'WORD(0x5ee0) = WORD(0x5ee4) + 32;'),
+    ('line fixed scale', '0x1p-16f', '0x1p-15f'),
+    ('line RGB red', 'BYTE(0x39c2 + colour * 3)', 'BYTE(0x39c4 + colour * 3)'),
+    ('line depth word', 'GLOBAL_HALF(0xdce)', 'GLOBAL[0xdce]'),
+    ('line fog gate', 'threshold < 0x7d00', 'threshold <= 0x7d00'),
+    ('line fog signed distance', '(int32_t)distance >> 8', 'distance >> 8'),
+    ('line fog threshold equality', '>> 8 >= (int32_t)threshold', '>> 8 > (int32_t)threshold'),
+    ('line fog numerator', '(int32_t)distance >> 4', '(int32_t)distance >> 3'),
+    ('line fog scale DWORD', 'GLOBAL_WORD(0x30c)', 'GLOBAL_HALF(0x30c)'),
+    ('line fog scale signed', '(int32_t)scale > (int32_t)maximum', 'scale > maximum'),
+    ('line fog maximum', 'GLOBAL_HALF(0xcd4)', 'GLOBAL_HALF(0xcd4) + 1'),
+    ('line fog clamp', 'amount = 254', 'amount = 255'),
+    ('line fog special key', 'threshold == 0x1fff', 'threshold == 0x1ffe'),
+    ('line fog accumulation', 'WORD(0x884c) |= amount', 'WORD(0x884c) = amount'),
+    ('line fog alpha', '0u - (amount + 1)', '0u - amount'),
+    ('line untouched UV', 'vertex[5] = specular;', 'vertex[5] = specular; vertex[6] = 0;'),
+    ('line second endpoint', 'vertex + 8, x2', 'vertex + 8, x1'),
+    ('line second z', 'vertex[10] = vertex[11] = 0x3f800000', 'vertex[10] = vertex[11] = 0'),
+    ('line second specular', 'vertex[13] = vertex[5]', 'vertex[13] = 0xff000000'),
+    ('line cursor', 'WORD(0x8848) += 64', 'WORD(0x8848) += 32'),
+    ('line capacity consumption', 'WORD(0x5ee8) -= count', 'WORD(0x5ee8) += count'),
+    ('line horizontal coordinates', 'fourth = third; third = second; second = fourth;', 'fourth = third; third = second;'),
+    ('line vertical coordinates', 'fourth = third; third = first;', 'fourth = third; third = second;'),
+    ('line integer shift', 'first <<= 16', 'first <<= 15'),
+    ('line inactive wrapper registers', 'registers[2] = first;', 'registers[2] = third;'),
+    ('frame full window', 'third == view[0x60 / 4]', 'third != view[0x60 / 4]'),
+    ('frame rectangle x', 'rectangle[1] - rectangle[0]', 'rectangle[1] + rectangle[0]'),
+    ('frame rectangle y', 'rectangle[3] + rectangle[2]', 'rectangle[3] - rectangle[2]'),
+    ('frame quarter offset', '(first << 16) + 0x4000', '(first << 16) + 0x8000'),
+    ('frame right inset', '((third + first) << 16) - 0xc000', '((third + first) << 16) - 0x4000'),
+    ('frame edge direction', 'device_fixed_line(right, bottom, right, top, registers);', 'device_fixed_line(right, top, right, bottom, registers);'),
+]
+mutations += [(*mutation, 'device_lines') for mutation in device_lines_mutations]
 device_commit_mutations = [
     ('commit publish cursor', 'WORD(0x5ee4) = next;', 'WORD(0x5ee4) = previous;'),
     ('commit signed count', '(int32_t)(next - previous) >> 5', '(int32_t)(next - previous) / 32'),
@@ -1577,7 +1614,7 @@ for name, old, new, suite in mutations:
         continue
     tested += 1
     owner = {'colours': 'palette', 'palette': 'palette', 'drawing': 'draw',
-             'polygons': 'polygon', 'fills': 'fill', 'textured': 'textured', 'affine': 'affine', 'gouraud': 'gouraud', 'blits': 'blit', 'optimized': 'affine', 'perspective': 'perspective', 'discs': 'disc', 'perspective_fill': 'perspective_fill', 'matrix_vertices': 'matrix', 'matrix_fills': 'matrix', 'projective': 'projective', 'projective_keyed': 'projective', 'projective_fog': 'projective', 'projective_key_fog': 'projective', 'projective_dither': 'projective', 'projective_dither_fog': 'projective', 'projective_dither_key': 'projective', 'projective_dither_key_fog': 'projective', 'projective_plane': 'matrix', 'projective_mip': 'mip', 'projective_mip_fog': 'mip', 'projective_mip_dither': 'mip_dither', 'projective_mip_dither_fog': 'mip_dither', 'resources': 'resource', 'initialization': 'init', 'projective_mip_build': 'mip_build', 'fans': 'fan', 'device_palettes': 'device_palette', 'device_pixels': 'device_pixels', 'device_states': 'device_states', 'device_shutdown': 'device_shutdown', 'device_config': 'device_config', 'device_formats': 'device_formats', 'device_select_format': 'device_select_format', 'device_flush': 'device_flush', 'device_colour': 'device_colour', 'device_create': 'device_create', 'device_surfaces': 'device_surfaces', 'device_reduce': 'device_reduce', 'device_upload': 'device_upload', 'device_prepare': 'device_prepare', 'device_texture': 'device_texture', 'device_batch': 'device_batch', 'device_points': 'device_points', 'device_commit': 'device_commit'}.get(suite)
+             'polygons': 'polygon', 'fills': 'fill', 'textured': 'textured', 'affine': 'affine', 'gouraud': 'gouraud', 'blits': 'blit', 'optimized': 'affine', 'perspective': 'perspective', 'discs': 'disc', 'perspective_fill': 'perspective_fill', 'matrix_vertices': 'matrix', 'matrix_fills': 'matrix', 'projective': 'projective', 'projective_keyed': 'projective', 'projective_fog': 'projective', 'projective_key_fog': 'projective', 'projective_dither': 'projective', 'projective_dither_fog': 'projective', 'projective_dither_key': 'projective', 'projective_dither_key_fog': 'projective', 'projective_plane': 'matrix', 'projective_mip': 'mip', 'projective_mip_fog': 'mip', 'projective_mip_dither': 'mip_dither', 'projective_mip_dither_fog': 'mip_dither', 'resources': 'resource', 'initialization': 'init', 'projective_mip_build': 'mip_build', 'fans': 'fan', 'device_palettes': 'device_palette', 'device_pixels': 'device_pixels', 'device_states': 'device_states', 'device_shutdown': 'device_shutdown', 'device_config': 'device_config', 'device_formats': 'device_formats', 'device_select_format': 'device_select_format', 'device_flush': 'device_flush', 'device_colour': 'device_colour', 'device_create': 'device_create', 'device_surfaces': 'device_surfaces', 'device_reduce': 'device_reduce', 'device_upload': 'device_upload', 'device_prepare': 'device_prepare', 'device_texture': 'device_texture', 'device_batch': 'device_batch', 'device_points': 'device_points', 'device_commit': 'device_commit', 'device_lines': 'device_lines'}.get(suite)
     if source.count(old) != 1 and owner:
         scope = sections[owner]
         assert scope.count(old) == 1 and source.count(scope) == 1, (name, scope.count(old))

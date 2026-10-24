@@ -30,3 +30,11 @@ EXPORTS
     hg2d_device_depth_point
     hg2d_device_commit
     hg2d_device_nop
+    hg2d_device_fixed_line
+    hg2d_device_horizontal
+    hg2d_device_vertical
+    hg2d_device_line
+    hg2d_device_frame
+    hg2d_device_palette_vertex
+    hg2d_device_uv_vertex
+    hg2d_device_intensity_vertex

@@ -189,6 +189,8 @@ EAX_ENTRY(texture_update, texture_update_body);
 #include "hg2d_device_batch.inc"
 #include "hg2d_device_points.inc"
 #include "hg2d_device_commit.inc"
+#include "hg2d_device_lines.inc"
+#include "hg2d_device_vertices.inc"
 
 __asm__(".globl _ImportTable\n.set _ImportTable, _hg2d_image\n"
         ".globl _Linkage\n.set _Linkage, _hg2d_image + 0x38\n");

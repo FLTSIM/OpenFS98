@@ -376,6 +376,46 @@ static LONG WINAPI draw_exception(EXCEPTION_POINTERS *exception)
             draw_div_repairs++;
             return EXCEPTION_CONTINUE_EXECUTION;
         }
+        if (context->Eip == 0x2078d1ce || context->Eip == 0x2078d1f2) {
+            uint32_t denominator = context->Eip == 0x2078d1ce ? context->Ebx : *(uint32_t *)(uintptr_t)(context->Ebp + 0x10);
+            int negative = ((int32_t)context->Edx < 0) != ((int32_t)denominator < 0);
+            CHECK(instruction[0] == 0xf7 && (instruction[1] == 0xfb || (instruction[1] == 0x7d && instruction[2] == 0x10)));
+            context->Eax = negative ? 0x80000001u : 0x7fffffffu;
+            context->Edx = 0x7fffffffu;
+            context->Eip += instruction[1] == 0xfb ? 2 : 3;
+            draw_div_repairs++;
+            return EXCEPTION_CONTINUE_EXECUTION;
+        }
+        if (context->Eip == 0x2078de2d || context->Eip == 0x2078de51) {
+            uint32_t denominator = context->Eip == 0x2078de2d ? context->Edi : *(uint32_t *)(uintptr_t)(context->Ebp + 0x14);
+            int negative = ((int32_t)context->Edx < 0) != ((int32_t)denominator < 0);
+            CHECK(instruction[0] == 0xf7 && (instruction[1] == 0xff || (instruction[1] == 0x7d && instruction[2] == 0x14)));
+            context->Eax = negative ? 0x80000001u : 0x7fffffffu;
+            context->Edx = 0x7fffffffu;
+            context->Eip += instruction[1] == 0xff ? 2 : 3;
+            draw_div_repairs++;
+            return EXCEPTION_CONTINUE_EXECUTION;
+        }
+        if (context->Eip == 0x2078d999 || context->Eip == 0x2078d9bd) {
+            uint32_t denominator = context->Eip == 0x2078d999 ? context->Edi : *(uint32_t *)(uintptr_t)(context->Ebp + 0x1c);
+            int negative = ((int32_t)context->Edx < 0) != ((int32_t)denominator < 0);
+            CHECK(instruction[0] == 0xf7 && (instruction[1] == 0xff || (instruction[1] == 0x7d && instruction[2] == 0x1c)));
+            context->Eax = negative ? 0x80000001u : 0x7fffffffu;
+            context->Edx = 0x7fffffffu;
+            context->Eip += instruction[1] == 0xff ? 2 : 3;
+            draw_div_repairs++;
+            return EXCEPTION_CONTINUE_EXECUTION;
+        }
+        if (context->Eip == 0x2078dbec || context->Eip == 0x2078dc10) {
+            uint32_t denominator = context->Eip == 0x2078dbec ? context->Ecx : *(uint32_t *)(uintptr_t)(context->Ebp + 0x1c);
+            int negative = ((int32_t)context->Edx < 0) != ((int32_t)denominator < 0);
+            CHECK(instruction[0] == 0xf7 && (instruction[1] == 0xf9 || (instruction[1] == 0x7d && instruction[2] == 0x1c)));
+            context->Eax = negative ? 0x80000001u : 0x7fffffffu;
+            context->Edx = 0x7fffffffu;
+            context->Eip += instruction[1] == 0xf9 ? 2 : 3;
+            draw_div_repairs++;
+            return EXCEPTION_CONTINUE_EXECUTION;
+        }
         if (context->Eip == 0x207880da || context->Eip == 0x207880f3) {
             CHECK(instruction[0] == 0x66 && instruction[1] == 0xf7 && instruction[2] == 0xf1);
             context->Eax |= 0xffff;

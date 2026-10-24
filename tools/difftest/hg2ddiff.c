@@ -334,6 +334,8 @@ static void run_textures(void)
 #include "hg2d_device_prepare_suite.inc"
 #include "hg2d_device_points_suite.inc"
 #include "hg2d_device_commit_suite.inc"
+#include "hg2d_device_lines_suite.inc"
+#include "hg2d_device_vertices_suite.inc"
 #include "hg2d_polygon_suite.inc"
 #include "hg2d_fill_suite.inc"
 #include "hg2d_resource_suite.inc"
@@ -363,7 +365,7 @@ int main(int argc, char **argv)
     uint32_t count = argc > 1 ? (uint32_t)strtoul(argv[1], NULL, 0) : 20000;
     HMODULE modules[2], util;
     const char *suite = argc > 2 ? argv[2] : "all";
-    CHECK(!strcmp(suite, "all") || !strcmp(suite, "textures") || !strcmp(suite, "palette") || !strcmp(suite, "colours") || !strcmp(suite, "drawing") || !strcmp(suite, "polygons") || !strcmp(suite, "fills") || !strcmp(suite, "textured") || !strcmp(suite, "affine") || !strcmp(suite, "gouraud") || !strcmp(suite, "blits") || !strcmp(suite, "lifecycle") || !strcmp(suite, "optimized") || !strcmp(suite, "perspective") || !strcmp(suite, "discs") || !strcmp(suite, "perspective_fill") || !strcmp(suite, "matrix_vertices") || !strcmp(suite, "matrix_fills") || !strcmp(suite, "projective") || !strcmp(suite, "projective_keyed") || !strcmp(suite, "projective_fog") || !strcmp(suite, "projective_key_fog") || !strcmp(suite, "projective_dither") || !strcmp(suite, "projective_dither_fog") || !strcmp(suite, "projective_dither_key") || !strcmp(suite, "projective_dither_key_fog") || !strcmp(suite, "projective_plane") || !strcmp(suite, "projective_mip") || !strcmp(suite, "projective_mip_fog") || !strcmp(suite, "projective_mip_dither") || !strcmp(suite, "projective_mip_dither_fog") || !strcmp(suite, "resources") || !strcmp(suite, "initialization") || !strcmp(suite, "projective_mip_build") || !strcmp(suite, "fans") || !strcmp(suite, "device_palettes") || !strcmp(suite, "device_pixels") || !strcmp(suite, "device_states") || !strcmp(suite, "device_shutdown") || !strcmp(suite, "device_config") || !strcmp(suite, "device_formats") || !strcmp(suite, "device_select_format") || !strcmp(suite, "device_flush") || !strcmp(suite, "device_colour") || !strcmp(suite, "device_create") || !strcmp(suite, "device_surfaces") || !strcmp(suite, "device_reduce") || !strcmp(suite, "device_upload") || !strcmp(suite, "device_prepare") || !strcmp(suite, "device_texture") || !strcmp(suite, "device_batch") || !strcmp(suite, "device_points") || !strcmp(suite, "device_commit"));
+    CHECK(!strcmp(suite, "all") || !strcmp(suite, "textures") || !strcmp(suite, "palette") || !strcmp(suite, "colours") || !strcmp(suite, "drawing") || !strcmp(suite, "polygons") || !strcmp(suite, "fills") || !strcmp(suite, "textured") || !strcmp(suite, "affine") || !strcmp(suite, "gouraud") || !strcmp(suite, "blits") || !strcmp(suite, "lifecycle") || !strcmp(suite, "optimized") || !strcmp(suite, "perspective") || !strcmp(suite, "discs") || !strcmp(suite, "perspective_fill") || !strcmp(suite, "matrix_vertices") || !strcmp(suite, "matrix_fills") || !strcmp(suite, "projective") || !strcmp(suite, "projective_keyed") || !strcmp(suite, "projective_fog") || !strcmp(suite, "projective_key_fog") || !strcmp(suite, "projective_dither") || !strcmp(suite, "projective_dither_fog") || !strcmp(suite, "projective_dither_key") || !strcmp(suite, "projective_dither_key_fog") || !strcmp(suite, "projective_plane") || !strcmp(suite, "projective_mip") || !strcmp(suite, "projective_mip_fog") || !strcmp(suite, "projective_mip_dither") || !strcmp(suite, "projective_mip_dither_fog") || !strcmp(suite, "resources") || !strcmp(suite, "initialization") || !strcmp(suite, "projective_mip_build") || !strcmp(suite, "fans") || !strcmp(suite, "device_palettes") || !strcmp(suite, "device_pixels") || !strcmp(suite, "device_states") || !strcmp(suite, "device_shutdown") || !strcmp(suite, "device_config") || !strcmp(suite, "device_formats") || !strcmp(suite, "device_select_format") || !strcmp(suite, "device_flush") || !strcmp(suite, "device_colour") || !strcmp(suite, "device_create") || !strcmp(suite, "device_surfaces") || !strcmp(suite, "device_reduce") || !strcmp(suite, "device_upload") || !strcmp(suite, "device_prepare") || !strcmp(suite, "device_texture") || !strcmp(suite, "device_batch") || !strcmp(suite, "device_points") || !strcmp(suite, "device_commit") || !strcmp(suite, "device_lines") || !strcmp(suite, "device_vertices"));
     SetUnhandledExceptionFilter(fault);
     CHECK(AddVectoredExceptionHandler(1, draw_exception));
     {
@@ -446,10 +448,26 @@ int main(int argc, char **argv)
     device_point_entry[0][1] = ADDRESS(GetProcAddress(modules[1], "hg2d_device_point"));
     device_point_entry[1][1] = ADDRESS(GetProcAddress(modules[1], "hg2d_device_depth_point"));
     CHECK(device_point_entry[0][1] && device_point_entry[1][1]);
+    device_palette_vertex_entry[0] = 0x2078dcd0;
+    device_palette_vertex_entry[1] = ADDRESS(GetProcAddress(modules[1], "hg2d_device_palette_vertex"));
+    device_uv_vertex_entry[0] = 0x2078d7a0;
+    device_uv_vertex_entry[1] = ADDRESS(GetProcAddress(modules[1], "hg2d_device_uv_vertex"));
+    device_intensity_vertex_entry[0] = 0x2078da60;
+    device_intensity_vertex_entry[1] = ADDRESS(GetProcAddress(modules[1], "hg2d_device_intensity_vertex"));
+    CHECK(device_uv_vertex_entry[1] && device_intensity_vertex_entry[1]);
+    CHECK(device_palette_vertex_entry[1]);
     device_commit_entry[0] = 0x2078da30; device_nop_entry[0] = 0x2078d060;
     device_commit_entry[1] = ADDRESS(GetProcAddress(modules[1], "hg2d_device_commit"));
     device_nop_entry[1] = ADDRESS(GetProcAddress(modules[1], "hg2d_device_nop"));
     CHECK(device_commit_entry[1] && device_nop_entry[1]);
+    {
+        const char *names[] = {"hg2d_device_fixed_line","hg2d_device_horizontal","hg2d_device_vertical","hg2d_device_line","hg2d_device_frame"};
+        uint32_t entries[] = {0x2078d0e0,0x2078d070,0x2078d090,0x2078d0b0,0x2078d2b0};
+        for (uint32_t index = 0; index < 5; index++) {
+            device_line_entry[index][0] = entries[index]; device_line_entry[index][1] = ADDRESS(GetProcAddress(modules[1], names[index]));
+            CHECK(device_line_entry[index][1]);
+        }
+    }
     {
         const char *names[] = {"hg2d_device_blend", "hg2d_device_mipmap", "hg2d_device_filter", "hg2d_device_fog"};
         uint32_t entries[] = {0x2078bdf0, 0x2078bf80, 0x2078bf10, 0x2078be50};
@@ -629,6 +647,20 @@ int main(int argc, char **argv)
         for (scenario = 0; scenario < count; scenario++)
             for (side = 0; side < 2; side++) run_device_commit();
         printf("hg2ddiff device_commit: %u scenarios, %u operations, 0 differ\n", count, operations / 2);
+    }
+    if (!strcmp(suite, "all") || !strcmp(suite, "device_vertices")) {
+        active_suite = "device_vertices"; operations = draw_div_repairs = 0;
+        for (scenario = 0; scenario < count; scenario++)
+            for (side = 0; side < 2; side++) run_device_vertices();
+        printf("hg2ddiff device_vertices: %u scenarios, %u operations, 0 differ\n", count, operations / 2);
+        printf("retail device vertex signed DIV repairs: %u\n", draw_div_repairs);
+    }
+    if (!strcmp(suite, "all") || !strcmp(suite, "device_lines")) {
+        active_suite = "device_lines"; operations = draw_div_repairs = 0;
+        for (scenario = 0; scenario < count; scenario++)
+            for (side = 0; side < 2; side++) run_device_lines();
+        printf("hg2ddiff device_lines: %u scenarios, %u operations, 0 differ\n", count, operations / 2);
+        printf("retail host divide repairs: %u\n", draw_div_repairs);
     }
     if (!strcmp(suite, "all") || !strcmp(suite, "drawing")) {
         active_suite = "drawing";

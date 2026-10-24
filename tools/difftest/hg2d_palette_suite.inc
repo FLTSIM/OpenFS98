@@ -32,7 +32,7 @@ static void palette_reset(void)
     memset(global, 0, sizeof global);
     random_state = scenario * 2654435761u + 0x12345;
     if (!random_state) random_state = 1;
-    polygon_compare = 0;
+    polygon_compare = device_linkage_compare = 0;
     step = check_carry = 0;
     touched = NULL;
     event_hash = 2166136261u;

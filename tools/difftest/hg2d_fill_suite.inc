@@ -117,5 +117,20 @@ static void run_fills(void)
         polygon_submit(12, 8, 1); polygon_submit(4, 8, 1);
         fill_close(remaps[shape]);
     }
+    /* Exercise the maximum post-clamp shadow length and both signs around
+     * 0x8000. Alias rows within the guarded 64K canvas so these wide spans
+     * test the public callers without requiring a huge framebuffer. */
+    surface[1] = 32768; surface[3] = 0;
+    for (index = 0; index < 160; index++) row_storage[index] = ADDRESS(canvas);
+    for (shape = 0; shape < 50; shape++) {
+        static const uint32_t boundaries[] = {0,1,0x7ffe,0x7fff,0x8000,0xffff};
+        uint32_t first = shape >= 48 ? 0 : boundaries[shape % 6], last = shape >= 48 ? 0x7fff : boundaries[(shape / 6) % 6];
+        fill_begin(shape & 1 ? 2 : 3, shape & 2 ? 1 : 0);
+        polygon_submit(first, 0, 1); polygon_submit(last, 0, 1);
+        polygon_submit(last, 1, 1); polygon_submit(first, 1, 1);
+        memcpy(fill_expected, canvas, CANVAS_SIZE);
+        fill_close(0);
+        CHECK(!memcmp(canvas + 0x8000, fill_expected + 0x8000, CANVAS_SIZE - 0x8000));
+    }
     polygon_compare = 0;
 }

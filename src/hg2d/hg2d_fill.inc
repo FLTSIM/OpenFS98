@@ -61,9 +61,10 @@ static void polygon_span(uint32_t first, uint32_t last, uint32_t y, uint32_t sta
         } while ((int32_t)count > 0);
         return;
     }
-    /* The shadow span's early negative-word return loses its saved ESI.
-     * Ordered, clipped spans used here do not take that corrupt-stack path. */
-    if ((int16_t)count < 0) __builtin_trap();
+    /* All five retail span call sites deliver ordered x in [0, 0x7fff]:
+     * they sort endpoints, clamp negative low words to zero and re-sort
+     * after clamping. Thus 0 <= last-first <= 0x7fff. The private shadow
+     * helper's corrupt-stack negative-CX return is unreachable here. */
     count++;
     map = hg2d_image + (HALF(0x94c) ? 0xa4e : 0x4035);
     if (ADDRESS(pixel) & 1) {

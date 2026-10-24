@@ -37,9 +37,9 @@ static void run_device_vertices(void)
         WORD(global, 0x2f0) = counts[(scenario + variant) % 8];
         WORD(images[side], 0x8850) = variant & 2 ? (kind == 0 ? 8 : kind == 1 ? 5 : 7) : 1;
         WORD(images[side], 0x5ee8) = capacities[(scenario + variant / 4) % 7];
-        WORD(images[side], 0x5ee4) = ADDRESS(images[side] + 0x8860);
-        WORD(images[side], 0x5ee0) = ADDRESS(images[side] + 0x8860 + 32);
-        WORD(images[side], 0x8848) = ADDRESS(images[side] + 0x8860 + 64);
+        WORD(images[side], 0x5ee4) = ADDRESS(images[side] + 0x8860 + 32);
+        WORD(images[side], 0x5ee0) = ADDRESS(images[side] + 0x8860);
+        WORD(images[side], 0x8848) = ADDRESS(images[side] + 0x8860 + 96);
         memset(device_vertex_texture, 0, sizeof device_vertex_texture);
         device_vertex_texture[1] = variant & 8 ? 0x100000 : 0;
         device_vertex_texture[2] = 0xaabbccdd; device_vertex_texture[3] = ADDRESS(device_objects[3]);

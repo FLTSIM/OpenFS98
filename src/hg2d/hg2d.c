@@ -1,4 +1,4 @@
-/* HG2D, module 13. Incomplete: texture, palette and drawing slices are implemented.
+/* HG2D, module 13. Software/device services and dispatch are implemented.
  * Keep the retail .data layout for whole-image differential testing.
  * See docs/modules/hg2d.md. */
 #include <windows.h>
@@ -191,6 +191,10 @@ EAX_ENTRY(texture_update, texture_update_body);
 #include "hg2d_device_commit.inc"
 #include "hg2d_device_lines.inc"
 #include "hg2d_device_vertices.inc"
+#include "hg2d_device_projected.inc"
+#include "hg2d_device_text.inc"
+#include "hg2d_device_disc.inc"
+#include "hg2d_device_scene.inc"
 
 __asm__(".globl _ImportTable\n.set _ImportTable, _hg2d_image\n"
         ".globl _Linkage\n.set _Linkage, _hg2d_image + 0x38\n");
@@ -239,6 +243,9 @@ BOOL WINAPI DllMain(HINSTANCE instance, DWORD reason, LPVOID reserved)
         WORD(0x38 + 0x84) = ADDRESS(disc);
         WORD(0x38 + 0x88) = ADDRESS(colour_remap);
         WORD(0x38 + 0x6c) = ADDRESS(texture_remap);
+        WORD(0x38 + 0x9c) = ADDRESS(hg2d_device_begin);
+        WORD(0x38 + 0xa0) = ADDRESS(hg2d_device_end);
+        WORD(0x38 + 0xbc) = ADDRESS(hg2d_device_select);
         WORD(0x38 + 0xa4) = ADDRESS(fan_draw);
         WORD(0x38 + 0xa8) = ADDRESS(texture_load);
         WORD(0x38 + 0xac) = ADDRESS(texture_create);

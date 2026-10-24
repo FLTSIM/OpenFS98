@@ -10,7 +10,7 @@ static void device_project_vertex(uint32_t *vertex, const uint32_t *view, uint32
         "fildl 8(%[view]); fmulp; fildl 12(%[view]); faddp; fstps 4(%[vertex]); "
         "flds %[one]; fdiv %%st(1),%%st; fstps 12(%[vertex]); fstp %%st(0)"
         : : [vertex]"r"(vertex), [view]"r"(view), [x]"m"(x), [y]"m"(y), [z]"m"(z),
-            [scale]"m"(fixed_scale), [one]"m"(one) : "memory", "st", "st(1)");
+            [scale]"m"(fixed_scale), [one]"m"(one) : "memory", "st", "st(1)", "st(2)");
 #else
     float *output = (float *)vertex;
     double depth = (double)(int32_t)z / 65536.0;

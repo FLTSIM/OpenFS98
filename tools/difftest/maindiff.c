@@ -141,6 +141,7 @@ static void put(const char *format, ...)
 }
 
 static uint32_t wanted_tags[8], nwanted;
+static void cap_lengths(uint8_t *b, uint32_t n);
 static uint8_t fixtures[0x80000] __attribute__((aligned(16)));
 static uint32_t fix_used;
 
@@ -221,6 +222,7 @@ static unsigned long cover_faults, cover_av, cover_huge, cover_hangs;
 static volatile int hung;
 static volatile DWORD call_start;
 static HANDLE main_thread;
+static uint8_t *exe_lo, *exe_hi;
 
 #define HANG_MS 300
 
@@ -250,9 +252,11 @@ static LONG WINAPI on_vectored(EXCEPTION_POINTERS *e)
         fflush(stdout);
         ExitProcess(5);
     }
-    /* a walk into the stack's guard page is the same fault as any other */
+    /* a walk into the stack's guard page, or far enough to exhaust it, is
+     * the same fault as any other read off the end of a situation */
     if (!in_main || cur == NULL ||
-        (code != EXCEPTION_ACCESS_VIOLATION && code != STATUS_GUARD_PAGE_VIOLATION))
+        (code != EXCEPTION_ACCESS_VIOLATION && code != STATUS_GUARD_PAGE_VIOLATION &&
+         code != STATUS_STACK_OVERFLOW))
         return EXCEPTION_CONTINUE_SEARCH;
     put(" FAULT(av)");
     if (getenv("MAIN_EXC")) {
@@ -706,6 +710,8 @@ typedef uint32_t (STDCALL *s4)(uint32_t, uint32_t, uint32_t, uint32_t);
 #define SVC(off) (*(void **)(cur->link + (off)))
 
 static int listening = 1;
+static uint32_t dispatches_this_op;
+static unsigned long cover_runaway;
 static void listen_save(void);
 static void listen_record(uint32_t rec);
 
@@ -717,11 +723,16 @@ static uint32_t STDCALL chain_send(uint32_t list, uint32_t a, uint32_t b)
     if (list == 0x14 && a == 0x23 && listening)
         listen_save();
     else if (list == 0x14 && a == 0x22) {
-        uint32_t body = *(uint32_t *)(uintptr_t)(b + 0xc);
-        if (!known_memory(body, 1, 0)) {
-            if (counting) cover_wild++;
-            stub_fault("wild");          /* a record the walk found off in the harness's memory */
+        /* A record of length 0 never moves the walk on (retail spins on
+         * it, sending it again and again): cut the op after a fixed number
+         * of dispatches, the same count on both sides, rather than by the
+         * watchdog's clock. */
+        if (++dispatches_this_op > 4096) {
+            if (counting) cover_runaway++;
+            stub_fault("runaway");
         }
+        if (getenv("MAIN_CUR"))
+            put(" [cur=%#x len=%#x body=%#x]", IMG32(0x41e5), IMG32(0x41ed), IMG32(0x41f1));
         if (listening)
             listen_record(b);
     }
@@ -1186,6 +1197,7 @@ static void fill_situation(struct vfile *f)
     if (rnd_n(8) == 0 && at > 0)
         at = rnd_n(at);                            /* cut short */
     f->size = at;
+    cap_lengths(f->bytes, f->size);
 }
 
 static char name_buf[4][32];
@@ -1335,8 +1347,10 @@ static void global_setup(void)
     /* the words the load's checks turn on, often at their edges, so that a
      * save takes them out and a load brings them back */
     {
-        static const uint16_t words[] = { 0x372, 0xc44, 0xf8c, 0x1074, 0x115c, 0xbc8, 0xe64, 0x354 };
-        static const uint16_t edge[] = { 0, 1, 2, 4, 99, 100, 101, 0x7ffe, 0x7fff, 0x8000, 0xffff };
+        static const uint16_t words[] = { 0x372, 0xc44, 0xf8c, 0x1074, 0x115c, 0xbc8, 0xe64, 0x354,
+                                          0xbd0, 0xbdc, 0xbe8, 0xbe9 };
+        static const uint16_t edge[] = { 0, 1, 2, 4, 8, 0x80, 0x100, 0x800, 0x888, 0xff00, 99, 100,
+                                         101, 0x7ffe, 0x7fff, 0x8000, 0xffff };
         for (i = 0; i < sizeof words / sizeof words[0]; i++)
             if (rnd_n(2))
                 *(uint16_t *)(global + words[i]) = edge[rnd_n(sizeof edge / sizeof edge[0])];
@@ -1389,8 +1403,8 @@ static uint32_t own_record(uint8_t *b, uint32_t max)
     if (hdr == 6) { b[4] = 0; b[5] = 0; }
     /* the body: random, or the values the load's checks turn on */
     for (i = 0; i < size; i += 2) {
-        static const uint16_t edge[] = { 0, 1, 2, 3, 4, 5, 99, 100, 101, 0x7ffe, 0x7fff, 0x8000,
-                                         0xffff, 0x7f };
+        static const uint16_t edge[] = { 0, 1, 2, 3, 4, 5, 8, 0x7f, 0x80, 0xff, 0x100, 0x800, 0x888,
+                                         0xff00, 99, 100, 101, 0x7ffe, 0x7fff, 0x8000, 0xffff };
         uint16_t w = rnd_n(3) == 0 ? edge[rnd_n(sizeof edge / sizeof edge[0])] : (uint16_t)rnd();
         b[hdr + i] = (uint8_t)w;
         if (i + 1 < size)
@@ -1403,14 +1417,54 @@ static uint32_t own_record(uint8_t *b, uint32_t max)
     return hdr + size;
 }
 
+/* Keep a situation's record lengths small enough that the parser's cursor
+ * walks forward byte-by-byte rather than leaping off into arbitrary process
+ * memory (where a jump of several MB lands at an absolute address mapped on
+ * one side's pass but not the other -- harness nondeterminism, not a module
+ * difference).  Every length is capped so the body is at most 0x400; the
+ * walk then crawls through the buffer into the 0xff tail and stops at a
+ * 0xffff there, the same on both sides.  All the parse logic -- every record
+ * type, both header widths, unknown records, the terminator, short lengths,
+ * past-the-end -- is still exercised; only the leap into wild memory is not.
+ */
+static void cap_lengths(uint8_t *b, uint32_t n)
+{
+    uint32_t at = 0;
+
+    while (at + 4 <= n) {
+        uint32_t tag = b[at] | (uint32_t)b[at + 1] << 8, len, hdr, body;
+        if (tag == 0xffff)
+            break;
+        if (tag < 1000) {
+            hdr = 4;
+            len = b[at + 2] | (uint32_t)b[at + 3] << 8;
+        } else {
+            hdr = 6;
+            if (at + 6 > n)
+                break;
+            len = b[at + 2] | (uint32_t)b[at + 3] << 8 | (uint32_t)b[at + 4] << 16 |
+                  (uint32_t)b[at + 5] << 24;
+        }
+        body = len > hdr ? len - hdr : 0;
+        if (body > 0x400) {
+            body = 0x400;
+            len = hdr + body;
+            b[at + 2] = (uint8_t)len;
+            b[at + 3] = (uint8_t)(len >> 8);
+            if (hdr == 6) { b[at + 4] = 0; b[at + 5] = 0; }
+        }
+        at += hdr + body;
+    }
+}
+
 /* A saved situation's bytes, damaged */
 static uint32_t mutate(uint8_t *b, uint32_t n, uint32_t max)
 {
-    uint32_t k = rnd_n(10), i, at;
+    uint32_t k = rnd_n(12), i, at;
 
     if (counting) cover_mutated++;
     if (k >= 8)
-        k = 7;
+        k = 7;                          /* MAIN's own records, a third of the time */
     if (n == 0)
         return n;
     switch (k) {
@@ -1427,15 +1481,19 @@ static uint32_t mutate(uint8_t *b, uint32_t n, uint32_t max)
             if (counting) cover_no_end++;
         }
         break;
-    case 7: {                                      /* MAIN's own records put in at the front */
+    case 7: {                                      /* MAIN's own records put in at the front,
+                                                      or last, where nothing after them
+                                                      in the file overwrites what they set */
         uint8_t rec[0x200];
-        uint32_t j, m;
+        uint32_t j, m, where = 0;
+        if (rnd_n(2) && n >= 2 && b[n - 2] == 0xff && b[n - 1] == 0xff)
+            where = n - 2;
         for (j = 1 + rnd_n(6); j > 0; j--) {
             m = own_record(rec, sizeof rec);
             if (m == 0 || n + m > max)
                 break;
-            memmove(b + m, b, n);
-            memcpy(b, rec, m);
+            memmove(b + where + m, b + where, n - where);
+            memcpy(b + where, rec, m);
             n += m;
         }
         break;
@@ -1471,6 +1529,7 @@ static uint32_t mutate(uint8_t *b, uint32_t n, uint32_t max)
         }
         break;
     }
+    cap_lengths(b, n);
     return n;
 }
 
@@ -1685,6 +1744,7 @@ static void run_side(struct side *s)
     nops = 2 + rnd_n(suite->max_ops);
     for (i = 0; i < nops && !faulted; i++) {
         op_number = i;
+        dispatches_this_op = 0;
         hung = 0;
         call_start = GetTickCount();
         in_main = 1;
@@ -1767,6 +1827,13 @@ int main(int argc, char **argv)
     AddVectoredExceptionHandler(1, on_vectored);
     if (getenv("MAIN_NOFILTER") == NULL)
         SetUnhandledExceptionFilter(on_fault);
+    {
+        HMODULE exe = GetModuleHandleA(NULL);
+        IMAGE_NT_HEADERS *nt = (IMAGE_NT_HEADERS *)((uint8_t *)exe +
+            ((IMAGE_DOS_HEADER *)exe)->e_lfanew);
+        exe_lo = (uint8_t *)exe;
+        exe_hi = exe_lo + nt->OptionalHeader.SizeOfImage;
+    }
     DuplicateHandle(GetCurrentProcess(), GetCurrentThread(), GetCurrentProcess(), &main_thread,
                     0, FALSE, DUPLICATE_SAME_ACCESS);
     CreateThread(NULL, 0, watchdog, NULL, 0, NULL);
@@ -1806,9 +1873,9 @@ int main(int argc, char **argv)
     printf("maindiff %s: %u scenarios, %u differ\n", suite->name, n, differ);
     suite->report();
     printf("  faults (alike, the scenario ends) %lu: access violations %lu, allocations too big "
-           "%lu, walks off into the harness's memory %lu; hangs %lu\n  scenarios whose state after the last op is "
+           "%lu, walks off into the harness's memory %lu; hangs %lu\n  runaway dispatch loops cut %lu; scenarios whose state after the last op is "
            "not compared: the walk off in unshared memory %lu (%lu of them after a fault), a load that wrote over "
-           "the situation table %lu\n", cover_faults, cover_av, cover_huge, cover_wild, cover_hangs,
+           "the situation table %lu\n", cover_faults, cover_av, cover_huge, cover_wild, cover_hangs, cover_runaway,
            cover_wild_cut + cover_wild_after_fault, cover_wild_after_fault, cover_table_overwritten);
     return differ ? 1 : 0;
 }

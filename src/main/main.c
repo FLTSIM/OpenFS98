@@ -67,6 +67,177 @@ typedef uint32_t (FS98_STDCALL *f4)(uint32_t, uint32_t, uint32_t, uint32_t);
 #define H_MEMMOVE     HOST_(0x21c, f3)   /* (dst, src, n) */
 
 #define CHAIN_SEND    CALL(CHAIN, 0x20, f3)   /* (list, a, b) */
+#define CHAIN_ADD     CALL(CHAIN, 0x18, f2)   /* (list, callback) */
+#define CHAIN_REMOVE  CALL(CHAIN, 0x1c, f2)
+
+/* ---- the registers, for the assembly slices ---------------------------------
+ *
+ * Retail's hand-written routines keep values in registers across calls and
+ * hand them on; they are transliterated over these, as FE's and G3D's are.
+ * A service entered through SERVICE gets the caller's registers in them and
+ * hands back eax, ecx and edx as the body leaves them (ebx, esi, edi and
+ * ebp are the caller's, as the retail routines save them). */
+uint32_t main_eax, main_ebx, main_ecx, main_edx, main_esi, main_edi, main_ebp;
+#define eax main_eax
+#define ebx main_ebx
+#define ecx main_ecx
+#define edx main_edx
+#define esi main_esi
+#define edi main_edi
+
+#define AX        ((uint16_t)eax)
+#define AL        ((uint8_t)eax)
+#define AH        ((uint8_t)(eax >> 8))
+#define BX        ((uint16_t)ebx)
+#define BL        ((uint8_t)ebx)
+#define BH        ((uint8_t)(ebx >> 8))
+#define CX        ((uint16_t)ecx)
+#define CL        ((uint8_t)ecx)
+#define CH        ((uint8_t)(ecx >> 8))
+#define DX        ((uint16_t)edx)
+#define DL        ((uint8_t)edx)
+#define DH        ((uint8_t)(edx >> 8))
+#define SET16(r, v) ((r) = ((r) & 0xffff0000u) | (uint16_t)(v))
+#define SETLO(r, v) ((r) = ((r) & 0xffffff00u) | (uint8_t)(v))
+#define SETHI(r, v) ((r) = ((r) & 0xffff00ffu) | ((uint32_t)(uint8_t)(v) << 8))
+#define SET_AX(v) SET16(eax, v)
+#define SET_AL(v) SETLO(eax, v)
+#define SET_AH(v) SETHI(eax, v)
+#define SET_BX(v) SET16(ebx, v)
+#define SET_BL(v) SETLO(ebx, v)
+#define SET_CX(v) SET16(ecx, v)
+#define SET_CL(v) SETLO(ecx, v)
+#define SET_CH(v) SETHI(ecx, v)
+#define SET_DX(v) SET16(edx, v)
+#define SET_DL(v) SETLO(edx, v)
+#define SET_DH(v) SETHI(edx, v)
+
+/* A routine that pushes and pops all six: what it does to them is undone. */
+#define SAVE_ALL   uint32_t s_eax = eax, s_ebx = ebx, s_ecx = ecx, s_edx = edx, \
+                            s_esi = esi, s_edi = edi
+#define RESTORE_ALL (eax = s_eax, ebx = s_ebx, ecx = s_ecx, edx = s_edx, \
+                     esi = s_esi, edi = s_edi)
+
+#define SERVICE(name, bytes)                                                  \
+    static void name##_body(const uint32_t *arg)                             \
+        __attribute__((used, noinline));                                     \
+    void name(void);                                                         \
+    __asm__(".text\n\t.p2align 4\n"                                          \
+            "_" #name ":\n\t"                                                \
+            "movl %eax, _main_eax\n\tmovl %ecx, _main_ecx\n\t"               \
+            "movl %edx, _main_edx\n\tmovl %ebx, _main_ebx\n\t"               \
+            "movl %esi, _main_esi\n\tmovl %edi, _main_edi\n\t"               \
+            "movl %ebp, _main_ebp\n\t"                                       \
+            "pushl %ebx\n\tpushl %esi\n\tpushl %edi\n\tpushl %ebp\n\t"       \
+            "leal 20(%esp), %eax\n\tpushl %eax\n\t"                          \
+            "call _" #name "_body\n\t"                                       \
+            "addl $4, %esp\n\t"                                              \
+            "popl %ebp\n\tpopl %edi\n\tpopl %esi\n\tpopl %ebx\n\t"           \
+            "movl _main_eax, %eax\n\tmovl _main_ecx, %ecx\n\t"               \
+            "movl _main_edx, %edx\n\t"                                       \
+            "ret $" #bytes "\n");                                            \
+    static void name##_body(const uint32_t *arg)
+
+/* External calls from the transliterated assembly: through these thunks,
+ * the callee's eax, ecx and edx land in the register variables, as they
+ * would in the hardware registers retail goes on to read.  N is the
+ * number of stdcall arguments; the callee pops them. */
+uint32_t main_xcall0(uint32_t fn);
+uint32_t main_xcall1(uint32_t fn, uint32_t a);
+uint32_t main_xcall2(uint32_t fn, uint32_t a, uint32_t b);
+uint32_t main_xcall3(uint32_t fn, uint32_t a, uint32_t b, uint32_t c);
+uint32_t main_xcall4(uint32_t fn, uint32_t a, uint32_t b, uint32_t c, uint32_t d);
+#define XCALL_THUNK(n, pushes)                                               \
+    __asm__(".text\n\t.p2align 4\n\t.globl _main_xcall" #n "\n"            \
+            "_main_xcall" #n ":\n\t"                                         \
+            "pushl %ebp\n\tmovl %esp, %ebp\n\t"                             \
+            pushes                                                           \
+            "call *8(%ebp)\n\t"                                              \
+            "movl %eax, _main_eax\n\tmovl %ecx, _main_ecx\n\t"               \
+            "movl %edx, _main_edx\n\t"                                       \
+            "popl %ebp\n\tret\n")
+XCALL_THUNK(0, "");
+XCALL_THUNK(1, "pushl 12(%ebp)\n\t");
+XCALL_THUNK(2, "pushl 16(%ebp)\n\tpushl 12(%ebp)\n\t");
+XCALL_THUNK(3, "pushl 20(%ebp)\n\tpushl 16(%ebp)\n\tpushl 12(%ebp)\n\t");
+XCALL_THUNK(4, "pushl 24(%ebp)\n\tpushl 20(%ebp)\n\tpushl 16(%ebp)\n\tpushl 12(%ebp)\n\t");
+#define SLOT_OF(m, off) M32((m) + (off))
+
+/* div and idiv, as retail executes them under the host's divide repair
+ * (0x4119a0, docs/modules/host.md): a quotient that does not fit, or a
+ * divisor of 0, gives all ones for div, the largest quotient (or the most
+ * negative but one) for idiv. */
+static void div8(uint8_t d)
+{
+    if (d == 0 || AX / d > 0xff) {
+        SET_AX(0xffff);
+        return;
+    }
+    SET_AX((AX % d) << 8 | AX / d);
+}
+
+static void div16(uint16_t d)
+{
+    uint32_t n = ((uint32_t)DX << 16) | AX;
+
+    if (d == 0 || n / d > 0xffff) {
+        SET_AX(0xffff);
+        SET_DX(0xffff);
+        return;
+    }
+    SET_AX(n / d);
+    SET_DX(n % d);
+}
+
+static void div32(uint32_t d)
+{
+    uint64_t n = ((uint64_t)edx << 32) | eax;
+
+    if (d == 0 || n / d > 0xffffffffu) {
+        eax = 0xffffffffu;
+        edx = 0xffffffffu;
+        return;
+    }
+    eax = (uint32_t)(n / d);
+    edx = (uint32_t)(n % d);
+}
+
+static void mul8(uint8_t m)
+{
+    SET_AX((uint16_t)AL * m);
+}
+
+static void mul16(uint16_t m)
+{
+    uint32_t p = (uint32_t)AX * m;
+
+    SET_AX(p);
+    SET_DX(p >> 16);
+}
+
+static void imul16(uint16_t m)
+{
+    uint32_t p = (uint32_t)((int32_t)(int16_t)AX * (int16_t)m);
+
+    SET_AX(p);
+    SET_DX(p >> 16);
+}
+
+static void mul32(uint32_t m)
+{
+    uint64_t p = (uint64_t)eax * m;
+
+    eax = (uint32_t)p;
+    edx = (uint32_t)(p >> 32);
+}
+
+static void imul32(uint32_t m)
+{
+    uint64_t p = (uint64_t)((int64_t)(int32_t)eax * (int32_t)m);
+
+    eax = (uint32_t)p;
+    edx = (uint32_t)(p >> 32);
+}
 
 /* ---- the image -------------------------------------------------------------- */
 

@@ -1,18 +1,17 @@
 # HG2D.DLL — module id 13
 
-In progress. Thirty-seven of forty Linkage services have implementations.
-The software renderer now includes all 24 ordinary projective targets,
-plain polygon plane spans, software triangle fans, affine and perspective textures, Gouraud shading,
-primitives, text, blits and discs. Device creation, palettes, texture conversion,
-surface allocation/reuse, mip upload, texture policy, batch setup/submission,
-points and writer commits now have standalone differential coverage.
-Palette/resource loading and initialization
-are implemented too. Some service branches remain unfinished below.
+All forty Linkage services and all eighteen GPU dispatch cells have native
+implementations. Software rendering includes all 24 ordinary projective
+targets, polygon plane spans, triangle fans, affine/perspective textures,
+Gouraud shading, primitives, text, blits and discs. Device creation, palettes,
+texture conversion, surfaces, mip upload, policy, batch submission, drawing,
+selection and scene lifecycle have standalone differential suites.
 HG2D uses snake_case and `<stdint.h>`; there is no `types.h` dependency.
+The standalone Win32 implementation is complete; verification results and
+remaining integration limits are recorded below.
 
-HG2D is not in `MODULES` and must not be installed yet. Direct3D services
-and their rendering dispatch remain incomplete.
-The negative-length shadow corrupt-stack return is also deferred.
+HG2D is not in `MODULES` and has not been installed in-game. A live graphics
+smoke test and non-x86 floating precision/status verification remain separate.
 
 The implementation and tests occupy HG2D-specific files. The shared Makefile,
 README and MAIN files are untouched so MAIN can proceed independently.
@@ -31,6 +30,13 @@ make -f tools/hg2d.mk hg2ddiff-run N=20000 SUITE=device_flush
 make -f tools/hg2d.mk hg2ddiff-run N=20000 SUITE=device_colour
 make -f tools/hg2d.mk hg2ddiff-run N=20000 SUITE=device_texture
 make -f tools/hg2d.mk hg2ddiff-run N=20000 SUITE=device_commit
+make -f tools/hg2d.mk hg2ddiff-run N=20000 SUITE=device_scene
+make -f tools/hg2d.mk hg2ddiff-run N=20000 SUITE=device_selection
+make -f tools/hg2d.mk hg2ddiff-run N=20000 SUITE=device_disc
+make -f tools/hg2d.mk hg2ddiff-run N=20000 SUITE=device_text
+make -f tools/hg2d.mk hg2ddiff-run N=20000 SUITE=device_projected
+make -f tools/hg2d.mk hg2ddiff-run N=20000 SUITE=device_vertices
+make -f tools/hg2d.mk hg2ddiff-run N=20000 SUITE=device_lines
 make -f tools/hg2d.mk hg2ddiff-run N=20000 SUITE=device_points
 make -f tools/hg2d.mk hg2ddiff-run N=20000 SUITE=device_batch
 make -f tools/hg2d.mk hg2ddiff-run N=20000 SUITE=device_prepare
@@ -105,8 +111,13 @@ The shared mapper has not been changed during concurrent MAIN work.
 
 `tools/gen_hg2d_data.py` extracts the complete data image and its 55 relocated
 pointers into itself. Linkage code pointers become zero; the loader installs
-only implemented services. Other retail code pointers retain their retail
-values pending the slices that own them. No executable code is copied.
+all forty native service addresses. Other retail code addresses remain numeric
+identifiers for the translated dispatch/state comparisons. No executable code
+is copied.
+
+The slice sections are a chronological work log. Counts and deferred paths
+under older slices describe that slice at the time; the current completion
+status and limits are in slices 49–55 and the completion section.
 
 ## Slice 1: textures
 
@@ -416,10 +427,9 @@ tables retain negative pitch and nonlinear addressing from the drawing suite.
 
 The joint nonzero +0xc90/+0x2f4 path now supports matrix edges and far-depth
 fills (slice 13) and basic projective spans (slice 14). Other projective spans
-and the separate +0xc90-only path remain deferred and trap when entered. The
-shadow span's corrupt-stack return for a negative low-word length also
-remains deferred and traps explicitly; these ordered, bounded fixtures do
-not reach it. Closing an exhausted vertex buffer, arbitrary invalid row
+and the separate +0xc90-only path were implemented in later slices. The
+private shadow mapper's negative-length return was subsequently proved
+unreachable from all five public-pipeline call sites (slice 55). Closing an exhausted vertex buffer, arbitrary invalid row
 pointers, and polygons that produce unbounded scanline loops are outside
 this verification. This slice does not install HG2D in-game.
 
@@ -1508,44 +1518,170 @@ cursor fields are normalized relative to the image even outside its range;
 scalar returns elsewhere retain their existing normalization rules. The
 large baseline passes **20,000 scenarios / 1,920,000 operations**, zero differences.
 
-## Next device work
+## Slice 49: device fixed lines, integer wrappers and frames
 
-The verified helpers are not yet wired into public device selection +0xbc or
-scene begin/end +0x9c/+0xa0. Selection still needs the public wrapper at
-`0x2078b760` and Linkage switching. Before activating the device table,
-complete the remaining eleven device table entries. Seven of eighteen cells
-now have native targets: ordinary/depth points, the no-op and the four shared
-writer-commit entries. Batch initialization and texture upload are implemented;
-the public wrappers and Linkage switching still remain.
+Five device cells now have native targets: horizontal +0x2c (`0x2078d070`),
+vertical +0x30 (`0x2078d090`), integer line +0x34 (`0x2078d0b0`), fixed line
++0x38 (`0x2078d0e0`) and frame +0x3c (`0x2078d2b0`). The shared fixed-line
+kernel builds two 32-byte vertices, preserves unused UV fields, packs palette
+RGB and fog alpha, and commits their capacity/cursor changes. Its x87 fixed
+conversion follows caller precision and rounding. Integer wrappers publish
+register values even when the capability gate fails. Frames submit four
+ordered edges with quarter-pixel offsets. The full-window rectangle case
+uses the original difference for X and sum for Y.
 
-The remaining device slots/targets are +0x28 `0x2078e2e0`, +0x2c
-`0x2078d070`, +0x30 `0x2078d090`, +0x34 `0x2078d0b0`, +0x38
-`0x2078d0e0`, +0x3c `0x2078d2b0`, +0x44 `0x2078d370`, +0x48
-`0x2078d7a0`, +0x50 `0x2078da60`, +0x74 `0x2078dcd0`, and +0x84
-`0x2078ded0`. The shared line kernel at `0x2078d0e0` is the next useful
-slice: its fixed-point float conversion and fog alpha feed the integer,
-horizontal, vertical and frame wrappers. Verify their register results at
-the owner, as the depth-point EBX bug demonstrated.
-The native flush uses the 32-byte vertex queue at data +0x8860; +0x18860 is
-inside that queue, not its start. No partial device dispatch table is installed.
+The GPU fog scale is a signed **DWORD** at GLOBAL +0x30c, unlike the software
+depth helper's word. Zero thresholds use the host's signed divide repair;
+the fixture models the same repair at the two retail line IDIV instructions.
+All seven registers, x87 control/status, full image and GLOBAL are compared.
 
-The creation helper first queries IDirectDrawSurface2, obtains its DirectDraw
-interface, releases the temporary surface interface, and queries IDirect3D2.
-It compares the host-selected device label with `lstrcmpA` (case-sensitive)
-against `(Direct3D MMX)`, `(Direct3D RGB)` and `(Direct3D)`, using the matching
-device GUID. The host +0x31c selector 1 always zeros all 0xe8 output bytes first
-(`FLTSIM98.EXE` `0x414510`), so a faithful fixture need not invent stack bytes
-for that descriptor. Its +0xd0 flags drive the verified option helpers.
-Hardware capabilities are preferred; a zero hardware flags word copies the
-software descriptor and sets +0x28cc8. Both empty descriptors fail with teardown.
-The viewport constants include clip Y = 2; preserve that literal.
+The baseline passes **64 scenarios / 15,424 operations**, zero differences.
+All **34 deliberate mutations** are caught. The large baseline passes
+**20,000 scenarios / 4,820,000 operations**, zero differences, including
+**189,998** retail divide repairs. These entries remain independently exported
+for testing until the complete device dispatch can be activated.
 
-Standalone COM fixtures establish call/state equivalence for the helpers,
-not equivalence with a live graphics device or modern host. The negative-length
-shadow corrupt-stack return and non-x86 floating precision/status remain
-separate validation limits.
+## Slice 50: explicit projected vertex writers
+
+Device +0x48 (`0x2078d7a0`), +0x50 (`0x2078da60`) and +0x74
+(`0x2078dcd0`) now implement explicit UV, intensity/UV and palette-colour
+vertices. They increment the polygon count, choose a batch on the first vertex,
+expand each vertex after the third into a triangle fan, project X/Y/RHW in
+retail x87 order, and build colour/fog fields. The G3D +0x44 distance call is
+represented by a deterministic logging boundary which supplies distinct
+volatile register results. The entry shims reproduce all seven registers;
+full state and x87 control/status are compared.
+
+Tests cover signed/wrapped counts, capacity equality at 100, mode and texture
+changes, full-word flags, side-texture brightness, negative intensity and the
+254/255 special blend. A mutation exposed identical first/previous fixture
+vertices; their buffers now have distinct origins and contents. All **59
+mutations** are caught. The baseline passes **64 scenarios / 24,640 operations**
+and **20,000 scenarios / 7,700,000 operations**, zero differences. The large
+run includes **270,835** retail signed-divide repairs.
+
+## Slice 51: ordinary projected device vertices
+
+Device +0x44 (`0x2078d370`) now selects opaque, alpha or textured batches,
+projects vertices and expands fans. Its `0x20784fb4` texture-plane helper
+reuses the verified matrix attributes and projection operations, preserving
+clamps, 24-bit UV masking, scratch words and unsigned distance division.
+The far-distance path uses the literal numerator `0x07ffffff`; the near
+path calls G3D for distance. Texture vertices fog by the plane helper's
+computed distance. All register results and x87 control/status are compared.
+
+Random clamps initially hid two UV-mask mutations. A directed zero-factor
+plane now produces U=`0x123456`, V=`0x654321` with 24-bit clip bounds. All
+**39 mutations** are caught. The final baseline passes **64 scenarios /
+15,424 operations**, and **20,000 scenarios / 4,820,000 operations**, zero
+differences, including **1,849,742** retail divide repairs in the large run.
+
+## Slice 52: device text through GDI
+
+Device +0x28 (`0x2078e2e0`) now flushes, ends the scene, obtains the target DC,
+optionally centres text, sets COLORREF/transparent background, draws, releases
+the DC and resumes the scene. Null/empty text exits and failed GetDC calls
+retain retail behaviour. Extent centring preserves signed DWORD wrap and
+rounding. The fixture hooks the five imported string/GDI APIs in both DLLs
+and uses logged COM objects. It compares EAX, callee-saved registers and
+complete state; volatile stack-address leftovers are outside this ABI check.
+
+All **19 mutations** are caught. Baselines pass **64 scenarios / 8,256
+operations** and **20,000 scenarios / 2,580,000 operations**, zero differences.
+No live window or graphics device is needed by this suite.
+
+## Slice 53: device disc fans
+
+Device +0x84 (`0x2078ded0`) takes `(surface, radius, x, y)`, truncates the three
+coordinates to words, rejects circles crossing the viewport, and submits a
+26-vertex triangle fan. Three UTIL sincos calls produce a quadrant; eight
+octants choose order, swaps and signs. The x87 sequence uses the original
+double constants and truncating angle conversion. Retail subtracts **-0.5**
+from screen positions, giving **+0.5** pixel placement. Flush and cached
+shade/texture/blend state changes precede DrawPrimitive.
+
+The fixture calls real retail UTIL sincos and compares every initialized
+vertex field, states, x87 control/status and callee-saved registers. Retail
+leaves specular/UV stack bytes uninitialized; their arbitrary bytes are not
+compared. All **34 mutations** are caught. Baselines pass **64 scenarios /
+10,304 operations** and **20,000 scenarios / 3,220,000 operations**, zero
+differences. All **18 device dispatch cells** now have tested native targets.
+
+## Slice 54: public device selection, scene lifecycle and dispatch
+
+Public +0xbc (`0x2078b760`), +0x9c (`0x2078b8c0`) and +0xa0 (`0x2078ba10`)
+now compose the verified device helpers. Selection preserves low flag clears,
+GetSurfaceDesc handling, indexed fallback, hardware/window flags and change
+notifications. BeginScene success selects device drawing and updates signed
+viewport halves/window offsets; failure leaves the prior mode. EndScene
+flushes and restores software drawing even when the COM call reports failure.
+The existing fog-colour helper handles pending begin-scene updates.
+
+`0x2078c6b0` snapshots both 0xc0-byte Linkage caches lazily, replaces precisely
+18 GPU cells, and copies a table only when its +0x40 identity differs. Host
+memmove calls are logged. Both cached tables and live Linkage are compared
+through an explicit software/GPU pointer pairing. A directed cache edit
+checks that the copy includes its last shared slot, +0xbc. The dispatcher is
+now active through the public entries; all **40 Linkage services** have native
+implementations.
+
+The final baselines pass **64 scenarios / 22,016 scene operations** and
+**64 scenarios / 9,280 selection operations**, zero differences. All **44
+scene mutations** and **17 selection mutations** are caught. A scene mutation
+found that two fixture flag bits always agreed; vectors now separate those
+bits. Selection's large run passes **20,000 scenarios / 2,900,000 operations**,
+zero differences. The corrected-vector scene run passes **20,000 scenarios /
+6,880,000 operations**, zero differences.
+
+## Slice 55: shadow-span return reachability
+
+The private shadow mapper at `0x20732e1a` has a negative-CX `ret` which would
+pop saved ESI as its return address. It is unreachable through the public
+polygon pipeline. All five indirect span call sites (`0x20732895`,
+`0x2073294c`, `0x207329c9`, `0x20732d64`, `0x20732d9e`) first clamp signed
+negative low-word X coordinates to zero. They sort after a clamp; inputs
+which need no clamp are already ordered by the walker, flat-edge sorter or
+intersection sorter. Values are zero-extended or nonnegative sign-extended.
+Consequently **0 <= first <= last <= 0x7fff**, so **0 <= last-first <= 0x7fff**
+and CX's sign bit cannot be set at the shadow helper. This proof covers both
+rasterizers and flat/packed spans, independent of viewport dimensions.
+
+The replacement's previous trap on that dead condition has been removed,
+not replaced with a guessed corrupt-stack return. Fifty directed public
+fixtures cover the word-sign boundary, maximum 0x7fff difference, both shadow
+maps and both rasterizers. Rows alias within a 64KB canvas, and an independent
+guard check confirms no write beyond its first 32KB. The baseline passes
+**64 scenarios / 24,704 operations**, zero differences, and all **43 existing
+fill mutations** were rerun and caught. A new signed 16-bit count-narrowing
+mutation is caught specifically by the wide fixtures. The large boundary run
+passes **20,000 scenarios / 7,720,000 operations**, zero differences and zero
+faults.
+
+## Completion and integration limits
+
+Every public service and GPU dispatch cell is implemented. HG2D remains outside
+`MODULES`, and no game installation has been performed while MAIN owns the
+shared build files. Standalone COM/GDI fixtures establish call/state behaviour,
+not a live Direct3D/in-game smoke test. Non-x86 floating precision/status is
+also outside the current verification. Arbitrary invalid pointers, corrupted
+code/selector tables and unbounded malformed scanline programs remain outside
+the supported fixture domain. The unreachable private shadow return is
+resolved by the caller proof above, rather than a remaining implementation gap.
 
 ## Verification and limits
+
+The final combined regression through **slice 55** passes **64 scenarios in
+every scripted suite**, plus the exhaustive colour/layout sweep and lifecycle
+check: **59 suite summaries, zero differences**. Slices 49–54 add **246 caught
+mutations**, slice 55 adds **one caught boundary mutation**, and all **43 existing
+fill mutations** were rerun. The complete audit verifies **1,564 mutation anchors**; it is an anchor audit,
+not a claim that all historical mutants were rerun in this pass. The four
+generated data/relocation/table/GUID files reproduce byte-for-byte.
+All seven new device suites pass **20,000 scenarios each / 32,920,000 operations
+combined**, zero differences. The enlarged fill suite also passes **20,000
+scenarios / 7,720,000 operations**, zero differences: **40,640,000 operations**
+across these eight large runs. Individual results are recorded above.
+
 
 The combined regression through **slice 48** passes **64 scenarios in every
 suite**, zero differences. The new slices catch **166 additional mutations**;
@@ -1867,7 +2003,5 @@ FE loader, DirectDraw objects, arbitrary malformed COM pointers, accounting
 indices outside 0..8, and initialization are outside this slice. The existing
 PANELS model and its verified harness remain unchanged.
 
-Remaining Linkage services: device-backed +0x9c/+0xa0/+0xbc.
-Live Direct3D dispatch and the negative-length
-shadow corrupt-stack return remain unfinished. The verified subsets do not
-establish whole-module equivalence or readiness to run in-game.
+All forty Linkage services and all eighteen GPU dispatch cells now have native
+implementations. See slices 49–55 for final verification and integration limits.

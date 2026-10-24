@@ -38,3 +38,10 @@ EXPORTS
     hg2d_device_palette_vertex
     hg2d_device_uv_vertex
     hg2d_device_intensity_vertex
+    hg2d_device_projected_vertex
+    hg2d_device_text=hg2d_device_text@24
+    hg2d_device_disc=hg2d_device_disc@16
+    hg2d_device_dispatch=hg2d_device_dispatch@4
+    hg2d_device_begin=hg2d_device_begin@4
+    hg2d_device_end=hg2d_device_end@4
+    hg2d_device_select=hg2d_device_select@8

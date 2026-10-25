@@ -514,6 +514,304 @@ static uint32_t FS98_STDCALL host_2fc(uint32_t l)
     return host_214(l + 0x18);
 }
 
+/* ---- the C-runtime wrappers -------------------------------------------------- */
+
+/* qsort and bsearch take a cdecl comparator; the host's callers pass stdcall
+ * ones, so the host parks the comparator at 0x41a24c and hands MSVCRT this
+ * trampoline (0x40cfe0) instead.  Not reentrant, as retail is not. */
+static int __cdecl host_cmp_tramp(const void *a, const void *b)
+{
+    return (int)((uint32_t (FS98_STDCALL *)(uint32_t, uint32_t))(uintptr_t)M32(V(0x41a24c)))(
+        ADDR(a), ADDR(b));
+}
+
+/* +0x22c (0x40cfb0): qsort(base, n, width, cmp).  Returns whatever MSVCRT's
+ * qsort left in eax; no caller reads it. */
+static uint32_t FS98_STDCALL host_22c(uint32_t base, uint32_t n, uint32_t width, uint32_t cmp)
+{
+    M32(V(0x41a24c)) = cmp;
+    qsort((void *)(uintptr_t)base, n, width, host_cmp_tramp);
+    return 0;
+}
+
+/* +0x234 (0x40d050): bsearch(key, base, n, width, cmp). */
+static uint32_t FS98_STDCALL host_234(uint32_t key, uint32_t base, uint32_t n, uint32_t width,
+                                      uint32_t cmp)
+{
+    M32(V(0x41a24c)) = cmp;
+    return ADDR(bsearch((const void *)(uintptr_t)key, (const void *)(uintptr_t)base, n, width,
+                        host_cmp_tramp));
+}
+
+/* +0x230 (0x40d000): exchange two blocks of `size` bytes through a temporary
+ * from +0x20c (kept, as retail keeps it, in the size argument's own slot).
+ * Returns +0x214's 0. */
+static uint32_t FS98_STDCALL host_230(uint32_t a, uint32_t b, uint32_t size)
+{
+    uint32_t tmp;
+    host_20c(1, size, ADDR(&tmp), 0);
+    host_21c(tmp, a, size);
+    host_21c(a, b, size);
+    host_21c(b, tmp, size);
+    return host_214(ADDR(&tmp));
+}
+
+/* +0x2ac (0x40eea0): strncpy(dst, src, n), returning dst. */
+static uint32_t FS98_STDCALL host_2ac(uint32_t dst, uint32_t src, uint32_t n)
+{
+    return ADDR(strncpy((char *)(uintptr_t)dst, (const char *)(uintptr_t)src, n));
+}
+
+/* +0x2b4 (0x40ef00): a copy of `s` from +0x20c (fatal on failure), or null for
+ * a null `s`. */
+static uint32_t FS98_STDCALL host_2b4(uint32_t s)
+{
+    uint32_t p;
+    if (s == 0)
+        return 0;
+    host_20c(1, host_2b8(s) + 1, ADDR(&p), 0);
+    lstrcpyA((char *)(uintptr_t)p, (const char *)(uintptr_t)s);
+    return p;
+}
+
+/* +0x2c0 (0x40efa0): MSVCRT _strcmpi, its result as is. */
+static uint32_t FS98_STDCALL host_2c0(uint32_t a, uint32_t b)
+{
+    return (uint32_t)_strcmpi((const char *)(uintptr_t)a, (const char *)(uintptr_t)b);
+}
+
+/* +0x2c8 (0x40efc0): delete every occurrence of the character `c` from `s`, in
+ * place, by +0x2a8 over the overlap.  Returns s. */
+static uint32_t FS98_STDCALL host_2c8(uint32_t s, uint32_t c)
+{
+    uint32_t i = 0, p;
+    if (M8(s) == 0)
+        return s;
+    p = s;
+    do {
+        if (M8(p) == (uint8_t)c) {
+            host_2a8(p, i + s + 1);
+        } else {
+            i++;
+            p++;
+        }
+    } while (M8(p) != 0);
+    return s;
+}
+
+/* ---- the command line -------------------------------------------------------- */
+
+/* 0x4095e0: find option `name` on command line `p` -- a '/' or '-' just after a
+ * space, then the name, then ':' or ' ' -- and return the address just past
+ * that separator, or 0.  The first character is tested against the byte
+ * before it, which for GetCommandLineA's own buffer is whatever precedes it. */
+static uint32_t host_opt_find(uint32_t p, uint32_t name)
+{
+    if (M8(p) == 0)
+        return 0;
+    do {
+        uint8_t c = M8(p);
+        if ((c == '/' || c == '-') && M8(p - 1) == ' ' &&
+            host_228(p + 1, name, host_2b8(name)) == 0 &&
+            (M8(host_2b8(name) + p + 1) == ':' || M8(host_2b8(name) + p + 1) == ' '))
+            return host_2b8(name) + p + 2;
+        p = ADDR(CharNextA((const char *)(uintptr_t)p));
+    } while (M8(p) != 0);
+    return 0;
+}
+
+/* 0x409670: copy an option's value -- up to the next option -- into buf,
+ * trimmed of spaces at both ends.  -1 if it does not fit in `len`.  An empty
+ * value trims from the byte before buf, and clears it if it is a space. */
+static uint32_t host_opt_copy(uint32_t v, uint32_t buf, uint32_t len)
+{
+    uint32_t e = v, n, q, t;
+    uint8_t c = M8(e);
+    while (c != 0) {
+        if ((c == '/' || c == '-') && M8(e - 1) == ' ')
+            break;
+        e = ADDR(CharNextA((const char *)(uintptr_t)e));
+        c = M8(e);
+    }
+    n = e - v;
+    if (n >= len)
+        return (uint32_t)-1;
+    host_218(buf, 0, len);
+    host_21c(buf, v, n);
+    q = buf;
+    while (M8(q) != 0 && M8(q) == ' ')
+        q = ADDR(CharNextA((const char *)(uintptr_t)q));
+    host_2a8(buf, q);
+    t = host_2b8(buf) + buf - 1;
+    if (M8(t) == ' ') {
+        while (t != buf) {
+            M8(t) = 0;
+            t = ADDR(CharPrevA((const char *)(uintptr_t)buf, (const char *)(uintptr_t)t));
+            if (M8(t) != ' ')
+                break;
+        }
+    }
+    return 0;
+}
+
+/* +0x98 (0x4094f0): the value of "/name:value" on the command line into buf.
+ * Only the colon form counts; 0, or -1 if absent, colonless or too long. */
+static uint32_t FS98_STDCALL host_098(uint32_t name, uint32_t buf, uint32_t len)
+{
+    uint32_t cl = ADDR(GetCommandLineA()), v;
+    if (M8(cl) == 0)
+        return (uint32_t)-1;
+    v = host_opt_find(cl, name);
+    if (v == 0 || M8(v - 1) != ':')
+        return (uint32_t)-1;
+    return host_opt_copy(v, buf, len);
+}
+
+/* +0x9c (0x409530) and +0xa0 (0x409570): the same value through atoi or atof
+ * into *out, left alone on failure. */
+static uint32_t FS98_STDCALL host_09c(uint32_t name, uint32_t out)
+{
+    char buf[0x40];
+    uint32_t r = host_098(name, ADDR(buf), 0x40);
+    if (r == 0)
+        M32(out) = (uint32_t)atoi(buf);
+    return r;
+}
+
+static uint32_t FS98_STDCALL host_0a0(uint32_t name, uint32_t out)
+{
+    char buf[0x40];
+    uint32_t r = host_098(name, ADDR(buf), 0x40);
+    if (r == 0)
+        *(double *)(uintptr_t)out = atof(buf);
+    return r;
+}
+
+/* +0xa4 (0x4095b0): is option `name` given?  0 if not, 2 for "/name:...", 1
+ * for "/name ..." (more exactly: 1 when a space precedes what follows). */
+static uint32_t FS98_STDCALL host_0a4(uint32_t name)
+{
+    uint32_t v = host_opt_find(ADDR(GetCommandLineA()), name);
+    if (v == 0)
+        return 0;
+    return (M8(v - 1) != ' ') + 1;
+}
+
+/* ---- file extensions --------------------------------------------------------- */
+
+/* A pointer the retail image keeps to its own .data, onto our image. */
+static uint32_t host_rebase(uint32_t p)
+{
+    return (p >= HOST_DATA_VA && p < HOST_DATA_VA + HOST_IMAGE_SIZE) ? V(p) : p;
+}
+
+/* Two NUL-terminated strings equal (the inlined compare in 0x40b410)? */
+static int host_str_eq(uint32_t a, uint32_t b)
+{
+    while (M8(a) == M8(b)) {
+        if (M8(a) == 0)
+            return 1;
+        a++; b++;
+    }
+    return 0;
+}
+
+/* 0x40b410: upper-case `ext` in place and look it up: the 37 built-in
+ * extensions at 0x417f20 are ids 0..0x24, the ones registered at run time
+ * (0x4188ac of them, _strdup'd, at *0x4188b0) follow from 0x25.  0 with the id
+ * in *out, or -1. */
+static uint32_t host_ext_lookup(uint32_t ext, uint32_t out)
+{
+    int32_t i, n;
+    _strupr((char *)(uintptr_t)ext);
+    for (i = 0; i < 0x25; i++)
+        if (host_str_eq(ext, host_rebase(M32(V(0x417f20) + 4 * i)))) {
+            M32(out) = (uint32_t)i;
+            return 0;
+        }
+    n = (int32_t)M32(V(0x4188ac));
+    for (i = 0; i < n; i++)
+        if (host_str_eq(ext, M32(M32(V(0x4188b0)) + 4 * i))) {
+            M32(out) = (uint32_t)i + 0x25;
+            return 0;
+        }
+    return (uint32_t)-1;
+}
+
+/* +0x1ac (0x40a480): the id of extension `ext` (upper-cased in place),
+ * registering it if new.  Returns 0. */
+static uint32_t FS98_STDCALL host_1ac(uint32_t ext, uint32_t out)
+{
+    uint32_t n;
+    _strupr((char *)(uintptr_t)ext);
+    if (host_ext_lookup(ext, out) != (uint32_t)-1)
+        return 0;
+    n = M32(V(0x4188ac));
+    if (n == 0)
+        host_20c(1, 4, V(0x4188b0), 0);
+    else
+        host_210(1, n * 4 + 4, V(0x4188b0));
+    M32(out) = M32(V(0x4188ac)) + 0x25;
+    M32(M32(V(0x4188b0)) + M32(V(0x4188ac)) * 4) = ADDR(_strdup((const char *)(uintptr_t)ext));
+    M32(V(0x4188ac)) = M32(V(0x4188ac)) + 1;
+    return 0;
+}
+
+/* 0x40a7f0: _splitpath, except that the host's empty string (0x4187f8) splits
+ * into empty parts by copying it into each part asked for. */
+static uint32_t host_split(uint32_t path, uint32_t drive, uint32_t dir, uint32_t fname,
+                           uint32_t ext)
+{
+    if (path == 0)
+        return (uint32_t)-1;
+    if (host_2bc(path, V(0x4187f8)) != 0) {
+        _splitpath((const char *)(uintptr_t)path, (char *)(uintptr_t)drive,
+                   (char *)(uintptr_t)dir, (char *)(uintptr_t)fname, (char *)(uintptr_t)ext);
+        return 0;
+    }
+    if (drive != 0) host_2a8(drive, V(0x4187f8));
+    if (dir != 0) host_2a8(dir, V(0x4187f8));
+    if (fname != 0) host_2a8(fname, V(0x4187f8));
+    if (ext == 0)
+        return 0;
+    host_2a8(ext, V(0x4187f8));
+    return 0;
+}
+
+/* +0x188 (0x40a6c0): split `path` into drive, directory and name, and give
+ * the extension's id (registering a new one) through `ext_id` -- left 0 when
+ * there is no extension.  A UNC path's "\\server" counts as its drive.
+ * Returns 0, or -1 for a null path. */
+static uint32_t FS98_STDCALL host_188(uint32_t path, uint32_t drive, uint32_t dir, uint32_t fname,
+                                      uint32_t ext_id)
+{
+    uint8_t unc[0x100], ext[0x100];
+    uint32_t p, i;
+    unc[0] = M8(V(0x4187f8));
+    for (i = 1; i < sizeof unc; i++)
+        unc[i] = 0;
+    if (ext_id != 0)
+        M32(ext_id) = 0;
+    if (path == 0)
+        return (uint32_t)-1;
+    if (drive != 0 && host_168(path) != 0) {
+        host_2a8(ADDR(unc), V(0x4180c8));
+        host_2a8(ADDR(unc) + 2, path + 2);
+        p = ADDR(unc) + 2;
+        do
+            p = ADDR(CharNextA((const char *)(uintptr_t)p));
+        while (M8(p) != '\\' && M8(p) != 0);
+        host_split(p, 0, dir, fname, ADDR(ext));
+        M8(p) = 0;
+        host_2a8(drive, ADDR(unc));
+    } else {
+        host_split(path, drive, dir, fname, ADDR(ext));
+    }
+    if (ext[0] != 0 && ext_id != 0 && host_ext_lookup(ADDR(ext), ext_id) != 0)
+        host_1ac(ADDR(ext), ext_id);
+    return 0;
+}
+
 /* ---- the table --------------------------------------------------------------- */
 
 /* The service table, the shape of the host's: slot 0 is the module id, the rest
@@ -529,11 +827,17 @@ __declspec(dllexport) void *HostTable[0xc8] = {
     [0x58 / 4] = (void *)host_058,
     [0x5c / 4] = (void *)host_05c,
     [0x60 / 4] = (void *)host_060,
+    [0x98 / 4] = (void *)host_098,
+    [0x9c / 4] = (void *)host_09c,
+    [0xa0 / 4] = (void *)host_0a0,
+    [0xa4 / 4] = (void *)host_0a4,
     [0x108 / 4] = (void *)host_zero2,
     [0x12c / 4] = (void *)host_zero1,
     [0x130 / 4] = (void *)host_130,
     [0x154 / 4] = (void *)host_zero0,
     [0x168 / 4] = (void *)host_168,
+    [0x188 / 4] = (void *)host_188,
+    [0x1ac / 4] = (void *)host_1ac,
     [0x20c / 4] = (void *)host_20c,
     [0x210 / 4] = (void *)host_210,
     [0x214 / 4] = (void *)host_214,
@@ -542,12 +846,19 @@ __declspec(dllexport) void *HostTable[0xc8] = {
     [0x220 / 4] = (void *)host_zero2,
     [0x224 / 4] = (void *)host_zero2,
     [0x228 / 4] = (void *)host_228,
+    [0x22c / 4] = (void *)host_22c,
+    [0x230 / 4] = (void *)host_230,
+    [0x234 / 4] = (void *)host_234,
     [0x288 / 4] = (void *)host_288,
     [0x28c / 4] = (void *)host_28c,
     [0x2a8 / 4] = (void *)host_2a8,
+    [0x2ac / 4] = (void *)host_2ac,
     [0x2b0 / 4] = (void *)host_2b0,
+    [0x2b4 / 4] = (void *)host_2b4,
     [0x2b8 / 4] = (void *)host_2b8,
     [0x2bc / 4] = (void *)host_2bc,
+    [0x2c0 / 4] = (void *)host_2c0,
+    [0x2c8 / 4] = (void *)host_2c8,
     [0x2cc / 4] = (void *)host_2cc,
     [0x2f8 / 4] = (void *)host_2f8,
     [0x2fc / 4] = (void *)host_2fc,

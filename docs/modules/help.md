@@ -173,8 +173,11 @@ Verified on the current implementation:
   1,820 expected allocation faults.
 
 The mutation script requires exit 1 and an actual `DIFFER scenario=` report;
-build failures, crashes and timeouts do not count as detection. Its final count
-is recorded after the stable-source run below.
+build failures, crashes and timeouts do not count as detection. The stable-source
+run caught **71/71 deliberate errors**, including three cleanup errors under
+exception injection. The Name-capacity mutation targets the assignment before
+RegQueryValueExA: its earlier initial assignment is overwritten before any
+registry query and changing that dead store alone is unobservable here.
 
 Next: implement the runtime adapter and exports (Linkage, ImportTable), module
 init/deinit and DllMain, native import/vtable/message-map binding including the

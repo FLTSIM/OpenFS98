@@ -69,6 +69,11 @@ static void *__cdecl moving_realloc(void *old, size_t size)
     return p;
 }
 
+/* GetCommandLineA, both sides: a command line the harness makes up, with a
+ * byte before it (the host's option finder reads one). */
+static char fake_cl[512];
+static char *__stdcall fake_GetCommandLineA(void) { return fake_cl + 1; }
+
 /* Point one import of a loaded image at `fn`. */
 static void hook_import(uint8_t *b, const char *dll, const char *name, void *fn)
 {
@@ -111,6 +116,7 @@ static void bind_real(void)
         }
     }
     hook_import(b, "MSVCRT.dll", "realloc", (void *)moving_realloc);
+    hook_import(b, "KERNEL32.dll", "GetCommandLineA", (void *)fake_GetCommandLineA);
 }
 
 /* Map the real host in place: make its region executable and copy the file. */
@@ -151,6 +157,7 @@ static void load_ours(void)
     our_data = (uint8_t *)GetProcAddress(m, "host_image");
     if (!our_tbl || !our_data) { printf("HOST_ours.dll: missing exports\n"); exit(2); }
     hook_import((uint8_t *)m, "msvcrt.dll", "realloc", (void *)moving_realloc);
+    hook_import((uint8_t *)m, "KERNEL32.dll", "GetCommandLineA", (void *)fake_GetCommandLineA);
     if ((uintptr_t)our_tbl[0] != 1) { printf("our table id = %p, not 1\n", our_tbl[0]); exit(2); }
 }
 
@@ -183,6 +190,36 @@ static void *our_fn(uint32_t off)
 #define STR_OFF     0x4ca0u            /* 0x41bca0 */
 #define QUEUE_OFF   0x1380u            /* 0x418380, the removal queue */
 #define QUEUE_END   0x139cu
+#define EXT_OFF     0x0f20u            /* 0x417f20: the 37 built-in extension names */
+#define EXT_END     0x10d0u            /* ... their strings, and the "\\\\" at 0x4180c8 */
+#define CFG_OFF     0x00a0u            /* 0x4170a0: ".CFG", the last of them */
+#define EMPTY_OFF   0x17f8u            /* 0x4187f8: the host's empty string (bss) */
+#define REG_N_OFF   0x18acu            /* 0x4188ac: extensions registered at run time */
+#define REG_P_OFF   0x18b0u            /* 0x4188b0: their _strdup'd names (heap) */
+
+/* The run-time extension registry: a few names, the same on both sides, each
+ * side's array and strings its own heap blocks (the host grows them with
+ * realloc and _strdup). */
+static const char *const reg_names[] = { ".XYZ", ".Q", ".ABCD", ".BGL2", ".", ".ZZ" };
+
+static void seed_registry(void)
+{
+    uint32_t n = rnd() % 4, i;
+    char **ra = 0, **oa = 0;
+    if (n) {
+        ra = malloc(n * 4); oa = malloc(n * 4);
+        for (i = 0; i < n; i++) {
+            const char *nm = reg_names[rnd() % 6];
+            ra[i] = _strdup(nm); oa[i] = _strdup(nm);
+        }
+    }
+    *(uint32_t *)(DATA_VA + REG_N_OFF) = n;
+    *(uint32_t *)(our_data + REG_N_OFF) = n;
+    *(uint32_t *)(DATA_VA + REG_P_OFF) = (uint32_t)(uintptr_t)ra;
+    *(uint32_t *)(our_data + REG_P_OFF) = (uint32_t)(uintptr_t)oa;
+    *(uint32_t *)(DATA_VA + EMPTY_OFF) = 0;
+    *(uint32_t *)(our_data + EMPTY_OFF) = 0;
+}
 
 static void seed_data(void)
 {
@@ -192,6 +229,10 @@ static void seed_data(void)
         if (i + 4 > TABLE_OFF && i < TABLE_LAST)
             continue;
         if (i >= QUEUE_OFF && i < QUEUE_END)
+            continue;
+        if ((i >= EXT_OFF && i < EXT_END) || (i >= CFG_OFF && i < CFG_OFF + 8))
+            continue;                   /* constant strings and pointers to them */
+        if (i == EMPTY_OFF || i == REG_N_OFF || i == REG_P_OFF)
             continue;
         v = rnd();
         *(uint32_t *)(DATA_VA + i) = v;
@@ -209,6 +250,7 @@ static void seed_data(void)
      * its capacity and data (a heap block on each side) kept. */
     *(uint32_t *)(DATA_VA + QUEUE_OFF) = 0;
     *(uint32_t *)(our_data + QUEUE_OFF) = 0;
+    seed_registry();
 }
 
 /* After a call, the two .data images must be identical; report the first word
@@ -219,7 +261,7 @@ static void check_state(const char *name)
     for (i = 0; i < DATA_SIZE; i += 4) {
         uint32_t rv;
         uint32_t ov;
-        if (i == QUEUE_OFF + 0x18)      /* the queue's data: each side's own heap block */
+        if (i == QUEUE_OFF + 0x18 || i == REG_P_OFF)   /* each side's own heap block */
             continue;
         rv = norm(*(uint32_t *)(DATA_VA + i));     /* real .data (mapped at 0x417000) */
         ov = norm(*(uint32_t *)(our_data + i));    /* our image */
@@ -229,6 +271,16 @@ static void check_state(const char *name)
             differ++;
             return;
         }
+    }
+    {   /* the registry's names, through each side's own array */
+        uint32_t n = *(uint32_t *)(DATA_VA + REG_N_OFF);
+        char **ra = *(char ***)(DATA_VA + REG_P_OFF), **oa = *(char ***)(our_data + REG_P_OFF);
+        for (i = 0; i < n && i < 64; i++)
+            if (strcmp(ra[i], oa[i])) {
+                printf("  %-16s REGISTRY DIFFER at %u: real=\"%s\" ours=\"%s\"\n", name, i, ra[i], oa[i]);
+                differ++;
+                return;
+            }
     }
 }
 
@@ -834,13 +886,193 @@ static void check_lists(void)
     }
 }
 
+/* ---- the command line -------------------------------------------------------- */
+
+static const char *const opt_names[] = { "a", "ab", "fly", "mode", "x", "" };
+static const char *const opt_words[] = { "fs98", "12", "-3.5", "1e3", "abc", "c:\\fs98", "  ", "", "0x10", "7" };
+
+/* A random command line of options in both forms, values and stray words,
+ * with irregular spacing; and the byte before it, a space or not. */
+static void make_cmdline(void)
+{
+    char *p = fake_cl + 1;
+    uint32_t n = rnd() % 7, i;
+    fake_cl[0] = rnd() & 1 ? ' ' : 'q';
+    p += sprintf(p, "%s", rnd() % 4 ? "fltsim98.exe" : "");
+    for (i = 0; i < n; i++) {
+        uint32_t k = rnd() % 5;
+        p += sprintf(p, "%s", rnd() % 4 ? " " : rnd() & 1 ? "   " : "");
+        if (k < 3)
+            p += sprintf(p, "%c%s%s%s", rnd() & 1 ? '/' : '-', opt_names[rnd() % 6],
+                         rnd() % 3 ? ":" : rnd() & 1 ? " " : "", opt_words[rnd() % 10]);
+        else
+            p += sprintf(p, "%s", opt_words[rnd() % 10]);
+    }
+    if (rnd() % 4 == 0) p += sprintf(p, "  ");
+}
+
+/* +0x98 into a guarded buffer (the byte before it included -- an empty value
+ * trims from there), +0x9c, +0xa0 and +0xa4, for one name. */
+static void check_cmdline(void)
+{
+    static uint8_t rb[80], ob[80];
+    const char *nm = opt_names[rnd() % 6];
+    uint32_t len = 1 + rnd() % 40, rv, ov, ri, oi;
+    double rd, od;
+    fn3 r98 = (fn3)real_fn(0x98), o98 = (fn3)our_fn(0x98);
+    fn2 r9c = (fn2)real_fn(0x9c), o9c = (fn2)our_fn(0x9c);
+    fn2 ra0 = (fn2)real_fn(0xa0), oa0 = (fn2)our_fn(0xa0);
+    fn1 ra4 = (fn1)real_fn(0xa4), oa4 = (fn1)our_fn(0xa4);
+    if (!o98 || !o9c || !oa0 || !oa4) return;
+    make_cmdline();
+    memset(rb, 0xaa, sizeof rb); memset(ob, 0xaa, sizeof ob);
+    rb[7] = ob[7] = rnd() & 1 ? ' ' : 'z';
+    rv = r98(P(nm), P(rb + 8), len);
+    ov = o98(P(nm), P(ob + 8), len);
+    if (rv != ov || memcmp(rb, ob, sizeof rb)) {
+        printf("  +0x098 option(\"%s\", %u) DIFFER real=%d ours=%d  cl=[%s]\n", nm, len, (int)rv, (int)ov, fake_cl + 1);
+        differ++;
+    }
+    ri = oi = rnd();
+    rv = r9c(P(nm), P(&ri)); ov = o9c(P(nm), P(&oi));
+    if (rv != ov || ri != oi) { printf("  +0x09c option-int DIFFER  cl=[%s]\n", fake_cl + 1); differ++; }
+    rd = od = (double)rnd();
+    rv = ra0(P(nm), P(&rd)); ov = oa0(P(nm), P(&od));
+    if (rv != ov || memcmp(&rd, &od, 8)) { printf("  +0x0a0 option-double DIFFER  cl=[%s]\n", fake_cl + 1); differ++; }
+    rv = ra4(P(nm)); ov = oa4(P(nm));
+    if (rv != ov) { printf("  +0x0a4 option-given DIFFER real=%u ours=%u  cl=[%s]\n", rv, ov, fake_cl + 1); differ++; }
+}
+
+/* ---- file extensions --------------------------------------------------------- */
+
+static const char *const ext_samples[] = {
+    ".bgl", ".BGL", ".Wav", ".xyz", ".q", ".abcd", ".bgl2", ".", ".zz", ".cfg", ".SC1", ".r81", ".new", ""
+};
+
+/* +0x1ac: each side upper-cases its own copy. */
+static void check_1ac(void)
+{
+    static char rs[16], os[16];
+    fn2 r = (fn2)real_fn(0x1ac), o = (fn2)our_fn(0x1ac);
+    uint32_t ri = rnd(), oi = ri, rv, ov;
+    if (!o) return;
+    strcpy(rs, ext_samples[rnd() % 14]); strcpy(os, rs);
+    rv = r(P(rs), P(&ri)); ov = o(P(os), P(&oi));
+    if (rv != ov || ri != oi || strcmp(rs, os)) {
+        printf("  +0x1ac ext(\"%s\") DIFFER real=%d/%#x ours=%d/%#x\n", rs, (int)rv, ri, (int)ov, oi);
+        differ++;
+    }
+    check_state("+0x1ac ext");
+}
+
+static const char *const path_dirs[] = { "", "c:", "C:\\", "\\\\srv", "\\\\srv\\share", "dir\\", "a\\b\\", "\\", "\\\\" };
+static const char *const path_names[] = { "", "name", "x", "a.b", "scenery", "..", "n m" };
+
+/* +0x188 over composed paths, with each part's buffer and the id sometimes
+ * null. */
+static void check_188(void)
+{
+    static char path[160], rb[3][160], ob[3][160];
+    fn5 r = (fn5)real_fn(0x188), o = (fn5)our_fn(0x188);
+    uint32_t ri = rnd(), oi = ri, rv, ov, k, mask = rnd();
+    if (!o) return;
+    sprintf(path, "%s%s%s%s", path_dirs[rnd() % 9], rnd() & 1 ? "sub\\" : "",
+            path_names[rnd() % 7], ext_samples[rnd() % 14]);
+    memset(rb, 0xaa, sizeof rb); memset(ob, 0xaa, sizeof ob);
+#define PART(b, k) ((mask >> (k)) & 1 ? P((b)[k]) : 0)
+    k = rnd() % 32 ? P(path) : 0;
+    rv = r(k, PART(rb, 0), PART(rb, 1), PART(rb, 2), mask & 8 ? P(&ri) : 0);
+    ov = o(k, PART(ob, 0), PART(ob, 1), PART(ob, 2), mask & 8 ? P(&oi) : 0);
+    if (rv != ov || ri != oi || memcmp(rb, ob, sizeof rb)) {
+        printf("  +0x188 split(\"%s\") DIFFER real=%d/%#x ours=%d/%#x\n", path, (int)rv, ri, (int)ov, oi);
+        differ++;
+    }
+    check_state("+0x188 split");
+}
+
+/* ---- the C-runtime wrappers -------------------------------------------------- */
+
+/* A stdcall comparator on the first dword. */
+static uint32_t __stdcall cmp_first(uint32_t a, uint32_t b)
+{
+    int32_t x = *(int32_t *)(uintptr_t)a, y = *(int32_t *)(uintptr_t)b;
+    return (uint32_t)(x < y ? -1 : x > y);
+}
+
+/* +0x22c qsort (ties included: both sides run one MSVCRT qsort) and +0x234
+ * bsearch over the sorted result. */
+static void check_sort(void)
+{
+    static int32_t ra[3 * 40], oa[3 * 40];
+    fn4 rq = (fn4)real_fn(0x22c), oq = (fn4)our_fn(0x22c);
+    fn5 rb = (fn5)real_fn(0x234), ob = (fn5)our_fn(0x234);
+    uint32_t n = rnd() % 40, w = rnd() & 1 ? 4 : 12, i, rv, ov;
+    int32_t key;
+    if (!oq || !ob) return;
+    for (i = 0; i < 3 * 40; i++) ra[i] = oa[i] = (int32_t)(rnd() % 16) - 4;
+    rq(P(ra), n, w, P(cmp_first)); oq(P(oa), n, w, P(cmp_first));
+    if (memcmp(ra, oa, sizeof ra)) { printf("  +0x22c qsort DIFFER\n"); differ++; return; }
+    check_state("+0x22c qsort");
+    key = (int32_t)(rnd() % 18) - 5;
+    rv = rb(P(&key), P(ra), n, w, P(cmp_first));
+    ov = ob(P(&key), P(oa), n, w, P(cmp_first));
+    if ((rv ? (int32_t)(rv - P(ra)) : -1) != (ov ? (int32_t)(ov - P(oa)) : -1)) {
+        printf("  +0x234 bsearch DIFFER\n"); differ++;
+    }
+}
+
+/* +0x230 swap, +0x2ac strncpy, +0x2b4 strdup, +0x2c0 _strcmpi, +0x2c8 strip. */
+static void check_crt(void)
+{
+    static uint8_t ra[128], oa[128];
+    static char rs[96], os[96], src[64];
+    uint32_t rv, ov, i, n;
+    fn3 r230 = (fn3)real_fn(0x230), o230 = (fn3)our_fn(0x230);
+    fn3 r2ac = (fn3)real_fn(0x2ac), o2ac = (fn3)our_fn(0x2ac);
+    fn1 r2b4 = (fn1)real_fn(0x2b4), o2b4 = (fn1)our_fn(0x2b4);
+    fn2 r2c0 = (fn2)real_fn(0x2c0), o2c0 = (fn2)our_fn(0x2c0);
+    fn2 r2c8 = (fn2)real_fn(0x2c8), o2c8 = (fn2)our_fn(0x2c8);
+    if (!o230 || !o2ac || !o2b4 || !o2c0 || !o2c8) return;
+
+    for (i = 0; i < sizeof ra; i++) ra[i] = oa[i] = (uint8_t)rnd();
+    n = rnd() % 64;
+    rv = r230(P(ra), P(ra + 64), n); ov = o230(P(oa), P(oa + 64), n);
+    if (rv != ov || memcmp(ra, oa, sizeof ra)) { printf("  +0x230 swap DIFFER\n"); differ++; }
+
+    rnd_str(src, rnd() & 1 ? 16 : sizeof src);
+    memset(rs, 0xaa, sizeof rs); memset(os, 0xaa, sizeof os);
+    n = rnd() % 80;
+    rv = r2ac(P(rs), P(src), n); ov = o2ac(P(os), P(src), n);
+    if (rv - P(rs) != ov - P(os) || memcmp(rs, os, sizeof rs)) { printf("  +0x2ac strncpy DIFFER\n"); differ++; }
+
+    rv = r2b4(rnd() % 8 ? P(src) : 0);
+    ov = o2b4(rv ? P(src) : 0);
+    if (!rv != !ov || (rv && strcmp((char *)(uintptr_t)rv, (char *)(uintptr_t)ov))) {
+        printf("  +0x2b4 strdup DIFFER\n"); differ++;
+    }
+    free((void *)(uintptr_t)rv); free((void *)(uintptr_t)ov);
+
+    rnd_str(rs, 24);
+    if (rnd() & 1) { strcpy(os, rs); for (i = 0; os[i]; i++) if (rnd() & 1) os[i] ^= 0x20 * ((os[i] | 0x20) >= 'a' && (os[i] | 0x20) <= 'z'); }
+    else rnd_str(os, 24);
+    rv = r2c0(P(rs), P(os)); ov = o2c0(P(rs), P(os));
+    if (rv != ov) { printf("  +0x2c0 strcmpi DIFFER real=%d ours=%d\n", (int)rv, (int)ov); differ++; }
+
+    for (i = 0, n = rnd() % 60; i < n; i++) rs[i] = "ab\\ c"[rnd() % 5];
+    rs[n] = 0; strcpy(os, rs);
+    memset(rs + n + 1, 0x55, sizeof rs - n - 1); memset(os + n + 1, 0x55, sizeof os - n - 1);
+    i = "ab\\ cz"[rnd() % 6];
+    rv = r2c8(P(rs), i); ov = o2c8(P(os), i);
+    if (rv - P(rs) != ov - P(os) || memcmp(rs, os, sizeof rs)) { printf("  +0x2c8 strip DIFFER\n"); differ++; }
+}
+
 int main(int argc, char **argv)
 {
     uint32_t n = (argc > 1) ? (uint32_t)strtoul(argv[1], NULL, 0) : 1, k, i;
 
     map_real();
     load_ours();
-    printf("hostdiff: %u accessors + writers + strings + primitives + stubs + allocator + lists, %u iteration(s)\n",
+    printf("hostdiff: %u accessors + writers + strings + primitives + stubs + allocator + lists + command line + extensions + CRT, %u iteration(s)\n",
            (unsigned)(sizeof accessors / sizeof accessors[0]), n);
     for (k = 0; k < n; k++) {
         seed_data();
@@ -865,6 +1097,11 @@ int main(int argc, char **argv)
         check_21c();
         check_lists();
         check_find_indirect();
+        check_cmdline();
+        check_1ac();
+        check_188();
+        check_sort();
+        check_crt();
     }
     printf("hostdiff: %d differ\n", differ);
     return differ ? 1 : 0;

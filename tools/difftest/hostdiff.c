@@ -39,7 +39,9 @@ static uint8_t *our_data;               /* base of HOST_ours.dll's host_image */
 static uint32_t rng = 0x1234567u;
 static int differ;
 
-static uint32_t rnd(void) { rng = rng * 1103515245u + 12345u; return rng; }
+/* xorshift32: unlike an LCG, its low bits are as well-mixed as its high ones,
+ * so decisions like rnd() & 1 and rnd() % n get full-period coverage. */
+static uint32_t rnd(void) { rng ^= rng << 13; rng ^= rng >> 17; rng ^= rng << 5; return rng; }
 
 /* Map the real host in place: make its region executable and copy the file. */
 static void map_real(void)
@@ -126,6 +128,8 @@ static const struct slot accessors[] = {
     { 0x58, "past-table",    1 },
     { 0x5c, "struct-41c240", 1 },
     { 0x60, "struct-41bb80", 1 },
+    { 0x154, "zero0",        0 },
+    { 0x2cc, "flag-41a3cc",  0 },
 };
 
 static void check_accessor(const struct slot *s)
@@ -237,13 +241,126 @@ static void check_2b0(void)
     if (memcmp(rb, ob, sizeof rb)) { printf("  +0x2b0 strcat DIFFER\n"); differ++; }
 }
 
+/* ---- the block and string primitives ---------------------------------------- */
+
+/* +0x288: stores its argument in a host global; +0x304: clears the dword its
+ * argument points at (the pointer is harness memory, so only the effect is
+ * compared, not the returned pointer). */
+static void check_288(void)
+{
+    fn1 r = (fn1)real_fn(0x288), o = (fn1)our_fn(0x288);
+    uint32_t v;
+    if (!o) return;
+    v = rnd();
+    r(v); o(v);
+    check_state("+0x288 set-417194");
+}
+
+static void check_304(void)
+{
+    fn1 r = (fn1)real_fn(0x304), o = (fn1)our_fn(0x304);
+    uint32_t rc = rnd(), oc = rc;
+    if (!o) return;
+    r((uint32_t)(uintptr_t)&rc); o((uint32_t)(uintptr_t)&oc);
+    if (rc != oc) { printf("  +0x304 clear DIFFER real=%#x ours=%#x\n", rc, oc); differ++; }
+}
+
+/* +0x130: copies a fixed host string into the caller's buffer. */
+static void check_130(void)
+{
+    static char rb[128], ob[128];
+    fn1 r = (fn1)real_fn(0x130), o = (fn1)our_fn(0x130);
+    if (!o) return;
+    memset(rb, 0xaa, sizeof rb); memset(ob, 0xaa, sizeof ob);
+    r((uint32_t)(uintptr_t)rb); o((uint32_t)(uintptr_t)ob);
+    if (memcmp(rb, ob, sizeof rb)) { printf("  +0x130 strcpy-const DIFFER\n"); differ++; }
+}
+
+/* +0x168: the UNC-prefix predicate over crafted inputs. */
+static void check_168(void)
+{
+    static const char *t[] = { "\\\\server", "\\x", "x\\\\", "\\", "", "ab" };
+    fn1 r = (fn1)real_fn(0x168), o = (fn1)our_fn(0x168);
+    uint32_t i;
+    if (!o) return;
+    if (r(0) != o(0)) { printf("  +0x168 UNC(NULL) DIFFER\n"); differ++; }
+    for (i = 0; i < sizeof t / sizeof t[0]; i++)
+        if (r((uint32_t)(uintptr_t)t[i]) != o((uint32_t)(uintptr_t)t[i]))
+            { printf("  +0x168 UNC(\"%s\") DIFFER\n", t[i]); differ++; }
+}
+
+/* +0x218 memset, +0x228 memcmp. */
+static void check_218(void)
+{
+    static uint8_t rb[256], ob[256];
+    {
+        uint32_t (__stdcall *r)(uint32_t, uint32_t, uint32_t) = (void *)real_fn(0x218);
+        uint32_t (__stdcall *o)(uint32_t, uint32_t, uint32_t) = (void *)our_fn(0x218);
+        uint32_t val = rnd() & 0xff, cnt = rnd() % sizeof rb;
+        if (!o) return;
+        memset(rb, 0x11, sizeof rb); memset(ob, 0x11, sizeof ob);
+        r((uint32_t)(uintptr_t)rb, val, cnt); o((uint32_t)(uintptr_t)ob, val, cnt);
+        if (memcmp(rb, ob, sizeof rb)) { printf("  +0x218 memset DIFFER\n"); differ++; }
+    }
+}
+
+static void check_228(void)
+{
+    static uint8_t a[64], b[64];
+    uint32_t (__stdcall *r)(uint32_t, uint32_t, uint32_t) = (void *)real_fn(0x228);
+    uint32_t (__stdcall *o)(uint32_t, uint32_t, uint32_t) = (void *)our_fn(0x228);
+    uint32_t i, n = 1 + rnd() % sizeof a, rv, ov;
+    if (!o) return;
+    for (i = 0; i < sizeof a; i++) { a[i] = (uint8_t)rnd(); b[i] = a[i]; }
+    if (rnd() & 1) b[rnd() % n] ^= (uint8_t)(1 + rnd());    /* sometimes differ */
+    rv = r((uint32_t)(uintptr_t)a, (uint32_t)(uintptr_t)b, n);
+    ov = o((uint32_t)(uintptr_t)a, (uint32_t)(uintptr_t)b, n);
+    if (rv != ov) { printf("  +0x228 memcmp DIFFER real=%d ours=%d\n", (int)rv, (int)ov); differ++; }
+}
+
+/* +0x2bc strcmp. */
+static void check_2bc(void)
+{
+    static char a[64], b[64];
+    fn2 r = (fn2)real_fn(0x2bc), o = (fn2)our_fn(0x2bc);
+    uint32_t rv, ov;
+    if (!o) return;
+    rnd_str(a, sizeof a);
+    if (rnd() & 1) memcpy(b, a, sizeof b); else rnd_str(b, sizeof b);  /* often equal */
+    rv = r((uint32_t)(uintptr_t)a, (uint32_t)(uintptr_t)b);
+    ov = o((uint32_t)(uintptr_t)a, (uint32_t)(uintptr_t)b);
+    if (rv != ov) { printf("  +0x2bc strcmp DIFFER real=%d ours=%d\n", (int)rv, (int)ov); differ++; }
+}
+
+/* +0x28c: compacts a 256-entry host table into a 0x300 buffer. */
+static void check_28c(void)
+{
+    static uint8_t rb[0x300], ob[0x300];
+    fn1 r = (fn1)real_fn(0x28c), o = (fn1)our_fn(0x28c);
+    if (!o) return;
+    memset(rb, 0xaa, sizeof rb); memset(ob, 0xaa, sizeof ob);
+    r((uint32_t)(uintptr_t)rb); o((uint32_t)(uintptr_t)ob);
+    if (memcmp(rb, ob, sizeof rb)) { printf("  +0x28c compact DIFFER\n"); differ++; }
+}
+
+/* The zero stubs, by argument count. */
+static void check_stubs(void)
+{
+    fn1 s12c = (fn1)our_fn(0x12c);
+    fn2 s108 = (fn2)our_fn(0x108), s220 = (fn2)our_fn(0x220), s224 = (fn2)our_fn(0x224);
+    if (s12c && ((fn1)real_fn(0x12c))(rnd()) != s12c(rnd())) { printf("  +0x12c DIFFER\n"); differ++; }
+    if (s108 && ((fn2)real_fn(0x108))(1, 2) != s108(1, 2)) { printf("  +0x108 DIFFER\n"); differ++; }
+    if (s220 && ((fn2)real_fn(0x220))(1, 2) != s220(1, 2)) { printf("  +0x220 DIFFER\n"); differ++; }
+    if (s224 && ((fn2)real_fn(0x224))(1, 2) != s224(1, 2)) { printf("  +0x224 DIFFER\n"); differ++; }
+}
+
 int main(int argc, char **argv)
 {
     uint32_t n = (argc > 1) ? (uint32_t)strtoul(argv[1], NULL, 0) : 1, k, i;
 
     map_real();
     load_ours();
-    printf("hostdiff: %u accessors + 3 writers + 3 strings, %u iteration(s)\n",
+    printf("hostdiff: %u accessors + writers + strings + primitives + stubs, %u iteration(s)\n",
            (unsigned)(sizeof accessors / sizeof accessors[0]), n);
     for (k = 0; k < n; k++) {
         for (i = 0; i < sizeof accessors / sizeof accessors[0]; i++)
@@ -254,6 +371,15 @@ int main(int argc, char **argv)
         check_2b8();
         check_2a8();
         check_2b0();
+        check_288();
+        check_304();
+        check_130();
+        check_168();
+        check_218();
+        check_228();
+        check_2bc();
+        check_28c();
+        check_stubs();
     }
     printf("hostdiff: %d differ\n", differ);
     return differ ? 1 : 0;

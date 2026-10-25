@@ -130,6 +130,99 @@ static uint32_t FS98_STDCALL host_2b0(uint32_t dst, uint32_t src)
     return dst;
 }
 
+/* +0x130 (0x40a970): copies the host's string constant at 0x41bca0 into the
+ * caller's buffer (a plain strcpy from a fixed source).  Returns 0. */
+static uint32_t FS98_STDCALL host_130(uint32_t dst)
+{
+    char *d = (char *)(uintptr_t)dst;
+    const char *s = (const char *)(uintptr_t)V(0x41bca0);
+    while ((*d++ = *s++) != '\0')
+        ;
+    return 0;
+}
+
+/* +0x168 (0x40a890): true when the string begins "\\" (a UNC path). */
+static uint32_t FS98_STDCALL host_168(uint32_t s)
+{
+    const uint8_t *p = (const uint8_t *)(uintptr_t)s;
+    return (p != 0 && p[0] == 0x5c && p[1] == 0x5c) ? 1 : 0;
+}
+
+/* +0x218 (0x40cf20): memset(dst, val, count).  Returns 0. */
+static uint32_t FS98_STDCALL host_218(uint32_t dst, uint32_t val, uint32_t count)
+{
+    uint8_t *d = (uint8_t *)(uintptr_t)dst;
+    uint32_t i;
+    for (i = 0; i < count; i++)
+        d[i] = (uint8_t)val;
+    return 0;
+}
+
+/* +0x228 (0x40cf90): memcmp(a, b, n) -- -1, 0 or 1. */
+static uint32_t FS98_STDCALL host_228(uint32_t a, uint32_t b, uint32_t n)
+{
+    const uint8_t *p = (const uint8_t *)(uintptr_t)a;
+    const uint8_t *q = (const uint8_t *)(uintptr_t)b;
+    uint32_t i;
+    for (i = 0; i < n; i++)
+        if (p[i] != q[i])
+            return p[i] < q[i] ? 1 : (uint32_t)-1;
+    return 0;
+}
+
+/* +0x288 (0x40dd80): stores the argument in the host global 0x417194.
+ * Returns 0. */
+static uint32_t FS98_STDCALL host_288(uint32_t v)
+{
+    M32(V(0x417194)) = v;
+    return 0;
+}
+
+/* +0x28c (0x40e260): compacts the 256-entry, 4-byte-per-entry table at
+ * 0x4171a4 into the caller's buffer, keeping the first three bytes of each. */
+static uint32_t FS98_STDCALL host_28c(uint32_t dst)
+{
+    uint32_t i;
+    for (i = 0; i < 256; i++) {
+        M8(dst + 3 * i + 0) = M8(V(0x4171a4) + 4 * i + 0);
+        M8(dst + 3 * i + 1) = M8(V(0x4171a4) + 4 * i + 1);
+        M8(dst + 3 * i + 2) = M8(V(0x4171a4) + 4 * i + 2);
+    }
+    return dst;
+}
+
+/* +0x2bc (0x40ef60): strcmp(a, b) -- -1, 0 or 1. */
+static uint32_t FS98_STDCALL host_2bc(uint32_t a, uint32_t b)
+{
+    const uint8_t *p = (const uint8_t *)(uintptr_t)a;
+    const uint8_t *q = (const uint8_t *)(uintptr_t)b;
+    for (;;) {
+        if (*p != *q)
+            return *p < *q ? (uint32_t)-1 : 1;
+        if (*p == 0)
+            return 0;
+        p++; q++;
+    }
+}
+
+/* +0x2cc (0x40f110): true when the host global 0x41a3cc is zero. */
+static uint32_t FS98_STDCALL host_2cc(void)
+{
+    return M32(V(0x41a3cc)) == 0 ? 1 : 0;
+}
+
+/* +0x304 (0x410230): clears the dword the argument points at.  Returns it. */
+static uint32_t FS98_STDCALL host_304(uint32_t p)
+{
+    M32(p) = 0;
+    return p;
+}
+
+/* Stubs the host leaves returning zero, by argument count. */
+static uint32_t FS98_STDCALL host_zero0(void) { return 0; }
+static uint32_t FS98_STDCALL host_zero1(uint32_t a) { (void)a; return 0; }
+static uint32_t FS98_STDCALL host_zero2(uint32_t a, uint32_t b) { (void)a; (void)b; return 0; }
+
 /* +0x2b8 (0x40ef40): strlen(s), 0 for a null pointer. */
 static uint32_t FS98_STDCALL host_2b8(uint32_t s)
 {
@@ -157,9 +250,23 @@ __declspec(dllexport) void *HostTable[0xc8] = {
     [0x58 / 4] = (void *)host_058,
     [0x5c / 4] = (void *)host_05c,
     [0x60 / 4] = (void *)host_060,
+    [0x108 / 4] = (void *)host_zero2,
+    [0x12c / 4] = (void *)host_zero1,
+    [0x130 / 4] = (void *)host_130,
+    [0x154 / 4] = (void *)host_zero0,
+    [0x168 / 4] = (void *)host_168,
+    [0x218 / 4] = (void *)host_218,
+    [0x220 / 4] = (void *)host_zero2,
+    [0x224 / 4] = (void *)host_zero2,
+    [0x228 / 4] = (void *)host_228,
+    [0x288 / 4] = (void *)host_288,
+    [0x28c / 4] = (void *)host_28c,
     [0x2a8 / 4] = (void *)host_2a8,
     [0x2b0 / 4] = (void *)host_2b0,
     [0x2b8 / 4] = (void *)host_2b8,
+    [0x2bc / 4] = (void *)host_2bc,
+    [0x2cc / 4] = (void *)host_2cc,
+    [0x304 / 4] = (void *)host_304,
 };
 
 BOOL WINAPI DllMain(HINSTANCE inst, DWORD reason, LPVOID reserved)

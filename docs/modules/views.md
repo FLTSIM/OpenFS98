@@ -27,6 +27,28 @@ make -f tools/views.mk viewsuidiff-run views-ui-breaks
 make -f tools/views.mk views-smoke
 ```
 
+Final acceptance:
+
+| Suite | Result |
+| --- | --- |
+| Seed `0x7e51a23b` | 20,000 scenarios, 800,000 comparisons, 0 differences |
+| Seed `0x98a1e7d3` | 20,000 scenarios, 800,000 comparisons, 0 differences |
+| Boundary exceptions, seed `0x7e51a23b` | 2,000 scenarios, 80,000 comparisons, 3,745 caught throws, 0 differences |
+| Deliberate logic/cleanup errors | 47/47 caught as reported differences |
+| Native MFC/SIMSUI GUI | 48 cases over two complete load/unload cycles, 0 differences |
+| Native module initialization | Eight comparisons over the two load cycles, 0 differences |
+| Native drawing/module-cleanup errors | 2/2 caught |
+| Isolated startup, 75 seconds | Rebuilt Views loaded; 27/27 modules and 95 gauges; bytes match; PASS |
+
+That is **1,680,000 synthetic comparisons and 49 deliberately broken builds
+caught**. Each ordinary 20,000-scenario run includes 1,819 allocation faults,
+2,858 painted-stack malformed zoom inputs, 8,000 invalid unit selectors and
+32,616 map-tail parses. The exception run reaches 1,977 late map-tail parses;
+it is not restricted to the first string-list loop. Compile failures,
+unexpected faults and timeouts do not count as caught mutations. The green
+edit negative control leaves descriptor, control metadata and callbacks
+identical while changing a pixel (255 versus 0).
+
 `run_viewsdiff.sh` serializes Wine jobs in the dedicated
 `bin/views-diff/wineprefix`. Fixtures, mutated builds and logs stay in ignored
 `bin/views-diff/`. The smoke boots a disposable game copy with only its
@@ -121,7 +143,8 @@ vtable, with no intervening call or branch.
 Factory `0x223e1130` allocates a `0x2808`-byte object, calls constructor
 `0x223e11d0`, stores the caller's descriptor at object `+0x2804`, creates
 template `0x5e1` through MFC42 ordinal 2086, shows the window and returns
-object `+0x20`. It returns with `ret 8`. The supplied parent argument is
+object `+0x20`. It also saves the module handle at `+0x80`. It returns with
+`ret 8`. The supplied parent argument is
 replaced by a null parent for template creation. The registry flags are 0,
 so the host runs the modal lifetime.
 
@@ -140,7 +163,7 @@ The descriptor fields established by both sides include:
 | `+0x04` | One-argument callback, initially `0x207f8670` |
 | `+0x08` | Three-argument preview callback, initially `0x207f8800` |
 | `+0x0c` | Caller supplies a 0/1 value derived from a module service |
-| `+0x10` | Caller copies GLOBAL word `+0xc18`; full interpretation pending |
+| `+0x10` | Unit selector copied from GLOBAL `+0xc18`: 0/1 use imperial lists, 2 metric; other values use an entry-stack leftover |
 | `+0x14` | Selected record index, initialized to zero |
 | `+0x18` | Record count |
 | `+0x1c` | Pointer to temporary records, each **0xb4 bytes** |

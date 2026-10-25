@@ -257,10 +257,17 @@ module with its own id, drops it into `Modules\`, and lets the real loader bind
 and call it. Slower, needs the sim to start, and reports through a log file --
 but it is the only way to reach anything that calls the host.
 
-The split exists because the host cannot be loaded beside a test program: it
-has no `.reloc`, so it only works at `0x400000`, and that address is already
-committed in any wine process. UTIL's dialog trio and all 194 host services
-need the in-process harness for that reason.
+The split existed because the host could not be *loaded* beside a test program:
+it has no `.reloc`, so it only works at `0x400000`, and that address is already
+committed in any wine process -- `VirtualAlloc` there fails and `VirtualFree`
+there crashes. `make hostdiff-run` gets past this without loading it: it
+`VirtualProtect`s the committed `0x400000` region to executable and copies the
+host's sections into place, so the real service table at `0x417ba0` and its
+code run in process beside `HOST_ours.dll` (linked away from `0x400000`). That
+makes every pure or self-contained host service differential-testable out of
+process, the same as a module -- see [modules/host.md](modules/host.md). The
+services that need the live sim's windows, device or MFC state still need the
+in-process `ofstest` harness.
 
 Anything running in the in-process harness runs during the sim's startup, so a
 fault there stops the sim from starting. Be defensive, and take the module back

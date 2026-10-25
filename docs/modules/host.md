@@ -391,6 +391,16 @@ the result, normalising a pointer into either side's `.data` to an offset.
 | 1, the plain accessors | `+0x1c` (returns 1), `+0x20`/`+0x34` (host globals), `+0x58`/`+0x5c`/`+0x60` (addresses of host structures) | verified: 0 differ; a deliberate wrong return is caught |
 | 2, the simple state services | `+0x18` (copies six fields of its argument into the globals at 0x418830), `+0x2c` (sets the flag at 0x4187ec), `+0x54` (reads the globals 0x41880c and 0x418828 back through two out-pointers) | verified: 0 differ over many iterations; a deliberate wrong write is caught |
 | 3, the C-runtime strings | `+0x2a8` strcpy, `+0x2b0` strcat, `+0x2b8` strlen (0 for a null pointer) | verified: 0 differ over thousands of random strings; a deliberate off-by-one is caught |
+| 4, the block and string primitives | `+0x130` (strcpy from the host constant at 0x41bca0), `+0x168` (the "\\" UNC-prefix test), `+0x218` memset, `+0x228` memcmp, `+0x28c` (compacts the 4-byte palette at 0x4171a4 to 3 bytes an entry), `+0x2bc` strcmp | verified: 0 differ |
+| 5, the small accessors and stubs | `+0x154`/`+0x2cc` (a constant and the 0x41a3cc flag), `+0x288` (stores into 0x417194), `+0x304` (clears a dword), `+0x108`/`+0x12c`/`+0x220`/`+0x224` (the zero stubs) | verified: 0 differ |
+
+The harness now seeds `.data` with distinct random values on both sides before
+each iteration (leaving the service table and bounding the string constant at
+0x41bca0), so a service that reads the wrong offset of an otherwise-zero global
+is caught -- `make host-breaks` runs 28 deliberate breaks, all caught. (An
+early run with a plain LCG missed seven, because the generator's low bits had a
+period that aligned with the per-iteration call count and froze the
+`.data`-seeding decisions; switching to xorshift32 fixed the coverage.)
 
 Slice 2 grew the harness two ways that every later slice reuses: it passes
 arguments (a struct pointer, out-pointers), and after each call it digests the
@@ -399,10 +409,31 @@ Because our image is a byte-for-byte copy of the host's `.data`, the two start
 identical and the digest needs no relocation masking -- a difference is a write
 we got wrong.
 
+### Continuing the reimplementation
+
+To add the next service: find it in the table with `python3 tools/hostmap.py`
+(it sizes every slot and names the imports each one uses, so a pure or
+self-contained service is easy to spot), read its body with `python3
+tools/hostdis.py <addr>` (the service table's addresses are retail's), add a
+`host_###` function and table entry in `src/host/host.c`, a check in
+`tools/difftest/hostdiff.c`, and a break in `tools/host_breaks.py`. Then `make
+hostdiff-run N=20000` (0 differ) and `make host-breaks`. A service that reads a
+global proves nothing unless the global varies, which the harness's per-call
+`.data` seeding takes care of; one that calls `malloc` or a window/GDI/DDRAW
+API is not out-of-process testable this way and waits for a model or the
+`ofstest` harness.
+
+Easiest remaining, roughly in order: the other pure accessors and getters (many
+read one global and return it, with an early-out); the remaining C-runtime
+services (`sprintf`-family and friends, `+0x22c` qsort); then the ones that
+call a host-internal helper that is itself pure. `+0x094` (a pure walk of a
+run-time linked list at 0x41a3dc) and `+0x314` (a no-op) are the two pure
+leaves left unimplemented.
+
 ## Status
 
-12 of 194 services reimplemented in `src/host/host.c` and verified against the
-real host in process (slices 1 to 3 above). 71 have prototypes confirmed from the
+26 of 194 services reimplemented in `src/host/host.c` and verified against the
+real host in process (slices 1 to 5 above). 71 have prototypes confirmed from the
 callee and recorded in `host.h` (15 of them the window services, from WINDOW),
 and 11 were already exercised in-process through other modules' harnesses: the
 clock, `strlen`, and the nine-service enumeration cluster above. The dialog

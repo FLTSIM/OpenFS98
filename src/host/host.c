@@ -166,7 +166,7 @@ static uint32_t FS98_STDCALL host_228(uint32_t a, uint32_t b, uint32_t n)
     uint32_t i;
     for (i = 0; i < n; i++)
         if (p[i] != q[i])
-            return p[i] < q[i] ? 1 : (uint32_t)-1;
+            return p[i] < q[i] ? (uint32_t)-1 : 1;
     return 0;
 }
 

@@ -100,6 +100,37 @@ static void *our_fn(uint32_t off)
     return p;
 }
 
+/* Seed .data with distinct random values, identically on both sides, so a
+ * service that reads the wrong offset of an otherwise-zero (or coincidentally
+ * equal) global is caught.  The service table at 0xba0..0xec0 is left alone --
+ * the real host dispatches through it -- and the string constant at 0x41bca0
+ * (offset 0x4ca0) is given a short NUL-terminated value so the strcpy from it
+ * stays bounded. */
+#define TABLE_OFF   0xba0u
+#define TABLE_LAST  0xec0u
+#define STR_OFF     0x4ca0u            /* 0x41bca0 */
+
+static void seed_data(void)
+{
+    uint32_t i, len;
+    for (i = 0; i + 4 <= DATA_SIZE; i += 4) {
+        uint32_t v;
+        if (i + 4 > TABLE_OFF && i < TABLE_LAST)
+            continue;
+        v = rnd();
+        *(uint32_t *)(DATA_VA + i) = v;
+        *(uint32_t *)(our_data + i) = v;
+    }
+    len = rnd() % 60;
+    for (i = 0; i < len; i++) {
+        uint8_t c = (uint8_t)(0x21 + rnd() % 0x5e);
+        *(uint8_t *)(DATA_VA + STR_OFF + i) = c;
+        *(uint8_t *)(our_data + STR_OFF + i) = c;
+    }
+    *(uint8_t *)(DATA_VA + STR_OFF + len) = 0;
+    *(uint8_t *)(our_data + STR_OFF + len) = 0;
+}
+
 /* After a call, the two .data images must be identical; report the first word
  * that is not. */
 static void check_state(const char *name)
@@ -363,6 +394,7 @@ int main(int argc, char **argv)
     printf("hostdiff: %u accessors + writers + strings + primitives + stubs, %u iteration(s)\n",
            (unsigned)(sizeof accessors / sizeof accessors[0]), n);
     for (k = 0; k < n; k++) {
+        seed_data();
         for (i = 0; i < sizeof accessors / sizeof accessors[0]; i++)
             check_accessor(&accessors[i]);
         check_018();

@@ -408,12 +408,12 @@ images for a later comparison. A different pressing must be surveyed again.
 ## Work to take next
 
 **Alerts first**: 7,649 bytes of code, three factories, three message maps and
-known UTIL descriptors. [alerts.md](alerts.md) gives the event/descriptor
-boundaries and the progress edge cases to verify. A harness should compare
-real dialog events and parameter writes against retail, with faithful
-SIMSUI/MFC/Win32 behavior or the real UI in an isolated environment. Calling
-only our own replacement or existing simulator-side stand-ins cannot establish
-UI equivalence.
+known UTIL descriptors. [alerts.md](alerts.md) now records a verified event
+slice: initialization, commands, control bindings and progress drawing match
+retail over controlled dependency scripts. The complete DLL still needs its
+constructors/destructors, factories, module lifecycle and real MFC dispatch
+verified. Calling only our own replacement or existing simulator-side
+stand-ins cannot establish UI equivalence.
 
 **Views next**: one registered dialog and one recognised message map (19
 entries), with 13,090 bytes of code. Its window/eyepoint parameter contract

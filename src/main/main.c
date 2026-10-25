@@ -269,6 +269,7 @@ static const uint32_t retail_linkage[] = {
 #include "main_records.inc"
 #include "main_situation.inc"
 #include "main_nav.inc"
+#include "main_season.inc"
 
 __asm__(".globl _ImportTable\n\t.set _ImportTable, _main_image + 0x0\n\t"
         ".globl _Linkage\n\t.set _Linkage, _main_image + 0xc0");
@@ -292,9 +293,13 @@ static void main_install(void)
         { 0x68, (void *)record_find },
         { 0x6c, (void *)record_find_flight },
         { 0x70, (void *)nav_range_bearing },
+        { 0x74, (void *)nav_season },
         { 0x78, (void *)nav_readout },
         { 0x7c, (void *)nav_describe },
         { 0x80, (void *)nav_select },
+        { 0x30, (void *)menu_grey },
+        { 0xa4, (void *)nav_clock_ascii },
+        { 0xc8, (void *)nav_viewcycle },
     };
     uint32_t i;
 
@@ -314,6 +319,20 @@ __declspec(dllexport) uint32_t FS98_STDCALL main_dispatch_record(uint32_t rec)
 __declspec(dllexport) uint32_t FS98_STDCALL main_save_records(uint32_t file)
 {
     return save_records(file);
+}
+
+/* +0x74 is still reached through the seam in the situations suite; the season
+ * suite drives it directly through this export. */
+__declspec(dllexport) uint32_t FS98_STDCALL main_season(uint32_t a, uint32_t b)
+{
+    return nav_season(a, b);
+}
+
+/* +0xa4 is still reached through the seam in the situations suite; the clock
+ * suite drives it directly through this export. */
+__declspec(dllexport) uint32_t FS98_STDCALL main_clock(void)
+{
+    return nav_clock_ascii();
 }
 
 /* .text+0x1000 */

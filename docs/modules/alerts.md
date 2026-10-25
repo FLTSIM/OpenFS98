@@ -1,10 +1,121 @@
-# Alerts — static boundaries for the first UI replacement
+# Alerts — verified event slice and remaining DLL boundary
 
 `English/Alerts.DLL`, module `0x80000009`, has 7,649 bytes of `.text`, three
 registered dialog factories and three MFC message maps. It imports HOST and
 GLOBAL through FS98's numeric ABI, and USER32, GDI32, SIMSUI, MFC42, MSVCRT
-and KERNEL32 through PE imports. This document records a **static reading of
-retail**, not an implementation or differential-test result.
+and KERNEL32 through PE imports. **The event slice is now implemented and
+differential-tested**, including all three initialization handlers, all three
+control-binding routines, the command handlers and the modeless progress
+tick. Construction, module lifetime and MFC dispatch remain to be implemented
+and verified before Alerts is a drop-in replacement.
+
+## Current acceptance
+
+Run from the repository root, independently of the shared Makefile:
+
+```sh
+make -f tools/alerts.mk alertsevents
+bash tools/run_alertsdiff.sh 20000
+bash tools/run_alertsdiff.sh 20000 0x98a1e7d3
+bash tools/run_alertsdiff.sh --breaks 2000
+```
+
+`tools/run_alertsdiff.sh` uses a dedicated Wine prefix at
+`bin/alerts-diff/wineprefix`. It does not install Alerts, boot the simulator,
+touch the normal Wine prefix, or share another module's harness outputs.
+Outputs and mutation copies live under `bin/alerts-diff/`.
+
+`src/alerts/alerts_events.c` contains the C translation. It uses the local
+`types.h` integer types and Hungarian identifiers. `alerts_internal.h`
+declares a dependency adapter for MFC/SIMSUI/Win32 calls; the harness provides
+that adapter. No public Linkage table or factory is exported yet, so this
+slice cannot accidentally be installed as a complete Alerts DLL.
+
+The harness maps the actual reference `orig/English/Alerts.DLL` with
+`DONT_RESOLVE_DLL_REFERENCES`, validates its layout, patches the dependency
+IAT entries reached by the selected routines, and calls the original x86
+routines beside the C translation. It does not copy original instructions
+into the implementation. DLL startup and unresolved CRT paths are never
+invoked. The module's exception-unwind paths are outside this slice.
+
+Acceptance with seed `0x41e2753b`:
+
+```text
+Alerts events: 20000 scenarios, 340000 event comparisons, 0 differ
+progress enabled=14084 disabled=3226 closed=2690 negative-current=6892
+self-checked product-wrap witnesses=1176
+init success=17777 failure=2223; text resource=16667 direct=3333
+modal low-byte flag combinations reached=256/256
+Alerts events mutations: 39/39 caught
+```
+
+Seed `0x98a1e7d3` also passes 20,000 scenarios and 340,000 comparisons with
+zero differences: **680,000 comparisons across the two acceptance runs**.
+The final mutation suite was rerun with the stateful scripts enabled and
+still catches all 39 changes.
+
+There are fourteen individually driven routines and three stateful scripts:
+modal init then a button, advisory init then a user checkbox edit and an
+answer, and modeless init then tick/close. The scripts preserve the object
+and descriptor between operations. Each comparison checks **every byte of
+the object and descriptor**, the return where defined, and the dependency
+transcript: text/resources, icon loads, button setup, control bindings,
+virtual Close/destroy order, coordinate conversions, text metrics, drawing
+rectangles, positions, options and colors. Initialization-failure cleanup is
+exercised too. The progress test can change the object's vtable during Close
+to check retail's use of the saved original vtable for the subsequent call.
+
+This verifies Alerts' logic under the stated dependency scripts. The models
+do not establish real MFC dispatch, pixel equivalence, keyboard navigation,
+allocation/creation failure behavior, nested host dialogs or the lifetime of
+fully constructed C++ objects. Those remain whole-module acceptance work.
+The control-binding model assigns child HWNDs when driven independently;
+the base-init model does not simulate the full inherited exchange/dispatch
+engine.
+
+Button string ids are generated from retail's two-level jump table by
+`tools/gen_alerts_tables.py` into `alerts_tables.inc`; no UI resource assets
+are copied into the repository. The modal init listing contains a dead
+default-focus branch: its stack local starts at -1 and can only change behind
+a check that it is already not -1. That branch is omitted. The live answer
+indices at object `+0x10f4/+0x10f8` are retained and compared.
+
+### Findings from differential testing
+
+- The icon selector is 1-based: tags 1, 2, 3 and 4 select `0x86`, `0x87`,
+  `0x88` and `0x89`. Tag 0 skips both load and sprite copy. Other tags load
+  `0x88`. The raw jump table's first target is after the load, not its first
+  icon case; the first comparison caught that misreading.
+- Broad random range inputs usually clamp start to `limit - 1`, leaving a
+  multiplier of one. A deliberate widened-product error initially escaped.
+  A self-checking fixture now uses current=total=`0x7fffffff`, start=0,
+  limit=100: the low product is `0xffffff9c`, and the percentage must be 1,
+  whereas a widened product would give 100. All 39 mutations now produce an
+  actual reported difference; compile errors, faults and timeouts are not
+  counted as caught mutations.
+- SIMSUI's `SetChecked` at `0x20474440` stores its argument at checkbox
+  `+0xbc` and returns the prior value. The advisory embeds that checkbox at
+  `+0x1494`, so this directly explains its field at `+0x1550`; it is not an
+  unrelated dialog data-exchange variable.
+
+## Remaining implementation
+
+1. Implement and verify the three constructors/destructors, deleting
+   destructors, local virtual methods, message-map getters and the progress
+   child class. Preserve C++ subobject offsets and reverse cleanup order.
+2. Supply real MFC/SIMSUI adapters and derived vtables/message maps using the
+   recovered retail ABI. Pin stack cleanup and preserved registers from the
+   dependency callees, including the varargs and by-value rectangle calls.
+3. Implement Linkage init/deinit, DLL attachment/detachment and all three
+   factories, with original ids/flags. Extract needed resources only into
+   ignored build output, and keep the shared Makefile/game installation out
+   of the work until the standalone DLL passes.
+4. Exercise real creation, inherited validation/data exchange, Return,
+   Escape, system close, modeless ticks and destruction through MFC. Compare
+   actual UI/graphics behavior and allocation/creation failures, then run a
+   separate installation smoke test with restoration.
+
+The sections below retain the detailed retail boundary notes for that work.
 
 Regenerate the tables and control metadata with
 `python3 -B tools/dialogmap.py --format json`. The broader inventory and
@@ -173,9 +284,10 @@ Map `0x22303358` is returned by `0x223022e0`:
 | `0x7da` | `0x223025d0` | Copy object `+0x1550` to parameter `+0x10`; write 0 to `+0x00`, 1 to `+0x0c`; Close |
 
 The first command's consecutive 1/0 writes are present in retail. Do not
-turn them into a presumed successful answer of 1. What transfers the checkbox
-control's checked state into object `+0x1550`, and the ordering of inherited
-validation/Close callbacks, must be verified with SIMSUI in the loop. The
+turn them into a presumed successful answer of 1. SIMSUI's `SetChecked` writes
+checkbox `+0xbc`, which is object `+0x1550`; initialization and the command
+handlers now agree on that field in the differential harness. The ordering
+of inherited validation/Close callbacks still needs real MFC verification. The
 static caller scan does not resolve a literal call to id 4; that is not
 evidence that the advisory is unused.
 
@@ -203,7 +315,8 @@ not the three small command routines. A valid sequence is:
    descriptor-write ordering and drawing splits on purpose, and show that the
    comparison catches each change.
 
-Calling raw handlers on a made-up C++ object may isolate an arithmetic or
-store sequence, but cannot prove the complete dialog. Likewise, UTIL's
-already-passing harness tests the caller's protocol, not Alerts' UI. No such
-retail-vs-replacement comparison has been run in this survey.
+The event harness above follows this plan for the explicitly scoped handlers,
+including descriptor writes, dependency transcripts and stateful sequences.
+It supplies controlled C++ objects and dependency models, so the factory,
+real MFC lifecycle and actual rendering parts of the plan remain pending.
+UTIL's already-passing harness tests the caller's protocol, not Alerts' UI.

@@ -243,9 +243,48 @@ static void stub_fault(const char *what)
     __builtin_longjmp(fault_jb, 1);
 }
 
+/* The host repairs integer divide faults in the modules it calls: its __try
+ * filter (retail 0x4119a0, docs/modules/host.md and window.md) saturates the
+ * result -- all ones for div, on a quotient that will not fit or a zero
+ * divisor -- and returns past the instruction.  maindiff stands in for the
+ * host, so it repairs them the same way; +0x74's minutes-to-hours divide runs
+ * into overflow and relies on it (ours models the repaired value in C).
+ * Only the register-operand div/idiv forms MAIN uses are decoded. */
+static int repair_divide(CONTEXT *c)
+{
+    const uint8_t *ip = (const uint8_t *)(uintptr_t)c->Eip;
+    uint32_t len = 0;
+    int opsz = 4;
+    uint8_t op, modrm;
+
+    if (ip[0] == 0x66) { opsz = 2; len = 1; }
+    op = ip[len];
+    if (op != 0xf6 && op != 0xf7)
+        return 0;
+    modrm = ip[len + 1];
+    if ((modrm >> 6) != 3 || (((modrm >> 3) & 7) != 6 && ((modrm >> 3) & 7) != 7))
+        return 0;                                  /* div (6) or idiv (7), register operand */
+    len += 2;
+    if (op == 0xf6)
+        c->Eax = (c->Eax & 0xffff0000u) | 0xffffu; /* 8-bit: AL quot, AH rem */
+    else if (opsz == 2) {
+        c->Eax = (c->Eax & 0xffff0000u) | 0xffffu;
+        c->Edx = (c->Edx & 0xffff0000u) | 0xffffu;
+    } else {
+        c->Eax = 0xffffffffu;
+        c->Edx = 0xffffffffu;
+    }
+    c->Eip += len;
+    return 1;
+}
+
 static LONG WINAPI on_vectored(EXCEPTION_POINTERS *e)
 {
     DWORD code = e->ExceptionRecord->ExceptionCode;
+
+    if ((code == EXCEPTION_INT_DIVIDE_BY_ZERO || code == EXCEPTION_INT_OVERFLOW) &&
+        in_main && cur != NULL && repair_divide(e->ContextRecord))
+        return EXCEPTION_CONTINUE_EXECUTION;
 
     if (code == EXCEPTION_ACCESS_VIOLATION &&
         (e->ContextRecord->Eip & 0xff000000u) == 0xde000000u) {
@@ -655,6 +694,12 @@ static int32_t STDCALL h_post(uint32_t a, uint32_t b)
     return 0;
 }
 
+static int32_t STDCALL h_menu(uint32_t id, uint32_t state)
+{
+    put(" menu(%#x,%#x)", id, state);
+    return 0;
+}
+
 static uint16_t clock_words[6];
 
 static int32_t STDCALL h_local_time(uint16_t *out)
@@ -923,6 +968,44 @@ static uint32_t STDCALL fe_2c(uint32_t which, uint32_t arg2, uint32_t buf)
     put(" FE2c(%#x,%#x)->%#x", w, arg2, status);
     return status;
 }
+/* FE +0x54 and +0x20, as logging models for the season slice (+0x74).  +0x54
+ * sets the enumeration going (its result is unused); +0x20 hands back a
+ * deterministic run of records, each in shared fixture memory so its pointer
+ * is the same on both sides, some of them the `d' records +0x74 looks for. */
+static uint32_t fe20_seed, fe20_i, fe20_n;
+
+static uint32_t STDCALL fe_54(uint32_t pos, uint32_t mode, uint32_t out)
+{
+    (void)pos;
+    (void)out;
+    put(" FE54(%#x)", mode);
+    return 0;
+}
+
+static uint32_t STDCALL fe_20(uint32_t state, uint32_t recptr, uint32_t stateptr)
+{
+    uint8_t *rec = fixtures + 0x68000;
+    uint32_t s;
+
+    (void)stateptr;
+    if ((state & 0xffff) == 0)                     /* the word only: pushed over stale bytes */
+        fe20_i = 0;
+    if (fe20_i >= fe20_n) {
+        put(" FE20end");
+        return 0;
+    }
+    s = fe20_seed + fe20_i * 2654435761u;
+    rec[0] = (s & 3) ? 0x64 : (uint8_t)(s >> 5);       /* mostly a `d' record */
+    *(uint16_t *)(rec + 0xe) = (uint16_t)(s >> 3);      /* the zone offset */
+    rec[0x10] = (uint8_t)(s >> 17);                     /* priority */
+    rec[0x11] = (uint8_t)(s % 7);                       /* daylight rule 0..6 */
+    *(uint32_t *)(uintptr_t)recptr = (uint32_t)(uintptr_t)rec;
+    put(" FE20[%u]b=%#x p=%#x o=%#x d=%#x", fe20_i, rec[0], rec[0x10],
+        *(uint16_t *)(rec + 0xe), rec[0x11]);
+    fe20_i++;
+    return 1;
+}
+
 static uint32_t STDCALL util_88(uint32_t buf, uint32_t desc, uint32_t n)
 {
     uint32_t dest = *(uint32_t *)(uintptr_t)(desc + 12), i, h = 2166136261u;
@@ -1003,6 +1086,7 @@ static void build_stubs(void)
     SET_SLOT(host, 0x214, h_free);
     SET_SLOT(host, 0x21c, h_memmove);
     SET_SLOT(host, 0x03c, h_post);
+    SET_SLOT(host, 0x254, h_menu);
     SET_SLOT(host, 0x044, h_local_time);
     SET_SLOT(host, 0x148, h_create);
     SET_SLOT(host, 0x184, h_join);
@@ -1033,7 +1117,9 @@ static void build_stubs(void)
     SET_SLOT(util, 0x48, util_geo48);
     SET_SLOT(util, 0x88, util_88);
     *(uint32_t *)fe = 18;
+    SET_SLOT(fe, 0x20, fe_20);
     SET_SLOT(fe, 0x2c, fe_2c);
+    SET_SLOT(fe, 0x54, fe_54);
     *(uint32_t *)weatherm = 27;
     SET_SLOT(weatherm, 0x24, weatherm_24);
     *(uint32_t *)multip = 35;
@@ -1970,6 +2056,110 @@ static void report_navdesc(void)
     printf("  describe %lu (lookup failed %lu)\n", cover_describe, cover_describe_miss);
 }
 
+/* ---- suite: season (the zone and clock, +0x74) ----------------------------------- */
+
+static unsigned long cover_season, cover_season_haved;
+
+static void op_season(void)
+{
+    uint32_t a = rnd_n(2), day = rnd_n(400);
+
+    *(uint32_t *)(global + 0x564) = rnd();
+    *(uint32_t *)(global + 0x56c) = rnd();         /* the longitude the zone comes from */
+    *(uint32_t *)(global + 0x574) = rnd();
+    global[0x238] = (uint8_t)rnd();                /* zulu hours/minutes */
+    global[0x239] = (uint8_t)rnd();
+    global[0x23b] = (uint8_t)rnd();                /* local hours/minutes */
+    global[0x23c] = (uint8_t)rnd();
+    *(uint32_t *)(cur->image + 0x7874) = rnd_n(2); /* a `d' record ever seen */
+    fe20_seed = rnd();
+    fe20_n = rnd_n(7);
+    if (counting) { cover_season++; if (*(uint32_t *)(cur->image + 0x7874)) cover_season_haved++; }
+    put("\n#season(a=%u,day=%u) lon=%#x haved=%u n=%u", a, day,
+        *(uint32_t *)(global + 0x56c), *(uint32_t *)(cur->image + 0x7874), fe20_n);
+    ((s2)internal(0x207f9781, "main_season@8"))(a, day);
+    put(" L=%02x:%02x Z=%02x:%02x off=%#x dst=%u", global[0x23b], global[0x23c],
+        global[0x238], global[0x239], *(uint16_t *)(global + 0x246), *(uint16_t *)(global + 0x244));
+}
+
+static void setup_season(void) { }
+
+static void report_season(void)
+{
+    printf("  season %lu (a `d' record already seen %lu)\n", cover_season, cover_season_haved);
+}
+
+/* ---- suite: clock (the zulu clock as digits, +0xa4) ------------------------------ */
+
+static unsigned long cover_clock;
+
+static void op_clock(void)
+{
+    global[0x238] = (uint8_t)(rnd_n(3) ? rnd_n(24) : rnd());   /* hours, now and then out of range */
+    global[0x239] = (uint8_t)(rnd_n(3) ? rnd_n(60) : rnd());   /* minutes */
+    global[0x23a] = (uint8_t)(rnd_n(3) ? rnd_n(60) : rnd());   /* seconds */
+    if (counting) cover_clock++;
+    put("\n#clock(%u:%u:%u)", global[0x238], global[0x239], global[0x23a]);
+    ((s0)internal(0x207f7ddf, "main_clock@0"))();
+    put(" -> %04x %04x %04x", *(uint16_t *)(global + 0xc20),
+        *(uint16_t *)(global + 0xc23), *(uint16_t *)(global + 0xc26));
+}
+
+static void setup_clock(void) { }
+
+static void report_clock(void)
+{
+    printf("  clock %lu\n", cover_clock);
+}
+
+/* ---- suite: view (the view cycler, +0xc8) ---------------------------------------- */
+
+static unsigned long cover_view, cover_view_active;
+
+static void op_view(void)
+{
+    uint8_t *vs = fixtures + 0x6a000;              /* the view record +0xc8 reads through */
+    uint32_t active;
+
+    *(uint32_t *)(vs + 8) = rnd();                 /* its +8 field: the sign bit is "active" */
+    active = *(uint32_t *)(vs + 8) >> 31;
+    *(uint32_t *)(cur->image + 0x7fc4) = (uint32_t)(uintptr_t)vs;
+    *(uint32_t *)(cur->image + 0x7fc8) = rnd_n(25);           /* the current index */
+    *(uint32_t *)(cur->image + 0xfda4) = 1 + rnd_n(20);       /* the count */
+    if (counting) { cover_view++; if (active) cover_view_active++; }
+    put("\n#view active=%u idx=%#x count=%u", active,
+        *(uint32_t *)(cur->image + 0x7fc8), *(uint32_t *)(cur->image + 0xfda4));
+    {
+        uint32_t r = ((s0)SVC(0xc8))();
+        put(" =%#x idx=%#x", r, *(uint32_t *)(cur->image + 0x7fc8));
+    }
+}
+
+static void setup_view(void) { }
+
+static void report_view(void)
+{
+    printf("  view %lu (the view active %lu)\n", cover_view, cover_view_active);
+}
+
+/* ---- suite: menu (grey the analysis items, +0x30) -------------------------------- */
+
+static unsigned long cover_menu;
+
+static void op_menu(void)
+{
+    if (counting) cover_menu++;
+    put("\n#menu");
+    put(" =%#x", ((s0)SVC(0x30))());
+}
+
+static void setup_menu(void) { }
+
+static void report_menu(void)
+{
+    printf("  menu %lu\n", cover_menu);
+}
+
 /* ---- running ---------------------------------------------------------------------- */
 
 struct suite {
@@ -1989,6 +2179,10 @@ static const struct suite suites[] = {
     { "nav", op_nav, report_nav, 20, setup_nav, 0x00 },
     { "navio", op_navio, report_navio, 20, setup_navio, 0x00 },
     { "navdesc", op_navdesc, report_navdesc, 20, setup_navdesc, 0x00 },
+    { "season", op_season, report_season, 20, setup_season, 0x00 },
+    { "clock", op_clock, report_clock, 20, setup_clock, 0x00 },
+    { "view", op_view, report_view, 20, setup_view, 0x00 },
+    { "menu", op_menu, report_menu, 20, setup_menu, 0x00 },
 };
 
 static const struct suite *suite;

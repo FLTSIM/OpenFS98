@@ -14,6 +14,10 @@ slot is done MAIN is not in `MODULES` and is never installed.
 | 3, range and bearing | `+0x70` (assembly, `.text+0x19507`..`+0x1972f`) | `nav` | verified: 20,000 scenarios, 0 differ; 13 of 14 breaks caught, 1 proven equivalent |
 | 4, the nav read-outs | `+0x78`, `+0x80` (assembly, `.text+0x19c94`, `+0x19f10`) | `navio` | verified: 20,000 scenarios, 0 differ; 12 of 12 breaks caught |
 | 5, the station descriptor | `+0x7c` (assembly, `.text+0x19cd5`..`+0x19db9`) | `navdesc` | verified: 20,000 scenarios, 0 differ; 9 of 9 breaks caught |
+| 6, the season, zone and clock | `+0x74` (assembly, `.text+0x18781`..`+0x189c3`) | `season` | verified: 20,000 scenarios, 0 differ; 23 of 24 breaks caught, 1 proven equivalent |
+| 7, the clock as digits | `+0xa4` (assembly, `.text+0x16ddf`..`+0x16e30`) | `clock` | verified: 20,000 scenarios, 0 differ; 6 of 6 breaks caught |
+| 8, the view cycler | `+0xc8` (assembly, `.text+0x18f0`..`+0x193a`) | `view` | verified: 20,000 scenarios, 0 differ; 10 of 10 breaks caught |
+| 9, the analysis menu greying | `+0x30` (assembly, `.text+0x16920`..`+0x16990`) | `menu` | verified: 20,000 scenarios, 0 differ; 4 of 4 breaks caught |
 
 ## Binary and linkage
 
@@ -54,19 +58,19 @@ calls are reached from the host, the `English\` dialog modules, or CHAIN.
 | `+0x18` | `.text+0xc000` | | |
 | `+0x1c` | `.text+0xc520` | FACIL | |
 | `+0x20` | `.text+0xa090` | | |
-| `+0x24`..`+0x34` | `.text+0x16a60`, `+0x165b0`, `+0x16880`, `+0x16920`, `+0x169a0` | REALITY (`+0x30`, `+0x34`) | `+0x30` greys menu items `0x1001`..`0x1006`; `+0x34` the options dialog |
+| `+0x24`..`+0x34` | `.text+0x16a60`, `+0x165b0`, `+0x16880`, `+0x16920`, `+0x169a0` | REALITY (`+0x30`, `+0x34`) | `+0x30` (**slice 9**) greys menu items `0x1001`..`0x1006`; `+0x34` the options dialog |
 | `+0x38`..`+0x4c` | `.text+0x11eeb`, `+0x11e3d`, `+0x120aa`, `+0x127b3`, `+0x12f50`, `+0x12f6a` | ADVDRV (`+0x3c`), REALITY (`+0x44`), DEMO (`+0x48`, `+0x4c`) | the situation reader and writer, assembly: `+0x48` loads a situation from memory, `+0x4c` from a file |
 | `+0x50` | `.text+0x13105` | | assembly, the largest gap (11 KB) |
 | `+0x54`..`+0x6c` | `.text+0x15cc0`..`+0x15f50` | WINMSG, WINDOW, PANELS (`+0x5c`..`+0x64`) | **slice 1**, below |
 | `+0x70` | `.text+0x19507` | ADVDRV, LANDME | **slice 3**: range and bearing between two points |
-| `+0x74` | `.text+0x18781` | ADVDRV, MULTIP | |
+| `+0x74` | `.text+0x18781` | ADVDRV, MULTIP | **slice 6**: the season, the zone and the clock |
 | `+0x78`, `+0x7c` | `.text+0x19c94`, `+0x19cd5` | | `+0x78` **slice 4**, `+0x7c` **slice 5** |
 | `+0x80` | `.text+0x19f10` | ADVDRV, PANELS | **slice 4**: `(which, &tenths)` |
 | `+0x84`..`+0x90` | `.text+0x16100`, `+0x162f0`, `+0x16570`, `+0x10560` | CONTROLS, WINDOW (`+0x88`) | |
 | `+0x94`..`+0xa0` | `.text+0x7140`, `+0x6f59`, `+0x6de9`, `+0x830d` | WEATHERM (`+0x94`), WINDOW (`+0x98`, `+0x9c`) | |
-| `+0xa4`, `+0xa8` | `.text+0x16ddf`, `+0x6450` | ADVDRV, CONTROLS, WINDOW | |
+| `+0xa4`, `+0xa8` | `.text+0x16ddf`, `+0x6450` | ADVDRV, CONTROLS, WINDOW | `+0xa4` is **slice 7** |
 | `+0xac`..`+0xbc` | `.text+0xc870`, `+0xcdb0`, `+0xdd70`, `+0xe5a0`, `+0xed10` | CONTROLS (`+0xac`), FACIL (`+0xb0`) | |
-| `+0xc0`..`+0xc8` | `.text+0x06a0`, `+0xc560`, `+0x18f0` | WINDOW, FACIL, CONTROLS | |
+| `+0xc0`..`+0xc8` | `.text+0x06a0`, `+0xc560`, `+0x18f0` | WINDOW, FACIL, CONTROLS | `+0xc8` is **slice 8** |
 
 ## Slice 1: situation records
 
@@ -211,12 +215,16 @@ Retail behaviour worth knowing, all reproduced:
   transliteration put both under the test; the harness caught it.)
 - **The load leaves `.data+0x41e1` naming a file it has closed.**
 
-MAIN `+0x74` (the season and date) and `+0xa4`, which loading calls, are
-not done yet. They are seams for now: retail's two call sites
-(`.text+0x12b5f`, `+0x130fe`) are patched in the harness to stubs, and ours
-calls them through its Linkage, which the harness points at the same stubs.
-`+0x74` is pushed the day as a word over two stale bytes; the stub logs the
-word, and `+0x74`'s slice must show that it reads only that.
+MAIN `+0x74` (the season and date, **slice 6** below) and `+0xa4`, which
+loading calls, are still seams *in the situations suite*: retail's two call
+sites (`.text+0x12b5f`, `+0x130fe`) are patched in the harness to stubs, and
+ours calls them through its Linkage, which the harness points at the same
+stubs. Both are now transliterated and verified on their own -- the `season`
+suite drives `+0x74` directly and the `clock` suite drives `+0xa4` (slice 7),
+each past the seam. Un-seaming them in the load path waits on FE being
+modelled there (`+0x74` needs it; `+0xa4` has no dependencies and could be
+un-seamed on its own). `+0x74` is pushed the day as a word over two stale
+bytes, which the slice confirms it reads only the low word of.
 
 ### Verifying the reader and writer
 
@@ -353,3 +361,94 @@ UTIL `+0x88` writes exactly the bytes `+0x7c` copies out and logs a hash of
 them, not the per-side `.data` address it was handed. The output lands in the
 harness's fixture memory so the memmove is over memory both sides share.
 `make main-breaks SUITE=navdesc`: 9 breaks, all caught.
+
+## Slice 6: the season, the zone and the clock
+
+`src/main/main_season.inc`, `.text+0x18781` (`+0x74`) with its helpers
+`.text+0x18394` (the position snapshot) and `.text+0x18994` (minutes into
+hours and minutes), assembly. Loading calls it; ADVDRV and MULTIP too.
+
+It fixes the time-zone offset from the longitude (`(lon >> 16) / 0x555`, past
+the date line wrapped, halved and scaled to minutes), then lets FE's nearest
+`d' records override it by priority, then trims it by a daylight rule whose
+season window is a five-entry `.text` table at `+0x18eb0`. Finally it converts
+between local and zulu time -- with its first argument zero and a `d' record
+ever seen, local drives zulu; otherwise zulu drives local.
+
+Retail details, reproduced:
+
+- **The minutes-to-hours divide runs into overflow and relies on the host's
+  repair.** `div bl` on a count that will not fit after one wrap raises a
+  divide fault that retail's host (`0x4119a0`) catches and saturates to all
+  ones; ours models the saturated value in C, and maindiff stands in for the
+  host's repair (see below).
+- **The daylight rule indexes a five-entry table**; retail bounds the index at
+  5. A rule of 6 would read a sixth entry that is an empty window (start 3, end
+  0), so it changes nothing -- which is why the `dst-bound` break is a proven
+  equivalence, not a miss.
+- **FE `+0x20`'s state argument is a word pushed over two stale bytes** (as
+  `+0x74`'s own day argument and FE `+0x2c`'s index are), so only its low word
+  counts.
+
+### Verifying the season, zone and clock
+
+`make maindiff-run SUITE=season`: 20,000 scenarios, 0 differences. The suite
+drives `+0x74` directly through the export `main_season`, past the seam the
+situations suite still uses, over random position, clock and day inputs. FE
+`+0x54` (which sets the enumeration going) and FE `+0x20` (which hands back a
+deterministic run of records, some of them `d' records) are **logging models**,
+their records in shared fixture memory so a record pointer is the same on both
+sides. The harness models the **host's integer-divide repair** (`repair_divide`
+in `maindiff.c`): retail's `div` into overflow is caught, saturated to all ones
+and stepped over, exactly as the host's `__try` filter does for the modules it
+calls (docs/modules/host.md, window.md). `make main-breaks SUITE=season`: 24
+breaks, 23 caught, 1 proven equivalent (`dst-bound`, above).
+
+## Slice 7: the clock as digits
+
+`src/main/main_season.inc`, `.text+0x16ddf` (`+0xa4`), assembly. A leaf with
+no arguments and no module calls: the three bytes of the zulu clock at GLOBAL
++0x238 (hours), +0x239 (minutes) and +0x23a (seconds) each become a
+two-character decimal at +0xc20, +0xc23 and +0xc26. Retail uses `aam 0xa` to
+split a byte into tens and units and `xchg`/`add 0x3030` to lay them down as
+ASCII, low character first; a byte past 99 keeps retail's result, which the
+transliteration reproduces with plain `/` and `%`.
+
+### Verifying the clock
+
+`make maindiff-run SUITE=clock`: 20,000 scenarios, 0 differences, driving
+`+0xa4` directly through the export `main_clock` over clock bytes that are
+usually in range and now and then past it. `make main-breaks SUITE=clock`:
+6 breaks, all caught.
+
+## Slice 8: the view cycler
+
+`src/main/main_nav.inc`, `.text+0x18f0` (`+0xc8`) with its one-line helper
+`.text+0x18c0`, assembly. `+0xc8()` steps the view index: from the current
+index at `.data+0x7fc8` when the current view (the record `.data+0x7fc4`
+points at) is active -- the sign bit of its `+8` field -- or from -1
+otherwise; one on, and once it reaches the count at `.data+0xfda4` it wraps
+back to -1. It posts the result to the host: a real index as itself plus
+0x300, a -1 as host command 0x1625.
+
+### Verifying the view cycler
+
+`make maindiff-run SUITE=view`: 20,000 scenarios, 0 differences. Each op points
+`.data+0x7fc4` at a view record in shared fixture memory (its `+8` field, and
+so the active bit, set at random), seeds the index and a small count so the
+wrap is reached often, and calls `+0xc8` through its Linkage slot; the posted
+command is the host stub's log. `make main-breaks SUITE=view`: 10 breaks, all
+caught.
+
+## Slice 9: the analysis menu greying
+
+`src/main/main_nav.inc`, `.text+0x16920` (`+0x30`), assembly. A leaf REALITY
+calls: it greys the six analysis menu items `0x1001` through `0x1006` with six
+HOST `+0x254(id, 2)` calls and nothing else (retail unrolls the six; the
+transliteration loops, the same six calls).
+
+### Verifying the menu greying
+
+`make maindiff-run SUITE=menu`: 20,000 scenarios, 0 differences -- the six host
+calls, logged by the host stub, match. `make main-breaks SUITE=menu`: 4 breaks,
+all caught.

@@ -160,6 +160,41 @@ static uint32_t FS98_STDCALL nav_select(uint32_t which, uint32_t out)
     }
 }
 
+/* .text+0x18c0: whether the current view is active -- the sign bit of the +8
+ * field of the record .data+0x7fc4 points at. */
+static uint32_t view_active(void)
+{
+    return M32(M32(V(0x20807fc4)) + 8) >> 31;
+}
+
+/* .text+0x18f0 == Linkage +0xc8: step to the next view and post it.  From the
+ * current index if the view is active, else from -1; one on, and past the
+ * count at .data+0xfda4 it wraps to -1.  A real index is posted as itself plus
+ * 0x300, a -1 as host command 0x1625. */
+static uint32_t FS98_STDCALL nav_viewcycle(void)
+{
+    uint32_t i = view_active() ? M32(V(0x20807fc8)) : 0xffffffffu;
+
+    i = i + 1;
+    if (i >= M32(V(0x2080fda4)))
+        i = 0xffffffffu;
+    M32(V(0x20807fc8)) = i;
+    if (i == 0xffffffffu)
+        return CALL(HOST, 0x3c, f2)(0x1625, 0);
+    return CALL(HOST, 0x3c, f2)(i + 0x300, 0);
+}
+
+/* .text+0x16920 == Linkage +0x30: grey the six analysis menu items, 0x1001
+ * through 0x1006, through HOST +0x254 (state 2).  REALITY calls it. */
+static uint32_t FS98_STDCALL menu_grey(void)
+{
+    uint32_t id;
+
+    for (id = 0x1001; id <= 0x1006; id++)
+        CALL(HOST, 0x254, f2)(id, 2);
+    return 0;
+}
+
 /* .text+0x19cd5 == Linkage +0x7c: (which, arg2, &out).  FE +0x2c looks the
  * station up into a local buffer (its first argument is pushed as a word over
  * two stale bytes, so only the low word reaches FE); UTIL +0x88 formats it,

@@ -10,7 +10,7 @@ $(HELP_DIR):
 	mkdir -p $@
 src/help/help_tables.inc src/help/help_objects_tables.inc &: tools/gen_help_tables.py tools/dialogmap.py orig/English/Help.DLL
 	python3 -B tools/gen_help_tables.py
-$(HELP_DIR)/helpeventsdiff.exe: tools/difftest/helpeventsdiff.c src/help/help_events.c src/help/help_internal.h src/help/types.h src/help/help_tables.inc src/help/help_objects.c src/help/help_objects.h src/help/help_objects_tables.inc src/help/help_unwind.h src/help/help_stack.S | $(HELP_DIR)
+$(HELP_DIR)/helpeventsdiff.exe: tools/difftest/helpeventsdiff.c src/help/help_events.c src/help/help_internal.h src/help/help_tables.inc src/help/help_objects.c src/help/help_objects.h src/help/help_objects_tables.inc src/help/help_unwind.h src/help/help_stack.S | $(HELP_DIR)
 	$(CC) -std=c99 -O2 -Wall -Wextra -Werror -fno-strict-aliasing -o $@ tools/difftest/helpeventsdiff.c src/help/help_events.c src/help/help_objects.c src/help/help_stack.S -lntdll
 helpeventsdiff-run: helpevents
 	bash tools/run_helpdiff.sh $(N) $(SEED) $(MODE)

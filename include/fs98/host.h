@@ -472,6 +472,49 @@ typedef void *(FS98_STDCALL *fs98_host_list_find_fn)(struct fs98_host_list *l, u
 #define FS98_HOST_S_STRNCPY        0x2ac
 #define FS98_HOST_S_STRCMP         0x2bc
 
+/* ---- the command line, extensions, more C runtime (HOST slice 7) -------- */
+
+/* +0x098 -- the value of "/name:value" (or "-name:value") on the command line
+ * into `buf`: up to the next option, trimmed of spaces.  Only the colon form
+ * counts.  0, or -1 if absent, colonless or not shorter than `len`. */
+typedef int32_t (FS98_STDCALL *fs98_host_option_fn)(const char *name, char *buf,
+                                                    uint32_t len);
+
+/* +0x09c / +0x0a0 -- the same value through atoi / atof into *out, which is
+ * left alone on failure. */
+typedef int32_t (FS98_STDCALL *fs98_host_option_int_fn)(const char *name, int32_t *out);
+typedef int32_t (FS98_STDCALL *fs98_host_option_double_fn)(const char *name, double *out);
+
+/* +0x0a4 -- 0 if option `name` is absent, 2 for "/name:...", 1 for
+ * "/name ...". */
+typedef int32_t (FS98_STDCALL *fs98_host_option_given_fn)(const char *name);
+
+/* +0x1ac -- the id of extension `ext` (".BGL" is 1; the 37 built-in ids are
+ * 0..0x24, and 0 is the empty extension), registering it from 0x25 on if new.
+ * Upper-cases `ext` in place.  Returns 0. */
+typedef int32_t (FS98_STDCALL *fs98_host_ext_id_fn)(char *ext, int32_t *id);
+
+/* +0x230 -- exchange two blocks of `size` bytes (through a temporary from the
+ * host allocator, fatal flag).  Returns 0. */
+typedef int32_t (FS98_STDCALL *fs98_host_swap_fn)(void *a, void *b, uint32_t size);
+
+/* +0x234 -- MSVCRT bsearch with a __stdcall comparator, parked like +0x22c's. */
+typedef void *(FS98_STDCALL *fs98_host_bsearch_fn)(const void *key, const void *base,
+                                                   uint32_t count, uint32_t width,
+                                                   fs98_host_cmp_fn cmp);
+
+/* +0x2c8 -- delete every occurrence of `c` from `s`, in place.  Returns s. */
+typedef char *(FS98_STDCALL *fs98_host_strip_char_fn)(char *s, int32_t c);
+
+#define FS98_HOST_S_OPTION         0x098
+#define FS98_HOST_S_OPTION_INT     0x09c
+#define FS98_HOST_S_OPTION_DOUBLE  0x0a0
+#define FS98_HOST_S_OPTION_GIVEN   0x0a4
+#define FS98_HOST_S_EXT_ID         0x1ac
+#define FS98_HOST_S_SWAP           0x230
+#define FS98_HOST_S_BSEARCH        0x234
+#define FS98_HOST_S_STRIP_CHAR     0x2c8
+
 /* ---- windows: +0x020..+0x094 (confirmed by WINDOW) ------------------------- */
 
 /* A window is a caller's 0xa4-byte record (see docs/modules/window.md); the
@@ -628,6 +671,14 @@ typedef int32_t (FS98_STDCALL *fs98_host_string_fn)(uint32_t id, char **out);
 #define FS98_HOST_PROFILE_DOUBLE(h) FS98_HOST_SLOT(h, FS98_HOST_S_PROFILE_DOUBLE, fs98_host_profile_double_fn)
 #define FS98_HOST_PROFILE_DOUBLES(h) FS98_HOST_SLOT(h, FS98_HOST_S_PROFILE_DOUBLES, fs98_host_profile_doubles_fn)
 #define FS98_HOST_STRDUP(h)      FS98_HOST_SLOT(h, FS98_HOST_S_STRDUP,      fs98_host_strdup_fn)
+#define FS98_HOST_OPTION(h)      FS98_HOST_SLOT(h, FS98_HOST_S_OPTION,      fs98_host_option_fn)
+#define FS98_HOST_OPTION_INT(h)  FS98_HOST_SLOT(h, FS98_HOST_S_OPTION_INT,  fs98_host_option_int_fn)
+#define FS98_HOST_OPTION_DOUBLE(h) FS98_HOST_SLOT(h, FS98_HOST_S_OPTION_DOUBLE, fs98_host_option_double_fn)
+#define FS98_HOST_OPTION_GIVEN(h) FS98_HOST_SLOT(h, FS98_HOST_S_OPTION_GIVEN, fs98_host_option_given_fn)
+#define FS98_HOST_EXT_ID(h)      FS98_HOST_SLOT(h, FS98_HOST_S_EXT_ID,      fs98_host_ext_id_fn)
+#define FS98_HOST_SWAP(h)        FS98_HOST_SLOT(h, FS98_HOST_S_SWAP,        fs98_host_swap_fn)
+#define FS98_HOST_BSEARCH(h)     FS98_HOST_SLOT(h, FS98_HOST_S_BSEARCH,     fs98_host_bsearch_fn)
+#define FS98_HOST_STRIP_CHAR(h)  FS98_HOST_SLOT(h, FS98_HOST_S_STRIP_CHAR,  fs98_host_strip_char_fn)
 #define FS98_HOST_SOUND_OFF(h)   FS98_HOST_SLOT(h, FS98_HOST_S_SOUND_OFF,   fs98_host_sound_off_fn)
 #define FS98_HOST_SOUND_ENABLE(h) FS98_HOST_SLOT(h, FS98_HOST_S_SOUND_ENABLE, fs98_host_sound_enable_fn)
 #define FS98_HOST_VOICE_LOAD(h)  FS98_HOST_SLOT(h, FS98_HOST_S_VOICE_LOAD,  fs98_host_voice_load_fn)

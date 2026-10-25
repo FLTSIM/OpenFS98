@@ -394,12 +394,13 @@ the result, normalising a pointer into either side's `.data` to an offset.
 | 4, the block and string primitives | `+0x130` (strcpy from the host constant at 0x41bca0), `+0x168` (the "\\" UNC-prefix test), `+0x218` memset, `+0x228` memcmp, `+0x28c` (compacts the 4-byte palette at 0x4171a4 to 3 bytes an entry), `+0x2bc` strcmp | verified: 0 differ |
 | 5, the small accessors and stubs | `+0x154`/`+0x2cc` (a constant and the 0x41a3cc flag), `+0x288` (stores into 0x417194), `+0x304` (clears a dword), `+0x108`/`+0x12c`/`+0x220`/`+0x224` (the zero stubs) | verified: 0 differ |
 | 6, the allocator and the growable array | `+0x20c` alloc, `+0x210` realloc, `+0x214` free, `+0x21c` memmove; `+0x2f8` append, `+0x2fc` free a list, `+0x300` remove, `+0x308`/`+0x30c` walk forward/back, `+0x310` find | verified: 0 differ over 20,000 iterations; its 24 breaks caught (`free-null` by a hang: the double free wedges wine's heap) |
+| 7, the command line, file extensions and the C-runtime wrappers | `+0x98`/`+0x9c`/`+0xa0`/`+0xa4` (a command-line option as text, int, double, or whether given), `+0x1ac` (an extension's id, registering a new one), `+0x188` (split a path, UNC-aware, and identify its extension), `+0x22c` qsort, `+0x230` swap two blocks, `+0x234` bsearch, `+0x2ac` strncpy, `+0x2b4` strdup, `+0x2c0` _strcmpi, `+0x2c8` (delete a character throughout a string) | verified: 0 differ over 20,000 iterations; 30 breaks, 27 caught, 3 proven equivalent |
 
 The harness now seeds `.data` with distinct random values on both sides before
 each iteration (leaving the service table and bounding the string constant at
 0x41bca0), so a service that reads the wrong offset of an otherwise-zero global
-is caught -- `make host-breaks` runs 52 deliberate breaks, all caught (a hang
-after two minutes counts as caught). (An
+is caught -- `make host-breaks` runs 82 deliberate breaks: 79 caught, 3 proven
+equivalent (a hang after two minutes counts as caught). (An
 early run with a plain LCG missed seven, because the generator's low bits had a
 period that aligned with the per-iteration call count and froze the
 `.data`-seeding decisions; switching to xorshift32 fixed the coverage.)
@@ -456,6 +457,33 @@ the list keeps more elements than are queued against it (a negative count is
 a caller's error, not behaviour to test). Allocation failure is exercised only
 with flags 4; the fatal paths are transliterated but not run.
 
+Slice 7 is the first that calls the window system and the command line.
+**The command line is the harness's**: `GetCommandLineA` is hooked on both
+sides (like `realloc`) to return a command line made up each iteration, with
+a byte before it -- the option finder tests each '/' or '-' against the byte
+before it, the first included, so retail reads one byte before
+`GetCommandLineA`'s buffer. An option is "/name:value" or "/name value" (or
+'-'); `+0x98` (and so `+0x9c`/`+0xa0`) accept only the colon form and return
+the value up to the next option, trimmed of spaces -- and an empty value
+trims from the byte *before* the caller's buffer, clearing it if it is a
+space. `+0xa4` returns 2 for the colon form, 1 for the space form, 0 if absent.
+
+**File extensions have ids.** 37 are built in, a table at 0x417f20 of pointers
+to ".BGL", ".STN", ".MOD" ... ".CFG" (id 0 is the host's empty string at
+0x4187f8, so a missing extension is id 0); more are registered at run time
+from 0x25 on, `_strdup`'d into a heap array (`*0x4188b0`, count at
+0x4188ac). Lookups upper-case the name in place. The table holds retail
+addresses, which our image keeps as they are (so the `.data` comparison stays
+byte-for-byte) and rebases when it reads them (`host_rebase`). The harness
+keeps that table, its strings and the empty string out of the random seeding,
+and gives each side an identical registry whose names it compares through each
+side's own array.
+
+`+0x22c`/`+0x234` take a stdcall comparator, parked at 0x41a24c for a cdecl
+trampoline -- not reentrant. Both sides call one MSVCRT, so ties sort alike.
+`+0x22c`'s return is whatever MSVCRT's `qsort` left in eax; ours returns 0,
+and no caller reads it.
+
 ### Continuing the reimplementation
 
 To add the next service: find it in the table with `python3 tools/hostmap.py`
@@ -472,17 +500,20 @@ API is not out-of-process testable this way and waits for a model or the
 
 Easiest remaining, roughly in order: the other pure accessors and getters (many
 read one global and return it, with an early-out); the remaining C-runtime
-services (`sprintf`-family and friends, `+0x22c` qsort) -- with the imports
-bound, the eleven services that call only MSVCRT (`hostmap.py` lists them) are
-now as testable as the pure ones; then the ones that call a host-internal
-helper that is itself pure. `+0x094` (a pure walk of a
+services (`sprintf`-family and friends) -- with the imports bound, anything
+that calls only MSVCRT, or a window-system call the harness can hook as it
+hooks `GetCommandLineA`, is as testable as the pure services; then the ones
+that call a host-internal helper that is itself pure. `+0x204` (a key-name
+parser) waits on the strings the host loads at run time into 0x41bec0 and
+its neighbours; the file services (`+0x1a4`/`+0x1a8` and the rest) want a
+sandboxed directory. `+0x094` (a pure walk of a
 run-time linked list at 0x41a3dc) and `+0x314` (a no-op) are the two pure
 leaves left unimplemented.
 
 ## Status
 
-36 of 194 services reimplemented in `src/host/host.c` and verified against the
-real host in process (slices 1 to 6 above). 71 have prototypes confirmed from the
+49 of 194 services reimplemented in `src/host/host.c` and verified against the
+real host in process (slices 1 to 7 above). 71 have prototypes confirmed from the
 callee and recorded in `host.h` (15 of them the window services, from WINDOW),
 and 11 were already exercised in-process through other modules' harnesses: the
 clock, `strlen`, and the nine-service enumeration cluster above. The dialog

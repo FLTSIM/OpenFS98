@@ -6,127 +6,127 @@ import subprocess
 from dialogmap import Fs98Pe, SurveyError
 
 
-def exchange_controls(uiStart, uiEnd):
-    szAsm = subprocess.check_output([
+def exchange_controls(start, end):
+    asm = subprocess.check_output([
         'objdump', '-d', '--no-show-raw-insn', '-M', 'intel',
-        f'--start-address={0x22330000 + uiStart}',
-        f'--stop-address={0x22330000 + uiEnd}', 'orig/English/Help.DLL'], text=True)
-    aRows = []
-    unOffset = unControl = None
-    for szLine in szAsm.splitlines():
-        pMatch = re.search(r'(?:lea\s+\w+,\[esi\+0x|add\s+esi,0x)([0-9a-f]+)', szLine)
-        if pMatch:
-            unOffset = int(pMatch[1], 16)
-        pMatch = re.search(r'push\s+0x([0-9a-f]+)', szLine)
-        if pMatch:
-            unControl = int(pMatch[1], 16)
-        if re.search(r'call\s+0x22333266', szLine):
-            if unOffset is None or unControl is None:
+        f'--start-address={0x22330000 + start}',
+        f'--stop-address={0x22330000 + end}', 'orig/English/Help.DLL'], text=True)
+    rows = []
+    offset = control = None
+    for line in asm.splitlines():
+        match = re.search(r'(?:lea\s+\w+,\[esi\+0x|add\s+esi,0x)([0-9a-f]+)', line)
+        if match:
+            offset = int(match[1], 16)
+        match = re.search(r'push\s+0x([0-9a-f]+)', line)
+        if match:
+            control = int(match[1], 16)
+        if re.search(r'call\s+0x22333266', line):
+            if offset is None or control is None:
                 raise SurveyError('unrecognised Help DDX binding')
-            aRows.append((unOffset, unControl))
-            unOffset = unControl = None
-    return aRows
+            rows.append((offset, control))
+            offset = control = None
+    return rows
 
 
-def object_calls(uiStart, uiEnd):
-    szAsm = subprocess.check_output([
+def object_calls(start, end):
+    asm = subprocess.check_output([
         'objdump', '-d', '--no-show-raw-insn', '-M', 'intel',
-        f'--start-address={0x22330000 + uiStart}',
-        f'--stop-address={0x22330000 + uiEnd}', 'orig/English/Help.DLL'], text=True)
-    dRegisters = {'ecx': ('object', 0)}
-    aCalls = []
-    for szLine in szAsm.splitlines():
-        pMatch = re.match(r'\s*[0-9a-f]+:\s+(.+)', szLine)
-        if not pMatch:
+        f'--start-address={0x22330000 + start}',
+        f'--stop-address={0x22330000 + end}', 'orig/English/Help.DLL'], text=True)
+    registers = {'ecx': ('object', 0)}
+    calls = []
+    for line in asm.splitlines():
+        match = re.match(r'\s*[0-9a-f]+:\s+(.+)', line)
+        if not match:
             continue
-        szInstruction = pMatch[1].strip()
-        pMatch = re.fullmatch(r'lea\s+(\w+),\[esi\+0x([0-9a-f]+)\]', szInstruction)
-        if pMatch:
-            dRegisters[pMatch[1]] = ('object', int(pMatch[2], 16))
+        instruction = match[1].strip()
+        match = re.fullmatch(r'lea\s+(\w+),\[esi\+0x([0-9a-f]+)\]', instruction)
+        if match:
+            registers[match[1]] = ('object', int(match[2], 16))
             continue
-        pMatch = re.fullmatch(r'mov\s+(e\w+),(e\w+)', szInstruction)
-        if pMatch:
-            dRegisters[pMatch[1]] = dRegisters.get(pMatch[2])
+        match = re.fullmatch(r'mov\s+(e\w+),(e\w+)', instruction)
+        if match:
+            registers[match[1]] = registers.get(match[2])
             continue
-        pMatch = re.fullmatch(r'mov\s+(\w+),DWORD PTR ds:0x2233([0-9a-f]+)', szInstruction)
-        if pMatch:
-            dRegisters[pMatch[1]] = ('import', int(pMatch[2], 16))
+        match = re.fullmatch(r'mov\s+(\w+),DWORD PTR ds:0x2233([0-9a-f]+)', instruction)
+        if match:
+            registers[match[1]] = ('import', int(match[2], 16))
             continue
-        if szInstruction.startswith('call'):
-            pDirect = re.search(r'ds:0x2233([0-9a-f]+)', szInstruction)
-            szTarget = szInstruction.split()[-1]
-            if pDirect:
-                uiImport = int(pDirect[1], 16)
-            elif szTarget in ('0x223332ae', '0x223332a8'):
-                uiImport = 0x6348 if szTarget.endswith('ae') else 0x634c
+        if instruction.startswith('call'):
+            direct = re.search(r'ds:0x2233([0-9a-f]+)', instruction)
+            target = instruction.split()[-1]
+            if direct:
+                import_slot = int(direct[1], 16)
+            elif target in ('0x223332ae', '0x223332a8'):
+                import_slot = 0x6348 if target.endswith('ae') else 0x634c
             else:
-                aValue = dRegisters.get(szTarget)
-                if not aValue or aValue[0] != 'import':
-                    raise SurveyError(f'unrecognised Help object call: {szInstruction}')
-                uiImport = aValue[1]
-            aObject = dRegisters.get('ecx')
-            if not aObject or aObject[0] != 'object':
+                value = registers.get(target)
+                if not value or value[0] != 'import':
+                    raise SurveyError(f'unrecognised Help object call: {instruction}')
+                import_slot = value[1]
+            object = registers.get('ecx')
+            if not object or object[0] != 'object':
                 raise SurveyError('unrecognised Help control offset')
-            aCalls.append((aObject[1], uiImport))
-    return aCalls
+            calls.append((object[1], import_slot))
+    return calls
 
 
 def object_tables():
-    aClasses = (
+    classes = (
         ('about', 0x197c, 0x2bd, 0x10dc, 0x1410, 0x1530, 0x1510, 0x11c0, 0x40c8, 0x1620, 11),
         ('credits', 0x149c, 0x2be, 0x1174, 0x1b70, 0x1c50, 0x1c30, 0x1250, 0x4260, 0x1ce0, 4),
         ('lessons', 0x1880, 0x2c1, 0x10dc, 0x2280, 0x2390, 0x2370, 0x1130, 0x44e8, 0x2480, 10),
         ('graph', 0x12d0, 0x2bf, 0x10e0, 0x2ae0, 0x2b70, 0x2b50, 0x12e0, 0x4660, 0x2be0, 2),
         ('completion', 0x1390, 0x2c0, 0x10dc, 0x2e30, 0x2ed0, 0x2eb0, 0x1370, 0x47c0, 0x2f50, 3))
-    aLines = ['/* Generated by tools/gen_help_tables.py; subobject ABI metadata only. */']
-    for szName, unSize, unTemplate, unDescriptor, unCtor, unDtor, unDelete, unFactory, unVtable, unDdx, iCount in aClasses:
-        aConstructors = object_calls(unCtor, unDelete)
-        aDestructors = list(reversed(object_calls(unDtor, unDdx)))
-        if len(aConstructors) != iCount + 1 or [a[0] for a in aConstructors] != [a[0] for a in aDestructors]:
-            raise SurveyError(f'{szName}: control lifetime layout moved')
-        if aConstructors[0] != (0, 0x64a0) or aDestructors[0] != (0, 0x64b4):
-            raise SurveyError(f'{szName}: base dialog changed')
-        aLines.append(f'static const struct fs98_help_subobject s_aControls_{szName}[] = {{')
-        for (unOffset, unConstructor), (_, unDestructor) in zip(aConstructors[1:], aDestructors[1:]):
-            aLines.append(f'    {{0x{unOffset:x}, 0x{unConstructor:x}, 0x{unDestructor:x}}},')
-        aLines.append('};')
-    aLines.append('static const struct fs98_help_class s_aClasses[] = {')
-    for aClass in aClasses:
-        szName = aClass[0]
-        aLines.append('    {' + ', '.join(f'0x{unValue:x}' for unValue in aClass[1:9]) +
-                      f', {aClass[-1]}, s_aControls_{szName}' + '},')
-    aLines.append('};')
-    Path('src/help/help_objects_tables.inc').write_text('\n'.join(aLines) + '\n')
+    lines = ['/* Generated by tools/gen_help_tables.py; subobject ABI metadata only. */']
+    for name, size, template, descriptor, ctor, dtor, delete, factory, vtable, ddx, count in classes:
+        constructors = object_calls(ctor, delete)
+        destructors = list(reversed(object_calls(dtor, ddx)))
+        if len(constructors) != count + 1 or [a[0] for a in constructors] != [a[0] for a in destructors]:
+            raise SurveyError(f'{name}: control lifetime layout moved')
+        if constructors[0] != (0, 0x64a0) or destructors[0] != (0, 0x64b4):
+            raise SurveyError(f'{name}: base dialog changed')
+        lines.append(f'static const struct fs98_help_subobject s_controls_{name}[] = {{')
+        for (offset, constructor), (_, destructor) in zip(constructors[1:], destructors[1:]):
+            lines.append(f'    {{0x{offset:x}, 0x{constructor:x}, 0x{destructor:x}}},')
+        lines.append('};')
+    lines.append('static const struct fs98_help_class s_classes[] = {')
+    for class_info in classes:
+        name = class_info[0]
+        lines.append('    {' + ', '.join(f'0x{value:x}' for value in class_info[1:9]) +
+                      f', {class_info[-1]}, s_controls_{name}' + '},')
+    lines.append('};')
+    Path('src/help/help_objects_tables.inc').write_text('\n'.join(lines) + '\n')
 
 
 def main():
-    pPe = Fs98Pe('orig/English/Help.DLL')
-    if pPe.uiBase != 0x22330000 or pPe.linkage()['id'] != 0x80000008:
+    pe = Fs98Pe('orig/English/Help.DLL')
+    if pe.uiBase != 0x22330000 or pe.linkage()['id'] != 0x80000008:
         raise SurveyError('expected the reference Help image')
-    aLines = ['/* Generated by tools/gen_help_tables.py; ABI metadata only. */']
-    for szName, uiRva, uiStart, uiEnd, iCount in (
+    lines = ['/* Generated by tools/gen_help_tables.py; ABI metadata only. */']
+    for name, rva, start, end, count in (
             ('about', 0x4000, 0x1620, 0x1700, 11),
             ('credits', 0x41b8, 0x1ce0, 0x1d40, 4),
             ('lessons', 0x4410, 0x2480, 0x2540, 10),
             ('graph', 0x45d8, 0x2be0, 0x2c10, 2),
             ('completion', 0x4750, 0x2f50, 0x2f90, 3)):
-        aLines.append(f'static const uint32 s_auiHelp_{szName}[] = {{')
-        for iIndex in range(64):
-            uiControl = pPe.va_uint32(pPe.uiBase + uiRva + iIndex * 8)
-            uiTopic = pPe.va_uint32(pPe.uiBase + uiRva + iIndex * 8 + 4)
-            aLines.append(f'    0x{uiControl:x}, 0x{uiTopic:x},')
-            if not uiControl and not uiTopic:
+        lines.append(f'static const uint32_t s_help_{name}[] = {{')
+        for index in range(64):
+            control = pe.va_uint32(pe.uiBase + rva + index * 8)
+            topic = pe.va_uint32(pe.uiBase + rva + index * 8 + 4)
+            lines.append(f'    0x{control:x}, 0x{topic:x},')
+            if not control and not topic:
                 break
         else:
             raise SurveyError('unterminated Help context table')
-        aLines.append('};')
-        aRows = exchange_controls(uiStart, uiEnd)
-        if len(aRows) != iCount:
-            raise SurveyError(f'{szName} DDX layout moved: {len(aRows)} bindings')
-        aLines.append(f'static const uint16 s_aunDdx_{szName}[][2] = {{')
-        aLines += [f'    {{0x{unOffset:x}, 0x{unControl:x}}},' for unOffset, unControl in aRows]
-        aLines.append('};')
-    Path('src/help/help_tables.inc').write_text('\n'.join(aLines) + '\n')
+        lines.append('};')
+        rows = exchange_controls(start, end)
+        if len(rows) != count:
+            raise SurveyError(f'{name} DDX layout moved: {len(rows)} bindings')
+        lines.append(f'static const uint16_t s_ddx_{name}[][2] = {{')
+        lines += [f'    {{0x{offset:x}, 0x{control:x}}},' for offset, control in rows]
+        lines.append('};')
+    Path('src/help/help_tables.inc').write_text('\n'.join(lines) + '\n')
     object_tables()
 
 

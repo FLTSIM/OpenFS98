@@ -16,8 +16,7 @@ make -f tools/help.mk help-breaks N=100
 
 The runner uses `bin/help-diff/wineprefix` and its own lock. It neither installs
 anything into `game/` nor uses another module's Wine prefix. The implementation
-uses Hungarian variable prefixes and local `types.h` integer aliases; no shared
-type header was introduced.
+uses snake_case identifiers and standard `<stdint.h>` integer types.
 
 ## Reference and implemented boundary
 

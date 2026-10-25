@@ -121,11 +121,13 @@ BREAKS = [
     ("opt-colon",   "    if (v == 0 || M8(v - 1) != ':')", "    if (v == 0)"),
     ("opt-int",     "        M32(out) = (uint32_t)atoi(buf);", "        M32(out) = (uint32_t)atoi(buf + 1);"),
     ("opt-double",  "        *(double *)(uintptr_t)out = atof(buf);", "        *(double *)(uintptr_t)out = (float)atof(buf);"),
-    ("opt-given",   "    return (M8(v - 1) != ' ') + 1;", "    return (M8(v - 1) == ':') + 1;"),
+    ("opt-given",   "    return (M8(v - 1) != ' ') + 1;", "    return (M8(v - 1) == ':') + 1;",
+                    "the finder only returns past a ':' or a ' '"),
     ("ext-builtin", "    for (i = 0; i < 0x25; i++)\n        if (host_str_eq(ext,", "    for (i = 0; i < 0x24; i++)\n        if (host_str_eq(ext,"),
     ("ext-dyn-id",  "            M32(out) = (uint32_t)i + 0x25;", "            M32(out) = (uint32_t)i + 0x24;"),
     ("ext-upper",   "static uint32_t host_ext_lookup(uint32_t ext, uint32_t out)\n{\n    int32_t i, n;\n    _strupr((char *)(uintptr_t)ext);",
-                    "static uint32_t host_ext_lookup(uint32_t ext, uint32_t out)\n{\n    int32_t i, n;"),
+                    "static uint32_t host_ext_lookup(uint32_t ext, uint32_t out)\n{\n    int32_t i, n;",
+                    "+0x1ac upper-cases first, and +0x188 falls back to +0x1ac on a miss"),
     ("ext-new-id",  "    M32(out) = M32(V(0x4188ac)) + 0x25;", "    M32(out) = M32(V(0x4188ac)) + 0x24;"),
     ("ext-grow",    "        host_210(1, n * 4 + 4, V(0x4188b0));", "        host_210(1, n * 4, V(0x4188b0));"),
     ("split-empty", "    if (fname != 0) host_2a8(fname, V(0x4187f8));", ""),
@@ -133,7 +135,8 @@ BREAKS = [
     ("split-unc-cut","        M8(p) = 0;\n        host_2a8(drive, ADDR(unc));", "        host_2a8(drive, ADDR(unc));"),
     ("split-unc-drive","    if (drive != 0 && host_168(path) != 0) {", "    if (host_168(path) != 0) {"),
     ("split-id0",   "    if (ext_id != 0)\n        M32(ext_id) = 0;", ""),
-    ("split-noext", "    if (ext[0] != 0 && ext_id != 0 && host_ext_lookup", "    if (ext_id != 0 && host_ext_lookup"),
+    ("split-noext", "    if (ext[0] != 0 && ext_id != 0 && host_ext_lookup", "    if (ext_id != 0 && host_ext_lookup",
+                    "\"\" looks up as id 0, built-in entry 0 being the host's empty string -- the 0 already written"),
 ]
 
 

@@ -11,6 +11,9 @@ slot is done MAIN is not in `MODULES` and is never installed.
 | --- | --- | --- | --- |
 | 1, situation records | `+0x54`..`+0x6c`, and `.text+0x15c80`/`+0x15d50` | `records` | verified: 20,000 scenarios, 0 differ; 38 of 40 breaks caught, 2 proven equivalent |
 | 2, the situation reader and writer | `+0x38`..`+0x4c` (assembly, `.text+0x11cd2`..`+0x13104`) | `situations` | verified: 20,000 scenarios, 0 differ; 63 of 69 breaks caught, 6 proven equivalent |
+| 3, range and bearing | `+0x70` (assembly, `.text+0x19507`..`+0x1972f`) | `nav` | verified: 20,000 scenarios, 0 differ; 13 of 14 breaks caught, 1 proven equivalent |
+| 4, the nav read-outs | `+0x78`, `+0x80` (assembly, `.text+0x19c94`, `+0x19f10`) | `navio` | verified: 20,000 scenarios, 0 differ; 12 of 12 breaks caught |
+| 5, the station descriptor | `+0x7c` (assembly, `.text+0x19cd5`..`+0x19db9`) | `navdesc` | verified: 20,000 scenarios, 0 differ; 9 of 9 breaks caught |
 
 ## Binary and linkage
 
@@ -55,10 +58,10 @@ calls are reached from the host, the `English\` dialog modules, or CHAIN.
 | `+0x38`..`+0x4c` | `.text+0x11eeb`, `+0x11e3d`, `+0x120aa`, `+0x127b3`, `+0x12f50`, `+0x12f6a` | ADVDRV (`+0x3c`), REALITY (`+0x44`), DEMO (`+0x48`, `+0x4c`) | the situation reader and writer, assembly: `+0x48` loads a situation from memory, `+0x4c` from a file |
 | `+0x50` | `.text+0x13105` | | assembly, the largest gap (11 KB) |
 | `+0x54`..`+0x6c` | `.text+0x15cc0`..`+0x15f50` | WINMSG, WINDOW, PANELS (`+0x5c`..`+0x64`) | **slice 1**, below |
-| `+0x70` | `.text+0x19507` | ADVDRV, LANDME | range and bearing between two points |
+| `+0x70` | `.text+0x19507` | ADVDRV, LANDME | **slice 3**: range and bearing between two points |
 | `+0x74` | `.text+0x18781` | ADVDRV, MULTIP | |
-| `+0x78`, `+0x7c` | `.text+0x19c94`, `+0x19cd5` | | |
-| `+0x80` | `.text+0x19f10` | ADVDRV, PANELS | `(which, &tenths)` |
+| `+0x78`, `+0x7c` | `.text+0x19c94`, `+0x19cd5` | | `+0x78` **slice 4**, `+0x7c` **slice 5** |
+| `+0x80` | `.text+0x19f10` | ADVDRV, PANELS | **slice 4**: `(which, &tenths)` |
 | `+0x84`..`+0x90` | `.text+0x16100`, `+0x162f0`, `+0x16570`, `+0x10560` | CONTROLS, WINDOW (`+0x88`) | |
 | `+0x94`..`+0xa0` | `.text+0x7140`, `+0x6f59`, `+0x6de9`, `+0x830d` | WEATHERM (`+0x94`), WINDOW (`+0x98`, `+0x9c`) | |
 | `+0xa4`, `+0xa8` | `.text+0x16ddf`, `+0x6450` | ADVDRV, CONTROLS, WINDOW | |
@@ -256,3 +259,97 @@ deliberately dispatches huge-length records to test the length path, so there
 the guard stays out of the way (`situations_suite` in `maindiff.c`). Across
 20,000 situations, 7,077 scenarios end this way (most after a fault both sides
 take alike); none is a missed difference.
+
+## Slice 3: range and bearing
+
+`src/main/main_nav.inc`, `.text+0x19507` with its two helpers `.text+0x1962c`
+(the delta vector and its magnitude) and `.text+0x195ab` (the angle of the
+delta), assembly. ADVDRV and LANDME call `+0x70(from, to, &bearing, &range)`.
+It has an ordinary stack frame -- no inbound registers -- so it transliterates
+as plain stdcall C, not through the register-threaded entry of slice 2.
+
+The two positions are records whose longitude is a 48-bit value at `+2`/`+4`
+and whose latitude is at `+0xa`/`+0xc`. The service builds a three-component
+vector between them: the longitude delta's high dword (the low word is
+dropped), a term from each record's field `+0x14` (or, when it holds the
+adventure sentinel `0xffffd8f1`, GLOBAL `+0x20` shifted down a byte), and the
+latitude delta turned into a planar x by UTIL `+0x48`. The magnitude of that
+vector (UTIL `+0x18`) is the range, stored through the pointer and left in
+`.data+0x72e0`; the angle of its x and z (UTIL `+0x3c`, after scaling both up
+until one fills its high word) is the bearing.
+
+Retail behaviour worth knowing, reproduced:
+
+- **`+0x70` restores every register, `eax` included, before it returns.** Its
+  result is the caller's own `eax`, not an output; only the two pointers and
+  `.data+0x72e0` carry anything out. The harness does not compare the return.
+- **The delta's y-term is only ever squared.** Its sign reaches nothing
+  observable -- the bearing is taken from x and z alone -- which is why the
+  `y-neg` break is a proven equivalence, not a miss.
+
+### Verifying the range and bearing
+
+`make maindiff-run SUITE=nav`: 20,000 scenarios, 0 differences, over random
+position pairs (the same point now and then, the adventure sentinel in the
+field now and then) with the three UTIL geometry services as **logging
+models**. UTIL's own geometry is verified in UTIL; the models return a value
+that varies with their inputs and log every argument, so what this suite
+compares is MAIN's glue -- the 48-bit subtractions, the squares, the magnitude
+and the normalising shift -- not UTIL. The models preserve the registers the
+retail assembly keeps live across their calls: `nav_delta` holds the `out`
+pointer in `ecx` across UTIL `+0x48`, so the `util_geo48` model (alone among
+the three) is entered through an assembly trampoline that saves and restores
+`ecx` and `edx`, the harness rule that a stub must leave the registers the
+real callee leaves (`maindiff.c`).
+
+`make main-breaks SUITE=nav`: 14 breaks, 13 caught, 1 proven equivalent
+(`y-neg`, above).
+
+## Slice 4: the nav read-outs
+
+`src/main/main_nav.inc`, `.text+0x19c94` (`+0x78`) and `.text+0x19f10`
+(`+0x80`), assembly. Two `(which, &out)` demultiplexers that hand back values
+the nav machine left in `.data`. `+0x78` (reached from the host) copies the
+word at `.data+0x7482` for `which` 1 or `+0x7484` for 2, and answers -1 for
+anything else. `+0x80` (ADVDRV, PANELS) has four cases: 1 and 2 first refresh
+`.data+0x72e8` and `+0x72ec` through MULTIP `+0x38` and `+0x34` (and answer -1
+if MULTIP fails), 3 and 4 just read `+0x72f0` and `+0x72f4`; `which` 0 or above
+4 writes nothing and answers 0 (`dec`/`cmp`/`ja` to the no-op tail, then a jump
+table).
+
+### Verifying the read-outs
+
+`make maindiff-run SUITE=navio`: 20,000 scenarios, 0 differences. Each op seeds
+the six `.data` words afresh and calls one service with a `which` spanning the
+real cases and the edges on either side, so a wrong offset or case shows at
+once. MULTIP's two accessors are **logging models** (MULTIP is verified
+elsewhere): each fills the word it is handed and returns a status that varies
+with what was there, so both the taken and the failed path of `+0x80` are
+exercised. `make main-breaks SUITE=navio`: 12 breaks, all caught.
+
+## Slice 5: the station descriptor
+
+`src/main/main_nav.inc`, `.text+0x19cd5` (`+0x7c`), assembly.
+`+0x7c(which, arg2, &out)` looks a station up through FE `+0x2c` into a local
+buffer, formats it with UTIL `+0x88` through a `.text` descriptor
+`{3, 3, 6, &.data+0x7248}` into `.data+0x7248`, and hands the 0x58-byte result
+back with a HOST memmove; a failed lookup zeroes `out` and answers -1.
+
+Two retail details, reproduced:
+
+- **FE `+0x2c`'s first argument is pushed as a word over two stale bytes**, so
+  only its low word reaches FE (as MAIN `+0x74`'s does, slice 2).
+- **The descriptor's fourth word is a relocation into `.data`.** Retail reads
+  it from `.text` already fixed to its own base; ours builds the descriptor
+  with its own `.data` address (`V(0x20807248)`) rather than reading retail's
+  unrelocated pointer out of the generated `.text` tail.
+
+### Verifying the station descriptor
+
+`make maindiff-run SUITE=navdesc`: 20,000 scenarios, 0 differences. FE `+0x2c`
+and UTIL `+0x88` are **logging models** (both verified in their own modules):
+FE `+0x2c` fills the buffer deterministically and fails one lookup in five;
+UTIL `+0x88` writes exactly the bytes `+0x7c` copies out and logs a hash of
+them, not the per-side `.data` address it was handed. The output lands in the
+harness's fixture memory so the memmove is over memory both sides share.
+`make main-breaks SUITE=navdesc`: 9 breaks, all caught.

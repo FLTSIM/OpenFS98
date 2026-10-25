@@ -268,6 +268,7 @@ static const uint32_t retail_linkage[] = {
 
 #include "main_records.inc"
 #include "main_situation.inc"
+#include "main_nav.inc"
 
 __asm__(".globl _ImportTable\n\t.set _ImportTable, _main_image + 0x0\n\t"
         ".globl _Linkage\n\t.set _Linkage, _main_image + 0xc0");
@@ -290,6 +291,10 @@ static void main_install(void)
         { 0x64, (void *)record_end },
         { 0x68, (void *)record_find },
         { 0x6c, (void *)record_find_flight },
+        { 0x70, (void *)nav_range_bearing },
+        { 0x78, (void *)nav_readout },
+        { 0x7c, (void *)nav_describe },
+        { 0x80, (void *)nav_select },
     };
     uint32_t i;
 

@@ -71,6 +71,12 @@ make maindiff-run SUITE=records  # MAIN slice 1, situation records -> 20000 scen
 make main-breaks SUITE=records   # its breaks -> 40, 38 caught, 2 proven equivalent (~35 min)
 make maindiff-run SUITE=situations  # MAIN slice 2, the reader and writer -> 20000 scenarios, 0 differ (~20 min)
 make main-breaks SUITE=situations   # its breaks -> 69, 63 caught, 6 proven equivalent (~40 min)
+make maindiff-run SUITE=nav          # MAIN slice 3, range and bearing (+0x70) -> 20000 scenarios, 0 differ (~3 min)
+make main-breaks SUITE=nav           # its breaks -> 14, 13 caught, 1 proven equivalent (~6 min)
+make maindiff-run SUITE=navio        # MAIN slice 4, the nav read-outs (+0x78,+0x80) -> 20000 scenarios, 0 differ (~3 min)
+make main-breaks SUITE=navio         # its breaks -> 12, all caught (~5 min)
+make maindiff-run SUITE=navdesc      # MAIN slice 5, the station descriptor (+0x7c) -> 20000 scenarios, 0 differ (~3 min)
+make main-breaks SUITE=navdesc       # its breaks -> 9, all caught (~4 min)
 make mpchatdiff-run      # whole-module MPCHAT, the chat window -> 20000 scenarios, 0 differ (~20 s)
 make mpchat-breaks       # MPCHAT broken on purpose -> 117 breaks, 113 caught, 4 proven equivalent (~8 min)
 make winmsgdiff-run      # whole-module WINMSG, the message bar -> 20000 scenarios, 0 differ (~2 min)
@@ -271,8 +277,10 @@ has to set `g3d_mesh_precision` to match. MULTIP, PANELS
 (docs/modules/panels.md) and **MPCHAT are done**; MPCHAT, the chat window,
 is verified against a model of the window system hooked into its import
 table (docs/modules/mpchat.md). **MAIN is in progress**, a slice at a time behind
-`maindiff`'s suites, as MULTIP was; slice 1 (situation records) is verified,
-slice 2 (the assembly situation reader and writer) is next. See
+`maindiff`'s suites, as MULTIP was; slices 1-5 are verified (situation
+records, the assembly situation reader and writer, and the nav services
+`+0x70`/`+0x78`/`+0x7c`/`+0x80` -- range and bearing, the read-outs and the
+station descriptor), the rest to go. See
 [docs/modules/main.md](docs/modules/main.md). The CHAIN ecx fix is done: OpenFS98's CHAIN enters callbacks with
 all of retail's registers and returns its ecx/edx, and `chaindiff` now
 compares them (see [docs/modules/chain.md](docs/modules/chain.md)).

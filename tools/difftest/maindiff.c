@@ -91,7 +91,7 @@ static struct side retail, ours;
 static struct side *cur;
 static uint32_t relocs[MAX_RELOCS], nrelocs;
 static uint8_t host[0x340], global[0x1400], stub_module[0x400];
-static uint8_t acontain[0x40], controls[0x60], sound[0x40], util[0xc0], weatherm[0x40];
+static uint8_t acontain[0x40], controls[0x60], sound[0x40], util[0xc0], weatherm[0x40], multip[0x40], fe[0x40];
 static uint8_t chain[0x24];
 static uint8_t arena[ARENA_SIZE] __attribute__((aligned(16)));
 static uint32_t arena_used;
@@ -828,6 +828,116 @@ static uint32_t STDCALL util_alert(uint32_t flags, uint32_t tag, const char *tex
     return 1;
 }
 
+/* UTIL's geometry, as logging models for the nav slice (+0x70).  Each logs
+ * every argument MAIN hands it -- so an arg passed wrongly shows in the
+ * transcript whatever the model returns -- and returns a value that varies
+ * with its inputs so MAIN's own arithmetic around the call is exercised.
+ * UTIL's real geometry is verified in UTIL; here only MAIN's glue is. */
+
+/* +0x48(&latbuf, to, &out): the latitude delta (word at +2, dword at +4)
+ * scaled toward a planar x, written into the second dword of `out`.
+ *
+ * Retail's nav_delta keeps `ecx` (the out pointer) live across this call, so
+ * the real UTIL leaves ecx (and edx) as it found them; a C stub does not, so
+ * the entry below saves and restores them around the body -- the harness
+ * lesson that a stub must leave the registers the real callee leaves. */
+uint32_t geo_save_ecx, geo_save_edx;
+static uint32_t util_geo48_impl(uint32_t latbuf, uint32_t to, uint32_t out) __attribute__((used));
+static uint32_t util_geo48_impl(uint32_t latbuf, uint32_t to, uint32_t out)
+{
+    int16_t latlo = *(int16_t *)(uintptr_t)(latbuf + 2);
+    int32_t lathi = *(int32_t *)(uintptr_t)(latbuf + 4);
+    int32_t lonhi = *(int32_t *)(uintptr_t)(to + 4);
+    int32_t x = lathi - (lonhi >> 3) + latlo;
+
+    *(uint32_t *)(uintptr_t)(out + 4) = (uint32_t)x;
+    put(" U48(lat=%d:%d,lon=%d)->%d", lathi, latlo, lonhi, x);
+    return 0;
+}
+uint32_t util_geo48(uint32_t latbuf, uint32_t to, uint32_t out);  /* really stdcall (ret $12) */
+__asm__(".text\n"
+        ".globl _util_geo48\n"
+        "_util_geo48:\n\t"
+        "movl %ecx, _geo_save_ecx\n\tmovl %edx, _geo_save_edx\n\t"
+        "pushl 12(%esp)\n\tpushl 12(%esp)\n\tpushl 12(%esp)\n\t"
+        "call _util_geo48_impl\n\t"
+        "addl $12, %esp\n\t"
+        "movl _geo_save_ecx, %ecx\n\tmovl _geo_save_edx, %edx\n\t"
+        "ret $12\n");
+
+/* +0x18(&v): the magnitude (integer square root) of a signed 64-bit v. */
+static uint32_t STDCALL util_mag(uint32_t p)
+{
+    int64_t v = *(int64_t *)(uintptr_t)p;
+    uint64_t rem = v < 0 ? 0 : (uint64_t)v, root = 0, b2 = 1ull << 62;
+
+    while (b2 > rem)
+        b2 >>= 2;
+    while (b2 != 0) {
+        if (rem >= root + b2) { rem -= root + b2; root = (root >> 1) + b2; }
+        else root >>= 1;
+        b2 >>= 2;
+    }
+    put(" Umag(%lld)->%u", (long long)v, (uint32_t)root);
+    return (uint32_t)root;
+}
+
+/* +0x3c(x, z): the angle of the 2-vector, low 16 bits significant. */
+static uint32_t STDCALL util_angle(uint32_t x, uint32_t z)
+{
+    uint32_t r = ((x * 2654435761u) ^ (z * 40503u) ^ (z >> 7)) & 0xffff;
+
+    put(" Uang(%d,%d)->%#x", (int32_t)x, (int32_t)z, r);
+    return r;
+}
+
+/* MULTIP's two accessors, as logging models for +0x80: each is handed a
+ * pointer to one of MAIN's .data words, fills it, and answers 0 or -- now
+ * and then, by what was there -- a failure.  MULTIP is verified elsewhere;
+ * the model is deterministic and logs its argument so a wrong one shows. */
+static uint32_t STDCALL multip_fill(uint32_t p, const char *tag)
+{
+    uint32_t in = *(uint32_t *)(uintptr_t)p, status = (in & 7) == 0 ? 1 : 0;
+
+    *(uint32_t *)(uintptr_t)p = in * 2654435761u + 1;
+    put(" %s(%#x)->%#x=%#x", tag, in, status, *(uint32_t *)(uintptr_t)p);
+    return status;
+}
+static uint32_t STDCALL multip_38(uint32_t p) { return multip_fill(p, "M38"); }
+static uint32_t STDCALL multip_34(uint32_t p) { return multip_fill(p, "M34"); }
+
+/* FE +0x2c and UTIL +0x88, as logging models for +0x7c (station lookup and
+ * format).  FE and UTIL are verified elsewhere; the pair just has to be
+ * deterministic, define exactly the bytes +0x7c then copies out, and log
+ * nothing base-dependent -- the first argument is the low word only (retail
+ * pushes it over two stale bytes), and the descriptor's dest pointer (each
+ * side's own .data) is summarised by a hash of what is written, not its
+ * address. */
+static uint32_t STDCALL fe_2c(uint32_t which, uint32_t arg2, uint32_t buf)
+{
+    uint32_t w = which & 0xffff, i, status = w % 5 == 0 ? 0 : 1;
+    uint8_t *b = (uint8_t *)(uintptr_t)buf;
+
+    for (i = 0; i < 0x58; i++)
+        b[i] = (uint8_t)(w + arg2 * 7u + i * 31u);
+    put(" FE2c(%#x,%#x)->%#x", w, arg2, status);
+    return status;
+}
+static uint32_t STDCALL util_88(uint32_t buf, uint32_t desc, uint32_t n)
+{
+    uint32_t dest = *(uint32_t *)(uintptr_t)(desc + 12), i, h = 2166136261u;
+    const uint8_t *b = (const uint8_t *)(uintptr_t)buf;
+    uint8_t *d = (uint8_t *)(uintptr_t)dest;
+
+    for (i = 0; i < 0x58; i++) {
+        d[i] = (uint8_t)(b[i] + 0x11 + i);
+        h = (h ^ d[i]) * 16777619u;
+    }
+    put(" U88(%u,%u,%u,n=%#x)->%08x", *(uint32_t *)(uintptr_t)desc,
+        *(uint32_t *)(uintptr_t)(desc + 4), *(uint32_t *)(uintptr_t)(desc + 8), n, h);
+    return 0;
+}
+
 /* MAIN +0x74 and +0xa4 until they are done: +0x74 reads its second
  * argument as a word, pushed over two stale bytes. */
 static uint32_t STDCALL seam_74(uint32_t a, uint32_t b)
@@ -880,6 +990,7 @@ static void build_stubs(void)
     for (i = 4; i < sizeof table; i += 4) *(uint32_t *)(table + i) = 0xde000000u | ((id) << 16) | i
     TRAPS(host, 1); TRAPS(chain, 4); TRAPS(stub_module, 0xff);
     TRAPS(acontain, 23); TRAPS(controls, 16); TRAPS(sound, 39); TRAPS(util, 20); TRAPS(weatherm, 27);
+    TRAPS(multip, 35); TRAPS(fe, 18);
 #undef TRAPS
     *(uint32_t *)host = 1;
     SET_SLOT(host, 0x13c, h_close);
@@ -917,8 +1028,17 @@ static void build_stubs(void)
     SET_SLOT(sound, 0x24, sound_24);
     *(uint32_t *)util = 20;
     SET_SLOT(util, 0xa4, util_alert);
+    SET_SLOT(util, 0x18, util_mag);
+    SET_SLOT(util, 0x3c, util_angle);
+    SET_SLOT(util, 0x48, util_geo48);
+    SET_SLOT(util, 0x88, util_88);
+    *(uint32_t *)fe = 18;
+    SET_SLOT(fe, 0x2c, fe_2c);
     *(uint32_t *)weatherm = 27;
     SET_SLOT(weatherm, 0x24, weatherm_24);
+    *(uint32_t *)multip = 35;
+    SET_SLOT(multip, 0x34, multip_34);
+    SET_SLOT(multip, 0x38, multip_38);
 }
 
 /* ---- loading ----------------------------------------------------------------------- */
@@ -984,6 +1104,7 @@ static void load_side(struct side *s, const char *path, const char *name)
                    im->id == 4 ? (void *)chain : im->id == 23 ? (void *)acontain :
                    im->id == 16 ? (void *)controls : im->id == 39 ? (void *)sound :
                    im->id == 20 ? (void *)util : im->id == 27 ? (void *)weatherm :
+                   im->id == 35 ? (void *)multip : im->id == 18 ? (void *)fe :
                    (void *)stub_module;
     memcpy(s->pristine, s->image, IMAGE_SIZE);
 }
@@ -1712,6 +1833,143 @@ static void report_situations(void)
            cover_own_modes[0xc], cover_own_modes[0xd], cover_own_modes[0xe]);
 }
 
+/* ---- suite: nav (range and bearing, +0x70) --------------------------------------- */
+
+static unsigned long cover_nav_calls, cover_nav_sentinel, cover_nav_same;
+
+/* A position record, as ADVDRV and LANDME pass them: a 48-bit longitude at
+ * +2 (word) and +4 (dword), a 48-bit latitude at +0xa/+0xc, a field at +0x14
+ * that now and then holds the adventure sentinel 0xffffd8f1.  Values cluster
+ * on the edges the 16-bit scaling of nav_bearing turns on. */
+static void fill_pos(uint8_t *p)
+{
+    static const int32_t edge[] = { 0, 1, -1, 2, 0x100, -0x100, 0x7fff, -0x8000, 0x3fff,
+                                    0x4000, -0x4000, 0x40000000, -0x40000000, 0x7fffffff,
+                                    (int32_t)0x80000000u };
+    uint32_t i;
+
+    for (i = 0; i < 0x20; i++)
+        p[i] = (uint8_t)(rnd_n(3) ? 0 : rnd());
+    *(uint16_t *)(p + 0x2) = (uint16_t)rnd();
+    *(int32_t  *)(p + 0x4) = rnd_n(2) ? edge[rnd_n(sizeof edge / sizeof edge[0])] : (int32_t)rnd();
+    *(uint16_t *)(p + 0xa) = (uint16_t)rnd();
+    *(int32_t  *)(p + 0xc) = rnd_n(2) ? edge[rnd_n(sizeof edge / sizeof edge[0])] : (int32_t)rnd();
+    *(int32_t  *)(p + 0x14) = rnd_n(4) == 0 ? (int32_t)0xffffd8f1u
+                            : rnd_n(2) ? edge[rnd_n(sizeof edge / sizeof edge[0])] : (int32_t)rnd();
+}
+
+static void op_nav(void)
+{
+    static uint8_t from[0x20], to[0x20];
+    uint32_t bearing = 0, range = 0, r;
+
+    fill_pos(from);
+    fill_pos(to);
+    if (rnd_n(3) == 0) {                            /* the same point, a zero vector */
+        memcpy(to, from, sizeof to);
+        if (counting) cover_nav_same++;
+    }
+    if (rnd_n(2))
+        *(uint32_t *)(global + 0x20) = rnd();
+    if (counting) {
+        cover_nav_calls++;
+        if (*(uint32_t *)(from + 0x14) == 0xffffd8f1u) cover_nav_sentinel++;
+    }
+    put("\n#rb from{%d:%u %d:%u f%#x} to{%d:%u %d:%u f%#x} G20=%#x",
+        *(int32_t *)(from + 4), *(uint16_t *)(from + 2), *(int32_t *)(from + 0xc),
+        *(uint16_t *)(from + 0xa), *(uint32_t *)(from + 0x14),
+        *(int32_t *)(to + 4), *(uint16_t *)(to + 2), *(int32_t *)(to + 0xc),
+        *(uint16_t *)(to + 0xa), *(uint32_t *)(to + 0x14), *(uint32_t *)(global + 0x20));
+    /* +0x70 restores eax before it returns, so its value is the caller's own
+     * and not an output; only the two out-parameters (and .data+0x72e0, in
+     * the image digest) are compared. */
+    r = ((s4)SVC(0x70))((uint32_t)(uintptr_t)from, (uint32_t)(uintptr_t)to,
+                        (uint32_t)(uintptr_t)&bearing, (uint32_t)(uintptr_t)&range);
+    (void)r;
+    put(" bearing=%#x range=%#x", bearing, range);
+}
+
+static void setup_nav(void)
+{
+    *(uint32_t *)(global + 0x20) = rnd();
+}
+
+static void report_nav(void)
+{
+    printf("  range/bearing %lu (adventure sentinel in `from` %lu, same point %lu)\n",
+           cover_nav_calls, cover_nav_sentinel, cover_nav_same);
+}
+
+/* ---- suite: navio (the read-outs, +0x78 and +0x80) ------------------------------- */
+
+static unsigned long cover_readouts, cover_selects, cover_select_which[6];
+
+/* The .data words these two services hand out, seeded afresh each call so a
+ * wrong offset in either shows at once. */
+static void navio_seed(void)
+{
+    *(uint16_t *)(cur->image + 0x7482) = (uint16_t)rnd();
+    *(uint16_t *)(cur->image + 0x7484) = (uint16_t)rnd();
+    *(uint32_t *)(cur->image + 0x72e8) = rnd();
+    *(uint32_t *)(cur->image + 0x72ec) = rnd();
+    *(uint32_t *)(cur->image + 0x72f0) = rnd();
+    *(uint32_t *)(cur->image + 0x72f4) = rnd();
+}
+
+static void op_navio(void)
+{
+    uint32_t out = 0xa5a5a5a5u, r, which;
+
+    navio_seed();
+    if (rnd_n(2)) {                                /* +0x78, the word read-outs */
+        which = rnd_n(5);                          /* 0..4: the two cases and the rest */
+        if (counting) cover_readouts++;
+        put("\n#readout(%u)", which);
+        r = ((s2)SVC(0x78))(which, (uint32_t)(uintptr_t)&out);
+        put(" =%#x out=%#x", r, out);
+    } else {                                       /* +0x80, the MULTIP-backed select */
+        which = rnd_n(6);                          /* 0..5: the four cases and either side */
+        if (counting) { cover_selects++; cover_select_which[which < 6 ? which : 5]++; }
+        put("\n#select(%u)", which);
+        r = ((s2)SVC(0x80))(which, (uint32_t)(uintptr_t)&out);
+        put(" =%#x out=%#x e8=%#x ec=%#x", r, out,
+            *(uint32_t *)(cur->image + 0x72e8), *(uint32_t *)(cur->image + 0x72ec));
+    }
+}
+
+static void setup_navio(void) { }
+
+static void report_navio(void)
+{
+    printf("  read-outs %lu; selects %lu (which 0 %lu, 1 %lu, 2 %lu, 3 %lu, 4 %lu, 5 %lu)\n",
+           cover_readouts, cover_selects, cover_select_which[0], cover_select_which[1],
+           cover_select_which[2], cover_select_which[3], cover_select_which[4], cover_select_which[5]);
+}
+
+/* ---- suite: navdesc (the station descriptor, +0x7c) ------------------------------ */
+
+static unsigned long cover_describe, cover_describe_miss;
+
+static void op_navdesc(void)
+{
+    uint8_t *out = fixtures + 0x60000;             /* known memory, so the memmove is not "wild" */
+    uint32_t which = rnd_n(20), arg2 = rnd(), r;
+
+    memset(out, 0xcc, 0x58);
+    if (counting) { cover_describe++; if (which % 5 == 0) cover_describe_miss++; }
+    put("\n#describe(%u,%#x)", which, arg2);
+    r = ((s3)SVC(0x7c))(which, arg2, (uint32_t)(uintptr_t)out);
+    put(" =%#x out=", r);
+    put_bytes(out, 0x58);
+}
+
+static void setup_navdesc(void) { }
+
+static void report_navdesc(void)
+{
+    printf("  describe %lu (lookup failed %lu)\n", cover_describe, cover_describe_miss);
+}
+
 /* ---- running ---------------------------------------------------------------------- */
 
 struct suite {
@@ -1728,6 +1986,9 @@ static void setup_records(void) { short_write_odds = 60; gentle = 0; }
 static const struct suite suites[] = {
     { "records", op_records, report_records, 40, setup_records, 0x00 },
     { "situations", op_situations, report_situations, 30, setup_situations, 0xff },
+    { "nav", op_nav, report_nav, 20, setup_nav, 0x00 },
+    { "navio", op_navio, report_navio, 20, setup_navio, 0x00 },
+    { "navdesc", op_navdesc, report_navdesc, 20, setup_navdesc, 0x00 },
 };
 
 static const struct suite *suite;

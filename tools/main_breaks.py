@@ -245,6 +245,8 @@ BREAKS = {
         ("end", "main_nav.inc", "id <= 0x1006", "id <= 0x1005"),
         ("state", "main_nav.inc", "CALL(HOST, 0x254, f2)(id, 2);", "CALL(HOST, 0x254, f2)(id, 3);"),
         ("slot", "main_nav.inc", "CALL(HOST, 0x254, f2)(id, 2);", "CALL(HOST, 0x258, f2)(id, 2);"),
+        ("enable-state", "main_nav.inc", "CALL(HOST, 0x254, f2)(id, 0);", "CALL(HOST, 0x254, f2)(id, 1);"),
+        ("enable-end", "main_nav.inc", "id < 0x1007", "id < 0x1006"),
     ],
 }
 

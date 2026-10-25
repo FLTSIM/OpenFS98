@@ -195,6 +195,16 @@ static uint32_t FS98_STDCALL menu_grey(void)
     return 0;
 }
 
+/* .text+0x169a0 == Linkage +0x34: enable the same six items (state 0). */
+static uint32_t FS98_STDCALL menu_enable(void)
+{
+    uint32_t id;
+
+    for (id = 0x1001; id < 0x1007; id++)
+        CALL(HOST, 0x254, f2)(id, 0);
+    return 0;
+}
+
 /* .text+0x19cd5 == Linkage +0x7c: (which, arg2, &out).  FE +0x2c looks the
  * station up into a local buffer (its first argument is pushed as a word over
  * two stale bytes, so only the low word reaches FE); UTIL +0x88 formats it,

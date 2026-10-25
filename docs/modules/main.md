@@ -17,7 +17,7 @@ slot is done MAIN is not in `MODULES` and is never installed.
 | 6, the season, zone and clock | `+0x74` (assembly, `.text+0x18781`..`+0x189c3`) | `season` | verified: 20,000 scenarios, 0 differ; 23 of 24 breaks caught, 1 proven equivalent |
 | 7, the clock as digits | `+0xa4` (assembly, `.text+0x16ddf`..`+0x16e30`) | `clock` | verified: 20,000 scenarios, 0 differ; 6 of 6 breaks caught |
 | 8, the view cycler | `+0xc8` (assembly, `.text+0x18f0`..`+0x193a`) | `view` | verified: 20,000 scenarios, 0 differ; 10 of 10 breaks caught |
-| 9, the analysis menu greying | `+0x30` (assembly, `.text+0x16920`..`+0x16990`) | `menu` | verified: 20,000 scenarios, 0 differ; 4 of 4 breaks caught |
+| 9, the analysis menu greying | `+0x30`, `+0x34` (assembly, `.text+0x16920`, `+0x169a0`) | `menu` | verified: 20,000 scenarios, 0 differ; 6 of 6 breaks caught |
 
 ## Binary and linkage
 
@@ -58,7 +58,7 @@ calls are reached from the host, the `English\` dialog modules, or CHAIN.
 | `+0x18` | `.text+0xc000` | | |
 | `+0x1c` | `.text+0xc520` | FACIL | |
 | `+0x20` | `.text+0xa090` | | |
-| `+0x24`..`+0x34` | `.text+0x16a60`, `+0x165b0`, `+0x16880`, `+0x16920`, `+0x169a0` | REALITY (`+0x30`, `+0x34`) | `+0x30` (**slice 9**) greys menu items `0x1001`..`0x1006`; `+0x34` the options dialog |
+| `+0x24`..`+0x34` | `.text+0x16a60`, `+0x165b0`, `+0x16880`, `+0x16920`, `+0x169a0` | REALITY (`+0x30`, `+0x34`) | `+0x30` and `+0x34` (**slice 9**) grey and enable menu items `0x1001`..`0x1006` |
 | `+0x38`..`+0x4c` | `.text+0x11eeb`, `+0x11e3d`, `+0x120aa`, `+0x127b3`, `+0x12f50`, `+0x12f6a` | ADVDRV (`+0x3c`), REALITY (`+0x44`), DEMO (`+0x48`, `+0x4c`) | the situation reader and writer, assembly: `+0x48` loads a situation from memory, `+0x4c` from a file |
 | `+0x50` | `.text+0x13105` | | assembly, the largest gap (11 KB) |
 | `+0x54`..`+0x6c` | `.text+0x15cc0`..`+0x15f50` | WINMSG, WINDOW, PANELS (`+0x5c`..`+0x64`) | **slice 1**, below |
@@ -442,13 +442,14 @@ caught.
 
 ## Slice 9: the analysis menu greying
 
-`src/main/main_nav.inc`, `.text+0x16920` (`+0x30`), assembly. A leaf REALITY
-calls: it greys the six analysis menu items `0x1001` through `0x1006` with six
-HOST `+0x254(id, 2)` calls and nothing else (retail unrolls the six; the
+`src/main/main_nav.inc`, `.text+0x16920` (`+0x30`) and `.text+0x169a0`
+(`+0x34`), assembly. Two leaves REALITY calls: `+0x30` greys the six analysis
+menu items `0x1001` through `0x1006` with six HOST `+0x254(id, 2)` calls, and
+`+0x34` enables them (state 0). Nothing else (retail unrolls the six; the
 transliteration loops, the same six calls).
 
 ### Verifying the menu greying
 
 `make maindiff-run SUITE=menu`: 20,000 scenarios, 0 differences -- the six host
-calls, logged by the host stub, match. `make main-breaks SUITE=menu`: 4 breaks,
-all caught.
+calls of whichever of the two is picked, logged by the host stub, match.
+`make main-breaks SUITE=menu`: 6 breaks, all caught.

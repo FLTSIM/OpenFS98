@@ -2,7 +2,7 @@
 CC := i686-w64-mingw32-gcc
 ALERTS_DIR := bin/alerts-diff
 N ?= 20000
-.PHONY: alertsevents alertseventsdiff-run alerts-events-breaks
+.PHONY: alertsevents alertseventsdiff-run alerts-events-breaks alertsobjects alertsobjectsdiff-run
 alertsevents: $(ALERTS_DIR)/alertseventsdiff.exe
 $(ALERTS_DIR):
 	mkdir -p $@
@@ -14,3 +14,8 @@ alertseventsdiff-run: alertsevents
 	bash tools/run_alertsdiff.sh $(N)
 alerts-events-breaks: alertsevents
 	bash tools/run_alertsdiff.sh --breaks $(N)
+alertsobjects: $(ALERTS_DIR)/alertsobjectsdiff.exe
+$(ALERTS_DIR)/alertsobjectsdiff.exe: tools/difftest/alertsobjectsdiff.c src/alerts/alerts_objects.c src/alerts/alerts_objects.h src/alerts/alerts_internal.h src/alerts/types.h | $(ALERTS_DIR)
+	$(CC) -std=c99 -O2 -Wall -Wextra -fno-strict-aliasing -fno-delete-null-pointer-checks -o $@ tools/difftest/alertsobjectsdiff.c src/alerts/alerts_objects.c
+alertsobjectsdiff-run: alertsobjects
+	bash tools/run_alertsdiff.sh --objects $(N)

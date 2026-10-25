@@ -9,4 +9,7 @@ mkdir -p -- "$WINEPREFIX"
 if [[ "${1:-}" == --breaks ]]; then
     exec python3 -B tools/alerts_breaks.py "${2:-2000}"
 fi
+if [[ "${1:-}" == --objects ]]; then
+    exec timeout 180s wine bin/alerts-diff/alertsobjectsdiff.exe "${2:-20000}" "${3:-0x587a41e9}"
+fi
 exec timeout 180s wine bin/alerts-diff/alertseventsdiff.exe "${1:-20000}" "${2:-0x41e2753b}"

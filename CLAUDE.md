@@ -83,8 +83,8 @@ make maindiff-run SUITE=clock        # MAIN slice 7, the clock as digits (+0xa4)
 make main-breaks SUITE=clock         # its breaks -> 6, all caught (~3 min)
 make maindiff-run SUITE=view         # MAIN slice 8, the view cycler (+0xc8) -> 20000 scenarios, 0 differ (~3 min)
 make main-breaks SUITE=view          # its breaks -> 10, all caught (~5 min)
-make maindiff-run SUITE=menu         # MAIN slice 9, the analysis menu greying (+0x30) -> 20000 scenarios, 0 differ (~3 min)
-make main-breaks SUITE=menu          # its breaks -> 4, all caught (~2 min)
+make maindiff-run SUITE=menu         # MAIN slice 9, analysis menu greying/enabling (+0x30,+0x34) -> 20000 scenarios, 0 differ (~3 min)
+make main-breaks SUITE=menu          # its breaks -> 6, all caught (~2 min)
 make mpchatdiff-run      # whole-module MPCHAT, the chat window -> 20000 scenarios, 0 differ (~20 s)
 make mpchat-breaks       # MPCHAT broken on purpose -> 117 breaks, 113 caught, 4 proven equivalent (~8 min)
 make winmsgdiff-run      # whole-module WINMSG, the message bar -> 20000 scenarios, 0 differ (~2 min)
@@ -289,8 +289,9 @@ table (docs/modules/mpchat.md). **MAIN is in progress**, a slice at a time behin
 records, the assembly situation reader and writer, the nav services
 `+0x70`/`+0x78`/`+0x7c`/`+0x80` -- range and bearing, the read-outs and the
 station descriptor -- `+0x74`, the season, zone and clock, `+0xa4`, the clock
-as digits, `+0xc8`, the view cycler, and `+0x30`, the analysis menu greying),
-the rest to go. See [docs/modules/main.md](docs/modules/main.md). The CHAIN ecx fix is done: OpenFS98's CHAIN enters callbacks with
+as digits, `+0xc8`, the view cycler, and `+0x30`/`+0x34`, the analysis menu
+greying and enabling), the rest to go. See
+[docs/modules/main.md](docs/modules/main.md). The CHAIN ecx fix is done: OpenFS98's CHAIN enters callbacks with
 all of retail's registers and returns its ecx/edx, and `chaindiff` now
 compares them (see [docs/modules/chain.md](docs/modules/chain.md)).
 

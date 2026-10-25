@@ -2149,8 +2149,13 @@ static unsigned long cover_menu;
 static void op_menu(void)
 {
     if (counting) cover_menu++;
-    put("\n#menu");
-    put(" =%#x", ((s0)SVC(0x30))());
+    if (rnd_n(2)) {
+        put("\n#grey");
+        put(" =%#x", ((s0)SVC(0x30))());
+    } else {
+        put("\n#enable");
+        put(" =%#x", ((s0)SVC(0x34))());
+    }
 }
 
 static void setup_menu(void) { }

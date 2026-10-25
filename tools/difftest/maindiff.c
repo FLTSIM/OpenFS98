@@ -68,7 +68,7 @@
 #define IMAGE_SIZE   0x2ee00u
 #define LINKAGE      0x0c0u
 #define LINKAGE_END  (LINKAGE + 51 * 4)
-#define ARENA_SIZE   (4u << 20)
+#define ARENA_SIZE   (16u << 20)   /* large, so a corrupt situation's multi-MB cursor jump lands in the 0xff fill and stops, the same on both passes, instead of walking into memory mapped differently between them */
 #define TRANSCRIPT_SIZE (8u << 20)
 #define MAX_RELOCS   1024
 #define MAX_PAIRS    64
@@ -96,6 +96,9 @@ static uint8_t chain[0x24];
 static uint8_t arena[ARENA_SIZE] __attribute__((aligned(16)));
 static uint32_t arena_used;
 static uint8_t pad_byte;
+static uint8_t free_fill = 0xdd;   /* what a freed block and alloc slack hold; 0xff for
+                                   * situations, so a parse that walks off a buffer meets
+                                   * 0xffff and stops the same on both sides */
 static uint32_t rng, scenario_seed, scenario, op_number;
 static int counting;
 static uint32_t pair_retail[MAX_PAIRS], pair_ours[MAX_PAIRS], npairs_retail, npairs_ours;
@@ -319,7 +322,7 @@ static void *arena_get(uint32_t size)
     memset(p, 0, 16);
     *(uint32_t *)p = size;
     *(uint32_t *)(p + 4) = LIVE;
-    memset(p + 16 + size, pad_byte, n - 16 - size);
+    memset(p + 16 + size, free_fill == 0xff ? 0xff : pad_byte, n - 16 - size);
     return p + 16;
 }
 
@@ -353,7 +356,7 @@ static int32_t STDCALL h_free(void **pp)
     if (b != NULL) {
         if (!in_arena((uint32_t)(uintptr_t)b) || *(uint32_t *)(b - 12) != LIVE)
             stub_fault("heap free");
-        memset(b, 0xdd, *(uint32_t *)(b - 16));
+        memset(b, free_fill, *(uint32_t *)(b - 16));
         *(uint32_t *)(b - 12) = FREED;
     }
     *pp = NULL;
@@ -382,18 +385,29 @@ static int known_memory(uint32_t v, uint32_t n, int stack_too)
  * nothing in this slice reads it. */
 static int32_t STDCALL h_memmove(void *d, const void *s, uint32_t n)
 {
+    /* A source off in memory the two sides do not share -- a walk that ran
+     * off a situation -- is logged as "wild" rather than by address: the
+     * same wild address lands inside one side's module image but not the
+     * other's (they load at different bases), which would differ only in
+     * the label.  No copy MAIN makes here has its source on the stack. */
+    int wild = n > 0x100000 ||
+               !known_memory((uint32_t)(uintptr_t)s, n, 0) ||
+               !known_memory((uint32_t)(uintptr_t)d, n, 1);
+
     put(" memmove(");
-    put_ptr((uint32_t)(uintptr_t)d);
+    if (wild)
+        put("wild");
+    else
+        put_ptr((uint32_t)(uintptr_t)d);
     put(",");
-    put_ptr((uint32_t)(uintptr_t)s);
+    if (wild)
+        put("wild");
+    else
+        put_ptr((uint32_t)(uintptr_t)s);
     put(",%#x)", n);
-    if (n > 0x100000)
-        stub_fault("memmove huge");
-    /* no copy MAIN makes through here has its source on the stack: one
-     * there is a walk that has wrapped round to it */
-    if (!known_memory((uint32_t)(uintptr_t)s, n, 0) || !known_memory((uint32_t)(uintptr_t)d, n, 1)) {
+    if (wild) {
         if (counting) cover_wild++;
-        stub_fault("wild");            /* a walk gone off into the harness's own memory */
+        stub_fault("wild");
     }
     put_bytes(s, n);
     memmove(d, s, n);
@@ -711,12 +725,15 @@ typedef uint32_t (STDCALL *s4)(uint32_t, uint32_t, uint32_t, uint32_t);
 
 static int listening = 1;
 static uint32_t dispatches_this_op;
+static int walked_off;
+static int situations_suite;      /* the walk-off guard is for situations only */
 static unsigned long cover_runaway;
 static void listen_save(void);
 static void listen_record(uint32_t rec);
 
 static uint32_t STDCALL chain_send(uint32_t list, uint32_t a, uint32_t b)
 {
+    uint32_t len_before = cur ? cur->length : 0;
     put(" chainsend(%#x,%#x,", list, a);
     put_ptr(b);
     put(")");
@@ -733,6 +750,27 @@ static uint32_t STDCALL chain_send(uint32_t list, uint32_t a, uint32_t b)
         }
         if (getenv("MAIN_CUR"))
             put(" [cur=%#x len=%#x body=%#x]", IMG32(0x41e5), IMG32(0x41ed), IMG32(0x41f1));
+        /* A corrupt situation drives the record walk off the end of its
+         * buffer, reading record headers out of the 0xff fill and whatever
+         * the walk has clobbered.  From there the two passes cannot agree:
+         * the modules load at different bases (retail at 0x20800000, ours
+         * relocated elsewhere), so the moment a base-relative pointer -- a
+         * table NEXT link, a self-pointer copied in as a field -- steers the
+         * cursor, the walks diverge though the code is the same.  The
+         * signature of a header read from past the data is a length no real
+         * record has: cap_lengths holds every generated record's body to
+         * 0x400, so a dispatched record whose length exceeds that is reading
+         * garbage.  Both passes read the same garbage length at the same
+         * first such record (the buffer being shared up to there), so both
+         * catch it together: drop this chainsend's text (the length, hence
+         * the divergence, is not yet shown) and end the op.  What follows
+         * cannot agree, the same as cursor_wild at op end. */
+        if (situations_suite && IMG32(0x41ed) > 0x800) {
+            cur->length = len_before;
+            walked_off = 1;
+            in_main = 0;
+            __builtin_longjmp(fault_jb, 1);
+        }
         if (listening)
             listen_record(b);
     }
@@ -1730,6 +1768,7 @@ static void run_side(struct side *s)
     s->length = 0;
     memcpy(s->image, s->pristine, IMAGE_SIZE);
     arena_used = 0;
+    free_fill = suite->fill;
     memset(arena, suite->fill, ARENA_SIZE);    /* all of it: a runaway walk reads far */
     memset(fixtures, suite->fill, sizeof fixtures);
     memset(files, 0, sizeof files);
@@ -1745,6 +1784,7 @@ static void run_side(struct side *s)
     for (i = 0; i < nops && !faulted; i++) {
         op_number = i;
         dispatches_this_op = 0;
+        walked_off = 0;
         hung = 0;
         call_start = GetTickCount();
         in_main = 1;
@@ -1756,9 +1796,12 @@ static void run_side(struct side *s)
             if (counting) cover_hangs++;
             break;
         }
-        if (cursor_wild()) {
+        if (cursor_wild() || walked_off) {
             /* the walk went off into memory the two sides do not share,
-             * and may have copied some of it in: what follows cannot agree */
+             * and may have copied some of it in: what follows cannot agree.
+             * cursor_wild() sees a wild cursor still parked at op end;
+             * walked_off caught one at a dispatched record mid-parse, before
+             * the parse read a terminator from wild memory and moved on. */
             put(" WALKED OFF");
             if (counting) {
                 if (faulted) cover_wild_after_fault++;
@@ -1824,6 +1867,7 @@ int main(int argc, char **argv)
         if (!strcmp(suites[i].name, which))
             suite = &suites[i];
     if (suite == NULL) { printf("no suite %s\n", which); return 2; }
+    situations_suite = !strcmp(suite->name, "situations");
     AddVectoredExceptionHandler(1, on_vectored);
     if (getenv("MAIN_NOFILTER") == NULL)
         SetUnhandledExceptionFilter(on_fault);

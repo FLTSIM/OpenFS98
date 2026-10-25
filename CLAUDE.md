@@ -69,6 +69,8 @@ make windowdiff-run      # whole-module WINDOW, windows and the eye -> 20000 sce
 make window-breaks       # WINDOW broken on purpose -> 109 breaks, 106 caught, 3 proven equivalent (~25 min)
 make maindiff-run SUITE=records  # MAIN slice 1, situation records -> 20000 scenarios, 0 differ (~15 min)
 make main-breaks SUITE=records   # its breaks -> 40, 38 caught, 2 proven equivalent (~35 min)
+make maindiff-run SUITE=situations  # MAIN slice 2, the reader and writer -> 20000 scenarios, 0 differ (~20 min)
+make main-breaks SUITE=situations   # its breaks -> 69, 63 caught, 6 proven equivalent (~40 min)
 make mpchatdiff-run      # whole-module MPCHAT, the chat window -> 20000 scenarios, 0 differ (~20 s)
 make mpchat-breaks       # MPCHAT broken on purpose -> 117 breaks, 113 caught, 4 proven equivalent (~8 min)
 make winmsgdiff-run      # whole-module WINMSG, the message bar -> 20000 scenarios, 0 differ (~2 min)

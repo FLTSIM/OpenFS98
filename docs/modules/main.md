@@ -10,7 +10,7 @@ slot is done MAIN is not in `MODULES` and is never installed.
 | slice | services | suite | status |
 | --- | --- | --- | --- |
 | 1, situation records | `+0x54`..`+0x6c`, and `.text+0x15c80`/`+0x15d50` | `records` | verified: 20,000 scenarios, 0 differ; 38 of 40 breaks caught, 2 proven equivalent |
-| 2, the situation reader and writer | `+0x38`..`+0x4c` (assembly, `.text+0x11cd2`..`+0x13104`) | `situations` | verified: SITUATIONS_RESULT |
+| 2, the situation reader and writer | `+0x38`..`+0x4c` (assembly, `.text+0x11cd2`..`+0x13104`) | `situations` | verified: 20,000 scenarios, 0 differ; 63 of 69 breaks caught, 6 proven equivalent |
 
 ## Binary and linkage
 
@@ -215,4 +215,44 @@ calls them through its Linkage, which the harness points at the same stubs.
 `+0x74` is pushed the day as a word over two stale bytes; the stub logs the
 word, and `+0x74`'s slice must show that it reads only that.
 
-SITUATIONS_DETAIL
+### Verifying the reader and writer
+
+`make maindiff-run SUITE=situations` runs 20,000 scenarios and reports 0
+differences; `make main-breaks SUITE=situations` applies 69 deliberate breaks,
+63 caught and 6 proven equivalent (none missed). The equivalences are all
+"retail's table never reaches this": no size code outside `0x80`..`0x83`/`0x20`
+(`field-low`), no tag `1000` (`write-hdr`), no entry of kind 5 (`write-kind5`)
+or mode `0xe` (`take-e`), GLOBAL `+0x5f4` never 4 at the one byte that is read
+(`after-5f4`), and the one count that is stored as itself either way
+(`after-100`).
+
+The `situations` suite fills free and unread memory with `0xff` rather than
+`0x00`, so a mutated situation's record lengths come back as large values
+instead of zero — which is what drives the parser off the end of the file and
+exercises the walk the way a damaged `.stn` on disk would.
+
+**Walking off into unshared memory is not a difference.** When a corrupt
+situation drives the record walk past the end of its buffer, the next tag,
+length and `NEXT` link are read from whatever follows — the arena's `0xff`
+fill, or a base-relative pointer the walk itself clobbered in. From there the
+walk follows pointers into memory the two sides do not share: retail is loaded
+at its preferred `0x20800000`, OpenFS98's MAIN is relocated to a different
+base in the same process, so identical code following its own base-relative
+pointers reaches different bytes and diverges. This is the same class the
+harness already handles for a cursor left outside the image (`cursor_wild`)
+and for a load that overwrote the situation table (`table_overwritten`): the
+op ran, but its result cannot be compared.
+
+The harness recognises the walk-off at the moment it happens. `cap_lengths`
+caps every generated record body to `0x400` (max dispatched length `0x406`),
+so a dispatched record whose length exceeds `0x800` can only be one read out
+of the fill or off a clobbered pointer. Both sides read that same impossible
+length at the same first such record — the buffer is still shared up to there —
+so when the dispatch hook (`list 0x14`, selector `0x22`) sees a length over
+`0x800` it drops that record's text on both sides and ends the op, which is
+then counted among the walk-offs rather than compared. The guard is scoped to
+the `situations` suite only: the `records` suite fills with `0x00` and
+deliberately dispatches huge-length records to test the length path, so there
+the guard stays out of the way (`situations_suite` in `maindiff.c`). Across
+20,000 situations, 7,077 scenarios end this way (most after a fault both sides
+take alike); none is a missed difference.

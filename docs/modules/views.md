@@ -1,15 +1,120 @@
-# Views — View Options dialog boundary
+# Views — View Options replacement DLL
 
 `English/Views.DLL` is UI module `0x80000005`, with 13,090 bytes of `.text`,
 one registered dialog (`0x1508`) and one recognised MFC message map with
-19 entries. This is a static survey; no Views replacement or UI differential
-test is implemented. The inventory and tool are described in
-[dialogs.md](dialogs.md).
+19 entries. A standalone Win32 replacement is implemented in `src/views/`
+and builds to `bin/views-diff/VIEWS_ours.dll`. It includes the complete event
+surface, control initialization and binding, all embedded-object lifetimes,
+factory and module lifecycle. The shared build and game install are left
+untouched while other agents finish MAIN and the host.
 
 It imports only HOST and GLOBAL through FS98's numeric ABI. PE imports are
 USER32, SIMSUI, MFC42, MSVCRT and KERNEL32. Preview rendering and simulator
 changes are supplied by descriptor callbacks rather than static imports of
 WINDOW, MAIN, G3D or HG2D.
+
+## Building and verification
+
+All commands run from the repository root, independently of the shared Makefile:
+
+```sh
+make -f tools/views.mk viewsevents views
+bash tools/run_viewsdiff.sh 20000
+bash tools/run_viewsdiff.sh 20000 0x98a1e7d3
+bash tools/run_viewsdiff.sh 2000 0x7e51a23b unwind
+make -f tools/views.mk views-breaks N=2000
+make -f tools/views.mk viewsuidiff-run views-ui-breaks
+make -f tools/views.mk views-smoke
+```
+
+`run_viewsdiff.sh` serializes Wine jobs in the dedicated
+`bin/views-diff/wineprefix`. Fixtures, mutated builds and logs stay in ignored
+`bin/views-diff/`. The smoke boots a disposable game copy with only its
+English Views DLL replaced, verifies the installed bytes against the launch
+snapshot, and stops only this prefix. It retains the copy and trace.
+
+`viewseventsdiff` maps the actual original DLL without its loader startup,
+patches reached imports and compares the original routines against C.
+There are **40 comparisons per scenario**: all 19 message handlers, control
+initialization and 34 bindings, accept/cancel, validation and error display,
+preview lifetime, five 3D view modes plus map, object construction/destruction,
+deleting destructors, public factory and constructor/destructor sequences.
+It compares every fixture byte (object, two replaceable descriptors, four
+records, numeric buffers and guards), defined returns, dependency transcripts,
+and the x87 control word. It varies 24/53/64-bit precision and all four
+rounding modes. Callbacks and dependencies can change selection, replace the
+descriptor and replace the object's vtable to expose stale-pointer mistakes.
+
+Numeric and map string operations use the CD's real MFC42 CString methods,
+with boundary logging rather than a reimplementation of CString. Synthetic
+resource lists include extra entries after the fixed 12/15 choices, absent
+separators, and empty labels. Unwind mode injects exceptions at successive
+boundary calls through position 512; the original uses its own real MSVCRT
+unwind handlers and cleanup funclets, compared with our cleanup-only SEH
+scopes. The test covers late map-list temporaries as well as constructors,
+destructors and allocation cleanup. Throws inside shared-library methods and
+double exceptions are outside this boundary-injection fixture.
+
+The native harness loads both DLLs normally with the CD's SIMSUI/MFC42,
+a real MFC application/main window, and a small host model. It validates that
+each dialog's own virtual methods belong to the expected module. It drives
+creation, selection, every view mode, combos, checkbox fields, zoom, spin,
+validation failure/retry, preview ticks and Return/Escape/OK/Cancel. It
+compares descriptor/record/buffer bytes, child classes/text/geometry/states,
+callback order, close signaling and **actual window pixels** across two
+complete load/unload cycles. Native module-init probes also compare successful,
+null and throwing allocation, throwing CDynLinkLibrary construction, and
+repeated deinit. WinHelp's parameters are verified in the synthetic suite;
+its external viewer is not launched.
+
+The preview renderer is a **stateful caller fixture**, not G3D: it creates a
+child on operation 1, changes its display from the selected record on ticks,
+and destroys it on operation 2 before the dialog signals completion. The host
+class `FS98DLG3D` must be registered with `CS_GLOBALCLASS` for dialog resources
+owned by another DLL. Rendering the simulator's real preview and applying
+edits remain MAIN/WINDOW responsibilities, not additional code in Views.
+Native Windows, other MFC builds and a full host-driven modal-loop integration
+are not established by the Wine comparison or startup smoke.
+
+`views_events.c` implements the UI behavior, `views_objects.c` the derived
+object and factory, `views_stack.S` the two entry-stack observations, and
+`views_runtime.c` the native library adapter and module lifecycle. The DLL
+exports exactly `Linkage` and `ImportTable`. `gen_views_tables.py` extracts
+control-state recipes, bindings, subobject layout and floating constants.
+`gen_views_runtime.py` extracts all 60 dialog vtable slots, the message map,
+119 shared-library bindings and dialog registry. All 23 non-version resource
+leaves are copied byte-for-byte into ignored build resources. No original
+machine code or resource payload is committed. The transient private spin
+vtable assignment is omitted: retail overwrites it immediately with SIMSUI's
+vtable, with no intervening call or branch.
+
+### Findings the comparisons established
+
+- Spot and track use record modes 4 and 3, but their radio positions are 3
+  and 4. Map sets record `+0x04` to 1 while retaining the previous 3D mode.
+  Only an exact map flag of 1 chooses that radio; validation instead skips
+  numeric checks for any nonzero map flag.
+- Numeric record fields are exchange blocks, not floating values. Sync calls
+  MFC `GetWindowTextA` with their buffer pointers and capacities, then the
+  caller validates. Spot sync reloads the descriptor before distance and
+  altitude. Validation reloads it after the caller callback as well.
+- Error reporting returns the result of the inherited virtual at `+0xe0`,
+  not the id passed to that virtual. Accept saves its original vtable across
+  validation, error reporting and synchronization before calling Close.
+- Retail's `-0.005`, `10.0` and `0.1` constants are binary64. Decimal literals
+  evaluated directly in x87 extended precision can change the format-call
+  argument, even when the eventual visible text agrees. Extracted hexadecimal
+  long-double literals preserve the exact binary64 values before arithmetic.
+- Both the map metric flag (invalid unit selector) and the zoom float (failed
+  `sscanf`) read an uninitialized local at **entry ESP-16**. Entry shims capture
+  those bytes before compiled-C frames overwrite them. The harness paints
+  that exact slot for both implementations, including positive/negative,
+  zero, NaN and infinity float patterns; valid input replaces the saved value.
+  This establishes the individual entry contract, not a deterministic value
+  for arbitrary prior stack histories in the simulator.
+- WM_PRINT alone misses the skinned edit's background-color error. The native
+  test now redraws the visible window and captures its real client pixels;
+  the deliberately green edit changes pixels while control metadata agrees.
 
 ## Factory and caller boundary
 
@@ -51,9 +156,8 @@ records at the wrong addresses. The final pointer at temporary record
 
 ## Preview lifetime
 
-Template `0x5e1` contains a custom `FS98DLG3D` control, id `0x188e`. A future
-UI harness needs its lifecycle and the callbacks, even if its first graphics
-model only logs them. The following calls are explicit in Views:
+Template `0x5e1` contains the custom `FS98DLG3D` control, id `0x188e`.
+The following operations are implemented and exercised in both harnesses:
 
 | Phase | Call site | Callback at descriptor `+0x08` |
 | --- | --- | --- |
@@ -67,9 +171,9 @@ The tick handler at `0x223e1f00` returns zero with `ret 8`. Close at
 current fields via `0x223e21a0`, then invokes descriptor `+0x04` with the
 descriptor pointer before checking per-mode numeric validation.
 
-These are argument observations from call sites. Callee stack cleanup and
-register preservation still need checking in MAIN's callback listings before
-declaring C prototypes, as required by [method.md](../method.md).
+The callback callees at `0x207f8670` and `0x207f8800` end in `ret 4` and
+`ret 12`, respectively, and preserve the usual nonvolatile registers. Both
+callback types are stdcall; Views ignores their return values.
 
 MAIN's preview dispatcher at `0x207f8800` branches on operations 1, 2 and 3.
 Its operation-3 path can create/destroy a preview view, tracks selection
@@ -81,8 +185,8 @@ stub that always returns success would hide observable preview behavior.
 Message map `0x223e5120` is returned by getter `0x223e1910`. Commands below
 use `WM_COMMAND` (`0x111`). Code 1 is the combo-box selection notification;
 code 0 covers the buttons and checkboxes. Code `0x300` is the edit-change
-notification. Labels here describe the associated controls, not verified
-handler behavior for every mode.
+notification. The handlers and their state changes are covered by the external differential
+suite; the native suite exercises the inherited MFC dispatch.
 
 | Control / event | Code | Handler | Narrow observation |
 | --- | --- | --- | --- |
@@ -115,25 +219,5 @@ Numeric validation depends on selected record `+0x04` and `+0x08` (mode),
 with different exchange descriptors inside the `0xb4` record. The mode
 switch covers values 0..4. Distance and altitude have separate validation
 paths for the spot-plane mode. A failure selects the zoom (`0x1886`),
-distance (`0x1889`) or altitude (`0x188b`) control for error display. These
-paths need boundary vectors, including zero and out-of-range mode values,
-before any rewrite.
-
-## Next verification slice
-
-First pin the descriptor and `0xb4` record layouts, callback prototypes and
-caller cleanup from retail. A harness should compare the descriptor and
-records as well as the callbacks and HWND lifetime. Drive every initial view
-type, switching between windows, all combo/check/radio changes, validation
-failure and retry, accept/cancel, repeated ticks and nested help.
-
-Use the real or faithfully modelled preview control and distinguish operation
-1 creation, operation-3 updates and operation-2 cleanup. Include selection
-changes while preview state already exists. Check numeric edits with empty
-text, malformed text, locale/formatting variations, spin boundaries and x87
-precision differences; `sscanf` and `_ftol` behavior are observable here.
-
-The independent survey is complete enough to scope this work, but it has not
-established the full field meanings, all inherited MFC behavior or a faithful
-native preview. Those are verification tasks, not assumptions to put into an
-already-passing WINDOW or MAIN harness.
+distance (`0x1889`) or altitude (`0x188b`) control for error display. The synthetic fixture includes zero/out-of-range modes, independent error
+flags, rejected error dialogs, negative record counts and callback reentry.

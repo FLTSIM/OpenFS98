@@ -400,9 +400,9 @@ displayed pairs agree, but agreement on that subset is not a full independent
 resource-directory validation. The synthetic traversal test and direct raw
 directory checks guard against mistaking a short listing for a small module.
 
-These are static-analysis checks. No English replacement DLL has been built,
-no GUI path has been differential-tested here, and no game installation has
-been modified. Per-file SHA-256 hashes in JSON identify the exact source
+Those inventory checks are static analysis. The separate Alerts and Views
+implementations now have differential suites and isolated startup tests; the
+inventory tool itself does not build or install replacements. Per-file SHA-256 hashes in JSON identify the exact source
 images for a later comparison. A different pressing must be surveyed again.
 
 ## Work to take next
@@ -414,12 +414,13 @@ and native differential suites, deliberate mutations and isolated startup
 smoke. Build with `make -f tools/alerts.mk alerts`; shared build integration
 is separate from MAIN's current work. It still uses the CD's SIMSUI/MFC42.
 
-**Views next**: one registered dialog and one recognised message map (19
-entries), with 13,090 bytes of code. Its window/eyepoint parameter contract
-has an initial boundary survey in [views.md](views.md): the descriptor uses
-`0xb4` records and a three-operation preview callback. Complete that layout
-and compare its effects with WINDOW's existing behavior. Help is small in
-bytes but adds registry access, RichEdit, credits and lesson-analysis paths.
+**Views is implemented** as a standalone replacement, including its preview
+callback lifecycle, all 19 message handlers, numeric editing and validation,
+control setup, object lifetimes and module ABI. [views.md](views.md) records
+its synthetic and native differential suites, deliberate errors and isolated
+startup test. It retains the CD's SIMSUI/MFC42, and the native preview renderer
+is a stateful caller fixture; the actual renderer and application of edits
+belong to MAIN/WINDOW. Build with `make -f tools/views.mk views`.
 
 **Options/World in slices**: start with CONTROLS, FE or FACIL's already
 specified descriptor contracts. Keep template creation, exchange-engine

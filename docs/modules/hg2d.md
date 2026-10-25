@@ -13,8 +13,8 @@ remaining integration limits are recorded below.
 HG2D is not in `MODULES` and has not been installed in-game. A live graphics
 smoke test and non-x86 floating precision/status verification remain separate.
 
-The implementation and tests occupy HG2D-specific files. The shared Makefile,
-README and MAIN files are untouched so MAIN can proceed independently.
+The implementation and tests occupy HG2D-specific files. The shared Makefile
+and MAIN files are untouched so MAIN can proceed independently. The README records the completed standalone implementation.
 For now build and verify from the repository root with:
 
 ```sh

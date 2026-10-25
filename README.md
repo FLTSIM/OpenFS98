@@ -237,6 +237,7 @@ emulate 80-bit arithmetic to preserve a rounding artefact. See
 | `ANALYSIS` | 29 | 8,086 | **reimplemented, verified, and running in-game** — landing and manoeuvre analysis and course tracking: the samples, the trail's display list, the three dialogs; 20,000 whole-module scenarios, zero differences — see [docs/modules/analysis.md](docs/modules/analysis.md) |
 | `CONTROLS` | 16 | 48,406 | **reimplemented, verified, and running in-game** — the keyboard, joysticks and mouse: 342 command handlers, the joystick poll and configs, the key bindings, force feedback over DirectInput 5 and the key-assignment dialog's callbacks; 20,000 whole-module scenarios, zero differences — see [docs/modules/controls.md](docs/modules/controls.md) |
 | `PANELS` | 15 | 50,038 | **reimplemented, verified, and running in-game** — the instrument panel and the gauges' runtime: bitmap scalers, eight element types, the gauge variables; 3,000 whole-module scenarios through the CD's gauges and 20,000 cases per image routine, zero differences — see [docs/modules/panels.md](docs/modules/panels.md) |
+| `HG2D` | 13 | 389,734 | **reimplemented and verified standalone** — all 40 public services and 18 GPU dispatch cells; 59 suites pass, 40.64 million large-run operations match retail, and 247 new mutations are caught; in-game and non-x86 validation remain — see [docs/modules/hg2d.md](docs/modules/hg2d.md) |
 | `UTIL` | 20 | 11,062 | **reimplemented, verified, and running in-game** — all 47 services; 19 seen called in a hands-on session, the modal alert among them — see [docs/modules/util.md](docs/modules/util.md) |
 | `FLTSIM98.EXE` | 1 (host) | 82,016 | 194 services mapped, 71 with confirmed prototypes, 11 verified in-process, 2 implemented — see [docs/modules/host.md](docs/modules/host.md) |
 
@@ -398,8 +399,9 @@ nothing in it imports anything interesting:
     ~~**`MPCHAT`** (3,104 bytes)~~ — done, verified and running in-game.
     **`MAIN`** (119,648 bytes) — in progress, a slice at a time; slice 1 of
     its situation code verified ([docs/modules/main.md](docs/modules/main.md)).
-13. `HG2D` (390 KB, the 2D rasteriser) last. It is 26% of the project on its
-   own.
+13. ~~**`HG2D`** (390 KB, the 2D rasteriser)~~ — implementation complete and
+    verified standalone; in-game and non-x86 validation remain
+    ([docs/modules/hg2d.md](docs/modules/hg2d.md)).
 
 `GLOBAL`'s state block is the shared workspace: every module worked through
 names more of its 4776 bytes, and those names are the project's real asset.

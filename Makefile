@@ -61,6 +61,7 @@ BASE_G3D    := 0x206e0000
 BASE_MULTIP := 0x20850000
 BASE_MPCHAT := 0x20840000
 BASE_MAIN   := 0x207e0000
+BASE_HOST   := 0x41000000
 
 MODULES := ACONTAIN ADVDRV ANALYSIS ATC BOOSTER CHAIN CONTROLS DEMO DYNAMIC FACIL FE G3D GLOBAL LANDME MPCHAT MULTIP NUMERIC PANELS REALITY SLEW SOUND UTIL WEATHERM WINDOW WINMSG
 
@@ -406,7 +407,7 @@ src/analysis/analysis_data.inc src/analysis/analysis_rdata.inc: $(ORIG)/Modules/
 
 # MAIN, the sim's controller: MSVC C and assembly.  In progress, a slice at a
 # time (docs/modules/main.md); not in MODULES until every slot is done.
-MAIN_SOURCES := src/main/main.c src/main/main_records.inc src/main/main_situation.inc src/main/main_nav.inc src/main/main_season.inc src/main/main_sun.inc src/main/main_eye.inc src/main/main_text_tail.inc
+MAIN_SOURCES := src/main/main.c src/main/main_records.inc src/main/main_situation.inc src/main/main_nav.inc src/main/main_season.inc src/main/main_sun.inc src/main/main_eye.inc src/main/main_band.inc src/main/main_text_tail.inc
 $(BIN)/MAIN.DLL: $(MAIN_SOURCES) src/main/main.def src/main/main_data.inc \
                  src/main/main_pointers.inc $(BIN)/main.res
 	@mkdir -p $(BIN)
@@ -1107,6 +1108,28 @@ main-break-build:
 main-breaks: maindiff
 	@python3 tools/main_breaks.py $(if $(N),$(N),2000) $(if $(SUITE),$(SUITE),records)
 
+# HOST (module id 1, FLTSIM98.EXE), a slice at a time (docs/modules/host.md).
+src/host/host_data.inc src/host/host_pointers.inc &: $(ORIG)/FLTSIM98.EXE tools/gen_host_data.py
+	python3 tools/gen_host_data.py
+
+$(BIN)/HOST.DLL: src/host/host.c src/host/host.def src/host/host_data.inc
+	@mkdir -p $(BIN)
+	$(CC) $(CFLAGS) $(LDFLAGS) -Wl,--image-base=$(BASE_HOST) \
+	      -o $@ src/host/host.c src/host/host.def -lkernel32
+
+# hostdiff runs the real host beside ours in one process, so it is linked away
+# from 0x400000 where the real host must map.
+$(DIFFDIR)/hostdiff.exe: tools/difftest/hostdiff.c
+	@mkdir -p $(DIFFDIR)
+	$(CC) -std=c99 -O1 -Wall -Wextra -Wl,--image-base=0x13000000 -o $@ tools/difftest/hostdiff.c
+
+hostdiff: $(DIFFDIR)/hostdiff.exe $(BIN)/HOST.DLL
+	@cp $(ORIG)/FLTSIM98.EXE $(DIFFDIR)/FLTSIM98.EXE
+	@cp $(BIN)/HOST.DLL      $(DIFFDIR)/HOST_ours.dll
+
+hostdiff-run: hostdiff
+	@cd $(DIFFDIR) && WINEDEBUG=-all timeout 600 wine hostdiff.exe $(if $(N),$(N),1)
+
 # MPCHAT, whole-module: the chat window, retail and OpenFS98 in turn over the
 # same scripts, against a model of the window system (hooked into both DLLs'
 # import tables), the host's dialog runner and strings, MULTIP's player lists
@@ -1487,4 +1510,4 @@ smoke: all
 clean:
 	rm -rf $(BIN)
 
-.PHONY: multip-acceptance multip-smoke multip-directplay-breaks multip-worker-breaks multip-breaks multip-receive-breaks multip-send-breaks all stage setup-map graph hostmap compare run trace trace-render trace-ddraw kill window-reset wm-unmanaged wm-managed vd-on vd-off mode8 mode16 ddraw-gdi ddraw-default smoke difftest difftest-run utildiff utildiff-run utildiff-portable numericdiff numericdiff-run chaindiff chaindiff-run atcdiff atcdiff-run weathermdiff weathermdiff-run acontaindiff acontaindiff-run sounddiff sounddiff-run dynamicdiff dynamicdiff-run fegriddiff fegriddiff-run fediff fediff-run fesldiff fesldiff-run boosterdiff boosterdiff-run demodiff demodiff-run windowdiff windowdiff-run g3ddiff g3ddiff-run multipdiff multipdiff-run g3d-break-build g3d-breaks g3dmeshdiff g3dmeshdiff-run g3ddiff-meshc-run hg2dmodeldiff-run panelsdiff panelsdiff-run panelsunit panelsunit-run panels-breaks panels-break-build window-breaks window-break-build maindiff maindiff-run main-break-build main-breaks mpchatdiff mpchatdiff-run mpchat-breaks mpchat-break-build winmsgdiff winmsgdiff-run winmsg-breaks winmsg-break-build realitydiff realitydiff-run reality-breaks reality-break-build analysisdiff analysisdiff-run analysis-breaks analysis-break-build controlsdiff controlsdiff-run controls-breaks controls-break-build advdrvdiff advdrvdiff-run advdrv-cover landmediff landmediff-run facildiff facildiff-run facildiff-fe-run ofstest ofstest-run ofstest-remove sehfix sehfix-install sehfix-remove sehfix-log util-trace install revert installed-name-of orig-module-of clean
+.PHONY: multip-acceptance multip-smoke multip-directplay-breaks multip-worker-breaks multip-breaks multip-receive-breaks multip-send-breaks all stage setup-map graph hostmap compare run trace trace-render trace-ddraw kill window-reset wm-unmanaged wm-managed vd-on vd-off mode8 mode16 ddraw-gdi ddraw-default smoke difftest difftest-run utildiff utildiff-run utildiff-portable numericdiff numericdiff-run chaindiff chaindiff-run atcdiff atcdiff-run weathermdiff weathermdiff-run acontaindiff acontaindiff-run sounddiff sounddiff-run dynamicdiff dynamicdiff-run fegriddiff fegriddiff-run fediff fediff-run fesldiff fesldiff-run boosterdiff boosterdiff-run demodiff demodiff-run windowdiff windowdiff-run g3ddiff g3ddiff-run multipdiff multipdiff-run g3d-break-build g3d-breaks g3dmeshdiff g3dmeshdiff-run g3ddiff-meshc-run hg2dmodeldiff-run panelsdiff panelsdiff-run panelsunit panelsunit-run panels-breaks panels-break-build window-breaks window-break-build maindiff maindiff-run main-break-build main-breaks hostdiff hostdiff-run mpchatdiff mpchatdiff-run mpchat-breaks mpchat-break-build winmsgdiff winmsgdiff-run winmsg-breaks winmsg-break-build realitydiff realitydiff-run reality-breaks reality-break-build analysisdiff analysisdiff-run analysis-breaks analysis-break-build controlsdiff controlsdiff-run controls-breaks controls-break-build advdrvdiff advdrvdiff-run advdrv-cover landmediff landmediff-run facildiff facildiff-run facildiff-fe-run ofstest ofstest-run ofstest-remove sehfix sehfix-install sehfix-remove sehfix-log util-trace install revert installed-name-of orig-module-of clean

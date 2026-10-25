@@ -1,0 +1,4 @@
+LIBRARY Views.DLL
+EXPORTS
+    Linkage=g_views_linkage DATA
+    ImportTable=g_views_imports DATA

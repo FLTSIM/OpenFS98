@@ -95,6 +95,9 @@ make maindiff-run SUITE=objalloc     # MAIN slice 13, allocate an object slot (+
 make main-breaks SUITE=objalloc      # its breaks -> 15, 14 caught, 1 proven equivalent (~6 min)
 make maindiff-run SUITE=eye          # MAIN slice 14, the eye's reticle (+0xc0) -> 20000 scenarios, 0 differ (~4 min)
 make main-breaks SUITE=eye           # its breaks -> 13, 12 caught, 1 proven equivalent (~5 min)
+make maindiff-run SUITE=band         # MAIN slice 15, the altitude band (+0x9c) -> 20000 scenarios, 0 differ (~4 min)
+make main-breaks SUITE=band          # its breaks -> 33, all caught (~12 min)
+make hostdiff-run                    # HOST (id 1, FLTSIM98.EXE) slices 1-3, 12 services -> 0 differ (~5 s); N=.. iterations
 make mpchatdiff-run      # whole-module MPCHAT, the chat window -> 20000 scenarios, 0 differ (~20 s)
 make mpchat-breaks       # MPCHAT broken on purpose -> 117 breaks, 113 caught, 4 proven equivalent (~8 min)
 make winmsgdiff-run      # whole-module WINMSG, the message bar -> 20000 scenarios, 0 differ (~2 min)

@@ -273,6 +273,7 @@ static const uint32_t retail_linkage[] = {
 #include "main_season.inc"
 #include "main_sun.inc"
 #include "main_eye.inc"
+#include "main_band.inc"
 
 __asm__(".globl _ImportTable\n\t.set _ImportTable, _main_image + 0x0\n\t"
         ".globl _Linkage\n\t.set _Linkage, _main_image + 0xc0");
@@ -305,6 +306,7 @@ static void main_install(void)
         { 0x34, (void *)menu_enable },
         { 0x84, (void *)obj_alloc },
         { 0x8c, (void *)obj_free },
+        { 0x9c, (void *)nav_band },
         { 0xa0, (void *)nav_sun },
         { 0xa4, (void *)nav_clock_ascii },
         { 0xc0, (void *)nav_eye },

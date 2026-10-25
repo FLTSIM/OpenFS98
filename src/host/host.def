@@ -1,0 +1,4 @@
+LIBRARY HOST.DLL
+EXPORTS
+    HostTable DATA
+    host_image DATA

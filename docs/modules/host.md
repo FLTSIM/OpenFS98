@@ -364,12 +364,49 @@ and G3D `+0x28` (`0x206e18c6`). Wine never hands the filter a fault raised
 inside a window procedure, and that is what froze the 3D view; see
 [../wine.md](../wine.md) and `SEHFIX.DLL`.
 
+## Reimplementation
+
+`src/host/host.c` is the reimplementation, built as `HOST.DLL` and verified by
+`tools/difftest/hostdiff.c` a slice at a time, the way the modules are. It is
+not installed -- the host is the executable and cannot be swapped out -- so it
+exists for the native build and as a tested specification; a native OpenFS98 is
+this service table on a portable runtime.
+
+The harness runs the **real host in process beside ours**, which is the trick
+that makes the host testable at all. The real host is a reloc-stripped image
+that must sit at 0x400000, an address wine keeps committed and will neither
+hand out (`VirtualAlloc` there fails 487) nor free (`VirtualFree` crashes). So
+the harness does not load it: it `VirtualProtect`s the region wine already owns
+to `PAGE_EXECUTE_READWRITE` and copies the file's headers and sections into
+place. The service table then stands at 0x417ba0 with its absolute 0x4xxxxx
+code pointers valid, and any pure service can be called. The harness is linked
+at 0x13000000 so it does not itself occupy 0x400000; our `HOST.DLL` is a normal
+relocatable DLL exporting its table (`HostTable`) and its `.data` image
+(`host_image`). For each done slot the harness calls both sides and compares
+the result, normalising a pointer into either side's `.data` to an offset.
+`make hostdiff-run`.
+
+| slice | services | status |
+| --- | --- | --- |
+| 1, the plain accessors | `+0x1c` (returns 1), `+0x20`/`+0x34` (host globals), `+0x58`/`+0x5c`/`+0x60` (addresses of host structures) | verified: 0 differ; a deliberate wrong return is caught |
+| 2, the simple state services | `+0x18` (copies six fields of its argument into the globals at 0x418830), `+0x2c` (sets the flag at 0x4187ec), `+0x54` (reads the globals 0x41880c and 0x418828 back through two out-pointers) | verified: 0 differ over many iterations; a deliberate wrong write is caught |
+| 3, the C-runtime strings | `+0x2a8` strcpy, `+0x2b0` strcat, `+0x2b8` strlen (0 for a null pointer) | verified: 0 differ over thousands of random strings; a deliberate off-by-one is caught |
+
+Slice 2 grew the harness two ways that every later slice reuses: it passes
+arguments (a struct pointer, out-pointers), and after each call it digests the
+whole `.data` image on both sides and reports the first word that differs.
+Because our image is a byte-for-byte copy of the host's `.data`, the two start
+identical and the digest needs no relocation masking -- a difference is a write
+we got wrong.
+
 ## Status
 
-2 of 194 services implemented. 71 have prototypes confirmed from the callee
-and recorded in `host.h` (15 of them the window services, from WINDOW), and 11 are verified in-process: the clock, `strlen`,
-and the nine-service enumeration cluster above. The dialog registry's contents
-are checked in-process too. 13 more are named from their
-shape alone, and all 194 are classified by subsystem. Sizes reported by the mapper are upper bounds:
-they are the gap to the next table-referenced address, and internal helpers
-that no slot points at fall inside those gaps.
+12 of 194 services reimplemented in `src/host/host.c` and verified against the
+real host in process (slices 1 to 3 above). 71 have prototypes confirmed from the
+callee and recorded in `host.h` (15 of them the window services, from WINDOW),
+and 11 were already exercised in-process through other modules' harnesses: the
+clock, `strlen`, and the nine-service enumeration cluster above. The dialog
+registry's contents are checked in-process too. 13 more are named from their
+shape alone, and all 194 are classified by subsystem. Sizes reported by the
+mapper are upper bounds: they are the gap to the next table-referenced address,
+and internal helpers that no slot points at fall inside those gaps.

@@ -23,6 +23,7 @@ slot is done MAIN is not in `MODULES` and is never installed.
 | 12, the sun direction and intensity | `+0xa0` (assembly, `.text+0x830d`..`+0x95e9`, helper `+0x9097`) | `sun` | verified: 20,000 scenarios, 0 differ; 12 of 14 breaks caught, 2 proven equivalent |
 | 13, allocate an object slot | `+0x84` (assembly, `.text+0x16100`..`+0x162e5`) | `objalloc` | verified: 20,000 scenarios, 0 differ; 14 of 15 breaks caught, 1 proven equivalent |
 | 14, the eye's reticle | `+0xc0` (assembly, `.text+0x16a0`..`+0x18c2`) | `eye` | verified: 20,000 scenarios, 0 differ; 12 of 13 breaks caught, 1 proven equivalent |
+| 15, the altitude band and its 3D submission | `+0x9c` (assembly, `.text+0x6de9`..`+0x6f58`, helper `+0x7200`..`+0x73d6`) | `band` | verified: 20,000 scenarios, 0 differ; 33 of 33 breaks caught |
 
 ## Binary and linkage
 
@@ -72,7 +73,7 @@ calls are reached from the host, the `English\` dialog modules, or CHAIN.
 | `+0x78`, `+0x7c` | `.text+0x19c94`, `+0x19cd5` | | `+0x78` **slice 4**, `+0x7c` **slice 5** |
 | `+0x80` | `.text+0x19f10` | ADVDRV, PANELS | **slice 4**: `(which, &tenths)` |
 | `+0x84`..`+0x90` | `.text+0x16100`, `+0x162f0`, `+0x16570`, `+0x10560` | CONTROLS, WINDOW (`+0x88`) | object table at `.data+0x9794`, 0x2d4-byte entries: `+0x84` **slice 13** allocates, `+0x88` iterates, `+0x8c` **slice 10** releases |
-| `+0x94`..`+0xa0` | `.text+0x7140`, `+0x6f59`, `+0x6de9`, `+0x830d` | WEATHERM (`+0x94`), WINDOW (`+0x98`, `+0x9c`) | `+0xa0` is **slice 12**: the sun direction |
+| `+0x94`..`+0xa0` | `.text+0x7140`, `+0x6f59`, `+0x6de9`, `+0x830d` | WEATHERM (`+0x94`), WINDOW (`+0x98`, `+0x9c`) | `+0x9c` is **slice 15** (the altitude band), `+0xa0` is **slice 12**: the sun direction |
 | `+0xa4`, `+0xa8` | `.text+0x16ddf`, `+0x6450` | ADVDRV, CONTROLS, WINDOW | `+0xa4` is **slice 7** |
 | `+0xac`..`+0xbc` | `.text+0xc870`, `+0xcdb0`, `+0xdd70`, `+0xe5a0`, `+0xed10` | CONTROLS (`+0xac`), FACIL (`+0xb0`) | |
 | `+0xc0`..`+0xc8` | `.text+0x06a0`, `+0xc560`, `+0x18f0` | WINDOW, FACIL, CONTROLS | `+0xc0` is **slice 14** (the eye's reticle), `+0xc8` is **slice 8** |
@@ -580,3 +581,38 @@ boxes (the `done-eq` break).
 `make maindiff-run SUITE=eye`: 20,000 scenarios, 0 differences, over a random
 box and style (now and then done or guarded, so the early return shows). `make
 main-breaks SUITE=eye`: 13 breaks, 12 caught, 1 proven equivalent (`done-eq`).
+
+## Slice 15: the altitude band and its 3D submission
+
+`src/main/main_band.inc`, `.text+0x6de9` (`+0x9c`) with its tail helper
+`.text+0x7200`, assembly. The service classifies the aircraft's reference
+altitude (GLOBAL `+0x5c4`, a signed word) into one of five bands and leaves the
+index 0..4 in GLOBAL `+0xe86`, with a derived word in the scratch `.data+0x1a76`.
+The band edges are two centre-half-width pairs (`+0xe6a`/`+0xe6c` and
+`+0xe72`/`+0xe74`) laid out as centre-minus-half-width in `.data+0x1a94` and
+`+0xaac`; which edges apply, and whether a middle band interpolates (an unsigned
+16x16 multiply whose high word is taken), is chosen by the `+0xe78` flag. A gate
+word `+0xe70` of zero drops straight to band 4. The helper then stages a run of
+draw commands: it patches a handful of static command blocks in `.data` from
+GLOBAL fields and hands each, in turn, to G3D `+0x1c` once and `+0x24` one to
+three times.
+
+- **This is the first MAIN slice to drive G3D (module id 14).** The draws are
+  fire-and-forget -- their results are never read -- so the harness logs the
+  command block each is handed (by image offset, identical on both sides) and
+  only MAIN's own classification arithmetic, its `.data` patches and the order
+  of the draws are under test. G3D is verified in its own harness.
+- **One scratch word holds a run-time image pointer.** `.data+0x1a72` stages the
+  block pointer for G3D; it is not a relocation, so put_state normalises it like
+  one (keeping the offset, so a wrong block still shows), alongside the
+  situation reader's run-time pointers.
+- **The stack-alignment dance and the `+0x3a8` save/restore are left out.** The
+  hand-rolled alignment around each call and the push/pop of GLOBAL `+0x3a8`
+  across the first call (which leaves it unchanged) have no observable effect.
+
+### Verifying the band
+
+`make maindiff-run SUITE=band`: 20,000 scenarios, 0 differences, over random
+centre/width pairs, flags and gate, with the altitude now and then snapped onto
+a computed band edge (and its neighbours) so the comparison boundaries are
+exercised exactly. `make main-breaks SUITE=band`: 33 breaks, 33 caught.

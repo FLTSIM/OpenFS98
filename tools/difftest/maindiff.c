@@ -94,6 +94,7 @@ static uint32_t relocs[MAX_RELOCS], nrelocs;
 static uint8_t host[0x340], global[0x1400], stub_module[0x400];
 static uint8_t acontain[0x40], controls[0x60], sound[0x40], util[0xc0], weatherm[0x40], multip[0x40], fe[0x40];
 static uint8_t hg2d[0x40];
+static uint8_t g3d[0x40];
 static uint8_t chain[0x24];
 static uint8_t arena[ARENA_SIZE] __attribute__((aligned(16)));
 static uint32_t arena_used;
@@ -1016,6 +1017,26 @@ static uint32_t STDCALL hg2d_34(uint32_t ctx, uint32_t a, uint32_t b, uint32_t c
     return 0;
 }
 
+/* G3D +0x1c and +0x24, the band's draw submissions (+0x9c).  Each is handed a
+ * pointer to a static command block in MAIN's .data; the band only ever hands
+ * blocks it has already patched in place, never reading anything back, so a
+ * stub that logs which block (by image offset) is enough.  G3D is verified in
+ * its own harness. */
+static uint32_t STDCALL g3d_1c(uint32_t cmd)
+{
+    put(" g3d+0x1c(");
+    put_ptr(cmd);
+    put(")");
+    return 0;
+}
+static uint32_t STDCALL g3d_24(uint32_t cmd)
+{
+    put(" g3d+0x24(");
+    put_ptr(cmd);
+    put(")");
+    return 0;
+}
+
 /* FE +0x2c and UTIL +0x88, as logging models for +0x7c (station lookup and
  * format).  FE and UTIL are verified elsewhere; the pair just has to be
  * deterministic, define exactly the bytes +0x7c then copies out, and log
@@ -1194,6 +1215,9 @@ static void build_stubs(void)
     *(uint32_t *)hg2d = 13;
     SET_SLOT(hg2d, 0x1c, hg2d_1c);
     SET_SLOT(hg2d, 0x34, hg2d_34);
+    *(uint32_t *)g3d = 14;
+    SET_SLOT(g3d, 0x1c, g3d_1c);
+    SET_SLOT(g3d, 0x24, g3d_24);
 }
 
 /* ---- loading ----------------------------------------------------------------------- */
@@ -1260,7 +1284,7 @@ static void load_side(struct side *s, const char *path, const char *name)
                    im->id == 16 ? (void *)controls : im->id == 39 ? (void *)sound :
                    im->id == 20 ? (void *)util : im->id == 27 ? (void *)weatherm :
                    im->id == 35 ? (void *)multip : im->id == 18 ? (void *)fe :
-                   im->id == 13 ? (void *)hg2d :
+                   im->id == 13 ? (void *)hg2d : im->id == 14 ? (void *)g3d :
                    (void *)stub_module;
     memcpy(s->pristine, s->image, IMAGE_SIZE);
 }
@@ -1301,8 +1325,9 @@ static void put_state(void)
          * being relocations: the situation reader's record and cursor (some
          * unaligned), the record being read and where its body is read
          * from.  Only these: any other word that looks like an image address
-         * is a value that happens to (a length, say). */
-        static const uint32_t odd[] = { 0x41e1, 0x41e5, 0x41f5, 0x41f9, 0x9754, 0x9758 };
+         * is a value that happens to (a length, say).  0x1a72 is the band's
+         * draw-command staging word (+0x9c). */
+        static const uint32_t odd[] = { 0x41e1, 0x41e5, 0x41f5, 0x41f9, 0x9754, 0x9758, 0x1a72 };
         uint32_t j, v;
         for (j = 0; j < sizeof odd / sizeof odd[0]; j++) {
             memcpy(&v, img + odd[j], 4);
@@ -2409,6 +2434,79 @@ static void report_eye(void)
     printf("  eye %lu (stamped %lu)\n", cover_eye, cover_eye_drawn);
 }
 
+/* ---- suite: band (the altitude band and its 3D submission, +0x9c) --------------- */
+
+static unsigned long cover_band, cover_band_ix[5], cover_band_double, cover_band_skip;
+
+static void op_band(void)
+{
+    uint16_t ix;
+    int16_t e1lo, e1hi, e2lo, e2hi, alt;
+
+    /* the two centre/half-width pairs the bands are built from */
+    *(int16_t *)(global + 0xe6a) = (int16_t)(rnd_n(3) ? (int16_t)(rnd() & 0x3fff) - 0x2000 : rnd());
+    *(uint16_t *)(global + 0xe6c) = (uint16_t)(rnd_n(3) ? rnd_n(0x1000) : rnd());
+    *(int16_t *)(global + 0xe72) = (int16_t)(rnd_n(3) ? (int16_t)(rnd() & 0x3fff) : rnd());
+    *(uint16_t *)(global + 0xe74) = (uint16_t)(rnd_n(3) ? rnd_n(0x1000) : rnd());
+    *(uint16_t *)(global + 0xe6e) = (uint16_t)rnd();
+    *(uint16_t *)(global + 0xe76) = (uint16_t)rnd();
+    /* the band edges, as the service computes them, so the altitude can be
+     * snapped onto one and the comparison boundaries are exercised exactly */
+    e1lo = (int16_t)(*(uint16_t *)(global + 0xe6a) - (*(uint16_t *)(global + 0xe6c) >> 1));
+    e1hi = (int16_t)(e1lo + *(uint16_t *)(global + 0xe6c));
+    e2lo = (int16_t)(*(uint16_t *)(global + 0xe72) - (*(uint16_t *)(global + 0xe74) >> 1));
+    e2hi = (int16_t)(e2lo + *(uint16_t *)(global + 0xe74));
+    if (rnd_n(2)) {
+        static const int16_t off[] = { -1, 0, 1 };
+        const int16_t edge[] = { e1lo, e1hi, e2lo, e2hi };
+        alt = (int16_t)(edge[rnd_n(4)] + off[rnd_n(3)]);
+    } else {
+        alt = (int16_t)(rnd_n(2) ? (int16_t)(rnd() & 0x7fff) - 0x4000 : rnd());
+    }
+    *(int16_t *)(global + 0x5c4) = alt;
+    *(uint16_t *)(global + 0xe70) = (uint16_t)(rnd_n(5) ? rnd() | 1 : 0);   /* the gate */
+    *(uint16_t *)(global + 0xe78) = (uint16_t)(rnd_n(2) ? 0 : rnd() | 1);   /* the band flag */
+    *(uint16_t *)(global + 0xcb4) = (uint16_t)(rnd_n(2) ? 2 : rnd());
+    *(uint16_t *)(global + 0x5ce) = (uint16_t)(rnd_n(2) ? rnd_n(0x2000) : rnd());
+    /* the helper's inputs */
+    *(uint16_t *)(global + 0xdce) = (uint16_t)(rnd_n(3) ? 0 : rnd());
+    *(int32_t *)(global + 0x394) = rnd_n(2) ? 0 : (int32_t)rnd();
+    *(uint16_t *)(global + 0x3bc) = (uint16_t)rnd();
+    *(uint16_t *)(global + 0xb50) = (uint16_t)rnd();
+    *(uint32_t *)(global + 0x5d0) = rnd();
+    *(uint16_t *)(global + 0xd44) = (uint16_t)rnd();
+    *(uint16_t *)(global + 0x3a8) = (uint16_t)rnd();
+
+    if (counting) cover_band++;
+    put("\n#band e6a=%d e6c=%u e72=%d e74=%u alt=%d gate=%#x flag=%#x cb4=%#x 5ce=%#x"
+        " dce=%#x g394=%d",
+        *(int16_t *)(global + 0xe6a), *(uint16_t *)(global + 0xe6c),
+        *(int16_t *)(global + 0xe72), *(uint16_t *)(global + 0xe74),
+        *(int16_t *)(global + 0x5c4), *(uint16_t *)(global + 0xe70),
+        *(uint16_t *)(global + 0xe78), *(uint16_t *)(global + 0xcb4),
+        *(uint16_t *)(global + 0x5ce), *(uint16_t *)(global + 0xdce),
+        *(int32_t *)(global + 0x394));
+    ((s0)SVC(0x9c))();
+    ix = *(uint16_t *)(global + 0xe86);
+    if (counting) {
+        if (ix < 5) cover_band_ix[ix]++;
+        if (ix == 0 && *(uint16_t *)(global + 0xe78) != 0) cover_band_double++;
+        if (*(uint16_t *)(global + 0xdce) == 0 && *(int32_t *)(global + 0x394) != 0)
+            cover_band_skip++;
+    }
+    put(" -> band=%u s1a76=%#x a70=%#x",
+        ix, *(uint16_t *)(cur->image + 0x1a76), *(uint16_t *)(cur->image + 0x1a70));
+}
+
+static void setup_band(void) { }
+
+static void report_band(void)
+{
+    printf("  band %lu (ix 0/1/2/3/4 = %lu/%lu/%lu/%lu/%lu, interp-double %lu, de2 skipped %lu)\n",
+           cover_band, cover_band_ix[0], cover_band_ix[1], cover_band_ix[2],
+           cover_band_ix[3], cover_band_ix[4], cover_band_double, cover_band_skip);
+}
+
 /* ---- running ---------------------------------------------------------------------- */
 
 struct suite {
@@ -2437,6 +2535,7 @@ static const struct suite suites[] = {
     { "sun", op_sun, report_sun, 20, setup_sun, 0x00 },
     { "objalloc", op_objalloc, report_objalloc, 20, setup_objalloc, 0x00 },
     { "eye", op_eye, report_eye, 20, setup_eye, 0x00 },
+    { "band", op_band, report_band, 20, setup_band, 0x00 },
 };
 
 static const struct suite *suite;

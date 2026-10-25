@@ -395,6 +395,10 @@ the result, normalising a pointer into either side's `.data` to an offset.
 | 5, the small accessors and stubs | `+0x154`/`+0x2cc` (a constant and the 0x41a3cc flag), `+0x288` (stores into 0x417194), `+0x304` (clears a dword), `+0x108`/`+0x12c`/`+0x220`/`+0x224` (the zero stubs) | verified: 0 differ |
 | 6, the allocator and the growable array | `+0x20c` alloc, `+0x210` realloc, `+0x214` free, `+0x21c` memmove; `+0x2f8` append, `+0x2fc` free a list, `+0x300` remove, `+0x308`/`+0x30c` walk forward/back, `+0x310` find | verified: 0 differ over 20,000 iterations; its 24 breaks caught (`free-null` by a hang: the double free wedges wine's heap) |
 | 7, the command line, file extensions and the C-runtime wrappers | `+0x98`/`+0x9c`/`+0xa0`/`+0xa4` (a command-line option as text, int, double, or whether given), `+0x1ac` (an extension's id, registering a new one), `+0x188` (split a path, UNC-aware, and identify its extension), `+0x22c` qsort, `+0x230` swap two blocks, `+0x234` bsearch, `+0x2ac` strncpy, `+0x2b4` strdup, `+0x2c0` _strcmpi, `+0x2c8` (delete a character throughout a string) | verified: 0 differ over 20,000 iterations; 30 breaks, 27 caught, 3 proven equivalent |
+| 8, string resources | `+0x2a0` (LoadStringA from the string modules, newest first, then the host), `+0x2a4` (the same into a new block), `+0x298`/`+0x29c` (a module's HMODULE onto / off the string list), `+0x1d0`/`+0x1d4` (an input's name -- "Button 07", "Axis 03" -- and back) | verified: 0 differ over 20,000 iterations; 22 breaks caught |
+| 9, names, paths and image buffers | `+0x178`/`+0x18c` (a valid file name / path), `+0x184` (join drive, directory and name), `+0x1b4`/`+0x1b8`/`+0x1bc` (create, free, resize an image buffer) | verified: 0 differ over 20,000 iterations; 18 breaks caught |
+| 10, accelerator tables | `+0x1d8` new, `+0x1dc` destroy, `+0x1e0` id by index, `+0x1e4` load from a resource, `+0x1e8`/`+0x1ec` enable/disable, `+0x1f0` clear, `+0x1f4` add entries, `+0x1f8` remove entries, `+0x1fc` read entries | verified: 0 differ over 20,000 iterations; 23 breaks, 19 caught, 4 proven equivalent |
+| 11, key names | `+0x200` (a key code's name: "CTRL + SHIFT + F1"), `+0x204` (a name's key code) | verified: 0 differ over 20,000 iterations; 15 breaks caught |
 
 The harness now seeds `.data` with distinct random values on both sides before
 each iteration (leaving the service table and bounding the string constant at
@@ -484,6 +488,56 @@ trampoline -- not reentrant. Both sides call one MSVCRT, so ties sort alike.
 `+0x22c`'s return is whatever MSVCRT's `qsort` left in eax; ours returns 0,
 and no caller reads it.
 
+Slice 8 reaches string resources, which the harness can serve because
+**LoadStringA works on the mapped host**: wine finds resources from a module's
+own headers, so `LoadStringA(0x400000, 9)` reads the real host's string table
+although the loader never loaded it. The strings the game asks for mostly live
+in the language DLL, ENGLISH.FLL ("Button ", "Axis ", "Generic_%d" ...),
+which the harness loads as a data file, with SIMSUI.DLL and DIALOG.DLL; it
+seeds the host's string-module list (0x4182e0, HMODULEs) and its module
+records (0x417b30, 0x14 bytes: HMODULE at +8, id at +0xc, loaded at +0x10)
+on both sides with those handles, and the host instance (0x41882c) with
+0x400000. `+0x1d0`/`+0x1d4` load the two input-name prefixes on first use
+(flag 0x41a240); the harness seeds that flag both ways, and, when set, the
+prefixes and their lengths with short strings of its own. Quirks reproduced:
+both return whatever eax holds (wsprintfA's count, the loader's last length,
+or the last compare); a number past 64 buttons or 16 axes gives code 0; and
+the axis prefix is compared from just past a matched button prefix.
+
+The **image buffers** of slice 9 are a 0x20-byte header -- format (0..5),
+width, height, stride, row table, size, pixels -- with the bytes per pixel of
+each format (1 1 2 2 3 4) in a table at 0x4180e8 and the stride rounded up
+to 4. Pixels and row table are zeroed; a resize discards the contents. The
+name checks refuse `" & * / < > ? |` (a file name also `:` and `\`), let
+everything outside 0x22..0x7c through, and return 0x1003 for an empty name.
+
+**Accelerator tables** (slice 10) are the host's own, not Windows': a list
+at 0x418278 of 0x10-byte tables { enabled, id, entries, count }, ids from a
+counter at 0x418294 that skips 0 on wrapping (but hands out 0 if it starts
+there), entries of 12 bytes { command, flags (1 shift, 2 ctrl, 4 alt, 8
+virtual key), key + 0x10000 } converted from Windows' 6-byte ACCEL. `+0x1e4`
+loads an accelerator resource where strings are found (the string modules,
+then the host instance) -- ENGLISH.FLL has three, 103 to 105, the first with
+148 entries; the harness sometimes makes ENGLISH.FLL the host instance so the
+fallback is exercised. `+0x1dc` takes a *pointer* to the id and zeroes it;
+`+0x1f8` removes every entry equal to one given, zeroing the vacated slot,
+and only then shrinks the array (freeing it if empty); `+0x1fc`'s second
+argument is unused and it does anything only in mode 2.
+
+**Key names** (slice 11) use ten words the host's init loads from
+ENGLISH.FLL (strings 0x9520..0x9529: "CTRL + ", "SHIFT + ", "ALT + ",
+"NumLock", "Num Enter", "Num /", "Break", "Menu", "Right Windows", "Left
+Windows") into pointers at 0x41bec0 and nearby, which the harness points at
+its own copies on both sides. `+0x200` names a key code (virtual key in the
+low byte, 2 ctrl / 1 shift / 4 alt above it): the modifier words, then the
+host's word for keys 3/0x13, 0x5b..0x5d, 0x6f, 0x87, 0x90, else
+GetKeyNameTextA of the scan code with the don't-care bit. It passes `len -
+used - 1` on unchecked, so a buffer shorter than the modifier words makes a
+negative count -- strncpy's zero fill then runs off the end of memory; the
+harness keeps buffers long enough. `+0x204` parses a name back, trying the
+host's words as prefixes and then every virtual key 0..0xff by
+case-insensitive name (0x100 when none matches).
+
 ### Continuing the reimplementation
 
 To add the next service: find it in the table with `python3 tools/hostmap.py`
@@ -512,8 +566,8 @@ leaves left unimplemented.
 
 ## Status
 
-49 of 194 services reimplemented in `src/host/host.c` and verified against the
-real host in process (slices 1 to 7 above). 71 have prototypes confirmed from the
+72 of 194 services reimplemented in `src/host/host.c` and verified against the
+real host in process (slices 1 to 11 above). 71 have prototypes confirmed from the
 callee and recorded in `host.h` (15 of them the window services, from WINDOW),
 and 11 were already exercised in-process through other modules' harnesses: the
 clock, `strlen`, and the nine-service enumeration cluster above. The dialog

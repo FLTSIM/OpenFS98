@@ -1126,6 +1126,7 @@ $(DIFFDIR)/hostdiff.exe: tools/difftest/hostdiff.c
 hostdiff: $(DIFFDIR)/hostdiff.exe $(BIN)/HOST.DLL
 	@cp $(ORIG)/FLTSIM98.EXE $(DIFFDIR)/FLTSIM98.EXE
 	@cp $(BIN)/HOST.DLL      $(DIFFDIR)/HOST_ours.dll
+	@cp $(ORIG)/ENGLISH.FLL $(ORIG)/SIMSUI.DLL $(ORIG)/DIALOG.DLL $(DIFFDIR)/
 
 hostdiff-run: hostdiff
 	@cd $(DIFFDIR) && WINEDEBUG=-all timeout 600 wine hostdiff.exe $(if $(N),$(N),1)

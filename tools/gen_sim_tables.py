@@ -65,7 +65,7 @@ def control_vtables(asm):
         match = re.fullmatch(r'mov\s+(e\w+),(e\w+)', op)
         if match:
             registers[match[1]] = registers.get(match[2]); continue
-        match = re.fullmatch(r'mov\s+(e\w+),DWORD PTR ds:0x223cd514', op)
+        match = re.fullmatch(r'mov\s+(e\w+),(?:DWORD PTR )?ds:0x223cd514', op)
         if match:
             registers[match[1]] = ('vtable', 2); continue
         match = re.fullmatch(r'mov\s+DWORD PTR \[(e\w+)\],(0x223ca450|e\w+)', op)
@@ -75,6 +75,51 @@ def control_vtables(asm):
             if obj and obj[0] == 'object' and value and value[0] == 'vtable':
                 stores[obj[1]] = value[1]
     return stores
+
+
+def cleanup_imports(pe, asm):
+    handlers = [int(m[1],16) for op in asm[:5]
+                if (m := re.fullmatch(r'push\s+0x223c([0-9a-f]+)',op))]
+    if len(handlers) != 1: raise SurveyError('unknown EH registration')
+    handler = handlers[0]
+    metadata = pe.va_uint32(pe.uiBase + handler + 1)
+    if pe.va_uint32(metadata) != 0x19930520: raise SurveyError('unknown EH metadata')
+    count, table = pe.va_uint32(metadata+4), pe.va_uint32(metadata+8)
+    if count > 80: raise SurveyError('unreasonable unwind state count')
+    imports = {}
+    for i in range(count):
+        previous, action = pe.va_uint32(table+i*8), pe.va_uint32(table+i*8+4)
+        if previous != (i-1)&0xffffffff: raise SurveyError('nonlinear unwind states')
+        code = instructions(action-pe.uiBase, action-pe.uiBase+24)
+        offset = 0
+        for op in code:
+            m = re.fullmatch(r'add\s+ecx,0x([0-9a-f]+)',op)
+            if m: offset=int(m[1],16)
+            m = re.fullmatch(r'jmp\s+DWORD PTR ds:0x223c([0-9a-f]+)',op)
+            if m: imports[offset]=int(m[1],16);break
+            if op == 'jmp    0x223c7ce4': imports[offset]=0xd38c;break
+            if op.startswith('jmp'): raise SurveyError(f'unknown cleanup target {op}')
+        else: raise SurveyError('unterminated unwind action')
+    return imports
+
+
+def descriptor_copies(start, end, descriptor_offset):
+    registers = {}
+    writes, combos = [], []
+    window = None
+    for op in instructions(start,end):
+        m = re.fullmatch(r'mov\s+(e\w+),DWORD PTR \[esi\+0x([0-9a-f]+)\]',op)
+        if m:
+            field=int(m[2],16)
+            registers[m[1]]=('descriptor',0) if field==descriptor_offset else ('field',field)
+            if field!=descriptor_offset:window=field
+        if op=='call   edi': registers['eax']=('selection',window)
+        m = re.fullmatch(r'mov\s+DWORD PTR \[(e\w+)\+0x([0-9a-f]+)\],(e\w+)',op)
+        if m and registers.get(m[1])==('descriptor',0):
+            source=registers.get(m[3])
+            if source and source[0]=='field': writes.append((source[1],int(m[2],16)))
+            if source and source[0]=='selection': combos.append((source[1],int(m[2],16)))
+    return writes,combos
 
 
 def main():
@@ -96,6 +141,10 @@ def main():
         base_hooks.add(base_ctor)
         ctor_hooks.update(a[1] for a in ctor[1:])
         dtor_hooks.update(a[1] for a in dtor)
+        unwind = cleanup_imports(pe,ctor_asm)
+        other_unwind = cleanup_imports(pe,dtor_asm)
+        if unwind != other_unwind: raise SurveyError(f'{name}: constructor/destructor EH differ')
+        dtor_hooks.update(unwind.values())
         if base_ctor not in (0xd578, 0xd510) or base_dtor not in (0xd588, 0xd520):
             raise SurveyError(f'{name}: unexpected base')
         vtable = [int(p[1],16) for s in ctor_asm
@@ -111,7 +160,7 @@ def main():
         ctor_vtables = control_vtables(ctor_asm)
         dtor_vtables = control_vtables(dtor_asm)
         lines.append(f'static const struct fs98_sim_control s_controls_{name}[] = {{')
-        lines += [f'    {{0x{offset:x}, 0x{ctor:x}, 0x{dtor:x}, {ctor_vtables.get(offset,0)}, {dtor_vtables.get(offset,0)}}},'
+        lines += [f'    {{0x{offset:x}, 0x{ctor:x}, 0x{dtor:x}, {ctor_vtables.get(offset,0)}, {dtor_vtables.get(offset,0)}, 0x{unwind.get(offset,dtor):x}}},'
                    for (offset,ctor),(_,dtor) in zip(ctor[1:],dtor[1:])]
         lines += ['};', f'static const struct fs98_sim_store s_stores_{name}[] = {{']
         lines += [f'    {{0x{offset:x}, 0x{value:x}}},' for offset,value in stores]
@@ -150,6 +199,17 @@ def main():
         else: raise SurveyError('unterminated help')
         lines.append('};')
         metadata.append((name,[size,template[0],ctor_rva,dtor_rva,delete,vtable[0],base_ctor,base_dtor,reset,len(ctor)-1,ddx_rva,help_rva,help_rva+0x20]))
+    for name,start,end,expected in (('piston',0x3079,0x3232,5),('turbine',0x3232,0x3314,3)):
+        ids=[int(m[1],16) for op in instructions(start,end)
+             if (m:=re.fullmatch(r'push\s+0x(f[0-9a-f]{3})',op)) and int(m[1],16)!=0xffffffff]
+        if len(ids)!=expected: raise SurveyError('engine string recipe changed')
+        lines.append(f'static const uint16_t s_engine_{name}_strings[] = {{'+', '.join(f'0x{x:x}' for x in ids)+'};')
+    engine_writes,engine_combos=descriptor_copies(0x2ee3,0x3008,0x111c)
+    if len(engine_writes)!=8 or len(engine_combos)!=5: raise SurveyError('engine exchange moved')
+    for name,rows in (('engine_writes',engine_writes),('engine_combos',engine_combos)):
+        lines.append(f'static const uint16_t s_{name}[][2] = {{')
+        lines += [f'    {{0x{source:x},0x{target:x}}},' for source,target in rows]
+        lines.append('};')
     lines.append('static const struct fs98_sim_class s_classes[] = {')
     for name,values in metadata:
         lines.append('    {'+', '.join(f'0x{x:x}' for x in values)+f', s_controls_{name}, s_stores_{name}'+'},')

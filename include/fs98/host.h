@@ -506,6 +506,118 @@ typedef void *(FS98_STDCALL *fs98_host_bsearch_fn)(const void *key, const void *
 /* +0x2c8 -- delete every occurrence of `c` from `s`, in place.  Returns s. */
 typedef char *(FS98_STDCALL *fs98_host_strip_char_fn)(char *s, int32_t c);
 
+/* ---- string resources, names, image buffers (HOST slices 8 and 9) ------- */
+
+/* +0x2a4 -- string `id` (as +0x2a0 finds it) in a new block from the host
+ * allocator, *out null if none.  Returns the count. */
+typedef int32_t (FS98_STDCALL *fs98_host_loadstring_dup_fn)(uint32_t id, char **out);
+
+/* +0x298 -- put module `id`'s HMODULE first in line for +0x2a0, and in *out.
+ * -1 with *out 0 if the module is unknown or not loaded. */
+typedef int32_t (FS98_STDCALL *fs98_host_strings_add_fn)(uint32_t module_id, void **out);
+
+/* +0x29c -- take an HMODULE off +0x2a0's list.  0, or -1 if it was not on it. */
+typedef int32_t (FS98_STDCALL *fs98_host_strings_drop_fn)(void *hmod);
+
+/* +0x1d0 -- the name of input code 1..0x10 (axes) or 0x11..0x50 (buttons) as
+ * the language DLL's prefix plus two digits, "" for any other code.  The
+ * third argument is unused.  Returns leftover eax. */
+typedef int32_t (FS98_STDCALL *fs98_host_input_name_fn)(int32_t code, char *buf, uint32_t unused);
+
+/* +0x1d4 -- the input code a name denotes, into *code (0 for none). */
+typedef int32_t (FS98_STDCALL *fs98_host_input_code_fn)(const char *name, int32_t *code);
+
+/* +0x178 / +0x18c -- is `s` a valid file name / path?  0; 0x1003 if empty;
+ * -1 if null or holding a refused character. */
+typedef int32_t (FS98_STDCALL *fs98_host_name_check_fn)(const char *s);
+
+/* An image buffer: +0x1b4 makes one, +0x1bc resizes it (contents lost),
+ * +0x1b8 frees it. */
+struct fs98_host_image {
+    int32_t  format;        /* 0..5; bytes per pixel 1 1 2 2 3 4 */
+    int32_t  width;
+    int32_t  height;
+    int32_t  stride;        /* width * bytes per pixel, rounded up to 4 */
+    uint8_t **rows;         /* height pointers into pixels */
+    int32_t  size;          /* height * stride */
+    uint8_t *pixels;        /* zeroed */
+};
+
+typedef int32_t (FS98_STDCALL *fs98_host_image_new_fn)(struct fs98_host_image **out, int32_t width,
+                                                       int32_t height, int32_t format);
+typedef int32_t (FS98_STDCALL *fs98_host_image_free_fn)(struct fs98_host_image *img);
+typedef int32_t (FS98_STDCALL *fs98_host_image_resize_fn)(struct fs98_host_image *img,
+                                                          int32_t width, int32_t height);
+
+/* ---- accelerators, key names (HOST slices 10 and 11) -------------------- */
+
+/* The host's accelerator tables, by id (never 0 unless the counter wrapped
+ * onto it).  An entry is 12 bytes. */
+struct fs98_host_accel {
+    uint32_t command;
+    uint32_t flags;         /* 1 shift, 2 ctrl, 4 alt, 8 virtual key */
+    uint32_t key;           /* the key + 0x10000 */
+};
+
+typedef int32_t (FS98_STDCALL *fs98_host_accel_new_fn)(uint32_t *id);                 /* +0x1d8 */
+typedef int32_t (FS98_STDCALL *fs98_host_accel_destroy_fn)(uint32_t *id);             /* +0x1dc, zeroes *id */
+typedef int32_t (FS98_STDCALL *fs98_host_accel_by_index_fn)(uint32_t *id, uint32_t i); /* +0x1e0 */
+typedef int32_t (FS98_STDCALL *fs98_host_accel_load_fn)(uint32_t *id, uint32_t res);  /* +0x1e4 */
+typedef int32_t (FS98_STDCALL *fs98_host_accel_id_fn)(uint32_t id);                   /* +0x1e8 on, +0x1ec off, +0x1f0 clear */
+typedef int32_t (FS98_STDCALL *fs98_host_accel_entries_fn)(uint32_t id, const struct fs98_host_accel *e,
+                                                           uint32_t n);               /* +0x1f4 add, +0x1f8 remove */
+/* +0x1fc -- with mode 2, *n = the entries from `start` on, copied to buf if
+ * not null.  The second argument is unused. */
+typedef int32_t (FS98_STDCALL *fs98_host_accel_read_fn)(uint32_t id, uint32_t unused, uint32_t start,
+                                                        uint32_t mode, struct fs98_host_accel *buf,
+                                                        uint32_t *n);
+
+/* +0x200 -- key code (vk | 2 ctrl, 1 shift, 4 alt << 8) to "CTRL + X" in buf;
+ * len must leave room past the modifier words.  +0x204 -- the reverse. */
+typedef int32_t (FS98_STDCALL *fs98_host_key_name_fn)(uint32_t key, char *buf, uint32_t len);
+typedef int32_t (FS98_STDCALL *fs98_host_key_code_fn)(const char *name, uint32_t *key);
+
+/* ---- profiles and files (HOST slices 12 and 13) -------------------------- */
+
+/* +0x0a8..+0x0cc, +0x0f8, +0x100 work on FLTSIM98.CFG; +0x0d0..+0x0f4,
+ * +0x0fc, +0x104 on path + extension id, in the same order.  Gets leave the
+ * output alone when the key is absent (an int's is its default); lists are
+ * "v,v,v", read n values (0 past the end). */
+typedef int32_t (FS98_STDCALL *fs98_host_cfg_int_fn)(const char *sec, const char *key, int32_t *io);
+typedef int32_t (FS98_STDCALL *fs98_host_cfg_put_int_fn)(const char *sec, const char *key, int32_t v);
+typedef int32_t (FS98_STDCALL *fs98_host_cfg_ints_fn)(const char *sec, const char *key, int32_t *v, uint32_t n);
+typedef int32_t (FS98_STDCALL *fs98_host_cfg_doubles_fn)(const char *sec, const char *key, double *v, uint32_t n);
+
+/* A host file: +0x17c opens (mode 0 read, 1 read/write, 2 write, 3 append;
+ * not shared), +0x148 creates, +0x13c closes; +0x19c reads, +0x1b0 writes,
+ * +0x194 seeks (not past the size), +0x190 tells, +0x1a4 sizes, +0x1a8
+ * truncates.  Paths are path + extension id throughout. */
+struct fs98_host_file {
+    void    *handle;
+    char    *path;
+    int32_t  mode;
+    int32_t  ext;
+};
+
+typedef int32_t (FS98_STDCALL *fs98_host_file_create_fn)(struct fs98_host_file **out, const char *path,
+                                                         int32_t ext);
+typedef int32_t (FS98_STDCALL *fs98_host_file_write_fn)(struct fs98_host_file *f, const void *buf,
+                                                        uint32_t n, uint32_t *put);
+typedef int32_t (FS98_STDCALL *fs98_host_file_attrs_fn)(uint32_t *flags, const char *path, int32_t ext);
+typedef int32_t (FS98_STDCALL *fs98_host_file_copy_fn)(const char *to, int32_t to_ext,
+                                                       const char *from, int32_t from_ext);
+
+#define FS98_HOST_S_LOADSTRING_DUP 0x2a4
+#define FS98_HOST_S_STRINGS_ADD    0x298
+#define FS98_HOST_S_STRINGS_DROP   0x29c
+#define FS98_HOST_S_INPUT_NAME     0x1d0
+#define FS98_HOST_S_INPUT_CODE     0x1d4
+#define FS98_HOST_S_FILE_NAME_OK   0x178
+#define FS98_HOST_S_PATH_NAME_OK   0x18c
+#define FS98_HOST_S_IMAGE_NEW      0x1b4
+#define FS98_HOST_S_IMAGE_FREE     0x1b8
+#define FS98_HOST_S_IMAGE_RESIZE   0x1bc
+
 #define FS98_HOST_S_OPTION         0x098
 #define FS98_HOST_S_OPTION_INT     0x09c
 #define FS98_HOST_S_OPTION_DOUBLE  0x0a0

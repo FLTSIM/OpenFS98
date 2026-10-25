@@ -135,19 +135,14 @@ void fs98_sim_engine_toggle(void *object, uint32_t index)
 }
 int32_t fs98_sim_engines_commit(void *object, uint32_t unused)
 {
-    static const uint16_t s_writes[][2] = {
-        {0x1db0,0x2c},{0x1ce8,0x34},{0x1c20,0x3c},{0x1b58,0x44},
-        {0x1e78,0x4c},{0x19c8,0x54},{0x1900,0x60},{0x1a90,0x68}
-    };
-    static const uint16_t s_combos[][2] = {{0x181c,8},{0x17d4,0x10},{0x178c,0x18},{0x1744,0x20}};
     uint32_t index;
     (void)unused;
     if (!D32(object, 0x1100)) return 0;
     for (index=0; index<8; ++index)
-        D32(PTR(object,0x111c),s_writes[index][1])=D32(object,s_writes[index][0]);
+        D32(PTR(object,0x111c),s_engine_writes[index][1])=D32(object,s_engine_writes[index][0]);
     for (index=0; index<4; ++index) {
-        int32_t selection=g_sim_services->send(D32(object,s_combos[index][0]),0x147,0,0);
-        D32(PTR(object,0x111c),s_combos[index][1])=(uint32_t)selection;
+        int32_t selection=g_sim_services->send(D32(object,s_engine_combos[index][0]),0x147,0,0);
+        D32(PTR(object,0x111c),s_engine_combos[index][1])=(uint32_t)selection;
     }
     if (D32(PTR(object,0x111c),0x6c)) {
         int32_t selection=g_sim_services->send(D32(object,0x16fc),0x147,0,0);
@@ -199,4 +194,95 @@ void fs98_sim_settings_close(void *object)
     if (notify) ((void *(TC *)(void *,uint32_t))PTR(PTR(notify,0),4))(notify,1);
     PTR(PTR(object,0x225c),0x1130)=0;
     g_sim_services->close(object);
+}
+
+/* 21b0: the first two radio matches return the virtual Validate(0) result.
+ * The third branch commits mode 2 and returns zero directly. */
+int32_t fs98_sim_damage_commit(void *object, uint32_t unused)
+{
+    uint32_t mode;
+    (void)unused;
+    if (!D32(object,0x1100))
+        return ((int32_t (TC *)(void *,uint32_t))PTR(PTR(object,0),0xe0))(object,0);
+    D32(PTR(object,0x1118),0x10)=D32(object,0x1218);
+    D32(PTR(object,0x1118),0x18)=D32(object,0x12e0);
+    D32(PTR(object,0x1118),0x20)=D32(object,0x13a8);
+    D32(PTR(object,0x1118),0x28)=D32(object,0x1564);
+    for (mode=0;mode<3;++mode) {
+        uint32_t offset=mode==0?0x13d4:mode==1?0x1590:0x1684;
+        int32_t checked=g_sim_services->window_long(D32(object,offset),-21);
+        if ((uint32_t)checked==D32(object,offset)) {
+            D32(PTR(object,0x1118),8)=mode;
+            if (mode<2) return ((int32_t (TC *)(void *,uint32_t))PTR(PTR(object,0),0xe0))(object,0);
+            break;
+        }
+    }
+    return 0;
+}
+void fs98_sim_damage_populate(void *object)
+{
+    uint32_t mode;
+    g_sim_services->check(AT(object,0x115c),D32(PTR(object,0x1118),0x10));
+    g_sim_services->check(AT(object,0x1224),D32(PTR(object,0x1118),0x18));
+    g_sim_services->check(AT(object,0x12ec),D32(PTR(object,0x1118),0x20));
+    g_sim_services->check(AT(object,0x14a8),D32(PTR(object,0x1118),0x28));
+    mode=D32(PTR(object,0x1118),8);
+    if (mode==2) g_sim_services->radio_check(AT(object,0x1664),1);
+    else if (mode==1) g_sim_services->radio_check(AT(object,0x1570),1);
+    else if (mode==0) {
+        g_sim_services->radio_check(AT(object,0x13b4),1);
+        fs98_sim_damage_radio(object,0);
+    }
+}
+/* 7300: retain the page vtable across validation/error callbacks, then reload
+ * the outer descriptor and close vtable after the callbacks have returned. */
+void fs98_sim_settings_accept(void *object)
+{
+    void *page=g_sim_services->active_page(AT(object,0x12e8));
+    uint32_t focused=g_sim_services->focus();
+    void *control=g_sim_services->from_handle(focused);
+    void *vtable;
+    int32_t id, error;
+    if (control && g_sim_services->is_edit(control)) id=g_sim_services->control_id(control);
+    else id=(int32_t)D32(page,0x7d0);
+    vtable=PTR(page,0);
+    error=((int32_t (TC *)(void *,uint32_t))PTR(vtable,0xd8))(page,(uint32_t)id);
+    if (error && ((int32_t (TC *)(void *,int32_t))PTR(vtable,0xdc))(page,error)) return;
+    D32(PTR(object,0x10ec),0)=1;
+    ((void (TC *)(void *))PTR(PTR(object,0),0xec))(object);
+}
+
+void fs98_sim_init_page_button(void *object,uint32_t offset,uint32_t font,uint32_t bitmap)
+{
+    void *control=AT(object,offset);
+    ((int32_t (TC *)(void *,void *,uint32_t,void *,void *,uint32_t))PTR(PTR(control,0),0xc4))(
+        control,AT(object,font),bitmap,PTR(object,0x10fc),PTR(object,0x10dc),g_sim_resource_module);
+}
+void fs98_sim_damage_init(void *object)
+{
+    struct fs98_sim_rect rect;
+    void *control=AT(object,0x111c);
+    fs98_sim_init_page_button(object,0x1664,0x530,0x134);
+    fs98_sim_init_page_button(object,0x1570,0x530,0x134);
+    fs98_sim_init_page_button(object,0x13b4,0x530,0x134);
+    fs98_sim_init_page_button(object,0x115c,0x4c0,0x139);
+    fs98_sim_init_page_button(object,0x1224,0x4c0,0x139);
+    fs98_sim_init_page_button(object,0x12ec,0x4c0,0x139);
+    fs98_sim_init_page_button(object,0x14a8,0x4c0,0x139);
+    g_sim_services->remap_rect(&rect,control);
+    g_sim_services->move_control(control,rect.left,rect.top,
+        (int32_t)((uint32_t)rect.right-(uint32_t)rect.left),
+        (int32_t)((uint32_t)rect.bottom-(uint32_t)rect.top),1);
+    fs98_sim_damage_populate(object);
+}
+void fs98_sim_reliability_init(void *object)
+{
+    g_sim_services->init_slider(AT(object,0x1348),0x135,0x136,PTR(object,0x10fc),PTR(object,0x10dc),
+        6,0x1a,6,8,1,-1,g_sim_resource_module);
+    g_sim_services->init_text(AT(object,0x1290),AT(object,0x760));
+    g_sim_services->init_text(AT(object,0x1120),AT(object,0x220));
+    g_sim_services->init_text(AT(object,0x11d8),AT(object,0x220));
+    fs98_sim_init_page_button(object,0x17c8,0x4c0,0x139);
+    fs98_sim_init_page_button(object,0x1890,0x4c0,0x139);
+    fs98_sim_reliability_populate(object);
 }

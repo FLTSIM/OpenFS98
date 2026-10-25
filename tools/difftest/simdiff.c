@@ -15,8 +15,11 @@
 #define LOG_SIZE 65536
 struct fixture {
     uint8_t guard_before[32], object[0x3000], descriptor[2][0x300];
-    uint8_t pages[2][0x1200], notify[3][32], help[32], exchange[32];
+    uint8_t pages[2][0x1200], notify[3][32], notify_storage[0x29c], help[32], exchange[64];
+    char axes[2][4][24];
+    const char *labels[2][4];
     char strings[2][2][32];
+    uint32_t resource_module;
     uint8_t guard_after[32];
 };
 static struct fixture s_fixture, s_initial, s_reference;
@@ -25,6 +28,8 @@ static uint32_t s_rng, s_seed, s_scenario, s_operation, s_calls, s_throw_at, s_s
 static uint32_t s_log_length, s_script, s_kind, s_descriptor_offset, s_comparisons, s_throws, s_faults, s_swaps;
 static int s_side, s_lifetime;
 static char s_logs[2][LOG_SIZE];
+static void *s_widget_vtable[60];
+static void *s_page_vtable[60], *s_other_page_vtable[60];
 static void *s_jump[5], *s_vtable[60], *s_other_vtable[60], *s_notify_vtable[60], *s_tabs_vtable[60];
 static uint32_t next_random(void) { s_rng^=s_rng<<13; s_rng^=s_rng>>17; s_rng^=s_rng<<5; return s_rng; }
 static uint32_t offset(const void *p) { return (uint32_t)((const uint8_t *)p-(const uint8_t *)&s_fixture); }
@@ -52,6 +57,7 @@ static void mutate(void)
     }
     if(s_script&8) {
         PTR(object,0x2258)=s_fixture.pages[1];PTR(object,0x225c)=s_fixture.pages[0];
+        if(s_side)fs98_sim_set_resource_module(s_seed);else D32(s_retail,0xc130)=s_seed;
     }
 }
 static void *base_construct(void *object,uint32_t import_slot,int32_t template,void *parent)
@@ -61,7 +67,7 @@ static void construct(void *object,uint32_t import_slot)
 static void destroy(void *object,uint32_t import_slot)
 { put("destroy %u import=%x vtable=%x\n",offset(object),import_slot,D32(object,0));D32(object,0)=import_slot;mutate(); }
 static void *allocate(uint32_t size)
-{ put("allocate %u\n",size);mutate();return s_scenario%11?s_fixture.object:0; }
+{ put("allocate %u\n",size);mutate();return s_scenario%11?(size==0x29c?s_fixture.notify_storage:s_fixture.object):0; }
 static void ui_delete(void *object) { put("ui.delete %u\n",offset(object));mutate(); }
 static void mfc_delete(void *object) { put("mfc.delete %u\n",offset(object));mutate(); }
 static void dialog_delete(void *object) { put("dialog.delete %u\n",offset(object));mutate(); }
@@ -82,11 +88,69 @@ static int32_t check(void *control,int32_t checked) { put("check %u %d\n",offset
 static int32_t slider_get(void *control) { put("slider.get %u\n",offset(control));mutate();return (int32_t)s_seed; }
 static void slider_range(void *control,int32_t min,int32_t max) { put("slider.range %u %d/%d\n",offset(control),min,max);mutate(); }
 static int32_t slider_set(void *control,int32_t position) { put("slider.set %u %d\n",offset(control),position);mutate();return (int32_t)s_seed; }
-static int32_t send_message(uint32_t window,uint32_t message,uint32_t first,uint32_t second) { put("send %u %x %u/%u\n",window,message,first,second);mutate();return (int32_t)(s_seed+s_calls); }
+static int32_t send_message(uint32_t window,uint32_t message,uint32_t first,uint32_t second) { if(message==0x143)put("send %u %x %u text=[%s]\n",window,message,first,(const char *)second);else put("send %u %x %u/%u\n",window,message,first,second);mutate();return (int32_t)(s_seed+s_calls); }
 static void text(void *control,const char *value) { put("text %u [%s]\n",offset(control),value);mutate(); }
 static void close_dialog(void *object) { put("base.close %u\n",offset(object));mutate(); }
+static int32_t radio_check(void *control,int32_t checked) { put("radio.check %u %d\n",offset(control),checked);mutate();return (int32_t)s_seed; }
+static void *active_page(void *tabs) { put("active.page %u\n",offset(tabs));mutate();return s_fixture.pages[s_scenario&1]; }
+static uint32_t focus(void) { put("focus\n");mutate();return s_seed; }
+static void *from_handle(uint32_t window) { put("from.handle %u\n",window);mutate();return s_scenario%3?s_fixture.exchange:0; }
+static int32_t is_edit(void *control) { put("is.edit %u\n",offset(control));mutate();return s_scenario&1; }
+static int32_t control_id(void *control) { put("control.id %u\n",offset(control));mutate();return (int32_t)s_seed; }
+static int32_t TC virtual_validate(void *object,uint32_t id)
+{ put("virtual.validate %u id=%u\n",offset(object),id);mutate();if(s_script&1)PTR(object,0)=s_other_page_vtable;return s_scenario%3?(int32_t)s_seed:0; }
+static int32_t TC virtual_other_validate(void *object,uint32_t id) { put("other.validate\n");return virtual_validate(object,id); }
+static int32_t TC virtual_error(void *object,int32_t error) { put("virtual.error %u error=%d\n",offset(object),error);mutate();return s_scenario&2; }
+static int32_t TC virtual_other_error(void *object,int32_t error) { put("other.error\n");return virtual_error(object,error); }
+static int32_t base_init(void *object) { put("base.init %u\n",offset(object));mutate();return (int32_t)s_seed; }
+static int32_t TC virtual_skin(void *object,uint32_t id,uint32_t module,uint32_t flags)
+{ put("skin %u id=%x module=%u flags=%u\n",offset(object),id,module,flags);mutate();return s_scenario%4?(int32_t)(s_seed|1):0; }
+static int32_t TC virtual_other_skin(void *object,uint32_t id,uint32_t module,uint32_t flags)
+{ put("other.skin\n");return virtual_skin(object,id,module,flags); }
+static int32_t init_button(void *control,void *font,void *alternate,uint32_t bitmap,void *dib,void *palette,
+    uint32_t flags,uint32_t color,uint32_t module,int32_t x,int32_t y,struct fs98_sim_rect rect)
+{
+    put("init.button %u font=%u/%u bitmap=%x dib=%u pal=%u flags=%u color=%x module=%u xy=%d/%d rect=%d/%d/%d/%d\n",
+        offset(control),offset(font),offset(alternate),bitmap,offset(dib),offset(palette),flags,color,module,x,y,rect.left,rect.top,rect.right,rect.bottom);
+    mutate();return (int32_t)s_seed;
+}
+static int32_t init_art(void *control,int32_t bitmap,void *dib,void *palette,uint32_t flags)
+{ put("init.art %u bitmap=%x dib=%u pal=%u flags=%u\n",offset(control),bitmap,offset(dib),offset(palette),flags);mutate();return (int32_t)s_seed; }
+static void init_text(void *control,void *font) { put("init.text %u font=%u\n",offset(control),offset(font));mutate(); }
+static void notify_construct(void *notify,uint32_t flags,uint32_t mode)
+{ put("notify.construct %u flags=%u mode=%u\n",offset(notify),flags,mode);D32(notify,0)=0xc0001234;D32(notify,4)=flags;D32(notify,8)=mode;mutate(); }
+static void notify_delete(void *notify) { put("notify.delete %u\n",offset(notify));mutate(); }
+static int32_t notify_send(void *notify,const char *format,const char *title,void *argument)
+{ put("notify.send %u format=[%s] title=[%s] argument=%u\n",offset(notify),format,title,(uint32_t)argument);mutate();return (int32_t)s_seed; }
+static void *get_control(void *object,uint32_t id) { put("get.control %u id=%x\n",offset(object),id);mutate();return s_fixture.exchange; }
+static void remap_rect(struct fs98_sim_rect *rect,void *control)
+{ put("remap.rect control=%u\n",offset(control));rect->left=(int32_t)s_seed;rect->top=(int32_t)(s_seed^0xfedcba98);rect->right=(int32_t)(s_seed+0x87654321);rect->bottom=(int32_t)(s_seed^0x12345678);mutate(); }
+static void move_control(void *control,int32_t x,int32_t y,int32_t width,int32_t height,int32_t repaint)
+{ put("move.control %u xy=%d/%d size=%d/%d repaint=%d\n",offset(control),x,y,width,height,repaint);mutate(); }
+static void paint_construct(void *dc,void *object) { put("paint.construct object=%u\n",offset(object));D32(dc,0)=s_seed;mutate(); }
+static void paint_destroy(void *dc) { put("paint.destroy marker=%u\n",D32(dc,0));mutate(); }
+static int32_t load_string(uint32_t module,uint32_t id,char *buffer,int32_t capacity)
+{ put("load.string module=%u id=%x capacity=%d\n",module,id,capacity);snprintf(buffer,capacity,"label%x",id);mutate();return strlen(buffer); }
+static int32_t invalidate(uint32_t window,const void *rect,int32_t erase)
+{ put("invalidate window=%u rect=%u erase=%d\n",window,(uint32_t)rect,erase);mutate();return (int32_t)s_seed; }
+static int32_t set_rect(struct fs98_sim_rect *rect,int32_t left,int32_t top,int32_t right,int32_t bottom)
+{ put("set.rect %d/%d/%d/%d\n",left,top,right,bottom);rect->left=left;rect->top=top;rect->right=right;rect->bottom=bottom;mutate();return (int32_t)s_seed; }
+static void string_construct_text(void *string,const char *text)
+{ put("string.construct.text [%s]\n",text);PTR(string,0)=(void *)text;mutate(); }
+static void draw_text(void *font,void *dc,uint32_t string,struct fs98_sim_rect rect,int32_t flags)
+{ put("draw.text font=%u marker=%u text=[%s] rect=%d/%d/%d/%d flags=%d\n",offset(font),D32(dc,0),(const char *)string,rect.left,rect.top,rect.right,rect.bottom,flags);mutate(); }
+static int32_t init_slider(void *control,uint32_t first_bitmap,uint32_t second_bitmap,void *dib,void *palette,
+    uint32_t first,uint32_t second,uint32_t third,uint32_t fourth,int32_t x,int32_t y,uint32_t module)
+{ put("init.slider %u bitmap=%x/%x dib=%u pal=%u cells=%u/%u/%u/%u xy=%d/%d module=%u\n",offset(control),first_bitmap,second_bitmap,(uint32_t)dib,(uint32_t)palette,first,second,third,fourth,x,y,module);mutate();return (int32_t)s_seed; }
+static int32_t TC widget_init(void *control,void *font,uint32_t bitmap,void *dib,void *palette,uint32_t module)
+{ put("widget.init %u font=%u bitmap=%x dib=%u pal=%u module=%u\n",offset(control),offset(font),bitmap,(uint32_t)dib,(uint32_t)palette,module);mutate();return (int32_t)s_seed; }
+static void init_group(void *control,void *font){put("init.group %u font=%u\n",offset(control),offset(font));mutate();}
+static void init_combo(void *control,void *font,void *label){put("init.combo %u font=%u label=%u\n",offset(control),offset(font),offset(label));mutate();}
+static void control_text(void *control,const char *value){put("control.text %u [%s]\n",offset(control),value);mutate();}
 static const struct fs98_sim_services s_services={base_construct,destroy,construct,allocate,ui_delete,mfc_delete,dialog_delete,
-    create,show,ddx,help,enable_window,enable_control,window_long,check,slider_get,slider_range,slider_set,send_message,text,close_dialog};
+    create,show,ddx,help,enable_window,enable_control,window_long,check,slider_get,slider_range,slider_set,send_message,text,close_dialog,radio_check,active_page,focus,from_handle,is_edit,control_id,
+    base_init,init_button,init_art,init_text,notify_construct,notify_delete,notify_send,get_control,remap_rect,move_control,
+    paint_construct,paint_destroy,load_string,invalidate,set_rect,string_construct_text,draw_text,init_group,init_combo,control_text,init_slider};
 #define BASE_HOOK(slot) static void *TC hook_##slot(void *object,int32_t template,void *parent){return base_construct(object,0x##slot,template,parent);}
 #define CTOR_HOOK(slot) static void *TC hook_##slot(void *object){construct(object,0x##slot);return object;}
 #define DTOR_HOOK(slot) static void TC hook_##slot(void *object){destroy(object,0x##slot);}
@@ -115,6 +179,38 @@ static void *TC virtual_delete(void *object,uint32_t flags) { put("virtual.delet
 static void TC virtual_tabs_close(void *object) { put("tabs.close %u\n",offset(object));mutate(); }
 static int32_t SC graph_callback(uint32_t operation,void *descriptor,uint32_t window)
 { put("graph.callback %u descriptor=%u window=%u state=%u answer=%u\n",operation,offset(descriptor),window,D32(s_fixture.object,0x1130),D32(descriptor,0));mutate();return (int32_t)s_seed; }
+static int32_t TC hook_radio_check(void *control,int32_t checked) { return radio_check(control,checked); }
+static void *TC hook_active_page(void *tabs) { return active_page(tabs); }
+static uint32_t SC hook_focus(void) { return focus(); }
+static void *SC hook_from_handle(uint32_t window) { return from_handle(window); }
+static int32_t TC hook_is_edit(void *control,void *runtime_class) { if(runtime_class!=(void *)0x12345678)exit(2);return is_edit(control); }
+static int32_t TC hook_control_id(void *control) { return control_id(control); }
+static int32_t TC hook_base_init(void *object){return base_init(object);}
+static int32_t TC hook_init_button(void *control,void *font,void *alternate,uint32_t bitmap,void *dib,void *palette,
+    uint32_t flags,uint32_t color,uint32_t module,int32_t x,int32_t y,struct fs98_sim_rect rect)
+{ return init_button(control,font,alternate,bitmap,dib,palette,flags,color,module,x,y,rect); }
+static int32_t TC hook_init_art(void *control,int32_t bitmap,void *dib,void *palette,uint32_t flags){return init_art(control,bitmap,dib,palette,flags);}
+static void TC hook_init_text(void *control,void *font){init_text(control,font);}
+static void *TC hook_notify_construct(void *notify,uint32_t flags,uint32_t mode){notify_construct(notify,flags,mode);return notify;}
+static void SC hook_notify_delete(void *notify){notify_delete(notify);}
+static int32_t hook_notify_send(void *notify,const char *format,const char *title,void *argument){return notify_send(notify,format,title,argument);}
+static void *TC hook_get_control(void *object,uint32_t id){return get_control(object,id);}
+static void SC hook_remap_rect(struct fs98_sim_rect *rect,void *control){remap_rect(rect,control);}
+static void TC hook_move_control(void *control,int32_t x,int32_t y,int32_t width,int32_t height,int32_t repaint){move_control(control,x,y,width,height,repaint);}
+static void TC hook_paint_construct(void *dc,void *object){paint_construct(dc,object);}
+static void TC hook_paint_destroy(void *dc){paint_destroy(dc);}
+static int32_t SC hook_load_string(uint32_t module,uint32_t id,char *buffer,int32_t capacity){return load_string(module,id,buffer,capacity);}
+static int32_t SC hook_invalidate(uint32_t window,const void *rect,int32_t erase){return invalidate(window,rect,erase);}
+static int32_t SC hook_set_rect(struct fs98_sim_rect *rect,int32_t left,int32_t top,int32_t right,int32_t bottom){return set_rect(rect,left,top,right,bottom);}
+static void TC hook_string_text(void *string,const char *text){string_construct_text(string,text);}
+static void TC hook_draw_text(void *font,void *dc,uint32_t string,struct fs98_sim_rect rect,int32_t flags){draw_text(font,dc,string,rect,flags);}
+static void TC hook_notify_destroy(void *object){destroy(object,0xd54c);}
+static int32_t TC hook_init_slider(void *control,uint32_t first_bitmap,uint32_t second_bitmap,void *dib,void *palette,
+    uint32_t first,uint32_t second,uint32_t third,uint32_t fourth,int32_t x,int32_t y,uint32_t module)
+{ return init_slider(control,first_bitmap,second_bitmap,dib,palette,first,second,third,fourth,x,y,module); }
+static void TC hook_init_group(void *control,void *font){init_group(control,font);}
+static void TC hook_init_combo(void *control,void *font,void *label){init_combo(control,font,label);}
+static void TC hook_control_text(void *control,const char *value){control_text(control,value);}
 static void patch(uint32_t rva,void *value)
 { DWORD old;void **slot=(void **)((uint8_t *)s_retail+rva);if(!VirtualProtect(slot,4,PAGE_READWRITE,&old))exit(2);*slot=value;VirtualProtect(slot,4,old,&old); }
 static void setup(void)
@@ -132,6 +228,20 @@ static void setup(void)
     patch(0xd5d8,hook_help);patch(0xd5ec,hook_enable_window);patch(0xd388,hook_enable_control);
     patch(0xd5e8,hook_window_long);patch(0xd504,hook_check);patch(0xd4c8,hook_slider_get);
     patch(0xd4c0,hook_slider_range);patch(0xd4c4,hook_slider_set);patch(0xd5e4,hook_send);
+    patch(0xd508,hook_radio_check);patch(0xd4ac,hook_active_page);patch(0xd5d0,hook_focus);patch(0xd368,hook_from_handle);
+    patch(0xd374,(void *)0x12345678);patch(0xd378,hook_is_edit);patch(0xd36c,hook_control_id);
+    patch(0xd550,hook_base_init);patch(0xd554,hook_init_button);patch(0xd558,hook_init_art);patch(0xd55c,hook_init_text);
+    patch(0xd560,hook_notify_construct);patch(0xd568,hook_notify_delete);patch(0xd544,hook_notify_send);patch(0xd3ac,hook_get_control);
+    patch(0xd564,hook_remap_rect);patch(0xd3b0,hook_move_control);patch(0xd3a0,hook_paint_construct);patch(0xd3a8,hook_paint_destroy);
+    patch(0xd5f0,hook_load_string);patch(0xd5f4,hook_invalidate);patch(0xd5f8,hook_set_rect);patch(0xd3a4,hook_string_text);patch(0xd540,hook_draw_text);
+    patch(0xd4ec,hook_init_group);patch(0xd4f0,hook_init_combo);patch(0xd384,hook_control_text);
+    patch(0xd4cc,hook_init_slider);s_widget_vtable[0xc4/4]=widget_init;
+    patch(0xd54c,hook_notify_destroy);patch(0xc130,(void *)0x27182818);
+    fs98_sim_set_crash_tables((uint8_t *)s_retail+0xa1b8);
+    s_vtable[0xe4/4]=virtual_skin;s_other_vtable[0xe4/4]=virtual_other_skin;
+    s_vtable[0xe0/4]=s_other_vtable[0xe0/4]=virtual_validate;
+    s_page_vtable[0xd8/4]=virtual_validate;s_page_vtable[0xdc/4]=virtual_error;
+    s_other_page_vtable[0xd8/4]=virtual_other_validate;s_other_page_vtable[0xdc/4]=virtual_other_error;
     patch(0xd548,hook_text);patch(0xd56c,hook_close);patch(0xc14c,(void *)0x31415926);
     patch(0xd48c,(void *)GetProcAddress(LoadLibraryA("msvcrt.dll"),"__CxxFrameHandler"));
     for(i=0;i<8;++i)vtables[i]=(uint8_t *)s_retail+s_classes[i].vtable;
@@ -158,6 +268,11 @@ static void operations(void)
     add(0x2ed0,2,24,"engines.commit");add(0x6ee0,6,25,"reliability.commit");add(0x6f30,6,26,"reliability.populate");
     add(0x5c60,4,27,"systems.selection");add(0x72e0,7,28,"settings.cancel");add(0x7380,7,29,"settings.close");
     add(0x7410,0,30,"post.destroy");add(0x1d40,0,31,"disable");add(0x1d50,0,32,"enable");
+    add(0x21b0,1,37,"damage.commit");add(0x22c0,1,38,"damage.populate");add(0x7300,7,39,"settings.accept");
+    add(0x19c0,0,40,"crash.validate");add(0x1750,0,41,"crash.init");add(0x1a00,0,42,"crash.paint");
+    add(0x1910,0,43,"notify.delete");add(0x24b0,1,44,"static.delete");add(0x1410,0,45,"class.delete");
+    add(0x1fe0,1,46,"damage.init");add(0x6dc0,6,47,"reliability.init");
+    add(0x2b90,2,48,"engines.init");add(0x3010,2,49,"engines.populate");
     add(0x1d20,0,33,"empty");add(0x1d30,0,34,"empty.arg");add(0x71f0,0,35,"zero.arg");add(0x6bb0,5,36,"zero.message");
 }
 static void initialize(void)
@@ -167,7 +282,10 @@ static void initialize(void)
     s_kind=s_operations[s_operation].kind;
     s_lifetime=s_operations[s_operation].signature<5 || s_operations[s_operation].signature==8;
     s_descriptor_offset=s_kind==0?0x112c:s_kind==1||s_kind==6?0x1118:s_kind==7?0x10ec:0x111c;
-    PTR(object,0)=s_vtable;PTR(object,s_descriptor_offset)=s_fixture.descriptor[0];
+    PTR(object,0)=s_vtable;
+    {static const uint16_t slots[]={0x17c8,0x1890,0x13b4,0x1570,0x1664,0x115c,0x1224,0x12ec,0x14a8,0x1dbc,0x1cf4,0x1c2c,0x1b64,0x1a9c,0x19d4,0x190c,0x1844};
+     for(i=0;i<sizeof(slots)/sizeof(slots[0]);++i)PTR(object,slots[i])=s_widget_vtable;}
+    s_fixture.resource_module=0x27182818;PTR(object,s_descriptor_offset)=s_fixture.descriptor[0];
     PTR(object,0x10f0)=s_scenario&1?s_fixture.notify[0]:0;
     PTR(object,0x1118)=PTR(object,0x111c)=s_fixture.descriptor[0];
     D32(object,0x1100)=s_scenario%3?1:0;
@@ -175,7 +293,8 @@ static void initialize(void)
     PTR(object,0x2258)=s_fixture.pages[0];PTR(object,0x225c)=s_fixture.pages[1];
     for(i=0;i<3;++i)PTR(s_fixture.notify[i],0)=s_notify_vtable;
     for(i=0;i<2;++i){
-        void *d=s_fixture.descriptor[i];static const uint16_t counts[]={0,1,2,3,4,5,0xffff,0x8000};
+        void *d=s_fixture.descriptor[i];
+        PTR(s_fixture.pages[i],0)=s_page_vtable;static const uint16_t counts[]={0,1,2,3,4,5,0xffff,0x8000};
         U16(d,0x24)=counts[s_scenario%8];
         snprintf(s_fixture.strings[i][0],32,"airspeed %u/%u",i,s_scenario);
         snprintf(s_fixture.strings[i][1],32,"vertical %x",s_seed);
@@ -183,8 +302,27 @@ static void initialize(void)
         PTR(s_fixture.pages[i],0x1124)=s_scenario&4?s_fixture.notify[1]:0;
         PTR(s_fixture.pages[i],0x1130)=s_scenario&8?s_fixture.notify[2]:0;
     }
+    if(s_kind==1){D32(s_fixture.descriptor[0],8)=D32(s_fixture.descriptor[1],8)=s_scenario%4;}
     if(s_kind==6){PTR(object,0x111c)=s_fixture.descriptor[1];}
-    if(s_kind==2){D32(object,0x1db0)=s_scenario&1;D32(object,0x1ce8)=s_scenario&2;D32(object,0x1c20)=s_scenario&4;D32(object,0x1b58)=s_scenario&8;D32(object,0x1e78)=s_scenario%3;}
+    if(s_kind==2){PTR(object,0x1120)=s_fixture.descriptor[1];
+        for(i=0;i<2;++i){D32(s_fixture.descriptor[i],0x58)=(s_scenario>>2)&1;D32(s_fixture.descriptor[i],0x6c)=(s_scenario>>3)&1;}
+        D32(s_fixture.descriptor[1],0x10)=s_scenario&1;D32(object,0x1db0)=(s_scenario/8)&1;D32(object,0x1ce8)=(s_scenario/8)&2;D32(object,0x1c20)=(s_scenario/8)&4;D32(object,0x1b58)=(s_scenario/8)&8;D32(object,0x1e78)=s_scenario%3;}
+    if(s_kind==0){
+        uint32_t axis,j;
+        for(axis=0;axis<2;++axis)for(j=0;j<4;++j){snprintf(s_fixture.axes[axis][j],24,"axis%u label%u",axis,j);s_fixture.labels[axis][j]=s_fixture.axes[axis][j];}
+        for(i=0;i<2;++i){void *d=s_fixture.descriptor[i];
+            D32(d,0x10)=(s_scenario/3)%3;D32(d,0x1c)=2+s_scenario%3;D32(d,0x24)=2+(s_scenario/3)%3;
+            PTR(d,0x20)=s_fixture.labels[0];PTR(d,0x28)=s_fixture.labels[1];D32(d,0x2c)=s_scenario&1;
+        }
+        D32(object,0x10e0)=s_seed;D32(object,0x10e8)=s_seed+(s_scenario&1?0xf1234567:300);
+        D32(object,0x10e4)=20;D32(object,0x10ec)=220;
+        D32(object,0x10f4)=s_scenario%3;
+        strcpy((char *)object+0x10f8,"vertical axis");strcpy((char *)object+0x1116,"time axis");
+        if(s_operations[s_operation].signature==42 && s_scenario%7==1 && s_scenario%3!=1)
+            D32(s_fixture.descriptor[0],0x24)=D32(s_fixture.descriptor[1],0x24)=1;
+        if((s_operations[s_operation].signature==40 || s_operations[s_operation].signature==41) && s_scenario%3)
+            PTR(object,0x112c)=s_scenario%3==1?0:(void *)0xcdcdcdcd;
+    }
     s_initial=s_fixture;
 }
 static LONG WINAPI fatal(EXCEPTION_POINTERS *e)
@@ -196,6 +334,10 @@ static LONG CALLBACK expected_fault(EXCEPTION_POINTERS *e)
         s_throw_at=0;put("allocation.fault access=%u address=%u\n",(uint32_t)e->ExceptionRecord->ExceptionInformation[0],(uint32_t)e->ExceptionRecord->ExceptionInformation[1]);
         if(!s_side)++s_faults;
         e->ContextRecord->Eip=(DWORD)land;return EXCEPTION_CONTINUE_EXECUTION;}
+    if(s_operations[s_operation].signature==42 && e->ExceptionRecord->ExceptionCode==EXCEPTION_INT_DIVIDE_BY_ZERO){
+        s_throw_at=0;put("divide.fault code=%x\n",(uint32_t)e->ExceptionRecord->ExceptionCode);
+        e->ContextRecord->Eip=(DWORD)land;return EXCEPTION_CONTINUE_EXECUTION;
+    }
     return EXCEPTION_CONTINUE_SEARCH;
 }
 static EXCEPTION_DISPOSITION __cdecl catch_throw(EXCEPTION_RECORD *record,void *frame,CONTEXT *context,void *dispatcher)
@@ -210,7 +352,7 @@ static __attribute__((noinline)) int32_t run(uint32_t throw_at)
     struct {void *previous,*handler;} catcher;
     struct operation *op=&s_operations[s_operation];void *object=s_fixture.object,*entry=(uint8_t *)s_retail+op->rva;
     volatile int32_t result=0;uint32_t signature=op->signature;
-    s_fixture=s_initial;s_calls=s_log_length=0;s_logs[s_side][0]=0;s_throw_at=throw_at;
+    s_fixture=s_initial;D32(s_retail,0xc130)=s_fixture.resource_module;fs98_sim_set_resource_module(s_fixture.resource_module);s_calls=s_log_length=0;s_logs[s_side][0]=0;s_throw_at=throw_at;
     __asm__ volatile("movl %%fs:0, %0":"=r"(s_saved_seh));
     if(__builtin_setjmp(s_jump)==0){
         catcher.previous=(void *)s_saved_seh;catcher.handler=catch_throw;
@@ -248,8 +390,24 @@ static __attribute__((noinline)) int32_t run(uint32_t throw_at)
         }else if(signature==34){if(s_side)fs98_sim_empty_arg(object,s_seed);else((void (TC *)(void *,uint32_t))entry)(object,s_seed);}
         else if(signature==35){result=s_side?fs98_sim_zero(object,s_seed):((int32_t (TC *)(void *,uint32_t))entry)(object,s_seed);}
         else if(signature==36){result=s_side?fs98_sim_zero_message(object,s_seed,s_seed^1):((int32_t (TC *)(void *,uint32_t,uint32_t))entry)(object,s_seed,s_seed^1);}
+        else if(signature==37){result=s_side?fs98_sim_damage_commit(object,s_seed):((int32_t (TC *)(void *,uint32_t))entry)(object,s_seed);}
+        else if(signature==38){if(s_side)fs98_sim_damage_populate(object);else((void (TC *)(void *))entry)(object);}
+        else if(signature==39){if(s_side)fs98_sim_settings_accept(object);else((void (TC *)(void *))entry)(object);}
+        else if(signature==40){result=s_side?fs98_sim_crash_validate(object):((int32_t (TC *)(void *))entry)(object);}
+        else if(signature==41){result=s_side?fs98_sim_crash_init(object):((int32_t (TC *)(void *))entry)(object);}
+        else if(signature==42){if(s_side)fs98_sim_crash_paint(object);else((void (TC *)(void *))entry)(object);}
+        else if(signature==43 || signature==44){void *returned;
+            if(s_side)returned=signature==43?fs98_sim_notify_delete(object,s_seed):fs98_sim_static_delete(object,s_seed);
+            else returned=((void *(TC *)(void *,uint32_t))entry)(object,s_seed);
+            put("return.object %u\n",offset(returned));}
+        else if(signature==45){if(s_side)fs98_sim_class_delete(object);else((void (SC *)(void *))entry)(object);}
+        else if(signature==46){if(s_side)fs98_sim_damage_init(object);else((void (TC *)(void *))entry)(object);}
+        else if(signature==47){if(s_side)fs98_sim_reliability_init(object);else((void (TC *)(void *))entry)(object);}
+        else if(signature==48){if(s_side)fs98_sim_engines_init(object);else((void (TC *)(void *))entry)(object);}
+        else if(signature==49){if(s_side)fs98_sim_engines_populate(object);else((void (TC *)(void *))entry)(object);}
     }
     __asm__ volatile("movl %0, %%fs:0"::"r"(s_saved_seh):"memory");
+    s_fixture.resource_module=s_side?g_sim_resource_module:D32(s_retail,0xc130);
     return result;
 }
 static int compare(uint32_t throw_at)

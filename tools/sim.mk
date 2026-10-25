@@ -10,8 +10,8 @@ $(SIM_DIR):
 	mkdir -p $@
 src/sim/sim_tables.inc src/sim/sim_hooks.inc &: tools/gen_sim_tables.py tools/dialogmap.py orig/English/Sim.DLL
 	python3 -B tools/gen_sim_tables.py
-$(SIM_DIR)/simdiff.exe: tools/difftest/simdiff.c src/sim/sim_events.c src/sim/sim_objects.c src/sim/sim_internal.h src/sim/sim_unwind.h src/sim/sim_tables.inc src/sim/sim_hooks.inc | $(SIM_DIR)
-	$(CC) -std=c99 -O2 -Wall -Wextra -Werror -fno-strict-aliasing -o $@ tools/difftest/simdiff.c src/sim/sim_events.c src/sim/sim_objects.c -lntdll
+$(SIM_DIR)/simdiff.exe: tools/difftest/simdiff.c src/sim/sim_events.c src/sim/sim_objects.c src/sim/sim_crash.c src/sim/sim_engines.c src/sim/sim_internal.h src/sim/sim_unwind.h src/sim/sim_tables.inc src/sim/sim_hooks.inc | $(SIM_DIR)
+	$(CC) -std=c99 -O2 -Wall -Wextra -Werror -fno-strict-aliasing -o $@ tools/difftest/simdiff.c src/sim/sim_events.c src/sim/sim_objects.c src/sim/sim_crash.c src/sim/sim_engines.c -lntdll
 simdiff-run: simevents
 	bash tools/run_simdiff.sh $(N) $(SEED) $(MODE)
 sim-breaks: simevents

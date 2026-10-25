@@ -40,6 +40,7 @@ static void **our_tbl;
 static uint8_t *our_data;               /* base of HOST_ours.dll's host_image */
 static uint32_t rng = 0x1234567u;
 static int differ;
+static int trace;                       /* HOSTDIFF_TRACE: print each profile and file operation */
 
 /* xorshift32: unlike an LCG, its low bits are as well-mixed as its high ones,
  * so decisions like rnd() & 1 and rnd() % n get full-period coverage. */
@@ -191,11 +192,19 @@ static void *our_fn(uint32_t off)
 #define QUEUE_OFF   0x1380u            /* 0x418380, the removal queue */
 #define QUEUE_END   0x139cu
 #define EXT_OFF     0x0f20u            /* 0x417f20: the 37 built-in extension names */
-#define EXT_END     0x10d0u            /* ... their strings, and the "\\\\" at 0x4180c8 */
+#define EXT_END     0x1100u            /* ... their strings, the colon, separator and UNC prefix, the bytes per pixel */
 #define CFG_OFF     0x00a0u            /* 0x4170a0: ".CFG", the last of them */
 #define EMPTY_OFF   0x17f8u            /* 0x4187f8: the host's empty string (bss) */
 #define REG_N_OFF   0x18acu            /* 0x4188ac: extensions registered at run time */
 #define REG_P_OFF   0x18b0u            /* 0x4188b0: their _strdup'd names (heap) */
+#define MODS_OFF    0x0b30u            /* 0x417b30: the module records, 0x14 bytes each */
+#define STRMODS_OFF 0x12e0u            /* 0x4182e0: the modules strings are looked up in */
+#define FMT_OFF     0x126cu            /* 0x41826c: "%s%2.2d" */
+#define HINST_OFF   0x182cu            /* 0x41882c: the host's instance */
+#define INAMES_OFF  0x3240u            /* 0x41a240: input names loaded; their lengths */
+#define ACCEL_OFF   0x1278u            /* 0x418278: accelerator tables, a host list; id counter after */
+#define BUTTON_OFF  0x1108u            /* 0x418108: "Button " (0x32 bytes) */
+#define AXIS_OFF    0x1140u            /* 0x418140: "Axis " */
 
 /* The run-time extension registry: a few names, the same on both sides, each
  * side's array and strings its own heap blocks (the host grows them with
@@ -221,18 +230,115 @@ static void seed_registry(void)
     *(uint32_t *)(our_data + EMPTY_OFF) = 0;
 }
 
+/* .data the seeding leaves alone: what the real host dispatches through or
+ * treats as constant, and the state the harness sets up itself. */
+static const struct { uint32_t lo, hi; } keep[] = {
+    { TABLE_OFF, TABLE_LAST + 4 },      /* the service table */
+    { QUEUE_OFF, QUEUE_END },           /* the removal queue (a host list) */
+    { EXT_OFF, EXT_END },               /* the extension names and "\\\\" */
+    { CFG_OFF, CFG_OFF + 8 },
+    { EMPTY_OFF, EMPTY_OFF + 4 },
+    { REG_N_OFF, REG_P_OFF + 4 },       /* the extension registry */
+    { MODS_OFF, MODS_OFF + 0x1c },      /* the module records (a host list) */
+    { STRMODS_OFF, STRMODS_OFF + 0x1c },/* the string modules (a host list) */
+    { ACCEL_OFF, ACCEL_OFF + 0x1c },    /* the accelerator tables (a host list) */
+    { FMT_OFF, FMT_OFF + 8 },           /* "%s%2.2d" */
+    { HINST_OFF, HINST_OFF + 4 },       /* the host instance strings fall back on */
+    { INAMES_OFF, INAMES_OFF + 0xc },   /* the input-name flag and lengths */
+    { 0x5120, 0x5224 },                 /* FLTSIM98.CFG's path (seed_profile) */
+    { 0x18a0, 0x18a4 },                 /* 0x4188a0: the empty double-NUL a section is cleared with */
+    { 0x0a24, 0x0a28 },                 /* 0x417a24: "%d" */
+    { 0x0ed0, 0x0ee0 },                 /* 0x417ed0: ", ", ",", "%f" */
+    { 0x4ec0, 0x4ec4 }, { 0x4c80, 0x4c88 }, { 0x4b64, 0x4b6c }, { 0x4fe8, 0x4fec },
+    { 0x4da4, 0x4da8 }, { 0x4dac, 0x4db0 }, { 0x5360, 0x5364 }, { 0x5104, 0x5108 },
+                                        /* the key words' pointers (seed_keynames) */
+};
+
+static int kept(uint32_t i)
+{
+    uint32_t k;
+    for (k = 0; k < sizeof keep / sizeof keep[0]; k++)
+        if (i + 4 > keep[k].lo && i < keep[k].hi)
+            return 1;
+    return 0;
+}
+
+static void seed_strings(void);
+static void seed_accels(void);
+static void seed_keynames(void);
+
+/* Modules with string tables, as data files: the language DLL (ENGLISH.FLL,
+ * which has the input names 0x8012/0x8013), two more, and the real host's
+ * own image (string 9). */
+static uint32_t strmod[4];
+
+static void load_strmods(void)
+{
+    static const char *const f[] = { "ENGLISH.FLL", "SIMSUI.DLL", "DIALOG.DLL" };
+    uint32_t i;
+    for (i = 0; i < 3; i++) {
+        strmod[i] = (uint32_t)(uintptr_t)LoadLibraryExA(f[i], 0, LOAD_LIBRARY_AS_DATAFILE);
+        if (!strmod[i]) { printf("cannot load %s as data (%lu)\n", f[i], GetLastError()); exit(2); }
+    }
+    strmod[3] = REAL_BASE;
+}
+
+/* A host list header {count, cap, grow, size, 0, 0, data} on both sides, the
+ * data a heap copy each of `bytes`. */
+static void seed_list(uint32_t off, uint32_t n, uint32_t size, const void *bytes)
+{
+    uint32_t h[7] = { n, n, 0x20, size, 0, 0, 0 };
+    uint8_t *r = 0, *o = 0;
+    if (n) {
+        r = malloc(n * size); o = malloc(n * size);
+        memcpy(r, bytes, n * size); memcpy(o, bytes, n * size);
+    }
+    h[6] = (uint32_t)(uintptr_t)r; memcpy((void *)(DATA_VA + off), h, sizeof h);
+    h[6] = (uint32_t)(uintptr_t)o; memcpy(our_data + off, h, sizeof h);
+}
+
+static const char *const prefixes[] = { "Button ", "Axis ", "Btn", "", "A" };
+
+/* The string modules, the module records, the host instance, and the input
+ * names -- either still to load (flag 0) or loaded as some short prefixes. */
+static void seed_strings(void)
+{
+    uint32_t mods[4], recs[5 * 5], n, m, i, v;
+    n = rnd() % 5;
+    for (i = 0; i < n; i++) mods[i] = strmod[rnd() % 4];
+    if (n == 4 && rnd() & 1) n = 3;
+    seed_list(STRMODS_OFF, n, 4, mods);
+    m = rnd() % 6;
+    for (i = 0; i < m; i++) {
+        recs[i * 5 + 0] = rnd();
+        recs[i * 5 + 1] = rnd();
+        recs[i * 5 + 2] = strmod[rnd() % 4];
+        recs[i * 5 + 3] = 1 + rnd() % 8;
+        recs[i * 5 + 4] = rnd() % 3 ? 1 + rnd() % 3 : 0;
+    }
+    seed_list(MODS_OFF, m, 0x14, recs);
+    /* the host instance: the real host's image, or (as if the host's own
+     * resources were the language DLL's) ENGLISH.FLL, which has accelerators */
+    *(uint32_t *)(DATA_VA + HINST_OFF) = *(uint32_t *)(our_data + HINST_OFF) = rnd() % 4 ? REAL_BASE : strmod[0];
+    v = rnd() & 1;
+    *(uint32_t *)(DATA_VA + INAMES_OFF) = *(uint32_t *)(our_data + INAMES_OFF) = v;
+    if (v) {
+        const char *b = prefixes[rnd() % 5], *a = prefixes[rnd() % 5];
+        strcpy((char *)(DATA_VA + BUTTON_OFF), b); strcpy((char *)(our_data + BUTTON_OFF), b);
+        strcpy((char *)(DATA_VA + AXIS_OFF), a); strcpy((char *)(our_data + AXIS_OFF), a);
+        v = rnd() % 8;
+        *(uint32_t *)(DATA_VA + INAMES_OFF + 4) = *(uint32_t *)(our_data + INAMES_OFF + 4) = v;
+        v = rnd() % 8;
+        *(uint32_t *)(DATA_VA + INAMES_OFF + 8) = *(uint32_t *)(our_data + INAMES_OFF + 8) = v;
+    }
+}
+
 static void seed_data(void)
 {
     uint32_t i, len;
     for (i = 0; i + 4 <= DATA_SIZE; i += 4) {
         uint32_t v;
-        if (i + 4 > TABLE_OFF && i < TABLE_LAST)
-            continue;
-        if (i >= QUEUE_OFF && i < QUEUE_END)
-            continue;
-        if ((i >= EXT_OFF && i < EXT_END) || (i >= CFG_OFF && i < CFG_OFF + 8))
-            continue;                   /* constant strings and pointers to them */
-        if (i == EMPTY_OFF || i == REG_N_OFF || i == REG_P_OFF)
+        if (kept(i))
             continue;
         v = rnd();
         *(uint32_t *)(DATA_VA + i) = v;
@@ -251,6 +357,9 @@ static void seed_data(void)
     *(uint32_t *)(DATA_VA + QUEUE_OFF) = 0;
     *(uint32_t *)(our_data + QUEUE_OFF) = 0;
     seed_registry();
+    seed_strings();
+    seed_accels();
+    seed_keynames();
 }
 
 /* After a call, the two .data images must be identical; report the first word
@@ -261,7 +370,9 @@ static void check_state(const char *name)
     for (i = 0; i < DATA_SIZE; i += 4) {
         uint32_t rv;
         uint32_t ov;
-        if (i == QUEUE_OFF + 0x18 || i == REG_P_OFF)   /* each side's own heap block */
+        if (i == QUEUE_OFF + 0x18 || i == REG_P_OFF || i == MODS_OFF + 0x18 || i == STRMODS_OFF + 0x18 ||
+            i == ACCEL_OFF + 0x18 || (i >= 0x5120 && i < 0x5224))   /* the CFG paths differ in a letter */
+            /* each side's own heap block */
             continue;
         rv = norm(*(uint32_t *)(DATA_VA + i));     /* real .data (mapped at 0x417000) */
         ov = norm(*(uint32_t *)(our_data + i));    /* our image */
@@ -270,6 +381,18 @@ static void check_state(const char *name)
                    name, i, rv, ov);
             differ++;
             return;
+        }
+    }
+    {   /* the two host lists the harness seeds: contents through each side's data */
+        static const uint32_t lists[] = { MODS_OFF, STRMODS_OFF };
+        for (i = 0; i < 2; i++) {
+            uint32_t n = *(uint32_t *)(DATA_VA + lists[i]), sz = *(uint32_t *)(DATA_VA + lists[i] + 0xc);
+            uint8_t *rd = *(uint8_t **)(DATA_VA + lists[i] + 0x18), *od = *(uint8_t **)(our_data + lists[i] + 0x18);
+            if (n && n < 64 && sz <= 0x14 && (!rd || !od || memcmp(rd, od, n * sz))) {
+                printf("  %-16s LIST .data+%#x CONTENTS DIFFER\n", name, lists[i]);
+                differ++;
+                return;
+            }
         }
     }
     {   /* the registry's names, through each side's own array */
@@ -802,10 +925,12 @@ static void list_op(void)
         fn3 r = (fn3)real_fn(s), o = (fn3)our_fn(s);
         static struct walkctx rw, ow;
         if (!o) return;
+        uint32_t dense = rnd() % 4 == 0;    /* mostly removals and nesting: several queued at once */
         for (i = 0; i < VISITS; i++) {
             script[i].r = rnd();
             script[i].act = rnd() % 7;                  /* 1 remove, 2 append, 3 nest, 4 bystander */
-            if (script[i].act == 3 && rnd() % 3) script[i].act = 0;
+            if (script[i].act == 3 && rnd() % 3 && !dense) script[i].act = 0;
+            if (dense && rnd() % 2) script[i].act = rnd() % 3 ? 1 : 3;
             script[i].stop = rnd() % 12 == 0 ? rnd() | 1 : 0;
         }
         memset(&rw, 0, sizeof rw); memset(&ow, 0, sizeof ow);
@@ -1066,13 +1191,674 @@ static void check_crt(void)
     if (rv - P(rs) != ov - P(os) || memcmp(rs, os, sizeof rs)) { printf("  +0x2c8 strip DIFFER\n"); differ++; }
 }
 
+/* ---- string resources -------------------------------------------------------- */
+
+/* Ids worth asking for: the input names, strings only ENGLISH.FLL, SIMSUI or
+ * DIALOG has, the host's own 9, and ones nobody has. */
+static const uint32_t str_ids[] = { 9, 0x8012, 0x8013, 0x2201, 0x73, 0xb000, 0xb001, 0xf000, 0xf001,
+                                    0xf100, 0xf800, 0xf8d0, 1, 0x5c, 0x7fff };
+
+/* +0x2a0 into a guarded buffer of random length, +0x2a4. */
+static void check_strings(void)
+{
+    static char rb[0x180], ob[0x180];
+    fn3 r = (fn3)real_fn(0x2a0), o = (fn3)our_fn(0x2a0);
+    fn2 r4 = (fn2)real_fn(0x2a4), o4 = (fn2)our_fn(0x2a4);
+    uint32_t id = str_ids[rnd() % 15], len = rnd() % 4 ? 0x100 : rnd() % 12, rv, ov;
+    char *rp = (char *)1, *op = (char *)1;
+    if (!o || !o4) return;
+    memset(rb, 0xaa, sizeof rb); memset(ob, 0xaa, sizeof ob);
+    rv = r(id, P(rb), len); ov = o(id, P(ob), len);
+    if (rv != ov || memcmp(rb, ob, sizeof rb)) {
+        printf("  +0x2a0 string(%#x, %u) DIFFER real=%u ours=%u\n", id, len, rv, ov); differ++;
+    }
+    check_state("+0x2a0 string");
+    rv = r4(id, P(&rp)); ov = o4(id, P(&op));
+    if (rv != ov || !rp != !op || (rp && strcmp(rp, op))) {
+        printf("  +0x2a4 string-dup(%#x) DIFFER real=%u ours=%u\n", id, rv, ov); differ++;
+    }
+    free(rp); free(op);
+    check_state("+0x2a4 string-dup");
+}
+
+/* +0x298 (a module's HMODULE onto the string list) and +0x29c (one off it). */
+static void check_strmods(void)
+{
+    fn2 r8 = (fn2)real_fn(0x298), o8 = (fn2)our_fn(0x298);
+    fn1 rc = (fn1)real_fn(0x29c), oc = (fn1)our_fn(0x29c);
+    uint32_t id = rnd() % 10, ro = rnd(), oo = ro, rv, ov, h;
+    if (!o8 || !oc) return;
+    if (*(uint32_t *)(DATA_VA + STRMODS_OFF) < 12) {
+        rv = r8(id, P(&ro)); ov = o8(id, P(&oo));
+        if (rv != ov || ro != oo) { printf("  +0x298 add-strings(%u) DIFFER real=%d/%#x ours=%d/%#x\n", id, (int)rv, ro, (int)ov, oo); differ++; }
+        check_state("+0x298 add-strings");
+    }
+    h = rnd() % 5 ? strmod[rnd() % 4] : rnd();
+    rv = rc(h); ov = oc(h);
+    if (rv != ov) { printf("  +0x29c drop-strings DIFFER real=%d ours=%d\n", (int)rv, (int)ov); differ++; }
+    check_state("+0x29c drop-strings");
+}
+
+/* +0x1d0 (an input's name) and +0x1d4 (a name's input). */
+static void check_inputs(void)
+{
+    static char rb[96], ob[96], name[48];
+    fn3 r0 = (fn3)real_fn(0x1d0), o0 = (fn3)our_fn(0x1d0);
+    fn2 r4 = (fn2)real_fn(0x1d4), o4 = (fn2)our_fn(0x1d4);
+    int32_t code = (int32_t)(rnd() % 0x58) - 4;
+    uint32_t rv, ov, ro, oo;
+    if (!o0 || !o4) return;
+    memset(rb, 0xaa, sizeof rb); memset(ob, 0xaa, sizeof ob);
+    rv = r0((uint32_t)code, P(rb), rnd()); ov = o0((uint32_t)code, P(ob), rnd());
+    if (rv != ov || memcmp(rb, ob, sizeof rb)) {
+        printf("  +0x1d0 input-name(%d) DIFFER real=%#x ours=%#x [%s] [%s]\n", code, rv, ov, rb, ob); differ++;
+    }
+    check_state("+0x1d0 input-name");
+    if (rnd() & 1)
+        strcpy(name, rb);                       /* a name it made */
+    else
+        sprintf(name, "%s%s%d", prefixes[rnd() % 5], rnd() & 1 ? prefixes[rnd() % 5] : "",
+                (int)(rnd() % 0x50) - 3);
+    ro = oo = rnd();
+    rv = r4(P(name), P(&ro)); ov = o4(P(name), P(&oo));
+    if (rv != ov || ro != oo) {
+        printf("  +0x1d4 input-code(\"%s\") DIFFER real=%#x/%d ours=%#x/%d\n", name, rv, (int)ro, ov, (int)oo); differ++;
+    }
+    check_state("+0x1d4 input-code");
+}
+
+/* ---- names and paths --------------------------------------------------------- */
+
+/* +0x178 and +0x18c over strings drawn from a set that has every refused
+ * character, a space, high bytes, and sometimes nothing. */
+static void check_names(void)
+{
+    static const char cs[] = "aZ09._-\"&*/:<>?\\|! }~#{\x80\xe9\xff";
+    static char s[24];
+    fn1 r8 = (fn1)real_fn(0x178), o8 = (fn1)our_fn(0x178);
+    fn1 rc = (fn1)real_fn(0x18c), oc = (fn1)our_fn(0x18c);
+    uint32_t n = rnd() % 8, i, p;
+    if (!o8 || !oc) return;
+    for (i = 0; i < n; i++)
+        s[i] = rnd() % 3 ? cs[rnd() % 7] : cs[rnd() % (sizeof cs - 1)];
+    s[n] = 0;
+    p = rnd() % 32 ? P(s) : 0;
+    if (r8(p) != o8(p)) { printf("  +0x178 file-name(\"%s\") DIFFER\n", s); differ++; }
+    if (rc(p) != oc(p)) { printf("  +0x18c path-name(\"%s\") DIFFER\n", s); differ++; }
+}
+
+/* +0x184 over parts with and without separators, sometimes long enough not
+ * to fit. */
+static void check_184(void)
+{
+    static const char *const drives[] = { "", "c", "C:", "c:\\", "\\\\srv", "ab", "\\" };
+    static const char *const parts[] = { "", "fs98", "\\fs98", "fs98\\", "a\\b\\", "\\", "x.bgl", "\\\\" };
+    static char dir[200], name[300], rb[0x120], ob[0x120];
+    fn4 r = (fn4)real_fn(0x184), o = (fn4)our_fn(0x184);
+    uint32_t rv, ov, k;
+    const char *d;
+    if (!o) return;
+    d = drives[rnd() % 7];
+    strcpy(dir, parts[rnd() % 8]);
+    strcpy(name, parts[rnd() % 8]);
+    if (rnd() % 4 == 0) { k = strlen(dir); memset(dir + k, 'd', 60 + rnd() % 130); dir[k + 60 + rnd() % 130] = 0; dir[199] = 0; }
+    if (rnd() % 4 == 0) { k = strlen(name); memset(name + k, 'n', 40 + rnd() % 150); name[k + 40 + rnd() % 150] = 0; name[199] = 0; }
+    if (rnd() % 8 == 0) {           /* a result right at the limit: dir plus name */
+        k = 0x102 + rnd() % 5;
+        strcpy(dir, "d"); memset(name, 'n', k - 2); name[k - 2] = 0;
+        d = "";
+    }
+    memset(rb, 0xaa, sizeof rb); memset(ob, 0xaa, sizeof ob);
+    k = rnd();
+    rv = r(k % 32 ? P(rb) : 0, k & 32 ? P(d) : 0, k & 64 ? P(dir) : 0, k & 128 ? P(name) : 0);
+    ov = o(k % 32 ? P(ob) : 0, k & 32 ? P(d) : 0, k & 64 ? P(dir) : 0, k & 128 ? P(name) : 0);
+    if (rv != ov || memcmp(rb, ob, sizeof rb)) {
+        printf("  +0x184 join(\"%s\",\"%.20s\",\"%.20s\") DIFFER real=%d ours=%d\n", d, dir, name, (int)rv, (int)ov);
+        differ++;
+    }
+}
+
+/* ---- image buffers ----------------------------------------------------------- */
+
+/* Compare two images: the header but its pointers, the pixels, and the row
+ * table as offsets into the pixels. */
+static int img_differ(const uint32_t *r, const uint32_t *o)
+{
+    int32_t i;
+    if (!r != !o) return 1;
+    if (!r) return 0;
+    if (r[0] != o[0] || r[1] != o[1] || r[2] != o[2] || r[3] != o[3] || r[5] != o[5]) return 1;
+    if (!r[6] != !o[6] || !r[4] != !o[4]) return 1;
+    if (r[6] && memcmp((void *)(uintptr_t)r[6], (void *)(uintptr_t)o[6], r[5])) return 1;
+    for (i = 0; r[4] && i < (int32_t)r[2]; i++)
+        if (((uint32_t *)(uintptr_t)r[4])[i] - r[6] != ((uint32_t *)(uintptr_t)o[4])[i] - o[6]) return 1;
+    return 0;
+}
+
+/* +0x1b4 create (every format, and some that are not), scribble, +0x1bc
+ * resize, +0x1b8 free (and of null). */
+static void check_images(void)
+{
+    fn4 rmk = (fn4)real_fn(0x1b4), omk = (fn4)our_fn(0x1b4);
+    fn3 rrs = (fn3)real_fn(0x1bc), ors = (fn3)our_fn(0x1bc);
+    fn1 rfr = (fn1)real_fn(0x1b8), ofr = (fn1)our_fn(0x1b8);
+    uint32_t *ri = (uint32_t *)1, *oi = (uint32_t *)1, rv, ov, w, h, f, i;
+    if (!omk || !ors || !ofr) return;
+    f = (uint32_t)((int32_t)(rnd() % 9) - 1);
+    w = rnd() % 41; h = rnd() % 21;
+    rv = rmk(P(&ri), w, h, f); ov = omk(P(&oi), w, h, f);
+    if (rv != ov || (rv == 0 && img_differ(ri, oi)) || (rv && ri != oi)) {
+        printf("  +0x1b4 image(%u,%u,%d) DIFFER real=%d ours=%d\n", w, h, (int)f, (int)rv, (int)ov); differ++; return;
+    }
+    if (rv) return;
+    for (i = 0; i < ri[5]; i++)
+        ((uint8_t *)(uintptr_t)ri[6])[i] = ((uint8_t *)(uintptr_t)oi[6])[i] = (uint8_t)rnd();
+    w = rnd() % 41; h = rnd() % 21;
+    rv = rrs(P(ri), w, h); ov = ors(P(oi), w, h);
+    if (rv != ov || img_differ(ri, oi)) { printf("  +0x1bc resize(%u,%u) DIFFER\n", w, h); differ++; }
+    rv = rfr(P(ri)); ov = ofr(P(oi));
+    if (rv != ov) { printf("  +0x1b8 free DIFFER\n"); differ++; }
+    if (rfr(0) != ofr(0)) { printf("  +0x1b8 free(null) DIFFER\n"); differ++; }
+}
+
+/* ---- accelerator tables ------------------------------------------------------ */
+
+/* A few entries for tables to hold, so that removals find matches. */
+static const uint32_t accel_pool[6][3] = {
+    { 0x9c40, 8, 0x10041 }, { 0x9c41, 9, 0x10042 }, { 0x9c40, 8, 0x10042 },
+    { 7, 0, 0x10070 }, { 0x9c40, 2, 0x10041 }, { 1, 1, 1 },
+};
+
+/* The table list: up to four tables of up to six pool entries each. */
+static void seed_accels(void)
+{
+    uint32_t recs[4 * 4], m = rnd() % 5, i, j, n;
+    uint8_t *ra[4], *oa[4];
+    for (i = 0; i < m; i++) {
+        n = rnd() % 7;
+        recs[i * 4 + 0] = rnd() & 1;
+        recs[i * 4 + 1] = 1 + rnd() % 12;
+        recs[i * 4 + 3] = n;
+        ra[i] = oa[i] = 0;
+        if (n || rnd() & 1) {
+            ra[i] = malloc(n * 12 + 1); oa[i] = malloc(n * 12 + 1);
+            for (j = 0; j < n; j++) {
+                const uint32_t *e = accel_pool[rnd() % 6];
+                memcpy(ra[i] + 12 * j, e, 12); memcpy(oa[i] + 12 * j, e, 12);
+            }
+        }
+        recs[i * 4 + 2] = (uint32_t)(uintptr_t)ra[i];
+    }
+    seed_list(ACCEL_OFF, m, 0x10, recs);
+    for (i = 0; i < m; i++)
+        (*(uint32_t **)(our_data + ACCEL_OFF + 0x18))[i * 4 + 2] = (uint32_t)(uintptr_t)oa[i];
+    if (rnd() % 8 == 0)     /* the id counter about to wrap, or at 0 (the next table's id) */
+        *(uint32_t *)(DATA_VA + ACCEL_OFF + 0x1c) = *(uint32_t *)(our_data + ACCEL_OFF + 0x1c) =
+            rnd() & 1 ? 0xffffffffu : 0;
+}
+
+/* The tables, field by field, entries through each side's own pointer. */
+static int accels_differ(void)
+{
+    uint32_t n = *(uint32_t *)(DATA_VA + ACCEL_OFF), i;
+    uint32_t *r = *(uint32_t **)(DATA_VA + ACCEL_OFF + 0x18), *o = *(uint32_t **)(our_data + ACCEL_OFF + 0x18);
+    if (n != *(uint32_t *)(our_data + ACCEL_OFF)) return 1;
+    for (i = 0; i < n; i++) {
+        uint32_t *rt = r + 4 * i, *ot = o + 4 * i;
+        if (rt[0] != ot[0] || rt[1] != ot[1] || rt[3] != ot[3] || !rt[2] != !ot[2]) return 1;
+        if (rt[2] && rt[3] < 4096 && memcmp((void *)(uintptr_t)rt[2], (void *)(uintptr_t)ot[2], rt[3] * 12)) return 1;
+    }
+    return 0;
+}
+
+/* An id worth asking about: one a table has, 0, or one nobody has. */
+static uint32_t accel_id(void)
+{
+    uint32_t n = *(uint32_t *)(DATA_VA + ACCEL_OFF);
+    uint32_t *r = *(uint32_t **)(DATA_VA + ACCEL_OFF + 0x18);
+    if (n && rnd() % 4) return r[4 * (rnd() % n) + 1];
+    return rnd() % 3 ? rnd() % 20 : 0;
+}
+
+static void check_accels(void)
+{
+    static uint32_t rbuf[512 * 3], obuf[512 * 3], ents[8 * 3];
+    uint32_t ops = 1 + rnd() % 6, k;
+    for (k = 0; k < ops && *(uint32_t *)(DATA_VA + ACCEL_OFF) < 12; k++) {
+        uint32_t op = rnd() % 10, s = 0x1d8 + 4 * op, rv = 0, ov = 0, ro, oo, id = accel_id(), i, n;
+        void *of = our_fn(s);
+        void *rf = real_fn(s);
+        if (!of) return;
+        ro = oo = rnd();
+        switch (op) {
+        case 0:                         /* +0x1d8 new */
+            rv = ((fn1)rf)(P(&ro)); ov = ((fn1)of)(P(&oo));
+            break;
+        case 1:                         /* +0x1dc destroy (through a pointer it zeroes) */
+            ro = oo = id;
+            rv = ((fn1)rf)(P(&ro)); ov = ((fn1)of)(P(&oo));
+            break;
+        case 2:                         /* +0x1e0 by index */
+            i = rnd() % 6;
+            rv = ((fn2)rf)(P(&ro), i); ov = ((fn2)of)(P(&oo), i);
+            break;
+        case 3:                         /* +0x1e4 from a resource */
+            i = rnd() % 4 ? 103 + rnd() % 3 : rnd() % 300;
+            rv = ((fn2)rf)(P(&ro), i); ov = ((fn2)of)(P(&oo), i);
+            break;
+        case 4: case 5: case 6:         /* +0x1e8 enable, +0x1ec disable, +0x1f0 clear */
+            rv = ((fn1)rf)(id); ov = ((fn1)of)(id);
+            break;
+        case 7: case 8:                 /* +0x1f4 add, +0x1f8 remove */
+            n = rnd() % 5;
+            for (i = 0; i < n; i++) memcpy(ents + 3 * i, accel_pool[rnd() % 6], 12);
+            rv = ((fn3)rf)(id, P(ents), n); ov = ((fn3)of)(id, P(ents), n);
+            break;
+        case 9: {                       /* +0x1fc read */
+            uint32_t (__stdcall *r6)(uint32_t, uint32_t, uint32_t, uint32_t, uint32_t, uint32_t) = (void *)rf;
+            uint32_t (__stdcall *o6)(uint32_t, uint32_t, uint32_t, uint32_t, uint32_t, uint32_t) = (void *)of;
+            uint32_t start = rnd() % 8, mode = rnd() % 4 ? 2 : rnd() % 4, b = rnd() % 4;
+            memset(rbuf, 0xaa, sizeof rbuf); memset(obuf, 0xaa, sizeof obuf);
+            rv = r6(id, rnd(), start, mode, b ? P(rbuf) : 0, P(&ro));
+            ov = o6(id, rnd(), start, mode, b ? P(obuf) : 0, P(&oo));
+            if (memcmp(rbuf, obuf, sizeof rbuf)) {
+                for (i = 0; i < 512 * 3 && rbuf[i] == obuf[i]; i++) ;
+                printf("  +0x1fc read(id %u, start %u, mode %u) DIFFER at dword %u: real=%#x ours=%#x, n %u/%u\n",
+                       id, start, mode, i, rbuf[i], obuf[i], ro, oo);
+                differ++;
+            }
+            break;
+        }
+        }
+        if (rv != ov || ro != oo) {
+            printf("  +%#05x accel op DIFFER real=%d/%#x ours=%d/%#x\n", s, (int)rv, ro, (int)ov, oo); differ++;
+        }
+        if (accels_differ()) { printf("  +%#05x accel TABLES DIFFER\n", s); differ++; }
+        check_state("accelerators");
+        if (differ) return;
+    }
+}
+
+/* ---- key names --------------------------------------------------------------- */
+
+/* The host's key words, as its init loads them from ENGLISH.FLL (0x9520 on),
+ * and the slots it keeps their copies in; the harness points both sides'
+ * slots at one set of strings (pointers outside .data compare as they are). */
+static const uint32_t kn_slot[10] = { 0x41bec0, 0x41bc80, 0x41bb64, 0x41bfe8, 0x41bb68,
+                                      0x41bdac, 0x41bda4, 0x41c360, 0x41bc84, 0x41c104 };
+static const char *const kn_text[10] = { "CTRL + ", "SHIFT + ", "ALT + ", "NumLock", "Num Enter",
+                                         "Num /", "Break", "Menu", "Right Windows", "Left Windows" };
+
+static void seed_keynames(void)
+{
+    uint32_t i;
+    for (i = 0; i < 10; i++) {
+        const char *t = kn_text[i];
+        if (i >= 3 && rnd() % 16 == 0) t = kn_text[rnd() % 10];  /* now and then a key word out of place */
+        *(uint32_t *)(DATA_VA + kn_slot[i] - DATA_VA) = (uint32_t)(uintptr_t)t;
+        *(uint32_t *)(our_data + kn_slot[i] - DATA_VA) = (uint32_t)(uintptr_t)t;
+    }
+}
+
+/* +0x200 over key codes (every virtual key, any modifiers) into a guarded
+ * buffer of random length; +0x204 over the names it made and some others. */
+static void check_keynames(void)
+{
+    static char rb[96], ob[96], name[96];
+    static const char *const odd[] = { "", "ctrl + a", "CTRL + ", "Num Enterprise", "F1", "Space", "q", "CTRL + SHIFT + ALT + Break" };
+    fn3 r0 = (fn3)real_fn(0x200), o0 = (fn3)our_fn(0x200);
+    fn2 r4 = (fn2)real_fn(0x204), o4 = (fn2)our_fn(0x204);
+    uint32_t key = (rnd() % 8) << 8 | rnd() % 0x100, len = rnd() % 4 ? 64 : 23 + rnd() % 20;
+    /* (len must leave room past the modifier words, up to 21 bytes: retail
+     * passes len - used - 1 on unchecked, and a negative count runs strncpy's
+     * zero fill off the end of memory) */
+    uint32_t rv, ov, ro, oo;
+    if (!o0 || !o4) return;
+    if (rnd() % 4 == 0) key = (key & 0x700) | (uint32_t)"\x00\x03\x13\x5b\x5c\x5d\x6f\x87\x90"[rnd() % 9];
+    memset(rb, 0xaa, sizeof rb); memset(ob, 0xaa, sizeof ob);
+    rv = r0(key, P(rb), len); ov = o0(key, P(ob), len);
+    if (rv > 0x10000) rv -= P(rb);
+    if (ov > 0x10000) ov -= P(ob);
+    if (rv != ov || memcmp(rb, ob, sizeof rb)) {
+        printf("  +0x200 key-name(%#x) DIFFER real=%#x ours=%#x [%s] [%s]\n", key, rv, ov, rb, ob); differ++;
+    }
+    if (rnd() % 4) { memcpy(name, rb, sizeof name); name[sizeof name - 1] = 0; }
+    else strcpy(name, odd[rnd() % 8]);
+    ro = oo = rnd();
+    rv = r4(P(name), P(&ro)); ov = o4(P(name), P(&oo));
+    if (rv != ov || ro != oo) {
+        printf("  +0x204 key-code(\"%s\") DIFFER real=%d/%#x ours=%d/%#x\n", name, (int)rv, ro, (int)ov, oo); differ++;
+    }
+}
+
+/* ---- profiles ---------------------------------------------------------------- */
+
+/* Each side has its own copy of a made-up profile, in hostfs\r and hostfs\o
+ * (paths of one length, differing in that letter), under a new name each
+ * iteration so wine's profile cache never serves a stale copy.  The CFG path
+ * at 0x41c120 points each side at its own; the path+extension services are
+ * given each side's own path. */
+#define CFGPATH_OFF 0x5120u            /* 0x41c120: FLTSIM98.CFG's full path */
+
+static char fs_base[MAX_PATH];         /* ...\hostfs\ */
+static char prof_r[MAX_PATH], prof_o[MAX_PATH];   /* without the extension */
+static uint32_t prof_seq;
+
+static void fs_init(void)
+{
+    GetCurrentDirectoryA(sizeof fs_base - 16, fs_base);
+    strcat(fs_base, "\\hostfs\\");
+    CreateDirectoryA(fs_base, 0);
+    sprintf(prof_r, "%sr", fs_base); CreateDirectoryA(prof_r, 0);
+    sprintf(prof_o, "%so", fs_base); CreateDirectoryA(prof_o, 0);
+}
+
+static const char *const prof_sections[] = { "Main", "Lists", "Empty", "Nope", "main" };
+static const char *const prof_keys[] = { "a", "b", "list", "dbl", "s", "missing", "A" };
+static const char *const prof_values[] = {
+    "12", "-5", "0x1f", "077", "1, 2,3", "4,,5", "1.5", "2.25, -3e2,7", " 9 ", "", "abc", "3.14159",
+    "100000000000", "1e5, 2e-3", "-0", "7,8,9,10,11,12,13"
+};
+
+static void write_file(const char *path, const char *text)
+{
+    FILE *f = fopen(path, "wb");
+    if (f) { fputs(text, f); fclose(f); }
+}
+
+static int files_differ(const char *a, const char *b)
+{
+    static char ba[8192], bb[8192];
+    FILE *f;
+    size_t na = 0, nb = 0;
+    if ((f = fopen(a, "rb"))) { na = fread(ba, 1, sizeof ba, f); fclose(f); }
+    if ((f = fopen(b, "rb"))) { nb = fread(bb, 1, sizeof bb, f); fclose(f); }
+    return na != nb || memcmp(ba, bb, na);
+}
+
+/* A fresh pair of profiles; the CFG path on each side. */
+static void seed_profile(void)
+{
+    static char text[2048], rcfg[MAX_PATH], ocfg[MAX_PATH];
+    uint32_t s, k, n;
+    char *p = text;
+    if (prof_seq) {                     /* the last pair */
+        sprintf(rcfg, "%sr\\P%07u.CFG", fs_base, prof_seq); DeleteFileA(rcfg);
+        sprintf(ocfg, "%so\\P%07u.CFG", fs_base, prof_seq); DeleteFileA(ocfg);
+    }
+    prof_seq++;
+    for (s = 0; s < 3; s++) {
+        if (rnd() % 4 == 0) continue;
+        p += sprintf(p, "[%s]\r\n", prof_sections[s]);
+        n = s == 2 ? 0 : 1 + rnd() % 5;
+        for (k = 0; k < n; k++)
+            p += sprintf(p, "%s=%s\r\n", prof_keys[rnd() % 6], prof_values[rnd() % 16]);
+    }
+    sprintf(prof_r, "%sr\\P%07u", fs_base, prof_seq);
+    sprintf(prof_o, "%so\\P%07u", fs_base, prof_seq);
+    sprintf(rcfg, "%s.CFG", prof_r); sprintf(ocfg, "%s.CFG", prof_o);
+    write_file(rcfg, text); write_file(ocfg, text);
+    strcpy((char *)(DATA_VA + CFGPATH_OFF), rcfg);
+    strcpy((char *)(our_data + CFGPATH_OFF), ocfg);
+}
+
+/* One random profile service on each side; outputs and both files compared. */
+static void check_profiles(void)
+{
+    static char rbuf[256], obuf[256], rcfg[MAX_PATH], ocfg[MAX_PATH];
+    static uint8_t rout[64], oout[64], vals[64];
+    uint32_t ops = 1 + rnd() % 3, k;
+    sprintf(rcfg, "%s.CFG", prof_r); sprintf(ocfg, "%s.CFG", prof_o);
+    for (k = 0; k < ops; k++) {
+        uint32_t s = 0xa8 + 4 * (rnd() % 0x18), i, n = rnd() % 7, rv = 0, ov = 0, ext;
+        uint32_t sec = P(prof_sections[rnd() % 5]), key = P(prof_keys[rnd() % 7]);
+        void *rf = real_fn(s), *of = our_fn(s);
+        double d = (double)(int32_t)(rnd() % 2000000 - 1000000) / (1 + rnd() % 64);
+        const char *rp = prof_r, *op = prof_o;
+        if (!of) return;
+        if (trace) printf("prof +%#x n=%u\n", s, n);
+        ext = rnd() % 8 ? 0x24 : rnd() & 1 ? 999 : 0xfffffffeu;
+        if (ext == 0xfffffffeu) { rp = rcfg; op = ocfg; }
+        for (i = 0; i < sizeof vals; i++) vals[i] = (uint8_t)rnd();
+        for (i = 0; i < 8; i++) ((double *)vals)[i] = (double)(int32_t)(rnd() % 20000 - 10000) / 8;
+        memcpy(rout, vals, sizeof rout); memcpy(oout, vals, sizeof oout);
+        memset(rbuf, 0, sizeof rbuf); memset(obuf, 0, sizeof obuf);
+        if (rnd() & 1) { strcpy(rbuf, "dflt"); strcpy(obuf, "dflt"); }
+        switch (s) {
+        case 0xa8: case 0xb8: rv = ((fn3)rf)(sec, key, P(rout)); ov = ((fn3)of)(sec, key, P(oout)); break;
+        case 0xac: rv = ((fn3)rf)(sec, key, vals[0] * 1000u - 7); ov = ((fn3)of)(sec, key, vals[0] * 1000u - 7); break;
+        case 0xb0: case 0xc0: rv = ((fn4)rf)(sec, key, P(rout), n); ov = ((fn4)of)(sec, key, P(oout), n); break;
+        case 0xb4: case 0xc4: rv = ((fn4)rf)(sec, key, P(vals), n); ov = ((fn4)of)(sec, key, P(vals), n); break;
+        case 0xbc: {
+            uint32_t (__stdcall *r)(uint32_t, uint32_t, double) = rf, (__stdcall *o)(uint32_t, uint32_t, double) = of;
+            rv = r(sec, key, d); ov = o(sec, key, d);
+            break;
+        }
+        case 0xc8: i = 1 + rnd() % 64; rv = ((fn4)rf)(sec, key, P(rbuf), i); ov = ((fn4)of)(sec, key, P(obuf), i); break;
+        case 0xcc: i = rnd() % 16; rv = ((fn3)rf)(sec, key, P(prof_values[i])); ov = ((fn3)of)(sec, key, P(prof_values[i])); break;
+        case 0xd0: case 0xe0: rv = ((fn5)rf)(sec, key, P(rout), P(rp), ext); ov = ((fn5)of)(sec, key, P(oout), P(op), ext); break;
+        case 0xd4: rv = ((fn5)rf)(sec, key, vals[1] * 77u, P(rp), ext); ov = ((fn5)of)(sec, key, vals[1] * 77u, P(op), ext); break;
+        case 0xd8: case 0xe8: case 0xdc: case 0xec: {
+            uint32_t (__stdcall *r)(uint32_t, uint32_t, uint32_t, uint32_t, uint32_t, uint32_t) = rf, (__stdcall *o)(uint32_t, uint32_t, uint32_t, uint32_t, uint32_t, uint32_t) = of;
+            int put = s == 0xdc || s == 0xec;
+            rv = r(sec, key, put ? P(vals) : P(rout), n, P(rp), ext);
+            ov = o(sec, key, put ? P(vals) : P(oout), n, P(op), ext);
+            break;
+        }
+        case 0xe4: {
+            uint32_t (__stdcall *r)(uint32_t, uint32_t, double, uint32_t, uint32_t) = rf, (__stdcall *o)(uint32_t, uint32_t, double, uint32_t, uint32_t) = of;
+            rv = r(sec, key, d, P(rp), ext); ov = o(sec, key, d, P(op), ext);
+            break;
+        }
+        case 0xf0: {
+            uint32_t (__stdcall *r)(uint32_t, uint32_t, uint32_t, uint32_t, uint32_t, uint32_t) = rf, (__stdcall *o)(uint32_t, uint32_t, uint32_t, uint32_t, uint32_t, uint32_t) = of;
+            i = 1 + rnd() % 64;
+            rv = r(sec, key, P(rbuf), i, P(rp), ext); ov = o(sec, key, P(obuf), i, P(op), ext);
+            break;
+        }
+        case 0xf4: i = rnd() % 16; rv = ((fn5)rf)(sec, key, P(prof_values[i]), P(rp), ext); ov = ((fn5)of)(sec, key, P(prof_values[i]), P(op), ext); break;
+        case 0xf8: rv = ((fn1)rf)(sec); ov = ((fn1)of)(sec); break;
+        case 0xfc: rv = ((fn3)rf)(sec, P(rp), ext); ov = ((fn3)of)(sec, P(op), ext); break;
+        case 0x100: rv = ((fn2)rf)(sec, P(rout)); ov = ((fn2)of)(sec, P(oout)); break;
+        case 0x104: rv = ((fn4)rf)(sec, P(rp), ext, P(rout)); ov = ((fn4)of)(sec, P(op), ext, P(oout)); break;
+        }
+        if (rv != ov || memcmp(rout, oout, sizeof rout) || memcmp(rbuf, obuf, sizeof rbuf)) {
+            printf("  +%#05x profile DIFFER real=%d ours=%d [%s] [%s]\n", s, (int)rv, (int)ov, rbuf, obuf); differ++;
+        }
+        if (files_differ(rcfg, ocfg)) { printf("  +%#05x profile FILES DIFFER\n", s); differ++; }
+        check_state("profiles");
+        if (differ) return;
+    }
+}
+
+/* ---- files ------------------------------------------------------------------- */
+
+/* Each side works in its own directory (hostfs\r\, hostfs\o\) on the same
+ * small set of files, names relative to the harness's directory; up to three
+ * files open at a time each.  After every operation the results, the file
+ * objects, and the two directories' contents are compared. */
+static const char *const fs_names[] = { "Fa", "Fb", "Fc", "Dd" };
+static const uint32_t fs_exts[] = { 18, 30, 0xfffffffeu, 18, 30, 999 };   /* .BIN .TMP none, bad */
+static uint32_t rfh[3], ofh[3];
+
+/* The file a name and extension make, on a side ('r' or 'o'). */
+static void fs_path(char *out, char side, const char *name, uint32_t ext)
+{
+    static const char *const e[] = { [18] = ".BIN", [30] = ".TMP" };
+    sprintf(out, "hostfs\\%c\\%s%s", side, name, ext < 31 && e[ext] ? e[ext] : "");
+}
+
+/* Remove every file and directory the operations can make, on both sides. */
+static void fs_clean(void)
+{
+    static char p[MAX_PATH];
+    uint32_t s, n, x;
+    for (s = 0; s < 2; s++)
+        for (n = 0; n < 4; n++)
+            for (x = 0; x < 3; x++) {
+                fs_path(p, "ro"[s], fs_names[n], fs_exts[x]);
+                SetFileAttributesA(p, FILE_ATTRIBUTE_NORMAL);
+                DeleteFileA(p);
+                RemoveDirectoryA(p);
+            }
+}
+
+/* A fresh pair of directories: some of the files, with the same contents. */
+static void seed_files(void)
+{
+    static char rp[MAX_PATH], op[MAX_PATH], data[200];
+    uint32_t n, x, len, i;
+    fs_clean();
+    for (n = 0; n < 3; n++)
+        for (x = 0; x < 3; x++) {
+            if (rnd() % 3) continue;
+            len = rnd() % sizeof data;
+            for (i = 0; i < len; i++) data[i] = (char)rnd();
+            fs_path(rp, 'r', fs_names[n], fs_exts[x]); fs_path(op, 'o', fs_names[n], fs_exts[x]);
+            {
+                FILE *f = fopen(rp, "wb"); if (f) { fwrite(data, 1, len, f); fclose(f); }
+                f = fopen(op, "wb"); if (f) { fwrite(data, 1, len, f); fclose(f); }
+            }
+        }
+    memset(rfh, 0, sizeof rfh); memset(ofh, 0, sizeof ofh);
+}
+
+/* The two directories alike: each name present on both or neither, with the
+ * same contents and the same attributes. */
+static int dirs_differ(void)
+{
+    static char rp[MAX_PATH], op[MAX_PATH];
+    uint32_t n, x;
+    for (n = 0; n < 4; n++)
+        for (x = 0; x < 3; x++) {
+            uint32_t ra, oa;
+            fs_path(rp, 'r', fs_names[n], fs_exts[x]); fs_path(op, 'o', fs_names[n], fs_exts[x]);
+            ra = GetFileAttributesA(rp); oa = GetFileAttributesA(op);
+            if (ra != oa) return 1;
+            if (ra != 0xffffffffu && !(ra & FILE_ATTRIBUTE_DIRECTORY) && files_differ(rp, op)) return 1;
+        }
+    return 0;
+}
+
+/* A file object on each side alike: mode, extension, and path but for the
+ * side's letter. */
+static int fobj_differ(uint32_t r, uint32_t o)
+{
+    const uint32_t *rf = (const uint32_t *)(uintptr_t)r, *of = (const uint32_t *)(uintptr_t)o;
+    const char *a, *b;
+    if (!r != !o) return 1;
+    if (!r) return 0;
+    if (rf[2] != of[2] || rf[3] != of[3]) return 1;
+    a = (const char *)(uintptr_t)rf[1]; b = (const char *)(uintptr_t)of[1];
+    if (strlen(a) != strlen(b) || strncmp(a, b, 7) || strcmp(a + 8, b + 8)) return 1;
+    return 0;
+}
+
+static void check_files(void)
+{
+    static uint8_t rbuf[128], obuf[128], data[128];
+    static char rp[MAX_PATH], op[MAX_PATH], rq[MAX_PATH], oq[MAX_PATH];
+    uint32_t ops = 1 + rnd() % 8, k, i;
+    for (k = 0; k < ops; k++) {
+        uint32_t op_ = rnd() % 16, slot = rnd() % 3, rv = 0, ov = 0, ro, oo, n, x, x2;
+        uint32_t rf = rfh[slot], of_ = ofh[slot];
+        const char *nm = fs_names[rnd() % 4], *nm2 = fs_names[rnd() % 3];
+        static const uint32_t slots[16] = { 0x17c, 0x17c, 0x148, 0x13c, 0x19c, 0x19c, 0x1b0, 0x194,
+                                            0x190, 0x1a4, 0x1a8, 0x134, 0x138, 0x158, 0x14c, 0x144 };
+        uint32_t s = slots[op_];
+        void *R = real_fn(s), *O = our_fn(s);
+        if (!O) return;
+        if (trace) printf("file +%#x slot %u\n", s, slot);
+        x = fs_exts[rnd() % 6]; x2 = fs_exts[rnd() % 5];
+        sprintf(rp, "hostfs\\r\\%s", nm); sprintf(op, "hostfs\\o\\%s", nm);
+        sprintf(rq, "hostfs\\r\\%s", nm2); sprintf(oq, "hostfs\\o\\%s", nm2);
+        if (x == 0xfffffffeu && rnd() & 1) { strcat(rp, ".BIN"); strcat(op, ".BIN"); }
+        ro = oo = rnd();
+        if (rnd() % 16 == 0) rf = of_ = 0;              /* a null file now and then */
+        memset(rbuf, 0x5a, sizeof rbuf); memset(obuf, 0x5a, sizeof obuf);
+        switch (s) {
+        case 0x17c: case 0x148:
+            if (rfh[slot] || ofh[slot]) continue;
+            n = rnd() % 5;                              /* modes 0..3, and 4 */
+            if (s == 0x17c) { rv = ((fn4)R)(P(&rfh[slot]), P(rp), x, n); ov = ((fn4)O)(P(&ofh[slot]), P(op), x, n); }
+            else { rv = ((fn3)R)(P(&rfh[slot]), P(rp), x); ov = ((fn3)O)(P(&ofh[slot]), P(op), x); }
+            if (rv) rfh[slot] = 0;
+            if (ov) ofh[slot] = 0;
+            if (fobj_differ(rfh[slot], ofh[slot])) { printf("  +%#05x open OBJECT DIFFER\n", s); differ++; }
+            break;
+        case 0x13c:
+            rv = ((fn1)R)(rf); ov = ((fn1)O)(of_);
+            if (rf) rfh[slot] = 0;
+            if (of_) ofh[slot] = 0;
+            break;
+        case 0x19c: case 0x1b0:
+            n = rnd() % 100;
+            for (i = 0; i < n; i++) data[i] = (uint8_t)rnd();
+            if (s == 0x1b0) { memcpy(rbuf, data, n); memcpy(obuf, data, n); }
+            i = rnd() & 1;
+            rv = ((fn4)R)(rf, P(rbuf), n, i ? P(&ro) : 0); ov = ((fn4)O)(of_, P(obuf), n, i ? P(&oo) : 0);
+            break;
+        case 0x194: {
+            uint32_t size = 0;
+            if (rf) size = GetFileSize((HANDLE)(uintptr_t)*(uint32_t *)(uintptr_t)rf, 0);
+            n = rnd() % (size + 4); i = rnd() % 3;
+            rv = ((fn3)R)(rf, n, i); ov = ((fn3)O)(of_, n, i);
+            break;
+        }
+        case 0x190: case 0x1a4:
+            rv = ((fn2)R)(rf, P(&ro)); ov = ((fn2)O)(of_, P(&oo));
+            break;
+        case 0x1a8:
+            n = rnd() % 120;
+            rv = ((fn2)R)(rf, n); ov = ((fn2)O)(of_, n);
+            break;
+        case 0x134:
+            rv = ((fn3)R)(P(&ro), P(rp), x); ov = ((fn3)O)(P(&oo), P(op), x);
+            break;
+        case 0x138:
+            n = rnd() % 0x20;
+            rv = ((fn3)R)(n, P(rp), x); ov = ((fn3)O)(n, P(op), x);
+            break;
+        case 0x158: case 0x14c:
+            if (s == 0x14c && rnd() % 4 == 0) {         /* +0x11c, a directory, instead */
+                s = 0x11c; R = real_fn(s); O = our_fn(s);
+                if (!O) return;
+                sprintf(rp, "hostfs\\r\\Dd"); sprintf(op, "hostfs\\o\\Dd");
+                rv = ((fn1)R)(P(rp)); ov = ((fn1)O)(P(op));
+                break;
+            }
+            rv = ((fn2)R)(P(rp), x); ov = ((fn2)O)(P(op), x);
+            break;
+        case 0x144:
+            if (rnd() & 1) { s = 0x16c; R = real_fn(s); O = our_fn(s); if (!O) return; }
+            rv = ((fn4)R)(P(rq), x2, P(rp), x); ov = ((fn4)O)(P(oq), x2, P(op), x);
+            break;
+        }
+        if (rv != ov || ro != oo || memcmp(rbuf, obuf, sizeof rbuf)) {
+            printf("  +%#05x file op DIFFER real=%d/%#x ours=%d/%#x (%s, %#x)\n", s, (int)rv, ro, (int)ov, oo, nm, x); differ++;
+        }
+        if (dirs_differ()) { printf("  +%#05x file op DIRS DIFFER (%s, %#x)\n", s, nm, x); differ++; }
+        check_state("files");
+        if (differ) break;
+    }
+    for (k = 0; k < 3; k++) {                           /* close what is open, each side its own */
+        if (rfh[k]) ((fn1)real_fn(0x13c))(rfh[k]);
+        if (ofh[k] && our_fn(0x13c)) ((fn1)our_fn(0x13c))(ofh[k]);
+        rfh[k] = ofh[k] = 0;
+    }
+}
+
 int main(int argc, char **argv)
 {
     uint32_t n = (argc > 1) ? (uint32_t)strtoul(argv[1], NULL, 0) : 1, k, i;
 
+    setvbuf(stdout, 0, _IONBF, 0);     /* so a crash still shows what came before it */
+    trace = getenv("HOSTDIFF_TRACE") != 0;
     map_real();
     load_ours();
-    printf("hostdiff: %u accessors + writers + strings + primitives + stubs + allocator + lists + command line + extensions + CRT, %u iteration(s)\n",
+    load_strmods();
+    fs_init();
+    printf("hostdiff: %u accessors + writers + strings + primitives + stubs + allocator + lists + command line + extensions + CRT + string resources + names + images + accelerators + key names + profiles + files, %u iteration(s)\n",
            (unsigned)(sizeof accessors / sizeof accessors[0]), n);
     for (k = 0; k < n; k++) {
         seed_data();
@@ -1102,6 +1888,18 @@ int main(int argc, char **argv)
         check_188();
         check_sort();
         check_crt();
+        check_strings();
+        check_strmods();
+        check_inputs();
+        check_names();
+        check_184();
+        check_images();
+        check_accels();
+        check_keynames();
+        seed_profile();
+        check_profiles();
+        seed_files();
+        check_files();
     }
     printf("hostdiff: %d differ\n", differ);
     return differ ? 1 : 0;

@@ -20,6 +20,9 @@ slot is done MAIN is not in `MODULES` and is never installed.
 | 9, the analysis menu greying | `+0x30`, `+0x34` (assembly, `.text+0x16920`, `+0x169a0`) | `menu` | verified: 20,000 scenarios, 0 differ; 6 of 6 breaks caught |
 | 10, an object slot release | `+0x8c` (assembly, `.text+0x16570`..`+0x165a2`) | `obj` | verified: 20,000 scenarios, 0 differ; 6 of 6 breaks caught |
 | 11, the latitude clamp | `+0x1c` (assembly, `.text+0xc520`..`+0xc552`) | `clamp` | verified: 20,000 scenarios, 0 differ; 5 of 6 breaks caught, 1 proven equivalent |
+| 12, the sun direction and intensity | `+0xa0` (assembly, `.text+0x830d`..`+0x95e9`, helper `+0x9097`) | `sun` | verified: 20,000 scenarios, 0 differ; 12 of 14 breaks caught, 2 proven equivalent |
+| 13, allocate an object slot | `+0x84` (assembly, `.text+0x16100`..`+0x162e5`) | `objalloc` | verified: 20,000 scenarios, 0 differ; 14 of 15 breaks caught, 1 proven equivalent |
+| 14, the eye's reticle | `+0xc0` (assembly, `.text+0x16a0`..`+0x18c2`) | `eye` | verified: 20,000 scenarios, 0 differ; 12 of 13 breaks caught, 1 proven equivalent |
 
 ## Binary and linkage
 
@@ -68,11 +71,11 @@ calls are reached from the host, the `English\` dialog modules, or CHAIN.
 | `+0x74` | `.text+0x18781` | ADVDRV, MULTIP | **slice 6**: the season, the zone and the clock |
 | `+0x78`, `+0x7c` | `.text+0x19c94`, `+0x19cd5` | | `+0x78` **slice 4**, `+0x7c` **slice 5** |
 | `+0x80` | `.text+0x19f10` | ADVDRV, PANELS | **slice 4**: `(which, &tenths)` |
-| `+0x84`..`+0x90` | `.text+0x16100`, `+0x162f0`, `+0x16570`, `+0x10560` | CONTROLS, WINDOW (`+0x88`) | `+0x8c` is **slice 10** (object table at `.data+0x9794`, 0x2d4-byte entries; `+0x84` allocates, `+0x88` iterates) |
-| `+0x94`..`+0xa0` | `.text+0x7140`, `+0x6f59`, `+0x6de9`, `+0x830d` | WEATHERM (`+0x94`), WINDOW (`+0x98`, `+0x9c`) | |
+| `+0x84`..`+0x90` | `.text+0x16100`, `+0x162f0`, `+0x16570`, `+0x10560` | CONTROLS, WINDOW (`+0x88`) | object table at `.data+0x9794`, 0x2d4-byte entries: `+0x84` **slice 13** allocates, `+0x88` iterates, `+0x8c` **slice 10** releases |
+| `+0x94`..`+0xa0` | `.text+0x7140`, `+0x6f59`, `+0x6de9`, `+0x830d` | WEATHERM (`+0x94`), WINDOW (`+0x98`, `+0x9c`) | `+0xa0` is **slice 12**: the sun direction |
 | `+0xa4`, `+0xa8` | `.text+0x16ddf`, `+0x6450` | ADVDRV, CONTROLS, WINDOW | `+0xa4` is **slice 7** |
 | `+0xac`..`+0xbc` | `.text+0xc870`, `+0xcdb0`, `+0xdd70`, `+0xe5a0`, `+0xed10` | CONTROLS (`+0xac`), FACIL (`+0xb0`) | |
-| `+0xc0`..`+0xc8` | `.text+0x06a0`, `+0xc560`, `+0x18f0` | WINDOW, FACIL, CONTROLS | `+0xc8` is **slice 8** |
+| `+0xc0`..`+0xc8` | `.text+0x06a0`, `+0xc560`, `+0x18f0` | WINDOW, FACIL, CONTROLS | `+0xc0` is **slice 14** (the eye's reticle), `+0xc8` is **slice 8** |
 
 ## Slice 1: situation records
 
@@ -485,3 +488,95 @@ it clamps the latitude dword at GLOBAL +0x564 into `[0xff683bb7, 0x97c449]`
 clustered on the two bounds and their neighbours. `make main-breaks SUITE=clamp`:
 6 breaks, 5 caught, 1 proven equivalent (`max-op`: `>` versus `>=` at exactly
 the maximum both leave the maximum).
+
+## Slice 12: the sun direction and intensity
+
+`src/main/main_sun.inc`, `.text+0x830d` (`+0xa0`) with its helper `.text+0x9097`,
+assembly. It builds a unit sun vector into GLOBAL (`+0xb2a` x, `+0xb2e` y,
+`+0xb32` z) from the time of day (GLOBAL `+0x23b`/`+0x23c`), the day of the year
+(`+0x23e`) and the latitude (`+0x564`), through four of UTIL `+0x2c`'s
+sine/cosine pairs, and then the helper turns the vertical component into a light
+intensity (`+0xcba`) and a sky-colour band (`+0x116e`, `+0x12a0`). The flags
+`+0xb34` and `+0x116e` are primed to 1 and cleared or raised as the geometry
+decides; a sun at or above the horizon zeroes the vector, and a gate word under
+`0x1000` forces it straight down. The arithmetic is 16-bit signed Q15 fixed
+point (`q15`: `imul`, double, keep the high word).
+
+- **Several divides run into overflow and lean on the host's divide filter.**
+  The minutes-of-day and day-of-year `div`s saturate to all ones; the latitude
+  `idiv bx` (by 305) and the helper's `idiv bx` (by 6000 or 14000) overflow for
+  a mid-range sun and saturate to `0x7fff`, or `0x8001` when the divisor and the
+  dividend's top half differ in sign. This is the first MAIN slice to divide
+  *signed* into overflow, so it pins down the `idiv` half of `repair_divide`
+  (maindiff.c), which had stood unverified since WINDOW; ours computes each
+  repaired quotient in C and never traps.
+- **UTIL `+0x2c` is modelled, not reproduced.** The real trig is verified in
+  UTIL; the harness drives this slice against a deterministic sine/cosine model
+  (`util_2c`), identical on both sides, so only MAIN's fixed-point arithmetic
+  and glue are under test. The angle is pushed over two stale bytes, so the
+  model reads its low word only.
+- **`eax` at exit is leftover, not a result.** The routine does not restore it
+  and the one caller ignores it, so the suite does not compare a return value.
+
+### Verifying the sun direction
+
+`make maindiff-run SUITE=sun`: 20,000 scenarios, 0 differences, over a random
+time, day, latitude (now and then large enough that the latitude `idiv`
+overflows) and gate (straddling `0x1000`). `make main-breaks SUITE=sun`: 14
+breaks, 12 caught, 2 proven equivalent -- `light-zero-op` (`>` versus `>=`
+where the subtraction already left zero) and `idiv-sat` (both `idiv` sites
+discard the quotient's low bits, so the low-order saturation value cannot be
+told apart, while the sign still shows and `idiv-neg` catches it).
+
+## Slice 13: allocate an object slot
+
+`src/main/main_nav.inc`, `.text+0x16100` (`+0x84`), assembly. `(tmpl, kind,
+&handle)`: a sibling of the slice-10 release, over the same 0x2d4-byte table at
+`.data+0x9794`. If `*handle` already carries the `0xf0000` flag and its entry
+is still active, nothing is done and 0 is returned. Otherwise the first entry
+whose active word is zero is taken: `kind` (0 or 1, anything else `-1`) picks
+four field words; the host allocates a 0xaa-byte buffer filled from a `.data`
+template at `+0x6240`, a 0xc-byte sub-template chosen by `kind` through the
+pointer table at `+0x62f0` is copied in, and fourteen more buffers are each a
+copy of the first; nine dwords of `tmpl` go into the entry, it is marked
+active, and `*handle` becomes `index | 0xf0000`. Returns 0, or `-1` when all
+twenty entries are taken.
+
+The host's allocator and memmove are verified elsewhere; the harness's models
+hand back pointers into its shared arena, the same address on both sides, so
+the pointers the table ends up holding compare equal. The slot's active word
+is only ever 0 or 1, so the fast path's `== 1` and a bare `!= 0` are
+indistinguishable (the `fast-eq` break).
+
+### Verifying the allocation
+
+`make maindiff-run SUITE=objalloc`: 20,000 scenarios, 0 differences, over a
+random template, kind (including invalid), and handle (fresh, already
+allocated with any nonzero subset of the flag bits over an in-range index, or
+random), with entries now and then pre-marked to move the free slot. `make
+main-breaks SUITE=objalloc`: 15 breaks, 14 caught, 1 proven equivalent
+(`fast-eq`).
+
+## Slice 14: the eye's reticle
+
+`src/main/main_eye.inc`, `.text+0x16a0` (`+0xc0`), assembly. `(view)`: the view
+record's `+0x1c` points to a box `{extent, lo, _, hi, done, guard, guard}`.
+Unless the box is already done (`+0x10 == 1`) or either guard (`+0x14`,
+`+0x18`) is set, GLOBAL `+0x2ec` is stamped `0xf00f` and, by the reticle style
+in GLOBAL `+0x600`, HG2D draws the segments of a frame (style 1, four `+0x1c`
+segments) or a cross (styles 2 and 3, four `+0x34` segments), each coordinate
+scaled from the extent (`>>6`, `>>5`, `>>4`). Styles 0 and above 3 draw
+nothing.
+
+HG2D (module id 13) is verified elsewhere; the eye only ever hands it
+coordinates and never reads anything back, so the harness logs the segments it
+is handed (the view context by what it points at) and compares those along
+with the stamp. `eax` at exit is leftover and the callers ignore it. The box's
+done flag is only ever 0 or 1, so its `== 1` and a bare `!= 0` gate on the same
+boxes (the `done-eq` break).
+
+### Verifying the reticle
+
+`make maindiff-run SUITE=eye`: 20,000 scenarios, 0 differences, over a random
+box and style (now and then done or guarded, so the early return shows). `make
+main-breaks SUITE=eye`: 13 breaks, 12 caught, 1 proven equivalent (`done-eq`).

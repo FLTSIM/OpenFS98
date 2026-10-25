@@ -52,6 +52,7 @@ typedef uint32_t (FS98_STDCALL *f1)(uint32_t);
 typedef uint32_t (FS98_STDCALL *f2)(uint32_t, uint32_t);
 typedef uint32_t (FS98_STDCALL *f3)(uint32_t, uint32_t, uint32_t);
 typedef uint32_t (FS98_STDCALL *f4)(uint32_t, uint32_t, uint32_t, uint32_t);
+typedef uint32_t (FS98_STDCALL *f5)(uint32_t, uint32_t, uint32_t, uint32_t, uint32_t);
 
 #define CALL(m, off, fn) (*(fn *)(uintptr_t)((m) + (off)))
 #define HOST_(off, fn)   CALL(HOST, off, fn)
@@ -270,6 +271,8 @@ static const uint32_t retail_linkage[] = {
 #include "main_situation.inc"
 #include "main_nav.inc"
 #include "main_season.inc"
+#include "main_sun.inc"
+#include "main_eye.inc"
 
 __asm__(".globl _ImportTable\n\t.set _ImportTable, _main_image + 0x0\n\t"
         ".globl _Linkage\n\t.set _Linkage, _main_image + 0xc0");
@@ -300,8 +303,11 @@ static void main_install(void)
         { 0x1c, (void *)lat_clamp },
         { 0x30, (void *)menu_grey },
         { 0x34, (void *)menu_enable },
+        { 0x84, (void *)obj_alloc },
         { 0x8c, (void *)obj_free },
+        { 0xa0, (void *)nav_sun },
         { 0xa4, (void *)nav_clock_ascii },
+        { 0xc0, (void *)nav_eye },
         { 0xc8, (void *)nav_viewcycle },
     };
     uint32_t i;

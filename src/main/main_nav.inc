@@ -220,6 +220,71 @@ static uint32_t FS98_STDCALL obj_free(uint32_t handle)
     return id * 181u;      /* eax is left holding the index, as retail leaves it */
 }
 
+/* .text+0x16100 == Linkage +0x84: allocate an object slot.  (tmpl, kind,
+ * &handle).  If the handle already carries the 0xf0000 flag and its entry is
+ * still active, nothing is done and 0 is returned.  Otherwise the first free
+ * entry (first dword zero) of the 0x2d4-byte table at .data+0x9794 is taken:
+ * `kind` (0 or 1, else -1) picks four field words; the host allocates a
+ * 0xaa-byte buffer filled from a .data template at +0x6240, a 0xc-byte sub-
+ * template (chosen by kind through the pointer table at +0x62f0) is copied in,
+ * then 14 more buffers each a copy of the first; nine dwords of `tmpl` go into
+ * the entry, it is marked active, and *handle becomes index | 0xf0000.
+ * Returns 0, or -1 when the table is full.  The host's allocator and memmove
+ * are verified elsewhere; the buffer pointers it hands back are the harness's
+ * shared arena, the same on both sides. */
+static uint32_t FS98_STDCALL obj_alloc(uint32_t tmpl, uint32_t kind, uint32_t handle)
+{
+    uint32_t index, ent, i, buf;
+
+    if ((M32(handle) & 0xf0000) &&
+        M32(V(0x20809794) + (M32(handle) & 0xff) * 181u * 4u) == 1)
+        return 0;
+
+    for (index = 0; index < 20; index++)
+        if (M32(V(0x20809794) + index * 0x2d4u) == 0)
+            break;
+    if (index >= 20)
+        return 0xffffffffu;
+
+    ent = index * 0x2d4u;
+    if (kind == 1) {
+        M16(V(0x2080979c) + ent) = 0x254;
+        M16(V(0x2080979e) + ent) = 0xc00;
+        M16(V(0x20809798) + ent) = 0x1;
+        M16(V(0x2080979a) + ent) = 0x10;
+    } else if (kind == 0) {
+        M16(V(0x2080979c) + ent) = 0x950;
+        M16(V(0x2080979e) + ent) = 0x3000;
+        M16(V(0x20809798) + ent) = 0x10;
+        M16(V(0x2080979a) + ent) = 0x100;
+    } else {
+        return 0xffffffffu;
+    }
+
+    M32(V(0x208097a0) + ent) = 0xf;
+    if (H_ALLOC(1, 0xaa, V(0x20809a00) + ent, 1) != 0)
+        return 0xffffffffu;
+    buf = M32(V(0x20809a00) + ent);
+    H_MEMMOVE(buf, V(0x20806240), 0xaa);
+    M32(V(0x2080d140)) = buf + 0x42;
+    H_MEMMOVE(buf + 0x64, M32(V(0x208062f0) + kind * 4u), 0xc);
+
+    for (i = 1; i < 0xf; i++) {
+        if (H_ALLOC(1, 0xaa, V(0x20809a00) + ent + i * 4u, 1) != 0)
+            break;
+        H_MEMMOVE(M32(V(0x20809a00) + ent + i * 4u), buf, 0xaa);
+    }
+
+    M32(V(0x20809790) + ent) = kind;
+    M32(V(0x20809768) + ent) = tmpl;
+    for (i = 0; i < 9; i++)
+        M32(V(0x2080976c) + ent + i * 4u) = M32(tmpl + i * 4u);
+    M32(V(0x208097a4) + ent) = 0;
+    M32(V(0x20809794) + ent) = 1;
+    M32(handle) = index | 0xf0000u;
+    return 0;
+}
+
 /* .text+0xc520 == Linkage +0x1c: clamp the latitude at GLOBAL +0x564 into
  * [0xff683bb7, 0x97c449] (signed).  FACIL calls it. */
 static uint32_t FS98_STDCALL lat_clamp(void)

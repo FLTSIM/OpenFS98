@@ -60,6 +60,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <stdarg.h>
+#include <math.h>
 
 #define STDCALL __attribute__((stdcall))
 
@@ -92,6 +93,7 @@ static struct side *cur;
 static uint32_t relocs[MAX_RELOCS], nrelocs;
 static uint8_t host[0x340], global[0x1400], stub_module[0x400];
 static uint8_t acontain[0x40], controls[0x60], sound[0x40], util[0xc0], weatherm[0x40], multip[0x40], fe[0x40];
+static uint8_t hg2d[0x40];
 static uint8_t chain[0x24];
 static uint8_t arena[ARENA_SIZE] __attribute__((aligned(16)));
 static uint32_t arena_used;
@@ -244,38 +246,60 @@ static void stub_fault(const char *what)
 }
 
 /* The host repairs integer divide faults in the modules it calls: its __try
- * filter (retail 0x4119a0, docs/modules/host.md and window.md) saturates the
- * result -- all ones for div, on a quotient that will not fit or a zero
- * divisor -- and returns past the instruction.  maindiff stands in for the
- * host, so it repairs them the same way; +0x74's minutes-to-hours divide runs
- * into overflow and relies on it (ours models the repaired value in C).
- * Only the register-operand div/idiv forms MAIN uses are decoded.  idiv's
- * repaired value (the host saturates to the largest-magnitude quotient, not
- * all ones) is not pinned down yet -- no slice so far divides signed into
- * overflow; the +0xa0 sun slice will be the first and must establish it. */
+ * filter (retail 0x4119a0, docs/modules/host.md and window.md) decodes the
+ * faulting F6/F7 and saturates the result past the instruction.  For div it
+ * is all ones (quotient and remainder); for idiv the quotient is the largest
+ * value -- or the most negative but one (0x8001, 0x80000001; a byte 0x7f81)
+ * when the divisor and the dividend's top half differ in sign -- and the
+ * remainder the largest.  maindiff stands in for the host and repairs them
+ * the same way: +0x74's minutes-to-hours divide and +0xa0's day and latitude
+ * divides run into overflow and rely on it, ours modelling the repaired value
+ * in C.  This matches windowdiff.c's div_fixup, which the WINDOW slice pinned
+ * down.  Only the register-operand forms MAIN uses are decoded. */
 static int repair_divide(CONTEXT *c)
 {
     const uint8_t *ip = (const uint8_t *)(uintptr_t)c->Eip;
-    uint32_t len = 0;
+    DWORD *reg[8];
+    uint32_t len = 0, v, neg;
     int opsz = 4;
-    uint8_t op, modrm;
+    uint8_t op, modrm, rm, kind;
 
+    reg[0] = &c->Eax; reg[1] = &c->Ecx; reg[2] = &c->Edx; reg[3] = &c->Ebx;
+    reg[4] = &c->Esp; reg[5] = &c->Ebp; reg[6] = &c->Esi; reg[7] = &c->Edi;
     if (ip[0] == 0x66) { opsz = 2; len = 1; }
     op = ip[len];
     if (op != 0xf6 && op != 0xf7)
         return 0;
     modrm = ip[len + 1];
-    if ((modrm >> 6) != 3 || (((modrm >> 3) & 7) != 6 && ((modrm >> 3) & 7) != 7))
+    kind = (modrm >> 3) & 7;
+    if ((modrm >> 6) != 3 || (kind != 6 && kind != 7))
         return 0;                                  /* div (6) or idiv (7), register operand */
+    rm = modrm & 7;
     len += 2;
-    if (op == 0xf6)
-        c->Eax = (c->Eax & 0xffff0000u) | 0xffffu; /* 8-bit: AL quot, AH rem */
-    else if (opsz == 2) {
-        c->Eax = (c->Eax & 0xffff0000u) | 0xffffu;
-        c->Edx = (c->Edx & 0xffff0000u) | 0xffffu;
-    } else {
-        c->Eax = 0xffffffffu;
-        c->Edx = 0xffffffffu;
+    if (kind == 6) {                               /* div: all ones */
+        if (op == 0xf6)
+            c->Eax = (c->Eax & 0xffff0000u) | 0xffffu;
+        else if (opsz == 2) {
+            c->Eax = (c->Eax & 0xffff0000u) | 0xffffu;
+            c->Edx = (c->Edx & 0xffff0000u) | 0xffffu;
+        } else {
+            c->Eax = 0xffffffffu;
+            c->Edx = 0xffffffffu;
+        }
+    } else {                                       /* idiv: saturate by sign */
+        v = *reg[rm];
+        if (op == 0xf6) {                          /* 8-bit: AL quot, AH rem; high is AH */
+            neg = ((int8_t)v < 0) != ((int8_t)(c->Eax >> 8) < 0);
+            c->Eax = (c->Eax & 0xffff0000u) | (neg ? 0x7f81u : 0x7f7fu);
+        } else if (opsz == 2) {
+            neg = ((int16_t)v < 0) != ((int16_t)c->Edx < 0);
+            c->Eax = (c->Eax & 0xffff0000u) | (neg ? 0x8001u : 0x7fffu);
+            c->Edx = (c->Edx & 0xffff0000u) | 0x7fffu;
+        } else {
+            neg = ((int32_t)v < 0) != ((int32_t)c->Edx < 0);
+            c->Eax = neg ? 0x80000001u : 0x7fffffffu;
+            c->Edx = 0x7fffffffu;
+        }
     }
     c->Eip += len;
     return 1;
@@ -939,6 +963,24 @@ static uint32_t STDCALL util_angle(uint32_t x, uint32_t z)
     return r;
 }
 
+/* +0x2c(angle, &first, &second): the sine and cosine of a 16-bit angle (a
+ * whole circle is 0x10000), each as a Q15 word.  The sun slice (+0xa0) reads
+ * the pairs back out of MAIN's .data; the real UTIL's trig is verified in
+ * UTIL, so a deterministic sin/cos stand-in is enough and identical on both
+ * sides.  Retail pushes the angle over two stale bytes, so only its low word
+ * is significant; the model masks it, the way fe_2c does its first argument. */
+static uint32_t STDCALL util_2c(uint32_t angle, uint32_t first, uint32_t second)
+{
+    double a = (double)(angle & 0xffff) * (2.0 * 3.14159265358979323846 / 65536.0);
+    int16_t s = (int16_t)(sin(a) * 32767.0 + (sin(a) < 0 ? -0.5 : 0.5));
+    int16_t c = (int16_t)(cos(a) * 32767.0 + (cos(a) < 0 ? -0.5 : 0.5));
+
+    *(uint16_t *)(uintptr_t)first = (uint16_t)s;
+    *(uint16_t *)(uintptr_t)second = (uint16_t)c;
+    put(" U2c(%#x)->%d,%d", angle & 0xffff, s, c);
+    return 0;
+}
+
 /* MULTIP's two accessors, as logging models for +0x80: each is handed a
  * pointer to one of MAIN's .data words, fills it, and answers 0 or -- now
  * and then, by what was there -- a failure.  MULTIP is verified elsewhere;
@@ -953,6 +995,26 @@ static uint32_t STDCALL multip_fill(uint32_t p, const char *tag)
 }
 static uint32_t STDCALL multip_38(uint32_t p) { return multip_fill(p, "M38"); }
 static uint32_t STDCALL multip_34(uint32_t p) { return multip_fill(p, "M34"); }
+
+/* HG2D's two segment drawers, as logging models for the eye slice (+0xc0).
+ * Each is handed the view's context pointer and the segment's coordinates;
+ * the eye only ever hands them values, never reading anything back, so a
+ * stub that logs its arguments (the context by what it points at) is enough.
+ * HG2D is verified in its own harness. */
+static uint32_t STDCALL hg2d_1c(uint32_t ctx, uint32_t a, uint32_t b)
+{
+    put(" hg2d+0x1c(");
+    put_ptr(ctx);
+    put(",%d,%d)", (int32_t)a, (int32_t)b);
+    return 0;
+}
+static uint32_t STDCALL hg2d_34(uint32_t ctx, uint32_t a, uint32_t b, uint32_t c, uint32_t d)
+{
+    put(" hg2d+0x34(");
+    put_ptr(ctx);
+    put(",%d,%d,%d,%d)", (int32_t)a, (int32_t)b, (int32_t)c, (int32_t)d);
+    return 0;
+}
 
 /* FE +0x2c and UTIL +0x88, as logging models for +0x7c (station lookup and
  * format).  FE and UTIL are verified elsewhere; the pair just has to be
@@ -1117,6 +1179,7 @@ static void build_stubs(void)
     SET_SLOT(util, 0xa4, util_alert);
     SET_SLOT(util, 0x18, util_mag);
     SET_SLOT(util, 0x3c, util_angle);
+    SET_SLOT(util, 0x2c, util_2c);
     SET_SLOT(util, 0x48, util_geo48);
     SET_SLOT(util, 0x88, util_88);
     *(uint32_t *)fe = 18;
@@ -1128,6 +1191,9 @@ static void build_stubs(void)
     *(uint32_t *)multip = 35;
     SET_SLOT(multip, 0x34, multip_34);
     SET_SLOT(multip, 0x38, multip_38);
+    *(uint32_t *)hg2d = 13;
+    SET_SLOT(hg2d, 0x1c, hg2d_1c);
+    SET_SLOT(hg2d, 0x34, hg2d_34);
 }
 
 /* ---- loading ----------------------------------------------------------------------- */
@@ -1194,6 +1260,7 @@ static void load_side(struct side *s, const char *path, const char *name)
                    im->id == 16 ? (void *)controls : im->id == 39 ? (void *)sound :
                    im->id == 20 ? (void *)util : im->id == 27 ? (void *)weatherm :
                    im->id == 35 ? (void *)multip : im->id == 18 ? (void *)fe :
+                   im->id == 13 ? (void *)hg2d :
                    (void *)stub_module;
     memcpy(s->pristine, s->image, IMAGE_SIZE);
 }
@@ -2194,6 +2261,52 @@ static void report_obj(void)
     printf("  obj %lu (slot active %lu)\n", cover_obj, cover_obj_active);
 }
 
+/* ---- suite: objalloc (allocate an object slot, +0x84) ---------------------------- */
+
+static unsigned long cover_objalloc, cover_objalloc_full, cover_objalloc_hit;
+
+static void op_objalloc(void)
+{
+    uint8_t *tmpl = fixtures + 0x6b000;            /* the nine dwords +0x84 copies in */
+    uint32_t handle, h, r, i;
+    uint32_t kind = rnd_n(4);                      /* 0, 1, and now and then an invalid 2/3 */
+
+    for (i = 0; i < 9; i++)
+        *(uint32_t *)(tmpl + i * 4) = rnd();
+    /* a handle is 0 (fresh) or index | 0xf0000 with a small index; the flag is
+     * driven as any nonzero subset of its four bits over an in-range index, so
+     * the exact mask is tested while the fast path's table[index] read stays
+     * inside the image (a garbage index would read unmapped .data, which the
+     * two sides do not share).  A random low word otherwise, flag bits clear. */
+    if (rnd_n(3) == 0) {
+        uint32_t id = rnd_n(20);
+        handle = ((rnd_n(15) + 1) << 16) | id;     /* an already-allocated handle: the fast path */
+        if (rnd_n(2))
+            *(uint32_t *)(cur->image + 0x9794 + id * 0x2d4) = 1;   /* its entry active */
+    } else {
+        handle = (rnd_n(2) ? 0 : rnd()) & ~0xf0000u;
+    }
+    if (rnd_n(2))                                  /* now and then mark an entry taken, moving the free slot */
+        *(uint32_t *)(cur->image + 0x9794 + rnd_n(20) * 0x2d4) = 1;
+    if (counting) cover_objalloc++;
+    put("\n#objalloc kind=%u handle=%#x", kind, handle);
+    h = handle;
+    r = ((s3)SVC(0x84))((uint32_t)(uintptr_t)tmpl, kind, (uint32_t)(uintptr_t)&h);
+    if (counting) {
+        if (r == 0xffffffffu) cover_objalloc_full++;
+        if (r == 0 && h == handle) cover_objalloc_hit++;
+    }
+    put(" =%#x h=%#x", r, h);
+}
+
+static void setup_objalloc(void) { }
+
+static void report_objalloc(void)
+{
+    printf("  objalloc %lu (table full %lu, already allocated %lu)\n",
+           cover_objalloc, cover_objalloc_full, cover_objalloc_hit);
+}
+
 /* ---- suite: clamp (clamp the latitude, +0x1c) ------------------------------------ */
 
 static unsigned long cover_clamp;
@@ -2217,6 +2330,83 @@ static void setup_clamp(void) { }
 static void report_clamp(void)
 {
     printf("  clamp %lu\n", cover_clamp);
+}
+
+/* ---- suite: sun (the sun direction and intensity, +0xa0) ------------------------- */
+
+static unsigned long cover_sun, cover_sun_gate, cover_sun_up;
+
+static void op_sun(void)
+{
+    uint16_t gate;
+
+    global[0x23b] = (uint8_t)(rnd_n(3) ? rnd_n(24) : rnd());   /* local hours */
+    global[0x23c] = (uint8_t)(rnd_n(3) ? rnd_n(60) : rnd());   /* local minutes */
+    *(uint16_t *)(global + 0x23e) = (uint16_t)(rnd_n(3) ? rnd_n(365) : rnd());  /* day of year */
+    *(uint16_t *)(global + 0x56e) = (uint16_t)rnd();           /* the angle offset */
+    /* the latitude the fourth angle divides by 305: now and then large enough
+     * that the signed divide overflows and leans on the host's repair */
+    *(int32_t *)(global + 0x564) = rnd_n(3) ? (int32_t)(rnd() & 0x3fffff) - 0x200000 : (int32_t)rnd();
+    *(uint16_t *)(global + 0xb54) = (uint16_t)(rnd_n(2) ? 0 : rnd());  /* the daylight flag */
+    gate = (uint16_t)(rnd_n(3) ? rnd_n(0x2000) : rnd());       /* the gate, straddling 0x1000 */
+    *(uint16_t *)(cur->image + 0x1a76) = gate;
+    if (counting) {
+        cover_sun++;
+        if (gate < 0x1000) cover_sun_gate++;
+    }
+    put("\n#sun %02u:%02u day=%u off=%#x lat=%d b54=%#x gate=%#x", global[0x23b], global[0x23c],
+        *(uint16_t *)(global + 0x23e), *(uint16_t *)(global + 0x56e),
+        *(int32_t *)(global + 0x564), *(uint16_t *)(global + 0xb54), gate);
+    ((s0)SVC(0xa0))();
+    if (counting && (int16_t)*(uint16_t *)(global + 0xb2e) == 0 &&
+        *(uint16_t *)(global + 0xb2a) == 0 && *(uint16_t *)(global + 0xb32) == 0)
+        cover_sun_up++;
+    put(" -> x=%d y=%d z=%d cba=%#x b34=%#x s116e=%#x s12a0=%#x",
+        *(int16_t *)(global + 0xb2a), *(int16_t *)(global + 0xb2e), *(int16_t *)(global + 0xb32),
+        *(uint16_t *)(global + 0xcba), *(uint16_t *)(global + 0xb34),
+        *(uint16_t *)(global + 0x116e), *(uint16_t *)(global + 0x12a0));
+}
+
+static void setup_sun(void) { }
+
+static void report_sun(void)
+{
+    printf("  sun %lu (gated down %lu, sun below the horizon %lu)\n",
+           cover_sun, cover_sun_gate, cover_sun_up);
+}
+
+/* ---- suite: eye (the reticle through HG2D, +0xc0) -------------------------------- */
+
+static unsigned long cover_eye, cover_eye_drawn;
+
+static void op_eye(void)
+{
+    uint8_t *view = fixtures + 0x6c000;            /* the view record +0xc0 reads through */
+    uint8_t *bx = fixtures + 0x6c400;              /* its +0x1c box substruct */
+    uint32_t style = rnd_n(5);                     /* 0..4; 0 and 4 draw nothing */
+
+    *(uint32_t *)(view + 0x1c) = (uint32_t)(uintptr_t)bx;
+    *(int32_t *)(bx + 0) = (int32_t)rnd();                  /* extent */
+    *(int32_t *)(bx + 4) = (int32_t)rnd();                  /* lo */
+    *(int32_t *)(bx + 0xc) = (int32_t)rnd();                /* hi */
+    *(uint32_t *)(bx + 0x10) = rnd_n(4) ? 0 : 1;            /* done, now and then set */
+    *(uint32_t *)(bx + 0x14) = rnd_n(4) ? 0 : rnd();        /* a guard */
+    *(uint32_t *)(bx + 0x18) = rnd_n(4) ? 0 : rnd();        /* the other guard */
+    *(uint16_t *)(global + 0x600) = (uint16_t)style;
+    if (counting) cover_eye++;
+    put("\n#eye style=%u extent=%d lo=%d hi=%d done=%u g14=%#x g18=%#x", style,
+        *(int32_t *)(bx + 0), *(int32_t *)(bx + 4), *(int32_t *)(bx + 0xc),
+        *(uint32_t *)(bx + 0x10), *(uint32_t *)(bx + 0x14), *(uint32_t *)(bx + 0x18));
+    ((s1)SVC(0xc0))((uint32_t)(uintptr_t)view);
+    if (counting && *(uint32_t *)(global + 0x2ec) == 0xf00fu) cover_eye_drawn++;
+    put(" 2ec=%#x", *(uint32_t *)(global + 0x2ec));
+}
+
+static void setup_eye(void) { }
+
+static void report_eye(void)
+{
+    printf("  eye %lu (stamped %lu)\n", cover_eye, cover_eye_drawn);
 }
 
 /* ---- running ---------------------------------------------------------------------- */
@@ -2244,6 +2434,9 @@ static const struct suite suites[] = {
     { "menu", op_menu, report_menu, 20, setup_menu, 0x00 },
     { "obj", op_obj, report_obj, 20, setup_obj, 0x00 },
     { "clamp", op_clamp, report_clamp, 20, setup_clamp, 0x00 },
+    { "sun", op_sun, report_sun, 20, setup_sun, 0x00 },
+    { "objalloc", op_objalloc, report_objalloc, 20, setup_objalloc, 0x00 },
+    { "eye", op_eye, report_eye, 20, setup_eye, 0x00 },
 };
 
 static const struct suite *suite;

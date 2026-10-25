@@ -406,7 +406,7 @@ src/analysis/analysis_data.inc src/analysis/analysis_rdata.inc: $(ORIG)/Modules/
 
 # MAIN, the sim's controller: MSVC C and assembly.  In progress, a slice at a
 # time (docs/modules/main.md); not in MODULES until every slot is done.
-MAIN_SOURCES := src/main/main.c src/main/main_records.inc src/main/main_situation.inc src/main/main_nav.inc src/main/main_season.inc src/main/main_text_tail.inc
+MAIN_SOURCES := src/main/main.c src/main/main_records.inc src/main/main_situation.inc src/main/main_nav.inc src/main/main_season.inc src/main/main_sun.inc src/main/main_eye.inc src/main/main_text_tail.inc
 $(BIN)/MAIN.DLL: $(MAIN_SOURCES) src/main/main.def src/main/main_data.inc \
                  src/main/main_pointers.inc $(BIN)/main.res
 	@mkdir -p $(BIN)
@@ -1087,7 +1087,7 @@ analysisdiff-run: analysisdiff
 # (records), N=... the scenario count.
 $(DIFFDIR)/maindiff.exe: tools/difftest/maindiff.c
 	@mkdir -p $(DIFFDIR)
-	$(CC) -std=c99 -O1 -Wall -Wextra -o $@ tools/difftest/maindiff.c
+	$(CC) -std=c99 -O1 -Wall -Wextra -o $@ tools/difftest/maindiff.c -lm
 
 maindiff: $(DIFFDIR)/maindiff.exe $(BIN)/MAIN.DLL
 	@cp $(ORIG)/Modules/MAIN.DLL $(DIFFDIR)/MAIN_retail.dll

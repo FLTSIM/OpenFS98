@@ -205,6 +205,34 @@ static uint32_t FS98_STDCALL menu_enable(void)
     return 0;
 }
 
+/* .text+0x16570 == Linkage +0x8c: release an object slot.  The handle's low
+ * byte indexes a table of 0x2d4-byte (181-dword) entries at .data+0x9794; if
+ * the entry's first dword is set, both it and the caller's handle are cleared. */
+static uint32_t FS98_STDCALL obj_free(uint32_t handle)
+{
+    uint32_t id = M32(handle) & 0xff;
+    uint32_t a = V(0x20809794) + id * 181u * 4u;
+
+    if (M32(a) != 0) {
+        M32(a) = 0;
+        M32(handle) = 0;
+    }
+    return id * 181u;      /* eax is left holding the index, as retail leaves it */
+}
+
+/* .text+0xc520 == Linkage +0x1c: clamp the latitude at GLOBAL +0x564 into
+ * [0xff683bb7, 0x97c449] (signed).  FACIL calls it. */
+static uint32_t FS98_STDCALL lat_clamp(void)
+{
+    uint32_t gp = G;
+
+    if ((int32_t)M32(gp + 0x564) > 0x97c449)
+        M32(gp + 0x564) = 0x97c449u;
+    if ((int32_t)M32(gp + 0x564) < (int32_t)0xff683bb7u)
+        M32(gp + 0x564) = 0xff683bb7u;
+    return gp;
+}
+
 /* .text+0x19cd5 == Linkage +0x7c: (which, arg2, &out).  FE +0x2c looks the
  * station up into a local buffer (its first argument is pushed as a word over
  * two stale bytes, so only the low word reaches FE); UTIL +0x88 formats it,

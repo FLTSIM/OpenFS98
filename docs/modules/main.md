@@ -18,6 +18,8 @@ slot is done MAIN is not in `MODULES` and is never installed.
 | 7, the clock as digits | `+0xa4` (assembly, `.text+0x16ddf`..`+0x16e30`) | `clock` | verified: 20,000 scenarios, 0 differ; 6 of 6 breaks caught |
 | 8, the view cycler | `+0xc8` (assembly, `.text+0x18f0`..`+0x193a`) | `view` | verified: 20,000 scenarios, 0 differ; 10 of 10 breaks caught |
 | 9, the analysis menu greying | `+0x30`, `+0x34` (assembly, `.text+0x16920`, `+0x169a0`) | `menu` | verified: 20,000 scenarios, 0 differ; 6 of 6 breaks caught |
+| 10, an object slot release | `+0x8c` (assembly, `.text+0x16570`..`+0x165a2`) | `obj` | verified: 20,000 scenarios, 0 differ; 6 of 6 breaks caught |
+| 11, the latitude clamp | `+0x1c` (assembly, `.text+0xc520`..`+0xc552`) | `clamp` | verified: 20,000 scenarios, 0 differ; 5 of 6 breaks caught, 1 proven equivalent |
 
 ## Binary and linkage
 
@@ -56,7 +58,7 @@ calls are reached from the host, the `English\` dialog modules, or CHAIN.
 | `+0x04` | `.text+0x0020` | host | init: Linkage `+0x18`'s registration, the instance (host `+0x298`), `.text+0x6cf0`, CHAIN list 0x14 |
 | `+0x08` | `.text+0x0070` | host | deinit |
 | `+0x18` | `.text+0xc000` | | |
-| `+0x1c` | `.text+0xc520` | FACIL | |
+| `+0x1c` | `.text+0xc520` | FACIL | **slice 11**: clamp the latitude |
 | `+0x20` | `.text+0xa090` | | |
 | `+0x24`..`+0x34` | `.text+0x16a60`, `+0x165b0`, `+0x16880`, `+0x16920`, `+0x169a0` | REALITY (`+0x30`, `+0x34`) | `+0x30` and `+0x34` (**slice 9**) grey and enable menu items `0x1001`..`0x1006` |
 | `+0x38`..`+0x4c` | `.text+0x11eeb`, `+0x11e3d`, `+0x120aa`, `+0x127b3`, `+0x12f50`, `+0x12f6a` | ADVDRV (`+0x3c`), REALITY (`+0x44`), DEMO (`+0x48`, `+0x4c`) | the situation reader and writer, assembly: `+0x48` loads a situation from memory, `+0x4c` from a file |
@@ -66,7 +68,7 @@ calls are reached from the host, the `English\` dialog modules, or CHAIN.
 | `+0x74` | `.text+0x18781` | ADVDRV, MULTIP | **slice 6**: the season, the zone and the clock |
 | `+0x78`, `+0x7c` | `.text+0x19c94`, `+0x19cd5` | | `+0x78` **slice 4**, `+0x7c` **slice 5** |
 | `+0x80` | `.text+0x19f10` | ADVDRV, PANELS | **slice 4**: `(which, &tenths)` |
-| `+0x84`..`+0x90` | `.text+0x16100`, `+0x162f0`, `+0x16570`, `+0x10560` | CONTROLS, WINDOW (`+0x88`) | |
+| `+0x84`..`+0x90` | `.text+0x16100`, `+0x162f0`, `+0x16570`, `+0x10560` | CONTROLS, WINDOW (`+0x88`) | `+0x8c` is **slice 10** (object table at `.data+0x9794`, 0x2d4-byte entries; `+0x84` allocates, `+0x88` iterates) |
 | `+0x94`..`+0xa0` | `.text+0x7140`, `+0x6f59`, `+0x6de9`, `+0x830d` | WEATHERM (`+0x94`), WINDOW (`+0x98`, `+0x9c`) | |
 | `+0xa4`, `+0xa8` | `.text+0x16ddf`, `+0x6450` | ADVDRV, CONTROLS, WINDOW | `+0xa4` is **slice 7** |
 | `+0xac`..`+0xbc` | `.text+0xc870`, `+0xcdb0`, `+0xdd70`, `+0xe5a0`, `+0xed10` | CONTROLS (`+0xac`), FACIL (`+0xb0`) | |
@@ -453,3 +455,33 @@ transliteration loops, the same six calls).
 `make maindiff-run SUITE=menu`: 20,000 scenarios, 0 differences -- the six host
 calls of whichever of the two is picked, logged by the host stub, match.
 `make main-breaks SUITE=menu`: 6 breaks, all caught.
+
+## Slice 10: an object slot release
+
+`src/main/main_nav.inc`, `.text+0x16570` (`+0x8c`), assembly. `+0x8c(&handle)`
+releases one entry of the object table at `.data+0x9794`, whose entries are
+0x2d4 bytes (181 dwords) apart, indexed by the handle's low byte: if the
+entry's first dword is set, both it and the caller's handle are zeroed. Like
+the other assembly leaves it leaves the index (`handle & 0xff` times 181) in
+`eax`, which the transliteration returns. (`+0x84` allocates into the same
+table and `+0x88` iterates it; both remain to do.)
+
+### Verifying the object slot release
+
+`make maindiff-run SUITE=obj`: 20,000 scenarios, 0 differences. Each op seeds a
+small handle (so the entry stays inside the compared image) and the entry's
+first dword, set or clear, and checks the entry and the handle after. `make
+main-breaks SUITE=obj`: 6 breaks, all caught.
+
+## Slice 11: the latitude clamp
+
+`src/main/main_nav.inc`, `.text+0xc520` (`+0x1c`), assembly. FACIL calls it:
+it clamps the latitude dword at GLOBAL +0x564 into `[0xff683bb7, 0x97c449]`
+(signed), and leaves GLOBAL's address in `eax` as retail does.
+
+### Verifying the latitude clamp
+
+`make maindiff-run SUITE=clamp`: 20,000 scenarios, 0 differences, over latitudes
+clustered on the two bounds and their neighbours. `make main-breaks SUITE=clamp`:
+6 breaks, 5 caught, 1 proven equivalent (`max-op`: `>` versus `>=` at exactly
+the maximum both leave the maximum).

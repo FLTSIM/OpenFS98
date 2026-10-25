@@ -297,8 +297,10 @@ static void main_install(void)
         { 0x78, (void *)nav_readout },
         { 0x7c, (void *)nav_describe },
         { 0x80, (void *)nav_select },
+        { 0x1c, (void *)lat_clamp },
         { 0x30, (void *)menu_grey },
         { 0x34, (void *)menu_enable },
+        { 0x8c, (void *)obj_free },
         { 0xa4, (void *)nav_clock_ascii },
         { 0xc8, (void *)nav_viewcycle },
     };

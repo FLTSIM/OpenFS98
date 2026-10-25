@@ -1,194 +1,304 @@
-/* Retail Alerts' ordinary C++ object lifecycle and three factory functions.
- * Exception unwinding from a throwing dependency still needs the real runtime
- * adapter; these functions preserve the normal-path subobject call order. */
+/* Retail Alerts' object lifecycle and three factory functions, including
+ * partial-construction cleanup across the Microsoft C++ dependency boundary. */
 #include "alerts_objects.h"
+#include "alerts_unwind.h"
 
-#define D32(pObject, iOffset) (*(uint32 *)((uint8 *)(pObject) + (iOffset)))
-#define PTR(pObject, iOffset) (*(void **)((uint8 *)(pObject) + (iOffset)))
+#define D32(object, offset) (*(uint32_t *)((uint8_t *)(object) + (offset)))
+#define PTR(object, offset) (*(void **)((uint8_t *)(object) + (offset)))
 
-static const struct fs98_alerts_object_services *s_pServices;
-static struct fs98_alerts_object_tables s_stTables;
-static uint32 s_uiModule;
+static const struct fs98_alerts_object_services *s_services;
+static struct fs98_alerts_object_tables s_tables;
+static uint32_t s_module;
 
-void fs98_alerts_set_object_services(const struct fs98_alerts_object_services *pServices,
-                                    const struct fs98_alerts_object_tables *pTables)
+struct fs98_alerts_object_unwind {
+    struct fs98_alerts_unwind frame;
+    void *object;
+    uint32_t kind;
+    volatile uint32_t stage, buttons;
+};
+
+static void fs98_alerts_object_cleanup(struct fs98_alerts_unwind *frame)
 {
-    s_pServices = pServices;
-    s_stTables = *pTables;
+    struct fs98_alerts_object_unwind *state = (void *)frame;
+    uint8_t *object = state->object;
+    if (state->kind == 3) {
+        if (state->stage) {
+            state->stage = 0;
+            s_services->dialog_delete(object);
+        }
+        return;
+    }
+    if (state->kind == 0) {
+        while (state->buttons) {
+            state->buttons--;
+            s_services->button_destroy(object + 0x11b4 + state->buttons * 0xfc);
+        }
+        if (state->stage == 3) {
+            state->stage = 2;
+            s_services->text_destroy(object + 0x10fc);
+        }
+        if (state->stage == 2) {
+            state->stage = 1;
+            s_services->string_destroy(object + 0x10f0);
+        }
+    } else if (state->kind == 1) {
+        if (state->stage == 3) {
+            state->stage = 2;
+            s_services->text_destroy(object + 0x1124);
+        }
+        if (state->stage == 2) {
+            state->stage = 1;
+            s_services->window_destroy(object + 0x10e4);
+        }
+    } else {
+        if (state->stage == 7) {
+            state->stage = 6;
+            s_services->check_destroy(object + 0x1494);
+        }
+        if (state->stage == 6) {
+            state->stage = 5;
+            s_services->button_destroy(object + 0x1398);
+        }
+        if (state->stage == 5) {
+            state->stage = 4;
+            s_services->text_destroy(object + 0x12e0);
+        }
+        if (state->stage == 4) {
+            state->stage = 3;
+            s_services->button_destroy(object + 0x11e4);
+        }
+        if (state->stage == 3) {
+            state->stage = 2;
+            s_services->button_destroy(object + 0x10e8);
+        }
+        if (state->stage == 2) {
+            state->stage = 1;
+            s_services->string_destroy(object + 0x10e4);
+        }
+    }
+    if (state->stage == 1) {
+        state->stage = 0;
+        s_services->dialog_destroy(object);
+    }
 }
 
-void fs98_alerts_set_object_module(uint32 uiModule)
+static void fs98_alerts_object_scope(struct fs98_alerts_object_unwind *state,
+                                     void *object, uint32_t kind, uint32_t stage)
 {
-    s_uiModule = uiModule;
+    state->object = object;
+    state->kind = kind;
+    state->stage = stage;
+    state->buttons = 0;
+    fs98_alerts_unwind_enter(&state->frame, fs98_alerts_object_cleanup);
+}
+
+void fs98_alerts_set_object_services(const struct fs98_alerts_object_services *services,
+                                    const struct fs98_alerts_object_tables *tables)
+{
+    s_services = services;
+    s_tables = *tables;
+}
+
+void fs98_alerts_set_object_module(uint32_t module)
+{
+    s_module = module;
 }
 
 /* 0x223012f0: the three buttons are constructed in ascending order. */
-void *FS98_ALERTS_THISCALL fs98_alerts_modal_construct(void *pObject, void *pParent)
+FS98_ALERTS_NOINLINE void *FS98_ALERTS_THISCALL fs98_alerts_modal_construct(void *object, void *parent)
 {
-    uint32 uiIndex;
-    s_pServices->pDialogConstruct(pObject, 0x8a, pParent);
-    s_pServices->pStringConstruct((uint8 *)pObject + 0x10f0);
-    s_pServices->pTextConstruct((uint8 *)pObject + 0x10fc);
-    for (uiIndex = 0; uiIndex < 3; uiIndex++)
-        s_pServices->pButtonConstruct((uint8 *)pObject + 0x11b4 + uiIndex * 0xfc);
-    D32(pObject, 0x10dc) = 0;
-    D32(pObject, 0x10e0) = 0;
-    D32(pObject, 0x10e4) = 0;
-    D32(pObject, 0x10e8) = 0;
-    D32(pObject, 0x10ec) = 0;
-    D32(pObject, 0x10f8) = 0xffffffff;
-    D32(pObject, 0x10f4) = 0xffffffff;
-    PTR(pObject, 0) = s_stTables.pModal;
-    return pObject;
+    uint32_t index;
+    struct fs98_alerts_object_unwind state;
+    fs98_alerts_object_scope(&state, object, 0, 0);
+    s_services->dialog_construct(object, 0x8a, parent);
+    state.stage = 1;
+    s_services->string_construct((uint8_t *)object + 0x10f0);
+    state.stage = 2;
+    s_services->text_construct((uint8_t *)object + 0x10fc);
+    state.stage = 3;
+    for (index = 0; index < 3; index++) {
+        s_services->button_construct((uint8_t *)object + 0x11b4 + index * 0xfc);
+        state.buttons++;
+    }
+    D32(object, 0x10dc) = 0;
+    D32(object, 0x10e0) = 0;
+    D32(object, 0x10e4) = 0;
+    D32(object, 0x10e8) = 0;
+    D32(object, 0x10ec) = 0;
+    D32(object, 0x10f8) = 0xffffffff;
+    D32(object, 0x10f4) = 0xffffffff;
+    PTR(object, 0) = s_tables.modal;
+    fs98_alerts_unwind_leave(&state.frame);
+    return object;
 }
 
 /* 0x22301a50: the embedded CWnd gets a derived progress vtable before text. */
-void *FS98_ALERTS_THISCALL fs98_alerts_modeless_construct(void *pObject, void *pParent)
+FS98_ALERTS_NOINLINE void *FS98_ALERTS_THISCALL fs98_alerts_modeless_construct(void *object, void *parent)
 {
-    s_pServices->pDialogConstruct(pObject, 0x8b, pParent);
-    s_pServices->pWindowConstruct((uint8 *)pObject + 0x10e4);
-    PTR(pObject, 0x10e4) = s_stTables.pProgress;
-    s_pServices->pTextConstruct((uint8 *)pObject + 0x1124);
-    PTR(pObject, 0) = s_stTables.pModeless;
-    D32(pObject, 0x10dc) = 0;
-    D32(pObject, 0x10e0) = 0;
-    return pObject;
+    struct fs98_alerts_object_unwind state;
+    fs98_alerts_object_scope(&state, object, 1, 0);
+    s_services->dialog_construct(object, 0x8b, parent);
+    state.stage = 1;
+    s_services->window_construct((uint8_t *)object + 0x10e4);
+    state.stage = 2;
+    PTR(object, 0x10e4) = s_tables.progress;
+    s_services->text_construct((uint8_t *)object + 0x1124);
+    state.stage = 3;
+    PTR(object, 0) = s_tables.modeless;
+    D32(object, 0x10dc) = 0;
+    D32(object, 0x10e0) = 0;
+    fs98_alerts_unwind_leave(&state.frame);
+    return object;
 }
 
 /* 0x223020d0: a CString, Quit, Help, message, OK, then checkbox. */
-void *FS98_ALERTS_THISCALL fs98_alerts_advisory_construct(void *pObject, void *pParent)
+FS98_ALERTS_NOINLINE void *FS98_ALERTS_THISCALL fs98_alerts_advisory_construct(void *object, void *parent)
 {
-    s_pServices->pDialogConstruct(pObject, 0x8c, pParent);
-    s_pServices->pStringConstruct((uint8 *)pObject + 0x10e4);
-    s_pServices->pButtonConstruct((uint8 *)pObject + 0x10e8);
-    s_pServices->pButtonConstruct((uint8 *)pObject + 0x11e4);
-    s_pServices->pTextConstruct((uint8 *)pObject + 0x12e0);
-    s_pServices->pButtonConstruct((uint8 *)pObject + 0x1398);
-    s_pServices->pCheckConstruct((uint8 *)pObject + 0x1494);
-    PTR(pObject, 0) = s_stTables.pAdvisory;
-    D32(pObject, 0x10dc) = 0;
-    D32(pObject, 0x10e0) = 0;
-    return pObject;
+    struct fs98_alerts_object_unwind state;
+    fs98_alerts_object_scope(&state, object, 2, 0);
+    s_services->dialog_construct(object, 0x8c, parent);
+    state.stage = 1;
+    s_services->string_construct((uint8_t *)object + 0x10e4);
+    state.stage = 2;
+    s_services->button_construct((uint8_t *)object + 0x10e8);
+    state.stage = 3;
+    s_services->button_construct((uint8_t *)object + 0x11e4);
+    state.stage = 4;
+    s_services->text_construct((uint8_t *)object + 0x12e0);
+    state.stage = 5;
+    s_services->button_construct((uint8_t *)object + 0x1398);
+    state.stage = 6;
+    s_services->check_construct((uint8_t *)object + 0x1494);
+    state.stage = 7;
+    PTR(object, 0) = s_tables.advisory;
+    D32(object, 0x10dc) = 0;
+    D32(object, 0x10e0) = 0;
+    fs98_alerts_unwind_leave(&state.frame);
+    return object;
 }
 
 /* 0x223013d0 / 0x22301b00 / 0x223021b0: the derived vtable is not reset on
  * entry. This can matter to callbacks made by the dependency destructors. */
-void FS98_ALERTS_THISCALL fs98_alerts_modal_destroy(void *pObject)
+FS98_ALERTS_NOINLINE void FS98_ALERTS_THISCALL fs98_alerts_modal_destroy(void *object)
 {
-    uint32 uiIndex = 3;
-    while (uiIndex--)
-        s_pServices->pButtonDestroy((uint8 *)pObject + 0x11b4 + uiIndex * 0xfc);
-    s_pServices->pTextDestroy((uint8 *)pObject + 0x10fc);
-    s_pServices->pStringDestroy((uint8 *)pObject + 0x10f0);
-    s_pServices->pDialogDestroy(pObject);
+    struct fs98_alerts_object_unwind state;
+    fs98_alerts_object_scope(&state, object, 0, 3);
+    state.buttons = 3;
+    fs98_alerts_object_cleanup(&state.frame);
+    fs98_alerts_unwind_leave(&state.frame);
 }
 
-void FS98_ALERTS_THISCALL fs98_alerts_modeless_destroy(void *pObject)
+FS98_ALERTS_NOINLINE void FS98_ALERTS_THISCALL fs98_alerts_modeless_destroy(void *object)
 {
-    s_pServices->pTextDestroy((uint8 *)pObject + 0x1124);
-    s_pServices->pWindowDestroy((uint8 *)pObject + 0x10e4);
-    s_pServices->pDialogDestroy(pObject);
+    struct fs98_alerts_object_unwind state;
+    fs98_alerts_object_scope(&state, object, 1, 3);
+    fs98_alerts_object_cleanup(&state.frame);
+    fs98_alerts_unwind_leave(&state.frame);
 }
 
-void FS98_ALERTS_THISCALL fs98_alerts_advisory_destroy(void *pObject)
+FS98_ALERTS_NOINLINE void FS98_ALERTS_THISCALL fs98_alerts_advisory_destroy(void *object)
 {
-    s_pServices->pCheckDestroy((uint8 *)pObject + 0x1494);
-    s_pServices->pButtonDestroy((uint8 *)pObject + 0x1398);
-    s_pServices->pTextDestroy((uint8 *)pObject + 0x12e0);
-    s_pServices->pButtonDestroy((uint8 *)pObject + 0x11e4);
-    s_pServices->pButtonDestroy((uint8 *)pObject + 0x10e8);
-    s_pServices->pStringDestroy((uint8 *)pObject + 0x10e4);
-    s_pServices->pDialogDestroy(pObject);
+    struct fs98_alerts_object_unwind state;
+    fs98_alerts_object_scope(&state, object, 2, 7);
+    fs98_alerts_object_cleanup(&state.frame);
+    fs98_alerts_unwind_leave(&state.frame);
 }
 
 /* Scalar deleting destructors: only low-byte bit 0 controls deallocation. */
-void *FS98_ALERTS_THISCALL fs98_alerts_modal_delete(void *pObject, uint32 uiFlags)
+void *FS98_ALERTS_THISCALL fs98_alerts_modal_delete(void *object, uint32_t flags)
 {
-    fs98_alerts_modal_destroy(pObject);
-    if (uiFlags & 1)
-        s_pServices->pUiDelete(pObject);
-    return pObject;
+    fs98_alerts_modal_destroy(object);
+    if (flags & 1)
+        s_services->ui_delete(object);
+    return object;
 }
 
-void *FS98_ALERTS_THISCALL fs98_alerts_modeless_delete(void *pObject, uint32 uiFlags)
+void *FS98_ALERTS_THISCALL fs98_alerts_modeless_delete(void *object, uint32_t flags)
 {
-    fs98_alerts_modeless_destroy(pObject);
-    if (uiFlags & 1)
-        s_pServices->pUiDelete(pObject);
-    return pObject;
+    fs98_alerts_modeless_destroy(object);
+    if (flags & 1)
+        s_services->ui_delete(object);
+    return object;
 }
 
-void *FS98_ALERTS_THISCALL fs98_alerts_advisory_delete(void *pObject, uint32 uiFlags)
+void *FS98_ALERTS_THISCALL fs98_alerts_advisory_delete(void *object, uint32_t flags)
 {
-    fs98_alerts_advisory_destroy(pObject);
-    if (uiFlags & 1)
-        s_pServices->pUiDelete(pObject);
-    return pObject;
+    fs98_alerts_advisory_destroy(object);
+    if (flags & 1)
+        s_services->ui_delete(object);
+    return object;
 }
 
-void *FS98_ALERTS_THISCALL fs98_alerts_progress_delete(void *pObject, uint32 uiFlags)
+void *FS98_ALERTS_THISCALL fs98_alerts_progress_delete(void *object, uint32_t flags)
 {
-    s_pServices->pWindowDestroy(pObject);
-    if (uiFlags & 1)
-        s_pServices->pMfcDelete(pObject);
-    return pObject;
+    s_services->window_destroy(object);
+    if (flags & 1)
+        s_services->mfc_delete(object);
+    return object;
 }
 
-void FS98_ALERTS_THISCALL fs98_alerts_post_destroy(void *pObject)
+void FS98_ALERTS_THISCALL fs98_alerts_post_destroy(void *object)
 {
-    typedef void *(FS98_ALERTS_THISCALL *fs98_delete_fn)(void *pThis, uint32 uiFlags);
-    if (pObject) {
-        fs98_delete_fn *ppVtable = PTR(pObject, 0);
-        ppVtable[1](pObject, 1);
+    typedef void *(FS98_ALERTS_THISCALL *fs98_delete_fn)(void *self, uint32_t flags);
+    if (object) {
+        fs98_delete_fn *vtable = PTR(object, 0);
+        vtable[1](object, 1);
     }
 }
 
-void FS98_ALERTS_THISCALL fs98_alerts_disable(void *pObject)
+void FS98_ALERTS_THISCALL fs98_alerts_disable(void *object)
 {
-    s_pServices->pEnable(D32(pObject, 0x20), 0);
+    s_services->enable(D32(object, 0x20), 0);
 }
 
-void FS98_ALERTS_THISCALL fs98_alerts_enable(void *pObject)
+void FS98_ALERTS_THISCALL fs98_alerts_enable(void *object)
 {
-    s_pServices->pEnable(D32(pObject, 0x20), 1);
+    s_services->enable(D32(object, 0x20), 1);
 }
 
-void FS98_ALERTS_THISCALL fs98_alerts_empty_arg(void *pObject, uint32 uiArgument)
+void FS98_ALERTS_THISCALL fs98_alerts_empty_arg(void *object, uint32_t argument)
 {
-    (void)pObject;
-    (void)uiArgument;
+    (void)object;
+    (void)argument;
 }
 
-typedef void *(FS98_ALERTS_THISCALL *fs98_construct_fn)(void *pObject, void *pParent);
+typedef void *(FS98_ALERTS_THISCALL *fs98_construct_fn)(void *object, void *parent);
 
-static uint32 fs98_alerts_create(void *pDescriptor, uint32 uiSize,
-                                 uint32 uiTemplate, fs98_construct_fn pConstruct)
+static FS98_ALERTS_NOINLINE uint32_t fs98_alerts_create(void *descriptor, uint32_t size,
+                                 uint32_t template, fs98_construct_fn construct)
 {
-    void *pObject = s_pServices->pAllocate(uiSize);
-    if (pObject)
-        pObject = pConstruct(pObject, 0);
+    struct fs98_alerts_object_unwind state;
+    void *object;
+    fs98_alerts_object_scope(&state, 0, 3, 0);
+    object = s_services->allocate(size);
+    state.object = object;
+    state.stage = 1;
+    if (object)
+        object = construct(object, 0);
     /* Retail deliberately continues through NULL on allocation failure. */
-    *(void *volatile *)((uint8 *)pObject + 0x10dc) = pDescriptor;
-    D32(pObject, 0x10e0) = s_uiModule;
-    s_pServices->pCreate(pObject, uiTemplate, 0);
-    s_pServices->pShow(pObject, 1);
-    return D32(pObject, 0x20);
+    *(void *volatile *)((uint8_t *)object + 0x10dc) = descriptor;
+    D32(object, 0x10e0) = s_module;
+    state.stage = 0;
+    s_services->create(object, template, 0);
+    s_services->show(object, 1);
+    fs98_alerts_unwind_leave(&state.frame);
+    return D32(object, 0x20);
 }
 
-uint32 FS98_ALERTS_STDCALL fs98_alerts_modal_create(uint32 uiParent, void *pDescriptor)
+uint32_t FS98_ALERTS_STDCALL fs98_alerts_modal_create(uint32_t parent, void *descriptor)
 {
-    (void)uiParent;
-    return fs98_alerts_create(pDescriptor, 0x14a8, 0x8a, fs98_alerts_modal_construct);
+    (void)parent;
+    return fs98_alerts_create(descriptor, 0x14a8, 0x8a, fs98_alerts_modal_construct);
 }
 
-uint32 FS98_ALERTS_STDCALL fs98_alerts_modeless_create(uint32 uiParent, void *pDescriptor)
+uint32_t FS98_ALERTS_STDCALL fs98_alerts_modeless_create(uint32_t parent, void *descriptor)
 {
-    (void)uiParent;
-    return fs98_alerts_create(pDescriptor, 0x11dc, 0x8b, fs98_alerts_modeless_construct);
+    (void)parent;
+    return fs98_alerts_create(descriptor, 0x11dc, 0x8b, fs98_alerts_modeless_construct);
 }
 
-uint32 FS98_ALERTS_STDCALL fs98_alerts_advisory_create(uint32 uiParent, void *pDescriptor)
+uint32_t FS98_ALERTS_STDCALL fs98_alerts_advisory_create(uint32_t parent, void *descriptor)
 {
-    (void)uiParent;
-    return fs98_alerts_create(pDescriptor, 0x155c, 0x8c, fs98_alerts_advisory_construct);
+    (void)parent;
+    return fs98_alerts_create(descriptor, 0x155c, 0x8c, fs98_alerts_advisory_construct);
 }

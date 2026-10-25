@@ -407,13 +407,12 @@ images for a later comparison. A different pressing must be surveyed again.
 
 ## Work to take next
 
-**Alerts first**: 7,649 bytes of code, three factories, three message maps and
-known UTIL descriptors. [alerts.md](alerts.md) now records a verified event
-slice: initialization, commands, control bindings and progress drawing match
-retail over controlled dependency scripts. The complete DLL still needs its
-constructors/destructors, factories, module lifecycle and real MFC dispatch
-verified. Calling only our own replacement or existing simulator-side
-stand-ins cannot establish UI equivalence.
+**Alerts is implemented** as a standalone replacement DLL: factories,
+object lifetime and exception cleanup, initialization, commands, progress,
+MFC dispatch and module lifetime. [alerts.md](alerts.md) records the synthetic
+and native differential suites, deliberate mutations and isolated startup
+smoke. Build with `make -f tools/alerts.mk alerts`; shared build integration
+is separate from MAIN's current work. It still uses the CD's SIMSUI/MFC42.
 
 **Views next**: one registered dialog and one recognised message map (19
 entries), with 13,090 bytes of code. Its window/eyepoint parameter contract

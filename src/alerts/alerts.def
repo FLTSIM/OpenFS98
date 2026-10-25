@@ -1,0 +1,4 @@
+LIBRARY Alerts.DLL
+EXPORTS
+    Linkage=g_alerts_linkage DATA
+    ImportTable=g_alerts_imports DATA

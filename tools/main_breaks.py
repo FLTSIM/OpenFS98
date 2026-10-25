@@ -248,6 +248,23 @@ BREAKS = {
         ("enable-state", "main_nav.inc", "CALL(HOST, 0x254, f2)(id, 0);", "CALL(HOST, 0x254, f2)(id, 1);"),
         ("enable-end", "main_nav.inc", "id < 0x1007", "id < 0x1006"),
     ],
+    "obj": [
+        ("stride", "main_nav.inc", "id * 181u * 4u", "id * 180u * 4u"),
+        ("base", "main_nav.inc", "V(0x20809794)", "V(0x20809798)"),
+        ("active-check", "main_nav.inc", "if (M32(a) != 0)", "if (M32(a) == 0)"),
+        ("clear-slot", "main_nav.inc", "M32(a) = 0;", "M32(a) = 1;"),
+        ("clear-handle", "main_nav.inc", "M32(handle) = 0;", "M32(handle) = 1;"),
+        ("ret", "main_nav.inc", "return id * 181u;", "return id * 180u;"),
+    ],
+    "clamp": [
+        ("max-const", "main_nav.inc", "> 0x97c449)", "> 0x97c44a)"),
+        ("max-set", "main_nav.inc", "M32(gp + 0x564) = 0x97c449u;", "M32(gp + 0x564) = 0x97c448u;"),
+        ("min-const", "main_nav.inc", "< (int32_t)0xff683bb7u)", "< (int32_t)0xff683bb6u)"),
+        ("min-set", "main_nav.inc", "M32(gp + 0x564) = 0xff683bb7u;", "M32(gp + 0x564) = 0xff683bb8u;"),
+        ("max-op", "main_nav.inc", "(int32_t)M32(gp + 0x564) > 0x97c449", "(int32_t)M32(gp + 0x564) >= 0x97c449",
+         "at exactly 0x97c449 the one branch leaves it and the other sets it to 0x97c449, the same value"),
+        ("field", "main_nav.inc", "if ((int32_t)M32(gp + 0x564) > 0x97c449)", "if ((int32_t)M32(gp + 0x568) > 0x97c449)"),
+    ],
 }
 
 

@@ -249,7 +249,10 @@ static void stub_fault(const char *what)
  * divisor -- and returns past the instruction.  maindiff stands in for the
  * host, so it repairs them the same way; +0x74's minutes-to-hours divide runs
  * into overflow and relies on it (ours models the repaired value in C).
- * Only the register-operand div/idiv forms MAIN uses are decoded. */
+ * Only the register-operand div/idiv forms MAIN uses are decoded.  idiv's
+ * repaired value (the host saturates to the largest-magnitude quotient, not
+ * all ones) is not pinned down yet -- no slice so far divides signed into
+ * overflow; the +0xa0 sun slice will be the first and must establish it. */
 static int repair_divide(CONTEXT *c)
 {
     const uint8_t *ip = (const uint8_t *)(uintptr_t)c->Eip;
@@ -2165,6 +2168,57 @@ static void report_menu(void)
     printf("  menu %lu\n", cover_menu);
 }
 
+/* ---- suite: obj (release an object slot, +0x8c) ---------------------------------- */
+
+static unsigned long cover_obj, cover_obj_active;
+
+static void op_obj(void)
+{
+    uint32_t handle = rnd_n(16);                   /* small, so the table stays in the image */
+    uint32_t a = 0x9794 + (handle & 0xff) * 181u * 4u;
+    uint32_t active = rnd_n(2);
+
+    *(uint32_t *)(cur->image + a) = active ? rnd() : 0;   /* the slot, set or clear */
+    if (counting) { cover_obj++; if (active) cover_obj_active++; }
+    put("\n#obj h=%u slot=%#x", handle, *(uint32_t *)(cur->image + a));
+    {
+        uint32_t hv = handle, r = ((s1)SVC(0x8c))((uint32_t)(uintptr_t)&hv);
+        put(" =%#x h=%#x slot=%#x", r, hv, *(uint32_t *)(cur->image + a));
+    }
+}
+
+static void setup_obj(void) { }
+
+static void report_obj(void)
+{
+    printf("  obj %lu (slot active %lu)\n", cover_obj, cover_obj_active);
+}
+
+/* ---- suite: clamp (clamp the latitude, +0x1c) ------------------------------------ */
+
+static unsigned long cover_clamp;
+
+static void op_clamp(void)
+{
+    static const int32_t edge[] = { 0, 0x97c449, 0x97c448, 0x97c44a, 0x7fffffff, 1,
+                                    (int32_t)0xff683bb7, (int32_t)0xff683bb6, (int32_t)0xff683bb8,
+                                    (int32_t)0x80000000, -1 };
+    int32_t v = rnd_n(2) ? edge[rnd_n(sizeof edge / sizeof edge[0])] : (int32_t)rnd();
+
+    *(int32_t *)(global + 0x564) = v;
+    if (counting) cover_clamp++;
+    put("\n#clamp(%d)", v);
+    ((s0)SVC(0x1c))();
+    put(" -> %d", *(int32_t *)(global + 0x564));
+}
+
+static void setup_clamp(void) { }
+
+static void report_clamp(void)
+{
+    printf("  clamp %lu\n", cover_clamp);
+}
+
 /* ---- running ---------------------------------------------------------------------- */
 
 struct suite {
@@ -2188,6 +2242,8 @@ static const struct suite suites[] = {
     { "clock", op_clock, report_clock, 20, setup_clock, 0x00 },
     { "view", op_view, report_view, 20, setup_view, 0x00 },
     { "menu", op_menu, report_menu, 20, setup_menu, 0x00 },
+    { "obj", op_obj, report_obj, 20, setup_obj, 0x00 },
+    { "clamp", op_clamp, report_clamp, 20, setup_clamp, 0x00 },
 };
 
 static const struct suite *suite;

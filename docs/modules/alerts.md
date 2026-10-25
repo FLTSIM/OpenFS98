@@ -1,84 +1,105 @@
-# Alerts — verified event slice and remaining DLL boundary
+# Alerts — replacement DLL and differential acceptance
 
-`English/Alerts.DLL`, module `0x80000009`, has 7,649 bytes of `.text`, three
-registered dialog factories and three MFC message maps. It imports HOST and
-GLOBAL through FS98's numeric ABI, and USER32, GDI32, SIMSUI, MFC42, MSVCRT
-and KERNEL32 through PE imports. **The event slice is now implemented and
-differential-tested**, including all three initialization handlers, all three
-control-binding routines, the command handlers and the modeless progress
-tick. Construction, module lifetime and MFC dispatch remain to be implemented
-and verified before Alerts is a drop-in replacement.
+`English/Alerts.DLL`, module `0x80000009`, is implemented as a standalone
+Win32 replacement in `bin/alerts-diff/ALERTS_ours.dll`. All three factories,
+object lifecycles, event handlers, message maps, derived vtables, module
+initialization and DLL attachment/detachment are rebuilt from C. The retail
+module has 7,649 bytes of `.text`, three registered dialogs and three message
+maps. The replacement retains HOST/GLOBAL's numeric ABI and uses the CD's
+native SIMSUI/MFC42 libraries. This is the Windows compatibility stage; those
+shared dependencies still need replacement for a native Linux/Mac port.
 
 ## Current acceptance
 
-Run from the repository root, independently of the shared Makefile:
+Run from the repository root, independently of MAIN's shared Makefile:
 
 ```sh
-make -f tools/alerts.mk alertsevents
+make -f tools/alerts.mk alertsevents alertsobjects alerts
 bash tools/run_alertsdiff.sh 20000
 bash tools/run_alertsdiff.sh 20000 0x98a1e7d3
-bash tools/run_alertsdiff.sh --breaks 2000
+bash tools/run_alertsdiff.sh --objects 20000
+bash tools/run_alertsdiff.sh --events-unwind 2000
+bash tools/run_alertsdiff.sh --objects 2000 0x587a41e9 unwind
+make -f tools/alerts.mk alerts-events-breaks alerts-object-breaks N=2000
+make -f tools/alerts.mk alertsuidiff-run alerts-ui-breaks
+make -f tools/alerts.mk alerts-smoke
 ```
 
-`tools/run_alertsdiff.sh` uses a dedicated Wine prefix at
-`bin/alerts-diff/wineprefix`. It does not install Alerts, boot the simulator,
-touch the normal Wine prefix, or share another module's harness outputs.
-Outputs and mutation copies live under `bin/alerts-diff/`.
+The runner serializes Wine jobs in its dedicated prefix,
+`bin/alerts-diff/wineprefix`; outputs and mutation copies stay under
+`bin/alerts-diff/`. The startup smoke boots a disposable copy of `game/`,
+replacing only that copy's `English/Alerts.DLL`. It retains the copy and load
+trace for inspection and stops only its own Wine prefix. The source game,
+normal Wine prefix and shared Makefile are untouched.
 
-`src/alerts/alerts_events.c` contains the C translation. It uses the local
-`types.h` integer types and Hungarian identifiers. `alerts_internal.h`
-declares a dependency adapter for MFC/SIMSUI/Win32 calls; the harness provides
-that adapter. No public Linkage table or factory is exported yet, so this
-slice cannot accidentally be installed as a complete Alerts DLL.
+The three complementary comparisons are:
 
-The harness maps the actual reference `orig/English/Alerts.DLL` with
-`DONT_RESOLVE_DLL_REFERENCES`, validates its layout, patches the dependency
-IAT entries reached by the selected routines, and calls the original x86
-routines beside the C translation. It does not copy original instructions
-into the implementation. DLL startup and unresolved CRT paths are never
-invoked. The module's exception-unwind paths are outside this slice.
+| Suite | Acceptance | Compared behavior |
+| --- | --- | --- |
+| Events, seed `0x41e2753b` | 20,000 scenarios, 340,000 comparisons, 0 differences | Fourteen routines and three stateful init/answer/tick scripts |
+| Events, seed `0x98a1e7d3` | 20,000 scenarios, 340,000 comparisons, 0 differences | Independent generated descriptors/objects |
+| Objects, seed `0x587a41e9` | 20,000 scenarios, 460,000 comparisons, 0 differences | Constructors, destructors, deleting destructors, virtual methods and public factories |
+| Event unwind | 2,000 scenarios, 34,000 comparisons, 8,597 caught throws, 0 differences | Partial CString/DIB/DC lifetime and cleanup ordering |
+| Object/factory unwind | 2,000 scenarios, 46,000 comparisons, 23,651 caught throws, 0 differences | Partial subobjects, array destruction and class-specific allocation cleanup |
+| Native MFC/SIMSUI | 96 GUI cases over two complete load/unload cycles | Public factories, inherited dispatch, controls, keyboard, close and pixels |
+| Native module init | Eight comparisons over two load cycles | Successful/null/throwing allocation, throwing constructor, repeated deinit |
+| Isolated startup smoke | 75 seconds, 27/27 modules and 95 gauges loaded, PASS | Rebuilt Alerts loaded, installed bytes match the launch snapshot, no reported runtime errors |
 
-Acceptance with seed `0x41e2753b`:
+The synthetic acceptance totals **1,220,000 comparisons with zero differences**.
 
-```text
-Alerts events: 20000 scenarios, 340000 event comparisons, 0 differ
-progress enabled=14084 disabled=3226 closed=2690 negative-current=6892
-self-checked product-wrap witnesses=1176
-init success=17777 failure=2223; text resource=16667 direct=3333
-modal low-byte flag combinations reached=256/256
-Alerts events mutations: 39/39 caught
-```
+The synthetic harnesses map the actual reference with
+`DONT_RESOLVE_DLL_REFERENCES`, validate its layout and replace reached
+imports with controlled dependencies. They compare every object/descriptor
+byte, guards, defined returns and call transcripts. Unwind runs resolve the
+reference's real MSVCRT exception handlers and inject Windows exceptions at
+successive dependency calls: retail's own unwind metadata executes alongside
+our cleanup-only SEH frames. Double exceptions/termination are not covered.
 
-Seed `0x98a1e7d3` also passes 20,000 scenarios and 340,000 comparisons with
-zero differences: **680,000 comparisons across the two acceptance runs**.
-The final mutation suite was rerun with the stateful scripts enabled and
-still catches all 39 changes.
+The object suite reproduces retail's null-allocation access violation at
+`0x10dc` (5,457 fault outcomes in the ordinary acceptance run), ignores
+Create/Show failure returns as retail does, and distinguishes SIMSUI delete,
+MFC global delete and CSimsDialog's class-specific delete. It also compares
+constructor/destructor sequences and low-bit deleting-destructor flags.
 
-There are fourteen individually driven routines and three stateful scripts:
-modal init then a button, advisory init then a user checkbox edit and an
-answer, and modeless init then tick/close. The scripts preserve the object
-and descriptor between operations. Each comparison checks **every byte of
-the object and descriptor**, the return where defined, and the dependency
-transcript: text/resources, icon loads, button setup, control bindings,
-virtual Close/destroy order, coordinate conversions, text metrics, drawing
-rectangles, positions, options and colors. Initialization-failure cleanup is
-exercised too. The progress test can change the object's vtable during Close
-to check retail's use of the saved original vtable for the subsequent call.
+The native harness loads both DLLs normally against the CD libraries and a
+small host model, with a real MFC application/main-window context. It checks
+that each dialog's own virtual methods belong to the expected DLL, preventing
+a retail-versus-retail false pass. It compares all 40 descriptor bytes,
+child classes/text/geometry/visibility/enabled state, Return/Escape outcomes,
+advisory checkbox/buttons, modeless close suppression and tick destruction.
+Modal/advisory Close must hide the HWND and set GWL_USERDATA to 1 before the
+host stand-in destroys it; the modeless tick must destroy its HWND itself.
+Modal/advisory pixels come from WM_PRINT; progress pixels come from the actual
+window DC after the tick. A paint sentinel rejects untouched buffers.
 
-This verifies Alerts' logic under the stated dependency scripts. The models
-do not establish real MFC dispatch, pixel equivalence, keyboard navigation,
-allocation/creation failure behavior, nested host dialogs or the lifetime of
-fully constructed C++ objects. Those remain whole-module acceptance work.
-The control-binding model assigns child HWNDs when driven independently;
-the base-init model does not simulate the full inherited exchange/dispatch
-engine.
+Deliberate errors must produce reported differences, never merely compilation
+failures, faults or timeouts: all **63 mutations are caught** (39 event,
+22 object/cleanup and two native). The native color
+mutation changes `0x7f0000` to `0x7e0000`: descriptor/control results still
+agree while a pixel differs (127 versus 126). The other native mutation
+removes the MFC allocation cleanup on a throwing module constructor.
 
-Button string ids are generated from retail's two-level jump table by
-`tools/gen_alerts_tables.py` into `alerts_tables.inc`; no UI resource assets
-are copied into the repository. The modal init listing contains a dead
-default-focus branch: its stack local starts at -1 and can only change behind
-a check that it is already not -1. That branch is omitted. The live answer
-indices at object `+0x10f4/+0x10f8` are retained and compared.
+The primary event run reaches all 256 low-byte flag combinations, 1,176
+self-checked product-wrap witnesses, 17,777 successful and 2,223 failing
+base initializations, 16,667 resource-string and 3,333 direct-text inputs.
+The progress script also changes the vtable during Close to verify the saved
+original vtable used by the following call. Synthetic coverage is broader
+than the native GUI sample; neither random scenarios nor startup alone prove
+every UI interaction.
+
+`alerts_events.c` implements events, `alerts_objects.c` implements lifetime
+and factories, and `alerts_runtime.c` adapts MFC/SIMSUI/Win32. The DLL exports
+only `Linkage` and `ImportTable`. `gen_alerts_runtime.py` extracts 100 import
+bindings, all 228 vtable slots, three message maps and the dialog registry as
+ABI metadata. Dialogs, strings and bitmaps are extracted into ignored build
+resources; no retail machine code or resource payload is committed. The
+retail version resource is excluded. `gen_alerts_tables.py` extracts the
+button-label jump table separately.
+
+The modal init listing contains a dead default-focus branch: its stack local
+starts at -1 and can only change behind a check that it is already not -1.
+That branch is omitted. Live answer indices at `+0x10f4/+0x10f8` are retained
+and compared.
 
 ### Findings from differential testing
 
@@ -98,30 +119,23 @@ indices at object `+0x10f4/+0x10f8` are retained and compared.
   `+0x1494`, so this directly explains its field at `+0x1550`; it is not an
   unrelated dialog data-exchange variable.
 
-## Remaining implementation
+## Scope and integration
 
-1. Implement and verify the three constructors/destructors, deleting
-   destructors, local virtual methods, message-map getters and the progress
-   child class. Preserve C++ subobject offsets and reverse cleanup order.
-2. Supply real MFC/SIMSUI adapters and derived vtables/message maps using the
-   recovered retail ABI. Pin stack cleanup and preserved registers from the
-   dependency callees, including the varargs and by-value rectangle calls.
-3. Implement Linkage init/deinit, DLL attachment/detachment and all three
-   factories, with original ids/flags. Extract needed resources only into
-   ignored build output, and keep the shared Makefile/game installation out
-   of the work until the standalone DLL passes.
-4. Exercise real creation, inherited validation/data exchange, Return,
-   Escape, system close, modeless ticks and destruction through MFC. Compare
-   actual UI/graphics behavior and allocation/creation failures, then run a
-   separate installation smoke test with restoration.
+The standalone DLL can replace the matching retail English module. The
+shared build/install targets are intentionally left to the MAIN integration
+work. The real GUI acceptance runs under Wine with the CD's native MFC42 and
+SIMSUI; native Windows and other MFC versions have not been exercised.
+WinHelp's call is transcript-verified, but its external viewer is not driven.
+Nested dialogs through the simulator's complete modal loop, arbitrary host
+callbacks, and double exceptions remain outside these acceptance fixtures.
+The isolated startup smoke establishes loading and initialization, not an
+interactive flight or every alert reachable during one.
 
-The sections below retain the detailed retail boundary notes for that work.
-
-Regenerate the tables and control metadata with
-`python3 -B tools/dialogmap.py --format json`. The broader inventory and
-tool limitations are in [dialogs.md](dialogs.md); the host's modal/modeless
-contract is in [host.md](host.md#the-dialog-engine). UTIL's side of dialogs
-2 and 3 is already implemented in `src/util/util_alert.c`.
+The sections below retain the retail boundary notes. Regenerate the broader
+inventory with `python3 -B tools/dialogmap.py --format json`; tool limitations
+are in [dialogs.md](dialogs.md), and the host modal/modeless contract is in
+[host.md](host.md#the-dialog-engine). UTIL's callers are already implemented
+in `src/util/util_alert.c`.
 
 ## Entry points and lifetime
 
@@ -155,8 +169,8 @@ id and a null parent, calls ordinal 6215 with 1, and returns object `+0x20`
 
 The allocation-failure branch sets the object pointer to zero and then
 continues to writes through it. Creation/show failures are not turned into a
-clean error result in these listings. A future harness must compare those
-failure paths instead of silently improving them.
+clean error result in these listings. The object harness compares those
+failure paths, including the fault address and continuation after Create/Show failure.
 
 ## Modal alert, id 2
 
@@ -195,9 +209,9 @@ The message map at `0x22303000`, returned by getter `0x223014b0`, contains:
 The object vtable is `0x22303068`. Its message-map getter is at slot `+0x30`,
 Init at `+0xe4`, and Close at `+0xec`. Init and Close resolve to SIMSUI's
 named imports. A common empty routine at `0x223025a0` and the inherited MFC
-handlers still need to be driven when checking Escape, Return, system close
-and ordinary accept/cancel behavior. Reading only this local map cannot
-establish the complete keyboard contract.
+handlers participate in Escape/Return and ordinary accept/cancel behavior;
+the native harness drives the inherited keyboard routing as well as local
+commands. Reading only this local map cannot establish the keyboard contract.
 
 UTIL frees the message after the host's modal call returns, and interprets
 answer 8 with flag 8 as a request to close the simulator. Therefore the
@@ -236,8 +250,8 @@ Message map `0x22303158`, returned by `0x22301bb0`:
 
 The modeless object vtable is `0x223031a8`. On a zero live flag, the tick
 calls virtual Close (`+0xec`, SIMSUI) and then virtual `+0x60` (a thunk to
-MFC42 ordinal 2446). Confirm the latter's exact cleanup contract in the real
-runtime before replacing it with a guessed destructor or free. The tick
+MFC42 ordinal 2446). The runtime preserves this inherited call; the native
+harness verifies that the window is destroyed before the tick returns. The tick
 returns zero with `ret 8`.
 
 On the enabled-progress path, the tick loads current and total into local
@@ -287,36 +301,6 @@ The first command's consecutive 1/0 writes are present in retail. Do not
 turn them into a presumed successful answer of 1. SIMSUI's `SetChecked` writes
 checkbox `+0xbc`, which is object `+0x1550`; initialization and the command
 handlers now agree on that field in the differential harness. The ordering
-of inherited validation/Close callbacks still needs real MFC verification. The
-static caller scan does not resolve a literal call to id 4; that is not
+of descriptor writes and Close is transcript-verified, and the native harness
+drives checkbox edits and both closing commands. The static caller scan does not resolve a literal call to id 4; that is not
 evidence that the advisory is unused.
-
-## A useful differential harness
-
-Keep this work independent from MAIN by giving Alerts its own build fragment,
-test binaries and fixtures. The hard part is the real MFC/SIMSUI lifecycle,
-not the three small command routines. A valid sequence is:
-
-1. Run retail Alerts with real SIMSUI/MFC and an isolated host-service model,
-   or observe it in an isolated simulator install. Match the module manager,
-   resource-module lookup, string loading, object creation and destruction.
-2. Drive initialization, every button, keyboard accept/cancel, title-bar close,
-   modeless ticks and nested alert opens. Log callback order, descriptor
-   writes, HWND lifetimes, host calls and graphics calls.
-3. Cover all 256 low button-flag combinations, including zero and more than
-   three bits; higher flag bits; direct text and resource ids; absent text;
-   tags outside 0..4; initialization and allocation failures.
-4. For progress, hit live/progress gates separately; total -1, 0, 1 and large
-   positive values; current -1, 0, total and total+1; range limits 0, 1, 100,
-   101 and `0xffffffff`; starts just below, at and above each limit; wrapped
-   products and narrow/zero-sized rectangles.
-5. Compare the replacement with the same script and dependency instances.
-   Break answer selection, title-bar close suppression, range clamps,
-   descriptor-write ordering and drawing splits on purpose, and show that the
-   comparison catches each change.
-
-The event harness above follows this plan for the explicitly scoped handlers,
-including descriptor writes, dependency transcripts and stateful sequences.
-It supplies controlled C++ objects and dependency models, so the factory,
-real MFC lifecycle and actual rendering parts of the plan remain pending.
-UTIL's already-passing harness tests the caller's protocol, not Alerts' UI.

@@ -1,7 +1,7 @@
 /* Alerts object/factory slice: original x86 routines against compiled C.
  * MFC/SIMSUI constructors/destructors are controlled logging dependencies.
- * This checks ordinary lifecycle and factory ABI, not throwing dependency
- * unwinding or inherited MFC dispatch. The actual factory NULL-allocation
+ * This checks lifecycle, factory ABI and injected dependency unwinding;
+ * inherited MFC dispatch has a separate harness. The factory NULL-allocation
  * access violation is compared, including the accessed address. */
 #include <windows.h>
 #include <stdio.h>
@@ -9,172 +9,197 @@
 #include <string.h>
 #include <stdarg.h>
 #include "../../src/alerts/alerts_objects.h"
+#include "../../src/alerts/alerts_unwind.h"
 
 #define THISCALL FS98_ALERTS_THISCALL
 #define STDCALL FS98_ALERTS_STDCALL
-#define D32(pObject, iOffset) (*(uint32 *)((uint8 *)(pObject) + (iOffset)))
-#define PTR(pObject, iOffset) (*(void **)((uint8 *)(pObject) + (iOffset)))
+#define D32(object, offset) (*(uint32_t *)((uint8_t *)(object) + (offset)))
+#define PTR(object, offset) (*(void **)((uint8_t *)(object) + (offset)))
 #define OBJECT_BYTES 0x1600
 #define LOG_BYTES 8192
 
-typedef void *(THISCALL *fs98_construct_fn)(void *pObject, void *pParent);
-typedef void (THISCALL *fs98_destroy_fn)(void *pObject);
-typedef void *(THISCALL *fs98_delete_fn)(void *pObject, uint32 uiFlags);
-typedef uint32 (STDCALL *fs98_create_fn)(uint32 uiParent, void *pDescriptor);
+typedef void *(THISCALL *fs98_construct_fn)(void *object, void *parent);
+typedef void (THISCALL *fs98_destroy_fn)(void *object);
+typedef void *(THISCALL *fs98_delete_fn)(void *object, uint32_t flags);
+typedef uint32_t (STDCALL *fs98_create_fn)(uint32_t parent, void *descriptor);
 
-static const uint32 s_auiConstruct[] = {0x12f0, 0x1a50, 0x20d0};
-static const uint32 s_auiDestroy[] = {0x13d0, 0x1b00, 0x21b0};
-static const uint32 s_auiDelete[] = {0x13b0, 0x1ae0, 0x2190, 0x20b0};
-static const uint32 s_auiCreate[] = {0x1130, 0x11c0, 0x1250};
-static const fs98_construct_fn s_apConstruct[] = {
+static const uint32_t s_constructor_rvas[] = {0x12f0, 0x1a50, 0x20d0};
+static const uint32_t s_destructor_rvas[] = {0x13d0, 0x1b00, 0x21b0};
+static const uint32_t s_deleter_rvas[] = {0x13b0, 0x1ae0, 0x2190, 0x20b0};
+static const uint32_t s_factory_rvas[] = {0x1130, 0x11c0, 0x1250};
+static const fs98_construct_fn s_constructors[] = {
     fs98_alerts_modal_construct, fs98_alerts_modeless_construct, fs98_alerts_advisory_construct
 };
-static const fs98_destroy_fn s_apDestroy[] = {
+static const fs98_destroy_fn s_destructors[] = {
     fs98_alerts_modal_destroy, fs98_alerts_modeless_destroy, fs98_alerts_advisory_destroy
 };
-static const fs98_delete_fn s_apDelete[] = {
+static const fs98_delete_fn s_deleters[] = {
     fs98_alerts_modal_delete, fs98_alerts_modeless_delete,
     fs98_alerts_advisory_delete, fs98_alerts_progress_delete
 };
-static const fs98_create_fn s_apCreate[] = {
+static const fs98_create_fn s_factories[] = {
     fs98_alerts_modal_create, fs98_alerts_modeless_create, fs98_alerts_advisory_create
 };
-static HMODULE s_pRetail;
-static uint8 s_abyStorage[OBJECT_BYTES + 32] __attribute__((aligned(16)));
-static uint8 s_abyInitial[sizeof(s_abyStorage)], s_abyRetail[sizeof(s_abyStorage)];
-static uint8 s_abyDescriptor[64];
-static void *s_pObject;
-static void *s_apVtable[60];
-static uint32 s_uiRng, s_uiSeed, s_uiScenario, s_uiOperation;
-static uint32 s_uiFlags, s_uiParent;
-static int s_iSide, s_bFailAllocate;
-static char s_aszLog[2][LOG_BYTES];
-static uint32 s_auiLogLength[2];
-static void *s_apFaultJump[5];
-static uint32 s_uiSavedSeh;
-static volatile int s_bRunning;
-static uint32 s_uiFaults, s_uiHeapUiDeletes, s_uiHeapMfcDeletes;
+static HMODULE s_retail;
+static uint8_t s_storage[OBJECT_BYTES + 32] __attribute__((aligned(16)));
+static uint8_t s_initial[sizeof(s_storage)], s_retail_storage[sizeof(s_storage)];
+static uint8_t s_descriptor_bytes[64];
+static void *s_object;
+static void *s_vtable[60];
+static uint32_t s_rng, s_seed, s_scenario, s_operation;
+static uint32_t s_flags, s_parent;
+static int s_side, s_fail_allocate;
+static char s_log[2][LOG_BYTES];
+static uint32_t s_log_length[2];
+static void *s_fault_jump[5];
+static uint32_t s_saved_seh;
+static volatile int s_running;
+static uint32_t s_faults, s_heap_ui_deletes, s_heap_mfc_deletes;
+static int s_throw_at, s_calls;
+static uint32_t s_throws;
+#define TEST_THROW 0x0e041a11
+static void fs98_put(const char *format, ...);
 
-static uint32 fs98_random(void)
+static void fs98_maybe_throw(void)
 {
-    s_uiRng ^= s_uiRng << 13;
-    s_uiRng ^= s_uiRng >> 17;
-    s_uiRng ^= s_uiRng << 5;
-    return s_uiRng;
+    s_calls++;
+    if (s_throw_at && s_calls == s_throw_at) {
+        fs98_put("THROW at=%d\n", s_throw_at);
+        RaiseException(TEST_THROW, 0, 0, 0);
+    }
 }
 
-static void fs98_put(const char *pszFormat, ...)
+static uint32_t fs98_random(void)
 {
-    va_list pArgs;
-    int iWritten;
-    uint32 uiLength = s_auiLogLength[s_iSide];
-    if (uiLength > LOG_BYTES - 1024)
+    s_rng ^= s_rng << 13;
+    s_rng ^= s_rng >> 17;
+    s_rng ^= s_rng << 5;
+    return s_rng;
+}
+
+static void fs98_put(const char *format, ...)
+{
+    va_list args;
+    int written;
+    uint32_t length = s_log_length[s_side];
+    if (length > LOG_BYTES - 1024)
         exit(2);
-    va_start(pArgs, pszFormat);
-    iWritten = vsnprintf(s_aszLog[s_iSide] + uiLength, LOG_BYTES - uiLength, pszFormat, pArgs);
-    va_end(pArgs);
-    if (iWritten < 0)
+    va_start(args, format);
+    written = vsnprintf(s_log[s_side] + length, LOG_BYTES - length, format, args);
+    va_end(args);
+    if (written < 0)
         exit(2);
-    s_auiLogLength[s_iSide] += (uint32)iWritten;
+    s_log_length[s_side] += (uint32_t)written;
 }
 
-static uint32 fs98_offset(const void *pObject)
+static uint32_t fs98_offset(const void *object)
 {
-    return (uint32)((const uint8 *)pObject - (const uint8 *)s_pObject);
+    return (uint32_t)((const uint8_t *)object - (const uint8_t *)s_object);
 }
 
-static void fs98_subobject(void *pThis, const char *pszName, uint32 uiSize, uint8 byFill)
+static void fs98_subobject(void *self, const char *name, uint32_t size, uint8_t fill)
 {
-    fs98_put("%s object=%u size=%u\n", pszName, fs98_offset(pThis), uiSize);
-    memset(pThis, byFill, uiSize);
+    fs98_put("%s object=%u size=%u\n", name, fs98_offset(self), size);
+    fs98_maybe_throw();
+    memset(self, fill, size);
 }
 
-static void *fs98_dialog_construct(void *pThis, int32 iTemplate, void *pParent)
+static void *fs98_dialog_construct(void *self, int32_t template, void *parent)
 {
     fs98_put("dialog.construct template=%d parent=%u object=%u\n",
-             iTemplate, (uint32)pParent, fs98_offset(pThis));
-    memset(pThis, 0x31, 0x10dc);
-    D32(pThis, 0x20) = 0x10020;
-    D32(pThis, 0x40) = (uint32)pParent;
-    D32(pThis, 0x44) = (uint32)iTemplate;
-    return pThis;
+             template, (uint32_t)parent, fs98_offset(self));
+    fs98_maybe_throw();
+    memset(self, 0x31, 0x10dc);
+    D32(self, 0x20) = 0x10020;
+    D32(self, 0x40) = (uint32_t)parent;
+    D32(self, 0x44) = (uint32_t)template;
+    return self;
 }
-static void fs98_dialog_destroy(void *pThis)
-{ fs98_subobject(pThis, "dialog.destroy", 0x10dc, 0xd1); }
-static void fs98_string_construct(void *pThis)
-{ fs98_subobject(pThis, "string.construct", 4, 0x32); }
-static void fs98_string_destroy(void *pThis)
-{ fs98_subobject(pThis, "string.destroy", 4, 0xd2); }
-static void fs98_text_construct(void *pThis)
-{ fs98_subobject(pThis, "text.construct", 0xb8, 0x33); }
-static void fs98_text_destroy(void *pThis)
-{ fs98_subobject(pThis, "text.destroy", 0xb8, 0xd3); }
-static void fs98_button_construct(void *pThis)
-{ fs98_subobject(pThis, "button.construct", 0xfc, 0x34); }
-static void fs98_button_destroy(void *pThis)
-{ fs98_subobject(pThis, "button.destroy", 0xfc, 0xd4); }
-static void fs98_window_construct(void *pThis)
-{ fs98_subobject(pThis, "window.construct", 0x40, 0x35); }
-static void fs98_window_destroy(void *pThis)
-{ fs98_subobject(pThis, "window.destroy", 0x40, 0xd5); }
-static void fs98_check_construct(void *pThis)
-{ fs98_subobject(pThis, "check.construct", 0xc8, 0x36); }
-static void fs98_check_destroy(void *pThis)
-{ fs98_subobject(pThis, "check.destroy", 0xc8, 0xd6); }
+static void fs98_dialog_destroy(void *self)
+{ fs98_subobject(self, "dialog.destroy", 0x10dc, 0xd1); }
+static void fs98_string_construct(void *self)
+{ fs98_subobject(self, "string.construct", 4, 0x32); }
+static void fs98_string_destroy(void *self)
+{ fs98_subobject(self, "string.destroy", 4, 0xd2); }
+static void fs98_text_construct(void *self)
+{ fs98_subobject(self, "text.construct", 0xb8, 0x33); }
+static void fs98_text_destroy(void *self)
+{ fs98_subobject(self, "text.destroy", 0xb8, 0xd3); }
+static void fs98_button_construct(void *self)
+{ fs98_subobject(self, "button.construct", 0xfc, 0x34); }
+static void fs98_button_destroy(void *self)
+{ fs98_subobject(self, "button.destroy", 0xfc, 0xd4); }
+static void fs98_window_construct(void *self)
+{ fs98_subobject(self, "window.construct", 0x40, 0x35); }
+static void fs98_window_destroy(void *self)
+{ fs98_subobject(self, "window.destroy", 0x40, 0xd5); }
+static void fs98_check_construct(void *self)
+{ fs98_subobject(self, "check.construct", 0xc8, 0x36); }
+static void fs98_check_destroy(void *self)
+{ fs98_subobject(self, "check.destroy", 0xc8, 0xd6); }
 
-static void *fs98_allocate(uint32 uiSize)
+static void *fs98_allocate(uint32_t size)
 {
-    fs98_put("allocate %u fail=%d\n", uiSize, s_bFailAllocate);
-    return s_bFailAllocate ? 0 : s_pObject;
+    fs98_put("allocate %u fail=%d\n", size, s_fail_allocate);
+    fs98_maybe_throw();
+    return s_fail_allocate ? 0 : s_object;
 }
 
-static void fs98_ui_delete(void *pThis)
+static void fs98_ui_delete(void *self)
 {
-    fs98_put("ui.delete %u\n", fs98_offset(pThis));
-    if (!s_iSide) s_uiHeapUiDeletes++;
+    fs98_put("ui.delete %u\n", fs98_offset(self));
+    if (!s_side) s_heap_ui_deletes++;
 }
 
-static void fs98_mfc_delete(void *pThis)
+static void fs98_mfc_delete(void *self)
 {
-    fs98_put("mfc.delete %u\n", fs98_offset(pThis));
-    if (!s_iSide) s_uiHeapMfcDeletes++;
+    fs98_put("mfc.delete %u\n", fs98_offset(self));
+    if (!s_side) s_heap_mfc_deletes++;
+}
+static void fs98_dialog_delete(void *self)
+{
+    fs98_put("dialog.delete %u\n", fs98_offset(self));
+    fs98_ui_delete(self);
 }
 
-static int32 fs98_create(void *pThis, uint32 uiTemplate, void *pParent)
+static int32_t fs98_create(void *self, uint32_t template, void *parent)
 {
     fs98_put("create object=%u template=%u parent=%u descriptor=%u module=%u\n",
-             fs98_offset(pThis), uiTemplate, (uint32)pParent,
-             PTR(pThis, 0x10dc) == s_abyDescriptor, D32(pThis, 0x10e0));
-    return (int32)(s_uiScenario % 3); /* Includes failure, which retail ignores. */
+             fs98_offset(self), template, (uint32_t)parent,
+             PTR(self, 0x10dc) == s_descriptor_bytes, D32(self, 0x10e0));
+    fs98_maybe_throw();
+    return (int32_t)(s_scenario % 3); /* Includes failure, which retail ignores. */
 }
 
-static int32 fs98_show(void *pThis, int32 iShow)
+static int32_t fs98_show(void *self, int32_t show)
 {
-    fs98_put("show object=%u flag=%d\n", fs98_offset(pThis), iShow);
-    D32(pThis, 0x20) = 0x20000 + (s_uiSeed & 0xffff);
-    return (int32)(s_uiScenario & 1);
+    fs98_put("show object=%u flag=%d\n", fs98_offset(self), show);
+    fs98_maybe_throw();
+    D32(self, 0x20) = 0x20000 + (s_seed & 0xffff);
+    return (int32_t)(s_scenario & 1);
 }
 
-static int32 fs98_enable(uint32 uiWindow, int32 iEnable)
+static int32_t fs98_enable(uint32_t window, int32_t enable)
 {
-    fs98_put("enable hwnd=%u flag=%d\n", uiWindow, iEnable);
-    return (int32)(s_uiSeed & 1);
+    fs98_put("enable hwnd=%u flag=%d\n", window, enable);
+    return (int32_t)(s_seed & 1);
 }
 
-static const struct fs98_alerts_object_services s_stServices = {
+static const struct fs98_alerts_object_services s_runtime_services = {
     fs98_dialog_construct, fs98_dialog_destroy, fs98_string_construct, fs98_string_destroy,
     fs98_text_construct, fs98_text_destroy, fs98_button_construct, fs98_button_destroy,
     fs98_window_construct, fs98_window_destroy, fs98_check_construct, fs98_check_destroy,
-    fs98_allocate, fs98_ui_delete, fs98_mfc_delete, fs98_create, fs98_show, fs98_enable
+    fs98_allocate, fs98_ui_delete, fs98_mfc_delete, fs98_create, fs98_show, fs98_enable,
+    fs98_dialog_delete
 };
 
 /* IAT adapters have the dependency's actual calling convention. */
-static void *THISCALL fs98_mfc_dialog(void *pThis, int32 iTemplate, void *pParent)
-{ return fs98_dialog_construct(pThis, iTemplate, pParent); }
-#define DEFINE_CTOR(szName, pFunction) \
-    static void *THISCALL szName(void *pThis) { pFunction(pThis); return pThis; }
-#define DEFINE_DTOR(szName, pFunction) \
-    static void THISCALL szName(void *pThis) { pFunction(pThis); }
+static void *THISCALL fs98_mfc_dialog(void *self, int32_t template, void *parent)
+{ return fs98_dialog_construct(self, template, parent); }
+#define DEFINE_CTOR(name, function) \
+    static void *THISCALL name(void *self) { function(self); return self; }
+#define DEFINE_DTOR(name, function) \
+    static void THISCALL name(void *self) { function(self); }
 DEFINE_CTOR(fs98_mfc_string, fs98_string_construct)
 DEFINE_CTOR(fs98_mfc_text, fs98_text_construct)
 DEFINE_CTOR(fs98_mfc_button, fs98_button_construct)
@@ -186,35 +211,37 @@ DEFINE_DTOR(fs98_mfc_text_destroy, fs98_text_destroy)
 DEFINE_DTOR(fs98_mfc_button_destroy, fs98_button_destroy)
 DEFINE_DTOR(fs98_mfc_window_destroy, fs98_window_destroy)
 DEFINE_DTOR(fs98_mfc_check_destroy, fs98_check_destroy)
-static int32 THISCALL fs98_mfc_create(void *pThis, uint32 uiTemplate, void *pParent)
-{ return fs98_create(pThis, uiTemplate, pParent); }
-static int32 THISCALL fs98_mfc_show(void *pThis, int32 iShow)
-{ return fs98_show(pThis, iShow); }
-static int32 STDCALL fs98_mfc_enable(uint32 uiWindow, int32 iEnable)
-{ return fs98_enable(uiWindow, iEnable); }
-static void *THISCALL fs98_virtual_delete(void *pThis, uint32 uiFlags)
+static int32_t THISCALL fs98_mfc_create(void *self, uint32_t template, void *parent)
+{ return fs98_create(self, template, parent); }
+static int32_t THISCALL fs98_mfc_show(void *self, int32_t show)
+{ return fs98_show(self, show); }
+static int32_t STDCALL fs98_mfc_enable(uint32_t window, int32_t enable)
+{ return fs98_enable(window, enable); }
+static void STDCALL fs98_mfc_dialog_delete(void *self)
+{ fs98_dialog_delete(self); }
+static void *THISCALL fs98_virtual_delete(void *self, uint32_t flags)
 {
-    fs98_put("virtual.delete object=%u flags=%u\n", fs98_offset(pThis), uiFlags);
-    return pThis;
+    fs98_put("virtual.delete object=%u flags=%u\n", fs98_offset(self), flags);
+    return self;
 }
 
-static void fs98_patch(uint32 uiRva, void *pFunction)
+static void fs98_patch(uint32_t rva, void *function)
 {
-    DWORD uiOldProtect;
-    void **ppSlot = (void **)((uint8 *)s_pRetail + uiRva);
-    if (!VirtualProtect(ppSlot, 4, PAGE_READWRITE, &uiOldProtect)) exit(2);
-    *ppSlot = pFunction;
-    VirtualProtect(ppSlot, 4, uiOldProtect, &uiOldProtect);
+    DWORD old_protect;
+    void **slot = (void **)((uint8_t *)s_retail + rva);
+    if (!VirtualProtect(slot, 4, PAGE_READWRITE, &old_protect)) exit(2);
+    *slot = function;
+    VirtualProtect(slot, 4, old_protect, &old_protect);
 }
 
 static void fs98_load(void)
 {
-    char szPath[MAX_PATH];
-    struct fs98_alerts_object_tables stTables;
-    GetFullPathNameA("orig\\English\\Alerts.DLL", MAX_PATH, szPath, 0);
-    s_pRetail = LoadLibraryExA(szPath, 0, DONT_RESOLVE_DLL_REFERENCES);
-    if (!s_pRetail || D32(s_pRetail, 0x4060) != 0x80000009 ||
-        D32(s_pRetail, 0x401c) != (uint32)s_pRetail + 0x1130) {
+    char path[MAX_PATH];
+    struct fs98_alerts_object_tables tables;
+    GetFullPathNameA("orig\\English\\Alerts.DLL", MAX_PATH, path, 0);
+    s_retail = LoadLibraryExA(path, 0, DONT_RESOLVE_DLL_REFERENCES);
+    if (!s_retail || D32(s_retail, 0x4060) != 0x80000009 ||
+        D32(s_retail, 0x401c) != (uint32_t)s_retail + 0x1130) {
         fprintf(stderr, "reference Alerts layout/load failed: %lu\n", GetLastError());
         exit(2);
     }
@@ -232,152 +259,183 @@ static void fs98_load(void)
     fs98_patch(0x5434, fs98_mfc_check_destroy);
     fs98_patch(0x5440, fs98_allocate);
     fs98_patch(0x53fc, fs98_ui_delete);
+    fs98_patch(0x5448, fs98_mfc_dialog_delete);
     fs98_patch(0x533c, fs98_mfc_delete);
     fs98_patch(0x5338, fs98_mfc_create);
     fs98_patch(0x52ac, fs98_mfc_show);
     fs98_patch(0x5464, fs98_mfc_enable);
-    D32(s_pRetail, 0x40bc) = 0x50060;
-    stTables.pModal = (uint8 *)s_pRetail + 0x3068;
-    stTables.pModeless = (uint8 *)s_pRetail + 0x31a8;
-    stTables.pProgress = (uint8 *)s_pRetail + 0x3298;
-    stTables.pAdvisory = (uint8 *)s_pRetail + 0x33c0;
-    fs98_alerts_set_object_services(&s_stServices, &stTables);
+    fs98_patch(0x53c8, (void *)GetProcAddress(GetModuleHandleA("msvcrt.dll"), "__CxxFrameHandler"));
+    fs98_patch(0x53cc, (void *)GetProcAddress(GetModuleHandleA("msvcrt.dll"), "_except_handler3"));
+    D32(s_retail, 0x40bc) = 0x50060;
+    tables.modal = (uint8_t *)s_retail + 0x3068;
+    tables.modeless = (uint8_t *)s_retail + 0x31a8;
+    tables.progress = (uint8_t *)s_retail + 0x3298;
+    tables.advisory = (uint8_t *)s_retail + 0x33c0;
+    fs98_alerts_set_object_services(&s_runtime_services, &tables);
     fs98_alerts_set_object_module(0x50060);
 }
 
 static void fs98_fault_land(void)
 {
-    __asm__ volatile("movl %0, %%fs:0" : : "r"(s_uiSavedSeh) : "memory");
-    __builtin_longjmp(s_apFaultJump, 1);
+    __asm__ volatile("movl %0, %%fs:0" : : "r"(s_saved_seh) : "memory");
+    __builtin_longjmp(s_fault_jump, 1);
 }
 
-static LONG CALLBACK fs98_exception(EXCEPTION_POINTERS *pException)
+static LONG CALLBACK fs98_exception(EXCEPTION_POINTERS *exception)
 {
-    if (s_bRunning && s_bFailAllocate && s_uiOperation >= 14 && s_uiOperation <= 16 &&
-        pException->ExceptionRecord->ExceptionCode == EXCEPTION_ACCESS_VIOLATION) {
+    if (exception->ExceptionRecord->ExceptionCode == TEST_THROW)
+        return EXCEPTION_CONTINUE_SEARCH;
+    if (s_running && s_fail_allocate && s_operation >= 14 && s_operation <= 16 &&
+        exception->ExceptionRecord->ExceptionCode == EXCEPTION_ACCESS_VIOLATION) {
         fs98_put("FAULT code=%08lx access=%u address=%u\n",
-                 pException->ExceptionRecord->ExceptionCode,
-                 (uint32)pException->ExceptionRecord->ExceptionInformation[0],
-                 (uint32)pException->ExceptionRecord->ExceptionInformation[1]);
-        if (!s_iSide) s_uiFaults++;
-        pException->ContextRecord->Eip = (DWORD)fs98_fault_land;
+                 exception->ExceptionRecord->ExceptionCode,
+                 (uint32_t)exception->ExceptionRecord->ExceptionInformation[0],
+                 (uint32_t)exception->ExceptionRecord->ExceptionInformation[1]);
+        if (!s_side) s_faults++;
+        exception->ContextRecord->Eip = (DWORD)fs98_fault_land;
         return EXCEPTION_CONTINUE_EXECUTION;
     }
     fprintf(stderr, "UNEXPECTED FAULT scenario=%u seed=%08x operation=%u side=%d "
-            "code=%08lx pc=%p\n", s_uiScenario, s_uiSeed, s_uiOperation, s_iSide,
-            pException->ExceptionRecord->ExceptionCode, pException->ExceptionRecord->ExceptionAddress);
+            "code=%08lx pc=%p\n", s_scenario, s_seed, s_operation, s_side,
+            exception->ExceptionRecord->ExceptionCode, exception->ExceptionRecord->ExceptionAddress);
     ExitProcess(3);
     return EXCEPTION_CONTINUE_SEARCH;
 }
 
+static EXCEPTION_DISPOSITION __cdecl fs98_catch(
+    EXCEPTION_RECORD *record, void *establisher, CONTEXT *context, void *dispatcher)
+{
+    (void)context;
+    (void)dispatcher;
+    if (record->ExceptionCode == TEST_THROW &&
+        !(record->ExceptionFlags & (EXCEPTION_UNWINDING | EXCEPTION_EXIT_UNWIND))) {
+        RtlUnwind(establisher, 0, record, 0);
+        fs98_put("CAUGHT\n");
+        if (!s_side) s_throws++;
+        __asm__ volatile("movl %0, %%fs:0" : : "r"(s_saved_seh) : "memory");
+        __builtin_longjmp(s_fault_jump, 1);
+    }
+    return ExceptionContinueSearch;
+}
+
 static void fs98_operation(void)
 {
-    void *pReturn;
-    uint32 uiKind;
-    if (s_uiOperation < 3) {
-        fs98_construct_fn pConstruct = s_iSide ? s_apConstruct[s_uiOperation] :
-            (fs98_construct_fn)((uint8 *)s_pRetail + s_auiConstruct[s_uiOperation]);
-        pReturn = pConstruct(s_pObject, (void *)s_uiParent);
-        fs98_put("return.object %u\n", fs98_offset(pReturn));
-    } else if (s_uiOperation < 6) {
-        uiKind = s_uiOperation - 3;
-        fs98_destroy_fn pDestroy = s_iSide ? s_apDestroy[uiKind] :
-            (fs98_destroy_fn)((uint8 *)s_pRetail + s_auiDestroy[uiKind]);
-        pDestroy(s_pObject);
-    } else if (s_uiOperation < 10) {
-        uiKind = s_uiOperation - 6;
-        fs98_delete_fn pDelete = s_iSide ? s_apDelete[uiKind] :
-            (fs98_delete_fn)((uint8 *)s_pRetail + s_auiDelete[uiKind]);
-        pReturn = pDelete(s_pObject, s_uiFlags);
-        fs98_put("return.object %u\n", fs98_offset(pReturn));
-    } else if (s_uiOperation == 10) {
-        fs98_destroy_fn pPost = s_iSide ? fs98_alerts_post_destroy :
-            (fs98_destroy_fn)((uint8 *)s_pRetail + 0x2590);
-        pPost(s_uiScenario & 1 ? s_pObject : 0);
-    } else if (s_uiOperation < 13) {
-        fs98_destroy_fn pEnable = s_iSide ?
-            (s_uiOperation == 11 ? fs98_alerts_disable : fs98_alerts_enable) :
-            (fs98_destroy_fn)((uint8 *)s_pRetail + (s_uiOperation == 11 ? 0x1a30 : 0x1a40));
-        pEnable(s_pObject);
-    } else if (s_uiOperation == 13) {
-        typedef void (THISCALL *fs98_empty_fn)(void *pThis, uint32 uiArgument);
-        fs98_empty_fn pEmpty = s_iSide ? fs98_alerts_empty_arg :
-            (fs98_empty_fn)((uint8 *)s_pRetail + 0x20a0);
-        pEmpty(s_pObject, s_uiFlags);
-    } else if (s_uiOperation < 17) {
-        uiKind = s_uiOperation - 14;
-        fs98_create_fn pCreate = s_iSide ? s_apCreate[uiKind] :
-            (fs98_create_fn)((uint8 *)s_pRetail + s_auiCreate[uiKind]);
-        uint32 uiReturn = pCreate(s_uiParent, s_abyDescriptor);
-        fs98_put("return.hwnd %u\n", uiReturn);
+    void *return_value;
+    uint32_t kind;
+    if (s_operation < 3) {
+        fs98_construct_fn construct = s_side ? s_constructors[s_operation] :
+            (fs98_construct_fn)((uint8_t *)s_retail + s_constructor_rvas[s_operation]);
+        return_value = construct(s_object, (void *)s_parent);
+        fs98_put("return.object %u\n", fs98_offset(return_value));
+    } else if (s_operation < 6) {
+        kind = s_operation - 3;
+        fs98_destroy_fn destroy = s_side ? s_destructors[kind] :
+            (fs98_destroy_fn)((uint8_t *)s_retail + s_destructor_rvas[kind]);
+        destroy(s_object);
+    } else if (s_operation < 10) {
+        kind = s_operation - 6;
+        fs98_delete_fn delete = s_side ? s_deleters[kind] :
+            (fs98_delete_fn)((uint8_t *)s_retail + s_deleter_rvas[kind]);
+        return_value = delete(s_object, s_flags);
+        fs98_put("return.object %u\n", fs98_offset(return_value));
+    } else if (s_operation == 10) {
+        fs98_destroy_fn post = s_side ? fs98_alerts_post_destroy :
+            (fs98_destroy_fn)((uint8_t *)s_retail + 0x2590);
+        post(s_scenario & 1 ? s_object : 0);
+    } else if (s_operation < 13) {
+        fs98_destroy_fn enable = s_side ?
+            (s_operation == 11 ? fs98_alerts_disable : fs98_alerts_enable) :
+            (fs98_destroy_fn)((uint8_t *)s_retail + (s_operation == 11 ? 0x1a30 : 0x1a40));
+        enable(s_object);
+    } else if (s_operation == 13) {
+        typedef void (THISCALL *fs98_empty_fn)(void *self, uint32_t argument);
+        fs98_empty_fn empty = s_side ? fs98_alerts_empty_arg :
+            (fs98_empty_fn)((uint8_t *)s_retail + 0x20a0);
+        empty(s_object, s_flags);
+    } else if (s_operation < 17) {
+        kind = s_operation - 14;
+        fs98_create_fn create = s_side ? s_factories[kind] :
+            (fs98_create_fn)((uint8_t *)s_retail + s_factory_rvas[kind]);
+        uint32_t result = create(s_parent, s_descriptor_bytes);
+        fs98_put("return.hwnd %u\n", result);
     } else {
-        uiKind = (s_uiOperation - 17) % 3;
-        fs98_construct_fn pConstruct = s_iSide ? s_apConstruct[uiKind] :
-            (fs98_construct_fn)((uint8 *)s_pRetail + s_auiConstruct[uiKind]);
-        pConstruct(s_pObject, (void *)s_uiParent);
-        if (s_uiOperation < 20) {
-            fs98_destroy_fn pDestroy = s_iSide ? s_apDestroy[uiKind] :
-                (fs98_destroy_fn)((uint8 *)s_pRetail + s_auiDestroy[uiKind]);
-            pDestroy(s_pObject);
+        kind = (s_operation - 17) % 3;
+        fs98_construct_fn construct = s_side ? s_constructors[kind] :
+            (fs98_construct_fn)((uint8_t *)s_retail + s_constructor_rvas[kind]);
+        construct(s_object, (void *)s_parent);
+        if (s_operation < 20) {
+            fs98_destroy_fn destroy = s_side ? s_destructors[kind] :
+                (fs98_destroy_fn)((uint8_t *)s_retail + s_destructor_rvas[kind]);
+            destroy(s_object);
         } else {
-            fs98_delete_fn pDelete = s_iSide ? s_apDelete[uiKind] :
-                (fs98_delete_fn)((uint8 *)s_pRetail + s_auiDelete[uiKind]);
-            pReturn = pDelete(s_pObject, s_uiFlags);
-            fs98_put("return.object %u\n", fs98_offset(pReturn));
+            fs98_delete_fn delete = s_side ? s_deleters[kind] :
+                (fs98_delete_fn)((uint8_t *)s_retail + s_deleter_rvas[kind]);
+            return_value = delete(s_object, s_flags);
+            fs98_put("return.object %u\n", fs98_offset(return_value));
         }
     }
 }
 
-static void fs98_run(void)
+static FS98_ALERTS_NOINLINE void fs98_run(void)
 {
-    memcpy(s_abyStorage, s_abyInitial, sizeof(s_abyStorage));
-    PTR(s_pObject, 0) = s_apVtable;
-    s_auiLogLength[s_iSide] = 0;
-    s_aszLog[s_iSide][0] = 0;
-    __asm__ volatile("movl %%fs:0, %0" : "=r"(s_uiSavedSeh));
-    s_bRunning = 1;
-    if (__builtin_setjmp(s_apFaultJump) == 0)
+    struct fs98_alerts_unwind catch;
+    memcpy(s_storage, s_initial, sizeof(s_storage));
+    PTR(s_object, 0) = s_vtable;
+    s_log_length[s_side] = 0;
+    s_log[s_side][0] = 0;
+    s_calls = 0;
+    __asm__ volatile("movl %%fs:0, %0" : "=r"(s_saved_seh));
+    s_running = 1;
+    if (__builtin_setjmp(s_fault_jump) == 0) {
+        catch.previous = (void *)s_saved_seh;
+        catch.handler = fs98_catch;
+        catch.cleanup = 0;
+        __asm__ volatile("movl %0, %%fs:0" : : "r"(&catch) : "memory");
         fs98_operation();
-    s_bRunning = 0;
-    __asm__ volatile("movl %0, %%fs:0" : : "r"(s_uiSavedSeh) : "memory");
+    }
+    s_running = 0;
+    __asm__ volatile("movl %0, %%fs:0" : : "r"(s_saved_seh) : "memory");
 }
 
-int main(int iArgc, char **ppszArgv)
+int main(int argc, char **argv)
 {
-    uint32 uiCount = iArgc > 1 ? (uint32)strtoul(ppszArgv[1], 0, 0) : 20000;
-    uint32 uiIndex;
-    static const uint32 s_auiFlags[] = {0, 1, 2, 3, 0x100, 0x101, 0x80000000, 0xffffffff};
-    if (!uiCount) return 2;
-    s_uiRng = iArgc > 2 ? (uint32)strtoul(ppszArgv[2], 0, 0) : 0x587a41e9;
-    if (!s_uiRng) return 2;
+    uint32_t count = argc > 1 ? (uint32_t)strtoul(argv[1], 0, 0) : 20000;
+    uint32_t index;
+    static const uint32_t s_flag_cases[] = {0, 1, 2, 3, 0x100, 0x101, 0x80000000, 0xffffffff};
+    if (!count) return 2;
+    s_rng = argc > 2 ? (uint32_t)strtoul(argv[2], 0, 0) : 0x587a41e9;
+    if (!s_rng) return 2;
     setvbuf(stdout, 0, _IONBF, 0);
-    s_pObject = s_abyStorage + 16;
-    s_apVtable[1] = fs98_virtual_delete;
+    s_object = s_storage + 16;
+    s_vtable[1] = fs98_virtual_delete;
     AddVectoredExceptionHandler(1, fs98_exception);
     fs98_load();
-    for (s_uiScenario = 0; s_uiScenario < uiCount; s_uiScenario++) {
-        s_uiSeed = s_uiRng;
-        for (uiIndex = 0; uiIndex < sizeof(s_abyStorage); uiIndex++)
-            s_abyInitial[uiIndex] = (uint8)fs98_random();
-        s_uiFlags = s_uiScenario % 3 ? s_auiFlags[s_uiScenario % 8] : fs98_random();
-        s_uiParent = s_uiScenario % 3 ? fs98_random() : 0;
-        s_bFailAllocate = s_uiScenario % 11 == 0;
-        for (s_uiOperation = 0; s_uiOperation < 23; s_uiOperation++) {
-            s_iSide = 0;
+    for (s_scenario = 0; s_scenario < count; s_scenario++) {
+        s_seed = s_rng;
+        for (index = 0; index < sizeof(s_storage); index++)
+            s_initial[index] = (uint8_t)fs98_random();
+        s_flags = s_scenario % 3 ? s_flag_cases[s_scenario % 8] : fs98_random();
+        s_parent = s_scenario % 3 ? fs98_random() : 0;
+        s_fail_allocate = s_scenario % 11 == 0;
+        s_throw_at = argc > 3 && !strcmp(argv[3], "unwind") ?
+            (int)(s_scenario % 11) + 1 : 0;
+        for (s_operation = 0; s_operation < 23; s_operation++) {
+            s_side = 0;
             fs98_run();
-            memcpy(s_abyRetail, s_abyStorage, sizeof(s_abyStorage));
-            s_iSide = 1;
+            memcpy(s_retail_storage, s_storage, sizeof(s_storage));
+            s_side = 1;
             fs98_run();
-            if (strcmp(s_aszLog[0], s_aszLog[1]) ||
-                memcmp(s_abyRetail, s_abyStorage, sizeof(s_abyStorage))) {
+            if (strcmp(s_log[0], s_log[1]) ||
+                memcmp(s_retail_storage, s_storage, sizeof(s_storage))) {
                 fprintf(stderr, "DIFFER scenario=%u seed=%08x operation=%u\nRETAIL:\n%sOURS:\n%s",
-                        s_uiScenario, s_uiSeed, s_uiOperation, s_aszLog[0], s_aszLog[1]);
+                        s_scenario, s_seed, s_operation, s_log[0], s_log[1]);
                 return 1;
             }
         }
     }
-    printf("Alerts objects: %u scenarios, %u comparisons, 0 differ\n", uiCount, uiCount * 23);
+    printf("Alerts objects: %u scenarios, %u comparisons, 0 differ\n", count, count * 23);
     printf("allocation faults=%u ui.deletes=%u mfc.deletes=%u\n",
-           s_uiFaults, s_uiHeapUiDeletes, s_uiHeapMfcDeletes);
+           s_faults, s_heap_ui_deletes, s_heap_mfc_deletes);
+    printf("caught dependency throws=%u\n", s_throws);
     return 0;
 }

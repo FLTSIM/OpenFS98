@@ -3,6 +3,7 @@
  * descriptors and vtables at the same points as external MFC/Win32 calls. */
 #include "help_internal.h"
 #include "help_tables.inc"
+#include "help_unwind.h"
 
 #define D32(pObject, uiOffset) (*(uint32 *)((uint8 *)(pObject) + (uiOffset)))
 #define PTR(pObject, uiOffset) (*(void **)((uint8 *)(pObject) + (uiOffset)))
@@ -366,5 +367,97 @@ int32 TC fs98_help_credits_init(void *pObject)
         D32(pObject, 0x20), 0xede, uiInstance, 0);
     D32(pObject, 0x10ec) = uiWindow;
     fs98_help_credits_load(pObject);
+    return 1;
+}
+
+struct fs98_help_about_unwind {
+    struct fs98_help_unwind oFrame;
+    void *pString;
+    volatile uint32 uiLive;
+};
+static void fs98_help_about_cleanup(struct fs98_help_unwind *pFrame)
+{
+    struct fs98_help_about_unwind *pState = (void *)pFrame;
+    if (pState->uiLive) {
+        pState->uiLive = 0;
+        s_pServices->pStringDestroy(pState->pString);
+    }
+}
+/* 0x22331950: one unused CString still has observable construction/cleanup.
+ * The successful RegOpen handle is never closed in retail. The first value
+ * is Name (99 bytes), the second ProductID (49 bytes), despite the screen's
+ * field order. The published descriptor pointer expires on return. */
+FS98_HELP_NOINLINE void fs98_help_about_populate_body(void *pObject, uint8 *pScratch)
+{
+    struct fs98_help_about_unwind oState;
+    uint32 *pCapacity = (void *)(pScratch + 0xc), *pKey = (void *)(pScratch + 0x10);
+    char *pVersion = (char *)pScratch + 0x18, *pBuild = (char *)pScratch + 0x2c;
+    char *pProductId = (char *)pScratch + 0x40, *pPrefix = (char *)pScratch + 0x74;
+    char *pName = (char *)pScratch + 0xa8, *pCopyright = (char *)pScratch + 0x10c;
+    oState.pString = pScratch + 0x14; oState.uiLive = 0;
+    fs98_help_unwind_enter(&oState.oFrame, fs98_help_about_cleanup);
+    *pCapacity = 0x63;
+    s_pServices->pStringConstruct(oState.pString);
+    oState.uiLive = 1;
+    if (s_pServices->pRegOpen(0x80000002,
+            "Software\\Microsoft\\Microsoft Games\\Flight Simulator\\6.1", 0, 0x20019, pKey)) {
+        s_pServices->pCopyText(pName, "Registry Error");
+        s_pServices->pCopyText(pProductId, "Registry Error");
+    } else {
+        *pCapacity = 0x63;
+        if (s_pServices->pRegQuery(*pKey, "Name", 0, 0, pName, pCapacity))
+            s_pServices->pCopyText(pName, "Failed Registry");
+        *pCapacity = 0x31;
+        if (s_pServices->pRegQuery(*pKey, "ProductID", 0, 0, pProductId, pCapacity))
+            s_pServices->pCopyText(pProductId, "Failed Registry");
+    }
+    PTR(PTR(pObject, 0x10dc), 8) = pName;
+    s_pServices->pSetSimsText(AT(pObject, 0x1528), pName);
+    s_pServices->pSetSimsText(AT(pObject, 0x15e0), pProductId);
+    s_pServices->pLoadString(D32(pObject, 0x80), 0xf70b, pPrefix, 0x1d);
+    s_pServices->pLoadString(D32(pObject, 0x80), 0xf6fd, pBuild, 0x13);
+    s_pServices->pFormatVersion(pVersion, "%d.%02d      %s%d", 6, 10, pBuild, 0x1a2);
+    s_pServices->pAppendText(pPrefix, pVersion);
+    s_pServices->pSetSimsText(AT(pObject, 0x1198), pPrefix);
+    s_pServices->pLoadString(D32(pObject, 0x80), 0xf70c, pCopyright, 0x1ff);
+    s_pServices->pSetSimsText(AT(pObject, 0x10e0), pCopyright);
+    fs98_help_about_cleanup(&oState.oFrame);
+    fs98_help_unwind_leave(&oState.oFrame);
+}
+
+static struct fs98_help_about_state s_oAboutState;
+static struct fs98_help_about_state *s_pAboutState = &s_oAboutState;
+void fs98_help_set_about_state(struct fs98_help_about_state *pState) { s_pAboutState = pState; }
+void fs98_help_about_font_destroy(void) { s_pServices->pFontDestroy(s_pAboutState->abyFont); }
+/* 0x22331710: the initialized bit is committed before the base-font and
+ * font-constructor calls. A throw does not clear it or schedule a destructor. */
+int32 fs98_help_about_init_body(void *pObject, uint8 *pScratch)
+{
+    s_pServices->pBaseInit(pObject);
+    if (!((int32 (TC *)(void *, int32, uint32, uint32))PTR(PTR(pObject, 0), 0xe4))(
+            pObject, 0x13a, s_uiResourceModule, 1)) return 0;
+    if (!(s_pAboutState->byInitialized & 1)) {
+        void *pBaseFont;
+        s_pAboutState->byInitialized |= 1;
+        pBaseFont = s_pServices->pBaseFont(11);
+        s_pServices->pFontConstruct(s_pAboutState->abyFont, pBaseFont);
+        s_pServices->pRegisterExit(fs98_help_about_font_destroy);
+    }
+    D32(s_pAboutState->abyFont, 8) = 0xffffff;
+    D32(s_pAboutState->abyFont, 0xc) = 0;
+    D32(s_pAboutState->abyFont, 0x50) = 0;
+    D32(s_pAboutState->abyFont, 0x54) = 1;
+    s_pServices->pInitArt(AT(pObject, 0x1890), 0xf831, AT(pObject, 0xff4), AT(pObject, 0x7e8), 2);
+    fs98_help_button(pObject, 0x1698);
+    fs98_help_button(pObject, 0x1794);
+    s_pServices->pInitText(AT(pObject, 0x10e0), s_pAboutState->abyFont);
+    s_pServices->pInitText(AT(pObject, 0x1198), AT(pObject, 0x220));
+    s_pServices->pInitText(AT(pObject, 0x1250), AT(pObject, 0x220));
+    s_pServices->pInitText(AT(pObject, 0x1308), AT(pObject, 0x220));
+    s_pServices->pInitGroup(AT(pObject, 0x13c0), AT(pObject, 0x220));
+    s_pServices->pInitGroup(AT(pObject, 0x1474), AT(pObject, 0x220));
+    s_pServices->pInitText(AT(pObject, 0x1528), AT(pObject, 0x220));
+    s_pServices->pInitText(AT(pObject, 0x15e0), AT(pObject, 0x220));
+    fs98_help_about_populate_body(pObject, pScratch);
     return 1;
 }

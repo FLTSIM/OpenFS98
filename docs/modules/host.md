@@ -393,11 +393,13 @@ the result, normalising a pointer into either side's `.data` to an offset.
 | 3, the C-runtime strings | `+0x2a8` strcpy, `+0x2b0` strcat, `+0x2b8` strlen (0 for a null pointer) | verified: 0 differ over thousands of random strings; a deliberate off-by-one is caught |
 | 4, the block and string primitives | `+0x130` (strcpy from the host constant at 0x41bca0), `+0x168` (the "\\" UNC-prefix test), `+0x218` memset, `+0x228` memcmp, `+0x28c` (compacts the 4-byte palette at 0x4171a4 to 3 bytes an entry), `+0x2bc` strcmp | verified: 0 differ |
 | 5, the small accessors and stubs | `+0x154`/`+0x2cc` (a constant and the 0x41a3cc flag), `+0x288` (stores into 0x417194), `+0x304` (clears a dword), `+0x108`/`+0x12c`/`+0x220`/`+0x224` (the zero stubs) | verified: 0 differ |
+| 6, the allocator and the growable array | `+0x20c` alloc, `+0x210` realloc, `+0x214` free, `+0x21c` memmove; `+0x2f8` append, `+0x2fc` free a list, `+0x300` remove, `+0x308`/`+0x30c` walk forward/back, `+0x310` find | verified: 0 differ over 20,000 iterations; its 24 breaks caught (`free-null` by a hang: the double free wedges wine's heap) |
 
 The harness now seeds `.data` with distinct random values on both sides before
 each iteration (leaving the service table and bounding the string constant at
 0x41bca0), so a service that reads the wrong offset of an otherwise-zero global
-is caught -- `make host-breaks` runs 28 deliberate breaks, all caught. (An
+is caught -- `make host-breaks` runs 52 deliberate breaks, all caught (a hang
+after two minutes counts as caught). (An
 early run with a plain LCG missed seven, because the generator's low bits had a
 period that aligned with the per-iteration call count and froze the
 `.data`-seeding decisions; switching to xorshift32 fixed the coverage.)
@@ -408,6 +410,51 @@ whole `.data` image on both sides and reports the first word that differs.
 Because our image is a byte-for-byte copy of the host's `.data`, the two start
 identical and the digest needs no relocation masking -- a difference is a write
 we got wrong.
+
+Slice 6 needed two more things of the harness. **The real host's imports are
+bound**: the copy at 0x400000 arrives with its import table unresolved, so
+`hostdiff` walks it and fills each slot by LoadLibrary/GetProcAddress (a trap
+for anything wine lacks, MFC42's ordinals among them). Both sides then call one
+MSVCRT and share its heap. And **realloc always moves**: both sides' `realloc`
+is hooked (the real host's when its imports are bound, ours by patching
+`HOST_ours.dll`'s import table) to copy to a new block and poison the old one,
+because wine's realloc grows a small block in place and a pointer kept across
+a move otherwise reads intact old contents and goes unseen.
+
+The growable array (`struct fs98_host_list` in `host.h`) is the host's general
+container: count, capacity, grow step, element size, a for-each depth, a
+removal-queued flag, data. While a list is being walked, removals are not
+applied but queued on the host's own list at 0x418380 (8-byte `{ list, index
+}` entries, grow 0x20) and applied newest first when the walk ends. Retail's
+quirks, reproduced:
+
+- a removal **always drops the count**, even for an index at or past the end
+  (which then moves nothing), and a queued removal does the same when it is
+  applied -- so more queued removals than elements drive the count negative,
+  and the next append writes below the data;
+- the walk's end applies the queue **without consulting the depth**: a nested
+  walk's end applies the outer walk's removals while it is still running, where
+  each is queued again -- and the list's queued flag is then cleared over it,
+  so they stay on the queue until some later walk sets the flag again;
+- `+0x2fc` frees the data but leaves the capacity, so a list freed and not
+  re-initialised never reallocates, and its next append writes through null;
+- `+0x300` returns what eax held: the element size after a move, the queue
+  entry when queued, else 0; `+0x2fc` returns the address of the data field
+  when there was nothing to free;
+- `+0x310` with a zero length matches the first element (`repz cmpsb` with
+  ecx 0 leaves the flags of the `xor` before it);
+- `+0x210`'s second failure is not fatal the way `+0x20c`'s is: it shows the
+  out-of-memory box and posts the quit (`+0x024`'s body), then returns 0 with
+  the pointer null.
+
+The harness drives a pair of lists through random appends, removals (inside
+and outside walks), nested walks, finds and clears, with a script both sides'
+walk callbacks follow; a bystander list kept permanently mid-walk puts a
+second list's entries on the queue, and sometimes the queue starts empty with
+a grow step of 1 so that it moves under a flush. Removals are only issued while
+the list keeps more elements than are queued against it (a negative count is
+a caller's error, not behaviour to test). Allocation failure is exercised only
+with flags 4; the fatal paths are transliterated but not run.
 
 ### Continuing the reimplementation
 
@@ -425,15 +472,17 @@ API is not out-of-process testable this way and waits for a model or the
 
 Easiest remaining, roughly in order: the other pure accessors and getters (many
 read one global and return it, with an early-out); the remaining C-runtime
-services (`sprintf`-family and friends, `+0x22c` qsort); then the ones that
-call a host-internal helper that is itself pure. `+0x094` (a pure walk of a
+services (`sprintf`-family and friends, `+0x22c` qsort) -- with the imports
+bound, the eleven services that call only MSVCRT (`hostmap.py` lists them) are
+now as testable as the pure ones; then the ones that call a host-internal
+helper that is itself pure. `+0x094` (a pure walk of a
 run-time linked list at 0x41a3dc) and `+0x314` (a no-op) are the two pure
 leaves left unimplemented.
 
 ## Status
 
-26 of 194 services reimplemented in `src/host/host.c` and verified against the
-real host in process (slices 1 to 5 above). 71 have prototypes confirmed from the
+36 of 194 services reimplemented in `src/host/host.c` and verified against the
+real host in process (slices 1 to 6 above). 71 have prototypes confirmed from the
 callee and recorded in `host.h` (15 of them the window services, from WINDOW),
 and 11 were already exercised in-process through other modules' harnesses: the
 clock, `strlen`, and the nine-service enumeration cluster above. The dialog

@@ -12,6 +12,9 @@ typedef int32 (FS98_HELP_STDCALL *fs98_help_about_fn)(void *pDescriptor);
 typedef int32 (FS98_HELP_STDCALL *fs98_help_graph_fn)(uint32 uiOperation,
                                                      void *pDescriptor, uint32 uiWindow);
 struct fs98_help_rect { int32 iLeft, iTop, iRight, iBottom; };
+struct fs98_help_about_state {
+    uint8 byInitialized, abyReserved[7], abyFont[0x70];
+};
 struct fs98_help_services {
     int32 (*pSendMessage)(uint32 uiWindow, uint32 uiMessage, uint32 uiWParam, uint32 uiLParam);
     int32 (*pWinHelp)(uint32 uiWindow, const char *pFile, uint32 uiCommand, const uint32 *pTable);
@@ -57,9 +60,24 @@ struct fs98_help_services {
     uint32 (*pCreateWindow)(uint32 uiExStyle, const char *pClass, const char *pTitle, uint32 uiStyle,
                             int32 iX, int32 iY, int32 iWidth, int32 iHeight, uint32 uiParent,
                             uint32 uiMenu, uint32 uiInstance, void *pParam);
+    void (*pStringConstruct)(void *pString);
+    void (*pStringDestroy)(void *pString);
+    int32 (*pRegOpen)(uint32 uiKey, const char *pSubkey, uint32 uiOptions, uint32 uiAccess, uint32 *pKey);
+    int32 (*pRegQuery)(uint32 uiKey, const char *pName, void *pReserved, uint32 *pType, void *pData, uint32 *pSize);
+    int32 (*pLoadString)(uint32 uiModule, uint32 uiId, char *pBuffer, int32 iCapacity);
+    void (*pSetSimsText)(void *pControl, const char *pText);
+    int32 (*pFormatVersion)(char *pOut, const char *pFormat, int32 iMajor, int32 iMinor,
+                            const char *pPrefix, int32 iBuild);
+    char *(*pAppendText)(char *pOut, const char *pText);
+    void (*pFontConstruct)(void *pFont, void *pBaseFont);
+    void (*pFontDestroy)(void *pFont);
+    void (*pRegisterExit)(void (*pHandler)(void));
     void (*pMoveControl)(void *pControl, int32 iX, int32 iY, int32 iWidth, int32 iHeight, int32 iRepaint);
 };
 
+void fs98_help_set_about_state(struct fs98_help_about_state *pState);
+void fs98_help_about_font_destroy(void);
+int32 FS98_HELP_THISCALL fs98_help_about_init(void *pObject);
 void fs98_help_set_resource_module(uint32 uiModule);
 int32 FS98_HELP_THISCALL fs98_help_lessons_init(void *pObject);
 int32 FS98_HELP_THISCALL fs98_help_credits_init(void *pObject);
@@ -67,6 +85,7 @@ int32 FS98_HELP_THISCALL fs98_help_graph_init(void *pObject);
 int32 FS98_HELP_THISCALL fs98_help_completion_init(void *pObject);
 void fs98_help_set_services(const struct fs98_help_services *pServices);
 #define FS98_HELP_EVENT(szName) void FS98_HELP_THISCALL fs98_help_##szName(void *pObject)
+FS98_HELP_EVENT(about_populate);
 FS98_HELP_EVENT(about_cancel);
 FS98_HELP_EVENT(about_accept);
 FS98_HELP_EVENT(about_credits);

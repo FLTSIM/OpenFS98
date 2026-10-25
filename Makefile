@@ -1115,7 +1115,7 @@ src/host/host_data.inc src/host/host_pointers.inc &: $(ORIG)/FLTSIM98.EXE tools/
 $(BIN)/HOST.DLL: src/host/host.c src/host/host.def src/host/host_data.inc
 	@mkdir -p $(BIN)
 	$(CC) $(CFLAGS) $(LDFLAGS) -Wl,--image-base=$(BASE_HOST) \
-	      -o $@ src/host/host.c src/host/host.def -lkernel32
+	      -o $@ src/host/host.c src/host/host.def -lmsvcrt -luser32 -lkernel32
 
 # hostdiff runs the real host beside ours in one process, so it is linked away
 # from 0x400000 where the real host must map.
@@ -1133,7 +1133,7 @@ hostdiff-run: hostdiff
 # A deliberately broken copy of host.c as the harness's "ours" (tools/host_breaks.py).
 host-break-build:
 	$(CC) $(CFLAGS) -Isrc/host $(LDFLAGS) -Wl,--image-base=$(BASE_HOST) \
-	      -o $(DIFFDIR)/HOST_ours.dll $(HOST_BREAK) src/host/host.def -lkernel32
+	      -o $(DIFFDIR)/HOST_ours.dll $(HOST_BREAK) src/host/host.def -lmsvcrt -luser32 -lkernel32
 
 host-breaks: hostdiff
 	@python3 tools/host_breaks.py $(if $(N),$(N),4000)

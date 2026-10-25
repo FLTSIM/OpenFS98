@@ -52,9 +52,51 @@ def main():
         ('graph-state-write', 'D32(pObject, 0x10e4) = uiOperation;', 'D32(pObject, 0x10e4) = uiOperation ^ 1;'),
         ('graph-debug-pointer', '&& (uint32)pDescriptor != 0xcdcdcdcd', '&& (uint32)pDescriptor != 0xcccccccc'),
     ]
+    aMutations += [
+        ('skin-flags', 's_uiResourceModule, 9)', 's_uiResourceModule, 8)'),
+        ('skin-resource', 'pObject, 0x14f,', 'pObject, 0x14e,'),
+        ('button-bitmap', '0x132, AT(pObject, 0xff4)', '0x133, AT(pObject, 0xff4)'),
+        ('completion-font', 'pInitText(AT(pObject, 0x10e0), AT(pObject, 0x220))', 'pInitText(AT(pObject, 0x10e0), AT(pObject, 0x370))'),
+        ('lessons-font-color', 'D32(pObject, 0x228) = 0;', 'D32(pObject, 0x228) = 1;'),
+        ('lessons-edit-limit', '0xc5, 0x3ff, 0)', '0xc5, 0x3fe, 0)'),
+        ('lessons-radio-bitmap', 'pRadio, AT(pObject, 0x4c0), 0x134,', 'pRadio, AT(pObject, 0x4c0), 0x135,'),
+        ('lessons-edit-error', 'pFont, 0xffffff, 0, 0xff0000,', 'pFont, 0xffffff, 0, 0xfe0000,'),
+        ('credits-window-style', '"RICHEDIT", "", 0x503000c4,', '"RICHEDIT", "", 0x503000c5,'),
+        ('credits-window-id', 'D32(pObject, 0x20), 0xede,', 'D32(pObject, 0x20), 0xedf,'),
+    ]
+    aMutations += [
+        ('registry-name-capacity', '        *pCapacity = 0x63;', '        *pCapacity = 0x62;'),
+        ('registry-product-capacity', '*pCapacity = 0x31;', '*pCapacity = 0x30;'),
+        ('registry-key-access', '\\6.1", 0, 0x20019, pKey)', '\\6.1", 0, 0x20018, pKey)'),
+        ('registry-name-pointer', '(char *)pScratch + 0xa8', '(char *)pScratch + 0xac'),
+        ('registry-fallback', '"Registry Error"', '"Registry failure"'),
+        ('version-minor', '6, 10, pBuild, 0x1a2', '6, 11, pBuild, 0x1a2'),
+        ('version-build', '6, 10, pBuild, 0x1a2', '6, 10, pBuild, 0x1a3'),
+        ('about-font-selector', 'pBaseFont(11)', 'pBaseFont(10)'),
+        ('about-font-color', 'D32(s_pAboutState->abyFont, 8) = 0xffffff;', 'D32(s_pAboutState->abyFont, 8) = 0xfffffe;'),
+        ('about-font-background', 'D32(s_pAboutState->abyFont, 0xc) = 0;', 'D32(s_pAboutState->abyFont, 0xc) = 1;'),
+        ('about-font-init-bit', 's_pAboutState->byInitialized |= 1;', 's_pAboutState->byInitialized |= 2;'),
+    ]
+    aMutations = [(szName, 'events', 'normal', szBefore, szAfter)
+                  for szName, szBefore, szAfter in aMutations]
+    aMutations += [
+        ('constructor-parent', 'objects', 'normal', 'pClass->unTemplate, pParent)', 'pClass->unTemplate, (void *)((uint32)pParent & 0))'),
+        ('credits-initial-pause', 'objects', 'normal', 'D32(pObject, 0x1108) = 1;', 'D32(pObject, 0x1108) = 0;'),
+        ('delete-flags', 'objects', 'normal', 'if (uiFlags & 1) s_pServices->pUiDelete', 'if (uiFlags & 2) s_pServices->pUiDelete'),
+        ('placeholder-delete-allocator', 'objects', 'normal', 'if (uiFlags & 1) s_pServices->pMfcDelete', 'if (uiFlags & 1) s_pServices->pUiDelete'),
+        ('factory-module', 'objects', 'normal', 'D32(pObject, 0x80) = s_uiModule;', 'D32(pObject, 0x80) = s_uiModule ^ 1;'),
+        ('factory-show', 'objects', 'normal', 'pShow(pObject, 1)', 'pShow(pObject, 0)'),
+        ('factory-size', 'objects', 'normal', 'pAllocate(pClass->unSize)', 'pAllocate(pClass->unSize - 4)'),
+        ('factory-parent', 'objects', 'normal', 'fs98_help_construct(pObject, 0, uiKind)', 'fs98_help_construct(pObject, (void *)uiParent, uiKind)'),
+        ('constructor-unwind-base', 'objects', 'unwind', '    oState.uiBase = 1;', '    oState.uiBase = 0;'),
+        ('factory-unwind-allocator', 'objects', 'unwind', 'pDialogDelete(pState->pObject)', 'pUiDelete(pState->pObject)'),
+    ]
+    aMutations += [
+        ('about-string-unwind', 'events', 'unwind', 'if (pState->uiLive) {', 'if (0) {'),
+    ]
     iCaught = 0
-    szOriginal = Path('src/help/help_events.c').read_text()
-    for szName, szBefore, szAfter in aMutations:
+    for szName, szUnit, szMode, szBefore, szAfter in aMutations:
+        szOriginal = Path(f'src/help/help_{szUnit}.c').read_text()
         if szBefore not in szOriginal:
             raise ValueError(f'{szName}: missing mutation anchor')
         pSource = pDirectory / f'{szName}.c'
@@ -64,12 +106,13 @@ def main():
         oBuild = subprocess.run([
             'i686-w64-mingw32-gcc', '-std=c99', '-O2', '-Wall', '-Wextra', '-Werror',
             '-fno-strict-aliasing', '-Isrc/help', '-o', str(pExecutable),
-            'tools/difftest/helpeventsdiff.c', str(pSource), '-lntdll'], text=True, capture_output=True)
+            'tools/difftest/helpeventsdiff.c', str(pSource),
+            f'src/help/help_{"objects" if szUnit == "events" else "events"}.c', 'src/help/help_stack.S', '-lntdll'], text=True, capture_output=True)
         if oBuild.returncode:
             print(f'{szName}: BUILD FAILED (not counted)\n{oBuild.stderr}', flush=True)
             continue
         try:
-            oRun = subprocess.run(['wine', str(pExecutable), str(iCount), '0x19a847e3'],
+            oRun = subprocess.run(['wine', str(pExecutable), str(iCount), '0x19a847e3', szMode],
                                   text=True, capture_output=True, timeout=60)
         except subprocess.TimeoutExpired:
             print(f'{szName}: TIMEOUT (not counted)', flush=True)

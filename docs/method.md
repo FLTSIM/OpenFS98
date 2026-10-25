@@ -266,8 +266,11 @@ host's sections into place, so the real service table at `0x417ba0` and its
 code run in process beside `HOST_ours.dll` (linked away from `0x400000`). That
 makes every pure or self-contained host service differential-testable out of
 process, the same as a module -- see [modules/host.md](modules/host.md). The
-services that need the live sim's windows, device or MFC state still need the
-in-process `ofstest` harness.
+copy's import table is then bound by hand (LoadLibrary/GetProcAddress per
+entry, a trap for anything wine lacks), so services that reach MSVCRT or the
+window system run too, and both sides share one CRT heap. The services that
+need the live sim's windows, device or MFC state still need the in-process
+`ofstest` harness.
 
 Anything running in the in-process harness runs during the sim's startup, so a
 fault there stops the sim from starting. Be defensive, and take the module back

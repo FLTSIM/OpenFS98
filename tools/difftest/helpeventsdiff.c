@@ -6,6 +6,8 @@
 #include <string.h>
 #include <stdarg.h>
 #include "../../src/help/help_internal.h"
+#include "../../src/help/help_objects.h"
+#include "../../src/help/help_objects_tables.inc"
 
 #define TC FS98_HELP_THISCALL
 #define SC FS98_HELP_STDCALL
@@ -22,13 +24,14 @@ struct fixture {
     uint8 abyExchange[32];
     uint8 abyBuffer[64];
     uint32 uiRead;
+    struct fs98_help_about_state oAboutState;
     uint8 abyGuardAfter[32];
 };
 static struct fixture s_oFixture, s_oInitial, s_oRetailResult;
 static HMODULE s_hRetail;
 static uint32 s_uiSeed, s_uiRng, s_uiScenario, s_uiOperation, s_uiScript;
 static uint32 s_uiCalls, s_uiLogLength, s_uiThrowAt, s_uiSavedSeh;
-static uint32 s_uiMaxCalls, s_uiThrows, s_uiComparisons, s_uiSwaps, s_uiReads, s_uiResets;
+static uint32 s_uiMaxCalls, s_uiThrows, s_uiComparisons, s_uiSwaps, s_uiReads, s_uiResets, s_uiAllocationFaults;
 static int s_iSide;
 static char s_aacLogs[2][LOG_SIZE];
 static void *s_apVtable[60], *s_apOtherVtable[60], *s_apControlVtable[60], *s_apJump[5];
@@ -59,13 +62,28 @@ static const struct operation s_aOperations[] = {
     CLASS(0x2da0, 0x2dc0, 0x2be0, graph),
     CLASS(0x30d0, 0x30f0, 0x2f50, completion),
     SPECIAL(0x2ca0, 4, graph_init), SPECIAL(0x2fa0, 4, completion_init),
-    SPECIAL(0x2570, 4, lessons_init), SPECIAL(0x1d50, 4, credits_init)
+    SPECIAL(0x2570, 4, lessons_init), SPECIAL(0x1d50, 4, credits_init),
+#define LIFETIME(uiCtor, uiDtor, uiDelete, uiFactory, szName) \
+    SPECIAL(uiCtor, 8, szName##_construct), SPECIAL(uiDtor, 9, szName##_destroy), \
+    SPECIAL(uiDelete, 10, szName##_delete), SPECIAL(uiFactory, 11, szName##_create), \
+    SPECIAL(uiCtor, 12, szName##_roundtrip), SPECIAL(uiCtor, 13, szName##_construct_delete)
+    LIFETIME(0x1410, 0x1530, 0x1510, 0x11c0, about),
+    LIFETIME(0x1b70, 0x1c50, 0x1c30, 0x1250, credits),
+    LIFETIME(0x2280, 0x2390, 0x2370, 0x1130, lessons),
+    LIFETIME(0x2ae0, 0x2b70, 0x2b50, 0x12e0, graph),
+    LIFETIME(0x2e30, 0x2ed0, 0x2eb0, 0x1370, completion),
+    SPECIAL(0x2260, 14, placeholder_delete), SPECIAL(0x1400, 15, class_delete),
+    SPECIAL(0x1950, 16, about_populate), SPECIAL(0x1710, 18, about_init),
+    SPECIAL(0x18b0, 17, about_font_destroy), SPECIAL(0x1710, 19, about_init_twice)
+#undef LIFETIME
 };
 #define OP_COUNT (sizeof(s_aOperations) / sizeof(s_aOperations[0]))
 static uint32 next_random(void)
 { s_uiRng ^= s_uiRng << 13; s_uiRng ^= s_uiRng >> 17; s_uiRng ^= s_uiRng << 5; return s_uiRng; }
 static uint32 offset(const void *pPointer)
-{ return (uint32)((const uint8 *)pPointer - (const uint8 *)&s_oFixture); }
+{
+    if (pPointer == (uint8 *)s_hRetail + 0x51c8) pPointer = s_oFixture.oAboutState.abyFont;
+    return (uint32)((const uint8 *)pPointer - (const uint8 *)&s_oFixture); }
 static void put(const char *pFormat, ...)
 {
     va_list pArgs;
@@ -103,8 +121,10 @@ static void mutate(void)
         }
         if ((s_uiScript & 2) && ((s_uiOperation >= 10 && s_uiOperation <= 17) || s_uiOperation == 47)) {
             pDescriptor = PTR(pObject, 0x10dc);
-            D32(pDescriptor, 8) = 2;
-            D32(pDescriptor, 0xc) = 1;
+            if (pDescriptor) {
+                D32(pDescriptor, 8) = 2;
+                D32(pDescriptor, 0xc) = 1;
+            }
         }
     }
     if (s_uiScript & 4) PTR(pObject, 0) = s_apOtherVtable;
@@ -312,13 +332,123 @@ static uint32 create_window(uint32 uiExStyle, const char *pClass, const char *pT
         uiExStyle, pClass, pTitle, uiStyle, iX, iY, iWidth, iHeight, uiParent, uiMenu, uiInstance, (uint32)pParam);
     mutate(); return s_uiScenario % 5 ? s_uiSeed ^ 0x123 : 0;
 }
+static void string_construct(void *pString)
+{ put("string.construct %u\n", offset(pString)); D32(pString, 0) = 0x1234; mutate(); }
+static void string_destroy(void *pString)
+{ put("string.destroy %u value=%u\n", offset(pString), D32(pString, 0)); mutate(); }
+static int32 reg_open(uint32 uiKey, const char *pSubkey, uint32 uiOptions, uint32 uiAccess, uint32 *pKey)
+{
+    put("reg.open key=%x subkey=[%s] options=%u access=%x\n", uiKey, pSubkey, uiOptions, uiAccess);
+    *pKey = s_uiSeed; mutate(); return s_uiScenario % 4 == 0 ? 2 : 0;
+}
+static int32 reg_query(uint32 uiKey, const char *pName, void *pReserved, uint32 *pType, void *pData, uint32 *pSize)
+{
+    uint32 uiCapacity = *pSize;
+    uint32 uiLength = s_uiScenario % 5 == 0 ? uiCapacity - 1 : 6;
+    int iFail = s_uiScenario & (!strcmp(pName, "Name") ? 1 : 2);
+    put("reg.query key=%u name=[%s] reserved=%u type=%u capacity=%u\n", uiKey, pName, (uint32)pReserved, (uint32)pType, uiCapacity);
+    memset(pData, !strcmp(pName, "Name") ? 'N' : 'P', uiLength);
+    ((char *)pData)[uiLength] = 0; *pSize = uiLength + 1;
+    mutate(); return iFail ? 234 : 0;
+}
+static int32 load_ui_string(uint32 uiModule, uint32 uiId, char *pBuffer, int32 iCapacity)
+{
+    const char *pText = uiId == 0xf70b ? "Version " : uiId == 0xf6fd ? "Build " : "Copyright fixture";
+    put("load.ui.string module=%u id=%x capacity=%d\n", uiModule, uiId, iCapacity);
+    snprintf(pBuffer, iCapacity, "%s", s_uiScenario % 7 ? pText : "");
+    mutate(); return strlen(pBuffer);
+}
+static void set_sims_text(void *pControl, const char *pText)
+{
+    put("set.sims.text %u [%s]\n", offset(pControl), pText);
+    mutate();
+}
+static int32 format_version(char *pOut, const char *pFormat, int32 iMajor, int32 iMinor,
+                            const char *pPrefix, int32 iBuild)
+{
+    put("format.version [%s] major=%d minor=%d prefix=[%s] build=%d\n", pFormat, iMajor, iMinor, pPrefix, iBuild);
+    mutate(); return sprintf(pOut, pFormat, iMajor, iMinor, pPrefix, iBuild);
+}
+static char *append_text(char *pOut, const char *pText)
+{ put("append.text [%s] [%s]\n", pOut, pText); mutate(); return strcat(pOut, pText); }
+static void font_construct(void *pFont, void *pBaseFont)
+{
+    put("font.construct %u base=%u\n", offset(pFont), offset(pBaseFont));
+    memset(pFont, s_uiSeed & 255, 0x70); mutate();
+}
+static void font_destroy(void *pFont)
+{ put("font.destroy %u value=%x\n", offset(pFont), D32(pFont, 0)); mutate(); }
+static void register_exit(void (*pHandler)(void))
+{
+    put("register.exit owns=%u\n", pHandler == (s_iSide ? fs98_help_about_font_destroy : (void (*)(void))((uint8 *)s_hRetail + 0x18b0)));
+    mutate();
+}
 static const struct fs98_help_services s_oServices = {
     send_message, win_help, enable_window, kill_timer, set_timer, destroy_window, free_library,
     close_dialog, message_box, get_window_long, set_checked, set_text, enable_control, load_string,
     split_path, join_path, exists, base_exchange, ddx_control, read_file, copy_text, open_file, close_handle,
     base_init, dialog_init, init_art, init_button, init_text, get_control, remap_rect,
-    init_group, base_font, init_list, init_edit, copy_rect, common_controls, load_library, module_state, create_window, move_control
+    init_group, base_font, init_list, init_edit, copy_rect, common_controls, load_library, module_state, create_window,
+    string_construct, string_destroy, reg_open, reg_query, load_ui_string, set_sims_text, format_version, append_text, font_construct, font_destroy, register_exit, move_control
 };
+
+static void *dialog_construct(void *pObject, int32 iResource, void *pParent)
+{
+    put("dialog.construct %u resource=%x parent=%u\n", offset(pObject), iResource, (uint32)pParent);
+    D32(pObject, 0) = 0xba5e0000; D32(pObject, 0x20) = s_uiSeed;
+    mutate(); return pObject;
+}
+static void dialog_destroy(void *pObject)
+{ put("dialog.destroy %u vtable=%x\n", offset(pObject), D32(pObject, 0)); D32(pObject, 0) = 0xdead0000; mutate(); }
+static void construct_control(void *pControl, uint32 uiImport)
+{
+    put("control.construct %u import=%x\n", offset(pControl), uiImport);
+    D32(pControl, 0) = uiImport; D32(pControl, 4) = s_uiSeed;
+    mutate();
+}
+static void destroy_control(void *pControl, uint32 uiImport)
+{
+    put("control.destroy %u import=%x vtable=%x\n", offset(pControl), uiImport, D32(pControl, 0));
+    D32(pControl, 0) = uiImport; mutate();
+}
+static void *allocate_object(uint32 uiSize)
+{
+    put("allocate %u\n", uiSize); mutate();
+    return s_uiScenario % 11 ? s_oFixture.abyObject : 0;
+}
+static void ui_delete(void *pObject) { put("ui.delete %u\n", offset(pObject)); mutate(); }
+static void mfc_delete(void *pObject) { put("mfc.delete %u\n", offset(pObject)); mutate(); }
+static void dialog_delete(void *pObject) { put("dialog.delete %u\n", offset(pObject)); mutate(); }
+static int32 create_dialog(void *pObject, uint32 uiResource, void *pParent)
+{
+    put("dialog.create %u resource=%x parent=%u module=%u\n", offset(pObject), uiResource, (uint32)pParent, D32(pObject, 0x80));
+    mutate(); return s_uiScenario & 1 ? 0 : (int32)s_uiSeed;
+}
+static int32 show_dialog(void *pObject, int32 iShow)
+{ put("dialog.show %u %d\n", offset(pObject), iShow); mutate(); return s_uiScenario & 2 ? 0 : (int32)s_uiSeed; }
+static const struct fs98_help_object_services s_oObjectServices = {
+    dialog_construct, dialog_destroy, construct_control, destroy_control, allocate_object,
+    ui_delete, mfc_delete, dialog_delete, create_dialog, show_dialog
+};
+#define CONTROL_HOOK(szName, uiCtor, uiDtor) \
+static void *TC hook_construct_##szName(void *pControl) { construct_control(pControl, uiCtor); return pControl; } \
+static void TC hook_destroy_##szName(void *pControl) { destroy_control(pControl, uiDtor); }
+CONTROL_HOOK(text, 0x64a4, 0x64b8)
+CONTROL_HOOK(group, 0x64a8, 0x64bc)
+CONTROL_HOOK(button, 0x64ac, 0x64c0)
+CONTROL_HOOK(art, 0x64b0, 0x6498)
+CONTROL_HOOK(list, 0x644c, 0x645c)
+CONTROL_HOOK(edit, 0x6458, 0x6460)
+CONTROL_HOOK(radio, 0x6468, 0x6464)
+CONTROL_HOOK(window, 0x6348, 0x634c)
+#undef CONTROL_HOOK
+static void *TC hook_dialog_construct(void *pObject, int32 iResource, void *pParent)
+{ return dialog_construct(pObject, iResource, pParent); }
+static void TC hook_dialog_destroy(void *pObject) { dialog_destroy(pObject); }
+static void SC hook_dialog_delete(void *pObject) { dialog_delete(pObject); }
+static int32 TC hook_create_dialog(void *pObject, uint32 uiResource, void *pParent)
+{ return create_dialog(pObject, uiResource, pParent); }
+static int32 TC hook_show_dialog(void *pObject, int32 iShow) { return show_dialog(pObject, iShow); }
 
 /* Original Win32/MFC import ABIs, separate from the plain-C service boundary. */
 static int32 SC hook_send(uint32 uiA, uint32 uiB, uint32 uiC, uint32 uiD) { return send_message(uiA,uiB,uiC,uiD); }
@@ -371,6 +501,23 @@ static uint32 SC hook_create_window(uint32 uiExStyle, const char *pClass, const 
                                     int32 iX, int32 iY, int32 iWidth, int32 iHeight, uint32 uiParent,
                                     uint32 uiMenu, uint32 uiInstance, void *pParam)
 { return create_window(uiExStyle, pClass, pTitle, uiStyle, iX, iY, iWidth, iHeight, uiParent, uiMenu, uiInstance, pParam); }
+static void TC hook_string_construct(void *pString) { string_construct(pString); }
+static void TC hook_string_destroy(void *pString) { string_destroy(pString); }
+static int32 SC hook_reg_open(uint32 uiKey, const char *pSubkey, uint32 uiOptions, uint32 uiAccess, uint32 *pKey)
+{ return reg_open(uiKey, pSubkey, uiOptions, uiAccess, pKey); }
+static int32 SC hook_reg_query(uint32 uiKey, const char *pName, void *pReserved, uint32 *pType, void *pData, uint32 *pSize)
+{ return reg_query(uiKey, pName, pReserved, pType, pData, pSize); }
+static int32 SC hook_load_ui_string(uint32 uiModule, uint32 uiId, char *pBuffer, int32 iCapacity)
+{ return load_ui_string(uiModule, uiId, pBuffer, iCapacity); }
+static void TC hook_set_sims_text(void *pControl, const char *pText) { set_sims_text(pControl, pText); }
+static char *SC hook_append_text(char *pOut, const char *pText) { return append_text(pOut, pText); }
+static void TC hook_font_construct(void *pFont, void *pBaseFont) { font_construct(pFont, pBaseFont); }
+static void TC hook_font_destroy(void *pFont) { font_destroy(pFont); }
+static void *hook_dll_onexit(void (*pHandler)(void), void **ppBegin, void **ppEnd)
+{
+    if (ppBegin != (void **)((uint8 *)s_hRetail + 0x5250) || ppEnd != (void **)((uint8 *)s_hRetail + 0x524c)) exit(2);
+    register_exit(pHandler); return (void *)pHandler;
+}
 static void patch(uint32 uiRva, void *pTarget)
 {
     DWORD uiOld;
@@ -398,7 +545,31 @@ static void setup_imports(void)
     patch(0x6478, hook_base_font); patch(0x6454, hook_init_list); patch(0x6450, hook_init_edit);
     patch(0x6510, hook_copy_rect); patch(0x62f0, hook_common_controls); patch(0x6304, hook_load_library);
     patch(0x63c8, hook_module_state); patch(0x6514, hook_create_window);
+    patch(0x6370, hook_string_construct); patch(0x6374, hook_string_destroy);
+    patch(0x62e4, hook_reg_open); patch(0x62e8, hook_reg_query); patch(0x651c, hook_load_ui_string);
+    patch(0x6490, hook_set_sims_text); patch(0x6520, format_version); patch(0x62fc, hook_append_text);
+    patch(0x647c, hook_font_construct); patch(0x6470, hook_font_destroy); patch(0x6444, hook_dll_onexit);
+    fs98_help_set_about_state(&s_oFixture.oAboutState);
     patch(0x51a4, (void *)0x31415926); fs98_help_set_resource_module(0x31415926);
+    patch(0x51bc, (void *)0x27182818); fs98_help_set_object_module(0x27182818);
+    patch(0x64a0, hook_dialog_construct); patch(0x64b4, hook_dialog_destroy);
+#define PATCH_CONTROL(szName, uiCtor, uiDtor) patch(uiCtor, hook_construct_##szName); patch(uiDtor, hook_destroy_##szName)
+    PATCH_CONTROL(text, 0x64a4, 0x64b8); PATCH_CONTROL(group, 0x64a8, 0x64bc);
+    PATCH_CONTROL(button, 0x64ac, 0x64c0); PATCH_CONTROL(art, 0x64b0, 0x6498);
+    PATCH_CONTROL(list, 0x644c, 0x645c); PATCH_CONTROL(edit, 0x6458, 0x6460);
+    PATCH_CONTROL(radio, 0x6468, 0x6464); PATCH_CONTROL(window, 0x6348, 0x634c);
+#undef PATCH_CONTROL
+    patch(0x64e8, allocate_object); patch(0x649c, ui_delete); patch(0x63e4, mfc_delete);
+    patch(0x64f0, hook_dialog_delete); patch(0x63e0, hook_create_dialog); patch(0x63dc, hook_show_dialog);
+    {
+        void *apVtables[5]; uint32 uiIndex;
+        HMODULE hCrt = LoadLibraryA("msvcrt.dll");
+        void *pHandler = (void *)GetProcAddress(hCrt, "__CxxFrameHandler");
+        if (!pHandler) exit(2);
+        patch(0x6440, pHandler);
+        for (uiIndex = 0; uiIndex < 5; ++uiIndex) apVtables[uiIndex] = (uint8 *)s_hRetail + s_aClasses[uiIndex].unVtable;
+        fs98_help_set_object_services(&s_oObjectServices, apVtables, (uint8 *)s_hRetail + 0x4350);
+    }
 }
 static void initialize(void)
 {
@@ -453,6 +624,20 @@ static void land(void)
     __asm__ volatile("movl %0, %%fs:0" : : "r"(s_uiSavedSeh) : "memory");
     __builtin_longjmp(s_apJump, 1);
 }
+static LONG CALLBACK expected_fault(EXCEPTION_POINTERS *pException)
+{
+    EXCEPTION_RECORD *pRecord = pException->ExceptionRecord;
+    if (s_aOperations[s_uiOperation].uiSignature == 11 && s_uiScenario % 11 == 0 &&
+        pRecord->ExceptionCode == EXCEPTION_ACCESS_VIOLATION) {
+        s_uiThrowAt = 0;
+        put("allocation.fault access=%u address=%u\n", (uint32)pRecord->ExceptionInformation[0],
+            (uint32)pRecord->ExceptionInformation[1]);
+        if (!s_iSide) ++s_uiAllocationFaults;
+        pException->ContextRecord->Eip = (DWORD)land;
+        return EXCEPTION_CONTINUE_EXECUTION;
+    }
+    return EXCEPTION_CONTINUE_SEARCH;
+}
 static EXCEPTION_DISPOSITION __cdecl catch_throw(EXCEPTION_RECORD *pRecord, void *pFrame,
                                                  CONTEXT *pContext, void *pDispatcher)
 {
@@ -473,6 +658,7 @@ static __attribute__((noinline)) int32 run(uint32 uiThrowAt)
     volatile int32 iResult = 0;
     uint32 uiArgument;
     s_oFixture = s_oInitial;
+    memcpy((uint8 *)s_hRetail + 0x51c0, &s_oFixture.oAboutState, sizeof(s_oFixture.oAboutState));
     s_uiLogLength = s_uiCalls = 0; s_aacLogs[s_iSide][0] = 0; s_uiThrowAt = uiThrowAt;
     __asm__ volatile("movl %%fs:0, %0" : "=r"(s_uiSavedSeh));
     if (__builtin_setjmp(s_apJump) == 0) {
@@ -522,9 +708,55 @@ static __attribute__((noinline)) int32 run(uint32 uiThrowAt)
             if (s_iSide) pEntry = fs98_help_credits_read;
             iResult = ((int32 (SC *)(uint32, void *, int32, uint32 *))pEntry)(s_uiSeed,
                 s_oFixture.abyBuffer, s_uiScenario % 65, &s_oFixture.uiRead); break;
+        case 8: case 9: case 10: case 11: case 12: case 13: {
+            uint32 uiKind = (s_uiOperation - 49) / 6;
+            uint32 uiWhich = (s_uiOperation - 49) % 6;
+            void *pReturned = 0;
+            static void *aapOurs[5][4] = {
+#define OUR_OBJECT(szName) {fs98_help_##szName##_construct, fs98_help_##szName##_destroy, fs98_help_##szName##_delete, fs98_help_##szName##_create}
+                OUR_OBJECT(about), OUR_OBJECT(credits), OUR_OBJECT(lessons), OUR_OBJECT(graph), OUR_OBJECT(completion)
+#undef OUR_OBJECT
+            };
+            const struct fs98_help_class *pClass = &s_aClasses[uiKind];
+            if (s_iSide) pEntry = aapOurs[uiKind][uiWhich < 4 ? uiWhich : 0];
+            if (uiWhich == 0 || uiWhich >= 4)
+                pReturned = ((void *(TC *)(void *, void *))pEntry)(pObject, (void *)s_uiSeed);
+            else if (uiWhich == 1) ((void (TC *)(void *))pEntry)(pObject);
+            else if (uiWhich == 2) pReturned = ((void *(TC *)(void *, uint32))pEntry)(pObject, s_uiSeed);
+            else iResult = ((int32 (SC *)(uint32, void *))pEntry)(s_uiSeed, s_oFixture.aabyDescriptor[0]);
+            if (uiWhich >= 4) {
+                pEntry = s_iSide ? aapOurs[uiKind][uiWhich == 4 ? 1 : 2] :
+                    (uint8 *)s_hRetail + (uiWhich == 4 ? pClass->unDestructor : pClass->unDelete);
+                if (uiWhich == 4) ((void (TC *)(void *))pEntry)(pObject);
+                else pReturned = ((void *(TC *)(void *, uint32))pEntry)(pObject, s_uiSeed);
+            }
+            if (pReturned) put("return.object %u\n", offset(pReturned));
+            break;
+        }
+        case 14:
+            if (s_iSide) pEntry = fs98_help_placeholder_delete;
+            put("return.object %u\n", offset(((void *(TC *)(void *, uint32))pEntry)(
+                s_oFixture.abyObject + 0x1274, s_uiSeed)));
+            break;
+        case 15:
+            if (s_iSide) pEntry = fs98_help_class_delete;
+            ((void (SC *)(void *))pEntry)(pObject); break;
+        case 16:
+            if (s_iSide) pEntry = fs98_help_about_populate;
+            ((event_fn)pEntry)(pObject); break;
+        case 17:
+            if (s_iSide) pEntry = fs98_help_about_font_destroy;
+            ((void (*)(void))pEntry)(); break;
+        case 18: case 19:
+            if (s_iSide) pEntry = fs98_help_about_init;
+            iResult = ((int32 (TC *)(void *))pEntry)(pObject);
+            if (s_aOperations[s_uiOperation].uiSignature == 19)
+                iResult = ((int32 (TC *)(void *))pEntry)(pObject);
+            break;
         }
     }
     __asm__ volatile("movl %0, %%fs:0" : : "r"(s_uiSavedSeh) : "memory");
+    if (!s_iSide) memcpy(&s_oFixture.oAboutState, (uint8 *)s_hRetail + 0x51c0, sizeof(s_oFixture.oAboutState));
     /* A persistent function pointer is compared by ownership, then normalized.
      * All other bytes, including the embedded descriptor/name, stay exact. */
     if ((s_uiOperation == 6 || s_uiOperation == 48) && PTR(s_oFixture.abyObject, 0x10e4) ==
@@ -562,6 +794,7 @@ int main(int iArgc, char **ppArgv)
     s_uiRng = uiInitialSeed;
     SetErrorMode(SEM_FAILCRITICALERRORS | SEM_NOGPFAULTERRORBOX);
     SetUnhandledExceptionFilter(fatal);
+    AddVectoredExceptionHandler(1, expected_fault);
     s_hRetail = LoadLibraryExA("orig/English/Help.DLL", 0, DONT_RESOLVE_DLL_REFERENCES);
     if (!s_hRetail || GetProcAddress(s_hRetail, "Linkage") != (FARPROC)((uint8 *)s_hRetail + 0x5078)) return 2;
     setup_imports(); fs98_help_set_services(&s_oServices);
@@ -581,7 +814,7 @@ int main(int iArgc, char **ppArgv)
                 if (compare(uiThrow)) return 1;
         }
     }
-    printf("Help events: %u scenarios, %u operations, %u comparisons, 0 differ; seed=%x swaps=%u reads=%u resets=%u throws=%u max_calls=%u\n",
-        uiCount, (uint32)OP_COUNT, s_uiComparisons, uiInitialSeed, s_uiSwaps, s_uiReads, s_uiResets, s_uiThrows, s_uiMaxCalls);
+    printf("Help events: %u scenarios, %u operations, %u comparisons, 0 differ; seed=%x swaps=%u reads=%u resets=%u throws=%u max_calls=%u allocation_faults=%u\n",
+        uiCount, (uint32)OP_COUNT, s_uiComparisons, uiInitialSeed, s_uiSwaps, s_uiReads, s_uiResets, s_uiThrows, s_uiMaxCalls, s_uiAllocationFaults);
     FreeLibrary(s_hRetail); return 0;
 }

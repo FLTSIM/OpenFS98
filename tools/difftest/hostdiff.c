@@ -22,6 +22,8 @@
 #include <stdio.h>
 #include <stdint.h>
 #include <string.h>
+#include <stdlib.h>
+#include <malloc.h>
 
 #define REAL_BASE   0x400000u
 #define DATA_VA     0x417000u
@@ -42,6 +44,74 @@ static int differ;
 /* xorshift32: unlike an LCG, its low bits are as well-mixed as its high ones,
  * so decisions like rnd() & 1 and rnd() % n get full-period coverage. */
 static uint32_t rnd(void) { rng ^= rng << 13; rng ^= rng >> 17; rng ^= rng << 5; return rng; }
+
+/* An import the harness could not bind.  Nothing tested should reach one. */
+static void __stdcall unbound(void)
+{
+    printf("hostdiff: the real host called an unbound import\n");
+    exit(3);
+}
+
+/* Both sides' realloc: always a new block, the old one poisoned before it is
+ * freed, so a pointer kept across a move reads garbage rather than the
+ * still-intact old contents. */
+static void *__cdecl moving_realloc(void *old, size_t size)
+{
+    size_t n;
+    void *p;
+    if (!old) return malloc(size);
+    p = malloc(size);
+    if (!p) return 0;
+    n = _msize(old);
+    memcpy(p, old, n < size ? n : size);
+    memset(old, 0xdd, n);
+    free(old);
+    return p;
+}
+
+/* Point one import of a loaded image at `fn`. */
+static void hook_import(uint8_t *b, const char *dll, const char *name, void *fn)
+{
+    uint32_t pe = *(uint32_t *)(b + 0x3c);
+    uint32_t *d = (uint32_t *)(b + *(uint32_t *)(b + pe + 0x80));
+    for (; d[3] != 0; d += 5) {
+        uint32_t *nm = (uint32_t *)(b + (d[0] ? d[0] : d[4]));
+        uint32_t *iat = (uint32_t *)(b + d[4]);
+        DWORD old;
+        if (_stricmp((const char *)(b + d[3]), dll)) continue;
+        for (; *nm != 0; nm++, iat++)
+            if (!(*nm & 0x80000000u) && !strcmp((const char *)(b + *nm + 2), name)) {
+                VirtualProtect(iat, 4, PAGE_READWRITE, &old);
+                *iat = (uint32_t)(uintptr_t)fn;
+                VirtualProtect(iat, 4, old, &old);
+            }
+    }
+}
+
+/* Bind the real host's import table as the loader would have, so the services
+ * that reach MSVCRT (malloc, realloc, free, memmove) or the window system run.
+ * Both sides then share one CRT heap.  A DLL or entry wine lacks (MFC42's
+ * ordinals) is bound to a trap instead. */
+static void bind_real(void)
+{
+    uint8_t *b = (uint8_t *)REAL_BASE;
+    uint32_t pe = *(uint32_t *)(b + 0x3c);
+    uint32_t *d = (uint32_t *)(b + *(uint32_t *)(b + pe + 0x80));
+
+    for (; d[3] != 0; d += 5) {
+        HMODULE m = LoadLibraryA((const char *)(b + d[3]));
+        uint32_t *name = (uint32_t *)(b + (d[0] ? d[0] : d[4]));
+        uint32_t *iat = (uint32_t *)(b + d[4]);
+        for (; *name != 0; name++, iat++) {
+            FARPROC f = 0;
+            if (m)
+                f = (*name & 0x80000000u) ? GetProcAddress(m, (LPCSTR)(uintptr_t)(*name & 0xffff))
+                                          : GetProcAddress(m, (const char *)(b + *name + 2));
+            *iat = f ? (uint32_t)(uintptr_t)f : (uint32_t)(uintptr_t)unbound;
+        }
+    }
+    hook_import(b, "MSVCRT.dll", "realloc", (void *)moving_realloc);
+}
 
 /* Map the real host in place: make its region executable and copy the file. */
 static void map_real(void)
@@ -68,6 +138,7 @@ static void map_real(void)
         uint32_t va = *(uint32_t *)(s + 12), raw = *(uint32_t *)(s + 20), rsz = *(uint32_t *)(s + 16);
         memcpy((uint8_t *)REAL_BASE + va, f + raw, rsz);
     }
+    bind_real();
     real_tbl = (uint32_t *)TABLE_VA;
     if (real_tbl[0] != 1) { printf("real host table id = %#x, not 1\n", real_tbl[0]); exit(2); }
 }
@@ -79,6 +150,7 @@ static void load_ours(void)
     our_tbl = (void **)GetProcAddress(m, "HostTable");
     our_data = (uint8_t *)GetProcAddress(m, "host_image");
     if (!our_tbl || !our_data) { printf("HOST_ours.dll: missing exports\n"); exit(2); }
+    hook_import((uint8_t *)m, "msvcrt.dll", "realloc", (void *)moving_realloc);
     if ((uintptr_t)our_tbl[0] != 1) { printf("our table id = %p, not 1\n", our_tbl[0]); exit(2); }
 }
 
@@ -109,6 +181,8 @@ static void *our_fn(uint32_t off)
 #define TABLE_OFF   0xba0u
 #define TABLE_LAST  0xec0u
 #define STR_OFF     0x4ca0u            /* 0x41bca0 */
+#define QUEUE_OFF   0x1380u            /* 0x418380, the removal queue */
+#define QUEUE_END   0x139cu
 
 static void seed_data(void)
 {
@@ -116,6 +190,8 @@ static void seed_data(void)
     for (i = 0; i + 4 <= DATA_SIZE; i += 4) {
         uint32_t v;
         if (i + 4 > TABLE_OFF && i < TABLE_LAST)
+            continue;
+        if (i >= QUEUE_OFF && i < QUEUE_END)
             continue;
         v = rnd();
         *(uint32_t *)(DATA_VA + i) = v;
@@ -129,6 +205,10 @@ static void seed_data(void)
     }
     *(uint8_t *)(DATA_VA + STR_OFF + len) = 0;
     *(uint8_t *)(our_data + STR_OFF + len) = 0;
+    /* The queue is the host's own list and stays one: emptied each iteration,
+     * its capacity and data (a heap block on each side) kept. */
+    *(uint32_t *)(DATA_VA + QUEUE_OFF) = 0;
+    *(uint32_t *)(our_data + QUEUE_OFF) = 0;
 }
 
 /* After a call, the two .data images must be identical; report the first word
@@ -137,8 +217,12 @@ static void check_state(const char *name)
 {
     uint32_t i;
     for (i = 0; i < DATA_SIZE; i += 4) {
-        uint32_t rv = norm(*(uint32_t *)(DATA_VA + i));     /* real .data (mapped at 0x417000) */
-        uint32_t ov = norm(*(uint32_t *)(our_data + i));    /* our image */
+        uint32_t rv;
+        uint32_t ov;
+        if (i == QUEUE_OFF + 0x18)      /* the queue's data: each side's own heap block */
+            continue;
+        rv = norm(*(uint32_t *)(DATA_VA + i));     /* real .data (mapped at 0x417000) */
+        ov = norm(*(uint32_t *)(our_data + i));    /* our image */
         if (rv != ov) {
             printf("  %-16s STATE DIFFER at .data+%#x: real=%#010x ours=%#010x\n",
                    name, i, rv, ov);
@@ -385,13 +469,378 @@ static void check_stubs(void)
     if (s224 && ((fn2)real_fn(0x224))(1, 2) != s224(1, 2)) { printf("  +0x224 DIFFER\n"); differ++; }
 }
 
+/* ---- the allocator ----------------------------------------------------------- */
+
+typedef uint32_t (__stdcall *fn3)(uint32_t, uint32_t, uint32_t);
+typedef uint32_t (__stdcall *fn4)(uint32_t, uint32_t, uint32_t, uint32_t);
+typedef uint32_t (__stdcall *fn5)(uint32_t, uint32_t, uint32_t, uint32_t, uint32_t);
+
+#define P(x) ((uint32_t)(uintptr_t)(x))
+
+/* +0x20c alloc, +0x210 realloc, +0x214 free.  The pointers differ by side, so
+ * what is compared is the return, null-or-not, and the bytes the service
+ * defines: zeroed when asked, the old contents kept across a realloc.  Only
+ * flags 4 is asked to fail (a size no heap grants); any other failure is
+ * fatal by design. */
+static void check_alloc(void)
+{
+    fn4 ra = (fn4)real_fn(0x20c), oa = (fn4)our_fn(0x20c);
+    fn3 rr = (fn3)real_fn(0x210), or_ = (fn3)our_fn(0x210);
+    fn1 rf = (fn1)real_fn(0x214), of = (fn1)our_fn(0x214);
+    uint8_t *rp = (uint8_t *)1, *op = (uint8_t *)1;
+    uint32_t size = 1 + rnd() % 300, zero = rnd() & 1, nsize, i, rv, ov;
+    if (!oa || !or_ || !of) return;
+
+    rv = ra(rnd() & 1 ? 4 : 1, size, P(&rp), zero);
+    ov = oa(rnd() & 1 ? 4 : 1, size, P(&op), zero);
+    if (rv != ov || !rp != !op) { printf("  +0x20c alloc DIFFER real=%#x ours=%#x\n", rv, ov); differ++; return; }
+    if (zero)
+        for (i = 0; i < size; i++)
+            if (rp[i] != op[i]) { printf("  +0x20c zero-fill DIFFER at %u\n", i); differ++; break; }
+    for (i = 0; i < size; i++) rp[i] = op[i] = (uint8_t)rnd();
+
+    nsize = 1 + rnd() % 600;
+    rv = rr(rnd() & 1 ? 4 : 1, nsize, P(&rp));
+    ov = or_(rnd() & 1 ? 4 : 1, nsize, P(&op));
+    if (rv != ov || !rp != !op) { printf("  +0x210 realloc DIFFER real=%#x ours=%#x\n", rv, ov); differ++; return; }
+    if (memcmp(rp, op, size < nsize ? size : nsize)) { printf("  +0x210 realloc contents DIFFER\n"); differ++; }
+
+    {   /* flags 4 failing: -1, the old pointer put back */
+        uint8_t *rk = rp, *ok = op;
+        rv = rr(4, 0xfffffff0u, P(&rp));
+        ov = or_(4, 0xfffffff0u, P(&op));
+        if (rv != ov || (rp == rk) != (op == ok)) { printf("  +0x210 failing DIFFER real=%#x ours=%#x\n", rv, ov); differ++; }
+    }
+    rv = rf(P(&rp)); ov = of(P(&op));
+    if (rv != ov || rp != 0 || op != 0) { printf("  +0x214 free DIFFER real=%#x ours=%#x\n", rv, ov); differ++; }
+    rv = rf(P(&rp)); ov = of(P(&op));                   /* and of null */
+    if (rv != ov) { printf("  +0x214 free(null) DIFFER\n"); differ++; }
+
+    {   /* flags 4 failing on a fresh allocation */
+        void *rq = (void *)1, *oq = (void *)1;
+        rv = ra(4, 0xfffffff0u, P(&rq), 1);
+        ov = oa(4, 0xfffffff0u, P(&oq), 1);
+        if (rv != ov || rq != oq) { printf("  +0x20c failing DIFFER real=%#x ours=%#x\n", rv, ov); differ++; }
+    }
+}
+
+/* +0x21c memmove, overlapping either way. */
+static void check_21c(void)
+{
+    static uint8_t rb[256], ob[256];
+    fn3 r = (fn3)real_fn(0x21c), o = (fn3)our_fn(0x21c);
+    uint32_t i, n = rnd() % 128, s = rnd() % 128, d = rnd() % 128, rv, ov;
+    if (!o) return;
+    for (i = 0; i < sizeof rb; i++) rb[i] = ob[i] = (uint8_t)rnd();
+    rv = r(P(rb + d), P(rb + s), n);
+    ov = o(P(ob + d), P(ob + s), n);
+    if (rv != ov || memcmp(rb, ob, sizeof rb)) { printf("  +0x21c memmove DIFFER\n"); differ++; }
+}
+
+/* ---- the growable array ------------------------------------------------------ */
+
+/* struct fs98_host_list.  One per side, built identically; the services see
+ * only their own.  Elements are compared by contents and returned element
+ * pointers as offsets into their own side's data. */
+struct hlist { int32_t count, cap, grow, size, iter, pend; uint8_t *data; };
+static struct hlist rl, ol;
+/* A bystander pair, permanently mid-walk, so removals from it are only ever
+ * queued: the queue then holds entries for two lists, and a walk's end must
+ * apply only its own. */
+static struct hlist rby, oby;
+
+#define REAL_QUEUE  ((struct hlist *)(DATA_VA + QUEUE_OFF))
+#define OUR_QUEUE   ((struct hlist *)(our_data + QUEUE_OFF))
+
+static char pool[64];                   /* what an indirect list's elements point into */
+
+/* A fresh pair.  `indirect` makes 8-byte elements whose first or second dword
+ * points into the pool, so +0x310 can follow it. */
+static void list_init(int indirect, uint32_t ptr_off)
+{
+    int32_t i;
+    free(rl.data); free(ol.data);
+    free(rby.data); free(oby.data);
+    memset(&rby, 0, sizeof rby);
+    rby.size = 4; rby.grow = 4; rby.count = rby.cap = 30; rby.iter = 1;
+    oby = rby;
+    rby.data = calloc(30, 4); oby.data = calloc(30, 4);
+    /* Sometimes the queue grows one entry at a time, so that a flush which
+     * queues again (a nested walk's end) moves it under its own feet. */
+    REAL_QUEUE->grow = OUR_QUEUE->grow = 0x20;
+    if (rnd() % 4 == 0) {           /* the queue is empty here (seed_data) */
+        free(REAL_QUEUE->data); free(OUR_QUEUE->data);
+        REAL_QUEUE->data = OUR_QUEUE->data = 0;
+        REAL_QUEUE->cap = OUR_QUEUE->cap = 0;
+        REAL_QUEUE->grow = OUR_QUEUE->grow = 1;
+    }
+    memset(&rl, 0, sizeof rl);
+    rl.size = indirect ? 8 : 1 + rnd() % 24;
+    rl.grow = 1 + rnd() % 6;
+    rl.count = rnd() % 12;
+    rl.cap = rl.count + (rnd() % 3 ? rnd() % 4 : 0);
+    rl.iter = (rnd() % 8 == 0);
+    ol = rl;
+    if (rl.cap) {
+        rl.data = malloc(rl.cap * rl.size);
+        ol.data = malloc(rl.cap * rl.size);
+        for (i = 0; i < rl.cap * rl.size; i++) rl.data[i] = ol.data[i] = (uint8_t)rnd();
+        if (indirect)
+            for (i = 0; i < rl.cap; i++) {
+                uint32_t p = P(pool + rnd() % 8);
+                memcpy(rl.data + i * 8 + ptr_off, &p, 4);
+                memcpy(ol.data + i * 8 + ptr_off, &p, 4);
+            }
+    }
+}
+
+/* Removals queued against list `l` on its side's queue. */
+static int32_t queued(const struct hlist *q, const struct hlist *l)
+{
+    int32_t i, n = 0;
+    for (i = 0; i < q->count; i++)
+        if (*(uint32_t *)(q->data + i * 8) == P(l)) n++;
+    return n;
+}
+
+/* A removal is allowed only while the list keeps more elements than removals
+ * queued against it: retail drops the count once per queued removal whatever
+ * its index, and a negative count makes the next append write below the data
+ * -- a caller's error, not something to test. */
+static int may_remove(const struct hlist *q, const struct hlist *l, int now)
+{
+    return l->count > queued(q, l) + (now ? 1 : 0);
+}
+
+static void list_compare(const char *name)
+{
+    int32_t i;
+    if (rl.count != ol.count || rl.cap != ol.cap || rl.grow != ol.grow || rl.size != ol.size ||
+        rl.iter != ol.iter || rl.pend != ol.pend || !rl.data != !ol.data) {
+        printf("  %-16s LIST DIFFER real={%d,%d,%d,%d,%d,%d,%s} ours={%d,%d,%d,%d,%d,%d,%s}\n", name,
+               rl.count, rl.cap, rl.grow, rl.size, rl.iter, rl.pend, rl.data ? "p" : "0",
+               ol.count, ol.cap, ol.grow, ol.size, ol.iter, ol.pend, ol.data ? "p" : "0");
+        differ++;
+        return;
+    }
+    if (rby.count != oby.count || rby.pend != oby.pend) {
+        printf("  %-16s BYSTANDER DIFFER real=%d,%d ours=%d,%d\n", name, rby.count, rby.pend, oby.count, oby.pend);
+        differ++;
+        return;
+    }
+    if (rl.count > 0 && rl.data && memcmp(rl.data, ol.data, rl.count * rl.size)) {
+        printf("  %-16s LIST CONTENTS DIFFER\n", name); differ++; return;
+    }
+    {   /* the queue: entries name each side's own list */
+        struct hlist *rq = REAL_QUEUE, *oq = OUR_QUEUE;
+        if (rq->count != oq->count || rq->cap != oq->cap) {
+            printf("  %-16s QUEUE DIFFER real=%d/%d ours=%d/%d\n", name, rq->count, rq->cap, oq->count, oq->cap);
+            differ++; return;
+        }
+        for (i = 0; i < rq->count; i++) {
+            uint32_t *re = (uint32_t *)(rq->data + i * 8), *oe = (uint32_t *)(oq->data + i * 8);
+            uint32_t rt = re[0] == P(&rl) ? 1 : re[0] == P(&rby) ? 2 : 0;
+            uint32_t ot = oe[0] == P(&ol) ? 1 : oe[0] == P(&oby) ? 2 : 0;
+            if (rt != ot || re[1] != oe[1]) {
+                printf("  %-16s QUEUE ENTRY %d DIFFER\n", name, i); differ++; return;
+            }
+        }
+    }
+    check_state(name);
+}
+
+/* Offset of a returned element pointer from its list's data, -1 for null. */
+static int32_t elem_off(uint32_t p, const struct hlist *l)
+{
+    return p ? (int32_t)(p - P(l->data)) : -1;
+}
+
+/* A walk's callback.  Each side gets its own context, and both follow one
+ * script drawn before either walks, so they make the same decisions as long
+ * as the lists agree; what each visit saw is logged and compared. */
+#define VISITS 64
+struct visit { uint32_t r, act, stop; };
+static struct visit script[VISITS];
+
+struct walkctx {
+    struct hlist *l;
+    struct hlist *by;
+    struct hlist *q;
+    int real;
+    int depth;
+    int n;
+    int32_t log[VISITS * 2];
+};
+
+static uint32_t __stdcall walk_cb(uint32_t elem, uint32_t c)
+{
+    struct walkctx *w = (struct walkctx *)(uintptr_t)c;
+    const struct visit *v;
+    if (w->n >= VISITS) return 0x7777;
+    v = &script[w->n];
+    w->log[w->n * 2] = (int32_t)(elem - P(w->l->data));
+    w->log[w->n * 2 + 1] = w->l->count;
+    w->n++;
+    switch (v->act) {
+    case 1:     /* remove an element, queued since we are walking */
+        if (may_remove(w->q, w->l, 0)) {
+            fn2 f = (fn2)(w->real ? real_fn(0x300) : our_fn(0x300));
+            f(P(w->l), P(w->l->data) + (v->r % w->l->count) * w->l->size + (v->r >> 16) % w->l->size);
+        }
+        break;
+    case 2:     /* append */
+        if (w->l->count < 40) {
+            fn1 f = (fn1)(w->real ? real_fn(0x2f8) : our_fn(0x2f8));
+            f(P(w->l));
+        }
+        break;
+    case 4:     /* remove from the bystander: queued */
+        if (may_remove(w->q, w->by, 0)) {
+            fn2 f = (fn2)(w->real ? real_fn(0x300) : our_fn(0x300));
+            f(P(w->by), P(w->by->data) + (v->r % w->by->count) * 4);
+        }
+        break;
+    case 3:     /* a nested walk, once */
+        if (w->depth == 0) {
+            fn3 f = (fn3)(w->real ? real_fn(v->r & 1 ? 0x308 : 0x30c) : our_fn(v->r & 1 ? 0x308 : 0x30c));
+            w->depth++;
+            f(P(w->l), c, P(walk_cb));
+            w->depth--;
+        }
+        break;
+    }
+    return v->stop;
+}
+
+static void list_op(void)
+{
+    uint32_t op = rnd() % 8, rv, ov;
+    switch (op) {
+    case 0: case 1: {                                   /* +0x2f8 append */
+        fn1 r = (fn1)real_fn(0x2f8), o = (fn1)our_fn(0x2f8);
+        int32_t i;
+        if (!o || rl.count >= 40) return;
+        rv = r(P(&rl)); ov = o(P(&ol));
+        if (elem_off(rv, &rl) != elem_off(ov, &ol)) {
+            printf("  +0x2f8 append RET DIFFER real=%d ours=%d\n", elem_off(rv, &rl), elem_off(ov, &ol));
+            differ++;
+        }
+        list_compare("+0x2f8 append");
+        if (rl.iter == 0 && rv && ov)                   /* give it contents, both alike */
+            for (i = 0; i < rl.size; i++)
+                ((uint8_t *)(uintptr_t)rv)[i] = ((uint8_t *)(uintptr_t)ov)[i] = (uint8_t)rnd();
+        break;
+    }
+    case 2: {                                           /* +0x300 remove */
+        fn2 r = (fn2)real_fn(0x300), o = (fn2)our_fn(0x300);
+        uint32_t i, sub;
+        if (!o || !may_remove(REAL_QUEUE, &rl, !rl.iter) || !may_remove(OUR_QUEUE, &ol, !ol.iter)) return;
+        i = rnd() % (rl.count + 1);                     /* the end itself: a count drop, no move */
+        sub = rnd() % rl.size;
+        rv = r(P(&rl), P(rl.data) + i * rl.size + sub);
+        ov = o(P(&ol), P(ol.data) + i * ol.size + sub);
+        if ((rv > 0xffff ? 1 : rv) != (ov > 0xffff ? 1 : ov)) {   /* a queue entry, or the size, or 0 */
+            printf("  +0x300 remove RET DIFFER real=%#x ours=%#x\n", rv, ov); differ++;
+        }
+        list_compare("+0x300 remove");
+        break;
+    }
+    case 3: case 4: {                                   /* +0x308 / +0x30c walk */
+        uint32_t s = op == 3 ? 0x308 : 0x30c, i;
+        fn3 r = (fn3)real_fn(s), o = (fn3)our_fn(s);
+        static struct walkctx rw, ow;
+        if (!o) return;
+        for (i = 0; i < VISITS; i++) {
+            script[i].r = rnd();
+            script[i].act = rnd() % 7;                  /* 1 remove, 2 append, 3 nest, 4 bystander */
+            if (script[i].act == 3 && rnd() % 3) script[i].act = 0;
+            script[i].stop = rnd() % 12 == 0 ? rnd() | 1 : 0;
+        }
+        memset(&rw, 0, sizeof rw); memset(&ow, 0, sizeof ow);
+        rw.l = &rl; rw.by = &rby; rw.q = REAL_QUEUE; rw.real = 1;
+        ow.l = &ol; ow.by = &oby; ow.q = OUR_QUEUE;
+        rv = r(P(&rl), P(&rw), P(walk_cb));
+        ov = o(P(&ol), P(&ow), P(walk_cb));
+        if (rv != ov || rw.n != ow.n || memcmp(rw.log, ow.log, sizeof rw.log)) {
+            printf("  +%#05x walk DIFFER ret real=%#x ours=%#x, visits %d/%d\n", s, rv, ov, rw.n, ow.n);
+            differ++;
+        }
+        list_compare(op == 3 ? "+0x308 walk" : "+0x30c walk back");
+        break;
+    }
+    case 5: case 6: {                                   /* +0x310 find */
+        fn5 r = (fn5)real_fn(0x310), o = (fn5)our_fn(0x310);
+        static uint8_t key[32];
+        uint32_t off = rnd() % rl.size, len = rnd() % (rl.size - off + 1), i;
+        if (!o) return;
+        if (rl.count > 0 && rnd() % 4)                  /* usually a key some element holds */
+            memcpy(key, rl.data + (rnd() % rl.count) * rl.size + off, len);
+        else
+            for (i = 0; i < len; i++) key[i] = (uint8_t)rnd();
+        if (rnd() % 8 == 0) len = 0;                    /* matches at once */
+        rv = r(P(&rl), off, P(key), len, 0);
+        ov = o(P(&ol), off, P(key), len, 0);
+        if (elem_off(rv, &rl) != elem_off(ov, &ol)) {
+            printf("  +0x310 find DIFFER real=%d ours=%d\n", elem_off(rv, &rl), elem_off(ov, &ol));
+            differ++;
+        }
+        break;
+    }
+    case 7:                                             /* +0x304 clears the count */
+        if (rl.iter == 0 && rnd() % 4 == 0) {
+            ((fn1)real_fn(0x304))(P(&rl)); ((fn1)our_fn(0x304))(P(&ol));
+            list_compare("+0x304 clear");
+        }
+        break;
+    }
+}
+
+/* +0x310 with `indirect`: elements hold pointers into the pool, the key is a
+ * pointer to a pointer into it. */
+static void check_find_indirect(void)
+{
+    fn5 r = (fn5)real_fn(0x310), o = (fn5)our_fn(0x310);
+    uint32_t off = (rnd() & 1) * 4, len = rnd() % 9, rv, ov, i;
+    char *k;
+    if (!o) return;
+    for (i = 0; i < sizeof pool - 1; i++) pool[i] = (char)('a' + rnd() % 3);
+    list_init(1, off);
+    k = pool + rnd() % 8;
+    rv = r(P(&rl), off, P(&k), len, 1);
+    ov = o(P(&ol), off, P(&k), len, 1);
+    if (elem_off(rv, &rl) != elem_off(ov, &ol)) {
+        printf("  +0x310 find-indirect DIFFER real=%d ours=%d\n", elem_off(rv, &rl), elem_off(ov, &ol));
+        differ++;
+    }
+}
+
+/* A run of operations on one pair, ended by +0x2fc on each side. */
+static void check_lists(void)
+{
+    fn1 r = (fn1)real_fn(0x2fc), o = (fn1)our_fn(0x2fc);
+    uint32_t n = 4 + rnd() % 16, i, rv, ov;
+    list_init(0, 0);
+    for (i = 0; i < n && !differ; i++)
+        list_op();
+    if (!o) return;
+    rv = r(P(&rl)); ov = o(P(&ol));
+    if ((rv == P(&rl.data) ? 1 : rv) != (ov == P(&ol.data) ? 1 : ov)) {
+        printf("  +0x2fc free DIFFER real=%#x ours=%#x\n", rv, ov); differ++;
+    }
+    list_compare("+0x2fc free");
+    rv = r(P(&rl)); ov = o(P(&ol));                     /* and with nothing to free */
+    if ((rv == P(&rl.data) ? 1 : rv) != (ov == P(&ol.data) ? 1 : ov)) {
+        printf("  +0x2fc free(null) DIFFER real=%#x ours=%#x\n", rv, ov); differ++;
+    }
+}
+
 int main(int argc, char **argv)
 {
     uint32_t n = (argc > 1) ? (uint32_t)strtoul(argv[1], NULL, 0) : 1, k, i;
 
     map_real();
     load_ours();
-    printf("hostdiff: %u accessors + writers + strings + primitives + stubs, %u iteration(s)\n",
+    printf("hostdiff: %u accessors + writers + strings + primitives + stubs + allocator + lists, %u iteration(s)\n",
            (unsigned)(sizeof accessors / sizeof accessors[0]), n);
     for (k = 0; k < n; k++) {
         seed_data();
@@ -412,6 +861,10 @@ int main(int argc, char **argv)
         check_2bc();
         check_28c();
         check_stubs();
+        check_alloc();
+        check_21c();
+        check_lists();
+        check_find_indirect();
     }
     printf("hostdiff: %d differ\n", differ);
     return differ ? 1 : 0;

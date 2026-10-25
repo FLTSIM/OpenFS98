@@ -88,9 +88,11 @@ typedef char *(FS98_STDCALL *fs98_host_strcat_fn)(char *dst, const char *src);
 typedef int32_t (FS98_STDCALL *fs98_host_alloc_fn)(int32_t flags, uint32_t size,
                                                    void **out, int32_t zero);
 
-/* +0x210 -- realloc(*pp, size) stored back through `pp`.  Failure follows
- * +0x20c's rule: flags 4 restores the old pointer and returns -1, anything
- * else is fatal.  Returns 0 on success. */
+/* +0x210 -- realloc(*pp, size) stored back through `pp`.  Failure with flags
+ * 4 restores the old pointer and returns -1; anything else retries once after
+ * the purge hook, and a second failure shows the out-of-memory box and posts
+ * the quit (+0x024) -- but returns 0 with *pp null rather than exiting, unlike
+ * +0x20c.  Returns 0 on success. */
 typedef int32_t (FS98_STDCALL *fs98_host_realloc_fn)(int32_t flags, uint32_t size,
                                                      void **pp);
 
@@ -170,7 +172,9 @@ struct fs98_host_list {
 typedef void *(FS98_STDCALL *fs98_host_list_add_fn)(struct fs98_host_list *l);
 
 /* +0x300 -- remove the element `elem` points at, closing the gap.  The index
- * is an unsigned divide of the pointer's offset by `elem_size`. */
+ * is an unsigned divide of the pointer's offset by `elem_size`.  The count
+ * drops even for an index at or past the end.  During a walk the removal is
+ * queued instead (see +0x308).  Returns leftover eax, which no caller reads. */
 typedef void (FS98_STDCALL *fs98_host_list_remove_fn)(struct fs98_host_list *l,
                                                       void *elem);
 
@@ -416,7 +420,8 @@ typedef int32_t (FS98_STDCALL *fs98_host_voice_pan_fn)(uint32_t h, int32_t pan);
 /* +0x2f4 -- stop. */
 typedef int32_t (FS98_STDCALL *fs98_host_voice_stop_fn)(uint32_t h);
 
-/* +0x2fc -- free a list's data.  Nothing else in the header is touched. */
+/* +0x2fc -- free a list's data.  Nothing else in the header is touched --
+ * capacity included, so the list must be re-initialised before reuse. */
 typedef int32_t (FS98_STDCALL *fs98_host_list_free_fn)(struct fs98_host_list *l);
 
 /* +0x308 -- call fn(element, ctx) for each element in order until one

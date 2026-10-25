@@ -60,6 +60,44 @@ BREAKS = [
     ("clear-304",   "M32(p) = 0;\n    return p;", "M32(p) = 1;\n    return p;"),
     ("stub-108",    "static uint32_t FS98_STDCALL host_zero2(uint32_t a, uint32_t b) { (void)a; (void)b; return 0; }",
                     "static uint32_t FS98_STDCALL host_zero2(uint32_t a, uint32_t b) { (void)a; (void)b; return 1; }"),
+    ("alloc-zero",  "        for (i = 0; i < size; i++)\n            p[i] = 0;\n    }\n    return 0;",
+                    "        for (i = 1; i < size; i++)\n            p[i] = 0;\n    }\n    return 0;"),
+    ("alloc-fail",  "        if (flags == 4)\n            return (uint32_t)-1;\n        host_purge",
+                    "        if (flags == 4)\n            return 0;\n        host_purge"),
+    ("realloc-fail","            M32(pp) = ADDR(old);\n            return (uint32_t)-1;",
+                    "            return (uint32_t)-1;"),
+    ("free-null",   "        free((void *)(uintptr_t)M32(pp));\n        M32(pp) = 0;",
+                    "        free((void *)(uintptr_t)M32(pp));"),
+    ("memmove-len", "memmove((void *)(uintptr_t)dst, (const void *)(uintptr_t)src, size);",
+                    "memmove((void *)(uintptr_t)dst, (const void *)(uintptr_t)src, size ? size - 1 : 0);"),
+    ("grow-step",   "uint32_t cap = L_CAP(l) + L_GROW(l);", "uint32_t cap = L_CAP(l) + L_GROW(l) + 1;"),
+    ("grow-realloc","        if (count == 0)\n            host_20c(1, L_SIZE(l) * cap, l + 0x18, 0);\n        else\n            host_210(1, L_SIZE(l) * cap, l + 0x18);",
+                    "        if (count == 0)\n            host_20c(1, L_SIZE(l) * cap, l + 0x18, 0);\n        else\n            host_20c(1, L_SIZE(l) * cap, l + 0x18, 1);"),
+    ("append-zero", "    for (j = 0; j < size; j++)\n        p[j] = 0;\n    return i * L_SIZE(l) + L_DATA(l);",
+                    "    for (j = 1; j < size; j++)\n        p[j] = 0;\n    return i * L_SIZE(l) + L_DATA(l);"),
+    ("queue-flag",  "        L_PEND(l) = 1;\n        e = host_2f8(HOST_QUEUE);", "        e = host_2f8(HOST_QUEUE);"),
+    ("queue-index", "        M32(e + 4) = (uint32_t)i;", "        M32(e + 4) = (uint32_t)i + 1;"),
+    ("remove-past", "    if (i < count) {\n        uint32_t size = L_SIZE(l)", "    if (i <= count) {\n        uint32_t size = L_SIZE(l)"),
+    ("remove-ret",  "        return size;                /* eax", "        return 0;                /* eax"),
+    ("remove-index","    return host_list_remove_at(l, (int32_t)((elem - L_DATA(l)) / L_SIZE(l)));",
+                    "    return host_list_remove_at(l, (int32_t)((elem - L_DATA(l) + 1) / L_SIZE(l)));"),
+    ("flush-match", "            if (M32(q + n * 8 - 8) == l) {", "            if (M32(q + n * 8 - 8) != 0) {"),
+    ("flush-reload","                host_list_remove_at(HOST_QUEUE, (int32_t)(n - 1));\n                q = L_DATA(HOST_QUEUE);",
+                    "                host_list_remove_at(HOST_QUEUE, (int32_t)(n - 1));"),
+    ("flush-flag",  "    L_PEND(l) = 0;\n}", "}"),
+    ("walk-order",  "        r = ((host_walk_fn)(uintptr_t)fn)(i * L_SIZE(l) + L_DATA(l), ctx);",
+                    "        r = ((host_walk_fn)(uintptr_t)fn)((L_COUNT(l) - i - 1) * L_SIZE(l) + L_DATA(l), ctx);"),
+    ("walk-depth",  "    L_ITER(l) = L_ITER(l) + 1;\n    for (i = 0; i < L_COUNT(l); i++) {\n        r = ((host_walk_fn)(uintptr_t)fn)(i",
+                    "    for (i = 0; i < L_COUNT(l); i++) {\n        r = ((host_walk_fn)(uintptr_t)fn)(i"),
+    ("walkback-idx","((L_COUNT(l) - i - 1) * L_SIZE(l) + L_DATA(l), ctx);\n        if (r != 0)\n            break;\n    }\n    L_ITER(l) = L_ITER(l) - 1;\n    host_list_flush(l);\n    return r;\n}\n\n/* 0x4104e0",
+                    "((L_COUNT(l) - i) * L_SIZE(l) + L_DATA(l), ctx);\n        if (r != 0)\n            break;\n    }\n    L_ITER(l) = L_ITER(l) - 1;\n    host_list_flush(l);\n    return r;\n}\n\n/* 0x4104e0"),
+    ("walkback-stop","        r = ((host_walk_fn)(uintptr_t)fn)((L_COUNT(l) - i - 1) * L_SIZE(l) + L_DATA(l), ctx);\n        if (r != 0)\n            break;",
+                    "        r = ((host_walk_fn)(uintptr_t)fn)((L_COUNT(l) - i - 1) * L_SIZE(l) + L_DATA(l), ctx);\n        if (r != 0 && i > 0)\n            break;"),
+    ("find-indirect","const uint8_t *b = (const uint8_t *)(uintptr_t)(indirect ? M32(key) : key);",
+                    "const uint8_t *b = (const uint8_t *)(uintptr_t)key;"),
+    ("find-len",    "        while (k < len && a[k] == b[k])", "        while (k + 1 < len && a[k] == b[k])"),
+    ("find-ret",    "    return L_SIZE(l) * (uint32_t)i + L_DATA(l);\n}", "    return L_SIZE(l) * (uint32_t)(i + 1) + L_DATA(l);\n}"),
+    ("listfree-ret","        return l + 0x18;", "        return 0;"),
 ]
 
 
@@ -83,9 +121,14 @@ def main():
             print("%-16s does not build:\n%s" % (name, build.stderr[-1500:]))
             results.append((name, "unbuilt"))
             continue
-        run = subprocess.run(["wine", "hostdiff.exe", str(N)], cwd="bin/difftest",
+        # A break that corrupts the heap can hang rather than differ; a hang
+        # is a catch.
+        run = subprocess.run(["timeout", "120", "wine", "hostdiff.exe", str(N)], cwd="bin/difftest",
                              capture_output=True, text=True, errors="replace",
                              env=dict(os.environ, WINEDEBUG="-all"))
+        if run.returncode == 124:
+            subprocess.run(["pkill", "-f", "hostdiff.exe"])
+            run.stdout += "\nhostdiff: hung (timeout)"
         caught = run.returncode != 0
         last = [l for l in run.stdout.splitlines() if l.startswith("hostdiff:")]
         verdict = "caught" if caught else "equivalent" if len(entry) > 3 else "MISSED"

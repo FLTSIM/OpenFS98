@@ -422,6 +422,12 @@ startup test. It retains the CD's SIMSUI/MFC42, and the native preview renderer
 is a stateful caller fixture; the actual renderer and application of edits
 belong to MAIN/WINDOW. Build with `make -f tools/views.mk views`.
 
+**Help is in progress** independently of MAIN/HOST. Its five dialogs' event,
+initialization and object-lifetime core is implemented and differentially tested;
+it is not yet a replacement DLL. [help.md](help.md) records the registry, RichEdit,
+timer and callback contracts, synthetic results and remaining native acceptance.
+Build the core with `make -f tools/help.mk helpevents`.
+
 **Options/World in slices**: start with CONTROLS, FE or FACIL's already
 specified descriptor contracts. Keep template creation, exchange-engine
 validation, accept/cancel ordering, callbacks and nested-dialog lifetime in

@@ -15,7 +15,9 @@ every call MPCHAT makes and its whole `.data` image: **0 differ**.
 equivalent. `make smoke` passes with it installed: 27/27 modules, 95 gauges.
 A session needs a multiplayer connection, which the smoke test does not
 make, so in-game that proves init (RICHED32 loaded, the class registered,
-list 0x1d joined); the differential harness covers the rest.
+list 0x1d joined). The core harness covers the wider synthetic boundary;
+the native GUI suite below now compares actual USER32/GDI/RichEdit behavior
+without requiring a multiplayer connection.
 
 The preflight ([../preflight.md](../preflight.md), round 9) expected this:
 "the USER32 calls hooked through its IAT against a model of window text and
@@ -223,3 +225,93 @@ one `WM_SIZE` lParam (`0x017a0217`) fell inside ours' load range and was
 logged as code, a false difference at scenario 3,084 -- and a local's
 address differs between the sides, so stack pointers are logged as
 `stack`.
+
+## Native GUI comparison
+
+The standalone suite in `tools/difftest/mpchatuidiff.c` loads retail and rebuilt
+MPCHAT normally, leaving **all Windows imports unhooked**. Windows, ListBox,
+Edit, Button, RichEdit, painting, scrolling, focus and message dispatch are real.
+HOST, CHAIN, MULTIP and WINMSG's numeric imports are controlled fixtures; sent
+packets and hidden-window notifications are recorded without network traffic.
+The owner is a native window with a real menu and message pump. Its posted
+`0x1183` commands dispatch back through MPCHAT's registered CHAIN callback.
+
+Build and run independently of the shared Makefile:
+
+```sh
+make -f tools/mpchat.mk mpchatuidiff-run
+make -f tools/mpchat.mk mpchat-ui-breaks
+make -f tools/mpchat.mk mpchat-modeldiff-run
+```
+
+`N` selects the native fixture count per DLL load cycle (default 24). All
+outputs, snapshots, mutation builds and the Wine prefix live under
+`bin/mpchat-ui/`, protected by its own lock. The runner does not alter `game/`,
+normal Wine prefixes or the existing `bin/difftest` binaries.
+
+Both DLLs register `FS98MPCHAT`, a global class, so they run their scripts **in
+turn**, with init/deinit between implementations. The harness verifies that the
+live window procedure and every registered CHAIN callback belong to the
+expected DLL; silently creating both windows through retail's registered class
+would otherwise create a false pass. Each script creates and tears down two
+sessions, checking the class, menu, callbacks, allocated host strings and module
+registration on deinit. Both DLLs must unmap after each of two load/unload
+cycles.
+
+The fixtures vary primary/secondary player lists, replacements/renames, local
+player presence, button versus command dispatch, and twelve width/height
+combinations. Each script covers:
+
+- Session creation, player-list refresh, known/unknown senders and ignored
+  payload types.
+- Empty and nonempty sends, exact packet contents/lengths, input truncation and
+  focus returning to the simulator's main window.
+- Transcript selection surviving appends, native RichEdit focus notifications,
+  key commands and resized control layouts.
+- Long transcripts, receiving at the bottom or while reading old messages,
+  hide/show/menu check marks and WINMSG forwarding while hidden.
+- `WM_CLOSE` posting the host command, session restart, window/control
+  destruction, class unregistering and complete module cleanup.
+
+Eighteen checkpoints per script compare the cumulative simulator-call log,
+window/control text, styles, geometry, visibility/enabled state, menu state,
+focus, full transcript text and RTF, native character/paragraph formats,
+selection, scrolling and every client pixel when visible. The RTF stream may
+include a NUL before its final chunk; snapshots compare their full byte counts,
+not `strcmp`, so protocol/cleanup evidence after the stream cannot be ignored.
+
+The message pump waits for two quiet intervals because Wine's window server
+can deliver activation/focus changes after the first queue drain. Formatting
+queries restore the selection and first visible **line**; `SCROLLINFO.nPos`
+is not interchangeable with RichEdit's line number. Pixel capture hides the
+native thread's actual caret after repainting settles, copies the complete
+client and restores the caret. No image pixels are masked. `WM_PRINT` on this
+DefDlgProc-based parent paints only its background here, so a background-only
+print is not accepted as the chat window's rendered image. First-fixture text
+and BMP snapshots remain as `bin/mpchat-ui/checkpoint-*`.
+
+Native acceptance on the reference build: **48 paired scripts, 864
+checkpoints, two DLL load/unload cycles, zero differences**. The full transcript
+is `bin/mpchat-ui/native-ui.log`.
+
+All **12/12 native GUI mutations** produced actual reported differences:
+sender color, message indent, resized transcript width, send focus, selection
+restoration, packet size, hidden-message slot, received-message filtering,
+RichEdit focus selection, entry limit, class unregistering and freeing the
+unknown-sender string. Summary: `bin/mpchat-ui/native-breaks.log`.
+The independently rebuilt DLL also passes the existing modeled regression:
+**20,000 scenarios, zero differences**, including the same 1,183 matched
+missing-name fault outcomes. Log: `bin/mpchat-ui/model-regression.log`.
+
+`tools/mpchat_ui_breaks.py` freezes the module sources, native harness, ABI
+headers and resource object before building deliberate errors. A baseline must
+pass first. A mutation counts only with exit 1 and an actual
+`MPCHAT UI DIFFER` report; compilation errors, unexpected faults and timeouts
+fail acceptance. Per-mutation logs, differing state/BMPs and input hashes stay
+under `bin/mpchat-ui/breaks/`.
+
+This supplements the 20,000-scenario modeled suite. It does not connect real
+DirectPlay peers, exercise the full simulator's menu/dialog engine, or establish
+native Windows behavior beyond the Wine environment used here. MPCHAT remains
+in the existing shared build/install flow; no production code or shared build
+changes are required for this suite.

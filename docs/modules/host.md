@@ -781,6 +781,22 @@ DirectDraw's palettes, surfaces, cooperative level and display modes, each
 failing by script. The dialog services are described under "The dialog
 engine" above.
 
+Finishing the table turned up harness faults worth knowing before writing the
+next one. A fake COM vtable must hold the highest slot any caller uses
+(IDirectDraw's SetDisplayMode is slot 21; a 16-entry table was overrun into
+its neighbours). Per-side state must be drawn from the random stream once and
+copied, never drawn twice. A block the host frees must be the heap's: the
+sound test's in-memory sounds were static arrays, and freeing one damaged
+wine's heap a thousand iterations later -- they now come from a pool the
+harness's `free` leaves alone, since retail goes on using a freed sound. A
+moving `realloc` must not free the old block at once, or alternating growth
+lands the next block on it and a stale pointer reads live data again (the
+removal queue's reload went unnoticed that way); old blocks are now
+quarantined. And `.data` strings a service compares against (the window
+classes at 0x417168) must be kept out of the random seeding, or the paths
+behind them are never taken. `HOSTDIFF_HEAPCHK=1` validates the heap after
+every check.
+
 ### Continuing the reimplementation
 
 To add the next service: find it in the table with `python3 tools/hostmap.py`

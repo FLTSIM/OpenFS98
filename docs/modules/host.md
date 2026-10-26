@@ -426,8 +426,8 @@ the result, normalising a pointer into either side's `.data` to an offset.
 | 24, tooltip regions | `+0x27c` (register a tree of tooltip regions), `+0x280` (re-place it), `+0x284` (unregister it) | verified: 0 differ; 15 breaks caught |
 | 25, view windows and the palette | `+0x064` (make a view window: frame, client, z-order group), `+0x04c` (size the main window for 640x480), `+0x094` (the nth visible record of a group key), `+0x128` (clear three words, free the DirectPlay library), `+0x290` (set the palette: GDI, DirectDraw, tinted tables), `+0x314` (a no-op) | verified: 0 differ; 52 breaks, 49 caught, 3 equivalent |
 | 26, text and DirectPlay | `+0x318` (draw text in a view window, four fonts, or measure it), `+0x08c` (a shadowed label at one of fifteen places in a view), `+0x124` (load dplayx and hand out its three entry points), `+0x120` (the lobby's connection settings, raw or flattened) | verified: 0 differ; 66 breaks, 63 caught, 3 equivalent |
-| 27, display settings | `+0x31c` (read the HARDWARE section or its defaults, list the DirectDraw/Direct3D devices, list a device's modes, write or remove the section) | verified: 0 differ |
-| 28, display mode and dialogs | `+0x048` (full screen on/off: window styles, DirectDraw torn down and rebuilt, the display mode changed on a thread), `+0x10c`/`+0x110`/`+0x118` (run a dialog, modal or modeless), `+0x114` (tick the modeless dialogs) | verified: 0 differ |
+| 27, display settings | `+0x31c` (read the HARDWARE section or its defaults, list the DirectDraw/Direct3D devices, list a device's modes, write or remove the section) | verified: 0 differ; 49 breaks, 4 equivalent, 3 rare paths missed at N=2000 (two caught at N=3000) |
+| 28, display mode and dialogs | `+0x048` (full screen on/off: window styles, DirectDraw torn down and rebuilt, the display mode changed on a thread), `+0x10c`/`+0x110`/`+0x118` (run a dialog, modal or modeless), `+0x114` (tick the modeless dialogs) | verified: 0 differ; dialog breaks all caught; +0x048 breaks caught or proven equivalent but `dd-mode640` (a secondary driver asked for a 640-wide, non-480 mode) |
 
 The harness now seeds `.data` with distinct random values on both sides before
 each iteration (leaving the service table and bounding the string constant at
@@ -796,6 +796,13 @@ quarantined. And `.data` strings a service compares against (the window
 classes at 0x417168) must be kept out of the random seeding, or the paths
 behind them are never taken. `HOSTDIFF_HEAPCHK=1` validates the heap after
 every check.
+
+The full `make host-breaks` (610 breaks, about six hours) catches 580, proves
+26 equivalent and misses four, all rare display paths: `ds-field-skip` (a
+39-character mode string read past its end into the flags, visible only when
+their low byte is a digit), `ds-mmx-hal` and `ds-mode-mem` (caught in targeted
+runs at N=3000), and `dd-mode640` (a secondary driver asked for a 640-wide
+mode that is not 480 high).
 
 ### Continuing the reimplementation
 

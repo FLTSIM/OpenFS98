@@ -98,7 +98,7 @@ make main-breaks SUITE=eye           # its breaks -> 13, 12 caught, 1 proven equ
 make maindiff-run SUITE=band         # MAIN slice 15, the altitude band (+0x9c) -> 20000 scenarios, 0 differ (~4 min)
 make main-breaks SUITE=band          # its breaks -> 33, all caught (~12 min)
 make hostdiff-run N=20000            # HOST (id 1, FLTSIM98.EXE) slices 1-28, all 194 services, real files in bin/difftest/hostfs -> 0 differ (~11 min)
-make host-breaks                     # HOST broken on purpose -> 82 breaks, 79 caught, 3 proven equivalent (~9 min)
+make host-breaks                     # HOST broken on purpose -> 610 breaks, 580 caught, 26 proven equivalent, 4 rare display paths missed at N=2000 (~6 h)
 make mpchatdiff-run      # whole-module MPCHAT, the chat window -> 20000 scenarios, 0 differ (~20 s)
 make mpchat-breaks       # MPCHAT broken on purpose -> 117 breaks, 113 caught, 4 proven equivalent (~8 min)
 make winmsgdiff-run      # whole-module WINMSG, the message bar -> 20000 scenarios, 0 differ (~2 min)

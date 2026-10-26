@@ -508,6 +508,9 @@ are implemented in a standalone partial DLL. Start from [world.md](world.md)
 for their acceptance and the remaining bounded slices; preserve all existing
 MAIN/HOST/FE work and keep unimplemented registrations explicitly pending.
 The shared add/edit booster family (`0x13080007` / `0x13080008`) also has
-initializer and native UI acceptance, including shared-font cleanup on unload. For a whole-DLL assignment, choose
+initializer and native UI acceptance, including shared-font cleanup on unload.
+Drive search (`0x13080002`) also has core, lifetime, initialization and native UI
+acceptance, bringing World to six accepted registrations; thirteen remain.
+For a whole-DLL assignment, choose
 MP_DIALOG and include all three registrations plus the full flag-2 window
 array in the completion criteria.

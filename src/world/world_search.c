@@ -1,6 +1,6 @@
 /* World 0x13080002 core. Retail preferred VAs identify recovered routines.
- * Class lifetimes live in world_search_objects.c; native registration awaits
- * UI acceptance. */
+ * Class lifetimes live in world_search_objects.c; native bindings live in
+ * world_runtime.c. */
 #include "world_search.h"
 #define U32 WORLD_U32
 #define PTR WORLD_PTR
@@ -20,7 +20,7 @@ static void search_callback(void *object, uint32_t offset)
 static void search_text(void *object)
 {
     s_services->ui->get_text(AT(object, 0x1304), PTR(PTR(object, 0x10dc), 0x38), 0x80);
-    s_services->ui->get_text(AT(object, 0x16c0), PTR(PTR(object, 0x10dc), 0x24), 0x80);
+    s_services->get_path(AT(object, 0x16c0), PTR(PTR(object, 0x10dc), 0x24), 0x80);
 }
 /* 0x223fe2d0: preserve the raw checkbox state, including noncanonical bits. */
 void fs98_world_search_collect(void *object)

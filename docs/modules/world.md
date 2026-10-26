@@ -1,14 +1,15 @@
-# World.DLL — native scenery-area, priority and booster slices
+# World.DLL — native scenery-area, priority, booster and drive-search slices
 
 **Partial replacement with native UI acceptance.** `bin/world-diff/WORLD_area.dll`
 registers add/edit scenery area (`0x13080003` / `0x13080004`), scenery
-priority (`0x13080005`) and add/edit booster (`0x13080008` / `0x13080007`).
+priority (`0x13080005`), add/edit booster (`0x13080008` / `0x13080007`)
+and drive search (`0x13080002`).
 Their classes, initialization, controls, event/message maps, factories,
 exception lifetimes and module binding are rebuilt in C, using
-retail MFC42/SIMSUI as shared dependencies. The other 14 World registrations
+retail MFC42/SIMSUI as shared dependencies. The other 13 World registrations
 remain pending native acceptance.
 
-This is ready to review as a standalone five-dialog slice. It is **not a full
+This is ready to review as a standalone six-dialog slice. It is **not a full
 World replacement** and must not replace the active game's World.DLL. The
 startup smoke changes only a private game copy; startup success does not supply
 the other registrations or establish their behavior.
@@ -51,8 +52,9 @@ verified by its own harness.
 
 This slice covers these two registrations and their shared class,
 control exchange, validation, accept/cancel and lifetimes. Use independent
-callback/file fixtures. Priority now has its own acceptance below. Broader scenery lists, drive search
-and booster-list dialogs remain candidates for later slices. The native
+callback/file fixtures. Priority and drive search now have their own acceptance
+below. Broader scenery lists and booster-list dialogs remain candidates for
+later slices. The native
 test DLL remains a partial World replacement.
 
 ## Other bounded slices
@@ -710,12 +712,12 @@ Selected area and priority colour mutations also passed again with the updated
 mutation build inputs (`booster-area-mutation-regression.log` and
 `booster-priority-mutation-regression.log`).
 
-## Drive-search core, lifetimes and initialization (native acceptance pending)
+## Drive-search accepted slice
 
-The next bounded family is FE's drive-search dialog `0x13080002`, factory
+This slice implements FE's drive-search dialog `0x13080002`, factory
 `0x223f1ac0`, template `0x6b0`. `world_search.c` implements its core handlers
-behind an independent UI boundary. It is **not registered in the native DLL**;
-the five accepted registrations above remain the complete native slice.
+behind an independent UI boundary. Its class, initialization and native UI now
+have the acceptance below; it is the sixth registration in the partial DLL.
 
 The owner is [FE's Scenery Library](fe.md#part-4--the-scenery-library-0x78-verified),
 `src/fe/fe_library.c` and `tools/difftest/fesldiff.c`'s `world_browse` stand-in.
@@ -768,7 +770,7 @@ object size is `0x1e78`, vtable `0x22410320`, map `0x224101c8`, base-map getter
 selection and close-up notifications, OK, help and context menu. The metadata
 contains no machine code or resource payloads. Both generated includes reproduce
 byte-for-byte in an isolated directory. Extraction alone establishes a graph;
-behavioral lifetime acceptance follows below. Native dispatch remains pending.
+behavioral lifetime and native-dispatch acceptance follow below.
 
 ```sh
 make -f tools/world.mk world-search-metadata
@@ -943,22 +945,122 @@ Acceptance logs are `bin/world-diff/search-init-normal.log`,
 Mutant sources, independently compiled executables and actual difference
 transcripts are under `bin/world-diff/search-init-breaks/`.
 
-Next: bind search imports, its 60-slot vtable, message map, factory and template
-in the standalone partial DLL, then add real UI/callback/rendering/deletion
-acceptance using independent FE-shaped descriptors. Use the existing booster
-native suite as the starting fixture. Search needs packed drive strings and
-an embedded area row, six action callbacks, both combo notification types,
-posted message `0x5fa` and both close paths returning answer zero. Exercise
-error priority and failed validation followed by population. Keep all five
-accepted registrations passing, verify new dispatch ownership, test unloads
-and deliberate native mutations, then run an isolated startup. Until that
-acceptance passes, drive search remains unregistered and the DLL still has
-only five accepted registrations.
+### Drive-search native acceptance
+
+`world_runtime.c` binds the search class as the fourth 60-slot vtable and fourth
+message map, registers factory `0x13080002` and propagates module handles to
+its factory across attach/init/deinit. Shared inherited Cancel/PostNcDestroy
+wrappers retain the earlier priority/booster dispatch. Build-only resources
+continue to come from the reference image; no resource payload is tracked.
+
+Native binding splits the path display's text getter from the title edit's
+getter. Retail uses SIMSUI `CSimsText::GetWindowTextA` (IAT `0x22415700`) for
+path and MFC ordinal 3873 (`0x22415598`) for title. Both had shared one
+synthetic fixture previously. The search service now exposes `get_path`
+separately so the native adapter binds each callee correctly. The SIMSUI getter
+at `0x204819a0` can copy its cached full text after display fitting; its cached
+branch ignores the requested capacity. The native fixture includes long paths
+with a larger backing buffer to distinguish this from MFC's bounded getter.
+
+`worldsearchuidiff.c` uses the existing real MFC/SIMSUI application setup,
+HOST/GLOBAL services, nested Alerts and GDI capture. Independent FE-shaped
+callbacks use a descriptor with its embedded area row and packed drive strings;
+they log ordered callback inputs and change row text, position and enable flags
+without using real FE files or game callbacks. Twenty cases cover all stored
+layers, active states, independent button states, differing title limits,
+drive selections and long paths. Seventeen scripts cover baseline, Return/OK,
+Escape/Cancel, a real checkbox mouse click, both selection/close-up notification
+types on both combos, Add/Add All/Next/Next Folder/Search and path/title/layer
+errors with a combined-priority case. Add/Add All must repopulate after failed
+validation. Both close commands must leave answer zero.
+
+Retail exposes **three** layer choices in this template. Selecting index 4
+therefore leaves the actual combo at its prior selection; the native scripts
+use indices 0..2 and independently require count three. This does not change
+the recovered core's 0..4 conversion, whose broader domain remains covered by
+synthetic fixtures. The three-choice finding corrected an initial native
+fixture assumption rather than changing World's behavior.
+
+Search's posted `0x5fa` message is inspected before pumping: it must be queued
+for the dialog, with the title HWND as wParam and zero lParam. Pumping must
+focus the title edit. The fixture compares this queued-message witness as
+well as normalized focus, full descriptors/text, callback order, child metadata,
+real alert controls/pixels, window pixels and automatic deleting destruction.
+It verifies ownership of the factory, local class slots and all 13 local
+message handlers. The inherited import slots are shared MFC/SIMSUI code;
+search's inherited validation/error slots must not be mistaken for local ones.
+
+```sh
+make -f tools/world.mk world-search-ui
+make -f tools/world.mk world-search-native-breaks
+make -f tools/world.mk worlduidiff-run
+make -f tools/world.mk world-priority-ui
+make -f tools/world.mk world-booster-ui
+make -f tools/world.mk world-smoke
+```
+
+The search suite passed **680 paired pixel/state/callback comparisons**,
+**1,160 witnesses**, eight module-init comparisons and two full unload cycles.
+Reference images are `bin/world-diff/ui-images/search-baseline-*.bmp`.
+All **13 native mutations** produced actual `SEARCH UI DIFFER` results with
+exit 1, bringing drive search to **76/76** across core, lifetimes,
+initialization and native UI. They cover edit color, title limit, active/next/
+drive/layer-close-up dispatch, missing and synchronous posts, error priority,
+automatic deletion, the path getter, answer zero and title enables. The color
+mutation changed pixels while descriptor state, controls and callbacks still
+matched. The getter mutation requires the long-path case: the tool runs twenty
+cases for it and ten for the others. Its difference occurs at case 16, step 3,
+with descriptor state differing while controls and callbacks still match.
+Faults, timeouts and build failures do not count. Snapshotted input hashes,
+sources, DLLs, harnesses and difference logs are in
+`bin/world-diff/search-native-breaks/`. `search-native-breaks.log` aggregates
+the initial run and the expanded long-path rerun; the original ten-case result
+and rerun remain in `search-native-breaks-initial.log` and
+`search-native-path-getter.log`.
+
+The six-registration DLL also passed the existing **288 area**, **210
+priority** and **320 booster** paired native comparisons, with their full
+witnesses, module-init checks and two unload cycles each. Booster's shared-font
+cleanup remains accepted. Selected area, priority and booster color mutations
+were detected again with the expanded native build inputs.
+
+After splitting the path getter service, search core again passed **260,000
+normal comparisons**, **239,054 interrupt-suite comparisons** and all **22
+core mutations**. Initializer and typed-lifetime regressions passed **67,523**
+and **292,103 comparisons**, respectively, including their normal fixture
+checks. The initializer includes 65,523 interrupted calls; the typed lifetime
+run includes 246,689 propagated exceptions and 27,414 fatal dispatches.
+
+Runtime/search metadata and build-only resource/anchor files reproduce
+byte-for-byte in an isolated directory. Logs are
+`bin/world-diff/search-ui-acceptance.log`, `search-native-breaks.log`,
+`search-area-regression.log`, `search-priority-regression.log`,
+`search-booster-regression.log`, `search-native-core-normal.log`,
+`search-native-core-interrupt.log`, `search-native-core-breaks.log`,
+`search-native-init-regression.log` and `search-native-life-regression.log`.
+Selected existing native mutation build inputs also include search source;
+logs are `search-area-mutation-regression.log`,
+`search-priority-mutation-regression.log` and
+`search-booster-mutation-regression.log`.
+
+A 75-second startup passed in private game copy
+`bin/world-diff/smoke-game-8oraaxgf`: **27/27 modules, 95 gauges**, matching
+replacement bytes and no runtime errors. The log is
+`bin/world-diff/search-smoke-acceptance.log`; the active game was unchanged.
+Final DLL SHA-256:
+`b9ed65eff63cedc4c03ebe37f2b42b0cf8b258f0786e074907fde1a60b22eca2`.
+The final comment-only rebuild's `.text`, `.data`, `.rdata` and `.rsrc`
+sections are byte-identical to the native-tested DLL retained at
+`bin/world-diff/search-native-tested.dll`.
+
+The drive-search family is complete through this native milestone. The DLL is
+still a partial replacement. Continue with a separately bounded remaining
+family and its own owner contract and acceptance.
 
 ## Remaining boundary
 
-Fourteen World registrations are still pending native acceptance: scenery lists/library,
-search/booster lists, weather/time, scenery settings and FACIL-backed
+Thirteen World registrations are still pending native acceptance: scenery lists/library,
+booster lists, weather/time, scenery settings and FACIL-backed
 position/facility screens. Continue as bounded slices with their own native
 acceptance before building or installing a complete World replacement. Shared
 build/install integration and complete host-driven interaction remain separate.

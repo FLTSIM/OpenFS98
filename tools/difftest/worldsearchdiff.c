@@ -142,7 +142,7 @@ static int world_post(uint32_t window, uint32_t message, uint32_t first, uint32_
 }
 static int SC world_hook_post(uint32_t window, uint32_t message, uint32_t first, uint32_t second)
 { return world_post(window, message, first, second); }
-static const struct fs98_world_search_services s_search_services = {&s_services, world_title, world_post};
+static const struct fs98_world_search_services s_search_services = {&s_services, world_title, world_post, world_get_text};
 static const uint32_t s_entries[] = {
     0xe2d0, 0xe560, 0xe270, 0xe210, 0xe320, 0xe370, 0xe3c0,
     0xe430, 0xe470, 0xe460, 0xe4e0, 0xe500, 0xe760

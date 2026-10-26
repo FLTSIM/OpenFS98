@@ -9,6 +9,8 @@ struct fs98_world_search_services {
     const struct fs98_world_services *ui;
     void (*title)(void *control, const char *text);
     int (*post)(uint32_t window, uint32_t message, uint32_t first, uint32_t second);
+    /* CSimsText::GetWindowTextA, separate from the MFC edit getter. */
+    int (*get_path)(void *control, char *text, int capacity);
 };
 void fs98_world_search_set_services(const struct fs98_world_search_services *services);
 void fs98_world_search_collect(void *object);

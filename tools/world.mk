@@ -28,7 +28,7 @@ world-life-breaks: worldlife
 	bash tools/run_worlddiff.sh --life-breaks
 
 PRIORITY_OBJECTS := src/world/world_priority_objects.c src/world/world_priority.h src/world/world_priority_tables.inc src/world/world_priority_hooks.inc src/world/world_objects.h src/world/world_init.h src/world/world_unwind.h src/world/world_exceptions.h src/world/world_internal.h
-WORLD_SOURCES := src/world/world_booster.c src/world/world_booster_objects.c src/world/world_booster_init.c src/world/world_priority.c src/world/world_priority_objects.c src/world/world_area.c src/world/world_objects.c src/world/world_init.c src/world/world_runtime.c
+WORLD_SOURCES := src/world/world_search.c src/world/world_search_objects.c src/world/world_search_init.c src/world/world_booster.c src/world/world_booster_objects.c src/world/world_booster_init.c src/world/world_priority.c src/world/world_priority_objects.c src/world/world_area.c src/world/world_objects.c src/world/world_init.c src/world/world_runtime.c
 .PHONY: world worlduidiff-run world-ui-breaks world-smoke
 src/world/world_runtime_tables.inc $(WORLD_DIR)/world.res $(WORLD_DIR)/simsui-anchor.def &: tools/gen_world_runtime.py tools/gen_views_runtime.py tools/dialogmap.py orig/English/World.DLL orig/SIMSUI.DLL | $(WORLD_DIR)
 	python3 -B tools/gen_world_runtime.py
@@ -143,3 +143,12 @@ world-search-init: $(WORLD_DIR)/worldsearchinitdiff.exe
 	bash tools/run_worlddiff.sh --search-init $(N) $(MODE)
 world-search-init-breaks: $(WORLD_DIR)/worldsearchinitdiff.exe
 	bash tools/run_worlddiff.sh --search-init-breaks
+
+$(WORLD_DIR)/WORLD_area.dll: $(SEARCH_OBJECTS) $(SEARCH_INIT)
+$(WORLD_DIR)/worldsearchuidiff.exe: tools/difftest/worldsearchuidiff.c tools/difftest/worlduidiff.c src/world/world_internal.h | $(WORLD_DIR)
+	$(CC) -std=c99 -O2 -Wall -Wextra -Werror -fno-strict-aliasing -o $@ $< -lgdi32 -lntdll
+.PHONY: world-search-ui world-search-native-breaks
+world-search-ui: world $(WORLD_DIR)/worldsearchuidiff.exe
+	bash tools/run_worlddiff.sh --search-ui
+world-search-native-breaks: world $(WORLD_DIR)/worldsearchuidiff.exe
+	bash tools/run_worlddiff.sh --search-native-breaks

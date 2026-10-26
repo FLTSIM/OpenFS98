@@ -710,6 +710,108 @@ Selected area and priority colour mutations also passed again with the updated
 mutation build inputs (`booster-area-mutation-regression.log` and
 `booster-priority-mutation-regression.log`).
 
+## Drive-search core milestone (native acceptance pending)
+
+The next bounded family is FE's drive-search dialog `0x13080002`, factory
+`0x223f1ac0`, template `0x6b0`. `world_search.c` implements its core handlers
+behind an independent UI boundary. It is **not registered in the native DLL**;
+the five accepted registrations above remain the complete native slice.
+
+The owner is [FE's Scenery Library](fe.md#part-4--the-scenery-library-0x78-verified),
+`src/fe/fe_library.c` and `tools/difftest/fesldiff.c`'s `world_browse` stand-in.
+The descriptor embeds an area row at `+0x20`, with shown path `+0x24`, title
+`+0x38`, layer `+0x4c` and active `+0x54`. Drive count, selection and packed
+four-byte drive strings are at `+0x68`, `+0x6c` and `+0x70`; four button states
+are at `+0x74..+0x80`. Owner callbacks take one descriptor pointer, `stdcall`;
+their returns are ignored. No real FE filesystem or game callback executes in
+this new harness, and the verified owner code/harness remains unchanged.
+
+Recovered behavior:
+
+- Add (`0x223fe270`), Add All (`0x223fe210`), active change (`0x223fe2d0`),
+  Next (`0x223fe320`), Next Folder (`0x223fe370`) and Search (`0x223fe3c0`)
+  first collect title and shown path, each with capacity `0x80`, reloading the
+  descriptor between reads. Active change then stores the raw checkbox state
+  from object `+0x1c70`, without boolean normalization. The other actions do
+  not implicitly collect active, layer or drive selection.
+- Add/Add All dispatch `+8`/`+0xc`, invoke the local validation helper and
+  repopulate even after validation fails. Next/Next Folder dispatch `+0x14`/
+  `+0x18` and repopulate. Search dispatches `+0x10`, repopulates, then posts
+  message `0x5fa` to the current dialog HWND with the current title-edit HWND
+  as wParam. This uses PostMessage, not SendMessage.
+- The local helper `0x223fe760` invokes check (`+4`), reloads the descriptor,
+  and reports the first nonzero status at `+0x20`, `+0x34`, `+0x48`, targeting
+  object controls `+0x16c0`, `+0x1304`, `+0x1830`. It returns zero for any
+  error, ignoring the error service's result; otherwise it returns one.
+  This helper is not the class's inherited virtual validation slot.
+- Populate (`0x223fe560`) uses SIMSUI title assignment for the shown path,
+  MFC text assignment for title, maps layers 10..50 to combo indices 0..4
+  and preserves selection for invalid layers. It passes active and the four
+  button enables as raw 32-bit values. The drive list is reset and rebuilt
+  from signed count `+0x68`, using four-byte entries and fresh descriptor
+  loads at each iteration, before restoring drive selection. The final
+  label/edit enables use one cached conjunction of `+0x74` and `+0x78`.
+- Drive selection (`0x223fe430`) reloads the descriptor after CB_GETCURSEL;
+  layer selection (`0x223fe470`, alias `0x223fe460`) caches its destination
+  before that call and ignores indices outside 0..4.
+- Cancel (`0x223fe4e0`) and the local OK command (`0x223fe500`) both write
+  answer **zero**, then dispatch virtual close. The latter and validation
+  call `0x223f99f0`, a bare `ret`; those no-effect calls are omitted in C.
+
+`gen_world_search.py` extracts the complete class graph for continuation:
+18 embedded controls and DDX bindings, reverse destruction and matching MSVC
+cleanup actions, terminated help map, 60-slot vtable and 13 message entries.
+Constructor/destructor/deleting destructor/DDX/initializer are
+`0x223fda90` / `0x223fdc10` / `0x223fdbf0` / `0x223fdd60` / `0x223fdec0`;
+object size is `0x1e78`, vtable `0x22410320`, map `0x224101c8`, base-map getter
+`0x223f5d40`. Local messages include six buttons `0x1aae..0x1ab3`, drive/layer
+selection and close-up notifications, OK, help and context menu. The metadata
+contains no machine code or resource payloads. Both generated includes reproduce
+byte-for-byte in an isolated directory. Extraction establishes a graph, not
+constructor, exception-lifetime or native-dispatch acceptance.
+
+```sh
+make -f tools/world.mk world-search-metadata
+make -f tools/world.mk world-search-core N=20000
+make -f tools/world.mk world-search-core N=2000 MODE=interrupt
+make -f tools/world.mk world-search-breaks
+```
+
+With seed `0x4a971b63` and the reference hash above, `worldsearchdiff` made
+**260,000 normal comparisons** and 260,000 independent reference-side fixture
+checks. The interrupt run made **239,054 comparisons**, including **213,054
+interrupted reference calls**, plus 26,000 normal fixture checks. All matched.
+Thirteen operations include both layer entry points and both close handlers.
+The fixture compares ordered calls, defined returns and every byte of the
+`0x1e78`-byte object, two descriptors, strings, packed drives and guards.
+It covers every error-status combination, ignored callback/error returns,
+valid/invalid layers, negative/zero/positive drive counts, valid/invalid combo
+indices, noncanonical checkbox/enables, descriptor swaps, changing enable
+flags, changed HWNDs and vtable replacement. Its independent checks require
+raw active collection, selection destinations, error priority/result, answer
+zero before close and the search post. Core interruption escapes through a
+vectored handler; these routines own no local exception cleanup.
+
+All **22 deliberate mutations** produced actual `DIFFER` results with exit 1;
+faults, build failures and timeouts do not count. They cover text capacities,
+raw checkbox/enables, path-control assignment, layer mapping/range, drive
+stride/count/selection, cached enable decisions, error priority/return,
+action callbacks, missing validation, the posted message, descriptor caching
+and answer zero. The existing area-core regression also passed **14,000
+comparisons** and 14,000 fixture checks with zero differences.
+Acceptance logs are `bin/world-diff/search-core-normal.log`,
+`search-core-interrupt.log`, `search-core-breaks.log` and
+`search-area-regression.log`. Mutant source, executables and actual difference
+transcripts are in `bin/world-diff/search-breaks/`. The shared runner still
+uses World's private Wine prefix and lock.
+
+Next: implement and compare this class's constructor/destructor/factory and
+real exception cleanup, then initialization and native UI/dispatch/rendering.
+The initializer uses a virtual setup call on its checkbox; recover its callee
+ABI before binding it. The factory has a typed exception boundary and a failed
+Create message path; the earlier factories' acceptance is not acceptance of
+this one. Keep drive search unregistered until those milestones pass.
+
 ## Remaining boundary
 
 Fourteen World registrations are still pending native acceptance: scenery lists/library,

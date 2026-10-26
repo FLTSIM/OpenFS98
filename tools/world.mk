@@ -113,3 +113,15 @@ world-booster-ui: world $(WORLD_DIR)/worldboosteruidiff.exe
 .PHONY: world-booster-native-breaks
 world-booster-native-breaks: world $(WORLD_DIR)/worldboosterinitdiff.exe $(WORLD_DIR)/worldboosteruidiff.exe
 	bash tools/run_worlddiff.sh --booster-native-breaks
+
+$(WORLD_DIR)/worldsearchdiff.exe: tools/difftest/worldsearchdiff.c src/world/world_search.c src/world/world_search.h src/world/world_internal.h | $(WORLD_DIR)
+	$(CC) -std=c99 -O2 -Wall -Wextra -Werror -fno-strict-aliasing -o $@ tools/difftest/worldsearchdiff.c src/world/world_search.c
+.PHONY: world-search-core world-search-breaks
+world-search-core: $(WORLD_DIR)/worldsearchdiff.exe
+	bash tools/run_worlddiff.sh --search-core $(N) $(SEED) $(MODE)
+world-search-breaks: $(WORLD_DIR)/worldsearchdiff.exe
+	bash tools/run_worlddiff.sh --search-breaks
+src/world/world_search_tables.inc src/world/world_search_hooks.inc &: tools/gen_world_search.py tools/gen_world_tables.py tools/dialogmap.py orig/English/World.DLL
+	python3 -B tools/gen_world_search.py
+.PHONY: world-search-metadata
+world-search-metadata: src/world/world_search_tables.inc src/world/world_search_hooks.inc

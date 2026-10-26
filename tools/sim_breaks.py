@@ -16,6 +16,7 @@ import sys
 
 def main():
     count=int(sys.argv[1]) if len(sys.argv)>1 else 100
+    requested=set(sys.argv[2:])
     if count<100:raise ValueError('use at least 100 scenarios')
     directory=Path('bin/sim-diff/breaks')
     directory.mkdir(parents=True,exist_ok=True)
@@ -81,12 +82,51 @@ def main():
         ('engine-populate-type-control','engines','normal','?0x190c:0x19d4','?0x19d4:0x190c'),
         ('engine-init-bitmap','engines','normal','0x1dbc-i*0xc8,0x4c0,0x139','0x1dbc-i*0xc8,0x4c0,0x138'),
     ]
+    mutations += [
+        ('systems-init-font','systems','normal','AT(object,0x3e0),AT(object,label)','AT(object,0x370),AT(object,label)'),
+        ('systems-commit-gate','systems','normal','if(!D32(object,0x1100))return 0;','if(D32(object,0x1100))return 0;'),
+        ('systems-feature-mask','systems','normal','&s_system_features[i][0]','&(s_system_features[i][0]^1)'),
+        ('systems-second-control','systems','normal','if(s_system_features[i][2])','if(!s_system_features[i][2])'),
+        ('realism-edit-flags','realism','normal','AT(object,0x1584),0x15','AT(object,0x1584),0x11'),
+        ('realism-first-converter','realism','normal','PTR(descriptor,0x70)','PTR(descriptor,0x6c)'),
+        ('realism-mode-reset','realism','normal','D32(PTR(object,0x1120),0x20)=0;','D32(PTR(object,0x1120),0x20)=1;'),
+        ('realism-error-id','realism','normal',')(object,0x13bd)',')(object,0x13be)'),
+        ('realism-feature-gate','realism','normal','&0x20))','&0x10))'),
+        ('fuel-availability-exact','fuel','normal','if (D32(object, 0x28f8 + index * 4) == 1) {\n            if (selection == available)','if (D32(object, 0x28f8 + index * 4) != 0) {\n            if (selection == available)'),
+        ('fuel-unavailable-sentinel','fuel','normal','    return 8;','    return 7;'),
+        ('fuel-manual-second-control','fuel','normal','enable_control(AT(object, 0x1c3c)','enable_control(AT(object, 0x1b84)'),
+        ('fuel-validation-gate','fuel','normal','!D32(object, 0x1100) || !control_id','D32(object, 0x1100) || !control_id'),
+        ('fuel-validation-raw-selection','fuel','normal','0x10) = result;','0x10) = fs98_sim_fuel_selection(object, result);'),
+        ('fuel-validation-delayed-row','fuel','normal','if (group != 1 || row < 3)','if (group != 1 || row < 4)'),
+        ('fuel-validation-error-order','fuel','normal','if (D32(descriptor, 0x7c))\n                group = 1;','if (D32(descriptor, 0x7c))\n                group = 0;'),
+        ('fuel-validation-edit-modify','fuel','normal','0xb9, 0, 0','0xb8, 0, 0'),
+        ('fuel-validation-converter','fuel','normal','mode == 2 ? 0x15c','mode == 2 ? 0x158'),
+        ('fuel-error-retry-id','fuel','normal',')(object, display)',')(object, 0)'),
+        ('fuel-init-final-label','fuel','normal','index == 4 ? 3 : index','index'),
+        ('fuel-init-string-length','fuel','normal','0x280c - index * 0x68','0x2808 - index * 0x68'),
+        ('fuel-init-edit-type','fuel','normal','offset + 0x64) = 3','offset + 0x64) = 2'),
+        ('fuel-populate-units','fuel','normal','0xf7b6 : 0xf7b5','0xf7b5 : 0xf7b6'),
+        ('fuel-populate-row-limit','fuel','normal','0x84 + row * 0x14) - 1','0x84 + row * 0x14) + 1'),
+        ('fuel-populate-disable-label','fuel','normal','index < 5; ++index)\n                g_sim_services->enable_control','index < 4; ++index)\n                g_sim_services->enable_control'),
+        ('settings-wire-fuel-record','settings','normal','AT(master, 0x164)','AT(master, 0x168)'),
+        ('settings-wire-realism-owner','settings','normal','PTR(realism, 0x1124) = object','PTR(realism, 0x1124) = master'),
+        ('settings-init-skin','settings','normal','0x14f, g_sim_resource_module, 0xf','0x14e, g_sim_resource_module, 0xf'),
+        ('settings-init-font-module','settings','normal','0x47, -1, tab_module, 0','0x47, -1, (tab_module & 0) | g_sim_resource_module, 0'),
+        ('settings-init-saved-vtable','settings','normal','PTR(vtable, 0xe8)','PTR(PTR(object, 0), 0xe8)'),
+        ('settings-init-page-flags','settings','normal','init_page(page, 9)','init_page(page, 8)'),
+        ('settings-init-tab-flag','settings','normal','s_descriptors[index]))','s_descriptors[index]) ^ 1)'),
+        ('settings-init-helper-count','settings','normal','index < 6; ++index)\n        g_sim_services->init_tab_helper','index < 5; ++index)\n        g_sim_services->init_tab_helper'),
+        ('settings-init-rectangle-point','settings','normal','(int *)AT(object, 0x10e4)','(int *)AT(object, 0x10dc)'),
+        ('settings-init-unwind-delete','settings','unwind','dialog_delete(state->page)','ui_delete(state->page)'),
+    ]
     wine_lock=threading.Lock()
     jobs=[]
     for name,unit,mode,before,after in mutations:
+        if requested and name not in requested:continue
         filename=f'sim_{unit}.c'
         if before not in sources[filename]:raise ValueError(f'{name}: anchor missing')
         jobs.append((name,filename,mode,before,after))
+    if requested-set(job[0] for job in jobs):raise ValueError('unknown mutation name')
 
     def check(job):
         name,filename,mode,before,after=job
@@ -98,7 +138,7 @@ def main():
         executable.unlink(missing_ok=True)
         build=subprocess.run(['i686-w64-mingw32-gcc','-std=c99','-O2','-Wall','-Wextra','-Werror',
             '-fno-strict-aliasing','-o',str(executable),str(work/'simdiff.c'),
-            *(str(work/f'sim_{unit}.c') for unit in ('events','objects','crash','engines')),'-lntdll'],text=True,capture_output=True)
+            *(str(work/f'sim_{unit}.c') for unit in ('events','objects','crash','engines','systems','realism','fuel','settings')),'-lntdll'],text=True,capture_output=True)
         if build.returncode:
             print(f'{name}: BUILD FAILED (not counted)\n{build.stderr}',flush=True);return False
         with wine_lock:

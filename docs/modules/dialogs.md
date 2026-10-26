@@ -198,6 +198,10 @@ fields come from the registry/tool; regenerate their canonical form with
 
 ### Sim.DLL
 
+The C dialog core and its standalone differential harness are implemented;
+native DLL integration remains pending. See [sim.md](sim.md) for the implemented
+boundary, callback contracts, verification and remaining work.
+
 | Registry id | Template id(s) | Description |
 | --- | --- | --- |
 | `0x00001206` | `0x452` | Aircraft settings, initial page 0 |

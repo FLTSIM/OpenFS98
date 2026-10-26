@@ -239,7 +239,7 @@ emulate 80-bit arithmetic to preserve a rounding artefact. See
 | `PANELS` | 15 | 50,038 | **reimplemented, verified, and running in-game** — the instrument panel and the gauges' runtime: bitmap scalers, eight element types, the gauge variables; 3,000 whole-module scenarios through the CD's gauges and 20,000 cases per image routine, zero differences — see [docs/modules/panels.md](docs/modules/panels.md) |
 | `HG2D` | 13 | 389,734 | **reimplemented and verified standalone** — all 40 public services and 18 GPU dispatch cells; 59 suites pass, 40.64 million large-run operations match retail, and 247 new mutations are caught; in-game and non-x86 validation remain — see [docs/modules/hg2d.md](docs/modules/hg2d.md) |
 | `UTIL` | 20 | 11,062 | **reimplemented, verified, and running in-game** — all 47 services; 19 seen called in a hands-on session, the modal alert among them — see [docs/modules/util.md](docs/modules/util.md) |
-| `FLTSIM98.EXE` | 1 (host) | 82,016 | 194 services mapped, 71 with confirmed prototypes, 11 verified in-process, 2 implemented — see [docs/modules/host.md](docs/modules/host.md) |
+| `FLTSIM98.EXE` | 1 (host) | 82,016 | 194 services mapped; **all 194 reimplemented and verified in-process** against the real host (`make hostdiff-run`) — see [docs/modules/host.md](docs/modules/host.md) |
 
 Retail baseline and the OpenFS98 build -- ACONTAIN, ADVDRV, ANALYSIS, ATC,
 BOOSTER, CHAIN, CONTROLS, DEMO, DYNAMIC, FACIL, FE, GLOBAL, LANDME, NUMERIC,

@@ -307,10 +307,22 @@ synchronously. That is the hook UTIL's alert-close uses -- it clears the
 alert's live flag, then ticks, and the alert destroys itself while handling the
 message.
 
-None of this is reimplemented, and none of it can be swapped in: there is no
-mechanism yet for replacing code inside the host. What is pinned is the
-contract -- registry, ids, flags, the `param` convention and the tick -- which
-is what a native host's dialog layer has to honour.
+All of it is now reimplemented (slice 28) and verified against the real host
+in process, over a seeded registry and module records, factories that make
+scripted windows, and a scripted message queue. Read from the callee, the
+details are: the pause is 0x40e450 -- on a palette display the grey palette
+(0x41a250), a 216-colour cube DIB header and a 16K table dithering each
+palette entry onto it over an 8x8 ordered matrix (0x40e6f0, the matrix in
+`.rdata` at 0x4160c8), the palette realised again on the way out; page
+flipping's part (0x413e80) goes back to the GDI surface; and host events
+0x100f8/0x100f9. A factory that makes nothing returns -1 *without releasing
+the module*. Each message a modal loop takes is first offered to every
+modeless dialog, each of which is ticked (`0x464`, sent) on the way -- so the
+modeless dialogs tick once per message, not once per idle. A modal dialog
+pushed over an array of windows reuses the register that held its own array:
+if both are arrays, its loop runs on the one below (reproduced). The loops'
+order of `IsWindow`/`GWLP_USERDATA` checks is retail's exactly, since the
+harness logs both.
 
 ## Windows
 
@@ -399,6 +411,23 @@ the result, normalising a pointer into either side's `.data` to an offset.
 | 9, names, paths and image buffers | `+0x178`/`+0x18c` (a valid file name / path), `+0x184` (join drive, directory and name), `+0x1b4`/`+0x1b8`/`+0x1bc` (create, free, resize an image buffer) | verified: 0 differ over 20,000 iterations; 18 breaks caught |
 | 10, accelerator tables | `+0x1d8` new, `+0x1dc` destroy, `+0x1e0` id by index, `+0x1e4` load from a resource, `+0x1e8`/`+0x1ec` enable/disable, `+0x1f0` clear, `+0x1f4` add entries, `+0x1f8` remove entries, `+0x1fc` read entries | verified: 0 differ over 20,000 iterations; 23 breaks, 19 caught, 4 proven equivalent |
 | 11, key names | `+0x200` (a key code's name: "CTRL + SHIFT + F1"), `+0x204` (a name's key code) | verified: 0 differ over 20,000 iterations; 15 breaks caught |
+| 12, profiles | `+0x0a8`..`+0x0cc` (ints, int lists, doubles, double lists, strings in FLTSIM98.CFG), `+0x0f8` (empty a section), `+0x100` (does a section have keys), and `+0x0d0`..`+0x0f4`, `+0x0fc`, `+0x104` (the same over path + extension) | verified: 0 differ over 20,000 iterations |
+| 13, files | `+0x17c` open, `+0x148` create, `+0x13c` close, `+0x19c` read, `+0x1b0` write, `+0x194` seek, `+0x190` tell, `+0x1a4` size, `+0x1a8` truncate, `+0x134`/`+0x138` attributes, `+0x158` exists, `+0x14c` delete, `+0x144` copy, `+0x16c` move, `+0x11c` make a directory | verified: 0 differ over 20,000 iterations |
+| 14, directory enumeration | `+0x164` find first, `+0x160` find next, `+0x15c` close | verified: 0 differ |
+| 15, messages, the clock, and the fatal file wrappers | `+0x024`/`+0x028` (quit by WM_CLOSE / command 0x110a), `+0x038` timeGetTime, `+0x03c`/`+0x040` (post / send a WM_COMMAND to the main window), `+0x044` (local date and time), `+0x07c`/`+0x080`/`+0x084` (a view window's titles and notifications), `+0x180`/`+0x1a0`/`+0x198`/`+0x140` (open, read, seek, close -- fatal on failure) | verified: 0 differ |
+| 16, dirty rectangles | `+0x088` (a rectangle into a view window's dirty list, merged with one within 16 pixels) | verified: 0 differ |
+| 17, joysticks | `+0x1c0` (enumerate), `+0x1c4` (read one: axes, buttons, POV), `+0x1c8` (describe one: axes, buttons, rudder, and the language DLL's name for it by its registry OEM name), `+0x1cc` (wait up to 5 s for an axis or button to move) | verified: 0 differ; 24 breaks caught |
+| 18, odds and ends | `+0x2c4` (shorten a string with "..."), `+0x274`/`+0x278` (capture / release the mouse), `+0x238` (validate the heaps), `+0x150` (free disk space), `+0x174` (a temporary file name), `+0x208` (fold the keypad), `+0x170` (the length of a path made absolute) | verified: 0 differ |
+| 19, the main menu | `+0x23c` (set the menu bar from a definition), `+0x240` (drop it), `+0x244`/`+0x248` (append an item / items to an item's submenu), `+0x24c`/`+0x250` (insert before an item), `+0x254` (gray / check), `+0x258` (an item's flags), `+0x25c` (remove), `+0x260`/`+0x264` (change id / text), `+0x268` (exists) | verified: 0 differ; 20 breaks caught |
+| 20, modules | `+0x26c` (load a module by path and extension: its Linkage), `+0x270` (release it), `+0x294` (load a language module and put it first for strings) | verified: 0 differ |
+| 21, the busy cursor | `+0x030` (the counterpart of `+0x2c`), `+0x050` (the hourglass on / off) | verified: 0 differ |
+| 22, sound | `+0x2d4` new voice, `+0x2dc` drop, `+0x2d8` append, `+0x2e0` play, `+0x2e4` frequency, `+0x2ec` volume, `+0x2f0` pan, `+0x2f4` stop, `+0x2e8` state, `+0x2d0` sound on/off | verified: 0 differ over 20,000 iterations |
+| 23, view-window surfaces and order | `+0x074` (a record's host block), `+0x078` (free it), `+0x06c`/`+0x070` (lock / unlock the drawing surface: DIB or DirectDraw), `+0x068` (destroy a view window), `+0x090` (bring to the front of its group) | verified: 0 differ; 18 breaks, 17 caught, 1 equivalent |
+| 24, tooltip regions | `+0x27c` (register a tree of tooltip regions), `+0x280` (re-place it), `+0x284` (unregister it) | verified: 0 differ; 15 breaks caught |
+| 25, view windows and the palette | `+0x064` (make a view window: frame, client, z-order group), `+0x04c` (size the main window for 640x480), `+0x094` (the nth visible record of a group key), `+0x128` (clear three words, free the DirectPlay library), `+0x290` (set the palette: GDI, DirectDraw, tinted tables), `+0x314` (a no-op) | verified: 0 differ; 52 breaks, 49 caught, 3 equivalent |
+| 26, text and DirectPlay | `+0x318` (draw text in a view window, four fonts, or measure it), `+0x08c` (a shadowed label at one of fifteen places in a view), `+0x124` (load dplayx and hand out its three entry points), `+0x120` (the lobby's connection settings, raw or flattened) | verified: 0 differ; 66 breaks, 63 caught, 3 equivalent |
+| 27, display settings | `+0x31c` (read the HARDWARE section or its defaults, list the DirectDraw/Direct3D devices, list a device's modes, write or remove the section) | verified: 0 differ |
+| 28, display mode and dialogs | `+0x048` (full screen on/off: window styles, DirectDraw torn down and rebuilt, the display mode changed on a thread), `+0x10c`/`+0x110`/`+0x118` (run a dialog, modal or modeless), `+0x114` (tick the modeless dialogs) | verified: 0 differ |
 
 The harness now seeds `.data` with distinct random values on both sides before
 each iteration (leaving the service table and bounding the string constant at
@@ -538,6 +567,220 @@ harness keeps buffers long enough. `+0x204` parses a name back, trying the
 host's words as prefixes and then every virtual key 0..0xff by
 case-insensitive name (0x100 when none matches).
 
+**Files and profiles** (slices 12 to 14) are tested against real files, each
+side in its own directory -- `hostfs\r\` for the real host, `hostfs\o\`
+for ours, under the harness's directory -- with paths of one length that
+differ only in that letter (the CFG path at 0x41c120 is compared everywhere
+but that byte). Each iteration writes the same made-up profile and the same
+few files (some read-only) to both, runs random operations on each side, and
+compares the results, the host file objects (mode, extension, path), and the
+two directories file by file. A profile gets a new name every iteration so
+wine's profile cache can never serve a stale copy. Two constraints of the
+harness, not the host: the format strings the profile code uses ("%d" at
+0x417a24, ", " / "," / "%f" at 0x417ed0) must not be randomised with the
+rest of `.data`, and `+0x150` (free disk space) is left out because the
+free space changes between the two calls.
+
+Quirks reproduced: profile lists are read into a block of 15 bytes an int or
+30 a double and written into one the same size, unchecked; an absent double
+leaves the output alone, an absent int returns the default; `+0x104` takes
+its output *last*, after path and extension (the first harness run caught
+our version taking it second); `+0x17c` opens unshared, and its mode 3 seeks
+to the end; `+0x194` refuses any position past the size whatever the method;
+`+0x11c` leaks its path copy when CreateDirectoryA fails; `+0x13c`, `+0x17c`
+and `+0x194` record GetLastError at 0x41ba50 (or 0), the others do not;
+`+0x164` with an empty directory string tests the byte *before* its path
+buffer -- the top byte of the search block's address -- for '\'; `+0x160`
+looks a file's extension up without registering it, leaving the type alone
+for an unknown one.
+
+Slice 15 hooks the window system and the clock on both sides --
+`SendMessageA`, `PostMessageA`, `SetWindowTextA`, `timeGetTime`,
+`GetLocalTime` -- into one call log the harness clears before each side's
+call and compares after, with made-up results the same for both; and
+`MessageBoxA`, so that a fatal path, should one be reached, exits at once
+rather than leaving a dialog open. The fatal file wrappers are driven only
+on their non-fatal paths, over a file both sides always have.
+
+**Joysticks** (slice 17) are a model in the harness, hooked on both sides
+like the window system: `joyGetNumDevs`, `joyGetPosEx` and `joyGetDevCapsA`
+over up to six made-up devices whose positions change after a scripted
+number of polls, `Sleep` (the slow probe sleeps 260 ms), and
+`RegOpenKeyExA`/`RegQueryValueExA`/`RegCloseKey` over the two keys the host
+reads a joystick's OEM name through. The script restarts before each side's
+call, and `timeGetTime` advances 700 ms a call so `+0x1cc`'s 5-second wait
+ends. The host keeps its joystick table at 0x4188b8 (16 entries: the WINMM id
++ 1, then the JOYCAPSA); `+0x1c4` cuts the caller's axis mask to the axes the
+caps report -- one bit for each of R, U, V and Z the device has, then one more
+for every axis left over, counted as a 16-bit number that wraps when the caps
+claim fewer axes than flags -- and maps the POV to eight directions with
+0x8ca-wide bands either side of north.
+
+Slice 18's quirks: `+0x2c4` tests strcpy's result the wrong way round, so
+whenever it actually shortens a string it returns -1 and leaks its working
+copy; `+0x150` multiplies sectors-per-cluster by bytes-per-sector in 32 bits
+before widening; `+0x208` turns an extended Enter into 0x87 without setting
+the folded flag. The mouse, heap, disk and temporary-name calls are hooked
+into the call log (`GetProcessHeaps`/`HeapValidate` over a made-up set of
+heaps, so a failed validation can be shown).
+
+**The main menu** (slice 19) is the host's own tree of 0x14-byte items --
+parent id, id (0xffff ends an array, 1 is a separator), text (a string id
+below 0x10000, else a pointer), flags (1 checked, 2 grayed), submenu items,
+HMENU -- rooted in a one-item array at 0x418298 (the bar, id 0). Every change
+rebuilds all the HMENUs from the tree (`CreateMenu`/`AppendMenuA`, hooked,
+handles numbered from a counter each side restarts). Retail trusts the tree:
+it finds an item's array through the item's own parent-id field, so an item
+whose field is wrong, a renumbered parent, the bar itself (whose "parent" is
+the bar), or an append to an item with no submenu all send it running off
+an array -- the harness keeps ids unique and fresh and never asks for those.
+Quirks: a removed item's submenu is never freed; `+0x254` rebuilds the bar
+before redrawing when the parent's own parent id is 0 (while 0x4182c0 is
+set).
+
+**Modules** (slice 20): the host's module records (0x417b30: name, id,
+HMODULE, Linkage, references) are filled by loading a module once to read its
+Linkage (`GetProcAddress(h, "Linkage")`, its dialog table at +0x14 registered
+on the dialog registry at 0x417ee0), and a module is loaded while referenced:
+the first reference resolves its ImportTable (`{ id, slot }` pairs, each slot
+given the Linkage of the module with that id, acquired in turn) and calls its
+init (Linkage +4, cleared after), the last calls its deinit (+8), releases its
+imports and frees it. The harness fakes four modules (with imports and dialog
+tables) and two language modules behind hooked `LoadLibraryA`,
+`GetProcAddress` and `FreeLibrary`, restoring their Linkage blocks before each
+side's call. **Correction:** `+0x298` takes a module's *Linkage* (records are
+found by it at +0xc), not a module id.
+
+**Sound** (slice 22) runs over a fake IDirectSound and a pool of fake
+buffers (each call logged; failures injected by a script both sides replay;
+Unlock logs a checksum of what was written), fake MSACM32 streams, and real
+.wav fixtures (8- and 16-bit PCM, a non-PCM one converted through ACM, a
+truncated one, a non-RIFF one). Both sides' `malloc` now fills new blocks with
+one pattern, because a voice leaves fields uninitialised that the state
+service reads. Retail's sound has several holes the harness has to step
+round, all reproduced in ours: a duplicate (type 6/7) that fails to get a
+buffer frees the sound it shares with its source, which keeps a dangling
+pointer; appending to a duplicate does the same; a type 7 duplicate of a type
+5 voice (which frees its sound once buffered) copies from null, as does
+appending to or from such a voice; `+0x2e4`/`+0x2f0`/`+0x2f4`/`+0x2e8` use the
+buffer (and `+0x2e8` its voice) unchecked; and a start that fails at the
+primary buffer leaves DirectSound set with no primary. The frequency is the
+rate times a double multiplier, computed in the x87 register and truncated
+without being rounded to a double first (`long double` in our C) -- a
+non-x87 build has to reproduce that.
+
+**View-window surfaces** (slice 23) run over records the harness builds per
+side (with host blocks and row tables), a fake DirectDraw surface (Lock,
+Restore, Unlock, failing by script), and hooked `GetObjectA`,
+`DeleteObject`, `DeleteDC`, `DestroyWindow`, `GetParent` and the
+`DeferWindowPos` trio; the z-order groups at 0x41a3dc are compared
+structurally. `+0x074` overwrites a record's host block without freeing the
+old one; `+0x06c` refills the row table only when its first row moved; the
+locks, `+0x068` and the restack read the host block unchecked, so the harness
+keeps blocks in place for them.
+
+**Tooltip regions** (slice 24): a window's hot regions are a tree of
+0x2c-byte nodes in arrays (type 1 opens a group whose nodes follow, 3 closes
+it, 0 ends the list), each given a heap rectangle at the offsets it is
+placed at and, if it has a tip string, a tool in the window's tooltip control
+(`tooltips_class32`, made on first use) by TTM_ADDTOOL with the rectangle
+scaled by the window's 16.16 factors. Retail registers the tools *before*
+checking the tree fits, nested nodes grow the outermost bounds rather than
+their group's, and the check reads every top-level node as a group, so a
+tree whose top level is not all groups sends it scanning past the end for a
+closing 3 -- the harness's trees have groups at the top. `SendMessageA`'s log
+records a TOOLINFO's fields and its rectangle, not the stack pointer.
+
+**View windows and the palette** (slice 25). `+0x064` makes a record's host
+block as `+0x074` does, a hidden "FS98CHILD" frame at the record's rectangle
+and a "FS98FLOAT" client, puts the record at the front of its z-order group
+(0x411710: groups in descending key order, a new one before the first with a
+smaller key; a record already in its group is left where it is), and sends
+the frame 0x467; if either window fails it frees the block and returns -1.
+`+0x094` walks *every* group of a key, its count of visible (top-bit) records
+restarting in each. `+0x290` copies the ten system colours at each end of the
+master palette (0x4171a4) to its copy (0x4175ac) and, as BGR, to 0x41adc0;
+given RGB triples it sets entries 10..245 of master and copy (PC_RESERVED),
+builds the BGR table at 0x41b620 (0x40e540: grey at half brightness when
+0x41a250 is set, else the animated ranges as a dim red of their luminance),
+hands the master to DirectDraw in a full-screen 8-bit mode (0x412b50, through
+0x412bf0, which reads the screen format from the primary surface or the
+screen DC), and animates the GDI palette (realising it and redrawing by day)
+or, on a non-palette display, sets its entries. It returns `ReleaseDC`'s
+result. The harness hooks `ShowWindow`, `UpdateWindow`, `GetWindowLongA`,
+`GetMenu`, `AdjustWindowRectEx`, `SetWindowPos`, `GetDC`/`ReleaseDC`,
+`GetDeviceCaps` and the GDI palette calls, makes `CreateWindowExA` fail by
+script, and gives fake DirectDraw, primary-surface and palette objects.
+Three breaks are proven equivalent through `+0x290`: `(x/1000)/2` is `x/2000`
+for non-negative x, and 0x412b50 reads only whether the depth is 8, not the
+width, height or the 555-means-15 rewrite (they matter to `+0x048`/`+0x31c`).
+
+**Text and DirectPlay** (slice 26). `+0x318` and `+0x08c` draw through a
+view record's DC (0x4108f0: the DirectDraw surface's, unlocking a locked
+record first and keeping its lock flag so the release, 0x4109f0, relocks it --
+which reads the row table unchecked, as `+0x06c` does -- else the host
+block's memory DC with its bitmap selected). Colours go through the master
+palette for a record with 0x8000 in the 8-bit mode, else as palette
+indices. `+0x318`'s fonts: kind 0 is a 7-pixel font made afresh on every
+call (a GDI leak in retail, reproduced), 1 the stock fixed font, 2 and 3
+plain and bold fonts from string resources 0x10/0x11 (`Verdana,-9,1` and
+`Verdana,-11,1` in ENGLISH.FLL), made once; another kind returns -1 holding
+the DC. `+0x08c` capitalises the label and uses the small font for a record
+with 0x10000 outside code page 932, and shadows it in colour 0 otherwise.
+`+0x124` loads dplayx once and, if DirectPlayCreate and a QueryInterface for
+IDirectPlay2A work, hands out DirectPlayCreate, DirectPlayEnumerateA and
+DirectPlayLobbyCreateA; else it frees it again through `+0x128`. `+0x120`
+asks the lobby for its connection settings and returns them raw or
+flattened into one block with offsets for pointers (the session password's
+pointer is copied as it is, into the freed copy); a lobby that has none
+returns 0 without being released, and a dplayx it loaded is freed with
+0x41a51c left set. The harness fakes dplayx, DirectPlay, the lobby and the
+GDI text calls, and now counts both sides' `free` calls (a missing free of
+the lobby's copy showed only there). Three text breaks are proven
+equivalent: the DC handed back is always the one 0x4108f0 gave, `atoi`
+stops at the comma the size cut replaces, and the face cut differs only for
+a string without a comma, which no shipped resource has.
+
+**Display settings** (slice 27). `+0x31c(op, block)` works on a 0xe8-byte
+settings block: device string (+0x00), its Direct3D suffix (+0x80, one of
+"(Direct3D)", "(Direct3D MMX)", "(Direct3D RGB)", "(Direct3D RAMP)"), mode
+"WxHxB" (+0xa8), option flags (+0xd0, named by the table at 0x418458 --
+DirectDrawDisable, Direct3D, DirectDraw, MMX, Filter, Dither, MipMap,
+PageFlip, and four texture/fog keys -- in FLTSIM98.CFG's `[HARDWARE]`
+section), the parsed mode and a list cursor (+0xe4). Ops 1/2 read it (or
+the defaults; an empty device becomes the default driver's label, a bad
+mode 640x480 at 16 bits with a suffix, 8 without); 3 lists the devices
+(DirectDrawEnumerateA, each driver's label -- "desc (name)" for a
+"\\." name -- and its HAL/MMX Direct3D devices); 4 lists the device's
+modes (8-bit without a suffix or with RAMP, else 16-bit ones the video
+memory holds three times over plus 1 MB); 5/6 write or delete the section
+and post the main window 0x46f. The profile section name and the GUIDs it
+compares live in `.rdata` (0x416120..0x41616f), outside the `.data` image, so
+host.c carries its own copies. The harness fakes DirectDrawCreate and
+DirectDrawEnumerateA with scripted drivers, Direct3D devices and modes, over
+real CFG files. Four breaks are proven equivalent: the label's extra text is
+always empty at its one caller (cleared on the line before), no suffix ends
+with another, and the flags are read into a block just zeroed.
+
+**Display mode and dialogs** (slice 28). `+0x048(on)` is the full-screen
+toggle. Going full screen keeps the window's zoom, rectangle and styles,
+makes it a popup without a menu covering the screen, tears DirectDraw down
+(0x412b10: the views told 0x46d by a broadcast to the main window's children
+and this thread's "FS98FLOAT" windows, page flipping off, the surfaces,
+Direct3D and the object released) and rebuilds it (0x412690: the settings
+re-read, the chosen driver opened -- or the default -- with exclusive
+cooperation, the mode set, 640x480 if that fails, Direct3D kept if a device
+with hardware rasterisation and enough video memory exists, the primary
+surface made, flipping with a back buffer when page flipping is on), then
+changes the display mode with ChangeDisplaySettingsA on a thread of its own
+(0x4038d0; retried without the depth if it asks for a restart) unless a
+secondary driver owns the screen. Going back restores the mode, the style
+(the extended style is not restored), the menu and the rectangle. The
+harness models the window calls, the thread's ChangeDisplaySettingsA, and
+DirectDraw's palettes, surfaces, cooperative level and display modes, each
+failing by script. The dialog services are described under "The dialog
+engine" above.
+
 ### Continuing the reimplementation
 
 To add the next service: find it in the table with `python3 tools/hostmap.py`
@@ -560,14 +803,15 @@ hooks `GetCommandLineA`, is as testable as the pure services; then the ones
 that call a host-internal helper that is itself pure. `+0x204` (a key-name
 parser) waits on the strings the host loads at run time into 0x41bec0 and
 its neighbours; the file services (`+0x1a4`/`+0x1a8` and the rest) want a
-sandboxed directory. `+0x094` (a pure walk of a
-run-time linked list at 0x41a3dc) and `+0x314` (a no-op) are the two pure
-leaves left unimplemented.
+sandboxed directory. Nothing is left: every slot is reimplemented. What remains is the
+harness's reach -- the paths noted above that only a scripted model covers --
+and the move from verifying in process to running OpenFS98's host in the
+game.
 
 ## Status
 
-72 of 194 services reimplemented in `src/host/host.c` and verified against the
-real host in process (slices 1 to 11 above). 71 have prototypes confirmed from the
+All 194 services reimplemented in `src/host/host.c` and verified against the
+real host in process (slices 1 to 28 above). 71 have prototypes confirmed from the
 callee and recorded in `host.h` (15 of them the window services, from WINDOW),
 and 11 were already exercised in-process through other modules' harnesses: the
 clock, `strlen`, and the nine-service enumeration cluster above. The dialog

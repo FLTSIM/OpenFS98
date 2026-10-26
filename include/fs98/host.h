@@ -512,9 +512,10 @@ typedef char *(FS98_STDCALL *fs98_host_strip_char_fn)(char *s, int32_t c);
  * allocator, *out null if none.  Returns the count. */
 typedef int32_t (FS98_STDCALL *fs98_host_loadstring_dup_fn)(uint32_t id, char **out);
 
-/* +0x298 -- put module `id`'s HMODULE first in line for +0x2a0, and in *out.
- * -1 with *out 0 if the module is unknown or not loaded. */
-typedef int32_t (FS98_STDCALL *fs98_host_strings_add_fn)(uint32_t module_id, void **out);
+/* +0x298 -- put the HMODULE of the module whose Linkage is `linkage` first in
+ * line for +0x2a0, and in *out.  -1 with *out 0 if no record has that Linkage
+ * or the module is not loaded. */
+typedef int32_t (FS98_STDCALL *fs98_host_strings_add_fn)(const void *linkage, void **out);
 
 /* +0x29c -- take an HMODULE off +0x2a0's list.  0, or -1 if it was not on it. */
 typedef int32_t (FS98_STDCALL *fs98_host_strings_drop_fn)(void *hmod);

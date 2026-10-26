@@ -122,6 +122,33 @@ def descriptor_copies(start, end, descriptor_offset):
     return writes,combos
 
 
+def system_features():
+    registers, stack = {}, {}
+    groups = []
+    byte_values = {}
+    for op in instructions(0x5e30,0x6162):
+        m=re.fullmatch(r'lea\s+(e\w+),\[esi\+0x([0-9a-f]+)\]',op)
+        if m: registers[m[1]]=int(m[2],16)
+        m=re.fullmatch(r'mov\s+(e\w+),(e\w+)',op)
+        if m: registers[m[1]]=registers.get(m[2])
+        m=re.fullmatch(r'mov\s+DWORD PTR \[esp\+0x([0-9a-f]+)\],(e\w+)',op)
+        if m: stack[int(m[1],16)]=registers.get(m[2])
+        m=re.fullmatch(r'mov\s+(e\w+),DWORD PTR \[esp\+0x([0-9a-f]+)\]',op)
+        if m: registers[m[1]]=stack.get(int(m[2],16))
+        m=re.fullmatch(r'mov\s+(bl),0x([0-9a-f]+)',op)
+        if m: byte_values[m[1]]=int(m[2],16)
+        m=re.fullmatch(r'test\s+BYTE PTR \[e\w+\+0x([0-9a-f]+)\],(0x[0-9a-f]+|bl)',op)
+        if m:
+            mask=byte_values[m[2]] if m[2] in byte_values else int(m[2],16)
+            groups.append([mask << ((int(m[1],16)-0x18)*8),[]])
+        if op=='call   0x223c7cea':
+            control=registers.get('ecx')
+            if control is None or not groups:raise SurveyError('unknown system feature control')
+            groups[-1][1].append(control)
+    if len(groups)!=15 or sum(len(g[1]) for g in groups)!=22:raise SurveyError('system feature layout moved')
+    return groups
+
+
 def main():
     pe = Fs98Pe('orig/English/Sim.DLL')
     if pe.uiBase != 0x223c0000 or pe.linkage()['id'] != 0x80000004:
@@ -210,9 +237,42 @@ def main():
         lines.append(f'static const uint16_t s_{name}[][2] = {{')
         lines += [f'    {{0x{source:x},0x{target:x}}},' for source,target in rows]
         lines.append('};')
+    system_writes,system_combos=descriptor_copies(0x5ca3,0x5e1f,0x1118)
+    if len(system_writes)!=8 or len(system_combos)!=7:raise SurveyError('systems exchange moved')
+    for name,rows in (('system_writes',system_writes),('system_combos',system_combos)):
+        lines.append(f'static const uint16_t s_{name}[][2] = {{')
+        lines += [f'    {{0x{source:x},0x{target:x}}},' for source,target in rows]
+        lines.append('};')
+    lines.append('static const uint32_t s_system_features[][3] = {')
+    for mask,controls in system_features():
+        if len(controls) not in (1,2):raise SurveyError('unsupported feature group')
+        lines.append(f'    {{0x{mask:x},0x{controls[0]:x},0x{controls[1] if len(controls)>1 else 0:x}}},')
+    lines.append('};')
     lines.append('static const struct fs98_sim_class s_classes[] = {')
     for name,values in metadata:
         lines.append('    {'+', '.join(f'0x{x:x}' for x in values)+f', s_controls_{name}, s_stores_{name}'+'},')
+    lines.append('};')
+    # The fuel validator has a sparse two-level switch over its edit IDs.
+    targets = ((0x4920,0x4953,0x4984,0x49b5,0x49e6),
+                (0x47f9,0x4832,0x4869,0x48a0,0x48dc),
+                (0x4a1c,0x4a55,0x4a8c,0x4ac0,0x4af4))
+    ids = [[0]*5 for group in range(3)]
+    for index in range(0x58):
+        target = pe.read_bytes(pe.file_offset(0x4de8+index),1)[0]
+        target = pe.va_uint32(pe.uiBase+0x4da8+target*4)-pe.uiBase
+        if target == 0x4d8f:
+            continue
+        for group_index,group in enumerate(targets):
+            if target in group:
+                row = group.index(target)
+                if ids[group_index][row]:raise SurveyError('duplicate fuel edit')
+                ids[group_index][row] = 0x13bf+index
+                break
+        else:raise SurveyError('unknown fuel edit target')
+    if any(not id for group in ids for id in group):
+        raise SurveyError('missing fuel edit')
+    lines.append('static const uint16_t s_fuel_edits[3][5] = {')
+    lines += ['    {'+', '.join(f'0x{id:x}' for id in group)+'},' for group in ids]
     lines.append('};')
     # Shared static's custom vtable store is always overwritten with SIMSUI's
     # imported CSimsStatic vtable before any external call; retain that value.

@@ -13,6 +13,9 @@ struct fs98_sim_class {
     const struct fs98_sim_control *controls;
     const struct fs98_sim_store *stores;
 };
+/* MAIN's aircraft-settings validator (0x207e5010) and conversion callbacks
+ * (0x207e5a80/5ac0) consume one descriptor with ret 4. */
+typedef int32_t (FS98_SIM_STDCALL *fs98_sim_settings_fn)(void *descriptor);
 struct fs98_sim_rect { int32_t left, top, right, bottom; };
 struct fs98_sim_services {
     void *(*base_construct)(void *object, uint32_t import, int32_t template, void *parent);
@@ -64,10 +67,49 @@ struct fs98_sim_services {
     void (*init_group)(void *control, void *font);
     void (*init_combo)(void *control, void *font, void *label);
     void (*control_text)(void *control, const char *text);
+    int32_t (*get_text)(void *control, char *buffer, int32_t capacity);
+    int32_t (*error_dialog)(void *object, void *control, void *descriptor);
+    void *(*base_font)(int32_t id);
+    void (*init_edit)(void *control, void *font, uint32_t foreground, uint32_t background,
+        uint32_t error_color, void *label, uint32_t flags);
     int32_t (*init_slider)(void *control, uint32_t first_bitmap, uint32_t second_bitmap,
         void *dib, void *palette, uint32_t first, uint32_t second, uint32_t third, uint32_t fourth,
         int32_t x, int32_t y, uint32_t module);
+    int (*is_enabled)(void *control);
+    int (*window_control_id)(uint32_t window);
+    uint32_t (*host_string)(uint32_t id, char **text_out);
+    uint32_t (*host_length)(const char *text);
+    int (*host_alloc)(int flags, uint32_t size, void **data_out, int zero);
+    int (*host_realloc)(int flags, uint32_t size, void **data_out);
+    int (*host_free)(void **data_out);
+    char *(*string_copy)(char *destination, const char *source);
+    char *(*string_cat)(char *destination, const char *source);
+    int (*string_length)(const char *text);
+    int (*parse_long)(const char *text);
+    void (*init_tabs)(void *tabs, void *parent, void *font, uint32_t bitmap,
+        void *dib, void *palette, uint32_t flags, uint32_t color, int inset,
+        int height, int width, int selection, uint32_t module, int last);
+    void (*init_page)(void *page, uint32_t flags);
+    void (*add_page)(void *tabs, void *page, const char *label, uint32_t available);
+    void (*init_tab_helper)(void *helper, void *tabs);
+    int (*modify_style)(void *control, uint32_t remove, uint32_t add, uint32_t flags);
+    int (*window_rect)(uint32_t window, struct fs98_sim_rect *rect);
+    int (*screen_to_client)(uint32_t window, int *point);
+    void (*last_page)(void *tabs, void *page);
+    void (*active_tab)(void *tabs, uint32_t index, int focus);
+    int (*message_box)(void *object, const char *text, const char *caption, uint32_t flags);
 };
+int fs98_sim_settings_placeholder(void *object, uint32_t unused);
+void fs98_sim_settings_wire(void *object);
+int fs98_sim_settings_validate(void *object);
+int fs98_sim_settings_init(void *object);
+int fs98_sim_fuel_selection(void *object, int selection);
+void fs98_sim_fuel_selector_changed(void *object);
+void fs98_sim_fuel_manual(void *object);
+int fs98_sim_fuel_error(void *object, int display);
+int fs98_sim_fuel_validate(void *object, uint32_t control_id);
+void fs98_sim_fuel_populate(void *object);
+void fs98_sim_fuel_init(void *object);
 void fs98_sim_set_services(const struct fs98_sim_services *services, void *const *vtables, void *static_vtable, void *control_vtable);
 void fs98_sim_set_module(uint32_t module);
 void fs98_sim_set_resource_module(uint32_t module);
@@ -86,6 +128,13 @@ int32_t fs98_sim_context(void *object, uint32_t window, uint32_t unused, uint32_
 int32_t fs98_sim_crash_tick(void *object, uint32_t w_param, uint32_t l_param);
 void *fs98_sim_make_notify(void);
 void fs98_sim_init_page_button(void *object, uint32_t offset, uint32_t font, uint32_t bitmap);
+void fs98_sim_realism_init(void *object);
+void fs98_sim_realism_populate(void *object);
+int32_t fs98_sim_realism_validate(void *object, uint32_t control_id);
+int32_t fs98_sim_realism_error(void *object, int32_t display);
+void fs98_sim_systems_init(void *object);
+int32_t fs98_sim_systems_commit(void *object, uint32_t unused);
+void fs98_sim_systems_populate(void *object);
 void fs98_sim_engines_init(void *object);
 void fs98_sim_engines_populate(void *object);
 void fs98_sim_set_crash_tables(void *notify_vtable);

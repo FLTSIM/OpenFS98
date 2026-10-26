@@ -3,8 +3,9 @@
 The retail English UI contains **64 registered dialogs in eight DLLs**, with
 340,814 bytes of `.text`. Together with MPCHAT's chat window this accounts for
 all **65** dialogs previously observed in the host's live registry. This is a
-static survey of the reference binaries, not a reimplementation or a claim of
-UI behavior verified against retail.
+static survey of the reference binaries. Implemented replacements and their
+behavioral acceptance are documented separately below; inventory counts alone
+do not establish implementation or verification.
 
 `tools/dialogmap.py` now covers the part of the module graph that `make graph`
 misses. It reads the English DLLs, root `SIMSUI.DLL`, `DIALOG.DLL` and
@@ -404,10 +405,12 @@ displayed pairs agree, but agreement on that subset is not a full independent
 resource-directory validation. The synthetic traversal test and direct raw
 directory checks guard against mistaking a short listing for a small module.
 
-Those inventory checks are static analysis. The separate Alerts and Views
-implementations now have differential suites and isolated startup tests; the
-inventory tool itself does not build or install replacements. Per-file SHA-256 hashes in JSON identify the exact source
-images for a later comparison. A different pressing must be surveyed again.
+Those inventory checks are static analysis. Alerts, Views, Sim and Help now
+have separate core/native differential suites and isolated startup tests.
+MPCHAT also has a real USER32/GDI/RichEdit comparison suite. The inventory tool
+itself does not build or install replacements. Per-file SHA-256 hashes in JSON
+identify the exact source images for a later comparison. A different pressing
+must be surveyed again.
 
 ## Work to take next
 
@@ -432,8 +435,78 @@ About's cached-font cleanup. [help.md](help.md) records the callback contracts,
 core and native differential suites, mutation checks and isolated startup.
 Build with `make -f tools/help.mk help`.
 
-**Options/World in slices**: start with CONTROLS, FE or FACIL's already
-specified descriptor contracts. Keep template creation, exchange-engine
-validation, accept/cancel ordering, callbacks and nested-dialog lifetime in
-scope. Replacing an MFC surface is much larger than copying its labels.
+**Sim is implemented** as a standalone native replacement, with all five
+factories, six settings pages, crash analysis, object/exception lifetimes,
+native comparisons and deliberate mutations. [sim.md](sim.md) records acceptance
+and the isolated startup result. Build with `make -f tools/sim.mk sim`.
 
+**MPCHAT is implemented and in the shared module build.** Its modeled suite
+is supplemented by real USER32/GDI/RichEdit comparisons: 48 paired scripts,
+864 checkpoints, two DLL unload cycles and 12 detected native mutations.
+See [mpchat.md](mpchat.md). The independent GUI runner is
+`make -f tools/mpchat.mk mpchatuidiff-run`.
+
+The four MFC replacements above remain standalone builds using the CD's
+MFC42/SIMSUI; shared build/install wiring and complete host-driven interaction
+are separate from their native harness and startup acceptance.
+
+### Remaining candidates
+
+| Target | Independent starting boundary | Handoff |
+| --- | --- | --- |
+| World, add/edit scenery area | Two ids share one template/class; FE already owns verified descriptors and validation callbacks. Best small first slice. | [world.md](world.md) |
+| MP_DIALOG | Smallest remaining whole English DLL by code size; MULTIP owns the verified callback blocks. Start with session settings/details, then recover the five-window connection flow. | [mpdialog.md](mpdialog.md) |
+| Options, customise controls | CONTROLS' shared data and callbacks are established, but the container has three child pages and device/key-capture behavior. | [options.md](options.md) |
+| Flights | Static inventory exists; caller descriptors and flight/menu ownership need more recovery alongside MAIN. Less convenient while MAIN is active. | [flights.md](flights.md) |
+
+Options replay/video or analysis, and World's FACIL-backed position/facility
+forms, are other possible slices. Keep template creation, exchange-engine
+validation, accept/cancel ordering, callbacks and nested lifetimes in scope.
+Existing owner stand-ins do not verify the real English DLL's UI.
+
+## Starting a remaining dialog in a fresh context
+
+The four handoffs above are **investigation starting points**, not complete
+recovered specifications. They identify the input image, ids/factories,
+verified owner contracts, scope and first unresolved work. Completed-module
+documents record build/test commands and acceptance limitations. Do not infer
+that an unimplemented module has a working harness merely because its callers
+have passed their own tests.
+
+1. Read this inventory, `docs/method.md`, the chosen module's handoff and the
+   linked owner document/source/stand-in. Check `git status` and leave other
+   agents' edits alone. Current project code uses snake_case and standard
+   `<stdint.h>` types.
+2. Regenerate the JSON/registry using the commands at the top. Confirm the
+   reference image base/id and use the preferred addresses only as reference
+   VAs. Do not copy resource payloads or machine code into tracked source.
+3. Pick one bounded family. Recover its complete class/page graph, constructors,
+   destructors, object layout, vtables, DDX, message/help maps and callbacks.
+   Verify argument counts and calling conventions at the callees. Record
+   unknowns and any conflict between old prose labels and actual registry ids.
+4. Keep writes to new module-specific source, standalone makefile, generators,
+   harnesses, documentation and ignored output. Use a separate Wine prefix and
+   lock. Read retail MAIN/HOST when needed, but do not edit their source,
+   harnesses, documentation or the shared Makefile. Likewise, keep verified
+   owner harnesses unchanged; construct new UI fixtures from their established
+   contracts. Never install a partial DLL over the live game.
+5. Follow Help/Sim for the core-to-native progression: guarded differential
+   fixtures, ordered calls and state/returns, exception cleanup, deliberate
+   mutations that require actual differences, then native import/vtable/map
+   binding, real controls/rendering and callback/lifetime comparisons. Verify
+   implementation ownership so the comparison cannot accidentally call retail
+   twice. For global-class windows, MPCHAT shows sequential registration and
+   ownership checks; for MFC dialogs, Help/Sim show native application setup.
+6. A whole-DLL claim needs every registered factory/page and module lifetime,
+   native mutation acceptance, repeated unload and an isolated startup using
+   a private game copy. A passing first slice remains partial. Document exact
+   commands, seeds/counts, artifacts, observed quirks and remaining boundaries
+   before handing off again.
+
+A concrete small-slice assignment is: implement World's `0x13080003` and
+`0x13080004` area-edit family using FE's existing descriptor contract, in a new
+standalone World harness; preserve all existing MAIN/HOST/FE work; verify core,
+exception and native behavior with actual detected mutations; leave other
+World registrations explicitly pending. For a whole-DLL assignment, choose
+MP_DIALOG and include all three registrations plus the full flag-2 window
+array in the completion criteria.

@@ -152,3 +152,15 @@ world-search-ui: world $(WORLD_DIR)/worldsearchuidiff.exe
 	bash tools/run_worlddiff.sh --search-ui
 world-search-native-breaks: world $(WORLD_DIR)/worldsearchuidiff.exe
 	bash tools/run_worlddiff.sh --search-native-breaks
+
+src/world/world_list_tables.inc src/world/world_list_hooks.inc &: tools/gen_world_list.py tools/gen_world_tables.py tools/dialogmap.py orig/English/World.DLL
+	python3 -B tools/gen_world_list.py
+LIST_CORE := src/world/world_list.c src/world/world_list.h src/world/world_list_tables.inc src/world/world_objects.h src/world/world_internal.h src/world/world_init.h src/world/world_unwind.h
+$(WORLD_DIR)/worldlistdiff.exe: tools/difftest/worldlistdiff.c $(LIST_CORE) src/world/world_init.c src/world/world_area.c | $(WORLD_DIR)
+	$(CC) -std=c99 -O2 -Wall -Wextra -Werror -fno-strict-aliasing -o $@ tools/difftest/worldlistdiff.c src/world/world_list.c src/world/world_init.c src/world/world_area.c -lntdll
+.PHONY: world-list-metadata world-list-core world-list-breaks
+world-list-metadata: src/world/world_list_tables.inc src/world/world_list_hooks.inc
+world-list-core: $(WORLD_DIR)/worldlistdiff.exe
+	bash tools/run_worlddiff.sh --list-core $(N) $(MODE)
+world-list-breaks: $(WORLD_DIR)/worldlistdiff.exe
+	bash tools/run_worlddiff.sh --list-breaks

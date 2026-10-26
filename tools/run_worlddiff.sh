@@ -7,6 +7,12 @@ export WINEDEBUG=-all
 mkdir -p -- "$WINEPREFIX"
 exec 9>bin/world-diff/wine.lock
 flock 9
+if [[ "${1:-}" == --list-core ]]; then
+    exec timeout 120s wine bin/world-diff/worldlistdiff.exe "${2:-2000}" "${3:-normal}"
+fi
+if [[ "${1:-}" == --list-breaks ]]; then
+    exec python3 -B tools/world_list_breaks.py
+fi
 if [[ "${1:-}" == --search-ui ]]; then
     exec timeout 180s wine bin/world-diff/worldsearchuidiff.exe "${2:-bin/world-diff/WORLD_area.dll}" "${3:-20}"
 fi

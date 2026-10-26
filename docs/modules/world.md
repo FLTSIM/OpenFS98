@@ -1057,6 +1057,148 @@ The drive-search family is complete through this native milestone. The DLL is
 still a partial replacement. Continue with a separately bounded remaining
 family and its own owner contract and acceptance.
 
+## Scenery-area list core and initialization (native acceptance pending)
+
+The next bounded slice is the scenery-area list `0x13080001`, template `0x6b5`,
+factory `0x223f12e0`. `world_list.c` implements its core routines and initializer
+behind independent services. It is **not registered in the native DLL**; the
+six accepted registrations above remain the complete native slice.
+
+Its owner is [FE's Scenery Library](fe.md#part-4--the-scenery-library-0x78-verified),
+`src/fe/fe_library.c` and `tools/difftest/fesldiff.c`'s `world_areas` stand-in.
+The descriptor at object `+0x10dc` contains heading `+0x1c`, signed row count
+`+0x20`, the 0x40-byte row array `+0x24` and selection `+0x28`. The callbacks
+are `stdcall(descriptor)`: `+8` Add, `+0xc` Edit, `+0x10` Delete, `+0x14` Browse
+and `+0x18` Priority. Their returns are ignored. The `+4` check/no-op callback
+is not used by these World routines. The row's title, layer, active and
+protected fields are `+0x18`, `+0x2c`, `+0x34` and `+0x3c`. FE and its verified
+harness are unchanged; no real files or nested owner dialogs execute here.
+
+Recovered core behavior:
+
+- Collect (`0x223fa870`) gets LB_GETCURSEL from the control HWND at object
+  `+0x1778` and reloads the descriptor before storing selection.
+- Selection change (`0x223fac70`) collects, reads protection through that
+  selection and caches one boolean for the Delete (`+0x1998`) and Edit
+  (`+0x189c`) enables. A callback changing protection between enables does
+  not change the second decision.
+- Add (`0x223fabb0`), Priority (`0x223fabd0`), Edit (`0x223fac30`) and Browse
+  (`0x223fac50`) invoke the owner then repopulate, without collecting first.
+  Delete (`0x223fabf0`) collects before invoking the owner, then repopulates.
+- Double-click (`0x223fad10`) calls LB_GETCURSEL but discards its return. It
+  tests protection using the descriptor's old selection and invokes Edit
+  only if that row is unprotected. It does not implicitly collect the new
+  selection before that check or owner dispatch.
+- OK (`0x223fab80`) collects, writes answer **one**, reloads the current
+  vtable and closes. Cancel (`0x223faba0`) closes without changing the answer.
+  There is no validation/check callback on either path.
+
+Population `0x223fa8a0` constructs its CString first, assigns the heading,
+saves the current UI selection, then resets the list. Each row becomes
+`title<TAB>layer<TAB>001+` (or `-`), with one-based `%03d` position and raw
+nonzero active state. The layer strings are extracted from retail's switch;
+all five valid values 10..50 and every default entry are validated by the
+generator. Descriptor/row accesses stay fresh across assignment and append
+calls. Row stride is `0x40`; the row-count test is signed.
+
+The scratch buffer survives iterations: an invalid later layer reuses the
+preceding formatted index, and an invalid first layer reads indeterminate
+stack text. The C local layout retains CString at `+0`, saved selection at
+`+4` and 100-byte scratch at `+8`; this differs from the priority class's
+adjacent locals. The fixture paints only the owned scratch through the CString
+constructor and independently requires the first-invalid-layer witness.
+No retail stack bytes are copied into source.
+
+After population, a positive LB_GETCOUNT enables Add/Edit/Delete, stores the
+saved selection (mapping exactly `-1` to zero), calls LB_SETCURSEL, then runs
+selection change to refresh Edit/Delete protection. An empty list disables
+those three buttons without writing descriptor selection. The CString is
+destroyed on success and during real exception unwinding after construction;
+it is marked dead before ordinary destruction and is not retried if that
+service throws.
+
+Selection and double-click do not range-check their row read. The differential
+fixture supplies committed rows before/after the logical array so negative
+and out-of-range selections can be observed safely, including 32-bit shift
+wraparound for `-1`. This establishes those accesses within the fixture;
+it does not claim acceptance of arbitrary invalid-address faults against real
+owner allocations. Native empty-list/selection behavior remains to be tested.
+
+Initializer `0x223fa5d0` calls base init, reloads the vtable and skins with
+`0x14f`, the current resource module and flags 15. Failed skinning returns zero.
+Success sets up the artwork; OK/Cancel buttons with `0x132` and coordinates
+0/0; five action buttons with `0x137` and coordinates 1/1; list/heading/static
+text; and tab stops `0x118` / `0x154`. The list uses font `+0x450` and its
+label `+0x16a0` uses `+0x370`; other text uses `+0x220`. Resource modules are
+loaded afresh for each button. It populates and returns one, without extra
+base color-field or close-pointer stores.
+
+`gen_world_list.py` recovers the complete class graph as metadata: 14 embedded
+controls and DDX bindings, their reverse destruction and MSVC cleanup actions,
+terminated help map, 60-slot vtable and nine local message entries. Preferred
+VAs are constructor `0x223fa260`, destructor `0x223fa3a0`, scalar deleting
+destructor `0x223fa380`, DDX `0x223fa4b0`, help/context `0x223facd0` /
+`0x223facf0`, vtable `0x2240f750`, message map `0x2240f658` and base-map getter
+`0x223f5d40`. Object size is `0x1c8c`. Message entries cover the five action
+buttons `0x1aa3..0x1aa7`, list `0x1b16` selection/double-click, help and context
+menu. PostNcDestroy is shared `0x223f3d30`; virtual OK/Cancel are the routines
+above, while validation/error remain inherited imports. Metadata extraction
+is not behavioral lifetime or native acceptance. Both includes reproduce
+byte-for-byte in an isolated directory and contain no code/resource payloads.
+
+```sh
+make -f tools/world.mk world-list-metadata
+make -f tools/world.mk world-list-core N=20000
+make -f tools/world.mk world-list-core N=2000 MODE=unwind
+make -f tools/world.mk world-list-breaks
+```
+
+With seed `0x4a971b63` and the reference hash above, the normal run made
+**240,000 comparisons** and 240,000 independent reference-side fixture checks.
+The unwind run made **521,948 comparisons**, including **497,948 real
+unwinds**, plus 24,000 normal fixture checks. All matched. Twelve operations
+cover initialization, population, collection, protection, all five owner
+actions, double-click, OK and Cancel. The suite compares ordered calls,
+defined returns, the complete guarded `0x1c8c`-byte object, two descriptors,
+padded rows, title buffers, simulated list state, callback counters,
+resource-module state and CString liveness. Scenarios include negative/empty/
+positive counts, divergent UI/descriptor selections, protected rows, all valid
+and invalid layer paths, raw noncanonical active state, descriptor/vtable
+swaps and changing protection/resource modules at external boundaries. Retail
+retains its MSVC frame handler; the harness unwinds with real RtlUnwind rather
+than escaping through a vectored handler. This accepts CString cleanup in the
+core call chains, not the unimplemented embedded-control/factory lifetimes.
+
+All **31 deliberate core/initializer mutations** produced exit 1 with an
+actual `LIST DIFFER` transcript. They cover CString unwind cleanup, heading
+assignment, reset/selection handling, row count/stride, formatting/capacity,
+descriptor reloads, invalid-layer scratch reuse, raw active flags, button
+enables, cached protection, OK/Cancel answers, close-vtable reload, owner
+callback choice, Delete collection, double-click's stale selection/protection,
+skin vtable/result, module reloads, artwork, button setup, list font and tabs.
+Each mutant is independently compiled and run with 1,024 scenarios in unwind
+mode; build failures, faults and timeouts do not count. The existing search
+core regression also passed **26,000 comparisons** and 26,000 fixture checks
+with zero differences.
+
+Acceptance logs are `bin/world-diff/list-core-normal.log`,
+`list-core-unwind.log`, `list-core-breaks.log` and `list-search-regression.log`.
+Mutant source, executables and actual difference transcripts are under
+`bin/world-diff/list-breaks/`. The World runner retains its private Wine prefix
+and lock; existing native registration/build inputs are unchanged.
+
+Next: implement the embedded-control constructor/destructor, scalar deleting
+destructor, factory, DDX, help/context and PostNcDestroy, with independent normal,
+real-unwind and typed-exception comparisons. The factory ignores its parent,
+allocates `0x1c8c`, stores descriptor `+0x10dc` and has a failed-Create message
+`CSceneryAreas::Create() failed\n`; recover and test its cleanup/catch paths
+rather than assuming earlier factories establish them. The core Delete action
+already uses `fs98_world_list_delete`; give scalar deleting destruction a
+separate name. After lifetime acceptance, bind native imports/vtable/map and
+test real list controls, nested FE-shaped action callbacks, protected states,
+close behavior, rendering, deletion and unloads. Keep the area list unregistered
+until that native acceptance passes.
+
 ## Remaining boundary
 
 Thirteen World registrations are still pending native acceptance: scenery lists/library,

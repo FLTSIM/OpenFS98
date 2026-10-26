@@ -1,0 +1,4 @@
+LIBRARY Sim.DLL
+EXPORTS
+    Linkage=g_sim_linkage DATA
+    ImportTable=g_sim_imports DATA

@@ -198,9 +198,9 @@ fields come from the registry/tool; regenerate their canonical form with
 
 ### Sim.DLL
 
-The C dialog core and its standalone differential harness are implemented;
-native DLL integration remains pending. See [sim.md](sim.md) for the implemented
-boundary, callback contracts, verification and remaining work.
+The standalone native replacement and its core/native differential harnesses
+are implemented. See [sim.md](sim.md) for the callback contracts, native
+rendering/lifetime comparisons, mutation checks and isolated startup result.
 
 | Registry id | Template id(s) | Description |
 | --- | --- | --- |

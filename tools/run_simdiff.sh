@@ -7,6 +7,15 @@ export WINEDEBUG=-all
 mkdir -p -- "$WINEPREFIX"
 exec 9>bin/sim-diff/wine.lock
 flock 9
+if [[ "${1:-}" == --ui-breaks ]]; then
+    exec python3 -B tools/sim_ui_breaks.py "${@:2}"
+fi
+if [[ "${1:-}" == --ui ]]; then
+    exec timeout 360s wine bin/sim-diff/simuidiff.exe "${2:-bin/sim-diff/SIM_ours.dll}" "${3:-30}"
+fi
+if [[ "${1:-}" == --smoke ]]; then
+    exec python3 -B tools/sim_smoke.py "${2:-75}"
+fi
 if [[ "${1:-}" == --breaks ]]; then
     wineserver -p60
     exec python3 -B tools/sim_breaks.py "${2:-100}" "${@:3}"

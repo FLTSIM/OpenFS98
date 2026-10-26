@@ -4026,8 +4026,8 @@ static void check_display(void)
             d->mode[k][1] = (uint32_t[]){ 200, 240, 384, 480, 600, 768, 1024 }[rnd() % 7];
             d->mode[k][2] = (uint32_t[]){ 8, 16, 16, 24, 32 }[rnd() % 5];
         }
-        d->vidmem = rnd() % 4 ? rnd() % 0x800000 : 0;
-        d->cur[0] = 640 + rnd() % 400; d->cur[1] = 480 + rnd() % 300; d->cur[2] = (uint32_t[]){ 8, 16, 24, 32 }[rnd() % 4];
+        d->vidmem = rnd() % 4 ? (rnd() & 1 ? 0x180000 : rnd() % 0x800000) : 0;   /* 1.5 MB: between 640x480's two 16-bit tests */
+        d->cur[0] = 640 + rnd() % 400; d->cur[1] = 480 + rnd() % 300; d->cur[2] = (uint32_t[]){ 8, 8, 16, 24, 32 }[rnd() % 5];
     }
     /* the profile */
     seq++;
@@ -4047,7 +4047,8 @@ static void check_display(void)
         if (rnd() % 4)
             t += sprintf(t, "Mode=%s\r\n", (const char *[]){ "640x480x16", "800x600x8", "1024x768x16x75", "x", "640", "640x480",
                                                               "0x480x8", "320x200x8x", "1280x1024x32", "640000000000000000000000000000000000000000",
-                                                              "640x48000000000000000000000000000000000000" }[rnd() % 11]);
+                                                              "640x48000000000000000000000000000000000000", "640x600x16",
+                                                              "640x480x16000000000000000000000000000000" /* 39: fills the buffer */ }[rnd() % 13]);
         for (k = 0; k < 12; k++)
             if (rnd() % 3 == 0) t += sprintf(t, "%s=%d\r\n", disp_keys[k], (int)(rnd() % 3));
     }
@@ -4254,7 +4255,8 @@ static void check_dialogs(void)
         *(uint32_t *)(d + 0x180c) = 0x5150;
     }
     *(uint32_t *)(our_data + 0x1834) = *(uint32_t *)(DATA_VA + 0x1834) = rnd() % 4 ? P(fake_purge) : 0;   /* the event hook */
-    *(uint32_t *)(DATA_VA + 0x34e4) = *(uint32_t *)(our_data + 0x34e4) = rnd() % 3 ? 0 : P(&dd_obj[0]);   /* 0x41a4e4 */
+    *(uint32_t *)(DATA_VA + 0x34e4) = *(uint32_t *)(our_data + 0x34e4) =
+        rnd() % 3 || !dd_obj[0].vtbl ? 0 : P(&dd_obj[0]);   /* 0x41a4e4 (the fake is made by the display check, which a file-less run skips) */
     *(uint32_t *)(DATA_VA + 0x1848) = *(uint32_t *)(our_data + 0x1848) = rnd() % 3 ? 0 : 3;               /* 0x418848 */
     pal_caps = rnd() % 3 ? 0x100 : rnd() & ~0x100u;
     dlg_slot = rnd() % 5; if (dlg_slot > 3) dlg_slot = 3;

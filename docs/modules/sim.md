@@ -3,14 +3,18 @@
 The crash-analysis and aircraft-settings dialog cores are implemented in C.
 The comparison harness covers all eight object lifetimes, five factories,
 control exchange, help maps, six settings pages, and the outer settings dialog.
-This is not yet a replacement DLL: the native MFC/SIMSUI adapter, module entry
-points, native vtables/message maps, resources, and native dialog/startup checks
-remain pending. The implementation does not require changes to MAIN, HOST, or
-the shared Makefile.
+The native replacement builds independently as `bin/sim-diff/SIM_ours.dll`,
+with MFC/SIMSUI import adapters, module entry points, native vtables/message
+maps and build-only resources. The implementation does not require changes
+to MAIN, HOST, or the shared Makefile. Native acceptance is recorded below.
 
 Build and run independently:
 
 ```sh
+make -f tools/sim.mk sim
+make -f tools/sim.mk simuidiff-run
+make -f tools/sim.mk sim-ui-breaks
+make -f tools/sim.mk sim-smoke
 make -f tools/sim.mk simdiff-run
 make -f tools/sim.mk simdiff-run N=2000 SEED=0x9e37b184 MODE=unwind
 make -f tools/sim.mk sim-breaks N=100
@@ -57,8 +61,10 @@ retail instructions or resources.
 `tools/gen_sim_runtime.py` prepares bindings for all eight class vtables, the
 notification and private CWnd vtables, eight message maps, and five factories.
 It extracts resources and an ordinal import anchor only into ignored build
-output. The generated wrappers pass a standalone C syntax check; they still
-need the native runtime adapter and native behavioral comparisons.
+output. The generated wrappers are compiled into the native DLL. `sim_runtime.c`
+resolves named SIMSUI imports and the CD MFC42 ordinals, binds the ten native
+vtable images and eight inherited message maps, and supplies typed adapters
+for every core service. Retail MFC/SIMSUI remain required dependencies.
 
 ## Implemented behavior
 
@@ -106,7 +112,7 @@ and return with `ret 8`. Their return values are ignored by the fuel page.
 
 `sim_settings.c` implements the outer initializer and descriptor wiring. It
 constructs the pages in realism, reliability, damage, engines, fuel, systems
-order, adds the labels with each descriptor's availability flag, initializes
+order, adds the labels with each descriptor's disable flag, initializes
 six tab helpers, converts the cancel-button rectangle, wires page records and
 owner controls, and activates the requested tab. It retains both descriptor
 guards and the saved virtual table used for the extra artwork. Each page
@@ -161,10 +167,64 @@ when it exits with an actual `DIFFER scenario=` report. Build errors, startup
 timeouts, and faults do not count. Snapshots and logs stay under ignored
 `bin/sim-diff/`.
 
-## Remaining integration
+## Native integration and acceptance
 
-Implement module init/deinit and DllMain, exports, runtime import adapters,
-and binding of the generated virtual tables/message maps. Then
-compare native dialogs and mutation cases under the private Sim Wine prefix,
-and perform an isolated startup smoke before installing or advertising a
-replacement DLL.
+`sim_runtime.c` implements `DllMain`, module init/deinit, `ImportTable` and
+`Linkage`, including all five public factories. MFC's extension-module
+registration uses the original 0x40-byte CDynLinkLibrary allocation and its
+constructor exception cleanup. Deinit releases the host registration and
+Dialog.DLL resource module, then clears both handles. The generated resource
+file remains under ignored build output; no resource payloads are committed.
+
+`tools/difftest/simuidiff.c` loads retail and rebuilt Sim with the real CD's
+MFC42 and SIMSUI. A native MFC application supplies window ownership; HOST
+memory/string/module services and the settings/graph descriptor owners are
+fixtures. The harness checks that virtual dispatch belongs to the expected
+module, creates each factory, visits all six settings pages, drives numeric
+edits, checkboxes, radios, combos and private messages, and closes through
+accept/cancel. Every page checkpoint compares child controls and their state,
+callback transcripts and complete client pixels. Final descriptor and numeric
+buffer bytes are compared after close. Two DLL load/unload cycles also check
+unmapping. Module-init probes compare normal allocation, allocation failure,
+allocator throws and constructor throws, including cleanup and repeated deinit.
+
+Native acceptance on the reference build:
+
+- Core regressions after integration: **2,920,000 normal comparisons** (20,000
+  scenarios) and **468,614 exception-mode comparisons** (200 scenarios), zero
+  differences; seed `0x73a915e2`. Logs: `native-core-normal.log` and
+  `native-core-unwind.log` under `bin/sim-diff/`.
+- 30 fixtures across two load/unload cycles: **60 public-factory/message cases,
+  zero differences**, including every page's visible rendering and controls.
+  The full transcript is `bin/sim-diff/native-ui.log`.
+- All **8/8 native mutations detected** after correcting the fixture's disable
+  flags and supplying crash-axis captions. The baseline and individual logs
+  are under `bin/sim-diff/ui-breaks/`.
+- Isolated startup: **27/27 modules, 95 gauges, PASS**, with English/Sim.DLL
+  loaded and its bytes confirmed. Trace: `bin/sim-diff/smoke-game-2968lo0a/sim-smoke.log`.
+
+The first native fixture exposed an important coverage trap: the first word of
+each page descriptor is a **disable** flag. Setting it to one creates all page
+windows but prevents activation and page initialization. The harness now uses
+zero and requires every selected page to be visible. Its crash graph fixture
+also supplies nonempty axis captions; moving an empty caption cannot establish
+paint coverage. First-case page snapshots and BMP captures are retained under
+`bin/sim-diff/native-page-*` for inspection.
+
+`tools/sim_ui_breaks.py` snapshots the native sources, harness and resource/link
+inputs before compiling deliberate rendering, message-dispatch, answer and
+module-lifetime errors. A baseline must pass first. Only an actual comparison
+mismatch with exit 1 counts; build errors, faults and timeouts fail acceptance.
+Logs and input hashes remain under `bin/sim-diff/ui-breaks/`.
+
+`tools/sim_smoke.py` copies the installed game into an ignored private tree,
+substitutes only English/Sim.DLL there, boots with the dedicated Sim Wine
+prefix and records the loaded modules/gauges. It checks the substituted DLL's
+bytes and loader trace, then stops only that prefix. It never installs into
+`game/` or changes the shared build.
+
+The graph callback is a stateful owner fixture, not REALITY's renderer, and
+the settings validator/converters are descriptor fixtures, not MAIN. The
+native suite complements the high-volume core comparisons; it does not claim
+to cover every possible Windows notification or native exception path. Shared
+build/install integration remains separate from this standalone replacement.

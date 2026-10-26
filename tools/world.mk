@@ -1,4 +1,4 @@
-# Partial World area DLL and core tests; isolated from the shared build/game.
+# Partial World native DLL and tests; isolated from the shared build/game.
 CC := i686-w64-mingw32-gcc
 WORLD_DIR := bin/world-diff
 N ?= 2000
@@ -28,7 +28,7 @@ world-life-breaks: worldlife
 	bash tools/run_worlddiff.sh --life-breaks
 
 PRIORITY_OBJECTS := src/world/world_priority_objects.c src/world/world_priority.h src/world/world_priority_tables.inc src/world/world_priority_hooks.inc src/world/world_objects.h src/world/world_init.h src/world/world_unwind.h src/world/world_exceptions.h src/world/world_internal.h
-WORLD_SOURCES := src/world/world_priority.c src/world/world_priority_objects.c src/world/world_area.c src/world/world_objects.c src/world/world_init.c src/world/world_runtime.c
+WORLD_SOURCES := src/world/world_booster.c src/world/world_booster_objects.c src/world/world_booster_init.c src/world/world_priority.c src/world/world_priority_objects.c src/world/world_area.c src/world/world_objects.c src/world/world_init.c src/world/world_runtime.c
 .PHONY: world worlduidiff-run world-ui-breaks world-smoke
 src/world/world_runtime_tables.inc $(WORLD_DIR)/world.res $(WORLD_DIR)/simsui-anchor.def &: tools/gen_world_runtime.py tools/gen_views_runtime.py tools/dialogmap.py orig/English/World.DLL orig/SIMSUI.DLL | $(WORLD_DIR)
 	python3 -B tools/gen_world_runtime.py
@@ -88,7 +88,7 @@ world-booster-breaks: $(WORLD_DIR)/worldboosterdiff.exe
 
 src/world/world_booster_tables.inc src/world/world_booster_hooks.inc &: tools/gen_world_booster.py tools/gen_world_tables.py tools/dialogmap.py orig/English/World.DLL
 	python3 -B tools/gen_world_booster.py
-BOOSTER_OBJECTS := src/world/world_booster_objects.c src/world/world_booster.h src/world/world_booster_tables.inc src/world/world_booster_hooks.inc src/world/world_objects.h src/world/world_unwind.h src/world/world_exceptions.h src/world/world_internal.h
+BOOSTER_OBJECTS := src/world/world_booster_objects.c src/world/world_booster.h src/world/world_booster_tables.inc src/world/world_booster_hooks.inc src/world/world_objects.h src/world/world_init.h src/world/world_unwind.h src/world/world_exceptions.h src/world/world_internal.h
 $(WORLD_DIR)/worldboosterlifediff.exe: tools/difftest/worldboosterlifediff.c $(BOOSTER_OBJECTS) | $(WORLD_DIR)
 	$(CC) -std=c99 -O2 -Wall -Wextra -Werror -fno-strict-aliasing -fno-delete-null-pointer-checks -o $@ tools/difftest/worldboosterlifediff.c src/world/world_booster_objects.c -lntdll
 .PHONY: world-booster-life
@@ -97,3 +97,19 @@ world-booster-life: $(WORLD_DIR)/worldboosterlifediff.exe
 .PHONY: world-booster-life-breaks
 world-booster-life-breaks: $(WORLD_DIR)/worldboosterlifediff.exe
 	bash tools/run_worlddiff.sh --booster-life-breaks
+
+BOOSTER_INIT := src/world/world_booster_init.c src/world/world_booster.h src/world/world_init.h src/world/world_unwind.h
+$(WORLD_DIR)/worldboosterinitdiff.exe: tools/difftest/worldboosterinitdiff.c tools/difftest/worldboosterdiff.c $(BOOSTER_INIT) src/world/world_booster.c src/world/world_init.c src/world/world_area.c | $(WORLD_DIR)
+	$(CC) -std=c99 -O2 -Wall -Wextra -Werror -fno-strict-aliasing -o $@ tools/difftest/worldboosterinitdiff.c src/world/world_booster_init.c src/world/world_booster.c src/world/world_init.c src/world/world_area.c -lntdll
+.PHONY: world-booster-init
+world-booster-init: $(WORLD_DIR)/worldboosterinitdiff.exe
+	bash tools/run_worlddiff.sh --booster-init $(N) $(MODE)
+$(WORLD_DIR)/WORLD_area.dll: $(BOOSTER_OBJECTS) $(BOOSTER_INIT)
+$(WORLD_DIR)/worldboosteruidiff.exe: tools/difftest/worldboosteruidiff.c tools/difftest/worldpriorityuidiff.c tools/difftest/worlduidiff.c src/world/world_internal.h | $(WORLD_DIR)
+	$(CC) -std=c99 -O2 -Wall -Wextra -Werror -fno-strict-aliasing -o $@ $< -lgdi32 -lntdll
+.PHONY: world-booster-ui
+world-booster-ui: world $(WORLD_DIR)/worldboosteruidiff.exe
+	bash tools/run_worlddiff.sh --booster-ui
+.PHONY: world-booster-native-breaks
+world-booster-native-breaks: world $(WORLD_DIR)/worldboosterinitdiff.exe $(WORLD_DIR)/worldboosteruidiff.exe
+	bash tools/run_worlddiff.sh --booster-native-breaks

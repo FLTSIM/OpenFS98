@@ -1,14 +1,14 @@
-# World.DLL — native scenery-area and priority slices
+# World.DLL — native scenery-area, priority and booster slices
 
 **Partial replacement with native UI acceptance.** `bin/world-diff/WORLD_area.dll`
-registers add/edit scenery area (`0x13080003` / `0x13080004`) and scenery
-priority (`0x13080005`). Their classes, initialization, controls, event/message
-maps, factories, exception lifetimes and module binding are rebuilt in C, using
-retail MFC42/SIMSUI as shared dependencies. The other 16 World registrations
-remain pending native acceptance. Add/edit booster events and class/factory
-lifetimes have independent acceptance below, but are not registered in this DLL.
+registers add/edit scenery area (`0x13080003` / `0x13080004`), scenery
+priority (`0x13080005`) and add/edit booster (`0x13080008` / `0x13080007`).
+Their classes, initialization, controls, event/message maps, factories,
+exception lifetimes and module binding are rebuilt in C, using
+retail MFC42/SIMSUI as shared dependencies. The other 14 World registrations
+remain pending native acceptance.
 
-This is ready to review as a standalone three-dialog slice. It is **not a full
+This is ready to review as a standalone five-dialog slice. It is **not a full
 World replacement** and must not replace the active game's World.DLL. The
 startup smoke changes only a private game copy; startup success does not supply
 the other registrations or establish their behavior.
@@ -52,7 +52,7 @@ verified by its own harness.
 This slice covers these two registrations and their shared class,
 control exchange, validation, accept/cancel and lifetimes. Use independent
 callback/file fixtures. Priority now has its own acceptance below. Broader scenery lists, drive search
-and booster dialogs remain candidates for later slices. The three-registration
+and booster-list dialogs remain candidates for later slices. The native
 test DLL remains a partial World replacement.
 
 ## Other bounded slices
@@ -471,11 +471,11 @@ All five World generated includes reproduce byte-for-byte in an isolated
 directory. The World sources and fixtures retain snake_case identifiers and
 standard `<stdint.h>` types, without `types.h`.
 
-## Next family: add/edit performance booster core and lifetimes
+## Implemented family: add/edit performance booster
 
-The shared booster editor now has a verified event core and class/factory
-lifetimes. This is the first two milestones for this family, **not native UI
-acceptance**. `WORLD_area.dll` still registers only the three dialogs above.
+The shared booster editor now has core-event, class/factory, initializer and
+native UI acceptance. `WORLD_area.dll` registers these two factories in addition
+to the three scenery-area/priority registrations above.
 
 | Registry id | Factory VA | FE descriptor |
 | --- | --- | --- |
@@ -491,35 +491,46 @@ row and `+0x10` points to the parent list descriptor. See
 Those owner files and their harnesses were not changed. The new tests supply
 independent descriptor, row, text and callback fixtures.
 
+The native template clarifies the field labels: row `+4` is
+**Cache path** (control `0x1ae8`), and row `+0x18` is **Source path** (control
+`0x1aea`). Row `+0x5c` is **Cache size**, and the unsigned WORD at `+0x74` is
+**Recommended size**, both in kilobytes. Earlier World/FE notes called
+these values layers and used the opposite path names. World documentation now
+follows the visible labels; callback offsets and measured owner behavior are
+unchanged. FE and its verified harness remain unchanged.
+The combo is **Cache cleanup strategy**, and `+0x54` is **Cache active**.
+
 `world_booster.c` implements six routines: collect (`0x223f6dd0`), populate
 (`0x223f6ea0`), OK (`0x223f6740`), path change (`0x223f6fd0`), virtual
 validation (`0x223f7160`) and virtual error (`0x223f71a0`). Observed behavior:
 
-- Collect reads the cache directory before the source path, both with capacity
-  `0x104`, reloading the descriptor/row between calls. Layer text uses capacity
+- Collect reads the source path before the cache path, both with capacity
+  `0x104`, reloading the descriptor/row between calls. Cache-size text uses
+  capacity
   `0x1f` and `atoi`, stored at row `+0x5c`. Combo selection exactly 1 sets row
   `+0x7c` to 1; every other selection sets zero. Any nonzero check state at
   object `+0x1d64` becomes active 1 at row `+0x54`.
-- Populate formats both layers with `%5d`. The original BSTINFO layer at row
+- Populate formats both sizes with `%5d`. The BSTINFO recommended size at row
   `+0x74` is an unsigned 16-bit value, even when the surrounding word contains
   nonzero upper bits. Name/description use SIMSUI text assignment, while the
-  directory, layer edit and source use MFC text assignment. Stored active and
-  combo values are selected only when exactly 1, unlike collect's active test.
+  source path, size edit and cache path use MFC text assignment. Stored active
+  and combo values are selected only when exactly 1, unlike collect's active test.
 - OK collects/checks and chooses the first error at row `+0`, `+0x14`,
-  `+0x78`, `+0x50`, then `+0x58`: source, directory, combo, active, layer.
+  `+0x78`, `+0x50`, then `+0x58`: cache path, source path, cleanup strategy,
+  active, cache size.
   A nonzero error-service return focuses the corresponding control and keeps
   the dialog open. A zero return accepts immediately, without examining later
   errors. Acceptance writes answer 1 before virtual close. It does not call
   virtual validation/error as the scenery-area editor does.
-- Layer errors build a three-word record at row `+0x60`: status, temporary
+- Cache-size errors build a three-word record at row `+0x60`: status, temporary
   edit text and the parsed maximum from the string at row `+0x70`. Both OK and
   virtual error leave the expired stack pointer at row `+0x64`. The latter
   returns virtual focus's result, including when no error exists. Virtual
   validation collects/checks again but examines only row `+0x58`, returning
   control id `0x1ae9` or zero.
-- Path change reads only the source, with capacity `0x80`, then checks. It
-  decides all seven enables once from the source status, refreshes description,
-  name and both layer displays, and preserves the other editable row fields.
+- Path change reads only the cache path, with capacity `0x80`, then checks. It
+  decides all seven enables once from the cache-path status, refreshes
+  description, name and both size displays, and preserves other editable fields.
   Descriptor loads after those calls remain fresh.
 
 The class vtable is `0x2240ee68`, constructor `0x223f6280`, destructor
@@ -564,7 +575,7 @@ the interrupt run made **105,520 comparisons**, including 93,520 interrupted
 reference calls, and 12,000 normal self-checks. All matched. Fixtures compare
 ordered calls, returns and every byte of the guarded object, both descriptors,
 rows and string buffers. They cover all status combinations, error-service
-outcomes, negative/extreme layer inputs, noncanonical active/combo values,
+outcomes, negative/extreme cache-size inputs, noncanonical active/combo values,
 upper-half BSTINFO values and descriptor/vtable/status changes at external
 boundaries. Only expired row `+0x64` addresses are normalized; text is checked
 inside the error service. Core interruptions escape through a vectored handler;
@@ -591,20 +602,118 @@ executables and logs are retained in `bin/world-diff/booster-breaks/` and
 `booster-breaks-acceptance.log`, `booster-life-normal.log`,
 `booster-life-unwind.log`, `booster-life-typed.log` and `booster-life-breaks.log`.
 
-The next booster milestone is initializer `0x223f68b0`, including its shared
-static font construction/cleanup, empty-source CString/resource branch,
-control setup and enables. The message-map getter `0x223f6730` returns
-`0x2240ede8`, based on getter `0x223f5d40`: local handlers are nonclient click
-`0x223f7240`, help, context menu and source change `0x400` for control `0x1ae8`.
-The nonclient handler forwards to an imported MFC handler. Native vtable/map
-binding, real controls/pixels, callback/error scripts, automatic deletion,
-repeated unload and private-copy startup remain pending. The standalone native
-DLL and active game were not changed for this milestone.
+### Booster initialization and native acceptance
+
+`world_booster_init.c` implements initializer `0x223f68b0`. It calls base init,
+then virtual skinning; failed skinning returns zero immediately. Successful
+skinning sets object `+0x84` to 12. An empty cache path loads heading resource
+`0xf8d4` through a temporary CString and sets object `+0x10e8` to 1; existing
+paths set that flag to zero. CString cleanup follows the same real-unwind
+boundary as the earlier initializer.
+
+A shared `CSimsFont` is constructed from base font 8 once per DLL load. Retail
+sets bit 0 of its flag byte **before** asking for the base font/constructing,
+then registers its destructor. Exceptions preserve that early flag, and a failed
+constructor never registers cleanup. Each successful initialization copies the
+current dialog's fields at `+0x228` / `+0x22c` / `+0x270` / `+0x274` into shared
+font fields `+8` / `+0xc` / `+0x50` / `+0x54`, setting byte flag `+0x58` bit
+`0x10` without disturbing adjacent bytes.
+The initializer uses that font for the description, base font 2 for the three
+edits, and the recovered groupbox, combo, checkbox, button and text setup.
+
+Text limits are loaded afresh from the row's source/cache capacities minus one;
+the cache-size edit limit is 7. For an empty cache path, population precedes
+seven disables. For an existing path, the first five controls are enabled and
+the last two disabled **before** population. Both branches decide their enable
+sequence once, even if a callback changes the flag. Finally object `+0x10e0`
+and `+0x10e4` receive the Cancel and OK embedded-control pointers.
+
+The message-map getter `0x223f6730` returns `0x2240ede8`, based on getter
+`0x223f5d40`. Local handlers are nonclient click `0x223f7240`, help, context menu
+and cache-path change `0x400` for control `0x1ae8`. The nonclient handler consumes
+12 stack bytes, but calls MFC ordinal 2379 (`Default`) with **no arguments**;
+its callee ends in plain `ret`. Passing the handler's three arguments onward
+corrupts the stack. The native suite explicitly sends `WM_NCLBUTTONDOWN` through
+this map as well as exercising command dispatch.
+
+`world_runtime.c` now rebuilds all three 60-slot vtables and all three message
+maps, binds the new imports, propagates module handles to the booster factories,
+and registers five dialogs. Shared native Cancel/PostNcDestroy wrappers serve
+both priority and booster classes. The shared-font destructor runs after MFC
+extension teardown on DLL detach, matching retail's DllMain/CRT exit order.
+This `-nostdlib` DLL owns its callback locally; it does not put an unloadable
+function pointer in the process-wide CRT exit table. Module deinit leaves the
+font alive until actual DLL unload.
+
+```sh
+make -f tools/world.mk world-booster-init N=20000
+make -f tools/world.mk world-booster-init N=2000 MODE=unwind
+make -f tools/world.mk world-booster-ui
+make -f tools/world.mk world-booster-native-breaks
+make -f tools/world.mk worlduidiff-run
+make -f tools/world.mk world-priority-ui
+make -f tools/world.mk world-smoke
+```
+
+With seed `0x4a971b63`, the initializer made **20,000 normal comparisons** and
+20,000 reference-side fixture checks. Its unwind run made **86,818 comparisons**,
+including **84,818 real unwinds**, and 2,000 normal fixture checks. All matched.
+The fixture compares complete object/descriptor/row/string state, ordered calls,
+returns, shared-font bytes, constructor/destructor liveness and registered
+cleanup. It covers empty/existing cache paths, failed skinning, initialized and
+uninitialized font flags, descriptor changes, changing enable flags and seeded
+neighbouring flag bytes. The font registration uses an independent `_onexit`
+service fixture; registered destructors run separately after initializer unwind.
+
+`worldboosteruidiff.c` uses the existing native application/HOST/GLOBAL, nested
+Alerts, GDI capture and module-init fixtures, with an independent booster
+validator and scripts. Sixteen cases cover both factory ids, empty/existing
+paths, both active states and both cleanup strategies. Ten scripts cover initial
+Cancel, edits with Return/OK and Escape/Cancel, all five error priorities with
+repair, virtual validation/error, and invalid cache-path disable/repair.
+The combo's focused child may have id `0x3e9`; the fixture checks that it belongs
+to the intended combo. Error snapshots include real alert controls and pixels.
+Full descriptor/row/text state, ordered callbacks, child metadata, focus, pixels
+and automatic deleting-destruction are compared, with module ownership checked
+for all class dispatch entries. Unload additionally probes the real SIMSUI font
+destructor, requiring one module-owned shared-font destruction per DLL load.
+
+The suite passed **320 paired pixel/state/callback comparisons**, **452
+witnesses**, eight module-init comparisons and two full unload cycles. Baseline
+images are `bin/world-diff/ui-images/booster-baseline-*.bmp`. All **18 new
+mutations** were detected: 12 initializer and six native, bringing the booster
+family to **49/49** across core, lifetimes, initialization and native UI. The
+native colour mutant changed pixels while descriptor state, controls and
+callbacks still matched. Other native mutations cover size limits, cache-path
+dispatch, error focus, automatic deletion and shared-font cleanup. Faults,
+timeouts and build errors do not count. Snapshotted inputs, mutant sources,
+executables and difference logs are in `bin/world-diff/booster-native-breaks/`.
+
+The existing area and priority suites also passed on the five-registration DLL:
+**288** and **210** paired comparisons, respectively, with their full witnesses
+and two unload cycles each. Runtime metadata regenerates identically in an
+isolated directory, as do all seven generated World includes. All World code
+retains snake_case and standard `<stdint.h>`
+types, without `types.h`. Acceptance logs in `bin/world-diff/` are
+`booster-init-normal.log`, `booster-init-unwind.log`, `booster-ui-acceptance.log`,
+`booster-native-breaks-acceptance.log`, `booster-area-regression.log` and
+`booster-priority-regression.log`.
+
+A 75-second startup of the five-registration DLL passed in private copy
+`bin/world-diff/smoke-game-koqll7ov`: **27/27 modules, 95 gauges**, matching
+replacement bytes and no runtime errors. DLL SHA-256:
+`67ac58c6b5d5f578ca2dc175e5d629df05a50e6da3a9b57df497f5bd19afa0f1`.
+The final DLL's `.text`, `.data`, `.rdata` and `.rsrc` sections match the
+native-tested DLL after the final comment-only rebuild. The startup log is
+`bin/world-diff/booster-smoke-acceptance.log`; the active game was unchanged.
+Selected area and priority colour mutations also passed again with the updated
+mutation build inputs (`booster-area-mutation-regression.log` and
+`booster-priority-mutation-regression.log`).
 
 ## Remaining boundary
 
-Sixteen World registrations are still pending native acceptance: scenery lists/library,
-search/boosters, weather/time, scenery settings and FACIL-backed
+Fourteen World registrations are still pending native acceptance: scenery lists/library,
+search/booster lists, weather/time, scenery settings and FACIL-backed
 position/facility screens. Continue as bounded slices with their own native
 acceptance before building or installing a complete World replacement. Shared
 build/install integration and complete host-driven interaction remain separate.

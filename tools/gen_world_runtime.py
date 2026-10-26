@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Extract the partial area-class native bindings and build-only resources."""
+"""Extract partial World native bindings and build-only resources."""
 from pathlib import Path
 import struct
 from dialogmap import Fs98Pe, SurveyError
@@ -29,7 +29,20 @@ def main():
         0xc720: ('void', '', 'fs98_world_area_path_changed(object);'),
         0xc5d0: ('int', ', uint32_t unused, void *info', 'return fs98_world_area_help(object, unused, info);'),
         0xc5f0: ('int', ', uint32_t window, uint32_t unused', 'return fs98_world_area_context(object, window, unused);')}
+    # 0x7240 consumes a nonclient handler's 12 bytes, but calls MFC Default()
+    # with no stack arguments. Its callee (#2379) ends in plain ret.
     local_bindings.update({
+        0x6400: ('void *', ', uint32_t flags', 'return fs98_world_booster_delete(object, flags);'),
+        0x6730: ('void *', '', '(void)object; return &s_booster_message_map;'),
+        0x65a0: ('void', ', void *exchange', 'fs98_world_booster_exchange(object, exchange);'),
+        0x68b0: ('int', '', 'return fs98_world_booster_init(object);'),
+        0x6740: ('void', '', 'fs98_world_booster_accept(object);'),
+        0x7160: ('int', ', uint32_t value', 'return fs98_world_booster_validate(object, value);'),
+        0x71a0: ('int', ', uint32_t value', 'return fs98_world_booster_error(object, value);'),
+        0x6fd0: ('void', '', 'fs98_world_booster_path_changed(object);'),
+        0x6d90: ('int', ', uint32_t unused, void *info', 'return fs98_world_booster_help(object, unused, info);'),
+        0x6db0: ('int', ', uint32_t window, uint32_t unused', 'return fs98_world_booster_context(object, window, unused);'),
+        0x7240: ('void', ', uint32_t hit, int x, int y', '(void)hit; (void)x; (void)y; ((void (TC *)(void *))world_slot(0x25584))(object);'),
         0xc940: ('void *', ', uint32_t flags', 'return fs98_world_priority_delete(object, flags);'),
         0xcb90: ('void *', '', '(void)object; return &s_priority_message_map;'),
         0xca80: ('void', ', void *exchange', 'fs98_world_priority_exchange(object, exchange);'),
@@ -55,7 +68,7 @@ def main():
         ordinal = int(name[1:]) if name.startswith('#') else 0
         lines.append(f'    {{"{binding["dll"]}", "{name}", {ordinal}, 0x{binding["iat_va"] - pe.uiBase:x}}},')
     lines += ['};', 'static const struct world_virtual_binding s_virtuals[] = {']
-    for table, vtable in enumerate((0x2240fc38, 0x2240fe50)):
+    for table, vtable in enumerate((0x2240fc38, 0x2240fe50, 0x2240ee68)):
         for slot in range(60):
             va = pe.va_uint32(vtable + slot * 4)
             rva = va - pe.uiBase
@@ -69,7 +82,7 @@ def main():
                 binding_spec = f'{indices[iat]}, 0'
             lines.append(f'    {{{table}, {slot}, {binding_spec}}},')
     lines.append('};')
-    for name, message_map in (('messages', 0x2240fbd0), ('priority_messages', 0x2240fda0)):
+    for name, message_map in (('messages', 0x2240fbd0), ('priority_messages', 0x2240fda0), ('booster_messages', 0x2240ede8)):
         lines.append(f'static const struct world_message_entry s_{name}[] = {{')
         entries = pe.va_uint32(message_map + 4)
         for index in range(64):
@@ -86,6 +99,9 @@ def main():
         lines.append('};')
     lines += ['static const struct world_dialog s_dialogs[] = {']
     for dialog_record in pe.linkage()['dialogs']:
+        if dialog_record['id'] in (0x13080007, 0x13080008):
+            kind = 'add' if dialog_record['id'] == 0x13080008 else 'edit'
+            lines.append(f'    {{0x{dialog_record["id"]:x}, fs98_world_booster_create_{kind}, {dialog_record["flags"]}}},')
         if dialog_record['id'] == 0x13080005:
             lines.append(f'    {{0x13080005, fs98_world_priority_create, {dialog_record["flags"]}}},')
         if dialog_record['id'] in (0x13080003, 0x13080004):

@@ -31,7 +31,7 @@ void fs98_world_booster_collect(void *object)
     U32(booster_row(object), 0x7c) = value == 1;
     U32(booster_row(object), 0x54) = U32(object, 0x1d64) != 0;
 }
-/* 0x223f6ea0: the BSTINFO layer is an unsigned WORD, not the entire slot. */
+/* 0x223f6ea0: the BSTINFO recommended size is an unsigned WORD, not the entire slot. */
 void fs98_world_booster_populate(void *object)
 {
     const struct fs98_world_services *ui = s_services->ui;
@@ -109,7 +109,7 @@ void fs98_world_booster_path_changed(void *object)
     ui->format_int(text, "%5d", (int)U32(booster_row(object), 0x5c));
     ui->set_text(AT(object, 0x1b90), text);
 }
-/* 0x223f7160: only the layer status belongs to virtual validation. */
+/* 0x223f7160: only the cache-size status belongs to virtual validation. */
 int fs98_world_booster_validate(void *object, uint32_t unused)
 {
     (void)unused;

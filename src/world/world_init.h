@@ -21,5 +21,6 @@ struct fs98_world_init_services {
 const struct fs98_world_services *fs98_world_get_services(void);
 void fs98_world_set_init_services(const struct fs98_world_init_services *services);
 void fs98_world_set_resource_module(uint32_t module);
+uint32_t fs98_world_get_resource_module(void);
 int fs98_world_area_init(void *object);
 #endif

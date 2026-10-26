@@ -7,6 +7,15 @@ export WINEDEBUG=-all
 mkdir -p -- "$WINEPREFIX"
 exec 9>bin/world-diff/wine.lock
 flock 9
+if [[ "${1:-}" == --booster-native-breaks ]]; then
+    exec python3 -B tools/world_booster_native_breaks.py "${@:2}"
+fi
+if [[ "${1:-}" == --booster-ui ]]; then
+    exec timeout 180s wine bin/world-diff/worldboosteruidiff.exe "${2:-bin/world-diff/WORLD_area.dll}" "${3:-16}"
+fi
+if [[ "${1:-}" == --booster-init ]]; then
+    exec timeout 120s wine bin/world-diff/worldboosterinitdiff.exe "${2:-2000}" "${3:-normal}"
+fi
 if [[ "${1:-}" == --booster-life-breaks ]]; then
     exec python3 -B tools/world_booster_life_breaks.py
 fi

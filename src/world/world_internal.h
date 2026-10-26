@@ -5,7 +5,7 @@
 #define FS98_WORLD_STDCALL __attribute__((stdcall))
 #define WORLD_U32(ptr, offset) (*(uint32_t *)((uint8_t *)(ptr) + (offset)))
 #define WORLD_PTR(ptr, offset) (*(void **)((uint8_t *)(ptr) + (offset)))
-/* Area-dialog core; the native adapter registers only area add/edit. */
+/* Shared UI boundary; each World class supplies its additional services. */
 struct fs98_world_services {
     int (*get_text)(void *control, char *text, int capacity);
     void (*set_text)(void *control, const char *text);

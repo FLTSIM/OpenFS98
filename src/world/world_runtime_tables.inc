@@ -14,6 +14,17 @@ static int TC world_rva_c660(void *object, uint32_t value) { return fs98_world_a
 static void TC world_rva_c720(void *object) { fs98_world_area_path_changed(object); }
 static int TC world_rva_c5d0(void *object, uint32_t unused, void *info) { return fs98_world_area_help(object, unused, info); }
 static int TC world_rva_c5f0(void *object, uint32_t window, uint32_t unused) { return fs98_world_area_context(object, window, unused); }
+static void * TC world_rva_6400(void *object, uint32_t flags) { return fs98_world_booster_delete(object, flags); }
+static void * TC world_rva_6730(void *object) { (void)object; return &s_booster_message_map; }
+static void TC world_rva_65a0(void *object, void *exchange) { fs98_world_booster_exchange(object, exchange); }
+static int TC world_rva_68b0(void *object) { return fs98_world_booster_init(object); }
+static void TC world_rva_6740(void *object) { fs98_world_booster_accept(object); }
+static int TC world_rva_7160(void *object, uint32_t value) { return fs98_world_booster_validate(object, value); }
+static int TC world_rva_71a0(void *object, uint32_t value) { return fs98_world_booster_error(object, value); }
+static void TC world_rva_6fd0(void *object) { fs98_world_booster_path_changed(object); }
+static int TC world_rva_6d90(void *object, uint32_t unused, void *info) { return fs98_world_booster_help(object, unused, info); }
+static int TC world_rva_6db0(void *object, uint32_t window, uint32_t unused) { return fs98_world_booster_context(object, window, unused); }
+static void TC world_rva_7240(void *object, uint32_t hit, int x, int y) { (void)hit; (void)x; (void)y; ((void (TC *)(void *))world_slot(0x25584))(object); }
 static void * TC world_rva_c940(void *object, uint32_t flags) { return fs98_world_priority_delete(object, flags); }
 static void * TC world_rva_cb90(void *object) { (void)object; return &s_priority_message_map; }
 static void TC world_rva_ca80(void *object, void *exchange) { fs98_world_priority_exchange(object, exchange); }
@@ -355,6 +366,66 @@ static const struct world_virtual_binding s_virtuals[] = {
     {1, 57, 90, 0},
     {1, 58, 91, 0},
     {1, 59, 55, 0},
+    {2, 0, 87, 0},
+    {2, 1, -1, (void *)world_rva_6400},
+    {2, 2, -1, (void *)world_rva_2d00},
+    {2, 3, -1, (void *)world_rva_2d10},
+    {2, 4, -1, (void *)world_rva_2d00},
+    {2, 5, 166, 0},
+    {2, 6, 167, 0},
+    {2, 7, 168, 0},
+    {2, 8, 169, 0},
+    {2, 9, 170, 0},
+    {2, 10, 171, 0},
+    {2, 11, 172, 0},
+    {2, 12, -1, (void *)world_rva_6730},
+    {2, 13, 173, 0},
+    {2, 14, 174, 0},
+    {2, 15, 175, 0},
+    {2, 16, 176, 0},
+    {2, 17, 177, 0},
+    {2, 18, 178, 0},
+    {2, 19, 179, 0},
+    {2, 20, 180, 0},
+    {2, 21, 159, 0},
+    {2, 22, 182, 0},
+    {2, 23, 183, 0},
+    {2, 24, 184, 0},
+    {2, 25, 185, 0},
+    {2, 26, 186, 0},
+    {2, 27, 187, 0},
+    {2, 28, 188, 0},
+    {2, 29, 189, 0},
+    {2, 30, 190, 0},
+    {2, 31, 191, 0},
+    {2, 32, 53, 0},
+    {2, 33, 181, 0},
+    {2, 34, 193, 0},
+    {2, 35, -1, (void *)world_rva_65a0},
+    {2, 36, -1, (void *)world_rva_2d20},
+    {2, 37, -1, (void *)world_rva_2d30},
+    {2, 38, 194, 0},
+    {2, 39, 195, 0},
+    {2, 40, 196, 0},
+    {2, 41, 197, 0},
+    {2, 42, 192, 0},
+    {2, 43, -1, (void *)world_rva_3d30},
+    {2, 44, 199, 0},
+    {2, 45, 200, 0},
+    {2, 46, 201, 0},
+    {2, 47, 202, 0},
+    {2, 48, 158, 0},
+    {2, 49, -1, (void *)world_rva_68b0},
+    {2, 50, 113, 0},
+    {2, 51, -1, (void *)world_rva_6740},
+    {2, 52, -1, (void *)world_rva_e4e0},
+    {2, 53, 160, 0},
+    {2, 54, -1, (void *)world_rva_7160},
+    {2, 55, -1, (void *)world_rva_71a0},
+    {2, 56, 89, 0},
+    {2, 57, 90, 0},
+    {2, 58, 91, 0},
+    {2, 59, 55, 0},
 };
 static const struct world_message_entry s_messages[] = {
     {0x111, 0x400, 0x1b05, 0x1b05, 0xc, (void *)world_rva_c720},
@@ -371,7 +442,16 @@ static const struct world_message_entry s_priority_messages[] = {
     {0x7b, 0x0, 0x0, 0x0, 0xa, (void *)world_rva_cfb0},
     {0, 0, 0, 0, 0, 0}
 };
+static const struct world_message_entry s_booster_messages[] = {
+    {0xa1, 0x0, 0x0, 0x0, 0x31, (void *)world_rva_7240},
+    {0x53, 0x0, 0x0, 0x0, 0xa, (void *)world_rva_6d90},
+    {0x7b, 0x0, 0x0, 0x0, 0xa, (void *)world_rva_6db0},
+    {0x111, 0x400, 0x1ae8, 0x1ae8, 0xc, (void *)world_rva_6fd0},
+    {0, 0, 0, 0, 0, 0}
+};
 static const struct world_dialog s_dialogs[] = {
+    {0x13080007, fs98_world_booster_create_edit, 0},
+    {0x13080008, fs98_world_booster_create_add, 0},
     {0x13080004, fs98_world_area_create_edit, 0},
     {0x13080003, fs98_world_area_create_add, 0},
     {0x13080005, fs98_world_priority_create, 0},

@@ -114,7 +114,7 @@ world-booster-ui: world $(WORLD_DIR)/worldboosteruidiff.exe
 world-booster-native-breaks: world $(WORLD_DIR)/worldboosterinitdiff.exe $(WORLD_DIR)/worldboosteruidiff.exe
 	bash tools/run_worlddiff.sh --booster-native-breaks
 
-$(WORLD_DIR)/worldsearchdiff.exe: tools/difftest/worldsearchdiff.c src/world/world_search.c src/world/world_search.h src/world/world_objects.h src/world/world_internal.h | $(WORLD_DIR)
+$(WORLD_DIR)/worldsearchdiff.exe: tools/difftest/worldsearchdiff.c src/world/world_search.c src/world/world_search.h src/world/world_init.h src/world/world_objects.h src/world/world_internal.h | $(WORLD_DIR)
 	$(CC) -std=c99 -O2 -Wall -Wextra -Werror -fno-strict-aliasing -o $@ tools/difftest/worldsearchdiff.c src/world/world_search.c
 .PHONY: world-search-core world-search-breaks
 world-search-core: $(WORLD_DIR)/worldsearchdiff.exe
@@ -126,7 +126,7 @@ src/world/world_search_tables.inc src/world/world_search_hooks.inc &: tools/gen_
 .PHONY: world-search-metadata
 world-search-metadata: src/world/world_search_tables.inc src/world/world_search_hooks.inc
 
-SEARCH_OBJECTS := src/world/world_search_objects.c src/world/world_search.h src/world/world_search_tables.inc src/world/world_search_hooks.inc src/world/world_objects.h src/world/world_unwind.h src/world/world_exceptions.h src/world/world_internal.h
+SEARCH_OBJECTS := src/world/world_search_objects.c src/world/world_search.h src/world/world_init.h src/world/world_search_tables.inc src/world/world_search_hooks.inc src/world/world_objects.h src/world/world_unwind.h src/world/world_exceptions.h src/world/world_internal.h
 $(WORLD_DIR)/worldsearchlifediff.exe: tools/difftest/worldsearchlifediff.c $(SEARCH_OBJECTS) | $(WORLD_DIR)
 	$(CC) -std=c99 -O2 -Wall -Wextra -Werror -fno-strict-aliasing -fno-delete-null-pointer-checks -o $@ tools/difftest/worldsearchlifediff.c src/world/world_search_objects.c -lntdll
 .PHONY: world-search-life world-search-life-breaks
@@ -134,3 +134,12 @@ world-search-life: $(WORLD_DIR)/worldsearchlifediff.exe
 	bash tools/run_worlddiff.sh --search-life $(N) $(SEED) $(MODE)
 world-search-life-breaks: $(WORLD_DIR)/worldsearchlifediff.exe
 	bash tools/run_worlddiff.sh --search-life-breaks
+
+SEARCH_INIT := src/world/world_search_init.c src/world/world_search.h src/world/world_init.h src/world/world_internal.h src/world/world_objects.h
+$(WORLD_DIR)/worldsearchinitdiff.exe: tools/difftest/worldsearchinitdiff.c tools/difftest/worldsearchdiff.c $(SEARCH_INIT) src/world/world_search.c src/world/world_init.c src/world/world_area.c src/world/world_unwind.h | $(WORLD_DIR)
+	$(CC) -std=c99 -O2 -Wall -Wextra -Werror -fno-strict-aliasing -o $@ tools/difftest/worldsearchinitdiff.c src/world/world_search_init.c src/world/world_search.c src/world/world_init.c src/world/world_area.c -lntdll
+.PHONY: world-search-init world-search-init-breaks
+world-search-init: $(WORLD_DIR)/worldsearchinitdiff.exe
+	bash tools/run_worlddiff.sh --search-init $(N) $(MODE)
+world-search-init-breaks: $(WORLD_DIR)/worldsearchinitdiff.exe
+	bash tools/run_worlddiff.sh --search-init-breaks

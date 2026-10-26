@@ -710,7 +710,7 @@ Selected area and priority colour mutations also passed again with the updated
 mutation build inputs (`booster-area-mutation-regression.log` and
 `booster-priority-mutation-regression.log`).
 
-## Drive-search core and lifetime milestones (native acceptance pending)
+## Drive-search core, lifetimes and initialization (native acceptance pending)
 
 The next bounded family is FE's drive-search dialog `0x13080002`, factory
 `0x223f1ac0`, template `0x6b0`. `world_search.c` implements its core handlers
@@ -876,10 +876,84 @@ Acceptance logs are `bin/world-diff/search-life-normal.log`,
 `search-life-core-regression.log`; mutant source, executables and actual
 `DIFFER` transcripts are under `bin/world-diff/search-life-breaks/`.
 
-Next: implement initialization `0x223fdec0`, then native imports, vtables,
-message maps and real UI/callback/rendering/deletion acceptance. The initializer
-uses a virtual setup call on its checkbox; recover that callee's ABI before
-binding it. Keep drive search unregistered until those milestones pass.
+### Drive-search initializer acceptance
+
+`world_search_init.c` implements initializer `0x223fdec0` using the shared
+control-setup boundary and a search-specific groupbox service. It ignores
+base initialization's return, reloads the current vtable, then calls virtual
+skinning at `+0xe4` with bitmap `0x14f`, the current resource module and flags
+15. Failed skinning returns zero immediately. Successful initialization:
+
+- Sets up the heading artwork and six buttons. OK uses font pair `+0x5a0` /
+  `+0x610`, bitmap `0x132` and coordinates 0/0; Add All, Add, Next, Next
+  Folder and Search use `+0x680` / `+0x6f0`, bitmap `0x137` and coordinates
+  1/1, in that order. Resource-module loads remain fresh between calls.
+- Initializes drive and layer labels/combos and selects index zero in each
+  before population. The drive label uses font `+0x220`, the layer label
+  `+0x370`; both combos use `+0x3e0`.
+- Sets up static text, the checkbox, path display, groupbox and title edit.
+  Checkbox setup dispatches its current vtable slot `+0xc4`, passing font
+  `+0x4c0`, bitmap `0x139`, DIB `+0xff4`, palette `+0x7e8` and the current
+  resource module. This is `CSimsCheckButton::Init` at SIMSUI `0x20473c20`;
+  its exported signature and `ret 0x14` at `0x2047419a` confirm five arguments
+  after `this`. The fixture supplies two distinguishable checkbox dispatches.
+- Uses base font 2 and colors `0xffffff` / 0 / `0xff0000` for the title
+  edit. EM_LIMITTEXT receives descriptor `+0x3c` minus one, preserving unsigned
+  wraparound for zero capacity. The descriptor is loaded after edit setup.
+- Disables the title label/edit, assigns heading text from the current
+  descriptor `+0x1c`, then calls population, which may enable those controls
+  again from the owner states. Success returns one. The class makes no
+  explicit stores at `+0x84`, `+0x10e0` or `+0x10e4`.
+
+There are no owned CString/font temporaries, shared font initialization or
+local EH cleanup in this initializer. This milestone uses external-boundary
+interruptions, separately from the preceding class/factory real-unwind suite.
+
+```sh
+make -f tools/world.mk world-search-init N=20000
+make -f tools/world.mk world-search-init N=2000 MODE=interrupt
+make -f tools/world.mk world-search-init-breaks
+```
+
+With seed `0x4a971b63` and the reference hash above, the normal suite made
+**20,000 comparisons** and 20,000 independent reference-side fixture checks.
+The interrupt suite made **67,523 comparisons**, including **65,523 interrupted
+reference calls**, plus 2,000 normal fixture checks. All matched. The fixture
+compares ordered calls, returns, every guarded object/descriptor/string/drive
+byte, and resource-module state. It seeds failed/successful skinning, both
+checkbox dispatches, extreme capacities, descriptor/vtable swaps, changing
+resource modules and changing enable flags. Independent witnesses require six
+buttons, two combos, six text setups, one checkbox/groupbox/edit setup, the
+failed-skinning boundary, defined returns and preservation of the fields above.
+
+All **24 initialization mutations** produced exit 1 with an actual `DIFFER`
+transcript, bringing drive search to **63/63** across core, lifetimes and
+initialization. Mutations cover failed skinning, cached skin vtables, artwork,
+button count/order/coordinates/module reloads, fonts, combo labels/selections,
+checkbox bitmap, groupbox binding, edit colors, title-limit arithmetic and
+window, initial disabling, cached title descriptors, missing population,
+extra object stores and return value. Faults, timeouts and build failures do
+not count. The core and typed-lifetime regressions also passed **26,000** and
+**292,103 comparisons**, respectively, with their full normal fixture checks;
+the latter includes 246,689 propagated exceptions and 27,414 fatal dispatches.
+
+Acceptance logs are `bin/world-diff/search-init-normal.log`,
+`search-init-interrupt.log`, `search-init-breaks.log`,
+`search-init-core-regression.log` and `search-init-life-regression.log`.
+Mutant sources, independently compiled executables and actual difference
+transcripts are under `bin/world-diff/search-init-breaks/`.
+
+Next: bind search imports, its 60-slot vtable, message map, factory and template
+in the standalone partial DLL, then add real UI/callback/rendering/deletion
+acceptance using independent FE-shaped descriptors. Use the existing booster
+native suite as the starting fixture. Search needs packed drive strings and
+an embedded area row, six action callbacks, both combo notification types,
+posted message `0x5fa` and both close paths returning answer zero. Exercise
+error priority and failed validation followed by population. Keep all five
+accepted registrations passing, verify new dispatch ownership, test unloads
+and deliberate native mutations, then run an isolated startup. Until that
+acceptance passes, drive search remains unregistered and the DLL still has
+only five accepted registrations.
 
 ## Remaining boundary
 

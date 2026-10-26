@@ -7,6 +7,12 @@ export WINEDEBUG=-all
 mkdir -p -- "$WINEPREFIX"
 exec 9>bin/world-diff/wine.lock
 flock 9
+if [[ "${1:-}" == --search-init ]]; then
+    exec timeout 120s wine bin/world-diff/worldsearchinitdiff.exe "${2:-2000}" "${3:-normal}"
+fi
+if [[ "${1:-}" == --search-init-breaks ]]; then
+    exec python3 -B tools/world_search_init_breaks.py
+fi
 if [[ "${1:-}" == --search-life ]]; then
     exec timeout 120s wine bin/world-diff/worldsearchlifediff.exe "${2:-2000}" "${3:-0x4a971b63}" "${4:-normal}"
 fi

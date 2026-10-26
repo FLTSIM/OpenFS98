@@ -2,6 +2,7 @@
 #define FS98_WORLD_SEARCH_H
 #include "world_internal.h"
 #include "world_objects.h"
+#include "world_init.h"
 /* Drive-search UI boundary. Owner callbacks are stdcall(descriptor), with
  * ignored returns. This class embeds its area row at descriptor +0x20. */
 struct fs98_world_search_services {
@@ -31,4 +32,11 @@ void fs98_world_search_exchange(void *object, void *exchange);
 int fs98_world_search_help(void *object, uint32_t unused, void *help);
 int fs98_world_search_context(void *object, uint32_t window, uint32_t unused);
 void fs98_world_search_post_destroy(void *object);
+struct fs98_world_search_init_services {
+    const struct fs98_world_init_services *ui;
+    const struct fs98_world_services *events;
+    void (*group)(void *control, void *font);
+};
+void fs98_world_search_set_init_services(const struct fs98_world_search_init_services *services);
+int fs98_world_search_init(void *object);
 #endif

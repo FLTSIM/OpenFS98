@@ -24,6 +24,12 @@ slot is done MAIN is not in `MODULES` and is never installed.
 | 13, allocate an object slot | `+0x84` (assembly, `.text+0x16100`..`+0x162e5`) | `objalloc` | verified: 20,000 scenarios, 0 differ; 14 of 15 breaks caught, 1 proven equivalent |
 | 14, the eye's reticle | `+0xc0` (assembly, `.text+0x16a0`..`+0x18c2`) | `eye` | verified: 20,000 scenarios, 0 differ; 12 of 13 breaks caught, 1 proven equivalent |
 | 15, the altitude band and its 3D submission | `+0x9c` (assembly, `.text+0x6de9`..`+0x6f58`, helper `+0x7200`..`+0x73d6`) | `band` | verified: 20,000 scenarios, 0 differ; 33 of 33 breaks caught |
+| 16, the smoke trails | `+0x88` (MSVC C, `.text+0x162f0`..`+0x16567`) | `objstep` | verified: 20,000 scenarios, 0 differ; 32 of 34 breaks caught, 2 proven equivalent |
+| 17, the quick save | `+0xb0` (MSVC C, `.text+0xcdb0`) | `quicksave` | verified: @QS@ |
+| 18, the preferences | `+0xb4`, `+0xb8`, `+0xbc` (MSVC C, `.text+0xdd70`..`+0xf2e0`, preset `+0x14d20`) | `prefs` | verified: @PR@ |
+| 19, the cloud layers' draw | `+0x98` (assembly, `.text+0x6f59`, `+0x741f`..`+0x77c6`, `+0x8275`, `+0x9146`..`+0x922c`, `+0x9d57`..`+0xa089`) | `clouds` | verified: @CL@ |
+| 20, the cloud layers' textures | `+0x94` (assembly, `.text+0x7140`, `+0x77c7`..`+0x7bc1`) | `cloudtex` | verified: @CT@ |
+| 21, the spot plane's eye | `+0xa8` (assembly, `.text+0x6450`..`+0x6ce2`) | `spot` | verified: @SP@ |
 
 ## Binary and linkage
 
@@ -72,10 +78,10 @@ calls are reached from the host, the `English\` dialog modules, or CHAIN.
 | `+0x74` | `.text+0x18781` | ADVDRV, MULTIP | **slice 6**: the season, the zone and the clock |
 | `+0x78`, `+0x7c` | `.text+0x19c94`, `+0x19cd5` | | `+0x78` **slice 4**, `+0x7c` **slice 5** |
 | `+0x80` | `.text+0x19f10` | ADVDRV, PANELS | **slice 4**: `(which, &tenths)` |
-| `+0x84`..`+0x90` | `.text+0x16100`, `+0x162f0`, `+0x16570`, `+0x10560` | CONTROLS, WINDOW (`+0x88`) | object table at `.data+0x9794`, 0x2d4-byte entries: `+0x84` **slice 13** allocates, `+0x88` iterates, `+0x8c` **slice 10** releases |
-| `+0x94`..`+0xa0` | `.text+0x7140`, `+0x6f59`, `+0x6de9`, `+0x830d` | WEATHERM (`+0x94`), WINDOW (`+0x98`, `+0x9c`) | `+0x9c` is **slice 15** (the altitude band), `+0xa0` is **slice 12**: the sun direction |
-| `+0xa4`, `+0xa8` | `.text+0x16ddf`, `+0x6450` | ADVDRV, CONTROLS, WINDOW | `+0xa4` is **slice 7** |
-| `+0xac`..`+0xbc` | `.text+0xc870`, `+0xcdb0`, `+0xdd70`, `+0xe5a0`, `+0xed10` | CONTROLS (`+0xac`), FACIL (`+0xb0`) | |
+| `+0x84`..`+0x90` | `.text+0x16100`, `+0x162f0`, `+0x16570`, `+0x10560` | CONTROLS, WINDOW (`+0x88`) | object table at `.data+0x9794`, 0x2d4-byte entries: `+0x84` **slice 13** allocates, `+0x88` **slice 16** steps them all (the smoke trails), `+0x8c` **slice 10** releases |
+| `+0x94`..`+0xa0` | `.text+0x7140`, `+0x6f59`, `+0x6de9`, `+0x830d` | WEATHERM (`+0x94`), WINDOW (`+0x98`, `+0x9c`) | `+0x94` is **slice 20** (the cloud layers' textures), `+0x98` is **slice 19** (the cloud layers' draw), `+0x9c` is **slice 15** (the altitude band), `+0xa0` is **slice 12**: the sun direction |
+| `+0xa4`, `+0xa8` | `.text+0x16ddf`, `+0x6450` | ADVDRV, CONTROLS, WINDOW | `+0xa4` is **slice 7**, `+0xa8` is **slice 21** (the spot plane's eye) |
+| `+0xac`..`+0xbc` | `.text+0xc870`, `+0xcdb0`, `+0xdd70`, `+0xe5a0`, `+0xed10` | CONTROLS (`+0xac`), FACIL (`+0xb0`) | `+0xb0` is **slice 17** (the quick save); `+0xb4`, `+0xb8`, `+0xbc` are **slice 18** (load, save and default the preferences) |
 | `+0xc0`..`+0xc8` | `.text+0x06a0`, `+0xc560`, `+0x18f0` | WINDOW, FACIL, CONTROLS | `+0xc0` is **slice 14** (the eye's reticle), `+0xc8` is **slice 8** |
 
 ## Slice 1: situation records
@@ -467,8 +473,8 @@ releases one entry of the object table at `.data+0x9794`, whose entries are
 0x2d4 bytes (181 dwords) apart, indexed by the handle's low byte: if the
 entry's first dword is set, both it and the caller's handle are zeroed. Like
 the other assembly leaves it leaves the index (`handle & 0xff` times 181) in
-`eax`, which the transliteration returns. (`+0x84` allocates into the same
-table and `+0x88` iterates it; both remain to do.)
+`eax`, which the transliteration returns. (`+0x84`, slice 13, allocates into
+the same table and `+0x88`, slice 16, steps it.)
 
 ### Verifying the object slot release
 
@@ -616,3 +622,288 @@ three times.
 centre/width pairs, flags and gate, with the altitude now and then snapped onto
 a computed band edge (and its neighbours) so the comparison boundaries are
 exercised exactly. `make main-breaks SUITE=band`: 33 breaks, 33 caught.
+
+## Slice 16: the smoke trails
+
+`src/main/main_nav.inc`, `.text+0x162f0` (`+0x88`), MSVC C. WINDOW calls it
+once a frame with no arguments. It walks all twenty entries of the slice-10/13
+object table at `.data+0x9794`; each active one (any non-zero first dword)
+keeps a run of 40-byte records at `+0x14` and as many buffer pointers at
+`+0x26c`, `n` of them (`+0xc`, which `+0x84` makes 15), `used` of them live
+(`+0x10`). It is the smoke system: CONTROLS' `SMOKE_TOGGLE` allocates an
+entry (`+0x84`, kind 1) whose template is GLOBAL `+0x560`, the aircraft's
+position, and releases it with `+0x8c`. So each entry is a trail of puffs that
+grows by one each frame to `n` and then scrolls:
+
+- both runs shift up by one (MSVCRT `memmove`, through MAIN's own import as
+  retail calls it, not the host's `+0x21c`), the last buffer coming round to
+  the front, and `used` grows unless it is already `n`;
+- the entry's nine-dword template copy (`-0x28`) becomes the newest record's
+  `+4`..`+0x24`;
+- the longitude difference from the aircraft (GLOBAL `+0x5d0` less that
+  record's `+0x24`) picks a wrap: within the quarter turns either side of the
+  half turn (`0x15540000`..`0x6aa40000` and `0x954c0000`..`0xea9c0000`,
+  exclusive) the side word is the record's `+0x1c` moved by `0x3ffc0000` one
+  way or the other; otherwise it is 0;
+- each live record is restamped from the aircraft (GLOBAL `+0x5d0` into
+  `+0x24`, `+0x5c8` less `0x7ff80000` into `+0x1c`, the side word into
+  `+0x20`), aged (`+0x18` grows by `i/13`, a multiply by `0x4ec4ec4f`), and
+  every one after the first xor-toggled by the entry's words `+4`/`+6` when
+  GLOBAL `+0x250` bit 0 is set; eight words at its buffer's `+0x42` (held in
+  `.data+0xd140`) are laid out from a width that steps by the entry's `+8`
+  word / 4 per record, and the buffer and record go to G3D `+0x38`;
+- between records the template copy is refreshed from the template itself
+  (the pointer at `-0x2c`).
+
+Retail details, reproduced:
+
+- **A side word that wraps to exactly 0 counts as no wrap.** The width is
+  taken from the running width whenever the side word is 0, whichever branch
+  made it.
+- **One stack local is written as a word on two paths and as a dword on the
+  third**, and read both ways; only its low word ever reaches memory.
+- **`eax` at exit is what the last entry left there**: its active word, its
+  live count, or the index the loop ended on. WINDOW ignores it; ours
+  returns it anyway, and the suite compares it.
+- **The step trusts `n`.** At 0 the record shift is 4 GB; past 15 it runs
+  into the buffer pointers. `+0x84` only ever makes 15, so the suite keeps
+  `n` in 1..15.
+
+### Verifying the step
+
+`make maindiff-run SUITE=objstep`: 20,000 scenarios, 0 differences (about 4
+minutes), with 2,296,860 active entries stepped and 18,540,797 submissions, 574,555
+of them on a wrap edge and 190,796 with a side word wrapped to 0. Each op
+re-seeds the twenty entries now and then (inactive, active with 1 or a
+stray even word, `n` 1..15 and mostly 15, `used` 0..`n`, the records,
+template and template copy random, the buffers in the shared arena), and
+otherwise lets the trails run on from where the last step left them. Before
+every step it aims entries' longitude differences onto the four wrap edges
+(and one either side) and their side words onto the values that wrap to 0.
+G3D `+0x38` is a **logging model** that records both pointers, the eight
+words laid out at the buffer's `+0x42` and a digest of the record (G3D is
+verified in its own harness); the image, arena and GLOBAL are compared after
+every op. `make main-breaks SUITE=objstep`: 34 breaks, 32
+caught, 2 proven equivalent: `s-high` (only the running width's low word is
+ever stored, and the low word of a sum depends only on the low words) and
+`width-else` (the branch that sets the width from `+8` also makes the side word
+0, so every record takes the width from the running one before reading it).
+
+
+## Slice 17: the quick save
+
+`src/main/main_flights.inc`, `.text+0xcdb0` (`+0xb0`), MSVC C. FACIL calls
+it. It saves the flight through slice 2's `+0x40`, called directly as retail
+calls it, with a title from string `0x2201` and the description at
+`.data+0x7fd0`; the save's result is the answer. The title buffer starts as
+the 17 bytes at `.data+0x3634`, `"Temporary Flight"` and its terminator, and
+zeros to 0x104 bytes, so a string the host cannot load leaves that title.
+
+### Verifying the quick save
+
+The `quicksave` suite is a `situations` scenario (slice 2's model of the
+host's files, its loads and its walk-off guard) in which a third of the ops
+are `+0xb0`, with string `0x2201` absent, `"Temporary Flight"`, short, or
+long enough to fill the buffer (the path join then refuses it). What it saves,
+`FLIGHTS\` and the title as the save copied it to `.data+0x441f`, joins the
+files the loads pick from. `make maindiff-run SUITE=quicksave`: @QSLONG@
+
+## Slice 18: the preferences
+
+`src/main/main_prefs.inc`, `.text+0xdd70` (`+0xb4`, load), `+0xe5a0` (`+0xb8`,
+save) and `+0xed10` (`+0xbc(mode)`, the defaults), MSVC C, with four helpers
+(`+0xe520`/`+0xe560` read a word or byte field, `+0xf290`/`+0xf2c0` write
+one) and `.text+0x14d20`, the performance-mode preset. All three are straight
+runs of host profile calls on `[PREFS]` in FLTSIM98.CFG (`.data+0x364c`), a
+key at a time (the keys are `.data` strings), each into or out of a GLOBAL
+field: 62 calls to load, 60 to save, 58 to write the defaults. The runs were
+transcribed from the disassembly by script, call for call.
+
+- **Load** reads each dword field through host `+0xa8` (the field is the
+  default) and each word or byte field through a helper that reads the field
+  zero-extended as the default and stores the low part back only when `+0xa8`
+  answers 0 -- which it always does. Three string fields (GLOBAL `+0x12c`,
+  `+0x24`, the default flight, and `+0x638`) come through `+0xc8` at 0x104
+  bytes. Then the performance mode's preset is applied and host `+0x288` is
+  told whether GLOBAL `+0x1220` is clear.
+- **The preset** (`.text+0x14d20(mode)`) copies sixteen fields into GLOBAL
+  from a table of 0x80-byte entries at `.data+0x5740` (a 0x40-byte name, string
+  `0x2300 + n`, then the settings). Mode 0 applies nothing. **The mode is not
+  bounded**: `PERFORMANCE_MODE` past the twelve entries, or negative, reads on
+  through `.data` (reproduced).
+- **Save** writes the same fields back, word and byte fields masked to their
+  width (retail pushes a register whose other half is stale).
+- **The defaults** write fixed values, `PERFORMANCE_MODE` and `DEF_PERF_MODE`
+  as `mode`, five keys whose values depend on `mode` above 4 (signed), six
+  `[AIRtoCONTAINER]` strings (the default aircraft, the Cessna Skylane 182RG)
+  and `[APL] CACHE_WAV_FILES=1`.
+
+### Verifying the preferences
+
+maindiff models the host's profile services over an in-memory CFG as the
+verified host performs them through `Get`/`WritePrivateProfile*A`: `+0xa8`
+reads an int as `GetPrivateProfileIntA` does (the old value is the default; a
+present value is blanks, a sign and digits) and always answers 0, `+0xac`
+writes `"%d"`, `+0xc8` reads a string with the buffer as its default and at
+most `size - 1` characters, and `+0xcc` writes one. Every call is logged with
+its section, key and value, and the CFG's digest after every op. The `prefs`
+suite loads, saves and writes the defaults over a random GLOBAL, between ops
+changing CFG values (huge, negative, empty, digits with a tail, text) or
+GLOBAL fields. Before every load it steers the performance mode onto one whose
+preset block lies in the image and holds no relocated pointer (one would reach
+GLOBAL as each side's own address): mostly 0 to 11, sometimes past the table
+or negative. `make maindiff-run SUITE=prefs`: @PRLONG@
+
+## Slice 19: the cloud layers' draw
+
+`src/main/main_clouds.inc`, `.text+0x6f59` (`+0x98(which)`), assembly, with
+the routines it reaches: `+0x741f` (the layers), `+0x7744`/`+0x7777` (the
+layer block's submit), `+0x8275` (the puffs), `+0x9146`/`+0x918b` (GLOBAL
+`+0xf10`), `+0x9d57` (the layer's texel under the aircraft) and
+`+0x9f39`/`+0xa04b` (the layer's vertical bands). WINDOW calls it.
+
+- **`which` 1 and above 3** copy the aircraft's position into the first
+  layer's command block (`.data+0x1aca` on, with slice 15's band edge at
+  `+0x1a92`/`+0x1a94`) and submit block `+0x2368` (1) or `+0x238c` to G3D
+  `+0x24`; **2 and 3** do the same for the second layer (`+0x1ae2` on,
+  `+0x1aaa`/`+0x1aac`; blocks `+0x23b0`, `+0x23d4`).
+- **`which` 0**, unless GLOBAL `+0xdce` is set, submits the puffs (GLOBAL
+  `+0xe7c`/0x1000 rounded of them, at most 16, each a pair of blocks from the
+  table at `.data+0x208e` to G3D `+0x38`), then works out whether the aircraft
+  is inside a layer, near one or clear: from slice 15's band edges (within 1500
+  either way sets `.data+0x1ff5`/`+0x1ff7`), and from each layer's texel under
+  the aircraft, looked up in an HG2D texel map through UTIL `+0x48`, against a
+  threshold HG2D `+0x88` hands back. That picks the layer block's colour
+  (`.data+0x22cc`, from a 32-entry table at `.data+0x1ff9` indexed by GLOBAL
+  `+0x2a8`), submits it, and sets GLOBAL `+0xf10`. It always clears GLOBAL
+  `+0xc90`.
+
+Retail details, reproduced:
+
+- **`+0x9f39` takes `shl ax,1` / `rol dx,1` after an `imul`**: dx's own top
+  bit comes round, not ax's.
+- **`+0x9d57`'s two 32-bit divides run into overflow** for an aircraft far
+  from the layer's origin and lean on the host's divide repair. This is the
+  first MAIN slice with a repaired 32-bit `idiv` (`idiv32` in
+  `main_clouds.inc`: `0x7fffffff`, or `0x80000001` when the divisor and the
+  dividend's high half differ in sign, as maindiff's `repair_divide` does).
+  Only the quotients' bits 8 to 31 are used.
+- **The texel index is two quotient bytes less the layer's origin bytes**, as
+  bh:bl, each byte wrapping on its own.
+- **`+0x918b`'s second-layer test reads the first layer's `+0xe6e`**, not
+  `+0xe76`, and compares the position the first test stored.
+- **Two run-time image pointers**, `.data+0x3470` (the layer record) and
+  `+0x35da` (unaligned, the layer block), join put_state's list as slice 15's
+  `+0x1a72` did.
+
+The stack-alignment shims around each call are left out, as in slice 15.
+
+### Verifying the cloud layers
+
+G3D, HG2D and UTIL are verified in their own harnesses. maindiff's stubs log
+what each is handed (a block of MAIN's own by its image offset alone, since
+it holds relocated pointers the image comparison already covers) and hand back
+what the routines read: HG2D `+0x88`'s threshold byte, `+0xb4`'s 64 KB texel
+map in fixtures, and slice 3's UTIL `+0x48` model. The `clouds` suite seeds
+GLOBAL's layer fields (slice 15's centre/width pairs and flags, the altitude
+now and then on or beside a band edge, or 1500, `0x34` or 6 from one), the band
+edges as slice 15 leaves them or not, the layer records with the aircraft
+usually near their origin (now and then far, so the divides saturate), the
+view kind behind GLOBAL `+0x1198`, and calls `+0x98` with `which` 0 to 5.
+`make maindiff-run SUITE=clouds`: @CLLONG@
+
+## Slice 20: the cloud layers' textures
+
+`src/main/main_clouds.inc`, `.text+0x7140` (`+0x94`) and its texture maker
+`.text+0x77c7`, assembly. WEATHERM calls it. When GLOBAL `+0x398` is set,
+each layer whose coverage's high byte (GLOBAL `+0xe6e`, `+0xe76`) differs from
+the last made (`.data+0x1eda`, `+0x1edc`) gets its texture remade, and the new
+one is kept only if it was written. Then the haze's cloud base, GLOBAL
+`+0xcd4`: the first layer's `+0xe6a`, at most `0x2bc` once GLOBAL `+0xe8a`
+reaches `0x7d00`, or 0 with no first layer.
+
+The maker submits the layer's block to G3D `+0x24`, then, when GLOBAL `+0xcb6`
+is set, reads `<string 0x9006>\clouds` (extension 4, 0x10000 bytes) into the
+texel map HG2D `+0xb4` hands out. It remaps every texel by a curve the
+coverage's high byte picks (`0xed` times it, the product's high byte, a
+shoulder below `0x80` or a knee above, the steepest past `0xe0`), shifted and
+offset by the coverage band (`.data+0x1ff3`/`+0x1ff4`, from `0xe001` up the
+second set). It then clears `cloudN`'s read-only flag (host `+0x134`/`+0x138`)
+and writes the map there. It answers retail's carry.
+
+Retail behaviour, reproduced:
+
+- **The read's open is never checked**: with no `clouds` file the host's read
+  and close of a null file fail quietly, and the map is remapped as it was.
+- **The shoulder's `div bl` runs into overflow** at a texel just inside the
+  curve, or divides by 0 at the lowest coverages, and leans on the host's
+  divide repair (`0xff`).
+- **A failed write leaves edi on the texel map.** The maker puts GLOBAL back in
+  edi only on the way to the end or before its early return; when the write's
+  open (or the write) fails it returns with edi still on the map, and `+0x94`
+  goes on reading GLOBAL's fields through edi: the second layer's flags and
+  coverage, the haze inputs, and the store of `+0xcd4` all go to the map
+  instead. `clouds_texture` hands its edi back for that.
+- **A failed write leaves the file open.**
+
+### Verifying the textures
+
+maindiff's file model grows: files hold up to 64 KB (the cap where a write
+runs out of disk stays per suite, so the situation suites' streams are
+unchanged), a file has the host's attribute flags (`+0x134`/`+0x138`), and a
+read-only file will not open for writing, as `CreateFileA` would refuse it.
+The `cloudtex` suite has `TEXTURE\clouds` there (whole, short or empty) or
+not, `cloud1`/`cloud2` there or not and now and then read-only. Each op seeds
+the coverages across the curve's turns, the flags and the last-made ids. The
+texel map is in fixtures, and its digest goes in the transcript after every op.
+`make maindiff-run SUITE=cloudtex`: @CTLONG@
+
+## Slice 21: the spot plane's eye
+
+`src/main/main_spot.inc`, `.text+0x6450` (`+0xa8`) with `+0x669a`..`+0x6ce2`,
+assembly. WINDOW, CONTROLS and ADVDRV call it. In the spot view (GLOBAL
+`+0x1198`'s view record of kind 0 or 1, with `+0x10` and `+0x18` clear) it
+places the eye, a 48-bit position at `.data+0x1868`, behind the aircraft it
+follows. The aircraft is chosen by GLOBAL `+0xe64` (mode 2, the first or, with
+`+0xe66`, the second of GLOBAL `+0x384`'s pair; mode 4, the first, through
+UTIL `+0x60`'s unpack). The eye is stepped by UTIL's 48-bit vector services
+and measured by G3D `+0x1c`, which leaves its distance in GLOBAL `+0xd4c`
+(GLOBAL `+0xe88` held at `0x7fff` across each call):
+
+- when the followed aircraft has moved, or GLOBAL `+0xe62` bit 0 asks, the
+  step is worked out afresh from the view's direction (UTIL `+0x2c`, the
+  metres turned to longitude by `+0x44`) and the eye walked along it, forward
+  and then (if the first step forward did not help) back, while the distance
+  falls; with `+0xe62` bit 1, a slewed transition is armed;
+- each call steps the eye out along the step 3, 7 or 15 times (GLOBAL `+0xe60`
+  0, 1 or 2) and back, and walks it again if the distance said so; an armed
+  transition slews in fifteen steps while the distance is past `0x40000`.
+
+Retail details:
+
+- **The step count for GLOBAL `+0xe60` past 2 is G3D's leftover ecx**:
+  retail's `loop` counts with whatever G3D `+0x1c` left there. The game sets
+  only 0 to 2. *Not reproduced*: the transliteration takes no steps there, and
+  the suite keeps `+0xe60` in range.
+- **The height term in mode 2 is an unsigned 32x32 product** whose high dword
+  becomes the count kept in `.data+0x1924`; mode 4's is a signed product's low
+  dword shifted down a byte.
+- **The slewed transition raises `.data+0x1888` by a quarter turn and puts it
+  back**; nothing reads it in between.
+- **The angle handed to UTIL `+0x2c` is a word over two stale bytes**, as in
+  slice 12.
+
+### Verifying the spot plane
+
+The walk's flow turns on what UTIL computes, so **this suite runs retail UTIL**
+(`use_retail_util` in maindiff.c), shared by both sides as g3ddiff and
+landmediff share it. UTIL's vector services are stateless arithmetic verified
+in UTIL's own harness, and the real routines keep the registers the real ones
+keep. G3D `+0x1c` is a model that leaves a distance in GLOBAL `+0xd4c`: falling
+for a per-op number of calls and then rising, so every walk ends, above a
+per-op base (often near the slew's `0x40000`), plus the low bits of the eye's
+position, so where the eye was stepped shows in what comes back. It also logs
+GLOBAL `+0xe88` during the call. The suite keeps the aircraft's latitude
+(GLOBAL `+0x564`) inside slice 11's clamp, as the game does, because UTIL
+`+0x44` indexes its latitude table by it. `make maindiff-run SUITE=spot`:
+@SPLONG@

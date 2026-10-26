@@ -17,6 +17,7 @@
  */
 #include <windows.h>
 #include <stdint.h>
+#include <string.h>
 
 #include "fs98/linkage.h"
 #include "fs98/host.h"
@@ -46,6 +47,7 @@ extern struct main_image main_image;
 #define HOST     M32(V(0x20800004))
 #define G        M32(V(0x2080000c))
 #define CHAIN    M32(V(0x20800034))
+#define G3D      M32(V(0x2080006c))
 
 typedef uint32_t (FS98_STDCALL *f0)(void);
 typedef uint32_t (FS98_STDCALL *f1)(uint32_t);
@@ -274,6 +276,10 @@ static const uint32_t retail_linkage[] = {
 #include "main_sun.inc"
 #include "main_eye.inc"
 #include "main_band.inc"
+#include "main_flights.inc"
+#include "main_prefs.inc"
+#include "main_clouds.inc"
+#include "main_spot.inc"
 
 __asm__(".globl _ImportTable\n\t.set _ImportTable, _main_image + 0x0\n\t"
         ".globl _Linkage\n\t.set _Linkage, _main_image + 0xc0");
@@ -305,10 +311,18 @@ static void main_install(void)
         { 0x30, (void *)menu_grey },
         { 0x34, (void *)menu_enable },
         { 0x84, (void *)obj_alloc },
+        { 0x88, (void *)obj_step },
         { 0x8c, (void *)obj_free },
+        { 0x94, (void *)clouds_textures },
+        { 0x98, (void *)clouds_draw },
         { 0x9c, (void *)nav_band },
         { 0xa0, (void *)nav_sun },
         { 0xa4, (void *)nav_clock_ascii },
+        { 0xa8, (void *)spot_view },
+        { 0xb0, (void *)flight_quicksave },
+        { 0xb4, (void *)prefs_load },
+        { 0xb8, (void *)prefs_save },
+        { 0xbc, (void *)prefs_defaults },
         { 0xc0, (void *)nav_eye },
         { 0xc8, (void *)nav_viewcycle },
     };

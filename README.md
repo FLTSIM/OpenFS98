@@ -397,8 +397,8 @@ nothing in it imports anything interesting:
     Round 9 of the [preflight](docs/preflight.md) surveyed what is left.
     ~~**`PANELS`** (50,038 bytes)~~ — done, verified and running in-game.
     ~~**`MPCHAT`** (3,104 bytes)~~ — done, verified and running in-game.
-    **`MAIN`** (119,648 bytes) — in progress, a slice at a time; slice 1 of
-    its situation code verified ([docs/modules/main.md](docs/modules/main.md)).
+    **`MAIN`** (119,648 bytes) — in progress, a slice at a time; slices 1 to 16
+    verified ([docs/modules/main.md](docs/modules/main.md)).
 13. ~~**`HG2D`** (390 KB, the 2D rasteriser)~~ — implementation complete and
     verified standalone; in-game and non-x86 validation remain
     ([docs/modules/hg2d.md](docs/modules/hg2d.md)).

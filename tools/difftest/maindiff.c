@@ -486,12 +486,19 @@ static int32_t STDCALL h_memmove(void *d, const void *s, uint32_t n)
 #define MAX_FILES 8
 #define FILE_MAX  0x4000u
 
+#define FILE_BYTES 0x10000u   /* room for the cloud texture (+0x94); FILE_MAX stays
+                               * the cap the situation suites were verified with */
+
 struct vfile {
     char name[64];
     int used;
-    uint8_t bytes[FILE_MAX];
+    uint8_t bytes[FILE_BYTES];
     uint32_t size;
+    uint32_t attr;            /* host +0x134/+0x138's flags: 2 read-only */
 };
+
+static uint32_t file_cap = FILE_MAX;   /* where a write runs out of disk; per suite */
+static uint32_t open_rw_refused;       /* read/write opens refused, for coverage */
 
 /* The host's block: { HANDLE, char *path, mode, ext } (host.h); the handle
  * here is the file's index, and the position is kept beside it. */
@@ -540,7 +547,9 @@ static int32_t STDCALL h_open(struct hblock **out, const char *path, int32_t ext
     put(",");
     put_name(path);
     put(",%d,%d)", ext, mode);
-    if (f == NULL || mode < 0 || mode > 3 || rnd_n(40) == 0) {
+    if (f == NULL || mode < 0 || mode > 3 || ((f->attr & 2) && mode != 0) || rnd_n(40) == 0) {
+        if (mode == 1)
+            open_rw_refused++;
         *out = NULL;
         put("=-1");
         return -1;
@@ -556,6 +565,40 @@ static int32_t STDCALL h_open(struct hblock **out, const char *path, int32_t ext
     *out = b;
     put("=");
     put_ptr((uint32_t)(uintptr_t)b);
+    return 0;
+}
+
+/* +0x134(&flags, path, ext) and +0x138(flags, path, ext): a file's
+ * attributes as the host's flags (1 normal, 2 read-only, 4 archive, ...);
+ * -1 with no such file.  A read-only file will not open for writing. */
+static int32_t STDCALL h_attr_get(uint32_t *out, const char *path, int32_t ext)
+{
+    struct vfile *f = vfile_find(path);
+
+    put(" attrs(");
+    put_name(path);
+    put(",%d)", ext);
+    if (f == NULL) {
+        put("=-1");
+        return -1;
+    }
+    *out = f->attr;
+    put("=%#x", f->attr);
+    return 0;
+}
+
+static int32_t STDCALL h_attr_set(uint32_t flags, const char *path, int32_t ext)
+{
+    struct vfile *f = vfile_find(path);
+
+    put(" setattrs(%#x,", flags);
+    put_name(path);
+    put(",%d)", ext);
+    if (f == NULL) {
+        put("=-1");
+        return -1;
+    }
+    f->attr = flags;
     return 0;
 }
 
@@ -630,8 +673,8 @@ static int32_t STDCALL h_write(struct hblock *b, const void *buf, uint32_t n, ui
     f = &files[b->handle];
     k = n;
     /* now and then the disk fills */
-    if (b->pos + k > FILE_MAX || rnd_n(short_write_odds) == 0) {
-        k = b->pos < FILE_MAX ? rnd_n(FILE_MAX - b->pos < k ? FILE_MAX - b->pos + 1 : k + 1) : 0;
+    if (b->pos + k > file_cap || rnd_n(short_write_odds) == 0) {
+        k = b->pos < file_cap ? rnd_n(file_cap - b->pos < k ? file_cap - b->pos + 1 : k + 1) : 0;
         if (counting) cover_short_writes++;
     }
     memcpy(f->bytes + b->pos, buf, k);
@@ -1022,11 +1065,31 @@ static uint32_t STDCALL hg2d_34(uint32_t ctx, uint32_t a, uint32_t b, uint32_t c
  * blocks it has already patched in place, never reading anything back, so a
  * stub that logs which block (by image offset) is enough.  G3D is verified in
  * its own harness. */
+/* For the spot plane (+0xa8), G3D +0x1c also leaves a distance in GLOBAL
+ * +0xd4c, as the real one leaves the measured object's: one that falls for a
+ * per-op number of calls, now and then holds there for a few, and then rises
+ * (so every walk ends), above a per-op base, plus (off the bottom) the low bits
+ * of the eye's position at .data+0x1868, so where the eye was stepped shows in
+ * what comes back.  The op's first measure is now and then steered onto the
+ * slew's limit, 0x40000, or one either side. */
+static int g3d_distance;
+static uint32_t g3d_calls, g3d_turn, g3d_base, g3d_first, g3d_flat;
 static uint32_t STDCALL g3d_1c(uint32_t cmd)
 {
     put(" g3d+0x1c(");
     put_ptr(cmd);
     put(")");
+    if (g3d_distance) {
+        uint32_t n = g3d_calls++, d, t;
+        /* down to the turn, flat there for g3d_flat more calls (so a walk
+         * meets an unchanged distance), then up */
+        t = n < g3d_turn ? g3d_turn - n : n <= g3d_turn + g3d_flat ? 0 : n - g3d_turn - g3d_flat;
+        d = g3d_base + t * 16u + (t != 0 ? digest(cur->image + 0x1868, 24, 0x811c9dc5u) & 15 : 0);
+        if (n == 0 && g3d_first != 0)              /* steered onto the slew's 0x40000 */
+            d = g3d_first;
+        *(uint32_t *)(global + 0xd4c) = d;
+        put(" e88=%#x d4c=%#x", *(uint16_t *)(global + 0xe88), d);
+    }
     return 0;
 }
 static uint32_t STDCALL g3d_24(uint32_t cmd)
@@ -1034,6 +1097,158 @@ static uint32_t STDCALL g3d_24(uint32_t cmd)
     put(" g3d+0x24(");
     put_ptr(cmd);
     put(")");
+    return 0;
+}
+
+/* ---- FLTSIM98.CFG, for the preferences (+0xb4, +0xb8, +0xbc) -------------------
+ *
+ * A model of the host's profile services over the sim's CFG, in memory: what
+ * the verified host does through Get/WritePrivateProfile*A.  +0xa8 reads an
+ * int as GetPrivateProfileIntA does (the old value is the default; a present
+ * value is leading blanks, a sign and decimal digits, wrapping) and always
+ * answers 0; +0xac writes "%d"; +0xc8 reads a string with the buffer as its
+ * default, at most size - 1 characters, answering the count; +0xcc writes
+ * one.  Every call is logged with its section, key and value. */
+
+#define CFG_MAX 160
+static struct cfg_entry { char sec[32], key[48], val[0x120]; } cfg[CFG_MAX];
+static uint32_t ncfg;
+
+static struct cfg_entry *cfg_find(const char *sec, const char *key)
+{
+    uint32_t i;
+
+    for (i = 0; i < ncfg; i++)
+        if (!_stricmp(cfg[i].sec, sec) && !_stricmp(cfg[i].key, key))
+            return &cfg[i];
+    return NULL;
+}
+
+static void cfg_set(const char *sec, const char *key, const char *val)
+{
+    struct cfg_entry *e = cfg_find(sec, key);
+
+    if (e == NULL) {
+        if (ncfg == CFG_MAX)
+            stub_fault("cfg full");
+        e = &cfg[ncfg++];
+        snprintf(e->sec, sizeof e->sec, "%s", sec);
+        snprintf(e->key, sizeof e->key, "%s", key);
+    }
+    snprintf(e->val, sizeof e->val, "%s", val);
+}
+
+static int32_t STDCALL h_cfg_get_int(const char *sec, const char *key, int32_t *io)
+{
+    struct cfg_entry *e = cfg_find(sec, key);
+
+    put(" cfgint(%s,%s,%d)", sec, key, *io);
+    if (e != NULL && e->val[0] != 0) {
+        const char *c = e->val;
+        uint32_t v = 0;
+        int neg = 0;
+        while (*c != 0 && (uint8_t)*c <= ' ')
+            c++;
+        if (*c == '-' || *c == '+')
+            neg = *c++ == '-';
+        while (*c >= '0' && *c <= '9')
+            v = v * 10 + (uint32_t)(*c++ - '0');
+        *io = (int32_t)(neg ? 0u - v : v);
+    }
+    put("=%d", *io);
+    return 0;
+}
+
+static int32_t STDCALL h_cfg_put_int(const char *sec, const char *key, int32_t v)
+{
+    char t[16];
+
+    put(" cfgput(%s,%s,%d)", sec, key, v);
+    snprintf(t, sizeof t, "%d", v);
+    cfg_set(sec, key, t);
+    return 0;
+}
+
+static int32_t STDCALL h_cfg_get_string(const char *sec, const char *key, char *buf, uint32_t size)
+{
+    struct cfg_entry *e = cfg_find(sec, key);
+    static char t[0x400];
+    uint32_t n;
+
+    /* the default is the buffer; the suite keeps a terminator within 0x3ff */
+    n = (uint32_t)strnlen(e != NULL ? e->val : buf, sizeof t - 1);
+    memcpy(t, e != NULL ? e->val : buf, n);
+    t[n] = 0;
+    if (size == 0)
+        n = 0;
+    else if (n > size - 1)
+        n = size - 1;
+    if (size != 0) {
+        memcpy(buf, t, n);
+        buf[n] = 0;
+    }
+    put(" cfgstr(%s,%s,%#x)='%.300s'", sec, key, size, size ? buf : "");
+    return (int32_t)n;
+}
+
+static int32_t STDCALL h_cfg_put_string(const char *sec, const char *key, const char *v)
+{
+    put(" cfgputstr(%s,%s,'%.300s')", sec, key, v);
+    cfg_set(sec, key, v);
+    return 0;
+}
+
+static int32_t STDCALL h_288(uint32_t v)
+{
+    put(" host288(%#x)", v);
+    return 0;
+}
+
+/* G3D +0x38, the object step's submission (+0x88): handed an object's buffer
+ * (in the shared arena) and the record it was stamped from (in the image).
+ * The step never reads anything back, so the stub logs both pointers and
+ * what G3D would read: the eight words +0x88 laid out at the buffer's +0x42
+ * and a digest of the 40-byte record.  G3D is verified in its own harness. */
+static uint32_t STDCALL g3d_38(uint32_t buf, uint32_t rec)
+{
+    const uint8_t *q = (const uint8_t *)(uintptr_t)buf + 0x42;
+
+    put(" g3d+0x38(");
+    put_ptr(buf);
+    put(",");
+    put_ptr(rec);
+    put(")");
+    if (in_image(buf))                             /* a block of MAIN's own, holding relocated
+                                                    * pointers: the image comparison covers it */
+        return 0;
+    put(" %04x %04x %04x %04x %04x %04x %04x %04x",
+        *(uint16_t *)(q + 0), *(uint16_t *)(q + 2), *(uint16_t *)(q + 6), *(uint16_t *)(q + 8),
+        *(uint16_t *)(q + 0xc), *(uint16_t *)(q + 0xe), *(uint16_t *)(q + 0x12), *(uint16_t *)(q + 0x14));
+    if (rec != 0)
+        put(" rec=%08x", digest((const void *)(uintptr_t)rec, 40, 0x811c9dc5u));
+    return 0;
+}
+
+/* HG2D +0x88, +0xb4 and +0xb8, as the cloud layers (+0x98) use them: +0x88(0xa200,
+ * out) hands back two bytes (the second is the layers' texel threshold), +0xb4(map)
+ * the base of a 64 KB texel map in fixtures, +0xb8(map, 0) releases it.  HG2D is
+ * verified in its own harness. */
+static uint8_t hg2d_threshold;
+static uint32_t STDCALL hg2d_88(uint32_t what, uint8_t *out)
+{
+    out[0] = (uint8_t)rnd();
+    out[1] = hg2d_threshold;
+    put(" hg2d+0x88(%#x)->%02x%02x", what, out[0], out[1]);
+    return 0x5a5a0000u | out[0];
+}
+static uint32_t STDCALL hg2d_b4(uint32_t map)
+{
+    put(" hg2d+0xb4(%#x)", map);
+    return (uint32_t)(uintptr_t)fixtures;
+}
+static uint32_t STDCALL hg2d_b8(uint32_t map, uint32_t z)
+{
+    put(" hg2d+0xb8(%#x,%#x)", map, z);
     return 0;
 }
 
@@ -1181,6 +1396,13 @@ static void build_stubs(void)
     SET_SLOT(host, 0x2a8, h_strcpy);
     SET_SLOT(host, 0x2ac, h_strncpy);
     SET_SLOT(host, 0x2b8, h_strlen);
+    SET_SLOT(host, 0x0a8, h_cfg_get_int);
+    SET_SLOT(host, 0x0ac, h_cfg_put_int);
+    SET_SLOT(host, 0x0c8, h_cfg_get_string);
+    SET_SLOT(host, 0x0cc, h_cfg_put_string);
+    SET_SLOT(host, 0x288, h_288);
+    SET_SLOT(host, 0x134, h_attr_get);
+    SET_SLOT(host, 0x138, h_attr_set);
     *(uint32_t *)chain = 4;
     SET_SLOT(chain, 0x20, chain_send);
     *(uint32_t *)acontain = 23;
@@ -1215,9 +1437,56 @@ static void build_stubs(void)
     *(uint32_t *)hg2d = 13;
     SET_SLOT(hg2d, 0x1c, hg2d_1c);
     SET_SLOT(hg2d, 0x34, hg2d_34);
+    SET_SLOT(hg2d, 0x88, hg2d_88);
+    SET_SLOT(hg2d, 0xb4, hg2d_b4);
+    SET_SLOT(hg2d, 0xb8, hg2d_b8);
     *(uint32_t *)g3d = 14;
     SET_SLOT(g3d, 0x1c, g3d_1c);
     SET_SLOT(g3d, 0x24, g3d_24);
+    SET_SLOT(g3d, 0x38, g3d_38);
+}
+
+/* ---- retail UTIL, for the suites whose UTIL arithmetic decides their flow --------
+ *
+ * The spot plane (+0xa8) steps a 48-bit eye with UTIL's vector services until
+ * a distance stops falling, so a logging model would decide the walk itself.
+ * Those services are stateless arithmetic (verified in UTIL's own harness), so
+ * retail UTIL is loaded once and shared, as g3ddiff and landmediff do, and the
+ * suite points the stub table's slots at its routines -- which also keep the
+ * registers the real ones keep.  Its imports: the host stub table, GLOBAL, and
+ * NUMERIC as a table of traps. */
+static uint8_t numeric_stub[0x100];
+
+static void use_retail_util(const uint32_t *slots, uint32_t n)
+{
+    HMODULE module = LoadLibraryA("UTIL_retail.dll");
+    uint8_t *link;
+    struct import *im;
+    uint32_t i;
+
+    if (module == NULL) {
+        printf("cannot load UTIL_retail.dll (%lu)\n", GetLastError());
+        exit(2);
+    }
+    link = (uint8_t *)GetProcAddress(module, "Linkage");
+    im = (struct import *)GetProcAddress(module, "ImportTable");
+    if (link == NULL || *(uint32_t *)link != 20 || im == NULL) {
+        printf("UTIL_retail.dll: wrong module\n");
+        exit(2);
+    }
+    for (i = 4; i < sizeof numeric_stub; i += 4)
+        *(uint32_t *)(numeric_stub + i) = 0xde110000u | i;
+    *(uint32_t *)numeric_stub = 17;
+    for (; im->id; im++) {
+        switch (im->id) {
+        case 1:  im->link = host; break;
+        case 2:  im->link = global; break;
+        case 17: im->link = numeric_stub; break;
+        default: printf("UTIL_retail.dll: unexpected import %u\n", im->id); exit(2);
+        }
+    }
+    for (i = 0; i < n; i++)
+        *(uint32_t *)(util + slots[i]) = *(uint32_t *)(link + slots[i]);
 }
 
 /* ---- loading ----------------------------------------------------------------------- */
@@ -1326,8 +1595,10 @@ static void put_state(void)
          * unaligned), the record being read and where its body is read
          * from.  Only these: any other word that looks like an image address
          * is a value that happens to (a length, say).  0x1a72 is the band's
-         * draw-command staging word (+0x9c). */
-        static const uint32_t odd[] = { 0x41e1, 0x41e5, 0x41f5, 0x41f9, 0x9754, 0x9758, 0x1a72 };
+         * draw-command staging word (+0x9c); 0x3470 and 0x35da (unaligned)
+         * are the cloud layer's record and block (+0x98). */
+        static const uint32_t odd[] = { 0x41e1, 0x41e5, 0x41f5, 0x41f9, 0x9754, 0x9758, 0x1a72,
+                                        0x3470, 0x35da };
         uint32_t j, v;
         for (j = 0; j < sizeof odd / sizeof odd[0]; j++) {
             memcpy(&v, img + odd[j], 4);
@@ -1645,12 +1916,16 @@ static unsigned long cover_saves2, cover_save_fail, cover_loads[6], cover_mutate
 static char saved[8][64];
 static uint32_t nsaved;
 
+static const char *string_2201;              /* the quick save's title, per scenario */
+
 static const char *string_of(uint32_t id)
 {
     switch (id) {
+    case 0x2201: return string_2201;
     case 0x9002: return "FLIGHTS";
     case 0x9004: return "FLIGHTS\\OTHER";
     case 0x9016: return "start.stn";
+    case 0x9006: return "TEXTURE";
     case 0xf461: return "No default flight";
     case 0xf462: return "Flight will not load";
     }
@@ -2507,6 +2782,675 @@ static void report_band(void)
            cover_band_ix[3], cover_band_ix[4], cover_band_double, cover_band_skip);
 }
 
+/* ---- suite: objstep (step every object, +0x88) ----------------------------------- */
+
+static unsigned long cover_objstep, cover_objstep_active, cover_objstep_submits,
+    cover_objstep_side[3], cover_objstep_edge, cover_objstep_toggle, cover_objstep_side0;
+
+/* Fill an entry as +0x84 would leave it, with every field random: n buffers
+ * (+0xc) in the arena, a live count (+0x10) up to n, the four words at +4..
+ * +0xa, the records, the template copy (-0x28) and the template itself
+ * (-0x2c, in fixtures).  n stays 1..15, as +0x84 makes it 15: past that the
+ * record shift runs into the buffer pointers and n = 0 shifts 4 GB. */
+static void objstep_fill(uint32_t idx)
+{
+    uint8_t *e = cur->image + 0x9794 + idx * 0x2d4;
+    uint8_t *tmpl = fixtures + 0x6d000 + idx * 0x40;
+    uint32_t n = rnd_n(2) ? 15 : 1 + rnd_n(15), i, used;
+
+    if (rnd_n(3) != 0) {
+        *(uint32_t *)e = rnd_n(4) ? 0 : rnd() & ~1u;   /* inactive (or a stray even word is active) */
+        if (*(uint32_t *)e == 0)
+            return;
+    } else {
+        *(uint32_t *)e = 1;
+    }
+    used = rnd_n(4) == 0 ? n : rnd_n(4) == 0 ? 0 : rnd_n(n + 1);
+    *(uint32_t *)(e + 0xc) = n;
+    *(uint32_t *)(e + 0x10) = used;
+    for (i = 4; i < 0xc; i += 2)
+        *(uint16_t *)(e + i) = (uint16_t)(rnd_n(3) ? rnd_n(0x2000) - 0x1000 : rnd());
+    for (i = 0; i < 15 * 40; i += 4)
+        *(uint32_t *)(e + 0x14 + i) = rnd();
+    for (i = 0; i < 9; i++) {
+        *(uint32_t *)(tmpl + i * 4) = rnd();
+        *(uint32_t *)(e - 0x28 + i * 4) = rnd();
+    }
+    *(uint32_t *)(e - 0x2c) = (uint32_t)(uintptr_t)tmpl;
+    for (i = 0; i < n; i++) {
+        uint8_t *b = arena_get(0xaa);
+        uint32_t j;
+        for (j = 0; j < 0xaa; j++)
+            b[j] = (uint8_t)rnd();
+        *(uint32_t *)(e + 0x26c + i * 4) = (uint32_t)(uintptr_t)b;
+    }
+}
+
+static void op_objstep(void)
+{
+    static const uint32_t edge[] = { 0x15540000u, 0x6aa40000u, 0x954c0000u, 0xea9c0000u };
+    uint32_t idx, r, before[20];
+
+    if (op_number == 0 || rnd_n(5) == 0)
+        for (idx = 0; idx < 20; idx++)
+            objstep_fill(idx);
+    *(uint32_t *)(global + 0x5d0) = rnd();
+    *(uint32_t *)(global + 0x5c8) = rnd();
+    global[0x250] = (uint8_t)rnd();
+    for (idx = 0; idx < 20; idx++) {
+        uint8_t *e = cur->image + 0x9794 + idx * 0x2d4;
+        uint32_t d;
+
+        before[idx] = *(uint32_t *)(e + 0x10);
+        if (*(uint32_t *)e == 0)
+            continue;
+        /* the newest record's +0x24 is the template copy's ninth dword: aim
+         * the longitude difference onto a wrap edge, or the side word (its
+         * seventh, +0x1c) onto the value that wraps to 0 */
+        switch (rnd_n(4)) {
+        case 0:
+            d = edge[rnd_n(4)] + rnd_n(3) - 1;
+            *(uint32_t *)(e - 8) = *(uint32_t *)(global + 0x5d0) - d;
+            break;
+        case 1:
+            *(uint32_t *)(e - 0x10) = rnd_n(2) ? 0xc0040000u : 0x3ffc0000u;
+            break;
+        default:
+            break;
+        }
+    }
+    if (counting) cover_objstep++;
+    put("\n#objstep 5d0=%#x 5c8=%#x 250=%#x", *(uint32_t *)(global + 0x5d0),
+        *(uint32_t *)(global + 0x5c8), global[0x250]);
+    if (counting)
+        for (idx = 0; idx < 20; idx++) {
+            uint8_t *e = cur->image + 0x9794 + idx * 0x2d4;
+            uint32_t d, side, used;
+            if (*(uint32_t *)e == 0)
+                continue;
+            cover_objstep_active++;
+            used = before[idx] + (before[idx] != *(uint32_t *)(e + 0xc));
+            cover_objstep_submits += used;
+            d = *(uint32_t *)(global + 0x5d0) - *(uint32_t *)(e - 8);
+            if (d > 0x15540000u && d < 0x6aa40000u) { cover_objstep_side[1]++; side = *(uint32_t *)(e - 0x10) + 0x3ffc0000u; }
+            else if (d > 0x954c0000u && d < 0xea9c0000u) { cover_objstep_side[2]++; side = *(uint32_t *)(e - 0x10) - 0x3ffc0000u; }
+            else { cover_objstep_side[0]++; side = 1; }
+            if (side == 0) cover_objstep_side0++;
+            for (r = 0; r < 4; r++)
+                if (d - edge[r] + 1 <= 2) cover_objstep_edge++;
+            if (used > 1 && (global[0x250] & 1)) cover_objstep_toggle++;
+        }
+    r = ((s0)SVC(0x88))();
+    put(" =%#x", r);
+}
+
+static void setup_objstep(void) { }
+
+static void report_objstep(void)
+{
+    printf("  objstep %lu (active entries %lu, submissions %lu, side 0/+/- %lu/%lu/%lu,"
+           " on a wrap edge %lu, side wrapped to 0 %lu, toggled %lu)\n",
+           cover_objstep, cover_objstep_active, cover_objstep_submits, cover_objstep_side[0],
+           cover_objstep_side[1], cover_objstep_side[2], cover_objstep_edge, cover_objstep_side0,
+           cover_objstep_toggle);
+}
+
+/* ---- suite: quicksave (save under the default title, +0xb0) -------------------- */
+
+static unsigned long cover_quick, cover_quick_default, cover_quick_ok, cover_quick_found;
+
+/* A situations scenario in which a third of the ops are +0xb0: it saves
+ * under string 0x2201 (absent, so the "Temporary Flight" the buffer starts
+ * as stands; short; or long enough to fill the buffer) with the description
+ * at .data+0x7fd0, and what it saved joins the files the loads pick from. */
+static void op_quicksave(void)
+{
+    uint32_t r;
+    struct vfile *f;
+    char path[64];
+
+    if (rnd_n(3) != 0) {
+        op_situations();
+        return;
+    }
+    random_string((char *)cur->image + 0x7fd0, rnd_n(4) ? 0x80 : 0x180);
+    if (rnd_n(3) == 0)
+        global[0x500 + rnd_n(0xd00)] = (uint8_t)rnd();
+    if (counting) {
+        cover_quick++;
+        if (string_2201 == NULL) cover_quick_default++;
+    }
+    put("\n#quicksave('%.40s')", (char *)cur->image + 0x7fd0);
+    r = ((s0)SVC(0xb0))();
+    put(" =%#x", r);
+    if (r == 0 && counting) cover_quick_ok++;
+    if (r != 0)
+        return;
+    /* the save joins FLIGHTS and the title as it copied it, at most 0x1e
+     * bytes, to .data+0x441f */
+    snprintf(path, sizeof path, "FLIGHTS\\%.30s", (char *)cur->image + 0x441f);
+    if ((f = vfile_find(path)) != NULL) {
+        if (counting) cover_quick_found++;
+        put(" file %#x", f->size);
+        put_bytes(f->bytes, f->size);
+        if (nsaved < 8)
+            snprintf(saved[nsaved++], sizeof saved[0], "%s", path);
+    }
+}
+
+static void setup_quicksave(void)
+{
+    static char name[0x140];
+    uint32_t k = rnd_n(4);
+
+    setup_situations();
+    if (k == 0) {
+        string_2201 = NULL;
+    } else if (k == 1) {
+        string_2201 = "Temporary Flight";
+    } else {
+        random_string(name, k == 2 ? 0x18 : 0x130);
+        string_2201 = name;
+    }
+}
+
+static void report_quicksave(void)
+{
+    report_situations();
+    printf("  quicksave %lu (title string absent %lu, saved %lu, file found %lu)\n",
+           cover_quick, cover_quick_default, cover_quick_ok, cover_quick_found);
+}
+
+/* ---- suite: prefs (the preferences: +0xb4 load, +0xb8 save, +0xbc defaults) ------ */
+
+static unsigned long cover_prefs_ops[4], cover_prefs_preset, cover_prefs_wild, cover_prefs_neg,
+    cover_prefs_high_mode, cover_prefs_junk;
+static int32_t safe_modes[0x300];
+static uint32_t nsafe_modes;
+
+/* The performance modes whose preset block, 0x40 bytes at .data+0x5780 +
+ * (mode << 7), lies in the image and holds no relocated pointer (one would
+ * reach GLOBAL as each side's own address).  The real presets are 1..11;
+ * the others read on through .data, as retail would. */
+static void prefs_modes(void)
+{
+    int32_t m;
+    uint32_t i;
+
+    for (m = -0xa0; m < 0x200 && nsafe_modes < 0x300; m++) {
+        int32_t at = 0x5780 + m * 0x80;
+        int ok = at >= 0 && (uint32_t)at + 0x40 <= IMAGE_SIZE;
+        for (i = 0; ok && i < nrelocs; i++)
+            if (relocs[i] + 4 > (uint32_t)at && relocs[i] < (uint32_t)at + 0x40)
+                ok = 0;
+        if (ok)
+            safe_modes[nsafe_modes++] = m;
+    }
+}
+
+static int32_t prefs_mode(void)
+{
+    int32_t m;
+
+    if (rnd_n(3))
+        m = (int32_t)rnd_n(12);
+    else
+        m = safe_modes[rnd_n(nsafe_modes)];
+    return m;
+}
+
+static void prefs_string(char *d, uint32_t max)
+{
+    random_string(d, max);
+    if (rnd_n(4) == 0)
+        d[rnd_n(max)] = ' ';
+}
+
+static void op_prefs(void)
+{
+    uint32_t k = rnd_n(10), r;
+
+    if (k < 3) {                                   /* load */
+        static char t[16];
+        int32_t m = prefs_mode();
+        struct cfg_entry *e = cfg_find("PREFS", "PERFORMANCE_MODE");
+        *(int32_t *)(global + 0x123c) = prefs_mode();
+        if (e != NULL || rnd_n(2)) {
+            /* the mode as the file gives it, now and then with a trailing tail */
+            snprintf(t, sizeof t, rnd_n(4) ? "%d" : rnd_n(2) ? " %dx" : "+%d;", m);
+            if (counting && t[0] != '-' && (t[0] < '0' || t[0] > '9')) cover_prefs_junk++;
+            cfg_set("PREFS", "PERFORMANCE_MODE", t);
+        }
+        if (counting) cover_prefs_ops[0]++;
+        put("\n#load");
+        r = ((s0)SVC(0xb4))();
+        m = *(int32_t *)(global + 0x123c);         /* the mode the preset was taken for */
+        if (counting) {
+            if (m != 0) cover_prefs_preset++;
+            if (m > 11) cover_prefs_wild++;
+            if (m < 0) cover_prefs_neg++;
+        }
+    } else if (k < 5) {                            /* save */
+        if (counting) cover_prefs_ops[1]++;
+        put("\n#save");
+        r = ((s0)SVC(0xb8))();
+    } else if (k < 7) {                            /* defaults */
+        int32_t m = rnd_n(4) ? (int32_t)rnd_n(10) : (int32_t)rnd();
+        if (counting) { cover_prefs_ops[2]++; if (m > 4) cover_prefs_high_mode++; }
+        put("\n#defaults(%d)", m);
+        r = ((s1)SVC(0xbc))((uint32_t)m);
+    } else {                                       /* the file or GLOBAL changes */
+        uint32_t j;
+        if (counting) cover_prefs_ops[3]++;
+        if (ncfg != 0 && rnd_n(2)) {
+            struct cfg_entry *e = &cfg[rnd_n(ncfg)];
+            char t[0x120];
+            switch (rnd_n(5)) {
+            case 0: snprintf(t, sizeof t, "%d", (int32_t)rnd()); break;
+            case 1: snprintf(t, sizeof t, "%d", (int32_t)rnd_n(0x20000) - 0x10000); break;
+            case 2: t[0] = 0; break;
+            case 3: snprintf(t, sizeof t, "%u%c", rnd_n(1000), (char)('a' + rnd_n(26))); break;
+            default: prefs_string(t, 0x118); break;
+            }
+            snprintf(e->val, sizeof e->val, "%s", t);
+            put("\n#cfg %s=%.300s", e->key, e->val);
+        } else {
+            for (j = 0; j < 8; j++)
+                global[rnd_n(sizeof global)] = (uint8_t)rnd();
+            prefs_string((char *)global + 0x24, rnd_n(4) ? 0x40 : 0x103);
+            put("\n#global");
+        }
+        return;
+    }
+    put(" =%#x cfg %u %08x", r, ncfg, digest(cfg, sizeof cfg, 0x811c9dc5u));
+}
+
+static void setup_prefs(void)
+{
+    uint32_t i, n;
+
+    ncfg = 0;
+    memset(cfg, 0, sizeof cfg);
+    if (nsafe_modes == 0)
+        prefs_modes();
+    for (i = 0; i < sizeof global; i++)
+        global[i] = (uint8_t)rnd();
+    /* the three string fields, terminated or now and then not within 0x104 */
+    prefs_string((char *)global + 0x24, 0x40);
+    prefs_string((char *)global + 0x12c, rnd_n(4) ? 0x40 : 0x103);
+    prefs_string((char *)global + 0x638, 0x40);
+    if (rnd_n(8) == 0) {
+        memset(global + 0x12c, 'z', 0x110);       /* longer than the 0x104 read */
+        global[0x12c + 0x110] = 0;
+    }
+    /* a file that already has some of the keys, or none */
+    n = rnd_n(3) ? 0 : rnd_n(6);
+    for (i = 0; i < n; i++) {
+        static const char *const key[] = { "ADF_500_HZ", "PERFORMANCE_MODE", "DEF_PERF_MODE", "WEIRD" };
+        char t[16];
+        snprintf(t, sizeof t, "%d", (int32_t)rnd_n(12));
+        cfg_set("PREFS", key[rnd_n(4)], t);
+    }
+}
+
+static void report_prefs(void)
+{
+    printf("  prefs: loads %lu, saves %lu, defaults %lu (mode above 4 %lu), changes %lu; presets"
+           " applied %lu (past the table %lu, negative %lu); mode text with a tail %lu\n",
+           cover_prefs_ops[0], cover_prefs_ops[1], cover_prefs_ops[2], cover_prefs_high_mode,
+           cover_prefs_ops[3], cover_prefs_preset, cover_prefs_wild, cover_prefs_neg, cover_prefs_junk);
+}
+
+/* ---- suite: clouds (the cloud layers' draw, +0x98) ------------------------------- */
+
+static unsigned long cover_clouds_which[5], cover_clouds_skip, cover_clouds_inside, cover_clouds_shown,
+    cover_clouds_flag8005, cover_clouds_puffs, cover_clouds_texel, cover_clouds_sat;
+
+/* Each op seeds GLOBAL's layer fields (slice 15's centre/width pairs and flags,
+ * the altitude now and then on or beside a band edge), the band edges slice 15
+ * leaves in .data, the layer records at .data+0x1a80/+0x1a98 (the aircraft
+ * usually near enough their origin that +0x9d57's divides fit, now and then
+ * far), the texel map and HG2D's threshold, the view record behind GLOBAL
+ * +0x1198, and calls +0x98 with a `which` from 0 to 5. */
+static void op_clouds(void)
+{
+    uint8_t *view = fixtures + 0x10000;
+    uint32_t which = rnd_n(3) ? 0 : 1 + rnd_n(5), i;
+    int16_t lo1, lo2;
+
+    for (i = 0; i < 0x40; i++)
+        global[0xe60 + i] = (uint8_t)rnd();
+    *(int16_t *)(global + 0xe6a) = (int16_t)(rnd_n(3) ? (int16_t)(rnd() & 0x3fff) - 0x2000 : (int16_t)rnd());
+    *(uint16_t *)(global + 0xe6c) = (uint16_t)(rnd_n(3) ? rnd_n(0x1000) : rnd());
+    *(int16_t *)(global + 0xe72) = (int16_t)(rnd_n(3) ? (int16_t)(rnd() & 0x3fff) : (int16_t)rnd());
+    *(uint16_t *)(global + 0xe74) = (uint16_t)(rnd_n(3) ? rnd_n(0x1000) : rnd());
+    *(uint16_t *)(global + 0xe6e) = (uint16_t)(rnd_n(2) ? 0xc000 + rnd_n(0x4000) : rnd());
+    if (rnd_n(4) == 0)                             /* on +0x918b's 0xc000 or +0x741f's 0xe001 */
+        *(uint16_t *)(global + 0xe6e) = (uint16_t)((rnd_n(2) ? 0xbfff : 0xe000) + rnd_n(3));
+    *(uint16_t *)(global + 0xe76) = (uint16_t)(rnd_n(2) ? 0xe000 + rnd_n(3) : rnd());
+    *(uint16_t *)(global + 0xe70) = (uint16_t)(rnd_n(5) ? 1 + rnd_n(0xffff) : 0);
+    *(uint16_t *)(global + 0xe78) = (uint16_t)(rnd_n(2) ? 0 : 1 + rnd_n(0xffff));
+    *(uint16_t *)(global + 0xe82) = (uint16_t)(rnd_n(2) ? 0 : rnd());
+    *(uint16_t *)(global + 0xe84) = (uint16_t)(rnd_n(3) ? rnd() | 1 : 0);
+    *(uint16_t *)(global + 0xe86) = (uint16_t)rnd_n(5);
+    *(uint16_t *)(global + 0xe7a) = (uint16_t)(rnd_n(3) ? rnd() : 0);
+    *(uint16_t *)(global + 0xe7e) = (uint16_t)(rnd_n(3) ? rnd() : 0);
+    *(uint16_t *)(global + 0xe7c) = (uint16_t)rnd();
+    *(uint16_t *)(global + 0xdce) = (uint16_t)(rnd_n(4) ? 0 : rnd());
+    *(uint32_t *)(global + 0x398) = rnd_n(4) ? rnd() : 0;
+    *(uint16_t *)(global + 0xcb6) = (uint16_t)(rnd_n(4) ? rnd() | 1 : 0);
+    *(uint16_t *)(global + 0xcba) = (uint16_t)(rnd_n(2) ? 0x4000 + rnd_n(3) - 1 : rnd());
+    global[0x282] = (uint8_t)(rnd_n(2) ? 0 : rnd());
+    *(uint16_t *)(global + 0x2a8) = (uint16_t)rnd();
+    *(uint32_t *)(global + 0x260) = rnd();
+    *(uint32_t *)(global + 0xc8c) = rnd();
+    *(uint32_t *)(global + 0x1198) = (uint32_t)(uintptr_t)view;
+    *(uint32_t *)(view + 0x14) = rnd_n(6);
+    for (i = 0x5b0; i < 0x5c0; i++)
+        global[i] = (uint8_t)rnd();
+    for (i = 0x560; i < 0x578; i++)
+        global[i] = (uint8_t)rnd();
+
+    /* the band edges as slice 15 leaves them, now and then not */
+    lo1 = (int16_t)(*(uint16_t *)(global + 0xe6a) - (*(uint16_t *)(global + 0xe6c) >> 1));
+    lo2 = (int16_t)(*(uint16_t *)(global + 0xe72) - (*(uint16_t *)(global + 0xe74) >> 1));
+    *(int16_t *)(cur->image + 0x1a94) = rnd_n(4) ? lo1 : (int16_t)rnd();
+    *(int16_t *)(cur->image + 0x1aac) = rnd_n(4) ? lo2 : (int16_t)rnd();
+    *(uint16_t *)(cur->image + 0x1a92) = (uint16_t)rnd();
+    *(uint16_t *)(cur->image + 0x1aaa) = (uint16_t)rnd();
+    *(uint16_t *)(cur->image + 0x1eb4) = (uint16_t)(rnd_n(4) ? rnd() & 0x7fff : rnd());
+    for (i = 0; i < 4; i++)
+        cur->image[0x1ec0 + i * 4] = (uint8_t)rnd();
+    *(uint32_t *)(cur->image + 0x2088) = *(uint32_t *)(global + 0x260) - rnd_n(20);
+    *(uint16_t *)(cur->image + 0x208c) = (uint16_t)rnd();
+    *(uint32_t *)(cur->image + 0x2043) = rnd();
+    /* the layer records: the aircraft's +0x5b4 near their +4, and its +0x5ba..
+     * near their +0xa.., or now and then anywhere */
+    for (i = 0; i < 2; i++) {
+        uint8_t *r = cur->image + 0x1a80 + i * 0x18;
+        uint32_t j;
+        for (j = 0; j < 0x14; j++)
+            if (j < 0x14 - 4 * (i == 0) || 1)
+                r[j] = (uint8_t)rnd();
+        if (rnd_n(4)) {
+            *(uint32_t *)(r + 4) = *(uint32_t *)(global + 0x5b4) - (rnd() & 0x3ffffff) + 0x2000000;
+            *(uint16_t *)(r + 0xc) = (uint16_t)(*(uint16_t *)(global + 0x5bc) - rnd_n(0x40) + 0x20);
+            *(uint16_t *)(r + 0xe) = *(uint16_t *)(global + 0x5be);
+        }
+    }
+    /* .data+0x1a94 and +0x1aac sit inside those records (at +0x14); put the edges back */
+    *(int16_t *)(cur->image + 0x1a94) = rnd_n(4) ? lo1 : *(int16_t *)(cur->image + 0x1a94);
+    *(int16_t *)(cur->image + 0x1aac) = rnd_n(4) ? lo2 : *(int16_t *)(cur->image + 0x1aac);
+    /* the altitude: on, or one either side of, a layer's edge or its band's */
+    if (rnd_n(2)) {
+        static const int16_t off[] = { -1, 0, 1, -1500, 1500, -1499, 1499, -0x34, 0x34, 6, 7 };
+        int16_t e[4];
+        e[0] = *(int16_t *)(cur->image + 0x1a94);
+        e[1] = (int16_t)(e[0] + *(uint16_t *)(global + 0xe6c));
+        e[2] = *(int16_t *)(cur->image + 0x1aac);
+        e[3] = (int16_t)(e[2] + *(uint16_t *)(global + 0xe74));
+        *(int16_t *)(global + 0x5c4) = (int16_t)(e[rnd_n(4)] + off[rnd_n(11)]);
+    } else {
+        *(int16_t *)(global + 0x5c4) = (int16_t)rnd();
+    }
+    /* +0x918b compares GLOBAL +0x574 with the same edges: on, or one either side */
+    if (rnd_n(3) == 0) {
+        int16_t e[4];
+        e[0] = *(int16_t *)(cur->image + 0x1a94);
+        e[1] = (int16_t)(e[0] + *(uint16_t *)(global + 0xe6c));
+        e[2] = *(int16_t *)(cur->image + 0x1aac);
+        e[3] = (int16_t)(e[2] + *(uint16_t *)(global + 0xe74));
+        *(int16_t *)(global + 0x574) = (int16_t)(e[rnd_n(4)] + (int16_t)rnd_n(3) - 1);
+    }
+    hg2d_threshold = (uint8_t)(rnd_n(3) ? rnd_n(8) : rnd());
+    if (op_number == 0)
+        for (i = 0; i < 0x10000; i++)
+            fixtures[i] = (uint8_t)(rnd_n(3) ? rnd_n(12) : rnd());
+
+    if (counting) {
+        cover_clouds_which[which < 4 ? which : 4]++;
+        if (which == 0 && *(uint16_t *)(global + 0xdce) != 0) cover_clouds_skip++;
+        if (which == 0 && *(uint16_t *)(global + 0xe7a) && *(uint16_t *)(global + 0xe7e) &&
+            *(uint16_t *)(global + 0xe7c) >= 0xf000 / 16) cover_clouds_puffs++;
+    }
+    put("\n#clouds(%u) 5c4=%d e86=%u dce=%#x", which, *(int16_t *)(global + 0x5c4),
+        *(uint16_t *)(global + 0xe86), *(uint16_t *)(global + 0xdce));
+    ((s1)SVC(0x98))(which);
+    if (counting && which == 0) {
+        uint16_t f = *(uint16_t *)(cur->image + 0x1afa);
+        if (f == 0x8007) cover_clouds_inside++;
+        if (*(uint16_t *)(global + 0xf10) == 0x8005) cover_clouds_flag8005++;
+        if (*(uint16_t *)(cur->image + 0x22cc) != 0 && f == 4) cover_clouds_shown++;
+        if (*(uint32_t *)(cur->image + 0x3498) != 0x258 && *(uint32_t *)(cur->image + 0x3498) != 0x320)
+            cover_clouds_texel++;
+        if (*(uint16_t *)(cur->image + 0x3438) == 0x7fff || *(uint16_t *)(cur->image + 0x3438) == 0x8000)
+            cover_clouds_sat++;
+    }
+    put(" f10=%#x c90=%#x", *(uint16_t *)(global + 0xf10), *(uint16_t *)(global + 0xc90));
+}
+
+static void setup_clouds(void) { }
+
+static void report_clouds(void)
+{
+    printf("  clouds: which 0/1/2/3/above %lu/%lu/%lu/%lu/%lu (0 skipped by +0xdce %lu, all 16 puffs %lu);"
+           " inside a layer %lu, layer block shown %lu, +0xf10 0x8005 %lu, texel looked up %lu,"
+           " a divide saturated %lu\n",
+           cover_clouds_which[0], cover_clouds_which[1], cover_clouds_which[2], cover_clouds_which[3],
+           cover_clouds_which[4], cover_clouds_skip, cover_clouds_puffs, cover_clouds_inside,
+           cover_clouds_shown, cover_clouds_flag8005, cover_clouds_texel, cover_clouds_sat);
+}
+
+/* ---- suite: cloudtex (the cloud layers' textures, +0x94) ------------------------- */
+
+static unsigned long cover_tex_calls, cover_tex_no_clouds, cover_tex_ro, cover_tex_wild_edi,
+    cover_tex_curve[3];
+
+/* TEXTURE\clouds is there (whole, short or empty) or not; TEXTURE\cloud1 and
+ * cloud2 are there or not, and read-only now and then (the routine clears the
+ * flag first).  Each op seeds the layers' coverages (high bytes on both sides of
+ * the curve's turns, 0x7f/0x80 of 0xed's product and 0xe0/0xe1), the flags, the
+ * texture ids last made, and calls +0x94.  The texel map is HG2D's, in fixtures;
+ * its digest goes in the transcript after every op, since a failed write leaves
+ * the routine reading GLOBAL's fields from it and writing +0xcd4 into it. */
+static void op_cloudtex(void)
+{
+    static const uint8_t turn[] = { 0x00, 0x01, 0x89, 0x8a, 0x8b, 0xe0, 0xe1, 0xff, 0x46, 0x10 };
+    uint32_t i;
+
+    for (i = 0; i < 2; i++) {
+        uint16_t v = (uint16_t)(rnd_n(2) ? ((uint32_t)turn[rnd_n(sizeof turn)] << 8 | (uint8_t)rnd()) : rnd());
+        if (rnd_n(6) == 0)
+            v = (uint16_t)(0xe000 + rnd_n(3));
+        *(uint16_t *)(global + (i ? 0xe76 : 0xe6e)) = v;
+        *(uint16_t *)(cur->image + (i ? 0x1edc : 0x1eda)) =
+            (uint16_t)(rnd_n(4) == 0 ? (v & 0xff00) : rnd());
+    }
+    *(uint32_t *)(global + 0x398) = rnd_n(5) ? rnd() : 0;
+    *(uint16_t *)(global + 0xe70) = (uint16_t)(rnd_n(5) ? rnd() | 1 : 0);
+    *(uint16_t *)(global + 0xe78) = (uint16_t)(rnd_n(3) ? rnd() | 1 : 0);
+    /* the flag now and then with only its high byte set, and its neighbour
+     * bytes random, so a read of the wrong word shows */
+    *(uint16_t *)(global + 0xcb6) = (uint16_t)(rnd_n(6) ? (rnd_n(4) ? rnd() | 1 : 0x100u << rnd_n(8)) : 0);
+    global[0xcb5] = (uint8_t)rnd();
+    global[0xcb8] = (uint8_t)rnd();
+    *(uint16_t *)(global + 0xe6a) = (uint16_t)(rnd_n(2) ? 0x2bc + rnd_n(3) - 1 : rnd());
+    *(uint16_t *)(global + 0xe8a) = (uint16_t)(rnd_n(2) ? 0x7d00 + rnd_n(3) - 1 : rnd());
+    *(uint32_t *)(global + 0xc8c) = rnd();
+    if (rnd_n(4) == 0) {                           /* the files change between ops */
+        struct vfile *f;
+        if (rnd_n(2) && (f = vfile_find(rnd_n(2) ? "TEXTURE\\cloud1" : "TEXTURE\\cloud2")) != NULL)
+            f->attr = rnd_n(2) ? 2 : rnd_n(8);
+        else if ((f = vfile_find("TEXTURE\\clouds")) != NULL)
+            f->size = rnd_n(3) ? 0x10000 : rnd_n(0x10001);
+    }
+    /* the map, filled afresh now and then (the routine remaps it in place) */
+    if (op_number == 0 || rnd_n(3) == 0)
+        for (i = 0; i < 0x10000; i++)
+            fixtures[i] = (uint8_t)rnd();
+    if (counting) {
+        uint8_t b = global[0xe6f];
+        cover_tex_calls++;
+        cover_tex_curve[b > 0xe0 ? 2 : ((0xedu * b) >> 8) >= 0x80 ? 1 : 0]++;
+    }
+    put("\n#cloudtex e6e=%#x e76=%#x 398=%#x e70=%#x e78=%#x cb6=%#x", *(uint16_t *)(global + 0xe6e),
+        *(uint16_t *)(global + 0xe76), *(uint32_t *)(global + 0x398), *(uint16_t *)(global + 0xe70),
+        *(uint16_t *)(global + 0xe78), *(uint16_t *)(global + 0xcb6));
+    i = open_rw_refused;
+    ((s0)SVC(0x94))();
+    if (counting && open_rw_refused != i)
+        cover_tex_wild_edi++;                      /* a write's open refused: edi left on the map */
+    put(" cd4=%#x map=%08x", *(uint16_t *)(global + 0xcd4), digest(fixtures, 0x10000, 0x811c9dc5u));
+}
+
+static void setup_cloudtex(void)
+{
+    struct vfile *f;
+    uint32_t i;
+
+    file_cap = FILE_BYTES;
+    short_write_odds = 8;
+    if (rnd_n(5)) {
+        f = make_file("TEXTURE\\clouds");
+        f->size = rnd_n(4) ? 0x10000 : rnd_n(0x10001);
+        for (i = 0; i < f->size; i++)
+            f->bytes[i] = (uint8_t)rnd();
+    } else if (counting) {
+        cover_tex_no_clouds++;
+    }
+    for (i = 1; i <= 2; i++) {
+        char name[32];
+        if (rnd_n(4) == 0)
+            continue;
+        snprintf(name, sizeof name, "TEXTURE\\cloud%u", i);
+        f = make_file(name);
+        f->size = rnd_n(0x100);
+        f->attr = rnd_n(3) ? 0 : rnd_n(2) ? 2 : rnd_n(0x20);
+        if (counting && (f->attr & 2)) cover_tex_ro++;
+    }
+}
+
+static void report_cloudtex(void)
+{
+    printf("  cloudtex %lu (curve shoulder/knee/steepest %lu/%lu/%lu); scenarios with no clouds file %lu,"
+           " a cloudN read-only %lu; ops with a write's open refused (edi left on the map) %lu; short writes %lu\n",
+           cover_tex_calls, cover_tex_curve[0], cover_tex_curve[1], cover_tex_curve[2], cover_tex_no_clouds,
+           cover_tex_ro, cover_tex_wild_edi, cover_short_writes);
+}
+
+/* ---- suite: spot (the spot plane's eye, +0xa8) ---------------------------------- */
+
+static unsigned long cover_spot_calls, cover_spot_skip, cover_spot_place, cover_spot_mode[3],
+    cover_spot_walk, cover_spot_slew, cover_spot_g3d;
+
+/* Each op seeds the spot view's settings in GLOBAL (+0xe5c..+0xe68: mode 2 or
+ * 4 or neither, the second aircraft or the first, the transition 0..2 -- see
+ * main_spot.inc for why not beyond --, the reset and slew flags), the view
+ * record behind GLOBAL +0x1198 (kind 0 or 1, now and then not a spot view), the
+ * aircraft list behind GLOBAL +0x384 and its records (present or not, the
+ * fields +0xa8 tests set or clear), and the eye's staged vectors in .data now
+ * and then; G3D's distance turns at a random call above a random base. */
+static void op_spot(void)
+{
+    uint8_t *view = fixtures + 0x20000, *list = fixtures + 0x20100;
+    uint32_t i, k;
+
+    g3d_calls = 0;
+    g3d_turn = rnd_n(3) ? rnd_n(24) : rnd_n(200);
+    g3d_base = rnd_n(3) ? rnd_n(2) ? 0x40000 - 0x100 + rnd_n(0x200) : rnd_n(0x10000) : rnd();
+    /* now and then the op's first measure -- the slew's, when the eye is not
+     * placed afresh first -- exactly on the slew's limit or one either side */
+    g3d_first = rnd_n(4) == 0 ? 0x40000 + rnd_n(3) - 1 : 0;
+    g3d_flat = rnd_n(3) == 0 ? 1 + rnd_n(3) : 0;
+    *(uint32_t *)(global + 0x1198) = rnd_n(12) ? (uint32_t)(uintptr_t)view : 0;
+    *(uint32_t *)(view + 0x10) = rnd_n(8) ? 0 : 1;
+    *(uint32_t *)(view + 0x14) = rnd_n(8) ? rnd_n(2) : rnd_n(5);
+    *(uint32_t *)(view + 0x18) = rnd_n(8) ? 0 : 1;
+    *(uint16_t *)(global + 0xe64) = (uint16_t)(rnd_n(8) ? (rnd_n(2) ? 2 : 4) : rnd_n(6));
+    *(uint16_t *)(global + 0xe66) = (uint16_t)(rnd_n(2) ? 0 : 1 + rnd_n(0xff));
+    *(uint16_t *)(global + 0xe60) = (uint16_t)rnd_n(3);
+    *(uint16_t *)(global + 0xe5e) = (uint16_t)(rnd_n(6) ? rnd_n(3) : rnd_n(8));
+    *(uint16_t *)(global + 0xe5c) = (uint16_t)rnd();
+    *(uint16_t *)(global + 0xe68) = (uint16_t)rnd();
+    if (rnd_n(3) == 0)
+        *(uint16_t *)(global + 0xe62) = (uint16_t)rnd_n(4);
+    *(uint16_t *)(global + 0xc4e) = (uint16_t)rnd();
+    *(uint16_t *)(global + 0xc5e) = (uint16_t)rnd();
+    *(uint32_t *)(global + 0x20) = rnd();
+    *(uint32_t *)(global + 0x384) = (uint32_t)(uintptr_t)list;
+    for (i = 0x560; i < 0x580; i++)
+        if (rnd_n(4) == 0)
+            global[i] = (uint8_t)rnd();
+    /* the latitude inside slice 11's clamp, as the game keeps it: UTIL +0x44
+     * indexes its latitude table by it and reads off the end otherwise */
+    *(int32_t *)(global + 0x564) = (int32_t)(rnd() % (0x97c449u + 0x97c449u + 1)) - 0x97c449;
+    for (k = 0; k < 2; k++) {
+        uint8_t *rec = fixtures + 0x20200 + k * 0x100;
+        *(uint32_t *)(list + k * 4) = rnd_n(10) ? (uint32_t)(uintptr_t)rec : 0;
+        if (op_number == 0 || rnd_n(4) == 0)
+            for (i = 0; i < 0x60; i++)
+                rec[i] = (uint8_t)rnd();
+        *(uint16_t *)(rec + 0x18) = (uint16_t)(rnd_n(8) ? 1 + rnd_n(0xfffe) : 0);
+        rec[0x1c] = (uint8_t)(rnd_n(2) ? rec[0x1c] | 0x80 : rec[0x1c] & 0x7f);
+    }
+    if (op_number == 0 || rnd_n(5) == 0) {         /* the staged vectors and scales */
+        for (i = 0x1860; i < 0x1960; i++) {
+            uint8_t v = (uint8_t)rnd();
+            uint32_t r;
+            /* not over a relocated pointer (the draw blocks at +0x192e and
+             * +0x1946 hold some): a random value there that happened to point
+             * into retail's image would compare as a pointer on that side only */
+            for (r = 0; r < nrelocs; r++)
+                if (relocs[r] <= i && i < relocs[r] + 4)
+                    break;
+            if (r == nrelocs)
+                cur->image[i] = v;
+        }
+        *(uint32_t *)(cur->image + 0x191c) = rnd_n(2);
+        *(uint32_t *)(cur->image + 0x1920) = rnd_n(2);
+    }
+    if (counting) {
+        cover_spot_calls++;
+        if (*(uint16_t *)(global + 0xe64) == 2) cover_spot_mode[0]++;
+        else if (*(uint16_t *)(global + 0xe64) == 4) cover_spot_mode[1]++;
+        else cover_spot_mode[2]++;
+        if (*(uint32_t *)(global + 0x1198) == 0 || *(uint32_t *)(view + 0x10) || *(uint32_t *)(view + 0x18) ||
+            *(uint32_t *)(view + 0x14) > 1)
+            cover_spot_skip++;
+        if (*(uint16_t *)(global + 0xe62) & 1) cover_spot_place++;
+        if (*(uint32_t *)(cur->image + 0x191c) && (*(uint16_t *)(global + 0xe62) & 2)) cover_spot_slew++;
+    }
+    put("\n#spot e64=%u e66=%#x e60=%u e5e=%u e62=%#x kind=%u turn=%u base=%#x", *(uint16_t *)(global + 0xe64),
+        *(uint16_t *)(global + 0xe66), *(uint16_t *)(global + 0xe60), *(uint16_t *)(global + 0xe5e),
+        *(uint16_t *)(global + 0xe62), *(uint32_t *)(view + 0x14), g3d_turn, g3d_base);
+    ((s0)SVC(0xa8))();
+    if (counting) {
+        cover_spot_g3d += g3d_calls;
+        if (*(uint32_t *)(cur->image + 0x1920) == 0 && g3d_calls > 2 + 2 * 15) cover_spot_walk++;
+    }
+    put(" e62=%#x calls=%u", *(uint16_t *)(global + 0xe62), g3d_calls);
+}
+
+static void setup_spot(void)
+{
+    static const uint32_t slots[] = { 0x2c, 0x44, 0x60, 0x74, 0x78, 0x7c, 0x80, 0x84 };
+    static int loaded;
+
+    if (!loaded) {
+        use_retail_util(slots, sizeof slots / sizeof slots[0]);
+        loaded = 1;
+    }
+    g3d_distance = 1;
+}
+
+static void report_spot(void)
+{
+    printf("  spot %lu (mode 2/4/other %lu/%lu/%lu, not a spot view %lu, placed afresh %lu, slewed %lu,"
+           " long walks %lu); G3D measures %lu\n",
+           cover_spot_calls, cover_spot_mode[0], cover_spot_mode[1], cover_spot_mode[2], cover_spot_skip,
+           cover_spot_place, cover_spot_slew, cover_spot_walk, cover_spot_g3d);
+}
+
 /* ---- running ---------------------------------------------------------------------- */
 
 struct suite {
@@ -2536,6 +3480,12 @@ static const struct suite suites[] = {
     { "objalloc", op_objalloc, report_objalloc, 20, setup_objalloc, 0x00 },
     { "eye", op_eye, report_eye, 20, setup_eye, 0x00 },
     { "band", op_band, report_band, 20, setup_band, 0x00 },
+    { "objstep", op_objstep, report_objstep, 20, setup_objstep, 0x00 },
+    { "quicksave", op_quicksave, report_quicksave, 30, setup_quicksave, 0xff },
+    { "prefs", op_prefs, report_prefs, 30, setup_prefs, 0x00 },
+    { "clouds", op_clouds, report_clouds, 20, setup_clouds, 0x00 },
+    { "cloudtex", op_cloudtex, report_cloudtex, 12, setup_cloudtex, 0x00 },
+    { "spot", op_spot, report_spot, 20, setup_spot, 0x00 },
 };
 
 static const struct suite *suite;
@@ -2583,6 +3533,7 @@ static void run_side(struct side *s)
     memset(global, 0, sizeof global);
     fix_used = 0;
     nwanted = 0;
+    file_cap = FILE_MAX;
     rng = scenario_seed;
     pad_byte = (uint8_t)(rnd_n(12) == 0 ? 0 : rnd());
     suite->setup();
@@ -2675,7 +3626,7 @@ int main(int argc, char **argv)
         if (!strcmp(suites[i].name, which))
             suite = &suites[i];
     if (suite == NULL) { printf("no suite %s\n", which); return 2; }
-    situations_suite = !strcmp(suite->name, "situations");
+    situations_suite = !strcmp(suite->name, "situations") || !strcmp(suite->name, "quicksave");
     AddVectoredExceptionHandler(1, on_vectored);
     if (getenv("MAIN_NOFILTER") == NULL)
         SetUnhandledExceptionFilter(on_fault);

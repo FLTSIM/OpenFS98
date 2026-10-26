@@ -407,14 +407,14 @@ src/analysis/analysis_data.inc src/analysis/analysis_rdata.inc: $(ORIG)/Modules/
 
 # MAIN, the sim's controller: MSVC C and assembly.  In progress, a slice at a
 # time (docs/modules/main.md); not in MODULES until every slot is done.
-MAIN_SOURCES := src/main/main.c src/main/main_records.inc src/main/main_situation.inc src/main/main_nav.inc src/main/main_season.inc src/main/main_sun.inc src/main/main_eye.inc src/main/main_band.inc src/main/main_text_tail.inc
+MAIN_SOURCES := src/main/main.c src/main/main_records.inc src/main/main_situation.inc src/main/main_nav.inc src/main/main_season.inc src/main/main_sun.inc src/main/main_eye.inc src/main/main_band.inc src/main/main_flights.inc src/main/main_prefs.inc src/main/main_clouds.inc src/main/main_spot.inc src/main/main_text_tail.inc
 $(BIN)/MAIN.DLL: $(MAIN_SOURCES) src/main/main.def src/main/main_data.inc \
                  src/main/main_pointers.inc $(BIN)/main.res
 	@mkdir -p $(BIN)
 	$(CC) $(CFLAGS) -fno-delete-null-pointer-checks -Isrc/main $(LDFLAGS) \
 	      -Wl,--image-base=$(BASE_MAIN) \
 	      -o $@ src/main/main.c $(BIN)/main.res src/main/main.def \
-	      -lkernel32 -luser32 -lgdi32 -lgcc
+	      -lmsvcrt -lkernel32 -luser32 -lgdi32 -lgcc
 
 $(BIN)/main.res: src/main/main.rc
 	@mkdir -p $(BIN)
@@ -1093,6 +1093,7 @@ $(DIFFDIR)/maindiff.exe: tools/difftest/maindiff.c
 maindiff: $(DIFFDIR)/maindiff.exe $(BIN)/MAIN.DLL
 	@cp $(ORIG)/Modules/MAIN.DLL $(DIFFDIR)/MAIN_retail.dll
 	@cp $(BIN)/MAIN.DLL          $(DIFFDIR)/MAIN_ours.dll
+	@cp $(ORIG)/Modules/UTIL.DLL $(DIFFDIR)/UTIL_retail.dll
 
 maindiff-run: maindiff
 	@cd $(DIFFDIR) && WINEDEBUG=-all timeout 3600 wine maindiff.exe $(if $(N),$(N),20000) $(if $(SUITE),$(SUITE),records)
@@ -1103,7 +1104,7 @@ maindiff-run: maindiff
 main-break-build:
 	$(CC) $(CFLAGS) -fno-delete-null-pointer-checks -I$(MAIN_BREAK_DIR) $(LDFLAGS) \
 	      -Wl,--image-base=$(BASE_MAIN) -o $(DIFFDIR)/MAIN_ours.dll \
-	      $(MAIN_BREAK_DIR)/main.c $(BIN)/main.res src/main/main.def -lkernel32 -luser32 -lgdi32 -lgcc
+	      $(MAIN_BREAK_DIR)/main.c $(BIN)/main.res src/main/main.def -lmsvcrt -lkernel32 -luser32 -lgdi32 -lgcc
 
 main-breaks: maindiff
 	@python3 tools/main_breaks.py $(if $(N),$(N),2000) $(if $(SUITE),$(SUITE),records)

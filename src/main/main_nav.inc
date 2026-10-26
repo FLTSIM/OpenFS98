@@ -322,3 +322,107 @@ static uint32_t FS98_STDCALL nav_describe(uint32_t which, uint32_t arg2, uint32_
     CALL(UTIL, 0x88, f3)(ADDR(buf), ADDR(desc), 0xa);
     return H_MEMMOVE(out, V(0x20807248), 0x58);
 }
+
+/* .text+0x162f0 == Linkage +0x88: step every active object of the table at
+ * .data+0x9794 (slices 10 and 13), MSVC C.  WINDOW calls it once a frame.
+ * The objects are smoke trails: CONTROLS' SMOKE_TOGGLE allocates one with
+ * its template at GLOBAL +0x560, the aircraft's position.
+ * An entry keeps a run of 40-byte records at +0x14 and as many buffer
+ * pointers at +0x26c; `n` (+0xc) is how many, `used` (+0x10) how many are
+ * live.  Each step shifts both runs up by one (MSVCRT memmove, through
+ * MAIN's own import, as retail calls it), the last buffer coming round to
+ * the front, counts one more live record unless all are, and copies the
+ * entry's nine template dwords (-0x28) into the newest record.  Then each
+ * live record is restamped from the aircraft's position (GLOBAL +0x5c8,
+ * +0x5d0), its age raising +0x18 by i/13, every one after the first
+ * xor-toggled by the words at +4 and +6 when GLOBAL +0x250's bit 0 is set;
+ * eight words of its buffer from +0x42 are laid out from a width that steps
+ * by +8's word / 4 per record, and the buffer and record go to G3D +0x38.
+ * Between records the template copy is refreshed from the template itself
+ * (the pointer at -0x2c).  `side` is the longitude wrap: within a quarter
+ * turn either way of the half-turn the record's +0x1c is moved by
+ * 0x3ffc0000, otherwise it is 0 and the width is the running one.
+ *
+ * Retail's [esp+0x14] local is written as a word on two paths and a dword
+ * on the third, and read as both; only its low word ever reaches memory.
+ * eax at exit is what the last entry left there (its active word, its live
+ * count, or the record index the loop ended on); WINDOW ignores it, but it
+ * is returned. */
+static uint32_t FS98_STDCALL obj_step(void)
+{
+    uint32_t idx, e, n, used, last, i, side, d, s, gp, buf, left = 0;
+    uint16_t w, width;
+
+    for (idx = 0; idx < 20; idx++) {
+        e = V(0x20809794) + idx * 0x2d4u;
+        left = M32(e);
+        if (left == 0)
+            continue;
+        n = M32(e + 0xc);
+        last = M32(V(0x208099fc) + (n + idx * 181u) * 4u);
+        memmove((void *)(uintptr_t)(e + 0x3c), (void *)(uintptr_t)(e + 0x14), n * 40u - 40u);
+        n = M32(e + 0xc);
+        memmove((void *)(uintptr_t)(e + 0x270), (void *)(uintptr_t)(e + 0x26c), n * 4u - 4u);
+        used = M32(e + 0x10);
+        if (used != M32(e + 0xc))
+            M32(e + 0x10) = used + 1;
+        M32(e + 0x26c) = last;
+        for (i = 0; i < 9; i++)
+            M32(e + 0x18 + i * 4u) = M32(e - 0x28 + i * 4u);
+
+        gp = G;
+        s = M32(e + 0x38);
+        width = M16(e + 0xa);
+        d = M32(gp + 0x5d0) - s;
+        if (d > 0x15540000u && d < 0x6aa40000u) {
+            side = M32(e + 0x30) + 0x3ffc0000u;
+        } else if (d > 0x954c0000u && d < 0xea9c0000u) {
+            side = M32(e + 0x30) - 0x3ffc0000u;
+        } else {
+            width = M16(e + 8);
+            side = 0;
+        }
+        left = M32(e + 0x10);
+        s = (s & 0xffff0000u) | M16(e + 8);
+        if (left == 0)
+            continue;
+
+        for (i = 0; ; ) {
+            uint32_t rec = e + 0x14 + i * 40u;
+
+            gp = G;
+            M32(rec + 0x24) = M32(gp + 0x5d0);
+            M32(rec + 0x1c) = M32(gp + 0x5c8) - 0x7ff80000u;
+            M32(rec + 0x20) = side;
+            M32(rec + 0x18) = M32(rec + 0x18) + (uint32_t)(((uint64_t)i * 0x4ec4ec4fu) >> 34);
+            if (i != 0 && (M8(gp + 0x250) & 1)) {
+                M32(rec + 8) = M32(rec + 8) ^ M16(e + 4);
+                M32(rec + 0x10) = M32(rec + 0x10) ^ M16(e + 6);
+            }
+            buf = M32(e + 0x26c + i * 4u);
+            M32(V(0x2080d140)) = buf + 0x42;
+            if (side == 0)
+                width = (uint16_t)s;
+            w = (uint16_t)((int32_t)(int16_t)width / 4);
+            M16(M32(V(0x2080d140)) + 2) = w;
+            M16(M32(V(0x2080d140)) + 8) = (uint16_t)(0u - width * 2u);
+            M16(M32(V(0x2080d140)) + 0xe) = (uint16_t)(0u - width * 2u);
+            M16(M32(V(0x2080d140)) + 0x14) = w;
+            M16(M32(V(0x2080d140))) = (uint16_t)(0u - s);
+            M16(M32(V(0x2080d140)) + 6) = (uint16_t)(0u - s);
+            M16(M32(V(0x2080d140)) + 0xc) = (uint16_t)s;
+            M16(M32(V(0x2080d140)) + 0x12) = (uint16_t)s;
+            CALL(G3D, 0x38, f2)(M32(e + 0x26c + i * 4u), rec);
+            s += (uint32_t)((int32_t)(int16_t)M16(e + 8) / 4);
+            {
+                uint32_t t = M32(e - 0x2c);
+                for (d = 0; d < 9; d++)
+                    M32(e - 0x28 + d * 4u) = M32(t + d * 4u);
+            }
+            left = ++i;
+            if (i >= M32(e + 0x10))
+                break;
+        }
+    }
+    return left;
+}

@@ -25,8 +25,6 @@
  * observable effect and are left out.
  */
 
-#define G3D M32(V(0x2080006c))
-
 static void band_submit(void);
 
 static uint32_t FS98_STDCALL nav_band(void)

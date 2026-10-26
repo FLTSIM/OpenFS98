@@ -1,5 +1,6 @@
 /* World 0x13080002 core. Retail preferred VAs identify recovered routines.
- * No factories or native registration until the remaining class is accepted. */
+ * Class lifetimes live in world_search_objects.c; native registration awaits
+ * initialization and UI acceptance. */
 #include "world_search.h"
 #define U32 WORLD_U32
 #define PTR WORLD_PTR

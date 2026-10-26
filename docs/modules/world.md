@@ -710,7 +710,7 @@ Selected area and priority colour mutations also passed again with the updated
 mutation build inputs (`booster-area-mutation-regression.log` and
 `booster-priority-mutation-regression.log`).
 
-## Drive-search core milestone (native acceptance pending)
+## Drive-search core and lifetime milestones (native acceptance pending)
 
 The next bounded family is FE's drive-search dialog `0x13080002`, factory
 `0x223f1ac0`, template `0x6b0`. `world_search.c` implements its core handlers
@@ -767,8 +767,8 @@ object size is `0x1e78`, vtable `0x22410320`, map `0x224101c8`, base-map getter
 `0x223f5d40`. Local messages include six buttons `0x1aae..0x1ab3`, drive/layer
 selection and close-up notifications, OK, help and context menu. The metadata
 contains no machine code or resource payloads. Both generated includes reproduce
-byte-for-byte in an isolated directory. Extraction establishes a graph, not
-constructor, exception-lifetime or native-dispatch acceptance.
+byte-for-byte in an isolated directory. Extraction alone establishes a graph;
+behavioral lifetime acceptance follows below. Native dispatch remains pending.
 
 ```sh
 make -f tools/world.mk world-search-metadata
@@ -805,12 +805,81 @@ Acceptance logs are `bin/world-diff/search-core-normal.log`,
 transcripts are in `bin/world-diff/search-breaks/`. The shared runner still
 uses World's private Wine prefix and lock.
 
-Next: implement and compare this class's constructor/destructor/factory and
-real exception cleanup, then initialization and native UI/dispatch/rendering.
-The initializer uses a virtual setup call on its checkbox; recover its callee
-ABI before binding it. The factory has a typed exception boundary and a failed
-Create message path; the earlier factories' acceptance is not acceptance of
-this one. Keep drive search unregistered until those milestones pass.
+### Drive-search class and factory lifetime acceptance
+
+`world_search_objects.c` implements constructor `0x223fda90`, destructor
+`0x223fdc10`, scalar deleting destructor `0x223fdbf0`, factory `0x223f1ac0`,
+DDX `0x223fdd60`, help/context `0x223fe520` / `0x223fe540` and shared
+PostNcDestroy `0x223f3d30` as C routines. The 18 controls and bindings use the
+extracted metadata above. The class vtable is installed only after all control
+constructors succeed. Destruction leaves the incoming vtable in place; if a
+control destructor throws, earlier controls and the base are still destroyed,
+without retrying the failed control. The scalar deleting destructor frees
+through UI delete only for flag bit 0 and after successful destruction.
+PostNcDestroy invokes virtual deleting destruction with flag 1 for non-null
+objects, and does nothing for null objects.
+
+The single factory ignores its parent, allocates `0x1e78` bytes, constructs
+with a null parent and stores the descriptor at `+0x10dc`. A null allocation
+faults on that store at address `0x10dc`, matching retail. It reads the current
+module after construction, stores it at `+0x80`, then transfers ownership before
+Create. Failed Create displays `CSceneryAreaSearch::Create() failed\n` and
+continues to Show(1). The returned HWND is read after Show. Failed partial
+construction releases the allocation through `CSimsDialog::operator delete`,
+whose calling convention and import differ from UI delete; Create/Show
+exceptions do not release it through that construction cleanup.
+
+The factory's typed `CException*` handler unwinds before calling the fatal
+`SIMSUI_ExitCleanlyE` service boundary. The new fixture independently executes
+retail's own catch metadata and real CRT frame handler, using
+`_CxxThrowException` for direct, derived and virtual-base pointers, null
+pointers, unrelated pointer types and incompatible const pointers. Matching
+exceptions reach fatal dispatch with the adjusted pointer; other exceptions
+propagate after cleanup. The fatal fixture terminates the comparison side;
+it does not run SIMSUI's message box or CRT abort. Normal services, Create/Show,
+DDX and WinHelp remain synthetic boundaries.
+
+```sh
+make -f tools/world.mk world-search-life N=20000
+make -f tools/world.mk world-search-life N=2000 MODE=unwind
+make -f tools/world.mk world-search-life N=2000 MODE=typed
+make -f tools/world.mk world-search-life-breaks
+make -f tools/world.mk world-search-core N=2000
+```
+
+With seed `0x4a971b63` and the reference hash above, nine lifetime operations
+made **180,000 normal comparisons**, including 1,819 expected allocation
+write faults and 178,181 successful-path fixture checks. Each exception suite
+made **292,103 comparisons**: unwind includes **274,103 real unwinds**; typed
+includes **246,689 propagated exceptions** and **27,414 fatal dispatches**.
+Each also includes 182 expected allocation faults and 17,818 normal fixture
+checks. All matched. The fixture compares the complete guarded `0x1e78`-byte
+object, `0x84`-byte descriptor, exchange/help buffers, module state, deletion
+counters, ordered calls and defined returns. Independent witnesses assert
+control markers, call counts, final constructor vtable, base destruction,
+flag-controlled deletion, factory result, context result and PostNcDestroy's
+flag. Injection occurs at every reached external boundary with real RtlUnwind;
+this is separate from the earlier core suite's vectored-handler interruption.
+
+All **17 lifetime mutations** produced exit 1 with an actual `DIFFER`
+transcript, bringing drive search to **39/39** across core and lifetimes.
+They cover constructor vtable timing, destructor vtable preservation, missing
+controls/base destruction, delete flags, allocator size, factory template and
+parent, the post-Show handle, allocation cleanup service, failed-Create message,
+typed catch cleanup, ownership transfer, DDX omission, help/context behavior
+and PostNcDestroy's flag. Faults, timeouts and build failures do not count.
+The final core regression also passed **26,000 comparisons** and 26,000
+reference-side fixture checks with zero differences.
+
+Acceptance logs are `bin/world-diff/search-life-normal.log`,
+`search-life-unwind.log`, `search-life-typed.log`, `search-life-breaks.log` and
+`search-life-core-regression.log`; mutant source, executables and actual
+`DIFFER` transcripts are under `bin/world-diff/search-life-breaks/`.
+
+Next: implement initialization `0x223fdec0`, then native imports, vtables,
+message maps and real UI/callback/rendering/deletion acceptance. The initializer
+uses a virtual setup call on its checkbox; recover that callee's ABI before
+binding it. Keep drive search unregistered until those milestones pass.
 
 ## Remaining boundary
 

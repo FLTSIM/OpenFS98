@@ -94,8 +94,9 @@ static uint32_t relocs[MAX_RELOCS], nrelocs;
 static uint8_t host[0x340], global[0x1400], stub_module[0x400];
 static uint8_t acontain[0x40], controls[0x60], sound[0x40], util[0xc0], weatherm[0x40], multip[0x40], fe[0x100];
 static uint8_t hg2d[0x100];   /* the clouds reach +0xb8 */
-static uint8_t g3d[0x40];
+static uint8_t g3d[0x100];   /* the frame reaches +0x60 */
 static uint8_t chain[0x24];
+static uint8_t module_stub[48][0x100];   /* the other modules, each its own table */
 static uint8_t arena[ARENA_SIZE] __attribute__((aligned(16)));
 static uint32_t arena_used;
 static uint8_t pad_byte;
@@ -266,13 +267,15 @@ static void stub_fault(const char *what)
  * divides run into overflow and rely on it, ours modelling the repaired value
  * in C.  This matches windowdiff.c's div_fixup, which the WINDOW slice pinned
  * down.  Only the register-operand forms MAIN uses are decoded. */
+static unsigned long cover_div_memory;           /* repairs of a memory-operand divide */
+
 static int repair_divide(CONTEXT *c)
 {
     const uint8_t *ip = (const uint8_t *)(uintptr_t)c->Eip;
     DWORD *reg[8];
-    uint32_t len = 0, v, neg;
+    uint32_t len = 0, v = 0, neg;
     int opsz = 4;
-    uint8_t op, modrm, rm, kind;
+    uint8_t op, modrm, rm, kind, mod;
 
     reg[0] = &c->Eax; reg[1] = &c->Ecx; reg[2] = &c->Edx; reg[3] = &c->Ebx;
     reg[4] = &c->Esp; reg[5] = &c->Ebp; reg[6] = &c->Esi; reg[7] = &c->Edi;
@@ -282,10 +285,51 @@ static int repair_divide(CONTEXT *c)
         return 0;
     modrm = ip[len + 1];
     kind = (modrm >> 3) & 7;
-    if ((modrm >> 6) != 3 || (kind != 6 && kind != 7))
-        return 0;                                  /* div (6) or idiv (7), register operand */
+    if (kind != 6 && kind != 7)
+        return 0;                                  /* div (6) or idiv (7) */
     rm = modrm & 7;
-    len += 2;
+    mod = modrm >> 6;
+    if (mod == 3) {
+        len += 2;
+        v = *reg[rm];
+    } else {
+        /* a memory operand, decoded as the host's filter decodes it
+         * (0x4119a0, docs/modules/host.md): its length, and for idiv the
+         * divisor's dword for the sign.  The filter's own quirks are kept:
+         * a disp8 is taken zero-extended, and a dword is read whatever the
+         * operand's size. */
+        const uint8_t *q = ip + len;               /* the opcode */
+        uint8_t sib = q[2];
+        uint32_t ea;
+
+        if (counting) cover_div_memory++;
+
+        if (rm == 4)
+            len++;
+        if (mod == 0)
+            len += (rm == 5 || (rm == 4 && (sib & 7) == 5)) ? 6 : 2;
+        else
+            len += mod == 1 ? 3 : 6;
+        if (kind == 7) {
+            if (rm == 4) {
+                uint32_t idx = (sib >> 3) & 7, b = sib & 7;
+                ea = idx == 4 ? 0 : *reg[idx] << (sib >> 6);
+                if (b != 5 || mod != 0)
+                    ea += *reg[b];
+                if (mod == 1)
+                    ea += q[3];
+                else if (mod == 2 || b == 5)
+                    ea += *(const uint32_t *)(q + 3);
+            } else if (mod == 0 && rm == 5) {
+                ea = *(const uint32_t *)(q + 2);
+            } else {
+                ea = *reg[rm] + (mod == 1 ? q[2] : mod == 2 ? *(const uint32_t *)(q + 2) : 0);
+            }
+            if (IsBadReadPtr((const void *)(uintptr_t)ea, 4))
+                return 0;
+            v = *(const uint32_t *)(uintptr_t)ea;
+        }
+    }
     if (kind == 6) {                               /* div: all ones */
         if (op == 0xf6)
             c->Eax = (c->Eax & 0xffff0000u) | 0xffffu;
@@ -296,20 +340,17 @@ static int repair_divide(CONTEXT *c)
             c->Eax = 0xffffffffu;
             c->Edx = 0xffffffffu;
         }
-    } else {                                       /* idiv: saturate by sign */
-        v = *reg[rm];
-        if (op == 0xf6) {                          /* 8-bit: AL quot, AH rem; high is AH */
-            neg = ((int8_t)v < 0) != ((int8_t)(c->Eax >> 8) < 0);
-            c->Eax = (c->Eax & 0xffff0000u) | (neg ? 0x7f81u : 0x7f7fu);
-        } else if (opsz == 2) {
-            neg = ((int16_t)v < 0) != ((int16_t)c->Edx < 0);
-            c->Eax = (c->Eax & 0xffff0000u) | (neg ? 0x8001u : 0x7fffu);
-            c->Edx = (c->Edx & 0xffff0000u) | 0x7fffu;
-        } else {
-            neg = ((int32_t)v < 0) != ((int32_t)c->Edx < 0);
-            c->Eax = neg ? 0x80000001u : 0x7fffffffu;
-            c->Edx = 0x7fffffffu;
-        }
+    } else if (op == 0xf6) {                       /* idiv, 8-bit: AL quot, AH rem; high is AH */
+        neg = ((int8_t)v < 0) != ((int8_t)(c->Eax >> 8) < 0);
+        c->Eax = (c->Eax & 0xffff0000u) | (neg ? 0x7f81u : 0x7f7fu);
+    } else if (opsz == 2) {
+        neg = ((int16_t)v < 0) != ((int16_t)c->Edx < 0);
+        c->Eax = (c->Eax & 0xffff0000u) | (neg ? 0x8001u : 0x7fffu);
+        c->Edx = (c->Edx & 0xffff0000u) | 0x7fffu;
+    } else {
+        neg = ((int32_t)v < 0) != ((int32_t)c->Edx < 0);
+        c->Eax = neg ? 0x80000001u : 0x7fffffffu;
+        c->Edx = 0x7fffffffu;
     }
     c->Eip += len;
     return 1;
@@ -1213,6 +1254,152 @@ static int32_t STDCALL h_288(uint32_t v)
     return 0;
 }
 
+/* ---- for init/deinit and the frame callbacks (slice 22) ------------------------ */
+
+/* CHAIN +0x18 and +0x1c: log the list and the callback (paired by first
+ * appearance, so retail's code address and ours compare), and keep lists 1
+ * and 3's callbacks so the frame suite can dispatch them. */
+static uint32_t frame_cb[2][2];                    /* [side][list 1, list 3] */
+static uint32_t record_cb[2];                      /* [side] list 0x14's */
+
+/* Call a callback (a, b) with eax, ecx and edx set to known values, and come
+ * back with what it left in them and how far it moved esp: retail's list
+ * 0x14 listener is `ret 8` alone, so all four are part of its behaviour. */
+uint32_t cb_eax, cb_ecx, cb_edx, cb_esp;
+uint32_t call_with_regs(uint32_t cb, uint32_t a, uint32_t b);
+__asm__(".text\n\t.globl _call_with_regs\n_call_with_regs:\n\t"
+        "pushl %ebx\n\tpushl %esi\n\tpushl %edi\n\tpushl %ebp\n\t"
+        "movl 20(%esp), %ebx\n\t"                /* cb */
+        "movl %esp, %esi\n\t"
+        "pushl 28(%esp)\n\tpushl 28(%esp)\n\t"  /* b, a */
+        "movl $0x11111111, %eax\n\tmovl $0x22222222, %ecx\n\tmovl $0x33333333, %edx\n\t"
+        "call *%ebx\n\t"
+        "movl %eax, _cb_eax\n\tmovl %ecx, _cb_ecx\n\tmovl %edx, _cb_edx\n\t"
+        "movl %esi, %eax\n\tsubl %esp, %eax\n\tmovl %eax, _cb_esp\n\t"
+        "movl %esi, %esp\n\t"
+        "popl %ebp\n\tpopl %edi\n\tpopl %esi\n\tpopl %ebx\n\tret\n");
+static uint32_t STDCALL chain_add(uint32_t list, uint32_t cb)
+{
+    put(" chain+0x18(%#x,cb%u)", list, pair_code(cb));
+    if (list == 1 || list == 3)
+        frame_cb[cur == &ours][list == 3] = cb;
+    if (list == 0x14)
+        record_cb[cur == &ours] = cb;
+    return 0;
+}
+static uint32_t STDCALL chain_remove(uint32_t list, uint32_t cb)
+{
+    put(" chain+0x1c(%#x,cb%u)", list, pair_code(cb));
+    if ((list == 1 || list == 3) && frame_cb[cur == &ours][list == 3] == cb)
+        frame_cb[cur == &ours][list == 3] = 0;
+    if (list == 0x14 && record_cb[cur == &ours] == cb)
+        record_cb[cur == &ours] = 0;
+    return 0;
+}
+
+/* host +0x18 (the Linkage's frame services to the host), +0x1c (a constant 1),
+ * +0x298 (onto the module stack, an HMODULE back) and +0x29c (off it).  The
+ * Linkage is logged as where it is, not what its slots hold: MAIN's +0x18,
+ * +0x20 and +0x24..+0x2c are not all done yet. */
+static uint32_t STDCALL h_frame_services(uint32_t linkage)
+{
+    put(" host+0x18(");
+    put_ptr(linkage);
+    put(")");
+    return 1;
+}
+static uint32_t STDCALL h_one(void)
+{
+    put(" host+0x1c");
+    return 1;
+}
+static uint32_t STDCALL h_push_module(uint32_t linkage, uint32_t *out)
+{
+    put(" host+0x298(");
+    put_ptr(linkage);
+    put(")");
+    *out = 0x5a5a0000u;
+    return 0;
+}
+static uint32_t STDCALL h_pop_module(uint32_t v)
+{
+    put(" host+0x29c(%#x)", v);
+    return 0;
+}
+
+/* FE's grid conversions, +0x60..+0x6c, as models (FE's are verified by
+ * fegriddiff): a latitude or longitude (the dword at +4 of a position) to its
+ * band at a level, a band back to its edge.  The band is the dword / 0x2000. */
+static uint32_t STDCALL fe_60(uint32_t pos, uint32_t level)
+{
+    uint32_t b = (uint32_t)((int32_t)*(uint32_t *)(uintptr_t)pos / 0x2000) & 0xffff;
+    put(" fe+0x60(%d,%u)=%#x", *(int32_t *)(uintptr_t)pos, level, b);
+    return b;
+}
+static uint32_t STDCALL fe_64(uint32_t band, uint32_t level, uint32_t out)
+{
+    put(" fe+0x64(%#x,%u)", band & 0xffff, level);
+    *(uint32_t *)(uintptr_t)out = 0;
+    *(int32_t *)(uintptr_t)(out + 4) = (int32_t)(int16_t)band * 0x2000;
+    return 0;
+}
+static uint32_t STDCALL fe_68(uint32_t pos, uint32_t level)
+{
+    uint32_t b = (uint32_t)((int32_t)*(uint32_t *)(uintptr_t)pos / 0x2000) & 0xffff;
+    put(" fe+0x68(%d,%u)=%#x", *(int32_t *)(uintptr_t)pos, level, b);
+    return b;
+}
+static uint32_t STDCALL fe_6c(uint32_t band, uint32_t level, uint32_t out)
+{
+    put(" fe+0x6c(%#x,%u)", band & 0xffff, level);
+    *(uint32_t *)(uintptr_t)out = 0;
+    *(int32_t *)(uintptr_t)(out + 4) = (int32_t)(int16_t)band * 0x2000;
+    return 0;
+}
+
+/* HG2D +0x7c, select a colour table (its result is not read), and UTIL +0x6c,
+ * the random generator (UTIL's own keeps its seed in UTIL's .data, which a
+ * shared retail UTIL would carry from one side to the other): the harness's
+ * generator, which each side starts afresh. */
+static uint32_t STDCALL hg2d_7c(uint32_t t)
+{
+    put(" hg2d+0x7c(%#x)", t & 0xffff);
+    return 0;
+}
+static uint32_t STDCALL util_rand(void)
+{
+    uint32_t r = rnd() & 0x7fff;
+    put(" rand=%#x", r);
+    return r;
+}
+
+/* ---- for the frame (+0x18) ------------------------------------------------------ */
+
+/* The modules' per-frame steps the frame calls: fire and forget, so each
+ * logs that it was called, and a digest of GLOBAL as the module would find
+ * it (a field the frame sets and clears again within the frame -- the lamp
+ * at +0x282 -- is seen only by the steps called in between).  The host's
+ * clock (+0x34) answers the frame time the op chose. */
+#define STEP_STUB(name, text) \
+    static uint32_t STDCALL name(void) { put(" " text " G=%08x", digest(global, sizeof global, 0x811c9dc5u)); return 0; }
+STEP_STUB(step_m6_18, "m6+0x18")
+STEP_STUB(step_m7_18, "m7+0x18")
+STEP_STUB(step_m9_18, "m9+0x18")
+STEP_STUB(step_m10_1c, "m10+0x1c")
+STEP_STUB(step_m26_18, "m26+0x18")
+STEP_STUB(step_sound_20, "sound+0x20")
+STEP_STUB(step_weatherm_1c, "weatherm+0x1c")
+STEP_STUB(step_g3d_60, "g3d+0x60")
+STEP_STUB(step_hg2d_18, "hg2d+0x18")
+STEP_STUB(step_util_70, "util+0x70")
+#undef STEP_STUB
+static uint32_t frame_ms;
+static uint32_t STDCALL h_clock(void)
+{
+    put(" host+0x34=%u", frame_ms);
+    return frame_ms;
+}
+
 /* G3D +0x38, the object step's submission (+0x88): handed an object's buffer
  * (in the shared arena) and the record it was stamped from (in the image).
  * The step never reads anything back, so the stub logs both pointers and
@@ -1384,6 +1571,12 @@ static void build_stubs(void)
     TRAPS(host, 1); TRAPS(chain, 4); TRAPS(stub_module, 0xff);
     TRAPS(acontain, 23); TRAPS(controls, 16); TRAPS(sound, 39); TRAPS(util, 20); TRAPS(weatherm, 27);
     TRAPS(multip, 35); TRAPS(fe, 18);
+    for (i = 0; i < 48; i++) {
+        uint32_t j;
+        for (j = 4; j < sizeof module_stub[i]; j += 4)
+            *(uint32_t *)(module_stub[i] + j) = 0xde000000u | (i << 16) | j;
+        *(uint32_t *)module_stub[i] = i;
+    }
 #undef TRAPS
     *(uint32_t *)host = 1;
     SET_SLOT(host, 0x13c, h_close);
@@ -1410,10 +1603,16 @@ static void build_stubs(void)
     SET_SLOT(host, 0x0c8, h_cfg_get_string);
     SET_SLOT(host, 0x0cc, h_cfg_put_string);
     SET_SLOT(host, 0x288, h_288);
+    SET_SLOT(host, 0x018, h_frame_services);
+    SET_SLOT(host, 0x01c, h_one);
+    SET_SLOT(host, 0x298, h_push_module);
+    SET_SLOT(host, 0x29c, h_pop_module);
     SET_SLOT(host, 0x134, h_attr_get);
     SET_SLOT(host, 0x138, h_attr_set);
     *(uint32_t *)chain = 4;
     SET_SLOT(chain, 0x20, chain_send);
+    SET_SLOT(chain, 0x18, chain_add);
+    SET_SLOT(chain, 0x1c, chain_remove);
     *(uint32_t *)acontain = 23;
     SET_SLOT(acontain, 0x28, acontain_28);
     SET_SLOT(acontain, 0x30, acontain_30);
@@ -1434,10 +1633,15 @@ static void build_stubs(void)
     SET_SLOT(util, 0x2c, util_2c);
     SET_SLOT(util, 0x48, util_geo48);
     SET_SLOT(util, 0x88, util_88);
+    SET_SLOT(util, 0x6c, util_rand);
     *(uint32_t *)fe = 18;
     SET_SLOT(fe, 0x20, fe_20);
     SET_SLOT(fe, 0x2c, fe_2c);
     SET_SLOT(fe, 0x54, fe_54);
+    SET_SLOT(fe, 0x60, fe_60);
+    SET_SLOT(fe, 0x64, fe_64);
+    SET_SLOT(fe, 0x68, fe_68);
+    SET_SLOT(fe, 0x6c, fe_6c);
     *(uint32_t *)weatherm = 27;
     SET_SLOT(weatherm, 0x24, weatherm_24);
     *(uint32_t *)multip = 35;
@@ -1449,6 +1653,18 @@ static void build_stubs(void)
     SET_SLOT(hg2d, 0x88, hg2d_88);
     SET_SLOT(hg2d, 0xb4, hg2d_b4);
     SET_SLOT(hg2d, 0xb8, hg2d_b8);
+    SET_SLOT(hg2d, 0x7c, hg2d_7c);
+    SET_SLOT(hg2d, 0x18, step_hg2d_18);
+    SET_SLOT(g3d, 0x60, step_g3d_60);
+    SET_SLOT(sound, 0x20, step_sound_20);
+    SET_SLOT(weatherm, 0x1c, step_weatherm_1c);
+    SET_SLOT(util, 0x70, step_util_70);
+    SET_SLOT(host, 0x034, h_clock);
+    SET_SLOT(module_stub[6], 0x18, step_m6_18);
+    SET_SLOT(module_stub[7], 0x18, step_m7_18);
+    SET_SLOT(module_stub[9], 0x18, step_m9_18);
+    SET_SLOT(module_stub[10], 0x1c, step_m10_1c);
+    SET_SLOT(module_stub[26], 0x18, step_m26_18);
     *(uint32_t *)g3d = 14;
     SET_SLOT(g3d, 0x1c, g3d_1c);
     SET_SLOT(g3d, 0x24, g3d_24);
@@ -1563,7 +1779,7 @@ static void load_side(struct side *s, const char *path, const char *name)
                    im->id == 20 ? (void *)util : im->id == 27 ? (void *)weatherm :
                    im->id == 35 ? (void *)multip : im->id == 18 ? (void *)fe :
                    im->id == 13 ? (void *)hg2d : im->id == 14 ? (void *)g3d :
-                   (void *)stub_module;
+                   im->id < 48 ? (void *)module_stub[im->id] : (void *)stub_module;
     memcpy(s->pristine, s->image, IMAGE_SIZE);
 }
 
@@ -3467,6 +3683,319 @@ static void report_spot(void)
            cover_spot_place, cover_spot_slew, cover_spot_walk, cover_spot_g3d);
 }
 
+/* ---- suite: frame (init, the frame callbacks and deinit: +0x04, +0x08) ---------- */
+
+static int util48_zero;                          /* UTIL +0x48 answers 0 this op (frame) */
+static unsigned long cover_frame_init, cover_frame_deinit, cover_frame_cb[2], cover_frame_scatter,
+    cover_frame_recentred, cover_frame_moved;
+
+/* Random bytes over an image range, leaving relocated words alone (a random
+ * value there that pointed into retail's image would compare as a pointer on
+ * that side only). */
+static void seed_image(uint32_t lo, uint32_t hi)
+{
+    uint32_t i, r;
+
+    for (i = lo; i < hi; i++) {
+        uint8_t v = (uint8_t)rnd();
+        for (r = 0; r < nrelocs; r++)
+            if (relocs[r] <= i && i < relocs[r] + 4)
+                break;
+        if (r == nrelocs)
+            cur->image[i] = v;
+    }
+}
+
+/* A latitude inside slice 11's clamp: UTIL +0x44 and +0x48 index their
+ * tables by it. */
+static int32_t frame_lat(void)
+{
+    return (int32_t)(rnd() % (0x97c449u + 0x97c449u + 1)) - 0x97c449;
+}
+
+/* GLOBAL's clouds, winds and positions, afresh or (`some`) in part. */
+static void frame_global(int some)
+{
+    uint32_t i;
+
+    if (!some || rnd_n(2))                         /* the three wind bands */
+        for (i = 0xeca; i < 0xeea; i += 2)
+            *(uint16_t *)(global + i) = (uint16_t)rnd();
+    if (!some || rnd_n(2)) {                       /* the layers and the puffs */
+        *(uint16_t *)(global + 0xe6a) = (uint16_t)rnd();
+        *(uint16_t *)(global + 0xe72) = (uint16_t)rnd();
+        *(uint16_t *)(global + 0xe70) = (uint16_t)(rnd_n(4) ? rnd() | 1 : 0);
+        *(uint16_t *)(global + 0xe78) = (uint16_t)(rnd_n(3) ? rnd() | 1 : 0);
+        *(uint16_t *)(global + 0xe7a) = (uint16_t)(rnd_n(6) ? rnd() | 1 : 0);
+        *(uint16_t *)(global + 0xe7c) = (uint16_t)rnd();
+        *(uint16_t *)(global + 0xe7e) = (uint16_t)(rnd_n(6) ? rnd() | 1 : 0);
+        *(uint16_t *)(global + 0xe80) = (uint16_t)rnd();
+    }
+    if (!some || rnd_n(2)) {                       /* the aircraft and its cell */
+        for (i = 0x560; i < 0x578; i++)
+            global[i] = (uint8_t)rnd();
+        *(int32_t *)(global + 0x564) = frame_lat();
+        for (i = 0xb38; i < 0xb48; i++)
+            global[i] = (uint8_t)rnd();
+        *(int32_t *)(global + 0xb3c) = frame_lat();
+    }
+    /* now and then a layer's or the puffs' altitude on a wind band's edge,
+     * or one either side (+0x8da5's unsigned range tests) */
+    for (i = 0; i < 3; i++)
+        if (rnd_n(2)) {
+            static const uint16_t alt[] = { 0xe6a, 0xe72, 0xe7a }, edge[] = { 0xeca, 0xecc, 0xed6, 0xed8, 0xee2, 0xee4 };
+            *(uint16_t *)(global + alt[i]) =
+                (uint16_t)(*(uint16_t *)(global + edge[rnd_n(6)]) + rnd_n(3) - 1);
+        }
+    *(uint16_t *)(global + 0xc1a) = (uint16_t)rnd();
+    *(uint16_t *)(global + 0x2aa) = (uint16_t)rnd();
+    *(uint16_t *)(global + 0x2ea) = (uint16_t)rnd();
+    *(uint32_t *)(global + 0x390) = rnd_n(4);
+    *(uint16_t *)(global + 0xe44) = (uint16_t)rnd();   /* list 1's callback clears it */
+    *(uint16_t *)(global + 0x116c) = (uint16_t)rnd();
+    *(uint32_t *)(global + 0x20) = rnd();
+}
+
+/* MAIN's own cloud state, afresh or in part. */
+static void frame_image(int some)
+{
+    uint32_t i;
+
+    if (!some || rnd_n(3) == 0) {
+        seed_image(0x1a80, 0x1ad0);
+        seed_image(0x1ab0, 0x1ac8);
+        seed_image(0x1afe, 0x1b24);
+        seed_image(0x1b2e, 0x1ce0);
+        seed_image(0x1e44, 0x1ed8);
+        *(int32_t *)(cur->image + 0x1b18) = frame_lat();
+        *(int32_t *)(cur->image + 0x1b00) = frame_lat();   /* the centre +0x80cd re-centres from */
+        *(uint16_t *)(cur->image + 0x1e72) = (uint16_t)rnd_n(2);
+    }
+    *(uint16_t *)(cur->image + 0x1e46) = (uint16_t)(rnd_n(3) ? 0 : rnd_n(4));
+    if (rnd_n(2) == 0)
+        *(uint16_t *)(cur->image + 0x1e44) = 1;   /* scatter the puffs afresh */
+    for (i = 0; i < 16; i++)                       /* the puffs the drawing has released */
+        *(uint16_t *)(cur->image + 0x3380 + i * 2) = (uint16_t)(rnd_n(3) ? 0 : 1);
+}
+
+static void op_frame(void)
+{
+    s2 cb;
+    uint32_t k = rnd_n(10), which;
+    int side = cur == &ours;
+
+    if (op_number == 0) {
+        frame_cb[side][0] = frame_cb[side][1] = 0;
+        record_cb[side] = 0;
+        frame_global(0);
+        frame_image(0);
+        if (counting) cover_frame_init++;
+        put("\n#init");
+        put(" =%#x", ((s0)SVC(0x04))() == GetUserDefaultLCID());
+        return;
+    }
+    if (k == 0 && op_number > 3 && (frame_cb[side][0] || frame_cb[side][1])) {
+        if (counting) cover_frame_deinit++;
+        put("\n#deinit");
+        put(" =%#x", ((s0)SVC(0x08))());
+        return;
+    }
+    if (k == 3 && record_cb[side] != 0) {          /* list 0x14's listener, a record */
+        put("\n#record");
+        call_with_regs(record_cb[side], 0x22, rnd());
+        put(" eax=%#x ecx=%#x edx=%#x esp%+d", cb_eax, cb_ecx, cb_edx, (int32_t)cb_esp);
+        return;
+    }
+    if (k < 4) {
+        frame_global(1);
+        frame_image(1);
+        put("\n#change");
+        return;
+    }
+    which = k < 7 ? 0 : 1;
+    cb = (s2)(uintptr_t)frame_cb[side][which];
+    if (cb == NULL)
+        return;
+    if (counting) {
+        cover_frame_cb[which]++;
+        if (which == 0 && *(uint16_t *)(cur->image + 0x1e44) && *(uint16_t *)(global + 0xe7a) &&
+            *(uint16_t *)(global + 0xe7e) && *(uint16_t *)(cur->image + 0x1e72))
+            cover_frame_scatter++;
+    }
+    util48_zero = which == 1 && rnd_n(6) == 0;
+    if (which == 1 && rnd_n(4) == 0) {
+        /* each layer's origin one cell short of half a turn from the latitude
+         * the grid will step it to (the FE model's cell edge), so the step
+         * meets a distance of 0x80000000, where +0x8887's signed test and an
+         * unsigned one part */
+        int32_t t = (*(int32_t *)(global + 0x564) / 0x2000) * 0x2000;
+        *(uint32_t *)(cur->image + 0x1a84) = (uint32_t)t + 0x80000000u - 0x1000000u / 0x258;
+        *(uint32_t *)(cur->image + 0x1a9c) = (uint32_t)t + 0x80000000u - 0x1000000u / 0x320;
+        *(uint16_t *)(global + 0x116c) &= 0xfffe;
+    }
+    put("\n#list%u", which ? 3 : 1);
+    cb(rnd(), rnd());
+    if (counting) {
+        if (which == 1 && *(uint16_t *)(cur->image + 0x2080)) cover_frame_recentred++;
+        if (which == 1 && *(uint16_t *)(cur->image + 0x1ab2) == *(uint16_t *)(global + 0xb46))
+            cover_frame_moved++;
+    }
+}
+
+/* UTIL +0x48 for the frame suite: retail's, except that now and then it
+ * answers a planar size of 0 -- which real latitudes never give -- so that
+ * +0x8609's `idiv` by it, a memory operand, meets the host's divide repair.
+ * Its one caller reloads every register it reads afterwards. */
+static uint32_t retail_util48;
+static uint32_t STDCALL util48_mix(uint32_t a, uint32_t b, uint32_t out)
+{
+    if (!util48_zero)
+        return ((s3)(uintptr_t)retail_util48)(a, b, out);
+    put(" U48=0");
+    *(uint32_t *)(uintptr_t)(out + 4) = 0;
+    return 0;
+}
+
+static void setup_frame(void)
+{
+    static const uint32_t slots[] = { 0x2c, 0x44, 0x48 };
+    static int loaded;
+
+    if (!loaded) {
+        use_retail_util(slots, sizeof slots / sizeof slots[0]);
+        retail_util48 = *(uint32_t *)(util + 0x48);
+        SET_SLOT(util, 0x48, util48_mix);
+        loaded = 1;
+    }
+}
+
+static void report_frame(void)
+{
+    printf("  frame: inits %lu, deinits %lu, list 1 %lu (puffs scattered %lu), list 3 %lu (puffs re-centred %lu);"
+           " memory-operand divides repaired %lu\n",
+           cover_frame_init, cover_frame_deinit, cover_frame_cb[0], cover_frame_scatter, cover_frame_cb[1],
+           cover_frame_recentred, cover_div_memory);
+    (void)cover_frame_moved;
+}
+
+/* ---- suite: tick (the timer tick, +0x24) ----------------------------------------- */
+
+static unsigned long cover_tick, cover_tick_carry, cover_tick_third, cover_tick_sixth, cover_tick_flag;
+
+/* Each op seeds the tick's GLOBAL fields (the fraction now and then just
+ * short of its carry) and now and then the three countdowns (1, small, or 0,
+ * which wraps), then ticks a few times. */
+static void op_tick(void)
+{
+    uint32_t i, n = 1 + rnd_n(8);
+    static const uint32_t cd[] = { 0x6dc0, 0x6dc4, 0x6dc8 };
+
+    if (op_number == 0 || rnd_n(3) == 0)
+        for (i = 0; i < 3; i++)
+            *(uint32_t *)(cur->image + cd[i]) = rnd_n(4) == 0 ? 0 : rnd_n(3) == 0 ? 1 : 1 + rnd_n(20);
+    *(uint32_t *)(global + 0x24c) = rnd();
+    *(uint32_t *)(global + 0x250) = rnd();
+    *(uint32_t *)(global + 0x254) = rnd_n(2) ? 0 : rnd();
+    *(uint16_t *)(global + 0x25e) = (uint16_t)(rnd_n(2) ? 0x10000 - 0xe38 + rnd_n(5) - 2 : rnd());
+    *(uint32_t *)(global + 0x260) = rnd();
+    for (i = 0x1176; i < 0x1180; i += 2)
+        *(uint16_t *)(global + i) = (uint16_t)rnd();
+    put("\n#tick x%u", n);
+    for (i = 0; i < n; i++) {
+        uint16_t f = *(uint16_t *)(global + 0x25e);
+        uint32_t c3 = *(uint32_t *)(cur->image + 0x6dc0), c6 = *(uint32_t *)(cur->image + 0x6dc4),
+                 c18 = *(uint32_t *)(cur->image + 0x6dc8);
+        ((s0)SVC(0x24))();
+        if (counting) {
+            cover_tick++;
+            if ((uint16_t)(f + 0xe38) < 0xe38) cover_tick_carry++;
+            if (c3 == 1) cover_tick_third++;
+            if (c6 == 1) cover_tick_sixth++;
+            if (c18 == 1) cover_tick_flag++;
+        }
+    }
+}
+
+static void setup_tick(void) { }
+
+static void report_tick(void)
+{
+    printf("  tick %lu (carries %lu, every third %lu, every sixth %lu, every eighteenth %lu)\n",
+           cover_tick, cover_tick_carry, cover_tick_third, cover_tick_sixth, cover_tick_flag);
+}
+
+/* ---- suite: step (the frame, +0x18) ---------------------------------------------- */
+
+static unsigned long cover_step, cover_step_events, cover_step_mode[3], cover_step_slew, cover_step_drain,
+    cover_step_slow;
+
+/* Each op seeds the fields the frame branches on -- the tick's counts and
+ * flags, the event count's low bits, the mode and its last state, the slew
+ * countdown and what is pending, the crash and the replay flags, the second
+ * marker -- and the frame time the host's clock gives (around one second,
+ * where it saturates), then runs one frame. */
+static void op_step(void)
+{
+    uint32_t mode;
+
+    *(uint32_t *)(global + 0x254) = rnd_n(2) ? 0 : rnd();
+    *(uint32_t *)(global + 0x258) = rnd();
+    *(uint32_t *)(global + 0x794) = rnd_n(2) ? 0 : rnd();
+    global[0xb6a] = (uint8_t)(rnd_n(2) ? 0 : rnd());
+    global[0x281] = (uint8_t)rnd();
+    global[0x282] = (uint8_t)rnd();
+    *(uint32_t *)(global + 0x84c) = rnd_n(2) ? 0 : rnd();
+    *(uint32_t *)(global + 0x850) = rnd_n(2) ? 0 : rnd();
+    global[0x365] = (uint8_t)(rnd_n(3) ? rnd_n(4) : rnd());
+    if (rnd_n(2))
+        *(uint32_t *)(cur->image + 0x85b8) = *(uint32_t *)(global + 0x2ac);
+    global[0x838] = (uint8_t)(rnd_n(3) ? 0 : rnd());
+    *(uint32_t *)(global + 0x11f0) = rnd_n(3) ? rnd_n(2) : rnd();
+    *(uint32_t *)(global + 0x11f4) = rnd_n(3) ? rnd_n(2) : rnd();
+    *(uint16_t *)(global + 0x11fa) = (uint16_t)rnd();
+    *(uint32_t *)(global + 0x11fc) = rnd();
+    *(uint32_t *)(global + 0x1200) = rnd();
+    *(uint16_t *)(global + 0x2a0) = (uint16_t)rnd();
+    *(uint32_t *)(global + 0x758) = rnd_n(3) ? 0 : rnd();
+    mode = rnd_n(4) ? rnd_n(3) : rnd();
+    *(uint32_t *)(global + 0x264) = mode;
+    if (rnd_n(2))
+        *(uint32_t *)(global + 0x268) = rnd_n(2);
+    *(uint32_t *)(global + 0xb20) = rnd_n(2) ? 0 : rnd();
+    *(uint16_t *)(global + 0x5dc) = (uint16_t)(rnd_n(2) ? 0 : rnd());
+    *(uint32_t *)(global + 0x628) = rnd_n(3) ? 0 : rnd();
+    *(uint32_t *)(global + 0x26c) = rnd();
+    if (rnd_n(2))
+        *(uint32_t *)(global + 0x260) = rnd();
+    *(uint16_t *)(global + 0x1206) = (uint16_t)(rnd_n(2) ? 0 : rnd());
+    *(uint32_t *)(global + 0x24c) = rnd_n(3) ? rnd_n(4) : 0;
+    *(uint32_t *)(global + 0x250) = rnd_n(3) ? rnd_n(3) : 0;
+    if (rnd_n(4) == 0)
+        *(uint32_t *)(cur->image + 0x85b0) = 0;
+    *(int32_t *)(global + 0x564) = (int32_t)rnd();
+    frame_ms = rnd_n(2) ? 998 + rnd_n(4) : rnd_n(3) ? rnd_n(2000) : rnd();
+    if (counting) {
+        cover_step++;
+        if (*(uint32_t *)(global + 0x254)) cover_step_events++;
+        if (mode < 3) cover_step_mode[mode]++;
+        if (global[0x365] > 1 && *(uint32_t *)(cur->image + 0x85b8) != *(uint32_t *)(global + 0x2ac)) cover_step_slew++;
+        if (*(uint32_t *)(global + 0x24c) || *(uint32_t *)(global + 0x250)) cover_step_drain++;
+        if (frame_ms >= 1000) cover_step_slow++;
+    }
+    put("\n#step mode=%u 264=%u 268=%u 758=%#x", mode, *(uint32_t *)(global + 0x264),
+        *(uint32_t *)(global + 0x268), *(uint32_t *)(global + 0x758));
+    put(" =%#x", ((s0)SVC(0x18))());
+}
+
+static void setup_step(void) { }
+
+static void report_step(void)
+{
+    printf("  step %lu (events %lu, modes 0/1/2 %lu/%lu/%lu, slew catch-ups due %lu, ticks drained %lu,"
+           " a second or more %lu)\n", cover_step, cover_step_events, cover_step_mode[0], cover_step_mode[1],
+           cover_step_mode[2], cover_step_slew, cover_step_drain, cover_step_slow);
+}
+
 /* ---- running ---------------------------------------------------------------------- */
 
 struct suite {
@@ -3502,6 +4031,9 @@ static const struct suite suites[] = {
     { "clouds", op_clouds, report_clouds, 20, setup_clouds, 0x00 },
     { "cloudtex", op_cloudtex, report_cloudtex, 12, setup_cloudtex, 0x00 },
     { "spot", op_spot, report_spot, 20, setup_spot, 0x00 },
+    { "frame", op_frame, report_frame, 30, setup_frame, 0x00 },
+    { "tick", op_tick, report_tick, 20, setup_tick, 0x00 },
+    { "step", op_step, report_step, 20, setup_step, 0x00 },
 };
 
 static const struct suite *suite;

@@ -280,6 +280,9 @@ static const uint32_t retail_linkage[] = {
 #include "main_prefs.inc"
 #include "main_clouds.inc"
 #include "main_spot.inc"
+#include "main_frame.inc"
+#include "main_tick.inc"
+#include "main_step.inc"
 
 __asm__(".globl _ImportTable\n\t.set _ImportTable, _main_image + 0x0\n\t"
         ".globl _Linkage\n\t.set _Linkage, _main_image + 0xc0");
@@ -289,6 +292,10 @@ __asm__(".globl _ImportTable\n\t.set _ImportTable, _main_image + 0x0\n\t"
 static void main_install(void)
 {
     static const struct { uint32_t slot; void *fn; } services[] = {
+        { 0x04, (void *)main_init },
+        { 0x08, (void *)main_deinit },
+        { 0x18, (void *)main_step },
+        { 0x24, (void *)main_tick },
         { 0x38, (void *)load_default },
         { 0x3c, (void *)load_flight },
         { 0x40, (void *)save_flight },

@@ -36,11 +36,11 @@
  *     first test stored. */
 
 /* a signed `idiv r32` under the host's divide repair: the quotient, or on
- * overflow 0x7fffffff, or 0x80000001 when the divisor and the dividend's
- * high half differ in sign.  The divisor is never 0 here. */
+ * overflow or a divisor of 0, 0x7fffffff, or 0x80000001 when the divisor and
+ * the dividend's high half differ in sign. */
 static uint32_t idiv32(int64_t num, int32_t den)
 {
-    int64_t q = num / den;
+    int64_t q = den != 0 ? num / den : 0x100000000LL;
 
     if (q > 0x7fffffffLL || q < -0x80000000LL) {
         int neg = (den < 0) != ((int32_t)(uint32_t)((uint64_t)num >> 32) < 0);

@@ -112,6 +112,12 @@ make maindiff-run SUITE=cloudtex     # MAIN slice 20, the cloud layers' textures
 make main-breaks SUITE=cloudtex      # its breaks -> 34, 33 caught, 1 proven equivalent (~30 min)
 make maindiff-run SUITE=spot         # MAIN slice 21, the spot plane's eye (+0xa8), over retail UTIL -> 20000 scenarios, 0 differ (~4 min)
 make main-breaks SUITE=spot          # its breaks -> 50, 47 caught, 3 proven equivalent (~45 min)
+make maindiff-run SUITE=frame        # MAIN slice 22, init/deinit and the frame callbacks (+0x04,+0x08), over retail UTIL -> 20000 scenarios, 0 differ (~5 min)
+make main-breaks SUITE=frame         # its breaks -> 60, 58 caught, 2 proven equivalent (~90 min)
+make maindiff-run SUITE=tick         # MAIN slice 23, the timer tick (+0x24) -> 20000 scenarios, 0 differ (~1 min)
+make main-breaks SUITE=tick          # its breaks -> 11, all caught (~10 min)
+make maindiff-run SUITE=step         # MAIN slice 24, the frame (+0x18) -> 20000 scenarios, 0 differ (~3 min)
+make main-breaks SUITE=step          # its breaks -> 40, 39 caught, 1 proven equivalent (~40 min)
 make hostdiff-run N=20000            # HOST (id 1, FLTSIM98.EXE) slices 1-28, all 194 services, real files in bin/difftest/hostfs -> 0 differ (~11 min)
 make host-breaks                     # HOST broken on purpose -> 610 breaks, 580 caught, 26 proven equivalent, 4 rare display paths missed at N=2000 (~6 h)
 make mpchatdiff-run      # whole-module MPCHAT, the chat window -> 20000 scenarios, 0 differ (~20 s)
@@ -314,7 +320,7 @@ has to set `g3d_mesh_precision` to match. MULTIP, PANELS
 (docs/modules/panels.md) and **MPCHAT are done**; MPCHAT, the chat window,
 is verified against a model of the window system hooked into its import
 table (docs/modules/mpchat.md). **MAIN is in progress**, a slice at a time behind
-`maindiff`'s suites, as MULTIP was; slices 1-21 are verified (among them situation
+`maindiff`'s suites, as MULTIP was; slices 1-24 are verified (among them situation
 records, the assembly situation reader and writer, the nav services
 `+0x70`/`+0x78`/`+0x7c`/`+0x80` -- range and bearing, the read-outs and the
 station descriptor -- `+0x74`, the season, zone and clock, `+0xa4`, the clock

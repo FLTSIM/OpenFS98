@@ -30,19 +30,18 @@ slot is done MAIN is not in `MODULES` and is never installed.
 | 19, the cloud layers' draw | `+0x98` (assembly, `.text+0x6f59`, `+0x741f`..`+0x77c6`, `+0x8275`, `+0x9146`..`+0x922c`, `+0x9d57`..`+0xa089`) | `clouds` | verified: 20,000 scenarios, 0 differ; 51 of 53 breaks caught, 2 proven equivalent |
 | 20, the cloud layers' textures | `+0x94` (assembly, `.text+0x7140`, `+0x77c7`..`+0x7bc1`) | `cloudtex` | verified: 20,000 scenarios, 0 differ; 33 of 34 breaks caught, 1 proven equivalent |
 | 21, the spot plane's eye | `+0xa8` (assembly, `.text+0x6450`..`+0x6ce2`) | `spot` | verified: 20,000 scenarios, 0 differ; 47 of 50 breaks caught, 3 proven equivalent |
+| 22, init, deinit and the frame callbacks | `+0x04`, `+0x08` (MSVC C, `.text+0x20`, `+0x70`), callbacks `.text+0x2e10`, `+0x7095`, `+0x85ea` (assembly) | `frame` | verified: 20,000 scenarios, 0 differ; 58 of 60 breaks caught, 2 proven equivalent |
+| 23, the timer tick | `+0x24` (MSVC C, `.text+0x16a60`) | `tick` | verified: 20,000 scenarios, 0 differ; 11 of 11 breaks caught |
+| 24, the frame | `+0x18` (MSVC C, `.text+0xc000`..`+0xc51d`) | `step` | verified: 20,000 scenarios, 0 differ; 39 of 40 breaks caught, 1 proven equivalent |
 
-**What is left** (as of slice 21): `+0x04`/`+0x08` (init and deinit: they
-register and remove three CHAIN callbacks, `.text+0x2e10` on list `0x14` -- an
-empty `ret 8` -- and the frame callbacks `.text+0x7095` on list 1, the cloud
-puff field through UTIL `+0x44`/`+0x6c`, and `.text+0x85ea` on list 3, through
-FE's grid conversions `+0x60`..`+0x6c`; so the callbacks come first), `+0x18`,
-`+0x20` (the frame's order of business), `+0x24`..`+0x2c`, `+0x50`, `+0x90`,
-`+0xac` and `+0xc4` (the Flights dialogs: UTIL `+0x98` lists the flights
-through MAIN callbacks and host `+0x10c` runs a dialog that calls back into
-MAIN, as FACIL's were done), and the menu command handlers the host reaches
-through the command table `+0x04` registers (most open dialogs through host
-`+0x10c`). UTIL's `+0x6c` keeps its seed in UTIL's `.data`, so a suite over
-retail UTIL that reaches it must reset the seed for each side.
+**What is left** (as of slice 24): `+0x20`; `+0x28` and `+0x2c`, the sim's
+start and shutdown, with the two CHAIN callbacks `+0x28` registers
+(`.text+0xae40` on list `0x14`, `.text+0x16c83` on list 2) and about ten
+internal routines (menus, the view windows, the clock, strings); `+0x50`;
+`+0x90`; `+0xac` and `+0xc4` (the Flights dialogs: UTIL `+0x98` lists the
+flights through MAIN callbacks and host `+0x10c` runs a dialog that calls back
+into MAIN, as FACIL's were done); and the menu command handlers the host
+reaches through the command table (most open dialogs through host `+0x10c`).
 
 ## Binary and linkage
 
@@ -78,12 +77,12 @@ calls are reached from the host, the `English\` dialog modules, or CHAIN.
 
 | slot | retail | callers | |
 | --- | --- | --- | --- |
-| `+0x04` | `.text+0x0020` | host | init: Linkage `+0x18`'s registration, the instance (host `+0x298`), `.text+0x6cf0`, CHAIN list 0x14 |
-| `+0x08` | `.text+0x0070` | host | deinit |
-| `+0x18` | `.text+0xc000` | | |
+| `+0x04` | `.text+0x0020` | host | **slice 22**: init: Linkage `+0x18`'s registration, the instance (host `+0x298`), `.text+0x6cf0`, CHAIN list 0x14 |
+| `+0x08` | `.text+0x0070` | host | **slice 22**: deinit |
+| `+0x18` | `.text+0xc000` | host | **slice 24**: the frame |
 | `+0x1c` | `.text+0xc520` | FACIL | **slice 11**: clamp the latitude |
 | `+0x20` | `.text+0xa090` | | |
-| `+0x24`..`+0x34` | `.text+0x16a60`, `+0x165b0`, `+0x16880`, `+0x16920`, `+0x169a0` | REALITY (`+0x30`, `+0x34`) | `+0x30` and `+0x34` (**slice 9**) grey and enable menu items `0x1001`..`0x1006` |
+| `+0x24`..`+0x34` | `.text+0x16a60`, `+0x165b0`, `+0x16880`, `+0x16920`, `+0x169a0` | REALITY (`+0x30`, `+0x34`) | `+0x24` is **slice 23** (the timer tick); `+0x28` starts the sim and `+0x2c` shuts it down; `+0x30` and `+0x34` (**slice 9**) grey and enable menu items `0x1001`..`0x1006` |
 | `+0x38`..`+0x4c` | `.text+0x11eeb`, `+0x11e3d`, `+0x120aa`, `+0x127b3`, `+0x12f50`, `+0x12f6a` | ADVDRV (`+0x3c`), REALITY (`+0x44`), DEMO (`+0x48`, `+0x4c`) | the situation reader and writer, assembly: `+0x48` loads a situation from memory, `+0x4c` from a file |
 | `+0x50` | `.text+0x13105` | | assembly, the largest gap (11 KB) |
 | `+0x54`..`+0x6c` | `.text+0x15cc0`..`+0x15f50` | WINMSG, WINDOW, PANELS (`+0x5c`..`+0x64`) | **slice 1**, below |
@@ -963,3 +962,124 @@ the slew's `0x40000`. The first full run also found a harness artifact: the
 suite's seeding wrote random words over the eye blocks' relocated pointers, and
 a value that happened to point into retail's image compared as a pointer on
 that side only; the seeding now skips relocated words.
+
+## Slice 22: init, deinit and the frame callbacks
+
+`src/main/main_frame.inc`. **Init** (`+0x04`, `.text+0x20` and `+0x6cf0`, MSVC
+C) hands the Linkage to the host (`+0x18`, which copies its frame services),
+puts MAIN on the host's module stack (`+0x298`, the HMODULE into
+`.data+0x7fc0`), registers the cloud callbacks on CHAIN lists 1 and 3, makes
+the cloud textures (slice 20), takes a random seed into GLOBAL `+0x1162`,
+registers the situation-record listener on list `0x14`, and stores the user's
+LCID in GLOBAL `+0x1288`. **Deinit** (`+0x08`) undoes it in reverse. The
+listener (`.text+0x2e10`) is `ret 8` and nothing else.
+
+**List 1's callback** (`.text+0x7095`) drifts the two cloud layers' origins
+with the wind at their altitudes (`+0x8ea9`, `+0x8d7b`; `+0x8da5` picks the
+wind band whose altitude range holds the layer and turns its direction and
+speed into a step through UTIL `+0x2c`), moves the sixteen puffs with the wind
+at theirs (`+0x7f73`), scattering them afresh through UTIL's generator when the
+puff parameters change (`+0x7c40`, `+0x7ec7`, `+0x7ee7`), submits the haze
+block to G3D `+0x1c`, runs slice 12's sun, and selects HG2D `+0x7c`'s colour
+table. **List 3's** (`.text+0x85ea`) follows the aircraft to its cell of FE's
+level-8 grid (FE `+0x60`..`+0x6c`), measures the cell through UTIL `+0x48`,
+steps both layers' origins onto it a cell at a time (`+0x8868`), and re-centres
+the puffs the drawing has released (`+0x80cd`).
+
+Retail details, reproduced:
+
+- **The puff re-centring's 48-bit value has its high word twice**: `shld`
+  and `shr` leave the high word of `.data+0x1e6e >> 2` in both upper words.
+- **Two divides run into the host's repair**: the re-centring's two `idiv`s by
+  a cell size and by UTIL `+0x44`'s answer, and the grid's `idiv` of
+  `0x1000000` by UTIL `+0x48`'s answer, *a memory operand*. maindiff's
+  `repair_divide` now decodes memory operands as the host's filter does
+  (`0x4119a0`: its length rules, the divisor's dword read for the sign, and its
+  quirk of taking a `disp8` zero-extended).
+- **The grid step's distance test is signed**, so a distance of `0x80000000`,
+  its own negation, counts as falling.
+- **The wind's speed keeps bits 8 to 23** of its scale by GLOBAL `+0xc1a`, and
+  each component bits 15 to 30 of its product (`add ax,ax` / `adc dx,dx`).
+
+Not reproduced: the callbacks' eax, ecx and edx at return. CHAIN ignores eax
+and ecx and passes edx to the next callback; no retail callback on lists 1 and
+3 reads it.
+
+### Verifying init, deinit and the callbacks
+
+The `frame` suite runs init (through CHAIN `+0x18` and host `+0x18`/`+0x298`
+stubs that log the lists, the callbacks -- paired by first appearance -- and
+the Linkage by address, not its slots, since some are not done), a run of
+list 1 and list 3 dispatches through the callbacks the CHAIN stub kept, with
+GLOBAL's clouds, winds and positions and MAIN's own cloud state changed between
+them, and now and then deinit. UTIL's `+0x2c`, `+0x44` and `+0x48` are retail's
+(latitudes kept inside slice 11's clamp, as UTIL's tables need); its generator
+`+0x6c` is the harness's, so each side draws the same numbers. FE's grid
+conversions and HG2D `+0x7c` are models. Real latitudes never give UTIL `+0x48`
+a size of 0, so a wrapper answers 0 now and then to drive the grid's
+memory-operand `idiv` into the repair. `make maindiff-run SUITE=frame`:
+20,000 scenarios, 0 differences (about 4 minutes):
+20,000 inits and 12,320 deinits, 55,156 list-1 dispatches (16,700 scattering the
+puffs), 54,876 list-3 (45,387 re-centring them), 9,096 memory-operand divides
+repaired. `make main-breaks SUITE=frame`: 60 breaks, 58 caught, 2 proven
+equivalent: `wind-none` (with no wind band the speed is 0, so the step is 0
+whatever the angle, and the angle's sine and cosine at `.data+0x201d`/`+0x201f`
+are overwritten by slice 12's sun later in the same callback) and
+`scatter-div` (`.data+0x2eb6` holds `0x4000` and nothing in MAIN writes it, so
+that divide never overflows). The breaks found five gaps, now closed:
+altitudes on a wind band's edge, GLOBAL `+0xe44` never set, a grid distance
+of exactly `0x80000000` (aimed at now), and the list-`0x14` listener, never
+called until the suite called it through a thunk that logs the registers and
+stack it comes back with. The LCID is wine's en-US `0x409` on both sides; the
+suite cannot vary the locale.
+
+## Slice 23: the timer tick
+
+`src/main/main_tick.inc`, `.text+0x16a60` (`+0x24`), MSVC C. The host calls it
+on its timer. GLOBAL `+0x24c` counts every tick and `+0x250` every third
+(`InterlockedIncrement`, as retail calls it). A 16-bit fraction at `+0x25e`
+gains `0xe38` a tick and carries into `+0x260`. Every sixth tick rotates
+`+0x1176` left one and advances `+0x1178`..`+0x117e` by `0x506`, `0x708`,
+`0x90a` and `0xb0c`, and every eighteenth sets `+0x254` to 1
+(`InterlockedExchange`). The countdowns are `.data+0x6dc0`, `+0x6dc4` and
+`+0x6dc8`; one seeded at 0 wraps and takes 2^32 ticks, as retail's would.
+
+`make maindiff-run SUITE=tick`: 20,000 scenarios, 0 differences (under a minute): 1,035,484 ticks,
+137,821 carries, the every-third, -sixth and -eighteenth paths 180,018,
+101,900 and 54,097 times. `make main-breaks SUITE=tick`: 11 breaks, all
+caught.
+
+## Slice 24: the frame
+
+`src/main/main_step.inc`, `.text+0xc000` (`+0x18`) with `+0xc230`, `+0xc330`,
+`+0xc430` and `+0xc450`, MSVC C. The host calls it once a frame. In order:
+
+- the half-second events when the tick has raised GLOBAL `+0x254`: UTIL
+  `+0x70`, CHAIN list 3 with the event count, then by the count's low bits
+  list 4 and WEATHERM `+0x1c` (and list 6), or a lamp copied, the slew
+  catch-up, and module 26's step;
+- CHAIN list 1 with the frame count;
+- module 6's step;
+- the mode: pause and slew raise list `0x14` messages `0x38`/`0x39` on the
+  change and list `0xd` while either holds. It decides between module 7's step
+  (with GLOBAL `+0x758`), the crash flag, module 9's step and the normal
+  `+0x270`;
+- the latitude clamp (slice 11), module 10's step and HG2D's;
+- a once-a-second flag, and G3D `+0x60` when asked;
+- the frame time from the host's clock as a fraction of a second in GLOBAL
+  `+0x2aa`, saturating at a second;
+- list 2 for every tick and list 5 for every third tick slice 23 counted,
+  each count drained with `InterlockedDecrement`;
+- SOUND's step.
+
+Every module call is a fire-and-forget step. maindiff now gives each module id
+it has no model for a table of its own, so a log can say which module was
+called. `make maindiff-run SUITE=step`: 20,000 scenarios, 0 differences (about 3 minutes): 230,264 frames,
+115,019 with events, the three modes about evenly, 69,609 slew catch-ups due,
+166,411 with ticks to drain, 134,438 with a frame time of a second or more.
+Each module step's stub logs a digest of GLOBAL as the module would find it.
+The breaks found that this was needed: the lamp copied into GLOBAL `+0x282`
+is cleared later in the same frame, so only the steps called in between can
+see it. `make main-breaks SUITE=step`: 40 breaks, 39 caught, 1 proven
+equivalent (`frame-274`: below a second the fraction is at most `0x7fde`, so
+sign- and zero-extension agree).

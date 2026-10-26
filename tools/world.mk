@@ -77,3 +77,11 @@ world-priority-ui: world $(WORLD_DIR)/worldpriorityuidiff.exe
 .PHONY: world-priority-breaks
 world-priority-breaks: world $(WORLD_DIR)/worldprioritydiff.exe $(WORLD_DIR)/worldprioritylifediff.exe $(WORLD_DIR)/worldpriorityuidiff.exe
 	bash tools/run_worlddiff.sh --priority-breaks
+
+$(WORLD_DIR)/worldboosterdiff.exe: tools/difftest/worldboosterdiff.c src/world/world_booster.c src/world/world_booster.h src/world/world_internal.h | $(WORLD_DIR)
+	$(CC) -std=c99 -O2 -Wall -Wextra -Werror -fno-strict-aliasing -o $@ tools/difftest/worldboosterdiff.c src/world/world_booster.c
+.PHONY: world-booster-core world-booster-breaks
+world-booster-core: $(WORLD_DIR)/worldboosterdiff.exe
+	bash tools/run_worlddiff.sh --booster-core $(N) $(SEED) $(MODE)
+world-booster-breaks: $(WORLD_DIR)/worldboosterdiff.exe
+	bash tools/run_worlddiff.sh --booster-breaks

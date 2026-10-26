@@ -27,7 +27,7 @@ slot is done MAIN is not in `MODULES` and is never installed.
 | 16, the smoke trails | `+0x88` (MSVC C, `.text+0x162f0`..`+0x16567`) | `objstep` | verified: 20,000 scenarios, 0 differ; 32 of 34 breaks caught, 2 proven equivalent |
 | 17, the quick save | `+0xb0` (MSVC C, `.text+0xcdb0`) | `quicksave` | verified: 20,000 scenarios, 0 differ; 6 of 7 breaks caught, 1 proven equivalent |
 | 18, the preferences | `+0xb4`, `+0xb8`, `+0xbc` (MSVC C, `.text+0xdd70`..`+0xf2e0`, preset `+0x14d20`) | `prefs` | verified: 20,000 scenarios, 0 differ; 26 of 28 breaks caught, 2 proven equivalent |
-| 19, the cloud layers' draw | `+0x98` (assembly, `.text+0x6f59`, `+0x741f`..`+0x77c6`, `+0x8275`, `+0x9146`..`+0x922c`, `+0x9d57`..`+0xa089`) | `clouds` | verified: @CL@ |
+| 19, the cloud layers' draw | `+0x98` (assembly, `.text+0x6f59`, `+0x741f`..`+0x77c6`, `+0x8275`, `+0x9146`..`+0x922c`, `+0x9d57`..`+0xa089`) | `clouds` | verified: 20,000 scenarios, 0 differ; 51 of 53 breaks caught, 2 proven equivalent |
 | 20, the cloud layers' textures | `+0x94` (assembly, `.text+0x7140`, `+0x77c7`..`+0x7bc1`) | `cloudtex` | verified: 20,000 scenarios, 0 differ; 33 of 34 breaks caught, 1 proven equivalent |
 | 21, the spot plane's eye | `+0xa8` (assembly, `.text+0x6450`..`+0x6ce2`) | `spot` | verified: 20,000 scenarios, 0 differ; 47 of 50 breaks caught, 3 proven equivalent |
 
@@ -838,7 +838,18 @@ now and then on or beside a band edge, or 1500, `0x34` or 6 from one), the band
 edges as slice 15 leaves them or not, the layer records with the aircraft
 usually near their origin (now and then far, so the divides saturate), the
 view kind behind GLOBAL `+0x1198`, and calls `+0x98` with `which` 0 to 5.
-`make maindiff-run SUITE=clouds`: @CLLONG@
+`make maindiff-run SUITE=clouds`: 20,000 scenarios, 0 differences
+(about 4 minutes): 153,366 calls with `which` 0 (38,572 skipped by
+`+0xdce`), 28,021 inside a layer, 122,332 texels looked up, 17,684 divides
+saturated. `make main-breaks SUITE=clouds`: 53 breaks, 51 caught, 2 proven
+equivalent: `9d57-sat` (only the quotients' bits 8 to 31 are used, and the two
+saturations agree there) and `9d57-sat-sign` (a 64-bit dividend is negative
+exactly when its high dword is). The breaks found seven gaps, all boundaries,
+now steered onto: GLOBAL `+0xe6e` on `0xc000` and `0xe001`, the aircraft's
+`+0x574` on a band edge, the altitude at the near and close thresholds on both
+sides of a layer, and `+0x564` where `+0x10` carries. A few are still caught
+by only a handful of scenarios in 2,000 (an exact offset and the right texel
+together), so a smaller N can miss them.
 
 ## Slice 20: the cloud layers' textures
 

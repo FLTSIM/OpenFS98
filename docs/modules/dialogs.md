@@ -506,6 +506,8 @@ have passed their own tests.
 World's `0x13080003` / `0x13080004` area-edit family and `0x13080005` priority
 are implemented in a standalone partial DLL. Start from [world.md](world.md)
 for their acceptance and the remaining bounded slices; preserve all existing
-MAIN/HOST/FE work and keep unimplemented registrations explicitly pending. For a whole-DLL assignment, choose
+MAIN/HOST/FE work and keep unimplemented registrations explicitly pending.
+The shared add/edit booster family now has core-event and class/factory lifetime
+acceptance; its initializer and native UI remain pending. For a whole-DLL assignment, choose
 MP_DIALOG and include all three registrations plus the full flag-2 window
 array in the completion criteria.

@@ -7,6 +7,12 @@ export WINEDEBUG=-all
 mkdir -p -- "$WINEPREFIX"
 exec 9>bin/world-diff/wine.lock
 flock 9
+if [[ "${1:-}" == --booster-life-breaks ]]; then
+    exec python3 -B tools/world_booster_life_breaks.py
+fi
+if [[ "${1:-}" == --booster-life ]]; then
+    exec timeout 120s wine bin/world-diff/worldboosterlifediff.exe "${2:-2000}" "${3:-0x4a971b63}" "${4:-normal}"
+fi
 if [[ "${1:-}" == --booster-core ]]; then
     exec timeout 120s wine bin/world-diff/worldboosterdiff.exe "${2:-2000}" "${3:-0x4a971b63}" "${4:-normal}"
 fi

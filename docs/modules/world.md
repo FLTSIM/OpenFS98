@@ -5,7 +5,8 @@ registers add/edit scenery area (`0x13080003` / `0x13080004`) and scenery
 priority (`0x13080005`). Their classes, initialization, controls, event/message
 maps, factories, exception lifetimes and module binding are rebuilt in C, using
 retail MFC42/SIMSUI as shared dependencies. The other 16 World registrations
-remain pending.
+remain pending native acceptance. Add/edit booster events and class/factory
+lifetimes have independent acceptance below, but are not registered in this DLL.
 
 This is ready to review as a standalone three-dialog slice. It is **not a full
 World replacement** and must not replace the active game's World.DLL. The
@@ -470,9 +471,139 @@ All five World generated includes reproduce byte-for-byte in an isolated
 directory. The World sources and fixtures retain snake_case identifiers and
 standard `<stdint.h>` types, without `types.h`.
 
+## Next family: add/edit performance booster core and lifetimes
+
+The shared booster editor now has a verified event core and class/factory
+lifetimes. This is the first two milestones for this family, **not native UI
+acceptance**. `WORLD_area.dll` still registers only the three dialogs above.
+
+| Registry id | Factory VA | FE descriptor |
+| --- | --- | --- |
+| `0x13080007`, edit booster | `0x223f1780` | FE `.data+0x30e8` |
+| `0x13080008`, add booster | `0x223f1850` | FE `.data+0x3118` |
+
+Both factories allocate `0x1f78` bytes, construct with template `0x6ab` and a
+null parent, and store the descriptor at object `+0x10dc`. FE owns the
+descriptor: `+4` checks, `+8` supplies the title, `+0xc` points to a `0x80`-byte
+row and `+0x10` points to the parent list descriptor. See
+[FE's Scenery Library contract](fe.md#part-4--the-scenery-library-0x78-verified),
+`src/fe/fe_library.c` and `world_cache` in `tools/difftest/fesldiff.c`.
+Those owner files and their harnesses were not changed. The new tests supply
+independent descriptor, row, text and callback fixtures.
+
+`world_booster.c` implements six routines: collect (`0x223f6dd0`), populate
+(`0x223f6ea0`), OK (`0x223f6740`), path change (`0x223f6fd0`), virtual
+validation (`0x223f7160`) and virtual error (`0x223f71a0`). Observed behavior:
+
+- Collect reads the cache directory before the source path, both with capacity
+  `0x104`, reloading the descriptor/row between calls. Layer text uses capacity
+  `0x1f` and `atoi`, stored at row `+0x5c`. Combo selection exactly 1 sets row
+  `+0x7c` to 1; every other selection sets zero. Any nonzero check state at
+  object `+0x1d64` becomes active 1 at row `+0x54`.
+- Populate formats both layers with `%5d`. The original BSTINFO layer at row
+  `+0x74` is an unsigned 16-bit value, even when the surrounding word contains
+  nonzero upper bits. Name/description use SIMSUI text assignment, while the
+  directory, layer edit and source use MFC text assignment. Stored active and
+  combo values are selected only when exactly 1, unlike collect's active test.
+- OK collects/checks and chooses the first error at row `+0`, `+0x14`,
+  `+0x78`, `+0x50`, then `+0x58`: source, directory, combo, active, layer.
+  A nonzero error-service return focuses the corresponding control and keeps
+  the dialog open. A zero return accepts immediately, without examining later
+  errors. Acceptance writes answer 1 before virtual close. It does not call
+  virtual validation/error as the scenery-area editor does.
+- Layer errors build a three-word record at row `+0x60`: status, temporary
+  edit text and the parsed maximum from the string at row `+0x70`. Both OK and
+  virtual error leave the expired stack pointer at row `+0x64`. The latter
+  returns virtual focus's result, including when no error exists. Virtual
+  validation collects/checks again but examines only row `+0x58`, returning
+  control id `0x1ae9` or zero.
+- Path change reads only the source, with capacity `0x80`, then checks. It
+  decides all seven enables once from the source status, refreshes description,
+  name and both layer displays, and preserves the other editable row fields.
+  Descriptor loads after those calls remain fresh.
+
+The class vtable is `0x2240ee68`, constructor `0x223f6280`, destructor
+`0x223f6420`, deleting destructor `0x223f6400` and DDX `0x223f65a0`.
+`gen_world_booster.py` extracts and validates all 21 embedded controls, their
+reverse destruction and MSVC cleanup graph, all 21 DDX bindings, the terminated
+help map and the constructor/deleting-destructor vtable association. Its two
+generated includes reproduce byte-for-byte in an isolated directory; they
+contain ABI metadata, without retail machine code or resource payloads.
+
+`world_booster_objects.c` implements those routines, both factories, help
+(`0x223f6d90`), context menu (`0x223f6db0`), inherited Cancel (`0x223fe4e0`)
+and PostNcDestroy (`0x223f3d30`). Construction sets its class vtable only after
+all embedded constructors succeed; destruction does not reset it. Exceptions
+destroy remaining controls/base once. The deleting destructor releases memory
+only for flag bit 0 and after successful destruction. PostNcDestroy dispatches
+deleting destruction with flag 1; Cancel writes answer 0 before virtual close.
+
+Both factories ignore their parent argument. A null allocation faults on the
+descriptor write at address `0x10dc`. A failed Create displays
+`CEditBooster::Create() failed\n`, then continues to Show(1); the returned HWND
+is read afterwards. Partial construction frees through the dialog delete
+operator; exceptions after ownership transfers do not. The typed `CException*`
+catch unwinds before fatal-service dispatch, including derived and virtual-base
+pointer adjustments. These rules match the earlier World lifetime boundary.
+
+### Reproduce booster core and lifetime acceptance
+
+```sh
+make -f tools/world.mk world-booster-core N=20000
+make -f tools/world.mk world-booster-core N=2000 MODE=interrupt
+make -f tools/world.mk world-booster-breaks
+make -f tools/world.mk world-booster-life N=20000
+make -f tools/world.mk world-booster-life N=2000 MODE=unwind
+make -f tools/world.mk world-booster-life N=2000 MODE=typed
+make -f tools/world.mk world-booster-life-breaks
+```
+
+All runs use seed `0x4a971b63` and the reference hash above. The six-operation
+core harness made **120,000 normal comparisons** and 120,000 fixture self-checks;
+the interrupt run made **105,520 comparisons**, including 93,520 interrupted
+reference calls, and 12,000 normal self-checks. All matched. Fixtures compare
+ordered calls, returns and every byte of the guarded object, both descriptors,
+rows and string buffers. They cover all status combinations, error-service
+outcomes, negative/extreme layer inputs, noncanonical active/combo values,
+upper-half BSTINFO values and descriptor/vtable/status changes at external
+boundaries. Only expired row `+0x64` addresses are normalized; text is checked
+inside the error service. Core interruptions escape through a vectored handler;
+they do not claim local exception-cleanup acceptance.
+
+The eleven-operation lifetime harness made **220,000 normal comparisons**,
+**386,064 unwind comparisons** and **386,064 typed-exception comparisons**, all
+matching. The normal run includes 3,638 expected allocation write faults and
+216,362 successful-path self-checks. Unwind covers 364,064 caught exceptions;
+typed covers 301,958 propagated exceptions and 62,106 fatal-service dispatches.
+Each exceptional run also includes 364 expected allocation faults and 21,636
+normal self-checks. It compares the complete `0x1f78`-byte object, descriptor,
+DDX/help buffers, module state, delete counters, ordered calls and returns.
+Retail retains its own MSVC EH metadata and real CRT frame handler; the outer
+catcher invokes real `RtlUnwind`. Null/non-null PostNcDestroy and both factories
+are exercised independently. Create/Show and control services remain fixtures.
+
+All **31 deliberate mutations** were detected: 18 core and 13 lifetime. Each
+mutant is independently compiled and requires exit 1 with an actual `DIFFER`
+transcript; faults, timeouts and build failures do not count. Mutation sources,
+executables and logs are retained in `bin/world-diff/booster-breaks/` and
+`booster-life-breaks/`. Acceptance logs in `bin/world-diff/` are
+`booster-core-normal.log`, `booster-interrupt-acceptance.log`,
+`booster-breaks-acceptance.log`, `booster-life-normal.log`,
+`booster-life-unwind.log`, `booster-life-typed.log` and `booster-life-breaks.log`.
+
+The next booster milestone is initializer `0x223f68b0`, including its shared
+static font construction/cleanup, empty-source CString/resource branch,
+control setup and enables. The message-map getter `0x223f6730` returns
+`0x2240ede8`, based on getter `0x223f5d40`: local handlers are nonclient click
+`0x223f7240`, help, context menu and source change `0x400` for control `0x1ae8`.
+The nonclient handler forwards to an imported MFC handler. Native vtable/map
+binding, real controls/pixels, callback/error scripts, automatic deletion,
+repeated unload and private-copy startup remain pending. The standalone native
+DLL and active game were not changed for this milestone.
+
 ## Remaining boundary
 
-Sixteen World registrations are still pending: scenery lists/library,
+Sixteen World registrations are still pending native acceptance: scenery lists/library,
 search/boosters, weather/time, scenery settings and FACIL-backed
 position/facility screens. Continue as bounded slices with their own native
 acceptance before building or installing a complete World replacement. Shared

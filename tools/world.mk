@@ -85,3 +85,15 @@ world-booster-core: $(WORLD_DIR)/worldboosterdiff.exe
 	bash tools/run_worlddiff.sh --booster-core $(N) $(SEED) $(MODE)
 world-booster-breaks: $(WORLD_DIR)/worldboosterdiff.exe
 	bash tools/run_worlddiff.sh --booster-breaks
+
+src/world/world_booster_tables.inc src/world/world_booster_hooks.inc &: tools/gen_world_booster.py tools/gen_world_tables.py tools/dialogmap.py orig/English/World.DLL
+	python3 -B tools/gen_world_booster.py
+BOOSTER_OBJECTS := src/world/world_booster_objects.c src/world/world_booster.h src/world/world_booster_tables.inc src/world/world_booster_hooks.inc src/world/world_objects.h src/world/world_unwind.h src/world/world_exceptions.h src/world/world_internal.h
+$(WORLD_DIR)/worldboosterlifediff.exe: tools/difftest/worldboosterlifediff.c $(BOOSTER_OBJECTS) | $(WORLD_DIR)
+	$(CC) -std=c99 -O2 -Wall -Wextra -Werror -fno-strict-aliasing -fno-delete-null-pointer-checks -o $@ tools/difftest/worldboosterlifediff.c src/world/world_booster_objects.c -lntdll
+.PHONY: world-booster-life
+world-booster-life: $(WORLD_DIR)/worldboosterlifediff.exe
+	bash tools/run_worlddiff.sh --booster-life $(N) $(SEED) $(MODE)
+.PHONY: world-booster-life-breaks
+world-booster-life-breaks: $(WORLD_DIR)/worldboosterlifediff.exe
+	bash tools/run_worlddiff.sh --booster-life-breaks

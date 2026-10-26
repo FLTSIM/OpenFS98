@@ -1,0 +1,4 @@
+LIBRARY Help.DLL
+EXPORTS
+    Linkage=g_help_linkage DATA
+    ImportTable=g_help_imports DATA

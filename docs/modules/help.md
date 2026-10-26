@@ -1,14 +1,17 @@
 # Help.DLL
 
-The dialog core is implemented and differentially tested. **This is not yet a
-replacement DLL.** The Win32/MFC runtime adapter, module entry points, generated
-vtables/message maps, build-only resources, native dialog comparisons and game
-startup smoke remain to be implemented. MAIN, HOST and the shared Makefile are
-outside this work's scope.
+The dialog core and standalone native replacement DLL are implemented. The
+Win32/MFC runtime adapter binds all five factories, native vtables and message
+maps, including the credits placeholder and the cached About font's unload
+lifetime. MAIN, HOST and the shared Makefile are outside this work's scope.
 
 Build and run independently:
 
 ```sh
+make -f tools/help.mk help
+make -f tools/help.mk helpuidiff-run
+make -f tools/help.mk help-ui-breaks
+make -f tools/help.mk help-smoke
 make -f tools/help.mk helpeventsdiff-run
 make -f tools/help.mk helpeventsdiff-run N=2000 SEED=0x7e51a23b MODE=unwind
 make -f tools/help.mk help-breaks N=100
@@ -83,7 +86,8 @@ construction; later initializers reuse the font. Foreground, background and two
 font state fields are then reset before the art initializer. The harness restores
 and compares the complete flag, padding and 0x70-byte font, tests repeated
 initialization, and independently calls the registered destructor entry.
-Actual DLL-unload registration belongs to the pending runtime adapter.
+The native adapter retains the registered destructor and calls it once on DLL
+unload, after terminating the MFC extension module, matching retail CRT order.
 
 About's Credits callback takes its descriptor as one stdcall argument. MAIN's
 callee `0x207e10f0` ends in `ret 4` and forwards it to dialog `0x16070001`.
@@ -142,9 +146,9 @@ then calls the callback, then reloads the virtual close target. Null and debug
 pointer `0xcdcdcdcd` fail validation with retail's message. The callback's
 12-byte stack consumption is evident at these call sites; no caller supplying
 this dialog id was found in the reference module set, so an independent callee
-has not been identified. Native validation needs an explicit graph owner fixture.
+has not been identified. Native validation uses an explicit graph owner fixture, described below.
 
-## Differential evidence and remaining acceptance
+## Core differential evidence
 
 The harness maps retail Help with DONT_RESOLVE_DLL_REFERENCES, verifies its
 Linkage RVA, and patches the dependency IAT slots. It runs both sides over the
@@ -178,10 +182,87 @@ exception injection. The Name-capacity mutation targets the assignment before
 RegQueryValueExA: its earlier initial assignment is overwritten before any
 registry query and changing that dead store alone is unobservable here.
 
-Next: implement the runtime adapter and exports (Linkage, ImportTable), module
-init/deinit and DllMain, native import/vtable/message-map binding including the
-credits placeholder, on-unload font cleanup and build-only resources. Then run
-real-MFC comparisons of all five dialogs with isolated registry/file/timer and
-callback fixtures, deliberate rendering/lifetime breaks and an isolated game
-startup smoke. Synthetic dependency agreement does not establish those native
-behaviors, and this module must not be installed until they pass.
+## Native integration and acceptance
+
+`help_runtime.c` supplies typed Win32, HOST and MFC/SIMSUI adapters, DLL entry
+points and both ABI exports. `tools/gen_help_runtime.py` validates the reference
+image and generates six vtable bindings, five message maps and all five
+registry factories. The sixth vtable belongs to Credits' embedded CWnd
+placeholder; it must keep its own deleting destructor. Resource payloads and
+an ordinal SIMSUI import anchor are generated only into ignored build output.
+The replacement still requires the CD's shared MFC42 and SIMSUI implementations.
+
+The module retains Help's MFC module-state initialization, extension-library
+allocation and constructor exception cleanup. Deinit releases the host
+registration and shared Dialog.DLL resource module and clears their handles.
+About's one registered cached-font destructor runs on unload; the font survives
+module deinit while the DLL remains loaded, just as in retail.
+
+`tools/difftest/helpuidiff.c` loads retail and rebuilt Help against the CD's
+actual MFC42 and SIMSUI. A native MFC application supplies the main window.
+HOST memory/string/path services and descriptor owners are fixtures. Both
+Help images' registry imports use a private fixture: no actual key is opened,
+including on About's intentional handle-leak path. The fixture exercises open
+success/failure and independent Name/ProductID query failures. Help's timer
+imports are deterministic fixtures, including initial allocation failures;
+WM_TIMER is dispatched through the real native message maps.
+
+Credits reads and streams a synthetic RTF file from `bin/help-diff/fltcred.rtf`
+through the real RichEdit window. The harness checks the populated line count,
+drives scroll/wrap and pause/resume, then verifies timer/window/library handles
+are cleared on close. The wrap fixture lowers the threshold to a reachable
+line; a small viewport can prevent the first visible line from ever passing
+retail's default line_count-minus-six threshold. About also opens and closes
+a nested native Credits window through its descriptor callback.
+
+Lessons varies empty/nonempty lists, selected records, descriptions, file
+availability, radio choices, accept/cancel and double-click. The graph owner
+creates and updates an actual child window and tears it down from the callback.
+Retail's graph constructor/initializer do not initialize the saved HWND at
+object `+0x10dc`; the fixture locates control `0xee2` independently and ignores
+that indeterminate callback argument. Exact argument forwarding is verified by
+the guarded core harness. No real simulator graph renderer is claimed here.
+
+Every native dialog has two checkpoints comparing child controls, text,
+geometry, visibility/enabled state, callback transcripts and all client pixels.
+Dispatch ownership is checked against the expected module. Descriptor results,
+registry/timer counts and close state are compared too. About's expired stack
+pointer is normalized only in the final native descriptor comparison; live
+control text and the core's exact stack-pointer checks cover its valid uses.
+The harness checks two DLL load/unload cycles and observes exactly one cached
+font destruction per module unload through the actual shared font destructor.
+Module-init probes also compare allocation failure and allocation/constructor
+throws with real exception unwinding and repeated deinit.
+
+Native acceptance on the reference:
+
+- Core regression after integration: **20,000 scenarios, 85 operations,
+  1,700,000 comparisons, zero differences**, seed `0x19a847e3`. Log:
+  `bin/help-diff/native-core-normal.log`.
+- Exception regression: **2,000 scenarios, 1,304,753 comparisons, zero
+  differences**, seed `0x7e51a23b`; 1,133,843 injected exceptions and 1,820
+  expected allocation faults. Log: `bin/help-diff/native-core-unwind.log`.
+- **60 public-factory/message cases across two DLL load/unload cycles, zero
+  differences**, including all five dialogs and nested Credits. Full transcript:
+  `bin/help-diff/native-ui.log`.
+- **9/9 native mutations detected**: About font color, registry-failure text,
+  Lessons edit color, Credits timer counter, graph message operation,
+  completion answer, module exception cleanup, deinit handle clearing and
+  cached-font unload. Summary: `bin/help-diff/native-breaks.log`.
+- Isolated game startup: **27/27 modules, 95 gauges, PASS**, with English/Help.DLL
+  loaded and replacement bytes confirmed. Trace:
+  `bin/help-diff/smoke-game-k86rquyf/help-smoke.log`.
+
+`tools/help_ui_breaks.py` snapshots sources, assembly, generated metadata,
+resources/import library and harness before compiling deliberate errors. Its
+baseline must pass first; only exit 1 with an actual native comparison mismatch
+counts. Build errors, faults and timeouts fail the run. Logs and source hashes
+remain under `bin/help-diff/ui-breaks/`. Retail text uses its Windows code page;
+mutation diagnostics decode invalid UTF-8 with replacement so a copyright
+character cannot discard an otherwise valid comparison result.
+
+`tools/help_smoke.py` substitutes the rebuilt DLL only in an ignored private
+game copy, uses the dedicated Help Wine prefix and stops only that prefix. It
+does not alter `game/` or shared build/install integration. The native suite
+complements the high-volume core comparisons; it does not claim every possible
+Windows notification or native exception path.

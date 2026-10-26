@@ -97,7 +97,12 @@ static void *__cdecl moving_realloc(void *old, size_t size)
     n = _msize(old);
     memcpy(p, old, n < size ? n : size);
     memset(old, 0xdd, n);
-    free(old);
+    {   /* freed a while later, so the next blocks do not land on it: a pointer kept across the move keeps reading 0xdd */
+        static void *quarantine[64];
+        static uint32_t qn;
+        free(quarantine[qn % 64]);
+        quarantine[qn++ % 64] = old;
+    }
     return p;
 }
 
@@ -2212,6 +2217,7 @@ static void seed_keynames(void)
     for (i = 0; i < 10; i++) {
         const char *t = kn_text[i];
         if (i >= 3 && rnd() % 16 == 0) t = kn_text[rnd() % 10];  /* now and then a key word out of place */
+        if (i == 5 && rnd() % 8 == 0) t = kn_text[4];             /* Num / as Num Enter: which is tried first shows */
         *(uint32_t *)(DATA_VA + kn_slot[i] - DATA_VA) = (uint32_t)(uintptr_t)t;
         *(uint32_t *)(our_data + kn_slot[i] - DATA_VA) = (uint32_t)(uintptr_t)t;
     }
@@ -2222,7 +2228,7 @@ static void seed_keynames(void)
 static void check_keynames(void)
 {
     static char rb[96], ob[96], name[96];
-    static const char *const odd[] = { "", "ctrl + a", "CTRL + ", "Num Enterprise", "F1", "Space", "q", "CTRL + SHIFT + ALT + Break" };
+    static const char *const odd[] = { "", "ctrl + a", "CTRL + ", "Num Enterprise", "F1", "Space", "Num Enter", "CTRL + SHIFT + ALT + Break" };
     fn3 r0 = (fn3)real_fn(0x200), o0 = (fn3)our_fn(0x200);
     fn2 r4 = (fn2)real_fn(0x204), o4 = (fn2)our_fn(0x204);
     uint32_t key = (rnd() % 8) << 8 | rnd() % 0x100, len = rnd() % 4 ? 64 : 23 + rnd() % 20;
@@ -3979,28 +3985,34 @@ static const char *const disp_keys[] = { "DirectDrawDisable", "Direct3D", "Direc
                                          "MipMap", "PageFlip", "TextureSmall", "Texture8Bit", "VertexFog", "Fog" };
 static const char *const disp_suffix[] = { "", " (Direct3D)", " (Direct3D MMX)", " (Direct3D RGB)", " (Direct3D RAMP)", "(Direct3D)" };
 
+/* The fake DirectDraw, Direct3D, surface and palette vtables, made once. */
+static void dd_fakes_init(void)
+{
+    static int init;
+    uint32_t i;
+    if (init) return;
+    for (i = 0; i < 32; i++) dd_vtbl[i] = (void *)dd_other;
+    for (i = 0; i < 8; i++) d3d_vtbl[i] = (void *)dd_other;
+    dd_vtbl[0] = (void *)dd_qi; dd_vtbl[2] = (void *)dd_release; dd_vtbl[0x20 / 4] = (void *)dd_enummodes;
+    dd_vtbl[0x2c / 4] = (void *)dd_getcaps; dd_vtbl[0x30 / 4] = (void *)dd_getmode;
+    d3d_vtbl[2] = (void *)dd_release; d3d_vtbl[0xc / 4] = (void *)d3d_enumdev;
+    dd_vtbl[0x14 / 4] = (void *)dd_createpal; dd_vtbl[0x18 / 4] = (void *)dd_createsurf; dd_vtbl[0x28 / 4] = (void *)dd_flipgdi;
+    dd_vtbl[0x50 / 4] = (void *)dd_coop; dd_vtbl[0x54 / 4] = (void *)dd_setmode;
+    for (i = 0; i < 34; i++) fs_vtbl[i] = (void *)dd_other;
+    fs_vtbl[2] = (void *)fo_release; fs_vtbl[0x14 / 4] = (void *)fo_blt; fs_vtbl[0x18 / 4] = (void *)fo_setentries;
+    fs_vtbl[0x58 / 4] = (void *)fo_desc; fs_vtbl[0x6c / 4] = (void *)fo_restore; fs_vtbl[0x7c / 4] = (void *)fo_setpal;
+    for (i = 0; i < NDRV; i++) { dd_obj[i].vtbl = dd_vtbl; dd_obj[i].idx = i; d3d_obj[i].vtbl = d3d_vtbl; d3d_obj[i].idx = i; }
+    init = 1;
+}
+
 static void check_display(void)
 {
     static char text[2048];
     static uint32_t seq;
     uint32_t i, k;
     char *t = text;
-    static int init;
     if (!our_fn(0x31c)) return;
-    if (!init) {
-        for (i = 0; i < 32; i++) dd_vtbl[i] = (void *)dd_other;
-        for (i = 0; i < 8; i++) d3d_vtbl[i] = (void *)dd_other;
-        dd_vtbl[0] = (void *)dd_qi; dd_vtbl[2] = (void *)dd_release; dd_vtbl[0x20 / 4] = (void *)dd_enummodes;
-        dd_vtbl[0x2c / 4] = (void *)dd_getcaps; dd_vtbl[0x30 / 4] = (void *)dd_getmode;
-        d3d_vtbl[2] = (void *)dd_release; d3d_vtbl[0xc / 4] = (void *)d3d_enumdev;
-        dd_vtbl[0x14 / 4] = (void *)dd_createpal; dd_vtbl[0x18 / 4] = (void *)dd_createsurf; dd_vtbl[0x28 / 4] = (void *)dd_flipgdi;
-        dd_vtbl[0x50 / 4] = (void *)dd_coop; dd_vtbl[0x54 / 4] = (void *)dd_setmode;
-        for (i = 0; i < 34; i++) fs_vtbl[i] = (void *)dd_other;
-        fs_vtbl[2] = (void *)fo_release; fs_vtbl[0x14 / 4] = (void *)fo_blt; fs_vtbl[0x18 / 4] = (void *)fo_setentries;
-        fs_vtbl[0x58 / 4] = (void *)fo_desc; fs_vtbl[0x6c / 4] = (void *)fo_restore; fs_vtbl[0x7c / 4] = (void *)fo_setpal;
-        for (i = 0; i < NDRV; i++) { dd_obj[i].vtbl = dd_vtbl; dd_obj[i].idx = i; d3d_obj[i].vtbl = d3d_vtbl; d3d_obj[i].idx = i; }
-        init = 1;
-    }
+    dd_fakes_init();
     /* the drivers */
     ndrv = 1 + rnd() % NDRV;
     for (i = 0; i < ndrv; i++) {
@@ -4204,6 +4216,7 @@ static void check_dialogs(void)
     static const char *const names[] = { "+0x10c dialog", "+0x110 dialog", "+0x118 dialog", "+0x114 dialog-tick" };
     uint32_t mods[4 * 5], regs[6 * 4], i, nreg, s;
     if (!our_fn(0x10c) || !our_fn(0x114) || getenv("HOSTDIFF_NO_DIALOGS")) return;
+    dd_fakes_init();
     /* the dialog table every fake module has: f0 single, f1 an array, f2 single */
     for (i = 0; i < 6; i++) {
         dlg_table[3 * i] = 0x51 + i;

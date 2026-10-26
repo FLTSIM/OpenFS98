@@ -7,6 +7,18 @@ export WINEDEBUG=-all
 mkdir -p -- "$WINEPREFIX"
 exec 9>bin/world-diff/wine.lock
 flock 9
+if [[ "${1:-}" == --priority-breaks ]]; then
+    exec python3 -B tools/world_priority_breaks.py "${@:2}"
+fi
+if [[ "${1:-}" == --priority-ui ]]; then
+    exec timeout 180s wine bin/world-diff/worldpriorityuidiff.exe "${2:-bin/world-diff/WORLD_area.dll}" "${3:-21}"
+fi
+if [[ "${1:-}" == --priority-core ]]; then
+    exec timeout 120s wine bin/world-diff/worldprioritydiff.exe "${2:-2000}" "${3:-normal}"
+fi
+if [[ "${1:-}" == --priority-life ]]; then
+    exec timeout 120s wine bin/world-diff/worldprioritylifediff.exe "${2:-2000}" "${3:-0x4a971b63}" "${4:-normal}"
+fi
 if [[ "${1:-}" == --init-breaks ]]; then
     exec python3 -B tools/world_init_breaks.py
 fi

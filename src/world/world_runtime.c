@@ -2,17 +2,18 @@
 #include <windows.h>
 #include "world_objects.h"
 #include "world_init.h"
+#include "world_priority.h"
 #include "world_unwind.h"
 #define TC FS98_WORLD_THISCALL
 #define SC FS98_WORLD_STDCALL
 struct world_import_binding { const char *dll, *name; uint32_t ordinal, slot; };
-struct world_virtual_binding { uint32_t slot; int import_index; void *local; };
+struct world_virtual_binding { uint32_t table, slot; int import_index; void *local; };
 struct world_message_entry { uint32_t message, code, first, last, signature; void *handler; };
 struct world_message_map { void *(*base)(void); const struct world_message_entry *entries; };
 struct world_dialog { uint32_t id; uint32_t (SC *create)(uint32_t, void *); uint32_t flags; };
-static struct world_message_map s_message_map;
+static struct world_message_map s_message_map, s_priority_message_map;
 #include "world_runtime_tables.inc"
-static void *s_functions[sizeof(s_imports) / sizeof(s_imports[0])], *s_vtable[60];
+static void *s_functions[sizeof(s_imports) / sizeof(s_imports[0])], *s_vtables[2][60];
 static uint8_t s_extension[0x14];
 static uint32_t s_module, s_resource_module;
 struct world_import { uint32_t id; void *link; };
@@ -99,6 +100,17 @@ static int world_format(char *text, const char *format, int value)
 { return ((int (*)(char *, const char *, ...))world_crt("sprintf"))(text, format, value); }
 static int world_load_string(uint32_t module, uint32_t id, char *buffer, int capacity)
 { return LoadStringA((HMODULE)module, id, buffer, capacity); }
+static void world_string_assign(void *string, const char *text)
+{ ((void *(TC *)(void *, const char *))world_slot(0x25578))(string, text); }
+static void world_string_append(void *string, const char *text)
+{ ((void *(TC *)(void *, const char *))world_slot(0x25580))(string, text); }
+static int world_font_tabs(void *font, int count, const int *tabs)
+{ return ((int (TC *)(void *, int, const int *))world_slot(0x25714))(font, count, tabs); }
+static void world_list_init(void *control, void *font, void *label)
+{ ((void (TC *)(void *, void *, void *))world_slot(0x25718))(control, font, label); }
+static const struct fs98_world_priority_services s_priority_services = {
+    world_string_assign, world_string_append, world_font_tabs, world_list_init
+};
 static const struct fs98_world_services s_services = {
     world_get_text, world_set_text, world_parse, world_format, world_send,
     world_check, world_enable, world_error, world_focus
@@ -127,12 +139,15 @@ static int world_bind(void)
     }
     for (index = 0; index < sizeof(s_virtuals) / sizeof(s_virtuals[0]); ++index) {
         const struct world_virtual_binding *binding = &s_virtuals[index];
-        s_vtable[binding->slot] = binding->import_index < 0 ? binding->local : s_functions[binding->import_index];
+        s_vtables[binding->table][binding->slot] = binding->import_index < 0 ? binding->local : s_functions[binding->import_index];
     }
     s_message_map.base = world_base_map; s_message_map.entries = s_messages;
     fs98_world_set_services(&s_services);
-    fs98_world_set_object_services(&s_object_services, s_vtable);
+    fs98_world_set_object_services(&s_object_services, s_vtables[0]);
     fs98_world_set_init_services(&s_init_services);
+    s_priority_message_map.base = world_base_map; s_priority_message_map.entries = s_priority_messages;
+    fs98_world_priority_set_object_services(&s_object_services, s_vtables[1]);
+    fs98_world_priority_set_services(&s_priority_services);
     return 1;
 }
 struct world_dynamic_unwind { struct fs98_world_unwind frame; void *dynamic; volatile int live; };
@@ -148,7 +163,7 @@ static WORLD_NOINLINE void world_module_init(void)
     state.dynamic = NULL; state.live = 0;
     world_unwind_enter(&state.frame, world_dynamic_cleanup);
     ((void (SC *)(void *, uint32_t *))WORLD_PTR(g_world_imports[0].link, 0x298))(&g_world_linkage, &s_module);
-    fs98_world_set_module(s_module);
+    fs98_world_set_module(s_module); fs98_world_priority_set_module(s_module);
     dynamic = ((void *(*)(uint32_t))world_mfc(823))(0x40);
     state.dynamic = dynamic; state.live = 1;
     if (dynamic) ((void *(TC *)(void *, void *, int))world_mfc(342))(dynamic, s_extension, 0);
@@ -162,7 +177,7 @@ static void world_module_deinit(void)
     if (s_module) ((void (SC *)(uint32_t))WORLD_PTR(g_world_imports[0].link, 0x29c))(s_module);
     FreeLibrary((HMODULE)s_resource_module);
     s_module = s_resource_module = 0;
-    fs98_world_set_module(0); fs98_world_set_resource_module(0);
+    fs98_world_set_module(0); fs98_world_priority_set_module(0); fs98_world_set_resource_module(0);
 }
 __declspec(dllimport) void *fs98_world_simsui_anchor(uint32_t size);
 BOOL WINAPI DllMain(HINSTANCE instance, DWORD reason, LPVOID reserved)
@@ -173,7 +188,7 @@ BOOL WINAPI DllMain(HINSTANCE instance, DWORD reason, LPVOID reserved)
         (void)anchor;
         if (!world_bind()) return FALSE;
         ((int (SC *)(void *, HINSTANCE))world_mfc(1182))(s_extension, instance);
-        s_module = (uint32_t)instance; fs98_world_set_module(s_module);
+        s_module = (uint32_t)instance; fs98_world_set_module(s_module); fs98_world_priority_set_module(s_module);
     } else if (reason == DLL_PROCESS_DETACH) {
         ((void (SC *)(void *, int))world_mfc(1253))(s_extension, 0);
     }

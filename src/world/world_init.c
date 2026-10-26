@@ -75,3 +75,6 @@ WORLD_NOINLINE int fs98_world_area_init(void *object)
         services->enable(AT(object, s_enable[index]), enabled);
     return 1;
 }
+
+const struct fs98_world_init_services *fs98_world_get_init_services(void) { return s_init_services; }
+uint32_t fs98_world_get_resource_module(void) { return s_resource_module; }

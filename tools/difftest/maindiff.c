@@ -92,8 +92,8 @@ static struct side retail, ours;
 static struct side *cur;
 static uint32_t relocs[MAX_RELOCS], nrelocs;
 static uint8_t host[0x340], global[0x1400], stub_module[0x400];
-static uint8_t acontain[0x40], controls[0x60], sound[0x40], util[0xc0], weatherm[0x40], multip[0x40], fe[0x40];
-static uint8_t hg2d[0x40];
+static uint8_t acontain[0x40], controls[0x60], sound[0x40], util[0xc0], weatherm[0x40], multip[0x40], fe[0x100];
+static uint8_t hg2d[0x100];   /* the clouds reach +0xb8 */
 static uint8_t g3d[0x40];
 static uint8_t chain[0x24];
 static uint8_t arena[ARENA_SIZE] __attribute__((aligned(16)));
@@ -106,7 +106,16 @@ static uint32_t rng, scenario_seed, scenario, op_number;
 static int counting;
 static uint32_t pair_retail[MAX_PAIRS], pair_ours[MAX_PAIRS], npairs_retail, npairs_ours;
 
-#define SET_SLOT(table, off, fn) (*(void **)((table) + (off)) = (void *)(fn))
+/* A slot past the end of its stub table would land in the next one (the clouds'
+ * HG2D +0x88..+0xb8 once overwrote MULTIP's +0x34/+0x38), so refuse it. */
+#define SET_SLOT(table, off, fn)                                                   \
+    do {                                                                           \
+        if ((off) + 4 > sizeof (table)) {                                          \
+            printf("stub slot %#x past the end of %s\n", (unsigned)(off), #table); \
+            exit(2);                                                               \
+        }                                                                          \
+        *(void **)((table) + (off)) = (void *)(fn);                                \
+    } while (0)
 #define IMG32(o) (*(uint32_t *)(cur->image + (o)))
 
 /* ---- utilities ---------------------------------------------------------------- */
@@ -3150,6 +3159,8 @@ static void op_clouds(void)
         global[i] = (uint8_t)rnd();
     for (i = 0x560; i < 0x578; i++)
         global[i] = (uint8_t)rnd();
+    if (rnd_n(8) == 0)                             /* +0x741f's +0x10 carries into +0x566 */
+        *(uint16_t *)(global + 0x564) = (uint16_t)(0xffe8 + rnd_n(24));
 
     /* the band edges as slice 15 leaves them, now and then not */
     lo1 = (int16_t)(*(uint16_t *)(global + 0xe6a) - (*(uint16_t *)(global + 0xe6c) >> 1));
@@ -3184,11 +3195,11 @@ static void op_clouds(void)
     /* the altitude: on, or one either side of, a layer's edge or its band's */
     if (rnd_n(2)) {
         /* the edges and one either side, +0x741f's 1500 either way, and its
-         * near/close thresholds below a layer (0x34, 0x1a, 4, 2 and their
-         * neighbours) and above one (6, 3 and theirs) */
+         * thresholds and their neighbours on both sides: near above a layer
+         * (0x34, 0x1a; 4, 2 with +0xe82 set), close below one (6, 3) */
         static const int16_t off[] = { -1, 0, 1, -1500, 1500, -1499, 1499, -1501, 1501,
-                                       -0x34, -0x35, -0x33, -0x1a, -0x1b, -0x19, -4, -5, -3, -2,
-                                       0x34, 6, 7, 5, 3, 4, 2 };
+                                       0x34, 0x35, 0x33, 0x1a, 0x1b, 0x19, 4, 5, 3, 2, 6, 7,
+                                       -0x34, -0x35, -0x33, -0x1a, -0x1b, -0x19, -4, -5, -3, -2, -6, -7 };
         int16_t e[4];
         e[0] = *(int16_t *)(cur->image + 0x1a94);
         e[1] = (int16_t)(e[0] + *(uint16_t *)(global + 0xe6c));

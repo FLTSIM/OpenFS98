@@ -39,7 +39,7 @@ def object_calls(ops):
     return calls
 
 
-def cleanup_imports(pe, ops):
+def cleanup_imports(pe, ops, expected_count=15):
     handlers = [int(match[1], 16) for op in ops[:5]
                  if (match := re.fullmatch(r'push\s+0x([0-9a-f]+)', op)) and int(match[1], 16) != 0xffffffff]
     if len(handlers) != 1:
@@ -48,7 +48,7 @@ def cleanup_imports(pe, ops):
     if pe.va_uint32(info) != 0x19930520:
         raise SurveyError('unknown MSVC EH version')
     count, table = pe.va_uint32(info + 4), pe.va_uint32(info + 8)
-    if count != 15:
+    if count != expected_count:
         raise SurveyError('unexpected area unwind state count')
     cleanup = {}
     for index in range(count):

@@ -1,12 +1,13 @@
-# World.DLL — native add/edit scenery-area slice
+# World.DLL — native scenery-area and priority slices
 
 **Partial replacement with native UI acceptance.** `bin/world-diff/WORLD_area.dll`
-registers only add/edit scenery area (`0x13080003` / `0x13080004`). Their shared
-class, initialization, controls, event/message maps, factories, exception
-lifetimes and module binding are rebuilt in C, using retail MFC42/SIMSUI as
-shared dependencies. The other 17 World registrations remain pending.
+registers add/edit scenery area (`0x13080003` / `0x13080004`) and scenery
+priority (`0x13080005`). Their classes, initialization, controls, event/message
+maps, factories, exception lifetimes and module binding are rebuilt in C, using
+retail MFC42/SIMSUI as shared dependencies. The other 16 World registrations
+remain pending.
 
-This is ready to review as a standalone two-dialog slice. It is **not a full
+This is ready to review as a standalone three-dialog slice. It is **not a full
 World replacement** and must not replace the active game's World.DLL. The
 startup smoke changes only a private game copy; startup success does not supply
 the other registrations or establish their behavior.
@@ -49,9 +50,9 @@ verified by its own harness.
 
 This slice covers these two registrations and their shared class,
 control exchange, validation, accept/cancel and lifetimes. Use independent
-callback/file fixtures. Broader scenery lists, priority, drive search and
-booster dialogs can follow in the same standalone harness. A two-registration
-test DLL is a partial slice, not a complete World replacement.
+callback/file fixtures. Priority now has its own acceptance below. Broader scenery lists, drive search
+and booster dialogs remain candidates for later slices. The three-registration
+test DLL remains a partial World replacement.
 
 ## Other bounded slices
 
@@ -162,11 +163,12 @@ There is no World-local `types.h`. The project exception is recorded in
 `CLAUDE.md` and the saved general agent instructions.
 
 The style audit covered all World C headers/source, generated includes, Python
-generators, mutation tools and fixtures. All three generated includes reproduce
+generators, mutation tools and fixtures. The three generated includes at that milestone reproduced
 exactly in an isolated directory. The rebuilt DLL's `.text`, `.data`, `.rdata`
 and `.rsrc` sections are byte-identical to the pre-cleanup startup-tested DLL.
-Core/unwind comparisons, all 51 mutation checks and the full 288-pair native UI
-run (384 validation/error checks over two unload cycles) passed again.
+Core/unwind comparisons, all 51 area mutation checks and the full 288-pair
+native UI run (384 validation/error checks over two unload cycles) passed again.
+These byte-identity results describe the style cleanup before adding Priority.
 
 ## Second milestone: factories, controls and exception lifetimes
 
@@ -264,7 +266,7 @@ empty-path CString/resource branch, 15 embedded-control setup, text limits,
 population and final enablement. `world_runtime.c` binds the retail imports,
 rebuilds the 60-slot area vtable and MFC message map, and implements module
 attachment, registration, dynamic-link-library cleanup and resource lifetime.
-`gen_world_runtime.py` extracts bindings and the two registry records. Build-only
+`gen_world_runtime.py` extracts bindings and registry records. Build-only
 resource payloads stay in ignored `bin/world-diff/world.res`; no retail machine
 code or resource payload is committed. The DLL exports only Linkage/ImportTable.
 
@@ -363,10 +365,115 @@ bytes and reported no runtime errors: **PASS**. The replacement SHA-256 was
 The copy and `world-smoke.log` are retained for inspection. This proves startup
 with the two-dialog slice, not that the other World menu commands work.
 
+## Fourth milestone: scenery priority
+
+Registry `0x13080005` uses template `0x6b4`, factory `0x223f1b90`, constructor
+`0x223fc820`, destructor `0x223fc960` and vtable `0x2240fe50`. The object is
+`0x1bb4` bytes with its descriptor at `+0x10dc`. Fourteen embedded controls are
+constructed, destroyed and DDX-bound. `gen_world_priority.py` extracts their
+lifetime/EH graph, DDX/help maps and layer-string recipe; the runtime generator
+now binds both classes and all three registrations. Generated includes contain
+numeric ABI metadata; build-only retail resources remain ignored.
+
+FE owns this descriptor and the reorder callbacks; see `fe_library.c`'s
+`fe_lib_priority` and the independent `fesldiff.c` owner fixture. No FE code was
+changed. The descriptor fields established against World are:
+
+| Offset | Meaning |
+| --- | --- |
+| `+0` | Answer |
+| `+4`, `+8`, `+0xc`, `+0x10`, `+0x14` | Check, raise, lower, sort, move callbacks |
+| `+0x18` | World title |
+| `+0x1c`, `+0x20`, `+0x24` | Row count, zero-based selection, 0x40-byte row array |
+| `+0x28`, `+0x2c` | Validation status, typed one-based position |
+| `+0x30`, `+0x34`, `+0x38` | Error status, temporary text pointer, list count |
+
+The callback ABI is stdcall with one descriptor pointer. Row title, layer and
+active fields are at `+0x18`, `+0x2c` and `+0x34`. Populate formats tab-separated
+name/type/three-digit layer rows, with `+`/`-` active markers, restores selection,
+and updates edit text, arrow enablement and focus. Layers 10/20/30/40/50 select
+the five retail resource strings. Invalid later layers reuse the previous
+formatted position as type text. An invalid first layer reads uninitialized
+scratch text in retail; the core fixture seeds that local at CString construction
+to witness the same read rather than comparing arbitrary stack garbage.
+
+Validation collects, checks and, when valid, invokes the move callback and
+repopulates: it has visible side effects. OK retains its original virtual table
+across validation/error handling, collects again, sets answer 1 and closes.
+Errors use real SIMSUI's three-word position record and return the virtual focus
+result. The expired stack pointer at descriptor `+0x34` is normalized after
+return; its text and rendered alert are checked while live. Unlike the area
+editor, Priority's PostNcDestroy calls the scalar deleting destructor with flag
+1. The native harness witnesses that automatic deletion and does not delete the
+object twice.
+
+```sh
+make -f tools/world.mk world-priority-core N=2000 MODE=unwind
+make -f tools/world.mk world-priority-life N=2000 MODE=typed
+make -f tools/world.mk world-priority-ui
+make -f tools/world.mk world-priority-breaks
+make -f tools/world.mk worlduidiff-run
+make -f tools/world.mk world-smoke
+```
+
+`worldprioritydiff.c` executes twelve operations against direct retail entry
+points: init, populate, selection, collect, raise/lower/sort, validation, error,
+OK, Cancel and post-destruction. It compares full guarded objects, descriptors,
+rows, returns and ordered calls. Fixtures cover negative/empty counts, invalid
+selections/layers, active/protected rows, descriptor/vtable changes and all
+reached exception boundaries, including CString cleanup. At 2,000 scenarios,
+**452,520 comparisons, including 428,520 real unwinds, matched**.
+
+`worldprioritylifediff.c` independently compares constructor/destructor,
+deleting destruction, factory, DDX and help/context behavior. The 2,000-scenario
+typed run passed **233,895 comparisons**, with 195,333 outer caught exceptions,
+22,562 fatal-service exits, 182 expected null-allocation faults and 15,818 normal
+self-checks. It uses the same actual MSVC exception and RtlUnwind boundaries as
+the area lifetime harness, including derived/null/incompatible pointer cases.
+
+`worldpriorityuidiff.c` reuses the native application, HOST and nested Alerts
+helpers from `worlduidiff.c`, with separate Priority descriptors, callbacks,
+row fixtures and scripts. Twenty-one cases cover zero through six rows, all
+five valid layers and active/protected state. Five scripts exercise initial
+rendering, selection/raise/lower, sort/OK, typed move/OK and invalid position,
+real nested alert, repair/Cancel. Full list text, descriptor/row state, ordered
+callbacks, controls, focus, automatic deletion and actual GDI pixels are compared.
+The native suite passed **210 paired pixel/state/callback comparisons**, with
+**648 witnesses**, eight module-init comparisons and two complete unload cycles.
+Baseline images are under `bin/world-diff/ui-images/priority-baseline-*.bmp`.
+
+All **22 deliberate Priority mutations were detected**: ten core, seven lifetime
+and five native. Each requires exit 1 and an actual comparison mismatch; faults,
+timeouts and build failures do not count. The color mutation changed pixels
+while descriptor state, control metadata and callbacks still matched. Other
+mutations cover position formatting/capacity, invalid-layer scratch text, active
+markers, validation's move callback, error count/return, retained virtual table,
+CString unwind, selection enablement, constructor/base/delete/ownership cleanup,
+factory parent/message behavior, typed catch cleanup, list tabs, Up dispatch,
+automatic deletion and edit limits. Inputs and logs are retained under ignored
+`bin/world-diff/priority-breaks/`. The lifetime fixture covers the complete
+`0x1bb4`-byte object and `0x40`-byte descriptor; all seven lifetime mutations
+were rerun successfully after correcting its original smaller area-class sizes.
+
+The existing area native suite also passed again: **288 paired comparisons**,
+384 validation/error checks and two unload cycles. A fresh 75-second startup
+with the three-registration DLL passed in private copy
+`bin/world-diff/smoke-game-0av7gxsn`: **27/27 modules and 95 gauges**, matching
+replacement bytes and no runtime errors. DLL SHA-256:
+`67a86d22a07215bcce85c443840638e8289c602b847ddcd4d21d6106cf9a1493`.
+The active game was not changed. Acceptance logs are
+`bin/world-diff/priority-life-final.log`, `priority-breaks-acceptance.log`,
+`priority-life-breaks-final.log`, `area-ui-regression.log` and
+`priority-smoke-acceptance.log`.
+
+All five World generated includes reproduce byte-for-byte in an isolated
+directory. The World sources and fixtures retain snake_case identifiers and
+standard `<stdint.h>` types, without `types.h`.
+
 ## Remaining boundary
 
-Seventeen World registrations are still pending: scenery lists/library,
-priority/search/boosters, weather/time, scenery settings and FACIL-backed
+Sixteen World registrations are still pending: scenery lists/library,
+search/boosters, weather/time, scenery settings and FACIL-backed
 position/facility screens. Continue as bounded slices with their own native
 acceptance before building or installing a complete World replacement. Shared
 build/install integration and complete host-driven interaction remain separate.

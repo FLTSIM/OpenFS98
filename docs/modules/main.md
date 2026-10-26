@@ -150,6 +150,12 @@ directly: retail's at their addresses, ours through exports named
 outcome; so is a hang, which a watchdog cuts after 300 ms, ending the
 scenario with its state not compared.
 
+**A stub table must hold its highest slot.** The module tables are small byte
+arrays side by side, and a slot set past one's end lands in the next: slice
+19's HG2D `+0x88`..`+0xb8` went into MULTIP's `+0x34`/`+0x38` and broke the
+`navio` suite, and slice 6's FE `+0x54` had long sat in MULTIP's `+0x14`
+(unused, so harmless). `SET_SLOT` now refuses a slot past its table's end.
+
 `records`: the host's file services are a model over files in memory (its
 writes sometimes fall short, as on a full disk); list 0x14's listeners are
 scripted modules writing records (whole, short, too long, begun and never

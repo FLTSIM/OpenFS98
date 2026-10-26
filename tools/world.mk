@@ -27,7 +27,8 @@ worldlifediff-run: worldlife
 world-life-breaks: worldlife
 	bash tools/run_worlddiff.sh --life-breaks
 
-WORLD_SOURCES := src/world/world_area.c src/world/world_objects.c src/world/world_init.c src/world/world_runtime.c
+PRIORITY_OBJECTS := src/world/world_priority_objects.c src/world/world_priority.h src/world/world_priority_tables.inc src/world/world_priority_hooks.inc src/world/world_objects.h src/world/world_init.h src/world/world_unwind.h src/world/world_exceptions.h src/world/world_internal.h
+WORLD_SOURCES := src/world/world_priority.c src/world/world_priority_objects.c src/world/world_area.c src/world/world_objects.c src/world/world_init.c src/world/world_runtime.c
 .PHONY: world worlduidiff-run world-ui-breaks world-smoke
 src/world/world_runtime_tables.inc $(WORLD_DIR)/world.res $(WORLD_DIR)/simsui-anchor.def &: tools/gen_world_runtime.py tools/gen_views_runtime.py tools/dialogmap.py orig/English/World.DLL orig/SIMSUI.DLL | $(WORLD_DIR)
 	python3 -B tools/gen_world_runtime.py
@@ -36,7 +37,7 @@ $(WORLD_DIR)/libworld-simsui.a: $(WORLD_DIR)/simsui-anchor.def
 $(WORLD_DIR)/world-res.o: $(WORLD_DIR)/world.res
 	i686-w64-mingw32-windres -J res -O coff $< $@
 world: $(WORLD_DIR)/WORLD_area.dll
-$(WORLD_DIR)/WORLD_area.dll: $(WORLD_SOURCES) src/world/world.def src/world/world_internal.h src/world/world_objects.h src/world/world_init.h src/world/world_exceptions.h src/world/world_unwind.h src/world/world_tables.inc src/world/world_runtime_tables.inc $(WORLD_DIR)/world-res.o $(WORLD_DIR)/libworld-simsui.a
+$(WORLD_DIR)/WORLD_area.dll: $(PRIORITY_OBJECTS) $(WORLD_SOURCES) src/world/world.def src/world/world_internal.h src/world/world_objects.h src/world/world_init.h src/world/world_exceptions.h src/world/world_unwind.h src/world/world_tables.inc src/world/world_runtime_tables.inc $(WORLD_DIR)/world-res.o $(WORLD_DIR)/libworld-simsui.a
 	$(CC) -std=c99 -O2 -Wall -Wextra -Werror -fno-strict-aliasing -fno-delete-null-pointer-checks -shared -nostdlib -Wl,--entry=_DllMain@12 -Wl,--disable-dynamicbase -Wl,--image-base=0x223f0000 -o $@ $(WORLD_SOURCES) src/world/world.def $(WORLD_DIR)/world-res.o $(WORLD_DIR)/libworld-simsui.a -lkernel32 -luser32 -lmsvcrt -lntdll
 $(WORLD_DIR)/worlduidiff.exe: tools/difftest/worlduidiff.c src/world/world_internal.h | $(WORLD_DIR)
 	$(CC) -std=c99 -O2 -Wall -Wextra -Werror -fno-strict-aliasing -o $@ $< -lgdi32 -lntdll
@@ -55,3 +56,24 @@ worldinitdiff-run: $(WORLD_DIR)/worldinitdiff.exe
 .PHONY: world-init-breaks
 world-init-breaks: $(WORLD_DIR)/worldinitdiff.exe
 	bash tools/run_worlddiff.sh --init-breaks
+
+src/world/world_priority_tables.inc src/world/world_priority_hooks.inc &: tools/gen_world_priority.py tools/gen_world_tables.py tools/dialogmap.py orig/English/World.DLL
+	python3 -B tools/gen_world_priority.py
+$(WORLD_DIR)/worldprioritylifediff.exe: tools/difftest/worldprioritylifediff.c $(PRIORITY_OBJECTS) | $(WORLD_DIR)
+	$(CC) -std=c99 -O2 -Wall -Wextra -Werror -fno-strict-aliasing -fno-delete-null-pointer-checks -o $@ tools/difftest/worldprioritylifediff.c src/world/world_priority_objects.c -lntdll
+.PHONY: world-priority-life
+world-priority-life: $(WORLD_DIR)/worldprioritylifediff.exe
+	bash tools/run_worlddiff.sh --priority-life $(N) $(SEED) $(MODE)
+$(WORLD_DIR)/worldprioritydiff.exe: tools/difftest/worldprioritydiff.c src/world/world_priority.c $(PRIORITY_OBJECTS) src/world/world_init.c src/world/world_area.c | $(WORLD_DIR)
+	$(CC) -std=c99 -O2 -Wall -Wextra -Werror -fno-strict-aliasing -o $@ tools/difftest/worldprioritydiff.c src/world/world_priority.c src/world/world_priority_objects.c src/world/world_init.c src/world/world_area.c -lntdll
+.PHONY: world-priority-core
+world-priority-core: $(WORLD_DIR)/worldprioritydiff.exe
+	bash tools/run_worlddiff.sh --priority-core $(N) $(MODE)
+$(WORLD_DIR)/worldpriorityuidiff.exe: tools/difftest/worldpriorityuidiff.c tools/difftest/worlduidiff.c src/world/world_internal.h | $(WORLD_DIR)
+	$(CC) -std=c99 -O2 -Wall -Wextra -Werror -fno-strict-aliasing -o $@ $< -lgdi32 -lntdll
+.PHONY: world-priority-ui
+world-priority-ui: world $(WORLD_DIR)/worldpriorityuidiff.exe
+	bash tools/run_worlddiff.sh --priority-ui
+.PHONY: world-priority-breaks
+world-priority-breaks: world $(WORLD_DIR)/worldprioritydiff.exe $(WORLD_DIR)/worldprioritylifediff.exe $(WORLD_DIR)/worldpriorityuidiff.exe
+	bash tools/run_worlddiff.sh --priority-breaks

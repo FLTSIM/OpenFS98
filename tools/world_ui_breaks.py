@@ -48,7 +48,7 @@ def main():
             ['i686-w64-mingw32-gcc', '-std=c99', '-O2', '-Wall', '-Wextra', '-Werror', '-fno-strict-aliasing',
              '-fno-delete-null-pointer-checks', '-shared', '-nostdlib', '-Wl,--entry=_DllMain@12',
              '-Wl,--disable-dynamicbase', '-Wl,--image-base=0x223f0000', '-o', str(dll),
-             *(str(work / f'world_{unit}.c') for unit in ('area', 'objects', 'init', 'runtime')),
+             *(str(work / f'world_{unit}.c') for unit in ('area', 'objects', 'init', 'priority', 'priority_objects', 'runtime')),
              str(work / 'world.def'), str(work / 'world-res.o'), str(work / 'libworld-simsui.a'),
              '-lkernel32', '-luser32', '-lmsvcrt', '-lntdll'],
             ['i686-w64-mingw32-gcc', '-std=c99', '-O2', '-Wall', '-Wextra', '-Werror', '-fno-strict-aliasing',

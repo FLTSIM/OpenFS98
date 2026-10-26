@@ -454,7 +454,7 @@ are separate from their native harness and startup acceptance.
 
 | Target | Independent starting boundary | Handoff |
 | --- | --- | --- |
-| World, add/edit scenery area | Two ids share one template/class; FE already owns verified descriptors and validation callbacks. Best small first slice. | [world.md](world.md) |
+| World, remaining dialogs | Add/edit scenery area and priority have native acceptance. Continue with one of the 16 remaining registrations, using the owner contracts in the handoff. | [world.md](world.md) |
 | MP_DIALOG | Smallest remaining whole English DLL by code size; MULTIP owns the verified callback blocks. Start with session settings/details, then recover the five-window connection flow. | [mpdialog.md](mpdialog.md) |
 | Options, customise controls | CONTROLS' shared data and callbacks are established, but the container has three child pages and device/key-capture behavior. | [options.md](options.md) |
 | Flights | Static inventory exists; caller descriptors and flight/menu ownership need more recovery alongside MAIN. Less convenient while MAIN is active. | [flights.md](flights.md) |
@@ -503,10 +503,9 @@ have passed their own tests.
    commands, seeds/counts, artifacts, observed quirks and remaining boundaries
    before handing off again.
 
-A concrete small-slice assignment is: implement World's `0x13080003` and
-`0x13080004` area-edit family using FE's existing descriptor contract, in a new
-standalone World harness; preserve all existing MAIN/HOST/FE work; verify core,
-exception and native behavior with actual detected mutations; leave other
-World registrations explicitly pending. For a whole-DLL assignment, choose
+World's `0x13080003` / `0x13080004` area-edit family and `0x13080005` priority
+are implemented in a standalone partial DLL. Start from [world.md](world.md)
+for their acceptance and the remaining bounded slices; preserve all existing
+MAIN/HOST/FE work and keep unimplemented registrations explicitly pending. For a whole-DLL assignment, choose
 MP_DIALOG and include all three registrations plus the full flag-2 window
 array in the completion criteria.

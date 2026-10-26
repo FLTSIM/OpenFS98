@@ -3183,13 +3183,18 @@ static void op_clouds(void)
     *(int16_t *)(cur->image + 0x1aac) = rnd_n(4) ? lo2 : *(int16_t *)(cur->image + 0x1aac);
     /* the altitude: on, or one either side of, a layer's edge or its band's */
     if (rnd_n(2)) {
-        static const int16_t off[] = { -1, 0, 1, -1500, 1500, -1499, 1499, -0x34, 0x34, 6, 7 };
+        /* the edges and one either side, +0x741f's 1500 either way, and its
+         * near/close thresholds below a layer (0x34, 0x1a, 4, 2 and their
+         * neighbours) and above one (6, 3 and theirs) */
+        static const int16_t off[] = { -1, 0, 1, -1500, 1500, -1499, 1499, -1501, 1501,
+                                       -0x34, -0x35, -0x33, -0x1a, -0x1b, -0x19, -4, -5, -3, -2,
+                                       0x34, 6, 7, 5, 3, 4, 2 };
         int16_t e[4];
         e[0] = *(int16_t *)(cur->image + 0x1a94);
         e[1] = (int16_t)(e[0] + *(uint16_t *)(global + 0xe6c));
         e[2] = *(int16_t *)(cur->image + 0x1aac);
         e[3] = (int16_t)(e[2] + *(uint16_t *)(global + 0xe74));
-        *(int16_t *)(global + 0x5c4) = (int16_t)(e[rnd_n(4)] + off[rnd_n(11)]);
+        *(int16_t *)(global + 0x5c4) = (int16_t)(e[rnd_n(4)] + off[rnd_n(sizeof off / sizeof off[0])]);
     } else {
         *(int16_t *)(global + 0x5c4) = (int16_t)rnd();
     }

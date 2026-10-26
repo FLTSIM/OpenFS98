@@ -1,35 +1,35 @@
 #ifndef FS98_WORLD_EXCEPTIONS_H
 #define FS98_WORLD_EXCEPTIONS_H
 #include "world_unwind.h"
-#include "types.h"
+#include <stdint.h>
 /* MSVC x86 ThrowInfo/CatchableType ABI. The area factories catch CException*,
  * including derived pointers whose catchable-type list names that base. */
-static int world_exception_pointer(EXCEPTION_RECORD *pRecord, void **ppException)
+static int world_exception_pointer(EXCEPTION_RECORD *record, void **exception_out)
 {
-    uint32 *puiThrowInfo, *puiTypes;
-    uint32 uiIndex;
-    if (pRecord->ExceptionCode != 0xe06d7363 || pRecord->NumberParameters < 3 ||
-        pRecord->ExceptionInformation[0] != 0x19930520)
+    uint32_t *throw_info, *types;
+    uint32_t index;
+    if (record->ExceptionCode != 0xe06d7363 || record->NumberParameters < 3 ||
+        record->ExceptionInformation[0] != 0x19930520)
         return 0;
-    puiThrowInfo = (uint32 *)pRecord->ExceptionInformation[2];
-    puiTypes = (uint32 *)puiThrowInfo[3];
-    for (uiIndex = 0; uiIndex < puiTypes[0]; ++uiIndex) {
-        uint32 *puiType = (uint32 *)puiTypes[uiIndex + 1];
-        const char *pcName = (const char *)puiType[1] + 8;
-        const char *pcExpected = ".PAVCException@@";
-        uint8 *pbyException;
-        while (*pcName && *pcName == *pcExpected) { ++pcName; ++pcExpected; }
-        if (*pcName || *pcExpected) continue;
-        if (!(puiType[0] & 1) || puiType[5] != 4) continue;
-        pbyException = *(uint8 **)pRecord->ExceptionInformation[1];
-        if (pbyException) {
-            if ((int)puiType[3] >= 0) {
-                uint8 *pbyVtable = *(uint8 **)(pbyException + puiType[3]);
-                pbyException += puiType[3] + *(int *)(pbyVtable + puiType[4]);
+    throw_info = (uint32_t *)record->ExceptionInformation[2];
+    types = (uint32_t *)throw_info[3];
+    for (index = 0; index < types[0]; ++index) {
+        uint32_t *type = (uint32_t *)types[index + 1];
+        const char *name = (const char *)type[1] + 8;
+        const char *expected_text = ".PAVCException@@";
+        uint8_t *exception_bytes;
+        while (*name && *name == *expected_text) { ++name; ++expected_text; }
+        if (*name || *expected_text) continue;
+        if (!(type[0] & 1) || type[5] != 4) continue;
+        exception_bytes = *(uint8_t **)record->ExceptionInformation[1];
+        if (exception_bytes) {
+            if ((int)type[3] >= 0) {
+                uint8_t *virtual_base_table = *(uint8_t **)(exception_bytes + type[3]);
+                exception_bytes += type[3] + *(int *)(virtual_base_table + type[4]);
             }
-            pbyException += (int)puiType[2];
+            exception_bytes += (int)type[2];
         }
-        *ppException = pbyException;
+        *exception_out = exception_bytes;
         return 1;
     }
     return 0;

@@ -5,137 +5,137 @@ import re
 import subprocess
 from dialogmap import Fs98Pe, SurveyError
 
-g_uiBase = 0x223f0000
-g_pImage = Path('orig/English/World.DLL')
+g_base = 0x223f0000
+g_image = Path('orig/English/World.DLL')
 
 
-def instructions(uiStart, uiEnd):
-    pcAsm = subprocess.check_output(['objdump', '-d', '--no-show-raw-insn', '-M', 'intel',
-        f'--start-address={g_uiBase + uiStart}', f'--stop-address={g_uiBase + uiEnd}', str(g_pImage)], text=True)
-    return [oMatch[1].strip() for pcLine in pcAsm.splitlines()
-            if (oMatch := re.match(r'\s*[0-9a-f]+:\s+(.+)', pcLine))]
+def instructions(start, end):
+    asm = subprocess.check_output(['objdump', '-d', '--no-show-raw-insn', '-M', 'intel',
+        f'--start-address={g_base + start}', f'--stop-address={g_base + end}', str(g_image)], text=True)
+    return [match[1].strip() for line in asm.splitlines()
+            if (match := re.match(r'\s*[0-9a-f]+:\s+(.+)', line))]
 
 
-def object_calls(aInstructions):
-    dRegisters = {'ecx': ('object', 0)}
-    aCalls = []
-    for pcOp in aInstructions:
-        oMatch = re.fullmatch(r'lea\s+(\w+),\[esi\+0x([0-9a-f]+)\]', pcOp)
-        if oMatch:
-            dRegisters[oMatch[1]] = ('object', int(oMatch[2], 16))
-        oMatch = re.fullmatch(r'mov\s+(e\w+),(e\w+)', pcOp)
-        if oMatch:
-            dRegisters[oMatch[1]] = dRegisters.get(oMatch[2])
-        oMatch = re.fullmatch(r'mov\s+(\w+),DWORD PTR ds:0x([0-9a-f]+)', pcOp)
-        if oMatch:
-            dRegisters[oMatch[1]] = ('import', int(oMatch[2], 16) - g_uiBase)
-        if pcOp.startswith('call'):
-            oMatch = re.search(r'ds:0x([0-9a-f]+)', pcOp)
-            tImport = ('import', int(oMatch[1], 16) - g_uiBase) if oMatch else dRegisters.get(pcOp.split()[-1])
-            tObject = dRegisters.get('ecx')
-            if not tImport or tImport[0] != 'import' or not tObject or tObject[0] != 'object':
-                raise SurveyError(f'unknown area object call: {pcOp}')
-            aCalls.append((tObject[1], tImport[1]))
-    return aCalls
+def object_calls(ops):
+    registers = {'ecx': ('object', 0)}
+    calls = []
+    for op in ops:
+        match = re.fullmatch(r'lea\s+(\w+),\[esi\+0x([0-9a-f]+)\]', op)
+        if match:
+            registers[match[1]] = ('object', int(match[2], 16))
+        match = re.fullmatch(r'mov\s+(e\w+),(e\w+)', op)
+        if match:
+            registers[match[1]] = registers.get(match[2])
+        match = re.fullmatch(r'mov\s+(\w+),DWORD PTR ds:0x([0-9a-f]+)', op)
+        if match:
+            registers[match[1]] = ('import', int(match[2], 16) - g_base)
+        if op.startswith('call'):
+            match = re.search(r'ds:0x([0-9a-f]+)', op)
+            import_call = ('import', int(match[1], 16) - g_base) if match else registers.get(op.split()[-1])
+            object = registers.get('ecx')
+            if not import_call or import_call[0] != 'import' or not object or object[0] != 'object':
+                raise SurveyError(f'unknown area object call: {op}')
+            calls.append((object[1], import_call[1]))
+    return calls
 
 
-def cleanup_imports(pPe, aInstructions):
-    aHandlers = [int(oMatch[1], 16) for pcOp in aInstructions[:5]
-                 if (oMatch := re.fullmatch(r'push\s+0x([0-9a-f]+)', pcOp)) and int(oMatch[1], 16) != 0xffffffff]
-    if len(aHandlers) != 1:
+def cleanup_imports(pe, ops):
+    handlers = [int(match[1], 16) for op in ops[:5]
+                 if (match := re.fullmatch(r'push\s+0x([0-9a-f]+)', op)) and int(match[1], 16) != 0xffffffff]
+    if len(handlers) != 1:
         raise SurveyError('unknown area EH registration')
-    uiInfo = pPe.va_uint32(aHandlers[0] + 1)
-    if pPe.va_uint32(uiInfo) != 0x19930520:
+    info = pe.va_uint32(handlers[0] + 1)
+    if pe.va_uint32(info) != 0x19930520:
         raise SurveyError('unknown MSVC EH version')
-    uiCount, uiTable = pPe.va_uint32(uiInfo + 4), pPe.va_uint32(uiInfo + 8)
-    if uiCount != 15:
+    count, table = pe.va_uint32(info + 4), pe.va_uint32(info + 8)
+    if count != 15:
         raise SurveyError('unexpected area unwind state count')
-    dCleanup = {}
-    for iIndex in range(uiCount):
-        uiPrevious, uiAction = pPe.va_uint32(uiTable + iIndex * 8), pPe.va_uint32(uiTable + iIndex * 8 + 4)
-        if uiPrevious != (iIndex - 1) & 0xffffffff:
+    cleanup = {}
+    for index in range(count):
+        previous, action = pe.va_uint32(table + index * 8), pe.va_uint32(table + index * 8 + 4)
+        if previous != (index - 1) & 0xffffffff:
             raise SurveyError('nonlinear area EH states')
-        uiOffset = 0
-        for pcOp in instructions(uiAction - g_uiBase, uiAction - g_uiBase + 24):
-            oMatch = re.fullmatch(r'add\s+ecx,0x([0-9a-f]+)', pcOp)
-            if oMatch:
-                uiOffset = int(oMatch[1], 16)
-            oMatch = re.fullmatch(r'jmp\s+DWORD PTR ds:0x([0-9a-f]+)', pcOp)
-            if oMatch:
-                dCleanup[uiOffset] = int(oMatch[1], 16) - g_uiBase
+        offset = 0
+        for op in instructions(action - g_base, action - g_base + 24):
+            match = re.fullmatch(r'add\s+ecx,0x([0-9a-f]+)', op)
+            if match:
+                offset = int(match[1], 16)
+            match = re.fullmatch(r'jmp\s+DWORD PTR ds:0x([0-9a-f]+)', op)
+            if match:
+                cleanup[offset] = int(match[1], 16) - g_base
                 break
         else:
             raise SurveyError('unknown area unwind action')
-    return dCleanup
+    return cleanup
 
 
 def main():
-    pPe = Fs98Pe(g_pImage)
-    if pPe.uiBase != g_uiBase or pPe.linkage()['id'] != 0x80000006:
+    pe = Fs98Pe(g_image)
+    if pe.uiBase != g_base or pe.linkage()['id'] != 0x80000006:
         raise SurveyError('expected reference World image')
-    aCtorAsm = instructions(0xbb30, 0xbc70)
-    aDtorAsm = instructions(0xbc90, 0xbdc0)
-    aCtor, aDtor = object_calls(aCtorAsm), list(reversed(object_calls(aDtorAsm)))
-    if len(aCtor) != 16 or [tCall[0] for tCall in aCtor] != [tCall[0] for tCall in aDtor]:
+    ctor_asm = instructions(0xbb30, 0xbc70)
+    dtor_asm = instructions(0xbc90, 0xbdc0)
+    ctor, dtor = object_calls(ctor_asm), list(reversed(object_calls(dtor_asm)))
+    if len(ctor) != 16 or [call[0] for call in ctor] != [call[0] for call in dtor]:
         raise SurveyError('area control lifetime graph moved')
-    dUnwind = cleanup_imports(pPe, aCtorAsm)
-    if dUnwind != cleanup_imports(pPe, aDtorAsm) or set(dUnwind) != {tCall[0] for tCall in aCtor[:-1]}:
+    unwind = cleanup_imports(pe, ctor_asm)
+    if unwind != cleanup_imports(pe, dtor_asm) or set(unwind) != {call[0] for call in ctor[:-1]}:
         raise SurveyError('area EH graph moved')
-    if any(dUnwind[uiOffset] != uiImport for uiOffset, uiImport in aDtor[:-1]):
+    if any(unwind[offset] != import_slot for offset, import_slot in dtor[:-1]):
         raise SurveyError('area unwind destructor differs')
-    aLines = ['/* Generated by tools/gen_world_tables.py; ABI metadata only. */',
-              'static const struct fs98_world_control s_astAreaControls[] = {']
-    aLines += [f'    {{0x{uiOffset:x}, 0x{uiCtor:x}, 0x{uiDtor:x}}},'
-               for (uiOffset, uiCtor), (_, uiDtor) in zip(aCtor[1:], aDtor[1:])]
-    aLines += ['};']
+    lines = ['/* Generated by tools/gen_world_tables.py; ABI metadata only. */',
+              'static const struct fs98_world_control s_area_controls[] = {']
+    lines += [f'    {{0x{offset:x}, 0x{ctor:x}, 0x{dtor:x}}},'
+               for (offset, ctor), (_, dtor) in zip(ctor[1:], dtor[1:])]
+    lines += ['};']
     # The final check-button has no separate unwind action:
     # state -1 owns nothing; states 0..14 own base through combo respectively.
-    aDdx = []
-    uiOffset = uiId = None
-    for pcOp in instructions(0xbdc0, 0xbed0):
-        oMatch = re.search(r'(?:lea\s+\w+,\[esi\+0x|add\s+esi,0x)([0-9a-f]+)', pcOp)
-        if oMatch:
-            uiOffset = int(oMatch[1], 16)
-        oMatch = re.fullmatch(r'push\s+0x([0-9a-f]+)', pcOp)
-        if oMatch:
-            uiId = int(oMatch[1], 16)
-        if pcOp == 'call   0x224099c4':
-            if uiOffset is None or uiId is None:
+    ddx = []
+    offset = id = None
+    for op in instructions(0xbdc0, 0xbed0):
+        match = re.search(r'(?:lea\s+\w+,\[esi\+0x|add\s+esi,0x)([0-9a-f]+)', op)
+        if match:
+            offset = int(match[1], 16)
+        match = re.fullmatch(r'push\s+0x([0-9a-f]+)', op)
+        if match:
+            id = int(match[1], 16)
+        if op == 'call   0x224099c4':
+            if offset is None or id is None:
                 raise SurveyError('unrecognized DDX binding')
-            aDdx.append((uiOffset, uiId))
-            uiOffset = uiId = None
-    if len(aDdx) != 14 or set(uiOffset for uiOffset, _ in aDdx) != {tCall[0] for tCall in aCtor[1:]} - {0x13a8}:
+            ddx.append((offset, id))
+            offset = id = None
+    if len(ddx) != 14 or set(offset for offset, _ in ddx) != {call[0] for call in ctor[1:]} - {0x13a8}:
         raise SurveyError('area DDX graph moved')
-    aLines += ['static const uint16 s_aaunAreaDdx[][2] = {']
-    aLines += [f'    {{0x{uiOffset:x}, 0x{uiId:x}}},' for uiOffset, uiId in aDdx]
-    aLines += ['};', 'static const uint32 s_auiAreaHelp[] = {']
-    aHelpPushes = [int(oMatch[1], 16) for pcOp in instructions(0xc5d0, 0xc5f0)
-                   if (oMatch := re.fullmatch(r'push\s+0x([0-9a-f]+)', pcOp))]
-    if len(aHelpPushes) != 3 or aHelpPushes[1] != 12:
+    lines += ['static const uint16_t s_area_ddx[][2] = {']
+    lines += [f'    {{0x{offset:x}, 0x{id:x}}},' for offset, id in ddx]
+    lines += ['};', 'static const uint32_t s_area_help[] = {']
+    help_pushes = [int(match[1], 16) for op in instructions(0xc5d0, 0xc5f0)
+                   if (match := re.fullmatch(r'push\s+0x([0-9a-f]+)', op))]
+    if len(help_pushes) != 3 or help_pushes[1] != 12:
         raise SurveyError('area help handler changed')
-    for iIndex in range(64):
-        uiControl = pPe.va_uint32(aHelpPushes[0] + iIndex * 8)
-        uiTopic = pPe.va_uint32(aHelpPushes[0] + iIndex * 8 + 4)
-        aLines.append(f'    0x{uiControl:x}, 0x{uiTopic:x},')
-        if not uiControl and not uiTopic:
+    for index in range(64):
+        control = pe.va_uint32(help_pushes[0] + index * 8)
+        topic = pe.va_uint32(help_pushes[0] + index * 8 + 4)
+        lines.append(f'    0x{control:x}, 0x{topic:x},')
+        if not control and not topic:
             break
     else:
         raise SurveyError('unterminated area help map')
-    aLines += ['};']
-    aVtables = [int(oMatch[1], 16) - g_uiBase for pcOp in aCtorAsm
-                if (oMatch := re.fullmatch(r'mov\s+DWORD PTR \[esi\],0x([0-9a-f]+)', pcOp))]
-    if len(aVtables) != 1 or pPe.va_uint32(g_uiBase + aVtables[0] + 4) != g_uiBase + 0xbc70:
+    lines += ['};']
+    vtables = [int(match[1], 16) - g_base for op in ctor_asm
+                if (match := re.fullmatch(r'mov\s+DWORD PTR \[esi\],0x([0-9a-f]+)', op))]
+    if len(vtables) != 1 or pe.va_uint32(g_base + vtables[0] + 4) != g_base + 0xbc70:
         raise SurveyError('area vtable changed')
-    aLines += [f'#define WORLD_AREA_VTABLE_RVA 0x{aVtables[0]:x}',
-               f'#define WORLD_AREA_BASE_CTOR 0x{aCtor[0][1]:x}',
-               f'#define WORLD_AREA_BASE_DTOR 0x{aDtor[0][1]:x}']
-    Path('src/world/world_tables.inc').write_text('\n'.join(aLines) + '\n')
-    aHooks = ['/* Generated by tools/gen_world_tables.py; import ABI metadata. */']
-    for pcMacro, aSlots in [('WORLD_BASE_HOOK', [aCtor[0][1]]),
-                           ('WORLD_CTOR_HOOK', sorted({uiImport for _, uiImport in aCtor[1:]})),
-                           ('WORLD_DTOR_HOOK', sorted({uiImport for _, uiImport in aDtor}))]:
-        aHooks += [f'{pcMacro}({uiSlot:x})' for uiSlot in aSlots]
-    Path('src/world/world_hooks.inc').write_text('\n'.join(aHooks) + '\n')
+    lines += [f'#define WORLD_AREA_VTABLE_RVA 0x{vtables[0]:x}',
+               f'#define WORLD_AREA_BASE_CTOR 0x{ctor[0][1]:x}',
+               f'#define WORLD_AREA_BASE_DTOR 0x{dtor[0][1]:x}']
+    Path('src/world/world_tables.inc').write_text('\n'.join(lines) + '\n')
+    hooks = ['/* Generated by tools/gen_world_tables.py; import ABI metadata. */']
+    for macro, slots in [('WORLD_BASE_HOOK', [ctor[0][1]]),
+                           ('WORLD_CTOR_HOOK', sorted({import_slot for _, import_slot in ctor[1:]})),
+                           ('WORLD_DTOR_HOOK', sorted({import_slot for _, import_slot in dtor}))]:
+        hooks += [f'{macro}({slot:x})' for slot in slots]
+    Path('src/world/world_hooks.inc').write_text('\n'.join(hooks) + '\n')
 
 
 if __name__ == '__main__':

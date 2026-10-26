@@ -25,11 +25,24 @@ slot is done MAIN is not in `MODULES` and is never installed.
 | 14, the eye's reticle | `+0xc0` (assembly, `.text+0x16a0`..`+0x18c2`) | `eye` | verified: 20,000 scenarios, 0 differ; 12 of 13 breaks caught, 1 proven equivalent |
 | 15, the altitude band and its 3D submission | `+0x9c` (assembly, `.text+0x6de9`..`+0x6f58`, helper `+0x7200`..`+0x73d6`) | `band` | verified: 20,000 scenarios, 0 differ; 33 of 33 breaks caught |
 | 16, the smoke trails | `+0x88` (MSVC C, `.text+0x162f0`..`+0x16567`) | `objstep` | verified: 20,000 scenarios, 0 differ; 32 of 34 breaks caught, 2 proven equivalent |
-| 17, the quick save | `+0xb0` (MSVC C, `.text+0xcdb0`) | `quicksave` | verified: @QS@ |
-| 18, the preferences | `+0xb4`, `+0xb8`, `+0xbc` (MSVC C, `.text+0xdd70`..`+0xf2e0`, preset `+0x14d20`) | `prefs` | verified: @PR@ |
+| 17, the quick save | `+0xb0` (MSVC C, `.text+0xcdb0`) | `quicksave` | verified: 20,000 scenarios, 0 differ; 6 of 7 breaks caught, 1 proven equivalent |
+| 18, the preferences | `+0xb4`, `+0xb8`, `+0xbc` (MSVC C, `.text+0xdd70`..`+0xf2e0`, preset `+0x14d20`) | `prefs` | verified: 20,000 scenarios, 0 differ; 26 of 28 breaks caught, 2 proven equivalent |
 | 19, the cloud layers' draw | `+0x98` (assembly, `.text+0x6f59`, `+0x741f`..`+0x77c6`, `+0x8275`, `+0x9146`..`+0x922c`, `+0x9d57`..`+0xa089`) | `clouds` | verified: @CL@ |
-| 20, the cloud layers' textures | `+0x94` (assembly, `.text+0x7140`, `+0x77c7`..`+0x7bc1`) | `cloudtex` | verified: @CT@ |
-| 21, the spot plane's eye | `+0xa8` (assembly, `.text+0x6450`..`+0x6ce2`) | `spot` | verified: @SP@ |
+| 20, the cloud layers' textures | `+0x94` (assembly, `.text+0x7140`, `+0x77c7`..`+0x7bc1`) | `cloudtex` | verified: 20,000 scenarios, 0 differ; 33 of 34 breaks caught, 1 proven equivalent |
+| 21, the spot plane's eye | `+0xa8` (assembly, `.text+0x6450`..`+0x6ce2`) | `spot` | verified: 20,000 scenarios, 0 differ; 47 of 50 breaks caught, 3 proven equivalent |
+
+**What is left** (as of slice 21): `+0x04`/`+0x08` (init and deinit: they
+register and remove three CHAIN callbacks, `.text+0x2e10` on list `0x14` -- an
+empty `ret 8` -- and the frame callbacks `.text+0x7095` on list 1, the cloud
+puff field through UTIL `+0x44`/`+0x6c`, and `.text+0x85ea` on list 3, through
+FE's grid conversions `+0x60`..`+0x6c`; so the callbacks come first), `+0x18`,
+`+0x20` (the frame's order of business), `+0x24`..`+0x2c`, `+0x50`, `+0x90`,
+`+0xac` and `+0xc4` (the Flights dialogs: UTIL `+0x98` lists the flights
+through MAIN callbacks and host `+0x10c` runs a dialog that calls back into
+MAIN, as FACIL's were done), and the menu command handlers the host reaches
+through the command table `+0x04` registers (most open dialogs through host
+`+0x10c`). UTIL's `+0x6c` keeps its seed in UTIL's `.data`, so a suite over
+retail UTIL that reaches it must reset the seed for each side.
 
 ## Binary and linkage
 
@@ -706,7 +719,11 @@ host's files, its loads and its walk-off guard) in which a third of the ops
 are `+0xb0`, with string `0x2201` absent, `"Temporary Flight"`, short, or
 long enough to fill the buffer (the path join then refuses it). What it saves,
 `FLIGHTS\` and the title as the save copied it to `.data+0x441f`, joins the
-files the loads pick from. `make maindiff-run SUITE=quicksave`: @QSLONG@
+files the loads pick from. `make maindiff-run SUITE=quicksave`: 20,000 scenarios, 0 differences (about 20 minutes, most of it slice 2's hangs), with 80,599 quick
+saves (19,853 with the string absent; 62,659 saved, 51,916 of them found and
+loaded back). `make main-breaks SUITE=quicksave`: 7 breaks, 6 caught, 1 proven
+equivalent (`zero-rest`: the default carries its own terminator and a loaded
+string ends in one, and nothing reads past it).
 
 ## Slice 18: the preferences
 
@@ -752,7 +769,12 @@ changing CFG values (huge, negative, empty, digits with a tail, text) or
 GLOBAL fields. Before every load it steers the performance mode onto one whose
 preset block lies in the image and holds no relocated pointer (one would reach
 GLOBAL as each side's own address): mostly 0 to 11, sometimes past the table
-or negative. `make maindiff-run SUITE=prefs`: @PRLONG@
+or negative. `make maindiff-run SUITE=prefs`: 20,000 scenarios, 0 differences (about 5 minutes): 99,089 loads, 65,813 saves, 66,118 defaults (33,092 with a mode
+above 4), 93,024 presets applied (27,655 past the table, 4,198 negative).
+`make main-breaks SUITE=prefs`: 28 breaks, 26 caught, 2 proven equivalent
+(`word-mask` and `byte-mask`: every caller passes a field already read at its
+width, so the helpers' masks, which clear a register's stale half in retail,
+have nothing to clear in C).
 
 ## Slice 19: the cloud layers' draw
 
@@ -856,7 +878,13 @@ The `cloudtex` suite has `TEXTURE\clouds` there (whole, short or empty) or
 not, `cloud1`/`cloud2` there or not and now and then read-only. Each op seeds
 the coverages across the curve's turns, the flags and the last-made ids. The
 texel map is in fixtures, and its digest goes in the transcript after every op.
-`make maindiff-run SUITE=cloudtex`: @CTLONG@
+`make maindiff-run SUITE=cloudtex`: 20,000 scenarios, 0 differences (about 5 minutes): 149,622 calls over all three curves, 27,486 ops whose write's open was
+refused (edi left on the map). `make main-breaks SUITE=cloudtex`: 34 breaks,
+33 caught, 1 proven equivalent (`edi-early`: the early return needs GLOBAL
+`+0xcb6` clear, read from GLOBAL each call, so every earlier call in the op
+returned early too and the caller's edi is still GLOBAL). The breaks found one
+gap, now closed: the suite seeded `+0xcb6` only as all-or-odd, so a read one
+byte lower went unseen.
 
 ## Slice 21: the spot plane's eye
 
@@ -906,4 +934,15 @@ position, so where the eye was stepped shows in what comes back. It also logs
 GLOBAL `+0xe88` during the call. The suite keeps the aircraft's latitude
 (GLOBAL `+0x564`) inside slice 11's clamp, as the game does, because UTIL
 `+0x44` indexes its latitude table by it. `make maindiff-run SUITE=spot`:
-@SPLONG@
+20,000 scenarios, 0 differences (about 4 minutes), with 3,532,883 G3D measures, 122,615 eyes placed afresh and 41,839
+transitions slewed. `make main-breaks SUITE=spot`: 50 breaks, 47 caught, 3
+proven equivalent: `target-sar` (the count is used only as its low word,
+product bits 8 to 23, and `sar` and `shr` differ only in the top byte),
+`target-1e` (the term is shifted up 16 at once, dropping the bits where sign-
+and zero-extension differ) and `follow-copy` (the copy's other source was just
+filled from the same place). The breaks found three gaps, now closed: the
+distance never repeated (the walk's "unchanged" exits), and never landed on
+the slew's `0x40000`. The first full run also found a harness artifact: the
+suite's seeding wrote random words over the eye blocks' relocated pointers, and
+a value that happened to point into retail's image compared as a pointer on
+that side only; the seeding now skips relocated words.

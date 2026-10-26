@@ -3,138 +3,138 @@
 #include "world_unwind.h"
 #include "world_exceptions.h"
 #include "world_tables.inc"
-static const struct fs98_world_object_services *s_pObjectServices;
-static void *s_pAreaVtable;
-static uint32 s_uiModule;
-void fs98_world_set_object_services(const struct fs98_world_object_services *pServices, void *pVtable)
-{ s_pObjectServices = pServices; s_pAreaVtable = pVtable; }
-void fs98_world_set_module(uint32 uiModule) { s_uiModule = uiModule; }
+static const struct fs98_world_object_services *s_object_services;
+static void *s_area_vtable;
+static uint32_t s_module;
+void fs98_world_set_object_services(const struct fs98_world_object_services *services, void *vtable)
+{ s_object_services = services; s_area_vtable = vtable; }
+void fs98_world_set_module(uint32_t module) { s_module = module; }
 struct world_object_unwind {
-    struct fs98_world_unwind stFrame;
-    void *pObject;
-    volatile uint32 uiConstructed, uiBase;
+    struct fs98_world_unwind frame;
+    void *object;
+    volatile uint32_t constructed, base;
 };
-static void world_destroy_remaining(struct world_object_unwind *pState)
+static void world_destroy_remaining(struct world_object_unwind *state)
 {
-    while (pState->uiConstructed) {
-        const struct fs98_world_control *pControl = &s_astAreaControls[--pState->uiConstructed];
-        s_pObjectServices->pfnDestroy((uint8 *)pState->pObject + pControl->uiOffset, pControl->uiDestructor);
+    while (state->constructed) {
+        const struct fs98_world_control *control = &s_area_controls[--state->constructed];
+        s_object_services->destroy((uint8_t *)state->object + control->offset, control->destructor);
     }
-    if (pState->uiBase) {
-        pState->uiBase = 0;
-        s_pObjectServices->pfnDestroy(pState->pObject, WORLD_AREA_BASE_DTOR);
+    if (state->base) {
+        state->base = 0;
+        s_object_services->destroy(state->object, WORLD_AREA_BASE_DTOR);
     }
 }
-static void world_object_cleanup(struct fs98_world_unwind *pFrame)
-{ world_destroy_remaining((struct world_object_unwind *)pFrame); }
+static void world_object_cleanup(struct fs98_world_unwind *frame)
+{ world_destroy_remaining((struct world_object_unwind *)frame); }
 /* 0x223fbb30 */
-WORLD_NOINLINE void *fs98_world_area_construct(void *pObject, void *pParent)
+WORLD_NOINLINE void *fs98_world_area_construct(void *object, void *parent)
 {
-    struct world_object_unwind stState;
-    stState.pObject = pObject; stState.uiConstructed = stState.uiBase = 0;
-    world_unwind_enter(&stState.stFrame, world_object_cleanup);
-    s_pObjectServices->pfnBaseConstruct(pObject, 0x6b3, pParent);
-    stState.uiBase = 1;
-    while (stState.uiConstructed < sizeof(s_astAreaControls) / sizeof(s_astAreaControls[0])) {
-        const struct fs98_world_control *pControl = &s_astAreaControls[stState.uiConstructed];
-        s_pObjectServices->pfnConstruct((uint8 *)pObject + pControl->uiOffset, pControl->uiConstructor);
-        ++stState.uiConstructed;
+    struct world_object_unwind state;
+    state.object = object; state.constructed = state.base = 0;
+    world_unwind_enter(&state.frame, world_object_cleanup);
+    s_object_services->base_construct(object, 0x6b3, parent);
+    state.base = 1;
+    while (state.constructed < sizeof(s_area_controls) / sizeof(s_area_controls[0])) {
+        const struct fs98_world_control *control = &s_area_controls[state.constructed];
+        s_object_services->construct((uint8_t *)object + control->offset, control->constructor);
+        ++state.constructed;
     }
-    WORLD_PTR(pObject, 0) = s_pAreaVtable;
-    WORLD_U32(pObject, 0x10e0) = 1;
-    world_unwind_leave(&stState.stFrame);
-    return pObject;
+    WORLD_PTR(object, 0) = s_area_vtable;
+    WORLD_U32(object, 0x10e0) = 1;
+    world_unwind_leave(&state.frame);
+    return object;
 }
 /* 0x223fbc90 does not reset its vtable on entry. */
-WORLD_NOINLINE void fs98_world_area_destroy(void *pObject)
+WORLD_NOINLINE void fs98_world_area_destroy(void *object)
 {
-    struct world_object_unwind stState;
-    stState.pObject = pObject; stState.uiBase = 1;
-    stState.uiConstructed = sizeof(s_astAreaControls) / sizeof(s_astAreaControls[0]);
-    world_unwind_enter(&stState.stFrame, world_object_cleanup);
-    world_destroy_remaining(&stState);
-    world_unwind_leave(&stState.stFrame);
+    struct world_object_unwind state;
+    state.object = object; state.base = 1;
+    state.constructed = sizeof(s_area_controls) / sizeof(s_area_controls[0]);
+    world_unwind_enter(&state.frame, world_object_cleanup);
+    world_destroy_remaining(&state);
+    world_unwind_leave(&state.frame);
 }
 /* 0x223fbc70 */
-void *fs98_world_area_delete(void *pObject, uint32 uiFlags)
+void *fs98_world_area_delete(void *object, uint32_t flags)
 {
-    fs98_world_area_destroy(pObject);
-    if (uiFlags & 1) s_pObjectServices->pfnUiDelete(pObject);
-    return pObject;
+    fs98_world_area_destroy(object);
+    if (flags & 1) s_object_services->ui_delete(object);
+    return object;
 }
 struct world_factory_unwind {
-    struct fs98_world_unwind stFrame;
-    void *pObject;
-    volatile uint32 uiLive;
+    struct fs98_world_unwind frame;
+    void *object;
+    volatile uint32_t live;
 };
-static void world_factory_cleanup(struct fs98_world_unwind *pFrame)
+static void world_factory_cleanup(struct fs98_world_unwind *frame)
 {
-    struct world_factory_unwind *pState = (void *)pFrame;
-    if (pState->uiLive) {
-        pState->uiLive = 0;
-        s_pObjectServices->pfnDialogDelete(pState->pObject);
+    struct world_factory_unwind *state = (void *)frame;
+    if (state->live) {
+        state->live = 0;
+        s_object_services->dialog_delete(state->object);
     }
 }
 /* Retail catches CException* and calls SIMSUI_ExitCleanlyE, which aborts.
  * Keep this distinct from unrelated exceptions, which propagate after cleanup. */
 static EXCEPTION_DISPOSITION __cdecl world_factory_handler(
-    EXCEPTION_RECORD *pRecord, void *pEstablisher, CONTEXT *pContext, void *pDispatcher)
+    EXCEPTION_RECORD *record, void *establisher, CONTEXT *context, void *dispatcher)
 {
-    struct world_factory_unwind *pState = pEstablisher;
-    void *pException;
-    if (!(pRecord->ExceptionFlags & (EXCEPTION_UNWINDING | EXCEPTION_EXIT_UNWIND)) &&
-        world_exception_pointer(pRecord, &pException)) {
-        RtlUnwind(pEstablisher, NULL, pRecord, NULL);
-        world_factory_cleanup(&pState->stFrame);
-        s_pObjectServices->pfnExitCleanly(pException);
+    struct world_factory_unwind *state = establisher;
+    void *exception;
+    if (!(record->ExceptionFlags & (EXCEPTION_UNWINDING | EXCEPTION_EXIT_UNWIND)) &&
+        world_exception_pointer(record, &exception)) {
+        RtlUnwind(establisher, NULL, record, NULL);
+        world_factory_cleanup(&state->frame);
+        s_object_services->exit_cleanly(exception);
         /* SIMSUI's real implementation cannot return. */
         __builtin_trap();
     }
-    return world_unwind_handler(pRecord, pEstablisher, pContext, pDispatcher);
+    return world_unwind_handler(record, establisher, context, dispatcher);
 }
 /* 0x223f1920 / 0x223f19f0. The parent argument is ignored. */
-static WORLD_NOINLINE uint32 world_area_create(uint32 uiParent, void *pDescriptor)
+static WORLD_NOINLINE uint32_t world_area_create(uint32_t parent, void *descriptor)
 {
-    struct world_factory_unwind stState;
-    void *pObject;
-    (void)uiParent;
-    stState.pObject = NULL; stState.uiLive = 0;
-    world_unwind_enter(&stState.stFrame, world_factory_cleanup);
-    stState.stFrame.pfnHandler = world_factory_handler;
-    pObject = s_pObjectServices->pfnAllocate(0x1b20);
-    stState.pObject = pObject; stState.uiLive = 1;
-    if (pObject) pObject = fs98_world_area_construct(pObject, NULL);
+    struct world_factory_unwind state;
+    void *object;
+    (void)parent;
+    state.object = NULL; state.live = 0;
+    world_unwind_enter(&state.frame, world_factory_cleanup);
+    state.frame.handler = world_factory_handler;
+    object = s_object_services->allocate(0x1b20);
+    state.object = object; state.live = 1;
+    if (object) object = fs98_world_area_construct(object, NULL);
     /* A null allocation faults here in retail, before Create. */
-    *(void *volatile *)((uint8 *)pObject + 0x10e4) = pDescriptor;
-    WORLD_U32(pObject, 0x80) = s_uiModule;
-    stState.uiLive = 0;
-    if (!s_pObjectServices->pfnCreate(pObject, 0x6b3, NULL))
-        s_pObjectServices->pfnMessage("CSceneryEdit::Create() failed\n", 0, 0);
-    s_pObjectServices->pfnShow(pObject, 1);
-    world_unwind_leave(&stState.stFrame);
-    return WORLD_U32(pObject, 0x20);
+    *(void *volatile *)((uint8_t *)object + 0x10e4) = descriptor;
+    WORLD_U32(object, 0x80) = s_module;
+    state.live = 0;
+    if (!s_object_services->create(object, 0x6b3, NULL))
+        s_object_services->message("CSceneryEdit::Create() failed\n", 0, 0);
+    s_object_services->show(object, 1);
+    world_unwind_leave(&state.frame);
+    return WORLD_U32(object, 0x20);
 }
-uint32 FS98_WORLD_STDCALL fs98_world_area_create_add(uint32 uiParent, void *pDescriptor)
-{ return world_area_create(uiParent, pDescriptor); }
-uint32 FS98_WORLD_STDCALL fs98_world_area_create_edit(uint32 uiParent, void *pDescriptor)
-{ return world_area_create(uiParent, pDescriptor); }
+uint32_t FS98_WORLD_STDCALL fs98_world_area_create_add(uint32_t parent, void *descriptor)
+{ return world_area_create(parent, descriptor); }
+uint32_t FS98_WORLD_STDCALL fs98_world_area_create_edit(uint32_t parent, void *descriptor)
+{ return world_area_create(parent, descriptor); }
 /* 0x223fbdc0 */
-void fs98_world_area_exchange(void *pObject, void *pExchange)
+void fs98_world_area_exchange(void *object, void *exchange)
 {
-    uint32 uiIndex;
-    for (uiIndex = 0; uiIndex < sizeof(s_aaunAreaDdx) / sizeof(s_aaunAreaDdx[0]); ++uiIndex)
-        s_pObjectServices->pfnDdx(pExchange, s_aaunAreaDdx[uiIndex][1], (uint8 *)pObject + s_aaunAreaDdx[uiIndex][0]);
+    uint32_t index;
+    for (index = 0; index < sizeof(s_area_ddx) / sizeof(s_area_ddx[0]); ++index)
+        s_object_services->ddx(exchange, s_area_ddx[index][1], (uint8_t *)object + s_area_ddx[index][0]);
 }
 /* 0x223fc5d0 leaves the WinHelp result in eax. */
-int fs98_world_area_help(void *pObject, uint32 uiUnused, void *pHelp)
+int fs98_world_area_help(void *object, uint32_t unused, void *help)
 {
-    (void)pObject; (void)uiUnused;
-    return s_pObjectServices->pfnHelp(WORLD_U32(pHelp, 0xc), "fs98.hlp", 12, s_auiAreaHelp);
+    (void)object; (void)unused;
+    return s_object_services->help(WORLD_U32(help, 0xc), "fs98.hlp", 12, s_area_help);
 }
 /* 0x223fc5f0 */
-int fs98_world_area_context(void *pObject, uint32 uiWindow, uint32 uiUnused)
+int fs98_world_area_context(void *object, uint32_t window, uint32_t unused)
 {
-    (void)pObject; (void)uiUnused;
-    s_pObjectServices->pfnHelp(uiWindow, "fs98.hlp", 10, s_auiAreaHelp);
+    (void)object; (void)unused;
+    s_object_services->help(window, "fs98.hlp", 10, s_area_help);
     return 1;
 }

@@ -12,266 +12,266 @@
 #define PTR WORLD_PTR
 #define THROW_CODE 0xe0429811
 struct world_fixture {
-    uint8 abyBefore[32], abyObject[0x1b20];
-    uint8 aabyDescriptors[2][0x30], aabyRows[2][0x40];
-    char aacPaths[2][160], aacTitles[2][160];
-    uint8 abyAfter[32];
+    uint8_t before[32], object[0x1b20];
+    uint8_t descriptors[2][0x30], rows[2][0x40];
+    char paths[2][160], titles[2][160];
+    uint8_t after[32];
 };
-static struct world_fixture s_stFixture, s_stInitial, s_stReference;
-static HMODULE s_hRetail;
-static void *s_apJump[5], *s_apVtable[60], *s_apOtherVtable[60];
-static char s_aacLogs[2][8192];
-static uint32 s_uiRng, s_uiScenario, s_uiOperation, s_uiCalls, s_uiLength;
-static uint32 s_uiThrowAt, s_uiComparisons, s_uiThrows, s_uiSwaps, s_uiSelfChecks;
-static int s_iSide, s_iSelection, s_iErrorResult, s_iValidateResult, s_iVirtualError;
-static uint32 world_random(void)
+static struct world_fixture s_fixture, s_initial, s_reference;
+static HMODULE s_retail;
+static void *s_jump[5], *s_vtable[60], *s_other_vtable[60];
+static char s_logs[2][8192];
+static uint32_t s_rng, s_scenario, s_operation, s_calls, s_length;
+static uint32_t s_throw_at, s_comparisons, s_throws, s_swaps, s_self_checks;
+static int s_side, s_selection, s_error_result, s_validate_result, s_virtual_error;
+static uint32_t world_random(void)
 {
-    s_uiRng ^= s_uiRng << 13; s_uiRng ^= s_uiRng >> 17; s_uiRng ^= s_uiRng << 5;
-    return s_uiRng;
+    s_rng ^= s_rng << 13; s_rng ^= s_rng >> 17; s_rng ^= s_rng << 5;
+    return s_rng;
 }
-static uint32 world_offset(const void *pVal)
+static uint32_t world_offset(const void *ptr)
 {
-    return (uint32)((const uint8 *)pVal - (const uint8 *)&s_stFixture);
+    return (uint32_t)((const uint8_t *)ptr - (const uint8_t *)&s_fixture);
 }
-static void world_log(const char *pcFormat, ...)
+static void world_log(const char *format, ...)
 {
-    va_list vaArgs;
-    int iLength;
-    va_start(vaArgs, pcFormat);
-    iLength = vsnprintf(s_aacLogs[s_iSide] + s_uiLength, 8192 - s_uiLength, pcFormat, vaArgs);
-    va_end(vaArgs);
-    if (iLength < 0 || (uint32)iLength >= 8192 - s_uiLength) exit(2);
-    s_uiLength += (uint32)iLength;
-    if (++s_uiCalls == s_uiThrowAt) RaiseException(THROW_CODE, 0, 0, NULL);
+    va_list args;
+    int length;
+    va_start(args, format);
+    length = vsnprintf(s_logs[s_side] + s_length, 8192 - s_length, format, args);
+    va_end(args);
+    if (length < 0 || (uint32_t)length >= 8192 - s_length) exit(2);
+    s_length += (uint32_t)length;
+    if (++s_calls == s_throw_at) RaiseException(THROW_CODE, 0, 0, NULL);
     /* External calls may change the descriptor, row flags or virtual table. */
-    if (s_uiCalls == 2 && s_uiScenario & 1) {
-        PTR(s_stFixture.abyObject, 0x10e4) = s_stFixture.aabyDescriptors[1];
-        if (!s_iSide) ++s_uiSwaps;
+    if (s_calls == 2 && s_scenario & 1) {
+        PTR(s_fixture.object, 0x10e4) = s_fixture.descriptors[1];
+        if (!s_side) ++s_swaps;
     }
-    if (s_uiScenario & 2) {
-        U32(s_stFixture.aabyRows[0], 0x3c) ^= 1;
-        U32(s_stFixture.aabyRows[1], 0x3c) ^= 1;
+    if (s_scenario & 2) {
+        U32(s_fixture.rows[0], 0x3c) ^= 1;
+        U32(s_fixture.rows[1], 0x3c) ^= 1;
     }
 }
-static int world_get_text(void *pControl, char *pcText, int iCapacity)
+static int world_get_text(void *control, char *text, int capacity)
 {
-    const char *pcValue;
-    static const char *s_apcNumbers[] = {"0", "-1", "2147483647", "-2147483648", "  +42x", "bad", "0000000020"};
-    uint32 uiOffset = world_offset(pControl) - world_offset(s_stFixture.abyObject);
-    pcValue = uiOffset == 0x19a0 ? s_apcNumbers[s_uiScenario % 7] : uiOffset == 0x1938 ? "C:\\area\\scenery\\test.bgl" : "Area title";
-    world_log("get %x capacity=%d [%s]\n", uiOffset, iCapacity, pcValue);
-    snprintf(pcText, (size_t)iCapacity, "%s", pcValue);
-    return (int)strlen(pcText);
+    const char *value_text;
+    static const char *s_numbers[] = {"0", "-1", "2147483647", "-2147483648", "  +42x", "bad", "0000000020"};
+    uint32_t offset = world_offset(control) - world_offset(s_fixture.object);
+    value_text = offset == 0x19a0 ? s_numbers[s_scenario % 7] : offset == 0x1938 ? "C:\\area\\scenery\\test.bgl" : "Area title";
+    world_log("get %x capacity=%d [%s]\n", offset, capacity, value_text);
+    snprintf(text, (size_t)capacity, "%s", value_text);
+    return (int)strlen(text);
 }
-static int TC world_hook_get(void *pControl, char *pcText, int iCapacity)
-{ return world_get_text(pControl, pcText, iCapacity); }
-static void world_set_text(void *pControl, const char *pcText)
-{ world_log("set %x [%s]\n", world_offset(pControl), pcText); }
-static void TC world_hook_set(void *pControl, const char *pcText)
-{ world_set_text(pControl, pcText); }
-static int world_parse(const char *pcText)
-{ world_log("parse [%s]\n", pcText); return atoi(pcText); }
-static int world_format(char *pcText, const char *pcFormat, int iValue)
-{ world_log("format [%s] %d\n", pcFormat, iValue); return sprintf(pcText, pcFormat, iValue); }
-static int __cdecl world_hook_format(char *pcText, const char *pcFormat, int iValue)
+static int TC world_hook_get(void *control, char *text, int capacity)
+{ return world_get_text(control, text, capacity); }
+static void world_set_text(void *control, const char *text)
+{ world_log("set %x [%s]\n", world_offset(control), text); }
+static void TC world_hook_set(void *control, const char *text)
+{ world_set_text(control, text); }
+static int world_parse(const char *text)
+{ world_log("parse [%s]\n", text); return atoi(text); }
+static int world_format(char *text, const char *format, int value)
+{ world_log("format [%s] %d\n", format, value); return sprintf(text, format, value); }
+static int __cdecl world_hook_format(char *text, const char *format, int value)
 {
-    return world_format(pcText, pcFormat, iValue);
+    return world_format(text, format, value);
 }
-static int world_send(uint32 uiWindow, uint32 uiMessage, uint32 uiFirst, uint32 uiSecond)
+static int world_send(uint32_t window, uint32_t message, uint32_t first, uint32_t second)
 {
-    world_log("send %x %x %x %x\n", uiWindow, uiMessage, uiFirst, uiSecond);
-    return s_iSelection;
+    world_log("send %x %x %x %x\n", window, message, first, second);
+    return s_selection;
 }
-static int SC world_hook_send(uint32 uiWindow, uint32 uiMessage, uint32 uiFirst, uint32 uiSecond)
-{ return world_send(uiWindow, uiMessage, uiFirst, uiSecond); }
-static int world_check_control(void *pControl, int iChecked)
+static int SC world_hook_send(uint32_t window, uint32_t message, uint32_t first, uint32_t second)
+{ return world_send(window, message, first, second); }
+static int world_check_control(void *control, int checked)
 {
-    world_log("check %x %x\n", world_offset(pControl), (uint32)iChecked);
-    U32(pControl, 0xbc) = (uint32)iChecked;
+    world_log("check %x %x\n", world_offset(control), (uint32_t)checked);
+    U32(control, 0xbc) = (uint32_t)checked;
     return 0;
 }
-static int TC world_hook_check(void *pControl, int iChecked)
-{ return world_check_control(pControl, iChecked); }
-static int world_enable(void *pControl, int iEnabled)
-{ world_log("enable %x %d\n", world_offset(pControl), iEnabled); return 0; }
-static int TC world_hook_enable(void *pControl, int iEnabled)
-{ return world_enable(pControl, iEnabled); }
-static int world_error(void *pObject, void *pControl, void *pStatus)
+static int TC world_hook_check(void *control, int checked)
+{ return world_check_control(control, checked); }
+static int world_enable(void *control, int enabled)
+{ world_log("enable %x %d\n", world_offset(control), enabled); return 0; }
+static int TC world_hook_enable(void *control, int enabled)
+{ return world_enable(control, enabled); }
+static int world_error(void *object, void *control, void *status)
 {
-    uint32 uiOffset = world_offset(pControl) - world_offset(pObject);
-    if (uiOffset == 0x19a0) {
-        world_log("error %x status=%x text=[%s] max=%u\n", uiOffset, U32(pStatus, 0), (char *)PTR(pStatus, 4), U32(pStatus, 8));
-    } else world_log("error %x status=%x\n", uiOffset, (uint32)pStatus);
-    return s_iErrorResult;
+    uint32_t offset = world_offset(control) - world_offset(object);
+    if (offset == 0x19a0) {
+        world_log("error %x status=%x text=[%s] max=%u\n", offset, U32(status, 0), (char *)PTR(status, 4), U32(status, 8));
+    } else world_log("error %x status=%x\n", offset, (uint32_t)status);
+    return s_error_result;
 }
-static int TC world_hook_error(void *pObject, void *pControl, void *pStatus)
-{ return world_error(pObject, pControl, pStatus); }
-static void world_focus_control(void *pControl)
-{ world_log("focus.control %x\n", world_offset(pControl)); }
-static void TC world_hook_focus_control(void *pControl)
-{ world_focus_control(pControl); }
-static uint32 SC world_check_descriptor(void *pDescriptor)
+static int TC world_hook_error(void *object, void *control, void *status)
+{ return world_error(object, control, status); }
+static void world_focus_control(void *control)
+{ world_log("focus.control %x\n", world_offset(control)); }
+static void TC world_hook_focus_control(void *control)
+{ world_focus_control(control); }
+static uint32_t SC world_check_descriptor(void *descriptor)
 {
-    world_log("callback %x\n", world_offset(pDescriptor));
+    world_log("callback %x\n", world_offset(descriptor));
     /* The return is ignored. Status records carry the result instead. */
     return 0xfedcba98;
 }
-static void TC world_close(void *pObject)
-{ world_log("close %x answer=%u\n", world_offset(pObject), U32(PTR(pObject, 0x10e4), 0)); }
-static void TC world_other_close(void *pObject)
-{ world_log("other.close\n"); world_close(pObject); }
-static int TC world_virtual_validate(void *pObject, uint32 uiValue)
+static void TC world_close(void *object)
+{ world_log("close %x answer=%u\n", world_offset(object), U32(PTR(object, 0x10e4), 0)); }
+static void TC world_other_close(void *object)
+{ world_log("other.close\n"); world_close(object); }
+static int TC world_virtual_validate(void *object, uint32_t value)
 {
-    world_log("validate %x %x\n", world_offset(pObject), uiValue);
-    PTR(pObject, 0) = s_apOtherVtable;
-    return s_iValidateResult;
+    world_log("validate %x %x\n", world_offset(object), value);
+    PTR(object, 0) = s_other_vtable;
+    return s_validate_result;
 }
-static int TC world_virtual_error(void *pObject, uint32 uiValue)
-{ world_log("virtual.error %x %x\n", world_offset(pObject), uiValue); return s_iVirtualError; }
-static int TC world_focus(void *pObject, uint32 uiValue)
-{ world_log("focus %x %x\n", world_offset(pObject), uiValue); return -1; }
-static const struct fs98_world_services s_stServices = {
+static int TC world_virtual_error(void *object, uint32_t value)
+{ world_log("virtual.error %x %x\n", world_offset(object), value); return s_virtual_error; }
+static int TC world_focus(void *object, uint32_t value)
+{ world_log("focus %x %x\n", world_offset(object), value); return -1; }
+static const struct fs98_world_services s_services = {
     world_get_text, world_set_text, world_parse, world_format, world_send,
     world_check_control, world_enable, world_error, world_focus_control
 };
-static void world_patch(uint32 uiRva, void *pValue)
+static void world_patch(uint32_t rva, void *value)
 {
-    DWORD dwOld;
-    void **ppSlot = (void **)((uint8 *)s_hRetail + uiRva);
-    if (!VirtualProtect(ppSlot, 4, PAGE_READWRITE, &dwOld)) exit(2);
-    *ppSlot = pValue;
-    if (!VirtualProtect(ppSlot, 4, dwOld, &dwOld)) exit(2);
+    DWORD old;
+    void **slot = (void **)((uint8_t *)s_retail + rva);
+    if (!VirtualProtect(slot, 4, PAGE_READWRITE, &old)) exit(2);
+    *slot = value;
+    if (!VirtualProtect(slot, 4, old, &old)) exit(2);
 }
-static const uint32 s_auiEntries[] = {0xc360, 0xc440, 0xc2c0, 0xc2e0, 0xc610, 0xc660, 0xc720};
+static const uint32_t s_entries[] = {0xc360, 0xc440, 0xc2c0, 0xc2e0, 0xc610, 0xc660, 0xc720};
 static void world_initialize(void)
 {
-    uint32 uiIndex, uiByte;
-    static const uint32 s_auiLayers[] = {0, 9, 10, 11, 20, 30, 40, 50, 51, 0xffffffff};
-    for (uiByte = 0; uiByte < sizeof(s_stFixture); ++uiByte) ((uint8 *)&s_stFixture)[uiByte] = (uint8)world_random();
-    PTR(s_stFixture.abyObject, 0) = s_apVtable;
-    PTR(s_stFixture.abyObject, 0x10e4) = s_stFixture.aabyDescriptors[0];
-    for (uiIndex = 0; uiIndex < 2; ++uiIndex) {
-        void *pDescriptor = s_stFixture.aabyDescriptors[uiIndex];
-        void *pRow = s_stFixture.aabyRows[uiIndex];
-        PTR(pDescriptor, 4) = world_check_descriptor;
-        PTR(pDescriptor, 0xc) = pRow;
-        U32(pDescriptor, 0x10) = s_uiScenario & 4 ? 6 : 0;
-        U32(pDescriptor, 0x14) = world_random();
-        PTR(pDescriptor, 0x1c) = NULL;
-        U32(pDescriptor, 0x2c) = 23 + uiIndex;
-        U32(pRow, 0) = s_uiScenario & 8 ? 0x1007 : 0;
-        U32(pRow, 0x14) = s_uiScenario & 16 ? 0x1005 : 0;
-        PTR(pRow, 4) = s_stFixture.aacPaths[uiIndex];
-        PTR(pRow, 0x18) = s_stFixture.aacTitles[uiIndex];
-        strcpy(s_stFixture.aacPaths[uiIndex], "Initial path");
-        strcpy(s_stFixture.aacTitles[uiIndex], "Initial title");
-        U32(pRow, 0x2c) = s_auiLayers[(s_uiScenario + uiIndex) % 10];
-        U32(pRow, 0x3c) = s_uiScenario & 32 ? 1 : 0;
+    uint32_t index, byte;
+    static const uint32_t s_layers[] = {0, 9, 10, 11, 20, 30, 40, 50, 51, 0xffffffff};
+    for (byte = 0; byte < sizeof(s_fixture); ++byte) ((uint8_t *)&s_fixture)[byte] = (uint8_t)world_random();
+    PTR(s_fixture.object, 0) = s_vtable;
+    PTR(s_fixture.object, 0x10e4) = s_fixture.descriptors[0];
+    for (index = 0; index < 2; ++index) {
+        void *descriptor = s_fixture.descriptors[index];
+        void *row = s_fixture.rows[index];
+        PTR(descriptor, 4) = world_check_descriptor;
+        PTR(descriptor, 0xc) = row;
+        U32(descriptor, 0x10) = s_scenario & 4 ? 6 : 0;
+        U32(descriptor, 0x14) = world_random();
+        PTR(descriptor, 0x1c) = NULL;
+        U32(descriptor, 0x2c) = 23 + index;
+        U32(row, 0) = s_scenario & 8 ? 0x1007 : 0;
+        U32(row, 0x14) = s_scenario & 16 ? 0x1005 : 0;
+        PTR(row, 4) = s_fixture.paths[index];
+        PTR(row, 0x18) = s_fixture.titles[index];
+        strcpy(s_fixture.paths[index], "Initial path");
+        strcpy(s_fixture.titles[index], "Initial title");
+        U32(row, 0x2c) = s_layers[(s_scenario + index) % 10];
+        U32(row, 0x3c) = s_scenario & 32 ? 1 : 0;
     }
-    s_iSelection = (int)(s_uiScenario % 8) - 1;
-    s_iErrorResult = s_uiScenario & 64 ? -1 : 0;
-    s_iValidateResult = s_uiScenario & 128 ? 0x1b07 : 0;
-    s_iVirtualError = s_uiScenario & 256 ? 1 : 0;
-    s_stInitial = s_stFixture;
+    s_selection = (int)(s_scenario % 8) - 1;
+    s_error_result = s_scenario & 64 ? -1 : 0;
+    s_validate_result = s_scenario & 128 ? 0x1b07 : 0;
+    s_virtual_error = s_scenario & 256 ? 1 : 0;
+    s_initial = s_fixture;
 }
 static void world_invoke(void)
 {
-    void *pObject = s_stFixture.abyObject;
-    void *pEntry = (uint8 *)s_hRetail + s_auiEntries[s_uiOperation];
-    int iResult = 0;
-    if (!s_iSide) {
-        if (s_uiOperation == 4 || s_uiOperation == 5)
-            iResult = ((int (TC *)(void *, uint32))pEntry)(pObject, s_uiScenario);
-        else ((void (TC *)(void *))pEntry)(pObject);
-    } else switch (s_uiOperation) {
-        case 0: fs98_world_area_collect(pObject); break;
-        case 1: fs98_world_area_populate(pObject); break;
-        case 2: fs98_world_area_cancel(pObject); break;
-        case 3: fs98_world_area_accept(pObject); break;
-        case 4: iResult = fs98_world_area_validate(pObject, s_uiScenario); break;
-        case 5: iResult = fs98_world_area_error(pObject, s_uiScenario); break;
-        case 6: fs98_world_area_path_changed(pObject); break;
+    void *object = s_fixture.object;
+    void *entry = (uint8_t *)s_retail + s_entries[s_operation];
+    int result = 0;
+    if (!s_side) {
+        if (s_operation == 4 || s_operation == 5)
+            result = ((int (TC *)(void *, uint32_t))entry)(object, s_scenario);
+        else ((void (TC *)(void *))entry)(object);
+    } else switch (s_operation) {
+        case 0: fs98_world_area_collect(object); break;
+        case 1: fs98_world_area_populate(object); break;
+        case 2: fs98_world_area_cancel(object); break;
+        case 3: fs98_world_area_accept(object); break;
+        case 4: result = fs98_world_area_validate(object, s_scenario); break;
+        case 5: result = fs98_world_area_error(object, s_scenario); break;
+        case 6: fs98_world_area_path_changed(object); break;
     }
-    if (!s_iSide && !s_uiThrowAt) {
-        void *pDescriptor = PTR(pObject, 0x10e4);
-        int iExpected = s_uiScenario & 16 ? 0x1b07 : s_uiScenario & 4 ? 0x1aef : 0;
-        if ((s_uiOperation == 4 && iResult != iExpected) ||
-            (s_uiOperation == 5 && iResult != -1) ||
-            (s_uiOperation == 2 && U32(pDescriptor, 0) != 0) ||
-            (s_uiOperation == 6 && s_uiCalls != 9) ||
-            (s_uiOperation == 0 && s_iSelection >= 0 && s_iSelection <= 4 &&
-                U32(s_stFixture.aabyRows[0], 0x2c) != (uint32)(s_iSelection + 1) * 10) ||
-            (s_uiOperation == 0 && (s_iSelection < 0 || s_iSelection > 4) &&
-                U32(s_stFixture.aabyRows[0], 0x2c) != U32(s_stInitial.aabyRows[0], 0x2c))) {
-            fprintf(stderr, "fixture branch self-check failed scenario=%u operation=%u\n", s_uiScenario, s_uiOperation);
+    if (!s_side && !s_throw_at) {
+        void *descriptor = PTR(object, 0x10e4);
+        int expected = s_scenario & 16 ? 0x1b07 : s_scenario & 4 ? 0x1aef : 0;
+        if ((s_operation == 4 && result != expected) ||
+            (s_operation == 5 && result != -1) ||
+            (s_operation == 2 && U32(descriptor, 0) != 0) ||
+            (s_operation == 6 && s_calls != 9) ||
+            (s_operation == 0 && s_selection >= 0 && s_selection <= 4 &&
+                U32(s_fixture.rows[0], 0x2c) != (uint32_t)(s_selection + 1) * 10) ||
+            (s_operation == 0 && (s_selection < 0 || s_selection > 4) &&
+                U32(s_fixture.rows[0], 0x2c) != U32(s_initial.rows[0], 0x2c))) {
+            fprintf(stderr, "fixture branch self-check failed scenario=%u operation=%u\n", s_scenario, s_operation);
             exit(2);
         }
-        ++s_uiSelfChecks;
+        ++s_self_checks;
     }
     /* A result is observable only for the two int-returning virtual methods. */
-    world_log("return %x\n", (uint32)iResult);
+    world_log("return %x\n", (uint32_t)result);
 }
-static LONG CALLBACK world_exception(EXCEPTION_POINTERS *pException)
+static LONG CALLBACK world_exception(EXCEPTION_POINTERS *exception)
 {
-    if (pException->ExceptionRecord->ExceptionCode == THROW_CODE) {
-        s_uiThrowAt = 0;
-        if (!s_iSide) ++s_uiThrows;
+    if (exception->ExceptionRecord->ExceptionCode == THROW_CODE) {
+        s_throw_at = 0;
+        if (!s_side) ++s_throws;
         /* These seven routines have no local EH frames/owned temporaries. */
-        __builtin_longjmp(s_apJump, 1);
+        __builtin_longjmp(s_jump, 1);
     }
     fprintf(stderr, "FAULT %lx at %p side=%d scenario=%u operation=%u\n",
-        pException->ExceptionRecord->ExceptionCode, pException->ExceptionRecord->ExceptionAddress,
-        s_iSide, s_uiScenario, s_uiOperation);
+        exception->ExceptionRecord->ExceptionCode, exception->ExceptionRecord->ExceptionAddress,
+        s_side, s_scenario, s_operation);
     ExitProcess(2);
 }
-static void world_run(uint32 uiThrowAt)
+static void world_run(uint32_t throw_at)
 {
-    uint32 uiIndex;
-    s_stFixture = s_stInitial;
-    s_uiCalls = s_uiLength = 0;
-    s_aacLogs[s_iSide][0] = 0;
-    s_uiThrowAt = uiThrowAt;
-    if (__builtin_setjmp(s_apJump) == 0) world_invoke();
+    uint32_t index;
+    s_fixture = s_initial;
+    s_calls = s_length = 0;
+    s_logs[s_side][0] = 0;
+    s_throw_at = throw_at;
+    if (__builtin_setjmp(s_jump) == 0) world_invoke();
     else world_log("caught\n");
-    if (memcmp(s_stFixture.abyBefore, s_stInitial.abyBefore, sizeof(s_stFixture.abyBefore)) ||
-        memcmp(s_stFixture.abyAfter, s_stInitial.abyAfter, sizeof(s_stFixture.abyAfter))) {
-        fprintf(stderr, "fixture guard changed side=%d scenario=%u operation=%u\n", s_iSide, s_uiScenario, s_uiOperation);
+    if (memcmp(s_fixture.before, s_initial.before, sizeof(s_fixture.before)) ||
+        memcmp(s_fixture.after, s_initial.after, sizeof(s_fixture.after))) {
+        fprintf(stderr, "fixture guard changed side=%d scenario=%u operation=%u\n", s_side, s_scenario, s_operation);
         exit(2);
     }
     /* Retail retains a pointer to its expired stack buffer. Compare the
      * pointed-to text inside Error, then normalize only that address. */
-    for (uiIndex = 0; uiIndex < 2; ++uiIndex)
-        if (PTR(s_stFixture.aabyDescriptors[uiIndex], 0x1c))
-            PTR(s_stFixture.aabyDescriptors[uiIndex], 0x1c) = (void *)0x1234;
+    for (index = 0; index < 2; ++index)
+        if (PTR(s_fixture.descriptors[index], 0x1c))
+            PTR(s_fixture.descriptors[index], 0x1c) = (void *)0x1234;
 }
-static int world_compare(uint32 uiThrowAt)
+static int world_compare(uint32_t throw_at)
 {
-    uint32 uiByte;
-    s_iSide = 0; world_run(uiThrowAt); s_stReference = s_stFixture;
-    s_iSide = 1; world_run(uiThrowAt); ++s_uiComparisons;
-    if (!memcmp(&s_stReference, &s_stFixture, sizeof(s_stFixture)) && !strcmp(s_aacLogs[0], s_aacLogs[1])) return 0;
-    fprintf(stderr, "DIFFER scenario=%u operation=%u throw=%u\n", s_uiScenario, s_uiOperation, uiThrowAt);
-    for (uiByte = 0; uiByte < sizeof(s_stFixture); ++uiByte)
-        if (((uint8 *)&s_stReference)[uiByte] != ((uint8 *)&s_stFixture)[uiByte]) {
-            fprintf(stderr, "byte=%x retail=%x ours=%x\n", uiByte, ((uint8 *)&s_stReference)[uiByte], ((uint8 *)&s_stFixture)[uiByte]); break;
+    uint32_t byte;
+    s_side = 0; world_run(throw_at); s_reference = s_fixture;
+    s_side = 1; world_run(throw_at); ++s_comparisons;
+    if (!memcmp(&s_reference, &s_fixture, sizeof(s_fixture)) && !strcmp(s_logs[0], s_logs[1])) return 0;
+    fprintf(stderr, "DIFFER scenario=%u operation=%u throw=%u\n", s_scenario, s_operation, throw_at);
+    for (byte = 0; byte < sizeof(s_fixture); ++byte)
+        if (((uint8_t *)&s_reference)[byte] != ((uint8_t *)&s_fixture)[byte]) {
+            fprintf(stderr, "byte=%x retail=%x ours=%x\n", byte, ((uint8_t *)&s_reference)[byte], ((uint8_t *)&s_fixture)[byte]); break;
         }
-    fprintf(stderr, "RETAIL:\n%sOURS:\n%s", s_aacLogs[0], s_aacLogs[1]);
+    fprintf(stderr, "RETAIL:\n%sOURS:\n%s", s_logs[0], s_logs[1]);
     return 1;
 }
-int main(int iArgc, char **ppcArgv)
+int main(int argc, char **argv)
 {
-    uint32 uiCount = iArgc > 1 ? strtoul(ppcArgv[1], NULL, 0) : 2000;
-    uint32 uiSeed = iArgc > 2 ? strtoul(ppcArgv[2], NULL, 0) : 0x4a971b63;
-    uint32 uiPosition, uiLimit;
-    int iInterrupt = iArgc > 3 && !strcmp(ppcArgv[3], "interrupt");
-    if (!uiCount || !uiSeed) return 2;
-    s_uiRng = uiSeed;
+    uint32_t count = argc > 1 ? strtoul(argv[1], NULL, 0) : 2000;
+    uint32_t seed = argc > 2 ? strtoul(argv[2], NULL, 0) : 0x4a971b63;
+    uint32_t position, limit;
+    int interrupt = argc > 3 && !strcmp(argv[3], "interrupt");
+    if (!count || !seed) return 2;
+    s_rng = seed;
     SetErrorMode(SEM_FAILCRITICALERRORS | SEM_NOGPFAULTERRORBOX);
     AddVectoredExceptionHandler(1, world_exception);
-    s_hRetail = LoadLibraryExA("orig/English/World.DLL", NULL, DONT_RESOLVE_DLL_REFERENCES);
-    if (!s_hRetail || GetProcAddress(s_hRetail, "Linkage") != (FARPROC)((uint8 *)s_hRetail + 0x24120)) {
-        fprintf(stderr, "retail ownership failed: module=%p Linkage=%p error=%lu\n", s_hRetail,
-            s_hRetail ? GetProcAddress(s_hRetail, "Linkage") : NULL, GetLastError());
+    s_retail = LoadLibraryExA("orig/English/World.DLL", NULL, DONT_RESOLVE_DLL_REFERENCES);
+    if (!s_retail || GetProcAddress(s_retail, "Linkage") != (FARPROC)((uint8_t *)s_retail + 0x24120)) {
+        fprintf(stderr, "retail ownership failed: module=%p Linkage=%p error=%lu\n", s_retail,
+            s_retail ? GetProcAddress(s_retail, "Linkage") : NULL, GetLastError());
         return 2;
     }
     world_patch(0x25598, world_hook_get); world_patch(0x255bc, world_hook_set);
@@ -279,24 +279,24 @@ int main(int iArgc, char **ppcArgv)
     world_patch(0x25778, world_hook_error); world_patch(0x2577c, world_hook_check);
     world_patch(0x258b0, world_hook_send); world_patch(0x256c0, world_parse);
     world_patch(0x256b8, world_hook_format);
-    s_apVtable[0xd8 / 4] = world_virtual_validate;
-    s_apVtable[0xdc / 4] = world_virtual_error;
-    s_apVtable[0xe0 / 4] = world_focus;
-    s_apVtable[0xec / 4] = world_close;
-    memcpy(s_apOtherVtable, s_apVtable, sizeof(s_apVtable));
-    s_apOtherVtable[0xec / 4] = world_other_close;
-    fs98_world_set_services(&s_stServices);
-    for (s_uiScenario = 0; s_uiScenario < uiCount; ++s_uiScenario) {
-        for (s_uiOperation = 0; s_uiOperation < 7; ++s_uiOperation) {
+    s_vtable[0xd8 / 4] = world_virtual_validate;
+    s_vtable[0xdc / 4] = world_virtual_error;
+    s_vtable[0xe0 / 4] = world_focus;
+    s_vtable[0xec / 4] = world_close;
+    memcpy(s_other_vtable, s_vtable, sizeof(s_vtable));
+    s_other_vtable[0xec / 4] = world_other_close;
+    fs98_world_set_services(&s_services);
+    for (s_scenario = 0; s_scenario < count; ++s_scenario) {
+        for (s_operation = 0; s_operation < 7; ++s_operation) {
             world_initialize();
             if (world_compare(0)) return 1;
-            uiLimit = s_uiCalls - 1; /* Last call is the harness's return log. */
-            if (iInterrupt) for (uiPosition = 1; uiPosition <= uiLimit; ++uiPosition)
-                if (world_compare(uiPosition)) return 1;
+            limit = s_calls - 1; /* Last call is the harness's return log. */
+            if (interrupt) for (position = 1; position <= limit; ++position)
+                if (world_compare(position)) return 1;
         }
     }
     printf("World area core: %u scenarios, 7 operations, %u comparisons, 0 differ; seed=%x interrupts=%u swaps=%u self_checks=%u\n",
-        uiCount, s_uiComparisons, uiSeed, s_uiThrows, s_uiSwaps, s_uiSelfChecks);
-    FreeLibrary(s_hRetail);
+        count, s_comparisons, seed, s_throws, s_swaps, s_self_checks);
+    FreeLibrary(s_retail);
     return 0;
 }

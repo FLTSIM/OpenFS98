@@ -7,6 +7,9 @@ possibly Android.
 
 ## Working agreements
 
+- **OpenFS98 style:** use snake_case identifiers and standard `<stdint.h>`
+  types such as `uint32_t`. Do not use Hungarian notation or `types.h`; this
+  project-specific rule overrides any general instruction to use them.
 - **Do not stage, commit or push.** Leave changes in the worktree and say
   which files changed; the user stages, reviews and commits. This holds for
   every change, including ones they asked for.
@@ -99,6 +102,16 @@ make maindiff-run SUITE=band         # MAIN slice 15, the altitude band (+0x9c) 
 make main-breaks SUITE=band          # its breaks -> 33, all caught (~12 min)
 make maindiff-run SUITE=objstep      # MAIN slice 16, the smoke trails (+0x88) -> 20000 scenarios, 0 differ (~4 min)
 make main-breaks SUITE=objstep       # its breaks -> 34, 32 caught, 2 proven equivalent (~12 min)
+make maindiff-run SUITE=quicksave    # MAIN slice 17, the quick save (+0xb0) -> 20000 scenarios, 0 differ (~20 min)
+make main-breaks SUITE=quicksave     # its breaks -> 7, 6 caught, 1 proven equivalent (~15 min)
+make maindiff-run SUITE=prefs        # MAIN slice 18, the preferences (+0xb4,+0xb8,+0xbc) -> 20000 scenarios, 0 differ (~5 min)
+make main-breaks SUITE=prefs         # its breaks -> 28, 26 caught, 2 proven equivalent (~25 min)
+make maindiff-run SUITE=clouds       # MAIN slice 19, the cloud layers' draw (+0x98) -> 20000 scenarios, 0 differ (~4 min)
+make main-breaks SUITE=clouds        # its breaks -> @CLB@
+make maindiff-run SUITE=cloudtex     # MAIN slice 20, the cloud layers' textures (+0x94) -> 20000 scenarios, 0 differ (~5 min)
+make main-breaks SUITE=cloudtex      # its breaks -> 34, 33 caught, 1 proven equivalent (~30 min)
+make maindiff-run SUITE=spot         # MAIN slice 21, the spot plane's eye (+0xa8), over retail UTIL -> 20000 scenarios, 0 differ (~4 min)
+make main-breaks SUITE=spot          # its breaks -> 50, 47 caught, 3 proven equivalent (~45 min)
 make hostdiff-run N=20000            # HOST (id 1, FLTSIM98.EXE) slices 1-28, all 194 services, real files in bin/difftest/hostfs -> 0 differ (~11 min)
 make host-breaks                     # HOST broken on purpose -> 610 breaks, 580 caught, 26 proven equivalent, 4 rare display paths missed at N=2000 (~6 h)
 make mpchatdiff-run      # whole-module MPCHAT, the chat window -> 20000 scenarios, 0 differ (~20 s)
@@ -301,13 +314,13 @@ has to set `g3d_mesh_precision` to match. MULTIP, PANELS
 (docs/modules/panels.md) and **MPCHAT are done**; MPCHAT, the chat window,
 is verified against a model of the window system hooked into its import
 table (docs/modules/mpchat.md). **MAIN is in progress**, a slice at a time behind
-`maindiff`'s suites, as MULTIP was; slices 1-6 are verified (situation
+`maindiff`'s suites, as MULTIP was; slices 1-21 are verified (among them situation
 records, the assembly situation reader and writer, the nav services
 `+0x70`/`+0x78`/`+0x7c`/`+0x80` -- range and bearing, the read-outs and the
 station descriptor -- `+0x74`, the season, zone and clock, `+0xa4`, the clock
 as digits, `+0xc8`, the view cycler, `+0x30`/`+0x34`, the analysis menu
 greying and enabling, `+0x8c`, an object slot release, and `+0x1c`, the
-latitude clamp), the rest to go. See
+latitude clamp; the full list is in main.md's table), the rest to go. See
 [docs/modules/main.md](docs/modules/main.md). The CHAIN ecx fix is done: OpenFS98's CHAIN enters callbacks with
 all of retail's registers and returns its ecx/edx, and `chaindiff` now
 compares them (see [docs/modules/chain.md](docs/modules/chain.md)).

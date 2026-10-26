@@ -156,9 +156,17 @@ the test escapes through a vectored handler. This is **not** acceptance of
 constructor, destructor, factory or MSVC exception-unwind behavior. UI services
 are synthetic fixtures, not real windows, SIMSUI's exchange engine or rendering.
 
-The new code follows Hungarian notation and local `types.h` aliases. The
-repository currently has no shared `types.h`; these aliases stay inside the
-World slice, without changing established module conventions.
+World source, generators and test fixtures use snake_case identifiers and
+standard `<stdint.h>` types such as `uint32_t`, matching the project style.
+There is no World-local `types.h`. The project exception is recorded in
+`CLAUDE.md` and the saved general agent instructions.
+
+The style audit covered all World C headers/source, generated includes, Python
+generators, mutation tools and fixtures. All three generated includes reproduce
+exactly in an isolated directory. The rebuilt DLL's `.text`, `.data`, `.rdata`
+and `.rsrc` sections are byte-identical to the pre-cleanup startup-tested DLL.
+Core/unwind comparisons, all 51 mutation checks and the full 288-pair native UI
+run (384 validation/error checks over two unload cycles) passed again.
 
 ## Second milestone: factories, controls and exception lifetimes
 

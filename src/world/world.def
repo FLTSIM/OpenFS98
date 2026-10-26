@@ -1,4 +1,4 @@
 LIBRARY World.DLL
 EXPORTS
-    Linkage=g_stWorldLinkage DATA
-    ImportTable=g_astWorldImports DATA
+    Linkage=g_world_linkage DATA
+    ImportTable=g_world_imports DATA

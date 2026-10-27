@@ -28,7 +28,7 @@ world-life-breaks: worldlife
 	bash tools/run_worlddiff.sh --life-breaks
 
 PRIORITY_OBJECTS := src/world/world_priority_objects.c src/world/world_priority.h src/world/world_priority_tables.inc src/world/world_priority_hooks.inc src/world/world_objects.h src/world/world_init.h src/world/world_unwind.h src/world/world_exceptions.h src/world/world_internal.h
-WORLD_SOURCES := src/world/world_search.c src/world/world_search_objects.c src/world/world_search_init.c src/world/world_booster.c src/world/world_booster_objects.c src/world/world_booster_init.c src/world/world_priority.c src/world/world_priority_objects.c src/world/world_area.c src/world/world_objects.c src/world/world_init.c src/world/world_runtime.c
+WORLD_SOURCES := src/world/world_list.c src/world/world_list_objects.c src/world/world_search.c src/world/world_search_objects.c src/world/world_search_init.c src/world/world_booster.c src/world/world_booster_objects.c src/world/world_booster_init.c src/world/world_priority.c src/world/world_priority_objects.c src/world/world_area.c src/world/world_objects.c src/world/world_init.c src/world/world_runtime.c
 .PHONY: world worlduidiff-run world-ui-breaks world-smoke
 src/world/world_runtime_tables.inc $(WORLD_DIR)/world.res $(WORLD_DIR)/simsui-anchor.def &: tools/gen_world_runtime.py tools/gen_views_runtime.py tools/dialogmap.py orig/English/World.DLL orig/SIMSUI.DLL | $(WORLD_DIR)
 	python3 -B tools/gen_world_runtime.py
@@ -164,3 +164,21 @@ world-list-core: $(WORLD_DIR)/worldlistdiff.exe
 	bash tools/run_worlddiff.sh --list-core $(N) $(MODE)
 world-list-breaks: $(WORLD_DIR)/worldlistdiff.exe
 	bash tools/run_worlddiff.sh --list-breaks
+
+LIST_OBJECTS := src/world/world_list_objects.c src/world/world_list.h src/world/world_list_tables.inc src/world/world_list_hooks.inc src/world/world_objects.h src/world/world_init.h src/world/world_unwind.h src/world/world_exceptions.h src/world/world_internal.h
+$(WORLD_DIR)/worldlistlifediff.exe: tools/difftest/worldlistlifediff.c $(LIST_OBJECTS) | $(WORLD_DIR)
+	$(CC) -std=c99 -O2 -Wall -Wextra -Werror -fno-strict-aliasing -fno-delete-null-pointer-checks -o $@ tools/difftest/worldlistlifediff.c src/world/world_list_objects.c -lntdll
+.PHONY: world-list-life world-list-life-breaks
+world-list-life: $(WORLD_DIR)/worldlistlifediff.exe
+	bash tools/run_worlddiff.sh --list-life $(N) $(SEED) $(MODE)
+world-list-life-breaks: $(WORLD_DIR)/worldlistlifediff.exe
+	bash tools/run_worlddiff.sh --list-life-breaks
+
+$(WORLD_DIR)/WORLD_area.dll: $(LIST_CORE) $(LIST_OBJECTS)
+$(WORLD_DIR)/worldlistuidiff.exe: tools/difftest/worldlistuidiff.c tools/difftest/worlduidiff.c src/world/world_internal.h | $(WORLD_DIR)
+	$(CC) -std=c99 -O2 -Wall -Wextra -Werror -fno-strict-aliasing -o $@ $< -lgdi32 -lntdll
+.PHONY: world-list-ui world-list-native-breaks
+world-list-ui: world $(WORLD_DIR)/worldlistuidiff.exe
+	bash tools/run_worlddiff.sh --list-ui
+world-list-native-breaks: world $(WORLD_DIR)/worldlistuidiff.exe
+	bash tools/run_worlddiff.sh --list-native-breaks

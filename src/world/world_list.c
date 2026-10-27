@@ -1,5 +1,6 @@
 /* World 0x13080001: scenery-area list core and control initialization.
- * Factories, embedded lifetimes and native binding remain separate milestones. */
+ * Embedded lifetimes are in world_list_objects.c; native bindings are in
+ * world_runtime.c. */
 #include "world_list.h"
 #include "world_unwind.h"
 #include "world_list_tables.inc"

@@ -20,4 +20,14 @@ void fs98_world_list_delete(void *object);
 void fs98_world_list_selection(void *object);
 void fs98_world_list_double_click(void *object);
 int fs98_world_list_init(void *object);
+void fs98_world_list_set_object_services(const struct fs98_world_object_services *services, void *vtable);
+void fs98_world_list_set_module(uint32_t module);
+void *fs98_world_list_construct(void *object, void *parent);
+void fs98_world_list_destroy(void *object);
+void *fs98_world_list_scalar_delete(void *object, uint32_t flags);
+uint32_t FS98_WORLD_STDCALL fs98_world_list_create(uint32_t parent, void *descriptor);
+void fs98_world_list_exchange(void *object, void *exchange);
+int fs98_world_list_help(void *object, uint32_t unused, void *help);
+int fs98_world_list_context(void *object, uint32_t window, uint32_t unused);
+void fs98_world_list_post_destroy(void *object);
 #endif

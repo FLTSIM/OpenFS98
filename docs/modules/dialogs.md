@@ -454,7 +454,7 @@ are separate from their native harness and startup acceptance.
 
 | Target | Independent starting boundary | Handoff |
 | --- | --- | --- |
-| World, remaining dialogs | Add/edit scenery area and priority have native acceptance. Continue with one of the 16 remaining registrations, using the owner contracts in the handoff. | [world.md](world.md) |
+| World, remaining dialogs | Scenery-area list/editors, priority, booster editors and drive search have native acceptance. Continue with one of the 12 remaining registrations, using its owner contract. | [world.md](world.md) |
 | MP_DIALOG | Smallest remaining whole English DLL by code size; MULTIP owns the verified callback blocks. Start with session settings/details, then recover the five-window connection flow. | [mpdialog.md](mpdialog.md) |
 | Options, customise controls | CONTROLS' shared data and callbacks are established, but the container has three child pages and device/key-capture behavior. | [options.md](options.md) |
 | Flights | Static inventory exists; caller descriptors and flight/menu ownership need more recovery alongside MAIN. Less convenient while MAIN is active. | [flights.md](flights.md) |
@@ -510,7 +510,9 @@ MAIN/HOST/FE work and keep unimplemented registrations explicitly pending.
 The shared add/edit booster family (`0x13080007` / `0x13080008`) also has
 initializer and native UI acceptance, including shared-font cleanup on unload.
 Drive search (`0x13080002`) also has core, lifetime, initialization and native UI
-acceptance, bringing World to six accepted registrations; thirteen remain.
+acceptance. The scenery-area list (`0x13080001`) also has native acceptance
+with nested add/edit, priority and search comparisons. World has seven accepted
+registrations; twelve remain.
 For a whole-DLL assignment, choose
 MP_DIALOG and include all three registrations plus the full flag-2 window
 array in the completion criteria.

@@ -1,15 +1,16 @@
 # World.DLL — native scenery-area, priority, booster and drive-search slices
 
 **Partial replacement with native UI acceptance.** `bin/world-diff/WORLD_area.dll`
-registers add/edit scenery area (`0x13080003` / `0x13080004`), scenery
+registers the scenery-area list (`0x13080001`), add/edit scenery area
+(`0x13080003` / `0x13080004`), scenery
 priority (`0x13080005`), add/edit booster (`0x13080008` / `0x13080007`)
 and drive search (`0x13080002`).
 Their classes, initialization, controls, event/message maps, factories,
 exception lifetimes and module binding are rebuilt in C, using
-retail MFC42/SIMSUI as shared dependencies. The other 13 World registrations
+retail MFC42/SIMSUI as shared dependencies. The other 12 World registrations
 remain pending native acceptance.
 
-This is ready to review as a standalone six-dialog slice. It is **not a full
+This is ready to review as a standalone seven-dialog slice. It is **not a full
 World replacement** and must not replace the active game's World.DLL. The
 startup smoke changes only a private game copy; startup success does not supply
 the other registrations or establish their behavior.
@@ -1057,12 +1058,12 @@ The drive-search family is complete through this native milestone. The DLL is
 still a partial replacement. Continue with a separately bounded remaining
 family and its own owner contract and acceptance.
 
-## Scenery-area list core and initialization (native acceptance pending)
+## Scenery-area list accepted slice
 
-The next bounded slice is the scenery-area list `0x13080001`, template `0x6b5`,
+This slice implements the scenery-area list `0x13080001`, template `0x6b5`,
 factory `0x223f12e0`. `world_list.c` implements its core routines and initializer
-behind independent services. It is **not registered in the native DLL**; the
-six accepted registrations above remain the complete native slice.
+behind independent services. Its class, factory and native UI have the
+acceptance below; it is the seventh registration in the partial DLL.
 
 Its owner is [FE's Scenery Library](fe.md#part-4--the-scenery-library-0x78-verified),
 `src/fe/fe_library.c` and `tools/difftest/fesldiff.c`'s `world_areas` stand-in.
@@ -1142,8 +1143,8 @@ destructor `0x223fa380`, DDX `0x223fa4b0`, help/context `0x223facd0` /
 `0x223f5d40`. Object size is `0x1c8c`. Message entries cover the five action
 buttons `0x1aa3..0x1aa7`, list `0x1b16` selection/double-click, help and context
 menu. PostNcDestroy is shared `0x223f3d30`; virtual OK/Cancel are the routines
-above, while validation/error remain inherited imports. Metadata extraction
-is not behavioral lifetime or native acceptance. Both includes reproduce
+above, while validation/error remain inherited imports. Metadata extraction alone establishes the graph; behavioral lifetime and
+native acceptance follow below. Both includes reproduce
 byte-for-byte in an isolated directory and contain no code/resource payloads.
 
 ```sh
@@ -1167,7 +1168,8 @@ and invalid layer paths, raw noncanonical active state, descriptor/vtable
 swaps and changing protection/resource modules at external boundaries. Retail
 retains its MSVC frame handler; the harness unwinds with real RtlUnwind rather
 than escaping through a vectored handler. This accepts CString cleanup in the
-core call chains, not the unimplemented embedded-control/factory lifetimes.
+core call chains; the separate embedded-control/factory lifetime suite follows
+below.
 
 All **31 deliberate core/initializer mutations** produced exit 1 with an
 actual `LIST DIFFER` transcript. They cover CString unwind cleanup, heading
@@ -1187,21 +1189,166 @@ Mutant source, executables and actual difference transcripts are under
 `bin/world-diff/list-breaks/`. The World runner retains its private Wine prefix
 and lock; existing native registration/build inputs are unchanged.
 
-Next: implement the embedded-control constructor/destructor, scalar deleting
-destructor, factory, DDX, help/context and PostNcDestroy, with independent normal,
-real-unwind and typed-exception comparisons. The factory ignores its parent,
-allocates `0x1c8c`, stores descriptor `+0x10dc` and has a failed-Create message
-`CSceneryAreas::Create() failed\n`; recover and test its cleanup/catch paths
-rather than assuming earlier factories establish them. The core Delete action
-already uses `fs98_world_list_delete`; give scalar deleting destruction a
-separate name. After lifetime acceptance, bind native imports/vtable/map and
-test real list controls, nested FE-shaped action callbacks, protected states,
-close behavior, rendering, deletion and unloads. Keep the area list unregistered
-until that native acceptance passes.
+### Scenery-area list class/factory lifetime acceptance
+
+`world_list_objects.c` implements the constructor, destructor, scalar deleting
+destructor, factory, DDX, help/context and PostNcDestroy using the extracted
+14-control graph. Scalar deleting destruction is named
+`fs98_world_list_scalar_delete`, keeping it separate from the existing core
+Delete action. Construction installs the class vtable only after every
+embedded constructor succeeds. Destruction retains the incoming vtable;
+remaining controls and the base still receive cleanup if a destructor throws,
+without retrying the failed control. UI delete runs only for flag bit 0 and
+after successful destruction. PostNcDestroy ignores null objects and otherwise
+dispatches virtual deleting destruction with flag 1.
+
+The factory ignores its parent, allocates `0x1c8c`, constructs with null parent,
+stores descriptor `+0x10dc`, then reads/stores the current module at `+0x80`.
+A null allocation faults on the descriptor store at address `0x10dc`.
+Ownership transfers before Create. Failed Create displays
+`CSceneryAreas::Create() failed\n` and continues to Show(1); the returned HWND
+is read afterwards. Partial construction releases through the dialog delete
+operator, whose import/convention differs from UI delete. Exceptions after
+ownership transfer do not invoke that construction cleanup.
+
+Retail's typed `CException*` handler unwinds first, frees a partial construction
+if needed, then calls the fatal `SIMSUI_ExitCleanlyE` boundary. The test uses
+real `_CxxThrowException` with direct, derived and virtual-base pointers, null
+pointers, unrelated pointer types and incompatible const pointers. Matching
+pointers reach fatal dispatch after conversion/cleanup; other exceptions
+propagate. The fixture ends that comparison side instead of invoking SIMSUI's
+message box or CRT abort. Embedded controls, Create/Show, DDX and WinHelp remain
+independent service fixtures in this suite; native control acceptance is below.
+
+```sh
+make -f tools/world.mk world-list-life N=20000
+make -f tools/world.mk world-list-life N=2000 MODE=unwind
+make -f tools/world.mk world-list-life N=2000 MODE=typed
+make -f tools/world.mk world-list-life-breaks
+```
+
+With seed `0x4a971b63` and the reference hash above, nine operations made
+**180,000 normal comparisons**, including 1,819 expected allocation write
+faults and 178,181 normal fixture checks. Each exceptional suite made
+**236,859 comparisons**: unwind includes **218,859 real unwinds**, while typed
+includes **196,297 propagated exceptions** and **22,562 fatal dispatches**.
+Each also includes 182 expected allocation faults and 17,818 normal fixture
+checks. All matched. The fixture compares the complete guarded `0x1c8c`-byte
+object, 0x30-byte descriptor, exchange/help buffers, module state, deletion
+counters, ordered calls and defined returns. Independent witnesses check
+control markers, call counts, constructor vtable, base destruction, deletion
+flags, factory result, context result and null/non-null PostNcDestroy.
+
+All **20 lifetime mutations** produced actual differences with exit 1, bringing
+core/initialization/lifetimes to **51/51**. Besides the earlier lifetime
+boundaries, these specifically test destruction order, retrying a failed child
+and freeing before typed-catch unwind. Faults, timeouts and build failures do
+not count. Logs are `bin/world-diff/list-life-normal.log`,
+`list-life-unwind.log`, `list-life-typed.log`, `list-life-breaks.log` and
+`list-life-core-regression.log`; mutant sources, executables and differences
+are in `bin/world-diff/list-life-breaks/`. The core/init regression again passed
+**521,948 comparisons**, including 497,948 real unwinds, with 24,000 normal
+fixture checks.
+
+### Scenery-area list native acceptance
+
+`world_runtime.c` now rebuilds five 60-slot vtables and five message maps,
+binds the list services and registers factory `0x13080001`, bringing the partial
+DLL to seven registrations. Module handles are propagated to the new factory
+on attach/init/deinit. `world_list.c` uses real CString assignment/append,
+CSimsListBox initialization and tab-stop services; existing shared bindings
+continue to serve the previously accepted classes.
+
+`worldlistuidiff.c` uses actual MFC/SIMSUI controls and an independent FE-shaped
+owner. Twenty-one cases cover empty through six-row lists, all five valid
+layers, active states, protected-first, mixed-protection and all-protected
+rows, and initial descriptor selections that differ from the initial UI.
+Twelve scripts cover baseline, Return/OK, Escape/Cancel, protected selection,
+Add/Edit/Delete/Browse/Priority, double-click, stale double-click selection and
+stale Delete selection. Native fixtures use committed rows before/after the
+logical array to observe retail's unchecked protection read when removing the
+last selected item leaves LB_GETCURSEL at `-1`. This preserves the access;
+it is not a claim about faults from arbitrary owner addresses.
+
+Owner callbacks open actual nested World dialogs: Add/Edit use the accepted
+area factories, Priority uses its dialog and move/check callbacks, and Browse
+uses drive search with an independent Add callback. No real FE files or game
+placement callbacks execute. Each child is inspected for import/local-dispatch
+ownership and compared through child metadata, pixels and callback logs, then
+closed. Area objects receive caller-owned scalar deletion; priority/search
+use their automatic deletion. Parent list population, disabled controls,
+ordered rows/active markers, callback selections, full descriptor/row/text
+state, nested descriptor state and automatic parent destruction are compared.
+The suite verifies ownership of the factory, local class slots and all nine
+message handlers, plus module init, double deinit and repeated unloads.
+
+Independent witnesses require initial UI selection zero for nonempty lists,
+Edit/Delete protection, disabled Add on empty lists, callback choices, list
+counts, double-click's stale descriptor protection, Delete's fresh selection,
+OK answer one and Cancel preserving a nonzero seeded answer. Pixel comparisons
+include parent and child windows. Invalid first-layer scratch remains a
+separately painted core fixture; native inputs use defined layer text.
+
+```sh
+make -f tools/world.mk world-list-ui
+make -f tools/world.mk world-list-native-breaks
+make -f tools/world.mk worlduidiff-run
+make -f tools/world.mk world-priority-ui
+make -f tools/world.mk world-booster-ui
+make -f tools/world.mk world-search-ui
+make -f tools/world.mk world-smoke
+```
+
+The suite passed **504 paired parent/child pixel/state/callback comparisons**,
+**2,180 witnesses**, eight module-init comparisons and two full unload cycles.
+Baselines are `bin/world-diff/ui-images/list-baseline-*.bmp`. The embedded
+control is `CSimsListBox` (constructor/import `0x22415720`, initializer
+`0x22415718`); its final text column uses `+`/`-` status markers rather than
+an interactive checkbox. The native cases compare both row text and pixels.
+
+All **13 native mutations** produced exit 1 with actual `LIST UI DIFFER`
+transcripts, bringing this family to **64/64** across core/init, lifetimes
+and native UI. They cover column tabs, row numbering, active markers,
+protection, OK/Cancel answers, Delete collection, Add/Edit dispatch,
+double-click dispatch/stale selection, automatic deletion and empty-list Add
+enabling. The tab mutation changed pixels while descriptor state, controls
+and callbacks still matched. Faults, timeouts and build failures do not count.
+Inputs, hashes, independently compiled DLLs/harnesses and actual difference
+logs are retained under `bin/world-diff/list-native-breaks/`.
+
+The seven-registration DLL passed the existing **288 area**, **210 priority**,
+**320 booster** and **680 drive-search** paired comparisons, totaling **1,498**,
+with their full witnesses/module-init checks and two unload cycles each.
+Booster's shared-font cleanup on unload still passes. Selected existing area,
+priority, booster and search color mutations were detected with the expanded
+native build inputs.
+
+Generated runtime/list metadata and build-only resource/anchor files reproduce
+byte-for-byte in an isolated directory. Acceptance logs are
+`bin/world-diff/list-ui-acceptance.log`, `list-native-breaks.log`,
+`list-area-regression.log`, `list-priority-regression.log`,
+`list-booster-regression.log` and `list-search-ui-regression.log`.
+Selected existing color-mutation logs are `list-area-mutation-regression.log`,
+`list-priority-mutation-regression.log`, `list-booster-mutation-regression.log`
+and `list-search-mutation-regression.log`. Mutation build inputs include both
+new list source files.
+
+A 75-second startup passed in private copy
+`bin/world-diff/smoke-game-vxa1d47d`: **27/27 modules, 95 gauges**, matching
+replacement bytes and no runtime errors. The log is
+`bin/world-diff/list-smoke-acceptance.log`; the active game was unchanged.
+Final DLL SHA-256:
+`101a33d8d925385001be48f45a3d6af711ccd0c67d60133389bcdb310674bec0`.
+Its `.text`, `.data`, `.rdata` and `.rsrc` sections match the native-tested DLL
+retained as `bin/world-diff/list-native-tested.dll` after the final comment-only
+rebuild.
+
+The scenery-area list is complete through native acceptance. The DLL remains
+a partial replacement; continue with a separately bounded remaining family.
 
 ## Remaining boundary
 
-Thirteen World registrations are still pending native acceptance: scenery lists/library,
+Twelve World registrations are still pending native acceptance: scenery library,
 booster lists, weather/time, scenery settings and FACIL-backed
 position/facility screens. Continue as bounded slices with their own native
 acceptance before building or installing a complete World replacement. Shared

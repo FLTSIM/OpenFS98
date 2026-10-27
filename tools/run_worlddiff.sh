@@ -19,6 +19,24 @@ fi
 if [[ "${1:-}" == --files-ui ]]; then
     exec timeout 240s wine bin/world-diff/worldfilesuidiff.exe "${2:-bin/world-diff/WORLD_area.dll}" "${3:-28}"
 fi
+if [[ "${1:-}" == --position-core ]]; then
+    exec timeout 120s wine bin/world-diff/worldpositiondiff.exe "${2:-2000}" "${3:-normal}"
+fi
+if [[ "${1:-}" == --position-ui ]]; then
+    exec timeout 300s wine bin/world-diff/worldpositionuidiff.exe "${2:-bin/world-diff/WORLD_area.dll}" "${3:-16}"
+fi
+if [[ "${1:-}" == --position-breaks ]]; then
+    exec python3 -B tools/world_position_breaks.py
+fi
+if [[ "${1:-}" == --position-life-breaks ]]; then
+    exec python3 -B tools/world_position_life_breaks.py
+fi
+if [[ "${1:-}" == --position-native-breaks ]]; then
+    exec python3 -B tools/world_position_native_breaks.py "${@:2}"
+fi
+if [[ "${1:-}" == --position-life ]]; then
+    exec timeout 120s wine bin/world-diff/worldpositionlifediff.exe "${2:-2000}" "${3:-0x4a971b63}" "${4:-normal}"
+fi
 if [[ "${1:-}" == --files-core ]]; then
     exec timeout 120s wine bin/world-diff/worldfilesdiff.exe "${2:-2000}" "${3:-normal}"
 fi

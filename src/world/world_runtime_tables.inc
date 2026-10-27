@@ -96,6 +96,25 @@ static void TC world_rva_da10(void *object) { fs98_world_files_selection(object)
 static int TC world_rva_da60(void *object, void *dc) { return fs98_world_files_erase(object, dc); }
 static int TC world_rva_d8f0(void *object, uint32_t unused, void *info) { return fs98_world_files_help(object, unused, info); }
 static int TC world_rva_d910(void *object, uint32_t window, uint32_t unused) { return fs98_world_files_context(object, window, unused); }
+static void * TC world_rva_139c0(void *object, uint32_t flags) { return fs98_world_position_scalar_delete(object, flags); }
+static void * TC world_rva_13e00(void *object) { (void)object; return &s_position_message_map; }
+static void TC world_rva_13be0(void *object, void *exchange) { fs98_world_position_exchange(object, exchange); }
+static int TC world_rva_13e10(void *object) { return fs98_world_position_init(object); }
+static void TC world_rva_14a40(void *object) { fs98_world_position_accept(object); }
+static int TC world_rva_144e0(void *object, uint32_t unused) { return fs98_world_position_validate(object, unused); }
+static int TC world_rva_145a0(void *object, uint32_t unused) { return fs98_world_position_error(object, unused); }
+static void TC world_rva_143f0(void *object) { fs98_world_position_populate(object); }
+static void TC world_rva_14950(void *object) { fs98_world_position_collect(object); }
+static void TC world_rva_14770(void *object) { fs98_world_position_reload(object); }
+static void TC world_rva_14790(void *object) { fs98_world_position_revert(object); }
+static void TC world_rva_14a80(void *object) { fs98_world_position_facilities(object); }
+static void TC world_rva_14a90(void *object) { fs98_world_position_changed(object, 0x78); }
+static void TC world_rva_14ab0(void *object) { fs98_world_position_changed(object, 0x90); }
+static void TC world_rva_14ad0(void *object) { fs98_world_position_changed(object, 0xa8); }
+static void TC world_rva_14af0(void *object) { fs98_world_position_changed(object, 0x34); }
+static void TC world_rva_14b10(void *object) { fs98_world_position_changed(object, 0x4c); }
+static int TC world_rva_143b0(void *object, uint32_t unused, void *info) { return fs98_world_position_help(object, unused, info); }
+static int TC world_rva_143d0(void *object, uint32_t window, uint32_t unused) { return fs98_world_position_context(object, window, unused); }
 static const struct world_import_binding s_imports[] = {
     {"SIMSUI.DLL", "??0CSimsFont@@QAE@XZ", 0, 0x256d8},
     {"SIMSUI.DLL", "??0CDIBSection@@QAE@XZ", 0, 0x256dc},
@@ -722,6 +741,68 @@ static const struct world_virtual_binding s_virtuals[] = {
     {6, 57, 90, 0},
     {6, 58, 91, 0},
     {6, 59, 55, 0},
+    {7, 0, 87, 0},
+    {7, 1, -1, (void *)world_rva_139c0},
+    {7, 2, -1, (void *)world_rva_2d00},
+    {7, 3, -1, (void *)world_rva_2d10},
+    {7, 4, -1, (void *)world_rva_2d00},
+    {7, 5, 166, 0},
+    {7, 6, 167, 0},
+    {7, 7, 168, 0},
+    {7, 8, 169, 0},
+    {7, 9, 170, 0},
+    {7, 10, 171, 0},
+    {7, 11, 172, 0},
+    {7, 12, -1, (void *)world_rva_13e00},
+    {7, 13, 173, 0},
+    {7, 14, 174, 0},
+    {7, 15, 175, 0},
+    {7, 16, 176, 0},
+    {7, 17, 177, 0},
+    {7, 18, 178, 0},
+    {7, 19, 179, 0},
+    {7, 20, 180, 0},
+    {7, 21, 159, 0},
+    {7, 22, 182, 0},
+    {7, 23, 183, 0},
+    {7, 24, 184, 0},
+    {7, 25, 185, 0},
+    {7, 26, 186, 0},
+    {7, 27, 187, 0},
+    {7, 28, 188, 0},
+    {7, 29, 189, 0},
+    {7, 30, 190, 0},
+    {7, 31, 191, 0},
+    {7, 32, 53, 0},
+    {7, 33, 181, 0},
+    {7, 34, 193, 0},
+    {7, 35, -1, (void *)world_rva_13be0},
+    {7, 36, -1, (void *)world_rva_2d20},
+    {7, 37, -1, (void *)world_rva_2d30},
+    {7, 38, 194, 0},
+    {7, 39, 195, 0},
+    {7, 40, 196, 0},
+    {7, 41, 197, 0},
+    {7, 42, 192, 0},
+    {7, 43, -1, (void *)world_rva_3d30},
+    {7, 44, 199, 0},
+    {7, 45, 200, 0},
+    {7, 46, 201, 0},
+    {7, 47, 202, 0},
+    {7, 48, 158, 0},
+    {7, 49, -1, (void *)world_rva_13e10},
+    {7, 50, 113, 0},
+    {7, 51, -1, (void *)world_rva_14a40},
+    {7, 52, -1, (void *)world_rva_e4e0},
+    {7, 53, 160, 0},
+    {7, 54, -1, (void *)world_rva_144e0},
+    {7, 55, -1, (void *)world_rva_145a0},
+    {7, 56, 89, 0},
+    {7, 57, 90, 0},
+    {7, 58, 91, 0},
+    {7, 59, 55, 0},
+    {7, 60, -1, (void *)world_rva_143f0},
+    {7, 61, -1, (void *)world_rva_14950},
 };
 static const struct world_message_entry s_messages[] = {
     {0x111, 0x400, 0x1b05, 0x1b05, 0xc, (void *)world_rva_c720},
@@ -792,6 +873,19 @@ static const struct world_message_entry s_files_messages[] = {
     {0x7b, 0x0, 0x0, 0x0, 0xa, (void *)world_rva_d910},
     {0, 0, 0, 0, 0, 0}
 };
+static const struct world_message_entry s_position_messages[] = {
+    {0x111, 0x0, 0x1bd2, 0x1bd2, 0xc, (void *)world_rva_14770},
+    {0x111, 0x0, 0x1bd4, 0x1bd4, 0xc, (void *)world_rva_14790},
+    {0x111, 0x0, 0x1bd9, 0x1bd9, 0xc, (void *)world_rva_14a80},
+    {0x53, 0x0, 0x0, 0x0, 0xa, (void *)world_rva_143b0},
+    {0x7b, 0x0, 0x0, 0x0, 0xa, (void *)world_rva_143d0},
+    {0x111, 0x400, 0x119c, 0x119c, 0xc, (void *)world_rva_14a90},
+    {0x111, 0x400, 0x11a3, 0x11a3, 0xc, (void *)world_rva_14ab0},
+    {0x111, 0x400, 0x11a4, 0x11a4, 0xc, (void *)world_rva_14ad0},
+    {0x111, 0x400, 0x11a1, 0x11a1, 0xc, (void *)world_rva_14af0},
+    {0x111, 0x400, 0x11a2, 0x11a2, 0xc, (void *)world_rva_14b10},
+    {0, 0, 0, 0, 0, 0}
+};
 static const struct world_dialog s_dialogs[] = {
     {0x1306, fs98_world_files_create, 0},
     {0x13080001, fs98_world_list_create, 0},
@@ -802,5 +896,6 @@ static const struct world_dialog s_dialogs[] = {
     {0x13080003, fs98_world_area_create_add, 0},
     {0x13080002, fs98_world_search_create, 0},
     {0x13080005, fs98_world_priority_create, 0},
+    {0x1308, fs98_world_position_create, 0},
     {0, 0, 0}
 };

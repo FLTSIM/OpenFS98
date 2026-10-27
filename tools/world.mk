@@ -39,7 +39,7 @@ world-life-breaks: worldlife
 	bash tools/run_worlddiff.sh --life-breaks
 
 PRIORITY_OBJECTS := src/world/world_priority_objects.c src/world/world_priority.h src/world/world_priority_tables.inc src/world/world_priority_hooks.inc src/world/world_objects.h src/world/world_init.h src/world/world_unwind.h src/world/world_exceptions.h src/world/world_internal.h
-WORLD_SOURCES := src/world/world_dynamic.c src/world/world_dynamic_objects.c src/world/world_dynamic_init.c src/world/world_complexity.c src/world/world_complexity_objects.c src/world/world_complexity_init.c src/world/world_airport.c src/world/world_airport_objects.c src/world/world_facilities.c src/world/world_facilities_objects.c src/world/world_position.c src/world/world_position_objects.c src/world/world_files.c src/world/world_files_objects.c src/world/world_cache.c src/world/world_cache_objects.c src/world/world_list.c src/world/world_list_objects.c src/world/world_search.c src/world/world_search_objects.c src/world/world_search_init.c src/world/world_booster.c src/world/world_booster_objects.c src/world/world_booster_init.c src/world/world_priority.c src/world/world_priority_objects.c src/world/world_area.c src/world/world_objects.c src/world/world_init.c src/world/world_runtime.c
+WORLD_SOURCES := src/world/world_copy.c src/world/world_copy_objects.c src/world/world_copy_init.c src/world/world_dynamic.c src/world/world_dynamic_objects.c src/world/world_dynamic_init.c src/world/world_complexity.c src/world/world_complexity_objects.c src/world/world_complexity_init.c src/world/world_airport.c src/world/world_airport_objects.c src/world/world_facilities.c src/world/world_facilities_objects.c src/world/world_position.c src/world/world_position_objects.c src/world/world_files.c src/world/world_files_objects.c src/world/world_cache.c src/world/world_cache_objects.c src/world/world_list.c src/world/world_list_objects.c src/world/world_search.c src/world/world_search_objects.c src/world/world_search_init.c src/world/world_booster.c src/world/world_booster_objects.c src/world/world_booster_init.c src/world/world_priority.c src/world/world_priority_objects.c src/world/world_area.c src/world/world_objects.c src/world/world_init.c src/world/world_runtime.c
 .PHONY: world worlduidiff-run world-ui-breaks world-smoke
 src/world/world_runtime_tables.inc $(WORLD_DIR)/world.res $(WORLD_DIR)/simsui-anchor.def &: tools/gen_world_runtime.py tools/gen_views_runtime.py tools/dialogmap.py orig/English/World.DLL orig/SIMSUI.DLL | $(WORLD_DIR)
 	python3 -B tools/gen_world_runtime.py
@@ -430,3 +430,31 @@ world-dynamic-init-breaks: $(WORLD_DIR)/worlddynamicinitdiff.exe
 	bash tools/run_worlddiff.sh --dynamic-init-breaks
 world-dynamic-native-breaks: world $(WORLD_DIR)/worlddynamicuidiff.exe
 	bash tools/run_worlddiff.sh --dynamic-native-breaks
+
+# Copy weather 0x13050001; independent of MAIN apply behavior.
+COPY_METADATA := src/world/world_copy_tables.inc src/world/world_copy_hooks.inc
+$(COPY_METADATA) &: tools/gen_world_copy.py tools/gen_world_tables.py tools/dialogmap.py orig/English/World.DLL
+	python3 -B tools/gen_world_copy.py
+$(WORLD_DIR)/WORLD_area.dll: $(COPY_METADATA) src/world/world_copy.h
+.PHONY: world-copy-metadata world-copy-core world-copy-life world-copy-ui
+world-copy-metadata: $(COPY_METADATA)
+$(WORLD_DIR)/worldcopydiff.exe: tools/difftest/worldcopydiff.c src/world/world_copy.c src/world/world_copy_init.c src/world/world_copy.h | $(WORLD_DIR)
+	$(CC) -std=c99 -O2 -Wall -Wextra -Werror -fno-strict-aliasing -o $@ tools/difftest/worldcopydiff.c src/world/world_copy.c src/world/world_copy_init.c
+$(WORLD_DIR)/worldcopylifediff.exe: tools/difftest/worldcopylifediff.c src/world/world_copy_objects.c src/world/world_copy.h $(COPY_METADATA) | $(WORLD_DIR)
+	$(CC) -std=c99 -O2 -Wall -Wextra -Werror -fno-strict-aliasing -fno-delete-null-pointer-checks -o $@ tools/difftest/worldcopylifediff.c src/world/world_copy_objects.c -lntdll
+world-copy-core: $(WORLD_DIR)/worldcopydiff.exe
+	bash tools/run_worlddiff.sh --copy-core $(N) $(SEED) $(MODE)
+world-copy-life: $(WORLD_DIR)/worldcopylifediff.exe
+	bash tools/run_worlddiff.sh --copy-life $(N) $(SEED) $(MODE)
+$(WORLD_DIR)/worldcopyuidiff.exe: tools/difftest/worldcopyuidiff.c tools/difftest/worlduidiff.c | $(WORLD_DIR)
+	$(CC) -std=c99 -O2 -Wall -Wextra -Werror -fno-strict-aliasing -o $@ $< -lgdi32 -lntdll
+world-copy-ui: world $(WORLD_DIR)/worldcopyuidiff.exe
+	bash tools/run_worlddiff.sh --copy-ui
+
+.PHONY: world-copy-breaks world-copy-life-breaks world-copy-native-breaks
+world-copy-breaks: $(WORLD_DIR)/worldcopydiff.exe
+	bash tools/run_worlddiff.sh --copy-breaks
+world-copy-life-breaks: $(WORLD_DIR)/worldcopylifediff.exe
+	bash tools/run_worlddiff.sh --copy-life-breaks
+world-copy-native-breaks: world $(WORLD_DIR)/worldcopyuidiff.exe
+	bash tools/run_worlddiff.sh --copy-native-breaks

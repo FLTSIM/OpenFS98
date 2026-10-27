@@ -7,6 +7,23 @@ export WINEDEBUG=-all
 mkdir -p -- "$WINEPREFIX"
 exec 9>bin/world-diff/wine.lock
 flock 9
+if [[ "${1:-}" == --copy-breaks ]]; then
+    exec python3 -B tools/world_copy_breaks.py
+fi
+if [[ "${1:-}" == --copy-life-breaks ]]; then
+    exec python3 -B tools/world_copy_life_breaks.py
+fi
+if [[ "${1:-}" == --copy-native-breaks ]]; then
+    exec python3 -B tools/world_copy_native_breaks.py "${@:2}"
+fi
+if [[ "${1:-}" == --copy-ui ]]; then
+    exec timeout 300s wine bin/world-diff/worldcopyuidiff.exe "${2:-bin/world-diff/WORLD_area.dll}" "${3:-16}"
+fi
+if [[ "${1:-}" == --copy-core || "${1:-}" == --copy-life ]]; then
+    kind="${1#--copy-}"
+    if [[ "$kind" == core ]]; then executable=worldcopydiff.exe; else executable=worldcopylifediff.exe; fi
+    exec timeout 120s wine "bin/world-diff/$executable" "${2:-2000}" "${3:-0x4a971b63}" "${4:-normal}"
+fi
 if [[ "${1:-}" == --dynamic-breaks ]]; then
     exec python3 -B tools/world_dynamic_breaks.py "${@:2}"
 fi

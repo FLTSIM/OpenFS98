@@ -182,6 +182,14 @@ static void TC world_rva_b870(void *object) { fs98_world_dynamic_accept(object);
 static void TC world_rva_b850(void *object) { fs98_world_dynamic_cancel(object); }
 static int TC world_rva_b8d0(void *object, uint32_t unused, void *info) { return fs98_world_dynamic_help(object, unused, info); }
 static int TC world_rva_b8f0(void *object, uint32_t window, uint32_t unused) { return fs98_world_dynamic_context(object, window, unused); }
+static void * TC world_rva_38e0(void *object, uint32_t flags) { return fs98_world_copy_scalar_delete(object, flags); }
+static void * TC world_rva_3b10(void *object) { (void)object; return &s_copy_message_map; }
+static void TC world_rva_3a10(void *object, void *exchange) { fs98_world_copy_exchange(object, exchange); }
+static int TC world_rva_3b20(void *object) { return fs98_world_copy_init(object); }
+static void TC world_rva_3d60(void *object) { fs98_world_copy_accept(object); }
+static void TC world_rva_3d40(void *object) { fs98_world_copy_cancel(object); }
+static int TC world_rva_3dc0(void *object, uint32_t unused, void *info) { return fs98_world_copy_help(object, unused, info); }
+static int TC world_rva_3de0(void *object, uint32_t window, uint32_t unused) { return fs98_world_copy_context(object, window, unused); }
 static const struct world_import_binding s_imports[] = {
     {"USER32.dll", "GetActiveWindow", 0, 0x25864},
     {"USER32.dll", "ValidateRect", 0, 0x25868},
@@ -1305,6 +1313,66 @@ static const struct world_virtual_binding s_virtuals[] = {
     {14, 57, 120, 0},
     {14, 58, 121, 0},
     {14, 59, -1, (void *)world_rva_b8b0},
+    {15, 0, 117, 0},
+    {15, 1, -1, (void *)world_rva_38e0},
+    {15, 2, -1, (void *)world_rva_2d00},
+    {15, 3, -1, (void *)world_rva_2d10},
+    {15, 4, -1, (void *)world_rva_2d00},
+    {15, 5, 196, 0},
+    {15, 6, 197, 0},
+    {15, 7, 198, 0},
+    {15, 8, 199, 0},
+    {15, 9, 200, 0},
+    {15, 10, 201, 0},
+    {15, 11, 202, 0},
+    {15, 12, -1, (void *)world_rva_3b10},
+    {15, 13, 203, 0},
+    {15, 14, 204, 0},
+    {15, 15, 205, 0},
+    {15, 16, 206, 0},
+    {15, 17, 207, 0},
+    {15, 18, 208, 0},
+    {15, 19, 209, 0},
+    {15, 20, 210, 0},
+    {15, 21, 189, 0},
+    {15, 22, 212, 0},
+    {15, 23, 213, 0},
+    {15, 24, 214, 0},
+    {15, 25, 215, 0},
+    {15, 26, 216, 0},
+    {15, 27, 217, 0},
+    {15, 28, 218, 0},
+    {15, 29, 219, 0},
+    {15, 30, 220, 0},
+    {15, 31, 221, 0},
+    {15, 32, 83, 0},
+    {15, 33, 211, 0},
+    {15, 34, 223, 0},
+    {15, 35, -1, (void *)world_rva_3a10},
+    {15, 36, -1, (void *)world_rva_2d20},
+    {15, 37, -1, (void *)world_rva_2d30},
+    {15, 38, 224, 0},
+    {15, 39, 225, 0},
+    {15, 40, 226, 0},
+    {15, 41, 227, 0},
+    {15, 42, 222, 0},
+    {15, 43, -1, (void *)world_rva_3d30},
+    {15, 44, 229, 0},
+    {15, 45, 230, 0},
+    {15, 46, 231, 0},
+    {15, 47, 232, 0},
+    {15, 48, 188, 0},
+    {15, 49, -1, (void *)world_rva_3b20},
+    {15, 50, 143, 0},
+    {15, 51, -1, (void *)world_rva_3d60},
+    {15, 52, -1, (void *)world_rva_3d40},
+    {15, 53, 190, 0},
+    {15, 54, 81, 0},
+    {15, 55, 118, 0},
+    {15, 56, 119, 0},
+    {15, 57, 120, 0},
+    {15, 58, 121, 0},
+    {15, 59, 85, 0},
 };
 static const struct world_message_entry s_messages[] = {
     {0x111, 0x400, 0x1b05, 0x1b05, 0xc, (void *)world_rva_c720},
@@ -1440,6 +1508,11 @@ static const struct world_message_entry s_dynamic_messages[] = {
     {0x7b, 0x0, 0x0, 0x0, 0xa, (void *)world_rva_b8f0},
     {0, 0, 0, 0, 0, 0}
 };
+static const struct world_message_entry s_copy_messages[] = {
+    {0x53, 0x0, 0x0, 0x0, 0xa, (void *)world_rva_3dc0},
+    {0x7b, 0x0, 0x0, 0x0, 0xa, (void *)world_rva_3de0},
+    {0, 0, 0, 0, 0, 0}
+};
 static const struct world_dialog s_dialogs[] = {
     {0x1304, fs98_world_complexity_create, 0},
     {0x1305, fs98_world_dynamic_create, 0},
@@ -1452,6 +1525,7 @@ static const struct world_dialog s_dialogs[] = {
     {0x13080003, fs98_world_area_create_add, 0},
     {0x13080002, fs98_world_search_create, 0},
     {0x13080005, fs98_world_priority_create, 0},
+    {0x13050001, fs98_world_copy_create, 0},
     {0x1309, fs98_world_airport_create, 0},
     {0x1308, fs98_world_position_create, 0},
     {0x1307, fs98_world_facilities_create, 0},

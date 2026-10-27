@@ -1,4 +1,4 @@
-# World.DLL — native scenery, position and facilities dialogs
+# World.DLL — native scenery, position, facilities and weather dialogs
 
 **Partial replacement with native UI acceptance.** `bin/world-diff/WORLD_area.dll`
 registers the scenery-area list (`0x13080001`), add/edit scenery area
@@ -6,13 +6,13 @@ registers the scenery-area list (`0x13080001`), add/edit scenery area
 priority (`0x13080005`), booster/cache list (`0x13080006`), add/edit booster
 (`0x13080008` / `0x13080007`), drive search (`0x13080002`) and the world-files
 container (`0x1306`), exact position (`0x1308`), facilities directory (`0x1307`)
-and go-to-airport (`0x1309`), plus scenery complexity (`0x1304`) and dynamic scenery (`0x1305`).
+and go-to-airport (`0x1309`), plus scenery complexity (`0x1304`), dynamic scenery (`0x1305`) and copy weather (`0x13050001`).
 Their classes, initialization, controls, event/message maps, factories,
 exception lifetimes and module binding are rebuilt in C, using
-retail MFC42/SIMSUI as shared dependencies. The other 5 World registrations
+retail MFC42/SIMSUI as shared dependencies. The other 4 World registrations
 remain pending native acceptance.
 
-This is ready to review as a standalone fourteen-dialog slice. It is **not a full
+This is ready to review as a standalone fifteen-dialog slice. It is **not a full
 World replacement** and must not replace the active game's World.DLL. The
 startup smoke changes only a private game copy; startup success does not supply
 the other registrations or establish their behavior.
@@ -113,9 +113,8 @@ UI fixtures: FACIL's apply path reaches MAIN, CHAIN and the aircraft simulator.
 
 Facilities directory `0x1307` and go-to-airport `0x1309` have richer list and
 nested-dialog contracts in the same owner/harness, with native World acceptance
-recorded below. Weather, time, scenery
-complexity and other MAIN-driven descriptors need separate caller recovery;
-their inventory entries are not behavior specifications.
+recorded below. The remaining weather and time descriptors need separate
+caller recovery; their inventory entries are not behavior specifications.
 
 ## First milestone: seven area-class core routines
 
@@ -2868,11 +2867,156 @@ The active game's World.DLL remains retail SHA-256 `35d67023...3118f5`.
 MAIN/HOST/FE/FACIL, their verified owner harnesses and the shared Makefile are
 unchanged. WORLD remains a partial replacement.
 
+## Copy weather: owner recovery and native implementation
+
+Copy weather **`0x13050001`**, factory **`0x223f11c0`**, template **`0x6a8`**,
+is the fifteenth registration in the partial native DLL. Its implementation is
+`world_copy.c`, `world_copy_objects.c` and `world_copy_init.c`. The runtime
+owns its 60-slot vtable and two help/message handlers. PostNcDestroy shares
+the existing module-owned scalar-delete dispatch; Close is imported from
+SIMSUI. This class has no CNotify.
+
+Independent caller recovery uses retail `orig/Modules/MAIN.DLL`, not the
+inventory labels. `0x207e7190` prepares the descriptor at `0x20801538`, opens
+`0x13050001` through HOST `+0x10c`, and calls `0x207e7200` only on zero modal
+return and answer 1. Preparation (`0x207e71d0`) clears the answer and copies
+the current area count into descriptor `+0xc`; the static row pointer at
+`+0x10` is `0x208012b0`. MAIN applies the source/destination indices to its
+weather arrays with a `0xc8`-byte area stride and checks each copy option for
+**exactly 1**. World preserves the raw values. No MAIN implementation or
+verified owner fixture was changed, and no real weather-copy operation runs
+in these tests.
+
+| Descriptor offset | World use |
+| --- | --- |
+| `+0` | Answer, 0 cancel / 1 accepted |
+| `+4`, `+8` | Owner fields, unused by this class |
+| `+0xc`, `+0x10` | Signed area count / row array; row `+8` is a text pointer |
+| `+0x14`, `+0x18` | Disable-option groups, tested for nonzero |
+| `+0x1c`, `+0x20` | Source / destination selection, including raw -1 |
+| `+0x28`, `+0x38`, `+0x50`, `+0x40`, `+0x30`, `+0x48` | Six checkbox values in control order |
+
+Recovered behavior retained in C:
+
+- The `0x1a74`-byte class constructs thirteen controls: two buttons, two labels,
+  two combos, artwork and six checkboxes. Construction installs vtable
+  `0x2240e540` after all children; it leaves descriptor `+0x10dc` and mode
+  `+0x1a70` untouched. Destruction retains the incoming vtable, reverses the
+  child order and unwinds remaining children/base after a throwing destructor.
+  Scalar deletion tests flag bit 0. Thirteen DDX bindings run without base DDX.
+- The factory ignores its supplied parent, allocates/constructs with null
+  parent, stores the descriptor and module, then calls Create and Show(1)
+  even if Create returns zero. The returned HWND is read after Show. A null
+  allocation faults writing `+0x10dc`; construction failure uses dialog
+  delete. Ownership transfers before Create, with no typed catch.
+- Initialization ignores base Init's result, calls skin Init with bitmap
+  `0x14f`, resource module and flags 15, and returns zero on skin failure.
+  It initializes artwork, both buttons, source label/combo, destination
+  label/combo, then all six checks. Only then does it test the descriptor:
+  null and `0xcdcdcdcd` are invalid. Valid descriptors populate and return 1.
+  Both combos retain font `+0x3e0` and their distinct label bindings.
+- Population resets both lists, adds each row's text and stores the original
+  row pointer as item data in each list. The initial row pointer is cached;
+  the signed loop bound is reloaded from the current descriptor after each
+  row. Descriptor reads reload after imported calls. It sets both selections
+  and six raw checkbox states, then conditionally disables two groups. Each
+  group makes five EnableWindow calls, including a repeated fourth-checkbox
+  call; these repetitions and their order are retained. Population does not
+  re-enable controls when a flag is clear.
+- Collection reads both signed combo selections, reloading the descriptor
+  after each send, then copies the six full 32-bit check values. Accept writes
+  mode 1 and collects before reading both selections again. Equal selections,
+  including two -1 values, reject with error `0x1012` against the destination
+  combo. The imported error return is ignored; a posted `0x5fa` message focuses
+  the reloaded destination HWND. Rejection leaves the answer unchanged and the
+  dialog visible. A successful retry writes answer 1 and closes. Cancel
+  samples descriptor/vtable, writes mode 2 and answer 0, then closes.
+- Help preserves the WinHelp command-12 result; context help uses command 10
+  and returns 1. The native class, maps and handlers are owned by the tested
+  module; the reference side executes retail code.
+
+```sh
+make -f tools/world.mk world-copy-metadata world
+make -f tools/world.mk world-copy-core N=20000
+make -f tools/world.mk world-copy-core N=2000 MODE=interrupt
+make -f tools/world.mk world-copy-life N=20000
+make -f tools/world.mk world-copy-life N=2000 MODE=unwind
+make -f tools/world.mk world-copy-life N=2000 MODE=typed
+make -f tools/world.mk world-copy-breaks world-copy-life-breaks
+make -f tools/world.mk world-copy-ui world-copy-native-breaks
+```
+
+Seed `0x4a971b63`: the independent guarded event/initializer fixture passed
+**160,000 normal comparisons** and **123,831 interrupted-mode comparisons**,
+including **107,831 actual interruptions** and 16,000 normal witnesses. It
+compares every fixture byte, ordered imports/virtual closes and returns, two
+replaceable descriptors/vtables with distinct row arrays, negative/zero row counts, original item-data
+pointers, raw checkbox/selection values, both disable groups, descriptor
+sentinels and skin failure. The eight core/initializer routines have no local
+EH cleanup; their exception mode verifies interruption at each imported call.
+
+The class fixture passed **180,000 normal comparisons** and **222,092 in each
+of unwind and typed mode**, each including **204,092 real unwinds**. The typed
+mode uses actual `_CxxThrowException` with direct, derived, virtual-base, null,
+unrelated and const CException pointer types. Null allocation faults are
+compared explicitly. Across these five runs: **908,015 guarded comparisons**,
+**408,184 real unwinds**, **107,831 core/initializer interruptions**, zero
+differences. Logs are `bin/world-diff/copy-core.log`, `copy-interrupt.log`,
+`copy-life-full.log`, `copy-unwind.log` and `copy-typed.log`.
+
+The full native suite passed **576 paired pixel/state/callback comparisons**,
+**1,152 independent script witnesses**, eight module-init comparisons and two
+unload cycles. It covers initial raw states, each enabled checkbox via real
+mouse clicks, both list rows/item-data/selections, retained font/label pointers,
+dropdown rendering, Return/Escape, command and virtual accept/cancel, both owner
+descriptors and module-owned scalar deletion. Three rejection scripts compare
+actual Alerts pixels/state and destination focus, preserve the answer/window,
+then retry successfully. No pixel rectangles are masked. Native log:
+`bin/world-diff/copy-ui-final.log`; baseline images:
+`ui-images/copy-baseline-*.bmp`.
+
+An initial fixture script tried to create a duplicate -1 selection using an
+out-of-range positive index. Retail retained its old selection, and the
+rejection witness correctly failed. The corrected scripts explicitly select
+the first/last equal rows or two -1s. This changed only the new fixture.
+
+Copy/runtime metadata and build-only resources/SIMSUI anchor reproduce
+byte-for-byte in an isolated directory. The retail registry is unchanged and
+all twelve dialogmap tests pass.
+
+Core/initializer mutations detected **42/42** actual differences; class/lifetime
+mutations detected **24/24**. The strengthened row fixtures use separate arrays
+for both descriptors and detect caching the row pointer before list resets,
+reloading it during iteration, and caching the live row count. Together with
+native mutations, acceptance is **80/80 actual differences detected**. Each
+requires exit 1 and a `DIFFER` transcript. Logs are `copy-core-breaks.log`,
+`copy-life-breaks.log` and `copy-native-breaks.log` under `bin/world-diff/`.
+
+Native mutations detected **14/14 actual differences**, including font/artwork,
+raw population and collection, list item-data pointers, disable groups,
+accept/veto/answer, cancel mode, posted error focus and destruction dispatch.
+The native builder retains complete source/DLL/harness snapshots, baseline DLL,
+input SHA-256 hashes and built DLL/executable hashes under
+`bin/world-diff/copy-native-breaks/`. Build errors, faults and timeouts do not
+count as detections. Earlier native mutation builders include the copy-weather
+sources in their expanded DLL builds.
+
+A **75-second startup** passed in private copy
+`bin/world-diff/smoke-game-zhcugas1`: **27/27 modules, 95 gauges**, World loaded,
+matching replacement bytes and no runtime errors. Log: `copy-smoke.log`.
+`WORLD_area.dll`, `copy-native-tested.dll`, `copy-source-reproduced.dll` and the
+startup copy are byte-identical, SHA-256
+`0b15076beaa823c58335c0b0d6ffb19cad985e82df8ee7aa3358847fb290d70b`.
+The final sources reproduce that DLL with `SOURCE_DATE_EPOCH=1793132385`.
+The active game's World.DLL remains retail SHA-256 `35d67023...3118f5`.
+MAIN/HOST/FE/FACIL, their verified owner harnesses and the shared Makefile are
+unchanged. WORLD remains a partial replacement.
+
 ## Remaining boundary
 
-Five registrations remain pending native acceptance: basic weather `0x1302`,
-time/season `0x1301`, weather areas `0x1303`, advanced
-weather `0x13040001` and copy weather `0x13050001`. These need independent
+Four registrations remain pending native acceptance: basic weather `0x1302`,
+time/season `0x1301`, weather areas `0x1303` and advanced
+weather `0x13040001`. These need independent
 caller/descriptor recovery before choosing another bounded family. Their
 inventory entries are not behavior specifications.
 

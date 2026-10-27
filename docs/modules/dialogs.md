@@ -513,7 +513,7 @@ Drive search (`0x13080002`) also has core, lifetime, initialization and native U
 acceptance. The scenery-area list (`0x13080001`) also has native acceptance
 with nested add/edit, priority and search comparisons. The booster/cache list
 (`0x13080006`) also has native acceptance with nested booster editors. World
-has fourteen accepted registrations; five remain. The world-files container `0x1306`
+has fifteen accepted registrations; four remain. The world-files container `0x1306`
 also has native acceptance with nested area/cache lists. Exact position `0x1308`
 has native control/error/lifetime acceptance over independent FACIL-shaped callbacks;
 its Select Flight owner flow remains separate. Facilities directory `0x1307`
@@ -524,8 +524,9 @@ core, initialization, lifetime and native UI acceptance over independent owner
 callbacks, including an actual nested facilities directory. Scenery complexity `0x1304` also has class, initializer and native acceptance,
 including its CNotify lifetime. Dynamic scenery `0x1305` also has owner, core,
 class, initializer and native acceptance, including ordered error dialogs and
-focus/retry behavior. The remaining five weather/time registrations need
-separate caller recovery.
+focus/retry behavior. Copy weather `0x13050001` also has native acceptance, including two area
+lists, raw copy options and same-area rejection/focus/retry. The remaining four
+weather/time registrations need separate caller recovery.
 For a whole-DLL assignment, choose
 MP_DIALOG and include all three registrations plus the full flag-2 window
 array in the completion criteria.

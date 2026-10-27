@@ -28,7 +28,7 @@ world-life-breaks: worldlife
 	bash tools/run_worlddiff.sh --life-breaks
 
 PRIORITY_OBJECTS := src/world/world_priority_objects.c src/world/world_priority.h src/world/world_priority_tables.inc src/world/world_priority_hooks.inc src/world/world_objects.h src/world/world_init.h src/world/world_unwind.h src/world/world_exceptions.h src/world/world_internal.h
-WORLD_SOURCES := src/world/world_position.c src/world/world_position_objects.c src/world/world_files.c src/world/world_files_objects.c src/world/world_cache.c src/world/world_cache_objects.c src/world/world_list.c src/world/world_list_objects.c src/world/world_search.c src/world/world_search_objects.c src/world/world_search_init.c src/world/world_booster.c src/world/world_booster_objects.c src/world/world_booster_init.c src/world/world_priority.c src/world/world_priority_objects.c src/world/world_area.c src/world/world_objects.c src/world/world_init.c src/world/world_runtime.c
+WORLD_SOURCES := src/world/world_facilities.c src/world/world_facilities_objects.c src/world/world_position.c src/world/world_position_objects.c src/world/world_files.c src/world/world_files_objects.c src/world/world_cache.c src/world/world_cache_objects.c src/world/world_list.c src/world/world_list_objects.c src/world/world_search.c src/world/world_search_objects.c src/world/world_search_init.c src/world/world_booster.c src/world/world_booster_objects.c src/world/world_booster_init.c src/world/world_priority.c src/world/world_priority_objects.c src/world/world_area.c src/world/world_objects.c src/world/world_init.c src/world/world_runtime.c
 .PHONY: world worlduidiff-run world-ui-breaks world-smoke
 src/world/world_runtime_tables.inc $(WORLD_DIR)/world.res $(WORLD_DIR)/simsui-anchor.def &: tools/gen_world_runtime.py tools/gen_views_runtime.py tools/dialogmap.py orig/English/World.DLL orig/SIMSUI.DLL | $(WORLD_DIR)
 	python3 -B tools/gen_world_runtime.py
@@ -290,3 +290,37 @@ world-position-life-breaks: $(WORLD_DIR)/worldpositionlifediff.exe
 .PHONY: world-position-native-breaks
 world-position-native-breaks: world $(WORLD_DIR)/worldpositionuidiff.exe
 	bash tools/run_worlddiff.sh --position-native-breaks
+
+# Facilities directory 0x1307: class/factory, browser core and native UI.
+src/world/world_facilities_tables.inc src/world/world_facilities_hooks.inc &: tools/gen_world_facilities.py tools/gen_world_tables.py tools/dialogmap.py orig/English/World.DLL
+	python3 -B tools/gen_world_facilities.py
+FACILITIES_OBJECTS := src/world/world_facilities_objects.c src/world/world_facilities.h src/world/world_facilities_tables.inc src/world/world_facilities_hooks.inc src/world/world_objects.h src/world/world_internal.h src/world/world_unwind.h
+$(WORLD_DIR)/worldfacilitieslifediff.exe: tools/difftest/worldfacilitieslifediff.c $(FACILITIES_OBJECTS) | $(WORLD_DIR)
+	$(CC) -std=c99 -O2 -Wall -Wextra -Werror -fno-strict-aliasing -fno-delete-null-pointer-checks -o $@ tools/difftest/worldfacilitieslifediff.c src/world/world_facilities_objects.c -lntdll
+.PHONY: world-facilities-metadata world-facilities-life world-facilities-life-breaks
+world-facilities-metadata: src/world/world_facilities_tables.inc src/world/world_facilities_hooks.inc
+world-facilities-life: $(WORLD_DIR)/worldfacilitieslifediff.exe
+	bash tools/run_worlddiff.sh --facilities-life $(N) $(SEED) $(MODE)
+world-facilities-life-breaks: $(WORLD_DIR)/worldfacilitieslifediff.exe
+	bash tools/run_worlddiff.sh --facilities-life-breaks
+
+FACILITIES_CORE := src/world/world_facilities.c src/world/world_facilities.h src/world/world_facilities_tables.inc src/world/world_unwind.h
+$(WORLD_DIR)/WORLD_area.dll: $(FACILITIES_CORE) $(FACILITIES_OBJECTS)
+
+$(WORLD_DIR)/worldfacilitiesuidiff.exe: tools/difftest/worldfacilitiesuidiff.c tools/difftest/worlduidiff.c src/world/world_internal.h | $(WORLD_DIR)
+	$(CC) -std=c99 -O2 -Wall -Wextra -Werror -fno-strict-aliasing -o $@ $< -lgdi32 -lntdll
+.PHONY: world-facilities-ui
+world-facilities-ui: world $(WORLD_DIR)/worldfacilitiesuidiff.exe
+	bash tools/run_worlddiff.sh --facilities-ui
+
+$(WORLD_DIR)/worldfacilitiesdiff.exe: tools/difftest/worldfacilitiesdiff.c $(FACILITIES_CORE) | $(WORLD_DIR)
+	$(CC) -std=c99 -O2 -Wall -Wextra -Werror -fno-strict-aliasing -o $@ tools/difftest/worldfacilitiesdiff.c src/world/world_facilities.c -lntdll
+.PHONY: world-facilities-core
+world-facilities-core: $(WORLD_DIR)/worldfacilitiesdiff.exe
+	bash tools/run_worlddiff.sh --facilities-core $(N) $(MODE)
+
+.PHONY: world-facilities-breaks world-facilities-native-breaks
+world-facilities-breaks: $(WORLD_DIR)/worldfacilitiesdiff.exe
+	bash tools/run_worlddiff.sh --facilities-breaks
+world-facilities-native-breaks: world $(WORLD_DIR)/worldfacilitiesuidiff.exe
+	bash tools/run_worlddiff.sh --facilities-native-breaks

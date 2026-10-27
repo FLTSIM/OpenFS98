@@ -1,17 +1,17 @@
-# World.DLL — native scenery and exact-position slices
+# World.DLL — native scenery, position and facilities dialogs
 
 **Partial replacement with native UI acceptance.** `bin/world-diff/WORLD_area.dll`
 registers the scenery-area list (`0x13080001`), add/edit scenery area
 (`0x13080003` / `0x13080004`), scenery
 priority (`0x13080005`), booster/cache list (`0x13080006`), add/edit booster
 (`0x13080008` / `0x13080007`), drive search (`0x13080002`) and the world-files
-container (`0x1306`) and exact position (`0x1308`).
+container (`0x1306`), exact position (`0x1308`) and facilities directory (`0x1307`).
 Their classes, initialization, controls, event/message maps, factories,
 exception lifetimes and module binding are rebuilt in C, using
-retail MFC42/SIMSUI as shared dependencies. The other 9 World registrations
+retail MFC42/SIMSUI as shared dependencies. The other 8 World registrations
 remain pending native acceptance.
 
-This is ready to review as a standalone ten-dialog slice. It is **not a full
+This is ready to review as a standalone eleven-dialog slice. It is **not a full
 World replacement** and must not replace the active game's World.DLL. The
 startup smoke changes only a private game copy; startup success does not supply
 the other registrations or establish their behavior.
@@ -94,8 +94,8 @@ and handoff work.
 The FE-owned world-files container `0x1306` (factory `0x223f1440`, template
 `0x6b6`, owner fixture `world_files`) now has native acceptance below, including
 its area/cache list children. FACIL's exact-position dialog `0x1308` now has
-its own acceptance below. Continue with FACIL's facilities directory `0x1307`,
-using independent owner callbacks; keep real placement callbacks out of tests
+its own acceptance below. FACIL's facilities directory `0x1307` now also has native acceptance below;
+continue with go-to-airport `0x1309` using independent owner callbacks; keep real placement callbacks out of tests
 because they reach MAIN and the aircraft simulator.
 
 ## Other bounded slices
@@ -104,12 +104,12 @@ FACIL's exact-position dialog `0x1308` uses template `0x70c`, factory
 `0x223f1c60`. Its owner contract is in [FACIL's dialogs](facil.md#the-dialogs),
 `src/facil/facil.c` and `tools/difftest/facildiff.c` (`world_position`). FACIL's
 validator/apply/revert/reload callbacks are established; its World class now
-has the native control/error/lifetime acceptance below. The separate facilities
-directory and flight-selection owner flows remain pending.
+has the native control/error/lifetime acceptance below. Facilities directory now has native acceptance below; the separate
+flight-selection owner flow remains pending.
 Do not execute real placement callbacks against the active game while building
 UI fixtures: FACIL's apply path reaches MAIN, CHAIN and the aircraft simulator.
 
-The facility directory `0x1307` and go-to-airport `0x1309` have richer list and
+Facilities directory `0x1307` and go-to-airport `0x1309` have richer list and
 nested-dialog contracts in the same owner/harness. Weather, time, scenery
 complexity and other MAIN-driven descriptors need separate caller recovery;
 their inventory entries are not behavior specifications.
@@ -1943,17 +1943,285 @@ owner callbacks. WORLD remains a partial replacement with ten accepted
 registrations; actual flight selection, simulator placement and the facilities
 window remain separate owner flows.
 
+## Facilities directory: class and factory milestone
+
+The facilities slice starts **`0x1307`**, factory **`0x223f1d80`**, template
+**`0x6bf`**, owned by FACIL `.data+0x80`. Its first milestone established independent class/factory acceptance without
+registering it in the native DLL. The subsequent browser/native milestone below
+adds that registration and raises the accepted count to eleven.
+
+`world_facilities_objects.c` implements the constructor `0x22406f00`,
+destructor `0x22407010`, scalar deleting destructor `0x22406ff0`, factory,
+DDX `0x224070f0`, help `0x224095e0`, context help `0x22409600` and shared
+PostNcDestroy `0x223f3d30`. The independent harness runs these eight entry
+points plus construction followed by deleting destruction. It calls retail
+code directly, patching imported services only, and leaves retail's local
+vtable, DDX/help maps and MSVC exception metadata intact. FACIL's implementation
+and verified harness are unchanged; no real placement or apply callbacks run.
+
+Recovered class details:
+
+- The object is `0x1db8` bytes with owner descriptor at `+0x10dc`, class vtable
+  `0x224116b8` and nine embedded controls. Their offsets in construction order
+  are `0x1628`, `0x1724`, `0x1764`, `0x1860`, `0x195c`, `0x1a50`, `0x1b44`,
+  `0x1c14`, `0x1cfc`. All nine have DDX bindings, preceded by base DDX.
+- Unlike exact position, the spin at `+0x1724` retains a **local** vtable,
+  `0x224117a8`. Normal destruction calls imported destructor `+0x25564`
+  directly without resetting that vtable. EH cleanup reaches the same import
+  through local jump thunk `0x22409aa2`.
+- The constructor installs its class vtable and clears `+0x1428` only after
+  every embedded constructor succeeds. Destruction retains the incoming class
+  vtable and destroys controls in reverse order, then the base. Exceptions
+  continue cleanup without retrying the failed destructor.
+- The factory ignores its parent, constructs with null parent, writes the
+  descriptor and current module, then calls Create and Show(1). Create failure
+  still proceeds to Show without a message. The handle is read after Show.
+  A null allocation faults on the descriptor write at address `0x10dc`.
+  Construction failures release through the dialog delete import; ownership
+  transfers before Create. There is no typed `CException*` catch here.
+- Help forwards WinHelp's result with command 12. Context help obtains the
+  **current cursor position**, queries the artwork window at `+0x1c34` and
+  calls PtInRect. Any nonzero result suppresses help and returns zero;
+  otherwise command 10 is issued for the supplied window and the return is 1.
+  The geometry-query return values and supplied message coordinates are ignored.
+- PostNcDestroy calls virtual deleting destruction with flag 1 for nonnull
+  objects, and does nothing for null objects.
+
+`gen_world_facilities.py` validates both EH state chains, reverse control
+lifetimes, all DDX bindings, class/deleting-destructor identity, local spin
+vtable and the terminated help/message maps. Its outputs are ABI metadata,
+without retail code or resource payloads. Both generated includes reproduce
+byte-for-byte in an isolated directory. The inventory also regenerates
+unchanged; all 12 dialogmap tests pass.
+
+```sh
+make -f tools/world.mk world-facilities-metadata
+make -f tools/world.mk world-facilities-life N=20000
+make -f tools/world.mk world-facilities-life N=2000 MODE=unwind
+make -f tools/world.mk world-facilities-life N=2000 MODE=typed
+make -f tools/world.mk world-facilities-life-breaks
+```
+
+Reference SHA-256 is the same `35d67023...3118f5` recorded above. Seed
+`0x4a971b63`: the normal run passed **180,000 comparisons**, with **1,819
+expected allocation write faults** and **178,181 successful-path witnesses**.
+Each exceptional mode passed **173,834 comparisons**, including **155,834 real
+unwinds**, **182 expected allocation faults** and **17,818 normal witnesses**.
+The total is **527,668 comparisons, zero differences**. Typed mode covers
+direct/derived/virtual-base/null `CException*` metadata, unrelated and const
+pointer types; every thrown exception propagates, with zero fatal dispatches.
+
+Comparisons include ordered calls and parameters, returns, complete guarded
+object and descriptor/exchange/help buffers, mutable module state, control
+markers and both deletion counters. Explicit witnesses check successful
+constructor state, control markers, call counts, factory handle, help and
+context returns, delete flags and PostNcDestroy. Every external service boundary
+is separately interrupted in the exceptional modes. Geometry fixtures exercise
+both suppression outcomes with a noncanonical nonzero PtInRect result and
+zero-returning cursor/rectangle queries that still fill their outputs.
+
+All **24/24 deliberate mutations** produced exit 1 and an actual `DIFFER`
+transcript. They cover constructor state/vtable timing and control omission,
+reverse destruction and base cleanup, delete flags and operators, exception
+ownership transfer, allocation size, Create template/parent, post-Show handle,
+base/local DDX, help command/return, context artwork window, coordinate order,
+help suppression and PostNcDestroy deletion. Build errors, faults and timeouts
+do not count as detections.
+
+Acceptance logs are `bin/world-diff/facilities-life-normal.log`,
+`facilities-life-unwind.log`, `facilities-life-typed.log` and
+`facilities-life-breaks.log`. Mutation sources, independent executables and
+actual difference logs live in ignored `bin/world-diff/facilities-life-breaks/`.
+All runs use the existing World-specific Wine prefix and lock. The existing
+exact-position typed lifetime regression also passed **7,124 comparisons**
+(`N=32`), logged in `facilities-position-life-regression.log`.
+
+## Facilities directory: browser core and native acceptance
+
+Facilities directory **`0x1307`** is accepted through native UI over independent
+FACIL-shaped owner callbacks. `WORLD_area.dll` now registers eleven dialogs;
+eight World registrations remain. This milestone adds the map/browser,
+rich-text results and their lifetimes to the earlier class/factory milestone.
+
+`world_facilities.c` implements row release (`0x22407210`), airport/navaid and
+runway output (`0x224073b0`), map/output transitions (`0x224086e0`), bitmap
+hit testing (`0x22408a40`), map highlighting (`0x22408aa0`), initialization
+(`0x22408c80`), command dispatch (`0x22409230`), mouse handlers, accept,
+close and home/back/refresh. Local CWnd-derived spin and rich-edit vtables
+are rebuilt alongside the dialog vtable and all ten message-map entries.
+Only imported MFC42/SIMSUI and Win32/CRT services remain shared. Native fixtures
+check module ownership of every local virtual/message handler and both local
+control deleting destructors; they cannot call retail World as the replacement.
+
+The native adapter resolves imported services with their actual calling
+conventions. The rich-edit control is separately allocated as `0x40` bytes,
+constructed through MFC, assigned its local vtable and created with style
+`0x403108c4`, id `0xede`, in the remapped placeholder rectangle. Failure during
+construction releases through MFC operator delete; ownership transfers before
+Create. Close deletes the current map mask, deletes the rich-edit control
+through its virtual scalar destructor, writes result 2 / answer 0 and invokes
+the imported dialog Close. Automatic dialog deletion follows on destruction.
+The facilities shared font is constructed once per module; the adapter owns
+its destructor on unload instead of registering unloadable code with the
+process-wide CRT exit table. Its lifecycle is independent of the booster font; both callbacks run in
+reverse registration order when the module unloads.
+
+Observed behavior preserved and tested:
+
+- The first screen has nine region entries; USA opens the 50-state screen.
+  Other selections build results using the previous screen's filter context
+  before changing mode to 40. Map, back and refresh use the stored history.
+  The apparent history limit at index 100 aliases object `+0x1420`, the history
+  index itself: storing that entry's mode changes the index used for the next
+  resource store. The C port retains this reload and alias. Transitions load
+  replacement mask bitmaps without deleting the earlier handles; Close deletes
+  the current mask, preserving retail's earlier-handle leak.
+- The actual radio state, stored in window user data, selects airports or
+  navaids. Output clears the rich edit, applies paragraph/character formats,
+  selects a wait cursor, fills borrowed stack-based region/country/state arrays,
+  calls the independent owner at descriptor `+0xc`, formats its returned rows,
+  and restores the arrow cursor. Expired filter-array addresses remain in the
+  descriptor after return. They are normalized only after callback contents
+  have been compared. Zero-count output retains the owner's returned storage;
+  nonzero and negative counts follow retail's distinct release paths.
+- Airport output uses city, country or state, and long name, followed by
+  frequency, altitude, latitude, longitude, ID and runway-end details. Navaid
+  output varies its place heading by mode and preserves frequency-bit priority,
+  including the unusual test `(flags & 8) && (flags & 0xf982)`. Runway output
+  preserves the `H` prefix, L/R/C suffixes, special runway names and surface
+  resources. Retail writes `_itoa` text through a newly constructed CString's
+  data pointer; the port retains that operation and its ordering.
+- Release retains each list's signed count but reloads the descriptor and row
+  base before every pointer-to-pointer free. It releases six fields per airport
+  row, five per navaid row, both row arrays, then zeros both counts. Descriptor
+  swaps, zero/negative/extreme counts and the complete guarded fixture are
+  compared at the external service boundaries.
+- Native hover/click tests use actual palette-index mask pixels and screen
+  coordinates. Hover, bitmap highlighting, keyboard cycling, Return, mouse
+  activation and the USA exception use the recovered command/mouse paths.
+  Help uses current cursor geometry to suppress context help over the artwork.
+- Initialization preserves the early base-init/skin return branches, CString
+  and bitmap temporaries, virtual radio setup, shared-font flag order, device
+  DPI conversions, character formats, paragraph tabs, initial transition and
+  focus. Failed temporary construction and rich-edit allocation cleanup are
+  independently compared with real Windows/MSVC unwinding.
+
+```sh
+make -f tools/world.mk world-facilities-core N=20000
+make -f tools/world.mk world-facilities-core N=256 MODE=unwind
+make -f tools/world.mk world-facilities-breaks
+make -f tools/world.mk world-facilities-life N=20000
+make -f tools/world.mk world-facilities-life N=2000 MODE=unwind
+make -f tools/world.mk world-facilities-life N=2000 MODE=typed
+make -f tools/world.mk world-facilities-life-breaks
+make -f tools/world.mk world-facilities-ui
+make -f tools/world.mk world-facilities-native-breaks
+make -f tools/world.mk world-smoke
+```
+
+The core fixture runs eighteen operations per scenario. It compares ordered
+calls, parameters and returns, all object bytes, both descriptors, row/runway
+buffers, CString storage and live-state counters, frees, bitmap bytes and guard
+regions. Imported service fixtures supply independent text and geometry;
+retail retains its internal calls and MSVC EH/vector-construction helpers.
+Both `__CxxFrameHandler` and `_except_handler3` are real MSVCRT handlers, and
+interruption calls real `RtlUnwind`. Callback contents are checked before
+normalizing expired stack addresses; generated node tables are compared by
+contents before normalizing their module-specific addresses. Initialization
+includes null output allocations, failed base/skin calls, 96/120 DPI and
+exceptions at each external call boundary. Native painting and mouse paths
+supply the real GDI/window acceptance beyond these synthetic services.
+
+The native fixture runs eighteen scripts per case across two unload cycles,
+plus shared-font construction/unload checks in both dialog-opening orders.
+It compares pixels, full rich-edit text, control metadata/geometry, defined
+character/paragraph formats, callbacks and filter contents, owner row releases,
+mode/history/selection and close results. The fixture physically clicks the
+radio button and asserts navaid flags; sending WM_COMMAND alone did not
+exercise that state change and was rejected after a missed mutation exposed
+it. Map scripts use actual mask pixels and reapply hover highlighting after the
+full-window redraw, so clearing/repainting focus cannot hide a highlight
+regression. WM_SETCURSOR is dispatched explicitly with its three stack
+arguments; its native result is compared. Independent hooks check one dialog
+and one output deletion with flag 1, plus exactly one construction and destruction of each shared font per module,
+in both facilities/booster construction orders. The shared-font cleanup mutation must fail during
+unload, not through a rendering difference.
+
+All mutation suites require exit 1 with actual difference transcripts; build
+failures, faults, fixture failures and timeouts never count as detections.
+Native mutants retain hashes and complete source/DLL/harness snapshots.
+
+With seed `0x4a971b63`, **20,000 normal scenarios passed 360,000 core
+comparisons and 360,000 witnesses**. The **256-scenario unwind run passed
+434,734 comparisons**, including **430,126 real unwinds** and **4,608 normal
+witnesses**. Together with the class/factory milestone's **527,668 lifetime
+comparisons**, that is **1,322,402 guarded core/lifetime comparisons, zero
+differences**. Core logs are `facilities-core-normal.log` and
+`facilities-core-unwind.log`; the final fixture also retains those runs as
+`facilities-core-final-normal.log` / `facilities-core-final-unwind.log`.
+
+The native suite passed **576 paired pixel/state/callback comparisons**, **576
+script witnesses**, eight module-initialization comparisons and two full unload
+cycles. It also verified both shared fonts' construction/destruction counts and
+reverse registration order in **four module unload checks covering both construction orders**.
+Baselines are `bin/world-diff/ui-images/facilities-baseline-*.bmp`.
+
+All **37 core/init**, **24 lifetime** and **16 native mutations** produced actual
+differences: **77/77 detected**. They include list release and descriptor reloads,
+filter/heading/placeholder construction, navaid frequency priority, runway
+prefix/suffix/surfaces, the history-index alias, back/keyboard wrap, bitmap
+stride/orientation/highlight dimensions and raster operation, mouse selection,
+close results/deletion flags, initialization formats/styles/cleanup, dispatch
+ownership and shared-font cleanup on unload. The initially missed radio/type
+mutation and highlight dimension error led to stronger fixtures, followed by
+passing baseline and mutation runs. Artifacts are under `facilities-breaks/`,
+`facilities-life-breaks/` and `facilities-native-breaks/`. Logs are
+`facilities-core-breaks.log`, `facilities-life-breaks.log`,
+`facilities-native-breaks.log` and `facilities-ui-acceptance.log`; the final
+keyboard/highlight run is also retained in `facilities-ui-keyboard.log`.
+
+The eleven-registration DLL also passed all earlier native suites: **288
+area**, **210 priority**, **320 booster**, **680 drive-search**, **504 area-list**,
+**672 cache-list**, **672 world-files** and **512 exact-position** pairs:
+**3,858 regression pairs**, zero differences, with their witnesses,
+module-init checks and two unload cycles each. Including facilities, the final
+build has **4,434 paired native UI comparisons**. One deliberate native mutation
+from each earlier family also produced an actual difference with the expanded
+build inputs. Their scripts now include the facilities sources. Regression logs
+are `facilities-<family>-regression.log` and
+`facilities-<family>-mutation-regression.log`, for `area`, `priority`, `booster`,
+`search`, `list`, `cache`, `files` or `position`.
+
+Facilities/runtime metadata and build-only resources/anchor outputs reproduce
+byte-for-byte in an isolated directory. The retail registry is unchanged and
+all twelve dialogmap tests pass. `git diff --check` passes.
+
+A **75-second startup** passed in private copy
+`bin/world-diff/smoke-game-doc_qdnw`: **27/27 modules, 95 gauges**, matching
+replacement bytes and no runtime errors. The active game's World.DLL hash is
+unchanged; the smoke runner only replaces the DLL in its private copy. Startup
+log: `bin/world-diff/facilities-smoke-acceptance.log`. Final DLL SHA-256:
+`82d24d4d5b5572e0a67ce07f7bc4f9cc7fdabab322953071cf53102845cdccb5`.
+`WORLD_area.dll`, `facilities-native-tested.dll` and the startup-tested copy are
+byte-identical. `facilities-final.log` records the successful acceptance and
+regression stages.
+
+Logs/artifacts use `bin/world-diff/facilities-`, the dedicated
+World Wine prefix and its lock. No FE/FACIL/MAIN/HOST implementation or verified
+owner harness, shared Makefile or active-game DLL is changed.
+
 ## Remaining boundary
 
-Nine registrations remain pending native acceptance: weather/time, scenery
-settings and the FACIL-backed facilities/airport screens. The next bounded
-candidate is facilities directory **`0x1307`**, factory **`0x223f1d80`**, template
-**`0x6bf`**, owner block FACIL `.data+0x80` and fixture `world_facilities`.
-Recover its full place/navaid/runway list graph and callback ordering with new
-World fixtures; preserve FACIL's verified implementation/harness. Exact
-position's Facilities button reaches this still-unaccepted owner flow.
-The airport dialog `0x1309` remains another candidate, with a larger filter/
-runway contract. Keep real placement/apply callbacks out of tests.
+Eight registrations remain pending native acceptance: weather/time, scenery
+settings and FACIL's go-to-airport screen. The next bounded candidate is
+**`0x1309`**, factory **`0x223f1cf0`**, template **`0x70d`**, owner block
+FACIL `.data+0x3e8` and fixture `world_airport`. Recover its place/name/airport/
+runway list graph, mode/filter state, controls, nested directory callback and
+callback order with new World fixtures. Preserve FACIL's verified source and
+harness. Real placement callbacks reach MAIN/CHAIN/the aircraft simulator and
+must remain outside the independent World fixtures. Facilities directory is
+accepted over independent owner callbacks; the actual FACIL filesystem lookup
+and simulator placement flows remain separate owner responsibilities.
 
 WORLD remains a partial replacement. Shared build/install integration and full
 host-driven interactions are separate. FE, FACIL, MAIN, HOST, their verified

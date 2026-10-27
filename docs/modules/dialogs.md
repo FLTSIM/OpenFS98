@@ -454,7 +454,7 @@ are separate from their native harness and startup acceptance.
 
 | Target | Independent starting boundary | Handoff |
 | --- | --- | --- |
-| World, remaining dialogs | World-files container, scenery-area list/editors, priority, booster list/editors, drive search and exact position have native acceptance. Next: FACIL-owned facilities directory `0x1307`, with independent owner fixtures; 9 registrations remain. | [world.md](world.md) |
+| World, remaining dialogs | World-files container, scenery-area list/editors, priority, booster list/editors, drive search, exact position and facilities directory have native acceptance. Next: FACIL-owned go-to-airport `0x1309`, with independent owner fixtures; 8 registrations remain. | [world.md](world.md) |
 | MP_DIALOG | Smallest remaining whole English DLL by code size; MULTIP owns the verified callback blocks. Start with session settings/details, then recover the five-window connection flow. | [mpdialog.md](mpdialog.md) |
 | Options, customise controls | CONTROLS' shared data and callbacks are established, but the container has three child pages and device/key-capture behavior. | [options.md](options.md) |
 | Flights | Static inventory exists; caller descriptors and flight/menu ownership need more recovery alongside MAIN. Less convenient while MAIN is active. | [flights.md](flights.md) |
@@ -513,10 +513,13 @@ Drive search (`0x13080002`) also has core, lifetime, initialization and native U
 acceptance. The scenery-area list (`0x13080001`) also has native acceptance
 with nested add/edit, priority and search comparisons. The booster/cache list
 (`0x13080006`) also has native acceptance with nested booster editors. World
-has ten accepted registrations; nine remain. The world-files container `0x1306`
+has eleven accepted registrations; eight remain. The world-files container `0x1306`
 also has native acceptance with nested area/cache lists. Exact position `0x1308`
 has native control/error/lifetime acceptance over independent FACIL-shaped callbacks;
-its Facilities and Select Flight owner flows remain separate.
+its Select Flight owner flow remains separate. Facilities directory `0x1307`
+now has browser core, initialization, class/control lifetimes and native UI
+acceptance over independent FACIL-shaped callbacks. Actual FACIL lookup and
+simulator placement remain owner boundaries; go-to-airport `0x1309` is next.
 For a whole-DLL assignment, choose
 MP_DIALOG and include all three registrations plus the full flag-2 window
 array in the completion criteria.

@@ -7,6 +7,24 @@ export WINEDEBUG=-all
 mkdir -p -- "$WINEPREFIX"
 exec 9>bin/world-diff/wine.lock
 flock 9
+if [[ "${1:-}" == --facilities-breaks ]]; then
+    exec python3 -B tools/world_facilities_breaks.py
+fi
+if [[ "${1:-}" == --facilities-native-breaks ]]; then
+    exec python3 -B tools/world_facilities_native_breaks.py "${@:2}"
+fi
+if [[ "${1:-}" == --facilities-core ]]; then
+    exec timeout 180s wine bin/world-diff/worldfacilitiesdiff.exe "${2:-200}" "${3:-normal}"
+fi
+if [[ "${1:-}" == --facilities-ui ]]; then
+    exec timeout 300s wine bin/world-diff/worldfacilitiesuidiff.exe "${2:-bin/world-diff/WORLD_area.dll}" "${3:-16}"
+fi
+if [[ "${1:-}" == --facilities-life ]]; then
+    exec timeout 120s wine bin/world-diff/worldfacilitieslifediff.exe "${2:-2000}" "${3:-0x4a971b63}" "${4:-normal}"
+fi
+if [[ "${1:-}" == --facilities-life-breaks ]]; then
+    exec python3 -B tools/world_facilities_life_breaks.py
+fi
 if [[ "${1:-}" == --files-breaks ]]; then
     exec python3 -B tools/world_files_breaks.py
 fi

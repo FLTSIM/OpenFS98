@@ -4,13 +4,14 @@
 registers the scenery-area list (`0x13080001`), add/edit scenery area
 (`0x13080003` / `0x13080004`), scenery
 priority (`0x13080005`), booster/cache list (`0x13080006`), add/edit booster
-(`0x13080008` / `0x13080007`) and drive search (`0x13080002`).
+(`0x13080008` / `0x13080007`), drive search (`0x13080002`) and the world-files
+container (`0x1306`).
 Their classes, initialization, controls, event/message maps, factories,
 exception lifetimes and module binding are rebuilt in C, using
-retail MFC42/SIMSUI as shared dependencies. The other 11 World registrations
+retail MFC42/SIMSUI as shared dependencies. The other 10 World registrations
 remain pending native acceptance.
 
-This is ready to review as a standalone eight-dialog slice. It is **not a full
+This is ready to review as a standalone nine-dialog slice. It is **not a full
 World replacement** and must not replace the active game's World.DLL. The
 startup smoke changes only a private game copy; startup success does not supply
 the other registrations or establish their behavior.
@@ -54,8 +55,8 @@ verified by its own harness.
 This slice covers these two registrations and their shared class,
 control exchange, validation, accept/cancel and lifetimes. Use independent
 callback/file fixtures. Priority, drive search and the scenery-area list now have their own acceptance
-below, as does the booster/cache list. The world-files container remains a
-candidate for a later slice. The native test DLL remains a partial World replacement.
+below, as do the booster/cache list and world-files container. The native
+test DLL remains a partial World replacement.
 
 ## Booster/cache list scope and owner
 
@@ -78,8 +79,9 @@ The class/control graph, lifetimes, initializer, message/help maps, selection,
 formatting, accept/cancel and owner refresh behavior have been recovered from
 retail and compared independently. Core, lifetime and native harnesses use the
 area-list harness structure with separate cache-row and callback fixtures;
-booster behavior is not inferred from scenery-area behavior. Eleven other
-registrations remain pending native acceptance.
+booster behavior is not inferred from scenery-area behavior. That milestone
+left eleven other registrations pending; world-files acceptance below reduces
+the remaining boundary to ten.
 
 Keep edits within `src/world/`, World generators/harnesses, `tools/world.mk`,
 `tools/run_worlddiff.sh` and World handoff documentation. Preserve FE/FACIL,
@@ -89,9 +91,12 @@ and prefix separate from MAIN/HOST runs. Never install the partial DLL into
 the active game. Check the worktree first and preserve any uncommitted slices
 and handoff work.
 
-The recommended next slice is the FE-owned world-files container `0x1306` (factory
-`0x223f1440`, template `0x6b6`, owner fixture `world_files`), with the area and
-cache lists as its children. Its UI still requires recovery and native acceptance.
+The FE-owned world-files container `0x1306` (factory `0x223f1440`, template
+`0x6b6`, owner fixture `world_files`) now has native acceptance below, including
+its area/cache list children. The recommended next slice is FACIL's
+exact-position dialog `0x1308`, described in the next section. Recover its UI
+with independent validator/apply/revert/reload fixtures; real placement callbacks
+must stay out of the test because they reach MAIN and the aircraft simulator.
 
 ## Other bounded slices
 
@@ -1550,17 +1555,187 @@ Final DLL SHA-256:
 The native-tested DLL is retained as `bin/world-diff/cache-native-tested.dll`;
 it is byte-identical to the final and startup-tested artifact.
 
-The booster/cache list is complete through native acceptance. This remains a
-partial World replacement with eight accepted registrations.
+The booster/cache list is complete through native acceptance. That milestone
+produced a partial World replacement with eight accepted registrations.
+
+## World-files container accepted slice
+
+The ninth accepted registration is **`0x1306`**, factory **`0x223f1440`**,
+template **`0x6b6`**. `world_files.c` implements core/initialization and
+`world_files_objects.c` implements class/factory lifetimes. Its independent
+owner fixtures follow FE's established `.data+0x2e28` block: answer `+0`,
+`stdcall(descriptor)` callbacks `+4` Check/no-op, `+8` Edit Areas and `+0xc`
+Edit Caches, signed count `+0x10`, rows `+0x14` and selection `+0x18`.
+Rows are `0x40` bytes: raw enable flag `+0`, path `+8`, title `+0x1c` and
+second title/description `+0x30`. No real FE file/placement callbacks execute.
+
+`gen_world_files.py` extracts the nine-control constructor/destructor graph,
+MSVC cleanup actions, nine DDX bindings, terminated help map, 60-slot vtable
+and six message entries. Constructor `0x223fd420`, destructor `0x223fd520`,
+scalar deleting destructor `0x223fd500`, DDX `0x223fd600`, initializer
+`0x223fd6c0`, vtable `0x22410040` and message map `0x2240ff90` are now rebuilt.
+The object is `0x1828` bytes, descriptor `+0x10dc`, local result `+0x1824`,
+list control `+0x152c` and its HWND `+0x154c`. The base-map getter remains
+`0x223f5d40`; PostNcDestroy uses the shared virtual deleting-destruction path.
+
+Recovered behavior:
+
+- Populate (`0x223fd930`) captures count and descriptor selection before any
+  external call, appends that many titles without resetting the list, sets
+  UI selection to the saved index, reads its description and updates the
+  two buttons. Count is signed and stays fixed across descriptor changes;
+  descriptor/row pointers stay fresh between appends and the detail call.
+  Calling Populate twice therefore appends duplicates. Negative/zero counts
+  append nothing but still select and read the detail row.
+- Selection (`0x223fda10`) reads UI selection, updates the description,
+  reloads the descriptor and stores the saved index, then updates enables.
+  Enable (`0x223fd9c0`) independently reloads descriptor, selection and rows
+  before each button call. It passes the row flag unchanged, including 2 and
+  high-bit values. This differs from the scenery-area list's cached boolean.
+- Edit Areas (`0x223fd870`) and Edit Caches (`0x223fd880`) invoke owner `+8`
+  and `+0xc`, respectively, with no implicit selection collection or refresh.
+  The callbacks see the descriptor's old selection even when UI selection
+  differs. Owner changes to row strings do not update displayed text.
+- OK (`0x223fd8b0`) writes local result 1, executes the empty shared Collect,
+  invokes owner Check and conditionally calls the empty zero-return validator
+  `0x223f3720`. It writes answer 1 and closes through a freshly loaded vtable,
+  with no validation error or selection collection. Cancel (`0x223fd890`)
+  retains the close vtable, writes local result 2 and preserves the answer.
+- Background erase (`0x223fda60`, WM_ERASEBKGND) posts WM_SETFOCUS to the
+  list before calling imported `CSimsDialog::OnEraseBkgnd`, returning that
+  handler's result. Its native fixture supplies a real device context.
+  Double-click has no local action handler.
+
+The initializer calls base init, reloads the skin vtable and uses `0x14f`, the
+current resource module and flags 15. Failed skin returns zero. Success sets
+up art `0xf831`, two `0x132` OK/Cancel buttons, two `0x137` action buttons,
+heading font `+0x370`, list font `+0x450` and group/detail font `+0x220`, then
+populates and returns 1. Button resource modules are reloaded individually.
+There are no CString lifetimes, numeric controls, tab stops or active toggles
+in this class. Its six messages cover the two action buttons `0x1aab/0x1aac`,
+list `0x1b11` selection, erase, help and context menu.
+
+Constructor installs its vtable only after all nine controls succeed.
+Destruction preserves the incoming vtable and cleans earlier controls/base
+when a child destructor throws, without retrying the failed child. Scalar
+delete releases only for flag bit 0 after successful destruction.
+Factory ignores parent, allocates `0x1828`, constructs with null parent,
+stores descriptor/module and transfers ownership before Create. It ignores
+Create's result: **no failure message**, then Show(1) and post-Show HWND return.
+Null allocation faults on a write at `0x10dc`. Partial construction uses
+dialog delete, distinct from UI delete; typed `CException*` conversion/catch
+runs real unwind before the fatal service boundary. Unrelated/incompatible
+exceptions propagate. The fixture terminates that comparison side at fatal
+dispatch instead of displaying the real SIMSUI error and aborting the process.
+
+```sh
+make -f tools/world.mk world-files-metadata
+make -f tools/world.mk world-files-core N=20000
+make -f tools/world.mk world-files-core N=2000 MODE=unwind
+make -f tools/world.mk world-files-breaks
+make -f tools/world.mk world-files-life N=20000
+make -f tools/world.mk world-files-life N=2000 MODE=unwind
+make -f tools/world.mk world-files-life N=2000 MODE=typed
+make -f tools/world.mk world-files-life-breaks
+make -f tools/world.mk world-files-ui
+make -f tools/world.mk world-files-native-breaks
+```
+
+The reference SHA-256 is recorded above; seed is `0x4a971b63`.
+The twelve-operation core/init suite passed **240,000 normal comparisons**
+and independent fixture checks. Unwind mode passed **94,826 comparisons**,
+including **70,826 real unwinds**, and 24,000 normal fixture checks. It compares
+ordered calls, defined returns, the guarded whole object, two descriptors,
+padded independent rows/text buffers, list state, callback counters and
+resource-module state. Cases include negative/empty/positive counts,
+UI/descriptor selection divergence, raw enable flags, descriptor/vtable/module
+swaps and changing flags between enables. Explicit witnesses check appending
+without reset, unchanged population selection, direct callback counts,
+collection/validation no-ops, erase result, selection and accept/cancel.
+
+Lifetime acceptance passed **180,000 normal comparisons**, with 1,819 expected
+allocation write faults and 178,181 independent fixture checks. Both exceptional
+modes passed **166,818 comparisons**, 182 expected allocation faults and 17,818
+normal fixture checks each. Unwind mode includes **148,818 real unwinds**;
+typed mode includes **132,928 propagated exceptions** and **15,890 fatal
+dispatches**. It covers direct/derived/virtual-base/null exception pointers,
+unrelated types and incompatible const pointers, all controls/DDX/help data,
+module mutation, ownership transfer, failure paths and automatic deletion.
+
+`worldfilesuidiff.c` uses actual MFC/SIMSUI controls and independent FE-shaped
+owners. Twenty-eight cases cover zero through six logical rows, four enable
+flag patterns and last-row initial selection. Twelve scripts cover baseline,
+Return/Escape, first/last selection, both nested editors, erase, double-click
+with no action, stale descriptor selection for both owner callbacks, and OK
+with UI selection changed without notification. Edit Areas opens the accepted
+scenery-area list and exercises selection/Add; Edit Caches opens the accepted
+cache list and exercises Flush. Child callbacks remain independent fixtures.
+Parent/child pixels, metadata, ordered callbacks and complete descriptor/row/
+text state match. Both child and parent automatic deletion are counted.
+Factory, local class slots and all six message handlers must belong to the
+module under test, preventing fallback into retail implementation code.
+
+The native suite passed **672 pixel/state/callback pairs**, **2,868 witnesses**,
+eight module-init comparisons and two complete unload cycles. Baselines are
+`bin/world-diff/ui-images/files-baseline-*.bmp`. Padded committed rows permit
+the unchecked `-1`/out-of-range reads to be observed safely, including empty
+lists; this does not accept arbitrary invalid owner allocations or establish
+that retail tolerates a null row array on an empty list.
+
+All **26 core/init**, **19 lifetime** and **11 native mutations** produced
+exit 1 with actual difference transcripts: **56/56 detected**. Core breaks
+include missing append/reset behavior, cached count, row/index/detail fields,
+raw enable flags and reloading, selection ordering, callback refresh/choice,
+accept/cancel/check state, erase message/return and initializer bindings.
+Lifetime breaks cover control/vtable timing, cleanup order, typed catches,
+allocation/template/parent/handle/ownership, deletion flags, DDX, help and
+PostNcDestroy. Native breaks cover list font, accept collection/result/answer,
+Cancel answer, area/cache/selection dispatch, automatic deletion, callback
+refresh and button polarity. Build failures, faults and timeouts do not count.
+Sources, executables, input hashes and actual difference transcripts are in
+`bin/world-diff/files-breaks/`, `files-life-breaks/` and `files-native-breaks/`.
+
+Acceptance logs are `bin/world-diff/files-core-normal.log`,
+`files-core-unwind.log`, `files-core-breaks.log`, `files-life-normal.log`,
+`files-life-unwind.log`, `files-life-typed.log`, `files-life-breaks.log`,
+`files-ui-acceptance.log` and `files-native-breaks.log`. Generated includes
+contain ABI metadata only. Metadata for the files class and runtime, plus
+build-only resource/anchor outputs, reproduce byte-for-byte in an isolated directory;
+the retail registry inventory is unchanged. All existing World native
+mutation build inputs include the new files source units.
+
+The nine-registration DLL passed **288 area**, **210 priority**, **320 booster**,
+**680 drive-search**, **504 scenery-area-list** and **672 booster/cache-list**
+paired comparisons, totaling **2,674**, with their witnesses/module-init checks
+and two unload cycles per suite. Selected area/priority/booster/search color
+mutations and area/cache list tab mutations produced actual differences with
+the expanded native builds. Logs are `bin/world-diff/files-<family>-regression.log`
+and `files-<family>-mutation-regression.log`, with family `area`, `priority`,
+`booster`, `search`, `list` or `cache`.
+
+A 75-second startup passed in private copy
+`bin/world-diff/smoke-game-iapym8g4`: **27/27 modules, 95 gauges**, matching
+replacement bytes and no runtime errors. Its log is
+`bin/world-diff/files-smoke-acceptance.log`; the active game was unchanged.
+Final DLL SHA-256:
+`aab7b831d973dbe40ae8c93925378eee85b4ff079cee2b7604795a82e2768cae`.
+The final DLL, `bin/world-diff/files-native-tested.dll` and the startup-tested
+copy are byte-identical.
+
+The world-files container is complete through native acceptance. WORLD remains
+a partial replacement with nine accepted registrations.
 
 ## Remaining boundary
 
-Eleven World registrations are still pending native acceptance: scenery library,
-weather/time, scenery settings and FACIL-backed position/facility screens.
-Continue with the FE-owned world-files container `0x1306` as described above,
-or another bounded family with its own native acceptance. The DLL remains a
-partial replacement. Shared build/install integration and complete host-driven
-interaction remain separate.
+Ten World registrations are still pending native acceptance: weather/time,
+scenery settings and FACIL-backed position/facility screens. The recommended
+next bounded family is FACIL's exact-position dialog `0x1308`, factory
+`0x223f1c60`, template `0x70c`, owner fixture `world_position`. Recover controls,
+validation, error display, numeric conversion, accept/cancel, nested facilities,
+class/factory exceptions and native UI with independent callbacks. Do not run
+real placement callbacks against the game. The DLL remains a partial replacement;
+shared build/install integration and complete host-driven interaction remain
+separate.
 
 FE, FACIL, MAIN, HOST, their verified harnesses and the shared Makefile remain
-unchanged by this work. Existing uncommitted documentation work is preserved.
+unchanged by this work. Preserve any existing uncommitted changes.

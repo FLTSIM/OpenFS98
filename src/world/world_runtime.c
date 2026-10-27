@@ -7,6 +7,7 @@
 #include "world_search.h"
 #include "world_list.h"
 #include "world_cache.h"
+#include "world_files.h"
 #include "world_unwind.h"
 #define TC FS98_WORLD_THISCALL
 #define SC FS98_WORLD_STDCALL
@@ -15,10 +16,10 @@ struct world_virtual_binding { uint32_t table, slot; int import_index; void *loc
 struct world_message_entry { uint32_t message, code, first, last, signature; void *handler; };
 struct world_message_map { void *(*base)(void); const struct world_message_entry *entries; };
 struct world_dialog { uint32_t id; uint32_t (SC *create)(uint32_t, void *); uint32_t flags; };
-static struct world_message_map s_message_map, s_priority_message_map, s_booster_message_map, s_search_message_map, s_list_message_map, s_cache_message_map;
+static struct world_message_map s_message_map, s_priority_message_map, s_booster_message_map, s_search_message_map, s_list_message_map, s_cache_message_map, s_files_message_map;
 static void *world_slot(uint32_t slot);
 #include "world_runtime_tables.inc"
-static void *s_functions[sizeof(s_imports) / sizeof(s_imports[0])], *s_vtables[6][60];
+static void *s_functions[sizeof(s_imports) / sizeof(s_imports[0])], *s_vtables[7][60];
 static void (*s_font_exit)(void);
 static uint8_t s_extension[0x14];
 static uint32_t s_module, s_resource_module;
@@ -150,6 +151,11 @@ static int world_search_get_path(void *control, char *text, int capacity)
 { return ((int (TC *)(void *, char *, int))world_slot(0x25700))(control, text, capacity); }
 static int world_post(uint32_t window, uint32_t message, uint32_t first, uint32_t second)
 { return PostMessageA((HWND)window, message, first, second); }
+static int world_erase(void *object, void *dc)
+{ return ((int (TC *)(void *, void *))world_slot(0x25704))(object, dc); }
+static const struct fs98_world_files_services s_files_services = {
+    &s_services, &s_init_services, world_list_init, world_group, world_post, world_erase
+};
 static const struct fs98_world_search_services s_search_services = {
     &s_services, world_title, world_post, world_search_get_path
 };
@@ -197,6 +203,9 @@ static int world_bind(void)
     s_cache_message_map.base = world_base_map; s_cache_message_map.entries = s_cache_messages;
     fs98_world_cache_set_object_services(&s_object_services, s_vtables[5]);
     fs98_world_cache_set_services(&s_cache_services);
+    s_files_message_map.base = world_base_map; s_files_message_map.entries = s_files_messages;
+    fs98_world_files_set_object_services(&s_object_services, s_vtables[6]);
+    fs98_world_files_set_services(&s_files_services);
     return 1;
 }
 struct world_dynamic_unwind { struct fs98_world_unwind frame; void *dynamic; volatile int live; };
@@ -213,7 +222,7 @@ static WORLD_NOINLINE void world_module_init(void)
     world_unwind_enter(&state.frame, world_dynamic_cleanup);
     ((void (SC *)(void *, uint32_t *))WORLD_PTR(g_world_imports[0].link, 0x298))(&g_world_linkage, &s_module);
     fs98_world_set_module(s_module); fs98_world_priority_set_module(s_module);
-    fs98_world_booster_set_module(s_module); fs98_world_search_set_module(s_module); fs98_world_list_set_module(s_module); fs98_world_cache_set_module(s_module);
+    fs98_world_booster_set_module(s_module); fs98_world_search_set_module(s_module); fs98_world_list_set_module(s_module); fs98_world_cache_set_module(s_module); fs98_world_files_set_module(s_module);
     dynamic = ((void *(*)(uint32_t))world_mfc(823))(0x40);
     state.dynamic = dynamic; state.live = 1;
     if (dynamic) ((void *(TC *)(void *, void *, int))world_mfc(342))(dynamic, s_extension, 0);
@@ -228,7 +237,7 @@ static void world_module_deinit(void)
     FreeLibrary((HMODULE)s_resource_module);
     s_module = s_resource_module = 0;
     fs98_world_set_module(0); fs98_world_priority_set_module(0); fs98_world_set_resource_module(0);
-    fs98_world_booster_set_module(0); fs98_world_search_set_module(0); fs98_world_list_set_module(0); fs98_world_cache_set_module(0);
+    fs98_world_booster_set_module(0); fs98_world_search_set_module(0); fs98_world_list_set_module(0); fs98_world_cache_set_module(0); fs98_world_files_set_module(0);
 }
 __declspec(dllimport) void *fs98_world_simsui_anchor(uint32_t size);
 BOOL WINAPI DllMain(HINSTANCE instance, DWORD reason, LPVOID reserved)
@@ -240,7 +249,7 @@ BOOL WINAPI DllMain(HINSTANCE instance, DWORD reason, LPVOID reserved)
         if (!world_bind()) return FALSE;
         ((int (SC *)(void *, HINSTANCE))world_mfc(1182))(s_extension, instance);
         s_module = (uint32_t)instance; fs98_world_set_module(s_module); fs98_world_priority_set_module(s_module);
-        fs98_world_booster_set_module(s_module); fs98_world_search_set_module(s_module); fs98_world_list_set_module(s_module); fs98_world_cache_set_module(s_module);
+        fs98_world_booster_set_module(s_module); fs98_world_search_set_module(s_module); fs98_world_list_set_module(s_module); fs98_world_cache_set_module(s_module); fs98_world_files_set_module(s_module);
     } else if (reason == DLL_PROCESS_DETACH) {
         ((void (SC *)(void *, int))world_mfc(1253))(s_extension, 0);
         if (s_font_exit) { void (*callback)(void) = s_font_exit; s_font_exit = NULL; callback(); }

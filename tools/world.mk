@@ -39,7 +39,7 @@ world-life-breaks: worldlife
 	bash tools/run_worlddiff.sh --life-breaks
 
 PRIORITY_OBJECTS := src/world/world_priority_objects.c src/world/world_priority.h src/world/world_priority_tables.inc src/world/world_priority_hooks.inc src/world/world_objects.h src/world/world_init.h src/world/world_unwind.h src/world/world_exceptions.h src/world/world_internal.h
-WORLD_SOURCES := src/world/world_complexity.c src/world/world_complexity_objects.c src/world/world_complexity_init.c src/world/world_airport.c src/world/world_airport_objects.c src/world/world_facilities.c src/world/world_facilities_objects.c src/world/world_position.c src/world/world_position_objects.c src/world/world_files.c src/world/world_files_objects.c src/world/world_cache.c src/world/world_cache_objects.c src/world/world_list.c src/world/world_list_objects.c src/world/world_search.c src/world/world_search_objects.c src/world/world_search_init.c src/world/world_booster.c src/world/world_booster_objects.c src/world/world_booster_init.c src/world/world_priority.c src/world/world_priority_objects.c src/world/world_area.c src/world/world_objects.c src/world/world_init.c src/world/world_runtime.c
+WORLD_SOURCES := src/world/world_dynamic.c src/world/world_dynamic_objects.c src/world/world_dynamic_init.c src/world/world_complexity.c src/world/world_complexity_objects.c src/world/world_complexity_init.c src/world/world_airport.c src/world/world_airport_objects.c src/world/world_facilities.c src/world/world_facilities_objects.c src/world/world_position.c src/world/world_position_objects.c src/world/world_files.c src/world/world_files_objects.c src/world/world_cache.c src/world/world_cache_objects.c src/world/world_list.c src/world/world_list_objects.c src/world/world_search.c src/world/world_search_objects.c src/world/world_search_init.c src/world/world_booster.c src/world/world_booster_objects.c src/world/world_booster_init.c src/world/world_priority.c src/world/world_priority_objects.c src/world/world_area.c src/world/world_objects.c src/world/world_init.c src/world/world_runtime.c
 .PHONY: world worlduidiff-run world-ui-breaks world-smoke
 src/world/world_runtime_tables.inc $(WORLD_DIR)/world.res $(WORLD_DIR)/simsui-anchor.def &: tools/gen_world_runtime.py tools/gen_views_runtime.py tools/dialogmap.py orig/English/World.DLL orig/SIMSUI.DLL | $(WORLD_DIR)
 	python3 -B tools/gen_world_runtime.py
@@ -48,7 +48,7 @@ $(WORLD_DIR)/libworld-simsui.a: $(WORLD_DIR)/simsui-anchor.def
 $(WORLD_DIR)/world-res.o: $(WORLD_DIR)/world.res
 	i686-w64-mingw32-windres -J res -O coff $< $@
 world: $(WORLD_DIR)/WORLD_area.dll
-$(WORLD_DIR)/WORLD_area.dll: $(PRIORITY_OBJECTS) $(WORLD_SOURCES) src/world/world.def src/world/world_internal.h src/world/world_objects.h src/world/world_init.h src/world/world_exceptions.h src/world/world_unwind.h src/world/world_tables.inc src/world/world_runtime_tables.inc $(WORLD_DIR)/world-res.o $(WORLD_DIR)/libworld-simsui.a
+$(WORLD_DIR)/WORLD_area.dll: src/world/world_dynamic.h src/world/world_dynamic_tables.inc src/world/world_dynamic_hooks.inc $(PRIORITY_OBJECTS) $(WORLD_SOURCES) src/world/world.def src/world/world_internal.h src/world/world_objects.h src/world/world_init.h src/world/world_exceptions.h src/world/world_unwind.h src/world/world_tables.inc src/world/world_runtime_tables.inc $(WORLD_DIR)/world-res.o $(WORLD_DIR)/libworld-simsui.a
 	$(CC) -std=c99 -O2 -Wall -Wextra -Werror -fno-strict-aliasing -fno-delete-null-pointer-checks -shared -nostdlib -Wl,--entry=_DllMain@12 -Wl,--disable-dynamicbase -Wl,--image-base=0x223f0000 -o $@ $(WORLD_SOURCES) src/world/world.def $(WORLD_DIR)/world-res.o $(WORLD_DIR)/libworld-simsui.a -lkernel32 -luser32 -lmsvcrt -lntdll
 $(WORLD_DIR)/worlduidiff.exe: tools/difftest/worlduidiff.c src/world/world_internal.h | $(WORLD_DIR)
 	$(CC) -std=c99 -O2 -Wall -Wextra -Werror -fno-strict-aliasing -o $@ $< -lgdi32 -lntdll
@@ -399,3 +399,34 @@ world-complexity-init-breaks: $(WORLD_DIR)/worldcomplexityinitdiff.exe
 .PHONY: world-complexity-native-breaks
 world-complexity-native-breaks: world $(WORLD_DIR)/worldcomplexityuidiff.exe
 	bash tools/run_worlddiff.sh --complexity-native-breaks
+
+DYNAMIC_METADATA := src/world/world_dynamic_tables.inc src/world/world_dynamic_hooks.inc
+$(DYNAMIC_METADATA) &: tools/gen_world_dynamic.py tools/gen_world_tables.py tools/dialogmap.py orig/English/World.DLL
+	python3 -B tools/gen_world_dynamic.py
+.PHONY: world-dynamic-metadata world-dynamic-core world-dynamic-life world-dynamic-init world-dynamic-ui world-dynamic-breaks
+world-dynamic-metadata: $(DYNAMIC_METADATA)
+$(WORLD_DIR)/worlddynamicdiff.exe: tools/difftest/worlddynamicdiff.c src/world/world_dynamic.c src/world/world_dynamic.h src/world/world_internal.h | $(WORLD_DIR)
+	$(CC) -std=c99 -O2 -Wall -Wextra -Werror -fno-strict-aliasing -o $@ tools/difftest/worlddynamicdiff.c src/world/world_dynamic.c
+$(WORLD_DIR)/worlddynamiclifediff.exe: tools/difftest/worlddynamiclifediff.c $(DYNAMIC_METADATA) src/world/world_dynamic_objects.c src/world/world_dynamic.h src/world/world_unwind.h | $(WORLD_DIR)
+	$(CC) -std=c99 -O2 -Wall -Wextra -Werror -fno-strict-aliasing -fno-delete-null-pointer-checks -o $@ tools/difftest/worlddynamiclifediff.c src/world/world_dynamic_objects.c -lntdll
+$(WORLD_DIR)/worlddynamicinitdiff.exe: tools/difftest/worlddynamicinitdiff.c tools/difftest/worlddynamicdiff.c src/world/world_dynamic_init.c src/world/world_dynamic.c src/world/world_dynamic.h src/world/world_unwind.h | $(WORLD_DIR)
+	$(CC) -std=c99 -O2 -Wall -Wextra -Werror -fno-strict-aliasing -o $@ tools/difftest/worlddynamicinitdiff.c src/world/world_dynamic_init.c src/world/world_dynamic.c -lntdll
+world-dynamic-core: $(WORLD_DIR)/worlddynamicdiff.exe
+	bash tools/run_worlddiff.sh --dynamic-core $(N) $(SEED) $(MODE)
+world-dynamic-life: $(WORLD_DIR)/worlddynamiclifediff.exe
+	bash tools/run_worlddiff.sh --dynamic-life $(N) $(SEED) $(MODE)
+world-dynamic-init: $(WORLD_DIR)/worlddynamicinitdiff.exe
+	bash tools/run_worlddiff.sh --dynamic-init $(N) $(MODE)
+$(WORLD_DIR)/worlddynamicuidiff.exe: tools/difftest/worlddynamicuidiff.c tools/difftest/worlduidiff.c src/world/world_internal.h | $(WORLD_DIR)
+	$(CC) -std=c99 -O2 -Wall -Wextra -Werror -fno-strict-aliasing -o $@ $< -lgdi32 -lntdll
+world-dynamic-ui: world $(WORLD_DIR)/worlddynamicuidiff.exe
+	bash tools/run_worlddiff.sh --dynamic-ui
+.PHONY: world-dynamic-life-breaks world-dynamic-init-breaks world-dynamic-native-breaks
+world-dynamic-breaks: $(WORLD_DIR)/worlddynamicdiff.exe
+	bash tools/run_worlddiff.sh --dynamic-breaks
+world-dynamic-life-breaks: $(WORLD_DIR)/worlddynamiclifediff.exe
+	bash tools/run_worlddiff.sh --dynamic-life-breaks
+world-dynamic-init-breaks: $(WORLD_DIR)/worlddynamicinitdiff.exe
+	bash tools/run_worlddiff.sh --dynamic-init-breaks
+world-dynamic-native-breaks: world $(WORLD_DIR)/worlddynamicuidiff.exe
+	bash tools/run_worlddiff.sh --dynamic-native-breaks

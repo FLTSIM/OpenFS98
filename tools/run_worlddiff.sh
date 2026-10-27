@@ -7,6 +7,30 @@ export WINEDEBUG=-all
 mkdir -p -- "$WINEPREFIX"
 exec 9>bin/world-diff/wine.lock
 flock 9
+if [[ "${1:-}" == --dynamic-breaks ]]; then
+    exec python3 -B tools/world_dynamic_breaks.py "${@:2}"
+fi
+if [[ "${1:-}" == --dynamic-life-breaks ]]; then
+    exec python3 -B tools/world_dynamic_life_breaks.py "${@:2}"
+fi
+if [[ "${1:-}" == --dynamic-init-breaks ]]; then
+    exec python3 -B tools/world_dynamic_init_breaks.py "${@:2}"
+fi
+if [[ "${1:-}" == --dynamic-native-breaks ]]; then
+    exec python3 -B tools/world_dynamic_native_breaks.py "${@:2}"
+fi
+if [[ "${1:-}" == --dynamic-ui ]]; then
+    exec timeout 300s wine bin/world-diff/worlddynamicuidiff.exe "${2:-bin/world-diff/WORLD_area.dll}" "${3:-16}"
+fi
+if [[ "${1:-}" == --dynamic-core ]]; then
+    exec timeout 120s wine bin/world-diff/worlddynamicdiff.exe "${2:-2000}" "${3:-0x4a971b63}" "${4:-normal}"
+fi
+if [[ "${1:-}" == --dynamic-life ]]; then
+    exec timeout 120s wine bin/world-diff/worlddynamiclifediff.exe "${2:-2000}" "${3:-0x4a971b63}" "${4:-normal}"
+fi
+if [[ "${1:-}" == --dynamic-init ]]; then
+    exec timeout 120s wine bin/world-diff/worlddynamicinitdiff.exe "${2:-2000}" "${3:-normal}"
+fi
 if [[ "${1:-}" == --complexity-native-breaks ]]; then
     exec python3 -B tools/world_complexity_native_breaks.py "${@:2}"
 fi

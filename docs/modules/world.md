@@ -6,13 +6,13 @@ registers the scenery-area list (`0x13080001`), add/edit scenery area
 priority (`0x13080005`), booster/cache list (`0x13080006`), add/edit booster
 (`0x13080008` / `0x13080007`), drive search (`0x13080002`) and the world-files
 container (`0x1306`), exact position (`0x1308`), facilities directory (`0x1307`)
-and go-to-airport (`0x1309`), plus scenery complexity (`0x1304`).
+and go-to-airport (`0x1309`), plus scenery complexity (`0x1304`) and dynamic scenery (`0x1305`).
 Their classes, initialization, controls, event/message maps, factories,
 exception lifetimes and module binding are rebuilt in C, using
-retail MFC42/SIMSUI as shared dependencies. The other 6 World registrations
+retail MFC42/SIMSUI as shared dependencies. The other 5 World registrations
 remain pending native acceptance.
 
-This is ready to review as a standalone thirteen-dialog slice. It is **not a full
+This is ready to review as a standalone fourteen-dialog slice. It is **not a full
 World replacement** and must not replace the active game's World.DLL. The
 startup smoke changes only a private game copy; startup success does not supply
 the other registrations or establish their behavior.
@@ -2709,10 +2709,169 @@ byte-identical. The active game's World.DLL remains retail SHA-256
 `35d67023...3118f5`. `complexity-final.log` records the artifact hashes and final
 acceptance summaries; `git diff --check` passes. WORLD remains a partial DLL.
 
+## Dynamic scenery: owner recovery and implementation
+
+Dynamic scenery **`0x1305`**, factory **`0x223f13b0`**, template **`0x6b2`**,
+adds the fourteenth registration to the partial native DLL. The implementation
+is `world_dynamic.c`, `world_dynamic_objects.c` and `world_dynamic_init.c`.
+The runtime builds its 60-slot vtable and two local help/message entries;
+shared Close, PostNcDestroy and CNotify deletion remain module-owned C.
+
+The independently recovered caller is retail `orig/Modules/MAIN.DLL`:
+`0x207e3e30` opens dialog `0x1305` through HOST `+0x10c` with descriptor
+`0x20800688`. Preparation at `0x207e3e70` clears its answer and invokes
+GLOBAL `+0x90` with parameter table `0x208006b8`, count 5 and the descriptor.
+On a zero modal return and answer 1, `0x207e3ea0` applies it through GLOBAL
+`+0x8c` with final argument 0. The descriptor's stdcall validation callback
+`0x207e3ec0` calls the same GLOBAL service with final argument 1 and returns
+its result unchanged (`ret 4`). No MAIN implementation or owner harness was
+changed, and the World fixtures execute no live simulator callbacks.
+
+| Descriptor offset | World use |
+| --- | --- |
+| `+0` | Answer, 0 cancel / 1 accepted |
+| `+4` | One-argument stdcall validation callback |
+| `+8`, `+0xc` | Fourth checkbox error / raw value |
+| `+0x10`, `+0x14` | Third checkbox error / raw value |
+| `+0x18`, `+0x1c` | Second checkbox error / raw value |
+| `+0x20`, `+0x24` | First checkbox error / raw value |
+| `+0x28`, `+0x2c` | Combo error (not read by this class) / selection |
+
+Recovered differences from scenery complexity are retained:
+
+- The `0x17e8`-byte class constructs nine embedded controls in retail order:
+  two buttons, artwork, text, combo and four checkboxes. The constructor
+  installs vtable `0x2240fa68` after construction and **does not initialize
+  `+0x10dc`**. The descriptor is at `+0x10e0`; mode is at `+0x17e4`.
+  Destruction retains the incoming vtable, reverses control order and unwinds
+  earlier children and the base after a throwing destructor. Scalar deletion
+  honors flag bit 0. All nine DDX bindings run without base DDX.
+- The factory ignores its parent, constructs with a null parent, stores the
+  descriptor and current module, calls Create and then Show(1), even if Create
+  fails, and returns the handle after Show. Null allocation faults writing
+  `+0x10e0`; construction failure uses dialog delete. Ownership transfers
+  before Create and there is no typed factory catch. Help returns WinHelp's
+  command-12 result; context help uses command 10 and returns 1.
+- Initialization ignores the base result, invokes skin initialization with
+  bitmap `0x14f`, module and flags 15, and returns zero immediately on failure.
+  Artwork is at `+0x12dc`; buttons are at `+0x10e4/+0x11e0`. Checkbox skin
+  initialization proceeds from `+0x171c` backwards to `+0x14c4`, followed by
+  text/combo font setup and selection zero. It allocates and constructs the
+  `0x29c`-byte CNotify **before testing descriptor presence**, stores it at
+  `+0x10dc`, then returns zero for a null descriptor. Null allocation still
+  permits successful population. A throwing CNotify constructor uses its
+  distinct stdcall delete import `0x257f4`; later failures retain ownership.
+- Collection preserves raw 32-bit checkbox values from object
+  `+0x1580/+0x1648/+0x1710/+0x17d8` and stores the signed combo result unchanged.
+  Population reloads the descriptor after every imported service. Accept
+  writes mode 1, collects, calls validation, and invokes the error routine
+  only for a nonzero callback result. It reloads descriptor/vtable before
+  writing answer 1 and closing. Cancel samples both first, writes mode 2 and
+  answer 0, and calls the sampled Close slot.
+- The error routine checks descriptor `+0x20/+0x18/+0x10/+8` in that order.
+  Zero fields skip DoErrorDialog. Each actual error call writes its raw result
+  at object `+0x8c`; the first nonzero result focuses that checkbox and posts
+  `EM_SETSEL` (`0xb1`, 0, -1) to its reloaded HWND. It returns `+0x8c` reloaded
+  after focus/post. Falling through returns zero, even if a previously stored
+  `+0x8c` was nonzero. A nonzero error result keeps the dialog open with mode 1
+  and without overwriting the answer; a nonzero validation result with no
+  rejected errors still accepts.
+- Close deletes a nonnull CNotify with flag 1 before imported base Close and
+  leaves its pointer unchanged. PostNcDestroy separately deletes the dialog
+  with flag 1. CNotify destruction uses the imported destructor and UI delete,
+  distinct from its construction-failure delete.
+
+```sh
+make -f tools/world.mk world-dynamic-metadata
+make -f tools/world.mk world-dynamic-core N=20000
+make -f tools/world.mk world-dynamic-core N=2000 MODE=interrupt
+make -f tools/world.mk world-dynamic-life N=20000
+make -f tools/world.mk world-dynamic-life N=2000 MODE=unwind
+make -f tools/world.mk world-dynamic-life N=2000 MODE=typed
+make -f tools/world.mk world-dynamic-init N=20000
+make -f tools/world.mk world-dynamic-init N=2000 MODE=unwind
+make -f tools/world.mk world-dynamic-breaks world-dynamic-life-breaks
+make -f tools/world.mk world-dynamic-init-breaks world-dynamic-native-breaks
+make -f tools/world.mk world-dynamic-ui
+```
+
+The fixtures use independent guarded objects and two owner descriptors. They
+compare every byte, ordered service/callback arguments and returns, control
+state, replacement of descriptors/vtables at service boundaries, raw checkbox
+values, invalid combo selections, scalar flags and exception cleanup. Core
+interruption uses a vectored handler; class and initializer fixtures perform
+real x86 unwinds. Typed class tests use actual `_CxxThrowException` with direct,
+derived, virtual-base, null, unrelated and const CException pointer types.
+
+Seed `0x4a971b63`: core acceptance passed **140,000 normal comparisons**
+and **45,855 interrupted-mode comparisons**, including **31,855 interrupted
+retail calls** and **14,000 normal witnesses**. The ten-operation class fixture
+passed **200,000 normal comparisons** and **171,768 comparisons in each of
+unwind and typed mode**, each including **151,768 real unwinds**.
+Initializer/CNotify acceptance passed **40,000 normal comparisons** and
+**36,641 unwind comparisons**, including **32,641 real unwinds**. All matched.
+This is **806,032 guarded comparisons with zero differences**, including
+**336,177 real unwinds** and **31,855 core interruptions**.
+Core and class mutation runs detected **26/26 each**, and initializer
+mutations detected **24/24**, requiring exit 1 and an
+actual `DIFFER` transcript. Build failures, faults and timeouts never count.
+
+The expanded native suite passed **544 paired pixel/state/callback comparisons**
+and **1,088 independent script witnesses**, plus eight module-init comparisons
+and two unload cycles. It checks real checkbox mouse clicks, combo rows,
+selection and dropdown, retained label/font bindings, Return/Escape, command
+and virtual accept/cancel, both descriptors, mode/answer and allocation
+ownership. Five rejection scripts exercise each error target and simultaneous
+errors through actual Alerts windows, compare their pixels/state and focus,
+require that rejection retains the window/CNotify, then retry successfully.
+Dispatch, vtable, handler and scalar-delete ownership belongs to the tested
+module. `dynamic-ui-final.log` records the final-artifact run; baseline images use
+`ui-images/dynamic-baseline-*.bmp`.
+
+All **92/92 deliberate mutations** now produce actual differences: **26 core**,
+**26 class**, **24 initializer** and **16 native**. The initial three-case native
+population mutation did not distinguish the upper checkbox bits and returned
+success, so it was not counted. The population probe now runs nine cases and
+detects the mismatch at case 4; the other fifteen native mutations were already
+detected. Logs are `dynamic-mutations.log`, `dynamic-native-breaks.log` and
+`dynamic-native-populate-final.log`. The native snapshot directory
+`dynamic-native-breaks/` retains source, DLL/harness and input hashes.
+Earlier World native mutation builders include the new dynamic sources.
+
+Dynamic class and runtime metadata, build-only resources and the SIMSUI anchor
+reproduce byte-for-byte in an isolated directory. The retail registry remains
+unchanged and all twelve dialogmap tests pass. `git diff --check` passes.
+
+All eleven earlier native suites passed against the fourteen-registration
+DLL: **288 area**, **210 priority**, **320 booster**, **680 drive-search**,
+**504 area-list**, **672 cache-list**, **672 world-files**, **512 exact-position**,
+**576 facilities**, **576 airport** and **352 scenery-complexity** comparisons.
+That is **5,362 regression pairs**, or **5,906 paired native comparisons** with
+dynamic scenery, with module-init probes and two unload cycles per suite.
+Logs are `dynamic-native-regressions.log` and
+`dynamic-airport-complexity-recheck.log`.
+
+The first airport run stopped at cycle 1, case 1, step 20 with identical state,
+control and callback transcripts but 708 different pixels in the selected
+“Initial airport” text rectangle `(36,120)-(95,132)` after closing nested
+facilities. Saved `airport-difference-cycle1-case1-step20-side*.bmp` images
+retain that observation. The complete unchanged airport suite then passed
+576 pairs; scenery complexity also passed. No pixels were masked, and neither
+the airport implementation nor its fixture was changed for the rerun.
+
+The **75-second startup** passed in private copy
+`bin/world-diff/smoke-game-k3zh4t3a`: **27/27 modules, 95 gauges**, World loaded,
+matching replacement bytes and no runtime errors. Log: `dynamic-smoke.log`.
+`WORLD_area.dll`, `dynamic-native-tested.dll` and the startup copy are identical,
+SHA-256 `d10ca83937d4d6a2d8f3faa492bfe545326345e36b001590a929cbce9456f01e`.
+The active game's World.DLL remains retail SHA-256 `35d67023...3118f5`.
+MAIN/HOST/FE/FACIL, their verified owner harnesses and the shared Makefile are
+unchanged. WORLD remains a partial replacement.
+
 ## Remaining boundary
 
-Six registrations remain pending native acceptance: basic weather `0x1302`,
-time/season `0x1301`, weather areas `0x1303`, dynamic scenery `0x1305`, advanced
+Five registrations remain pending native acceptance: basic weather `0x1302`,
+time/season `0x1301`, weather areas `0x1303`, advanced
 weather `0x13040001` and copy weather `0x13050001`. These need independent
 caller/descriptor recovery before choosing another bounded family. Their
 inventory entries are not behavior specifications.

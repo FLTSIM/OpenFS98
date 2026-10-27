@@ -174,6 +174,14 @@ static int TC world_rva_b250(void *object, uint32_t unused, void *info) { return
 static int TC world_rva_b270(void *object, uint32_t window, uint32_t unused) { return fs98_world_complexity_context(object, window, unused); }
 static void TC world_rva_b8b0(void *object) { fs98_world_complexity_close(object); }
 static void * TC world_rva_2700(void *object, uint32_t flags) { return fs98_world_complexity_notify_delete(object, flags); }
+static void * TC world_rva_b460(void *object, uint32_t flags) { return fs98_world_dynamic_scalar_delete(object, flags); }
+static void * TC world_rva_b600(void *object) { (void)object; return &s_dynamic_message_map; }
+static void TC world_rva_b550(void *object, void *exchange) { fs98_world_dynamic_exchange(object, exchange); }
+static int TC world_rva_b610(void *object) { return fs98_world_dynamic_init(object); }
+static void TC world_rva_b870(void *object) { fs98_world_dynamic_accept(object); }
+static void TC world_rva_b850(void *object) { fs98_world_dynamic_cancel(object); }
+static int TC world_rva_b8d0(void *object, uint32_t unused, void *info) { return fs98_world_dynamic_help(object, unused, info); }
+static int TC world_rva_b8f0(void *object, uint32_t window, uint32_t unused) { return fs98_world_dynamic_context(object, window, unused); }
 static const struct world_import_binding s_imports[] = {
     {"USER32.dll", "GetActiveWindow", 0, 0x25864},
     {"USER32.dll", "ValidateRect", 0, 0x25868},
@@ -1237,6 +1245,66 @@ static const struct world_virtual_binding s_virtuals[] = {
     {13, 45, 193, 0},
     {13, 46, 231, 0},
     {13, 47, 194, 0},
+    {14, 0, 117, 0},
+    {14, 1, -1, (void *)world_rva_b460},
+    {14, 2, -1, (void *)world_rva_2d00},
+    {14, 3, -1, (void *)world_rva_2d10},
+    {14, 4, -1, (void *)world_rva_2d00},
+    {14, 5, 196, 0},
+    {14, 6, 197, 0},
+    {14, 7, 198, 0},
+    {14, 8, 199, 0},
+    {14, 9, 200, 0},
+    {14, 10, 201, 0},
+    {14, 11, 202, 0},
+    {14, 12, -1, (void *)world_rva_b600},
+    {14, 13, 203, 0},
+    {14, 14, 204, 0},
+    {14, 15, 205, 0},
+    {14, 16, 206, 0},
+    {14, 17, 207, 0},
+    {14, 18, 208, 0},
+    {14, 19, 209, 0},
+    {14, 20, 210, 0},
+    {14, 21, 189, 0},
+    {14, 22, 212, 0},
+    {14, 23, 213, 0},
+    {14, 24, 214, 0},
+    {14, 25, 215, 0},
+    {14, 26, 216, 0},
+    {14, 27, 217, 0},
+    {14, 28, 218, 0},
+    {14, 29, 219, 0},
+    {14, 30, 220, 0},
+    {14, 31, 221, 0},
+    {14, 32, 83, 0},
+    {14, 33, 211, 0},
+    {14, 34, 223, 0},
+    {14, 35, -1, (void *)world_rva_b550},
+    {14, 36, -1, (void *)world_rva_2d20},
+    {14, 37, -1, (void *)world_rva_2d30},
+    {14, 38, 224, 0},
+    {14, 39, 225, 0},
+    {14, 40, 226, 0},
+    {14, 41, 227, 0},
+    {14, 42, 222, 0},
+    {14, 43, -1, (void *)world_rva_3d30},
+    {14, 44, 229, 0},
+    {14, 45, 230, 0},
+    {14, 46, 231, 0},
+    {14, 47, 232, 0},
+    {14, 48, 188, 0},
+    {14, 49, -1, (void *)world_rva_b610},
+    {14, 50, 143, 0},
+    {14, 51, -1, (void *)world_rva_b870},
+    {14, 52, -1, (void *)world_rva_b850},
+    {14, 53, 190, 0},
+    {14, 54, 81, 0},
+    {14, 55, 118, 0},
+    {14, 56, 119, 0},
+    {14, 57, 120, 0},
+    {14, 58, 121, 0},
+    {14, 59, -1, (void *)world_rva_b8b0},
 };
 static const struct world_message_entry s_messages[] = {
     {0x111, 0x400, 0x1b05, 0x1b05, 0xc, (void *)world_rva_c720},
@@ -1367,8 +1435,14 @@ static const struct world_message_entry s_complexity_messages[] = {
     {0x7b, 0x0, 0x0, 0x0, 0xa, (void *)world_rva_b270},
     {0, 0, 0, 0, 0, 0}
 };
+static const struct world_message_entry s_dynamic_messages[] = {
+    {0x53, 0x0, 0x0, 0x0, 0xa, (void *)world_rva_b8d0},
+    {0x7b, 0x0, 0x0, 0x0, 0xa, (void *)world_rva_b8f0},
+    {0, 0, 0, 0, 0, 0}
+};
 static const struct world_dialog s_dialogs[] = {
     {0x1304, fs98_world_complexity_create, 0},
+    {0x1305, fs98_world_dynamic_create, 0},
     {0x1306, fs98_world_files_create, 0},
     {0x13080001, fs98_world_list_create, 0},
     {0x13080006, fs98_world_cache_create, 0},

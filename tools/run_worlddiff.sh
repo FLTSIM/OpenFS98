@@ -7,6 +7,30 @@ export WINEDEBUG=-all
 mkdir -p -- "$WINEPREFIX"
 exec 9>bin/world-diff/wine.lock
 flock 9
+if [[ "${1:-}" == --complexity-native-breaks ]]; then
+    exec python3 -B tools/world_complexity_native_breaks.py "${@:2}"
+fi
+if [[ "${1:-}" == --complexity-init-breaks ]]; then
+    exec python3 -B tools/world_complexity_init_breaks.py
+fi
+if [[ "${1:-}" == --complexity-ui ]]; then
+    exec timeout 300s wine bin/world-diff/worldcomplexityuidiff.exe "${2:-bin/world-diff/WORLD_area.dll}" "${3:-16}"
+fi
+if [[ "${1:-}" == --complexity-init ]]; then
+    exec timeout 120s wine bin/world-diff/worldcomplexityinitdiff.exe "${2:-2000}" "${3:-normal}"
+fi
+if [[ "${1:-}" == --complexity-life ]]; then
+    exec timeout 120s wine bin/world-diff/worldcomplexitylifediff.exe "${2:-2000}" "${3:-0x4a971b63}" "${4:-normal}"
+fi
+if [[ "${1:-}" == --complexity-life-breaks ]]; then
+    exec python3 -B tools/world_complexity_life_breaks.py
+fi
+if [[ "${1:-}" == --complexity-core ]]; then
+    exec timeout 120s wine bin/world-diff/worldcomplexitydiff.exe "${2:-2000}" "${3:-0x4a971b63}" "${4:-normal}"
+fi
+if [[ "${1:-}" == --complexity-breaks ]]; then
+    exec python3 -B tools/world_complexity_breaks.py
+fi
 if [[ "${1:-}" == --airport-native-breaks ]]; then
     exec python3 -B tools/world_airport_native_breaks.py "${@:2}"
 fi

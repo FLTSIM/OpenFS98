@@ -4,6 +4,17 @@ WORLD_DIR := bin/world-diff
 N ?= 2000
 SEED ?= 0x4a971b63
 MODE ?= normal
+.PHONY: world-complexity-core world-complexity-breaks
+$(WORLD_DIR)/worldcomplexitydiff.exe: tools/difftest/worldcomplexitydiff.c src/world/world_complexity.c src/world/world_complexity.h src/world/world_internal.h | $(WORLD_DIR)
+	$(CC) -std=c99 -O2 -Wall -Wextra -Werror -fno-strict-aliasing -o $@ tools/difftest/worldcomplexitydiff.c src/world/world_complexity.c
+world-complexity-core: $(WORLD_DIR)/worldcomplexitydiff.exe
+	bash tools/run_worlddiff.sh --complexity-core $(N) $(SEED) $(MODE)
+world-complexity-breaks: $(WORLD_DIR)/worldcomplexitydiff.exe
+	bash tools/run_worlddiff.sh --complexity-breaks
+.PHONY: world-complexity-metadata
+src/world/world_complexity_tables.inc src/world/world_complexity_hooks.inc &: tools/gen_world_complexity.py tools/gen_world_tables.py tools/dialogmap.py orig/English/World.DLL
+	python3 -B tools/gen_world_complexity.py
+world-complexity-metadata: src/world/world_complexity_tables.inc src/world/world_complexity_hooks.inc
 .PHONY: worldcore worlddiff-run world-breaks
 worldcore: $(WORLD_DIR)/worlddiff.exe
 $(WORLD_DIR):
@@ -28,7 +39,7 @@ world-life-breaks: worldlife
 	bash tools/run_worlddiff.sh --life-breaks
 
 PRIORITY_OBJECTS := src/world/world_priority_objects.c src/world/world_priority.h src/world/world_priority_tables.inc src/world/world_priority_hooks.inc src/world/world_objects.h src/world/world_init.h src/world/world_unwind.h src/world/world_exceptions.h src/world/world_internal.h
-WORLD_SOURCES := src/world/world_airport.c src/world/world_airport_objects.c src/world/world_facilities.c src/world/world_facilities_objects.c src/world/world_position.c src/world/world_position_objects.c src/world/world_files.c src/world/world_files_objects.c src/world/world_cache.c src/world/world_cache_objects.c src/world/world_list.c src/world/world_list_objects.c src/world/world_search.c src/world/world_search_objects.c src/world/world_search_init.c src/world/world_booster.c src/world/world_booster_objects.c src/world/world_booster_init.c src/world/world_priority.c src/world/world_priority_objects.c src/world/world_area.c src/world/world_objects.c src/world/world_init.c src/world/world_runtime.c
+WORLD_SOURCES := src/world/world_complexity.c src/world/world_complexity_objects.c src/world/world_complexity_init.c src/world/world_airport.c src/world/world_airport_objects.c src/world/world_facilities.c src/world/world_facilities_objects.c src/world/world_position.c src/world/world_position_objects.c src/world/world_files.c src/world/world_files_objects.c src/world/world_cache.c src/world/world_cache_objects.c src/world/world_list.c src/world/world_list_objects.c src/world/world_search.c src/world/world_search_objects.c src/world/world_search_init.c src/world/world_booster.c src/world/world_booster_objects.c src/world/world_booster_init.c src/world/world_priority.c src/world/world_priority_objects.c src/world/world_area.c src/world/world_objects.c src/world/world_init.c src/world/world_runtime.c
 .PHONY: world worlduidiff-run world-ui-breaks world-smoke
 src/world/world_runtime_tables.inc $(WORLD_DIR)/world.res $(WORLD_DIR)/simsui-anchor.def &: tools/gen_world_runtime.py tools/gen_views_runtime.py tools/dialogmap.py orig/English/World.DLL orig/SIMSUI.DLL | $(WORLD_DIR)
 	python3 -B tools/gen_world_runtime.py
@@ -360,3 +371,31 @@ world-airport-breaks: $(WORLD_DIR)/worldairportdiff.exe
 .PHONY: world-airport-native-breaks
 world-airport-native-breaks: world $(WORLD_DIR)/worldairportuidiff.exe
 	bash tools/run_worlddiff.sh --airport-native-breaks
+
+COMPLEXITY_OBJECTS := src/world/world_complexity_objects.c src/world/world_complexity.h src/world/world_complexity_tables.inc src/world/world_complexity_hooks.inc src/world/world_objects.h src/world/world_internal.h src/world/world_unwind.h
+$(WORLD_DIR)/worldcomplexitylifediff.exe: tools/difftest/worldcomplexitylifediff.c $(COMPLEXITY_OBJECTS) | $(WORLD_DIR)
+	$(CC) -std=c99 -O2 -Wall -Wextra -Werror -fno-strict-aliasing -fno-delete-null-pointer-checks -o $@ tools/difftest/worldcomplexitylifediff.c src/world/world_complexity_objects.c -lntdll
+.PHONY: world-complexity-life world-complexity-life-breaks
+world-complexity-life: $(WORLD_DIR)/worldcomplexitylifediff.exe
+	bash tools/run_worlddiff.sh --complexity-life $(N) $(SEED) $(MODE)
+world-complexity-life-breaks: $(WORLD_DIR)/worldcomplexitylifediff.exe
+	bash tools/run_worlddiff.sh --complexity-life-breaks
+COMPLEXITY_INIT := src/world/world_complexity_init.c src/world/world_complexity.h src/world/world_unwind.h src/world/world_init.h
+$(WORLD_DIR)/worldcomplexityinitdiff.exe: tools/difftest/worldcomplexityinitdiff.c tools/difftest/worldcomplexitydiff.c src/world/world_complexity.c $(COMPLEXITY_INIT) | $(WORLD_DIR)
+	$(CC) -std=c99 -O2 -Wall -Wextra -Werror -fno-strict-aliasing -o $@ tools/difftest/worldcomplexityinitdiff.c src/world/world_complexity.c src/world/world_complexity_init.c -lntdll
+.PHONY: world-complexity-init
+world-complexity-init: $(WORLD_DIR)/worldcomplexityinitdiff.exe
+	bash tools/run_worlddiff.sh --complexity-init $(N) $(MODE)
+
+$(WORLD_DIR)/WORLD_area.dll: $(COMPLEXITY_OBJECTS) $(COMPLEXITY_INIT)
+$(WORLD_DIR)/worldcomplexityuidiff.exe: tools/difftest/worldcomplexityuidiff.c tools/difftest/worlduidiff.c src/world/world_internal.h | $(WORLD_DIR)
+	$(CC) -std=c99 -O2 -Wall -Wextra -Werror -fno-strict-aliasing -o $@ $< -lgdi32 -lntdll
+.PHONY: world-complexity-ui
+world-complexity-ui: world $(WORLD_DIR)/worldcomplexityuidiff.exe
+	bash tools/run_worlddiff.sh --complexity-ui
+.PHONY: world-complexity-init-breaks
+world-complexity-init-breaks: $(WORLD_DIR)/worldcomplexityinitdiff.exe
+	bash tools/run_worlddiff.sh --complexity-init-breaks
+.PHONY: world-complexity-native-breaks
+world-complexity-native-breaks: world $(WORLD_DIR)/worldcomplexityuidiff.exe
+	bash tools/run_worlddiff.sh --complexity-native-breaks

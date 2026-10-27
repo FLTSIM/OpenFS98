@@ -2,6 +2,10 @@
 
 Hybrid decompilation of Microsoft Flight Simulator 98 (retail, 1997-08-07).
 
+![wine](./images/screenshot.png)
+
+CD Image: MSFlightSimulator98.iso `SHA256: be523a66bf368f8769f86aedcddad6f58fb0185908b6a398c456c0c5a4d07436`
+
 The approach is OpenRCT2's, not a ROM-style matching decompilation: the retail
 game keeps running, and reimplemented code is swapped in a piece at a time so
 there is something testable from the first commit.

@@ -7,6 +7,24 @@ export WINEDEBUG=-all
 mkdir -p -- "$WINEPREFIX"
 exec 9>bin/world-diff/wine.lock
 flock 9
+if [[ "${1:-}" == --airport-native-breaks ]]; then
+    exec python3 -B tools/world_airport_native_breaks.py "${@:2}"
+fi
+if [[ "${1:-}" == --airport-breaks ]]; then
+    exec python3 -B tools/world_airport_breaks.py
+fi
+if [[ "${1:-}" == --airport-ui ]]; then
+    exec timeout 300s wine bin/world-diff/worldairportuidiff.exe "${2:-bin/world-diff/WORLD_area.dll}" "${3:-12}"
+fi
+if [[ "${1:-}" == --airport-core ]]; then
+    exec timeout 180s wine bin/world-diff/worldairportdiff.exe "${2:-2000}" "${3:-normal}"
+fi
+if [[ "${1:-}" == --airport-life ]]; then
+    exec timeout 120s wine bin/world-diff/worldairportlifediff.exe "${2:-2000}" "${3:-0x4a971b63}" "${4:-normal}"
+fi
+if [[ "${1:-}" == --airport-life-breaks ]]; then
+    exec python3 -B tools/world_airport_life_breaks.py
+fi
 if [[ "${1:-}" == --facilities-breaks ]]; then
     exec python3 -B tools/world_facilities_breaks.py
 fi

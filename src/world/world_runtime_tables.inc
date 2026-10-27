@@ -132,6 +132,38 @@ static void TC world_rva_19770(void *object) { fs98_world_facilities_refresh(obj
 static void TC world_rva_197b0(void *object) { fs98_world_facilities_back(object); }
 static void * TC world_rva_19810(void *object, uint32_t flags) { return fs98_world_facilities_control_delete(object, flags, 0); }
 static void * TC world_rva_19830(void *object, uint32_t flags) { return fs98_world_facilities_control_delete(object, flags, 1); }
+static void * TC world_rva_14d50(void *object, uint32_t flags) { return fs98_world_airport_scalar_delete(object, flags); }
+static void * TC world_rva_15180(void *object) { (void)object; return &s_airport_message_map; }
+static void TC world_rva_14f60(void *object, void *exchange) { fs98_world_airport_exchange(object, exchange); }
+static int TC world_rva_15190(void *object) { return fs98_world_airport_init(object); }
+static void TC world_rva_16680(void *object) { fs98_world_airport_accept(object); }
+static void TC world_rva_16700(void *object) { fs98_world_airport_cancel(object); }
+static int TC world_rva_15a70(void *object, uint32_t unused) { (void)object; (void)unused; return 0; }
+static int TC world_rva_155a0(void *object, uint32_t unused, void *info) { return fs98_world_airport_help(object, unused, info); }
+static int TC world_rva_155c0(void *object, uint32_t window, uint32_t unused) { return fs98_world_airport_context(object, window, unused); }
+static void TC world_rva_15ea0(void *object) { fs98_world_airport_refresh(object); }
+static void TC world_rva_15de0(void *object) { fs98_world_airport_airport(object); }
+static void TC world_rva_15e70(void *object) { fs98_world_airport_double_click(object); }
+static void TC world_rva_15ec0(void *object) { fs98_world_airport_airport_edit(object); }
+static void TC world_rva_163a0(void *object) { fs98_world_airport_name_edit(object); }
+static void TC world_rva_16550(void *object) { fs98_world_airport_name(object); }
+static void TC world_rva_99f0(void *object) { (void)object; }
+static void TC world_rva_15a80(void *object) { fs98_world_airport_mode_button(object, 0); }
+static void TC world_rva_15aa0(void *object) { fs98_world_airport_mode_button(object, 1); }
+static void TC world_rva_15ac0(void *object) { fs98_world_airport_mode_button(object, 2); }
+static void TC world_rva_15ae0(void *object) { fs98_world_airport_place(object, 0); }
+static void TC world_rva_15b50(void *object) { fs98_world_airport_place(object, 1); }
+static void TC world_rva_15bc0(void *object) { fs98_world_airport_place(object, 2); }
+static void TC world_rva_15c30(void *object) { fs98_world_airport_place(object, 3); }
+static void TC world_rva_15ca0(void *object) { fs98_world_airport_place(object, 4); }
+static void TC world_rva_16070(void *object) { fs98_world_airport_dropdown(object, 0, 0); }
+static void TC world_rva_16090(void *object) { fs98_world_airport_dropdown(object, 1, 0); }
+static void TC world_rva_160b0(void *object) { fs98_world_airport_dropdown(object, 2, 0); }
+static void TC world_rva_160d0(void *object) { fs98_world_airport_dropdown(object, 3, 0); }
+static void TC world_rva_16140(void *object) { fs98_world_airport_dropdown(object, 0, 1); }
+static void TC world_rva_161d0(void *object) { fs98_world_airport_dropdown(object, 1, 1); }
+static void TC world_rva_16250(void *object) { fs98_world_airport_dropdown(object, 2, 1); }
+static void TC world_rva_162d0(void *object) { fs98_world_airport_dropdown(object, 3, 1); }
 static const struct world_import_binding s_imports[] = {
     {"USER32.dll", "GetActiveWindow", 0, 0x25864},
     {"USER32.dll", "ValidateRect", 0, 0x25868},
@@ -1027,6 +1059,66 @@ static const struct world_virtual_binding s_virtuals[] = {
     {10, 45, 193, 0},
     {10, 46, 231, 0},
     {10, 47, 194, 0},
+    {11, 0, 117, 0},
+    {11, 1, -1, (void *)world_rva_14d50},
+    {11, 2, -1, (void *)world_rva_2d00},
+    {11, 3, -1, (void *)world_rva_2d10},
+    {11, 4, -1, (void *)world_rva_2d00},
+    {11, 5, 196, 0},
+    {11, 6, 197, 0},
+    {11, 7, 198, 0},
+    {11, 8, 199, 0},
+    {11, 9, 200, 0},
+    {11, 10, 201, 0},
+    {11, 11, 202, 0},
+    {11, 12, -1, (void *)world_rva_15180},
+    {11, 13, 203, 0},
+    {11, 14, 204, 0},
+    {11, 15, 205, 0},
+    {11, 16, 206, 0},
+    {11, 17, 207, 0},
+    {11, 18, 208, 0},
+    {11, 19, 209, 0},
+    {11, 20, 210, 0},
+    {11, 21, 189, 0},
+    {11, 22, 212, 0},
+    {11, 23, 213, 0},
+    {11, 24, 214, 0},
+    {11, 25, 215, 0},
+    {11, 26, 216, 0},
+    {11, 27, 217, 0},
+    {11, 28, 218, 0},
+    {11, 29, 219, 0},
+    {11, 30, 220, 0},
+    {11, 31, 221, 0},
+    {11, 32, 83, 0},
+    {11, 33, 211, 0},
+    {11, 34, 223, 0},
+    {11, 35, -1, (void *)world_rva_14f60},
+    {11, 36, -1, (void *)world_rva_2d20},
+    {11, 37, -1, (void *)world_rva_2d30},
+    {11, 38, 224, 0},
+    {11, 39, 225, 0},
+    {11, 40, 226, 0},
+    {11, 41, 227, 0},
+    {11, 42, 222, 0},
+    {11, 43, -1, (void *)world_rva_3d30},
+    {11, 44, 229, 0},
+    {11, 45, 230, 0},
+    {11, 46, 231, 0},
+    {11, 47, 232, 0},
+    {11, 48, 188, 0},
+    {11, 49, -1, (void *)world_rva_15190},
+    {11, 50, 143, 0},
+    {11, 51, -1, (void *)world_rva_16680},
+    {11, 52, -1, (void *)world_rva_16700},
+    {11, 53, 190, 0},
+    {11, 54, -1, (void *)world_rva_15a70},
+    {11, 55, -1, (void *)world_rva_15a70},
+    {11, 56, 119, 0},
+    {11, 57, 120, 0},
+    {11, 58, 121, 0},
+    {11, 59, 85, 0},
 };
 static const struct world_message_entry s_messages[] = {
     {0x111, 0x400, 0x1b05, 0x1b05, 0xc, (void *)world_rva_c720},
@@ -1123,6 +1215,35 @@ static const struct world_message_entry s_facilities_messages[] = {
     {0x7b, 0x0, 0x0, 0x0, 0xa, (void *)world_rva_19600},
     {0, 0, 0, 0, 0, 0}
 };
+static const struct world_message_entry s_airport_messages[] = {
+    {0x111, 0x0, 0x1bdd, 0x1bdd, 0xc, (void *)world_rva_15a80},
+    {0x111, 0x0, 0x1bde, 0x1bde, 0xc, (void *)world_rva_15aa0},
+    {0x111, 0x0, 0x1bdf, 0x1bdf, 0xc, (void *)world_rva_15ac0},
+    {0x111, 0x0, 0x1be8, 0x1be8, 0xc, (void *)world_rva_15ea0},
+    {0x111, 0x0, 0x1bd9, 0x1bd9, 0xc, (void *)world_rva_14a80},
+    {0x53, 0x0, 0x0, 0x0, 0xa, (void *)world_rva_155a0},
+    {0x111, 0x1, 0x1be1, 0x1be1, 0xc, (void *)world_rva_15ae0},
+    {0x111, 0x1, 0x1add, 0x1add, 0xc, (void *)world_rva_15b50},
+    {0x111, 0x1, 0x1be5, 0x1be5, 0xc, (void *)world_rva_15bc0},
+    {0x111, 0x1, 0x1ade, 0x1ade, 0xc, (void *)world_rva_15c30},
+    {0x7b, 0x0, 0x0, 0x0, 0xa, (void *)world_rva_155c0},
+    {0x111, 0x1, 0x1beb, 0x1beb, 0xc, (void *)world_rva_15de0},
+    {0x111, 0x2, 0x1beb, 0x1beb, 0xc, (void *)world_rva_15e70},
+    {0x111, 0x400, 0x1bea, 0x1bea, 0xc, (void *)world_rva_15ec0},
+    {0x111, 0x7, 0x1be1, 0x1be1, 0xc, (void *)world_rva_16070},
+    {0x111, 0x8, 0x1be1, 0x1be1, 0xc, (void *)world_rva_16140},
+    {0x111, 0x7, 0x1add, 0x1add, 0xc, (void *)world_rva_16090},
+    {0x111, 0x8, 0x1add, 0x1add, 0xc, (void *)world_rva_161d0},
+    {0x111, 0x7, 0x1be5, 0x1be5, 0xc, (void *)world_rva_160b0},
+    {0x111, 0x8, 0x1be5, 0x1be5, 0xc, (void *)world_rva_16250},
+    {0x111, 0x7, 0x1ade, 0x1ade, 0xc, (void *)world_rva_160d0},
+    {0x111, 0x8, 0x1ade, 0x1ade, 0xc, (void *)world_rva_162d0},
+    {0x111, 0x400, 0x1bee, 0x1bee, 0xc, (void *)world_rva_163a0},
+    {0x111, 0x1, 0x1bef, 0x1bef, 0xc, (void *)world_rva_16550},
+    {0x111, 0x2, 0x1bef, 0x1bef, 0xc, (void *)world_rva_99f0},
+    {0x111, 0x1, 0x1bf0, 0x1bf0, 0xc, (void *)world_rva_15ca0},
+    {0, 0, 0, 0, 0, 0}
+};
 static const struct world_dialog s_dialogs[] = {
     {0x1306, fs98_world_files_create, 0},
     {0x13080001, fs98_world_list_create, 0},
@@ -1133,6 +1254,7 @@ static const struct world_dialog s_dialogs[] = {
     {0x13080003, fs98_world_area_create_add, 0},
     {0x13080002, fs98_world_search_create, 0},
     {0x13080005, fs98_world_priority_create, 0},
+    {0x1309, fs98_world_airport_create, 0},
     {0x1308, fs98_world_position_create, 0},
     {0x1307, fs98_world_facilities_create, 0},
     {0, 0, 0}

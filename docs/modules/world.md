@@ -5,13 +5,14 @@ registers the scenery-area list (`0x13080001`), add/edit scenery area
 (`0x13080003` / `0x13080004`), scenery
 priority (`0x13080005`), booster/cache list (`0x13080006`), add/edit booster
 (`0x13080008` / `0x13080007`), drive search (`0x13080002`) and the world-files
-container (`0x1306`), exact position (`0x1308`) and facilities directory (`0x1307`).
+container (`0x1306`), exact position (`0x1308`), facilities directory (`0x1307`)
+and go-to-airport (`0x1309`).
 Their classes, initialization, controls, event/message maps, factories,
 exception lifetimes and module binding are rebuilt in C, using
-retail MFC42/SIMSUI as shared dependencies. The other 8 World registrations
+retail MFC42/SIMSUI as shared dependencies. The other 7 World registrations
 remain pending native acceptance.
 
-This is ready to review as a standalone eleven-dialog slice. It is **not a full
+This is ready to review as a standalone twelve-dialog slice. It is **not a full
 World replacement** and must not replace the active game's World.DLL. The
 startup smoke changes only a private game copy; startup success does not supply
 the other registrations or establish their behavior.
@@ -95,7 +96,8 @@ The FE-owned world-files container `0x1306` (factory `0x223f1440`, template
 `0x6b6`, owner fixture `world_files`) now has native acceptance below, including
 its area/cache list children. FACIL's exact-position dialog `0x1308` now has
 its own acceptance below. FACIL's facilities directory `0x1307` now also has native acceptance below;
-continue with go-to-airport `0x1309` using independent owner callbacks; keep real placement callbacks out of tests
+go-to-airport `0x1309` now also has native acceptance below over independent
+owner callbacks; keep real placement callbacks out of tests
 because they reach MAIN and the aircraft simulator.
 
 ## Other bounded slices
@@ -110,7 +112,8 @@ Do not execute real placement callbacks against the active game while building
 UI fixtures: FACIL's apply path reaches MAIN, CHAIN and the aircraft simulator.
 
 Facilities directory `0x1307` and go-to-airport `0x1309` have richer list and
-nested-dialog contracts in the same owner/harness. Weather, time, scenery
+nested-dialog contracts in the same owner/harness, with native World acceptance
+recorded below. Weather, time, scenery
 complexity and other MAIN-driven descriptors need separate caller recovery;
 their inventory entries are not behavior specifications.
 
@@ -2210,19 +2213,244 @@ Logs/artifacts use `bin/world-diff/facilities-`, the dedicated
 World Wine prefix and its lock. No FE/FACIL/MAIN/HOST implementation or verified
 owner harness, shared Makefile or active-game DLL is changed.
 
+## Go-to-airport: class and factory milestone
+
+Go-to-airport **`0x1309`**, factory **`0x223f1cf0`**, template **`0x70d`**,
+is now implemented through independent class/factory lifetime acceptance.
+Its FACIL owner is `.data+0x3e8`; the established owner fixture is
+`world_airport` in `tools/difftest/facildiff.c`. This first milestone did not register
+the airport dialog in `WORLD_area.dll`. The core/native milestone below adds
+that registration, raising the accepted count to twelve.
+
+`src/world/world_airport_objects.c` implements constructor `0x22404b50`,
+destructor `0x22404d70`, scalar deleting destructor `0x22404d50`, factory,
+DDX `0x22404f60`, help `0x224055a0`, context help `0x224055c0` and shared
+PostNcDestroy `0x223f3d30`. The new harness calls these eight retail entry
+points plus construction followed by deleting destruction. It patches imported
+services only; retail retains its local code, maps, vtable and MSVC exception
+metadata. No FACIL callback or real aircraft placement runs.
+
+Recovered and independently compared behavior:
+
+- The object is `0x23e0` bytes, with descriptor at `+0x10dc` and class vtable
+  `0x22411468`. Its 29 embedded controls are 11 text controls, one text-art
+  control, three radio buttons, five combo boxes, two edit controls, three list
+  boxes and four three-piece buttons. All 29 have DDX bindings, preceded by
+  base DDX. Exact offsets, construction order and ids are in the generated
+  `world_airport_tables.inc`; DDX order differs from construction order.
+- The constructor installs the class vtable only after all controls succeed.
+  It leaves the tail state untouched. The destructor retains its incoming
+  vtable, destroys controls in reverse order, then destroys the base. A failed
+  destructor is not retried during exception cleanup; earlier controls and
+  the base still receive destruction.
+- The factory ignores its parent, allocates `0x23e0` bytes, constructs with a
+  null parent and stores the descriptor and current module. A null allocation
+  faults writing address `0x10dc`. Create failure still proceeds to Show(1),
+  without a message; the handle is read after Show. Exceptions during
+  construction release the allocation through dialog operator delete, while
+  successful ownership transfer occurs before Create. This factory has no
+  typed `CException*` catch: all tested exception types propagate.
+- Scalar deletion calls UI operator delete only for flag bit 0 after successful
+  destruction. PostNcDestroy dispatches virtual scalar deletion with flag 1
+  for nonnull objects and does nothing for null objects.
+- Help returns WinHelp's result with command 12 and the full numeric map.
+  Context help uses command 10 and returns 1, ignoring its message coordinates.
+  Unlike the facilities directory, it has no artwork geometry suppression.
+
+`tools/gen_world_airport.py` validates the reference image base/module id,
+both 29-state EH cleanup graphs, reverse control lifetimes, complete DDX
+coverage, class/deleting-destructor identity and the terminated help/message
+maps. It extracts a 60-slot vtable and 26 local message entries plus terminator.
+Generated outputs contain ABI metadata, with no copied code or resources;
+both reproduce byte-for-byte in an isolated directory. The registry regenerates
+unchanged and all twelve dialogmap tests pass.
+
+```sh
+make -f tools/world.mk world-airport-metadata
+make -f tools/world.mk world-airport-life N=20000
+make -f tools/world.mk world-airport-life N=2000 MODE=unwind
+make -f tools/world.mk world-airport-life N=2000 MODE=typed
+make -f tools/world.mk world-airport-life-breaks
+```
+
+Against reference SHA-256 `35d67023...3118f5`, seed `0x4a971b63`, the normal
+run passed **180,000 comparisons**, **178,181 successful-path witnesses** and
+**1,819 expected allocation write faults**. Each exceptional mode passed
+**445,206 comparisons**, including **427,206 real unwinds**, **17,818 normal
+witnesses** and **182 expected allocation faults**. Total: **1,070,412 guarded
+comparisons, zero differences**, including **854,412 real unwinds**. Typed mode
+uses direct/derived/virtual-base/null `CException*` metadata, unrelated and const
+pointer types; no fatal dispatch occurred.
+
+The harness compares ordered service calls, parameters, returns, every object
+and descriptor byte, exchange/help buffers, mutable module state, control
+markers, deletion counts and guards. Successful-path witnesses independently
+check call counts, every control's marker, constructor vtable, post-Show handle,
+help/context returns, deletion flags and PostNcDestroy behavior. Every external
+service boundary is separately interrupted through real `RtlUnwind` and the
+retail MSVCRT exception handler. The fixture supplies synthetic controls;
+these results do not establish native window behavior or owner callback order.
+
+All **24/24 lifetime mutations** produce exit 1 with actual `DIFFER`
+transcripts. They cover constructor template/parent, vtable timing and control
+omission, destructor vtable reset, reverse destruction and retry behavior,
+base cleanup, delete flags/operators, allocation size, factory template/parent,
+module, Show flag and post-Show handle, ownership transfer, base/local DDX,
+help command/return, context command/return and PostNcDestroy deletion.
+Build errors, faults and timeouts do not count as detections.
+
+Logs are `bin/world-diff/airport-life-normal.log`, `airport-life-unwind.log`,
+`airport-life-typed.log` and `airport-life-breaks.log`. Mutated sources,
+independent executables and actual difference logs live in ignored
+`bin/world-diff/airport-life-breaks/`. Runs use World's existing Wine prefix
+and lock. The facilities typed lifetime regression (`N=32`) also passes
+**2,778 comparisons**, including **2,490 real unwinds**; its log is `airport-facilities-life-regression.log`.
+
+At this first milestone the native DLL was unchanged, with SHA-256
+`82d24d4d5b5572e0a67ce07f7bc4f9cc7fdabab322953071cf53102845cdccb5`.
+No native UI or startup acceptance is claimed for the airport dialog.
+
+The subsequent milestone below completes those core and native boundaries.
+
+## Go-to-airport: core and native UI acceptance
+
+Go-to-airport **`0x1309`** now has core, initialization and native acceptance
+over independent FACIL-shaped callbacks. `WORLD_area.dll` registers twelve
+World dialogs; seven registrations remain pending. `world_airport.c` implements
+the complete place/name/airport/runway flow, mode and edit/dropdown handlers,
+refresh, owner facilities dispatch, accept/cancel, HOST resource lifetimes and
+initialization. Runtime bindings rebuild the 60-slot vtable and all 26 local
+message entries; the existing shared facilities callback and inert name-list
+double-click handler are also module-owned C implementations. The replacement
+never calls retail World code.
+
+Observed behavior preserved and independently compared:
+
+- Descriptor modes `0x1000`, `0x1001` and `0x1002` select place, name and
+  FE-area searches. Transitions clear lists using the **old** mode before
+  storing the new mode and changing control visibility/enabling. Area mode
+  invokes the owner area callback before population. Its visible controls use
+  Show(5), while the other mode controls use Show(1). The radio-handler cache
+  at `+0x23dc` is separate from descriptor mode; initialization leaves it at 3.
+- Population calls owner `+0x20` first. It inserts a formatted placeholder
+  before each place list, appends borrowed 12-byte records, restores saved
+  selections and calls the runway owner except in area mode. Counts are
+  signed; row bases and descriptors reload at service boundaries. Refresh
+  calls owner `+0x10`, restores the seven saved selections, checks the mode's
+  radio and runs its transition. Place/area selection handlers have distinct
+  owner callbacks, then clear the selected-airport text and repopulate.
+- Place dropdown opening replaces the first row with the generic all-items
+  string, deletes the old placeholder and restores selection. Close-up
+  reformats the placeholder and reverses the replacement. The first place
+  combo only formats on close-up when selection is zero; the other three
+  format regardless of selection. Both the intermediate and final rows are
+  checked by the native fixture.
+- Airport and name edits use case-insensitive recursive insertion search,
+  with empty, before-first, exact, between-row and after-last branches. Airport
+  edit skips under the `+0x23d8` notification gate and permits a null row base.
+  Name edit returns immediately for a zero count, performs an extra exact
+  comparison and either queries/rebuilds airports or clears airport/runway
+  controls. It writes its edit selection to **`+0x23a0`**, rather than the
+  name-selection snapshot `+0x239c`; that retail quirk is preserved. Selecting
+  an airport sets the gate while changing its edit text and updating runways.
+- Accept retains the validation/error vtable for final Close, samples runway
+  selection only when that combo is enabled, calls owner `+8`, stores answer 1
+  and releases temporary HOST storage. Cancel stores answer 0, releases storage
+  and reloads the close vtable. Airport double-click invokes virtual accept;
+  name double-click is inert. Native fixtures exercise Return and Escape too.
+- Initialization retains retail's base-init/skin behavior, artwork, fonts,
+  radio setup, all list/edit/button bindings, both edit limits of 100 and the
+  unusual shared edit label at `+0x1a88`. It invokes owner places then names,
+  loads nine HOST strings, allocates a work buffer at twice their maximum
+  returned length, restores the initial mode and focuses the airport edit.
+  Null and `0xcdcdcdcd` descriptors follow the diagnostic-message branch.
+  There is no local cleanup for failures during these HOST allocations;
+  accept/cancel free all nine strings and the work buffer in ascending order.
+
+```sh
+make -f tools/world.mk world-airport-core N=20000
+make -f tools/world.mk world-airport-core N=256 MODE=unwind
+make -f tools/world.mk world-airport-breaks
+make -f tools/world.mk world-airport-life N=20000
+make -f tools/world.mk world-airport-life N=2000 MODE=unwind
+make -f tools/world.mk world-airport-life N=2000 MODE=typed
+make -f tools/world.mk world-airport-life-breaks
+make -f tools/world.mk world-airport-ui
+make -f tools/world.mk world-airport-native-breaks
+make -f tools/world.mk world-smoke
+```
+
+The core fixture exercises 39 operations per scenario. It compares ordered
+calls, arguments and returns, complete guarded object state, both descriptors,
+all row and text buffers, saved selections, control visibility/enabling,
+resource allocations/releases and callback counters. Independent witnesses
+check construction of HOST storage, release counts, mode writes, notification
+suppression and cancel results. Descriptor swaps and validation-time vtable
+replacement exercise reload/caching behavior. Fixtures keep payload fields
+valid under deliberate row-stride mutations, so a fault cannot masquerade as
+a detected difference. Each list has independent selections, making swapped
+selection mappings observable. Interruption injects a Windows exception at
+every external boundary and uses real `RtlUnwind`; retail internal calls remain
+intact. No FACIL implementation or simulator placement callback runs.
+
+The native fixture uses 24 scripts per case across two module unload cycles.
+It compares GDI pixels, control text/geometry/visibility/enabling and edit
+limits, all eight lists' counts, full contents and selections, radio state,
+owner callback order/parameters, descriptor/text/saved state, allocation/free
+counts and automatic deletion. It physically clicks the radio buttons and
+opens an actual nested facilities directory from the independent owner
+callback. Factory, local virtual and all message-handler addresses must belong
+to the tested module. A scalar-delete probe verifies flag 1 and exactly one
+deletion after window destruction. Module-init allocation/exception and repeated
+deinit checks run on both sides before each UI cycle.
+
+With seed `0x4a971b63`, the final normal core run passed **780,000 comparisons
+and 780,000 witnesses** over 20,000 scenarios. The final 256-scenario unwind run
+passed **218,420 comparisons**, including **208,436 real unwinds** and **9,984
+normal witnesses**. Including the class/factory milestone's **1,070,412 lifetime
+comparisons**, this is **2,068,832 guarded core/lifetime comparisons, zero
+differences**. The final core fixture includes direct one-row search boundaries;
+its logs are `airport-core-final-normal.log` and `airport-core-final-unwind.log`.
+The typed lifetime regression (`N=32`) also passed **7,126 comparisons**,
+including **6,838 real unwinds** (`airport-life-regression.log`).
+
+The final native suite passed **576 paired pixel/state/callback comparisons**,
+**576 script witnesses**, eight module-init comparisons and two full unload
+cycles. It opens a nested facilities directory in each case in each cycle.
+Baselines are `bin/world-diff/ui-images/airport-baseline-*.bmp`; the final
+baseline log is `airport-ui-final.log`.
+
+All **38 core/init**, **24 lifetime** and **14 native mutations** produced
+actual differences: **76/76 detected**. Every accepted detection requires
+exit 1 and an actual difference transcript. Compile errors, faults, fixture
+failures and timeouts do not count. One native dropdown-placeholder mutation
+initially passed because close-up restored the row before capture; the fixture
+now captures and witnesses the open row too. A core search mutation exposed
+missing one-row search coverage; direct single-row cases were added. Strengthened
+normal/unwind/native baselines and all affected mutation suites then passed.
+Final mutation logs are `airport-core-final-breaks.log`,
+`airport-life-breaks.log` and `airport-native-final-breaks.log`; artifacts are
+under `airport-breaks/`, `airport-life-breaks/` and `airport-native-breaks/`.
+Native mutation builds retain input hashes and complete source/DLL/harness
+snapshots. Earlier World mutation builders now include the airport sources.
+
+Airport/runtime metadata and build-only resource/anchor outputs reproduce
+byte-for-byte in an isolated directory. The retail registry is unchanged;
+all twelve dialogmap tests pass. Runs use World's dedicated Wine prefix/lock
+and ignored `bin/world-diff/airport-` artifacts. No FE/FACIL/MAIN/HOST source,
+verified owner harness, shared Makefile or active-game DLL is changed.
+
 ## Remaining boundary
 
-Eight registrations remain pending native acceptance: weather/time, scenery
-settings and FACIL's go-to-airport screen. The next bounded candidate is
-**`0x1309`**, factory **`0x223f1cf0`**, template **`0x70d`**, owner block
-FACIL `.data+0x3e8` and fixture `world_airport`. Recover its place/name/airport/
-runway list graph, mode/filter state, controls, nested directory callback and
-callback order with new World fixtures. Preserve FACIL's verified source and
-harness. Real placement callbacks reach MAIN/CHAIN/the aircraft simulator and
-must remain outside the independent World fixtures. Facilities directory is
-accepted over independent owner callbacks; the actual FACIL filesystem lookup
-and simulator placement flows remain separate owner responsibilities.
+Seven registrations remain pending native acceptance: basic weather `0x1302`,
+time/season `0x1301`, weather areas `0x1303`, scenery complexity `0x1304`, dynamic
+scenery `0x1305`, advanced weather `0x13040001` and copy weather `0x13050001`.
+These need independent caller/descriptor recovery before choosing another
+bounded family. Their inventory entries are not behavior specifications.
 
+FACIL's three World dialogs now have native acceptance over independent owner
+fixtures. Real filesystem lookup, flight-selection and simulator placement
+remain owner responsibilities; no real placement callback runs in World tests.
 WORLD remains a partial replacement. Shared build/install integration and full
 host-driven interactions are separate. FE, FACIL, MAIN, HOST, their verified
-harnesses/docs and the shared Makefile remain unchanged by this work.
+harnesses/docs, the shared Makefile and the active game remain unchanged.

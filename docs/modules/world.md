@@ -3,14 +3,14 @@
 **Partial replacement with native UI acceptance.** `bin/world-diff/WORLD_area.dll`
 registers the scenery-area list (`0x13080001`), add/edit scenery area
 (`0x13080003` / `0x13080004`), scenery
-priority (`0x13080005`), add/edit booster (`0x13080008` / `0x13080007`)
-and drive search (`0x13080002`).
+priority (`0x13080005`), booster/cache list (`0x13080006`), add/edit booster
+(`0x13080008` / `0x13080007`) and drive search (`0x13080002`).
 Their classes, initialization, controls, event/message maps, factories,
 exception lifetimes and module binding are rebuilt in C, using
-retail MFC42/SIMSUI as shared dependencies. The other 12 World registrations
+retail MFC42/SIMSUI as shared dependencies. The other 11 World registrations
 remain pending native acceptance.
 
-This is ready to review as a standalone seven-dialog slice. It is **not a full
+This is ready to review as a standalone eight-dialog slice. It is **not a full
 World replacement** and must not replace the active game's World.DLL. The
 startup smoke changes only a private game copy; startup success does not supply
 the other registrations or establish their behavior.
@@ -53,10 +53,45 @@ verified by its own harness.
 
 This slice covers these two registrations and their shared class,
 control exchange, validation, accept/cancel and lifetimes. Use independent
-callback/file fixtures. Priority and drive search now have their own acceptance
-below. Broader scenery lists and booster-list dialogs remain candidates for
-later slices. The native
-test DLL remains a partial World replacement.
+callback/file fixtures. Priority, drive search and the scenery-area list now have their own acceptance
+below, as does the booster/cache list. The world-files container remains a
+candidate for a later slice. The native test DLL remains a partial World replacement.
+
+## Booster/cache list scope and owner
+
+Start with registry **`0x13080006`**, factory **`0x223f16b0`**, template
+**`0x6ae`**. This is now the eighth accepted registration, through the native
+acceptance recorded below. It uses new World fixtures and the standalone World
+build, independently of MAIN/HOST. Its accepted add/edit children
+(`0x13080008` / `0x13080007`) execute as actual nested windows.
+
+Read [FE's Scenery Library contract](fe.md#part-4--the-scenery-library-0x78-verified),
+`src/fe/fe_library.c` (the `dialog 0x13080006` section), and
+`tools/difftest/fesldiff.c` (`world_caches`, `world_cache`, `fesl_call`).
+The established owner block is FE `.data+0x3000`: answer `+0`, callbacks
+`+4` nothing, `+8` Add, `+0xc` Edit, `+0x10` Delete and `+0x14` Flush;
+title `+0x18`, count `+0x1c`, selection `+0x20`, rows `+0x24`.
+Rows are `0x80` bytes. These are caller-side contracts, not proof of World's
+callback ordering, control behavior or validation. Recover those from retail.
+
+The class/control graph, lifetimes, initializer, message/help maps, selection,
+formatting, accept/cancel and owner refresh behavior have been recovered from
+retail and compared independently. Core, lifetime and native harnesses use the
+area-list harness structure with separate cache-row and callback fixtures;
+booster behavior is not inferred from scenery-area behavior. Eleven other
+registrations remain pending native acceptance.
+
+Keep edits within `src/world/`, World generators/harnesses, `tools/world.mk`,
+`tools/run_worlddiff.sh` and World handoff documentation. Preserve FE/FACIL,
+MAIN/HOST and their harnesses/docs, and the shared Makefile. The World runner
+uses `bin/world-diff/wineprefix` and `bin/world-diff/wine.lock`; keep its output
+and prefix separate from MAIN/HOST runs. Never install the partial DLL into
+the active game. Check the worktree first and preserve any uncommitted slices
+and handoff work.
+
+The recommended next slice is the FE-owned world-files container `0x1306` (factory
+`0x223f1440`, template `0x6b6`, owner fixture `world_files`), with the area and
+cache lists as its children. Its UI still requires recovery and native acceptance.
 
 ## Other bounded slices
 
@@ -1346,13 +1381,186 @@ rebuild.
 The scenery-area list is complete through native acceptance. The DLL remains
 a partial replacement; continue with a separately bounded remaining family.
 
+## Booster/cache list accepted slice
+
+`world_cache.c` and `world_cache_objects.c` implement registry `0x13080006`,
+factory `0x223f16b0`, template `0x6ae` and class `CPerformanceBoosters`.
+`gen_world_cache.py` extracts 15 embedded controls and DDX bindings, reverse
+destruction, the MSVC cleanup graph, terminated help map, 60-slot vtable and
+seven message entries. The constructor is `0x223f91c0`, destructor
+`0x223f9310`, scalar deleting destructor `0x223f92f0`, DDX `0x223f9430`,
+initializer `0x223f9560`, vtable `0x2240f338` and message map `0x2240f270`.
+The base-map getter is `0x223f5d40`. The object is `0x1d00` bytes; descriptor
+is `+0x10dc`, local accept/cancel result `+0x1cfc`, list control `+0x18c4`
+and its HWND `+0x18e4`. The title field at descriptor `+0x18` is not read by
+these routines. Owner callbacks are `stdcall(descriptor)`.
+
+Recovered behavior:
+
+- Collect (`0x223f99f0`) is empty. Check (`0x223f9c20`) directly calls owner
+  `+4` and returns its result. Validate (`0x223f9c00`) gets the UI selection,
+  discards it and returns zero. These helpers are direct calls, separate from
+  inherited virtual validation/error slots.
+- OK (`0x223f97d0`) writes local result 1, calls Collect and Check, and calls
+  Validate only when Check returns nonzero. It then writes descriptor answer
+  1 and closes through the freshly loaded vtable. Even nonzero Check cannot
+  prevent closing because Validate always returns zero. OK does not collect
+  selection or active flags. Cancel (`0x223f9810`) loads the close vtable,
+  writes local result 2 and closes, preserving the descriptor answer.
+- Selection (`0x223f9930`) saves LB_GETCURSEL, then updates source (`+0x18`),
+  cache path (`+4`) and description (`+0x40`) detail text. Each title call
+  reloads descriptor/rows while retaining the saved index. Only afterwards
+  does it store selection at descriptor `+0x20`. There is no range check.
+- Add (`0x223f9830`) calls owner `+8` then populates. Flush (`0x223f9910`)
+  calls owner `+0x14` then populates; World performs no filesystem work.
+- Edit (`0x223f98c0`) and Delete (`0x223f9850`) save UI selection, call owner
+  `+0xc` / `+0x10` with the **old descriptor selection**, and populate. Delete
+  decrements the saved index exactly when new LB_GETCOUNT equals that index.
+  Both set UI selection and then descriptor selection to the saved/adjusted
+  index. They do not refresh details again. Delete can therefore leave the
+  deleted row's detail text visible after selection moves to its predecessor.
+
+Populate (`0x223f9a00`) constructs CString, resets the list and adds each
+`name<TAB>marker` row. The name is row `+0x2c`; **only active `+0x54 == 1`**
+produces `+`, with all other values producing `-`. Descriptor/row reads stay
+fresh across external calls and the row-count loop is signed. After the loop,
+exactly zero count selects the descriptor index, clears three detail texts
+with null pointers, focuses the list and enables Add/Flush while disabling
+Edit/Delete. Any nonzero count, including negative, selects the descriptor
+index, reads its details, focuses the list and enables all four buttons.
+It does not normalize selection or store a new one. CString is destroyed on
+success and real exception unwind; destruction is marked dead before the
+ordinary call so a throwing destructor is not retried.
+
+The embedded list is `CSimsListBox`, not a checkbox control: status is text,
+with no checkbox/toggle handler. Double-click also has no local handler and
+does not open Edit. The seven entries cover four buttons `0x1a9d..0x1aa0`,
+list `0x1b10` selection, help and context menu. Initializer uses skin `0x14f`,
+art `0xf831`, two `0x132` OK/Cancel buttons and four `0x137` action buttons.
+It initializes the list with font `+0x450` and heading `+0x15b4`, its heading
+with font `+0x370`, the group/text with `+0x220`, and a single tab stop 250.
+It reloads the resource module for every button, then populates and returns 1;
+skin failure returns zero.
+
+The constructor installs the class vtable only after all embedded constructors
+succeed. Destruction retains the incoming vtable and unwinds remaining earlier
+controls/base if a destructor throws, without retrying the failed control.
+Deleting destruction uses UI delete only for flag bit 0 after success.
+PostNcDestroy dispatches virtual deleting destruction with flag 1 for non-null
+objects. Factory ignores parent, allocates `0x1d00`, constructs with null
+parent, stores descriptor/module and transfers ownership before Create.
+Failed Create displays `CPerformanceBoosters::Create() failed\n` then still
+shows the window and returns its post-Show HWND. Null allocation faults on a
+write at `0x10dc`. Partial construction cleanup uses dialog delete, distinct
+from UI delete. Typed `CException*` catches perform real unwind before fatal
+`SIMSUI_ExitCleanlyE` dispatch; unrelated/incompatible exceptions propagate.
+The fatal fixture records that boundary instead of executing its abort.
+
+```sh
+make -f tools/world.mk world-cache-metadata
+make -f tools/world.mk world-cache-core N=20000
+make -f tools/world.mk world-cache-core N=2000 MODE=unwind
+make -f tools/world.mk world-cache-breaks
+make -f tools/world.mk world-cache-life N=20000
+make -f tools/world.mk world-cache-life N=2000 MODE=unwind
+make -f tools/world.mk world-cache-life N=2000 MODE=typed
+make -f tools/world.mk world-cache-life-breaks
+make -f tools/world.mk world-cache-ui
+make -f tools/world.mk world-cache-native-breaks
+```
+
+Using seed `0x4a971b63` and the reference SHA-256 recorded above, the 12-operation
+core/init suite passed **240,000 normal comparisons** and independent fixture
+checks. Its unwind run passed **337,392 comparisons**, including **313,392 real
+unwinds**, plus 24,000 normal fixture checks. It compares ordered calls, defined
+returns, full guarded object, two descriptors, padded independent cache rows,
+four string fields, simulated list state, callback counters, resource modules
+and CString liveness. Cases cover negative/empty/positive counts, divergent UI
+and descriptor selections, active 0/1/2/high-bit values, descriptor/vtable/module
+swaps at service boundaries, both check outcomes and interrupted call chains.
+Padded committed rows cover the observed unchecked reads, including `-1`;
+this is not acceptance of arbitrary invalid owner-address faults.
+
+The nine-operation lifetime suite passed **180,000 normal comparisons**, with
+1,819 expected allocation write faults and 178,181 independent fixture checks.
+Both exceptional suites passed **250,537 comparisons** and 182 expected
+allocation faults, with 17,818 normal fixture checks each. Unwind mode includes
+**232,537 real unwinds**. Typed mode includes **208,762 propagated exceptions**
+and **23,775 fatal dispatches**, covering direct, derived, virtual-base and null
+exception pointers, unrelated types and incompatible const pointers. Full
+objects, descriptor/exchange/help buffers, module state, deletion counters,
+ordered calls and returns match. Construction markers, deletion flags, call
+counts, vtable timing, factory results and PostNcDestroy have independent
+witnesses. All **29 core/init** and **20 lifetime mutations** produced exit 1
+with actual difference transcripts; faults, timeouts and build failures do not
+count. Sources, executables and logs are retained in `bin/world-diff/cache-breaks/`
+and `cache-life-breaks/`.
+
+Native runtime builds six class vtables/maps and registers eight factories.
+`worldcacheuidiff.c` uses real MFC/SIMSUI controls and its own FE-shaped owner.
+Twenty-eight cases cover zero through six rows, four active-state patterns,
+initial descriptor selection at the last row and padded detail rows. Twelve
+scripts cover baseline, keyboard Return/Escape, selection, nested Add/Edit,
+Delete, Flush, double-click with no Edit, stale descriptor selection for
+Edit/Delete, and OK after changing UI selection without a notification.
+Add/Edit open actual accepted booster editors, edit controls, invoke an
+independent validator and close with automatic child deletion. Parent/child
+control metadata, pixels, callbacks and complete descriptor/row/text state
+are compared. Factory, local vtable and all seven message-handler ownership
+are checked so native calls cannot fall back to retail implementation code.
+Parent local result and automatic deletion are also compared.
+
+The native suite passed **672 paired pixel/state/callback comparisons**,
+**2,840 witnesses**, eight module-init comparisons and two full unload cycles.
+Baseline images are `bin/world-diff/ui-images/cache-baseline-*.bmp`.
+All **14 native mutations** produced exit 1 with actual `CACHE UI DIFFER`
+transcripts, bringing this slice to **63/63 deliberate breaks** across the
+three suites. Native mutations cover tabs, markers, exact active equality,
+accept selection/result/answer, Cancel answer, Delete adjustment, Add/Edit/Flush
+and selection dispatch, automatic deletion and empty-list Edit enabling.
+Inputs/hashes, independently compiled DLLs/harnesses and difference logs are
+under `bin/world-diff/cache-native-breaks/`.
+
+Acceptance logs are `bin/world-diff/cache-core-normal.log`,
+`cache-core-unwind.log`, `cache-core-breaks.log`, `cache-life-normal.log`,
+`cache-life-unwind.log`, `cache-life-typed.log`, `cache-life-breaks.log`,
+`cache-ui-acceptance.log` and `cache-native-breaks.log`. The runner retains
+WORLD's private Wine prefix and lock. No real FE file callbacks execute.
+
+The eight-registration DLL also passed **288 area**, **210 priority**,
+**320 booster**, **680 drive-search** and **504 scenery-area-list** native
+comparisons, totaling **2,002**, with their witnesses/module-init checks and
+two unload cycles per suite. Generated cache/runtime
+metadata and build-only resource/anchor files reproduce byte-for-byte in an
+isolated directory; the retail dialog registry inventory is unchanged.
+All existing World native mutation build lists include the cache sources.
+Selected existing area, priority, booster and search color mutations and the
+area-list tab mutation also produced actual differences with the expanded
+build. Regression logs are `bin/world-diff/cache-area-regression.log`,
+`cache-priority-regression.log`, `cache-booster-regression.log`,
+`cache-search-regression.log` and `cache-list-regression.log`; corresponding
+mutation logs use `cache-<family>-mutation-regression.log`.
+
+A 75-second startup passed in private copy
+`bin/world-diff/smoke-game-lwba0okj`: **27/27 modules, 95 gauges**, matching
+replacement bytes and no runtime errors. The log is
+`bin/world-diff/cache-smoke-acceptance.log`; the active game was unchanged.
+Final DLL SHA-256:
+`0066518f21c00770af813ac09af24f382528881095ed15e1dc165572b5f1759d`.
+The native-tested DLL is retained as `bin/world-diff/cache-native-tested.dll`;
+it is byte-identical to the final and startup-tested artifact.
+
+The booster/cache list is complete through native acceptance. This remains a
+partial World replacement with eight accepted registrations.
+
 ## Remaining boundary
 
-Twelve World registrations are still pending native acceptance: scenery library,
-booster lists, weather/time, scenery settings and FACIL-backed
-position/facility screens. Continue as bounded slices with their own native
-acceptance before building or installing a complete World replacement. Shared
-build/install integration and complete host-driven interaction remain separate.
+Eleven World registrations are still pending native acceptance: scenery library,
+weather/time, scenery settings and FACIL-backed position/facility screens.
+Continue with the FE-owned world-files container `0x1306` as described above,
+or another bounded family with its own native acceptance. The DLL remains a
+partial replacement. Shared build/install integration and complete host-driven
+interaction remain separate.
 
 FE, FACIL, MAIN, HOST, their verified harnesses and the shared Makefile remain
-unchanged by this work.
+unchanged by this work. Existing uncommitted documentation work is preserved.

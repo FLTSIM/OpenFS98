@@ -28,7 +28,7 @@ world-life-breaks: worldlife
 	bash tools/run_worlddiff.sh --life-breaks
 
 PRIORITY_OBJECTS := src/world/world_priority_objects.c src/world/world_priority.h src/world/world_priority_tables.inc src/world/world_priority_hooks.inc src/world/world_objects.h src/world/world_init.h src/world/world_unwind.h src/world/world_exceptions.h src/world/world_internal.h
-WORLD_SOURCES := src/world/world_list.c src/world/world_list_objects.c src/world/world_search.c src/world/world_search_objects.c src/world/world_search_init.c src/world/world_booster.c src/world/world_booster_objects.c src/world/world_booster_init.c src/world/world_priority.c src/world/world_priority_objects.c src/world/world_area.c src/world/world_objects.c src/world/world_init.c src/world/world_runtime.c
+WORLD_SOURCES := src/world/world_cache.c src/world/world_cache_objects.c src/world/world_list.c src/world/world_list_objects.c src/world/world_search.c src/world/world_search_objects.c src/world/world_search_init.c src/world/world_booster.c src/world/world_booster_objects.c src/world/world_booster_init.c src/world/world_priority.c src/world/world_priority_objects.c src/world/world_area.c src/world/world_objects.c src/world/world_init.c src/world/world_runtime.c
 .PHONY: world worlduidiff-run world-ui-breaks world-smoke
 src/world/world_runtime_tables.inc $(WORLD_DIR)/world.res $(WORLD_DIR)/simsui-anchor.def &: tools/gen_world_runtime.py tools/gen_views_runtime.py tools/dialogmap.py orig/English/World.DLL orig/SIMSUI.DLL | $(WORLD_DIR)
 	python3 -B tools/gen_world_runtime.py
@@ -182,3 +182,39 @@ world-list-ui: world $(WORLD_DIR)/worldlistuidiff.exe
 	bash tools/run_worlddiff.sh --list-ui
 world-list-native-breaks: world $(WORLD_DIR)/worldlistuidiff.exe
 	bash tools/run_worlddiff.sh --list-native-breaks
+
+# Booster/cache list 0x13080006, isolated from the shared Makefile.
+src/world/world_cache_tables.inc src/world/world_cache_hooks.inc &: tools/gen_world_cache.py tools/gen_world_tables.py tools/dialogmap.py orig/English/World.DLL
+	python3 -B tools/gen_world_cache.py
+CACHE_OBJECTS := src/world/world_cache_objects.c src/world/world_cache.h src/world/world_cache_tables.inc src/world/world_cache_hooks.inc src/world/world_objects.h src/world/world_unwind.h src/world/world_exceptions.h
+$(WORLD_DIR)/worldcachelifediff.exe: tools/difftest/worldcachelifediff.c $(CACHE_OBJECTS) | $(WORLD_DIR)
+	$(CC) -std=c99 -O2 -Wall -Wextra -Werror -fno-strict-aliasing -fno-delete-null-pointer-checks -o $@ tools/difftest/worldcachelifediff.c src/world/world_cache_objects.c -lntdll
+.PHONY: world-cache-metadata world-cache-life
+world-cache-metadata: src/world/world_cache_tables.inc src/world/world_cache_hooks.inc
+world-cache-life: $(WORLD_DIR)/worldcachelifediff.exe
+	bash tools/run_worlddiff.sh --cache-life $(N) $(SEED) $(MODE)
+
+CACHE_CORE := src/world/world_cache.c src/world/world_cache.h src/world/world_init.h src/world/world_internal.h src/world/world_unwind.h
+$(WORLD_DIR)/worldcachediff.exe: tools/difftest/worldcachediff.c $(CACHE_CORE) src/world/world_init.c src/world/world_area.c | $(WORLD_DIR)
+	$(CC) -std=c99 -O2 -Wall -Wextra -Werror -fno-strict-aliasing -o $@ tools/difftest/worldcachediff.c src/world/world_cache.c src/world/world_init.c src/world/world_area.c -lntdll
+.PHONY: world-cache-core
+world-cache-core: $(WORLD_DIR)/worldcachediff.exe
+	bash tools/run_worlddiff.sh --cache-core $(N) $(MODE)
+
+$(WORLD_DIR)/WORLD_area.dll: $(CACHE_CORE) $(CACHE_OBJECTS)
+
+$(WORLD_DIR)/worldcacheuidiff.exe: tools/difftest/worldcacheuidiff.c tools/difftest/worlduidiff.c src/world/world_internal.h | $(WORLD_DIR)
+	$(CC) -std=c99 -O2 -Wall -Wextra -Werror -fno-strict-aliasing -o $@ $< -lgdi32 -lntdll
+.PHONY: world-cache-ui
+world-cache-ui: world $(WORLD_DIR)/worldcacheuidiff.exe
+	bash tools/run_worlddiff.sh --cache-ui
+
+.PHONY: world-cache-breaks world-cache-life-breaks
+world-cache-breaks: $(WORLD_DIR)/worldcachediff.exe
+	bash tools/run_worlddiff.sh --cache-breaks
+world-cache-life-breaks: $(WORLD_DIR)/worldcachelifediff.exe
+	bash tools/run_worlddiff.sh --cache-life-breaks
+
+.PHONY: world-cache-native-breaks
+world-cache-native-breaks: world $(WORLD_DIR)/worldcacheuidiff.exe
+	bash tools/run_worlddiff.sh --cache-native-breaks

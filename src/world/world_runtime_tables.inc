@@ -71,6 +71,19 @@ static void TC world_rva_ac70(void *object) { fs98_world_list_selection(object);
 static int TC world_rva_acd0(void *object, uint32_t unused, void *info) { return fs98_world_list_help(object, unused, info); }
 static int TC world_rva_acf0(void *object, uint32_t window, uint32_t unused) { return fs98_world_list_context(object, window, unused); }
 static void TC world_rva_ad10(void *object) { fs98_world_list_double_click(object); }
+static void * TC world_rva_92f0(void *object, uint32_t flags) { return fs98_world_cache_scalar_delete(object, flags); }
+static void * TC world_rva_9550(void *object) { (void)object; return &s_cache_message_map; }
+static void TC world_rva_9430(void *object, void *exchange) { fs98_world_cache_exchange(object, exchange); }
+static int TC world_rva_9560(void *object) { return fs98_world_cache_init(object); }
+static void TC world_rva_97d0(void *object) { fs98_world_cache_accept(object); }
+static void TC world_rva_9810(void *object) { fs98_world_cache_cancel(object); }
+static void TC world_rva_9830(void *object) { fs98_world_cache_action(object, 8); }
+static void TC world_rva_9850(void *object) { fs98_world_cache_delete(object); }
+static void TC world_rva_98c0(void *object) { fs98_world_cache_action(object, 0xc); }
+static void TC world_rva_9910(void *object) { fs98_world_cache_action(object, 0x14); }
+static void TC world_rva_9930(void *object) { fs98_world_cache_selection(object); }
+static int TC world_rva_99b0(void *object, uint32_t unused, void *info) { return fs98_world_cache_help(object, unused, info); }
+static int TC world_rva_99d0(void *object, uint32_t window, uint32_t unused) { return fs98_world_cache_context(object, window, unused); }
 static const struct world_import_binding s_imports[] = {
     {"SIMSUI.DLL", "??0CSimsFont@@QAE@XZ", 0, 0x256d8},
     {"SIMSUI.DLL", "??0CDIBSection@@QAE@XZ", 0, 0x256dc},
@@ -577,6 +590,66 @@ static const struct world_virtual_binding s_virtuals[] = {
     {4, 57, 90, 0},
     {4, 58, 91, 0},
     {4, 59, 55, 0},
+    {5, 0, 87, 0},
+    {5, 1, -1, (void *)world_rva_92f0},
+    {5, 2, -1, (void *)world_rva_2d00},
+    {5, 3, -1, (void *)world_rva_2d10},
+    {5, 4, -1, (void *)world_rva_2d00},
+    {5, 5, 166, 0},
+    {5, 6, 167, 0},
+    {5, 7, 168, 0},
+    {5, 8, 169, 0},
+    {5, 9, 170, 0},
+    {5, 10, 171, 0},
+    {5, 11, 172, 0},
+    {5, 12, -1, (void *)world_rva_9550},
+    {5, 13, 173, 0},
+    {5, 14, 174, 0},
+    {5, 15, 175, 0},
+    {5, 16, 176, 0},
+    {5, 17, 177, 0},
+    {5, 18, 178, 0},
+    {5, 19, 179, 0},
+    {5, 20, 180, 0},
+    {5, 21, 159, 0},
+    {5, 22, 182, 0},
+    {5, 23, 183, 0},
+    {5, 24, 184, 0},
+    {5, 25, 185, 0},
+    {5, 26, 186, 0},
+    {5, 27, 187, 0},
+    {5, 28, 188, 0},
+    {5, 29, 189, 0},
+    {5, 30, 190, 0},
+    {5, 31, 191, 0},
+    {5, 32, 53, 0},
+    {5, 33, 181, 0},
+    {5, 34, 193, 0},
+    {5, 35, -1, (void *)world_rva_9430},
+    {5, 36, -1, (void *)world_rva_2d20},
+    {5, 37, -1, (void *)world_rva_2d30},
+    {5, 38, 194, 0},
+    {5, 39, 195, 0},
+    {5, 40, 196, 0},
+    {5, 41, 197, 0},
+    {5, 42, 192, 0},
+    {5, 43, -1, (void *)world_rva_3d30},
+    {5, 44, 199, 0},
+    {5, 45, 200, 0},
+    {5, 46, 201, 0},
+    {5, 47, 202, 0},
+    {5, 48, 158, 0},
+    {5, 49, -1, (void *)world_rva_9560},
+    {5, 50, 113, 0},
+    {5, 51, -1, (void *)world_rva_97d0},
+    {5, 52, -1, (void *)world_rva_9810},
+    {5, 53, 160, 0},
+    {5, 54, 51, 0},
+    {5, 55, 88, 0},
+    {5, 56, 89, 0},
+    {5, 57, 90, 0},
+    {5, 58, 91, 0},
+    {5, 59, 55, 0},
 };
 static const struct world_message_entry s_messages[] = {
     {0x111, 0x400, 0x1b05, 0x1b05, 0xc, (void *)world_rva_c720},
@@ -628,8 +701,19 @@ static const struct world_message_entry s_list_messages[] = {
     {0x111, 0x2, 0x1b16, 0x1b16, 0xc, (void *)world_rva_ad10},
     {0, 0, 0, 0, 0, 0}
 };
+static const struct world_message_entry s_cache_messages[] = {
+    {0x111, 0x0, 0x1a9d, 0x1a9d, 0xc, (void *)world_rva_9830},
+    {0x111, 0x0, 0x1a9e, 0x1a9e, 0xc, (void *)world_rva_9850},
+    {0x111, 0x0, 0x1a9f, 0x1a9f, 0xc, (void *)world_rva_98c0},
+    {0x111, 0x0, 0x1aa0, 0x1aa0, 0xc, (void *)world_rva_9910},
+    {0x111, 0x1, 0x1b10, 0x1b10, 0xc, (void *)world_rva_9930},
+    {0x53, 0x0, 0x0, 0x0, 0xa, (void *)world_rva_99b0},
+    {0x7b, 0x0, 0x0, 0x0, 0xa, (void *)world_rva_99d0},
+    {0, 0, 0, 0, 0, 0}
+};
 static const struct world_dialog s_dialogs[] = {
     {0x13080001, fs98_world_list_create, 0},
+    {0x13080006, fs98_world_cache_create, 0},
     {0x13080007, fs98_world_booster_create_edit, 0},
     {0x13080008, fs98_world_booster_create_add, 0},
     {0x13080004, fs98_world_area_create_edit, 0},

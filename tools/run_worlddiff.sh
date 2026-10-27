@@ -7,6 +7,24 @@ export WINEDEBUG=-all
 mkdir -p -- "$WINEPREFIX"
 exec 9>bin/world-diff/wine.lock
 flock 9
+if [[ "${1:-}" == --cache-breaks ]]; then
+    exec python3 -B tools/world_cache_breaks.py
+fi
+if [[ "${1:-}" == --cache-life-breaks ]]; then
+    exec python3 -B tools/world_cache_life_breaks.py
+fi
+if [[ "${1:-}" == --cache-native-breaks ]]; then
+    exec python3 -B tools/world_cache_native_breaks.py "${@:2}"
+fi
+if [[ "${1:-}" == --cache-ui ]]; then
+    exec timeout 240s wine bin/world-diff/worldcacheuidiff.exe "${2:-bin/world-diff/WORLD_area.dll}" "${3:-28}"
+fi
+if [[ "${1:-}" == --cache-life ]]; then
+    exec timeout 120s wine bin/world-diff/worldcachelifediff.exe "${2:-2000}" "${3:-0x4a971b63}" "${4:-normal}"
+fi
+if [[ "${1:-}" == --cache-core ]]; then
+    exec timeout 120s wine bin/world-diff/worldcachediff.exe "${2:-2000}" "${3:-normal}"
+fi
 if [[ "${1:-}" == --list-ui ]]; then
     exec timeout 240s wine bin/world-diff/worldlistuidiff.exe "${2:-bin/world-diff/WORLD_area.dll}" "${3:-21}"
 fi

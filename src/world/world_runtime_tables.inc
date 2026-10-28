@@ -190,6 +190,16 @@ static void TC world_rva_3d60(void *object) { fs98_world_copy_accept(object); }
 static void TC world_rva_3d40(void *object) { fs98_world_copy_cancel(object); }
 static int TC world_rva_3dc0(void *object, uint32_t unused, void *info) { return fs98_world_copy_help(object, unused, info); }
 static int TC world_rva_3de0(void *object, uint32_t window, uint32_t unused) { return fs98_world_copy_context(object, window, unused); }
+static void * TC world_rva_2e50(void *object, uint32_t flags) { return fs98_world_weather_scalar_delete(object, flags); }
+static void * TC world_rva_3070(void *object) { (void)object; return &s_weather_message_map; }
+static void TC world_rva_2f80(void *object, void *exchange) { fs98_world_weather_exchange(object, exchange); }
+static int TC world_rva_3080(void *object) { return fs98_world_weather_init(object); }
+static void TC world_rva_3490(void *object) { fs98_world_weather_accept(object); }
+static void TC world_rva_34d0(void *object) { fs98_world_weather_cancel(object); }
+static void TC world_rva_33e0(void *object, uint32_t id, void *measure) { (void)fs98_world_weather_measure(object, id, measure); }
+static int TC world_rva_3400(void *object, uint32_t unused, void *info) { return fs98_world_weather_help(object, unused, info); }
+static int TC world_rva_3420(void *object, uint32_t window, uint32_t unused) { return fs98_world_weather_context(object, window, unused); }
+static void TC world_rva_3730(void *object) { fs98_world_weather_changed(object); }
 static const struct world_import_binding s_imports[] = {
     {"USER32.dll", "GetActiveWindow", 0, 0x25864},
     {"USER32.dll", "ValidateRect", 0, 0x25868},
@@ -1373,6 +1383,66 @@ static const struct world_virtual_binding s_virtuals[] = {
     {15, 57, 120, 0},
     {15, 58, 121, 0},
     {15, 59, 85, 0},
+    {16, 0, 117, 0},
+    {16, 1, -1, (void *)world_rva_2e50},
+    {16, 2, -1, (void *)world_rva_2d00},
+    {16, 3, -1, (void *)world_rva_2d10},
+    {16, 4, -1, (void *)world_rva_2d00},
+    {16, 5, 196, 0},
+    {16, 6, 197, 0},
+    {16, 7, 198, 0},
+    {16, 8, 199, 0},
+    {16, 9, 200, 0},
+    {16, 10, 201, 0},
+    {16, 11, 202, 0},
+    {16, 12, -1, (void *)world_rva_3070},
+    {16, 13, 203, 0},
+    {16, 14, 204, 0},
+    {16, 15, 205, 0},
+    {16, 16, 206, 0},
+    {16, 17, 207, 0},
+    {16, 18, 208, 0},
+    {16, 19, 209, 0},
+    {16, 20, 210, 0},
+    {16, 21, 189, 0},
+    {16, 22, 212, 0},
+    {16, 23, 213, 0},
+    {16, 24, 214, 0},
+    {16, 25, 215, 0},
+    {16, 26, 216, 0},
+    {16, 27, 217, 0},
+    {16, 28, 218, 0},
+    {16, 29, 219, 0},
+    {16, 30, 220, 0},
+    {16, 31, 221, 0},
+    {16, 32, 83, 0},
+    {16, 33, 211, 0},
+    {16, 34, 223, 0},
+    {16, 35, -1, (void *)world_rva_2f80},
+    {16, 36, -1, (void *)world_rva_2d20},
+    {16, 37, -1, (void *)world_rva_2d30},
+    {16, 38, 224, 0},
+    {16, 39, 225, 0},
+    {16, 40, 226, 0},
+    {16, 41, 227, 0},
+    {16, 42, 222, 0},
+    {16, 43, -1, (void *)world_rva_3d30},
+    {16, 44, 229, 0},
+    {16, 45, 230, 0},
+    {16, 46, 231, 0},
+    {16, 47, 232, 0},
+    {16, 48, 188, 0},
+    {16, 49, -1, (void *)world_rva_3080},
+    {16, 50, 143, 0},
+    {16, 51, -1, (void *)world_rva_3490},
+    {16, 52, -1, (void *)world_rva_34d0},
+    {16, 53, 190, 0},
+    {16, 54, 81, 0},
+    {16, 55, 118, 0},
+    {16, 56, 119, 0},
+    {16, 57, 120, 0},
+    {16, 58, 121, 0},
+    {16, 59, 85, 0},
 };
 static const struct world_message_entry s_messages[] = {
     {0x111, 0x400, 0x1b05, 0x1b05, 0xc, (void *)world_rva_c720},
@@ -1513,7 +1583,15 @@ static const struct world_message_entry s_copy_messages[] = {
     {0x7b, 0x0, 0x0, 0x0, 0xa, (void *)world_rva_3de0},
     {0, 0, 0, 0, 0, 0}
 };
+static const struct world_message_entry s_weather_messages[] = {
+    {0x2c, 0x0, 0x0, 0x0, 0x20, (void *)world_rva_33e0},
+    {0x53, 0x0, 0x0, 0x0, 0xa, (void *)world_rva_3400},
+    {0x7b, 0x0, 0x0, 0x0, 0xa, (void *)world_rva_3420},
+    {0x111, 0x1, 0x1abe, 0x1abe, 0xc, (void *)world_rva_3730},
+    {0, 0, 0, 0, 0, 0}
+};
 static const struct world_dialog s_dialogs[] = {
+    {0x1302, fs98_world_weather_create, 0},
     {0x1304, fs98_world_complexity_create, 0},
     {0x1305, fs98_world_dynamic_create, 0},
     {0x1306, fs98_world_files_create, 0},

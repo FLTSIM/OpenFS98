@@ -7,6 +7,23 @@ export WINEDEBUG=-all
 mkdir -p -- "$WINEPREFIX"
 exec 9>bin/world-diff/wine.lock
 flock 9
+if [[ "${1:-}" == --weather-breaks ]]; then
+    exec python3 -B tools/world_weather_breaks.py "${@:2}"
+fi
+if [[ "${1:-}" == --weather-native-breaks ]]; then
+    exec python3 -B tools/world_weather_native_breaks.py "${@:2}"
+fi
+if [[ "${1:-}" == --weather-init ]]; then
+    exec timeout 180s wine bin/world-diff/worldweatherinitdiff.exe "${2:-2000}" "${3:-0x4a971b63}" "${4:-normal}"
+fi
+if [[ "${1:-}" == --weather-life || "${1:-}" == --weather-core ]]; then
+    kind="${1#--weather-}"
+    if [[ "$kind" == life ]]; then executable=worldweatherlifediff.exe; else executable=worldweatherdiff.exe; fi
+    exec timeout 180s wine "bin/world-diff/$executable" "${2:-2000}" "${3:-0x4a971b63}" "${4:-normal}"
+fi
+if [[ "${1:-}" == --weather-ui ]]; then
+    exec timeout 300s wine bin/world-diff/worldweatheruidiff.exe "${2:-bin/world-diff/WORLD_area.dll}" "${3:-20}"
+fi
 if [[ "${1:-}" == --copy-breaks ]]; then
     exec python3 -B tools/world_copy_breaks.py
 fi

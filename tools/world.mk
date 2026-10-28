@@ -39,7 +39,7 @@ world-life-breaks: worldlife
 	bash tools/run_worlddiff.sh --life-breaks
 
 PRIORITY_OBJECTS := src/world/world_priority_objects.c src/world/world_priority.h src/world/world_priority_tables.inc src/world/world_priority_hooks.inc src/world/world_objects.h src/world/world_init.h src/world/world_unwind.h src/world/world_exceptions.h src/world/world_internal.h
-WORLD_SOURCES := src/world/world_copy.c src/world/world_copy_objects.c src/world/world_copy_init.c src/world/world_dynamic.c src/world/world_dynamic_objects.c src/world/world_dynamic_init.c src/world/world_complexity.c src/world/world_complexity_objects.c src/world/world_complexity_init.c src/world/world_airport.c src/world/world_airport_objects.c src/world/world_facilities.c src/world/world_facilities_objects.c src/world/world_position.c src/world/world_position_objects.c src/world/world_files.c src/world/world_files_objects.c src/world/world_cache.c src/world/world_cache_objects.c src/world/world_list.c src/world/world_list_objects.c src/world/world_search.c src/world/world_search_objects.c src/world/world_search_init.c src/world/world_booster.c src/world/world_booster_objects.c src/world/world_booster_init.c src/world/world_priority.c src/world/world_priority_objects.c src/world/world_area.c src/world/world_objects.c src/world/world_init.c src/world/world_runtime.c
+WORLD_SOURCES := src/world/world_weather.c src/world/world_weather_objects.c src/world/world_copy.c src/world/world_copy_objects.c src/world/world_copy_init.c src/world/world_dynamic.c src/world/world_dynamic_objects.c src/world/world_dynamic_init.c src/world/world_complexity.c src/world/world_complexity_objects.c src/world/world_complexity_init.c src/world/world_airport.c src/world/world_airport_objects.c src/world/world_facilities.c src/world/world_facilities_objects.c src/world/world_position.c src/world/world_position_objects.c src/world/world_files.c src/world/world_files_objects.c src/world/world_cache.c src/world/world_cache_objects.c src/world/world_list.c src/world/world_list_objects.c src/world/world_search.c src/world/world_search_objects.c src/world/world_search_init.c src/world/world_booster.c src/world/world_booster_objects.c src/world/world_booster_init.c src/world/world_priority.c src/world/world_priority_objects.c src/world/world_area.c src/world/world_objects.c src/world/world_init.c src/world/world_runtime.c
 .PHONY: world worlduidiff-run world-ui-breaks world-smoke
 src/world/world_runtime_tables.inc $(WORLD_DIR)/world.res $(WORLD_DIR)/simsui-anchor.def &: tools/gen_world_runtime.py tools/gen_views_runtime.py tools/dialogmap.py orig/English/World.DLL orig/SIMSUI.DLL | $(WORLD_DIR)
 	python3 -B tools/gen_world_runtime.py
@@ -458,3 +458,36 @@ world-copy-life-breaks: $(WORLD_DIR)/worldcopylifediff.exe
 	bash tools/run_worlddiff.sh --copy-life-breaks
 world-copy-native-breaks: world $(WORLD_DIR)/worldcopyuidiff.exe
 	bash tools/run_worlddiff.sh --copy-native-breaks
+
+# Basic weather 0x1302; MAIN-shaped descriptor, no live weather apply.
+WEATHER_METADATA := src/world/world_weather_tables.inc src/world/world_weather_hooks.inc
+$(WEATHER_METADATA) &: tools/gen_world_weather.py tools/gen_world_tables.py tools/dialogmap.py orig/English/World.DLL
+	python3 -B tools/gen_world_weather.py
+$(WORLD_DIR)/WORLD_area.dll: $(WEATHER_METADATA) src/world/world_weather.h
+.PHONY: world-weather-metadata world-weather-ui
+world-weather-metadata: $(WEATHER_METADATA)
+$(WORLD_DIR)/worldweatheruidiff.exe: tools/difftest/worldweatheruidiff.c tools/difftest/worlduidiff.c | $(WORLD_DIR)
+	$(CC) -std=c99 -O2 -Wall -Wextra -Werror -fno-strict-aliasing -o $@ $< -lgdi32 -lntdll
+world-weather-ui: world $(WORLD_DIR)/worldweatheruidiff.exe
+	bash tools/run_worlddiff.sh --weather-ui
+$(WORLD_DIR)/worldweatherlifediff.exe: tools/difftest/worldweatherlifediff.c src/world/world_weather.c src/world/world_weather_objects.c src/world/world_weather.h $(WEATHER_METADATA) | $(WORLD_DIR)
+	$(CC) -std=c99 -O2 -Wall -Wextra -Werror -fno-strict-aliasing -fno-delete-null-pointer-checks -o $@ tools/difftest/worldweatherlifediff.c src/world/world_weather.c src/world/world_weather_objects.c -lntdll
+.PHONY: world-weather-life
+world-weather-life: $(WORLD_DIR)/worldweatherlifediff.exe
+	bash tools/run_worlddiff.sh --weather-life $(N) $(SEED) $(MODE)
+$(WORLD_DIR)/worldweatherdiff.exe: tools/difftest/worldweatherdiff.c src/world/world_weather.c src/world/world_weather.h | $(WORLD_DIR)
+	$(CC) -std=c99 -O2 -Wall -Wextra -Werror -fno-strict-aliasing -o $@ tools/difftest/worldweatherdiff.c src/world/world_weather.c
+.PHONY: world-weather-core
+world-weather-core: $(WORLD_DIR)/worldweatherdiff.exe
+	bash tools/run_worlddiff.sh --weather-core $(N) $(SEED) $(MODE)
+$(WORLD_DIR)/worldweatherinitdiff.exe: tools/difftest/worldweatherinitdiff.c tools/difftest/worldweatherdiff.c src/world/world_weather.c src/world/world_weather.h | $(WORLD_DIR)
+	$(CC) -std=c99 -O2 -Wall -Wextra -Werror -fno-strict-aliasing -o $@ tools/difftest/worldweatherinitdiff.c src/world/world_weather.c -lntdll
+.PHONY: world-weather-init
+world-weather-init: $(WORLD_DIR)/worldweatherinitdiff.exe
+	bash tools/run_worlddiff.sh --weather-init $(N) $(SEED) $(MODE)
+
+.PHONY: world-weather-breaks world-weather-native-breaks
+world-weather-breaks:
+	bash tools/run_worlddiff.sh --weather-breaks
+world-weather-native-breaks: world $(WORLD_DIR)/worldweatheruidiff.exe
+	bash tools/run_worlddiff.sh --weather-native-breaks

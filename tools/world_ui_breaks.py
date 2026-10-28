@@ -48,7 +48,7 @@ def main():
             ['i686-w64-mingw32-gcc', '-std=c99', '-O2', '-Wall', '-Wextra', '-Werror', '-fno-strict-aliasing',
              '-fno-delete-null-pointer-checks', '-shared', '-nostdlib', '-Wl,--entry=_DllMain@12',
              '-Wl,--disable-dynamicbase', '-Wl,--image-base=0x223f0000', '-o', str(dll),
-             *(str(work / f'world_{unit}.c') for unit in ('area', 'objects', 'init', 'priority', 'priority_objects', 'booster', 'booster_objects', 'booster_init', 'search', 'search_objects', 'search_init', 'list', 'list_objects', 'cache', 'cache_objects', 'files', 'files_objects', 'position', 'position_objects', 'facilities', 'facilities_objects', 'airport', 'airport_objects', 'complexity', 'complexity_objects', 'complexity_init', 'dynamic', 'dynamic_objects', 'dynamic_init', 'copy', 'copy_objects', 'copy_init', 'runtime')),
+             *(str(work / f'world_{unit}.c') for unit in ('area', 'objects', 'init', 'priority', 'priority_objects', 'booster', 'booster_objects', 'booster_init', 'search', 'search_objects', 'search_init', 'list', 'list_objects', 'cache', 'cache_objects', 'files', 'files_objects', 'position', 'position_objects', 'facilities', 'facilities_objects', 'airport', 'airport_objects', 'complexity', 'complexity_objects', 'complexity_init', 'dynamic', 'dynamic_objects', 'dynamic_init', 'copy', 'copy_objects', 'copy_init', 'weather', 'weather_objects', 'runtime')),
              str(work / 'world.def'), str(work / 'world-res.o'), str(work / 'libworld-simsui.a'),
              '-lkernel32', '-luser32', '-lmsvcrt', '-lntdll'],
             ['i686-w64-mingw32-gcc', '-std=c99', '-O2', '-Wall', '-Wextra', '-Werror', '-fno-strict-aliasing',

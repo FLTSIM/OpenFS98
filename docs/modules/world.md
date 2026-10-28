@@ -6,13 +6,13 @@ registers the scenery-area list (`0x13080001`), add/edit scenery area
 priority (`0x13080005`), booster/cache list (`0x13080006`), add/edit booster
 (`0x13080008` / `0x13080007`), drive search (`0x13080002`) and the world-files
 container (`0x1306`), exact position (`0x1308`), facilities directory (`0x1307`)
-and go-to-airport (`0x1309`), plus scenery complexity (`0x1304`), dynamic scenery (`0x1305`) and copy weather (`0x13050001`).
+and go-to-airport (`0x1309`), plus scenery complexity (`0x1304`), dynamic scenery (`0x1305`) and copy weather (`0x13050001`), plus basic weather (`0x1302`).
 Their classes, initialization, controls, event/message maps, factories,
 exception lifetimes and module binding are rebuilt in C, using
-retail MFC42/SIMSUI as shared dependencies. The other 4 World registrations
+retail MFC42/SIMSUI as shared dependencies. The other 3 World registrations
 remain pending native acceptance.
 
-This is ready to review as a standalone fifteen-dialog slice. It is **not a full
+This is ready to review as a standalone sixteen-dialog slice. It is **not a full
 World replacement** and must not replace the active game's World.DLL. The
 startup smoke changes only a private game copy; startup success does not supply
 the other registrations or establish their behavior.
@@ -3001,22 +3001,152 @@ input SHA-256 hashes and built DLL/executable hashes under
 count as detections. Earlier native mutation builders include the copy-weather
 sources in their expanded DLL builds.
 
+All twelve earlier native suites passed against the fifteen-registration DLL:
+**288 area**, **210 priority**, **320 booster**, **680 drive-search**,
+**504 area-list**, **672 cache-list**, **672 world-files**, **512 exact-position**,
+**576 facilities**, **576 airport**, **352 scenery-complexity** and **544 dynamic
+scenery** comparisons. That is **5,906 regression pairs**, or **6,482 paired
+native comparisons** including copy weather, with module-init comparisons and
+two unload cycles per suite. Per-family logs are `copy-<family>-regression.log`;
+`copy-native-regressions.log` collects their completion records.
+
+```sh
+for family in area priority booster search list cache files position facilities airport complexity dynamic; do
+    option="--$family-ui"
+    if [ "$family" = area ]; then option=--ui; fi
+    bash tools/run_worlddiff.sh "$option" > "bin/world-diff/copy-$family-regression.log" 2>&1
+done
+```
+
+A server restart interrupted control of the regression runner after facilities.
+The surviving runner and resumed remaining suites used the same Wine lock;
+all individual suite logs are clean and passed. The aggregate summary was
+rebuilt from those individual completion records; its original overlapping
+output is retained as `copy-native-regressions-restart-raw.log`. A final
+one-case copy-weather recheck passed **36 additional pairs**, **72 witnesses**,
+module-init comparisons and two unload cycles, restoring the baseline images
+after mutation runs. Its log is `copy-ui-artifact-recheck.log`.
+
 A **75-second startup** passed in private copy
 `bin/world-diff/smoke-game-zhcugas1`: **27/27 modules, 95 gauges**, World loaded,
 matching replacement bytes and no runtime errors. Log: `copy-smoke.log`.
 `WORLD_area.dll`, `copy-native-tested.dll`, `copy-source-reproduced.dll` and the
 startup copy are byte-identical, SHA-256
 `0b15076beaa823c58335c0b0d6ffb19cad985e82df8ee7aa3358847fb290d70b`.
-The final sources reproduce that DLL with `SOURCE_DATE_EPOCH=1793132385`.
+The final sources reproduce that DLL with `SOURCE_DATE_EPOCH=1793132385`;
+`copy-final-build.log` records the final rebuild. `copy-final.log` records
+acceptance totals and the matching artifact hashes. `git diff --check` passes.
 The active game's World.DLL remains retail SHA-256 `35d67023...3118f5`.
 MAIN/HOST/FE/FACIL, their verified owner harnesses and the shared Makefile are
 unchanged. WORLD remains a partial replacement.
 
+## Basic weather: owner recovery and native implementation
+
+Basic weather **`0x1302`**, factory **`0x223f1590`**, template **`0x6a6`**,
+is the sixteenth registration in the partial native DLL. Its implementation is
+`world_weather.c` and `world_weather_objects.c`. The runtime owns the 60-slot
+vtable and four message handlers, including measure-item forwarding. This
+class has no CNotify and uses the existing module-owned scalar-delete dispatch
+for PostNcDestroy. Close remains a SIMSUI import.
+
+Independent caller recovery uses retail `orig/Modules/MAIN.DLL`, SHA-256
+`c55a0ae7c94ade0b549d78b5730cf5ff25ed2a00aa2b72b510932dd7408a7b3b`.
+MAIN `0x207fafb0` selects the advanced-weather owner path when GLOBAL
+`+0x1234` is nonzero. Otherwise it prepares the basic descriptor through
+`0x207fb010`, opens `0x1302` through HOST `+0x10c` with descriptor
+`0x208079b0`, and applies through `0x207fb220` only on zero modal return and
+answer exactly 1. The descriptor's static `+4` callback is `0x207e1680`,
+which returns zero and consumes its one stack argument (`ret 4`).
+The new fixtures also exercise nonzero callback results and replacement
+descriptors. No MAIN source, owner fixture or real weather-application call
+is used by these comparisons.
+
+| Descriptor offset | World use |
+| --- | --- |
+| `+0` | Answer, 0 cancel / 1 accepted |
+| `+4` | Stdcall validation callback, passed the current descriptor |
+| `+8` | Text pointer displayed beneath the combo controls |
+| `+0xc` | Disable clouds and their label; show “Auto Cloud Set” when nonzero |
+| `+0x10` | Disable winds and their label; show “Auto Wind Set” when nonzero |
+| `+0x14` | Clouds selection, five rows |
+| `+0x18` | Visibility selection, five rows |
+| `+0x1c` | Winds selection, four rows |
+
+Recovered behavior retained in C:
+
+- The `0x1960`-byte class constructs an embedded font and twelve controls:
+  six text controls, three combos, two buttons and artwork. It installs
+  vtable `0x2240e390` after construction and preserves descriptor `+0x10e0`,
+  initializer state `+0x10dc` and mode `+0x195c`. Destruction preserves the
+  incoming vtable and reverses construction, including the embedded font;
+  throwing destructors unwind the remaining children and base. Scalar deletion
+  tests flag bit 0. DDX calls the imported base before twelve bindings.
+- The factory ignores its parent, constructs with null parent, sets descriptor
+  and module, transfers ownership before Create, then calls Show(1) regardless
+  of Create's return. It reads the HWND after Show. A null allocation faults
+  at the descriptor store; failed construction uses dialog deletion.
+- Initialization ignores base Init's return, then calls skin Init with bitmap
+  `0x14f`, resources and flags 15. Skin failure returns zero. Success sets
+  `+0x84` to 11 and `+0x10dc` to 1, initializes artwork and copies its title
+  through a temporary CString. The CString is cleaned up on normal return
+  and exception unwind, with ownership released before a throwing destructor.
+  Two buttons, labels and combos retain the recovered initialization order.
+- A lazy shared font uses base font 1, white foreground, zero background,
+  fields `+0x50=1`, `+0x54=0` and the full 16-bit style store `+0x58=4`.
+  Its construction flag is set before construction; successful construction
+  registers destruction for module unload. The runtime exit list now has room
+  for this third shared font, preserving reverse registration order.
+- Initialization sets all combos to row zero, applies both disable/show
+  groups, then populates. Descriptor validation only checks null; the earlier
+  title and flag reads already require a valid descriptor. The core helper
+  considers `0xcdcdcdcd` non-null. Population reloads the descriptor after
+  imported calls. It sets clouds and winds, then sets visibility only for
+  clouds other than 0 or 4; otherwise it disables visibility and its label.
+  Population does not re-enable previously disabled controls. A cloud
+  selection notification explicitly enables or disables that pair.
+- Collection reads clouds, winds, visibility in that order. Unsigned invalid
+  indices map to 0 for clouds/winds and 4 for visibility. Accept sets mode 1,
+  collects, then invokes the current owner validator. The local error helper
+  always returns zero, so either validator outcome accepts, writes answer 1
+  to the reloaded descriptor and closes. Cancel samples descriptor/vtable,
+  writes mode 2 and answer 0, then closes.
+- Help preserves the command-12 WinHelp result. Context help suppresses help
+  when the cursor lies inside the artwork rectangle; elsewhere it uses
+  command 10 and returns 1. The measure-item handler forwards `this` and both
+  stack arguments to SIMSUI. Dropping `this` left native combo lists empty;
+  the native count/row witness caught this during implementation.
+
+```sh
+make -f tools/world.mk world-weather-metadata world
+make -f tools/world.mk world-weather-core N=20000
+make -f tools/world.mk world-weather-core N=2000 MODE=interrupt
+make -f tools/world.mk world-weather-init N=20000
+make -f tools/world.mk world-weather-init N=2000 MODE=unwind
+make -f tools/world.mk world-weather-life N=20000
+make -f tools/world.mk world-weather-life N=2000 MODE=unwind
+make -f tools/world.mk world-weather-life N=2000 MODE=typed
+make -f tools/world.mk world-weather-breaks
+make -f tools/world.mk world-weather-ui world-weather-native-breaks
+```
+
+Seed `0x4a971b63`: the guarded event fixture passed **160,000 normal** and
+**55,000 interrupted-mode comparisons**, including **39,000 real
+interruptions**, across eight routines. It compares every fixture byte,
+ordered calls and returns, raw and invalid indices, two independently
+replaceable descriptors and vtables, nonzero owner validation and collection
+before validation. The core has no local exception cleanup.
+
+The initializer passed **20,000 normal** and **52,600 unwind comparisons**,
+including **50,600 real unwinds**. It compares skin failure, both flag groups,
+retained initialization parameters, descriptor/vtable replacement, all font
+bytes and flag states, title-string cleanup and shared-font exit registration.
+Logs are `bin/world-diff/weather-core.log`, `weather-interrupt.log`,
+`weather-init-normal.log` and `weather-init-unwind.log`.
+
 ## Remaining boundary
 
-Four registrations remain pending native acceptance: basic weather `0x1302`,
-time/season `0x1301`, weather areas `0x1303` and advanced
-weather `0x13040001`. These need independent
+Three registrations remain pending native acceptance: time/season `0x1301`,
+weather areas `0x1303` and advanced weather `0x13040001`. These need independent
 caller/descriptor recovery before choosing another bounded family. Their
 inventory entries are not behavior specifications.
 

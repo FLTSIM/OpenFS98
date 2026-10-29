@@ -7,6 +7,33 @@ export WINEDEBUG=-all
 mkdir -p -- "$WINEPREFIX"
 exec 9>bin/world-diff/wine.lock
 flock 9
+if [[ "${1:-}" == --advanced-native-breaks ]]; then
+    exec python3 -B tools/world_advanced_native_breaks.py "${@:2}"
+fi
+if [[ "${1:-}" == --advanced-ui ]]; then
+    exec timeout 600s wine bin/world-diff/worldadvanceduidiff.exe "${2:-bin/world-diff/WORLD_area.dll}" "${3:-8}"
+fi
+if [[ "${1:-}" == --advanced-cloud ]]; then
+    exec timeout 180s wine bin/world-diff/worldadvancedclouddiff.exe "${2:-2000}" "${3:-0x4a971b63}" "${4:-normal}"
+fi
+if [[ "${1:-}" == --advanced-wind ]]; then
+    exec timeout 180s wine bin/world-diff/worldadvancedwinddiff.exe "${2:-2000}" "${3:-0x4a971b63}" "${4:-normal}"
+fi
+if [[ "${1:-}" == --advanced-core-breaks ]]; then
+    exec python3 -B tools/world_advanced_core_breaks.py "${@:2}"
+fi
+if [[ "${1:-}" == --advanced-temperature ]]; then
+    exec timeout 180s wine bin/world-diff/worldadvancedtemperaturediff.exe "${2:-2000}" "${3:-0x4a971b63}" "${4:-normal}"
+fi
+if [[ "${1:-}" == --advanced-parent ]]; then
+    exec timeout 180s wine bin/world-diff/worldadvancedparentdiff.exe "${2:-2000}" "${3:-0x4a971b63}" "${4:-normal}"
+fi
+if [[ "${1:-}" == --advanced-life-breaks ]]; then
+    exec python3 -B tools/world_advanced_life_breaks.py "${@:2}"
+fi
+if [[ "${1:-}" == --advanced-life ]]; then
+    exec timeout 180s wine bin/world-diff/worldadvancedlifediff.exe "${2:-2000}" "${3:-0x4a971b63}" "${4:-normal}"
+fi
 if [[ "${1:-}" == --wareas-breaks ]]; then
     exec python3 -B tools/world_wareas_breaks.py "${@:2}"
 fi

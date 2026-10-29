@@ -454,13 +454,11 @@ are separate from their native harness and startup acceptance.
 
 | Target | Independent starting boundary | Handoff |
 | --- | --- | --- |
-| World, remaining dialogs | World-files container, scenery-area list/editors, priority, booster list/editors, drive search and all three FACIL dialogs have native acceptance. Seven weather/time/scenery registrations remain; recover their caller descriptors before choosing the next family. | [world.md](world.md) |
 | MP_DIALOG | Smallest remaining whole English DLL by code size; MULTIP owns the verified callback blocks. Start with session settings/details, then recover the five-window connection flow. | [mpdialog.md](mpdialog.md) |
 | Options, customise controls | CONTROLS' shared data and callbacks are established, but the container has three child pages and device/key-capture behavior. | [options.md](options.md) |
 | Flights | Static inventory exists; caller descriptors and flight/menu ownership need more recovery alongside MAIN. Less convenient while MAIN is active. | [flights.md](flights.md) |
 
-Options replay/video or analysis, and World's FACIL-backed position/facility
-forms, are other possible slices. Keep template creation, exchange-engine
+Options replay/video or analysis are other possible slices. Keep template creation, exchange-engine
 validation, accept/cancel ordering, callbacks and nested lifetimes in scope.
 Existing owner stand-ins do not verify the real English DLL's UI.
 
@@ -503,17 +501,19 @@ have passed their own tests.
    commands, seeds/counts, artifacts, observed quirks and remaining boundaries
    before handing off again.
 
-World's `0x13080003` / `0x13080004` area-edit family and `0x13080005` priority
-are implemented in a standalone partial DLL. Start from [world.md](world.md)
-for their acceptance and the remaining bounded slices; preserve all existing
-MAIN/HOST/FE work and keep unimplemented registrations explicitly pending.
+All nineteen World registrations are implemented in a standalone DLL. Start
+from [world.md](world.md) for native acceptance and the remaining shared
+integration boundary; preserve all existing MAIN/HOST/FE work. The
+`0x13080003` / `0x13080004` area-edit family and `0x13080005` priority have
+independent behavior, lifetime and native UI coverage.
+
 The shared add/edit booster family (`0x13080007` / `0x13080008`) also has
 initializer and native UI acceptance, including shared-font cleanup on unload.
 Drive search (`0x13080002`) also has core, lifetime, initialization and native UI
 acceptance. The scenery-area list (`0x13080001`) also has native acceptance
 with nested add/edit, priority and search comparisons. The booster/cache list
 (`0x13080006`) also has native acceptance with nested booster editors. World
-has eighteen accepted registrations; one remains. The world-files container `0x1306`
+has nineteen accepted registrations. The world-files container `0x1306`
 also has native acceptance with nested area/cache lists. Exact position `0x1308`
 has native control/error/lifetime acceptance over independent FACIL-shaped callbacks;
 its Select Flight owner flow remains separate. Facilities directory `0x1307`
@@ -530,8 +530,12 @@ also has native acceptance, including its three combos, disable groups, owner
 validation and shared-font cleanup. Time/season `0x1301` also has native
 acceptance for its complete parent and season/date/clock page graph. The
 weather-area dialog `0x1303` also has native acceptance with an independent
-MAIN-shaped owner fixture. Advanced weather `0x13040001` remains pending
-and needs separate caller recovery and complete page-graph recovery.
+MAIN-shaped owner fixture. Advanced weather `0x13040001` also has complete
+caller/page-graph recovery and native acceptance: 960 native pairs, 71 detected
+mutations, all sixteen prior native families passing, source reproduction and
+a private-copy startup smoke. See [World acceptance](world.md#advanced-weather-native-ui-acceptance)
+for the contract, retained retail quirks and evidence. Shared build/install
+integration and full host-driven interactions remain separate.
 For a whole-DLL assignment, choose
 MP_DIALOG and include all three registrations plus the full flag-2 window
 array in the completion criteria.

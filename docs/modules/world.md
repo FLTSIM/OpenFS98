@@ -8,16 +8,19 @@ priority (`0x13080005`), booster/cache list (`0x13080006`), add/edit booster
 container (`0x1306`), exact position (`0x1308`), facilities directory (`0x1307`)
 and go-to-airport (`0x1309`), plus scenery complexity (`0x1304`), dynamic
 scenery (`0x1305`), copy weather (`0x13050001`), basic weather (`0x1302`)
-and time/season (`0x1301`), plus weather areas (`0x1303`).
+and time/season (`0x1301`), weather areas (`0x1303`) and advanced weather
+(`0x13040001`).
 Their classes, initialization, controls, event/message maps, factories,
 exception lifetimes and module binding are rebuilt in C, using
-retail MFC42/SIMSUI as shared dependencies. The remaining advanced-weather
-registration awaits native acceptance.
+retail MFC42/SIMSUI as shared dependencies. All nineteen registrations now
+have native UI acceptance, including the Advanced Weather parent and five pages.
 
-This is ready to review as a standalone eighteen-dialog slice. It is **not a full
-World replacement** and must not replace the active game's World.DLL. The
-startup smoke changes only a private game copy; startup success does not supply
-the remaining registration or establish its behavior.
+This is ready to review as a standalone nineteen-registration DLL. Shared
+build/install integration and full host-driven interactions remain separate.
+The startup smoke changes only a private game copy; the active game retains
+its retail World.DLL. Family sections retain historical artifact hashes and
+registration counts; the final Advanced Weather acceptance below records the
+current complete native DLL.
 
 Reference: `orig/English/World.DLL`, preferred base `0x223f0000`, module id
 `0x80000006`, 19 registrations. See [dialogs.md](dialogs.md#worlddll) and
@@ -3444,7 +3447,7 @@ The Copy Weather owner callback prepares descriptor `0x20801538` at
 `0x207e71d0`, opens the separately accepted `0x13050001` and applies through
 `0x207e7200` only on success. This fixture intercepts that owner callback;
 the nested dialog has its own native suite. Advanced weather `0x13040001`
-is a different registration and remains pending.
+is a different registration; its complete native acceptance is recorded below.
 
 | Owner descriptor | World use |
 | --- | --- |
@@ -3591,15 +3594,283 @@ source-reproduced DLL and private startup copy are byte-identical. All twelve
 dialogmap tests and `git diff --check` pass. MAIN/HOST/FE/FACIL, their verified
 owner harnesses/docs, the shared Makefile and the active game are unchanged.
 
+## Advanced weather: native UI acceptance
+
+Registration **`0x13040001`**, factory **`0x223f1620`**, parent template
+**`0x6a5`**, now has complete C behavior, class/control lifetimes, initialization,
+module-owned runtime binding and native acceptance. The parent and all five
+pages are implemented in `world_advanced*.c`; the standalone DLL registers all
+nineteen World dialogs. Tests use independent owner blocks and retail shared
+MFC42/SIMSUI/Alerts dependencies.
+
+Independent caller recovery uses retail MAIN (SHA-256
+`c55a0ae7c94ade0b549d78b5730cf5ff25ed2a00aa2b72b510932dd7408a7b3b`).
+Entry `0x207fb470` clears `0x2080d12c`, calls preparation `0x207fb630`,
+and opens `0x13040001` through HOST `+0x10c`, passing **`0x20807b40`**.
+Only a zero modal return and answer exactly 1 invoke apply `0x207fc260`.
+It returns the answer afterward. The static descriptor's checker at `+4`
+is **`0x207fcd50`**. These addresses are caller recovery, not acceptance of
+MAIN's live-weather behavior; the lifetime fixture executes no MAIN code.
+
+The complete class graph, in parent allocation order:
+
+| Class | Constructor | Destructor | Scalar delete | Size | Template | Embedded controls | Vtable |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| Parent | `0x223f1e20` | `0x223f1f70` | `0x223f1f50` | `0x2658` | `0x6a5` | 14 | `0x2240e0f8` |
+| Clouds | `0x223f7250` | `0x223f73e0` | `0x223f73c0` | `0x21a0` | `0x6a7` | 20 | `0x2240f0f8` |
+| Temperature | `0x223fe7d0` | `0x223fe920` | `0x223fe900` | `0x199c` | `0x6b7` | 13 | `0x22410538` |
+| Visibility | `0x223ffbc0` | `0x223ffc70` | `0x223ffc50` | `0x12e4` | `0x6b9` | 3 | `0x224106e8` |
+| Wind | `0x224019b0` | `0x22401b50` | `0x22401b30` | `0x2210` | `0x6bb` | 20 | `0x22410c38` |
+| Pressure | `0x223f9c30` | `0x223f9d10` | `0x223f9cf0` | `0x15a4` | `0x6af` | 7 | `0x2240f4e8` |
+
+There are **77 embedded controls**. Parent slots number 60; pages have 61,
+including their control initializer. `gen_world_advanced.py` extracts and
+cross-checks construction/destruction offsets, imported cleanup slots, MSVC
+unwind metadata, DDX, message/help maps and vtables. It extracts ABI metadata
+only. Normal destruction and unwinding use their respective recovered slots.
+
+Recovered lifetime behavior now compared against retail:
+
+- Parent construction uses the dialog base; page construction uses the page
+  base. The final class vtable is installed after all children. Only the parent
+  destructor reinstalls its class vtable; page destructors retain the incoming
+  class vtable. Children are destroyed in reverse order, including on real
+  exceptions thrown during construction or destruction. Scalar deletion
+  releases memory only for flag bit zero.
+- Parent constructor clears notification pointer `+0x2638`; Temperature clears
+  `+0x1208`; Wind clears `+0x1204`. Other owner/notification fields retain their
+  incoming bytes until initialization. Temperature replaces the embedded
+  separator's vtable at `+0x195c` with imported SIMSUI `+0x25758` after
+  construction and before destruction. Its immediately overwritten local
+  constructor-vtable store has no intervening observable call and is omitted.
+- Factory allocation is `0x2658`; it ignores the supplied parent and constructs
+  with null parent. It stores the owner at `+0x1104`, samples the live module
+  for `+0x80`, transfers ownership before Create, calls Show(1) even when
+  Create returns zero, then returns HWND `+0x20`. A null allocation faults
+  writing `+0x1104`; the fixture explicitly compares that fault. Exceptions
+  before ownership transfer use dialog deletion.
+- Parent DDX invokes imported base DDX before its fourteen bindings. Pages
+  perform their own bindings without base DDX. Help/context use each class's
+  recovered map, and context returns 1. PostNcDestroy follows the already
+  recovered shared scalar-delete dispatch.
+
+```sh
+make -f tools/world.mk world-advanced-metadata
+make -f tools/world.mk world-advanced-life N=20000
+make -f tools/world.mk world-advanced-life N=2000 MODE=unwind
+make -f tools/world.mk world-advanced-life N=2000 MODE=typed
+make -f tools/world.mk world-advanced-life-breaks
+```
+
+Seed **`0x4a971b63`**, six classes and **49 operations**: **980,000 normal
+comparisons**, **1,158,522 unwind comparisons** and **1,158,522 typed
+comparisons**, all with zero differences. Each exceptional run includes
+**1,060,522 real unwinds**. Typed mode uses real `_CxxThrowException` with
+direct, derived, virtual-base, null, unrelated and const CException pointers.
+The fixture compares ordered imported-service calls, return values, complete
+object bytes and guards, allocation ownership and explicit successful-path
+witnesses. Logs: `bin/world-diff/advanced-life-{normal,unwind,typed}.log`.
+
+All **24/24 lifetime mutations** produced actual differences. The suite
+requires exit 1 with an actual `DIFFER` report; build failures, faults and
+timeouts do not count. Inputs, per-mutation sources,
+harnesses, executables and hashes are retained under
+`bin/world-diff/advanced-life-breaks/`; its log is
+`advanced-life-breaks.log`. Native mutations are recorded below.
+
+The parent initializer **`0x223f21d0`** and the Visibility, Pressure and
+Temperature pages now have guarded implementations in `world_advanced.c` and
+`world_advanced_temperature.c`, with shared imported-service helpers in
+`world_advanced_internal.h`. Useful
+recovered parent boundaries: accept `0x223f2760`, cancel `0x223f2720`, close
+`0x223f27e0`, Add `0x223f2870`, Delete `0x223f2990`, command routing
+`0x223f28c0`, owner/page binding `0x223f2a20`, button enabling `0x223f2bf0`.
+The parent allocates page pointers at `+0x263c`, `+0x2640`, `+0x2644`,
+`+0x2648`, `+0x264c` in the table's order. Tab order differs: Clouds, Wind,
+Temperature, Visibility, Pressure. Bindings start each page's live data at
+owner `+0x1c`, `+0x2f0`, `+0x1c`, `+0x160`, `+0x2f0`, respectively.
+These bindings are checked by guarded fixtures and the complete native page graph.
+
+### Parent and three-page guarded behavior
+
+```sh
+make -f tools/world.mk world-advanced-parent N=20000
+make -f tools/world.mk world-advanced-parent N=2000 MODE=unwind
+make -f tools/world.mk world-advanced-temperature N=20000
+make -f tools/world.mk world-advanced-temperature N=2000 MODE=unwind
+make -f tools/world.mk world-advanced-core-breaks
+```
+
+Seed **`0x4a971b63`**. The parent/Visibility/Pressure fixture has 20 operations:
+**400,000 normal comparisons** and **333,034 interruption comparisons**,
+including **293,034 real unwinds**. Temperature has twelve operations:
+**240,000 normal comparisons** and **508,893 interruption comparisons**,
+including **484,893 real unwinds**. All four runs have zero differences.
+Logs: `bin/world-diff/advanced-{parent,temperature}-{normal,unwind}.log`.
+The printed baseline count counts uninterrupted retail executions; it is not
+an independent branch-coverage or witness claim.
+
+Both fixtures patch imported services only and compare the complete guarded
+fixture, ordered calls and defined returns. Adversarial imported callbacks
+replace owner pointers and class vtables during calls. The parent fixture
+covers binding all five page descriptors; skin/art/button/tab initialization
+and page allocations; null/poison descriptor diagnostics; accept/cancel/close;
+notification cleanup; all button modes; base-command forwarding; and both
+small pages' initializers and handlers. Clouds/Wind add/delete paths in the
+parent command router are **not exercised**: fixture-only implementations of
+these page dispatchers exit with an error if reached. Separate Clouds/Wind
+fixtures and the complete native harness exercise their actual implementations.
+
+Visibility retains `20 - selection`, the three cloud-row enable gate and
+focus posting. Pressure retains raw checkbox values, both edit styles and
+member limits, ordered collection, checker and unit-conversion callbacks,
+status priority, raw Alerts results and virtual validation dispatch.
+
+Temperature covers list construction with real CString-shaped service
+boundaries, reverse layer ordering and item data, selection fallback, unit
+titles, raw checkbox values and enable rules, Add popup construction/direct
+selection, Delete and focus recovery, capacity four, checker/status/error
+priority, `0x100e` Alerts handling, notification allocation cleanup, edit flags
+and limits, and reload messages. Retail's redundant list-count queries are
+retained. List strings use `LB_ADDSTRING`'s **lParam**, and every retained tab
+separator is `\t`. Invalid layer indices map to 3. The fixture deliberately
+returns unusual list counts and raw checkbox/error results; it does not run
+MAIN or change simulator weather.
+
+All **24/24 core/initializer mutations** produce actual `DIFFER` outcomes;
+build failures, faults and timeouts are excluded. Cases include parent setup
+and ownership, live vtable sampling, button/tab bindings, Visibility indices,
+Pressure flags/status mapping, Temperature item data, clamping, callbacks,
+checker results, units and notification cleanup. Log:
+`bin/world-diff/advanced-core-breaks.log`. Immutable source/harness snapshots,
+build and run logs and executable hashes are retained under
+`advanced-core-breaks/`. Together with the lifetime suite this is 48 detected
+mutations. These guarded counts are separate from native acceptance below.
+
+### Clouds and Wind behavior and owner contract
+
+```sh
+make -f tools/world.mk world-advanced-cloud N=20000
+make -f tools/world.mk world-advanced-cloud N=2000 MODE=unwind
+make -f tools/world.mk world-advanced-wind N=20000
+make -f tools/world.mk world-advanced-wind N=2000 MODE=unwind
+```
+
+Clouds has twenty guarded operations: **400,000 normal comparisons** and
+**1,276,804 interruption comparisons**, including **1,236,804 real unwinds**.
+Wind has twelve: **240,000 normal comparisons** and **1,097,129 interruption
+comparisons**, including **1,073,129 real unwinds**. Seed `0x4a971b63`, zero
+differences. Logs: `bin/world-diff/advanced-{cloud,wind}-{normal,unwind}.log`.
+Both compare complete guarded state, ordered imported-service calls and defined
+returns, including CString cleanup on exceptions and callback replacement of
+live owner pointers. Neither substitutes retail class code for local behavior.
+
+The owner is a **0x408-byte block**: answer `+0`, stdcall checker `+4`, title
+`+8`, area `+0xc`, units `+0x10`, cloud-auto `+0x14`, wind-auto `+0x18`.
+Cloud data starts at `+0x1c`, Wind at `+0x160`, Temperature/Pressure at
+`+0x2f0`. A status/text record has status `+0`, buffer `+4`, capacity `+8`,
+minimum `+0xc` and maximum `+0x10`. MAIN callbacks recovered independently:
+cloud changed `+0x158` = `0x207fe180`, pressure conversion `+0x3f4` =
+`0x207fe100` and `+0x3f8` = `0x207fe140`, Add `+0x3fc` = `0x207fdab0`,
+Delete `+0x400` = `0x207fdd80`. Both pressure conversions use stdcall `ret 4`.
+Parent routing writes active tab `+0x404` before Add/Delete. The native fixture
+provides independent callbacks and does not execute MAIN's weather application.
+
+Clouds retains three `0x58`-byte rows, reverse list order, item data, amount
+**word** writes and raw checkbox **dword** writes. Type changes preserve retail's
+surface/upper promotion, demotion and packing, selected-layer changes, text-copy
+order, callback timing, type-specific amount limits and visibility-tab gating.
+The per-type minimum/maximum words at data `+0x110/+0x112` and static lookup
+values are metadata, not extracted executable code. Disabled auto groups, empty
+lists, capacity, Add/Delete, reload, direction, units and validation/Alerts paths
+are covered. Retail's redundant list-count queries and live-owner reloads remain.
+
+Wind retains three `0x64`-byte upper rows and its separate surface record at
+`+0x140`. The surface list entry starts with literal `"000000\t"` and has item
+data 3; upper presence is written at `+0x138`. Ground/upper labels, hidden
+altitude controls, units, turbulence, direction, selection fallback, capacity,
+popup construction/command routing, Add/Delete, auto groups, empty rows,
+notification allocation, checker ordering and error recovery are preserved.
+Temperature retains four `0x2c`-byte rows, dew-point controls and its special
+`0x100e` error path. All five page handlers and the parent use local C dispatch.
+
+### Complete native graph and acceptance
+
+`gen_world_runtime.py` binds six additional module-owned vtables, message/help
+maps, DDX handlers, initializers and event/validation handlers. The shared local
+CNotify class serves the parent, Temperature and Wind. The runtime has 27 class
+vtables, registers all nineteen factories, initializes/deinitializes the new
+services and keeps every retail shared import at its recovered ABI boundary.
+Resource extraction remains build-only; no retail World class handler is called.
+
+```sh
+make -f tools/world.mk world-advanced-ui
+make -f tools/world.mk world-advanced-native-breaks
+```
+
+`worldadvanceduidiff.c` uses two independent owners and 35 independent text
+records. **Sixty scripts × eight cases × two unload cycles = 960 native
+pixel/state/callback pairs and 1,920 explicit witnesses**, with zero differences.
+Parent pixels are retained separately from Alerts pixels; both are compared
+without masks. Snapshots include controls, ordered callbacks, all owner data,
+list/combo text and item data, raw checks, retained edit limits, flags and label
+bindings. The fixture verifies module ownership of every class's local virtual,
+message, DDX and help handler, all six scalar deletions, all three CNotify
+releases and one tab Close before destruction. Each unload cycle includes
+module-init allocation/failure/double-deinit probes.
+
+Native scripts exercise every tab, Enter/Escape, command and virtual
+accept/cancel/close, Add popup routing and Delete, cloud promotion/demotion,
+list selection, amount/turbulence/visibility combos, direction, physical clicks
+and raw member notifications, edits and pressure conversions, reload, units,
+auto groups, empty layers, owner replacement, individual and simultaneous
+validation failures, actual Alerts, focus/retry and Temperature's special error.
+Only test-owned popup menus are ended by the harness timer before posting the
+chosen real command. The fixture never changes simulator weather.
+
+All **23/23 native mutations** produce actual `ADVANCED UI DIFFER` outcomes.
+They change artwork, tab order/Close, notification ownership, accept/cancel,
+Visibility, Pressure raw values/styles/error priority, Cloud titles/raw
+checks/promotion/limits/DDX labels, Temperature units/limits/raw checks/Add
+callbacks, and Wind surface text/limits/turbulence/notification allocation.
+The native suite requires exit 1 and an actual difference; faults, build errors
+and timeouts do not count. Immutable sources, harnesses, binaries, hashes and
+per-mutation logs are retained under `advanced-native-breaks/`. Together with
+guarded suites this is **71 detected Advanced Weather mutations**.
+Logs: `advanced-ui-final.log`, `advanced-native-breaks.log`.
+
+All sixteen previous native families pass against this DLL: area 288, priority
+210, booster 320, search 680, area list 504, cache list 672, world files 672,
+position 512, facilities 576, airport 576, complexity 352, dynamic 544, copy
+weather 576, basic weather 800, time/season 896 and weather areas 744.
+This is **8,922 regression pairs**, or **9,882 native pairs** including Advanced
+Weather, all with zero differences. Logs: `advanced-<family>-regression.log`.
+
+One initial Airport capture differed only in the 59×12-pixel selection highlight
+over “Initial” after its nested directory closed; state, controls and callbacks
+matched. The unchanged full 576-pair rerun and a 192-pair control against the
+previously accepted DLL passed. The initial log and both BMPs remain as
+`advanced-airport-regression-initial.log` and `advanced-airport-initial-*.bmp`;
+the prior-artifact control is `advanced-airport-prior-artifact.log`. No harness
+or pixel mask was changed to obtain the passing rerun.
+
+An isolated source snapshot explicitly regenerates all 38 metadata/resource
+outputs and rebuilds with **`SOURCE_DATE_EPOCH=1793284704`**. The generated
+outputs and DLL are byte-identical to the tested artifact. DLL SHA-256:
+`9186c742a679470c623a70a22fce91a4402085e42df160ac8db73c468bd89242`.
+Evidence: `advanced-reproduce/reproduce.log` and `reproduce-checks.json`.
+A **75-second private-copy startup smoke** passes with **27/27 modules and
+95 gauges**, English World loaded, matching DLL bytes and no runtime errors.
+Log: `advanced-smoke.log`. The active game's retail World remains SHA-256
+`35d67023ba2ff0113c519f6e2c4ab5f19c842c923401a255e7761eae423118f5`.
+All twelve dialogmap tests pass, the registry is unchanged, and shell syntax
+and `git diff --check` pass. Final evidence: `advanced-acceptance.json` and
+`advanced-final.log`, checked by `advanced-audit.py` under `bin/world-diff/`.
+
 ## Remaining boundary
 
-Advanced weather `0x13040001` is the remaining registration pending native
-acceptance. It needs independent caller/descriptor recovery and its complete
-owned page graph; the inventory entry is not a behavior specification.
-
-FACIL's three World dialogs now have native acceptance over independent owner
-fixtures. Real filesystem lookup, flight-selection and simulator placement
-remain owner responsibilities; no real placement callback runs in World tests.
-WORLD remains a partial replacement. Shared build/install integration and full
-host-driven interactions are separate. FE, FACIL, MAIN, HOST, their verified
-harnesses/docs, the shared Makefile and the active game remain unchanged.
+All nineteen World registrations now have native UI acceptance. Shared
+build/install integration and full host-driven interactions remain separate.
+Real filesystem lookup, flight selection, simulator placement and weather
+application remain owner responsibilities. MAIN/HOST/FE/FACIL, their verified
+harnesses/docs, the shared Makefile and the active game are unchanged.

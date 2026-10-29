@@ -39,9 +39,9 @@ world-life-breaks: worldlife
 	bash tools/run_worlddiff.sh --life-breaks
 
 PRIORITY_OBJECTS := src/world/world_priority_objects.c src/world/world_priority.h src/world/world_priority_tables.inc src/world/world_priority_hooks.inc src/world/world_objects.h src/world/world_init.h src/world/world_unwind.h src/world/world_exceptions.h src/world/world_internal.h
-WORLD_SOURCES := src/world/world_wareas.c src/world/world_wareas_objects.c src/world/world_time.c src/world/world_time_init.c src/world/world_time_objects.c src/world/world_weather.c src/world/world_weather_objects.c src/world/world_copy.c src/world/world_copy_objects.c src/world/world_copy_init.c src/world/world_dynamic.c src/world/world_dynamic_objects.c src/world/world_dynamic_init.c src/world/world_complexity.c src/world/world_complexity_objects.c src/world/world_complexity_init.c src/world/world_airport.c src/world/world_airport_objects.c src/world/world_facilities.c src/world/world_facilities_objects.c src/world/world_position.c src/world/world_position_objects.c src/world/world_files.c src/world/world_files_objects.c src/world/world_cache.c src/world/world_cache_objects.c src/world/world_list.c src/world/world_list_objects.c src/world/world_search.c src/world/world_search_objects.c src/world/world_search_init.c src/world/world_booster.c src/world/world_booster_objects.c src/world/world_booster_init.c src/world/world_priority.c src/world/world_priority_objects.c src/world/world_area.c src/world/world_objects.c src/world/world_init.c src/world/world_runtime.c
+WORLD_SOURCES := src/world/world_advanced.c src/world/world_advanced_objects.c src/world/world_advanced_temperature.c src/world/world_advanced_cloud.c src/world/world_advanced_wind.c src/world/world_wareas.c src/world/world_wareas_objects.c src/world/world_time.c src/world/world_time_init.c src/world/world_time_objects.c src/world/world_weather.c src/world/world_weather_objects.c src/world/world_copy.c src/world/world_copy_objects.c src/world/world_copy_init.c src/world/world_dynamic.c src/world/world_dynamic_objects.c src/world/world_dynamic_init.c src/world/world_complexity.c src/world/world_complexity_objects.c src/world/world_complexity_init.c src/world/world_airport.c src/world/world_airport_objects.c src/world/world_facilities.c src/world/world_facilities_objects.c src/world/world_position.c src/world/world_position_objects.c src/world/world_files.c src/world/world_files_objects.c src/world/world_cache.c src/world/world_cache_objects.c src/world/world_list.c src/world/world_list_objects.c src/world/world_search.c src/world/world_search_objects.c src/world/world_search_init.c src/world/world_booster.c src/world/world_booster_objects.c src/world/world_booster_init.c src/world/world_priority.c src/world/world_priority_objects.c src/world/world_area.c src/world/world_objects.c src/world/world_init.c src/world/world_runtime.c
 .PHONY: world worlduidiff-run world-ui-breaks world-smoke
-src/world/world_runtime_tables.inc $(WORLD_DIR)/world.res $(WORLD_DIR)/simsui-anchor.def &: tools/gen_world_runtime.py tools/gen_views_runtime.py tools/dialogmap.py orig/English/World.DLL orig/SIMSUI.DLL | $(WORLD_DIR)
+src/world/world_runtime_tables.inc $(WORLD_DIR)/world.res $(WORLD_DIR)/simsui-anchor.def &: tools/gen_world_runtime.py tools/gen_world_advanced.py tools/gen_views_runtime.py tools/dialogmap.py orig/English/World.DLL orig/SIMSUI.DLL | $(WORLD_DIR)
 	python3 -B tools/gen_world_runtime.py
 $(WORLD_DIR)/libworld-simsui.a: $(WORLD_DIR)/simsui-anchor.def
 	i686-w64-mingw32-dlltool -d $< -l $@
@@ -552,3 +552,51 @@ world-wareas-breaks: $(WORLD_DIR)/worldwareasdiff.exe $(WORLD_DIR)/worldwareasin
 	bash tools/run_worlddiff.sh --wareas-breaks
 world-wareas-native-breaks: world $(WORLD_DIR)/worldwareasuidiff.exe
 	bash tools/run_worlddiff.sh --wareas-native-breaks
+
+# Advanced weather: complete six-class graph, guarded and native acceptance.
+ADVANCED_METADATA := src/world/world_advanced_tables.inc src/world/world_advanced_hooks.inc src/world/world_advanced_data.inc
+$(ADVANCED_METADATA) &: tools/gen_world_advanced.py tools/gen_world_tables.py tools/dialogmap.py orig/English/World.DLL
+	python3 -B tools/gen_world_advanced.py
+.PHONY: world-advanced-metadata world-advanced-life
+world-advanced-metadata: $(ADVANCED_METADATA)
+$(WORLD_DIR)/worldadvancedlifediff.exe: tools/difftest/worldadvancedlifediff.c src/world/world_advanced_objects.c src/world/world_advanced.h src/world/world_objects.h src/world/world_internal.h src/world/world_unwind.h $(ADVANCED_METADATA) | $(WORLD_DIR)
+	$(CC) -std=c99 -O2 -Wall -Wextra -Werror -fno-strict-aliasing -fno-delete-null-pointer-checks -o $@ tools/difftest/worldadvancedlifediff.c src/world/world_advanced_objects.c -lntdll
+world-advanced-life: $(WORLD_DIR)/worldadvancedlifediff.exe
+	bash tools/run_worlddiff.sh --advanced-life $(N) $(SEED) $(MODE)
+.PHONY: world-advanced-life-breaks
+world-advanced-life-breaks: $(WORLD_DIR)/worldadvancedlifediff.exe
+	bash tools/run_worlddiff.sh --advanced-life-breaks
+
+$(WORLD_DIR)/worldadvancedparentdiff.exe: tools/difftest/worldadvancedparentdiff.c src/world/world_advanced.c src/world/world_advanced_temperature.c src/world/world_advanced_objects.c src/world/world_advanced_internal.h src/world/world_advanced.h src/world/world_objects.h src/world/world_internal.h src/world/world_init.h src/world/world_unwind.h $(ADVANCED_METADATA) | $(WORLD_DIR)
+	$(CC) -std=c99 -O2 -Wall -Wextra -Werror -fno-strict-aliasing -fno-delete-null-pointer-checks -o $@ tools/difftest/worldadvancedparentdiff.c src/world/world_advanced.c src/world/world_advanced_temperature.c src/world/world_advanced_objects.c -lntdll
+.PHONY: world-advanced-parent
+world-advanced-parent: $(WORLD_DIR)/worldadvancedparentdiff.exe
+	bash tools/run_worlddiff.sh --advanced-parent $(N) $(SEED) $(MODE)
+$(WORLD_DIR)/worldadvancedtemperaturediff.exe: tools/difftest/worldadvancedtemperaturediff.c src/world/world_advanced.c src/world/world_advanced_temperature.c src/world/world_advanced_objects.c src/world/world_advanced_internal.h src/world/world_advanced.h src/world/world_objects.h src/world/world_internal.h src/world/world_init.h src/world/world_unwind.h $(ADVANCED_METADATA) | $(WORLD_DIR)
+	$(CC) -std=c99 -O2 -Wall -Wextra -Werror -fno-strict-aliasing -fno-delete-null-pointer-checks -o $@ tools/difftest/worldadvancedtemperaturediff.c src/world/world_advanced.c src/world/world_advanced_temperature.c src/world/world_advanced_objects.c -lntdll
+.PHONY: world-advanced-temperature
+world-advanced-temperature: $(WORLD_DIR)/worldadvancedtemperaturediff.exe
+	bash tools/run_worlddiff.sh --advanced-temperature $(N) $(SEED) $(MODE)
+.PHONY: world-advanced-core-breaks
+world-advanced-core-breaks: $(WORLD_DIR)/worldadvancedparentdiff.exe $(WORLD_DIR)/worldadvancedtemperaturediff.exe
+	bash tools/run_worlddiff.sh --advanced-core-breaks
+$(WORLD_DIR)/worldadvancedwinddiff.exe: tools/difftest/worldadvancedwinddiff.c src/world/world_advanced.c src/world/world_advanced_temperature.c src/world/world_advanced_wind.c src/world/world_advanced_objects.c src/world/world_advanced_internal.h src/world/world_advanced.h $(ADVANCED_METADATA) | $(WORLD_DIR)
+	$(CC) -std=c99 -O2 -Wall -Wextra -Werror -fno-strict-aliasing -fno-delete-null-pointer-checks -o $@ tools/difftest/worldadvancedwinddiff.c src/world/world_advanced.c src/world/world_advanced_temperature.c src/world/world_advanced_wind.c src/world/world_advanced_objects.c -lntdll
+.PHONY: world-advanced-wind
+world-advanced-wind: $(WORLD_DIR)/worldadvancedwinddiff.exe
+	bash tools/run_worlddiff.sh --advanced-wind $(N) $(SEED) $(MODE)
+$(WORLD_DIR)/worldadvancedclouddiff.exe: tools/difftest/worldadvancedclouddiff.c src/world/world_advanced.c src/world/world_advanced_temperature.c src/world/world_advanced_cloud.c src/world/world_advanced_data.inc src/world/world_advanced_objects.c src/world/world_advanced_internal.h src/world/world_advanced.h $(ADVANCED_METADATA) | $(WORLD_DIR)
+	$(CC) -std=c99 -O2 -Wall -Wextra -Werror -fno-strict-aliasing -fno-delete-null-pointer-checks -o $@ tools/difftest/worldadvancedclouddiff.c src/world/world_advanced.c src/world/world_advanced_temperature.c src/world/world_advanced_cloud.c src/world/world_advanced_objects.c -lntdll
+.PHONY: world-advanced-cloud
+world-advanced-cloud: $(WORLD_DIR)/worldadvancedclouddiff.exe
+	bash tools/run_worlddiff.sh --advanced-cloud $(N) $(SEED) $(MODE)
+
+$(WORLD_DIR)/WORLD_area.dll: $(ADVANCED_METADATA) src/world/world_advanced_data.inc src/world/world_advanced.h src/world/world_advanced_internal.h
+$(WORLD_DIR)/worldadvanceduidiff.exe: tools/difftest/worldadvanceduidiff.c tools/difftest/worlduidiff.c src/world/world_internal.h | $(WORLD_DIR)
+	$(CC) -std=c99 -O2 -Wall -Wextra -Werror -fno-strict-aliasing -o $@ $< -lgdi32 -lntdll
+.PHONY: world-advanced-ui
+world-advanced-ui: world $(WORLD_DIR)/worldadvanceduidiff.exe
+	bash tools/run_worlddiff.sh --advanced-ui
+.PHONY: world-advanced-native-breaks
+world-advanced-native-breaks: world $(WORLD_DIR)/worldadvanceduidiff.exe
+	bash tools/run_worlddiff.sh --advanced-native-breaks

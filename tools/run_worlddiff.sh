@@ -10,6 +10,9 @@ flock 9
 if [[ "${1:-}" == --advanced-native-breaks ]]; then
     exec python3 -B tools/world_advanced_native_breaks.py "${@:2}"
 fi
+if [[ "${1:-}" == --game-ui ]]; then
+    exec python3 -B tools/world_game.py "${@:2}"
+fi
 if [[ "${1:-}" == --advanced-ui ]]; then
     exec timeout 600s wine bin/world-diff/worldadvanceduidiff.exe "${2:-bin/world-diff/WORLD_area.dll}" "${3:-8}"
 fi

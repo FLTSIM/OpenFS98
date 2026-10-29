@@ -501,9 +501,10 @@ have passed their own tests.
    commands, seeds/counts, artifacts, observed quirks and remaining boundaries
    before handing off again.
 
-All nineteen World registrations are implemented in a standalone DLL. Start
-from [world.md](world.md) for native acceptance and the remaining shared
-integration boundary; preserve all existing MAIN/HOST/FE work. The
+All nineteen World registrations are implemented in a standalone DLL with
+shared build/install and real-game owner acceptance. Start from
+[world.md](world.md) for native and in-game evidence; preserve all existing
+MAIN/HOST/FE work. The
 `0x13080003` / `0x13080004` area-edit family and `0x13080005` priority have
 independent behavior, lifetime and native UI coverage.
 
@@ -518,8 +519,10 @@ also has native acceptance with nested area/cache lists. Exact position `0x1308`
 has native control/error/lifetime acceptance over independent FACIL-shaped callbacks;
 its Select Flight owner flow remains separate. Facilities directory `0x1307`
 now has browser core, initialization, class/control lifetimes and native UI
-acceptance over independent FACIL-shaped callbacks. Actual FACIL lookup and
-simulator placement remain owner boundaries. Go-to-airport `0x1309` also has
+acceptance over independent FACIL-shaped callbacks. The in-game KORD search and
+nested facilities directory now exercise the real MAIN/FACIL owner path;
+Exact Location's Select Flight and latitude/longitude repositioning remain
+separate owner workflows. Go-to-airport `0x1309` also has
 core, initialization, lifetime and native UI acceptance over independent owner
 callbacks, including an actual nested facilities directory. Scenery complexity `0x1304` also has class, initializer and native acceptance,
 including its CNotify lifetime. Dynamic scenery `0x1305` also has owner, core,
@@ -530,12 +533,17 @@ also has native acceptance, including its three combos, disable groups, owner
 validation and shared-font cleanup. Time/season `0x1301` also has native
 acceptance for its complete parent and season/date/clock page graph. The
 weather-area dialog `0x1303` also has native acceptance with an independent
-MAIN-shaped owner fixture. Advanced weather `0x13040001` also has complete
+MAIN-shaped owner fixture. Actual game-owner checks now cover MAIN's Basic
+Weather, Time, position, Airport search, Complexity, Dynamic Scenery and
+Weather Areas flows, plus FE's scenery-file write/reopen. Advanced weather
+opens all five pages in the installed game. Advanced weather `0x13040001` also has complete
 caller/page-graph recovery and native acceptance: 960 native pairs, 71 detected
 mutations, all sixteen prior native families passing, source reproduction and
-a private-copy startup smoke. See [World acceptance](world.md#advanced-weather-native-ui-acceptance)
-for the contract, retained retail quirks and evidence. Shared build/install
-integration and full host-driven interactions remain separate.
+a private-copy startup smoke. Shared startup smoke confirms 27/27 runtime
+modules and 95 gauges with the replacement loaded. See
+[World acceptance](world.md#advanced-weather-native-ui-acceptance) for the
+native contract and [the game-owner acceptance](world.md#shared-buildinstall-and-game-owner-acceptance)
+for installed integration, exercised owner flows and remaining boundaries.
 For a whole-DLL assignment, choose
 MP_DIALOG and include all three registrations plus the full flag-2 window
 array in the completion criteria.

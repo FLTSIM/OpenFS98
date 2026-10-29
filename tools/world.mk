@@ -52,6 +52,11 @@ $(WORLD_DIR)/WORLD_area.dll: src/world/world_dynamic.h src/world/world_dynamic_t
 	$(CC) -std=c99 -O2 -Wall -Wextra -Werror -fno-strict-aliasing -fno-delete-null-pointer-checks -shared -nostdlib -Wl,--entry=_DllMain@12 -Wl,--disable-dynamicbase -Wl,--image-base=0x223f0000 -o $@ $(WORLD_SOURCES) src/world/world.def $(WORLD_DIR)/world-res.o $(WORLD_DIR)/libworld-simsui.a -lkernel32 -luser32 -lmsvcrt -lntdll
 $(WORLD_DIR)/worlduidiff.exe: tools/difftest/worlduidiff.c src/world/world_internal.h | $(WORLD_DIR)
 	$(CC) -std=c99 -O2 -Wall -Wextra -Werror -fno-strict-aliasing -o $@ $< -lgdi32 -lntdll
+.PHONY: world-game-ui
+$(WORLD_DIR)/worldgameui.exe: tools/difftest/worldgameui.c | $(WORLD_DIR)
+	i686-w64-mingw32-gcc -std=c99 -O2 -Wall -Wextra -Werror -o $@ $< -luser32
+world-game-ui: world $(WORLD_DIR)/worldgameui.exe
+	FS98_DIR="$(FS98_DIR)" bash tools/run_worlddiff.sh --game-ui
 worlduidiff-run: world $(WORLD_DIR)/worlduidiff.exe
 	bash tools/run_worlddiff.sh --ui
 world-ui-breaks: world $(WORLD_DIR)/worlduidiff.exe

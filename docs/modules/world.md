@@ -1,6 +1,7 @@
 # World.DLL — native scenery, position, facilities, weather and time dialogs
 
-**Partial replacement with native UI acceptance.** `bin/world-diff/WORLD_area.dll`
+**Complete native replacement, integrated and exercised in the game.**
+`bin/WORLD.DLL`
 registers the scenery-area list (`0x13080001`), add/edit scenery area
 (`0x13080003` / `0x13080004`), scenery
 priority (`0x13080005`), booster/cache list (`0x13080006`), add/edit booster
@@ -14,13 +15,12 @@ Their classes, initialization, controls, event/message maps, factories,
 exception lifetimes and module binding are rebuilt in C, using
 retail MFC42/SIMSUI as shared dependencies. All nineteen registrations now
 have native UI acceptance, including the Advanced Weather parent and five pages.
-
-This is ready to review as a standalone nineteen-registration DLL. Shared
-build/install integration and full host-driven interactions remain separate.
-The startup smoke changes only a private game copy; the active game retains
-its retail World.DLL. Family sections retain historical artifact hashes and
-registration counts; the final Advanced Weather acceptance below records the
-current complete native DLL.
+The shared Makefile builds World, installs it at `English/World.DLL`, restores
+the retail file with `make world-revert`, and includes it in `make install`,
+`make revert`, `make compare`, `make run` and `make smoke` reporting.
+Real MAIN/FE/FACIL owner flows and both Basic/Advanced Weather modes pass the
+installed-game UI runner. Older family sections retain historical hashes and
+statuses; the latest integrated artifact and test record are below.
 
 Reference: `orig/English/World.DLL`, preferred base `0x223f0000`, module id
 `0x80000006`, 19 registrations. See [dialogs.md](dialogs.md#worlddll) and
@@ -3859,18 +3859,55 @@ outputs and rebuilds with **`SOURCE_DATE_EPOCH=1793284704`**. The generated
 outputs and DLL are byte-identical to the tested artifact. DLL SHA-256:
 `9186c742a679470c623a70a22fce91a4402085e42df160ac8db73c468bd89242`.
 Evidence: `advanced-reproduce/reproduce.log` and `reproduce-checks.json`.
-A **75-second private-copy startup smoke** passes with **27/27 modules and
-95 gauges**, English World loaded, matching DLL bytes and no runtime errors.
-Log: `advanced-smoke.log`. The active game's retail World remains SHA-256
-`35d67023ba2ff0113c519f6e2c4ab5f19c842c923401a255e7761eae423118f5`.
-All twelve dialogmap tests pass, the registry is unchanged, and shell syntax
-and `git diff --check` pass. Final evidence: `advanced-acceptance.json` and
+A **75-second private-copy startup smoke** passed during Advanced acceptance
+with **27/27 modules and 95 gauges**, English World loaded, matching DLL bytes
+and no runtime errors. The current artifact has the SHA-256 recorded above.
+All twelve dialogmap tests pass and the registry is unchanged. Historical
+Advanced evidence remains in `advanced-acceptance.json` and
 `advanced-final.log`, checked by `advanced-audit.py` under `bin/world-diff/`.
 
-## Remaining boundary
+## Shared build/install and game-owner acceptance
 
-All nineteen World registrations now have native UI acceptance. Shared
-build/install integration and full host-driven interactions remain separate.
-Real filesystem lookup, flight selection, simulator placement and weather
-application remain owner responsibilities. MAIN/HOST/FE/FACIL, their verified
-harnesses/docs, the shared Makefile and the active game are unchanged.
+```sh
+make world
+make world-install FS98_DIR="$PWD/game"
+make world-game-ui FS98_DIR="$PWD/game"
+make smoke FS98_DIR="$PWD/game"
+make world-revert FS98_DIR="$PWD/game"
+```
+
+`make world` is also part of the default shared `make` build. The installed
+replacement is `game/English/World.DLL`, SHA-256
+`9186c742a679470c623a70a22fce91a4402085e42df160ac8db73c468bd89242`.
+`make world-install` retains the first retail copy at
+`English/World.DLL.orig` (retail SHA-256
+`35d67023ba2ff0113c519f6e2c4ab5f19c842c923401a255e7761eae423118f5`);
+`make world-revert` copies the authoritative `orig/English/World.DLL` back.
+
+`tools/world_game.py` starts the retail simulator twice from a disposable copy of
+the installed game and uses normal Win32 window messages. It verifies the
+loaded module path `C:\FS98\ENGLISH\World.DLL` and exercises:
+
+- Basic Weather apply/reopen/restore through MAIN, exact time and aircraft
+  heading changes through MAIN, Airport ID search (`KORD`) through FACIL, and
+  the nested Airport/Facility Directory.
+- Scenery Complexity and Dynamic Scenery apply/reopen/restore, Weather Areas
+  add/copy/reopen/delete with MAIN's real confirmation, and the real FE
+  Scenery Library edit/write/reopen/restore flow.
+- The Performance Boosters list under the Scenery Library and the Advanced
+  Weather parent with all five pages in a second game session configured for
+  Advanced Weather.
+
+The Linux fixture stores filenames case-sensitively while the game expects
+Windows case-insensitive paths. The runner copies the install and uses a single
+`Scenery/world.VIS` spelling for the FE write/reopen check; it restores the
+copy's original config and `.VIS` inventory afterward. It does not modify the
+installed game's config or scenery. Results and full window snapshots are in
+`bin/world-diff/game-integration/acceptance.json` and the adjacent JSON files.
+
+The shared smoke against the installed game passed: **27/27 runtime modules,
+95 gauges, and the installed World.DLL loaded**. `tools/smoketest.sh` explicitly
+compares `bin/WORLD.DLL` with `English/World.DLL` and requires the World load
+trace. Flight selection from Exact Location, actual aircraft repositioning,
+and saved-flight persistence remain MAIN/host workflows outside this World
+DLL acceptance.

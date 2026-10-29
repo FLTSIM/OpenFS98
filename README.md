@@ -11,10 +11,10 @@ game keeps running, and reimplemented code is swapped in a piece at a time so
 there is something testable from the first commit.
 
 FS98 makes this unusually easy. It has no static linkage between its own
-modules — `FLTSIM98.EXE` enumerates `Modules\`, loads each DLL, and links them
-by numeric id through two exported data symbols. So a reimplemented module is a
-**drop-in replacement**: same two exports, same id, same service slots, copy it
-into `Modules\`, done. No binary patching, no hooking, no injected loader.
+modules — `FLTSIM98.EXE` loads modules by numeric id through two exported data
+symbols. Most runtime modules live in `Modules\`; the localized World dialog
+module lives in `English\World.DLL`. Replacements keep the same exports, id and
+service slots, with no binary patching, hooking or injected loader.
 
 Total code to account for across the whole product: **1.44 MiB** of `.text`
 across 27 modules plus the host. See [docs/architecture.md](docs/architecture.md)
@@ -33,7 +33,7 @@ sudo apt install gcc-mingw-w64-i686-win32 p7zip-full   # 32-bit toolchain, 7z
 ./tools/extract.sh ~/Downloads/MSFlightSimulator98.iso   # orig/ reference binaries
 make stage                                        # game/ — a real install
 ln -s "$PWD/game" ~/.wine/drive_c/FS98            # game/ as C:\FS98 (see below)
-make && make smoke                                # build, then boot the game
+make && make install && make smoke                # build, install, then boot the game
 ```
 
 `cd/`, `orig/`, `game/` and `bin/` are gitignored — no game content goes in the
@@ -125,6 +125,9 @@ else's 1997 build, and it should read that way.
 | `make weathermdiff-run` | the same for WEATHERM: updates, frames, resets, scenery effects and list operations, comparing every import call, GLOBAL, the heap and the `.data` image |
 | `make chaindiff-run` | drive retail and OpenFS98 CHAIN side by side over random re-entrant callback scripts; `N=...` sets the count |
 | `make ofstest-run` | run assertions *inside* the sim, where the host is reachable; `ofstest-remove` takes the module back out |
+| `make world` | build World.DLL into `bin/WORLD.DLL` as part of the shared module build |
+| `make world-install` / `make world-revert` | install World at `English/World.DLL` (saving the retail file as `English/World.DLL.orig`) or restore the retail DLL |
+| `make world-game-ui` | drive the installed World module through the retail game's menus and owner callbacks on a disposable copy; see [docs/modules/world.md](docs/modules/world.md#shared-buildinstall-and-game-owner-acceptance) |
 | `make sehfix-install` | put `SEHFIX.DLL` in `Modules\`, which hands the divide faults wine swallows back to the host's repair, so the 3D view does not freeze; `sehfix-remove` takes it out, `sehfix-log` shows what it repaired (see [docs/wine.md](docs/wine.md)) |
 | `make util-trace` | boot the sim with a UTIL that counts every service call, and list what ran; `UTIL_TRACE_SECS=` for a longer session to play in |
 | `make graph` | module id and dependency table, read live from `orig/` |
@@ -147,10 +150,10 @@ the game runs from `Z:\` instead (`make smoke` itself runs `game/` directly
 and does not mind).
 
 ```sh
-make install     # swap rebuilt modules in; backs up to *.orig first
+make install     # install rebuilt modules, including World.DLL under English/
 make run         # wine FLTSIM98.EXE
 make sehfix-install vd-on   # what a flyable sim needs under wine -- docs/wine.md
-make revert      # put the retail modules back
+make revert      # restore retail modules, including English/World.DLL
 make trace       # WINEDEBUG=+loaddll, to see which modules got loaded
 ```
 
@@ -161,8 +164,9 @@ a module directly against the retail one, which is the only way to check
 anything the game will not exercise on startup — SLEW's tick, for instance, runs
 only in slew mode.
 
-`make smoke` asserts the game actually comes up: all 27 modules loaded **and**
-at least one `.GAU` loaded. The gauge check is the point — FS98 reports startup
+`make smoke` asserts the game actually comes up: all 27 runtime modules and
+the localized `English/World.DLL` replacement load, followed by at least one
+`.GAU`. The gauge check is the point — FS98 reports startup
 failures in *modal dialogs*, so a game wedged behind "Aircraft initialization
 failure" stays alive and looks identical to one that is flying. Gauges only load
 once an aircraft has resolved, its visual model has been found and its panel
@@ -229,6 +233,7 @@ emulate 80-bit arithmetic to preserve a rounding artefact. See
 | `SOUND` | 39 | 15,174 | **reimplemented, verified, and running in-game** — engine, warning, marker and Morse ident sounds, driven through the host's voice engine; 20,000 whole-module differential scripts comparing its whole `.data` image, zero differences — see [docs/modules/sound.md](docs/modules/sound.md) |
 | `DYNAMIC` | 6 | 12,300 | **reimplemented, verified, and running in-game** — dynamic scenery: an interpreter for the airport traffic programs in scenery files, three of whose opcodes write programs of their own; 20,000 whole-module differential scripts comparing GLOBAL, the heap and its whole `.data` image, zero differences — see [docs/modules/dynamic.md](docs/modules/dynamic.md) |
 | `FE` | 18 | 49,016 | **reimplemented, verified, and running in-game** — the grid conversions, assembly engine, compiled-C file services (20,000 whole-module scenarios) and the Scenery Library (20,000 scenarios through a World.DLL stand-in), zero differences — see [docs/modules/fe.md](docs/modules/fe.md) |
+| `WORLD` | `0x80000006` | 115,275 | **reimplemented and integrated at `English/World.DLL`** — all 19 registrations have native acceptance; real MAIN/FE/FACIL owner flows and both weather modes pass the installed-game UI runner — see [docs/modules/world.md](docs/modules/world.md) |
 | `LANDME` | 26 | 4,094 | **reimplemented, verified, and running in-game** — nearest-runway selection and all eleven nonzero landing-guidance phases; 20,000 whole-module scenarios over retail FE and real scenery, zero differences — see [docs/modules/landme.md](docs/modules/landme.md) |
 | `BOOSTER` | 34 | 8,024 | **reimplemented, verified, and running in-game** — the performance boosters: CD scenery copied to a disk cache on a worker thread, nearest first, and evicted out of reach; 20,000 whole-module scenarios, zero differences — see [docs/modules/booster.md](docs/modules/booster.md) |
 | `DEMO` | 7 | 16,864 | **reimplemented, verified, and running in-game** — flight videos (record and play), instant replay and the four dialogs' callbacks; 20,000 whole-module scenarios, zero differences — see [docs/modules/demo.md](docs/modules/demo.md) |
@@ -247,8 +252,9 @@ emulate 80-bit arithmetic to preserve a rounding artefact. See
 
 Retail baseline and the OpenFS98 build -- ACONTAIN, ADVDRV, ANALYSIS, ATC,
 BOOSTER, CHAIN, CONTROLS, DEMO, DYNAMIC, FACIL, FE, GLOBAL, LANDME, NUMERIC,
-PANELS, REALITY, SLEW, SOUND, UTIL, WEATHERM, WINDOW and WINMSG all installed -- both
-reach the panel: 27/27 modules, 95 gauges, `make smoke` PASS.
+PANELS, REALITY, SLEW, SOUND, UTIL, WEATHERM, WINDOW and WINMSG installed in
+`Modules/`, with World installed in `English/`, both reach the panel: 27/27
+runtime modules, 95 gauges, `make smoke` PASS.
 
 `GLOBAL.DLL`'s 4764-byte shared state block is byte-identical to retail, and the
 module id matches. The remaining differences from the retail binary are

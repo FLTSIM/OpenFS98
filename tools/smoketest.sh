@@ -71,16 +71,22 @@ for f in bin/*.DLL; do
     # targets (make util-trace), never by make install.
     case "$m" in *_TRACE.DLL) continue ;; esac
     case "$m" in
-        FACIL.DLL)  installed=FACILITIES.DLL ;;
-        MULTIP.DLL) installed=MULTIPLAYER.DLL ;;
-        MPCHAT.DLL) installed=mpchat.DLL ;;
-        *)          installed="$m" ;;
+        FACIL.DLL)  installed=Modules/FACILITIES.DLL ;;
+        MULTIP.DLL) installed=Modules/MULTIPLAYER.DLL ;;
+        MPCHAT.DLL) installed=Modules/mpchat.DLL ;;
+        WORLD.DLL)  installed=English/World.DLL ;;
+        *)          installed="Modules/$m" ;;
     esac
-    if cmp -s "$f" "$GAME/Modules/$installed"; then
+    if cmp -s "$f" "$GAME/$installed"; then
         echo "  running the OpenFS98 build of $m"
     else
         echo "  NOTE: $m differs from the installed DLL -- this exact build was not tested."
         echo "        run 'make install' to test what you just built."
+        [ "$m" != WORLD.DLL ] || fail=1
+    fi
+    if [ "$m" = WORLD.DLL ] && ! grep -qiE 'english.+world\.dll' "$TRACE"; then
+        echo "FAIL: English/World.DLL was not loaded"
+        fail=1
     fi
 done
 

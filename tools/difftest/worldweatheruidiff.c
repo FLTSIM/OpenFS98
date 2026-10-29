@@ -53,7 +53,7 @@ static void weather_ownership(void *object,HMODULE module)
 }
 struct weather_result {
     uint8_t descriptors[2][0x20];uint32_t mode,dialog_deletes,callbacks;
-    uint32_t fonts[3],labels[3],enabled[3],heading_font[6];
+    uint32_t fonts[3],labels[3],enabled[3],measure[3][2];
     int selection[3],count[3];char rows[3][512];
 };
 struct weather_probe {void **slot;void *original;uint32_t calls;};
@@ -82,6 +82,14 @@ static void weather_controls(HWND window,void *object,struct weather_result *res
     uint32_t index;
     for(index=0;index<3;++index){
         HWND combo=GetDlgItem(window,s_combo_ids[index]);uint32_t offset=s_combo_offsets[index];int row,length=0;
+        {
+            MEASUREITEMSTRUCT measure;
+            memset(&measure,0,sizeof(measure));measure.CtlType=ODT_COMBOBOX;measure.CtlID=s_combo_ids[index];
+            measure.itemID=0;measure.itemWidth=0x1234;measure.itemHeight=0x5678;
+            SendMessageA(window,WM_MEASUREITEM,measure.CtlID,(LPARAM)&measure);
+            result->measure[index][0]=measure.itemWidth;result->measure[index][1]=measure.itemHeight;
+            if(!s_side&&measure.itemHeight==0x5678){fprintf(stderr,"measurement witness failed\n");exit(2);}
+        }
         result->count[index]=(int)SendMessageA(combo,CB_GETCOUNT,0,0);
         result->selection[index]=(int)SendMessageA(combo,CB_GETCURSEL,0,0);
         result->enabled[index]=!!IsWindowEnabled(combo);
@@ -168,6 +176,10 @@ int main(int argc,char **argv)
                 HWND window;void *object;void **vtable;int accept=s_step!=0&&s_step!=2&&s_step!=12;
                 uint32_t descriptor_index=s_step==19;int initial_cloud,expected_enabled;
                 memset(&results[s_side],0,sizeof(results[s_side]));s_current=modules[s_side];weather_fixture();
+                /* Keep the desktop pointer outside each dropdown so queued
+                 * hover messages cannot select a row on only one side. */
+                if(!SetCursorPos(0,0))return 2;
+                world_pump();
                 window=(HWND)world_factory(linkages[s_side],0x1302)(0,s_weather_descriptors[descriptor_index]);
                 if(!IsWindow(window))return 2;
                 world_pump();object=world_object(window);s_weather_object=object;vtable=PTR(object,0);weather_ownership(object,modules[s_side]);

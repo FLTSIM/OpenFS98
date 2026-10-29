@@ -200,6 +200,43 @@ static void TC world_rva_33e0(void *object, uint32_t id, void *measure) { (void)
 static int TC world_rva_3400(void *object, uint32_t unused, void *info) { return fs98_world_weather_help(object, unused, info); }
 static int TC world_rva_3420(void *object, uint32_t window, uint32_t unused) { return fs98_world_weather_context(object, window, unused); }
 static void TC world_rva_3730(void *object) { fs98_world_weather_changed(object); }
+static void * TC world_rva_5bd0(void *object, uint32_t flags) { return fs98_world_time_delete(object, flags, 0); }
+static void * TC world_rva_4270(void *object, uint32_t flags) { return fs98_world_time_delete(object, flags, 1); }
+static void * TC world_rva_4eb0(void *object, uint32_t flags) { return fs98_world_time_delete(object, flags, 2); }
+static void * TC world_rva_5d50(void *object) { (void)object; return &s_time_message_map; }
+static void * TC world_rva_4510(void *object) { (void)object; return &s_time_season_message_map; }
+static void * TC world_rva_51d0(void *object) { (void)object; return &s_time_clock_message_map; }
+static void TC world_rva_5cc0(void *object, void *exchange) { fs98_world_time_exchange(object, exchange, 0); }
+static void TC world_rva_43d0(void *object, void *exchange) { fs98_world_time_exchange(object, exchange, 1); }
+static void TC world_rva_5040(void *object, void *exchange) { fs98_world_time_exchange(object, exchange, 2); }
+static int TC world_rva_5d60(void *object) { return fs98_world_time_init(object); }
+static void TC world_rva_4520(void *object) { fs98_world_time_page_init(object, 1); }
+static void TC world_rva_51e0(void *object) { fs98_world_time_page_init(object, 2); }
+static void TC world_rva_6080(void *object) { fs98_world_time_accept(object); }
+static void TC world_rva_6060(void *object) { fs98_world_time_cancel(object); }
+static void TC world_rva_6100(void *object) { fs98_world_time_close(object); }
+static int TC world_rva_5ca0(void *object, uint32_t unused) { return fs98_world_time_frame_validate(object, unused); }
+static int TC world_rva_4870(void *object, uint32_t id) { return fs98_world_time_validate(object, id, 1); }
+static int TC world_rva_55e0(void *object, uint32_t id) { return fs98_world_time_validate(object, id, 2); }
+static int TC world_rva_4a20(void *object, uint32_t id) { return fs98_world_time_error(object, id, 1); }
+static int TC world_rva_5870(void *object, uint32_t id) { return fs98_world_time_error(object, id, 2); }
+static void TC world_rva_4af0(void *object) { fs98_world_time_radio(object, 1, 1); }
+static void TC world_rva_4bc0(void *object) { fs98_world_time_radio(object, 0, 1); }
+static void TC world_rva_5980(void *object) { fs98_world_time_radio(object, 1, 2); }
+static void TC world_rva_5a20(void *object) { fs98_world_time_radio(object, 0, 2); }
+static void TC world_rva_4ca0(void *object) { fs98_world_time_selection(object, 1); }
+static void TC world_rva_4ce0(void *object) { fs98_world_time_selection(object, 1); }
+static void TC world_rva_5ac0(void *object) { fs98_world_time_selection(object, 2); }
+static void TC world_rva_5b00(void *object) { fs98_world_time_selection(object, 2); }
+static int TC world_rva_4cf0(void *object, uint32_t unused, uint32_t parameter) { (void)unused; (void)parameter; return fs98_world_time_reload(object, 1); }
+static int TC world_rva_5b10(void *object, uint32_t unused, uint32_t parameter) { (void)unused; (void)parameter; return fs98_world_time_reload(object, 2); }
+static void TC world_rva_4c90(void *object) { ((void (TC *)(void *))world_slot(0x25594))(object); }
+static int TC world_rva_6130(void *object, uint32_t unused, void *help) { (void)unused; return fs98_world_time_help(object, WORLD_U32(help, 0xc), 12, 0); }
+static int TC world_rva_4750(void *object, uint32_t unused, void *help) { (void)unused; return fs98_world_time_help(object, WORLD_U32(help, 0xc), 12, 1); }
+static int TC world_rva_5490(void *object, uint32_t unused, void *help) { (void)unused; return fs98_world_time_help(object, WORLD_U32(help, 0xc), 12, 2); }
+static int TC world_rva_6150(void *object, uint32_t window, uint32_t unused) { (void)unused; fs98_world_time_help(object, window, 10, 0); return 1; }
+static int TC world_rva_4770(void *object, uint32_t window, uint32_t unused) { (void)unused; fs98_world_time_help(object, window, 10, 1); return 1; }
+static int TC world_rva_54b0(void *object, uint32_t window, uint32_t unused) { (void)unused; fs98_world_time_help(object, window, 10, 2); return 1; }
 static const struct world_import_binding s_imports[] = {
     {"USER32.dll", "GetActiveWindow", 0, 0x25864},
     {"USER32.dll", "ValidateRect", 0, 0x25868},
@@ -1443,6 +1480,188 @@ static const struct world_virtual_binding s_virtuals[] = {
     {16, 57, 120, 0},
     {16, 58, 121, 0},
     {16, 59, 85, 0},
+    {17, 0, 117, 0},
+    {17, 1, -1, (void *)world_rva_5bd0},
+    {17, 2, -1, (void *)world_rva_2d00},
+    {17, 3, -1, (void *)world_rva_2d10},
+    {17, 4, -1, (void *)world_rva_2d00},
+    {17, 5, 196, 0},
+    {17, 6, 197, 0},
+    {17, 7, 198, 0},
+    {17, 8, 199, 0},
+    {17, 9, 200, 0},
+    {17, 10, 201, 0},
+    {17, 11, 202, 0},
+    {17, 12, -1, (void *)world_rva_5d50},
+    {17, 13, 203, 0},
+    {17, 14, 204, 0},
+    {17, 15, 205, 0},
+    {17, 16, 206, 0},
+    {17, 17, 207, 0},
+    {17, 18, 208, 0},
+    {17, 19, 209, 0},
+    {17, 20, 210, 0},
+    {17, 21, 189, 0},
+    {17, 22, 212, 0},
+    {17, 23, 213, 0},
+    {17, 24, 214, 0},
+    {17, 25, 215, 0},
+    {17, 26, 216, 0},
+    {17, 27, 217, 0},
+    {17, 28, 218, 0},
+    {17, 29, 219, 0},
+    {17, 30, 220, 0},
+    {17, 31, 221, 0},
+    {17, 32, 83, 0},
+    {17, 33, 211, 0},
+    {17, 34, 223, 0},
+    {17, 35, -1, (void *)world_rva_5cc0},
+    {17, 36, -1, (void *)world_rva_2d20},
+    {17, 37, -1, (void *)world_rva_2d30},
+    {17, 38, 224, 0},
+    {17, 39, 225, 0},
+    {17, 40, 226, 0},
+    {17, 41, 227, 0},
+    {17, 42, 222, 0},
+    {17, 43, -1, (void *)world_rva_3d30},
+    {17, 44, 229, 0},
+    {17, 45, 230, 0},
+    {17, 46, 231, 0},
+    {17, 47, 232, 0},
+    {17, 48, 188, 0},
+    {17, 49, -1, (void *)world_rva_5d60},
+    {17, 50, 143, 0},
+    {17, 51, -1, (void *)world_rva_6080},
+    {17, 52, -1, (void *)world_rva_6060},
+    {17, 53, 190, 0},
+    {17, 54, -1, (void *)world_rva_5ca0},
+    {17, 55, 118, 0},
+    {17, 56, 119, 0},
+    {17, 57, 120, 0},
+    {17, 58, 121, 0},
+    {17, 59, -1, (void *)world_rva_6100},
+    {18, 0, 66, 0},
+    {18, 1, -1, (void *)world_rva_4270},
+    {18, 2, -1, (void *)world_rva_2d00},
+    {18, 3, -1, (void *)world_rva_2d10},
+    {18, 4, -1, (void *)world_rva_2d00},
+    {18, 5, 196, 0},
+    {18, 6, 197, 0},
+    {18, 7, 198, 0},
+    {18, 8, 199, 0},
+    {18, 9, 200, 0},
+    {18, 10, 201, 0},
+    {18, 11, 202, 0},
+    {18, 12, -1, (void *)world_rva_4510},
+    {18, 13, 203, 0},
+    {18, 14, 204, 0},
+    {18, 15, 205, 0},
+    {18, 16, 206, 0},
+    {18, 17, 207, 0},
+    {18, 18, 208, 0},
+    {18, 19, 209, 0},
+    {18, 20, 210, 0},
+    {18, 21, 189, 0},
+    {18, 22, 212, 0},
+    {18, 23, 213, 0},
+    {18, 24, 214, 0},
+    {18, 25, 215, 0},
+    {18, 26, 216, 0},
+    {18, 27, 217, 0},
+    {18, 28, 218, 0},
+    {18, 29, 219, 0},
+    {18, 30, 220, 0},
+    {18, 31, 221, 0},
+    {18, 32, 83, 0},
+    {18, 33, 211, 0},
+    {18, 34, 223, 0},
+    {18, 35, -1, (void *)world_rva_43d0},
+    {18, 36, -1, (void *)world_rva_2d20},
+    {18, 37, -1, (void *)world_rva_2d30},
+    {18, 38, 67, 0},
+    {18, 39, 225, 0},
+    {18, 40, 226, 0},
+    {18, 41, 227, 0},
+    {18, 42, 222, 0},
+    {18, 43, 68, 0},
+    {18, 44, 229, 0},
+    {18, 45, 230, 0},
+    {18, 46, 231, 0},
+    {18, 47, 232, 0},
+    {18, 48, 188, 0},
+    {18, 49, 69, 0},
+    {18, 50, 143, 0},
+    {18, 51, 175, 0},
+    {18, 52, 176, 0},
+    {18, 53, 190, 0},
+    {18, 54, -1, (void *)world_rva_4870},
+    {18, 55, -1, (void *)world_rva_4a20},
+    {18, 56, 119, 0},
+    {18, 57, 120, 0},
+    {18, 58, 121, 0},
+    {18, 59, 85, 0},
+    {18, 60, -1, (void *)world_rva_4520},
+    {19, 0, 66, 0},
+    {19, 1, -1, (void *)world_rva_4eb0},
+    {19, 2, -1, (void *)world_rva_2d00},
+    {19, 3, -1, (void *)world_rva_2d10},
+    {19, 4, -1, (void *)world_rva_2d00},
+    {19, 5, 196, 0},
+    {19, 6, 197, 0},
+    {19, 7, 198, 0},
+    {19, 8, 199, 0},
+    {19, 9, 200, 0},
+    {19, 10, 201, 0},
+    {19, 11, 202, 0},
+    {19, 12, -1, (void *)world_rva_51d0},
+    {19, 13, 203, 0},
+    {19, 14, 204, 0},
+    {19, 15, 205, 0},
+    {19, 16, 206, 0},
+    {19, 17, 207, 0},
+    {19, 18, 208, 0},
+    {19, 19, 209, 0},
+    {19, 20, 210, 0},
+    {19, 21, 189, 0},
+    {19, 22, 212, 0},
+    {19, 23, 213, 0},
+    {19, 24, 214, 0},
+    {19, 25, 215, 0},
+    {19, 26, 216, 0},
+    {19, 27, 217, 0},
+    {19, 28, 218, 0},
+    {19, 29, 219, 0},
+    {19, 30, 220, 0},
+    {19, 31, 221, 0},
+    {19, 32, 83, 0},
+    {19, 33, 211, 0},
+    {19, 34, 223, 0},
+    {19, 35, -1, (void *)world_rva_5040},
+    {19, 36, -1, (void *)world_rva_2d20},
+    {19, 37, -1, (void *)world_rva_2d30},
+    {19, 38, 67, 0},
+    {19, 39, 225, 0},
+    {19, 40, 226, 0},
+    {19, 41, 227, 0},
+    {19, 42, 222, 0},
+    {19, 43, 68, 0},
+    {19, 44, 229, 0},
+    {19, 45, 230, 0},
+    {19, 46, 231, 0},
+    {19, 47, 232, 0},
+    {19, 48, 188, 0},
+    {19, 49, 69, 0},
+    {19, 50, 143, 0},
+    {19, 51, 175, 0},
+    {19, 52, 176, 0},
+    {19, 53, 190, 0},
+    {19, 54, -1, (void *)world_rva_55e0},
+    {19, 55, -1, (void *)world_rva_5870},
+    {19, 56, 119, 0},
+    {19, 57, 120, 0},
+    {19, 58, 121, 0},
+    {19, 59, 85, 0},
+    {19, 60, -1, (void *)world_rva_51e0},
 };
 static const struct world_message_entry s_messages[] = {
     {0x111, 0x400, 0x1b05, 0x1b05, 0xc, (void *)world_rva_c720},
@@ -1590,8 +1809,35 @@ static const struct world_message_entry s_weather_messages[] = {
     {0x111, 0x1, 0x1abe, 0x1abe, 0xc, (void *)world_rva_3730},
     {0, 0, 0, 0, 0, 0}
 };
+static const struct world_message_entry s_time_messages[] = {
+    {0x53, 0x0, 0x0, 0x0, 0xa, (void *)world_rva_6130},
+    {0x7b, 0x0, 0x0, 0x0, 0xa, (void *)world_rva_6150},
+    {0, 0, 0, 0, 0, 0}
+};
+static const struct world_message_entry s_time_season_messages[] = {
+    {0x111, 0x0, 0x1b18, 0x1b18, 0xc, (void *)world_rva_4af0},
+    {0x111, 0x0, 0x1b19, 0x1b19, 0xc, (void *)world_rva_4bc0},
+    {0x2, 0x0, 0x0, 0x0, 0xc, (void *)world_rva_4c90},
+    {0x111, 0x8, 0x1adc, 0x1adc, 0xc, (void *)world_rva_4ca0},
+    {0x111, 0x1, 0x1adc, 0x1adc, 0xc, (void *)world_rva_4ce0},
+    {0x53, 0x0, 0x0, 0x0, 0xa, (void *)world_rva_4750},
+    {0x7b, 0x0, 0x0, 0x0, 0xa, (void *)world_rva_4770},
+    {0x5f9, 0x0, 0x0, 0x0, 0xa, (void *)world_rva_4cf0},
+    {0, 0, 0, 0, 0, 0}
+};
+static const struct world_message_entry s_time_clock_messages[] = {
+    {0x111, 0x0, 0x1b1c, 0x1b1c, 0xc, (void *)world_rva_5980},
+    {0x111, 0x0, 0x1b1d, 0x1b1d, 0xc, (void *)world_rva_5a20},
+    {0x111, 0x8, 0x1add, 0x1add, 0xc, (void *)world_rva_5ac0},
+    {0x53, 0x0, 0x0, 0x0, 0xa, (void *)world_rva_5490},
+    {0x7b, 0x0, 0x0, 0x0, 0xa, (void *)world_rva_54b0},
+    {0x111, 0x1, 0x1add, 0x1add, 0xc, (void *)world_rva_5b00},
+    {0x5f9, 0x0, 0x0, 0x0, 0xa, (void *)world_rva_5b10},
+    {0, 0, 0, 0, 0, 0}
+};
 static const struct world_dialog s_dialogs[] = {
     {0x1302, fs98_world_weather_create, 0},
+    {0x1301, fs98_world_time_create, 0},
     {0x1304, fs98_world_complexity_create, 0},
     {0x1305, fs98_world_dynamic_create, 0},
     {0x1306, fs98_world_files_create, 0},

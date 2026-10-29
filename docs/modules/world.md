@@ -1,4 +1,4 @@
-# World.DLL — native scenery, position, facilities and weather dialogs
+# World.DLL — native scenery, position, facilities, weather and time dialogs
 
 **Partial replacement with native UI acceptance.** `bin/world-diff/WORLD_area.dll`
 registers the scenery-area list (`0x13080001`), add/edit scenery area
@@ -6,13 +6,15 @@ registers the scenery-area list (`0x13080001`), add/edit scenery area
 priority (`0x13080005`), booster/cache list (`0x13080006`), add/edit booster
 (`0x13080008` / `0x13080007`), drive search (`0x13080002`) and the world-files
 container (`0x1306`), exact position (`0x1308`), facilities directory (`0x1307`)
-and go-to-airport (`0x1309`), plus scenery complexity (`0x1304`), dynamic scenery (`0x1305`) and copy weather (`0x13050001`), plus basic weather (`0x1302`).
+and go-to-airport (`0x1309`), plus scenery complexity (`0x1304`), dynamic
+scenery (`0x1305`), copy weather (`0x13050001`), basic weather (`0x1302`)
+and time/season (`0x1301`).
 Their classes, initialization, controls, event/message maps, factories,
 exception lifetimes and module binding are rebuilt in C, using
-retail MFC42/SIMSUI as shared dependencies. The other 3 World registrations
+retail MFC42/SIMSUI as shared dependencies. The other 2 World registrations
 remain pending native acceptance.
 
-This is ready to review as a standalone sixteen-dialog slice. It is **not a full
+This is ready to review as a standalone seventeen-dialog slice. It is **not a full
 World replacement** and must not replace the active game's World.DLL. The
 startup smoke changes only a private game copy; startup success does not supply
 the other registrations or establish their behavior.
@@ -3136,17 +3138,294 @@ ordered calls and returns, raw and invalid indices, two independently
 replaceable descriptors and vtables, nonzero owner validation and collection
 before validation. The core has no local exception cleanup.
 
-The initializer passed **20,000 normal** and **52,600 unwind comparisons**,
-including **50,600 real unwinds**. It compares skin failure, both flag groups,
+The initializer passed **20,000 normal** and **48,526 unwind comparisons**,
+including **46,526 real unwinds**. It compares skin failure, both flag groups,
 retained initialization parameters, descriptor/vtable replacement, all font
-bytes and flag states, title-string cleanup and shared-font exit registration.
-Logs are `bin/world-diff/weather-core.log`, `weather-interrupt.log`,
-`weather-init-normal.log` and `weather-init-unwind.log`.
+bytes and flag states, title-string cleanup, descriptor clearing after the
+last control setup call, and shared-font exit registration. Logs are
+`bin/world-diff/weather-core.log`, `weather-interrupt.log`,
+`weather-init-normal-final.log` and `weather-init-unwind-final.log`.
+
+The class fixture passed **180,000 normal comparisons** and **227,096 in
+each of unwind and typed mode**, each including **209,096 real unwinds**.
+The nine operations cover constructor/destructor/scalar deletion, factory,
+DDX, help, context suppression and PostNcDestroy. The typed run uses real
+`_CxxThrowException`, including direct, derived, virtual-base, null, unrelated
+and const CException pointer types. Null allocation faults are compared
+explicitly. Logs are `weather-life-normal.log`, `weather-life-unwind.log` and
+`weather-life-typed.log` under `bin/world-diff/`.
+
+Across these seven guarded runs: **917,718 comparisons**, **464,718 real
+unwinds**, **39,000 core interruptions**, zero differences.
+
+The expanded native suite passed **800 paired pixel/state/callback
+comparisons** and **1,600 independent script witnesses**, eight module-init
+comparisons and two unload cycles. It checks all three combo row lists,
+selections and dropdowns, both disable/show groups, retained label/font
+bindings, cloud-selection enablement, invalid indices, Return/Escape,
+command/virtual accept/cancel, owner callback order and descriptor replacement,
+mode/answer, dialog scalar deletion and shared-font destruction on unload.
+Explicit measure-item notifications also compare both returned dimensions
+for each actual combo control. No pixel rectangles are masked. Native log:
+`bin/world-diff/weather-ui-acceptance.log`; baseline images:
+`ui-images/weather-baseline-*.bmp`.
+
+The measurement-expanded full suite initially stopped at cycle 0, case 4,
+step 15: retail changed the Clouds dropdown from Thunderstorm to Clear while
+the replacement retained Thunderstorm. State and callback transcripts preserve
+that observation in `weather-ui-measure-dropdown.log`; corresponding images
+use `weather-difference-cycle0-case4-step15-side*.bmp`. The fixture now places
+the desktop pointer outside the windows before each side and pumps pending
+input so pointer state does not depend on earlier runs. A five-case rerun
+passed **200 pairs**, followed by the complete **800-pair suite**, with the
+implementation unchanged. No pixels were masked.
+
+The first native mutation run detected **13/14** differences. Omitting
+measure-item forwarding was not exposed by ordinary interactions and was not
+counted. The explicit measurement probes now detect that omission against
+retail. The fixture also checks a validator that replaces the descriptor,
+with a deliberate descriptor-cache mutation. The final native mutation suite
+detects **15/15 actual differences**; together with guarded mutations,
+acceptance is **76/76**. Its log is
+`bin/world-diff/weather-native-breaks-final.log`. Native source/DLL/harness
+snapshots and input/artifact hashes are retained under
+`bin/world-diff/weather-native-breaks/`.
+
+The final guarded mutation suite detected **61/61 actual differences**, covering
+collection/defaults, descriptor reloads, population/enablement, owner validation,
+mode/answer, initialization/font/string cleanup, class/factory ownership, DDX,
+help/context and scalar deletion. Log: `bin/world-diff/weather-breaks-final.log`.
+Build failures, faults and timeouts never count as mutation detections.
+
+Weather/runtime metadata and build-only resources/SIMSUI anchor reproduce
+byte-for-byte in an isolated directory. The final sources reproduce the DLL
+with `SOURCE_DATE_EPOCH=1793148813`. Logs are `weather-final-build.log` and
+`weather-reproduce-final.log`. The retail registry is unchanged and all twelve
+dialogmap tests pass.
+
+All thirteen earlier native suites passed against the sixteen-registration DLL:
+**288 area**, **210 priority**, **320 booster**, **680 drive-search**,
+**504 area-list**, **672 cache-list**, **672 world-files**, **512 exact-position**,
+**576 facilities**, **576 airport**, **352 scenery-complexity**, **544 dynamic
+scenery** and **576 copy-weather** comparisons. That is **6,482 regression
+pairs**, or **7,282 main native comparisons** including basic weather, with
+module-init comparisons and two unload cycles per suite. Per-family logs are
+`weather-<family>-regression.log`; `weather-native-regressions.log` collects
+the completion records.
+
+A final one-case basic-weather artifact recheck passed **40 additional pairs**,
+**80 witnesses**, module-init comparisons and two unload cycles, restoring the
+baseline images after mutations. Log: `weather-ui-artifact-recheck.log`.
+`weather-final.log` and `weather-acceptance.json` audit final totals, artifact
+hashes and the unchanged retail active game. `git diff --check` passes.
+
+A **75-second startup** passed in private copy
+`bin/world-diff/smoke-game-ynpvl_w_`: **27/27 modules, 95 gauges**, World loaded,
+matching replacement bytes and no runtime errors. Log: `weather-smoke.log`.
+`WORLD_area.dll`, `weather-native-tested.dll`, `weather-source-reproduced.dll`
+and the startup copy are byte-identical, SHA-256
+`6da3a6ff463e6e694aeea30cecd4c01f4dbc00b76b090167e255349a95ce9c3d`.
+The active game's World.DLL remains retail SHA-256 `35d67023...3118f5`.
+MAIN/HOST/FE/FACIL, their verified owner harnesses and the shared Makefile are
+unchanged. WORLD remains a partial replacement.
+
+## Time/season: parent, season page and clock page
+
+Time/season **`0x1301`**, factory **`0x223f1500`**, parent template **`0x6aa`**,
+is the seventeenth registration in the partial native DLL. The complete owned
+page graph is implemented in `world_time.c`, `world_time_init.c` and
+`world_time_objects.c`. The parent owns a season/date page (`0x6a9`), a clock
+page (`0x6b8`) and a CNotify. No MAIN implementation or verified owner fixture
+is used as the UI implementation.
+
+Independent caller recovery uses retail MAIN `0x207e2b20`: preparation
+`0x207e2b60` clears descriptor `0x20800308`, obtains date/time fields through
+its existing owner services, then opens `0x1301` through HOST `+0x10c`.
+Only zero modal return and answer exactly 1 trigger `0x207e2c80` and
+`0x207e3e20`. The five conversion callbacks remain MAIN responsibilities;
+the new fixtures supply separate callbacks and never apply real simulator
+date/time changes. MAIN's descriptor check callback is `0x207e2df0`.
+The conversion entries are `0x207e2f70`, `0x207e31a0`, `0x207e33c0`,
+`0x207e3460` and `0x207e3600`; each consumes one stack argument (`ret 4`).
+
+| Owner descriptor | World use |
+| --- | --- |
+| `+0`, `+4`, `+0xc` | Answer, stdcall check callback, conversion action |
+| `+0x10` | Season/date block; its first dword is passed to AddPage |
+| `+0x74` | Clock block; its first dword is passed to AddPage |
+| `+0x110`, `+0x114` | Season-to-date / date-to-season callbacks |
+| `+0x118` | Time-of-day conversion callback |
+| `+0x11c`, `+0x120` | Local-to-GMT / GMT-to-local callbacks |
+
+The season/date block has mode `+8`, month/day/year status records at
+`+0xc`, `+0x20`, `+0x34`, and selection at `+0x60`. A status record contains
+code, text pointer, capacity and min/max text pointers. The clock block has a
+current-local display pointer at `+4`, inline GMT/DST displays at `+8`/`+0x11`,
+mode `+0x28`, time-of-day selection `+0x30`, local-hour/minute records at
+`+0x3c`/`+0x50`, GMT-hour/minute records at `+0x64`/`+0x78`, and the full
+32-bit reset-seconds checkbox state at `+0x90`.
+
+| Class | Constructor / destructor | Size | Own controls / vtable slots |
+| --- | --- | --- | --- |
+| Parent | `0x223f5b20` / `0x223f5bf0` | `0x212c` | 6 / 60 |
+| Season/date | `0x223f4110` / `0x223f4290` | `0x1c08` | 17 / 61 |
+| Clock | `0x223f4d20` / `0x223f4ed0` | `0x1df0` | 20 / 61 |
+
+The parent and both pages run their own DDX bindings without base DDX.
+Construction installs each final vtable after all children. The clock page
+also clears its `+0x1118` conversion-direction flag. The parent destructor
+resets its vtable; page destructors preserve the incoming vtable and reset the
+separator's imported CSimsStatic vtable before its MFC destructor. All reverse
+child/base cleanup and scalar-delete flag-bit-0 behavior are retained.
+The separator constructor's temporary local vtable store is immediately
+replaced by the imported vtable with no intervening external call; that dead
+store is omitted. The final imported vtable is retained.
+
+Recovered behavior retained in C:
+
+- The factory ignores its parent, constructs with null parent, writes owner
+  descriptor `+0x10dc` and module `+0x80`, transfers ownership before Create,
+  calls Show(1) even after a zero Create result, and reads the HWND after Show.
+  A null allocation faults at the descriptor store. Failed construction uses
+  dialog deletion.
+- Parent initialization ignores base Init's result and calls skin Init with
+  bitmap `0x14f`, resources and flags 15. Success initializes artwork, OK,
+  Cancel, the tab control and frame, then allocates season/date, clock and
+  CNotify objects in that order. Each page gets Init(9). Allocation cleanup
+  remains live only through construction, before page Init. Invalid owner
+  descriptors (null or `0xcdcdcdcd`) send the recovered CNotify diagnostic
+  after those allocations and return zero.
+- Binding writes each page's data, owner, button and tab pointers. Clock is
+  added before season/date, using their live owner flags and localized titles.
+  Both shortcut helpers are initialized, season/date is recorded as last page,
+  tab zero is activated, the frame is shown, tab zero is activated again, then
+  the tab pointer is retained at parent `+0x7c`.
+- Page setup retains font/label bindings, radio/check sprites, shared displays,
+  edit flags, remapped separator geometry and edit limits of capacity minus
+  one, including 32-bit wrap. Owner validity is checked after control setup.
+  Null/poison page descriptors display the recovered message and stop setup.
+- Population copies raw selections, strings and checkbox values. Valid mode
+  zero selects the season/time-of-day radio and disables exact edits; mode one
+  selects exact entry and enables those edits. Other mode values do neither.
+  Season radio handlers infer mode using GetWindowLong(`-21`) against each
+  reloaded HWND. Clock handlers write mode directly and change ten controls.
+- Validation returns zero immediately while page `+0x1100` is clear. Otherwise
+  it collects edits, selection, radio mode and the raw clock checkbox, sets the
+  owner's action and calls its checker. Date actions are month 5, day 6, year 7;
+  clock actions are local hour/minute 1/2 and GMT hour/minute 3/4. GMT actions
+  set the clock page's direction flag; local actions clear it. Unknown IDs
+  clear the action without resetting that flag.
+- A nonzero checker result maps the first matching date error in year, month,
+  day order, or clock error in GMT hour, GMT minute, local hour, local minute
+  order. With no matching status, the raw checker result survives. Successful
+  validation with an action calls the appropriate conversion and repopulates
+  the affected controls before clearing the reloaded action. Selection handlers
+  and `0x5f9` reload messages retain their distinct callback/return behavior.
+- Error handlers prioritize the same records, pass the status record address
+  to DoErrorDialog, store its full result at page `+0x8c`, then invoke virtual
+  Validate (`+0xe0`). They return that dispatcher's result, which is the
+  parent's close/veto decision. Returning the control ID instead was caught
+  by the guarded comparison and corrected.
+- Accept obtains the active page, uses permanent edit focus when available
+  (FromHandlePermanent consumes one stack argument), otherwise page `+0x7d0`.
+  It retains the sampled page vtable across validation/error dispatch. Success
+  writes answer 1 through the reloaded owner and closes. Accept deliberately
+  leaves parent mode `+0x2124` unchanged; Cancel writes mode 2 and answer 0.
+- Virtual Close destroys the tab's pages first, deletes the sampled CNotify
+  with flag 1 if present, then calls imported base Close. Parent nonclient
+  destruction uses the existing module-owned scalar-delete dispatch. All three
+  classes, message maps, handlers and CNotify deletion are owned by the tested
+  module. Pages retain the shared imported CSimsTabPage PostNcDestroy.
+
+```sh
+make -f tools/world.mk world-time-metadata world
+make -f tools/world.mk world-time-core N=20000
+make -f tools/world.mk world-time-core N=2000 MODE=unwind
+make -f tools/world.mk world-time-life N=20000
+make -f tools/world.mk world-time-life N=2000 MODE=unwind
+make -f tools/world.mk world-time-life N=2000 MODE=typed
+make -f tools/world.mk world-time-breaks
+make -f tools/world.mk world-time-ui world-time-native-breaks
+```
+
+Seed `0x4a971b63`: the independent guarded core/initializer fixture passed
+**460,000 normal comparisons** and **584,438 unwind comparisons**, including
+**538,438 real unwinds**, over 23 routines. It compares every fixture byte,
+ordered imports/callbacks/returns, both replaceable owner blocks and vtables,
+all seven edit records, unknown IDs, invalid mode/index values, raw checkbox
+states, capacities including zero and upper bits, page-ready suppression,
+parent/child validity checks, all three allocation cleanup paths and the
+cached page-vtable rule. The parent frame's diagnostic validator is included.
+An earlier 22-operation normal run was superseded after adding that routine.
+
+The three-class fixture passed **500,000 normal comparisons** and **635,368
+in each of unwind and typed mode**, each including **585,368 real unwinds**.
+Its 25 operations include construction/destruction/deletion for all three
+classes, the registered parent factory, DDX and help/context. Real
+`_CxxThrowException` covers direct, derived, virtual-base, null, unrelated and
+const CException pointer types. Factory null-allocation faults are compared
+explicitly. Across the five main guarded runs: **2,815,174 comparisons**,
+**1,709,174 real unwinds**, zero differences. Logs use
+`bin/world-diff/time-core-{normal,unwind}-final.log` and
+`time-life-{normal,unwind,typed}-final.log`.
+
+All **74/74 guarded mutations** produced actual differences, including event
+routing and returns, error priority, both pages' setup, edit limits, allocation
+cleanup, vtable timing, lifetime order, scalar flags, factory ownership and DDX.
+Log: `bin/world-diff/time-breaks.log`. Faults, timeouts and build failures do
+not count as detections.
+
+Native coverage uses independently prepared MAIN-shaped descriptors, real
+SIMSUI tabs, both four-row combos, radio/edit groups, raw checkbox values,
+conversion callbacks, Enter/Escape, command and virtual accept/cancel/close,
+reload messages, seven individual and two simultaneous error scripts, actual
+Alerts focus/retry, owner replacement during acceptance and scalar deletion
+of the parent, both pages and CNotify. It checks module ownership for all three
+classes, maps and handlers. Pixels are compared without masking; the pointer
+is moved outside the dialog before each side to stabilize hover state.
+
+All **23 native mutations** produced actual differences. The first suite
+detected 22; removing explicit tab Close initially survived because later
+destruction cleaned up the pages. A forwarding observer now records that
+dispatch before destruction, and the targeted rerun detects its removal.
+The observer forwards the original call and compares its position in the
+callback/deletion log. Logs: `time-native-breaks.log` and
+`time-native-tab-break.log`; snapshots include source inputs, harnesses,
+resources and artifact hashes. Together with the guarded suite, this is
+**97 detected mutations**. Build failures, faults and timeouts are excluded.
+
+The final native suite, including the explicit tab-Close witness, passed
+**896 paired pixel/state/callback comparisons**, **1,792 witnesses** and two
+unload cycles with zero differences: 16 cases across 28 interaction scripts.
+Log: `bin/world-diff/time-ui-final.log`. A subsequent artifact recheck passed
+another **56 pairs and 112 witnesses**, including both unload cycles, in
+`time-ui-artifact-recheck.log`.
+
+Metadata, resources and the DLL were independently reproduced from an isolated
+source snapshot with `SOURCE_DATE_EPOCH=1793236222`. The tested and reproduced
+DLL SHA-256 is
+`2aa9a4adff86f76e398dfeedfa456c570f0401e9246535568d704ea64bac9b66`.
+Log: `time-reproduce.log`. The 75-second private-copy startup smoke passed with
+**27/27 modules and 95 gauges**, with the expected English World bytes loaded.
+Copy: `bin/world-diff/smoke-game-x0o5f65r`; log: `time-smoke.log`.
+
+All fourteen earlier native families passed against the same DLL: area 288,
+priority 210, booster 320, search 680, list 504, cache 672, files 672,
+position 512, facilities 576, airport 576, complexity 352, dynamic 544,
+copy weather 576 and basic weather 800. This totals **7,282 regression pairs**,
+or **8,178 native pairs** including time/season, with zero differences.
+Logs: `time-<family>-regression.log` and `time-native-regressions.log`.
+
+Final evidence is recorded in `bin/world-diff/time-final.log` and
+`time-acceptance.json`, checked by `time-audit.py`. The registry inventory is
+unchanged and all 12 dialog-map tests pass. The active game's retail World
+SHA-256 remains
+`35d67023ba2ff0113c519f6e2c4ab5f19c842c923401a255e7761eae423118f5`.
 
 ## Remaining boundary
 
-Three registrations remain pending native acceptance: time/season `0x1301`,
-weather areas `0x1303` and advanced weather `0x13040001`. These need independent
+Two registrations remain pending native acceptance: weather areas `0x1303`
+and advanced weather `0x13040001`. These need independent
 caller/descriptor recovery before choosing another bounded family. Their
 inventory entries are not behavior specifications.
 

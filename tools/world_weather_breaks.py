@@ -9,6 +9,8 @@ import sys
 
 def main():
     mutations = [
+        ('collect-descriptor-cache', 'core', '    int selection = world_send(object, 0x1634, 0x147, 0);\n    U32(PTR(object, 0x10e0), 0x14)', '    void *descriptor = PTR(object, 0x10e0);\n    int selection = world_send(object, 0x1634, 0x147, 0);\n    U32(descriptor, 0x14)'),
+        ('accept-descriptor-cache', 'core', 'void fs98_world_weather_accept(void *object)\n{\n', 'void fs98_world_weather_accept(void *object)\n{\n    void *saved_descriptor = PTR(object, 0x10e0);\n'),
         ('collect-cloud-range', 'core', 'selection <= 4 ?', 'selection <= 3 ?'),
         ('collect-wind-default', 'core', 'selection <= 3 ? (uint32_t)selection : 0;', 'selection <= 3 ? (uint32_t)selection : 4;'),
         ('collect-visibility-default', 'core', 'selection <= 3 ? (uint32_t)selection : 4;', 'selection <= 3 ? (uint32_t)selection : 0;'),
@@ -86,7 +88,10 @@ def main():
         source = (work / filename).read_text()
         if source.count(before) != 1:
             raise ValueError(f'{name}: anchor count {source.count(before)}')
-        (work / filename).write_text(source.replace(before, after, 1))
+        mutated = source.replace(before, after, 1)
+        if name == 'accept-descriptor-cache':
+            mutated = mutated.replace('        void *descriptor = PTR(object, 0x10e0);', '        void *descriptor = saved_descriptor;')
+        (work / filename).write_text(mutated)
         harness = 'worldweatherinitdiff.c' if unit == 'init' else 'worldweatherlifediff.c' if unit.startswith('life') else 'worldweatherdiff.c'
         sources = [str(work / 'world_weather.c')]
         if unit.startswith('life'):

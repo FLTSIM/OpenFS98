@@ -39,7 +39,7 @@ world-life-breaks: worldlife
 	bash tools/run_worlddiff.sh --life-breaks
 
 PRIORITY_OBJECTS := src/world/world_priority_objects.c src/world/world_priority.h src/world/world_priority_tables.inc src/world/world_priority_hooks.inc src/world/world_objects.h src/world/world_init.h src/world/world_unwind.h src/world/world_exceptions.h src/world/world_internal.h
-WORLD_SOURCES := src/world/world_weather.c src/world/world_weather_objects.c src/world/world_copy.c src/world/world_copy_objects.c src/world/world_copy_init.c src/world/world_dynamic.c src/world/world_dynamic_objects.c src/world/world_dynamic_init.c src/world/world_complexity.c src/world/world_complexity_objects.c src/world/world_complexity_init.c src/world/world_airport.c src/world/world_airport_objects.c src/world/world_facilities.c src/world/world_facilities_objects.c src/world/world_position.c src/world/world_position_objects.c src/world/world_files.c src/world/world_files_objects.c src/world/world_cache.c src/world/world_cache_objects.c src/world/world_list.c src/world/world_list_objects.c src/world/world_search.c src/world/world_search_objects.c src/world/world_search_init.c src/world/world_booster.c src/world/world_booster_objects.c src/world/world_booster_init.c src/world/world_priority.c src/world/world_priority_objects.c src/world/world_area.c src/world/world_objects.c src/world/world_init.c src/world/world_runtime.c
+WORLD_SOURCES := src/world/world_time.c src/world/world_time_init.c src/world/world_time_objects.c src/world/world_weather.c src/world/world_weather_objects.c src/world/world_copy.c src/world/world_copy_objects.c src/world/world_copy_init.c src/world/world_dynamic.c src/world/world_dynamic_objects.c src/world/world_dynamic_init.c src/world/world_complexity.c src/world/world_complexity_objects.c src/world/world_complexity_init.c src/world/world_airport.c src/world/world_airport_objects.c src/world/world_facilities.c src/world/world_facilities_objects.c src/world/world_position.c src/world/world_position_objects.c src/world/world_files.c src/world/world_files_objects.c src/world/world_cache.c src/world/world_cache_objects.c src/world/world_list.c src/world/world_list_objects.c src/world/world_search.c src/world/world_search_objects.c src/world/world_search_init.c src/world/world_booster.c src/world/world_booster_objects.c src/world/world_booster_init.c src/world/world_priority.c src/world/world_priority_objects.c src/world/world_area.c src/world/world_objects.c src/world/world_init.c src/world/world_runtime.c
 .PHONY: world worlduidiff-run world-ui-breaks world-smoke
 src/world/world_runtime_tables.inc $(WORLD_DIR)/world.res $(WORLD_DIR)/simsui-anchor.def &: tools/gen_world_runtime.py tools/gen_views_runtime.py tools/dialogmap.py orig/English/World.DLL orig/SIMSUI.DLL | $(WORLD_DIR)
 	python3 -B tools/gen_world_runtime.py
@@ -491,3 +491,31 @@ world-weather-breaks:
 	bash tools/run_worlddiff.sh --weather-breaks
 world-weather-native-breaks: world $(WORLD_DIR)/worldweatheruidiff.exe
 	bash tools/run_worlddiff.sh --weather-native-breaks
+
+TIME_METADATA := src/world/world_time_tables.inc src/world/world_time_hooks.inc
+$(TIME_METADATA) &: tools/gen_world_time.py tools/gen_world_tables.py tools/dialogmap.py orig/English/World.DLL
+	python3 -B tools/gen_world_time.py
+$(WORLD_DIR)/WORLD_area.dll: $(TIME_METADATA) src/world/world_time.h
+.PHONY: world-time-metadata
+world-time-metadata: $(TIME_METADATA)
+$(WORLD_DIR)/worldtimelifediff.exe: tools/difftest/worldtimelifediff.c src/world/world_time.c src/world/world_time_objects.c src/world/world_time.h $(TIME_METADATA) | $(WORLD_DIR)
+	$(CC) -std=c99 -O2 -Wall -Wextra -Werror -fno-strict-aliasing -fno-delete-null-pointer-checks -o $@ tools/difftest/worldtimelifediff.c src/world/world_time.c src/world/world_time_objects.c -lntdll
+.PHONY: world-time-life
+world-time-life: $(WORLD_DIR)/worldtimelifediff.exe
+	bash tools/run_worlddiff.sh --time-life $(N) $(SEED) $(MODE)
+$(WORLD_DIR)/worldtimediff.exe: tools/difftest/worldtimediff.c src/world/world_time.c src/world/world_time_init.c src/world/world_time_objects.c src/world/world_time.h $(TIME_METADATA) | $(WORLD_DIR)
+	$(CC) -std=c99 -O2 -Wall -Wextra -Werror -fno-strict-aliasing -fno-delete-null-pointer-checks -o $@ tools/difftest/worldtimediff.c src/world/world_time.c src/world/world_time_init.c src/world/world_time_objects.c -lntdll
+.PHONY: world-time-core
+world-time-core: $(WORLD_DIR)/worldtimediff.exe
+	bash tools/run_worlddiff.sh --time-core $(N) $(SEED) $(MODE)
+$(WORLD_DIR)/worldtimeuidiff.exe: tools/difftest/worldtimeuidiff.c tools/difftest/worlduidiff.c | $(WORLD_DIR)
+	$(CC) -std=c99 -O2 -Wall -Wextra -Werror -fno-strict-aliasing -o $@ $< -lgdi32 -lntdll
+.PHONY: world-time-ui
+world-time-ui: world $(WORLD_DIR)/worldtimeuidiff.exe
+	bash tools/run_worlddiff.sh --time-ui
+
+.PHONY: world-time-breaks world-time-native-breaks
+world-time-breaks:
+	bash tools/run_worlddiff.sh --time-breaks
+world-time-native-breaks: world $(WORLD_DIR)/worldtimeuidiff.exe
+	bash tools/run_worlddiff.sh --time-native-breaks

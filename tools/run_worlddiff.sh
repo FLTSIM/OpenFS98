@@ -7,6 +7,20 @@ export WINEDEBUG=-all
 mkdir -p -- "$WINEPREFIX"
 exec 9>bin/world-diff/wine.lock
 flock 9
+if [[ "${1:-}" == --time-breaks ]]; then
+    exec python3 -B tools/world_time_breaks.py "${@:2}"
+fi
+if [[ "${1:-}" == --time-native-breaks ]]; then
+    exec python3 -B tools/world_time_native_breaks.py "${@:2}"
+fi
+if [[ "${1:-}" == --time-life || "${1:-}" == --time-core ]]; then
+    kind="${1#--time-}"
+    if [[ "$kind" == life ]]; then executable=worldtimelifediff.exe; else executable=worldtimediff.exe; fi
+    exec timeout 180s wine "bin/world-diff/$executable" "${2:-2000}" "${3:-0x4a971b63}" "${4:-normal}"
+fi
+if [[ "${1:-}" == --time-ui ]]; then
+    exec timeout 300s wine bin/world-diff/worldtimeuidiff.exe "${2:-bin/world-diff/WORLD_area.dll}" "${3:-16}"
+fi
 if [[ "${1:-}" == --weather-breaks ]]; then
     exec python3 -B tools/world_weather_breaks.py "${@:2}"
 fi

@@ -34,7 +34,10 @@ static int TC init_button_hook(void *control,void *font,void *alternate,uint32_t
     uint32_t flags,int color,uint32_t module,int x,int y,struct fs98_world_rect rect)
 { return init_button(control,font,alternate,bitmap,dib,palette,flags,color,module,x,y,rect); }
 static void init_text(void *control,void *font)
-{ world_log("text %x font=%x\n",world_offset(control),init_offset(font)); }
+{
+    world_log("text %x font=%x\n",world_offset(control),init_offset(font));
+    if(control==(void *)(s_fixture.object+0x1154)&&(s_scenario&16))PTR(s_fixture.object,0x10e0)=NULL;
+}
 static void TC init_text_hook(void *control,void *font){init_text(control,font);}
 static void init_combo(void *control,void *font,void *label)
 { world_log("combo %x font=%x label=%x\n",world_offset(control),world_offset(font),world_offset(label)); }
@@ -62,7 +65,11 @@ static int init_at_exit(void (*callback)(void))
 static void *init_on_exit(void (*callback)(void))
 { init_at_exit(callback);return (void *)callback; }
 static int TC init_show(void *control,int show)
-{ world_log("show %x %x\n",world_offset(control),(uint32_t)show);U32(control,0xc)=(uint32_t)show;return 0; }
+{
+    world_log("show %x %x\n",world_offset(control),(uint32_t)show);U32(control,0xc)=(uint32_t)show;
+    if(control==(void *)(s_fixture.object+0x1154)&&(s_scenario&16))PTR(s_fixture.object,0x10e0)=NULL;
+    return 0;
+}
 static void *init_resolve(uint32_t slot)
 {
     switch(slot){
@@ -101,7 +108,7 @@ static void init_invoke(void)
 {
     int result=s_side?fs98_world_weather_init(s_fixture.object):((int(TC *)(void *))((uint8_t *)s_retail+0x3080))(s_fixture.object);
     if(!s_side&&!s_throw_at){
-        if(result!=(s_scenario%5!=0)||((s_scenario%5==0)&&s_calls!=2)||
+        if(result!=(s_scenario%5!=0&&!(s_scenario&16))||((s_scenario%5==0)&&s_calls!=2)||
             ((s_scenario%5!=0)&&(!strstr(s_logs[0],"combo ")||!strstr(s_logs[0],"string.destroy ")||U32(s_fixture.object,0x84)!=11))){
             fprintf(stderr,"initializer witness failed\n");exit(2);
         }

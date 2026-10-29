@@ -27,6 +27,7 @@ def main():
         ('collect-default', 'world_weather.c', 'selection <= 3 ? (uint32_t)selection : 4;', 'selection <= 3 ? (uint32_t)selection : 0;'),
         ('disabled-group', 'world_weather.c', 'if (U32(PTR(object, 0x10e0), 0xc))', 'if (U32(PTR(object, 0x10e0), 0x10))'),
         ('changed-dispatch', 'world_runtime_tables.inc', 'fs98_world_weather_changed(object);', '(void)object;'),
+        ('accept-descriptor-cache', 'world_weather.c', 'void fs98_world_weather_accept(void *object)\n{\n', 'void fs98_world_weather_accept(void *object)\n{\n    void *saved_descriptor = PTR(object, 0x10e0);\n'),
         ('accept-validation', 'world_weather.c', 'if (!fs98_world_weather_validate(object) || !fs98_world_weather_error(object))', 'if (1)'),
         ('accept-answer', 'world_weather.c', 'U32(descriptor, 0) = 1;', 'U32(descriptor, 0) = 0;'),
         ('cancel-mode', 'world_weather.c', '0x195c) = 2;', '0x195c) = 1;'),
@@ -47,11 +48,13 @@ def main():
                 if data.count(before.encode()) != 1:
                     raise ValueError(f'{name}: mutation anchor is not unique')
                 data = data.replace(before.encode(), after.encode(), 1)
+                if name == 'accept-descriptor-cache':
+                    data = data.replace(b'        void *descriptor = PTR(object, 0x10e0);', b'        void *descriptor = saved_descriptor;')
             (work / source_name).write_bytes(data)
         dll, exe = work / 'WORLD_area.dll', work / 'worldweatheruidiff.exe'
         flags = ['i686-w64-mingw32-gcc', '-std=c99', '-O2', '-Wall', '-Wextra', '-Werror', '-fno-strict-aliasing', '-fno-delete-null-pointer-checks']
         commands = [flags + ['-shared', '-nostdlib', '-Wl,--entry=_DllMain@12', '-Wl,--disable-dynamicbase', '-Wl,--image-base=0x223f0000', '-o', str(dll),
-            *(str(work / f'world_{unit}.c') for unit in ('area', 'objects', 'init', 'priority', 'priority_objects', 'booster', 'booster_objects', 'booster_init', 'search', 'search_objects', 'search_init', 'list', 'list_objects', 'cache', 'cache_objects', 'files', 'files_objects', 'position', 'position_objects', 'facilities', 'facilities_objects', 'airport', 'airport_objects', 'complexity', 'complexity_objects', 'complexity_init', 'dynamic', 'dynamic_objects', 'dynamic_init', 'copy', 'copy_objects', 'copy_init', 'weather', 'weather_objects', 'runtime')),
+            *(str(work / f'world_{unit}.c') for unit in ('area', 'objects', 'init', 'priority', 'priority_objects', 'booster', 'booster_objects', 'booster_init', 'search', 'search_objects', 'search_init', 'list', 'list_objects', 'cache', 'cache_objects', 'files', 'files_objects', 'position', 'position_objects', 'facilities', 'facilities_objects', 'airport', 'airport_objects', 'complexity', 'complexity_objects', 'complexity_init', 'dynamic', 'dynamic_objects', 'dynamic_init', 'copy', 'copy_objects', 'copy_init', 'weather', 'weather_objects', 'time', 'time_init', 'time_objects', 'runtime')),
             str(work / 'world.def'), str(work / 'world-res.o'), str(work / 'libworld-simsui.a'), '-lkernel32', '-luser32', '-lmsvcrt', '-lntdll'],
             flags + ['-o', str(exe), str(work / 'worldweatheruidiff.c'), '-lgdi32', '-lntdll']]
         for command in commands:

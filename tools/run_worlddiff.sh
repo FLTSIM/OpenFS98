@@ -7,6 +7,24 @@ export WINEDEBUG=-all
 mkdir -p -- "$WINEPREFIX"
 exec 9>bin/world-diff/wine.lock
 flock 9
+if [[ "${1:-}" == --wareas-breaks ]]; then
+    exec python3 -B tools/world_wareas_breaks.py "${@:2}"
+fi
+if [[ "${1:-}" == --wareas-native-breaks ]]; then
+    exec python3 -B tools/world_wareas_breaks.py --native "${@:2}"
+fi
+if [[ "${1:-}" == --wareas-init ]]; then
+    exec timeout 180s wine bin/world-diff/worldwareasinitdiff.exe "${2:-2000}" "${3:-0x4a971b63}" "${4:-normal}"
+fi
+if [[ "${1:-}" == --wareas-core ]]; then
+    exec timeout 180s wine bin/world-diff/worldwareasdiff.exe "${2:-2000}" "${3:-0x4a971b63}" "${4:-normal}"
+fi
+if [[ "${1:-}" == --wareas-life ]]; then
+    exec timeout 180s wine bin/world-diff/worldwareaslifediff.exe "${2:-2000}" "${3:-0x4a971b63}" "${4:-normal}"
+fi
+if [[ "${1:-}" == --wareas-ui ]]; then
+    exec timeout 300s wine bin/world-diff/worldwareasuidiff.exe "${2:-bin/world-diff/WORLD_area.dll}" "${3:-12}"
+fi
 if [[ "${1:-}" == --time-breaks ]]; then
     exec python3 -B tools/world_time_breaks.py "${@:2}"
 fi

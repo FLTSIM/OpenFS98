@@ -8,16 +8,16 @@ priority (`0x13080005`), booster/cache list (`0x13080006`), add/edit booster
 container (`0x1306`), exact position (`0x1308`), facilities directory (`0x1307`)
 and go-to-airport (`0x1309`), plus scenery complexity (`0x1304`), dynamic
 scenery (`0x1305`), copy weather (`0x13050001`), basic weather (`0x1302`)
-and time/season (`0x1301`).
+and time/season (`0x1301`), plus weather areas (`0x1303`).
 Their classes, initialization, controls, event/message maps, factories,
 exception lifetimes and module binding are rebuilt in C, using
-retail MFC42/SIMSUI as shared dependencies. The other 2 World registrations
-remain pending native acceptance.
+retail MFC42/SIMSUI as shared dependencies. The remaining advanced-weather
+registration awaits native acceptance.
 
-This is ready to review as a standalone seventeen-dialog slice. It is **not a full
+This is ready to review as a standalone eighteen-dialog slice. It is **not a full
 World replacement** and must not replace the active game's World.DLL. The
 startup smoke changes only a private game copy; startup success does not supply
-the other registrations or establish their behavior.
+the remaining registration or establish its behavior.
 
 Reference: `orig/English/World.DLL`, preferred base `0x223f0000`, module id
 `0x80000006`, 19 registrations. See [dialogs.md](dialogs.md#worlddll) and
@@ -3422,12 +3422,180 @@ unchanged and all 12 dialog-map tests pass. The active game's retail World
 SHA-256 remains
 `35d67023ba2ff0113c519f6e2c4ab5f19c842c923401a255e7761eae423118f5`.
 
+## Weather areas
+
+Weather areas **`0x1303`**, factory **`0x223f1130`**, template **`0x6ba`**,
+is the eighteenth registration in the partial native DLL. The single class,
+33 embedded controls and owned CNotify are implemented in `world_wareas.c`
+and `world_wareas_objects.c`. Constructor `0x22400130`, destructor
+`0x22400380` and scalar destructor `0x22400360` use an object of **`0x2720`**
+bytes. The class retains 60 virtual slots, its own DDX without base DDX,
+eight message entries and a help map. Metadata generators extract ABI data;
+resource payloads remain build-only.
+
+Independent caller recovery starts at retail MAIN `0x207e6010`. Preparation
+`0x207e6660` clears answer at descriptor `0x20801508`, prepares up to three
+area rows and opens `0x1303` through HOST `+0x10c`. Only zero modal return and
+answer exactly 1 call `0x207e6ac0` to apply weather. The checker is
+`0x207e6e20`; Add, Delete and Copy Weather are `0x207e7050`, `0x207e70a0` and
+`0x207e7190`. All consume one pointer argument (`ret 4`). Fixtures supply
+independent callbacks and never apply simulator weather or execute MAIN.
+The Copy Weather owner callback prepares descriptor `0x20801538` at
+`0x207e71d0`, opens the separately accepted `0x13050001` and applies through
+`0x207e7200` only on success. This fixture intercepts that owner callback;
+the nested dialog has its own native suite. Advanced weather `0x13040001`
+is a different registration and remains pending.
+
+| Owner descriptor | World use |
+| --- | --- |
+| `+0`, `+4`, `+8` | Answer, stdcall checker, units flag |
+| `+0xc`, `+0x10`, `+0x14` | Selection, signed row count, contiguous row array |
+| `+0x18`, `+0x1c` | Add / Copy Weather enable flags |
+| `+0x20`, `+0x24`, `+0x28` | Add / Delete / Copy Weather callbacks |
+
+Each **`0xc8`**-byte row has an editable flag at `+0`, a name status record at
+`+4` and eight records at `+0x18`, `+0x2c`, `+0x40`, `+0x54`, `+0x68`,
+`+0x7c`, `+0x90` and `+0xa4`. Each record contains status, text pointer,
+capacity and min/max text pointers. Two checkbox values are full dwords at
+`+0xbc` and `+0xc4`. Object `+0x10f8` points to the owner, `+0x10fc` to the
+current row and `+0x10f4` retains selection.
+
+Recovered behavior retained in C:
+
+- The factory ignores its parent, constructs with null parent, stores owner
+  and module, transfers ownership before Create, calls Show(1) even after zero
+  Create, then reads the HWND. Null allocation faults at the owner store.
+  Construction failure uses dialog deletion. Construction installs the final
+  vtable after every child; destruction preserves the incoming vtable and
+  destroys children in reverse order. Scalar deletion uses flag bit zero.
+- Initialization retains the skin, artwork, five button bindings, units titles,
+  label/list/edit fonts, edit flags and both checkbox sprites. The lazily owned
+  font copies font 8, inherits skin colors and stores style `0x110`.
+  The notification allocation has cleanup only until its construction finishes.
+  Owner validity is checked after control setup and that allocation; setup
+  already reads the owner's units flag, so invalid pointers can fault first.
+- Initial name/four coordinate limits use capacity minus one with 32-bit wrap.
+  The four remaining limits use **stdcall `lstrlenA`** on the live row strings,
+  in retail's order. They are lengths, not parsed numbers or capacities.
+- Population resets and rebuilds the list with row pointers as item data,
+  selects the owner's index and reloads the live row through the list. Every
+  text, enable and checkbox operation retains descriptor reloads. Row zero
+  disables name/Delete during selection handling; population subsequently
+  enables Delete whenever the list has more than one entry. This difference
+  between population and selection is retained.
+- Add/Delete invoke their owner callback and repopulate before optionally
+  posting `0x5fa` to move focus. Copy Weather disables the parent around its owner
+  callback, reenables it, focuses Copy Weather and repopulates. The checkbox
+  handlers write the full raw value to their distinct row fields.
+- Validation returns zero for a noneditable row. Name validation collects only
+  name, calls the checker and returns `0x1b0b` on failure; success rebuilds the
+  list. Other IDs collect eight edits in priority order, call the checker and
+  map the first status in `+0x90`, `+0xa4`, `+0x7c`, `+0x68`, `+0x18`,
+  `+0x2c`, `+0x40`, `+0x54` order. With no status, the raw checker result
+  survives. Unknown IDs take this same eight-edit path.
+- Error display prioritizes name, then the same eight records, stores the full
+  DoErrorDialog result at object `+0x8c` and returns virtual Validate (`+0xe0`)
+  with the recovered control ID or zero. Accept retains its sampled vtable
+  across validation/error dispatch, reloads the owner for answer 1 and closes;
+  Cancel writes answer zero and closes. Neither writes a separate mode field.
+- Close uses the existing module-owned CNotify/base-close implementation.
+  PostNcDestroy uses module-owned scalar deletion. Native tests check ownership
+  of the factory, class, map, entries, handlers and notification deletion.
+
+```sh
+make -f tools/world.mk world-wareas-metadata world
+make -f tools/world.mk world-wareas-core N=20000
+make -f tools/world.mk world-wareas-core N=2000 MODE=interrupt
+make -f tools/world.mk world-wareas-init N=20000
+make -f tools/world.mk world-wareas-init N=2000 MODE=unwind
+make -f tools/world.mk world-wareas-life N=20000
+make -f tools/world.mk world-wareas-life N=2000 MODE=unwind
+make -f tools/world.mk world-wareas-life N=2000 MODE=typed
+make -f tools/world.mk world-wareas-breaks
+make -f tools/world.mk world-wareas-ui world-wareas-native-breaks
+```
+
+Seed **`0x4a971b63`**: 12 core operations passed **240,000 normal** and
+**509,038 interruption comparisons**, including **485,038 interruptions**.
+The initializer passed **20,000 normal** and **173,914 unwind comparisons**,
+including **171,914 real unwinds**. Nine lifetime operations passed
+**180,000 normal**, **498,424 unwind** and **498,424 typed comparisons**;
+each exceptional lifetime run includes **480,424 real unwinds**. Typed tests
+use real `_CxxThrowException` and direct, derived, virtual-base, null, unrelated
+and const CException pointer types. Factory null-allocation faults are compared
+explicitly. Total: **2,119,800 guarded comparisons**, **1,132,762 real unwinds**,
+plus the event interruptions, with zero differences. Logs are
+`bin/world-diff/wareas-{core,init,life}-{normal,interrupt,unwind,typed}-final.log`
+for the seven combinations above.
+
+Native acceptance passes **744 paired pixel/state/callback comparisons** and
+**1,488 witnesses**, over twelve owner cases, 31 scripts and two unload cycles.
+It covers list selection and callback rebuilding, Add/Delete/Copy Weather,
+all nine edit validations, raw checkbox fields, disabled rows, units flags,
+Enter/Escape, virtual and command accept/cancel, owner replacement during
+acceptance, individual and simultaneous Alerts with focus/retry, member limits,
+parent/CNotify scalar deletion and lazy-font destruction. Every pixel is
+compared without masking. Imported Alerts may leave an expired temporary
+status-message pointer; only that pointer is normalized in state comparisons.
+Log: `bin/world-diff/wareas-ui-final.log`. Both module-initialization allocation/
+throw/double-deinit probes pass on each load cycle.
+
+The guarded mutation suite detects **53/53 actual differences**, including
+owner/vtable reloads, row stride/item data, error priority/results, initializer
+bindings, limits, notification cleanup, class lifetimes, factory ownership,
+DDX and help. Logs: `wareas-breaks-final.log` (52) and
+`wareas-guarded-owner-break.log` (1).
+
+Native mutation acceptance detects **20 actual differences**. The initial run
+detected 15/17: one stored font-style bit did not affect the sampled pixels;
+the native fixture now checks that retained label style. A missing DDX binding
+faulted and was excluded; a valid swap of the checkbox bindings produces an
+actual difference. Supplemental probes detect omitted notification/parent
+deletion and owner caching across acceptance. Owner replacement is armed only
+immediately before acceptance, so an earlier focus callback cannot satisfy that
+witness. Logs: `wareas-native-breaks.log`,
+`wareas-native-witness-breaks.log`, `wareas-native-lifetime-breaks.log` and
+`wareas-native-owner-break-final.log`. Source/DLL/harness snapshots and input/
+artifact hashes are retained under `wareas-{native-breaks,breaks}/`.
+Together, acceptance detects **73 mutations**. Build failures, faults and
+timeouts never count as detections. Older fixture/mutation log tags call the
+Copy Weather owner callback “advanced”; MAIN's recovered target is `0x13050001`.
+
+Metadata, resources, SIMSUI anchor and the DLL reproduce from an isolated source
+snapshot with **`SOURCE_DATE_EPOCH=1793240481`**. Tested/reproduced DLL SHA-256:
+`6347a17ce9b317c0313e626fa498bf91cb67d052fa094b064a13e47ac199e6ed`.
+Log: `bin/world-diff/wareas-reproduce.log`. The retail registry is unchanged
+and all twelve dialogmap tests pass.
+
+A **75-second startup** in private copy
+`bin/world-diff/smoke-game-n67ke8x2` passed with **27/27 modules, 95 gauges**,
+English World loaded, matching DLL bytes and no runtime errors.
+Log: `bin/world-diff/wareas-smoke.log`. The active game's retail World remains
+SHA-256 `35d67023ba2ff0113c519f6e2c4ab5f19c842c923401a255e7761eae423118f5`.
+A final artifact recheck passed another **62 native pairs and 124 witnesses**,
+including both unload cycles, with the final owner-replacement fixture.
+Log: `bin/world-diff/wareas-ui-artifact-recheck.log`.
+
+All fifteen earlier native families pass against this same DLL: area 288,
+priority 210, booster 320, drive search 680, area list 504, cache list 672,
+world files 672, exact position 512, facilities 576, airport 576, complexity
+352, dynamic scenery 544, copy weather 576, basic weather 800 and time/season
+896. This is **8,178 regression pairs**, or **8,922 main native pairs** including
+weather areas, with zero differences. Every suite includes module-initialization
+probes and two unload cycles. Logs: `wareas-<family>-regression.log` and
+`wareas-native-regressions.log`.
+
+Final evidence is recorded in `bin/world-diff/wareas-final.log` and
+`wareas-acceptance.json`, checked by `wareas-audit.py`. The tested DLL,
+source-reproduced DLL and private startup copy are byte-identical. All twelve
+dialogmap tests and `git diff --check` pass. MAIN/HOST/FE/FACIL, their verified
+owner harnesses/docs, the shared Makefile and the active game are unchanged.
+
 ## Remaining boundary
 
-Two registrations remain pending native acceptance: weather areas `0x1303`
-and advanced weather `0x13040001`. These need independent
-caller/descriptor recovery before choosing another bounded family. Their
-inventory entries are not behavior specifications.
+Advanced weather `0x13040001` is the remaining registration pending native
+acceptance. It needs independent caller/descriptor recovery and its complete
+owned page graph; the inventory entry is not a behavior specification.
 
 FACIL's three World dialogs now have native acceptance over independent owner
 fixtures. Real filesystem lookup, flight-selection and simulator placement

@@ -237,6 +237,22 @@ static int TC world_rva_5490(void *object, uint32_t unused, void *help) { (void)
 static int TC world_rva_6150(void *object, uint32_t window, uint32_t unused) { (void)unused; fs98_world_time_help(object, window, 10, 0); return 1; }
 static int TC world_rva_4770(void *object, uint32_t window, uint32_t unused) { (void)unused; fs98_world_time_help(object, window, 10, 1); return 1; }
 static int TC world_rva_54b0(void *object, uint32_t window, uint32_t unused) { (void)unused; fs98_world_time_help(object, window, 10, 2); return 1; }
+static void * TC world_rva_10360(void *object, uint32_t flags) { return fs98_world_wareas_scalar_delete(object, flags); }
+static void * TC world_rva_10800(void *object) { (void)object; return &s_wareas_message_map; }
+static void TC world_rva_105a0(void *object, void *exchange) { fs98_world_wareas_exchange(object, exchange); }
+static int TC world_rva_10810(void *object) { return fs98_world_wareas_init(object); }
+static void TC world_rva_10fb0(void *object) { fs98_world_wareas_accept(object); }
+static void TC world_rva_10f90(void *object) { fs98_world_wareas_cancel(object); }
+static int TC world_rva_113a0(void *object, uint32_t id) { return fs98_world_wareas_validate(object, id); }
+static int TC world_rva_11620(void *object, uint32_t id) { return fs98_world_wareas_error(object, id); }
+static void TC world_rva_10e80(void *object) { fs98_world_wareas_action(object, 0x20); }
+static void TC world_rva_10ee0(void *object) { fs98_world_wareas_action(object, 0x24); }
+static void TC world_rva_10f50(void *object) { fs98_world_wareas_action(object, 0x28); }
+static void TC world_rva_11070(void *object) { fs98_world_wareas_selection(object); }
+static void TC world_rva_11030(void *object) { fs98_world_wareas_check(object, 0xbc, 0x2714); }
+static void TC world_rva_11050(void *object) { fs98_world_wareas_check(object, 0xc4, 0x264c); }
+static int TC world_rva_10ff0(void *object, uint32_t unused, void *help) { return fs98_world_wareas_help(object, unused, help); }
+static int TC world_rva_11010(void *object, uint32_t window, uint32_t unused) { (void)object; (void)unused; fs98_world_wareas_context_map(window); return 1; }
 static const struct world_import_binding s_imports[] = {
     {"USER32.dll", "GetActiveWindow", 0, 0x25864},
     {"USER32.dll", "ValidateRect", 0, 0x25868},
@@ -1662,6 +1678,66 @@ static const struct world_virtual_binding s_virtuals[] = {
     {19, 58, 121, 0},
     {19, 59, 85, 0},
     {19, 60, -1, (void *)world_rva_51e0},
+    {20, 0, 117, 0},
+    {20, 1, -1, (void *)world_rva_10360},
+    {20, 2, -1, (void *)world_rva_2d00},
+    {20, 3, -1, (void *)world_rva_2d10},
+    {20, 4, -1, (void *)world_rva_2d00},
+    {20, 5, 196, 0},
+    {20, 6, 197, 0},
+    {20, 7, 198, 0},
+    {20, 8, 199, 0},
+    {20, 9, 200, 0},
+    {20, 10, 201, 0},
+    {20, 11, 202, 0},
+    {20, 12, -1, (void *)world_rva_10800},
+    {20, 13, 203, 0},
+    {20, 14, 204, 0},
+    {20, 15, 205, 0},
+    {20, 16, 206, 0},
+    {20, 17, 207, 0},
+    {20, 18, 208, 0},
+    {20, 19, 209, 0},
+    {20, 20, 210, 0},
+    {20, 21, 189, 0},
+    {20, 22, 212, 0},
+    {20, 23, 213, 0},
+    {20, 24, 214, 0},
+    {20, 25, 215, 0},
+    {20, 26, 216, 0},
+    {20, 27, 217, 0},
+    {20, 28, 218, 0},
+    {20, 29, 219, 0},
+    {20, 30, 220, 0},
+    {20, 31, 221, 0},
+    {20, 32, 83, 0},
+    {20, 33, 211, 0},
+    {20, 34, 223, 0},
+    {20, 35, -1, (void *)world_rva_105a0},
+    {20, 36, -1, (void *)world_rva_2d20},
+    {20, 37, -1, (void *)world_rva_2d30},
+    {20, 38, 224, 0},
+    {20, 39, 225, 0},
+    {20, 40, 226, 0},
+    {20, 41, 227, 0},
+    {20, 42, 222, 0},
+    {20, 43, -1, (void *)world_rva_3d30},
+    {20, 44, 229, 0},
+    {20, 45, 230, 0},
+    {20, 46, 231, 0},
+    {20, 47, 232, 0},
+    {20, 48, 188, 0},
+    {20, 49, -1, (void *)world_rva_10810},
+    {20, 50, 143, 0},
+    {20, 51, -1, (void *)world_rva_10fb0},
+    {20, 52, -1, (void *)world_rva_10f90},
+    {20, 53, 190, 0},
+    {20, 54, -1, (void *)world_rva_113a0},
+    {20, 55, -1, (void *)world_rva_11620},
+    {20, 56, 119, 0},
+    {20, 57, 120, 0},
+    {20, 58, 121, 0},
+    {20, 59, -1, (void *)world_rva_b8b0},
 };
 static const struct world_message_entry s_messages[] = {
     {0x111, 0x400, 0x1b05, 0x1b05, 0xc, (void *)world_rva_c720},
@@ -1835,9 +1911,21 @@ static const struct world_message_entry s_time_clock_messages[] = {
     {0x5f9, 0x0, 0x0, 0x0, 0xa, (void *)world_rva_5b10},
     {0, 0, 0, 0, 0, 0}
 };
+static const struct world_message_entry s_wareas_messages[] = {
+    {0x111, 0x0, 0x1a93, 0x1a93, 0xc, (void *)world_rva_10e80},
+    {0x111, 0x0, 0x1aa2, 0x1aa2, 0xc, (void *)world_rva_10ee0},
+    {0x111, 0x1, 0x1b14, 0x1b14, 0xc, (void *)world_rva_11070},
+    {0x111, 0x0, 0x1a95, 0x1a95, 0xc, (void *)world_rva_10f50},
+    {0x111, 0x0, 0x1ac6, 0x1ac6, 0xc, (void *)world_rva_11030},
+    {0x111, 0x0, 0x1ac7, 0x1ac7, 0xc, (void *)world_rva_11050},
+    {0x53, 0x0, 0x0, 0x0, 0xa, (void *)world_rva_10ff0},
+    {0x7b, 0x0, 0x0, 0x0, 0xa, (void *)world_rva_11010},
+    {0, 0, 0, 0, 0, 0}
+};
 static const struct world_dialog s_dialogs[] = {
     {0x1302, fs98_world_weather_create, 0},
     {0x1301, fs98_world_time_create, 0},
+    {0x1303, fs98_world_wareas_create, 0},
     {0x1304, fs98_world_complexity_create, 0},
     {0x1305, fs98_world_dynamic_create, 0},
     {0x1306, fs98_world_files_create, 0},

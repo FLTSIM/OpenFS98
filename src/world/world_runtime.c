@@ -15,6 +15,7 @@
 #include "world_dynamic.h"
 #include "world_copy.h"
 #include "world_weather.h"
+#include "world_wareas.h"
 #include "world_time.h"
 #include "world_unwind.h"
 #define TC FS98_WORLD_THISCALL
@@ -24,11 +25,11 @@ struct world_virtual_binding { uint32_t table, slot; int import_index; void *loc
 struct world_message_entry { uint32_t message, code, first, last, signature; void *handler; };
 struct world_message_map { void *(*base)(void); const struct world_message_entry *entries; };
 struct world_dialog { uint32_t id; uint32_t (SC *create)(uint32_t, void *); uint32_t flags; };
-static struct world_message_map s_message_map, s_priority_message_map, s_booster_message_map, s_search_message_map, s_list_message_map, s_cache_message_map, s_files_message_map, s_position_message_map, s_facilities_message_map, s_airport_message_map, s_complexity_message_map, s_dynamic_message_map, s_copy_message_map, s_weather_message_map, s_time_message_map, s_time_season_message_map, s_time_clock_message_map;
+static struct world_message_map s_message_map, s_priority_message_map, s_booster_message_map, s_search_message_map, s_list_message_map, s_cache_message_map, s_files_message_map, s_position_message_map, s_facilities_message_map, s_airport_message_map, s_complexity_message_map, s_dynamic_message_map, s_copy_message_map, s_weather_message_map, s_time_message_map, s_time_season_message_map, s_time_clock_message_map, s_wareas_message_map;
 static void *world_slot(uint32_t slot);
 #include "world_runtime_tables.inc"
-static void *s_functions[sizeof(s_imports) / sizeof(s_imports[0])], *s_vtables[20][62];
-static void (*s_font_exit)(void), (*s_font_exits[3])(void);
+static void *s_functions[sizeof(s_imports) / sizeof(s_imports[0])], *s_vtables[21][62];
+static void (*s_font_exit)(void), (*s_font_exits[4])(void);
 static uint32_t s_font_exit_count;
 static uint8_t s_extension[0x14];
 static uint32_t s_module, s_resource_module;
@@ -132,7 +133,7 @@ static void world_font_destroy(void *font)
  * without putting unloadable callbacks in the process-wide CRT exit table. */
 static int world_font_at_exit(void (*callback)(void))
 {
-    if (s_font_exit_count == 3) return -1;
+    if (s_font_exit_count == 4) return -1;
     s_font_exits[s_font_exit_count++] = callback;
     return 0;
 }
@@ -212,6 +213,7 @@ static const struct fs98_world_copy_services s_copy_services = {world_send, worl
 static const struct fs98_world_copy_init_services s_copy_init_services = {&s_init_services, world_resources};
 static const struct fs98_world_weather_services s_weather_services = {&s_init_services, world_slot, world_resources, world_font_at_exit};
 static struct fs98_world_time_services s_time_services = {&s_init_services, world_slot, world_resources, NULL};
+static struct fs98_world_wareas_services s_wareas_services = {&s_init_services, world_slot, world_resources, NULL, world_font_at_exit};
 static void *world_page_base_map(void) { return world_slot(0x25748); }
 static int world_bind(void)
 {
@@ -264,6 +266,10 @@ static int world_bind(void)
     s_time_services.notify_vtable = s_vtables[13];
     fs98_world_time_set_services(&s_time_services);
     fs98_world_time_set_object_services(&s_object_services, s_vtables[17], s_vtables[18], s_vtables[19]);
+    s_wareas_message_map.base = world_base_map; s_wareas_message_map.entries = s_wareas_messages;
+    s_wareas_services.notify_vtable = s_vtables[13];
+    fs98_world_wareas_set_object_services(&s_object_services, s_vtables[20]);
+    fs98_world_wareas_set_services(&s_wareas_services);
     s_weather_message_map.base = world_base_map; s_weather_message_map.entries = s_weather_messages;
     fs98_world_weather_set_object_services(&s_object_services, s_vtables[16]);
     fs98_world_weather_set_services(&s_weather_services);
@@ -302,7 +308,7 @@ static WORLD_NOINLINE void world_module_init(void)
     world_unwind_enter(&state.frame, world_dynamic_cleanup);
     ((void (SC *)(void *, uint32_t *))WORLD_PTR(g_world_imports[0].link, 0x298))(&g_world_linkage, &s_module);
     fs98_world_set_module(s_module); fs98_world_priority_set_module(s_module);
-    fs98_world_booster_set_module(s_module); fs98_world_search_set_module(s_module); fs98_world_list_set_module(s_module); fs98_world_cache_set_module(s_module); fs98_world_files_set_module(s_module); fs98_world_position_set_module(s_module); fs98_world_facilities_set_module(s_module); fs98_world_airport_set_module(s_module); fs98_world_complexity_set_module(s_module); fs98_world_dynamic_set_module(s_module); fs98_world_copy_set_module(s_module); fs98_world_weather_set_module(s_module); fs98_world_time_set_module(s_module);
+    fs98_world_booster_set_module(s_module); fs98_world_search_set_module(s_module); fs98_world_list_set_module(s_module); fs98_world_cache_set_module(s_module); fs98_world_files_set_module(s_module); fs98_world_position_set_module(s_module); fs98_world_facilities_set_module(s_module); fs98_world_airport_set_module(s_module); fs98_world_complexity_set_module(s_module); fs98_world_dynamic_set_module(s_module); fs98_world_copy_set_module(s_module); fs98_world_weather_set_module(s_module); fs98_world_wareas_set_module(s_module); fs98_world_time_set_module(s_module);
     dynamic = ((void *(*)(uint32_t))world_mfc(823))(0x40);
     state.dynamic = dynamic; state.live = 1;
     if (dynamic) ((void *(TC *)(void *, void *, int))world_mfc(342))(dynamic, s_extension, 0);
@@ -317,7 +323,7 @@ static void world_module_deinit(void)
     FreeLibrary((HMODULE)s_resource_module);
     s_module = s_resource_module = 0;
     fs98_world_set_module(0); fs98_world_priority_set_module(0); fs98_world_set_resource_module(0);
-    fs98_world_booster_set_module(0); fs98_world_search_set_module(0); fs98_world_list_set_module(0); fs98_world_cache_set_module(0); fs98_world_files_set_module(0); fs98_world_position_set_module(0); fs98_world_facilities_set_module(0); fs98_world_airport_set_module(0); fs98_world_complexity_set_module(0); fs98_world_dynamic_set_module(0); fs98_world_copy_set_module(0); fs98_world_weather_set_module(0); fs98_world_time_set_module(0);
+    fs98_world_booster_set_module(0); fs98_world_search_set_module(0); fs98_world_list_set_module(0); fs98_world_cache_set_module(0); fs98_world_files_set_module(0); fs98_world_position_set_module(0); fs98_world_facilities_set_module(0); fs98_world_airport_set_module(0); fs98_world_complexity_set_module(0); fs98_world_dynamic_set_module(0); fs98_world_copy_set_module(0); fs98_world_weather_set_module(0); fs98_world_wareas_set_module(0); fs98_world_time_set_module(0);
 }
 __declspec(dllimport) void *fs98_world_simsui_anchor(uint32_t size);
 BOOL WINAPI DllMain(HINSTANCE instance, DWORD reason, LPVOID reserved)
@@ -329,7 +335,7 @@ BOOL WINAPI DllMain(HINSTANCE instance, DWORD reason, LPVOID reserved)
         if (!world_bind()) return FALSE;
         ((int (SC *)(void *, HINSTANCE))world_mfc(1182))(s_extension, instance);
         s_module = (uint32_t)instance; fs98_world_set_module(s_module); fs98_world_priority_set_module(s_module);
-        fs98_world_booster_set_module(s_module); fs98_world_search_set_module(s_module); fs98_world_list_set_module(s_module); fs98_world_cache_set_module(s_module); fs98_world_files_set_module(s_module); fs98_world_position_set_module(s_module); fs98_world_facilities_set_module(s_module); fs98_world_airport_set_module(s_module); fs98_world_complexity_set_module(s_module); fs98_world_dynamic_set_module(s_module); fs98_world_copy_set_module(s_module); fs98_world_weather_set_module(s_module); fs98_world_time_set_module(s_module);
+        fs98_world_booster_set_module(s_module); fs98_world_search_set_module(s_module); fs98_world_list_set_module(s_module); fs98_world_cache_set_module(s_module); fs98_world_files_set_module(s_module); fs98_world_position_set_module(s_module); fs98_world_facilities_set_module(s_module); fs98_world_airport_set_module(s_module); fs98_world_complexity_set_module(s_module); fs98_world_dynamic_set_module(s_module); fs98_world_copy_set_module(s_module); fs98_world_weather_set_module(s_module); fs98_world_wareas_set_module(s_module); fs98_world_time_set_module(s_module);
     } else if (reason == DLL_PROCESS_DETACH) {
         ((void (SC *)(void *, int))world_mfc(1253))(s_extension, 0);
         while (s_font_exit_count) {

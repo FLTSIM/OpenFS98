@@ -259,7 +259,7 @@ rendering/lifetime comparisons, mutation checks and isolated startup result.
 
 `mpdialog:0x110a` at `0x22341130` creates five ordinary dialogs, stores their
 HWNDs in globals `0x2234a0b8` through `0x2234a0c8`, writes a null terminator
-at `0x2234a0cc`, and returns the array. They are created in this order:
+at `0x2234a0cc`, and returns the array. Factory creation order is:
 
 | Helper factory | Template | Role |
 | --- | --- | --- |
@@ -269,10 +269,21 @@ at `0x2234a0cc`, and returns the array. They are created in this order:
 | `0x223413a0` | `0x66` | Callsign and host/join choice |
 | `0x22341300` | `0x65` | Connection introduction |
 
-If parameter `+0x1c` is zero, the factory sends `WM_COMMAND` (`0x111`) with
-command `0x3e8` to the last-created window. The full transition and validation
-behavior is not yet recovered. This is why counting one template per registry
-record would miss four screens in this module.
+The returned array is ordered `[intro, choice, host options, connection type,
+session browser, NULL]`, the reverse of creation. If descriptor `+0x1c` is
+zero, the factory calls `PostMessageA` at IAT `0x2234b4ec` to queue
+`WM_COMMAND` (`0x111`) with Next (`0x3e8`) for Intro before returning. The
+retail probe found that command still queued after return with state 0/0. After
+modeling HOST's first-HWND show and dispatching the queued command, the shared
+state advanced 0→1 and only Choice remained visible. A synchronous
+`SendMessageA` after return advanced immediately; this had been mistaken for
+the factory call because the initial probe labeled the IAT hook incorrectly.
+The call's `PostMessageA` semantics, not a different handler branch or owner
+callback, explain the timing. The state machine, validation, callback ABI,
+ownership, probe evidence and HOST teardown contract are documented in
+[MP_DIALOG's 0x110a contract and partial implementation](mpdialog.md#connection-flow-0x110a-contract-and-partial-implementation).
+The five templates are why counting one template per registry record misses
+four screens in this module.
 
 ### Reused templates and child pages
 
@@ -454,7 +465,7 @@ are separate from their native harness and startup acceptance.
 
 | Target | Independent starting boundary | Handoff |
 | --- | --- | --- |
-| MP_DIALOG | Smallest remaining whole English DLL by code size; MULTIP owns the verified callback blocks. Start with session settings/details, then recover the five-window connection flow. | [mpdialog.md](mpdialog.md) |
+| MP_DIALOG | `0x110a`, `0x110b` and `0x110c` pass isolated state/callback/lifetime, full child-tree, per-control rendering and repeatability checks, along with behavioral mutations, repeated unload and private-copy startup. Actual private-copy HOST/MULTIP runs cover matched Connect → Cancel teardown/owner cleanup and matched retail/replacement Host attempts through the nested provider callback. DirectPlayCreate and QueryInterface succeed, then both binaries receive `E_NOTIMPL` from Wine `dplayx.dll` `IDirectPlay3::Open`; Host Settings stays disabled and actual 0x110c/1016 remain unreachable. Genuine MFC construction-failure cleanup remains unverified. | [mpdialog.md](mpdialog.md) |
 | Options, customise controls | CONTROLS' shared data and callbacks are established, but the container has three child pages and device/key-capture behavior. | [options.md](options.md) |
 | Flights | Static inventory exists; caller descriptors and flight/menu ownership need more recovery alongside MAIN. Less convenient while MAIN is active. | [flights.md](flights.md) |
 
@@ -544,6 +555,14 @@ modules and 95 gauges with the replacement loaded. See
 [World acceptance](world.md#advanced-weather-native-ui-acceptance) for the
 native contract and [the game-owner acceptance](world.md#shared-buildinstall-and-game-owner-acceptance)
 for installed integration, exercised owner flows and remaining boundaries.
-For a whole-DLL assignment, choose
-MP_DIALOG and include all three registrations plus the full flag-2 window
-array in the completion criteria.
+MP_DIALOG's three registrations, five-window flag-2 factory, real child
+controls, callback comparisons, teardown, behavioral mutation suite, repeated
+unload and private-copy startup have isolated evidence. Native child-tree and
+all seven per-control render captures match retail, with stable repeated
+captures. Private-copy HOST/MULTIP runs now verify the actual 0x110a cancel
+teardown and provider-row cleanup, plus validation/accept callback entry for
+host mode. They do not reach an active session: actual 0x110c, confirmation
+service `1016`, actual 0x110b OK, and genuine MFC construction-failure cleanup
+remain open. See [the MP_DIALOG audit](mpdialog.md#whole-module-criteria-audit)
+for exact results and boundaries; do not treat modeled owner callbacks as
+game integration.

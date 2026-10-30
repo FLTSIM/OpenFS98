@@ -1,0 +1,4 @@
+LIBRARY MP_DIALOG_ours
+EXPORTS
+    ImportTable
+    Linkage

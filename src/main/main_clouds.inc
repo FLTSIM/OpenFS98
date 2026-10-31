@@ -143,8 +143,10 @@ static void clouds_8275(void)
 /* .text+0x9d57: layer `which`'s block to G3D +0x24, then, when GLOBAL +0xcb6
  * is set, the layer's texel under the aircraft: answers 0x100 | the texel in
  * the low half (over the upper half of what HG2D +0xb4 returned), or 0 in
- * ax (the upper half left as it was) when +0xcb6 is clear. */
-static uint32_t clouds_9d57(uint16_t which, uint32_t eax_in)
+ * ax (over the upper half of what G3D +0x24 returned) when +0xcb6 is clear.
+ * With a texel, cx holds the two quotients' second bytes and ebx the index;
+ * slice 28's +0x9818 reads them. */
+static uint32_t clouds_9d57(uint16_t which)
 {
     uint32_t gp = G;
     uint32_t q1, q2, rec, row, at;
@@ -161,9 +163,10 @@ static uint32_t clouds_9d57(uint16_t which, uint32_t eax_in)
         M32(V(0x20803498)) = 0x320;
         M32(V(0x20803470)) = V(0x20801a98);
     }
-    CALL(G3D, 0x24, f1)(M32(V(0x208035da)));
+    eax = main_xcall1(SLOT_OF(G3D, 0x24), M32(V(0x208035da)));
+    edi = G;
     if (M16(gp + 0xcb6) == 0)
-        return eax_in & 0xffff0000u;
+        return eax & 0xffff0000u;
 
     M32(V(0x20803498)) = 0x1000000u / M32(V(0x20803498));
     rec = M32(V(0x20803470));
@@ -181,7 +184,7 @@ static uint32_t clouds_9d57(uint16_t which, uint32_t eax_in)
     M16(V(0x2080203b)) = w0;
     M16(V(0x2080203d)) = w1;
     M16(V(0x2080203f)) = w2;
-    CALL(UTIL, 0x48, f3)(V(0x20802039), gp + 0x5b0, V(0x20802041));
+    main_xcall3(SLOT_OF(UTIL, 0x48), V(0x20802039), gp + 0x5b0, V(0x20802041));
 
     q2 = idiv32((int64_t)(((uint64_t)(uint32_t)(int32_t)(int16_t)M16(V(0x20802047)) << 32) |
                           M32(V(0x20802043))),
@@ -190,6 +193,8 @@ static uint32_t clouds_9d57(uint16_t which, uint32_t eax_in)
 
     bl = (uint8_t)(q2 >> 8);
     bh = (uint8_t)(q1 >> 8);
+    SET_CL(bl);
+    SET_CH(bh);
     if (M16(V(0x20803474)) == 1) {
         bl = (uint8_t)(bl - M8(V(0x20801ec0)));
         bh = (uint8_t)(bh - M8(V(0x20801ec4)));
@@ -197,10 +202,16 @@ static uint32_t clouds_9d57(uint16_t which, uint32_t eax_in)
         bl = (uint8_t)(bl - M8(V(0x20801ec8)));
         bh = (uint8_t)(bh - M8(V(0x20801ecc)));
     }
-    row = CALL(HG2D, 0xb4, f1)(M32(gp + 0xc8c));
-    at = row + ((uint32_t)bh << 8 | bl);
-    a = (row & 0xffff0000u) | 0x100 | M8(at);
-    CALL(HG2D, 0xb8, f2)(M32(gp + 0xc8c), 0);
+    {
+        uint32_t s_ecx = ecx;
+
+        ebx = (uint32_t)bh << 8 | bl;
+        row = CALL(HG2D, 0xb4, f1)(M32(gp + 0xc8c));
+        at = row + ebx;
+        a = (row & 0xffff0000u) | 0x100 | M8(at);
+        main_xcall2(SLOT_OF(HG2D, 0xb8), M32(gp + 0xc8c), 0);
+        ecx = s_ecx;
+    }
     return a;
 }
 
@@ -245,7 +256,7 @@ static uint16_t clouds_9f39(uint16_t which, uint16_t *dist)
     ax = (uint16_t)(ax << 1);
     M16(V(0x208035d6)) = (uint16_t)(M16(V(0x208035d6)) + ax);
 
-    r = clouds_9d57(which, which);
+    r = clouds_9d57(which);
     if ((uint8_t)(r >> 8) == 0 || (uint8_t)r < M8(V(0x208033b9))) {
         *dist = 0;
         return 0;

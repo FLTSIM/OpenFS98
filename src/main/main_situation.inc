@@ -462,12 +462,73 @@ static void parse_records(void)
     }
 }
 
-/* The dialogs' callbacks main_install puts in .data, as retail's code addresses. */
+/* The code pointers main_install puts in .data, as retail's addresses. */
 static const struct { uint32_t at, to; } retail_callbacks[] = {
     { 0x68c, 0x207e3ec0 },
     { 0x123c, 0x207e5ff0 },
     { 0x1a4, 0x207e1910 },
     { 0x35ec, 0x207ee6b0 },
+    /* and the routines MAIN's G3D programs call (slice 28) */
+    { 0x2386, 0x207e83d7 },
+    { 0x23aa, 0x207e83d7 },
+    { 0x2466, 0x207e83d7 },
+    { 0x2716, 0x207e83d7 },
+    { 0x23ce, 0x207e83fb },
+    { 0x23f2, 0x207e83fb },
+    { 0x2822, 0x207e83fb },
+    { 0x290a, 0x207e83fb },
+    { 0x313a, 0x207e8bc2 },
+    { 0x3160, 0x207e8bc2 },
+    { 0x3186, 0x207e8bc2 },
+    { 0x31ac, 0x207e8bc2 },
+    { 0x31d2, 0x207e8bc2 },
+    { 0x31f8, 0x207e8bc2 },
+    { 0x321e, 0x207e8bc2 },
+    { 0x3244, 0x207e8bc2 },
+    { 0x326a, 0x207e8bc2 },
+    { 0x3290, 0x207e8bc2 },
+    { 0x32b6, 0x207e8bc2 },
+    { 0x32dc, 0x207e8bc2 },
+    { 0x3302, 0x207e8bc2 },
+    { 0x3328, 0x207e8bc2 },
+    { 0x334e, 0x207e8bc2 },
+    { 0x3374, 0x207e8bc2 },
+    { 0x262c, 0x207e989c },
+    { 0x282e, 0x207e98e2 },
+    { 0x2916, 0x207e98e2 },
+    { 0x243c, 0x207e9d47 },
+    { 0x2674, 0x207e9d47 },
+    { 0x26e4, 0x207e9d47 },
+    { 0x278e, 0x207e9d47 },
+    { 0x27f4, 0x207e9d5e },
+    { 0x2876, 0x207e9d5e },
+    { 0x28e8, 0x207e9d5e },
+    { 0x295e, 0x207e9d5e },
+    { 0x2692, 0x207e9f34 },
+    { 0x2702, 0x207e9f34 },
+    { 0x2894, 0x207e9f34 },
+    { 0x297c, 0x207e9f34 },
+    { 0x2812, 0x207e9f51 },
+    { 0x24a8, 0x207e9f6e },
+    { 0x2990, 0x207e9f85 },
+    { 0x24ce, 0x207e9f89 },
+    { 0x29ca, 0x207e9f89 },
+    { 0x29ea, 0x207e9f89 },
+    { 0x307c, 0x207e9f90 },
+    { 0x269c, 0x207e9fb8 },
+    { 0x270c, 0x207e9fb8 },
+    { 0x281c, 0x207e9fb8 },
+    { 0x289e, 0x207e9fb8 },
+    { 0x2986, 0x207e9fb8 },
+    { 0x3088, 0x207e9fb8 },
+    { 0x34fa, 0x207eb04a },
+};
+
+/* and what is only written there at run time, once it has been: the module's
+ * handle and the kneeboard's close button (slices 32 and 33) */
+static const struct { uint32_t at, to; } retail_written[] = {
+    { 0x7fc0, 0x207e0000 },
+    { 0xdc24, 0x207e2590 },
 };
 
 /* A byte as retail's process holds it at `a`: its own code, gap and .rdata
@@ -485,6 +546,9 @@ static uint8_t retail_byte_at(uint32_t a)
     for (i = 0; i < sizeof retail_callbacks / sizeof retail_callbacks[0]; i++)
         if (off >= retail_callbacks[i].at && off < retail_callbacks[i].at + 4)
             return (uint8_t)(retail_callbacks[i].to >> 8 * (off - retail_callbacks[i].at));
+    for (i = 0; i < sizeof retail_written / sizeof retail_written[0]; i++)
+        if (off >= retail_written[i].at && off < retail_written[i].at + 4 && M32(D + retail_written[i].at) != 0)
+            return (uint8_t)(retail_written[i].to >> 8 * (off - retail_written[i].at));
     for (i = 0; i < sizeof data_pointers / sizeof data_pointers[0]; i++) {
         uint32_t at = data_pointers[i].at;
         if (off < at || off >= at + 4)

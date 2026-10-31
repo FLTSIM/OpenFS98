@@ -432,7 +432,7 @@ src/analysis/analysis_data.inc src/analysis/analysis_rdata.inc: $(ORIG)/Modules/
 
 # MAIN, the sim's controller: MSVC C and assembly.  In progress, a slice at a
 # time (docs/modules/main.md); not in MODULES until every slot is done.
-MAIN_SOURCES := src/main/main.c src/main/main_records.inc src/main/main_situation.inc src/main/main_nav.inc src/main/main_season.inc src/main/main_sun.inc src/main/main_eye.inc src/main/main_band.inc src/main/main_flights.inc src/main/main_prefs.inc src/main/main_clouds.inc src/main/main_spot.inc src/main/main_frame.inc src/main/main_tick.inc src/main/main_step.inc src/main/main_dialogs.inc src/main/main_commands.inc src/main/main_text_tail.inc
+MAIN_SOURCES := src/main/main.c src/main/main_records.inc src/main/main_situation.inc src/main/main_nav.inc src/main/main_season.inc src/main/main_sun.inc src/main/main_eye.inc src/main/main_band.inc src/main/main_flights.inc src/main/main_prefs.inc src/main/main_clouds.inc src/main/main_natives.inc src/main/main_spot.inc src/main/main_frame.inc src/main/main_tick.inc src/main/main_step.inc src/main/main_dialogs.inc src/main/main_commands.inc src/main/main_radios.inc src/main/main_weather.inc src/main/main_kneeboard.inc src/main/main_start.inc src/main/main_text_tail.inc
 $(BIN)/MAIN.DLL: $(MAIN_SOURCES) src/main/main.def src/main/main_data.inc \
                  src/main/main_pointers.inc $(BIN)/main.res
 	@mkdir -p $(BIN)
@@ -441,9 +441,13 @@ $(BIN)/MAIN.DLL: $(MAIN_SOURCES) src/main/main.def src/main/main_data.inc \
 	      -o $@ src/main/main.c $(BIN)/main.res src/main/main.def \
 	      -lmsvcrt -lkernel32 -luser32 -lgdi32 -lgcc
 
-$(BIN)/main.res: src/main/main.rc
+$(BIN)/main_kneeboard.bmp: $(ORIG)/Modules/MAIN.DLL tools/gen_main_bitmap.py
 	@mkdir -p $(BIN)
-	$(RC) $< -O coff -o $@
+	@python3 tools/gen_main_bitmap.py $< $@
+
+$(BIN)/main.res: src/main/main.rc $(BIN)/main_kneeboard.bmp
+	@mkdir -p $(BIN)
+	$(RC) -I$(BIN) $< -O coff -o $@
 
 src/main/main_data.inc src/main/main_pointers.inc src/main/main_text_tail.inc &: $(ORIG)/Modules/MAIN.DLL tools/gen_main_data.py
 	@python3 tools/gen_main_data.py
@@ -946,6 +950,11 @@ multipdiff-run: multipdiff
 multip-smoke: all $(BIN)/MULTIP.DLL
 	@tools/multip_smoke.sh
 
+# Boot the game with the rebuilt MAIN, then restore the previous DLL.  MAIN is
+# not in MODULES yet (docs/modules/main.md).
+main-smoke: all $(BIN)/MAIN.DLL
+	@tools/main_smoke.sh
+
 multip-acceptance: all multipdiff
 	@cd $(DIFFDIR) && WINEDEBUG=-all wine multipdiff.exe 20000
 	@python3 -B tools/multip_breaks.py
@@ -1113,7 +1122,7 @@ analysisdiff-run: analysisdiff
 # (records), N=... the scenario count.
 $(DIFFDIR)/maindiff.exe: tools/difftest/maindiff.c
 	@mkdir -p $(DIFFDIR)
-	$(CC) -std=c99 -O1 -Wall -Wextra -o $@ tools/difftest/maindiff.c -lm
+	$(CC) -std=c99 -O1 -Wall -Wextra -o $@ tools/difftest/maindiff.c -lm -lgdi32
 
 maindiff: $(DIFFDIR)/maindiff.exe $(BIN)/MAIN.DLL
 	@cp $(ORIG)/Modules/MAIN.DLL $(DIFFDIR)/MAIN_retail.dll
@@ -1551,4 +1560,4 @@ smoke: all
 clean:
 	rm -rf $(BIN)
 
-.PHONY: multip-acceptance multip-smoke multip-directplay-breaks multip-worker-breaks multip-breaks multip-receive-breaks multip-send-breaks all stage setup-map graph hostmap compare run trace trace-render trace-ddraw kill window-reset wm-unmanaged wm-managed vd-on vd-off mode8 mode16 ddraw-gdi ddraw-default smoke difftest difftest-run utildiff utildiff-run utildiff-portable numericdiff numericdiff-run chaindiff chaindiff-run atcdiff atcdiff-run weathermdiff weathermdiff-run acontaindiff acontaindiff-run sounddiff sounddiff-run dynamicdiff dynamicdiff-run fegriddiff fegriddiff-run fediff fediff-run fesldiff fesldiff-run boosterdiff boosterdiff-run demodiff demodiff-run windowdiff windowdiff-run g3ddiff g3ddiff-run multipdiff multipdiff-run g3d-break-build g3d-breaks g3dmeshdiff g3dmeshdiff-run g3ddiff-meshc-run hg2dmodeldiff-run panelsdiff panelsdiff-run panelsunit panelsunit-run panels-breaks panels-break-build window-breaks window-break-build maindiff maindiff-run main-break-build main-breaks hostdiff hostdiff-run host-break-build host-breaks mpchatdiff mpchatdiff-run mpchat-breaks mpchat-break-build winmsgdiff winmsgdiff-run winmsg-breaks winmsg-break-build realitydiff realitydiff-run reality-breaks reality-break-build analysisdiff analysisdiff-run analysis-breaks analysis-break-build controlsdiff controlsdiff-run controls-breaks controls-break-build advdrvdiff advdrvdiff-run advdrv-cover landmediff landmediff-run facildiff facildiff-run facildiff-fe-run ofstest ofstest-run ofstest-remove sehfix sehfix-install sehfix-remove sehfix-log util-trace install revert installed-name-of installed-path-of orig-module-of clean
+.PHONY: main-smoke multip-acceptance multip-smoke multip-directplay-breaks multip-worker-breaks multip-breaks multip-receive-breaks multip-send-breaks all stage setup-map graph hostmap compare run trace trace-render trace-ddraw kill window-reset wm-unmanaged wm-managed vd-on vd-off mode8 mode16 ddraw-gdi ddraw-default smoke difftest difftest-run utildiff utildiff-run utildiff-portable numericdiff numericdiff-run chaindiff chaindiff-run atcdiff atcdiff-run weathermdiff weathermdiff-run acontaindiff acontaindiff-run sounddiff sounddiff-run dynamicdiff dynamicdiff-run fegriddiff fegriddiff-run fediff fediff-run fesldiff fesldiff-run boosterdiff boosterdiff-run demodiff demodiff-run windowdiff windowdiff-run g3ddiff g3ddiff-run multipdiff multipdiff-run g3d-break-build g3d-breaks g3dmeshdiff g3dmeshdiff-run g3ddiff-meshc-run hg2dmodeldiff-run panelsdiff panelsdiff-run panelsunit panelsunit-run panels-breaks panels-break-build window-breaks window-break-build maindiff maindiff-run main-break-build main-breaks hostdiff hostdiff-run host-break-build host-breaks mpchatdiff mpchatdiff-run mpchat-breaks mpchat-break-build winmsgdiff winmsgdiff-run winmsg-breaks winmsg-break-build realitydiff realitydiff-run reality-breaks reality-break-build analysisdiff analysisdiff-run analysis-breaks analysis-break-build controlsdiff controlsdiff-run controls-breaks controls-break-build advdrvdiff advdrvdiff-run advdrv-cover landmediff landmediff-run facildiff facildiff-run facildiff-fe-run ofstest ofstest-run ofstest-remove sehfix sehfix-install sehfix-remove sehfix-log util-trace install revert installed-name-of installed-path-of orig-module-of clean

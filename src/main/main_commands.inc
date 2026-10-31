@@ -28,6 +28,8 @@ static void cmd_pending(uint32_t retail_text)
     *(volatile uint32_t *)(uintptr_t)0xdead0000u = retail_text;
 }
 
+static void welcome_cmd(void);
+
 /* .text+0xae50: the 0x80000 range; 0x80001 does nothing, as the others do. */
 static void cmd_range8(uint32_t command)
 {
@@ -93,7 +95,7 @@ static uint32_t FS98_STDCALL main_command(uint32_t command, uint32_t argument)
     case 0x1105: CALL(ADVDRV_, 0x2c, f0)(); break;
     case 0x1106: command_1106(); break;
     case 0x1107: CALL(ADVDRV_, 0x28, f0)(); break;
-    case 0x1109: cmd_pending(0x14ab0); break;
+    case 0x1109: welcome_cmd(); break;
     case 0x1180: CALL(MULTIP_, 0x18, f0)(); break;
     case 0x1181: CALL(MULTIP_, 0x1c, f0)(); break;
     case 0x1201: cmd_pending(0x110); break;

@@ -36,16 +36,29 @@ slot is done MAIN is not in `MODULES` and is never installed.
 | 25, the menu command dispatcher | `+0x20` (MSVC C, `.text+0xa090`, `+0xae50`), the dialog handlers pending | `commands` | verified: 20,000 scenarios, 0 differ; 73 of 73 breaks caught |
 | 26, the first dialogs | commands `0x1203`, `0x1308`, `0x1309`, `0x1607` (MSVC C, `.text+0x8d0`, `+0x4f50`, `+0x2e30`, `+0xa0`, with their check callbacks) | `dialogs` | verified: 20,000 scenarios, 0 differ; 38 of 40 breaks caught, 2 proven equivalent |
 | 27, rewriting a situation file and the Flights dialogs | `+0x50` (assembly, `.text+0x13105`, `+0x13500`, `+0x13612`, `+0x13710`), `+0xac`, `+0xc4` and command `0x1106` (MSVC C, `.text+0xc560`..`+0xc870`, `+0xd180`..`+0xd790`, `+0xea80`..`+0xeb30`) | `flights` | verified: 20,000 scenarios, 0 differ; 96 of 98 breaks caught, 2 proven equivalent |
+| 28, the routines MAIN's G3D programs call | 15 native routines (assembly, `.text+0x73d7`..`+0xa04a`), 53 pointers in `.data` | `natives` | verified: 20,000 scenarios, 0 differ; 95 of 98 breaks caught, 3 proven equivalent |
+| 29, what `+0x28` sets going | the menu state and listener, the clock (MSVC C and assembly, `.text+0xae40`, `+0xae70`, `+0x11330`) | `start` | verified: 20,000 scenarios, 0 differ; 93 of 93 breaks caught |
+| 30, the radios | CHAIN lists 3 and 5 (assembly, `.text+0x1816e`..`+0x19eb2`) | `radios` | verified: 20,000 scenarios, 0 differ; 115 of 120 breaks caught, 5 proven equivalent |
+| 31, the weather's layers | `.text+0x1a5f0`, `+0x1a4b0`, `+0x1b260`, `+0x1cf80` (MSVC C) | `weather` | verified: 20,000 scenarios, 0 differ; 50 of 50 breaks caught |
+| 32, the kneeboard | `.text+0xa80`..`+0x1940` (MSVC C), bitmap 101 | `kneeboard` | verified: 20,000 scenarios, 0 differ; 61 of 61 breaks caught |
+| 33, start and shutdown | `+0x28`, `+0x2c` and the welcome dialog (MSVC C, `.text+0x165b0`, `+0x16880`, `+0x14ab0`), command `0x1109` | `session` | verified: 20,000 scenarios, 0 differ; 53 of 53 breaks caught |
 
-**What is left** (as of slice 27): `+0x28` and `+0x2c`, the sim's start and
-shutdown, with the two CHAIN callbacks `+0x28` registers (`.text+0xae40` on
-list `0x14`, `.text+0x16c83` on list 2) and about ten internal routines (menus,
-the view windows, the clock, strings); `+0x90`; and the dialog handlers `+0x20`
-still reaches through `cmd_pending`, which faults on purpose: `0x1101` (`.text+0xdaa0`),
-`0x1109` (`+0x14ab0`), `0x1201` (`+0x110`), `0x1202` (`+0x13870`), `0x1204`
-(`+0x2ee0`), `0x1205` (`+0x3bf0`), `0x1301` (`+0x1b20`), `0x1306` (`+0x19fb0`),
-`0x1307` (`+0x5010`), `0x1407` (`+0xf3d0`), `0x1409` (`+0x14ce0`), `0x1502`
-(`+0x16e40`) and the kneeboard pages `0x300`..`0x3ff` (`+0x18d0`).
+**What is left** (as of slice 33): `+0x90` (`.text+0x10560`), the one Linkage
+slot still null; and the dialog handlers `+0x20` still reaches through
+`cmd_pending`, which faults on purpose: `0x1101` (`.text+0xdaa0`, also the
+welcome dialog's Create a Flight button), `0x1201` (`+0x110`), `0x1202`
+(`+0x13870`), `0x1204` (`+0x2ee0`), `0x1205` (`+0x3bf0`), `0x1301` (`+0x1b20`),
+`0x1306` (`+0x19fb0`), `0x1307` (`+0x5010`), `0x1407` (`+0xf3d0`), `0x1409`
+(`+0x14ce0`), `0x1502` (`+0x16e40`) and the kneeboard pages `0x300`..`0x3ff`
+(`+0x18d0`). The dialog callbacks and tables those reach are the remaining
+retail code pointers in `.data`. Until then MAIN stays out of `MODULES`, and the
+exports named `main_*` stay for the harness.
+
+**In the game** (`make main-smoke`, which restores the previous DLL byte for
+byte): 27/27 modules and 95 gauges, and with a flight on the command line
+(`/STN:Situatio\STGEORGE.STN`) the sky, cloud layers, panel and menu bar draw as
+they do on retail. Without one it stops at the welcome dialog, drawn correctly.
+No menu or dialog has been driven, and nothing has been flown by hand.
 
 ## Binary and linkage
 
@@ -67,8 +80,9 @@ still reaches through `cmd_pending`, which faults on purpose: `0x1101` (`.text+0
   the other code pointers keep retail's values, as G3D's do. Which of those
   tables only MAIN calls through, and which it hands to the host (menus,
   dialogs, commands), is for the slices that reach them to settle.
-- `.rsrc` 0x3664 bytes (bitmaps, by `LoadImageA`); `.rdata` 0x1f9 bytes.
-  Neither is reproduced yet.
+- `.rsrc` 0x3664 bytes: the kneeboard's bitmap 101 (by `LoadImageA`), which
+  `tools/gen_main_bitmap.py` writes from retail at build time for `main.rc`, and
+  the version block. `.rdata` 0x1f9 bytes, not reproduced.
 - Win32: KERNEL32 (interlocked counts, `lstrcpyA`, `lstrcmpiA`,
   `GetUserDefaultLCID`), USER32 (`CharNextA`, `CharPrevA`, `wsprintfA`,
   `LoadImageA`), GDI32 `GetObjectA`, MSVCRT (`atoi`, `_itoa`, `_ftol`,
@@ -86,7 +100,7 @@ calls are reached from the host, the `English\` dialog modules, or CHAIN.
 | `+0x18` | `.text+0xc000` | host | **slice 24**: the frame |
 | `+0x1c` | `.text+0xc520` | FACIL | **slice 11**: clamp the latitude |
 | `+0x20` | `.text+0xa090` | host | **slice 25**: the menu command dispatcher; dialogs **slices 26, 27** |
-| `+0x24`..`+0x34` | `.text+0x16a60`, `+0x165b0`, `+0x16880`, `+0x16920`, `+0x169a0` | REALITY (`+0x30`, `+0x34`) | `+0x24` is **slice 23** (the timer tick); `+0x28` starts the sim and `+0x2c` shuts it down; `+0x30` and `+0x34` (**slice 9**) grey and enable menu items `0x1001`..`0x1006` |
+| `+0x24`..`+0x34` | `.text+0x16a60`, `+0x165b0`, `+0x16880`, `+0x16920`, `+0x169a0` | REALITY (`+0x30`, `+0x34`) | `+0x24` is **slice 23** (the timer tick); `+0x28` starts the sim and `+0x2c` shuts it down (**slice 33**); `+0x30` and `+0x34` (**slice 9**) grey and enable menu items `0x1001`..`0x1006` |
 | `+0x38`..`+0x4c` | `.text+0x11eeb`, `+0x11e3d`, `+0x120aa`, `+0x127b3`, `+0x12f50`, `+0x12f6a` | ADVDRV (`+0x3c`), REALITY (`+0x44`), DEMO (`+0x48`, `+0x4c`) | the situation reader and writer, assembly: `+0x48` loads a situation from memory, `+0x4c` from a file |
 | `+0x50` | `.text+0x13105` | | **slice 27**: replace a record of a situation file, assembly |
 | `+0x54`..`+0x6c` | `.text+0x15cc0`..`+0x15f50` | WINMSG, WINDOW, PANELS (`+0x5c`..`+0x64`) | **slice 1**, below |
@@ -1173,3 +1187,123 @@ Flights; 25,548 deletes and 25,684 edits pressed, 3,430 saves refused by the che
 main-breaks SUITE=flights`: 98 breaks, 96 caught, 2 proven equivalent (`hdr-end`:
 the loop leaves on the end tag without reading the length; `blank-size`: at size
 == length the loop writes the one terminator the early path does).
+
+## Slice 28: the routines MAIN's G3D programs call
+
+`src/main/main_natives.inc`, assembly. MAIN's command blocks
+(`.data+0x2386`..`+0x34fa`) hold G3D opcode `0x8c`, which calls an absolute code
+address out of the program. Fifteen routines are named that way, 53 times:
+`+0x73d7` and `+0x73fb` (a cloud layer's faces, reaching `+0x9230`..`+0x9818`),
+`+0x7bc2` (the puffs' fade flags), `+0x889c` and `+0x88e2` (the ground's nine
+tiles, `+0x8935`, `+0x8c75`), `+0x8d47` and `+0x8d5e` (two colours), `+0x8f34`..
+`+0x8fb8` (GLOBAL `+0xe88` and `+0xd4c` set aside and put back) and `+0xa04a` (a
+bare `ret`). `main_install` writes ours over the 53 words; `retail_byte_at` still
+answers a wild read there with retail's address.
+
+**G3D keeps what they leave in every register**, so they are entered through
+`NATIVE`, which loads and stores all seven. Retail details kept:
+
+- `+0x88e2` loads `di` before reading GLOBAL `+0xe76` through `edi`, so that read
+  lands at G's upper half, that `di`, plus `0xe76`.
+- `+0x8d47` writes through the `edi` it was called with; `+0x8d5e` loads G first.
+- `+0x9230` goes on using `ecx` and `edx` across G3D `+0x40`, which leaves them
+  alone. Ours has to as well.
+
+### Verifying the natives
+
+`make maindiff-run SUITE=natives`. No other suite could see this, because they
+stub G3D. Each call reads its address out of the image, enters it with random
+registers (`edi` on GLOBAL, as a rule) and compares all seven on the way out, the
+quad buffer G3D `+0x40` hands back (at every `+0x1c`) and the state. Stubs of
+routines whose `ecx` and `edx` retail goes on to read are wrapped in `CLEAN`
+thunks that fix them, since a C stub leaves pointers to each side's own
+transcript there. The log says whether the address lies in the side's own image,
+because an uninstalled pointer in ours would otherwise call retail's mapped copy
+and agree: break `t-a04a` was missed until it did.
+
+## Slice 29: what `+0x28` sets going
+
+`src/main/main_start.inc`, MSVC C and assembly. `.text+0xae40` hears CHAIN list
+`0x14`; message `0x40` runs `+0xae70`, the whole menu bar's state, with `+0xf50`
+for the kneeboard's items. `+0x16900` greys the menus, and `+0x16a20` on list 1
+restores them sixteen frames on. `+0x16b70` takes the date and time from the
+host. `+0x16c83` on list 2 runs the sim's clock at the sim rate, `+0x16cde`
+carries it, and `+0x11330` adds up the logbook's minutes.
+
+- `+0xae70` pushes several item ids over stale upper halves. The host's `+0x254`
+  looks them up as 16 bits (checked in `src/host/host.c`), so ours passes the id
+  alone and the harness logs its low half.
+- `+0xae40` is `ret 8` for every other message, leaving all registers, and ours
+  does the same: CHAIN passes `edx` on.
+
+Not reproduced: `eax`, `ecx` and `edx` after `+0xae40`'s message `0x40`, and after
+the list 2 and list 3 and 5 callbacks. CHAIN ignores `eax` and `ecx`, and no
+retail callback found so far reads the `edx` it is entered with, but lists 2, 3,
+5 and `0x14` have not been audited for that as lists 1 and 3 were for slice 22.
+
+## Slice 30: the radios
+
+`src/main/main_radios.inc`, assembly, `.text+0x1816e`..`+0x19eb2`. List 3 retunes,
+every second time, when a tuning has changed or the aircraft has left a box:
+NAV1 and NAV2 (`+0x183c4`), the ADF (`+0x1859f`), the marker beacons (`+0x18679`),
+ATIS (`+0x189c6`) and the COM (`+0x18a17`). List 5 moves the needles and works the
+DME (`+0x18b3d`, `+0x1908c`), the ADF's needle and the marker lamps (`+0x19a3e`).
+The boxes at `.data+0x748a` keep retail's code addresses at `+0x14`, mapped by a
+switch as the situation table's are. The `.text` descriptors for UTIL `+0x88` hold
+pointers into `.data`, so ours builds them.
+
+- **The course survives only as UTIL leaves it.** `cx` crosses UTIL `+0x6c` on the
+  terrain mask and UTIL `+0x60` on a localiser, neither of which saves it, so
+  GLOBAL `+0xc50` holds what those calls left. Ours keeps this through `xcall`.
+- `+0x197b1` compares a record's address with `0x12160` and `0xb4dc`, where it
+  meant a distance. An address always passes.
+- NAV2's retune word steps with `inc` where NAV1's is set to 1.
+- `+0x18261` saves GLOBAL `+0x37e` across the second lookup only.
+- The word and dword divides lean on the host's repair.
+
+## Slice 31: the weather's layers
+
+`src/main/main_weather.inc`, MSVC C. `+0x1a5f0` runs at start: `+0x1a4b0` builds
+the table of pointers into GLOBAL at `.data+0xd0c0` (two rows, by GLOBAL `+0xf18`)
+and `+0x1b260` converts the winds, clouds and temperatures through NUMERIC `+0x1c`
+into that row, after `+0x1cf80` has sorted the cloud layers and lifted or dropped
+overlaps. The host's sort (`+0x22c`) gets ours as its compares. Only what start
+reaches is done; the weather dialog's routines around it are not.
+
+## Slice 32: the kneeboard
+
+`src/main/main_kneeboard.inc`, MSVC C. `+0x1320` makes the view window, with
+bitmap 101 behind its pages; `+0x1940` saves its place and takes it down. List
+`0x14` message `0x60` reads the pages from the aircraft's file (`+0xc30`,
+`+0xaf0`, `+0xa80`) and `0x70` redraws (`+0x1620`, `+0x15c0`, `+0x11b0`).
+
+`+0x1620` hands the host's `+0x318` a RECT whose bottom it never set the first
+time, and `+0x11b0` reads a byte past a row ending in transparent pixels. Both are
+kept. The suite calls the real `LoadImageA` and `GetObjectA` on each side's own
+resource, so a wrong bitmap would show in the row digest; the module handle and
+the bitmap handle are left out of the state.
+
+Retail imports no `DeleteObject`, so every `+0x1320` leaves its DIB section behind.
+Over a run that fills the process's address space (about 30,000, or scenario 15,296
+of the suite), and `LoadImageA` then fails on whichever side is next; the harness
+deletes each once the module has let go of it. Ours keeps the leak.
+
+The season walk (`.text+0x1309b`, slice 2) reaches `.data+0x7fc0` and `+0xdc24`, the
+module handle and the close button, so `retail_byte_at` answers with retail's values
+there once they have been written. The `session` suite found this at 20,000
+scenarios, in 4 of them.
+
+## Slice 33: start and shutdown
+
+`+0x28` (`.text+0x165b0`, `main_start`) and `+0x2c` (`+0x16880`, `main_shutdown`),
+in `main_start.inc`, with `+0x14ab0`, the welcome dialog at start, which is also
+command `0x1109`. Start loads the preferences, the menus, the weather and the
+kneeboard; takes a flight from `/STN:` or else the default; sets the clock, radios
+and listeners going; runs one frame; and shows the welcome dialog when no flight
+was given and GLOBAL `+0x121c` is clear. The dialog's Create a Flight button
+reaches `cmd_pending`.
+
+`session` runs start then shutdown over the models the other suites use. A flight
+with no default to fall back on spins for good in retail too, so about 7% of
+scenarios end in the watchdog.
+

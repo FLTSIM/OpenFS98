@@ -821,7 +821,7 @@ static int32_t STDCALL h_post(uint32_t a, uint32_t b)
 
 static int32_t STDCALL h_menu(uint32_t id, uint32_t state)
 {
-    put(" menu(%#x,%#x)", id, state);
+    put(" menu(%#x,%#x)", (uint16_t)id, state);    /* the host looks it up as 16 bits */
     return 0;
 }
 
@@ -845,6 +845,8 @@ static int32_t STDCALL h_memset(void *d, int32_t c, uint32_t n)
 
 static const char *string_of(uint32_t id);
 
+static int session_empty_strings;
+
 static int32_t STDCALL h_loadstring(uint32_t id, char *buf, int32_t len)
 {
     const char *t = string_of(id);
@@ -856,6 +858,8 @@ static int32_t STDCALL h_loadstring(uint32_t id, char *buf, int32_t len)
         if (n > len - 1) n = len - 1;
         memcpy(buf, t, (size_t)n);
         buf[n] = 0;
+    } else if (session_empty_strings && len > 0) {
+        buf[0] = 0;                                /* a string the tables lack, as LoadStringA leaves it */
     }
     put("=%d", n);
     return n;
@@ -1982,13 +1986,22 @@ static uint32_t STDCALL fe_20(uint32_t state, uint32_t recptr, uint32_t stateptr
     return 1;
 }
 
+static int util88_all;                             /* log every field of the descriptor */
 static uint32_t STDCALL util_88(uint32_t buf, uint32_t desc, uint32_t n)
 {
     uint32_t dest = *(uint32_t *)(uintptr_t)(desc + 12), i, h = 2166136261u;
+
+    if (util88_all)
+        for (i = 0; i < n; i++) {
+            put(" f%u,%u,%u,", *(uint32_t *)(uintptr_t)(desc + i * 16), *(uint32_t *)(uintptr_t)(desc + i * 16 + 4),
+                *(uint32_t *)(uintptr_t)(desc + i * 16 + 8));
+            put_ptr(*(uint32_t *)(uintptr_t)(desc + i * 16 + 12));
+        }
+    i = 0;
     const uint8_t *b = (const uint8_t *)(uintptr_t)buf;
     uint8_t *d = (uint8_t *)(uintptr_t)dest;
 
-    for (i = 0; i < 0x58; i++) {
+    for (i = 0; i < (util88_all && n == 4 ? 0x38u : 0x58u); i++) {  /* the ADF's fields stop short of a relocated word */
         d[i] = (uint8_t)(b[i] + 0x11 + i);
         h = (h ^ d[i]) * 16777619u;
     }
@@ -2339,6 +2352,8 @@ static void *internal(uint32_t retail_va, const char *name)
 
 /* ---- the comparable image ------------------------------------------------------------ */
 
+static int handles_differ;
+
 static void put_state(void)
 {
     static uint8_t img[IMAGE_SIZE];
@@ -2367,7 +2382,7 @@ static void put_state(void)
          * draw-command staging word (+0x9c); 0x3470 and 0x35da (unaligned)
          * are the cloud layer's record and block (+0x98). */
         static const uint32_t odd[] = { 0x41e1, 0x41e5, 0x41f5, 0x41f9, 0x9754, 0x9758, 0x1a72,
-                                        0x3470, 0x35da };
+                                        0x3470, 0x35da, 0x7862, 0x7f54, 0x7f58, 0x7f5c, 0x7f60 };
         uint32_t j, v;
         for (j = 0; j < sizeof odd / sizeof odd[0]; j++) {
             memcpy(&v, img + odd[j], 4);
@@ -2379,6 +2394,14 @@ static void put_state(void)
 
     }
     memset(img + LINKAGE, 0, LINKAGE_END - LINKAGE);
+    if (handles_differ) {                          /* the module's instance and its loaded bitmap */
+        memset(img + 0x7fc0, 0, 4);
+        memset(img + 0xdc84, 0, 4);
+        {                                          /* the close box's routine: its own, retail's or ours */
+            uint32_t v = *(uint32_t *)(img + 0xdc24);
+            *(uint32_t *)(img + 0xdc24) = (uint8_t *)(uintptr_t)v >= cur->lo && (uint8_t *)(uintptr_t)v < cur->hi ? 0xc0de0001u : v;
+        }
+    }
     {                                              /* a save's description buffer */
         NT_TIB *tib = (NT_TIB *)NtCurrentTeb();
         uint8_t *v = (uint8_t *)(uintptr_t)*(uint32_t *)(img + 0x4480);
@@ -2389,6 +2412,12 @@ static void put_state(void)
         *(uint32_t *)(img + i) = 0;
     put("\n  state img=%08x heap=%#x/%08x G=%08x", digest(img, IMAGE_SIZE, 0x811c9dc5u), arena_used,
         digest(arena, arena_used, 0x811c9dc5u), digest(global, sizeof global, 0x811c9dc5u));
+    if (getenv("MAIN_GLOBAL")) {
+        put("\n  G:");
+        for (i = 0; i + 4 <= sizeof global; i += 4)
+            if (*(uint32_t *)(global + i) != 0)
+                put(" %x:%08x", i, *(uint32_t *)(global + i));
+    }
     if (getenv("MAIN_IMAGE")) {
         put("\n  words");
         for (i = 0; i + 4 <= IMAGE_SIZE; i += 4)
@@ -4817,6 +4846,1328 @@ struct suite {
 
 static void setup_records(void) { short_write_odds = 60; gentle = 0; }
 
+/* ---- suite: natives (the routines MAIN's G3D programs call, slice 28) ----------- */
+
+/* G3D's opcode 0x8c calls them with its registers and keeps what they leave, so
+ * every register goes in random and comes out compared.  The stubs' ecx and edx
+ * are whatever C left, so these thunks fix them; G3D +0x40 leaves both alone. */
+uint32_t clean_ret, clean_target, native_quad, native_quads;
+void clean_g3d_1c(void); void clean_g3d_24(void); void clean_hg2d_b4(void);
+void clean_hg2d_b8(void); void clean_util_44(void); void clean_util_48(void);
+void native_g3d_40(void);
+void *clean_t_g3d_1c, *clean_t_g3d_24, *clean_t_hg2d_b4, *clean_t_hg2d_b8, *clean_t_util_44, *clean_t_util_48;
+#define CLEAN(name, ecx_value, edx_value)                                      \
+    __asm__(".text\n_clean_" #name ":\n\t"                                     \
+            "popl _clean_ret\n\tcall *_clean_t_" #name "\n\t"                  \
+            "movl $" #ecx_value ", %ecx\n\tmovl $" #edx_value ", %edx\n\t"     \
+            "pushl _clean_ret\n\tret\n")
+CLEAN(g3d_1c, 0x11110001, 0x22220001);
+CLEAN(g3d_24, 0x11110002, 0x22220002);
+CLEAN(hg2d_b4, 0x11110003, 0x22220003);
+CLEAN(hg2d_b8, 0x11110004, 0x22220004);
+CLEAN(util_44, 0x11110005, 0x22220005);
+CLEAN(util_48, 0x11110006, 0x22220006);
+__asm__(".text\n_native_g3d_40:\n\tpushal\n\tcall _native_steer\n\tpopal\n\tmovl _native_quad, %eax\n\tret\n");
+void native_steer(void);
+
+/* regs: eax ebx ecx edx esi edi ebp, in and out. */
+void native_call(uint32_t fn, uint32_t *regs);
+__asm__(".text\n_native_call:\n\t"
+        "pushl %ebp\n\tpushl %ebx\n\tpushl %esi\n\tpushl %edi\n\t"
+        "movl 24(%esp), %eax\n\tpushl %eax\n\t"           /* regs, for afterwards */
+        "movl 24(%esp), %edx\n\tpushl %edx\n\t"           /* fn */
+        "movl 0(%eax), %edx\n\tmovl %edx, _native_eax\n\t"
+        "movl 4(%eax), %ebx\n\tmovl 8(%eax), %ecx\n\tmovl 12(%eax), %edx\n\t"
+        "movl 16(%eax), %esi\n\tmovl 20(%eax), %edi\n\tmovl 24(%eax), %ebp\n\t"
+        "movl _native_eax, %eax\n\t"
+        "call *(%esp)\n\t"
+        "addl $4, %esp\n\t"
+        "xchgl %eax, (%esp)\n\t"                          /* eax kept, regs in eax */
+        "movl %ebx, 4(%eax)\n\tmovl %ecx, 8(%eax)\n\tmovl %edx, 12(%eax)\n\t"
+        "movl %esi, 16(%eax)\n\tmovl %edi, 20(%eax)\n\tmovl %ebp, 24(%eax)\n\t"
+        "popl %edx\n\tmovl %edx, 0(%eax)\n\t"
+        "popl %edi\n\tpopl %esi\n\tpopl %ebx\n\tpopl %ebp\n\tret\n");
+uint32_t native_eax;
+
+static uint32_t STDCALL natives_util_44(uint32_t a, uint32_t b, uint32_t out)
+{
+    uint8_t *o = (uint8_t *)(uintptr_t)out;
+    uint32_t i;
+
+    put(" util+0x44(");
+    put_ptr(a);
+    put(",");
+    put_ptr(b);
+    put(",");
+    put_ptr(out);
+    put(")");
+    for (i = 0; i < 8; i++)
+        o[i] = (uint8_t)(rnd_n(3) ? 0 : rnd());
+    return 0x5a5a0044u;
+}
+
+static uint32_t STDCALL natives_g3d_1c(uint32_t cmd)
+{
+    put(" g3d+0x1c(");
+    put_ptr(cmd);
+    put(")=%08x", digest((uint8_t *)(uintptr_t)native_quad, 0x6d0, 0x811c9dc5u));
+    if (getenv("MAIN_QUAD")) {
+        uint32_t i;
+        for (i = 0; i < 0x6d0; i += 4)
+            if (i < 0x100 || i >= 0x640)
+                put(" %x:%08x", i, *(uint32_t *)(uintptr_t)(native_quad + i));
+        for (i = 0x33ba; i < 0x3470; i += 4)
+            put(" d%x:%08x", i, *(uint32_t *)(cur->image + i));
+    }
+    return 0x5a5a001cu;
+}
+
+/* A column's quad: GLOBAL +0xce0 now and then on the height it is about to be
+ * compared with. */
+void native_steer(void)
+{
+    native_quads++;
+    if (native_quads > 1 && rnd_n(8) == 0)
+        *(uint32_t *)(global + 0xce0) = *(uint32_t *)(cur->image + 0x3458 + 4 * rnd_n(4));
+}
+
+static unsigned long cover_native[15], cover_native_faces, cover_native_quads, cover_native_nine, cover_native_block;
+
+static void setup_natives(void)
+{
+    clean_t_g3d_1c = (void *)natives_g3d_1c;
+    clean_t_g3d_24 = (void *)g3d_24;
+    clean_t_hg2d_b4 = (void *)hg2d_b4;
+    clean_t_hg2d_b8 = (void *)hg2d_b8;
+    clean_t_util_44 = (void *)natives_util_44;
+    clean_t_util_48 = (void *)util_geo48;
+    SET_SLOT(g3d, 0x1c, clean_g3d_1c);
+    SET_SLOT(g3d, 0x24, clean_g3d_24);
+    SET_SLOT(g3d, 0x40, native_g3d_40);
+    SET_SLOT(hg2d, 0xb4, clean_hg2d_b4);
+    SET_SLOT(hg2d, 0xb8, clean_hg2d_b8);
+    SET_SLOT(util, 0x44, clean_util_44);
+    SET_SLOT(util, 0x48, clean_util_48);
+}
+
+static void op_natives(void)
+{
+    /* one of each's offsets in the image, and any other block's now and then */
+    static const uint16_t at[15][4] = {
+        { 0x2386, 0x23aa, 0x2466, 0x2716 }, { 0x23ce, 0x23f2, 0x2822, 0x290a },
+        { 0x313a, 0x3186, 0x3244, 0x3374 }, { 0x262c, 0x262c, 0x262c, 0x262c },
+        { 0x282e, 0x2916, 0x282e, 0x2916 }, { 0x243c, 0x2674, 0x26e4, 0x278e },
+        { 0x27f4, 0x2876, 0x28e8, 0x295e }, { 0x2692, 0x2702, 0x2894, 0x297c },
+        { 0x2812, 0x2812, 0x2812, 0x2812 }, { 0x24a8, 0x24a8, 0x24a8, 0x24a8 },
+        { 0x2990, 0x2990, 0x2990, 0x2990 }, { 0x24ce, 0x29ca, 0x29ea, 0x24ce },
+        { 0x307c, 0x307c, 0x307c, 0x307c }, { 0x269c, 0x270c, 0x3088, 0x2986 },
+        { 0x34fa, 0x34fa, 0x34fa, 0x34fa },
+    };
+    uint32_t which = rnd_n(3) == 0 ? rnd_n(2) : rnd_n(15), regs[7], i, fn;
+    uint8_t *quad = fixtures + 0x20000;
+
+    /* GLOBAL round what they read: often on an edge */
+    for (i = 0xb3c; i < 0xb52; i++)
+        global[i] = (uint8_t)rnd();
+    for (i = 0xc8c; i < 0xca0; i++)
+        global[i] = (uint8_t)rnd();
+    for (i = 0xe60; i < 0xe8a; i++)
+        global[i] = (uint8_t)rnd();
+    for (i = 0x560; i < 0x578; i++)
+        global[i] = (uint8_t)rnd();
+    for (i = 0x5b0; i < 0x5c0; i++)
+        global[i] = (uint8_t)rnd();
+    *(uint32_t *)(global + 0xce0) = rnd_n(3) ? rnd_n(0x40000) : rnd();
+    *(uint16_t *)(global + 0xce2) = (uint16_t)rnd();
+    *(uint32_t *)(global + 0xd4c) = rnd_n(2) ? rnd_n(0x400) : rnd();
+    *(uint16_t *)(global + 0xdce) = (uint16_t)(rnd_n(5) ? 0 : rnd());
+    *(uint16_t *)(global + 0xcb6) = (uint16_t)(rnd_n(5) ? rnd() | 1 : 0);
+    *(uint16_t *)(global + 0xe86) = (uint16_t)rnd_n(3);
+    *(uint16_t *)(global + 0xe6e) = (uint16_t)(rnd_n(3) == 0 ? 0xe000 + rnd_n(3) : rnd());
+    *(uint16_t *)(global + 0xe76) = (uint16_t)(rnd_n(3) == 0 ? 0xe000 + rnd_n(3) : rnd());
+    *(uint16_t *)(global + 0x574) = (uint16_t)(rnd_n(3) == 0 ? *(uint16_t *)(global + 0xe7a) + rnd_n(3) - 1 : rnd());
+    if (rnd_n(3) == 0)
+        *(uint16_t *)(global + 0xe80) = (uint16_t)(*(uint16_t *)(global + 0xe7a) - *(uint16_t *)(global + 0x574) + rnd_n(3) - 1);
+
+    /* the image round what they read; the relocated words stay */
+    seed_image(0x1a80, 0x1ab0);
+    seed_image(0x1e4a, 0x1e56);
+    seed_image(0x1eb4, 0x1ed0);
+    seed_image(0x1ff5, 0x201d);
+    seed_image(0x2052, 0x2068);
+    seed_image(0x33ba, 0x3402);
+    seed_image(0x3468, 0x3470);
+    seed_image(0x349c, 0x34bc);
+    for (i = 0; i < 3; i++)                        /* just on +0x7bc2's three thresholds */
+        if (rnd_n(2))
+            *(uint32_t *)(cur->image + 0x1e4a + 4 * i) = *(uint32_t *)(global + 0xd4c) + rnd_n(3) - 1;
+    *(uint16_t *)(cur->image + 0x1ff5) = (uint16_t)(rnd_n(5) ? 1 : 0);
+    *(uint16_t *)(cur->image + 0x1ff7) = (uint16_t)(rnd_n(5) ? 1 : 0);
+    if (rnd_n(8))                                  /* a real divisor, now and then none */
+        *(int32_t *)(cur->image + 0x3468) = (int32_t)(rnd_n(0x10000) + 1) * (rnd_n(2) ? 1 : -1);
+    /* the aircraft near the layer record: a texel inside the map, most times */
+    for (i = 0; i < 2; i++) {
+        uint8_t *r = cur->image + 0x1a80 + i * 0x18;
+        if (rnd_n(4)) {
+            *(uint32_t *)(r + 4) = *(uint32_t *)(global + 0x5b4) - (rnd() & 0x3ffffff) + 0x2000000;
+            *(uint16_t *)(r + 0xc) = (uint16_t)(*(uint16_t *)(global + 0x5bc) - rnd_n(0x40) + 0x20);
+            *(uint16_t *)(r + 0xe) = *(uint16_t *)(global + 0x5be);
+        }
+    }
+    *(uint32_t *)(cur->image + 0x2043) = rnd();
+    hg2d_threshold = (uint8_t)(rnd_n(3) ? rnd_n(8) : rnd());
+    if (op_number == 0) {
+        uint32_t density = 1 + rnd_n(8);
+        for (i = 0; i < 0x10000; i++)
+            fixtures[i] = (uint8_t)(rnd_n(density) == 0 ? rnd_n(12) : 0);
+        for (i = 0; i < 0x6d0; i++)
+            quad[i] = (uint8_t)rnd();
+    }
+    native_quad = (uint32_t)(uintptr_t)quad;
+    native_quads = 0;
+
+    fn = *(uint32_t *)(cur->image + at[which][rnd_n(4)]);
+    regs[0] = rnd();
+    regs[1] = rnd();
+    regs[2] = rnd();
+    regs[3] = rnd();
+    regs[4] = rnd();
+    regs[5] = rnd_n(8) ? (uint32_t)(uintptr_t)global : (uint32_t)(uintptr_t)(fixtures + 0x30000);
+    regs[6] = rnd();
+    if (counting)
+        cover_native[which]++;
+    put("\n#native(%u) dce=%#x cb6=%#x own=%d", which, *(uint16_t *)(global + 0xdce), *(uint16_t *)(global + 0xcb6),
+        (uint8_t *)(uintptr_t)fn >= cur->lo && (uint8_t *)(uintptr_t)fn < cur->hi);
+    native_call(fn, regs);
+    put(" ->");
+    for (i = 0; i < 7; i++)
+        put(" %08x", regs[i]);
+    put(" c94=%08x c9c=%08x e88=%#x d4c=%08x", *(uint32_t *)(global + 0xc94), *(uint32_t *)(global + 0xc9c),
+        *(uint16_t *)(global + 0xe88), *(uint32_t *)(global + 0xd4c));
+    put(" quad=%08x", digest(quad, 0x6d0, 0x811c9dc5u));
+    if (counting) {
+        if (native_quads > 1) { cover_native_faces++; cover_native_quads += native_quads; }
+        if (which == 3 || which == 4) {
+            if (*(uint16_t *)(cur->image + 0x205e) != 0) cover_native_nine++;
+            else cover_native_block++;
+        }
+    }
+}
+
+static void report_natives(void)
+{
+    uint32_t i;
+
+    printf("  natives: calls");
+    for (i = 0; i < 15; i++)
+        printf(" %lu", cover_native[i]);
+    printf("; faces drawn %lu with %lu quads; tiles nine %lu, block or none %lu\n",
+           cover_native_faces, cover_native_quads, cover_native_nine, cover_native_block);
+}
+
+/* ---- suite: start (what +0x28 sets going, slice 29) ------------------------------- */
+
+static uint32_t start_lists;                       /* for WINDOW +0x80: how many items */
+
+static uint32_t STDCALL start_window_80(uint32_t *list, int32_t *n, uint32_t mode)
+{
+    uint32_t count = rnd_n(5), i;
+    uint32_t *a;
+
+    put(" window+0x80(%u)->%u", mode, count);
+    a = arena_get(4 * (count ? count : 1));
+    for (i = 0; i < count; i++) {
+        uint8_t *item = fixtures + 0x20000 + 0x100 * (start_lists++ % 0x40);
+        uint32_t *cls = (uint32_t *)(item + 0x40);
+        *(uint32_t *)(item + 8) = rnd();
+        *(uint16_t *)(item + 0xc) = (uint16_t)rnd();
+        *(uint32_t *)(item + 0x1c) = (uint32_t)(uintptr_t)cls;
+        cls[4] = rnd_n(2) ? 0 : rnd();
+        a[i] = (uint32_t)(uintptr_t)item;
+    }
+    *list = (uint32_t)(uintptr_t)a;
+    *n = (int32_t)count;
+    return 0;
+}
+static uint32_t STDCALL start_m35_30(void)
+{
+    uint32_t r = rnd() & 7;
+    put(" m35+0x30->%u", r);
+    return r;
+}
+static uint32_t STDCALL start_m21_18(uint32_t *out)
+{
+    static const uint32_t v[] = { 0, 0x20, 0x1a, 0x21, 5 };
+    uint32_t r = rnd_n(2) ? rnd() : 0;
+    *out = v[rnd_n(5)];
+    put(" m21+0x18->%#x,%#x", r, *out);
+    return r;
+}
+static uint32_t STDCALL start_m15_38(void)
+{
+    uint32_t r = rnd_n(2) ? rnd() : 0;
+    put(" m15+0x38->%#x", r);
+    return r;
+}
+static uint32_t STDCALL start_h_264(uint32_t a, uint32_t b)
+{
+    put(" menutext(%#x,%#x)", a, b);
+    return 0;
+}
+static uint32_t STDCALL start_h_50(uint32_t a)
+{
+    put(" host+0x50(%u)", a);
+    return 0;
+}
+static uint32_t STDCALL start_season(uint32_t a, uint32_t b)
+{
+    put(" season(%#x,%#x)", a, b & 0xffff);
+    return 0;
+}
+
+static unsigned long cover_start[8], cover_start_v[5], cover_start_minute, cover_start_rollover, cover_start_tally;
+
+static void setup_start(void)
+{
+    SET_SLOT(module_stub[10], 0x80, start_window_80);
+    SET_SLOT(multip, 0x30, start_m35_30);
+    SET_SLOT(module_stub[21], 0x18, start_m21_18);
+    SET_SLOT(module_stub[15], 0x38, start_m15_38);
+    SET_SLOT(host, 0x264, start_h_264);
+    SET_SLOT(host, 0x50, start_h_50);
+    SET_SLOT(host, 0x44, h_local_time);
+    start_lists = 0;
+    (void)start_season;
+}
+
+static void op_start(void)
+{
+    uint32_t which = rnd_n(7), i;
+    uint8_t *view = cur->image + 0; (void)view;
+
+    /* the menus' inputs: each zero half the time */
+    {
+        static const uint16_t w32[] = { 0x1240, 0xb20, 0x268, 0x628, 0x758, 0x5d4, 0x5d8, 0x764, 0x850, 0x84c };
+        static const uint16_t w8[] = { 0xb04, 0xb64, 0xb68, 0xb6f, 0xb70 };
+        for (i = 0; i < sizeof w32 / sizeof w32[0]; i++)
+            *(uint32_t *)(global + w32[i]) = rnd_n(2) ? 0 : (rnd_n(2) ? 1 : rnd());
+        for (i = 0; i < sizeof w8 / sizeof w8[0]; i++)
+            global[w8[i]] = (uint8_t)(rnd_n(2) ? 0 : rnd());
+    }
+    *(uint16_t *)(global + 0x5dc) = (uint16_t)(rnd_n(2) ? 0 : rnd());
+    *(uint16_t *)(global + 0x129c) = (uint16_t)rnd_n(0x20);
+    {
+        static const uint16_t rates[] = { 0x20, 0x40, 0x80, 0x100, 0x200, 0x400, 0x800, 0x1000, 0x2000, 0x4000, 0x8000, 0xffff };
+        *(uint16_t *)(global + 0xc1a) = rates[rnd_n(sizeof rates / sizeof rates[0])];
+    }
+    /* the aircraft records */
+    {
+        uint8_t *a = fixtures + 0x10000, *b = fixtures + 0x10100;
+        *(uint32_t *)(a + 0x10) = rnd_n(3);
+        *(uint32_t *)(a + 0x14) = rnd_n(6);
+        *(uint32_t *)(b + 8) = rnd();
+        *(uint16_t *)(b + 0xc) = (uint16_t)rnd();
+        *(uint32_t *)(global + 0x11a0) = rnd_n(4) ? (uint32_t)(uintptr_t)a : 0;
+        *(uint32_t *)(global + 0x119c) = rnd_n(4) ? (uint32_t)(uintptr_t)b : 0;
+    }
+    *(uint32_t *)(cur->image + 0xfda4) = rnd_n(4) ? rnd_n(9) : 0;
+    *(uint32_t *)(cur->image + 0x7fc4) = (uint32_t)(uintptr_t)(fixtures + 0x10200);
+    *(uint32_t *)(fixtures + 0x10208) = rnd();
+
+    /* the clock */
+    *(uint16_t *)(global + 0x242) = (uint16_t)(rnd_n(4) ? 1 : 0);
+    *(uint16_t *)(global + 0x240) = (uint16_t)(1990 + rnd_n(16));
+    if (rnd_n(2)) {
+        *(uint16_t *)(global + 0x23e) = (uint16_t)(rnd_n(2) ? 0x16d + rnd_n(3) : 1 + rnd_n(0x16e));
+        global[0x23a] = (uint8_t)(rnd_n(2) ? 0x3b + rnd_n(3) : rnd_n(0x3c));
+        global[0x239] = (uint8_t)(rnd_n(2) ? 0x3b + rnd_n(2) : rnd_n(0x3c));
+        global[0x23c] = (uint8_t)(rnd_n(2) ? 0x3b + rnd_n(2) : rnd_n(0x3c));
+        global[0x238] = (uint8_t)(rnd_n(2) ? 0x17 + rnd_n(2) : rnd_n(0x18));
+        global[0x23b] = (uint8_t)(rnd_n(2) ? 0x17 + rnd_n(2) : rnd_n(0x18));
+    }
+    *(uint32_t *)(global + 0x128) = rnd_n(3) ? rnd() : 0;
+    *(uint16_t *)(global + 0x116e) = (uint16_t)(rnd_n(2) ? 4 : rnd());
+    *(uint32_t *)(global + 0x268) = rnd_n(4) ? 0 : 1;
+    global[0x365] = (uint8_t)(rnd_n(4) ? 0 : 1);
+    *(uint16_t *)(cur->image + 0x6dd0) = (uint16_t)rnd();
+    *(uint16_t *)(cur->image + 0x6dd2) = (uint16_t)(rnd_n(2) ? 0xffff - rnd_n(16) : rnd());
+    cur->image[0x3c70] = (uint8_t)(rnd_n(2) ? 0xe0 : rnd());
+    cur->image[0x3c71] = (uint8_t)(rnd_n(2) ? 0xe0 : rnd());
+    cur->image[0x3c72] = (uint8_t)(rnd_n(2) ? 0xe0 : rnd());
+    *(int16_t *)(global + 0x574) = (int16_t)rnd();
+    for (i = 0; i < 4; i++) {
+        static const uint16_t edge[] = { 0xe9a, 0xe9c, 0xea2, 0xea4 };
+        *(int16_t *)(global + edge[i]) = rnd_n(3) == 0 ? 0 :
+            (int16_t)(*(int16_t *)(global + 0x574) + (int16_t)rnd_n(5) - 2);
+    }
+    clock_words[0] = (uint16_t)(1990 + rnd_n(16));
+    clock_words[1] = (uint16_t)(1 + rnd_n(12));
+    clock_words[2] = (uint16_t)(1 + rnd_n(31));
+    clock_words[3] = (uint16_t)rnd_n(24);
+    clock_words[4] = (uint16_t)rnd_n(60);
+    clock_words[5] = (uint16_t)rnd_n(60);
+    *(uint32_t *)(cur->image + 0xcff8) = rnd_n(2) ? 0xe + rnd_n(4) : rnd_n(16);
+    *(uint32_t *)(cur->image + 0x7874) = rnd_n(2);  /* a `d' record seen: +0x74's two directions */
+
+    if (counting) cover_start[which]++;
+    put("\n#start(%u)", which);
+    switch (which) {
+    case 0: ((s0)internal(0x207ebe70, "main_menu_state@0"))(); break;
+    case 1: {
+        uint32_t msg = rnd_n(3) ? 0x40 : rnd_n(0x80);
+        uint32_t cb = cur == &retail ? (uint32_t)(uintptr_t)internal(0x207ebe40, "")
+                                     : ((s0)internal(0, "main_menu_listener_at@0"))();
+        put(" msg=%#x", msg);
+        call_with_regs(cb, msg, rnd());
+        put(" esp %u", cb_esp);
+        if (msg != 0x40)                           /* any other message leaves every register */
+            put(" regs %08x %08x %08x", cb_eax, cb_ecx, cb_edx);
+        break;
+    }
+    case 2: ((s0)internal(0x207f7900, "main_start_menus@0"))(); break;
+    case 3: ((s2)internal(0x207f7a20, "main_start_countdown@8"))(rnd(), rnd()); break;
+    case 4: ((s0)internal(0x207f7b70, "main_clock_from_host@0"))(); break;
+    case 5: ((s0)internal(0x207f2330, "main_clock_logbook@0"))(); break;
+    default: {
+        uint32_t b = rnd();
+        put("->%#x", ((s2)internal(0x207f7c83, "main_clock_tick@8"))(rnd(), b));
+        break;
+    }
+    }
+    put(" clock %u:%u:%u %u:%u day %u year %u season %u text %.8s", global[0x238], global[0x239], global[0x23a],
+        global[0x23b], global[0x23c], *(uint16_t *)(global + 0x23e), *(uint16_t *)(global + 0x240),
+        *(uint16_t *)(global + 0x248), (char *)global + 0xc20);
+    if (counting) {
+        if (*(uint32_t *)(cur->image + 0xcff8) == 0 && which == 3) cover_start_minute++;
+        if (*(uint16_t *)(global + 0x23e) == 1 && which == 6) cover_start_rollover++;
+        if (*(uint8_t *)(cur->image + 0x3c71) == 0x40) cover_start_tally++;
+    }
+}
+
+static void report_start(void)
+{
+    printf("  start: menus %lu, listener %lu, greyed %lu, countdown %lu (finished %lu), clock from host %lu, logbook %lu (tally carried %lu), tick %lu (new year %lu)\n",
+           cover_start[0], cover_start[1], cover_start[2], cover_start[3], cover_start_minute, cover_start[4],
+           cover_start[5], cover_start_tally, cover_start[6], cover_start_rollover);
+}
+
+/* ---- suite: radios (CHAIN lists 3 and 5, slice 30) ---------------------------------- */
+
+static uint32_t STDCALL radios_fe_2c(uint32_t which, uint32_t pos, uint8_t *buf)
+{
+    uint32_t i, ok = rnd_n(5) != 0;
+    (void)pos;
+    put(" fe+0x2c(%#x)->%u", which & 0xffff, ok);
+    for (i = 0; i < 0x190; i++)
+        buf[i] = (uint8_t)rnd();
+    *(uint16_t *)(global + 0x37e) = (uint16_t)rnd();
+    return ok;
+}
+static uint32_t STDCALL radios_fe_28(uint32_t which, uint32_t cl, uint32_t pos, uint8_t *buf)
+{
+    uint32_t i, ok = rnd_n(5) != 0;
+    (void)pos;
+    put(" fe+0x28(%#x,%#x)->%u", which & 0xffff, cl & 0xff, ok);
+    for (i = 0; i < 0x190; i++)
+        buf[i] = (uint8_t)rnd();
+    return ok;
+}
+static uint32_t STDCALL radios_fe_24(uint32_t which, uint32_t pos, uint32_t *out)
+{
+    uint32_t ok = rnd_n(3) != 0;
+    (void)pos;
+    put(" fe+0x24(%#x)->%u", which & 0xffff, ok);
+    if (ok)
+        *out = rnd();
+    return ok;
+}
+static uint32_t STDCALL radios_fe_30(uint32_t pos)
+{
+    uint32_t r = rnd();
+    (void)pos;
+    put(" fe+0x30->%#x", r);
+    return r;
+}
+static uint32_t radios_range;
+static uint32_t STDCALL radios_fe_54(uint32_t pos, uint32_t range, uint32_t to)
+{
+    (void)pos;
+    radios_range = range;
+    put(" fe+0x54(%#x,", range);
+    put_ptr(to);
+    put(")");
+    return 0;
+}
+static uint32_t radios_markers, radios_full;
+static uint32_t STDCALL radios_fe_20(uint32_t n, uint32_t *rec, uint32_t *other)
+{
+    uint8_t *r = fixtures + 0x30000 + 0x40 * (radios_markers % 32);
+    uint32_t i;
+
+    (void)other;
+    n &= 0xffff;                                   /* a word over two stale bytes */
+    put(" fe+0x20(%u)", n);
+    if (n == 0)
+        radios_markers = radios_full ? 30 : rnd_n(3) == 0 ? rnd_n(32) : rnd_n(5);
+    if (radios_markers == 0)                       /* the markers test ax alone, the season eax */
+        return radios_range == 0x1d4c ? 0xffff0000u : 0;
+    radios_markers--;
+    for (i = 0; i < 0x40; i++)
+        r[i] = (uint8_t)rnd();
+    r[0] = radios_full ? (uint8_t)(4 + rnd_n(3)) : (uint8_t)(3 + rnd_n(5));
+    *rec = (uint32_t)(uintptr_t)r;
+    return 1;
+}
+static uint32_t STDCALL radios_util_60(uint32_t from, uint32_t to)
+{
+    put(" util+0x60(");
+    put_ptr(from);
+    put(",");
+    put_ptr(to);
+    put(")");
+    memmove((void *)(uintptr_t)to, (void *)(uintptr_t)from, 8);
+    return 0;
+}
+static uint32_t STDCALL radios_util_3c(uint32_t x, uint32_t y)
+{
+    uint32_t r = (x * 31 + y) >> 8;
+
+    if (rnd_n(3) == 0) {                           /* on an edge of the to/from or the glide's cone */
+        static const uint16_t edge[] = { 0x38e3, 0x471c, 0xc71d, 0xb8e4, 0xc001, 0x3fff };
+        r = (uint32_t)(*(uint16_t *)(cur->image + 0x735f) + edge[rnd_n(6)] + rnd_n(3) - 1);
+    }
+    put(" util+0x3c(%#x,%#x)->%#x", x, y, r & 0xffff);
+    return r;
+}
+static uint32_t radios_6c, radios_6c_set;
+static uint32_t STDCALL radios_util_6c(void)
+{
+    uint32_t r = radios_6c_set ? radios_6c : rnd();
+    put(" util+0x6c->%#x", r);
+    return r;
+}
+uint32_t clean_t_util_6c_v, clean_t_util_60_v, clean_ret60;
+void clean_util_6c(void);
+void clean_util_60(void);
+__asm__(".text\n_clean_util_60:\n\tpopl _clean_ret60\n\tcall *_clean_t_util_60_v\n\t"
+        "movl $0x7fff2345, %ecx\n\tmovl $0x22220008, %edx\n\tpushl _clean_ret60\n\tret\n");
+__asm__(".text\n_clean_util_6c:\n\tcall *_clean_t_util_6c_v\n\tmovl $0x7fff1234, %ecx\n\tmovl $0x22220007, %edx\n\tret\n");
+static uint32_t radios_flat, radios_mag, radios_mag_set, radios_mag_stays;
+static uint32_t STDCALL radios_util_18(int64_t *v)
+{
+    uint32_t r = radios_mag_set ? radios_mag : (uint32_t)((uint64_t)*v >> 31);
+
+    radios_mag_set = radios_mag_stays;
+    put(" Umag(%lld)->%u", (long long)*v, r);
+    return r;
+}
+static uint32_t STDCALL radios_util_2c(uint32_t a, uint16_t *s, uint16_t *c)
+{
+    *s = (uint16_t)rnd();
+    *c = radios_flat ? 0 : (uint16_t)rnd();
+    put(" util+0x2c(%#x)->%#x,%#x", a & 0xffff, *s, *c);
+    return 0;
+}
+static uint32_t STDCALL radios_sound_24(uint32_t a, uint32_t b)
+{
+    put(" sound+0x24(%#x,", a);
+    put_ptr(b);
+    put(")");
+    return 0;
+}
+static uint32_t STDCALL radios_m24_20(uint32_t a)
+{
+    put(" m24+0x20(%#x)", a);
+    return 0;
+}
+
+static unsigned long cover_radio[4], cover_radio_masked, cover_radio_lamps, cover_radio_flagged;
+
+static void setup_radios(void)
+{
+    SET_SLOT(fe, 0x2c, radios_fe_2c);
+    SET_SLOT(fe, 0x28, radios_fe_28);
+    SET_SLOT(fe, 0x24, radios_fe_24);
+    SET_SLOT(fe, 0x30, radios_fe_30);
+    SET_SLOT(fe, 0x54, radios_fe_54);
+    SET_SLOT(fe, 0x20, radios_fe_20);
+    clean_t_util_60_v = (uint32_t)(uintptr_t)radios_util_60;
+    SET_SLOT(util, 0x60, clean_util_60);
+    SET_SLOT(util, 0x3c, radios_util_3c);
+    clean_t_util_6c_v = (uint32_t)(uintptr_t)radios_util_6c;
+    SET_SLOT(util, 0x6c, clean_util_6c);
+    SET_SLOT(util, 0x2c, radios_util_2c);
+    SET_SLOT(util, 0x18, radios_util_18);
+    SET_SLOT(sound, 0x24, radios_sound_24);
+    SET_SLOT(module_stub[24], 0x20, radios_m24_20);
+    util88_all = 1;
+}
+
+static void op_radios(void)
+{
+    uint32_t which = rnd_n(10), i;
+
+    for (i = 0x34c; i < 0x358; i++)
+        global[i] = (uint8_t)rnd();
+    *(uint16_t *)(global + 0x444) = (uint16_t)(rnd_n(4) ? rnd() & ~2u : rnd());
+    global[0x388] = (uint8_t)(rnd_n(3) ? rnd() : 2);
+    global[0x389] = (uint8_t)(rnd_n(3) ? rnd() : 2);
+    global[0x38a] = (uint8_t)(rnd_n(3) ? 0 : 1);
+    *(uint32_t *)(global + 0x38c) = rnd_n(3) ? 0 : 1;
+    *(uint16_t *)(global + 0xc1a) = (uint16_t)(rnd_n(8) ? 0x100 << rnd_n(7) : 0);
+    global[0xb70] = (uint8_t)(rnd_n(4) ? 0 : 1);
+    *(uint32_t *)(global + 0x84c) = rnd_n(3);
+    *(uint16_t *)(global + 0xc4e) = (uint16_t)rnd();
+    *(uint16_t *)(global + 0xc5e) = (uint16_t)rnd();
+    *(uint32_t *)(global + 0x7a8) = rnd_n(3) ? 1 : 0;
+    *(uint32_t *)(global + 0x20) = rnd();
+    *(uint32_t *)(global + 0x580) = rnd();
+    for (i = 0x560; i < 0x578; i++)
+        global[i] = (uint8_t)rnd();
+    *(int32_t *)(global + 0x574) = rnd_n(2) ? (int32_t)rnd_n(0x3000) : (int32_t)rnd();
+    *(uint16_t *)(global + 0xbac) = (uint16_t)rnd_n(2);
+    *(uint16_t *)(global + 0xbae) = (uint16_t)rnd_n(2);
+    *(uint16_t *)(global + 0xbb0) = (uint16_t)rnd_n(2);
+    *(uint32_t *)(global + 0x2ac) = rnd_n(2) ? *(uint32_t *)(cur->image + 0x732e) : rnd();
+    /* +0x74 is reached too: a day and a year it can use (the season suite goes wider) */
+    *(uint16_t *)(global + 0x23e) = (uint16_t)(1 + rnd_n(365));
+    *(uint16_t *)(global + 0x240) = (uint16_t)(1990 + rnd_n(16));
+
+    seed_image(0x7248, 0x72dc);
+    if (op_number == 0 || rnd_n(3) == 0) {
+        seed_image(0x72dc, 0x7300);
+        seed_image(0x7341, 0x7480);
+        seed_image(0x7480, 0x7489);
+        for (i = 0; i < 6; i++) {
+            /* the boxes: each field near the aircraft or far */
+            uint32_t *r = (uint32_t *)(cur->image + 0x748a + 0x18 * i);
+            r[0] = *(uint32_t *)(global + 0x564) + rnd_n(0x200) - 0x100;
+            r[1] = *(uint32_t *)(global + 0x56c) + rnd_n(0x200) - 0x100;
+            r[2] = *(uint32_t *)(global + 0x574) + rnd_n(0x200) - 0x100;
+            r[3] = rnd_n(0x200);
+            r[4] = rnd_n(0x200);
+        }
+        *(uint16_t *)(cur->image + 0x746c) = (uint16_t)(rnd_n(8) ? rnd() | 0x100 : rnd_n(3));
+        *(uint16_t *)(cur->image + 0x7474) = (uint16_t)rnd();
+        cur->image[0x746b] = (uint8_t)rnd();
+        cur->image[0x7476] = (uint8_t)(1 + rnd_n(3));
+        cur->image[0x7477] = (uint8_t)(1 + rnd_n(3));
+        *(uint16_t *)(cur->image + 0x7478) = (uint16_t)(1 + rnd_n(3));
+        global[0xc43] = (uint8_t)(1 + rnd_n(3));
+        cur->image[0x786e] = (uint8_t)(rnd_n(2) ? 0 : rnd());
+        cur->image[0x786f] = (uint8_t)(rnd_n(2) ? 0 : rnd());
+        cur->image[0x7334] = (uint8_t)rnd_n(3);
+        cur->image[0x7050] = (uint8_t)rnd_n(4);
+        /* the marker table */
+        memset(cur->image + 0x7522, 0, 0x7842 - 0x7522);
+        for (i = rnd_n(5); i-- != 0; ) {
+            uint32_t *e = (uint32_t *)(cur->image + 0x7522 + 0x20 * i);
+            e[0] = 4 + rnd_n(3);
+            e[1] = rnd();
+            e[2] = rnd();
+            e[3] = rnd();
+            e[4] = rnd();
+            e[6] = *(uint32_t *)(global + 0x574) - rnd_n(0x1000);
+            e[7] = rnd_n(0x100);
+        }
+    }
+
+    /* steered: the boundaries each routine compares with */
+    radios_full = rnd_n(6) == 0;
+    radios_flat = 0;
+    radios_mag_set = 0;
+    radios_mag_stays = 0;
+    radios_6c_set = 0;
+    for (i = 0xc48; i < 0xc62; i++)
+        global[i] = (uint8_t)(rnd_n(2) ? global[i] : rnd());
+    if (rnd_n(2))                                  /* a needle that just reaches its limit */
+        *(uint16_t *)(cur->image + (rnd_n(2) ? 0x746e : 0x7470)) = (uint16_t)(0xf0 + rnd_n(0x60));
+    *(uint32_t *)(cur->image + 0x730c) = *(uint32_t *)(global + 0x574) + rnd_n(0x100);   /* below the slope's top: no angle */
+    if (rnd_n(2)) {
+        static const int16_t edge[] = { 0x641, (int16_t)0xf9bf };
+        *(int16_t *)(cur->image + 0x738b) = (int16_t)(edge[rnd_n(2)] + (int16_t)rnd_n(3) - 1);
+    }
+    switch (rnd_n(8)) {
+    case 0:                                        /* a station's height unknown: the sentinel */
+        *(uint32_t *)(cur->image + 0x7355) = 0xffffd8f1u;
+        break;
+    case 1:                                        /* the bearing's scaling stops at its limit */
+        *(uint32_t *)(cur->image + 0x7345) = *(uint32_t *)(global + 0x564) - 0xc0000000u;
+        break;
+    case 2: {                                      /* the mask: class, height and range on their edges */
+        static const uint16_t cls[] = { 0, 0x19, 0x1a, 0x31, 0x32, 0x40, 0x10, 0x20 };
+        static const int32_t alts[] = { 0xf4, 0xf5, 0x7be, 0x7bf, 0xb50, 0xb51, 0x1144, 0x1145, 0x2581, 0x2582 };
+        static const uint32_t dists[] = { 0x15b4, 0x15b5, 0x1458c, 0x1458d, 0x2d370, 0x2d371, 0x3d0aa, 0x3d0ab, 0x3d0ac, 0x90000 };
+        *(uint16_t *)(cur->image + 0x7361) = cls[rnd_n(8)];
+        *(int32_t *)(cur->image + 0x7355) = *(int32_t *)(global + 0x574) - alts[rnd_n(10)];
+        radios_mag = dists[rnd_n(10)];
+        radios_mag_set = 1;
+        cur->image[0x735d] = (uint8_t)(cur->image[0x735d] & 0x77);
+        *(uint16_t *)(cur->image + 0x7359) = 1;
+        cur->image[0x786e] = 0;
+        break;
+    }
+    case 3: {                                      /* the DME's speed on its digit boundary */
+        uint32_t r = rnd_n(4) ? rnd_n(0x100000) : rnd_n(8);      /* or no range at all */
+        static const uint16_t dist[] = { 411, 412, 413 };
+        if (rnd_n(2)) {                            /* the last reading blank: this one is not shown */
+            cur->image[0x72e4] = 0;
+            cur->image[0x72e5] = 0;
+        }
+        cur->image[0x72dc] &= 0xfe;
+        radios_mag = r;
+        radios_mag_set = 1;
+        *(uint32_t *)(cur->image + 0x747a) = r + dist[rnd_n(3)];
+        *(uint16_t *)(global + 0xc1a) = 0x100;
+        *(uint16_t *)(cur->image + 0x738d) = 0;
+        *(uint16_t *)(cur->image + 0x7359) = 1;
+        cur->image[0x735d] |= 1;
+        cur->image[0x7476] = 1;
+        global[0xc43] = 1;
+        global[0xb70] = 0;
+        *(uint32_t *)(global + 0x84c) = 1;
+        break;
+    }
+    case 4: {                                      /* one marker, alone, on its cone's edge */
+        uint32_t *e = (uint32_t *)(cur->image + 0x7522);
+        static const uint32_t over[] = { 0x100, 0xbe8, 0xbe7 };
+        memset(cur->image + 0x7522, 0, 0x40);
+        e[0] = 4 + rnd_n(3);
+        e[6] = *(uint32_t *)(global + 0x574) - over[rnd_n(3)];
+        e[7] = rnd_n(0x100);
+        radios_flat = 1;
+        radios_mag = 0x132 + rnd_n(3);
+        radios_mag_set = 1;
+        *(uint16_t *)(cur->image + 0x7359) = 0;
+        *(uint16_t *)(cur->image + 0x73b1) = 0;
+        *(uint16_t *)(cur->image + 0x7409) = 0;
+        *(uint16_t *)(cur->image + 0x738d) = 0;
+        *(uint16_t *)(cur->image + 0x73e5) = 0;
+        cur->image[0x7334] = 0;
+        *(uint32_t *)(global + 0x7a8) = 1;
+        if (which < 4) which += 4;
+        break;
+    }
+    case 5: {                                      /* a retune box exactly on its height */
+        uint32_t *r = (uint32_t *)(cur->image + 0x748a + 0x18 * rnd_n(6));
+        uint32_t k = rnd_n(0x100);
+        r[0] = *(uint32_t *)(global + 0x564);
+        r[1] = *(uint32_t *)(global + 0x56c);
+        r[2] = *(uint32_t *)(global + 0x574) + k;
+        r[3] = 0x7fffffff;
+        r[4] = k + rnd_n(2);
+        break;
+    }
+    case 6: {                                      /* the aircraft above the slope: an angle, or on its limit */
+        uint32_t mode = rnd_n(3), h, r;
+        if (mode == 0) {
+            h = 0x100 + rnd_n(0x4000);
+            r = h * 8 + rnd_n(0x100);
+            *(uint16_t *)(cur->image + 0x738b) = (uint16_t)((h << 16) / (uint16_t)(r >> 1) + rnd_n(0x800) - 0x400);
+        } else if (mode == 1) {                    /* twice the height just reaches half the range */
+            h = 1 + rnd_n(0x7000);
+            r = h * 4;
+            *(uint16_t *)(cur->image + 0x738b) = 0;
+        } else {                                   /* twice the height carries out of the word */
+            h = 0x8000 + rnd_n(0x4000);
+            r = 2 * (2 * (h - 0x8000) + 1 + rnd_n(0x1000));
+            *(uint16_t *)(cur->image + 0x738b) = 0;
+        }
+        *(uint32_t *)(cur->image + 0x730c) = *(uint32_t *)(global + 0x574) - h;
+        radios_mag = r;
+        radios_mag_set = 1;
+        radios_mag_stays = 1;
+        *(uint16_t *)(cur->image + 0x7359) = 1;
+        cur->image[0x735d] |= 0x40;
+        cur->image[0x7469] = 1;
+        if (which < 4) which += 4;
+        break;
+    }
+    case 7: {                                      /* the mask: exactly on a line, or a unit from a whole step */
+        static const struct { uint16_t cls; int32_t lo, hi; uint32_t a8, ac, b0, b4, b8, bc; } line[] = {
+            { 0x10, 1, 0xf4, 0, 0x155c80c, 0, 0, 0x25f9c8b, 0 },
+            { 0x10, 0xf5, 0x7be, 0xf4, 0x55476, 0xb4dc, 0x98, 0xf30b7, 0xb4dc },
+            { 0x10, 0x7bf, 0x1000, 0x7be, 0xfffaab8au, 0xd908, 0x7be, 0xfff0cf49u, 0xfd34 },
+            { 0x20, 0xf5, 0xb50, 0xf4, 0x6fbea, 0x12160, 0x98, 0xd80a2, 0x12160 },
+            { 0x20, 0xb51, 0x1000, 0xb50, 0xfff90416u, 0x1458c, 0xb50, 0xfff27f5eu, 0x169b8 },
+            { 0x40, 0xf5, 0x1144, 0xf4, 0x27ea84, 0x1458c, 0x98, 0x293b14, 0x169b8 },
+            { 0x40, 0x1145, 0x2581, 0x1144, 0x725fc, 0x3d0a4, 0x1144, 0xe4bf8, 0x3f4d0 },
+            { 0x40, 0x2582, 0x4000, 0x2581, 0xfff998a8u, 0x46154, 0x2581, 0xfff55715u, 0x51630 },
+        };
+        uint32_t l = rnd_n(8), k = 1 + rnd_n(8), e1, e2, span;
+        int32_t alt = line[l].lo + (int32_t)rnd_n((uint32_t)(line[l].hi - line[l].lo + 1));
+
+        e1 = (uint32_t)((uint64_t)((int64_t)(alt - (int32_t)line[l].a8) * (int32_t)line[l].ac) >> 16) + line[l].b0;
+        e2 = (uint32_t)((uint64_t)((int64_t)(alt - (int32_t)line[l].b4) * (int32_t)line[l].b8) >> 16) + line[l].bc;
+        span = (e2 - e1) >> 8;
+        *(uint16_t *)(cur->image + 0x7361) = line[l].cls;
+        *(int32_t *)(cur->image + 0x7355) = *(int32_t *)(global + 0x574) - alt;
+        radios_mag = rnd_n(3) == 0 ? e1 : e2 - (span * k - 1);
+        radios_mag_set = 1;
+        radios_6c = (k - 1 + ((k - 1) >> 4) + 1) << 8;
+        radios_6c_set = 1;
+        cur->image[0x735d] = (uint8_t)(cur->image[0x735d] & 0x77);
+        *(uint16_t *)(cur->image + 0x7359) = 1;
+        cur->image[0x786e] = 0;
+        break;
+    }
+    default:
+        break;
+    }
+
+    if (counting) cover_radio[which < 4 ? 0 : which < 8 ? 1 : which - 6]++;
+    put("\n#radio(%u) 735d=%#x 7359=%#x 7469=%u 735f=%#x", which, cur->image[0x735d], *(uint16_t *)(cur->image + 0x7359),
+        cur->image[0x7469], *(uint16_t *)(cur->image + 0x735f));
+    if (which < 4) {
+        ((s2)internal(0x207f9261, "main_radio_list3@8"))(rnd(), rnd());   /* CHAIN ignores its eax */
+    } else if (which < 8) {
+        ((s2)internal(0x207f9344, "main_radio_list5@8"))(rnd(), rnd());
+    } else if (which == 8) {
+        ((s0)internal(0x207f916e, "main_radios_start@0"))();
+        put(" 384=");                              /* an image pointer, in GLOBAL */
+        put_ptr(*(uint32_t *)(global + 0x384));
+        *(uint32_t *)(global + 0x384) = 0;
+    } else {
+        ((s0)internal(0x207f9208, "main_radios_stop@0"))();
+    }
+    put(" after 7469=%u", cur->image[0x7469]);
+    put(" needles %d %d %d %d %d %d adf %#x gs %d text %.5s %.3s %.5s %.3s lamps %u%u%u",
+        (int8_t)global[0xc48], global[0xc4b], (int8_t)global[0xc49], (int8_t)global[0xc59], global[0xc5b],
+        *(uint16_t *)(global + 0xc50), *(uint16_t *)(global + 0xc6a), global[0xc4c], (char *)global + 0xc29,
+        (char *)global + 0xc2e, (char *)global + 0xc33, (char *)global + 0xc38, *(uint16_t *)(global + 0xbac),
+        *(uint16_t *)(global + 0xbae), *(uint16_t *)(global + 0xbb0));
+    if (counting) {
+        if (*(uint16_t *)(global + 0xbac) | *(uint16_t *)(global + 0xbae) | *(uint16_t *)(global + 0xbb0)) cover_radio_lamps++;
+        if (cur->image[0x735d] & 0x80) cover_radio_flagged++;
+        if (*(uint16_t *)(cur->image + 0x7359) == 0) cover_radio_masked++;
+    }
+}
+
+static void report_radios(void)
+{
+    printf("  radios: list 3 %lu, list 5 %lu, start %lu, stop %lu; lamps lit %lu, localiser %lu, NAV1 dead %lu\n",
+           cover_radio[0], cover_radio[1], cover_radio[2], cover_radio[3], cover_radio_lamps, cover_radio_flagged,
+           cover_radio_masked);
+}
+
+/* ---- suite: weather (the layers at start, slice 31) --------------------------------- */
+
+static uint32_t STDCALL weather_n_get(uint32_t v, uint32_t type, uint16_t *out)
+{
+    uint16_t r;
+
+    if (in_image(v))                               /* a value field's own address */
+        v -= (uint32_t)(uintptr_t)cur->image;
+    r = (uint16_t)(v + type);
+    put(" N1c(%#x,%#x)->%#x c18=%#x", v, type, r, *(uint16_t *)(global + 0xc18));
+    *out = r;
+    return 0;
+}
+static uint32_t STDCALL weather_n_put(uint16_t *in, uint32_t type, uint32_t to)
+{
+    if (in_image(to))
+        to -= (uint32_t)(uintptr_t)cur->image;
+    put(" N18(%#x,%#x,%#x)", *in, type, to);
+    return 0;
+}
+static uint32_t STDCALL weather_h_2a4(uint32_t id, void **out)
+{
+    void *p = arena_get(0x40);
+    put(" host+0x2a4(%#x)", id);
+    *out = p;
+    return 0;
+}
+typedef int32_t (STDCALL *weather_cmp)(uint32_t, uint32_t);
+static uint32_t STDCALL weather_h_22c(uint8_t *base, uint32_t n, uint32_t size, weather_cmp cmp)
+{
+    static uint8_t tmp[0x100];
+    uint32_t i, j;
+
+    put(" sort(");
+    put_ptr((uint32_t)(uintptr_t)base);
+    put(",%u,%#x)", n, size);
+    for (i = 1; i < n; i++) {
+        memcpy(tmp, base + i * size, size);
+        for (j = i; j > 0 && cmp((uint32_t)(uintptr_t)(base + (j - 1) * size), (uint32_t)(uintptr_t)tmp) > 0; j--)
+            memcpy(base + j * size, base + (j - 1) * size, size);
+        memcpy(base + j * size, tmp, size);
+    }
+    return 0;
+}
+
+static unsigned long cover_weather, cover_weather_swapped, cover_weather_lifted;
+
+static void setup_weather(void)
+{
+    SET_SLOT(module_stub[17], 0x1c, weather_n_get);
+    SET_SLOT(module_stub[17], 0x18, weather_n_put);
+    SET_SLOT(host, 0x2a4, weather_h_2a4);
+    SET_SLOT(host, 0x22c, weather_h_22c);
+}
+
+/* A value field for NUMERIC's model: few enough that layers meet, and a high
+ * word a compare must not look at. */
+static uint32_t weather_value(void)
+{
+    return rnd_n(8) ? 0x1000 + rnd_n(4) + (rnd_n(4) ? 0 : rnd_n(3) << 16) : 0;
+}
+
+static void op_weather(void)
+{
+    uint32_t i;
+
+    /* the tables are full of relocated pointers, which stay */
+    seed_image(0x7b50, 0x7f44);
+    *(uint32_t *)(cur->image + 0x7b50) = rnd_n(2);
+    *(uint32_t *)(cur->image + 0x7b54) = rnd_n(8) ? 0 : 1;
+    *(uint32_t *)(cur->image + 0x7b58) = rnd_n(8) ? 0 : 1;
+    for (i = 0; i < 3; i++) {
+        uint8_t *r = cur->image + 0x7b64 + 0x58 * i;
+        *(uint32_t *)(r + 0x54) = rnd_n(4) ? 1 : 0;
+        *(uint32_t *)(r + 0x40) = rnd_n(13);
+        *(uint16_t *)(r + 0x3c) = (uint16_t)rnd_n(10);
+        *(uint32_t *)(r + 4) = weather_value();
+        *(uint32_t *)(r + 0x18) = weather_value();
+        *(uint32_t *)(r + 0x2c) = weather_value();
+    }
+    for (i = 0; i < 3; i++)
+        *(uint32_t *)(cur->image + 0x7ca8 + 0x64 * i + 0x60) = rnd_n(4) ? 1 : 0;
+    for (i = 0; i < 4; i++)
+        *(uint32_t *)(cur->image + 0x7e38 + 0x2c * i + 0x28) = rnd_n(3) ? 1 : rnd_n(2) * 2;
+    /* the relevant pointer fields go to fixture words, for NUMERIC's model */
+    for (i = 0; i < 3; i++) {
+        uint8_t *r = cur->image + 0x7ca8 + 0x64 * i;
+        *(uint32_t *)(r + 4) = weather_value();
+        *(uint32_t *)(r + 0x18) = weather_value();
+        *(uint32_t *)(r + 0xc4 - 0x64) = *(uint32_t *)(r + 0x60);
+    }
+    for (i = 0; i < 4; i++)
+        *(uint32_t *)(cur->image + 0x7e38 + 0x2c * i + 4) = weather_value();
+    *(uint32_t *)(cur->image + 0x7de0) = rnd_n(3);  /* the layer the sort keeps the others above */
+    *(uint32_t *)(cur->image + 0x7de8) = weather_value();
+    *(uint32_t *)(cur->image + 0xd12c) = rnd();
+    *(uint32_t *)(global + 0xf18) = rnd_n(2);      /* the table has two rows */
+    global[0xf12] = (uint8_t)(rnd_n(4) ? 0 : 1);
+    global[0xf13] = (uint8_t)rnd();
+    *(uint16_t *)(global + 0xc18) = (uint16_t)rnd();
+    for (i = 0xfc0; i < 0xfc4; i++)
+        global[i] = (uint8_t)rnd();
+    for (i = 0x10a8; i < 0x10ac; i++)
+        global[i] = (uint8_t)rnd();
+    *(uint32_t *)(cur->image + 0x7b5c + 0x140) = rnd_n(4);
+    if (counting) cover_weather++;
+    put("\n#weather mode %u", *(uint32_t *)(global + 0xf18));
+    ((s0)internal(0x207fb5f0, "main_weather_load@0"))();
+    put(" c18=%#x", *(uint16_t *)(global + 0xc18));
+    if (counting) {
+        uint8_t *a = global + 0xf1c;
+        if (*(int16_t *)(a + 2) > *(int16_t *)(a + 0xa)) cover_weather_swapped++;
+        if (*(uint32_t *)(cur->image + 0x7ca8 + 0x60) == 0) cover_weather_lifted++;
+    }
+}
+
+static void report_weather(void)
+{
+    printf("  weather: %lu runs, winds in order %lu, a layer dropped %lu\n", cover_weather, cover_weather_swapped,
+           cover_weather_lifted);
+}
+
+/* ---- suite: kneeboard (slice 32) --------------------------------------------------- */
+
+static uint8_t *kb_rec(void) { return fixtures + 0x40000; }
+static uint32_t kb_pages, kb_lines;
+
+static uint32_t STDCALL kb_w78(uint32_t *to, const char *title, uint32_t a)
+{
+    uint8_t *r = kb_rec();
+    uint32_t y, *rows = (uint32_t *)(fixtures + 0x41000);
+
+    put(" window+0x78(%s,%u)", title, a);
+    memset(r, 0, 0x200);
+    *(uint32_t *)(r + 8) = rnd_n(2) ? 0x80000000u : 0;
+    *(uint32_t *)(r + 0x38) = 0xbd;
+    *(uint32_t *)(r + 0x3c) = 0x12a;
+    *(uint32_t *)(r + 0x60) = 0xbd;
+    *(uint32_t *)(r + 0x64) = 0x12a;
+    *(uint32_t *)(r + 0x84) = 0xbd;
+    *(uint32_t *)(r + 0x88) = 0x12a;
+    *(uint32_t *)(r + 0x90) = (uint32_t)(uintptr_t)rows;
+    *(uint32_t *)(r + 0x90 + 0) = (uint32_t)(uintptr_t)rows;
+    *(uint32_t *)(r + 0x80 + 0x10) = (uint32_t)(uintptr_t)rows;
+    for (y = 0; y < 0x12a; y++)
+        rows[y] = (uint32_t)(uintptr_t)(fixtures + 0x42000 + y * 0xc0);
+    *to = (uint32_t)(uintptr_t)r;
+    return 0;
+}
+#define KB_LOG1(name, text) static uint32_t STDCALL name(uint32_t a) { put(" " text "("); put_ptr(a); put(")"); return 0; }
+KB_LOG1(kb_w68, "window+0x68")
+KB_LOG1(kb_w6c, "window+0x6c")
+KB_LOG1(kb_w7c, "window+0x7c")
+static uint32_t kb_h64_fails;
+static uint32_t STDCALL kb_h64(uint32_t a)
+{
+    put(" host+0x64(");
+    put_ptr(a);
+    put(")");
+    return kb_h64_fails;
+}
+KB_LOG1(kb_h68, "host+0x68")
+KB_LOG1(kb_h7c, "host+0x7c")
+KB_LOG1(kb_h25c, "host+0x25c")
+static uint32_t STDCALL kb_h27c(uint32_t r, uint32_t c, uint32_t a, uint32_t b)
+{
+    put(" host+0x27c(");
+    put_ptr(r);
+    put(",");
+    put_ptr(c);
+    put(",%u,%u) d=%08x", a, b, digest((uint8_t *)(uintptr_t)c, 0x24, 0x811c9dc5u));
+    return 0;
+}
+static uint32_t STDCALL kb_h284(uint32_t r, uint32_t c)
+{
+    put(" host+0x284(");
+    put_ptr(r);
+    put(",");
+    put_ptr(c);
+    put(")");
+    return 0;
+}
+static uint32_t STDCALL kb_h318(uint32_t r, int32_t *rc, uint32_t a, uint32_t b, const char *text, uint32_t f, uint32_t z)
+{
+    (void)r;
+    /* the title's bottom is retail's stack garbage on the way in; a line's is set */
+    put(" text(%d,%d,%d,%d,%d,%d,%s,%u,%u)", rc[0], rc[1], rc[2], f == 2 ? rc[3] : 0, (int32_t)a, (int32_t)b, text, f, z);
+    rc[2] = rc[0] + 6 * (int32_t)strlen(text);
+    rc[3] = rc[1] + 12;
+    return 0;
+}
+static uint32_t STDCALL kb_h88(uint32_t r, int32_t *rc)
+{
+    (void)r;
+    put(" host+0x88(%d,%d,%d,%d) rows=%08x", rc[0], rc[1], rc[2], rc[3], digest(fixtures + 0x42000, 0x12a * 0xc0, 0x811c9dc5u));
+    return 0;
+}
+static uint32_t STDCALL kb_h244(uint32_t a, uint32_t b, const char *t, uint32_t c)
+{
+    put(" add(%#x,%#x,%s,%u)", a, b, t, c);
+    return 0;
+}
+static uint32_t STDCALL kb_hf0(const char *section, const char *key, char *out, uint32_t size, const char *path, uint32_t ext)
+{
+    int k = atoi(key);
+
+    put(" ini(%s,%s,%#x,%s,%#x)", section, key, size, path, ext);
+    if (strcmp(section, "lists") == 0 || strcmp(section, "CHECKLISTS") == 0) {
+        if ((uint32_t)k >= kb_pages) {
+            out[0] = 0;
+            return rnd_n(3) ? 0xffffffffu : 0;     /* no key, or an empty one */
+        }
+        sprintf(out, rnd_n(3) ? "  Page %d , \tShort%d  " : "Page%d", k, k);
+        return (uint32_t)strlen(out);
+    }
+    if ((uint32_t)k >= kb_lines) {
+        out[0] = 0;
+        return 0;
+    }
+    sprintf(out, "%s line %d", section, k);
+    return (uint32_t)strlen(out);
+}
+static uint32_t STDCALL kb_hc8(const char *a, const char *b, char *out, uint32_t n)
+{
+    uint32_t have = rnd_n(3);
+
+    put(" prefs-read(%s,%s,%#x)->%u", a, b, n, have);
+    if (have == 0)
+        return 0;
+    sprintf(out, have == 1 ? "%d,%d,%d" : "%d, -1 ,%d", rnd_n(3), (int)rnd_n(500) - 50, (int)rnd_n(500) - 50);
+    return 1;
+}
+static uint32_t STDCALL kb_hcc(const char *a, const char *b, const char *v)
+{
+    put(" prefs-write(%s,%s,%s)", a, b, v);
+    return 0;
+}
+static uint32_t STDCALL kb_m23_30(uint32_t a, uint32_t b, char *path, uint32_t n)
+{
+    uint32_t ok = rnd_n(6) != 0;
+    (void)a;
+    put(" m23+0x30(%u,%#x)->%u", b, n, ok);
+    if (ok)
+        strcpy(path, "c:\\plane\\panel.cfg");
+    return ok;
+}
+static uint32_t STDCALL kb_h2a8(char *d, const char *s)
+{
+    strcpy(d, s);
+    return 0;
+}
+static uint32_t STDCALL kb_h218(uint8_t *d, int32_t v, uint32_t n)
+{
+    memset(d, v, n);
+    return 0;
+}
+static uint32_t STDCALL kb_h3c(uint32_t a, uint32_t b)
+{
+    put(" post(%#x,%#x)", a, b);
+    return 0;
+}
+
+static unsigned long cover_kb[8], cover_kb_pages;
+
+static void kneeboard_stubs(void)
+{
+    uint32_t i;
+
+    SET_SLOT(module_stub[10], 0x78, kb_w78);
+    SET_SLOT(module_stub[10], 0x7c, kb_w7c);
+    SET_SLOT(module_stub[10], 0x68, kb_w68);
+    SET_SLOT(module_stub[10], 0x6c, kb_w6c);
+    SET_SLOT(host, 0x64, kb_h64);
+    SET_SLOT(host, 0x68, kb_h68);
+    SET_SLOT(host, 0x7c, kb_h7c);
+    SET_SLOT(host, 0x25c, kb_h25c);
+    SET_SLOT(host, 0x27c, kb_h27c);
+    SET_SLOT(host, 0x284, kb_h284);
+    SET_SLOT(host, 0x318, kb_h318);
+    SET_SLOT(host, 0x88, kb_h88);
+    SET_SLOT(host, 0x244, kb_h244);
+    SET_SLOT(host, 0xf0, kb_hf0);
+    SET_SLOT(host, 0xc8, kb_hc8);
+    SET_SLOT(host, 0xcc, kb_hcc);
+    SET_SLOT(host, 0x2a8, kb_h2a8);
+    SET_SLOT(host, 0x218, kb_h218);
+    SET_SLOT(host, 0x3c, kb_h3c);
+    SET_SLOT(acontain, 0x30, kb_m23_30);
+    handles_differ = 1;
+    for (i = 0; i < 256; i++)
+        fixtures[0x3ff00 + i] = (uint8_t)(i * 3);
+    *(uint32_t *)(hg2d + 0x90) = (uint32_t)(uintptr_t)(fixtures + 0x3ff00);
+    IMG32(0x7fc0) = (uint32_t)(uintptr_t)cur->module;
+}
+
+static void setup_kneeboard(void)
+{
+    kneeboard_stubs();
+    ((s0)internal(0x207e2320, "main_kb_create@0"))();
+}
+
+static void op_kneeboard(void)
+{
+    uint32_t which = rnd_n(8);
+    uint8_t *r = kb_rec();
+
+    kb_pages = rnd_n(5);
+    kb_lines = rnd_n(6);
+    *(uint32_t *)(r + 8) = (rnd_n(2) ? 0x80000000u : 0) | (rnd_n(3) == 0 ? 0x40000000u : 0) |
+                           (rnd_n(2) ? 0x5000000u : 0);
+    *(uint32_t *)(global + 0x129c) = rnd_n(4);
+    if (rnd_n(2))
+        *(uint32_t *)(cur->image + 0x7fc8) = rnd_n(3);
+    if (counting) cover_kb[which]++;
+    put("\n#kb(%u) pages=%u lines=%u", which, kb_pages, kb_lines);
+    switch (which) {
+    case 0: put("->%u", ((s0)internal(0x207e1c30, "main_kb_load@0"))()); break;
+    case 1: ((s2)internal(0x207e1fc0, "main_kb_listener@8"))(0x60, 0); break;
+    case 2: ((s2)internal(0x207e1fc0, "main_kb_listener@8"))(0x70, 0); break;
+    case 3: {
+        uint32_t x = rnd_n(2) ? 0x1f9c + rnd_n(3) + (rnd_n(2) ? 0xc8 : 0) - 1 : rnd_n(0x3000);
+        uint32_t y = rnd_n(2) ? 0x179c + rnd_n(3) + (rnd_n(2) ? 0xc8 : 0) - 1 : rnd_n(0x3000);
+        *(uint32_t *)(r + 0x20) = x;
+        *(uint32_t *)(r + 0x24) = y;
+        *(uint32_t *)(r + 0x28) = 0;
+        *(uint32_t *)(r + 0x2c) = 0;
+        ((s4)internal(0x207e1b80, "main_kb_window@16"))(rnd_n(2) ? 2 : rnd_n(4), (uint32_t)(uintptr_t)r,   /* its eax is junk */
+            rnd_n(3) == 0 ? 0 : rnd_n(2) ? 1 + rnd_n(0xffff) : rnd() | 0x10000, rnd());
+        break;
+    }
+    case 4: put("->%u", ((s2)internal(0x207e2590, "main_kb_close@8"))(0, 0)); break;
+    case 5: {
+        static char buf[0x100];
+        static const char *const texts[] = { "", " a ", "\t\t", "a,b", " a b ,c", "abc", ",x", "  ,  " };
+        strcpy(buf, texts[rnd_n(8)]);
+        ((void (STDCALL *)(char *))internal(0x207e1a80, "main_kb_trim@4"))(buf);
+        put("[%s]", buf);
+        break;
+    }
+    case 6: {
+        static char buf[0x100], out[0x100];
+        static const char *const texts[] = { "", " a ", "a,b", " a b ,c", ",x", "  ,  ", "\tq\t,r," };
+        uint32_t n;
+        strcpy(buf, texts[rnd_n(7)]);
+        memset(out, 0, sizeof out);
+        n = ((s3)internal(0x207e1af0, "main_kb_field@12"))((uint32_t)(uintptr_t)buf, (uint32_t)(uintptr_t)out, 0x2c);
+        put("[%s]->%d", out, n ? (int)(n - (uint32_t)(uintptr_t)buf) : -1);
+        break;
+    }
+    default: {
+        uint32_t page = rnd_n(3), list = page * 0x2108, n = rnd_n(6), j;
+
+        *(uint32_t *)(r + 0x10) = 0;
+        *(uint32_t *)(cur->image + 0xfda4) = 1;
+        if (rnd_n(2))                              /* short enough that the rules reach its last rows */
+            *(uint32_t *)(r + 0x3c) = 0x3c + rnd_n(0x60);
+        sprintf((char *)cur->image + 0xdda4 + (page << 8), "Title %u", page);
+        *(uint32_t *)(cur->image + 0x11eac + list) = n;
+        for (j = 0; j < n; j++)
+            sprintf((char *)cur->image + 0x10eac + list + j * 0x100, "Line %u", j);
+        ((s1)internal(0x207e2620, "main_kb_draw@4"))(page);
+        break;
+    }
+    }
+    put(" page=%u count=%u flags=%#x", *(uint32_t *)(cur->image + 0x7fc8), *(uint32_t *)(cur->image + 0xfda4), *(uint32_t *)(r + 8));
+    if (counting) cover_kb_pages += *(uint32_t *)(cur->image + 0xfda4);
+}
+
+static void report_kneeboard(void)
+{
+    printf("  kneeboard: load %lu, list 0x60 %lu, 0x70 %lu, window %lu, close %lu, trim %lu, field %lu, draw %lu; pages seen %lu\n",
+           cover_kb[0], cover_kb[1], cover_kb[2], cover_kb[3], cover_kb[4], cover_kb[5], cover_kb[6], cover_kb[7], cover_kb_pages);
+}
+
+static uint32_t session_line, session_type;
+#define SESSION_0(name, text) static uint32_t STDCALL name(void) { put(" " text); return 0; }
+#define SESSION_1(name, text) static uint32_t STDCALL name(uint32_t a) { put(" " text "("); put_ptr(a); put(")"); return 0; }
+static uint32_t STDCALL ses_h23c(uint32_t a)
+{
+    put(" menus(");
+    put_ptr(a);
+    put(")");
+    *(uint32_t *)(global + 0xf18) = rnd_n(2);      /* the preferences have just been read: a mode the weather has a row for */
+    return 0;
+}
+SESSION_0(ses_h240, "menus-off")
+SESSION_0(ses_h114, "host+0x114")
+SESSION_0(ses_h28, "host+0x28")
+SESSION_0(ses_s18, "sound+0x18")
+SESSION_0(ses_s1c, "sound+0x1c")
+SESSION_0(ses_s20, "sound+0x20")
+SESSION_0(ses_m16_4c, "m16+0x4c")
+SESSION_0(ses_m16_50, "m16+0x50")
+SESSION_0(ses_m23_2c, "m23+0x2c")
+SESSION_1(ses_m23_28, "m23+0x28")
+SESSION_0(ses_w18, "window+0x18")
+SESSION_0(ses_h18, "hg2d+0x18")
+SESSION_0(ses_wm24, "weatherm+0x24")
+/* The radios leave an image pointer in GLOBAL +0x384; the digests want it side-free. */
+static uint32_t STDCALL ses_chain_add(uint32_t list, uint32_t cb)
+{
+    uint32_t v = *(uint32_t *)(global + 0x384);
+
+    if (in_image(v))
+        *(uint32_t *)(global + 0x384) = v - (uint32_t)(uintptr_t)cur->image;
+    return chain_add(list, cb);
+}
+static uint32_t STDCALL ses_h98(uint32_t name, char *out, uint32_t n)
+{
+    uint32_t r = session_line ? 0 : 1;
+    (void)name;
+    put(" option(%#x)->%u", n, r);
+    if (r == 0)
+        strcpy(out, "c:\\f\\mine.flt");
+    return r;
+}
+static uint32_t STDCALL ses_h188(const char *in, char *file, char *dir, char *ext, uint32_t *type)
+{
+    put(" split(%s)", in);
+    strcpy(file, "mine");
+    strcpy(dir, "c:\\f\\");
+    strcpy(ext, ".flt");
+    *type = session_type;
+    return 0;
+}
+static uint32_t STDCALL ses_h14c(const char *path, uint32_t ext)
+{
+    put(" delete(%s,%u)", path, ext);
+    return 0;
+}
+static uint32_t STDCALL ses_h10c(uint32_t id, uint32_t *block)
+{
+    put(" dialog(%#x)", id);
+    (void)block;
+    return 0;
+}
+static uint32_t STDCALL ses_m7_28(uint32_t p, uint32_t a)
+{
+    put(" m7+0x28(");
+    put_ptr(p);
+    put(",%u)", a);
+    return 0;
+}
+
+/* ---- suite: session (+0x28 and +0x2c, slice 33) ------------------------------------- */
+
+static void setup_session(void)
+{
+    setup_situations();
+    setup_prefs();
+    setup_start();
+    setup_radios();
+    setup_weather();
+    kneeboard_stubs();
+    setup_prefs();                                 /* the CFG's readers, over the kneeboard's models */
+    SET_SLOT(chain, 0x18, ses_chain_add);
+    session_empty_strings = 1;
+    SET_SLOT(host, 0x23c, ses_h23c);
+    SET_SLOT(host, 0x240, ses_h240);
+    SET_SLOT(host, 0x114, ses_h114);
+    SET_SLOT(host, 0x28, ses_h28);
+    SET_SLOT(host, 0x98, ses_h98);
+    SET_SLOT(host, 0x188, ses_h188);
+    SET_SLOT(host, 0x14c, ses_h14c);
+    SET_SLOT(host, 0x10c, ses_h10c);
+    SET_SLOT(sound, 0x18, ses_s18);
+    SET_SLOT(sound, 0x1c, ses_s1c);
+    SET_SLOT(sound, 0x20, ses_s20);
+    SET_SLOT(controls, 0x4c, ses_m16_4c);
+    SET_SLOT(controls, 0x50, ses_m16_50);
+    SET_SLOT(acontain, 0x28, ses_m23_28);
+    SET_SLOT(acontain, 0x2c, ses_m23_2c);
+    SET_SLOT(module_stub[10], 0x18, ses_w18);
+    SET_SLOT(module_stub[7], 0x28, ses_m7_28);
+    SET_SLOT(hg2d, 0x18, ses_h18);
+    SET_SLOT(weatherm, 0x24, ses_wm24);
+    session_line = rnd_n(3) == 0;
+    session_type = rnd_n(4);
+    *(uint32_t *)(global + 0x1210) = rnd_n(3);
+    *(uint32_t *)(global + 0x1218) = rnd_n(2);
+    *(uint32_t *)(global + 0x121c) = rnd_n(2);
+    *(uint32_t *)(global + 0x11d4) = rnd_n(2);
+    *(uint32_t *)(cur->image + 0x7f48) = *(uint32_t *)(cur->image + 0x7f48);
+}
+
+static void op_session(void)
+{
+    static char mode[16];
+
+    if (op_number != 0)                            /* one run a scenario */
+        return;
+    snprintf(mode, sizeof mode, "%u", 1 + rnd_n(11));   /* a real preset (the prefs suite goes wider) */
+    cfg_set("PREFS", "PERFORMANCE_MODE", mode);
+    clock_words[0] = (uint16_t)(1990 + rnd_n(16));
+    clock_words[1] = (uint16_t)(1 + rnd_n(12));
+    clock_words[2] = (uint16_t)(1 + rnd_n(31));
+    clock_words[3] = (uint16_t)rnd_n(24);
+    clock_words[4] = (uint16_t)rnd_n(60);
+    clock_words[5] = (uint16_t)rnd_n(60);
+    *(uint32_t *)(cur->image + 0x7874) = rnd_n(2); /* a `d' record seen: +0x74's first argument counts */
+    kb_h64_fails = rnd_n(8) == 0;
+    put("\n#session start");
+    ((s0)SVC(0x28))();
+    put(" c9c=%08x\n#session stop", *(uint32_t *)(global + 0xc9c));
+    *(uint32_t *)(global + 0x11d8) = 0;            /* ACONTAIN's block, or none */
+    kb_h64_fails = 0;
+    *(uint32_t *)(cur->image + 0x7fc8) = rnd_n(3);
+    if (rnd_n(2)) {                                /* the kneeboard shown and moved, which the prefs remember */
+        *(uint32_t *)(kb_rec() + 8) |= 0x80000000u;
+        *(uint32_t *)(kb_rec() + 8) &= 0xfeffffffu;
+    }
+    ((s0)SVC(0x2c))();
+}
+
+static void report_session(void)
+{
+}
+
 static const struct suite suites[] = {
     { "records", op_records, report_records, 40, setup_records, 0x00 },
     { "situations", op_situations, report_situations, 30, setup_situations, 0xff },
@@ -4845,6 +6196,12 @@ static const struct suite suites[] = {
     { "commands", op_commands, report_commands, 30, setup_commands, 0xff },
     { "dialogs", op_dialogs, report_dialogs, 20, setup_dialogs, 0x00 },
     { "flights", op_flights, report_flights, 12, setup_flights, 0xff },
+    { "natives", op_natives, report_natives, 8, setup_natives, 0x00 },
+    { "start", op_start, report_start, 20, setup_start, 0x00 },
+    { "radios", op_radios, report_radios, 12, setup_radios, 0x00 },
+    { "weather", op_weather, report_weather, 8, setup_weather, 0x00 },
+    { "kneeboard", op_kneeboard, report_kneeboard, 12, setup_kneeboard, 0x00 },
+    { "session", op_session, report_session, 1, setup_session, 0x00 },
 };
 
 static const struct suite *suite;
@@ -4875,6 +6232,20 @@ static int table_overwritten(void)
             return 1;
     }
     return 0;
+}
+
+/* Retail never deletes the kneeboard's picture: every .text+0x1320 loads another
+ * DIB section, and 30,000 of them fill the process's address space, after which
+ * LoadImageA fails on whichever side is next. Drop each once the module has let
+ * go of it, or at the end of its scenario. */
+static void drop_kneeboard_bitmap(int last)
+{
+    static uint32_t held;
+    uint32_t now = IMG32(0xdc84);
+
+    if (held != 0 && (last || held != now))
+        DeleteObject((HGDIOBJ)(uintptr_t)held);
+    held = last ? 0 : now;
 }
 
 static void run_side(struct side *s)
@@ -4909,8 +6280,12 @@ static void run_side(struct side *s)
         if (__builtin_setjmp(fault_jb) == 0)
             suite->op();
         in_main = 0;
+        if (handles_differ)
+            drop_kneeboard_bitmap(0);
         if (hung) {
             put(" HANG");
+            if (getenv("MAIN_HANG") && cur->length > 300)
+                printf("%s hang: %.300s\n", cur->name, cur->transcript + cur->length - 300);
             if (counting) cover_hangs++;
             break;
         }
@@ -4936,6 +6311,8 @@ static void run_side(struct side *s)
         }
         put_state();
     }
+    if (handles_differ)
+        drop_kneeboard_bitmap(1);
     put("\n");
     cur = NULL;
 }
@@ -4957,6 +6334,15 @@ static void show_difference(void)
     from = i - (uint32_t)(ls - a) > 400 ? i - 400 : (uint32_t)(ls - a);
     printf("--- retail:\n...%.900s\n", a + from);
     printf("--- ours:\n...%.900s\n", b + from);
+    if (getenv("MAIN_IMAGE")) {                    /* the words behind a digest */
+        uint32_t k, shown = 0;
+        for (k = i + 1; k < n && shown < 12; k++)
+            if (a[k] != b[k] && k > 8) {
+                printf("  at %u: retail %.24s / ours %.24s\n", k, a + k - 8, b + k - 8);
+                shown++;
+                k += 16;
+            }
+    }
 }
 
 static LONG WINAPI on_fault(EXCEPTION_POINTERS *e)

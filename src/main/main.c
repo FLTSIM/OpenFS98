@@ -18,6 +18,7 @@
 #include <windows.h>
 #include <stdint.h>
 #include <string.h>
+#include <stdlib.h>
 
 #include "fs98/linkage.h"
 #include "fs98/host.h"
@@ -279,12 +280,17 @@ static const uint32_t retail_linkage[] = {
 #include "main_flights.inc"
 #include "main_prefs.inc"
 #include "main_clouds.inc"
+#include "main_natives.inc"
 #include "main_spot.inc"
 #include "main_frame.inc"
 #include "main_tick.inc"
 #include "main_step.inc"
 #include "main_dialogs.inc"
 #include "main_commands.inc"
+#include "main_radios.inc"
+#include "main_weather.inc"
+#include "main_kneeboard.inc"
+#include "main_start.inc"
 
 __asm__(".globl _ImportTable\n\t.set _ImportTable, _main_image + 0x0\n\t"
         ".globl _Linkage\n\t.set _Linkage, _main_image + 0xc0");
@@ -298,6 +304,8 @@ static void main_install(void)
         { 0x08, (void *)main_deinit },
         { 0x18, (void *)main_step },
         { 0x20, (void *)main_command },
+        { 0x28, (void *)main_start },
+        { 0x2c, (void *)main_shutdown },
         { 0x50, (void *)flight_set_record },
         { 0xac, (void *)flight_save_dialog },
         { 0xc4, (void *)flight_open },
@@ -350,6 +358,9 @@ static void main_install(void)
     M32(V(0x2080123c)) = ADDR(dialog_1304_check);
     M32(V(0x208001a4)) = ADDR(dialog_1203_check);
     M32(V(0x208035ec)) = ADDR(save_dialog_check);
+    /* the routines MAIN's G3D programs call */
+    for (i = 0; i < sizeof native_pointers / sizeof native_pointers[0]; i++)
+        M32(D + native_pointers[i].at) = ADDR(native_pointers[i].fn);
 }
 
 /* The internal entry points the harness drives directly until their
@@ -376,6 +387,37 @@ __declspec(dllexport) uint32_t FS98_STDCALL main_season(uint32_t a, uint32_t b)
 __declspec(dllexport) uint32_t FS98_STDCALL main_clock(void)
 {
     return nav_clock_ascii();
+}
+
+/* Slices 29's to 32's, until +0x28 installs them. */
+__declspec(dllexport) void FS98_STDCALL main_kb_trim(char *s) { kb_trim(s); }
+__declspec(dllexport) uint32_t FS98_STDCALL main_kb_field(char *s, char *out, uint32_t sep) { return ADDR(kb_field(s, out, (uint8_t)sep)); }
+__declspec(dllexport) uint32_t FS98_STDCALL main_kb_window(uint32_t a, uint32_t b, uint32_t c, uint32_t d) { return kb_window(a, b, c, d); }
+__declspec(dllexport) uint32_t FS98_STDCALL main_kb_load(void) { return kb_load(); }
+__declspec(dllexport) uint32_t FS98_STDCALL main_kb_shape(uint32_t bm) { return kb_shape(bm); }
+__declspec(dllexport) uint32_t FS98_STDCALL main_kb_draw(uint32_t page) { return kb_draw(page); }
+__declspec(dllexport) uint32_t FS98_STDCALL main_kb_listener(uint32_t a, uint32_t b) { return kb_listener(a, b); }
+__declspec(dllexport) uint32_t FS98_STDCALL main_kb_close(uint32_t a, uint32_t b) { return kb_close(a, b); }
+__declspec(dllexport) uint32_t FS98_STDCALL main_kb_create(void) { return kb_create(); }
+__declspec(dllexport) void FS98_STDCALL main_kb_destroy(void) { kb_destroy(); }
+__declspec(dllexport) uint32_t FS98_STDCALL main_welcome(uint32_t show) { return welcome(show); }
+__declspec(dllexport) void FS98_STDCALL main_weather_load(void) { weather_load(); }
+__declspec(dllexport) uint32_t FS98_STDCALL main_radio_list3(uint32_t a, uint32_t b) { return radio_list3(a, b); }
+__declspec(dllexport) uint32_t FS98_STDCALL main_radio_list5(uint32_t a, uint32_t b) { return radio_list5(a, b); }
+__declspec(dllexport) void FS98_STDCALL main_radios_start(void) { radios_start(); }
+__declspec(dllexport) void FS98_STDCALL main_radios_stop(void) { radios_stop(); }
+__declspec(dllexport) void FS98_STDCALL main_menu_state(void) { menu_state(); }
+__declspec(dllexport) uint32_t FS98_STDCALL main_menu_listener_at(void) { return ADDR(menu_listener); }
+__declspec(dllexport) void FS98_STDCALL main_start_menus(void) { start_menus(); }
+__declspec(dllexport) uint32_t FS98_STDCALL main_start_countdown(uint32_t a, uint32_t b)
+{
+    return start_countdown(a, b);
+}
+__declspec(dllexport) void FS98_STDCALL main_clock_from_host(void) { clock_from_host(); }
+__declspec(dllexport) void FS98_STDCALL main_clock_logbook(void) { clock_logbook(); }
+__declspec(dllexport) uint32_t FS98_STDCALL main_clock_tick(uint32_t a, uint32_t b)
+{
+    return clock_tick(a, b);
 }
 
 /* .text+0x1000 */

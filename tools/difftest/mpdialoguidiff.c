@@ -143,6 +143,10 @@ struct fs98_flow_render_capture {
     struct fs98_flow_control_render controls[FS98_FLOW_MAX_RENDERED_CONTROLS];
 };
 
+struct fs98_browser_event {
+    uint32_t stage, selection, count, join, details, descriptor_selection, argument;
+};
+
 struct fs98_flow_result {
     uint32_t array_valid, posts, post_message, post_wparam, post_lparam;
     uint32_t before_host_mask, after_host_show_mask, after_initial_mask;
@@ -156,6 +160,11 @@ struct fs98_flow_result {
     struct fs98_flow_event callbacks[24];
     char callsign[32], session[64], pilot[16], observer_text[16];
     uint32_t idle_ticks, accepted_hidden_mask, hwnd_alive_mask, hwnd_alive_after_mask;
+    uint32_t browser_initial_count, browser_probe_count;
+    uint32_t browser_fields[6], browser_reentry_count;
+    char browser_reentry_text[128];
+    char browser_formatted[2][1024];
+    struct fs98_browser_event browser_probe[32];
     uint32_t browser_timer_count, browser_timer_overflow, browser_timer_dispatches;
     uint32_t browser_refresh_callbacks, browser_nested_refresh_attempts;
     struct fs98_flow_timer_event browser_timers[16];
@@ -168,8 +177,12 @@ struct fs98_flow_result {
 static uint8_t s_flow_blocks[2][0xbc];
 static uint32_t s_flow_providers[2][65][7];
 static char s_flow_provider_names[2][65][32];
-static uint8_t s_flow_rows[2][2][2][84];
+static uint8_t s_flow_rows[2][2][129][84];
 static char s_flow_session_names[2][2][32];
+static char s_browser_long_names[2][768];
+static uint32_t s_browser_field_probe[2];
+static WNDPROC s_browser_list_original;
+static uint32_t s_browser_list_reentry;
 static char s_flow_callsigns[2][32], s_flow_host_names[2][64];
 static char s_flow_pilot_caps[2][16], s_flow_observer_caps[2][16];
 static char s_flow_limits[2][4][8];
@@ -177,6 +190,7 @@ static struct fs98_flow_event s_flow_events[2][24];
 static struct fs98_flow_result s_flow_results[2];
 static uint32_t s_flow_event_count[2], s_flow_provider_failures[2];
 static uint32_t s_flow_refresh_reentry_pending[2];
+static uint32_t s_browser_probe_mode[2];
 static uint32_t s_flow_accept_result[2], s_flow_owner_active[2], s_flow_idle_ticks[2];
 static HWND *s_flow_windows[2];
 static void *s_flow_dialog_objects[2][5];
@@ -224,8 +238,12 @@ static struct fs98_flow_render_capture s_session_render_repeat[2];
 static struct fs98_flow_render_capture s_details_render_results[2];
 static struct fs98_flow_render_capture s_details_render_repeat[2];
 static uint32_t s_render_only;
+static uint32_t s_details_focus_trace, s_details_focus_reset = 1, s_details_focus_deactivate;
+static HWND s_details_trace_window;
+static HHOOK s_details_focus_hook;
 static uint32_t s_cleanup_flow_lifetime_leaks;
 static int32_t s_flow_mutation_case = -1;
+static uint32_t s_choice_real_modal;
 static int32_t s_session_mutation_case = -1;
 static int32_t s_details_mutation_case = -1;
 static HWND s_main_window;
@@ -507,8 +525,322 @@ static uint32_t fs98_flow_watch_message(uint32_t message)
         message == WM_SYSCOMMAND;
 }
 
+struct fs98_host_update_event { uint32_t kind, id, value; };
+static struct fs98_host_update_event s_host_update_events[2][16];
+static uint32_t s_host_update_counts[2], s_host_update_active;
+static uint32_t s_host_initial_limits[2][3];
+static uint32_t s_host_init_active, s_host_init_count[2], s_host_init_args[2][3][2];
+static uint32_t s_host_init_edits[2][3][2];
+static int32_t s_host_display_return = 1;
+static uint32_t s_real_modal_active, s_real_modal[2][13];
+static uint32_t s_real_modal_page;
+static HMODULE s_alert_module;
+static uint8_t s_host_capture_results[2][15][3][12];
+static uint32_t s_host_validation_results[2][10][3];
+static uint32_t s_host_pending_results[2][3][2];
+static uint32_t s_host_error_results[2][18][6], s_host_error_calls, s_host_error_return, s_host_error_offset, s_host_error_control, s_host_error_active;
+static uint32_t s_choice_error_results[2][12][7];
+static uint32_t s_choice_pending_results[2][3][2];
+static uint32_t s_host_validation_mask, s_host_validation_fail, s_host_validation_calls;
+static uint32_t s_host_validation_reenter, s_host_validation_nested;
+static void *s_host_checked_target;
+static uint8_t s_host_checked_original[5], s_host_checked_jump[5];
+
+static void fs98_host_record(uint32_t kind, uint32_t id, uint32_t value)
+{
+    uint32_t index = s_host_update_counts[s_side]++;
+    if (index >= 16) fs98_fail("Host update event overflow");
+    s_host_update_events[s_side][index] = (struct fs98_host_update_event){kind, id, value};
+}
+
+static void fs98_host_patch_checked(const uint8_t *bytes)
+{
+    DWORD old;
+    if (!VirtualProtect(s_host_checked_target, 5, PAGE_EXECUTE_READWRITE, &old))
+        fs98_fail("protect SetChecked probe");
+    memcpy(s_host_checked_target, bytes, 5);
+    FlushInstructionCache(GetCurrentProcess(), s_host_checked_target, 5);
+    if (!VirtualProtect(s_host_checked_target, 5, old, &old))
+        fs98_fail("restore SetChecked protection");
+}
+
+static int32_t TC fs98_host_checked_probe(void *control, int32_t value)
+{
+    int32_t result;
+    if (control != (uint8_t *)s_flow_dialog_objects[s_side][2] + 0x19b4)
+        fs98_fail("unexpected SetChecked control in Host update");
+    fs98_host_record(3, 0x3ed, value);
+    fs98_host_patch_checked(s_host_checked_original);
+    result = ((int32_t (TC *)(void *, int32_t))s_host_checked_target)(control, value);
+    fs98_host_patch_checked(s_host_checked_jump);
+    return result;
+}
+
+static void fs98_host_capture_probe(uint32_t side, HWND window)
+{
+    static const uint32_t capacities[] = {0, 1, 8};
+    static const char *strings[] = {"", "x", "1234567", "12345678", "123456789"};
+    static const uint32_t pointer_offsets[] = {0x4c, 0x60, 0x74};
+    static const uint32_t capacity_offsets[] = {0x50, 0x64, 0x78};
+    static const int ids[] = {0x41a, 0x40f, 0x410};
+    uint8_t *block = s_flow_blocks[side];
+    void *object = s_flow_dialog_objects[side][2];
+    uint32_t saved_pointer[3], saved_capacity[3], i, j, k;
+    for (k = 0; k < 3; ++k) {
+        saved_pointer[k] = D32(block, pointer_offsets[k]);
+        saved_capacity[k] = D32(block, capacity_offsets[k]);
+        s_host_initial_limits[side][k] = (uint32_t)SendDlgItemMessageA(window, ids[k], EM_GETLIMITTEXT, 0, 0);
+    }
+    for (i = 0; i < 3; ++i) for (j = 0; j < 5; ++j) {
+        uint32_t index = i * 5 + j;
+        for (k = 0; k < 3; ++k) {
+            memset(s_host_capture_results[side][index][k], 0x5a, 12);
+            SetDlgItemTextA(window, ids[k], strings[j]);
+            D32(block, pointer_offsets[k]) = (uint32_t)(uintptr_t)s_host_capture_results[side][index][k];
+            D32(block, capacity_offsets[k]) = capacities[i];
+        }
+        ((void (TC *)(void *))PTR(PTR(object, 0), 0xf4))(object);
+    }
+    for (k = 0; k < 3; ++k) {
+        D32(block, pointer_offsets[k]) = saved_pointer[k];
+        D32(block, capacity_offsets[k]) = saved_capacity[k];
+    }
+    ((void (TC *)(void *))PTR(PTR(object, 0), 0xf0))(object);
+}
+
+static int32_t SC fs98_host_validation_probe_callback(void *block)
+{
+    void *object = s_flow_dialog_objects[s_side][2];
+    ++s_host_validation_calls;
+    D32(block, 0x48) = (s_host_validation_mask & 1) ? 0x1003 : 0;
+    D32(block, 0x5c) = (s_host_validation_mask & 2) ? 0x1004 : 0;
+    D32(block, 0x70) = (s_host_validation_mask & 4) ? 0x1004 : 0;
+    if (s_host_validation_reenter) {
+        s_host_validation_reenter = 0;
+        s_host_validation_nested = ((int32_t (TC *)(void *, uint32_t))PTR(PTR(object, 0), 0xd8))(object, 0);
+    }
+    return s_host_validation_fail ? -1 : 0;
+}
+
+static void fs98_host_validation_probe(uint32_t side, HWND window)
+{
+    void *object = s_flow_dialog_objects[side][2];
+    uint8_t *block = s_flow_blocks[side];
+    uint32_t saved_callback = D32(block, 0x10), i;
+    int32_t (TC *validate)(void *, uint32_t) = PTR(PTR(object, 0), 0xd8);
+    if (!IsWindowVisible(window)) fs98_fail("Host validation fixture must be visible");
+    D32(block, 0x10) = (uint32_t)(uintptr_t)fs98_host_validation_probe_callback;
+    for (i = 0; i < 10; ++i) {
+        s_host_validation_mask = i < 8 ? i : 7;
+        s_host_validation_fail = i != 8;
+        s_host_validation_calls = s_host_validation_nested = 0;
+        s_host_validation_reenter = i == 9;
+        if (i == 7) ShowWindow(window, SW_HIDE);
+        s_host_validation_results[side][i][0] = validate(object, 0x410);
+        s_host_validation_results[side][i][1] = s_host_validation_calls;
+        s_host_validation_results[side][i][2] = s_host_validation_nested;
+        if (i == 7) ShowWindow(window, SW_SHOW);
+    }
+    s_host_validation_mask = s_host_validation_fail = s_host_validation_reenter = 0;
+    SetFocus(GetDlgItem(window, 0x41a));
+    D32(block, 0x10) = saved_callback;
+    D32(block, 0x48) = D32(block, 0x5c) = D32(block, 0x70) = 0;
+}
+
+static int32_t TC fs98_host_error_dialog_probe(void *object, void *control, uint32_t status)
+{
+    ++s_host_error_calls;
+    s_host_error_offset = status - (uint32_t)(uintptr_t)s_flow_blocks[s_side];
+    s_host_error_control = (uint32_t)((uint8_t *)control - (uint8_t *)object);
+    return s_host_error_return;
+}
+
+static void fs98_host_error_probe(uint32_t side, HMODULE module)
+{
+    const char *symbol = "?DoErrorDialog@CSimsDialog@@IAEHPAVCWnd@@K@Z";
+    void *object = s_flow_dialog_objects[side][2];
+    uint8_t *block = s_flow_blocks[side];
+    struct fs98_flow_result *result = &s_flow_results[side];
+    uint32_t saved_count = result->error_count[2], saved_field = result->error_field[2];
+    uint32_t saved_dialog = D32(object, 0x8c), i;
+    void **slot;
+    int32_t (TC *error)(void *, int32_t) = PTR(PTR(object, 0), 0xdc);
+    s_host_checked_target = (void *)GetProcAddress(s_ui, symbol);
+    if (!s_host_checked_target) fs98_fail("resolve Host error dialog probe");
+    if (!side) {
+        slot = fs98_find_import_slot(module, "SIMSUI.DLL", symbol);
+        if (!slot || *slot != s_host_checked_target) fs98_fail("retail Host error import mismatch");
+    }
+    memcpy(s_host_checked_original, s_host_checked_target, 5);
+    s_host_checked_jump[0] = 0xe9;
+    D32(s_host_checked_jump, 1) = (uint32_t)((uintptr_t)fs98_host_error_dialog_probe -
+        (uintptr_t)s_host_checked_target - 5);
+    fs98_host_patch_checked(s_host_checked_jump);
+    s_host_error_active = 1;
+    for (i = 0; i < 18; ++i) {
+        uint32_t mask = i < 8 ? i : i >= 15 ? 0 : 7;
+        D32(block, 0x48) = (mask & 1) ? 0x1003 : 0;
+        D32(block, 0x5c) = (mask & 2) ? 0x1004 : 0;
+        D32(block, 0x70) = (mask & 4) ? 0x1004 : 0;
+        s_host_error_return = i == 8 ? 0 : i == 13 ? 2 : i == 14 ? (uint32_t)-7 : 1;
+        s_host_display_return = i == 10 || i == 15 ? 0 : i == 11 || i == 16 ? 2 : i == 12 || i == 17 ? -7 : 1;
+        s_host_error_calls = s_host_error_offset = s_host_error_control = 0;
+        result->error_count[2] = result->error_field[2] = 0;
+        D32(object, 0x8c) = 0;
+        s_host_error_results[side][i][0] = error(object, i == 9 ? 0 : 0x555);
+        s_host_error_results[side][i][1] = result->error_field[2];
+        s_host_error_results[side][i][2] = s_host_error_calls;
+        s_host_error_results[side][i][3] = s_host_error_offset;
+        s_host_error_results[side][i][4] = s_host_error_control;
+        s_host_error_results[side][i][5] = D32(object, 0x8c);
+    }
+    {
+        static const int32_t values[] = {0, 2, -7};
+        uint32_t saved_pending = D32(object, 0x7d0), saved_enabled = D32(object, 0x7dc);
+        D32(block, 0x48) = D32(block, 0x5c) = D32(block, 0x70) = 0;
+        D32(object, 0x7dc) = 1;
+        for (i = 0; i < 3; ++i) {
+            s_host_display_return = values[i];
+            D32(object, 0x7d0) = 0x555;
+            s_host_pending_results[side][i][0] = (uint32_t)SendMessageA((HWND)D32(object, 0x20), 0x5f4, 0x555, 0);
+            s_host_pending_results[side][i][1] = D32(object, 0x7d0);
+        }
+        D32(object, 0x7d0) = saved_pending;
+        D32(object, 0x7dc) = saved_enabled;
+    }
+    s_host_error_active = 0;
+    s_host_display_return = 1;
+    fs98_host_patch_checked(s_host_checked_original);
+    result->error_count[2] = saved_count;
+    result->error_field[2] = saved_field;
+    D32(object, 0x8c) = saved_dialog;
+    D32(block, 0x48) = D32(block, 0x5c) = D32(block, 0x70) = 0;
+}
+
+static void fs98_choice_error_probe(uint32_t side, HMODULE module)
+{
+    static const struct { int32_t field; uint32_t status; int32_t helper, display; } cases[] = {
+        {0, 0, 1, 1}, {0, 0x1003, 1, 1},
+        {0x555, 0, 1, 0}, {0x555, 0, 1, 2}, {0x555, 0, 1, -7},
+        {0x555, 0x1003, 0, 2}, {0x555, 0x1003, 1, 0},
+        {0x555, 0x1003, 1, 2}, {0x555, 0x1003, 1, -7},
+        {0x555, 0x1003, 2, 2}, {0x555, 0x1003, -7, -7},
+        {0x419, 0x1003, 0, 2}
+    };
+    const char *symbol = "?DoErrorDialog@CSimsDialog@@IAEHPAVCWnd@@K@Z";
+    void *object = s_flow_dialog_objects[side][1];
+    uint8_t *block = s_flow_blocks[side];
+    struct fs98_flow_result *result = &s_flow_results[side];
+    uint32_t saved_count = result->error_count[1], saved_field = result->error_field[1];
+    uint32_t saved_dialog = D32(object, 0x8c), saved_status = D32(block, 0x28), i;
+    void **slot = fs98_find_import_slot(module, "SIMSUI.DLL", symbol);
+    int32_t (TC *error)(void *, int32_t) = PTR(PTR(object, 0), 0xdc);
+    HMODULE owner = 0;
+    if (!GetModuleHandleExA(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS |
+            GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT, (const char *)error, &owner) ||
+            owner != module || (!side && (uint32_t)(uintptr_t)error != 0x22345a40))
+        fs98_fail("Choice error target ownership");
+    s_host_checked_target = (void *)GetProcAddress(s_ui, symbol);
+    if (!s_host_checked_target || (!side && (!slot || *slot != s_host_checked_target)))
+        fs98_fail("Choice error helper import");
+    memcpy(s_host_checked_original, s_host_checked_target, 5);
+    s_host_checked_jump[0] = 0xe9;
+    D32(s_host_checked_jump, 1) = (uint32_t)((uintptr_t)fs98_host_error_dialog_probe -
+        (uintptr_t)s_host_checked_target - 5);
+    fs98_host_patch_checked(s_host_checked_jump);
+    s_host_error_active = 1;
+    for (i = 0; i < sizeof(cases) / sizeof(cases[0]); ++i) {
+        uint32_t *out = s_choice_error_results[side][i];
+        D32(block, 0x28) = cases[i].status;
+        D32(object, 0x8c) = 0x12345678;
+        s_host_error_return = cases[i].helper;
+        s_host_display_return = cases[i].display;
+        s_host_error_calls = s_host_error_offset = s_host_error_control = 0;
+        result->error_count[1] = result->error_field[1] = 0;
+        out[0] = error(object, cases[i].field);
+        out[1] = result->error_count[1];
+        out[2] = result->error_field[1];
+        out[3] = s_host_error_calls;
+        out[4] = s_host_error_offset;
+        out[5] = s_host_error_control;
+        out[6] = D32(object, 0x8c);
+    }
+    {
+        static const int32_t values[] = {0, 2, -7};
+        uint32_t saved_pending = D32(object, 0x7d0), saved_enabled = D32(object, 0x7dc);
+        HWND window = (HWND)D32(object, 0x20);
+        MSG message;
+        D32(block, 0x28) = 0;
+        D32(object, 0x7dc) = 1;
+        if (PeekMessageA(&message, window, 0x5f4, 0x5f4, PM_NOREMOVE))
+            fs98_fail("unexpected queued Choice validation before injected probe");
+        for (i = 0; i < 3; ++i) {
+            s_host_display_return = values[i];
+            D32(object, 0x7d0) = 0x555;
+            if (!PostMessageA(window, 0x5f4, 0x555, 0) ||
+                !PeekMessageA(&message, window, 0x5f4, 0x5f4, PM_REMOVE))
+                fs98_fail("Choice posted validation message");
+            if (message.wParam != 0x555) fs98_fail("unexpected Choice posted validation payload");
+            s_choice_pending_results[side][i][0] = DispatchMessageA(&message);
+            s_choice_pending_results[side][i][1] = D32(object, 0x7d0);
+        }
+        D32(object, 0x7d0) = saved_pending;
+        D32(object, 0x7dc) = saved_enabled;
+    }
+    s_host_error_active = 0;
+    s_host_display_return = 1;
+    fs98_host_patch_checked(s_host_checked_original);
+    result->error_count[1] = saved_count;
+    result->error_field[1] = saved_field;
+    D32(object, 0x8c) = saved_dialog;
+    D32(block, 0x28) = saved_status;
+}
+
+static void fs98_host_update_probe(uint32_t side, HMODULE module)
+{
+    const char *symbol = "?SetChecked@CSimsCheckButton@@QAEHH@Z";
+    void *object = s_flow_dialog_objects[side][2];
+    void **slot;
+    s_host_checked_target = (void *)GetProcAddress(GetModuleHandleA("SIMSUI.DLL"), symbol);
+    if (!s_host_checked_target) fs98_fail("resolve Host SetChecked probe");
+    if (!side) {
+        slot = fs98_find_import_slot(module, "SIMSUI.DLL", symbol);
+        if (!slot || *slot != s_host_checked_target) fs98_fail("retail SetChecked import mismatch");
+    }
+    memcpy(s_host_checked_original, s_host_checked_target, 5);
+    s_host_checked_jump[0] = 0xe9;
+    D32(s_host_checked_jump, 1) = (uint32_t)((uintptr_t)fs98_host_checked_probe -
+        (uintptr_t)s_host_checked_target - 5);
+    fs98_host_patch_checked(s_host_checked_jump);
+    s_host_update_active = 1;
+    ((void (TC *)(void *))PTR(PTR(object, 0), 0xf0))(object);
+    s_host_update_active = 0;
+    fs98_host_patch_checked(s_host_checked_original);
+    if (!s_host_update_counts[side]) fs98_fail("Host update probe recorded no events");
+}
+
 static LRESULT CALLBACK fs98_flow_callwnd_hook(int code, WPARAM wparam, LPARAM lparam)
 {
+    if (code >= 0 && s_host_init_active) {
+        const CWPSTRUCT *call = (const CWPSTRUCT *)lparam;
+        int id = GetDlgCtrlID(call->hwnd);
+        if (call->message == EM_SETLIMITTEXT && (id == 0x40f || id == 0x410 || id == 0x41a)) {
+            uint32_t index = s_host_init_count[s_side]++;
+            if (index >= 3) fs98_fail("Host initialization limit count");
+            s_host_init_args[s_side][index][0] = id;
+            s_host_init_args[s_side][index][1] = (uint32_t)call->wParam;
+        }
+    }
+    if (code >= 0 && s_host_update_active) {
+        const CWPSTRUCT *call = (const CWPSTRUCT *)lparam;
+        int id = GetDlgCtrlID(call->hwnd);
+        if (call->message == WM_SETTEXT && (id == 0x41a || id == 0x40f || id == 0x410))
+            fs98_host_record(1, id, 0);
+        else if (call->message == WM_USER + 101 && (id == 0x411 || id == 0x412))
+            fs98_host_record(2, id, (uint32_t)call->lParam);
+        else if (call->message == EM_SETLIMITTEXT && (id == 0x411 || id == 0x412 || id == 0x41a))
+            fs98_host_record(4, id, (uint32_t)call->wParam);
+    }
     if (code >= 0 && s_flow_active &&
         (s_case == 200 || s_case == 203 || s_case == 204 || s_case == 210)) {
         const CWPSTRUCT *call = (const CWPSTRUCT *)lparam;
@@ -713,6 +1045,10 @@ static uint32_t SC fs98_host_free(void **block_out)
 static uint32_t SC fs98_host_register(void *linkage, uint32_t *module_out)
 {
     struct fs98_test_linkage *entry = linkage;
+    if (entry && entry->id == 0x80000009 && module_out && s_alert_module) {
+        *module_out = (uint32_t)s_alert_module;
+        return 0;
+    }
     if (!entry || entry->id != 0x8000000a || !module_out || !s_current_module)
         fs98_fail("HOST +0x298 registration arguments");
     *module_out = (uint32_t)s_current_module;
@@ -722,15 +1058,67 @@ static uint32_t SC fs98_host_register(void *linkage, uint32_t *module_out)
 
 static uint32_t SC fs98_host_release(uint32_t module)
 {
+    if (module == (uint32_t)s_alert_module && s_alert_module) return 0;
     if (module != (uint32_t)s_current_module) fs98_fail("HOST +0x29c release handle");
     ++s_host_release[s_side];
     return 0;
 }
 
+static uint32_t SC fs98_host_string(uint32_t id, char *buffer, int32_t size)
+{
+    if (!s_alert_module || !s_real_modal_active) fs98_fail("unexpected HOST string request");
+    return (uint32_t)LoadStringA(s_alert_module, id, buffer, size);
+}
+
 static uint32_t SC fs98_host_dialog(uint32_t dialog_id, void *descriptor)
 {
-    (void)descriptor;
-    /* Model the HOST +0x10c error-sheet path: the harness user presses OK. */
+    if (dialog_id == 2 && s_real_modal_active) {
+        struct fs98_test_import *imports;
+        struct fs98_test_linkage *linkage;
+        HWND alert;
+        MSG message;
+        DWORD deadline;
+        s_alert_module = LoadLibraryA("../../orig/English/Alerts.DLL");
+        if (!s_alert_module) fs98_fail("load retail Alerts DLL");
+        imports = (void *)GetProcAddress(s_alert_module, "ImportTable");
+        linkage = (void *)GetProcAddress(s_alert_module, "Linkage");
+        if (!imports || !linkage || linkage->id != 0x80000009 ||
+            imports[0].id != 1 || imports[1].id != 2 || linkage->dialogs[0].id != 2)
+            fs98_fail("retail Alerts ABI");
+        imports[0].link = s_host_services;
+        imports[1].link = s_global;
+        linkage->init();
+        alert = (HWND)(uintptr_t)linkage->dialogs[0].create((uint32_t)(uintptr_t)s_main_window, descriptor);
+        if (!alert || !IsWindow(alert)) fs98_fail("retail Alerts modal factory");
+        ShowWindow(alert, SW_SHOW);
+        /* Keep unrelated owner messages queued while this test drives the alert. */
+        deadline = GetTickCount() + 10000;
+        while (IsWindow(alert) && !GetWindowLongA(alert, GWL_USERDATA)) {
+            if (PeekMessageA(&message, alert, 0, 0, PM_REMOVE)) {
+                if (!IsDialogMessageA(alert, &message)) {
+                    TranslateMessage(&message);
+                    DispatchMessageA(&message);
+                }
+            } else {
+                if ((int32_t)(GetTickCount() - deadline) >= 0) fs98_fail("retail Alerts modal timeout");
+                Sleep(1);
+            }
+        }
+        s_real_modal[s_side][12] = D32(descriptor, 0x0c);
+        if (IsWindow(alert)) DestroyWindow(alert);
+        linkage->deinit();
+        if (!FreeLibrary(s_alert_module)) fs98_fail("unload retail Alerts DLL");
+        s_alert_module = 0;
+        /* The bounded pump does not run HOST's modal-owner restoration. Put
+         * the originating page back in the foreground before SIMSUI resumes
+         * its real error/focus handler, for both binaries. */
+        if (s_real_modal_page == 1) {
+            SetForegroundWindow(s_flow_windows[s_side][1]);
+            SetActiveWindow(s_flow_windows[s_side][1]);
+        }
+        return 0;
+    }
+    /* Other scripts model the HOST +0x10c error-sheet path. */
     if (dialog_id == 2) return 2;
     fs98_host_unexpected();
     return 0;
@@ -781,10 +1169,44 @@ static int32_t fs98_parse_capacity(const char *text, uint32_t minimum, uint32_t 
     return 0;
 }
 
+static void fs98_details_focus_checkpoint(const char *stage)
+{
+    MSG pending;
+    HWND focus, active, foreground;
+    BOOL has_pending;
+    if (!s_details_focus_trace || s_case % 10 != 5) return;
+    focus = GetFocus(); active = GetActiveWindow(); foreground = GetForegroundWindow();
+    has_pending = PeekMessageA(&pending, 0, 0, 0, PM_NOREMOVE);
+    fprintf(stderr, "DETAILS FOCUS side=%u case=%u stage=%s focus=%p id=%ld active=%p foreground=%p main=%p mainvisible=%d mainenabled=%d dialog=%p owner=%p pending=%d/%p/%04x/%08lx/%08lx callbacks=%u\n",
+        s_side, s_case, stage, focus, focus ? (long)GetDlgCtrlID(focus) : -1L,
+        active, foreground, s_main_window, IsWindowVisible(s_main_window),
+        IsWindowEnabled(s_main_window), s_details_trace_window,
+        s_details_trace_window ? GetWindow(s_details_trace_window, GW_OWNER) : 0,
+        has_pending, has_pending ? pending.hwnd : 0, has_pending ? pending.message : 0,
+        has_pending ? (unsigned long)pending.wParam : 0,
+        has_pending ? (unsigned long)pending.lParam : 0, s_details_event_count[s_side]);
+}
+
+static LRESULT CALLBACK fs98_details_focus_message_hook(int code, WPARAM wp, LPARAM lp)
+{
+    if (code >= 0) {
+        CWPSTRUCT *msg = (CWPSTRUCT *)lp;
+        if (msg->message == WM_SETFOCUS || msg->message == WM_KILLFOCUS ||
+            msg->message == WM_ACTIVATE || msg->message == WM_ACTIVATEAPP ||
+            msg->message == WM_COMMAND || msg->message == 0x5f4)
+            fprintf(stderr, "DETAILS MESSAGE side=%u case=%u hwnd=%p id=%ld msg=%04x wp=%08lx lp=%08lx active=%p focus=%p\n",
+                s_side, s_case, msg->hwnd, msg->hwnd ? (long)GetDlgCtrlID(msg->hwnd) : -1L,
+                msg->message, (unsigned long)msg->wParam, (unsigned long)msg->lParam,
+                GetActiveWindow(), GetFocus());
+    }
+    return CallNextHookEx(s_details_focus_hook, code, wp, lp);
+}
+
 static int32_t SC fs98_details_validate_callback(void *block)
 {
     uint32_t mode = D32(block, 0x14);
     int32_t result = 0;
+    fs98_details_focus_checkpoint("validate-enter");
     D32(block, 0x1c) = 0;
     D32(block, 0x30) = 0;
     if (mode == 1) {
@@ -798,6 +1220,10 @@ static int32_t SC fs98_details_validate_callback(void *block)
     }
     fs98_details_record(block, 4, 0);
     s_details_events[s_side][s_details_event_count[s_side] - 1].reserved = (uint32_t)result;
+    if (s_details_focus_trace && s_case % 10 == 5)
+        fprintf(stderr, "DETAILS VALIDATE side=%u case=%u result=%d pilot=%u observer=%u\n",
+            s_side, s_case, result, D32(block, 0x1c), D32(block, 0x30));
+    fs98_details_focus_checkpoint("validate-exit");
     return result;
 }
 
@@ -894,6 +1320,15 @@ static int32_t SC fs98_flow_reset_callback(void *block)
     fs98_flow_trace_event(s_side, 3, -1, 1, 0, D32(block, 0x24), 0,
         (uint32_t)(uintptr_t)__builtin_return_address(0));
     fs98_flow_record(block, 1, 0);
+    if (s_case >= 200 && (s_case - 200) % 12 == 10) {
+        void *object = s_flow_dialog_objects[s_side][4];
+        HWND list = (HWND)D32(object, 0x190c);
+        s_flow_results[s_side].browser_fields[0] = (uint32_t)SendMessageA(list, LB_GETCOUNT, 0, 0);
+        s_flow_results[s_side].browser_fields[1] = (uint32_t)SendMessageA(list, LB_GETCURSEL, 0, 0);
+        s_flow_results[s_side].browser_fields[2] = D32(block, 0x40);
+        s_flow_results[s_side].browser_fields[3] = D32(block, 0xb8);
+        s_flow_results[s_side].browser_fields[4] = !!IsWindowEnabled(GetDlgItem((HWND)D32(object, 0x20), 0x3ff));
+    }
     return 0;
 }
 
@@ -949,11 +1384,49 @@ static int32_t SC fs98_flow_host_settings_callback(void *block)
     return 0;
 }
 
+static void fs98_browser_event(uint32_t stage, uint32_t argument)
+{
+    struct fs98_flow_result *result = &s_flow_results[s_side];
+    struct fs98_browser_event *event;
+    void *object = s_flow_dialog_objects[s_side][4];
+    HWND window = (HWND)D32(object, 0x20);
+    HWND list = GetDlgItem(window, 0x3fd);
+    if (result->browser_probe_count >= 32) fs98_fail("Browser probe overflow");
+    event = &result->browser_probe[result->browser_probe_count++];
+    event->stage = stage;
+    event->selection = (uint32_t)SendMessageA(list, LB_GETCURSEL, 0, 0);
+    event->count = (uint32_t)SendMessageA(list, LB_GETCOUNT, 0, 0);
+    event->join = !!IsWindowEnabled(GetDlgItem(window, 0x3ff));
+    event->details = !!IsWindowEnabled(GetDlgItem(window, 0x400));
+    event->descriptor_selection = D32(s_flow_blocks[s_side], 0xb8);
+    event->argument = argument;
+}
+
 static int32_t SC fs98_flow_selection_callback(void *block, uint32_t selection)
 {
     fs98_flow_trace_event(s_side, 3, -1, 5, selection, D32(block, 0x24), 0,
         (uint32_t)(uintptr_t)__builtin_return_address(0));
     fs98_flow_record(block, 5, selection);
+    if (s_browser_probe_mode[s_side]) {
+        void *object = s_flow_dialog_objects[s_side][4];
+        uint32_t mode = s_browser_probe_mode[s_side];
+        fs98_browser_event(10 + mode, selection);
+        if (mode == 1) {
+            D32(s_flow_rows[s_side][0][0], 0x20) = 8;
+            D32(s_flow_rows[s_side][0][0], 0x24) = 4;
+        } else if (mode == 2) {
+            s_browser_probe_mode[s_side] = 3;
+            D32(s_flow_rows[s_side][0][0], 0x20) = 8;
+            D32(s_flow_rows[s_side][0][0], 0x24) = 4;
+            D32(block, 0xb0) = 1;
+            ((void (TC *)(void *))PTR(PTR(object, 0), 0xf0))(object);
+            fs98_browser_event(20, selection);
+            SendMessageA((HWND)D32(object, 0x20), WM_COMMAND,
+                         MAKEWPARAM(0x3fd, 1), (LPARAM)D32(object, 0x190c));
+            fs98_browser_event(21, selection);
+        }
+        fs98_browser_event(30 + mode, selection);
+    }
     return 0;
 }
 
@@ -968,6 +1441,10 @@ static int32_t SC fs98_flow_details_callback(void *block)
 static int32_t SC fs98_flow_refresh_callback(void *block)
 {
     struct fs98_flow_result *result = &s_flow_results[s_side];
+    if (s_browser_field_probe[s_side]) {
+        result->browser_fields[4] = D32(block, 0x40);
+        result->browser_fields[5] = D32(block, 0xb8);
+    }
     D32(block, 0xac) = (uint32_t)(uintptr_t)s_flow_rows[s_side][1][0];
     D32(block, 0xb0) = 2;
     ++result->browser_refresh_callbacks;
@@ -1117,6 +1594,90 @@ static void fs98_restore_slot(void **slot, void *original)
     *slot = original;
     FlushInstructionCache(GetCurrentProcess(), slot, sizeof(*slot));
     VirtualProtect(slot, sizeof(*slot), previous, &previous);
+}
+
+struct fs98_help_event {
+    uint32_t calls, hwnd_matches, command, result, table_words, valid_table;
+    uint32_t table[48];
+    char file[32];
+};
+static struct fs98_help_event s_help_results[2][7][4];
+static struct fs98_help_event *s_help_event;
+static HWND s_help_expected_hwnd;
+static int32_t s_help_service_return;
+static uint32_t s_help_only;
+
+static BOOL WINAPI fs98_help_service_probe(HWND window, LPCSTR file, UINT command, ULONG_PTR data)
+{
+    SIZE_T bytes;
+    uint32_t i;
+    struct fs98_help_event *event = s_help_event;
+    if (!event) fs98_fail("unexpected WinHelp call");
+    ++event->calls;
+    event->hwnd_matches = window == s_help_expected_hwnd;
+    event->command = command;
+    if (file) lstrcpynA(event->file, file, sizeof(event->file));
+    for (i = 0; i < 48; i += 2) {
+        if (!data || !ReadProcessMemory(GetCurrentProcess(), (void *)(data + i * 4),
+                &event->table[i], 8, &bytes) || bytes != 8) break;
+        event->table_words = i + 2;
+        if (!event->table[i] && !event->table[i + 1]) {
+            event->valid_table = 1;
+            break;
+        }
+    }
+    return s_help_service_return;
+}
+
+static void fs98_help_probe(HWND window, HMODULE module, uint32_t page)
+{
+    static const uint32_t retail_targets[7][2] = {
+        {0x22346180,0x223461a0}, {0x22345a00,0x22345a20},
+        {0x22342b20,0x22342b40}, {0x22341f20,0x22341f40},
+        {0x223434d0,0x223434f0}, {0x22344340,0x22344360},
+        {0x22344f60,0x22344f80}
+    };
+    void *(SC *from_handle)(HWND) = (void *)GetProcAddress(s_mfc, (const char *)(uintptr_t)2864);
+    void *object = from_handle(window);
+    void *(TC *get_map)(void *) = PTR(PTR(object, 0), 0x30);
+    struct fs98_mpdialog_message_map *map = get_map(object);
+    const struct fs98_mpdialog_message_entry *entry;
+    uint32_t i, found[2] = {0,0};
+    void **slot = fs98_find_import_slot(module, "USER32.dll", "WinHelpA");
+    void *original = 0;
+    HELPINFO info;
+    HWND item = GetDlgItem(window, 2);
+    if (!item || !map || !map->entries || !slot) fs98_fail("help probe setup");
+    for (entry = map->entries, i = 0; i < 128 && (entry->message || entry->handler); ++entry, ++i) {
+        uint32_t kind;
+        HMODULE owner = 0;
+        if (entry->message == WM_HELP) kind = 0;
+        else if (entry->message == WM_CONTEXTMENU) kind = 1;
+        else continue;
+        if (found[kind]++ || entry->signature != 0x0a || entry->code || entry->first || entry->last)
+            fs98_fail("help message map signature");
+        if (!GetModuleHandleExA(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS |
+                GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT, (const char *)entry->handler, &owner) ||
+                owner != module || (!s_side && (uint32_t)(uintptr_t)entry->handler != retail_targets[page][kind]))
+            fs98_fail("help message map handler ownership");
+    }
+    if (found[0] != 1 || found[1] != 1) fs98_fail("help message map missing entry");
+    memset(&info, 0, sizeof(info));
+    info.cbSize = sizeof(info);
+    info.iContextType = HELPINFO_WINDOW;
+    info.hItemHandle = item;
+    fs98_patch_slot(slot, (void *)fs98_help_service_probe, &original);
+    for (i = 0; i < 4; ++i) {
+        struct fs98_help_event *event = &s_help_results[s_side][page][i];
+        memset(event, 0, sizeof(*event));
+        s_help_event = event;
+        s_help_service_return = (i & 1) ? 7 : 0;
+        s_help_expected_hwnd = i < 2 ? item : window;
+        if (i < 2) event->result = (uint32_t)SendMessageA(window, WM_HELP, 0x8765, (LPARAM)&info);
+        else event->result = (uint32_t)SendMessageA(window, WM_CONTEXTMENU, (WPARAM)window, MAKELPARAM(19, 31));
+    }
+    s_help_event = 0;
+    fs98_restore_slot(slot, original);
 }
 
 static int32_t TC fs98_validate_hook(void *object, uint32_t control_id)
@@ -1305,6 +1866,12 @@ static void TC fs98_flow_base_activate_probe(void *object, uint32_t state,
     if (other && ReadProcessMemory(GetCurrentProcess(), (uint8_t *)other + 0x20,
             &other_hwnd, sizeof(other_hwnd), &bytes_read) && bytes_read != sizeof(other_hwnd))
         other_hwnd = 0;
+    if (page < 0 && s_real_modal_active && s_alert_module) {
+        original = s_flow_base_activate_original[s_side][2];
+        if (!original) fs98_fail("Alerts inherited OnActivate target");
+        ((void (TC *)(void *, uint32_t, void *, uint32_t))original)(object, state, other, minimized);
+        return;
+    }
     if (page < 0 || page >= 5) fs98_fail("inherited OnActivate object identity");
     original = s_flow_base_activate_original[s_side][page];
     if (!original) fs98_fail("inherited OnActivate original target");
@@ -1638,6 +2205,31 @@ static void TC fs98_flow_browser_timer_probe(void *object, uint32_t timer_id)
         object, timer_id);
 }
 
+static void fs98_flow_lifetime_phase(const char *phase, int32_t page)
+{
+    uint32_t index, alive = 0;
+    HWND *windows = s_flow_windows[s_side];
+    if (windows) for (index = 0; index < 5; ++index)
+        if (IsWindow(windows[index])) alive |= 1u << index;
+    fprintf(stderr, "FLOW LIFETIME PHASE side=%u case=%u page=%ld phase=%s alive=%02x pending=%lu depth=%u owner=%u refresh_pending=%u list_hook=%u list_reentry=%u\n",
+        s_side, s_case, (long)page, phase, alive, (unsigned long)(MsgWaitForMultipleObjectsEx(0, NULL, 0, QS_ALLINPUT, MWMO_INPUTAVAILABLE) == WAIT_OBJECT_0),
+        s_flow_dispatch_depth[s_side], s_flow_owner_active[s_side],
+        s_flow_refresh_reentry_pending[s_side], !!s_browser_list_original, s_browser_list_reentry);
+    if (!strcmp(phase, "destroy-enter") && getenv("MPD_TRACE_LIFETIME_QUEUE")) {
+        MSG message;
+        BOOL head = PeekMessageA(&message, 0, 0, 0, PM_NOREMOVE);
+        fprintf(stderr, "FLOW LIFETIME QUEUE side=%u case=%u page=%ld head=%u hwnd=%p msg=%04x wp=%08lx lp=%08lx\n",
+            s_side, s_case, (long)page, !!head, head ? message.hwnd : 0,
+            head ? message.message : 0, head ? (unsigned long)message.wParam : 0,
+            head ? (unsigned long)message.lParam : 0);
+        head = PeekMessageA(&message, 0, 0x5f4, 0x5f4, PM_NOREMOVE);
+        fprintf(stderr, "FLOW LIFETIME VALIDATION side=%u case=%u page=%ld pending=%u hwnd=%p wp=%08lx lp=%08lx\n",
+            s_side, s_case, (long)page, !!head, head ? message.hwnd : 0,
+            head ? (unsigned long)message.wParam : 0, head ? (unsigned long)message.lParam : 0);
+    }
+    fflush(stderr);
+}
+
 static void TC fs98_flow_post_hook(void *object)
 {
     int32_t page = fs98_flow_page_for_object(object);
@@ -1647,9 +2239,11 @@ static void TC fs98_flow_post_hook(void *object)
         fprintf(stderr, "FLOW POST side=%lu case=%lu object=%p tick=%lu\n",
             (unsigned long)s_side, (unsigned long)s_case, object,
             (unsigned long)s_flow_lifecycle_tick);
+    fs98_flow_lifetime_phase("post-enter", page);
     ++result->post_destroy[page];
     result->post_order[page] = ++s_flow_lifecycle_tick;
     ((void (TC *)(void *))s_flow_post_originals[s_side][page])(object);
+    fs98_flow_lifetime_phase("post-return", page);
 }
 
 static void *TC fs98_flow_delete_hook(void *object, uint32_t flags)
@@ -1662,10 +2256,12 @@ static void *TC fs98_flow_delete_hook(void *object, uint32_t flags)
         fprintf(stderr, "FLOW DELETE side=%lu case=%lu object=%p flags=%lu tick=%lu\n",
             (unsigned long)s_side, (unsigned long)s_case, object,
             (unsigned long)flags, (unsigned long)s_flow_lifecycle_tick);
+    fs98_flow_lifetime_phase("delete-enter", page);
     ++result->deleting_dtor[page];
     result->delete_flags[page] = flags;
     result->delete_order[page] = ++s_flow_lifecycle_tick;
     returned = ((void *(TC *)(void *, uint32_t))s_flow_delete_originals[s_side][page])(object, flags);
+    fs98_flow_lifetime_phase("delete-return", page);
     return returned;
 }
 
@@ -1697,10 +2293,20 @@ static int32_t TC fs98_flow_error_hook(void *object, int32_t field)
     int32_t page = fs98_flow_page_for_object(object);
     struct fs98_flow_result *result = &s_flow_results[s_side];
     if (page < 0) fs98_fail("flow DisplayError object identity");
+    if (page == (int32_t)s_real_modal_page && s_real_modal_active) {
+        int32_t value = ((int32_t (TC *)(void *, int32_t))s_flow_error_originals[s_side][page])(object, field);
+        if (page == 1) fprintf(stderr, "CHOICE DISPLAY side=%lu field=%lx return=%lx focus=%p active=%p page=%p edit=%p pending=%lx enabled=%lx\n",
+            (unsigned long)s_side, (unsigned long)field, (unsigned long)value,
+            GetFocus(), GetActiveWindow(), (HWND)D32(object, 0x20),
+            GetDlgItem((HWND)D32(object, 0x20), 0x419),
+            (unsigned long)D32(object, 0x7d0), (unsigned long)D32(object, 0x7dc));
+        s_real_modal[s_side][10] = (uint32_t)value;
+        return value;
+    }
     ++result->error_count[page];
     result->error_field[page] = (uint32_t)field;
-    if (field) SetFocus(GetDlgItem((HWND)D32(object, 0x20), field));
-    return 1;
+    if (field && !s_host_error_active) SetFocus(GetDlgItem((HWND)D32(object, 0x20), field));
+    return s_host_display_return;
 }
 
 static LRESULT CALLBACK fs98_flow_nc_destroy_proc(HWND window, UINT message,
@@ -1782,6 +2388,7 @@ static LRESULT CALLBACK fs98_flow_nc_destroy_proc(HWND window, UINT message,
     }
     if (message == WM_NCDESTROY) {
         if (page >= 0) {
+            fs98_flow_lifetime_phase("ncdestroy-enter", page);
             ++s_flow_results[s_side].nc_destroy[page];
             s_flow_results[s_side].nc_order[page] = ++s_flow_lifecycle_tick;
         }
@@ -1792,6 +2399,8 @@ static LRESULT CALLBACK fs98_flow_nc_destroy_proc(HWND window, UINT message,
     --s_flow_dispatch_depth[s_side];
     if (trace) fs98_flow_trace_event(s_side, 2, page, message,
         (uint32_t)wparam, (uint32_t)lparam, s_flow_dispatch_depth[s_side], 0);
+    if (message == WM_NCDESTROY && page >= 0)
+        fs98_flow_lifetime_phase("ncdestroy-return", page);
     return result;
 }
 
@@ -2147,6 +2756,22 @@ static LRESULT CALLBACK fs98_flow_modal_hook_proc(int code, WPARAM wparam, LPARA
     if (code == HCBT_ACTIVATE && wparam) {
         char class_name[64];
         GetClassNameA((HWND)wparam, class_name, sizeof(class_name));
+        if (!strcmp(class_name, "#32770") && s_real_modal_active &&
+            !s_real_modal[s_side][0] && fs98_flow_message_page((HWND)wparam) < 0) {
+            HWND host = s_flow_windows[s_side][s_real_modal_page];
+            void *object = s_flow_dialog_objects[s_side][s_real_modal_page];
+            uint32_t before = fs98_flow_visible_mask(s_side);
+            uint32_t callbacks = s_flow_results[s_side].callback_count;
+            ++s_real_modal[s_side][0];
+            s_real_modal[s_side][1] = D32(object, 0x7d0);
+            s_real_modal[s_side][2] = IsWindowEnabled(host);
+            SendMessageA(host, WM_COMMAND, 0x3e8, 0);
+            s_real_modal[s_side][3] = before == fs98_flow_visible_mask(s_side) &&
+                callbacks == s_flow_results[s_side].callback_count;
+            if (!GetDlgItem((HWND)wparam, 2003)) fs98_fail("retail Alerts first button");
+            PostMessageA((HWND)wparam, WM_COMMAND, 2003, (LPARAM)GetDlgItem((HWND)wparam, 2003));
+            return CallNextHookEx(s_flow_modal_hook, code, wparam, lparam);
+        }
         if (!strcmp(class_name, "#32770")) {
             char caption[256];
             caption[0] = 0;
@@ -2359,6 +2984,8 @@ static void fs98_flow_setup(uint32_t side, uint32_t case_index)
     memset(&s_flow_results[side], 0, sizeof(s_flow_results[side]));
     memset(s_flow_trace[side], 0, sizeof(s_flow_trace[side]));
     s_flow_event_count[side] = s_flow_idle_ticks[side] = 0;
+    s_host_update_counts[side] = 0;
+    memset(s_host_update_events[side], 0, sizeof(s_host_update_events[side]));
     s_flow_trace_count[side] = s_flow_dispatch_depth[side] = 0;
     s_flow_windows[side] = 0;
     s_flow_refresh_reentry_pending[side] = case_index == 3;
@@ -2423,7 +3050,9 @@ static void fs98_flow_setup(uint32_t side, uint32_t case_index)
     D32(block, 0xa0) = (uint32_t)(uintptr_t)fs98_flow_refresh_callback;
     D32(block, 0xa4) = (uint32_t)(uintptr_t)fs98_flow_browser_settings_callback;
     D32(block, 0xac) = (uint32_t)(uintptr_t)s_flow_rows[side][0][0];
-    D32(block, 0xb0) = 2;
+    D32(block, 0xb0) = case_index == 0 ? 129 : 2;
+    for (row = 2; row < D32(block, 0xb0); ++row)
+        memcpy(s_flow_rows[side][0][row], s_flow_rows[side][0][0], 84);
     D32(block, 0xb8) = 0;
 }
 
@@ -2534,8 +3163,14 @@ static void fs98_flow_choose(HWND *windows, uint32_t route_id,
 static void fs98_flow_dispatch_validation_error(HWND window)
 {
     MSG message;
-    while (PeekMessageA(&message, window, 0x5f4, 0x5f4, PM_REMOVE))
+    while (PeekMessageA(&message, window, 0x5f4, 0x5f4, PM_REMOVE)) {
+        if (s_real_modal_active && s_real_modal_page == 1)
+            fprintf(stderr, "CHOICE POST dispatch side=%lu field=%lx pending=%lx enabled=%lx\n",
+                (unsigned long)s_side, (unsigned long)message.wParam,
+                (unsigned long)D32(s_flow_dialog_objects[s_side][1], 0x7d0),
+                (unsigned long)D32(s_flow_dialog_objects[s_side][1], 0x7dc));
         DispatchMessageA(&message);
+    }
 }
 
 static void fs98_flow_focus_loss(HWND *windows, uint32_t page, uint32_t control_id,
@@ -3010,8 +3645,14 @@ static void fs98_flow_lifetime(uint32_t side, HWND *windows,
         fs98_flow_trace_event(side, 6, (int32_t)page, WM_DESTROY,
             (uint32_t)GetWindowLongA(windows[page], GWL_STYLE),
             (uint32_t)(uintptr_t)windows[page], 0, 0);
+        fs98_flow_lifetime_phase("destroy-enter", (int32_t)page);
+        if (page == 0 && s_side == 0 && s_case == 203 &&
+            getenv("MPD_TEST_STALL_DESTROY") &&
+            strcmp(getenv("MPD_TEST_STALL_DESTROY"), "case3-page0") == 0)
+            Sleep(INFINITE);
         if (IsWindow(windows[page]) && !DestroyWindow(windows[page]))
             fs98_fail("HOST-modeled 0x110a array teardown");
+        fs98_flow_lifetime_phase("destroy-return", (int32_t)page);
         if (page == 4 && (s_case == 203 || s_case == 204 || s_case == 210))
             fprintf(stderr, "FLOW LIFE AFTER side=%lu case=%lu page=%lu nc=%u post=%u delete=%u depth=%lu\n",
                 (unsigned long)side, (unsigned long)s_case, (unsigned long)page,
@@ -3063,6 +3704,137 @@ static void fs98_flow_lifetime(uint32_t side, HWND *windows,
     s_flow_windows[side] = 0;
 }
 
+static LRESULT CALLBACK fs98_browser_list_reentry_proc(HWND window, UINT message,
+                                                       WPARAM wparam, LPARAM lparam)
+{
+    LRESULT result = CallWindowProcA(s_browser_list_original, window, message, wparam, lparam);
+    if (message == LB_ADDSTRING && s_browser_list_reentry) {
+        uint32_t mode = s_browser_list_reentry;
+        s_browser_list_reentry = 0;
+        if (mode == 1) D32(s_flow_blocks[s_side], 0xb0) = 1;
+        else D32(s_flow_blocks[s_side], 0xac) = (uint32_t)(uintptr_t)s_flow_rows[s_side][1][0];
+    }
+    return result;
+}
+
+static void fs98_flow_browser_probe(uint32_t side, HWND window)
+{
+    void *object = s_flow_dialog_objects[side][4];
+    uint8_t *block = s_flow_blocks[side];
+    HWND list = GetDlgItem(window, 0x3fd);
+    void (TC *update)(void *) = PTR(PTR(object, 0), 0xf0);
+    D32(block, 0xac) = (uint32_t)(uintptr_t)s_flow_rows[side][0][0];
+    D32(block, 0xb0) = 2;
+    D32(block, 0xb8) = 1;
+    SendMessageA(list, LB_SETCURSEL, 1, 0);
+    fs98_browser_event(1, 0);
+    update(object);
+    fs98_browser_event(2, 0);
+    SendMessageA(list, LB_SETCURSEL, 1, 0);
+    D32(block, 0xb0) = 1;
+    update(object);
+    fs98_browser_event(3, 0);
+    D32(block, 0xb0) = 0;
+    update(object);
+    fs98_browser_event(4, 0);
+    SendMessageA(window, WM_COMMAND, MAKEWPARAM(0x3fd, 1), (LPARAM)list);
+    fs98_browser_event(5, 0);
+    D32(block, 0xb0) = 2;
+    update(object);
+    fs98_browser_event(6, 0);
+    s_browser_probe_mode[side] = 1;
+    EnableWindow(GetDlgItem(window, 0x3ff), FALSE);
+    SendMessageA(window, WM_COMMAND, MAKEWPARAM(0x3fd, 1), (LPARAM)list);
+    fs98_browser_event(7, 0);
+    D32(s_flow_rows[side][0][0], 0x20) = 2;
+    D32(s_flow_rows[side][0][0], 0x24) = 0;
+    s_browser_probe_mode[side] = 2;
+    SendMessageA(window, WM_COMMAND, MAKEWPARAM(0x3fd, 1), (LPARAM)list);
+    fs98_browser_event(8, 0);
+    s_browser_probe_mode[side] = 0;
+    if (side == 0) {
+        const struct fs98_browser_event *e = s_flow_results[side].browser_probe;
+        uint32_t i;
+        for (i = 0; i < s_flow_results[side].browser_probe_count; ++i)
+            fprintf(stderr, "BROWSER RETAIL event=%u stage=%u selection=%u count=%u join=%u details=%u descriptor=%u argument=%u\n",
+                i, e[i].stage, e[i].selection, e[i].count, e[i].join, e[i].details,
+                e[i].descriptor_selection, e[i].argument);
+        if (s_flow_results[side].browser_probe_count != 16 ||
+            e[1].selection != 0 || e[1].count != 2 ||
+            e[2].selection != 0 || e[2].count != 1 ||
+            e[3].selection != (uint32_t)-1 || e[3].count != 0 ||
+            e[3].join || e[3].details || e[5].selection != 0 ||
+            e[6].stage != 11 || !e[6].join || !e[8].join ||
+            e[10].stage != 20 || e[10].join ||
+            e[11].stage != 13 || !e[11].join || !e[13].join)
+            fs98_fail("retail Browser probe did not reach expected states");
+    }
+    {
+        struct fs98_flow_result *result = &s_flow_results[side];
+        uint8_t *first = s_flow_rows[side][0][0];
+        uint8_t *second = s_flow_rows[side][0][1];
+        memset(s_browser_long_names[side], 'N', 700);
+        s_browser_long_names[side][700] = 0;
+        D32(first, 0) = (uint32_t)(uintptr_t)s_browser_long_names[side];
+        D32(first, 0x20) = 0x80000000u;
+        D32(first, 0x24) = 0xffffffffu;
+        D32(first, 0x28) = 0x7fffffffu;
+        D32(first, 0x2c) = 0;
+        D32(second, 0) = (uint32_t)(uintptr_t)"";
+        D32(second, 0x20) = 0xffffffffu;
+        D32(second, 0x24) = 0x80000000u;
+        D32(second, 0x28) = 0;
+        D32(second, 0x2c) = 0x7fffffffu;
+        D32(block, 0xac) = (uint32_t)(uintptr_t)first;
+        D32(block, 0xb0) = 2;
+        update(object);
+        SendMessageA(list, LB_GETTEXT, 0, (LPARAM)result->browser_formatted[0]);
+        SendMessageA(list, LB_GETTEXT, 1, (LPARAM)result->browser_formatted[1]);
+        if (side == 0 && (strlen(result->browser_formatted[0]) <= 700 ||
+            strcmp(result->browser_formatted[1], "\t0 of -1\t2147483647 of -2147483648")))
+            fs98_fail("retail Browser formatting fixture");
+        D32(block, 0x40) = 1;
+        D32(block, 0xb8) = 77;
+        D32(object, 0x1ad8) = 1;
+        SendMessageA(window, WM_COMMAND, MAKEWPARAM(0x430, 0), (LPARAM)GetDlgItem(window, 0x430));
+        result->browser_fields[0] = D32(block, 0x40);
+        result->browser_fields[1] = D32(block, 0xb8);
+        D32(block, 0x40) = 1;
+        SendMessageA(window, WM_COMMAND, MAKEWPARAM(0x400, 0), (LPARAM)GetDlgItem(window, 0x400));
+        result->browser_fields[2] = D32(block, 0x40);
+        result->browser_fields[3] = D32(block, 0xb8);
+        D32(block, 0x40) = 1;
+        s_browser_field_probe[side] = 1;
+        SendMessageA(window, WM_COMMAND, MAKEWPARAM(0x401, 0), (LPARAM)GetDlgItem(window, 0x401));
+        s_browser_field_probe[side] = 0;
+        if (side == 0 && (result->browser_fields[0] != 2 || result->browser_fields[1] != 77 ||
+            result->browser_fields[2] != 1 || result->browser_fields[3] != 0 ||
+            result->browser_fields[4] != 1 || result->browser_fields[5] != 0))
+            fs98_fail("retail Browser independent descriptor fields");
+        D32(first, 0) = (uint32_t)(uintptr_t)s_flow_session_names[side][0];
+        D32(second, 0) = (uint32_t)(uintptr_t)s_flow_session_names[side][1];
+        D32(s_flow_rows[side][1][1], 0) = (uint32_t)(uintptr_t)"Changed Session";
+        s_browser_list_original = (WNDPROC)(uintptr_t)SetWindowLongA(
+            list, GWL_WNDPROC, (LONG)(uintptr_t)fs98_browser_list_reentry_proc);
+        if (!s_browser_list_original) fs98_fail("subclass Browser list for reentry");
+        D32(block, 0xac) = (uint32_t)(uintptr_t)first;
+        D32(block, 0xb0) = 2;
+        s_browser_list_reentry = 1;
+        update(object);
+        result->browser_reentry_count = (uint32_t)SendMessageA(list, LB_GETCOUNT, 0, 0);
+        D32(block, 0xac) = (uint32_t)(uintptr_t)first;
+        D32(block, 0xb0) = 2;
+        s_browser_list_reentry = 2;
+        update(object);
+        SendMessageA(list, LB_GETTEXT, 1, (LPARAM)result->browser_reentry_text);
+        SetWindowLongA(list, GWL_WNDPROC, (LONG)(uintptr_t)s_browser_list_original);
+        s_browser_list_original = 0;
+        if (side == 0 && (result->browser_reentry_count != 1 ||
+            strncmp(result->browser_reentry_text, "Changed Session\t", 16)))
+            fs98_fail("retail Browser list reentry fixture");
+    }
+}
+
 static uint32_t fs98_run_flow_case(uint32_t cycle, uint32_t case_index,
                                    HMODULE *modules, struct fs98_test_linkage **linkages)
 {
@@ -3078,8 +3850,9 @@ static uint32_t fs98_run_flow_case(uint32_t cycle, uint32_t case_index,
         s_current_module = modules[side];
         s_flow_active = 0;
         s_flow_modal_seen[side] = 0;
+        memset(s_real_modal[side], 0, sizeof(s_real_modal[side]));
         fs98_flow_setup(side, case_index);
-        isolated_host = case_index == 0 ? fs98_flow_create_isolated_host() : 0;
+        isolated_host = case_index == 0 || (case_index == 6 && s_choice_real_modal) ? fs98_flow_create_isolated_host() : 0;
         fs98_patch_flow_main();
         fs98_flow_reset_host_focus();
         if (GetActiveWindow() != s_main_window || GetFocus() != s_main_window) {
@@ -3098,8 +3871,16 @@ static uint32_t fs98_run_flow_case(uint32_t cycle, uint32_t case_index,
         s_flow_modal_hook = SetWindowsHookExA(WH_CBT, fs98_flow_modal_hook_proc, 0,
                                                GetCurrentThreadId());
         if (!s_flow_modal_hook) fs98_fail("install 0x110a modal diagnostic hook");
+        if (case_index == 1 || case_index == 11) {
+            uint32_t capacity = case_index == 1 ? 0 : 1;
+            D32(block, 0x50) = D32(block, 0x64) = D32(block, 0x78) = capacity;
+            s_host_init_count[side] = 0;
+            memset(s_host_init_args[side], 0, sizeof(s_host_init_args[side]));
+            s_host_init_active = 1;
+        }
         windows = (HWND *)(uintptr_t)linkages[side]->dialogs[0].create(
             (uint32_t)(uintptr_t)s_main_window, block);
+        s_host_init_active = 0;
         if (!UnhookWindowsHookEx(s_flow_modal_hook)) fs98_fail("remove 0x110a modal diagnostic hook");
         s_flow_modal_hook = 0;
         if (s_flow_modal_seen[side]) fs98_fail("retail/replacement displayed resource or error modal during page construction");
@@ -3111,9 +3892,33 @@ static uint32_t fs98_run_flow_case(uint32_t cycle, uint32_t case_index,
         result->array_valid = 1;
         for (page = 0; page < 5; ++page)
             if (!IsWindow(windows[page])) result->array_valid = 0;
+        result->browser_initial_count = (uint32_t)SendDlgItemMessageA(
+            windows[4], 0x3fd, LB_GETCOUNT, 0, 0);
+        if (side == 0 && result->browser_initial_count != D32(block, 0xb0))
+            fs98_fail("retail Browser fixture must contain every descriptor row");
+        if (case_index == 1 || case_index == 11) {
+            static const int ids[] = {0x40f, 0x410, 0x41a};
+            uint32_t i;
+            for (i = 0; i < 3; ++i) {
+                HWND edit = GetDlgItem(windows[2], ids[i]);
+                SetWindowTextA(edit, "");
+                SendMessageA(edit, WM_CHAR, 'A', 0);
+                SendMessageA(edit, WM_CHAR, 'B', 0);
+                s_host_init_edits[side][i][0] = (uint32_t)SendMessageA(edit, EM_GETLIMITTEXT, 0, 0);
+                s_host_init_edits[side][i][1] = (uint32_t)GetWindowTextLengthA(edit);
+            }
+            D32(block, 0x50) = sizeof(s_flow_host_names[side]);
+            D32(block, 0x64) = sizeof(s_flow_pilot_caps[side]);
+            D32(block, 0x78) = sizeof(s_flow_observer_caps[side]);
+            for (i = 0; i < 3; ++i) SetWindowTextA(GetDlgItem(windows[2], ids[i]), i == 0 ? "4" : i == 1 ? "2" : "Sierra Session");
+        }
         fs98_flow_capture_children(windows, result);
         result->before_host_mask = fs98_flow_visibility_mask(windows);
         for (page = 0; page < 5; ++page) fs98_patch_flow_page(windows[page], page, modules[side]);
+        if (case_index == 0) {
+            fs98_host_capture_probe(side, windows[2]);
+            fs98_host_update_probe(side, modules[side]);
+        }
         if (case_index == 3 || case_index == 4 || case_index == 10)
             fs98_flow_patch_timer_imports(side, modules[side]);
         if (s_case == 200) fs98_flow_patch_showwindow_import(side, modules[side]);
@@ -3145,6 +3950,8 @@ static uint32_t fs98_run_flow_case(uint32_t cycle, uint32_t case_index,
             break;
         case 2: /* host route, settings callback, back/forward, accept on Connection */
             fs98_flow_to_host(windows, result);
+            fs98_host_validation_probe(side, windows[2]);
+            fs98_host_error_probe(side, modules[side]);
             fs98_flow_send(windows, 2, 0x426, result);
             fs98_flow_send(windows, 2, 0x3e9, result);
             fs98_flow_choose(windows, 0x41e, result);
@@ -3156,6 +3963,7 @@ static uint32_t fs98_run_flow_case(uint32_t cycle, uint32_t case_index,
             fs98_flow_to_connection(windows, result);
             fs98_flow_provider_to_browser(windows, side, result);
             if (!IsWindowVisible(windows[4])) fs98_fail("Browser page not visible for timer probe");
+            fs98_flow_browser_probe(side, windows[4]);
             fs98_flow_dispatch_browser_timer_probe(windows[4]);
             fs98_flow_checkpoint(windows, result);
             SendMessageA(GetDlgItem(windows[4], 0x3fd), LB_SETCURSEL, 0, 0);
@@ -3166,6 +3974,7 @@ static uint32_t fs98_run_flow_case(uint32_t cycle, uint32_t case_index,
             fs98_flow_send(windows, 4, 0x3ec, result);
             fs98_flow_send(windows, 4, 0x401, result);
             fs98_flow_send(windows, 4, 0x430, result);
+            s_flow_accept_result[side] = 1;
             fs98_flow_send(windows, 4, 0x3ff, result);
             break;
         case 4: /* failed provider path invokes reset; retry succeeds; cancel Browser */
@@ -3189,14 +3998,31 @@ static uint32_t fs98_run_flow_case(uint32_t cycle, uint32_t case_index,
             break;
         case 6: /* callsign failure sets pending error, suppresses Next, then recovers */
             fs98_flow_to_choice(windows, result);
+            fs98_choice_error_probe(side, modules[side]);
             fs98_flow_focus_loss(windows, 1, 0x419, "", result, 0, 0);
             pending = fs98_flow_visibility_mask(windows);
             fs98_flow_send(windows, 1, 0x3e8, result);
             result->blocked_next[0] = pending == fs98_flow_visibility_mask(windows);
             fs98_flow_checkpoint(windows, result);
-            fs98_flow_dispatch_validation_error(windows[1]);
+            if (s_choice_real_modal) {
+                MSG message;
+                void *object = s_flow_dialog_objects[side][1];
+                s_real_modal[side][4] = PeekMessageA(&message, windows[1], 0x5f4, 0x5f4, PM_NOREMOVE);
+                s_real_modal[side][5] = D32(object, 0x7d0);
+                s_real_modal_page = 1;
+                s_real_modal_active = 1;
+                fs98_flow_dispatch_validation_error(windows[1]);
+                s_real_modal_active = 0;
+                s_real_modal[side][6] = D32(object, 0x8c);
+                s_real_modal[side][7] = (uint32_t)GetDlgCtrlID(GetFocus());
+                s_real_modal[side][8] = D32(object, 0x7d0);
+            } else fs98_flow_dispatch_validation_error(windows[1]);
             fs98_flow_focus_loss(windows, 1, 0x419, "OpenFS", result, 1, 1);
+            if (s_choice_real_modal)
+                s_real_modal[side][9] = D32(s_flow_dialog_objects[side][1], 0x7d0);
             fs98_flow_send(windows, 1, 0x3e8, result);
+            if (s_choice_real_modal)
+                s_real_modal[side][11] = fs98_flow_visibility_mask(windows);
             fs98_flow_send(windows, 3, IDCANCEL, result);
             break;
         case 7: /* host name failure and recovery */
@@ -3206,9 +4032,23 @@ static uint32_t fs98_run_flow_case(uint32_t cycle, uint32_t case_index,
             fs98_flow_send(windows, 2, 0x3e8, result);
             result->blocked_next[0] = pending == fs98_flow_visibility_mask(windows);
             fs98_flow_checkpoint(windows, result);
-            fs98_flow_dispatch_validation_error(windows[2]);
+            {
+                MSG message;
+                void *object = s_flow_dialog_objects[side][2];
+                s_real_modal[side][4] = PeekMessageA(&message, windows[2], 0x5f4, 0x5f4, PM_NOREMOVE);
+                s_real_modal[side][5] = D32(object, 0x7d0);
+                s_real_modal_page = 2;
+                s_real_modal_active = 1;
+                fs98_flow_dispatch_validation_error(windows[2]);
+                s_real_modal_active = 0;
+                s_real_modal[side][6] = D32(object, 0x8c);
+                s_real_modal[side][7] = (uint32_t)GetDlgCtrlID(GetFocus());
+                s_real_modal[side][8] = D32(object, 0x7d0);
+            }
             fs98_flow_focus_loss(windows, 2, 0x41a, "Sierra Session", result, 1, 1);
+            s_real_modal[side][9] = D32(s_flow_dialog_objects[side][2], 0x7d0);
             fs98_flow_send(windows, 2, 0x3e8, result);
+            s_real_modal[side][11] = fs98_flow_visibility_mask(windows);
             fs98_flow_send(windows, 3, IDCANCEL, result);
             break;
         case 8: /* pilot-capacity failure and recovery */
@@ -3238,6 +4078,10 @@ static uint32_t fs98_run_flow_case(uint32_t cycle, uint32_t case_index,
         case 10: /* Browser -> Connection -> Choice -> Intro back chain; cancel Intro */
             fs98_flow_to_connection(windows, result);
             fs98_flow_provider_to_browser(windows, side, result);
+            D32(block, 0x40) = 1;
+            D32(block, 0xb8) = 77;
+            D32(s_flow_dialog_objects[side][4], 0x1ad8) = 1;
+            SendDlgItemMessageA(windows[4], 0x3fd, LB_SETCURSEL, 1, 0);
             fs98_flow_send(windows, 4, 0x3e9, result);
             fs98_flow_send(windows, 3, 0x3e9, result);
             fs98_flow_send(windows, 1, 0x3e9, result);
@@ -3274,13 +4118,76 @@ static uint32_t fs98_run_flow_case(uint32_t cycle, uint32_t case_index,
     {
         const struct fs98_flow_result *retail = &s_flow_results[0];
         const struct fs98_flow_result *replacement = &s_flow_results[1];
+        uint32_t host_update_diff = 0;
+        if (case_index == 1 || case_index == 11) {
+            uint32_t i, expected = case_index == 1 ? 0xffffffffu : 0;
+            static const uint32_t ids[] = {0x40f, 0x410, 0x41a};
+            if (s_host_init_count[0] != 3) fs98_fail("retail Host initialization messages");
+            for (i = 0; i < 3; ++i) {
+                if (s_host_init_edits[0][i][0] != 0x7ffffffe || s_host_init_edits[0][i][1] != 2)
+                    fs98_fail("retail Host initialization edit behavior");
+                if (s_host_init_args[0][i][0] != ids[i] || s_host_init_args[0][i][1] != expected)
+                    fs98_fail("retail Host initialization argument");
+                fprintf(stderr, "HOST INIT capacity=%lu field=%lu arg=%08lx limit=%lu typed=%lu\n",
+                    (unsigned long)(case_index == 1 ? 0 : 1), (unsigned long)i,
+                    (unsigned long)s_host_init_args[0][i][1], (unsigned long)s_host_init_edits[0][i][0],
+                    (unsigned long)s_host_init_edits[0][i][1]);
+            }
+            host_update_diff = s_host_init_count[0] != s_host_init_count[1] ||
+                memcmp(s_host_init_args[0], s_host_init_args[1], sizeof(s_host_init_args[0])) ||
+                memcmp(s_host_init_edits[0], s_host_init_edits[1], sizeof(s_host_init_edits[0]));
+        }
+        if (case_index == 0) {
+            uint32_t i;
+            static const struct fs98_host_update_event expected[] = {
+                {1, 0x41a, 0}, {1, 0x40f, 0}, {1, 0x410, 0},
+                {2, 0x411, 0x00080002}, {2, 0x412, 4}, {3, 0x3ed, 0}
+            };
+            for (i = 0; i < 15; ++i) {
+                uint32_t k;
+                for (k = 0; k < 3; ++k) {
+                    const uint8_t *buffer = s_host_capture_results[0][i][k];
+                    if ((i < 5 && buffer[0] != 0x5a) ||
+                        (i >= 5 && i < 10 && (buffer[0] != 0 || buffer[1] != 0x5a)) ||
+                        buffer[8] != 0x5a)
+                        fs98_fail("retail Host capture boundary fixture");
+                }
+            }
+            if (s_host_update_counts[0] != 6 ||
+                memcmp(s_host_update_events[0], expected, sizeof(expected)))
+                fs98_fail("retail Host update probe sequence");
+            host_update_diff = memcmp(s_host_initial_limits[0], s_host_initial_limits[1], sizeof(s_host_initial_limits[0])) ||
+                memcmp(s_host_capture_results[0], s_host_capture_results[1], sizeof(s_host_capture_results[0])) ||
+                s_host_update_counts[0] != s_host_update_counts[1] ||
+                memcmp(s_host_update_events[0], s_host_update_events[1], sizeof(s_host_update_events[0]));
+            if (host_update_diff) {
+                uint32_t j, k;
+                fprintf(stderr, "HOST LIMITS retail=%lu,%lu,%lu replacement=%lu,%lu,%lu\n",
+                    (unsigned long)s_host_initial_limits[0][0], (unsigned long)s_host_initial_limits[0][1], (unsigned long)s_host_initial_limits[0][2],
+                    (unsigned long)s_host_initial_limits[1][0], (unsigned long)s_host_initial_limits[1][1], (unsigned long)s_host_initial_limits[1][2]);
+                for (j = 0; j < 15; ++j) for (k = 0; k < 3; ++k)
+                    if (memcmp(s_host_capture_results[0][j][k], s_host_capture_results[1][j][k], 12))
+                        fprintf(stderr, "HOST CAPTURE case=%lu field=%lu retail=%02x,%02x replacement=%02x,%02x\n",
+                            (unsigned long)j, (unsigned long)k,
+                            s_host_capture_results[0][j][k][0], s_host_capture_results[0][j][k][1],
+                            s_host_capture_results[1][j][k][0], s_host_capture_results[1][j][k][1]);
+                for (i = 0; i < s_host_update_counts[0] || i < s_host_update_counts[1]; ++i) {
+                    struct fs98_host_update_event *a = &s_host_update_events[0][i];
+                    struct fs98_host_update_event *b = &s_host_update_events[1][i];
+                    fprintf(stderr, "HOST UPDATE event=%lu retail=%lu/%lx/%lx replacement=%lu/%lx/%lx\n",
+                        (unsigned long)i, (unsigned long)a->kind, (unsigned long)a->id, (unsigned long)a->value,
+                        (unsigned long)b->kind, (unsigned long)b->id, (unsigned long)b->value);
+                }
+            }
+        }
         uint32_t timing_diff = retail->posts != replacement->posts ||
             retail->post_message != replacement->post_message ||
             retail->post_wparam != replacement->post_wparam || retail->post_lparam != replacement->post_lparam ||
             retail->before_host_mask != replacement->before_host_mask ||
             retail->after_host_show_mask != replacement->after_host_show_mask ||
             retail->after_initial_mask != replacement->after_initial_mask;
-        uint32_t initial_diff = retail->array_valid != replacement->array_valid ||
+        uint32_t initial_diff = retail->browser_initial_count != replacement->browser_initial_count ||
+            retail->array_valid != replacement->array_valid ||
             memcmp(retail->controls, replacement->controls, sizeof(retail->controls)) ||
             retail->before_host_mask != replacement->before_host_mask;
         uint32_t child_inventory_diff =
@@ -3299,17 +4206,89 @@ static uint32_t fs98_run_flow_case(uint32_t cycle, uint32_t case_index,
             strcmp(retail->callsign, replacement->callsign) || strcmp(retail->session, replacement->session) ||
             strcmp(retail->pilot, replacement->pilot) || strcmp(retail->observer_text, replacement->observer_text) ||
             retail->accepted_hidden_mask != replacement->accepted_hidden_mask;
-        uint32_t validation_diff = retail->validation_count != replacement->validation_count ||
+        if (case_index == 6) {
+            static const uint32_t expected[12][7] = {
+                {0,0,0,0,0,0,0x12345678}, {0,0,0,0,0,0,0x12345678},
+                {0,1,0,0,0,0,0x12345678}, {2,1,0,0,0,0,0x12345678},
+                {(uint32_t)-7,1,0,0,0,0,0x12345678},
+                {2,1,0x555,1,0x28,0x17ac,0}, {0,1,0x419,1,0x28,0x17ac,1},
+                {2,1,0x419,1,0x28,0x17ac,1}, {(uint32_t)-7,1,0x419,1,0x28,0x17ac,1},
+                {2,1,0x419,1,0x28,0x17ac,2},
+                {(uint32_t)-7,1,0x419,1,0x28,0x17ac,(uint32_t)-7},
+                {2,1,0x419,1,0x28,0x17ac,0}
+            };
+            static const uint32_t expected_modal[13] = {
+                1,0x41a,1,1,1,0x41a,1,0x419,0x419,0,0x419,8,0
+            };
+            static const uint32_t expected_pending[3][2] = {{0,0},{0,2},{0,(uint32_t)-7}};
+            uint32_t i, j;
+            if (memcmp(s_choice_error_results[0], expected, sizeof(expected)))
+                fs98_fail("retail Choice injected error fixture");
+            if (memcmp(s_choice_pending_results[0], expected_pending, sizeof(expected_pending)))
+                fs98_fail("retail Choice posted pending fixture");
+            for (i = 0; i < 12; ++i) for (j = 0; j < 7; ++j)
+                if (s_choice_error_results[0][i][j] != s_choice_error_results[1][i][j])
+                    fprintf(stderr, "CHOICE ERROR case=%lu part=%lu retail=%lx replacement=%lx\n",
+                        (unsigned long)i, (unsigned long)j,
+                        (unsigned long)s_choice_error_results[0][i][j],
+                        (unsigned long)s_choice_error_results[1][i][j]);
+            if (s_choice_real_modal) {
+                for (i = 0; i < 13; ++i)
+                    fprintf(stderr, "CHOICE REAL MODAL index=%lu retail=%lx replacement=%lx\n",
+                        (unsigned long)i, (unsigned long)s_real_modal[0][i], (unsigned long)s_real_modal[1][i]);
+                if (memcmp(s_real_modal[0], expected_modal, sizeof(expected_modal)) || !retail->blocked_next[0])
+                    fs98_fail("retail Choice real-alert validation fixture");
+            }
+        }
+        if (case_index == 7) {
+            static const uint32_t expected_modal[13] = {1, 0x41a, 1, 1, 1, 0x41a, 1, 0x41a, 0x41a, 0, 0x41a, 8, 0};
+            uint32_t i;
+            if (memcmp(s_real_modal[0], expected_modal, sizeof(expected_modal)) ||
+                !retail->blocked_next[0] || !(retail->after_initial_mask & 1))
+                fs98_fail("retail Alerts modal validation fixture");
+            for (i = 0; i < 13; ++i) fprintf(stderr, "HOST REAL MODAL index=%lu retail=%lx replacement=%lx\n",
+                (unsigned long)i, (unsigned long)s_real_modal[0][i], (unsigned long)s_real_modal[1][i]);
+        }
+        uint32_t validation_diff = (case_index == 6 && (memcmp(s_choice_error_results[0], s_choice_error_results[1], sizeof(s_choice_error_results[0])) || memcmp(s_choice_pending_results[0], s_choice_pending_results[1], sizeof(s_choice_pending_results[0])) || memcmp(s_real_modal[0], s_real_modal[1], sizeof(s_real_modal[0])))) || (case_index == 7 && memcmp(s_real_modal[0], s_real_modal[1], sizeof(s_real_modal[0]))) || (case_index == 2 && (memcmp(s_host_validation_results[0], s_host_validation_results[1], sizeof(s_host_validation_results[0])) ||
+                memcmp(s_host_error_results[0], s_host_error_results[1], sizeof(s_host_error_results[0])) ||
+                memcmp(s_host_pending_results[0], s_host_pending_results[1], sizeof(s_host_pending_results[0])))) ||
+            retail->validation_count != replacement->validation_count ||
             memcmp(retail->validation_focus, replacement->validation_focus, sizeof(retail->validation_focus)) ||
             memcmp(retail->blocked_next, replacement->blocked_next, sizeof(retail->blocked_next)) ||
             retail->status_callsign != replacement->status_callsign || retail->status_name != replacement->status_name ||
             retail->status_pilot != replacement->status_pilot || retail->status_observer != replacement->status_observer ||
             memcmp(retail->error_count, replacement->error_count, sizeof(retail->error_count)) ||
             memcmp(retail->error_field, replacement->error_field, sizeof(retail->error_field));
+        if (case_index == 2) {
+            static const uint32_t expected_pending[3][2] = {{0, 0}, {0, 2}, {0, (uint32_t)-7}};
+            static const uint32_t expected_validation[10][3] = {
+                {0,1,0}, {0x41a,1,0}, {0x40f,1,0}, {0x41a,1,0},
+                {0x410,1,0}, {0x41a,1,0}, {0x40f,1,0}, {0,0,0},
+                {0,1,0}, {0x41a,2,0x41a}
+            };
+            if (s_host_error_results[0][10][0] != 0 || s_host_error_results[0][11][0] != 2 ||
+                s_host_error_results[0][12][0] != (uint32_t)-7 ||
+                s_host_error_results[0][15][0] != 0 || s_host_error_results[0][16][0] != 2 ||
+                s_host_error_results[0][17][0] != (uint32_t)-7 ||
+                s_host_error_results[0][13][1] != 0x41a || s_host_error_results[0][13][5] != 2 ||
+                s_host_error_results[0][14][1] != 0x41a || s_host_error_results[0][14][5] != (uint32_t)-7)
+                fs98_fail("retail Host injected error returns");
+            if (memcmp(s_host_pending_results[0], expected_pending, sizeof(expected_pending)))
+                fs98_fail("retail Host propagated pending values");
+            if (memcmp(s_host_validation_results[0], expected_validation, sizeof(expected_validation)))
+                fs98_fail("retail Host validation fixture");
+        }
         uint32_t callback_diff = retail->callback_count != replacement->callback_count ||
             retail->callback_overflow != replacement->callback_overflow ||
             memcmp(retail->callbacks, replacement->callbacks, sizeof(retail->callbacks));
-        uint32_t browser_dispatch_diff =
+        uint32_t browser_fields_diff = retail->browser_reentry_count != replacement->browser_reentry_count ||
+            strcmp(retail->browser_reentry_text, replacement->browser_reentry_text) || memcmp(retail->browser_fields, replacement->browser_fields,
+                sizeof(retail->browser_fields)) ||
+            memcmp(retail->browser_formatted, replacement->browser_formatted,
+                sizeof(retail->browser_formatted));
+        uint32_t browser_probe_diff = retail->browser_probe_count != replacement->browser_probe_count ||
+            memcmp(retail->browser_probe, replacement->browser_probe, sizeof(retail->browser_probe));
+        uint32_t browser_dispatch_diff = browser_fields_diff || browser_probe_diff ||
             retail->browser_timer_count != replacement->browser_timer_count ||
             retail->browser_timer_overflow != replacement->browser_timer_overflow ||
             retail->browser_timer_dispatches != replacement->browser_timer_dispatches ||
@@ -3330,15 +4309,48 @@ static uint32_t fs98_run_flow_case(uint32_t cycle, uint32_t case_index,
             memcmp(retail->delete_flags, replacement->delete_flags, sizeof(retail->delete_flags));
         ++s_flow_child_inventory_total_pairs;
         if (!child_inventory_diff) ++s_flow_child_inventory_pairs;
-        difference = timing_diff || initial_diff || child_inventory_diff ||
+        difference = host_update_diff || timing_diff || initial_diff || child_inventory_diff ||
             transition_diff || validation_diff || callback_diff ||
             browser_dispatch_diff || lifetime_diff;
         if (difference) {
-            fprintf(stderr, "MP_DIALOG 0x110a DIFFER cycle=%lu case=%lu groups timing=%u initial=%u child_controls=%u transitions=%u validation=%u callbacks=%u browser_dispatch=%u lifetime=%u\n",
+            fprintf(stderr, "MP_DIALOG 0x110a DIFFER cycle=%lu case=%lu groups timing=%u initial=%u child_controls=%u transitions=%u validation=%u callbacks=%u browser_dispatch=%u lifetime=%u host_update=%u\n",
                 (unsigned long)cycle, (unsigned long)case_index, timing_diff, initial_diff,
                 child_inventory_diff,
                 transition_diff, validation_diff, callback_diff, browser_dispatch_diff,
-                lifetime_diff);
+                lifetime_diff, host_update_diff);
+            if (case_index == 2 && validation_diff) {
+                uint32_t i, j;
+                for (i = 0; i < 18; ++i) for (j = 0; j < 6; ++j)
+                    if (s_host_error_results[0][i][j] != s_host_error_results[1][i][j])
+                        fprintf(stderr, "HOST ERROR case=%lu part=%lu retail=%lx replacement=%lx\n",
+                            (unsigned long)i, (unsigned long)j,
+                            (unsigned long)s_host_error_results[0][i][j], (unsigned long)s_host_error_results[1][i][j]);
+            }
+            if (browser_fields_diff)
+                fprintf(stderr, "BROWSER REENTRY count=%u/%u text='%s'/'%s'\n",
+                    retail->browser_reentry_count, replacement->browser_reentry_count,
+                    retail->browser_reentry_text, replacement->browser_reentry_text);
+            if (browser_fields_diff)
+                fprintf(stderr, "BROWSER FIELDS retail=%u,%u,%u,%u,%u,%u replacement=%u,%u,%u,%u,%u,%u text0='%s'/'%s' text1='%s'/'%s'\n",
+                    retail->browser_fields[0], retail->browser_fields[1], retail->browser_fields[2], retail->browser_fields[3], retail->browser_fields[4], retail->browser_fields[5],
+                    replacement->browser_fields[0], replacement->browser_fields[1], replacement->browser_fields[2], replacement->browser_fields[3], replacement->browser_fields[4], replacement->browser_fields[5],
+                    retail->browser_formatted[0], replacement->browser_formatted[0], retail->browser_formatted[1], replacement->browser_formatted[1]);
+            if (browser_probe_diff) {
+                uint32_t i, limit = retail->browser_probe_count < replacement->browser_probe_count ?
+                    retail->browser_probe_count : replacement->browser_probe_count;
+                for (i = 0; i < limit; ++i) {
+                    const struct fs98_browser_event *a = &retail->browser_probe[i];
+                    const struct fs98_browser_event *b = &replacement->browser_probe[i];
+                    if (memcmp(a, b, sizeof(*a))) {
+                        fprintf(stderr, "BROWSER FIRST DIFFER event=%u retail=%u,%u,%u,%u,%u,%u,%u replacement=%u,%u,%u,%u,%u,%u,%u\n",
+                            i, a->stage, a->selection, a->count, a->join, a->details, a->descriptor_selection, a->argument,
+                            b->stage, b->selection, b->count, b->join, b->details, b->descriptor_selection, b->argument);
+                        break;
+                    }
+                }
+                if (i == limit) fprintf(stderr, "BROWSER FIRST DIFFER event count=%u/%u\n",
+                    retail->browser_probe_count, replacement->browser_probe_count);
+            }
             if (child_inventory_diff) {
                 uint32_t page;
                 for (page = 0; page < 5; ++page) {
@@ -3821,10 +4833,27 @@ static uint32_t fs98_run_details_suite(uint32_t cycle, HMODULE *modules,
             s_side = side;
             s_case = 100 + cycle * s_scripts + case_index;
             s_current_module = modules[side];
+            s_details_trace_window = 0;
+            if (s_details_focus_reset) {
+                fs98_flow_reset_host_focus();
+                if (!IsWindowVisible(s_main_window) || !IsWindowEnabled(s_main_window) ||
+                    GetActiveWindow() != s_main_window || GetFocus() != s_main_window)
+                    fs98_fail("0x110c cannot establish common owner and focus state");
+            }
+            if (case_index == 5 && s_details_focus_trace) {
+                s_details_focus_hook = SetWindowsHookExA(WH_CALLWNDPROC,
+                    fs98_details_focus_message_hook, 0, GetCurrentThreadId());
+                if (!s_details_focus_hook) fs98_fail("details focus hook");
+                fs98_details_focus_checkpoint("before-setup");
+            }
             fs98_setup_details(side, case_index);
+            fs98_details_focus_checkpoint("before-create");
             window = (HWND)linkages[side]->dialogs[dialog_index].create(0, block);
+            s_details_trace_window = window;
+            fs98_details_focus_checkpoint("after-create");
             if (!IsWindow(window) || !IsWindowVisible(window)) fs98_fail("0x110c factory HWND");
             fs98_pump();
+            fs98_details_focus_checkpoint("after-pump");
             fs98_patch_dialog_vtable(window, modules[side], 0);
             fs98_capture_details(window, side);
             fs98_capture_native_child_tree(window, &result->native_child_count,
@@ -3844,11 +4873,19 @@ static uint32_t fs98_run_details_suite(uint32_t cycle, HMODULE *modules,
                 result->hwnd_state = (uint32_t)(IsWindow(window) && IsWindowVisible(window) && block[0] == 0);
                 if (IsWindowVisible(window)) fs98_send_command(window, IDCANCEL);
             } else if (case_index == 5) {
+                fs98_details_focus_checkpoint("before-edit");
                 SetWindowTextA(GetDlgItem(window, 0x40d), "9");
+                if (s_details_focus_deactivate) {
+                    SetActiveWindow(0);
+                    fs98_details_focus_checkpoint("after-deactivate");
+                }
+                fs98_details_focus_checkpoint("before-notification");
                 SendMessageA(window, WM_COMMAND, MAKEWPARAM(0x40d, 0x0200),
                              (LPARAM)GetDlgItem(window, 0x40d));
+                fs98_details_focus_checkpoint("after-notification");
                 fs98_capture_details(window, side);
                 result->focus_after_validation = (uint32_t)GetDlgCtrlID(GetFocus());
+                fs98_details_focus_checkpoint("after-capture");
                 SetWindowTextA(GetDlgItem(window, 0x40d), "3");
                 fs98_send_command(window, IDOK);
             } else if (case_index == 6 || case_index == 7) {
@@ -3887,6 +4924,10 @@ static uint32_t fs98_run_details_suite(uint32_t cycle, HMODULE *modules,
             result->opaque_bc = D32(block, 0xbc);
             result->opaque_d0 = D32(block, 0xd0);
             fs98_restore_dialog_vtable();
+            if (case_index == 5 && s_details_focus_hook) {
+                if (!UnhookWindowsHookEx(s_details_focus_hook)) fs98_fail("remove details focus hook");
+                s_details_focus_hook = 0;
+            }
             if (!result->delete_count) {
                 void **vtable = PTR(s_test_dialog[side], 0);
                 ((void *(TC *)(void *, uint32_t))vtable[1])(s_test_dialog[side], 1);
@@ -4021,6 +5062,69 @@ static uint32_t fs98_run_details_suite(uint32_t cycle, HMODULE *modules,
     return differences;
 }
 
+static uint32_t fs98_run_help_suite(HMODULE *modules, struct fs98_test_linkage **linkages)
+{
+    uint32_t side, page, i, differences = 0;
+    memset(s_help_results, 0, sizeof(s_help_results));
+    for (side = 0; side < 2; ++side) {
+        HWND *windows, window;
+        s_side = side;
+        s_current_module = modules[side];
+        fs98_flow_reset_host_focus();
+        fs98_flow_setup(side, 1);
+        windows = (HWND *)(uintptr_t)linkages[side]->dialogs[0].create(
+            (uint32_t)(uintptr_t)s_main_window, s_flow_blocks[side]);
+        if (!windows || windows[5]) fs98_fail("help flow factory array");
+        for (page = 0; page < 5; ++page) {
+            if (!IsWindow(windows[page])) fs98_fail("help flow page");
+            fs98_help_probe(windows[page], modules[side], page);
+        }
+        for (page = 0; page < 5; ++page)
+            if (!DestroyWindow(windows[page])) fs98_fail("help flow teardown");
+        s_flow_owner_active[side] = 0;
+        fs98_setup_block(0);
+        window = (HWND)(uintptr_t)linkages[side]->dialogs[1].create(
+            (uint32_t)(uintptr_t)s_main_window, &s_blocks[side]);
+        if (!IsWindow(window)) fs98_fail("help settings factory");
+        fs98_help_probe(window, modules[side], 5);
+        if (!DestroyWindow(window)) fs98_fail("help settings teardown");
+        s_details_active = 1;
+        fs98_setup_details(side, 0);
+        window = (HWND)(uintptr_t)linkages[side]->dialogs[2].create(
+            (uint32_t)(uintptr_t)s_main_window, s_details_blocks[side]);
+        if (!IsWindow(window)) fs98_fail("help details factory");
+        fs98_help_probe(window, modules[side], 6);
+        if (!DestroyWindow(window)) fs98_fail("help details teardown");
+        s_details_owner_active[side] = 0;
+        s_details_active = 0;
+        fs98_pump();
+    }
+    for (page = 0; page < 7; ++page) for (i = 0; i < 4; ++i) {
+        const struct fs98_help_event *a = &s_help_results[0][page][i];
+        const struct fs98_help_event *b = &s_help_results[1][page][i];
+        if (a->calls != 1 || !a->hwnd_matches || !a->valid_table ||
+            strcmp(a->file, "fs98.hlp") || a->command != (i < 2 ? HELP_WM_HELP : HELP_CONTEXTMENU) ||
+            a->result != (i < 2 ? ((i & 1) ? 7u : 0u) : 1u))
+            fs98_fail("retail help behavior oracle");
+        if (memcmp(a, b, sizeof(*a))) {
+            uint32_t j;
+            ++differences;
+            fprintf(stderr, "MP_DIALOG HELP DIFFER page=%lu case=%lu retail calls=%lu hwnd=%lu cmd=%lx result=%lx words=%lu valid=%lu file=%s replacement calls=%lu hwnd=%lu cmd=%lx result=%lx words=%lu valid=%lu file=%s\n",
+                (unsigned long)page, (unsigned long)i,
+                (unsigned long)a->calls, (unsigned long)a->hwnd_matches, (unsigned long)a->command,
+                (unsigned long)a->result, (unsigned long)a->table_words, (unsigned long)a->valid_table, a->file,
+                (unsigned long)b->calls, (unsigned long)b->hwnd_matches, (unsigned long)b->command,
+                (unsigned long)b->result, (unsigned long)b->table_words, (unsigned long)b->valid_table, b->file);
+            for (j = 0; j < 48; ++j) if (a->table[j] != b->table[j]) {
+                fprintf(stderr, "MP_DIALOG HELP TABLE first=%lu retail=%lx replacement=%lx\n",
+                    (unsigned long)j, (unsigned long)a->table[j], (unsigned long)b->table[j]);
+                break;
+            }
+        }
+    }
+    return differences;
+}
+
 static void fs98_mutation_unload(HMODULE *modules,
                                  struct fs98_test_linkage **linkages)
 {
@@ -4044,13 +5148,23 @@ int main(int argc, char **argv)
     char directory[MAX_PATH], module_path[MAX_PATH], retail_path[MAX_PATH];
     uint32_t cases = argc > 2 ? strtoul(argv[2], 0, 0) : 12;
     uint32_t cycle, case_index, side, comparisons = 0, differences = 0;
-    uint32_t details_differences = 0, flow_differences = 0, render_differences = 0;
+    uint32_t details_differences = 0, flow_differences = 0, render_differences = 0, help_differences = 0;
     uint32_t visibility_checkpoint_matches = 0;
     int32_t arg_index;
     if (!cases || cases > 100) return 2;
     for (arg_index = 3; arg_index < argc; ++arg_index) {
-        if (strcmp(argv[arg_index], "--cleanup-flow-lifetime-leaks") == 0) {
+        if (strcmp(argv[arg_index], "--details-focus-trace") == 0) {
+            s_details_focus_trace = 1;
+        } else if (strcmp(argv[arg_index], "--details-focus-reset") == 0) {
+            s_details_focus_reset = 1;
+        } else if (strcmp(argv[arg_index], "--details-focus-uncontrolled") == 0) {
+            s_details_focus_reset = 0;
+        } else if (strcmp(argv[arg_index], "--details-focus-deactivate") == 0) {
+            s_details_focus_deactivate = 1;
+        } else if (strcmp(argv[arg_index], "--cleanup-flow-lifetime-leaks") == 0) {
             s_cleanup_flow_lifetime_leaks = 1;
+        } else if (strcmp(argv[arg_index], "--choice-real-modal") == 0) {
+            s_choice_real_modal = 1;
         } else if (strcmp(argv[arg_index], "--flow-mutation-case") == 0 &&
                    arg_index + 1 < argc) {
             uint32_t mutation_case = strtoul(argv[++arg_index], 0, 0);
@@ -4068,12 +5182,15 @@ int main(int argc, char **argv)
             s_details_mutation_case = (int32_t)mutation_case;
         } else if (strcmp(argv[arg_index], "--render-only") == 0) {
             s_render_only = 1;
+        } else if (strcmp(argv[arg_index], "--help-only") == 0) {
+            s_help_only = 1;
         } else {
             return 2;
         }
     }
     if ((s_flow_mutation_case >= 0) + (s_session_mutation_case >= 0) +
-        (s_details_mutation_case >= 0) + s_render_only > 1) return 2;
+        (s_details_mutation_case >= 0) + s_render_only + s_help_only > 1) return 2;
+    if (s_choice_real_modal && s_flow_mutation_case != 6) return 2;
     setvbuf(stdout, 0, _IONBF, 0);
     SetUnhandledExceptionFilter(fs98_check_fault);
     GetFullPathNameA("orig", MAX_PATH, directory, 0);
@@ -4089,6 +5206,7 @@ int main(int argc, char **argv)
     *(void **)(s_host_services + 0x298) = (void *)fs98_host_register;
     *(void **)(s_host_services + 0x29c) = (void *)fs98_host_release;
     *(void **)(s_host_services + 0x10c) = (void *)fs98_host_dialog;
+    *(void **)(s_host_services + 0x2a0) = (void *)fs98_host_string;
     *(void **)(s_host_services + 0x20c) = (void *)fs98_host_allocate;
     *(void **)(s_host_services + 0x210) = (void *)fs98_host_reallocate;
     *(void **)(s_host_services + 0x214) = (void *)fs98_host_free;
@@ -4151,6 +5269,14 @@ int main(int argc, char **argv)
             printf("MP_DIALOG render-only comparison: %lu differing page(s); modules deinitialized and unloaded\n",
                 (unsigned long)differences);
             return differences ? 1 : 0;
+        }
+        if (s_help_only || (s_flow_mutation_case < 0 && s_session_mutation_case < 0 && s_details_mutation_case < 0))
+            help_differences += fs98_run_help_suite(modules, linkages);
+        if (s_help_only) {
+            fs98_mutation_unload(modules, linkages);
+            printf("MP_DIALOG help comparison: %lu differing cases; modules deinitialized and unloaded\n",
+                (unsigned long)help_differences);
+            return help_differences ? 1 : 0;
         }
         if (s_session_mutation_case < 0 && s_details_mutation_case < 0)
             flow_differences += fs98_run_flow_suite(cycle, modules, linkages);
@@ -4426,7 +5552,9 @@ int main(int argc, char **argv)
            (unsigned long)s_render_repeat_matches,
            (unsigned long)s_render_repeat_total,
            (unsigned long)s_render_repeat_differences);
-    return flow_differences || differences || details_differences || render_differences ||
+    printf("MP_DIALOG help comparison: seven dialogs, four messages each, two cycles, %lu differing cases\n",
+           (unsigned long)help_differences);
+    return flow_differences || differences || details_differences || render_differences || help_differences ||
         s_session_child_tree_differences || s_details_child_tree_differences ||
         s_render_repeat_differences ? 1 : 0;
 }

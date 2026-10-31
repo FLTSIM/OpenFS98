@@ -96,8 +96,17 @@ void FS98_MPDIALOG_THISCALL fs98_mpdialog_hide(void *object);
 void FS98_MPDIALOG_THISCALL fs98_mpdialog_show(void *object);
 void *FS98_MPDIALOG_THISCALL fs98_mpdialog_message_map(void *object);
 void *FS98_MPDIALOG_THISCALL fs98_mpdialog_details_message_map(void *object);
-int32_t FS98_MPDIALOG_THISCALL fs98_mpdialog_help(void *object, void *info);
-int32_t FS98_MPDIALOG_THISCALL fs98_mpdialog_context(void *object, uint32_t window, uint32_t unused);
+#define FS98_MPDIALOG_DECLARE_HELP(name) \
+    int32_t FS98_MPDIALOG_THISCALL fs98_mpdialog_help_##name(void *object, uint32_t unused, uint32_t info); \
+    int32_t FS98_MPDIALOG_THISCALL fs98_mpdialog_context_##name(void *object, uint32_t window, uint32_t unused);
+FS98_MPDIALOG_DECLARE_HELP(intro)
+FS98_MPDIALOG_DECLARE_HELP(choice)
+FS98_MPDIALOG_DECLARE_HELP(host)
+FS98_MPDIALOG_DECLARE_HELP(connection)
+FS98_MPDIALOG_DECLARE_HELP(browser)
+FS98_MPDIALOG_DECLARE_HELP(settings)
+FS98_MPDIALOG_DECLARE_HELP(details)
+#undef FS98_MPDIALOG_DECLARE_HELP
 uint32_t FS98_MPDIALOG_STDCALL fs98_mpdialog_create(uint32_t parent, void *descriptor);
 uint32_t FS98_MPDIALOG_STDCALL fs98_mpdialog_details_create(uint32_t parent, void *descriptor);
 void FS98_MPDIALOG_THISCALL fs98_mpdialog_details_delete_body(void *object);

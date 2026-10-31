@@ -260,10 +260,153 @@ extern struct fs98_mpdialog_message_map fs98_mpdialog_maps[7];
 void *FS98_MPDIALOG_THISCALL fs98_mpdialog_message_map(void *object)
 { (void)object; return &fs98_mpdialog_maps[0]; }
 
-int32_t FS98_MPDIALOG_THISCALL fs98_mpdialog_help(void *object, void *info)
-{ (void)object; (void)info; return 0; }
-int32_t FS98_MPDIALOG_THISCALL fs98_mpdialog_context(void *object, uint32_t window, uint32_t unused)
-{ (void)object; (void)unused; return (int32_t)WinHelpA((HWND)window, "fs98.hlp", HELP_CONTEXTPOPUP, 0); }
+/* Retail control-ID to WinHelp context-ID maps, terminated by {0, 0}. */
+static const uint32_t s_help_intro[] = {
+    0x425, 0x41f0065,
+    0x427, 0x4250065,
+    0x2, 0x20065,
+    0x42b, 0x4290065,
+    0x3e8, 0x3e80065,
+    0x3e9, 0x3e90065,
+    0x434, 0x4320065,
+    0x421, 0x41f0065,
+    0x422, 0x41f0065,
+    0x423, 0x41f0065,
+    0x424, 0x41f0065,
+    0x0, 0x0,
+};
+static const uint32_t s_help_choice[] = {
+    0x2, 0x20066,
+    0x42e, 0x42c0066,
+    0x3e8, 0x3e80066,
+    0x419, 0x41d0066,
+    0x3e9, 0x3e90066,
+    0x41c, 0x41a0066,
+    0x434, 0x4320066,
+    0x41d, 0x41b0066,
+    0x41e, 0x41c0066,
+    0x3f0, 0x3ee0066,
+    0x41f, 0x41d0066,
+    0x3f1, 0x3ef0066,
+    0x3f2, 0x3ef0066,
+    0x0, 0x0,
+};
+static const uint32_t s_help_host[] = {
+    0x426, 0x4240067,
+    0x40f, 0x4110067,
+    0x410, 0x4120067,
+    0x2, 0x20067,
+    0x411, 0x4110067,
+    0x412, 0x4120067,
+    0x413, 0x4110067,
+    0x414, 0x4120067,
+    0x42f, 0x42d0067,
+    0x3e8, 0x3e80067,
+    0x3e9, 0x3e90067,
+    0x41a, 0x41e0067,
+    0x434, 0x4320067,
+    0x3ed, 0x4330067,
+    0x420, 0x41e0067,
+    0x3f3, 0x3f20067,
+    0x3f4, 0x3f20067,
+    0x3f5, 0x3f30067,
+    0x0, 0x0,
+};
+static const uint32_t s_help_connection[] = {
+    0x3f7, 0x3f50068,
+    0x3f8, 0x3f50068,
+    0x2, 0x20068,
+    0x3f9, 0x3f70068,
+    0x3e8, 0x3e80068,
+    0x3e9, 0x3e90068,
+    0x41b, 0x3f70068,
+    0x433, 0x4310068,
+    0x434, 0x4320068,
+    0x3f6, 0x3f40068,
+    0x0, 0x0,
+};
+static const uint32_t s_help_browser[] = {
+    0x2, 0x20069,
+    0x3fa, 0x40b42a9,
+    0x3fb, 0x3fc0069,
+    0x3fc, 0x3fc0069,
+    0x3fd, 0x3fe0069,
+    0x3fe, 0x3fe0069,
+    0x3ff, 0x3ff0069,
+    0x400, 0x4000069,
+    0x3e9, 0x3e90069,
+    0x401, 0x4010069,
+    0x430, 0x4300069,
+    0x3ec, 0x3ec0069,
+    0x0, 0x0,
+};
+static const uint32_t s_help_settings[] = {
+    0x1, 0x1006a,
+    0x2, 0x2006a,
+    0x415, 0x415006a,
+    0x416, 0x416006a,
+    0x417, 0x417006a,
+    0x418, 0x418006a,
+    0x401, 0x401006a,
+    0x419, 0x419006a,
+    0x402, 0x401006a,
+    0x3eb, 0x3eb006a,
+    0x431, 0x431006a,
+    0x403, 0x403006a,
+    0x432, 0x432006a,
+    0x404, 0x404006a,
+    0x3ee, 0x3ee006a,
+    0x0, 0x0,
+};
+static const uint32_t s_help_details[] = {
+    0x40e, 0x408006b,
+    0x1, 0x1006b,
+    0x2, 0x1006c,
+    0x428, 0x426006b,
+    0x429, 0x407006b,
+    0x42a, 0x408006b,
+    0x42c, 0x407006b,
+    0x42d, 0x408006b,
+    0x3ea, 0x3ea006b,
+    0x405, 0x426006b,
+    0x406, 0x405006b,
+    0x3ef, 0x3ed006b,
+    0x407, 0x405006b,
+    0x408, 0x406006b,
+    0x409, 0x407006b,
+    0x40a, 0x408006b,
+    0x40b, 0x407006b,
+    0x40c, 0x407006b,
+    0x40d, 0x408006b,
+    0x0, 0x0,
+};
+
+static int32_t mpdialog_help_message(uint32_t info, const uint32_t *map)
+{
+    HELPINFO *help_info = (HELPINFO *)(uintptr_t)info;
+    return WinHelpA((HWND)help_info->hItemHandle, "fs98.hlp", HELP_WM_HELP, (ULONG_PTR)map);
+}
+
+static int32_t mpdialog_context_message(uint32_t window, const uint32_t *map)
+{
+    WinHelpA((HWND)(uintptr_t)window, "fs98.hlp", HELP_CONTEXTMENU, (ULONG_PTR)map);
+    return 1;
+}
+
+#define MPD_HELP_HANDLERS(name) \
+    int32_t FS98_MPDIALOG_THISCALL fs98_mpdialog_help_##name(void *object, uint32_t unused, uint32_t info) \
+    { (void)object; (void)unused; return mpdialog_help_message(info, s_help_##name); } \
+    int32_t FS98_MPDIALOG_THISCALL fs98_mpdialog_context_##name(void *object, uint32_t window, uint32_t unused) \
+    { (void)object; (void)unused; return mpdialog_context_message(window, s_help_##name); }
+
+MPD_HELP_HANDLERS(intro)
+MPD_HELP_HANDLERS(choice)
+MPD_HELP_HANDLERS(host)
+MPD_HELP_HANDLERS(connection)
+MPD_HELP_HANDLERS(browser)
+MPD_HELP_HANDLERS(settings)
+MPD_HELP_HANDLERS(details)
+#undef MPD_HELP_HANDLERS
 
 uint32_t FS98_MPDIALOG_STDCALL fs98_mpdialog_create(uint32_t parent, void *descriptor)
 {

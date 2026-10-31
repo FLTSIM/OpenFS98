@@ -212,7 +212,8 @@ Refresh `0x401`, Details `0x400`, Settings `0x3ec`, Back, Join `0x3ff`, and
 Cancel. List selection is stored at `+0xb8`; selection handlers
 `0x22343510/0x22343570` update Join availability and call `+0x98` with
 `(descriptor, selected_index)` to refresh that row's player counts. Join
-handler `0x22343060` calls `+0x0c` and, on zero, the shared accept helper.
+handler `0x22343060` calls `+0x0c` and then the shared accept helper regardless
+of the callback result (see the later paired Browser audit).
 Details `0x22343110` stores selection and calls `+0x9c`; Settings
 `0x22343150` calls `+0xa4`; Refresh `0x22343850` calls `+0xa0` and refreshes
 the controls when that callback reports success. The observer toggle updates
@@ -1678,3 +1679,552 @@ with 14/14 stable repeated captures across two load/unload cycles. Log:
 The mutation rerun also passed its clean baseline and caught all 16 existing
 mutations; log: `/tmp/mpdialog-review-breaks.log`. Build and `git diff --check`
 passed. No shared build files or live installation were changed.
+
+### Browser row boundary audit (partial)
+
+Retail's row loop at `0x223435d3..0x223436e3` reads the descriptor
+`+0xb0` count without a 128-row cap. The replacement now does likewise. The
+native flow fixture supplies 129 rows in case 0 and asserts the list count for
+both modules. With the previous cap the retail side passed and the replacement
+failed that assertion (`/tmp/mpdialog-audit-before.log`); after removing it,
+`bash tools/run_mpdialogdiff.sh --ui` passed the isolated suites and rendering
+checks (`/tmp/mpdialog-audit-after.log`). The previous implementation is the
+targeted cap mutation for this fixture.
+
+Retail's row rebuild at `0x22343590..0x22343752` resets the list and
+selects row 0 when the count is nonzero, or -1 when empty. It enables Details
+according to count and computes Join from the selected row. The selection
+handler at `0x22343510..0x22343564` instead enables Join solely according to
+whether a selection exists, reads selection again, and invokes `+0x98`; it
+does not write `+0xb8` or recompute capacity afterwards. The replacement now
+follows these decisions and orders observer availability before SetChecked.
+
+The case-3 native probe records list selection/count, Join and Details enabled
+state, descriptor selection and callback argument at each step and prints the
+first divergent event. It covers a retained row-1 selection before rebuild,
+shrink from two rows to one, an empty list and selection notification, growth
+back to two, a callback changing capacity, and a callback that changes capacity,
+rebuilds the list and recursively sends a selection notification. Retail
+assertions check these branches, including a full selected row disabling Join
+on rebuild and the nested selection enabling it again. Before the fix the first
+difference was event 1: retail selected 0 and replacement selected 1. The
+callback-order mutant first differs at event 6: Join is enabled at retail's
+callback entry and disabled in the mutant
+(`/tmp/mpdialog-browser-order-mutant.log`). The 129-row case remains in case 0.
+
+`bash tools/run_mpdialogdiff.sh --ui` passed 24 flow, 24 settings and 20 details
+pairs over two load/unload cycles, all control-tree and seven render captures,
+and 14/14 stable repeated captures (`/tmp/mpdialog-selection-ui.log`). The
+final `--ui-breaks` run repeated the complete baseline with the final fixture
+and caught all 19 mutations, including row cap, rebuild selection and callback
+ordering (`/tmp/mpdialog-selection-mutations-rerun.log`). One preceding
+baseline run reported an isolated 0x110c case-5 focus difference (retail
+control 2, replacement none; `/tmp/mpdialog-selection-mutations-final.log`);
+the earlier comparison and subsequent full baseline passed. This focus
+intermittency remains an observation, not a diagnosed Browser defect. Build and
+`git diff --check` passed.
+
+The remaining flow audit includes row formatting and long strings, descriptor
+field substitutions and bounds outside these cases, owner-drawn state and
+other callback/message ordering. The existing owner-integration and
+whole-module acceptance limits above are unchanged.
+
+### 0x110c case-5 focus investigation
+
+The preserved failure is `bin/mpdialog-diff/focus-study/original-failure.log`
+(SHA-256 `60a66dd8260ef0bfe7fd4e18f48f2b34665bde44cda0c57de8a34aca5e34c2b6`).
+It reports cycle 0, case 5, `capacity=1`: the first and only recorded focus
+checkpoint, `focus_after_validation`, was control 2 for retail and 0 for the
+replacement. Callback results, values, other recorded state and controls
+matched. That log did not record earlier checkpoints, so it cannot establish
+the first actual divergence or attribute that particular event definitively.
+
+The case sets observer capacity to `9` and sends the observer edit's
+`EN_KILLFOCUS` notification. The harness now has opt-in `--details-focus-trace`
+logging for activation/focus and command messages, pending queue head,
+owner/foreground/active/focus windows, and validation callback entry, exit and
+results. An uncontrolled targeted trace (`focus-study/uncontrolled-retail-replacement.log`)
+showed the two sides already differed before setup: the first had the hidden
+main window active and focused, and the second had neither an active nor a
+focused window. Both happened to focus control 2 after creation in that run.
+Thus the preexisting harness did not give the sides equivalent starting focus;
+it is a demonstrated harness defect, although the original failure's exact
+activation history remains unknown.
+
+With the same visible, enabled, active and focused owner before each factory,
+20 separate case-5 retail/replacement processes and 20 retail/retail processes
+(two separately loaded DLL copies) all returned zero differences. Normalized
+owner, activation, focus, pending-message and callback checkpoints matched in
+all 40 pairs; detailed logs are `focus-study/ours-1.log` through `ours-20.log`
+and `retail_copy-1.log` through `retail_copy-20.log`. The targeted runs use
+`--details-mutation-case 5 --details-focus-trace --details-focus-reset`.
+Three further runs of each pairing added `--details-focus-deactivate` after the
+edit and before its notification. Both sides then had no focus rather than
+control 2, returned the same failed validation (`observer=1`), and recorded a
+pending `0x5f4` validation message; all six pairs matched. This demonstrates
+that activation can change the measured focus on either binary. It does not
+prove external deactivation occurred in the original uninstrumented run.
+
+The normal 0x110c suite now establishes and asserts the same visible, enabled,
+active, focused owner before **each** factory call. This changes the fixture
+precondition only: focus after validation is still captured and compared, and
+`--details-focus-uncontrolled` retains the old diagnostic setup. A targeted
+mutation forcing focus onto invalid observer control `0x40d` was caught as a
+capacity difference, first at the post-notification checkpoint (retail focus 2,
+mutant 1037); trace `focus-study/focus-mutant.log`. It is now also part of the
+mutation runner.
+
+After the fixture fix, `bash tools/run_mpdialogdiff.sh --ui` passed 24/24 flow,
+24/24 settings and 20/20 details pairs, all child trees and seven render
+captures, with 14/14 stable repeats (`focus-study/fixed-ui.log`). The complete
+existing 19-mutation suite passed (`focus-study/fixed-mutations.log`); the new
+focus mutation was built and run separately and caught
+(`focus-study/focus-mutant-check.log`). Build and `git diff --check` passed.
+These runs use the isolated prefix and modeled owners; the integration and
+whole-module limitations remain unchanged.
+
+### Browser formatting, descriptor and ordering audit
+
+Reviewed retail Browser Back/Join/Cancel and Details/Settings at
+`0x22343000..0x2234315d`, Update/Capture at `0x22343420..0x223434cc`,
+selection and row construction at `0x22343510..0x22343753`, and idle,
+observer, Join availability, refresh, activation and timer handlers at
+`0x22343780..0x2234392a`. The owner-drawn observer checked word is object
+`+0x1ad8`, the availability flag is descriptor `+0xa8`, and the selected
+mode is descriptor `+0x40`. The earlier independent-flag combinations and
+refresh/selection reentry cases remain in the isolated suite.
+
+- The row formatter uses MSVCRT `_itoa` on signed 32-bit row fields, with
+  the order `+0x28/+0x20`, then `+0x2c/+0x24`. The old replacement printed
+  unsigned values and used a 256-byte stack buffer. Case 3 compares an empty
+  name and a long name with 0, -1, INT_MIN and INT_MAX; before the fix, with a
+  200-character name, the first signed field differed. After the fix a
+  700-character name and the boundary values match. The implementation now
+  allocates the name plus a bounded numeric suffix. Allocation-failure parity
+  and arbitrarily large or invalid pointers remain unverified.
+- The Observer handler writes `+0x40` from the owner-drawn checked word but
+  does not capture selection. Details and Refresh write `+0xb8` but do not
+  capture `+0x40`; refresh does that before callback `+0xa0`, and updates
+  only if the callback returns nonzero. Case 3 seeds independent fields and
+  snapshots at observer handling, Details and refresh callback entry. Before
+  the fix retail recorded `2,77,1,0,1,0` and replacement `2,0,2,0,2,0`.
+- Browser Join calls `+0x0c` and finishes regardless of its return. Case 3 now
+  supplies a nonzero accept result: the pre-fix replacement remained open and
+  retail closed. Browser Back first clears the list, clears selection and
+  disables Join, then invokes reset `+0x08` and navigates back; it does not
+  capture the descriptor fields. Case 10 snapshots those values inside the
+  callback. Before the fix retail saw list count/selection/mode/descriptor
+  selection/Join `0,-1,1,77,0`, and replacement `2,1,2,1,1`.
+- Retail rereads descriptor `+0xb0` after each list insertion and reloads
+  `+0xac` before each row. A list-subclass probe changes count or row storage
+  during the first `LB_ADDSTRING`: retail uses one row after a shrink and the
+  new storage for the next row; the old replacement cached both. Case 3 now
+  compares both and asserts retail reached the intended states. This is a
+  controlled synchronous reentry fixture, not evidence that a specific real
+  owner performs those mutations.
+
+The before-fix transcripts for formatting/fields, nonzero accept, Back and
+list reentry are preserved in `bin/mpdialog-diff/browser-audit/`. All four
+focused cases pass after the fixes. The complete isolated UI run
+`/tmp/mpdialog-browser-final-ui.log` passed 24 flow, 24 settings and 20 details
+pairs over two load/unload cycles, all child-tree and seven rendering captures,
+and 14/14 stable repeats. The 129-row, selection and 0x110c focus regressions
+remain enabled.
+
+Remaining gaps include null/invalid descriptor and row pointers, allocation
+failure, list-insertion failures, abnormal or destructive callback reentry,
+and full negative/zero refresh callback and UI message ordering coverage.
+The DirectPlay integration blocker and whole-module acceptance limits above
+remain unchanged; no actual owner integration was retried in this audit.
+
+The final `bash tools/run_mpdialogdiff.sh --ui-breaks` rerun passed its full
+baseline and caught **28/28** behavioral and rendering mutations, including
+separate signed-format, three descriptor-field, nonzero-accept, Back-order,
+and reentrant count and pointer mutations. Its log is
+`bin/mpdialog-diff/browser-audit/mpdialog-browser-final-mutations-rerun.log`.
+A preceding run timed out during retail-side teardown of the Details-field
+mutant after ten mutations had been caught; the runner correctly rejected that
+timeout as a detection. The subsequent full rerun passed; the original timeout
+log is preserved alongside it. `git diff --check` and the standalone build
+passed.
+
+### Mutation timeout investigation and next audit family
+
+The preserved timeout is
+`bin/mpdialog-diff/browser-audit/mpdialog-browser-final-mutations.log`. It was
+mutation `flow-browser-details-fields`, case 3, retail side 0. Intro page 0's
+`DestroyWindow` was entered with all five page windows live and hidden. After
+owner deactivation, the final completed logged dispatch was `WM_ACTIVATEAPP`
+(`0x001c`) for Host Options page 2. There is no recorded Intro `WM_NCDESTROY`,
+`DestroyWindow` return, or replacement-side execution. The record does not
+include a blocking stack or the pending-queue contents at the stall. The
+mutant changes the replacement Browser Details handler; that handler had not
+been called when the timeout happened. Both DLLs had been loaded and
+initialized, however, so this observation alone does not rule out all shared
+MFC, SIMSUI, Wine or harness state effects.
+
+With the same case, five clean and five mutant runs in separate private Wine
+prefixes completed all five destruction chains for each side and unloaded both
+modules; the expected mutant difference remained detected. At the retail
+Intro teardown entry, all five windows were live, no refresh reentry was
+pending, and the list subclass probe had been removed. Two additional runs of
+each pairing used optional non-removing `PeekMessage` diagnostics. Their queue
+head was `EM_SETSEL` (`0x00b1`), and no `0x5f4` validation message was pending
+at that checkpoint; both pairings completed. `PeekMessage` can dispatch sent
+messages, so those diagnostic runs are separate from the five uninstrumented
+queue repetitions. The logs are under `bin/mpdialog-diff/timeout-study/`.
+These observations neither reproduce the original stall nor establish whether
+it blocked in retail code, shared framework code, Wine, or activation/message
+dispatch. A successful rerun is not treated as its explanation.
+
+The flow harness now records each `DestroyWindow`, `WM_NCDESTROY`,
+`PostNcDestroy`, and deleting-destructor entry/return, live-window mask,
+pending-input indication, callback guard and test-list-hook state. It retains
+all lifetime assertions. `MPD_TRACE_LIFETIME_QUEUE=1` adds the opt-in queue
+head and `0x5f4` observations. The mutation runner creates and owns a fresh
+private Wine prefix for its run; timeout kills its process group and that
+private wineserver only, reports the last lifetime checkpoint, and fails the
+mutation. Baseline and render timeouts use the same handling. The
+`tools/mpdialog_timeout_check.py` sentinel check deliberately stalls case 3
+at Intro destruction in a private prefix, verifies the reported phase and
+prefix removal, and checks that a separate Wine process remains alive. The
+original forced-timeout evidence is `timeout-study/isolation-check.log` and
+`timeout-study/forced-timeout.log`. The deliberate stall is opt-in via the
+exact `MPD_TEST_STALL_DESTROY=case3-page0` test value.
+
+The next bounded independent audit family was the 0x110a **Host Options**
+update/capture and validation/error handlers (`0x22342990`, `0x22342aa0`,
+`0x22342b60`, `0x22342c40`; replacement
+`fs98_mpdialog_flow_update_host`, `capture_host`, `error_host`, and
+`validate_host`). The handoff already identifies independent descriptor
+fields, spin bounds, owner-drawn state, and validation ordering as audit
+priorities. Initial disassembly shows retail sets both spin ranges before its
+`SetChecked` call; the replacement currently calls `SetChecked` first and
+also sends limit-text messages from update. These are hypotheses for a native
+message-order fixture, not yet established observable defects. Test boundary
+strings, independent status words and reentrant validation callbacks against
+retail before changing the implementation. Owner-integration and genuine MFC
+partial-creation limits continue to block whole-module acceptance under the
+existing criteria.
+
+Validation after the runner change: `bash tools/run_mpdialogdiff.sh
+--ui-breaks` used the fresh private prefix, passed the full 24/24 flow, 24/24
+settings and 20/20 details baseline and rendering gates, and caught all 28
+mutations (`timeout-study/private-suite.log`). The checked-in isolation test
+was run as `WINEARCH=win32 WINEDEBUG=-all python3 -B tools/mpdialog_timeout_check.py`; it reported the controlled Intro
+`destroy-enter` stall, removed the private prefix, and verified the independent
+Wine sentinel survived (`timeout-study/tracked-isolation-check.log`). These
+checks do not retroactively identify the original timeout's blocking stack.
+
+### Host Options audit: initial message probe (incomplete)
+
+An isolated, private-prefix paired probe invoked virtual update `+0xf0` after
+factory creation with normal capacities (64, 16, 16). A thread call-window
+hook recorded `WM_SETTEXT`, `UDM_SETRANGE`, and `EM_SETLIMITTEXT`: both sides
+sent three text updates followed by range messages to `0x411` and `0x412`.
+Only replacement then sent `EM_SETLIMITTEXT` to `0x411` (15), `0x412` (15),
+and `0x41a` (63). These messages establish a difference, but the probe did not
+observe the `CSimsCheckButton::SetChecked` call, so they are not established
+as the first divergent event. The temporary trace is
+`/tmp/mpdialog-host-audit.log`; it is diagnostic evidence, not a regression
+test. No implementation change was made on this evidence.
+
+Retail disassembly reviewed: update `0x22342990..0x22342a97` (range calls at
+`0x22342a20` and `0x22342a64`, `SetChecked` at `0x22342a7a/0x22342a8d`),
+capture `0x22342aa0..0x22342b15`, error `0x22342b60..0x22342c37`, and
+validation `0x22342c40..0x22342ca2`. A complete paired event fixture must
+also intercept `SetChecked` and exercise zero/one/normal capacities, text
+boundaries, independent and simultaneous status fields, visible/hidden
+validation, and callback reentry. Error paths and capture capacity behavior
+remain unverified dynamically. The full isolated baseline and mutation suite
+were not run as part of this initial probe; the historical timeout limitation
+above remains unresolved.
+
+### Host Options paired update, capture and error audit
+
+The paired Host update probe intercepts the shared SIMSUI `SetChecked` entry,
+verifies retail's import resolves to that entry, and requires an invocation
+from each binary. A thread call-window hook records the corresponding text,
+spin-range and limit messages. Before the fix the first divergence was event 3:
+retail sent `UDM_SETRANGE` to `0x411`, while replacement called `SetChecked`.
+The complete retail sequence was `WM_SETTEXT` to `0x41a`, `0x40f`, `0x410`;
+`UDM_SETRANGE` to `0x411` and `0x412`; and `SetChecked` for `0x3ed`.
+Replacement then also sent three `EM_SETLIMITTEXT` messages. The failing
+paired trace is `/tmp/mpdialog-host-sequence-before.log`.
+
+Retail initialization sets edit limits at `0x22342909..0x2234295e`, using
+capacity minus one for pilot, observer and name edit HWNDs respectively; this
+happens before the update at `0x22342970`. The replacement now sets those
+limits there and does not send limit messages in update. The fixture compares
+initial `EM_GETLIMITTEXT` results separately, as well as the update event
+sequence. It also captures into sentinel-filled buffers with capacities 0, 1
+and 8 and strings of length 0, 1, 7, 8 and 9 for each of the three edits.
+The tests compare the complete 12-byte buffers, including the guards.
+
+The paired validation probe checks the three status fields independently and
+in combinations, callback success with statuses present, hidden validation,
+and a single nested validation call from the owner callback. The retail oracle
+requires field priority name, pilot, observer and confirms the nested callback
+is entered twice. The error probe intercepts the shared SIMSUI error-dialog
+helper, checks retail's import target and tests status combinations, field zero,
+and helper returns zero and one. It found two defects at the handler's final
+selection: with no status retail forwards zero to `+0xe0`; on helper return
+zero it forwards the original incoming field. The replacement now does both.
+The paired failure evidence is `/tmp/mpdialog-host-validation-before.log` and
+the corrected focused comparison is `/tmp/mpdialog-host-validation-after2.log`.
+The helper is stubbed in this fixture: its actual modal UI and returned values
+are not tested there. The capture capacity checks change descriptor capacities
+after creation; initialization with zero or one capacity and its message order
+remain untested. Null descriptor pointers, unusual huge capacities, other
+reentrant mutations of descriptor pointers, and deeper callback nesting also
+remain untested. These do not change the owner-integration and genuine MFC
+creation-failure gaps or resolve the historical timeout described above.
+The error fixture's `+0xe0` test hook returns 1; return propagation for other
+values is untested. Retail leaves `+0xe0`'s return in EAX at
+`0x22342bad..0x22342bb3` and `0x22342c2f..0x22342c37`, while the replacement
+currently returns 1. Whether a caller can observe a different value remains a
+specific follow-up rather than a verified behavioral equivalence.
+
+Validation: `bash tools/run_mpdialogdiff.sh --ui-breaks` passed the full
+24/24 flow, 24/24 settings and 20/20 details paired baseline, rendering and
+repeatability gates, and caught all 33 mutations, including the five new Host
+update, error and validation mutations (`/tmp/mpdialog-host-final-suite.log`).
+The runner used and cleaned its own private Wine prefix.
+
+### Host Options boundary and error propagation follow-up
+
+The earlier Host audit's untested initialization and return-propagation notes
+above are superseded by this follow-up. In paired factories with all three
+capacities set to 0, retail sends `EM_SETLIMITTEXT` in pilot, observer, name
+order with `wParam=0xffffffff` for each. At capacity 1 it sends `wParam=0` for
+each. Under this Wine/USER32 fixture, all six edit controls report an effective
+limit of `0x7ffffffe` and accept both characters delivered as `WM_CHAR`;
+replacement matches. This is creation-time evidence, separate from the prior
+capture-buffer tests that changed capacities after creation. It does not imply
+that other Windows implementations expose the same effective edit limit.
+
+The Host error handler returns the virtual `+0xe0` result unchanged (and
+returns 0 immediately for a zero input field). With an injected `+0xe0`, paired
+tests use 0, 2 and -7, both with and without a status; the prior replacement's
+constant 1 differs. The fix returns that value. Separately injected helper
+returns 2 and -7 are treated as nonzero, stored at object `+0x8c` and select
+the status's field. These values are deliberately injected test vectors, not
+claims about naturally occurring SIMSUI results.
+
+The downstream SIMSUI `0x5f4` handler at `0x204767b0` calls `+0xdc`, passes its
+return to `0x20476960`, which stores the value at `+0x7d0`, and uses nonzero to
+decide whether to repost a deferred command; the message handler itself returns
+0. Paired injected 0, 2 and -7 values verify the pending word and message
+return. The Host Next handler at `0x22342520` also calls `+0xdc` on failure,
+then returns from its void command handler; the inherited tab-dialog path at
+`0x2048072b` tests the result for zero. These observations do not assume the
+synthetic values occur in normal operation.
+
+The separate real-helper scenario loads retail `Alerts.DLL`, initializes its
+imports over the same fixture, creates its registered id-2 dialog (template
+`0x8a`), and dismisses its actual first button, 2003. It invokes the real
+SIMSUI error helper and `+0xe0`; neither return is injected. A bounded test
+pump dispatches the alert's window messages and defers other windows' queued
+messages, rather than implementing all HOST modal and idle processing. The
+modeled owner still supplies validation and HOST services. Both sides observe
+the pending `0x41a` before and during the alert, suppress Next while pending,
+restore focus to edit `0x41a` after dismissal, retain the pending value until a
+successful edit, and then clear it and advance. The alert writes result 0 into
+its descriptor; SIMSUI's real error helper returns 1, and the real `+0xe0`
+returns `0x41a`. The old constant-return implementation instead causes the
+posted handler to store 1 as the pending field, so the real-modal mutation
+also detects the defect. This is isolated real-dialog coverage, not a new
+actual-HOST/MULTIP integration result.
+
+#### Reviewed Host Options functions
+
+| Retail function | Reviewed behavior and evidence | Remaining boundary |
+| --- | --- | --- |
+| `0x223425e0` initialization | Control setup and creation-time edit-limit arguments, including 0 and 1 capacities, paired against retail | Failure and null-descriptor paths remain outside this fixture |
+| `0x22342990` update | Text, spin-range and `SetChecked` ordering; no update-time limit messages, paired event trace | Arbitrary reentrant descriptor changes remain open |
+| `0x22342aa0` capture | All three fields, capacities 0/1/8, boundary strings and sentinel buffers, paired | Null pointers and huge capacities remain open |
+| `0x22342c40` validation | Status priority, visibility, success/failure and one callback reentry, paired | Deeper callback nesting remains open |
+| `0x22342b60` error | Status selection, injected helper and downstream return values, posted-message propagation and one real retail alert dismissal, paired | No claim that unusual injected results occur naturally; other alert choices and full HOST pump remain open |
+| `0x22342520` Next | Failure calls `+0xdc`; its command handler is void; normal suppression and recovery observed | Real MULTIP/HOST owner path remains limited as above |
+
+The earlier lifetime timeout's blocking stack and cause remain unknown; this
+follow-up does not explain or reclassify it. The private-prefix isolation,
+actual-owner limitations, and whole-module partial status remain unchanged.
+
+Validation: the full private-prefix mutation run passed its baseline and
+caught all 36 mutations (`/tmp/mpdialog-followup-full-suite.log`). After the
+pending-propagation and modal observations were strengthened, the final paired
+baseline passed 24 flow, 24 settings and 20 details scripts, all child trees,
+seven render captures and 14/14 stable repeats
+(`/tmp/mpdialog-followup-final-baseline.log`). The three affected return and
+initialization mutations were rerun against that fixture and caught
+(`/tmp/mpdialog-followup-final.log`); the constant-return mutant was also
+caught through the actual alert (`/tmp/mpdialog-followup-final-modal-mutation.log`).
+Build and `git diff --check` passed.
+The controlled timeout isolation check again removed its private prefix while
+an independent Wine sentinel remained alive (`/tmp/mpdialog-followup-isolation.log`).
+
+### Reconciled local-target inventory and next differential family
+
+This inventory supersedes the earlier recommendation to audit Host Options,
+which was completed above. It reconciles the three registry factories, all
+seven retail class vtables and all seven message maps against the evidence in
+this handoff and the replacement bindings in `tools/gen_mpdialog_runtime.py`.
+Addresses are retail preferred VAs. Imported SIMSUI/MFC thunks are framework
+code, not additional MP_DIALOG-owned function bodies; the Connection provider
+and Details command thunks are included with their ultimate targets. Binding,
+child-tree and baseline-script checks show that a target is connected or that
+particular scenarios match; they do not by themselves review every branch or
+establish a full source-versus-retail comparison.
+
+| Family | MP_DIALOG-owned targets and existing evidence | Remaining implementation review or differential coverage |
+| --- | --- | --- |
+| Factories and construction | Registry factories `0x22341130`, `0x223411e0`, `0x22341270`; 0x110a helpers `0x22341300`, `0x223413a0`, `0x22341440`, `0x223414e0`, `0x22341580`. Normal allocation, creation, output, native trees and lifetime are compared; caller failure behavior is statically examined. | Constructors, individual control initialization and DDX have normal-path/tree evidence, not exhaustive call-order or failure-path comparisons. The separate genuine MFC cleanup uncertainty below is not a proven implementation defect. |
+| Common vtable and lifecycle | All seven tables contain local `0x22342040`, `0x22342cb0`, `0x22342050`, `0x22342060`, and `0x22344820`; the seven deleting destructors are `0x22345c90`, `0x22345270`, `0x223421f0`, `0x22341910`, `0x22342de0`, `0x22343aa0`, `0x22344510`. Normal window destruction and deleting flag 1 are observed. | `0x22342040` and `0x22342cb0` are no-op returns; `0x22342050/2060` call `EnableWindow` on object `+0x20` with 0/1. Their seven-class slot bindings are checked, but a focused paired enabled/already-disabled transition and no-op/ABI check is not documented. Destructor flag 0 and exceptional construction are not established by the normal teardown scripts. The flow `+0xec` replacement is a deliberate isolated model of inherited close, not a local retail vtable target. |
+| Map getters and DDX | Getters `0x22345e80`, `0x223454c0`, `0x223424e0`, `0x22341af0`, `0x22342ff0`, `0x22343d50`, `0x22344810`; DDX `0x22345da0`, `0x223453b0`, `0x22342380`, `0x22341a10`, `0x22342f00`, `0x22343c30`, `0x223446a0`. Seven map bindings and complete created control trees are compared. | Full ordered DDX calls and unusual DDX/error paths have no documented focused paired oracle. Map presence does not prove each mapped handler's behavior; see the rows below. |
+| Intro | Init `0x22345f20`, update/capture `0x22346120/0x22346150`, Back/Next `0x22345e90/0x22345ea0`, Cancel `0x22345f00`. Factory post, transitions, checkbox state and normal teardown are exercised. | No documented focused source-to-retail and paired boundary audit for independent checkbox values and capture/update ordering; ordinary flow coverage is not an exhaustive audit. |
+| Choice | Init `0x223455c0`, update/capture `0x223458a0/0x22345920`, validation/error `0x22345ab0/0x22345a40`, Back/Next `0x223454d0/0x22345500`, Next/Cancel virtual wrappers `0x22345590/0x223455a0`, route handlers `0x22345b00/0x22345b50`. Normal modes and visible/hidden focus-loss are exercised. Error handling is covered by the follow-up below. | Route, text-capacity and reentrant validation/update cases still need a focused audit; do not infer their equivalence from the normal scripts. |
+| Host Options | Init `0x223425e0`, update/capture `0x22342990/0x22342aa0`, validation/error `0x22342c40/0x22342b60`, Back/Next/Settings `0x223424f0/0x22342520/0x223425d0`, virtual wrappers `0x223425a0/0x223425b0`. The completed paired audits and their specific remaining boundaries are in the preceding sections. | Back, Settings and wrappers have normal flow evidence but no separate exhaustive branch/order audit. Preserve the already documented unusual-pointer, deeper-reentry and real-owner limits; do not repeat the completed investigation. |
+| Connection | Init `0x22341c40`, update/capture `0x22341e60/0x22341ef0`, Back/Next `0x22341b00/0x22341b30`, virtual wrappers `0x22341c00/0x22341c20`, provider map thunk `0x22341c10`, activation `0x22342010`. Provider success/failure and navigation have paired coverage. | Provider list boundaries, capture/update order, activation and unusual callback/reentry behavior need focused source comparison and paired cases. The notification thunk's indirect `+0xcc` dispatch is documented, not a substitute for all handler branches. |
+| Browser | Init `0x22343160`, update/capture `0x22343420/0x22343480`, Back/Join `0x22343000/0x22343060`, virtual wrappers `0x223430d0/0x223430e0`, Details/Settings `0x22343110/0x22343150`, selection/rows `0x22343510/0x22343570`, idle/observer/refresh `0x22343780/0x223437a0/0x22343850`, activation/show/timer `0x223438b0/0x223438d0/0x22343910`. The completed Browser audit and timer reentry cases are above. | Keep its stated allocation, insertion, invalid-pointer, abnormal reentry, refresh-result and physical-input limits; initialization and wrappers do not have an exhaustive focused audit. Do not repeat the completed investigation. |
+| Session Settings | Init `0x22343de0`, update/save `0x223440f0/0x223442a0`, OK/Cancel `0x22343d90/0x22343dc0`, callback handlers `0x22343d60/0x22343d70/0x22343d80`. Twelve block patterns, callback order, six check states, visibility and mutation checks are paired. | There is no documented exhaustive source-to-retail audit of all independent checkbox words and noncanonical values, initialization order, or callback reentry; normal scenarios and the four settings mutations cover only their stated cases. |
+| Session Details | Init `0x223448c0`, update/capture `0x22344d10/0x22344f00`, validate/error `0x223450c0/0x22345020`, OK/Cancel/Remove `0x22344850/0x223448a0/0x22344830`, their map thunks `0x22345120/0x22345130/0x22345140`, refresh/selection `0x22344fa0/0x22344fd0`. The 20 paired scripts cover selected focus, capacity, refresh, selection and teardown cases. | A focused source-to-retail audit remains for independent statuses and callback results, edit-buffer boundaries, list count/selection and reentrant mutation/order, including refresh negative returns. Existing cases are meaningful but do not establish every branch or actual owner integration. |
+| Help and context messages | All seven maps contain `WM_HELP` and `WM_CONTEXTMENU`; their 14 local targets and a confirmed source discrepancy are listed below. | No paired `WinHelpA` argument, return or stack/dispatch coverage is documented. This is an implementation gap independent of DirectPlay and MFC cleanup. |
+
+Shared 0x110a helpers `0x22341620`, `0x223416a0`, `0x223417b0`,
+`0x22341710`, `0x22341760`, and callback adapters `0x223417f0/0x22341800`
+are exercised through the documented transitions and callbacks, but unusual
+state values, destructive callback reentry and all ordering permutations are
+not thereby covered. Class constructors and their local initialization callees
+also remain subject to the limits in the factory row. This inventory concerns
+the local factory/vtable/map surface and directly reached helpers, not every
+compiler support routine or imported framework implementation.
+
+**Choice error source differences, resolved in the follow-up below:** retail
+Choice error `0x22345a40` returns 0 for field 0. For nonzero field with no
+`+0x28` status it sends field 0 to virtual `+0xe0`; with status set and error
+helper returning 0 it sends the original field; with nonzero helper result it
+sends `0x419`. It returns the `+0xe0` result. The current
+prior `fs98_mpdialog_flow_error_choice` instead sent the original field when the
+status was clear, sent 0 when the helper returned 0, and returned constant 1.
+
+The seven retail `WM_HELP`/`WM_CONTEXTMENU` pairs and their per-dialog help
+mapping tables are Intro `0x22346180/0x223461a0` (`0x22348ea8`), Choice
+`0x22345a00/0x22345a20` (`0x22348c60`), Host Options
+`0x22342b20/0x22342b40` (`0x22348218`), Connection
+`0x22341f20/0x22341f40` (`0x22348000`), Browser
+`0x223434d0/0x223434f0` (`0x22348500`), Settings
+`0x22344340/0x22344360` (`0x223487d0`), and Details
+`0x22344f60/0x22344f80` (`0x223489e0`). All retail pairs call `WinHelpA`
+with `fs98.hlp` and their table: `WM_HELP` uses the HWND at help-info `+0x0c`
+and command `0x0c`; context uses the supplied HWND and command `0x0a`, then
+returns 1. Both retail entries end in `ret 8`. The replacement binds all
+seven pairs to a no-op help function and a context function using
+`HELP_CONTEXTPOPUP` with data 0 and returning the API result; its help
+prototype also accepts only one stack argument. These differences are static
+evidence, not a claim that an actual help viewer was run.
+
+**Previous next-family proposal, now completed:** Choice error `0x22345a40` is one local target. It is
+smaller than a page-wide audit or the 14 help targets. The isolated no-op
+slots are also single bodies, but have no behavioral branches to compare;
+Choice error is the smallest outstanding behavioral family with a concrete
+source discrepancy. The proposed isolated-harness cases were:
+resolve and verify each binary's Choice `+0xdc` and wrap the real error helper
+and `+0xe0` independently, restoring all hooks afterward. Compare helper
+arguments, object `+0x8c`, forwarded field, return value and callback order:
+
+1. Field 0, with status clear and set: expect immediate 0 and no helper or
+   `+0xe0` call.
+2. Nonzero field, status clear: helper is not called and `+0xe0` receives 0.
+3. Nonzero field, status set: inject helper return 0 and require the original
+   field; inject 1 and a distinct nonzero value and require `0x419`, including
+   the stored helper result at `+0x8c`.
+4. For the nonzero-field paths inject `+0xe0` results 0, 2 and -7, and compare
+   the handler return. Exercise a posted `0x5f4` path to observe pending-field
+   propagation, keeping synthetic return values identified as test inputs.
+
+First capture the expected paired differences, then fix and require a clean
+paired baseline and targeted mutations for the no-status, helper-zero and
+return-propagation differences. If a real-alert case is added,
+state its pump and modeled-owner limits; it is not required to infer that the
+injected values naturally occur. See the follow-up for the resulting evidence.
+
+**Separate acceptance limits:** matched actual-owner attempts still stop at
+Wine DirectPlay `Open` returning `E_NOTIMPL`, so actual active-session 0x110c,
+service `1016`, and 0x110b OK remain unobserved; this is not evidence of an
+MP_DIALOG mismatch. The `+0x1c=0` actual factory-post path and repeated actual
+owner unload also remain unobserved. Genuine MFC partial-Create cleanup is
+unknown because the artificial failures were outside MFC; caller-level static
+parity does not settle framework cleanup. The historical teardown timeout is
+unexplained. Keep private prefixes, modeled owners and ignored
+`bin/mpdialog-diff/` outputs isolated; do not install the partial replacement or
+change the existing whole-module acceptance criteria.
+
+### Choice error handling follow-up
+
+Retail `0x22345a40` tests its incoming field first: zero returns 0 without
+calling the error helper or `+0xe0`. With a nonzero field and descriptor
+`+0x28` clear, it calls `+0xe0(0)`. With status set, it passes the callsign
+control object at `+0x17ac` and the address of `+0x28` to the SIMSUI error
+helper, saves its result at object `+0x8c`, forwards the original field on
+helper result zero or `0x419` on a nonzero result, and returns the result of
+`+0xe0` unchanged. The replacement now follows these branches. Its existing
+null-block guard is not a claim of retail behavior for an invalid descriptor.
+
+The isolated harness verifies the retail `+0xdc` address and both targets'
+module ownership, verifies the retail helper import, and exercises 12 paired
+vectors. Incoming zero and `0x555` are independent of the status word; the
+helper returns 0, 1, 2 and -7, and `+0xe0` returns 0, 2 and -7. It compares
+call counts, control/status offsets, the saved helper result, forwarded field
+and returned value. The focused fixture also posts three `0x5f4` messages and
+compares message return and pending word: injected downstream returns 0, 2 and
+-7 propagate to pending 0, 2 and -7 respectively, while the message returns
+0. These numbers are injected test values, not claims about normal helper or
+focus-handler results. The original paired run is preserved in
+`bin/mpdialog-diff/choice-audit/before.log`: with status clear retail forwards
+0 and the replacement forwarded `0x555`; with helper return 0 retail forwarded
+`0x555` and replacement forwarded 0; injected downstream 0, 2 and -7 were
+all replaced by the old constant 1. Each of the three changes is independently
+covered by a mutation.
+
+A separate focused `--flow-mutation-case 6 --choice-real-modal` scenario uses
+the actual retail Alerts id-2 dialog, actual SIMSUI error helper and actual
+`+0xe0`, without injecting their results. The bounded modeled HOST pump
+services the alert and dismisses button 2003; it explicitly reactivates the
+originating Choice page after the alert, before the error handler resumes.
+It does not reproduce the full HOST modal pump. Both binaries observe pending
+`0x41a` before and during the alert and suppress Next; the alert result is 0,
+the real helper returns 1, `+0xe0` returns `0x419`, focus returns to edit
+`0x419`, and pending becomes `0x419`. A valid callsign clears pending to 0,
+after which Next advances to Connection. In the pre-fix focused run the
+replacement stored pending 1 and remained on Choice after the edit, while
+retail recovered. The fixture creates a fresh owner window per side. A separate
+run without stable foreground activation produced an extra validation dispatch
+and failed the fixture's retail preconditions; it is not counted as evidence of
+a binary difference. The normal full baseline uses the modeled display hook,
+while the real-alert variant is explicitly selected in focused runs.
+
+The seven dialogs' `WM_HELP`/`WM_CONTEXTMENU` targets listed above remain the
+next separate implementation and differential family. Their known source
+mismatches are not addressed by the Choice change. DirectPlay integration,
+genuine MFC partial-Create uncertainty, the unexplained historical timeout,
+the private-prefix boundary and whole-module acceptance limits remain as
+previously documented.
+
+Validation: `make -f tools/mpdialog.mk mpdialog bin/mpdialog-diff/mpdialoguidiff.exe`
+built the replacement and harness. The private-prefix `--ui-breaks` run passed
+the complete 24/24 flow, 24/24 settings and 20/20 details paired baseline,
+all child-tree and seven rendering gates, and 14/14 stable repeats. It caught
+all three new Choice mutations (`flow-choice-error-no-status`,
+`flow-choice-error-helper-zero`, and `flow-choice-error-return`) independently,
+as well as the preceding Host and other mutations in the log. The separate
+real-alert focused run also passed and unloaded both binaries; its paired
+trace is `bin/mpdialog-diff/choice-audit/after-real-alert.log`.
+
+The broader mutation run did **not** complete: the unrelated
+`flow-browser-accept-return` mutation timed out before a lifetime checkpoint,
+and the runner rejected that timeout rather than counting it as detection.
+The complete run output is `bin/mpdialog-diff/choice-audit/full-suite.log`.
+This does not invalidate the already-passed baseline or the three Choice
+mutations, and it does not explain the prior historical teardown stall. No
+actual HOST/MULTIP integration was retried. `git diff --check` passed.

@@ -511,10 +511,9 @@ int32_t TC fs98_mpdialog_flow_error_choice(void *object, int32_t field)
             fs98_mpdialog_import_va(0x2234b414))(
                 object, AT(object, 0x17ac), (uint32_t)(uintptr_t)AT(block, 0x28));
         D32(object, 0x8c) = result;
-        field = result ? 0x419 : 0;
-    }
-    ((void (TC *)(void *, int32_t))PTR(PTR(object, 0), 0xe0))(object, field);
-    return 1;
+        if (result) field = 0x419;
+    } else field = 0;
+    return ((int32_t (TC *)(void *, int32_t))PTR(PTR(object, 0), 0xe0))(object, field);
 }
 
 static void flow_choice_route_update(void *object, uint32_t online)
@@ -601,19 +600,13 @@ void TC fs98_mpdialog_flow_update_host(void *object)
     if (D32(block, 0x4c)) SetWindowTextA((HWND)D32(object, 0x1b54), (const char *)D32(block, 0x4c));
     if (D32(block, 0x60)) SetWindowTextA((HWND)D32(object, 0x1904), (const char *)D32(block, 0x60));
     if (D32(block, 0x74)) SetWindowTextA((HWND)D32(object, 0x196c), (const char *)D32(block, 0x74));
-    set_checked(AT(object, 0x19b4), D32(block, 0x40) == 2);
     SendMessageA((HWND)D32(object, 0x1714), UDM_SETRANGE, 0,
         MAKELPARAM(flow_atoi_pointer((void *)(uintptr_t)D32(block, 0x6c)),
                    flow_atoi_pointer((void *)(uintptr_t)D32(block, 0x68))));
     SendMessageA((HWND)D32(object, 0x1754), UDM_SETRANGE, 0,
         MAKELPARAM(flow_atoi_pointer((void *)(uintptr_t)D32(block, 0x80)),
                    flow_atoi_pointer((void *)(uintptr_t)D32(block, 0x7c))));
-    SendMessageA((HWND)D32(object, 0x1714), EM_SETLIMITTEXT,
-        D32(block, 0x64) ? D32(block, 0x64) - 1 : 0, 0);
-    SendMessageA((HWND)D32(object, 0x1754), EM_SETLIMITTEXT,
-        D32(block, 0x78) ? D32(block, 0x78) - 1 : 0, 0);
-    SendMessageA((HWND)D32(object, 0x1b54), EM_SETLIMITTEXT,
-        D32(block, 0x50) ? D32(block, 0x50) - 1 : 0, 0);
+    set_checked(AT(object, 0x19b4), D32(block, 0x40) == 2);
 }
 
 int32_t TC fs98_mpdialog_flow_validate_host(void *object, uint32_t control_id)
@@ -635,6 +628,7 @@ int32_t TC fs98_mpdialog_flow_error_host(void *object, int32_t field)
 {
     void *block = flow_block(object, 2);
     uint32_t status_offset = 0, control_offset = 0, result = 0;
+    int32_t original_field = field;
     if (!field) return 0;
     if (block && D32(block, 0x48)) { status_offset = 0x48; control_offset = 0x1b34; field = 0x41a; }
     else if (block && D32(block, 0x5c)) { status_offset = 0x5c; control_offset = 0x18e4; field = 0x40f; }
@@ -644,10 +638,9 @@ int32_t TC fs98_mpdialog_flow_error_host(void *object, int32_t field)
             fs98_mpdialog_import_va(0x2234b414))(
                 object, AT(object, control_offset), (uint32_t)(uintptr_t)AT(block, status_offset));
         D32(object, 0x8c) = result;
-        if (!result) field = 0;
-    }
-    ((void (TC *)(void *, int32_t))PTR(PTR(object, 0), 0xe0))(object, field);
-    return 1;
+        if (!result) field = original_field;
+    } else field = 0;
+    return ((int32_t (TC *)(void *, int32_t))PTR(PTR(object, 0), 0xe0))(object, field);
 }
 
 void TC fs98_mpdialog_flow_next_host(void *object)
@@ -690,6 +683,12 @@ int32_t TC fs98_mpdialog_flow_on_init_host(void *object)
     fs98_mpdialog_enable(AT(object, 0x11d8), 1);
     fs98_mpdialog_enable(AT(object, 0x10dc), 1);
     fs98_mpdialog_enable(AT(object, 0x13d0), 1);
+    {
+        void *block = flow_block(object, 2);
+        SendMessageA((HWND)D32(object, 0x1904), EM_SETLIMITTEXT, D32(block, 0x64) - 1, 0);
+        SendMessageA((HWND)D32(object, 0x196c), EM_SETLIMITTEXT, D32(block, 0x78) - 1, 0);
+        SendMessageA((HWND)D32(object, 0x1b54), EM_SETLIMITTEXT, D32(block, 0x50) - 1, 0);
+    }
     fs98_mpdialog_flow_update_host(object);
     flow_focus(object, 0x1b34);
     return 0;
@@ -806,27 +805,35 @@ int32_t TC fs98_mpdialog_flow_on_init_connection(void *object)
     return 0;
 }
 
+static void flow_browser_update_join(void *object);
+
 static void flow_browser_rows(void *object)
 {
     void *block = flow_block(object, 4);
     HWND list = (HWND)D32(object, 0x190c);
     uint8_t *rows;
-    uint32_t count, index, selected;
+    uint32_t count, index;
     if (!block || !list) return;
-    selected = (uint32_t)SendMessageA(list, LB_GETCURSEL, 0, 0);
     SendMessageA(list, LB_RESETCONTENT, 0, 0);
-    rows = (uint8_t *)(uintptr_t)D32(block, 0xac);
-    count = D32(block, 0xb0);
-    for (index = 0; rows && index < count && index < 128; ++index) {
-        uint8_t *row = rows + index * 84;
+    for (index = 0; index < D32(block, 0xb0); ++index) {
+        uint8_t *row;
+        rows = (uint8_t *)(uintptr_t)D32(block, 0xac);
+        row = rows + index * 84;
         const char *name = (const char *)(uintptr_t)D32(row, 0);
-        char text[256];
-        wsprintfA(text, "%s\t%u of %u\t%u of %u",
-            name ? name : "", D32(row, 0x28), D32(row, 0x20),
-            D32(row, 0x2c), D32(row, 0x24));
+        char *text;
+        if (!name) name = "";
+        text = malloc(strlen(name) + 64);
+        strcpy(text, name);
+        wsprintfA(text + strlen(name), "\t%d of %d\t%d of %d",
+            S32(row, 0x28), S32(row, 0x20), S32(row, 0x2c), S32(row, 0x24));
         SendMessageA(list, LB_ADDSTRING, 0, (LPARAM)text);
+        free(text);
     }
-    SendMessageA(list, LB_SETCURSEL, selected < count ? selected : D32(block, 0xb8), 0);
+    count = D32(block, 0xb0);
+    SendMessageA(list, LB_SETCURSEL, count ? 0 : (WPARAM)-1, 0);
+    fs98_mpdialog_enable(AT(object, 0x11d8), count != 0);
+    fs98_mpdialog_enable(AT(object, 0x13d0), count != 0);
+    flow_browser_update_join(object);
 }
 
 static void flow_browser_update_join(void *object)
@@ -868,8 +875,8 @@ void TC fs98_mpdialog_flow_update_browser(void *object)
         (void *)fs98_mpdialog_simsui("?SetChecked@CSimsCheckButton@@QAEHH@Z");
     if (!block) return;
     flow_browser_rows(object);
-    check(AT(object, 0x1a1c), D32(block, 0x40) == 2);
     fs98_mpdialog_enable(AT(object, 0x1a1c), D32(block, 0xa8) != 0);
+    check(AT(object, 0x1a1c), D32(block, 0x40) == 2);
     flow_browser_update_join(object);
 }
 
@@ -879,9 +886,9 @@ static void flow_browser_selection(void *object)
     uint32_t selection;
     if (!block) return;
     selection = (uint32_t)SendMessageA((HWND)D32(object, 0x190c), LB_GETCURSEL, 0, 0);
-    D32(block, 0xb8) = selection;
+    fs98_mpdialog_enable(AT(object, 0x11d8), selection != (uint32_t)-1);
+    selection = (uint32_t)SendMessageA((HWND)D32(object, 0x190c), LB_GETCURSEL, 0, 0);
     ((int32_t (SC *)(void *, uint32_t))D32(block, 0x98))(block, selection);
-    flow_browser_update_join(object);
 }
 
 void TC fs98_mpdialog_flow_select_browser(void *object) { flow_browser_selection(object); }
@@ -893,13 +900,17 @@ void TC fs98_mpdialog_flow_next_browser(void *object)
     void *block = flow_block(object, 4);
     flow_capture(object);
     if (!block) return;
-    if (((int32_t (SC *)(void *))D32(block, 0x0c))(block) == 0) flow_finish(block, 1);
+    ((int32_t (SC *)(void *))D32(block, 0x0c))(block);
+    flow_finish(block, 1);
 }
 void TC fs98_mpdialog_flow_back_browser(void *object)
 {
     void *block = flow_block(object, 4);
-    flow_capture(object);
+    HWND list = (HWND)D32(object, 0x190c);
     if (!block) return;
+    SendMessageA(list, LB_RESETCONTENT, 0, 0);
+    SendMessageA(list, LB_SETCURSEL, (WPARAM)-1, 0);
+    fs98_mpdialog_enable(AT(object, 0x11d8), 0);
     ((int32_t (SC *)(void *))D32(block, 8))(block);
     (void)flow_back(block);
 }
@@ -914,8 +925,9 @@ void TC fs98_mpdialog_flow_cancel_browser(void *object)
 void TC fs98_mpdialog_flow_details_browser(void *object)
 {
     void *block = flow_block(object, 4);
-    flow_capture(object);
-    if (block && D32(block, 0xb8) != (uint32_t)-1)
+    if (!block) return;
+    D32(block, 0xb8) = (uint32_t)SendMessageA((HWND)D32(object, 0x190c), LB_GETCURSEL, 0, 0);
+    if (D32(block, 0xb8) != (uint32_t)-1)
         ((int32_t (SC *)(void *))D32(block, 0x9c))(block);
 }
 void TC fs98_mpdialog_flow_settings_browser(void *object)
@@ -928,13 +940,17 @@ void TC fs98_mpdialog_flow_refresh_browser(void *object)
     void *block = flow_block(object, 4);
     if (!block || D32(object, 0x1aec)) return;
     D32(object, 0x1aec) = 1;
-    flow_capture(object);
+    D32(block, 0xb8) = (uint32_t)SendMessageA((HWND)D32(object, 0x190c), LB_GETCURSEL, 0, 0);
     if (((int32_t (SC *)(void *))D32(block, 0xa0))(block))
         ((void (TC *)(void *))PTR(PTR(object, 0), 0xf0))(object);
     D32(object, 0x1aec) = 0;
 }
 void TC fs98_mpdialog_flow_observer_browser(void *object)
-{ flow_browser_update_join(object); flow_capture(object); }
+{
+    void *block = flow_block(object, 4);
+    flow_browser_update_join(object);
+    if (block) D32(block, 0x40) = D32(object, 0x1ad8) ? 2 : 1;
+}
 void TC fs98_mpdialog_flow_idle_browser(void *object, uint32_t wparam, uint32_t lparam)
 {
     void *block = flow_block(object, 4);

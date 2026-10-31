@@ -431,7 +431,6 @@ static uint32_t FS98_STDCALL clouds_draw(uint32_t which)
 
 /* ---- slice 20: +0x94, the cloud layers' textures ------------------------------ */
 
-#define H_ATTR_GET  HOST_(0x134, f3)   /* (&flags, path, ext) */
 #define H_ATTR_SET  HOST_(0x138, f3)   /* (flags, path, ext) */
 #define H_JOIN      HOST_(0x184, f4)   /* (out, drive, dir, name) */
 

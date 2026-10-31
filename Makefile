@@ -432,7 +432,7 @@ src/analysis/analysis_data.inc src/analysis/analysis_rdata.inc: $(ORIG)/Modules/
 
 # MAIN, the sim's controller: MSVC C and assembly.  In progress, a slice at a
 # time (docs/modules/main.md); not in MODULES until every slot is done.
-MAIN_SOURCES := src/main/main.c src/main/main_records.inc src/main/main_situation.inc src/main/main_nav.inc src/main/main_season.inc src/main/main_sun.inc src/main/main_eye.inc src/main/main_band.inc src/main/main_flights.inc src/main/main_prefs.inc src/main/main_clouds.inc src/main/main_spot.inc src/main/main_frame.inc src/main/main_tick.inc src/main/main_step.inc src/main/main_text_tail.inc
+MAIN_SOURCES := src/main/main.c src/main/main_records.inc src/main/main_situation.inc src/main/main_nav.inc src/main/main_season.inc src/main/main_sun.inc src/main/main_eye.inc src/main/main_band.inc src/main/main_flights.inc src/main/main_prefs.inc src/main/main_clouds.inc src/main/main_spot.inc src/main/main_frame.inc src/main/main_tick.inc src/main/main_step.inc src/main/main_dialogs.inc src/main/main_commands.inc src/main/main_text_tail.inc
 $(BIN)/MAIN.DLL: $(MAIN_SOURCES) src/main/main.def src/main/main_data.inc \
                  src/main/main_pointers.inc $(BIN)/main.res
 	@mkdir -p $(BIN)
@@ -1119,6 +1119,7 @@ maindiff: $(DIFFDIR)/maindiff.exe $(BIN)/MAIN.DLL
 	@cp $(ORIG)/Modules/MAIN.DLL $(DIFFDIR)/MAIN_retail.dll
 	@cp $(BIN)/MAIN.DLL          $(DIFFDIR)/MAIN_ours.dll
 	@cp $(ORIG)/Modules/UTIL.DLL $(DIFFDIR)/UTIL_retail.dll
+	@cp $(ORIG)/Modules/NUMERIC.DLL $(DIFFDIR)/NUMERIC_retail.dll
 
 maindiff-run: maindiff
 	@cd $(DIFFDIR) && WINEDEBUG=-all timeout 3600 wine maindiff.exe $(if $(N),$(N),20000) $(if $(SUITE),$(SUITE),records)

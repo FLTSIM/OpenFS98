@@ -547,6 +547,7 @@ struct vfile {
     uint32_t attr;            /* host +0x134/+0x138's flags: 2 read-only */
 };
 
+static uint32_t fixture_arg;           /* what a dialog's plain callback is handed */
 static uint32_t file_cap = FILE_MAX;   /* where a write runs out of disk; per suite */
 static uint32_t open_rw_refused;       /* read/write opens refused, for coverage */
 
@@ -711,7 +712,10 @@ static int32_t STDCALL h_write(struct hblock *b, const void *buf, uint32_t n, ui
     put(" write(");
     put_ptr((uint32_t)(uintptr_t)b);
     put(",");
-    put_ptr((uint32_t)(uintptr_t)buf);
+    if (n == 2 && *(const uint16_t *)buf == 0xffff)
+        put("endtag");                             /* retail's word is in its .text, ours in .rdata */
+    else
+        put_ptr((uint32_t)(uintptr_t)buf);
     put(",%#x,", n);
     put_ptr((uint32_t)(uintptr_t)wrote);
     put(")");
@@ -903,6 +907,13 @@ static uint32_t STDCALL chain_send(uint32_t list, uint32_t a, uint32_t b)
     put(" chainsend(%#x,%#x,", list, a);
     put_ptr(b);
     put(")");
+    if (list == 0xb && b != 0) {                   /* the other modules' menus: { command, handled, argument } */
+        uint32_t *block = (uint32_t *)(uintptr_t)b;
+        put(" {%#x,%u,", block[0], block[1]);
+        put_ptr(block[2]);
+        put("}");
+        block[1] = rnd_n(2);
+    }
     if (list == 0x14 && a == 0x23 && listening)
         listen_save();
     else if (list == 0x14 && a == 0x22) {
@@ -989,8 +1000,15 @@ static unsigned long cover_alerts;
 static uint32_t STDCALL util_alert(uint32_t flags, uint32_t tag, const char *text, uint32_t arg,
                                    uint32_t p3, uint32_t p4, uint32_t p5, uint32_t lines)
 {
-    put(" alert(%#x,%#x,'%.60s',%#x,%#x,%#x,%#x,%#x)", flags, tag, text, arg, p3, p4, p5, lines);
+    if ((uint32_t)(uintptr_t)text < 0x10000)       /* a string's id, which UTIL loads */
+        put(" alert(%#x,%#x,#%#x,", flags, tag, (uint32_t)(uintptr_t)text);
+    else
+        put(" alert(%#x,%#x,'%.60s',", flags, tag, text);
+    put_ptr(arg);
+    put(",%#x,%#x,%#x,%#x)", p3, p4, p5, lines);
     if (counting) cover_alerts++;
+    if (flags == 0xc0)                             /* a question: Yes is 0x40 */
+        return rnd_n(2) ? 0x40 : 0x80;
     return 1;
 }
 
@@ -1400,6 +1418,467 @@ static uint32_t STDCALL h_clock(void)
     return frame_ms;
 }
 
+/* ---- for the command dispatcher (+0x20) ------------------------------------------ */
+
+/* The services the menus' commands call: logged, with their arguments. */
+#define CMD_STUB0(name, text) \
+    static uint32_t STDCALL name(void) { put(" " text); return 0; }
+#define CMD_STUB1(name, text) \
+    static uint32_t STDCALL name(uint32_t a) { put(" " text "("); put_ptr(a); put(")"); return 0; }
+#define CMD_STUB2(name, text) \
+    static uint32_t STDCALL name(uint32_t a, uint32_t b) { put(" " text "("); put_ptr(a); put(",%#x)", b); return 0; }
+CMD_STUB0(cmd_advdrv_28, "advdrv+0x28")
+CMD_STUB0(cmd_advdrv_2c, "advdrv+0x2c")
+CMD_STUB0(cmd_multip_18, "multip+0x18")
+CMD_STUB0(cmd_multip_1c, "multip+0x1c")
+CMD_STUB1(cmd_facil_24, "facil+0x24")
+CMD_STUB0(cmd_facil_28, "facil+0x28")
+CMD_STUB0(cmd_facil_30, "facil+0x30")
+CMD_STUB0(cmd_fe_78, "fe+0x78")
+CMD_STUB0(cmd_demo_2c, "demo+0x2c")
+CMD_STUB0(cmd_demo_30, "demo+0x30")
+CMD_STUB0(cmd_demo_34, "demo+0x34")
+CMD_STUB0(cmd_analysis_34, "analysis+0x34")
+CMD_STUB0(cmd_controls_58, "controls+0x58")
+CMD_STUB1(cmd_panels_20, "panels+0x20")
+CMD_STUB1(cmd_panels_24, "panels+0x24")
+CMD_STUB1(cmd_window_40, "window+0x40")
+CMD_STUB1(cmd_window_48, "window+0x48")
+CMD_STUB1(cmd_window_50, "window+0x50")
+CMD_STUB1(cmd_window_54, "window+0x54")
+CMD_STUB2(cmd_window_58, "window+0x58")
+CMD_STUB2(cmd_window_5c, "window+0x5c")
+CMD_STUB1(cmd_window_68, "window+0x68")
+CMD_STUB1(cmd_window_6c, "window+0x6c")
+CMD_STUB1(cmd_host_48, "host+0x48")
+CMD_STUB1(cmd_host_7c, "host+0x7c")
+#undef CMD_STUB0
+#undef CMD_STUB1
+#undef CMD_STUB2
+/* WINDOW +0x8c: find a window or panel by its command; none now and then */
+static uint32_t cmd_record_now;
+static uint32_t STDCALL cmd_window_8c(uint32_t command, uint32_t kind)
+{
+    put(" window+0x8c(%#x,%u)=", command, kind);
+    put_ptr(cmd_record_now);
+    return cmd_record_now;
+}
+
+/* ---- the host's and UTIL's file services the Flights dialogs add ------------------ */
+
+static int32_t STDCALL h_split(const char *path, char *drive, char *dir, char *name, uint32_t *ext)
+{
+    const char *p = path, *slash;
+
+    put(" split(");
+    put_name(path);
+    put(",%d%d%d%d)", drive != NULL, dir != NULL, name != NULL, ext != NULL);
+    if (rnd_n(60) == 0) {
+        put("=-1");
+        return -1;
+    }
+    if (ext != NULL) *ext = 0;
+    if (drive != NULL) drive[0] = 0;
+    if (p[0] && p[1] == ':') {
+        if (drive != NULL) { drive[0] = p[0]; drive[1] = ':'; drive[2] = 0; }
+        p += 2;
+    }
+    slash = strrchr(p, '\\');
+    if (dir != NULL) {
+        size_t n = slash ? (size_t)(slash - p) + 1 : 0;
+        memcpy(dir, p, n);
+        dir[n] = 0;
+    }
+    if (name != NULL)
+        strcpy(name, slash ? slash + 1 : p);
+    return 0;
+}
+
+static int32_t STDCALL h_tempname(char *out, const char *dir)
+{
+    put(" tempname(");
+    put_name(dir);
+    put(")");
+    if (rnd_n(60) == 0) {
+        put("=-1");
+        return -1;
+    }
+    /* the host's GetTempFileNameA, less its ".tmp": a full path in `dir` */
+    snprintf(out, 40, "%s~t%u", dir, rnd_n(1000));
+    put("='%s'", out);
+    return 0;
+}
+
+static int32_t STDCALL h_delete(const char *path, int32_t ext)
+{
+    struct vfile *f = vfile_find(path);
+
+    put(" delete(");
+    put_name(path);
+    put(",%d)", ext);
+    if (f == NULL || (f->attr & 2) || rnd_n(60) == 0) {
+        put("=-1");
+        return -1;
+    }
+    f->used = 0;
+    return 0;
+}
+
+static int32_t STDCALL h_rename(const char *to, int32_t to_ext, const char *from, int32_t from_ext)
+{
+    struct vfile *f = vfile_find(from);
+
+    put(" rename(");
+    put_name(to);
+    put(",%d,", to_ext);
+    put_name(from);
+    put(",%d)", from_ext);
+    if (f == NULL || vfile_find(to) != NULL || rnd_n(60) == 0) {
+        put("=-1");
+        return -1;
+    }
+    snprintf(f->name, sizeof f->name, "%s", to);
+    return 0;
+}
+
+static int32_t STDCALL h_pathlen(const char *path, int32_t ext, uint32_t *length)
+{
+    put(" pathlen(");
+    put_name(path);
+    put(",%d)", ext);
+    if (rnd_n(40) == 0) {
+        /* the Save dialog's check goes on to test it, an uninitialised local in
+         * retail and in ours, whatever each stack holds: give them the same */
+        *length = 0;
+        put("=-1");
+        return -1;
+    }
+    /* now and then too long, or right on the limit */
+    *length = rnd_n(6) == 0 ? 0x103 + rnd_n(2) : (uint32_t)strlen(path) + 8;
+    put("=%#x", *length);
+    return 0;
+}
+
+static int32_t STDCALL h_nameok(const char *name)
+{
+    int32_t r = strpbrk(name, "?*\\/") != NULL || !name[0] ? -1 : 0;
+
+    put(" nameok(");
+    put_name(name);
+    put(")=%d", r);
+    return r;
+}
+
+static int32_t STDCALL h_cwd(char *out)
+{
+    put(" cwd");
+    if (rnd_n(60) == 0) {
+        put("=-1");
+        return -1;
+    }
+    strcpy(out, "C:\\FS98");
+    return 0;
+}
+
+static int32_t STDCALL h_free_space(const char *drive, uint32_t *space)
+{
+    put(" freespace(");
+    put_name(drive);
+    put(")");
+    if (rnd_n(60) == 0) {
+        put("=-1");
+        return -1;
+    }
+    space[1] = rnd_n(4) == 0 ? 1 : 0;
+    space[0] = rnd_n(4) == 0 ? rnd_n(0x2000) : 0x100000;
+    put("=%#x,%#x", space[1], space[0]);
+    return 0;
+}
+
+static int32_t STDCALL h_strcmp(const char *a, const char *b)
+{
+    int r = strcmp(a, b);
+
+    put(" strcmp(");
+    put_name(a);
+    put(",");
+    put_name(b);
+    put(")");
+    return r < 0 ? -1 : r > 0;
+}
+
+static int32_t STDCALL h_stricmp(const char *a, const char *b)
+{
+    int r = _stricmp(a, b);
+
+    put(" stricmp(");
+    put_name(a);
+    put(",");
+    put_name(b);
+    put(")");
+    return r < 0 ? -1 : r > 0;
+}
+
+/* UTIL +0x98: list the situation files of two directories into records of
+ * 0xa08: +0 the name, +0x100 and +0x500 from the callbacks, +0x900 the path,
+ * +0xa04 set for the second directory's, which may be changed.  UTIL is verified
+ * in its own harness; here only MAIN's glue around it. */
+static unsigned long cover_list_empty;
+static uint32_t list_last_count;
+
+static uint32_t STDCALL util_list(uint32_t id1, uint32_t id2, uint32_t ext, uint32_t *count, uint32_t *list,
+                                  uint32_t title, uint32_t description, uint32_t a8, uint32_t a9)
+{
+    uint32_t ids[2], d, i, n = 0;
+    uint8_t *recs;
+
+    ids[0] = id1;
+    ids[1] = id2;
+    put(" list(%#x,%#x,%u,", id1, id2, ext);
+    put_ptr(title);
+    put(",");
+    put_ptr(description);
+    put(",%#x,%#x)", a8, a9);
+    recs = (uint8_t *)arena_get(MAX_FILES * 0xa08u);
+    for (d = 0; d < 2; d++) {
+        const char *dir = ids[d] ? string_of(ids[d]) : NULL;
+        size_t k;
+
+        if (dir == NULL)
+            continue;
+        k = strlen(dir);
+        for (i = 0; i < MAX_FILES; i++) {
+            uint8_t *r = recs + n * 0xa08u;
+
+            if (!files[i].used || _strnicmp(files[i].name, dir, k) || files[i].name[k] != '\\' ||
+                strchr(files[i].name + k + 1, '\\') != NULL)
+                continue;
+            strcpy((char *)r, files[i].name + k + 1);
+            ((s2)(uintptr_t)title)((uint32_t)(uintptr_t)files[i].name, (uint32_t)(uintptr_t)(r + 0x100));
+            ((s2)(uintptr_t)description)((uint32_t)(uintptr_t)files[i].name, (uint32_t)(uintptr_t)(r + 0x500));
+            strcpy((char *)r + 0x900, files[i].name);
+            *(uint32_t *)(r + 0xa04) = d;
+            n++;
+        }
+    }
+    *count = n;
+    *list = (uint32_t)(uintptr_t)recs;
+    list_last_count = n;
+    put("=%u", n);
+    if (counting && n == 0) cover_list_empty++;
+    return 0;
+}
+
+static void dump_files(void)
+{
+    uint32_t i, j, h;
+
+    for (i = 0; i < MAX_FILES; i++)
+        if (files[i].used) {
+            for (h = 0x811c9dc5u, j = 0; j < files[i].size; j++)
+                h = (h ^ files[i].bytes[j]) * 0x01000193u;
+            put(" [%s %#x %08x]", files[i].name, files[i].size, h);
+        }
+}
+
+/* ---- the dialogs' stand-in (host +0x10c) ----------------------------------------- */
+
+/* A dialog as the English DLLs drive it: it edits the records of its exchange
+ * table, may ask the descriptor's callback at +4 to validate, and answers OK or
+ * not in the descriptor's +0.  Each dialog is told by its id: its table(s) in
+ * MAIN's .data.  Now and then the host fails to open it. */
+static const struct dialog_kind { uint32_t id, table, n; } dialog_kinds[] = {
+    { 0x1305, 0x6b8, 5 }, { 0x1304, 0x1260, 4 }, { 0x1203, 0x1f8, 5 }, { 0x1203, 0x1e0, 1 },
+};
+static unsigned long cover_dlg, cover_dlg_ok, cover_dlg_refused, cover_dlg_child, cover_dlg_noopen;
+
+static void dialog_edit(uint32_t desc, const uint8_t *table, uint32_t n)
+{
+    uint32_t i;
+
+    for (i = 0; i < n; i++, table += 20) {
+        uint32_t kind = *(const uint32_t *)table, off = *(const uint32_t *)(table + 4);
+        uint8_t *rec = (uint8_t *)(uintptr_t)(desc + off);
+
+        if (kind == 4) {
+            char *t = *(char **)(rec + 4);
+            uint32_t k = rnd_n(6);
+            if (t != NULL && !IsBadWritePtr(t, 16)) {
+                if (k >= 3) {                      /* a COM frequency: 0x1203's limit is 118.00 */
+                    static const char *const edge[] = { "118.00", "117.95", "118.02", "118.05" };
+                    if (rnd_n(2))
+                        snprintf(t, 16, "%s", edge[rnd_n(4)]);
+                    else
+                        snprintf(t, 16, "%u.%02u", 108 + rnd_n(30), rnd_n(4) * 25);
+                }
+                else
+                    snprintf(t, 16, k == 0 ? "x%u" : k == 1 ? "%u" : "%u.%u", k == 1 ? rnd_n(0x4000) : rnd_n(70000),
+                             rnd_n(100));
+            }
+        } else if (kind < 4 && rnd_n(2)) {
+            *(uint32_t *)(rec + 4) = rnd_n(4) ? (rnd_n(4) ? 1 : rnd_n(3)) : rnd();
+        }
+    }
+}
+
+/* The Open Flight dialog over its block { answer, nothing, delete, edit, default,
+ * selection, count, list }: pressing its buttons in some order, then closing it. */
+static unsigned long cover_open_delete, cover_open_edit, cover_open_ok, cover_save_ok, cover_save_status;
+
+static uint32_t flight_pick(uint32_t count)
+{
+    return count ? rnd_n(count) : 0;
+}
+
+static void open_dialog(uint32_t *b)
+{
+    uint32_t i, n = rnd_n(4), r;
+
+    put(" {sel=%u of %u}", b[5], b[6]);
+    r = ((s1)(uintptr_t)b[1])((uint32_t)(uintptr_t)b);
+    put(" nothing=%#x", r);
+    for (i = 0; i < n; i++) {
+        b[5] = flight_pick(b[6]);
+        if (b[6] == 0)
+            break;
+        if (rnd_n(2)) {
+            if (counting) cover_open_delete++;
+            r = ((s1)(uintptr_t)b[2])((uint32_t)(uintptr_t)b);
+            put(" delete=%#x sel=%u of %u", r, b[5], b[6]);
+        } else {
+            char *edit = (char *)arena_get(0xa08);
+            uint32_t k = rnd_n(8);
+
+            memset(edit, 0, 0xa08);
+            b[5] = rnd_n(16) == 0 ? b[6] : b[5];
+            if (b[5] < b[6])
+                strcpy(edit + 0x900, (char *)(uintptr_t)b[7] + b[5] * 0xa08u + 0x900);
+            if (k == 0)                            /* past what record 0 keeps */
+                snprintf(edit, 48, "FL%u_%034u", rnd_n(8), rnd_n(100));
+            else if (k < 3)
+                snprintf(edit, 32, "FL%u", rnd_n(8));
+            else if (k == 3)
+                strcpy(edit, "bad?name");
+            if (k >= 3 && rnd_n(2)) {
+                if (rnd_n(3) == 0) {               /* past what record 2 keeps */
+                    uint32_t n = 0xf0 + rnd_n(0x40);
+                    memset(edit + 0x100, 'w', n);
+                    edit[0x100 + n] = 0;
+                } else {
+                    snprintf(edit + 0x100, 64, "words %u", rnd());
+                }
+            }
+            if (counting) cover_open_edit++;
+            r = ((s2)(uintptr_t)b[3])((uint32_t)(uintptr_t)b, (uint32_t)(uintptr_t)edit);
+            put(" edit=%#x", r);
+        }
+    }
+    b[5] = flight_pick(b[6]);
+    b[4] = rnd_n(2);
+    /* any other button's number: retail tests != 0 here, != 1 in +0xc4 */
+    b[0] = b[6] == 0 ? 0 : rnd_n(4) ? 1 : rnd_n(3);
+    if (counting && b[0]) cover_open_ok++;
+}
+
+/* The Save Flight dialog over its descriptor: a file name and description in the
+ * buffers its records name, its callback asked now and then. */
+static void save_dialog(uint32_t desc)
+{
+    char *name = *(char **)(uintptr_t)(desc + 0xc), *words = *(char **)(uintptr_t)(desc + 0x20);
+    uint32_t k = rnd_n(8), r;
+
+    /* the callback: left retail's, ours would call retail's mapped copy and agree */
+    put(" {%#x,", *(uint32_t *)(uintptr_t)(desc + 0x10));
+    put_ptr(*(uint32_t *)(uintptr_t)(desc + 4));
+    put("}");
+    if (k == 0)
+        name[0] = 0;
+    else if (k == 1)
+        strcpy(name, "no?good");
+    else
+        snprintf(name, 32, "FL%u", rnd_n(8));
+    snprintf(words, 32, "about %u", rnd_n(100));
+    if (rnd_n(2)) {
+        r = ((s1)(uintptr_t)*(uint32_t *)(uintptr_t)(desc + 4))(desc);
+        put(" check=%#x status=%#x", r, *(uint32_t *)(uintptr_t)(desc + 8));
+        if (counting && r != 0) cover_save_status++;
+    }
+    *(uint32_t *)(uintptr_t)(desc + 0x30) = rnd_n(2);
+    *(uint32_t *)(uintptr_t)desc = rnd_n(3) != 0;
+    if (counting && *(uint32_t *)(uintptr_t)desc) cover_save_ok++;
+}
+
+static uint32_t STDCALL h_dialog(uint32_t id, uint32_t desc)
+{
+    uint32_t i, known = 0;
+
+    put(" dialog(%#x,", id);
+    put_ptr(desc);
+    put(")");
+    if (counting) cover_dlg++;
+    if (id == 0x16070001) {
+        if (counting) cover_dlg_child++;
+        return 0;
+    }
+    if (id == 0x1607) {
+        uint32_t *b = (uint32_t *)(uintptr_t)desc, r;
+        put(" {%u}", b[0]);
+        r = ((s1)(uintptr_t)b[1])(fixture_arg);
+        put(" a=%#x", r);
+        r = ((s1)(uintptr_t)b[4])(fixture_arg);
+        put(" b=%#x", r);
+        return 0;
+    }
+    if (rnd_n(8) == 0) {
+        if (counting) cover_dlg_noopen++;
+        put(" no");
+        return 0xffffffffu;
+    }
+    if (id == 0x1102) {
+        open_dialog((uint32_t *)(uintptr_t)desc);
+        return 0;
+    }
+    if (id == 0x1107) {
+        uint32_t *b = (uint32_t *)(uintptr_t)desc;
+        put(" nothing=%#x", ((s1)(uintptr_t)b[1])(desc));
+        b[3] = flight_pick(b[2]);
+        b[0] = b[2] != 0 && rnd_n(4) != 0;
+        return 0;
+    }
+    if (id == 0x1104) {
+        save_dialog(desc);
+        return 0;
+    }
+    for (i = 0; i < sizeof dialog_kinds / sizeof dialog_kinds[0]; i++)
+        if (dialog_kinds[i].id == id) {
+            dialog_edit(desc, cur->image + dialog_kinds[i].table, dialog_kinds[i].n);
+            known = 1;
+        }
+    if (!known) {
+        printf("no stand-in for dialog %#x\n", id);
+        exit(2);
+    }
+    /* the button pressed goes in first: the callback validates knowing it */
+    *(uint32_t *)(uintptr_t)desc = rnd_n(4) ? 1 : rnd_n(3);
+    if (rnd_n(2)) {
+        uint32_t r = ((s1)(uintptr_t)*(uint32_t *)(uintptr_t)(desc + 4))(desc);
+        put(" check=%#x", r);
+        if (counting && r != 0) cover_dlg_refused++;
+        /* the statuses, which a dialog reads now to mark the fields objected to */
+        for (i = 0; i < sizeof dialog_kinds / sizeof dialog_kinds[0]; i++)
+            if (dialog_kinds[i].id == id) {
+                const uint8_t *table = cur->image + dialog_kinds[i].table;
+                uint32_t j;
+                for (j = 0; j < dialog_kinds[i].n; j++)
+                    put(" %x", *(uint32_t *)(uintptr_t)(desc + *(const uint32_t *)(table + 20 * j + 4)));
+            }
+    }
+    if (counting && *(uint32_t *)(uintptr_t)desc == 1) cover_dlg_ok++;
+    return 0;
+}
+static uint32_t STDCALL m24_18(void) { put(" m24+0x18"); return 0; }
+static uint32_t STDCALL m24_1c(void) { put(" m24+0x1c"); return 0; }
+
 /* G3D +0x38, the object step's submission (+0x88): handed an object's buffer
  * (in the shared arena) and the record it was stamped from (in the image).
  * The step never reads anything back, so the stub logs both pointers and
@@ -1660,6 +2139,46 @@ static void build_stubs(void)
     SET_SLOT(weatherm, 0x1c, step_weatherm_1c);
     SET_SLOT(util, 0x70, step_util_70);
     SET_SLOT(host, 0x034, h_clock);
+    SET_SLOT(module_stub[21], 0x28, cmd_advdrv_28);
+    SET_SLOT(module_stub[21], 0x2c, cmd_advdrv_2c);
+    SET_SLOT(multip, 0x18, cmd_multip_18);
+    SET_SLOT(multip, 0x1c, cmd_multip_1c);
+    SET_SLOT(module_stub[37], 0x24, cmd_facil_24);
+    SET_SLOT(module_stub[37], 0x28, cmd_facil_28);
+    SET_SLOT(module_stub[37], 0x30, cmd_facil_30);
+    SET_SLOT(fe, 0x78, cmd_fe_78);
+    SET_SLOT(module_stub[7], 0x2c, cmd_demo_2c);
+    SET_SLOT(module_stub[7], 0x30, cmd_demo_30);
+    SET_SLOT(module_stub[7], 0x34, cmd_demo_34);
+    SET_SLOT(module_stub[29], 0x34, cmd_analysis_34);
+    SET_SLOT(controls, 0x58, cmd_controls_58);
+    SET_SLOT(module_stub[15], 0x20, cmd_panels_20);
+    SET_SLOT(module_stub[15], 0x24, cmd_panels_24);
+    SET_SLOT(module_stub[10], 0x40, cmd_window_40);
+    SET_SLOT(module_stub[10], 0x48, cmd_window_48);
+    SET_SLOT(module_stub[10], 0x50, cmd_window_50);
+    SET_SLOT(module_stub[10], 0x54, cmd_window_54);
+    SET_SLOT(module_stub[10], 0x58, cmd_window_58);
+    SET_SLOT(module_stub[10], 0x5c, cmd_window_5c);
+    SET_SLOT(module_stub[10], 0x68, cmd_window_68);
+    SET_SLOT(module_stub[10], 0x6c, cmd_window_6c);
+    SET_SLOT(module_stub[10], 0x8c, cmd_window_8c);
+    SET_SLOT(host, 0x10c, h_dialog);
+    SET_SLOT(host, 0x188, h_split);
+    SET_SLOT(host, 0x174, h_tempname);
+    SET_SLOT(host, 0x14c, h_delete);
+    SET_SLOT(host, 0x16c, h_rename);
+    SET_SLOT(host, 0x170, h_pathlen);
+    SET_SLOT(host, 0x178, h_nameok);
+    SET_SLOT(host, 0x130, h_cwd);
+    SET_SLOT(host, 0x150, h_free_space);
+    SET_SLOT(host, 0x2bc, h_strcmp);
+    SET_SLOT(host, 0x2c0, h_stricmp);
+    SET_SLOT(util, 0x98, util_list);
+    SET_SLOT(module_stub[24], 0x18, m24_18);
+    SET_SLOT(module_stub[24], 0x1c, m24_1c);
+    SET_SLOT(host, 0x048, cmd_host_48);
+    SET_SLOT(host, 0x07c, cmd_host_7c);
     SET_SLOT(module_stub[6], 0x18, step_m6_18);
     SET_SLOT(module_stub[7], 0x18, step_m7_18);
     SET_SLOT(module_stub[9], 0x18, step_m9_18);
@@ -1681,6 +2200,29 @@ static void build_stubs(void)
  * registers the real ones keep.  Its imports: the host stub table, GLOBAL, and
  * NUMERIC as a table of traps. */
 static uint8_t numeric_stub[0x100];
+static uint8_t *numeric_real;
+
+/* Retail NUMERIC for the exchange engine's text fields (UTIL +0x8c/+0x90): it
+ * formats and parses, verified by numericdiff.  It keeps only what its init
+ * sets, once, here.  Its UTIL is retail UTIL's own Linkage. */
+static void use_retail_numeric(void)
+{
+    HMODULE module = LoadLibraryA("NUMERIC_retail.dll"), um = LoadLibraryA("UTIL_retail.dll");
+    struct import *im;
+    struct side *saved = cur;
+
+    if (module == NULL || um == NULL) {
+        printf("cannot load NUMERIC_retail.dll or UTIL_retail.dll (%lu)\n", GetLastError());
+        exit(2);
+    }
+    numeric_real = (uint8_t *)GetProcAddress(module, "Linkage");
+    for (im = (struct import *)GetProcAddress(module, "ImportTable"); im->id; im++)
+        im->link = im->id == 1 ? (void *)host : im->id == 2 ? (void *)global :
+                   (void *)GetProcAddress(um, "Linkage");
+    cur = NULL;
+    ((s0)*(void **)(numeric_real + 4))();
+    cur = saved;
+}
 
 static void use_retail_util(const uint32_t *slots, uint32_t n)
 {
@@ -1706,7 +2248,7 @@ static void use_retail_util(const uint32_t *slots, uint32_t n)
         switch (im->id) {
         case 1:  im->link = host; break;
         case 2:  im->link = global; break;
-        case 17: im->link = numeric_stub; break;
+        case 17: im->link = numeric_real != NULL ? (void *)numeric_real : (void *)numeric_stub; break;
         default: printf("UTIL_retail.dll: unexpected import %u\n", im->id); exit(2);
         }
     }
@@ -1810,6 +2352,8 @@ static void put_state(void)
         v = *(uint32_t *)(img + at);
         if (in_image(v))
             v = 0xda000000u | (v - (uint32_t)(uintptr_t)cur->image);
+        else if (v == *(uint32_t *)(cur->pristine + at))
+            v = 0xc0de0000u;                       /* a code pointer as loaded: ours installs its own */
         else if (cur == &retail && (uint8_t *)(uintptr_t)v >= retail.lo && (uint8_t *)(uintptr_t)v < retail.hi)
             v = v - (uint32_t)(uintptr_t)retail.lo + RETAIL_BASE;
         *(uint32_t *)(img + at) = v;
@@ -2149,8 +2693,10 @@ static const char *string_of(uint32_t id)
     case 0x2201: return string_2201;
     case 0x9002: return "FLIGHTS";
     case 0x9004: return "FLIGHTS\\OTHER";
+    case 0x900a: return "FLIGHTS\\CHALLENGE";
     case 0x9016: return "start.stn";
     case 0x9006: return "TEXTURE";
+    case 0x9100: return "N S E W";
     case 0xf461: return "No default flight";
     case 0xf462: return "Flight will not load";
     }
@@ -3996,6 +4542,268 @@ static void report_step(void)
            cover_step_mode[2], cover_step_slew, cover_step_drain, cover_step_slow);
 }
 
+/* ---- suite: commands (the menu command dispatcher, +0x20) ------------------------- */
+
+/* The commands whose handlers are done, and the rest of the dispatcher's
+ * ranges.  Not issued, their handlers still to come (cmd_pending in
+ * main_commands.inc): 0x1101, 0x1102, 0x1106, 0x1109, 0x1201..0x1205, 0x1301,
+ * 0x1306..0x1309, 0x1407, 0x1409, 0x1502, 0x1607 and 0x300..0x3ff. */
+static const uint32_t cmd_list[] = {
+    0x1103, 0x1104, 0x1105, 0x1107, 0x1180, 0x1181, 0x1206, 0x1207, 0x1303, 0x1304, 0x1305, 0x130a,
+    0x1401, 0x1403, 0x1404, 0x1405, 0x1406, 0x1408, 0x140a, 0x1421, 0x1422, 0x1423, 0x1424, 0x1425,
+    0x1426, 0x1427, 0x1428, 0x1429, 0x142a, 0x1501, 0x1506, 0x1507, 0x1508, 0x1520, 0x1540, 0x1541,
+    0x1542, 0x1543, 0x1544, 0x1545, 0x1550, 0x1551, 0x1552, 0x1553, 0x1554, 0x1555, 0x1625,
+    0x20000, 0x20001, 0x20002, 0x20003, 0x20004, 0x20005, 0x20006, 0x20007, 0x20008, 0x20009,
+    0x2000a, 0x2000b, 0x2000c, 0x2000d, 0x2000e, 0x2000f, 0x20010, 0x20011, 0x20012, 0x20013, 0x20014,
+};
+/* Commands on the edges of the ranges, which must fall to the default. */
+static const uint32_t cmd_edges[] = {
+    0, 0xff, 0x400, 0x1100, 0x1108, 0x110a, 0x117f, 0x1182, 0x1200, 0x1208, 0x1300, 0x1302, 0x130b,
+    0x1400, 0x1402, 0x140b, 0x1420, 0x142b, 0x1500, 0x1503, 0x1505, 0x1509, 0x151f, 0x1521, 0x153f,
+    0x1546, 0x154f, 0x1556, 0x1606, 0x1608, 0x1624, 0x1626, 0x1fff, 0x1ffff, 0x20015, 0x7ffff,
+    0x80000, 0x80001, 0x80002, 0x80004, 0x80006, 0x8ffff, 0x90000,
+};
+static unsigned long cover_cmd, cover_cmd_list, cover_cmd_edge, cover_cmd_window, cover_cmd_panel, cover_cmd_reload;
+
+static void op_commands(void)
+{
+    uint8_t *rec = fixtures + 0x21000;
+    uint32_t k = rnd_n(20), command, argument, r;
+
+    if (k < 12)
+        command = cmd_list[rnd_n(sizeof cmd_list / sizeof cmd_list[0])];
+    else if (k < 15)
+        command = cmd_edges[rnd_n(sizeof cmd_edges / sizeof cmd_edges[0])];
+    else if (k < 17)
+        command = 0x100 + rnd_n(0x100);
+    else if (k < 19)
+        command = 0x200 + rnd_n(0x100);
+    else
+        command = rnd_n(8) ? rnd() : 0x80005;
+    if (command >= 0x300 && command < 0x400)
+        command = 0x1103;                          /* the kneeboard pages, not done yet */
+    if (command == 0x1101 || command == 0x1102 || command == 0x1106 || command == 0x1109 ||
+        (command >= 0x1201 && command <= 0x1205) || command == 0x1301 ||
+        (command >= 0x1306 && command <= 0x1309) || command == 0x1407 || command == 0x1409 ||
+        command == 0x1502 || command == 0x1607)
+        command = 0x1104;                          /* a random one that landed on a pending handler */
+    *(uint32_t *)(rec + 4) = rnd_n(4);
+    *(uint32_t *)(rec + 8) = rnd();
+    argument = (uint32_t)(uintptr_t)rec;
+    if ((command == 0x2000f || command == 0x20011) && rnd_n(2))
+        argument = 0;                              /* these two test it */
+    cmd_record_now = rnd_n(4) ? (uint32_t)(uintptr_t)rec : 0;
+    *(uint32_t *)(global + 0x760) = rnd_n(2) ? 0 : rnd();
+    *(uint32_t *)(global + 0x1240) = rnd_n(2) ? 0 : rnd();
+    *(uint32_t *)(global + 0x119c) = rnd();
+    *(uint32_t *)(global + 0x2ac) = rnd_n(2) ? 0 : rnd();
+    *(uint32_t *)(global + 0x1230) = rnd_n(2) ? 0 : rnd();
+    *(uint32_t *)(global + 0x254) = rnd();
+    *(uint32_t *)(global + 0x250) = rnd();
+    *(uint32_t *)(global + 0x24c) = rnd();
+    *(uint32_t *)(cur->image + 0x7fc4) = (uint32_t)(uintptr_t)rec;
+    if (counting) {
+        cover_cmd++;
+        if (command < 0x200 && command >= 0x100) cover_cmd_window++;
+        else if (command < 0x300 && command >= 0x200) cover_cmd_panel++;
+        else if (command == 0x80005) cover_cmd_reload++;
+        else if (k < 12) cover_cmd_list++;
+        else cover_cmd_edge++;
+    }
+    put("\n#command(%#x,", command);
+    put_ptr(argument);
+    put(")");
+    r = ((s2)SVC(0x20))(command, argument);
+    put(" =%#x c1a=%#x rec8=%#x", r, *(uint16_t *)(global + 0xc1a), *(uint32_t *)(rec + 8));
+}
+
+static void setup_commands(void)
+{
+    setup_situations();
+}
+
+static void report_commands(void)
+{
+    printf("  commands %lu (listed %lu, others and edges %lu, windows %lu, panels %lu, reloads %lu)\n",
+           cover_cmd, cover_cmd_list, cover_cmd_edge, cover_cmd_window, cover_cmd_panel, cover_cmd_reload);
+}
+
+/* ---- suite: dialogs (the menu commands' dialogs, through +0x20) -------------------- */
+
+static const uint32_t dialog_commands[] = { 0x1308, 0x1309, 0x1607, 0x1203 };
+static unsigned long cover_dlg_cmd[4];
+
+static void op_dialogs(void)
+{
+    uint32_t k = rnd_n(sizeof dialog_commands / sizeof dialog_commands[0]), i, r;
+
+    for (i = 0; i < 32; i++)
+        global[rnd_n(sizeof global)] = (uint8_t)rnd();
+    for (i = 0; i < 3; i++) {                      /* the fields the tables name, in range now and then */
+        static const uint16_t f[] = { 0xb54, 0xb58, 0xb5c, 0xb60, 0x1180, 0x1184, 0x1188, 0x118c, 0x1190,
+                                      0x34e, 0x27c, 0x38a, 0x362 };
+        *(uint32_t *)(global + f[rnd_n(sizeof f / sizeof f[0])]) = rnd_n(4);
+    }
+    fixture_arg = (uint32_t)(uintptr_t)(fixtures + 0x22000);
+    if (counting) cover_dlg_cmd[k]++;
+    put("\n#command(%#x)", dialog_commands[k]);
+    r = ((s2)SVC(0x20))(dialog_commands[k], rnd());
+    put(" =%#x", r);
+}
+
+static void setup_dialogs(void)
+{
+    static const uint32_t slots[] = { 0x8c, 0x90 };
+    static int loaded;
+    uint32_t i;
+
+    if (!loaded) {
+        use_retail_numeric();
+        use_retail_util(slots, sizeof slots / sizeof slots[0]);
+        loaded = 1;
+    }
+    for (i = 0; i < sizeof global; i++)
+        global[i] = (uint8_t)rnd();
+}
+
+static void report_dialogs(void)
+{
+    printf("  dialogs: 0x1308/0x1309/0x1607/0x1203 %lu/%lu/%lu/%lu; opened %lu, none %lu, OK %lu, a check refused %lu,"
+           " children %lu\n", cover_dlg_cmd[0], cover_dlg_cmd[1], cover_dlg_cmd[2], cover_dlg_cmd[3], cover_dlg,
+           cover_dlg_noopen, cover_dlg_ok, cover_dlg_refused, cover_dlg_child);
+}
+
+/* ---- suite: flights (+0x50, +0xac, +0xc4, commands 0x1102 and 0x1106) ------------- */
+
+static unsigned long cover_fl[5], cover_fl_replaced, cover_fl_appended;
+
+/* A flight file: well formed (a title, a description, others) or damaged. */
+static void flight_file(const char *name)
+{
+    struct vfile *f = make_file(name);
+
+    if (rnd_n(6) == 0) {
+        fill_situation(f);
+    } else {
+        uint32_t at = 0, i, n = rnd_n(4);
+
+        if (rnd_n(4)) {                            /* the title */
+            static const char t[] = "A Title";
+            f->bytes[at] = 0; f->bytes[at + 1] = 0; f->bytes[at + 2] = 0x23; f->bytes[at + 3] = 0;
+            memcpy(f->bytes + at + 4, t, sizeof t);
+            at += 0x23;
+        }
+        for (i = 0; i < n; i++) {
+            uint32_t tag = rnd_n(2) ? 3 + rnd_n(900) : 1000 + rnd_n(3000), body = rnd_n(0x40), len = body + (tag < 1000 ? 4 : 6);
+
+            f->bytes[at++] = (uint8_t)tag;
+            f->bytes[at++] = (uint8_t)(tag >> 8);
+            f->bytes[at++] = (uint8_t)len;
+            f->bytes[at++] = (uint8_t)(len >> 8);
+            if (tag >= 1000) {
+                f->bytes[at++] = 0;
+                f->bytes[at++] = 0;
+            }
+            fill_random(f->bytes + at, body);
+            at += body;
+        }
+        if (rnd_n(3)) {                            /* the description */
+            f->bytes[at] = 2; f->bytes[at + 1] = 0; f->bytes[at + 2] = 0x20; f->bytes[at + 3] = 0;
+            memcpy(f->bytes + at + 4, "Some words", 11);
+            at += 0x20;
+        }
+        if (rnd_n(10) == 0) {                      /* cut off inside a record's header */
+            uint32_t tag = rnd_n(2) ? 500 : 1500, k = rnd_n(tag < 1000 ? 2 : 4);
+
+            f->bytes[at++] = (uint8_t)tag;
+            f->bytes[at++] = (uint8_t)(tag >> 8);
+            for (i = 0; i < k; i++)
+                f->bytes[at++] = 0x10;
+        } else {
+            f->bytes[at++] = 0xff;
+            f->bytes[at++] = 0xff;
+        }
+        f->size = at;
+    }
+    f->attr = rnd_n(8) == 0 ? 2 : 0;
+}
+
+static void op_flights(void)
+{
+    static const char *const dirs[] = { "FLIGHTS\\OTHER\\", "FLIGHTS\\", "FLIGHTS\\CHALLENGE\\" };
+    char name[64], other[64];
+    uint32_t k = rnd_n(100), r;
+    struct vfile *f;
+
+    if (rnd_n(2)) {
+        snprintf(name, sizeof name, "%sF%u", dirs[rnd_n(3)], rnd_n(4));
+        flight_file(name);
+    }
+    snprintf(other, sizeof other, "%sF%u", dirs[rnd_n(2)], rnd_n(4));
+    if (rnd_n(2) && (f = vfile_find(other)) != NULL) {
+        strcpy((char *)cur->image + 0x40dc, other);
+    }
+    if (rnd_n(2))
+        strcpy((char *)global + 0x24, other);
+    if (k < 40) {
+        uint8_t *data = fixtures + 0x24000;
+        uint32_t tag = rnd_n(3) == 0 ? 2 : rnd_n(3) == 0 ? 0 : rnd_n(2) ? 3 + rnd_n(900) : 1000 + rnd_n(3000);
+        uint32_t body = rnd_n(0x80);
+        uint32_t total = body + (tag < 1000 ? 4 : 6);
+
+        fill_random(data, body);
+        if (counting) cover_fl[0]++;
+        put("\n#set(");
+        put_name(other);
+        put(",%#x,%#x)", tag, total);
+        r = ((s4)SVC(0x50))((uint32_t)(uintptr_t)other, tag, (uint32_t)(uintptr_t)data, total);
+        put(" =%#x", r);
+    } else if (k < 60) {
+        if (counting) cover_fl[1]++;
+        put("\n#open");
+        list_last_count = 1;
+        r = ((s0)SVC(0xc4))();
+        if (list_last_count != 0)                  /* with no flights retail answers what its stack held */
+            put(" =%#x", r);
+    } else if (k < 70) {
+        if (counting) cover_fl[2]++;
+        put("\n#command(0x1102)");
+        ((s2)SVC(0x20))(0x1102, 0);
+    } else if (k < 80) {
+        if (counting) cover_fl[3]++;
+        put("\n#command(0x1106)");
+        ((s2)SVC(0x20))(0x1106, 0);
+    } else {
+        if (counting) cover_fl[4]++;
+        put("\n#save");
+        r = ((s0)SVC(0xac))();
+        put(" =%#x", r);
+    }
+    dump_files();
+    put(" g24='%.60s' def='%.60s'", (char *)global + 0x24, (char *)cur->image + 0x40dc);
+}
+
+static void setup_flights(void)
+{
+    uint32_t i, n = rnd_n(5);
+
+    setup_situations();
+    short_write_odds = 150;                        /* the disk fills mid-rewrite, even on the end tag */
+    for (i = 0; i < n; i++) {
+        char name[64];
+        snprintf(name, sizeof name, "%sF%u", i & 1 ? "FLIGHTS\\" : "FLIGHTS\\OTHER\\", i);
+        flight_file(name);
+    }
+}
+
+static void report_flights(void)
+{
+    printf("  flights: set record %lu, open %lu (+0xc4) + %lu (0x1102), challenges %lu, save %lu; lists empty %lu\n",
+           cover_fl[0], cover_fl[1], cover_fl[2], cover_fl[3], cover_fl[4], cover_list_empty);
+    printf("  Open: delete %lu, edit %lu, OK %lu; Save: OK %lu, check refused %lu\n", cover_open_delete,
+           cover_open_edit, cover_open_ok, cover_save_ok, cover_save_status);
+}
+
 /* ---- running ---------------------------------------------------------------------- */
 
 struct suite {
@@ -4034,6 +4842,9 @@ static const struct suite suites[] = {
     { "frame", op_frame, report_frame, 30, setup_frame, 0x00 },
     { "tick", op_tick, report_tick, 20, setup_tick, 0x00 },
     { "step", op_step, report_step, 20, setup_step, 0x00 },
+    { "commands", op_commands, report_commands, 30, setup_commands, 0xff },
+    { "dialogs", op_dialogs, report_dialogs, 20, setup_dialogs, 0x00 },
+    { "flights", op_flights, report_flights, 12, setup_flights, 0xff },
 };
 
 static const struct suite *suite;
@@ -4174,7 +4985,8 @@ int main(int argc, char **argv)
         if (!strcmp(suites[i].name, which))
             suite = &suites[i];
     if (suite == NULL) { printf("no suite %s\n", which); return 2; }
-    situations_suite = !strcmp(suite->name, "situations") || !strcmp(suite->name, "quicksave");
+    situations_suite = !strcmp(suite->name, "situations") || !strcmp(suite->name, "quicksave") ||
+                       !strcmp(suite->name, "commands") || !strcmp(suite->name, "flights");
     AddVectoredExceptionHandler(1, on_vectored);
     if (getenv("MAIN_NOFILTER") == NULL)
         SetUnhandledExceptionFilter(on_fault);

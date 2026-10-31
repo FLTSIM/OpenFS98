@@ -33,15 +33,19 @@ slot is done MAIN is not in `MODULES` and is never installed.
 | 22, init, deinit and the frame callbacks | `+0x04`, `+0x08` (MSVC C, `.text+0x20`, `+0x70`), callbacks `.text+0x2e10`, `+0x7095`, `+0x85ea` (assembly) | `frame` | verified: 20,000 scenarios, 0 differ; 58 of 60 breaks caught, 2 proven equivalent |
 | 23, the timer tick | `+0x24` (MSVC C, `.text+0x16a60`) | `tick` | verified: 20,000 scenarios, 0 differ; 11 of 11 breaks caught |
 | 24, the frame | `+0x18` (MSVC C, `.text+0xc000`..`+0xc51d`) | `step` | verified: 20,000 scenarios, 0 differ; 39 of 40 breaks caught, 1 proven equivalent |
+| 25, the menu command dispatcher | `+0x20` (MSVC C, `.text+0xa090`, `+0xae50`), the dialog handlers pending | `commands` | verified: 20,000 scenarios, 0 differ; 73 of 73 breaks caught |
+| 26, the first dialogs | commands `0x1203`, `0x1308`, `0x1309`, `0x1607` (MSVC C, `.text+0x8d0`, `+0x4f50`, `+0x2e30`, `+0xa0`, with their check callbacks) | `dialogs` | verified: 20,000 scenarios, 0 differ; 38 of 40 breaks caught, 2 proven equivalent |
+| 27, rewriting a situation file and the Flights dialogs | `+0x50` (assembly, `.text+0x13105`, `+0x13500`, `+0x13612`, `+0x13710`), `+0xac`, `+0xc4` and command `0x1106` (MSVC C, `.text+0xc560`..`+0xc870`, `+0xd180`..`+0xd790`, `+0xea80`..`+0xeb30`) | `flights` | verified: 20,000 scenarios, 0 differ; 96 of 98 breaks caught, 2 proven equivalent |
 
-**What is left** (as of slice 24): `+0x20`; `+0x28` and `+0x2c`, the sim's
-start and shutdown, with the two CHAIN callbacks `+0x28` registers
-(`.text+0xae40` on list `0x14`, `.text+0x16c83` on list 2) and about ten
-internal routines (menus, the view windows, the clock, strings); `+0x50`;
-`+0x90`; `+0xac` and `+0xc4` (the Flights dialogs: UTIL `+0x98` lists the
-flights through MAIN callbacks and host `+0x10c` runs a dialog that calls back
-into MAIN, as FACIL's were done); and the menu command handlers the host
-reaches through the command table (most open dialogs through host `+0x10c`).
+**What is left** (as of slice 27): `+0x28` and `+0x2c`, the sim's start and
+shutdown, with the two CHAIN callbacks `+0x28` registers (`.text+0xae40` on
+list `0x14`, `.text+0x16c83` on list 2) and about ten internal routines (menus,
+the view windows, the clock, strings); `+0x90`; and the dialog handlers `+0x20`
+still reaches through `cmd_pending`, which faults on purpose: `0x1101` (`.text+0xdaa0`),
+`0x1109` (`+0x14ab0`), `0x1201` (`+0x110`), `0x1202` (`+0x13870`), `0x1204`
+(`+0x2ee0`), `0x1205` (`+0x3bf0`), `0x1301` (`+0x1b20`), `0x1306` (`+0x19fb0`),
+`0x1307` (`+0x5010`), `0x1407` (`+0xf3d0`), `0x1409` (`+0x14ce0`), `0x1502`
+(`+0x16e40`) and the kneeboard pages `0x300`..`0x3ff` (`+0x18d0`).
 
 ## Binary and linkage
 
@@ -81,10 +85,10 @@ calls are reached from the host, the `English\` dialog modules, or CHAIN.
 | `+0x08` | `.text+0x0070` | host | **slice 22**: deinit |
 | `+0x18` | `.text+0xc000` | host | **slice 24**: the frame |
 | `+0x1c` | `.text+0xc520` | FACIL | **slice 11**: clamp the latitude |
-| `+0x20` | `.text+0xa090` | | |
+| `+0x20` | `.text+0xa090` | host | **slice 25**: the menu command dispatcher; dialogs **slices 26, 27** |
 | `+0x24`..`+0x34` | `.text+0x16a60`, `+0x165b0`, `+0x16880`, `+0x16920`, `+0x169a0` | REALITY (`+0x30`, `+0x34`) | `+0x24` is **slice 23** (the timer tick); `+0x28` starts the sim and `+0x2c` shuts it down; `+0x30` and `+0x34` (**slice 9**) grey and enable menu items `0x1001`..`0x1006` |
 | `+0x38`..`+0x4c` | `.text+0x11eeb`, `+0x11e3d`, `+0x120aa`, `+0x127b3`, `+0x12f50`, `+0x12f6a` | ADVDRV (`+0x3c`), REALITY (`+0x44`), DEMO (`+0x48`, `+0x4c`) | the situation reader and writer, assembly: `+0x48` loads a situation from memory, `+0x4c` from a file |
-| `+0x50` | `.text+0x13105` | | assembly, the largest gap (11 KB) |
+| `+0x50` | `.text+0x13105` | | **slice 27**: replace a record of a situation file, assembly |
 | `+0x54`..`+0x6c` | `.text+0x15cc0`..`+0x15f50` | WINMSG, WINDOW, PANELS (`+0x5c`..`+0x64`) | **slice 1**, below |
 | `+0x70` | `.text+0x19507` | ADVDRV, LANDME | **slice 3**: range and bearing between two points |
 | `+0x74` | `.text+0x18781` | ADVDRV, MULTIP | **slice 6**: the season, the zone and the clock |
@@ -93,8 +97,8 @@ calls are reached from the host, the `English\` dialog modules, or CHAIN.
 | `+0x84`..`+0x90` | `.text+0x16100`, `+0x162f0`, `+0x16570`, `+0x10560` | CONTROLS, WINDOW (`+0x88`) | object table at `.data+0x9794`, 0x2d4-byte entries: `+0x84` **slice 13** allocates, `+0x88` **slice 16** steps them all (the smoke trails), `+0x8c` **slice 10** releases |
 | `+0x94`..`+0xa0` | `.text+0x7140`, `+0x6f59`, `+0x6de9`, `+0x830d` | WEATHERM (`+0x94`), WINDOW (`+0x98`, `+0x9c`) | `+0x94` is **slice 20** (the cloud layers' textures), `+0x98` is **slice 19** (the cloud layers' draw), `+0x9c` is **slice 15** (the altitude band), `+0xa0` is **slice 12**: the sun direction |
 | `+0xa4`, `+0xa8` | `.text+0x16ddf`, `+0x6450` | ADVDRV, CONTROLS, WINDOW | `+0xa4` is **slice 7**, `+0xa8` is **slice 21** (the spot plane's eye) |
-| `+0xac`..`+0xbc` | `.text+0xc870`, `+0xcdb0`, `+0xdd70`, `+0xe5a0`, `+0xed10` | CONTROLS (`+0xac`), FACIL (`+0xb0`) | `+0xb0` is **slice 17** (the quick save); `+0xb4`, `+0xb8`, `+0xbc` are **slice 18** (load, save and default the preferences) |
-| `+0xc0`..`+0xc8` | `.text+0x06a0`, `+0xc560`, `+0x18f0` | WINDOW, FACIL, CONTROLS | `+0xc0` is **slice 14** (the eye's reticle), `+0xc8` is **slice 8** |
+| `+0xac`..`+0xbc` | `.text+0xc870`, `+0xcdb0`, `+0xdd70`, `+0xe5a0`, `+0xed10` | CONTROLS (`+0xac`), FACIL (`+0xb0`) | `+0xac` is **slice 27** (Save Flight); `+0xb0` is **slice 17** (the quick save); `+0xb4`, `+0xb8`, `+0xbc` are **slice 18** (load, save and default the preferences) |
+| `+0xc0`..`+0xc8` | `.text+0x06a0`, `+0xc560`, `+0x18f0` | WINDOW, FACIL, CONTROLS | `+0xc0` is **slice 14** (the eye's reticle), `+0xc4` is **slice 27** (Open Flight), `+0xc8` is **slice 8** |
 
 ## Slice 1: situation records
 
@@ -1083,3 +1087,89 @@ is cleared later in the same frame, so only the steps called in between can
 see it. `make main-breaks SUITE=step`: 40 breaks, 39 caught, 1 proven
 equivalent (`frame-274`: below a second the fraction is at most `0x7fde`, so
 sign- and zero-extension agree).
+
+## Slice 25: the menu command dispatcher
+
+`src/main/main_commands.inc`, `.text+0xa090` (`+0x20`) with `+0xae50`, MSVC C.
+`(command, argument)`: commands `0x80000`..`0x8ffff` first go to `.text+0xae50`,
+where `0x80005` reloads the flight (slice 2). The menus' commands then post to
+the host, toggle GLOBAL fields, drive WINDOW and PANELS by command ranges
+(`0x100`.. windows, `0x200`.. panels) or call modules. Handlers not done yet go
+through `cmd_pending`, which faults on purpose so that a reached one cannot pass
+for done; the suite steers around them.
+
+`make maindiff-run SUITE=commands`: 20,000 scenarios, 0 differences (about 4
+minutes): 330,481 commands, 198,576 from the table, 63,905 others and edges,
+33,193 windows, 32,741 panels, 2,066 reloads. `make main-breaks SUITE=commands`:
+73 breaks, all caught.
+
+## Slice 26: the first dialogs
+
+`src/main/main_dialogs.inc`. Each runs host `+0x10c` over a descriptor in `.data`
+whose exchange tables UTIL `+0x90` and `+0x8c` move between GLOBAL and the
+dialog's records: `0x1309` (dialog `0x1305`), `0x1308` (dialog `0x1304`),
+`0x1607` (with its child `0x16070001`) and `0x1203`. `main_install` puts the
+check callbacks at `.data+0x68c`, `+0x123c` and `+0x1a4` over retail's code
+addresses, which `retail_byte_at` (slice 2) still answers with retail's values
+when a wild season index reads through them.
+
+**`0x1203`'s text field is a COM frequency in BCD**, parsed by NUMERIC format
+`0x12`. Its check refuses anything below `0x1800` (118.00 MHz) with status `0xc`.
+When the answer is OK, records `+0x2c` and `+0x24` are 1 and `+0x34` is non-zero,
+it raises the statuses at `+0x30` and `+0x20`. Applying then clears them, so only
+a dialog reading them straight after the check can see them.
+
+The suite runs retail UTIL and NUMERIC (`use_retail_numeric`), so the exchange is
+the real one. The stand-in for host `+0x10c` walks the exchange tables, edits the
+records, sets the answer first (a real dialog knows which button was pressed
+before it validates), calls the check and logs the statuses. Early versions of
+the stand-in set the answer afterwards, typed text that never parsed as a
+frequency and did not log the statuses. Each of those hid a branch, and the
+breaks found all three. `make maindiff-run SUITE=dialogs`: 20,000 scenarios, 0
+differences (about 3 minutes): 271,777 dialogs opened, 19,514 that would not open,
+113,830 OK, 11,897 refused by a check. `make main-breaks SUITE=dialogs`: 40
+breaks, 38 caught, 2 proven equivalent (`1305-table`, `1304-table`: at mode 1 a plain
+width entry neither stores nor objects, and the entry left out is one).
+
+## Slice 27: rewriting a situation file and the Flights dialogs
+
+`src/main/main_flights.inc`.
+
+**`+0x50`** (`.text+0x13105`, assembly) replaces record `tag` of a situation
+file, appending it before the end tag if absent, through a temporary file that
+then takes the original's name. Host `+0x174` answers a full path, so the second
+join, with drive and directory null, only copies it. **`+0x174` is handed the
+directory without the drive**, so for a file on another drive the temporary one
+goes on the current drive. This is retail's behaviour and is reproduced.
+
+**`+0xc4`** (`.text+0xc560`) and **command `0x1106`** (`+0xc5e0`) choose a flight
+from UTIL `+0x98`'s list (records of `0xa08`: `+0` name, `+0x100` title, `+0x500`
+description, `+0x900` path, `+0xa04` set when it may be changed) and load it.
+`.text+0xc6e0` runs dialog `0x1102` with the Delete (`+0xd260`) and Edit
+(`+0xd400`) callbacks; `.text+0x1680` is the shared `xor eax, eax; ret 4`
+callback. **`+0xac`** (`.text+0xc870`) is Save Flight: it refuses with under 5000
+bytes free, and the name's room shrinks by the length of the directories.
+
+Retail behaviours kept or noted:
+
+- With no flights `.text+0xc6e0` alerts and returns its block's first word,
+  uninitialised stack. Ours answers 0, and the suite does not compare that answer.
+- The Save check (`.text+0xd6b0`) goes on testing the path length after
+  host `+0x170` has failed, so it reads an uninitialised local. The harness's
+  stub writes 0 on failure so that both sides read the same thing.
+- A too-long name gets status `0x100d` but answer `0x1001`.
+- A wild season index (slice 2) can read through `.data+0x35ec`, so
+  `retail_byte_at` answers there with retail's code address. The suite found this.
+
+The harness gained the host's split, temporary name, delete, rename, path length,
+name check, working directory, free space, `strcmp` and `_strcmpi`, a model of
+UTIL `+0x98` over its files, and stand-ins for dialogs `0x1102`, `0x1107` and
+`0x1104`. UTIL's alert takes a string or a string's id, and the end tag's address
+is not compared because retail's word lies in its `.text`. `make maindiff-run
+SUITE=flights`: 20,000 scenarios, 0 differences (about 5 minutes): 52,482 records
+set, 39,430 Open Flights (6,520 lists empty), 13,153 challenges, 26,426 Save
+Flights; 25,548 deletes and 25,684 edits pressed, 3,430 saves refused by the check.
+`make
+main-breaks SUITE=flights`: 98 breaks, 96 caught, 2 proven equivalent (`hdr-end`:
+the loop leaves on the end tag without reading the length; `blank-size`: at size
+== length the loop writes the one terminator the early path does).

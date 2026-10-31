@@ -462,6 +462,14 @@ static void parse_records(void)
     }
 }
 
+/* The dialogs' callbacks main_install puts in .data, as retail's code addresses. */
+static const struct { uint32_t at, to; } retail_callbacks[] = {
+    { 0x68c, 0x207e3ec0 },
+    { 0x123c, 0x207e5ff0 },
+    { 0x1a4, 0x207e1910 },
+    { 0x35ec, 0x207ee6b0 },
+};
+
 /* A byte as retail's process holds it at `a`: its own code, gap and .rdata
  * below .data, MAIN's image above, with its self-pointers and its Linkage
  * as retail's. */
@@ -474,6 +482,9 @@ static uint8_t retail_byte_at(uint32_t a)
     off = a - MAIN_DATA_VA;
     if (off >= MAIN_LINKAGE && off < MAIN_LINKAGE + 4 * (sizeof retail_linkage / sizeof retail_linkage[0]))
         return (uint8_t)(retail_linkage[(off - MAIN_LINKAGE) / 4] >> 8 * ((off - MAIN_LINKAGE) % 4));
+    for (i = 0; i < sizeof retail_callbacks / sizeof retail_callbacks[0]; i++)
+        if (off >= retail_callbacks[i].at && off < retail_callbacks[i].at + 4)
+            return (uint8_t)(retail_callbacks[i].to >> 8 * (off - retail_callbacks[i].at));
     for (i = 0; i < sizeof data_pointers / sizeof data_pointers[0]; i++) {
         uint32_t at = data_pointers[i].at;
         if (off < at || off >= at + 4)

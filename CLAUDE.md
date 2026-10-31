@@ -118,6 +118,12 @@ make maindiff-run SUITE=tick         # MAIN slice 23, the timer tick (+0x24) -> 
 make main-breaks SUITE=tick          # its breaks -> 11, all caught (~10 min)
 make maindiff-run SUITE=step         # MAIN slice 24, the frame (+0x18) -> 20000 scenarios, 0 differ (~3 min)
 make main-breaks SUITE=step          # its breaks -> 40, 39 caught, 1 proven equivalent (~40 min)
+make maindiff-run SUITE=commands     # MAIN slice 25, the menu command dispatcher (+0x20) -> 20000 scenarios, 0 differ (~4 min)
+make main-breaks SUITE=commands      # its breaks -> 73, all caught (~50 min)
+make maindiff-run SUITE=dialogs      # MAIN slice 26, the first dialogs, over retail UTIL and NUMERIC -> 20000 scenarios, 0 differ (~3 min)
+make main-breaks SUITE=dialogs       # its breaks -> 40, 38 caught, 2 proven equivalent (~25 min)
+make maindiff-run SUITE=flights      # MAIN slice 27, +0x50, +0xac, +0xc4 and command 0x1106 -> 20000 scenarios, 0 differ (~5 min)
+make main-breaks SUITE=flights       # its breaks -> 98, 96 caught, 2 proven equivalent (~80 min)
 make hostdiff-run N=20000            # HOST (id 1, FLTSIM98.EXE) slices 1-28, all 194 services, real files in bin/difftest/hostfs -> 0 differ (~11 min)
 make host-breaks                     # HOST broken on purpose -> 610 breaks, 580 caught, 26 proven equivalent, 4 rare display paths missed at N=2000 (~6 h)
 make mpchatdiff-run      # whole-module MPCHAT, the chat window -> 20000 scenarios, 0 differ (~20 s)
@@ -320,7 +326,7 @@ has to set `g3d_mesh_precision` to match. MULTIP, PANELS
 (docs/modules/panels.md) and **MPCHAT are done**; MPCHAT, the chat window,
 is verified against a model of the window system hooked into its import
 table (docs/modules/mpchat.md). **MAIN is in progress**, a slice at a time behind
-`maindiff`'s suites, as MULTIP was; slices 1-24 are verified (among them situation
+`maindiff`'s suites, as MULTIP was; slices 1-27 are verified (among them situation
 records, the assembly situation reader and writer, the nav services
 `+0x70`/`+0x78`/`+0x7c`/`+0x80` -- range and bearing, the read-outs and the
 station descriptor -- `+0x74`, the season, zone and clock, `+0xa4`, the clock

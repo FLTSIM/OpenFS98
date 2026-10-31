@@ -283,6 +283,8 @@ static const uint32_t retail_linkage[] = {
 #include "main_frame.inc"
 #include "main_tick.inc"
 #include "main_step.inc"
+#include "main_dialogs.inc"
+#include "main_commands.inc"
 
 __asm__(".globl _ImportTable\n\t.set _ImportTable, _main_image + 0x0\n\t"
         ".globl _Linkage\n\t.set _Linkage, _main_image + 0xc0");
@@ -295,6 +297,10 @@ static void main_install(void)
         { 0x04, (void *)main_init },
         { 0x08, (void *)main_deinit },
         { 0x18, (void *)main_step },
+        { 0x20, (void *)main_command },
+        { 0x50, (void *)flight_set_record },
+        { 0xac, (void *)flight_save_dialog },
+        { 0xc4, (void *)flight_open },
         { 0x24, (void *)main_tick },
         { 0x38, (void *)load_default },
         { 0x3c, (void *)load_flight },
@@ -339,6 +345,11 @@ static void main_install(void)
         M32(D + data_pointers[i].at) = D + data_pointers[i].to;
     for (i = 0; i < sizeof services / sizeof services[0]; i++)
         M32(D + MAIN_LINKAGE + services[i].slot) = ADDR(services[i].fn);
+    /* the dialog descriptors' callbacks, over retail's code addresses */
+    M32(V(0x2080068c)) = ADDR(dialog_1305_check);
+    M32(V(0x2080123c)) = ADDR(dialog_1304_check);
+    M32(V(0x208001a4)) = ADDR(dialog_1203_check);
+    M32(V(0x208035ec)) = ADDR(save_dialog_check);
 }
 
 /* The internal entry points the harness drives directly until their

@@ -11,6 +11,7 @@
 #   make compare         size-compare each built module against the retail one
 #   make run             launch the game under wine (reports which modules are in)
 #   make stage           build game/ from the CD (applies setup's renames)
+#   make stage-scenery   add the CD's regional scenery to an existing game/
 #   make smoke           boot the game and assert it reaches the panel
 #   make difftest-run    diff a rebuilt module against retail on synthetic state
 #
@@ -1396,6 +1397,9 @@ difftest-run: difftest
 stage:
 	@python3 tools/stage_game.py
 
+stage-scenery:
+	@python3 -B tools/stage_scenery.py
+
 setup-map:
 	@python3 tools/extract_setup_map.py cd/Setup.exe > docs/setup_map.tsv
 	@wc -l < docs/setup_map.tsv | xargs echo "entries:"
@@ -1565,4 +1569,4 @@ smoke: all
 clean:
 	rm -rf $(BIN)
 
-.PHONY: main-smoke main-dialogs multip-acceptance multip-smoke multip-directplay-breaks multip-worker-breaks multip-breaks multip-receive-breaks multip-send-breaks all stage setup-map graph hostmap compare run trace trace-render trace-ddraw kill window-reset wm-unmanaged wm-managed vd-on vd-off mode8 mode16 ddraw-gdi ddraw-default smoke difftest difftest-run utildiff utildiff-run utildiff-portable numericdiff numericdiff-run chaindiff chaindiff-run atcdiff atcdiff-run weathermdiff weathermdiff-run acontaindiff acontaindiff-run sounddiff sounddiff-run dynamicdiff dynamicdiff-run fegriddiff fegriddiff-run fediff fediff-run fesldiff fesldiff-run boosterdiff boosterdiff-run demodiff demodiff-run windowdiff windowdiff-run g3ddiff g3ddiff-run multipdiff multipdiff-run g3d-break-build g3d-breaks g3dmeshdiff g3dmeshdiff-run g3ddiff-meshc-run hg2dmodeldiff-run panelsdiff panelsdiff-run panelsunit panelsunit-run panels-breaks panels-break-build window-breaks window-break-build maindiff maindiff-run main-break-build main-breaks hostdiff hostdiff-run host-break-build host-breaks mpchatdiff mpchatdiff-run mpchat-breaks mpchat-break-build winmsgdiff winmsgdiff-run winmsg-breaks winmsg-break-build realitydiff realitydiff-run reality-breaks reality-break-build analysisdiff analysisdiff-run analysis-breaks analysis-break-build controlsdiff controlsdiff-run controls-breaks controls-break-build advdrvdiff advdrvdiff-run advdrv-cover landmediff landmediff-run facildiff facildiff-run facildiff-fe-run ofstest ofstest-run ofstest-remove sehfix sehfix-install sehfix-remove sehfix-log util-trace install revert installed-name-of installed-path-of orig-module-of clean
+.PHONY: stage-scenery main-smoke main-dialogs multip-acceptance multip-smoke multip-directplay-breaks multip-worker-breaks multip-breaks multip-receive-breaks multip-send-breaks all stage setup-map graph hostmap compare run trace trace-render trace-ddraw kill window-reset wm-unmanaged wm-managed vd-on vd-off mode8 mode16 ddraw-gdi ddraw-default smoke difftest difftest-run utildiff utildiff-run utildiff-portable numericdiff numericdiff-run chaindiff chaindiff-run atcdiff atcdiff-run weathermdiff weathermdiff-run acontaindiff acontaindiff-run sounddiff sounddiff-run dynamicdiff dynamicdiff-run fegriddiff fegriddiff-run fediff fediff-run fesldiff fesldiff-run boosterdiff boosterdiff-run demodiff demodiff-run windowdiff windowdiff-run g3ddiff g3ddiff-run multipdiff multipdiff-run g3d-break-build g3d-breaks g3dmeshdiff g3dmeshdiff-run g3ddiff-meshc-run hg2dmodeldiff-run panelsdiff panelsdiff-run panelsunit panelsunit-run panels-breaks panels-break-build window-breaks window-break-build maindiff maindiff-run main-break-build main-breaks hostdiff hostdiff-run host-break-build host-breaks mpchatdiff mpchatdiff-run mpchat-breaks mpchat-break-build winmsgdiff winmsgdiff-run winmsg-breaks winmsg-break-build realitydiff realitydiff-run reality-breaks reality-break-build analysisdiff analysisdiff-run analysis-breaks analysis-break-build controlsdiff controlsdiff-run controls-breaks controls-break-build advdrvdiff advdrvdiff-run advdrv-cover landmediff landmediff-run facildiff facildiff-run facildiff-fe-run ofstest ofstest-run ofstest-remove sehfix sehfix-install sehfix-remove sehfix-log util-trace install revert installed-name-of installed-path-of orig-module-of clean

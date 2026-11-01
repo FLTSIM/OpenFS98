@@ -17,7 +17,7 @@ and Linux is case-sensitive, so lookups resolve case-insensitively.
 
 Usage: tools/stage_game.py [--cd DIR] [--map FILE] [--out DIR]
 """
-import argparse, os, re, shutil, sys
+import argparse, os, re, shutil, subprocess, sys
 
 ap = argparse.ArgumentParser()
 ap.add_argument('--cd',  default='cd')
@@ -139,3 +139,7 @@ if bad:
         print('   ' + b)
     sys.exit(1)
 print('OK: every sim=, model and gauge reference resolves')
+
+subprocess.check_call([sys.executable, '-B',
+                       os.path.join(os.path.dirname(os.path.abspath(__file__)), 'stage_scenery.py'),
+                       '--cd', args.cd, '--out', OUT])

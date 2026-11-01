@@ -217,8 +217,10 @@ def basic_owner_flows() -> None:
     set_text(control(window, 0x1bee), "KORD")
     state = wait_for(lambda item: next((item for item in modal_windows(item) if any(c["id"] == 0x1bef and c.get("count", 0) > 0 for c in item["controls"])), None), "airport search results")
     window = state
-    if control(window, 0x1bef)["count"] != 16:
-        raise AssertionError("KORD results list did not populate from the real FACIL database")
+    # Every airport ID in the staged world, the regional scenery's included:
+    # 3,791 airports, of which two share the ID UDD.
+    if control(window, 0x1bef)["count"] != 3790:
+        raise AssertionError("KORD results list did not populate from the real FACIL database: %d rows" % control(window, 0x1bef)["count"])
     save_step("owner-airport-kord-search")
     command(window, 0x1bd9)
     nested = wait_for(lambda state: next((item for item in modal_windows(state) if item["window"]["enabled"] and item["window"]["hwnd"] != window["window"]["hwnd"]), None), "nested Airport/Facility Directory")

@@ -212,6 +212,23 @@ Still open:
   reachable, since its service table has been mapped.
 - The remaining 4752 bytes of `GLOBAL`'s block.
 
+## The CD's `fs98` tree is not the whole world
+
+`fs98/` holds the default world only: the terrain base, Chicago, the metro areas
+and navaids, and no airport but the 16 heliports of `heloafd.bgl`. The other 3,775
+airports and all regional scenery are in `Boosters/`, 18 regions that Setup offers
+either on the CD through a cache or on the hard drive, adding an area or a cache to
+`Scenery\world.vis` as it goes. The CD's own `world.vis` lists neither, so a tree
+without this step lists 16 places to go and is water away from Chicago.
+
+`tools/stage_scenery.py` makes the hard drive choice for all 18: Setup's table
+gives the 3,437 file destinations, and the world file's areas and their layers come
+from Setup's code (see the script). Flying over the result reads no CD and no cache,
+so BOOSTER stays idle in-game. Not installed, because the sim does not use them for
+flying: `Media/` (help videos and pictures), `sampler/`, `directx/`, `Indeo4/`, and
+`Boosters/Facility` and `ScnSetup/`, which no module reads and Setup's install
+table does not copy.
+
 ## The CD layout is not the installed layout
 
 Setup.exe renames 263 files and three directories as it copies, and FS98 opens

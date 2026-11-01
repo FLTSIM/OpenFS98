@@ -69,7 +69,9 @@ builds.
 `make stage` exists because the CD layout is not the installed layout: setup
 renames 263 files on the way in, and FS98 opens them by their installed names.
 Skipping that is why the sim first dies with "Aircraft initialization failure".
-See [docs/architecture.md](docs/architecture.md#the-cd-layout-is-not-the-installed-layout).
+It also installs the CD's regional scenery, as Setup's Custom install does; `make
+stage-scenery` adds just that to an existing `game/`, keeping its modules and
+profile. See [docs/architecture.md](docs/architecture.md#the-cd-layout-is-not-the-installed-layout).
 
 ## Layout
 
@@ -141,7 +143,7 @@ else's 1997 build, and it should read that way.
 
 The game does not need installing — the CD's `fs98` tree runs as-is once
 `mfc42.dll` and `MSVCRT.DLL` from the CD root sit next to `FLTSIM98.EXE`. That
-tree is staged in `game/` (gitignored, 103 MB) and symlinked into the wine
+tree and the regional scenery are staged in `game/` (gitignored, 288 MB) and symlinked into the wine
 prefix as `C:\FS98`, so no bulk data lands in `~/.wine`. `make install`,
 `make run` and `make ofstest-run` default to that path (`FS98_DIR`), and the
 game must run from drive C:. Two of `ofstest`'s checks are of UTIL's

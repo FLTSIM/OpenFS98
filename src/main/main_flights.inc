@@ -253,7 +253,7 @@ static void flight_blank(uint32_t text, uint32_t size)
     } while (size > n);
 }
 
-/* .text+0xea80: a flight's title (record 0, 0x1f bytes zero-padded) */
+/* .text+0xda80: a flight's title (record 0, 0x1f bytes zero-padded) */
 static uint32_t flight_set_title(uint32_t path, uint32_t title)
 {
     char copy[0x104];

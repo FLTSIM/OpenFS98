@@ -290,6 +290,17 @@ static const uint32_t retail_linkage[] = {
 #include "main_radios.inc"
 #include "main_weather.inc"
 #include "main_kneeboard.inc"
+#include "main_aircraft.inc"
+#include "main_clockdlg.inc"
+#include "main_engines.inc"
+#include "main_limits.inc"
+#include "main_areas.inc"
+#include "main_prefdlg.inc"
+#include "main_viewdlg.inc"
+#include "main_logbook.inc"
+#include "main_wxdlg.inc"
+#include "main_radiodlg.inc"
+#include "main_create.inc"
 #include "main_start.inc"
 
 __asm__(".globl _ImportTable\n\t.set _ImportTable, _main_image + 0x0\n\t"
@@ -334,6 +345,7 @@ static void main_install(void)
         { 0x84, (void *)obj_alloc },
         { 0x88, (void *)obj_step },
         { 0x8c, (void *)obj_free },
+        { 0x90, (void *)main_log_flight },
         { 0x94, (void *)clouds_textures },
         { 0x98, (void *)clouds_draw },
         { 0x9c, (void *)nav_band },
@@ -358,6 +370,70 @@ static void main_install(void)
     M32(V(0x2080123c)) = ADDR(dialog_1304_check);
     M32(V(0x208001a4)) = ADDR(dialog_1203_check);
     M32(V(0x208035ec)) = ADDR(save_dialog_check);
+    M32(V(0x2080030c)) = ADDR(clock_check);
+    M32(V(0x20800418)) = ADDR(clock_field_season);
+    M32(V(0x2080041c)) = ADDR(clock_field_date);
+    M32(V(0x20800420)) = ADDR(clock_field_button);
+    M32(V(0x20800424)) = ADDR(clock_field_local);
+    M32(V(0x20800428)) = ADDR(clock_field_zulu);
+    M32(V(0x2080536c)) = ADDR(rd_check);
+    M32(V(0x20806f3c)) = ADDR(vw_mouse);
+    M32(V(0x20806fc0)) = ADDR(vw_mouse);
+    M32(V(0x20807b44)) = ADDR(wx_check);
+    M32(V(0x20807f34)) = ADDR(wx_units_up);
+    M32(V(0x20807f38)) = ADDR(wx_units_down);
+    M32(V(0x20807f3c)) = ADDR(wx_add);
+    M32(V(0x20807f40)) = ADDR(wx_delete);
+    M32(V(0x20807c98)) = ADDR(wx_wind_defaults);
+    M32(V(0x208079b4)) = ADDR(main_nothing);
+    M32(V(0x20803b0c)) = ADDR(main_nothing);
+    M32(V(0x20803b34)) = ADDR(lb_new_check);
+    M32(V(0x20803b60)) = ADDR(lb_entry_check);
+    M32(V(0x20803c58)) = ADDR(lb_button);
+    M32(V(0x20806e9c)) = ADDR(vw_check);
+    M32(V(0x20806ea0)) = ADDR(vw_preview);
+    M32(V(0x20805cc4)) = ADDR(pf_check);
+    M32(V(0x20805ccc)) = ADDR(pf_defaults);
+    M32(V(0x20805cd4)) = ADDR(pf_aircraft);
+    M32(V(0x20805cd8)) = ADDR(pf_flight);
+    M32(V(0x20805d84)) = ADDR(pf_display);
+    M32(V(0x20805d94)) = ADDR(pf_preset_show);
+    M32(V(0x20805e0c)) = ADDR(pf_display_check);
+    M32(V(0x20805ea8)) = ADDR(pf_list_drivers);
+    M32(V(0x20805eac)) = ADDR(pf_list_modes);
+    M32(V(0x20805eb0)) = ADDR(pf_refresh);
+    M32(V(0x2080150c)) = ADDR(ar_check);
+    M32(V(0x20801528)) = ADDR(ar_add);
+    M32(V(0x2080152c)) = ADDR(ar_delete);
+    M32(V(0x20801530)) = ADDR(ar_copy);
+    M32(V(0x2080153c)) = ADDR(main_nothing);
+    M32(V(0x2080076c)) = ADDR(lm_check);
+    M32(V(0x20800870)) = ADDR(lm_field_group3);
+    M32(V(0x20800884)) = ADDR(lm_field_flaps);
+    M32(V(0x208008ac)) = ADDR(lm_field_speed);
+    M32(V(0x208008d4)) = ADDR(lm_field_group4);
+    M32(V(0x208009fc)) = ADDR(en_check);
+    M32(V(0x20800ef8)) = ADDR(en_all);
+    M32(V(0x20800a8c)) = ADDR(en_units_up);
+    M32(V(0x20800a90)) = ADDR(en_units_down);
+    M32(V(0x20800cb4)) = ADDR(en_edit_throttle);
+    M32(V(0x20800cb8)) = ADDR(en_edit_fuel);
+    M32(V(0x20800cbc)) = ADDR(en_edit_power);
+    M32(V(0x20800fd4)) = ADDR(en_throttle0);
+    M32(V(0x20800fe8)) = ADDR(en_throttle1);
+    M32(V(0x20800ffc)) = ADDR(en_throttle4);
+    M32(V(0x20801010)) = ADDR(en_throttle2);
+    M32(V(0x20801024)) = ADDR(en_throttle3);
+    M32(V(0x20801038)) = ADDR(en_fuel0);
+    M32(V(0x2080104c)) = ADDR(en_fuel1);
+    M32(V(0x20801060)) = ADDR(en_fuel4);
+    M32(V(0x20801074)) = ADDR(en_fuel2);
+    M32(V(0x20801088)) = ADDR(en_fuel3);
+    M32(V(0x2080109c)) = ADDR(en_power0);
+    M32(V(0x208010b0)) = ADDR(en_power1);
+    M32(V(0x208010c4)) = ADDR(en_power4);
+    M32(V(0x208010d8)) = ADDR(en_power2);
+    M32(V(0x208010ec)) = ADDR(en_power3);
     /* the routines MAIN's G3D programs call */
     for (i = 0; i < sizeof native_pointers / sizeof native_pointers[0]; i++)
         M32(D + native_pointers[i].at) = ADDR(native_pointers[i].fn);

@@ -84,6 +84,8 @@ struct side {
     uint8_t *link;
     uint8_t *image;
     uint8_t *pristine;
+    uint8_t *tail;                                 /* what follows the image, while writable */
+    uint32_t tail_size;
     char *transcript;
     uint32_t length;
 };
@@ -92,7 +94,7 @@ static struct side retail, ours;
 static struct side *cur;
 static uint32_t relocs[MAX_RELOCS], nrelocs;
 static uint8_t host[0x340], global[0x1400], stub_module[0x400];
-static uint8_t acontain[0x40], controls[0x60], sound[0x40], util[0xc0], weatherm[0x40], multip[0x40], fe[0x100];
+static uint8_t acontain[0x40], controls[0x60], sound[0x60], util[0xc0], weatherm[0x40], multip[0x40], fe[0x100];
 static uint8_t hg2d[0x100];   /* the clouds reach +0xb8 */
 static uint8_t g3d[0x100];   /* the frame reaches +0x60 */
 static uint8_t chain[0x24];
@@ -246,6 +248,8 @@ static void fault_land(void)
 {
     __builtin_longjmp(fault_jb, 1);
 }
+
+static int stack_sources;                           /* the logbook suite */
 
 static void stub_fault(const char *what)
 {
@@ -500,15 +504,17 @@ static int known_memory(uint32_t v, uint32_t n, int stack_too)
 
 /* MSVCRT memmove leaves 7 in ecx on the CD's 1997 DLL (docs/modules/analysis.md);
  * nothing in this slice reads it. */
+
+
 static int32_t STDCALL h_memmove(void *d, const void *s, uint32_t n)
 {
     /* A source off in memory the two sides do not share -- a walk that ran
      * off a situation -- is logged as "wild" rather than by address: the
      * same wild address lands inside one side's module image but not the
      * other's (they load at different bases), which would differ only in
-     * the label.  No copy MAIN makes here has its source on the stack. */
+     * the label.  Only the logbook's sort, swapping rows through a local, copies from the stack. */
     int wild = n > 0x100000 ||
-               !known_memory((uint32_t)(uintptr_t)s, n, 0) ||
+               !known_memory((uint32_t)(uintptr_t)s, n, stack_sources) ||
                !known_memory((uint32_t)(uintptr_t)d, n, 1);
 
     put(" memmove(");
@@ -578,9 +584,10 @@ static void put_name(const char *s)
         put("'%.60s'", s);
 }
 
+static uint32_t pf_exists_answer;
 static int32_t STDCALL h_exists(const char *path, int32_t ext)
 {
-    int32_t r = vfile_find(path) ? 0 : -1;
+    int32_t r = ext == 0x1d ? (pf_exists_answer ? 0 : -1) : vfile_find(path) ? 0 : -1;     /* 0x1d: the aircraft */
 
     put(" exists(");
     put_name(path);
@@ -588,6 +595,8 @@ static int32_t STDCALL h_exists(const char *path, int32_t ext)
     return r;
 }
 
+static int open_makes;
+static struct vfile *make_file(const char *name);
 static int32_t STDCALL h_open(struct hblock **out, const char *path, int32_t ext, int32_t mode)
 {
     struct vfile *f = vfile_find(path);
@@ -598,7 +607,11 @@ static int32_t STDCALL h_open(struct hblock **out, const char *path, int32_t ext
     put(",");
     put_name(path);
     put(",%d,%d)", ext, mode);
-    if (f == NULL || mode < 0 || mode > 3 || ((f->attr & 2) && mode != 0) || rnd_n(40) == 0) {
+    if (f == NULL && open_makes) {                 /* the logbook's reader would go on with counts its stack held */
+        f = make_file(path);
+        f->size = (uint32_t)sprintf((char *)f->bytes, "T\r\n\r\nHead\r\n\r\n\r\nTotals\r\n");
+    }
+    if (f == NULL || mode < 0 || mode > 3 || ((f->attr & 2) && mode != 0) || (!open_makes && rnd_n(40) == 0)) {
         if (mode == 1)
             open_rw_refused++;
         *out = NULL;
@@ -693,6 +706,14 @@ static int32_t STDCALL h_read(struct hblock *b, void *buf, uint32_t n, uint32_t 
     k = b->pos < f->size ? f->size - b->pos : 0;
     if (k > n)
         k = n;
+    if (stack_sources && b->pos == 0 && k > 0x20 && k < 0x80) {
+        /* the logbook suite: a book that is only its heads, as "new" writes it, has no CR
+         * after the column heads, and .text+0x11480 then leaves .text+0xfd70's row count
+         * as the stack held it (retail; ours has 0): nothing to compare from here on */
+        const uint8_t *cr = memchr(f->bytes, 0xd, k);
+        if (cr != NULL && cr + 3 < f->bytes + k && memchr(cr + 3, 0xd, (size_t)(f->bytes + k - (cr + 3))) == NULL)
+            stub_fault("heads only");
+    }
     memcpy(buf, f->bytes + b->pos, k);
     b->pos += k;
     if (got != NULL)
@@ -905,9 +926,13 @@ static unsigned long cover_runaway;
 static void listen_save(void);
 static void listen_record(uint32_t rec);
 
+static uint32_t load_mark;                          /* where the op's latest load began in the transcript */
+
 static uint32_t STDCALL chain_send(uint32_t list, uint32_t a, uint32_t b)
 {
     uint32_t len_before = cur ? cur->length : 0;
+    if (list == 0x14 && a == 0x20)
+        load_mark = len_before;
     put(" chainsend(%#x,%#x,", list, a);
     put_ptr(b);
     put(")");
@@ -1692,8 +1717,23 @@ static void dump_files(void)
  * not in the descriptor's +0.  Each dialog is told by its id: its table(s) in
  * MAIN's .data.  Now and then the host fails to open it. */
 static const struct dialog_kind { uint32_t id, table, n; } dialog_kinds[] = {
+    { 0x1301, 0x430, 0xf },
+    { 0x1206, 0xd48, 0x3f },
+    { 0x1204, 0x850, 7 },
+    { 0x1303, 0x1590, 1 },
+    { 0x1409, 0x5ee8, 0x19 },
+    { 0x1508, 0x6e98, 0 },
+    { 0x1407, 0x3b08, 0 },
+    { 0x1302, 0x79b0, 0 },
+    { 0x1202, 0x5588, 0xe },
+    { 0x1101, 0x3b08, 0 },
+    { 0x13040001, 0x7b40, 0 },
+    { 0x14070001, 0x3b08, 0 },
+    { 0x14070002, 0x3b08, 0 },
+    { 0x14090001, 0x60e0, 0x10 },
     { 0x1305, 0x6b8, 5 }, { 0x1304, 0x1260, 4 }, { 0x1203, 0x1f8, 5 }, { 0x1203, 0x1e0, 1 },
 };
+static unsigned long cover_cd_field, cover_cd_field_ok;
 static unsigned long cover_dlg, cover_dlg_ok, cover_dlg_refused, cover_dlg_child, cover_dlg_noopen;
 
 static void dialog_edit(uint32_t desc, const uint8_t *table, uint32_t n)
@@ -1812,9 +1852,187 @@ static void save_dialog(uint32_t desc)
     if (counting && *(uint32_t *)(uintptr_t)desc) cover_save_ok++;
 }
 
+static uint32_t pf_entries;
+
+/* The advanced weather dialog's text fields, mostly numbers on the limits its check holds them to. */
+static void wx_text(char *t)
+{
+    static const uint16_t v[] = { 0, 1, 9, 10, 100, 199, 200, 201, 250, 0x7710, 0x7711, 0x76ab, 0x76ac, 36, 37, 20, 21 };
+
+    if (t != NULL && !IsBadWritePtr(t, 8))
+        snprintf(t, 7, rnd_n(16) ? "%u" : "x%u", v[rnd_n(17)]);
+}
+
+/* Every field in range, then one at an edge, in metres so that the text is the value:
+ * refused text returns from the check at the first layer, and the rest is never looked at */
+static void wx_good(uint32_t desc)
+{
+    static const char *const edges[][2] = {
+        { "1", "1100" }, { "0", "1000" }, { "30379", "30380" }, { "30380", "30500" }, { "1000", "1100" }, { "1000", "30480" },
+        { "1000", "30481" }, { "1000", "2000" },
+    };
+    uint8_t *b = (uint8_t *)(uintptr_t)desc;
+    uint8_t *cloud = (uint8_t *)(uintptr_t)*(uint32_t *)(cur->image + 0x7f4c), *misc = (uint8_t *)(uintptr_t)*(uint32_t *)(cur->image + 0x7f50);
+    uint32_t i, at = rnd_n(3), which = rnd_n(8);
+
+    *(uint16_t *)(global + 0xc18) = 2;
+    for (i = 0; i < 3; i++) {
+        uint8_t *r = b + 0x24 + i * 0x58, *c = b + 0x168 + i * 0x64;
+
+        *(uint32_t *)(r + 0x40) = rnd_n(2) * 10;
+        snprintf(*(char **)(r + 4), 7, "5000");
+        snprintf(*(char **)(r + 0x18), 7, "8000");
+        snprintf(*(char **)(r + 0x2c), 7, "10");
+        snprintf(*(char **)(c + 4), 7, "%s", i == at ? edges[which][0] : "2000");
+        snprintf(*(char **)(c + 0x18), 7, "%s", i == at ? edges[which][1] : "3000");
+        snprintf(*(char **)(c + 0x2c), 7, "%s", i == at && rnd_n(4) == 0 ? (rnd_n(2) ? "199" : "200") : "4");
+        snprintf(*(char **)(c + 0x40), 7, "0");
+    }
+    for (i = 0; i < 4; i++) {
+        uint8_t *t = b + 0x2f8 + i * 0x2c;
+
+        snprintf(*(char **)(t + 4), 7, "%u", 500 + i * 1000);
+        snprintf(*(char **)(t + 0x18), 7, "10");
+    }
+    snprintf(*(char **)(misc + 0xc4), 7, "5");
+    snprintf(*(char **)(misc + 0xe0), 7, "29.92");
+    snprintf(*(char **)(misc + 0xf4), 7, "1013.2");
+    *(uint32_t *)(cloud + 0x140) = rnd_n(2);
+    snprintf(*(char **)(cloud + 0x148), 7, "%u", rnd_n(2) ? 2000 : 9 + rnd_n(3));
+    snprintf(*(char **)(cloud + 0x15c), 7, "%s", rnd_n(4) ? "4" : rnd_n(2) ? "199" : "200");
+    snprintf(*(char **)(cloud + 0x170), 7, "0");
+}
+
+static void wx_edit(uint32_t desc)
+{
+    uint8_t *b = (uint8_t *)(uintptr_t)desc;
+    uint32_t i;
+
+    for (i = 0; i < 3; i++) {
+        uint8_t *r = b + 0x24 + i * 0x58, *c = b + 0x168 + i * 0x64;
+
+        if (rnd_n(2)) {
+            *(uint32_t *)(r + 0x54) = rnd_n(3) ? 1 : 0;
+            *(uint32_t *)(r + 0x40) = rnd_n(11);
+            *(uint32_t *)(r + 0x48) = rnd_n(0x100);
+            wx_text(*(char **)(r + 4));
+            wx_text(*(char **)(r + 0x18));
+            wx_text(*(char **)(r + 0x2c));
+        }
+        if (rnd_n(2)) {
+            *(uint32_t *)(c + 0x60) = rnd_n(3) ? 1 : 0;
+            /* the cloud sort reads these on applying: refused, it compares what its stack held */
+            snprintf(*(char **)(c + 4), 7, "%u", rnd_n(0x7700));
+            snprintf(*(char **)(c + 0x18), 7, "%u", rnd_n(0x7700));
+            wx_text(*(char **)(c + 0x2c));
+            wx_text(*(char **)(c + 0x40));
+        }
+    }
+    for (i = 0; i < 4; i++) {
+        uint8_t *t = b + 0x2f8 + i * 0x2c;
+
+        if (rnd_n(2)) {
+            *(uint32_t *)(t + 0x28) = rnd_n(3) ? 1 : 0;
+            /* refused, .text+0x1ce70 would compare with what its stack held */
+            snprintf(*(char **)(t + 4), 7, "%u", rnd_n(0x600));
+            wx_text(*(char **)(t + 0x18));
+        }
+    }
+    if (rnd_n(2)) {
+        uint8_t *x = b + 0x2f0;                    /* .data+0x7e30, the misc fields */
+        /* refused, with every layer off, the check would read what its stack held */
+        snprintf(*(char **)(x + 0xc4), 7, "%u", rnd_n(0x30));
+        wx_text(*(char **)(x + 0xe0));
+        wx_text(*(char **)(x + 0xf4));
+    }
+    if (rnd_n(2)) {
+        uint8_t *x = b + 0x160;                    /* .data+0x7ca0, the fourth cloud */
+        *(uint32_t *)(x + 0x140) = rnd_n(2);
+        snprintf(*(char **)(x + 0x148), 7, "%u", rnd_n(0x7700));
+        wx_text(*(char **)(x + 0x15c));
+        wx_text(*(char **)(x + 0x170));
+    }
+}
+
+/* The text a table entry's field shows. */
+static void clock_text(uint32_t desc, uint32_t entry, uint32_t v)
+{
+    char *t = *(char **)(uintptr_t)(desc + *(uint32_t *)(cur->image + entry + 4) + 4);
+
+    if (t != NULL && !IsBadWritePtr(t, 8))
+        snprintf(t, 8, "%u", v);
+}
+
+/* A date on an edge: past a month or the year's end, or by a season's first day. */
+static void clock_date_edge(uint32_t desc)
+{
+    static const uint8_t days[12] = { 31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31 };
+    uint32_t year = rnd_n(3) ? 1999 : rnd_n(2) ? 2000 : 1900, month, day;
+
+    if (rnd_n(2)) {
+        static const uint8_t edge[][2] = { { 1, 0 }, { 12, 31 }, { 12, 32 }, { 12, 33 }, { 12, 34 }, { 2, 29 }, { 2, 30 }, { 13, 1 }, { 0, 1 } };
+        const uint8_t *e = edge[rnd_n(9)];
+        month = e[0];
+        day = e[1];
+    } else {
+        uint32_t t = *(uint16_t *)(cur->image + 0x2f8 + 2 * rnd_n(5)) + rnd_n(3) - 1;
+
+        month = 1;
+        while (month < 12 && t > days[month - 1]) {
+            t -= days[month - 1];
+            month++;
+        }
+        day = t;
+    }
+    clock_text(desc, 0x444, year);
+    clock_text(desc, 0x520, month);
+    clock_text(desc, 0x534, day);
+}
+
+/* And a time on one. */
+static void clock_time_edge(uint32_t desc)
+{
+    clock_text(desc, 0x494, rnd_n(26));
+    clock_text(desc, 0x4a8, rnd_n(62));
+    clock_text(desc, 0x4bc, rnd_n(26));
+    clock_text(desc, 0x4d0, rnd_n(62));
+}
+
+/* The view dialog's records as they stand: all but their pointers, and their texts */
+static void vw_recs(uint32_t recs, uint32_t n)
+{
+    uint32_t i, off, h = 0x811c9dc5u;
+
+    for (i = 0; i < n; i++) {
+        const uint8_t *rec = (const uint8_t *)(uintptr_t)recs + i * 0xb4;
+
+        for (off = 0; off < 0xb0; off += 4)
+            switch (off) {
+            case 0x10: case 0x24: case 0x38: case 0x4c: case 0x60: case 0x80: case 0x94:
+                h = digest(*(const uint8_t *const *)(rec + off), 8, h);
+                break;
+            case 0x18: case 0x1c: case 0x2c: case 0x30: case 0x40: case 0x44: case 0x54: case 0x58:
+            case 0x68: case 0x6c: case 0x88: case 0x8c: case 0x9c: case 0xa0:
+                break;
+            default:
+                h = digest(rec + off, 4, h);
+            }
+    }
+    put(" recs=%08x", h);
+}
+
 static uint32_t STDCALL h_dialog(uint32_t id, uint32_t desc)
 {
     uint32_t i, known = 0;
+
+    if (id == 0x1508) {                            /* the limits each record names, each side's own address */
+        uint32_t *d = (uint32_t *)(uintptr_t)desc, r, j;
+        static const uint8_t limits[14] = { 0x18, 0x1c, 0x2c, 0x30, 0x40, 0x44, 0x54, 0x58, 0x68, 0x6c, 0x88, 0x8c, 0x9c, 0xa0 };
+
+        for (r = 0; r < d[6]; r++)
+            for (j = 0; j < 14; j++)
+                *(uint32_t *)(uintptr_t)(d[7] + r * 0xb4 + limits[j]) = 0;
+    }
 
     put(" dialog(%#x,", id);
     put_ptr(desc);
@@ -1837,6 +2055,27 @@ static uint32_t STDCALL h_dialog(uint32_t id, uint32_t desc)
         if (counting) cover_dlg_noopen++;
         put(" no");
         return 0xffffffffu;
+    }
+    if (id == 0x14090002) {                        /* the aircraft */
+        uint32_t *b = (uint32_t *)(uintptr_t)desc;
+
+        put(" %u a=%#x b=%#x c=%#x", b[5], ((s1)(uintptr_t)b[1])(desc), ((s1)(uintptr_t)b[2])(desc), ((s1)(uintptr_t)b[3])(desc));
+        b[0] = rnd_n(2);
+        b[4] = b[5] ? rnd_n(b[5]) : 0;
+        pf_exists_answer = rnd_n(3) == 0;
+        return 0;
+    }
+    if (id == 0x13050001) {                        /* which to copy from, to, and what */
+        uint32_t *b = (uint32_t *)(uintptr_t)desc, i;
+
+        put(" {%u of %u}", b[2], b[3]);
+        b[0] = rnd_n(4) ? 1 : rnd_n(3);
+        b[7] = rnd_n(3);
+        b[8] = rnd_n(3);
+        b[10] = rnd_n(2);
+        for (i = 12; i <= 20; i += 2)
+            b[i] = rnd_n(2);
+        return 0;
     }
     if (id == 0x1102) {
         open_dialog((uint32_t *)(uintptr_t)desc);
@@ -1862,6 +2101,428 @@ static uint32_t STDCALL h_dialog(uint32_t id, uint32_t desc)
         printf("no stand-in for dialog %#x\n", id);
         exit(2);
     }
+    if (id == 0x1301) {                            /* a field at a time, as they are edited */
+        uint32_t k = rnd_n(6);
+
+        put(" 7ff0=%x 7ff8=%x", *(uint16_t *)(cur->image + 0x7ff0), *(uint16_t *)(cur->image + 0x7ff8));
+        dialog_edit(desc, cur->image + 0x560, 0xb);
+        while (k-- != 0) {
+            static const uint8_t pick[8] = { 0, 1, 1, 2, 2, 2, 3, 4 };
+            uint32_t f = pick[rnd_n(8)], r;
+
+            if (rnd_n(4) == 0)
+                dialog_edit(desc, cur->image + 0x430 + 20 * rnd_n(0xc), 1);
+            if (f == 1)
+                clock_date_edge(desc);
+            if (rnd_n(2))
+                clock_time_edge(desc);
+            if (f == 2)
+                *(uint32_t *)(uintptr_t)(desc + 0xa4) = rnd_n(5);
+            r = ((s1)(uintptr_t)*(uint32_t *)(uintptr_t)(desc + 0x110 + f * 4))(desc);
+            put(" field%u=%#x", f, r);
+            if (counting) { cover_cd_field++; if (r == 0) cover_cd_field_ok++; }
+            put(" %u:%u %u:%u", cur->image[0x8004], cur->image[0x7fd8], cur->image[0x7fe8], cur->image[0x7fe4]);
+        }
+        *(uint32_t *)(uintptr_t)(desc + 0xc) = rnd_n(9);
+        if (rnd_n(2)) {                            /* all well but for one thing, on its edge */
+            static const uint8_t ok[3] = { 1, 2, 4 };
+            uint32_t edge = rnd_n(7);
+
+            *(uint32_t *)(uintptr_t)(desc + 0xc) = 0;
+            clock_text(desc, 0x444, 1999);
+            clock_text(desc, 0x520, 1 + rnd_n(12));
+            clock_text(desc, 0x534, 1 + rnd_n(28));
+            clock_text(desc, 0x494, rnd_n(24));
+            clock_text(desc, 0x4a8, rnd_n(60));
+            clock_text(desc, 0x4bc, rnd_n(24));
+            clock_text(desc, 0x4d0, rnd_n(60));
+            *(uint32_t *)(uintptr_t)(desc + 0x70) = rnd_n(4);
+            *(uint32_t *)(uintptr_t)(desc + 0xac) = ok[rnd_n(3)];
+            switch (edge) {
+            case 0: clock_text(desc, 0x494, 0x17 + rnd_n(3)); break;
+            case 1: clock_text(desc, 0x4a8, 0x3b + rnd_n(3)); break;
+            case 2: clock_text(desc, 0x4bc, 0x17 + rnd_n(3)); break;
+            case 3: clock_text(desc, 0x4d0, 0x3b + rnd_n(3)); break;
+            case 4: *(uint32_t *)(uintptr_t)(desc + 0x70) = rnd_n(6); break;
+            case 5: *(uint32_t *)(uintptr_t)(desc + 0xac) = rnd_n(6); break;
+            default: clock_text(desc, rnd_n(2) ? 0x520 : 0x534, 0); break;
+            }
+        }
+    }
+    if (id == 0x14090001) {                        /* the display: drivers, modes, flags */
+        uint8_t *e = (uint8_t *)(uintptr_t)(desc + 0xa0);
+        uint32_t k;
+
+        for (k = rnd_n(3); k-- != 0; ) {
+            *(uint32_t *)(e + 0x10) = rnd_n(2);
+            *(uint32_t *)(e + 0x34) = rnd_n(2);
+            *(uint32_t *)(e + 0x38) = rnd_n(2);
+            *(uint32_t *)(e + 0x3c) = rnd_n(2);
+            put(" drivers=%#x", ((s1)(uintptr_t)*(uint32_t *)e)((uint32_t)(uintptr_t)e));
+            put(" d=%u/%u", *(uint32_t *)(e + 0x18), *(uint32_t *)(e + 0x20));
+            if (rnd_n(2))
+                *(uint32_t *)(e + 0x20) = pf_entries ? rnd_n(pf_entries) : 0;
+            put(" modes=%#x", ((s1)(uintptr_t)*(uint32_t *)(e + 4))((uint32_t)(uintptr_t)e));
+            put(" m=%d f=%u", *(int32_t *)(e + 0x2c), *(uint32_t *)(e + 0x30));
+            if (*(int32_t *)(e + 0x2c) < 0 && rnd_n(2))
+                *(uint32_t *)(e + 0x2c) = 0;
+            if (rnd_n(4) == 0)
+                put(" refresh=%#x", ((s1)(uintptr_t)*(uint32_t *)(e + 8))((uint32_t)(uintptr_t)e));
+        }
+        *(uint32_t *)(e + 0x14) = *(int32_t *)(e + 0x2c) >= 0 && *(uint32_t *)(e + 0x18) != 0 && *(uint32_t *)(e + 0x24) != 0 ? rnd_n(2) : 0;
+    }
+    if (id == 0x1409) {                            /* the buttons, some of them */
+        uint32_t *b = (uint32_t *)(uintptr_t)desc, k;
+
+        put(" sel=%u %u", b[0xd0 / 4], b[0xdc / 4]);
+        for (k = rnd_n(4); k-- != 0; )
+            switch (rnd_n(5)) {
+            case 0: put(" defaults=%#x", ((s1)(uintptr_t)b[3])(desc)); break;
+            case 1: put(" aircraft=%#x g638='%.20s'", ((s1)(uintptr_t)b[5])(desc), (char *)global + 0x638); break;
+            case 2: put(" flight=%#x", ((s1)(uintptr_t)b[6])(desc)); break;
+            case 3: put(" display=%#x", ((s1)(uintptr_t)b[0xc4 / 4])(desc)); break;
+            default:
+                b[0xd0 / 4] = rnd_n(6);
+                put(" preset=%#x %x %x", ((s1)(uintptr_t)b[0xd4 / 4])(desc), b[0xdc / 4], b[0xf4 / 4]);
+                break;
+            }
+        put(" sel=%u", b[0xd0 / 4]);
+        b[0xe4 / 4] = rnd_n(2);
+    }
+    if (id == 0x14070001) {                        /* a new logbook's name */
+        uint8_t *b = (uint8_t *)(uintptr_t)desc;
+        char *name = *(char **)(b + 0x34);
+        static const char *const names[] = { "NEWLOG", "LOG1", "LOG1.LOG", "", "bad:name", "LOG2" };
+        uint32_t k = rnd_n(3);
+
+        strcpy(name, names[rnd_n(6)]);
+        *(uint32_t *)(b + 0x28) = rnd_n(4) ? 1 : 0;
+        while (k-- != 0)
+            put(" check=%#x s=%#x x=%u", ((s1)(uintptr_t)*(uint32_t *)(b + 0x2c))((uint32_t)(uintptr_t)(b + 0x28)), *(uint32_t *)(b + 0x30), *(uint32_t *)(b + 0x44));
+        put(" name=%s", name);
+        return 0;
+    }
+    if (id == 0x14070002) {                        /* a row's fields */
+        uint8_t *b = (uint8_t *)(uintptr_t)desc;
+        static const uint16_t cols[3] = { 0x9c, 0xb0, 0xc4 };
+        uint32_t k;
+        static const char *const nums[] = { "", "0", "1.5", " 12.3", "99.9", "999.9", "1000", ".5", "1.", "1..2", "12x", "000.0", " .", "99999", "   ", "2.75", "12:5", "1:", "1 2", "1234", "1234.5", "123.4", "12345", "999.", "0.0", "00.5", "001", "1000.0", "9999", "x"};
+        static const char *const dates[] = { "01-01-98", "12-31-99", "13-01-98", "02-29-96", "02-29-97", "04-31-98", "1-1-98", "", "02-30-96", "11-31-00", "09-31-98", "09-30-98", "01-32-98", "01-31-98", "20-01-98", "1x-01-98", "01-40-98", "01/01/98", "01-01-9x", "04-30-98"};
+
+        put(" [%.8s|%.16s|%.24s|%.6s|%.6s|%.6s|%.6s]", *(char **)(b + 0x60), *(char **)(b + 0x74), *(char **)(b + 0x88), *(char **)(b + 0x9c), *(char **)(b + 0xb0), *(char **)(b + 0xc4), *(char **)(b + 0xd8));
+        put(" sel=%u", *(uint32_t *)(b + 0xf4));
+        *(uint32_t *)(b + 0x54) = rnd_n(4) ? 1 : 0;
+        if (rnd_n(2))
+            strcpy(*(char **)(b + 0x60), dates[rnd_n(sizeof dates / sizeof dates[0])]);
+        strcpy(*(char **)(b + 0x74), rnd_n(2) ? "CESSNA" : "737");
+        for (k = 0; k < 3; k++)
+            if (rnd_n(2))
+                strcpy(*(char **)(b + cols[k]), nums[rnd_n(sizeof nums / sizeof nums[0])]);
+        put(" check=%#x", ((s1)(uintptr_t)*(uint32_t *)(b + 0x58))((uint32_t)(uintptr_t)(b + 0x54)));
+        put(" %x %x %x %x %.6s", *(uint32_t *)(b + 0x5c), *(uint32_t *)(b + 0x98), *(uint32_t *)(b + 0xac), *(uint32_t *)(b + 0xc0), *(char **)(b + 0xd8));
+        return 0;
+    }
+    if (id == 0x1407) {                            /* the buttons */
+        uint8_t *b = (uint8_t *)(uintptr_t)desc;
+        uint32_t k;
+
+        for (k = rnd_n(5); k-- != 0; ) {
+            uint32_t op = rnd_n(10), books = *(uint32_t *)(b + 0x1c), rows = *(uint32_t *)(b + 0x48);
+            uint32_t i;
+
+            if (cur->image[0x3c86] != 0)
+                break;
+            i = rnd_n(4) ? rnd_n((op >= 5 && op <= 7 ? rows : books) + 1) : rnd_n(4);
+
+            if (op == 8)
+                strcpy(*(char **)(b + 0xc), rnd_n(2) ? "New title" : "");
+            put(" button(%u,%u)=%#x", op, i, ((s3)(uintptr_t)*(uint32_t *)(b + 0x150))(op, i, desc));
+            put(" %u/%u %u/%u", *(uint32_t *)(b + 0x20), *(uint32_t *)(b + 0x1c), *(uint32_t *)(b + 0x4c), *(uint32_t *)(b + 0x48));
+        }
+        return 0;
+    }
+    if (id == 0x1302) {                            /* the simple dialog: its three answers */
+        uint32_t *b = (uint32_t *)(uintptr_t)desc;
+
+        put(" %u %u %u %u %u", b[2], b[3], b[4], b[5], b[7]);
+        {
+            uint32_t j;
+            for (j = 0; j < 4; j++)
+                put(" T[%.8s|%.8s %u]", *(char **)(cur->image + 0x7e38 + j * 0x2c + 4), *(char **)(cur->image + 0x7e38 + j * 0x2c + 0x18),
+                    *(uint32_t *)(cur->image + 0x7e38 + j * 0x2c + 0x28));
+            for (j = 0; j < 8; j++)
+                put(" %x", *(uint16_t *)(global + 0xf34 + j * 2));
+        }
+        b[6] = rnd_n(6);
+        b[5] = rnd_n(6);
+        b[7] = rnd_n(5);
+        b[0] = rnd_n(4) ? 1 : 0;
+        return 0;
+    }
+    if (id == 0x13040001) {                        /* the advanced one: its pages and their fields */
+        uint8_t *b = (uint8_t *)(uintptr_t)desc;
+        uint32_t k;
+
+        for (k = rnd_n(4); k-- != 0; )
+            wx_edit(desc);
+        for (k = rnd_n(3); k-- != 0; ) {
+            *(uint32_t *)(b + 0x404) = rnd_n(4);
+            *(uint16_t *)(b + 0x20) = (uint16_t)rnd_n(3);
+            *(uint16_t *)(b + 0x164) = (uint16_t)rnd_n(4);
+            *(uint16_t *)(b + 0x2f4) = (uint16_t)rnd_n(4);
+            switch (rnd_n(5)) {
+            case 0: put(" add=%#x", ((s1)(uintptr_t)*(uint32_t *)(b + 0x3fc))(desc)); break;
+            case 1: put(" del=%#x", ((s1)(uintptr_t)*(uint32_t *)(b + 0x400))(desc)); break;
+            case 2: put(" up=%#x", ((s1)(uintptr_t)*(uint32_t *)(b + 0x3f4))(desc)); break;
+            case 3: put(" down=%#x", ((s1)(uintptr_t)*(uint32_t *)(b + 0x3f8))(desc)); break;
+            default:
+                if (rnd_n(2)) {                    /* the height a wind type's defaults are held to */
+                    static const char *const heights[] = { "13996", "13997", "99", "100", "4799", "4800", "5998", "5999" };
+                    *(uint16_t *)(global + 0xc18) = 2;
+                    snprintf(*(char **)(b + 0x24 + *(uint16_t *)(b + 0x20) * 0x58 + 4), 7, "%s", heights[rnd_n(8)]);
+                }
+                put(" def=%#x", ((s1)(uintptr_t)*(uint32_t *)(b + 0x158))(desc));
+                put(" %.6s", *(char **)(b + 0x24 + *(uint16_t *)(b + 0x20) * 0x58 + 4));
+                break;
+            }
+        }
+        wx_edit(desc);
+        if (rnd_n(2))
+            wx_good(desc);
+        *(uint32_t *)b = rnd_n(4) ? 1 : rnd_n(3);
+        /* the selected temperature, absent or not: refused, .text+0x1ce70 starts from its stack */
+        snprintf(*(char **)(b + 0x2fc + *(uint32_t *)(b + 0x2f4) * 0x2c), 7, "%u", rnd_n(0x600));
+        put(" check=%#x", ((s1)(uintptr_t)*(uint32_t *)(b + 4))(desc));
+        for (k = 0; k < 3; k++) {
+            uint8_t *r = b + 0x24 + k * 0x58, *c = b + 0x168 + k * 0x64;
+            put(" w%x,%x,%x c%x,%x,%x,%x", *(uint32_t *)r, *(uint32_t *)(r + 0x14), *(uint32_t *)(r + 0x28), *(uint32_t *)c,
+                *(uint32_t *)(c + 0x14), *(uint32_t *)(c + 0x28), *(uint32_t *)(c + 0x3c));
+        }
+        for (k = 0; k < 4; k++)
+            put(" t%x,%x", *(uint32_t *)(b + 0x2f8 + k * 0x2c), *(uint32_t *)(b + 0x2f8 + k * 0x2c + 0x14));
+        return 0;
+    }
+    if (id == 0x1101) {                            /* Create a Flight: its buttons */
+        uint32_t *b = (uint32_t *)(uintptr_t)desc, k;
+
+        put(" %.20s|%.20s|%.30s|%.20s", (char *)(uintptr_t)b[7], (char *)(uintptr_t)b[8], (char *)(uintptr_t)b[9], (char *)(uintptr_t)b[10]);
+        for (k = rnd_n(4); k-- != 0; ) {
+            uint32_t w = rnd_n(5);
+            put(" button%u=%#x", w, ((s1)(uintptr_t)b[2 + w])(desc));
+            put(" %u %u %u %.20s|%.20s|%.60s|%.20s", b[11], b[12], b[13], (char *)(uintptr_t)b[7], (char *)(uintptr_t)b[8],
+                (char *)(uintptr_t)b[9], (char *)(uintptr_t)b[10]);
+        }
+        b[0] = rnd_n(2);
+        return 0;
+    }
+    if (id == 0x1202) {                            /* the radios: frequencies at their edges, a check */
+        static const char *const adf[] = { "199", "200", "1699", "1699.9", "1700", "999", "1000", "1000.5", "99", "20000", "0999.5", "3a4", "12.5", "1.2", "", " 500 " };
+        static const char *const nav[] = { "108.00", "117.95", "118.00", "111.10", "x", "", "122.50" };
+        uint32_t b = desc, k;
+
+        static const char *const adf2[] = { "\t300", " 450", "", "12", "1234567", "123.45", "1234.5", "2000", "2000.5", "699", "1699", "1700",
+                                            "200", "199", "999", "1000", "300.5", "1699.9", "1234.56" };
+        snprintf(*(char **)(uintptr_t)(b + 0x178), 8, "%s", rnd_n(2) ? adf[rnd_n(16)] : adf2[rnd_n(19)]);
+        /* the rest of the check's fields, or it never gets past them */
+        snprintf(*(char **)(uintptr_t)(b + 0x164), 8, "%s", rnd_n(8) ? "1200" : "9999");
+        snprintf(*(char **)(uintptr_t)(b + 0x20c), 8, "%s", rnd_n(8) ? "100" : "x");
+        snprintf(*(char **)(uintptr_t)(b + 0x44), 8, "%u", rnd_n(362));
+        snprintf(*(char **)(uintptr_t)(b + 0xcc), 8, "%u", rnd_n(362));
+        snprintf(*(char **)(uintptr_t)(b + 0x2c), 8, "%s", nav[rnd_n(4)]);
+        snprintf(*(char **)(uintptr_t)(b + 0xb4), 8, "%s", nav[rnd_n(4)]);
+        *(uint32_t *)(uintptr_t)(b + 0xc) = rnd_n(3);
+        *(uint32_t *)(uintptr_t)(b + 0x12c) = rnd_n(2);
+        *(uint32_t *)(uintptr_t)(b + 0x1b8) = rnd_n(2);
+        *(uint32_t *)(uintptr_t)(b + 0xac) = rnd_n(4);
+        *(uint32_t *)(uintptr_t)(b + 0x1cc) = rnd_n(4);
+        *(uint32_t *)(uintptr_t)(b + 0x1d4) = rnd_n(4);
+        *(uint32_t *)(uintptr_t)(b + 0x1dc) = rnd_n(4);
+        *(uint32_t *)(uintptr_t)(b + 0x1e4) = rnd_n(4);
+        *(uint32_t *)(uintptr_t)(b + 0x1ec) = 1 + rnd_n(4);
+        *(uint32_t *)(uintptr_t)(b + 0x1fc) = rnd_n(3);
+        *(uint32_t *)(uintptr_t)(b + 0x1bc) = rnd_n(2);
+        *(uint32_t *)(uintptr_t)b = rnd_n(4) ? 1 : rnd_n(2);
+        *(uint32_t *)(uintptr_t)(b + 0x174) = rnd_n(3);    /* a mark from an earlier look */
+        if (rnd_n(2)) {
+            static const uint16_t words[] = { 0x174, 0xa0, 0xa4, 0xac, 0x128, 0x12c, 0x1b4, 0x1b8, 0x1c8, 0x1d0, 0x1d8, 0x1e0, 0x1e8, 0x1f0, 0x1f4, 0x200, 0x204, 0x3c, 0xc4 };
+
+            put(" check=%#x", ((s1)(uintptr_t)*(uint32_t *)(uintptr_t)(b + 4))(desc));
+            for (k = 0; k < sizeof words / sizeof words[0]; k++)
+                put(" %x", *(uint32_t *)(uintptr_t)(b + words[k]));
+            put(" [%.6s|%.6s|%x %x %x %x %x]", *(char **)(uintptr_t)(b + 0x178), (char *)(uintptr_t)(b + 0x142), *(uint32_t *)(uintptr_t)(b + 0x174),
+                *(uint32_t *)(uintptr_t)(b + 0x128), *(uint32_t *)(uintptr_t)(b + 0x1f0), *(uint32_t *)(uintptr_t)(b + 0x200), *(uint32_t *)(uintptr_t)(b + 0x204));
+        }
+        for (k = 0; k < 2; k++)
+            put(" [%.8s|%.8s]", (char *)(uintptr_t)(b + (k ? 0xe2 : 0x5a)), (char *)(uintptr_t)(b + (k ? 0xdc : 0x54)));
+        return 0;
+    }
+    if (id == 0x1508) {                            /* the views: picked, edited, previewed */
+        uint32_t *b = (uint32_t *)(uintptr_t)desc, window = 0x7100 + rnd_n(0x100), r, k, recs = b[7], n = b[6];
+        static const uint8_t fields[7] = { 0x10, 0x24, 0x38, 0x60, 0x4c, 0x80, 0x94 };
+
+        put(" count=%u", n);
+        vw_recs(recs, n);
+        b[5] = n != 0 ? rnd_n(n) : (rnd_n(2) ? 0xffffffffu : 0);
+        if (n != 0 && rnd_n(8) == 0) {             /* no window picked, among some */
+            b[5] = 0xffffffffu;
+            put(" open=%#x", ((s3)(uintptr_t)b[2])(1, desc, window));
+            put(" draw=%#x", ((s3)(uintptr_t)b[2])(3, desc, window));
+            put(" other=%#x", ((s3)(uintptr_t)b[2])(5, desc, window));
+            put(" close=%#x", ((s3)(uintptr_t)b[2])(2, desc, window));
+            b[5] = 0;
+            b[0] = rnd_n(3);
+            return 0;
+        }
+        r = ((s3)(uintptr_t)b[2])(1, desc, window);
+        put(" open=%#x", r == (uint32_t)(uintptr_t)global ? 0xc0 : r);
+        *(uint32_t *)(global + 0x1194) = 0;
+        if (r == 0 || r == (uint32_t)(uintptr_t)global) {
+            for (k = rnd_n(4); k-- != 0; ) {
+                if (n != 0) {
+                    uint8_t *rec;
+
+                    if (rnd_n(2))
+                        b[5] = rnd_n(n);
+                    rec = (uint8_t *)(uintptr_t)recs + b[5] * 0xb4;
+                    if (rnd_n(2)) {
+                        char *t = *(char **)(rec + fields[rnd_n(7)]);
+                        static const uint16_t v[] = { 0, 1, 45, 90, 180, 360, 361, 9999 };
+                        static const char *const zooms[] = { "0.5", "1", "2", "32", "64", "0.01", "100" };
+                        if (rnd_n(2))
+                            snprintf(t, 8, rnd_n(4) ? "%u" : "x%u", v[rnd_n(8)]);
+                        else
+                            snprintf(t, 8, "%s", zooms[rnd_n(7)]);
+                    }
+                    if (rnd_n(3) == 0) {
+                        *(uint32_t *)(rec + 4) = rnd_n(2);
+                        *(uint32_t *)(rec + 8) = rnd_n(6);
+                    }
+                    if (rnd_n(3) == 0)                 /* a field only the apply takes back */
+                        *(uint32_t *)(rec + 0x70) = rnd();
+                }
+                r = ((s3)(uintptr_t)b[2])(3, desc, window);
+                put(" draw=%#x", r);
+                if (n != 0 && rnd_n(2)) {                  /* the card: a click, or a key */
+                    static uint32_t ev[2];
+                    static const uint8_t keys[] = { 0x25, 0x26, 0x27, 0x28, 0x61, 0x62, 0x63, 0x64, 0x65, 0x66, 0x67, 0x68, 0x69, 0x24, 0x6a };
+                    uint32_t key = rnd_n(2);
+                    uint16_t *h = (uint16_t *)(uintptr_t)(recs + b[5] * 0xb4 + 0x78);
+
+                    ev[0] = key ? keys[rnd_n(15)] : rnd_n(0x100);
+                    ev[1] = rnd_n(0x100);
+                    *h = (uint16_t)(rnd_n(2) ? rnd() : (rnd_n(5) * 0x4000 - 1 + rnd_n(3)));
+                    r = ((s2)(uintptr_t)*(uint32_t *)(cur->image + 0x6f3c))((uint32_t)(uintptr_t)ev, key ? 0x100000 : rnd_n(0x10));
+                    put(" card=%#x %x", r, *h);
+                }
+                if (rnd_n(2)) {
+                    if (n == 0)
+                        continue;
+                    r = ((s1)(uintptr_t)b[1])(desc);
+                    put(" check=%#x", r);
+                    vw_recs(recs, n);
+                }
+            }
+            r = ((s3)(uintptr_t)b[2])(rnd_n(8) ? 2 : 4, desc, window);
+            put(" close=%#x", r == (uint32_t)(uintptr_t)global ? 0xc0 : r);
+        }
+        b[0] = rnd_n(3);
+        b[8] = (uint16_t)rnd();                    /* +0x600 and +0x552, as the dialog leaves them */
+        b[9] = (uint16_t)rnd();
+        return 0;
+    }
+    if (id == 0x1303) {                            /* the areas: edited, added, taken away and copied */
+        uint32_t *b = (uint32_t *)(uintptr_t)desc, recs = b[5], r, k;
+        static const uint16_t t4[3] = { 0x15a8, 0x1688, 0x1768 }, t7[3] = { 0x15f8, 0x16d8, 0x17b8 };
+
+        put(" which=%u count=%u", b[3], b[4]);
+        for (r = 0; r < 3; r++) {
+            static const uint8_t status[11] = { 0, 4, 0x18, 0x2c, 0x40, 0x54, 0x68, 0x7c, 0x90, 0xa4, 0xb8 };
+            uint32_t j;
+
+            if (rnd_n(2))
+                dialog_edit(recs + r * 0xc8, cur->image + t4[r], 4);
+            if (rnd_n(2))
+                dialog_edit(recs + r * 0xc8, cur->image + t7[r], 7);
+            if (rnd_n(2))                          /* marks from an earlier look, which a copy carries */
+                for (j = 0; j < 11; j++)
+                    *(uint32_t *)(uintptr_t)(recs + r * 0xc8 + status[j]) = rnd_n(4) + 2;
+            if (rnd_n(2))
+                *(uint32_t *)(uintptr_t)(recs + r * 0xc8 + 0xc0) = rnd_n(4) + 2;
+        }
+        for (k = rnd_n(5); k-- != 0; ) {
+            uint32_t which = rnd_n(3);
+
+            if (rnd_n(2))
+                b[3] = rnd_n(4);
+            put(" %s=%#x", which == 0 ? "add" : which == 1 ? "del" : "copy", ((s1)(uintptr_t)b[8 + which])(desc));
+            put(" which=%u count=%u %u,%u", b[3], b[4], b[6], b[7]);
+        }
+        put(" area=%08x", digest(cur->image + 0x83e8, 0x170, 0x811c9dc5u));
+    }
+    if (id == 0x1204) {                            /* the fields, near their limits */
+        static const uint16_t texts[3] = { 0x4c, 0x7c, 0x90 };
+        uint32_t j;
+
+        for (j = 0; j < 4; j++) {
+            char *t = *(char **)(uintptr_t)(desc + (j < 3 ? texts[j] : 0xc4));
+            static const int32_t edge[] = { -1000, -1001, -999, 1000, 1001, 999, 0, 49, 50, 25, 24, 75, 100, 150, 2500, 30000,
+                                            2200, 2130, -1700, -1625, 6950, 7000, -5950, -6000 };
+            if (t != NULL && !IsBadWritePtr(t, 8) && rnd_n(2))
+                snprintf(t, 8, rnd_n(2) ? "%d" : "%d.5", edge[rnd_n(24)]);
+        }
+        *(uint32_t *)(uintptr_t)(desc + 0x64) = rnd_n(2);
+        *(uint32_t *)(uintptr_t)(desc + 0x6c) = rnd_n(2);
+        *(uint32_t *)(uintptr_t)(desc + 0xa0) = rnd_n(3);
+        *(uint32_t *)(uintptr_t)(desc + 0xa4) = rnd_n(3);
+        *(uint32_t *)(uintptr_t)(desc + 0xbc) = rnd_n(3);
+        *(uint16_t *)(global + 0xc18) = (uint16_t)rnd_n(3);
+        *(uint32_t *)(uintptr_t)(desc + 0x44) = rnd_n(2);
+        *(uint32_t *)(uintptr_t)(desc + 0x18) = rnd_n(6);
+        *(uint32_t *)(uintptr_t)(desc + 0xe0) = rnd_n(7);
+        for (j = 0; j < 4; j++)
+            put(" [%.8s]", *(char **)(uintptr_t)(desc + (j < 3 ? texts[j] : 0xc4)));
+    }
+    if (id == 0x1206) {                            /* the engines, a field edited at a time */
+        uint32_t k = rnd_n(5);
+        static const uint16_t base[3] = { 0x17c, 0x1e0, 0x244 };
+
+        put(" a00=%u", *(uint32_t *)(uintptr_t)(desc + 8));
+        {
+            uint32_t j;
+            for (j = 0; j < 5; j++)
+                put(" [%.8s %.8s %.8s %.8s]", *(char **)(uintptr_t)(desc + 0x180 + j * 20), *(char **)(uintptr_t)(desc + 0x1e4 + j * 20),
+                    *(char **)(uintptr_t)(desc + 0x248 + j * 20), *(char **)(uintptr_t)(desc + 0x2a8 + j * 4));
+        }
+        while (k-- != 0) {
+            uint32_t i = rnd_n(6), which = rnd_n(3), r, j;
+            char *cap = *(char **)(uintptr_t)(desc + 0x2a8 + (i % 5) * 4);
+
+            for (j = 0; j < 3; j++) {                  /* numbers, mostly; the edges of the limits */
+                static const uint16_t edges[] = { 0, 1, 99, 100, 101, 200, 255, 256 };
+                char *t = *(char **)(uintptr_t)(desc + base[j] + (i % 5) * 20 + 4);
+                if (t != NULL && !IsBadWritePtr(t, 8))
+                    snprintf(t, 8, "%u", rnd_n(3) ? edges[rnd_n(8)] : rnd_n(0x4000));
+            }
+            (void)cap;
+            r = ((s2)(uintptr_t)*(uint32_t *)(uintptr_t)(desc + 0x2bc + which * 4))(desc, i % 5);
+            put(" edit%u(%u)=%#x", which, i % 5, r);
+            *(uint32_t *)(uintptr_t)(desc + 0x20) = which + 1;
+            *(uint32_t *)(uintptr_t)(desc + 0x24) = i % 5;
+            for (j = 0; j < 5; j++)
+                put(" %.8s/%.8s", *(char **)(uintptr_t)(desc + 0x1e4 + j * 20), *(char **)(uintptr_t)(desc + 0x248 + j * 20));
+        }
+        if (rnd_n(2)) {                            /* stale statuses, with a tank that holds nothing */
+            uint32_t j;
+            for (j = 0; j < 5; j++)
+                *(uint32_t *)(uintptr_t)(desc + (j + 0x18) * 20) = rnd_n(3);
+        }
+        put(" up=%#x", ((s1)(uintptr_t)*(uint32_t *)(uintptr_t)(desc + 0x94))(desc));
+        put(" down=%#x", ((s1)(uintptr_t)*(uint32_t *)(uintptr_t)(desc + 0x98))(desc));
+        if (rnd_n(2)) {
+            *(uint32_t *)(uintptr_t)(desc + 0x20) = rnd_n(5);
+            *(uint32_t *)(uintptr_t)(desc + 0x24) = rnd_n(5);
+        }
+    }
     /* the button pressed goes in first: the callback validates knowing it */
     *(uint32_t *)(uintptr_t)desc = rnd_n(4) ? 1 : rnd_n(3);
     if (rnd_n(2)) {
@@ -1874,8 +2535,18 @@ static uint32_t STDCALL h_dialog(uint32_t id, uint32_t desc)
                 const uint8_t *table = cur->image + dialog_kinds[i].table;
                 uint32_t j;
                 for (j = 0; j < dialog_kinds[i].n; j++)
-                    put(" %x", *(uint32_t *)(uintptr_t)(desc + *(const uint32_t *)(table + 20 * j + 4)));
+                {
+                    uint32_t v = *(uint32_t *)(uintptr_t)(desc + *(const uint32_t *)(table + 20 * j + 4));
+                    put(" %x", in_image(v) ? v - (uint32_t)(uintptr_t)cur->image : v);
+                }
             }
+    }
+    if (id == 0x1204) {
+        /* with text that does not parse, .text+0x3320 stores what ecx held on entry: nothing
+         * to compare, so applied, this one parses */
+        char *t = *(char **)(uintptr_t)(desc + 0xc4);
+        if (t != NULL && !IsBadWritePtr(t, 8))
+            snprintf(t, 8, "%d", (int)rnd_n(4000) - 2000);
     }
     if (counting && *(uint32_t *)(uintptr_t)desc == 1) cover_dlg_ok++;
     return 0;
@@ -2005,6 +2676,13 @@ static uint32_t STDCALL util_88(uint32_t buf, uint32_t desc, uint32_t n)
         d[i] = (uint8_t)(b[i] + 0x11 + i);
         h = (h ^ d[i]) * 16777619u;
     }
+    if (util88_all)                                 /* the real one writes only the fields: a text ends in the gap after it */
+        for (i = 0; i < n; i++) {
+            uint32_t count = *(uint32_t *)(uintptr_t)(desc + i * 16), end = *(uint32_t *)(uintptr_t)(desc + i * 16 + 12) + count - dest;
+
+            if (count > 1 && *(uint32_t *)(uintptr_t)(desc + i * 16 + 4) == 0 && end < 0x58)
+                d[end] = 0;
+        }
     put(" U88(%u,%u,%u,n=%#x)->%08x", *(uint32_t *)(uintptr_t)desc,
         *(uint32_t *)(uintptr_t)(desc + 4), *(uint32_t *)(uintptr_t)(desc + 8), n, h);
     return 0;
@@ -2353,6 +3031,7 @@ static void *internal(uint32_t retail_va, const char *name)
 /* ---- the comparable image ------------------------------------------------------------ */
 
 static int handles_differ;
+static int wx_norm;
 
 static void put_state(void)
 {
@@ -2382,7 +3061,7 @@ static void put_state(void)
          * draw-command staging word (+0x9c); 0x3470 and 0x35da (unaligned)
          * are the cloud layer's record and block (+0x98). */
         static const uint32_t odd[] = { 0x41e1, 0x41e5, 0x41f5, 0x41f9, 0x9754, 0x9758, 0x1a72,
-                                        0x3470, 0x35da, 0x7862, 0x7f54, 0x7f58, 0x7f5c, 0x7f60 };
+                                        0x3470, 0x35da, 0x7862, 0x7f54, 0x7f58, 0x7f5c, 0x7f60, 0xd128 };
         uint32_t j, v;
         for (j = 0; j < sizeof odd / sizeof odd[0]; j++) {
             memcpy(&v, img + odd[j], 4);
@@ -2394,6 +3073,28 @@ static void put_state(void)
 
     }
     memset(img + LINKAGE, 0, LINKAGE_END - LINKAGE);
+    memset(img + 0x2ede4, 0, 0x10);                /* the Select Aircraft dialog's callbacks */
+    if (wx_norm) {                                 /* the weather check's limits, named in the layers' records */
+        uint32_t j, v;
+        for (j = 0x7b40; j < 0x7f44; j += 4) {
+            memcpy(&v, img + j, 4);
+            if (in_image(v)) {
+                v = 0xda000000u | (v - (uint32_t)(uintptr_t)cur->image);
+                memcpy(img + j, &v, 4);
+            }
+        }
+    }
+    {                                              /* the Preferences dialog's copy of its descriptor */
+        static const uint16_t code[] = { 0x950c, 0x9514, 0x951c, 0x9520, 0x95cc, 0x95dc };
+        uint32_t j, v;
+        for (j = 0; j < sizeof code / sizeof code[0]; j++)
+            memset(img + code[j], 0, 4);
+        memcpy(&v, img + 0x95d0, 4);
+        if (in_image(v)) {
+            v = 0xda000000u | (v - (uint32_t)(uintptr_t)cur->image);
+            memcpy(img + 0x95d0, &v, 4);
+        }
+    }
     if (handles_differ) {                          /* the module's instance and its loaded bitmap */
         memset(img + 0x7fc0, 0, 4);
         memset(img + 0xdc84, 0, 4);
@@ -3219,7 +3920,7 @@ static void op_navdesc(void)
     put_bytes(out, 0x58);
 }
 
-static void setup_navdesc(void) { }
+static void setup_navdesc(void) { util88_all = 1; }
 
 static void report_navdesc(void)
 {
@@ -4659,12 +5360,25 @@ static void report_commands(void)
 
 /* ---- suite: dialogs (the menu commands' dialogs, through +0x20) -------------------- */
 
-static const uint32_t dialog_commands[] = { 0x1308, 0x1309, 0x1607, 0x1203 };
-static unsigned long cover_dlg_cmd[4];
+static const uint32_t dialog_commands[] = { 0x1308, 0x1309, 0x1607, 0x1203, 0x1301, 0x1205, 0x1204, 0x1307, 0x1409, 0x1502, 0x1407, 0x1306, 0x1202, 0x1101 };
+static unsigned long cover_dlg_cmd[14];
 
-static void op_dialogs(void)
+static void run_dialog(uint32_t k);
+static void op_dialogs(void) { run_dialog(rnd_n(4)); }
+static void op_clockdlg(void) { run_dialog(4); }
+static void op_engines(void) { run_dialog(5); }
+static void op_limits(void) { run_dialog(6); }
+static void op_areas(void) { run_dialog(7); }
+static void op_prefdlg(void) { run_dialog(8); }
+static void op_viewdlg(void) { run_dialog(9); }
+static void op_logbook(void);
+static void op_wxdlg(void) { run_dialog(11); }
+static void op_radiodlg(void) { run_dialog(12); }
+static void op_create(void);
+
+static void run_dialog(uint32_t k)
 {
-    uint32_t k = rnd_n(sizeof dialog_commands / sizeof dialog_commands[0]), i, r;
+    uint32_t i, r;
 
     for (i = 0; i < 32; i++)
         global[rnd_n(sizeof global)] = (uint8_t)rnd();
@@ -4673,11 +5387,180 @@ static void op_dialogs(void)
                                       0x34e, 0x27c, 0x38a, 0x362 };
         *(uint32_t *)(global + f[rnd_n(sizeof f / sizeof f[0])]) = rnd_n(4);
     }
+    if (dialog_commands[k] == 0x1202) {            /* the radios' switches, off now and then */
+        *(uint32_t *)(global + 0x7a0) = rnd_n(2);
+        *(uint32_t *)(global + 0x7a4) = rnd_n(2);
+        *(uint32_t *)(global + 0x35c) = rnd_n(2);
+        global[0xc58] = (uint8_t)rnd_n(2);
+        global[0xc68] = (uint8_t)rnd_n(2);
+        global[0xb70] = (uint8_t)rnd_n(2);
+    }
+    if (dialog_commands[k] == 0x1306 && rnd_n(2)) { /* temperatures a hundred apart, a wind's top unset */
+        uint32_t j;
+
+        global[0xf18] = 0;
+        *(uint16_t *)(global + 0xc18) = 2;
+        for (j = 0; j < 4; j++)
+            *(uint16_t *)(global + 0xf34 + j * 4) = (uint16_t)(3000 - j * (rnd_n(2) ? 100 : 99));
+        if (rnd_n(2))
+            *(uint16_t *)(global + 0xf1c + 4 + rnd_n(3) * 8) = 0xffff;
+    }
+    if ((dialog_commands[k] == 0x1301 || dialog_commands[k] == 0x1101) && rnd_n(8)) {  /* a date and a light it can open on */
+        static const uint16_t light[] = { 1, 2, 4, 3 };
+        *(uint16_t *)(global + 0x23e) = (uint16_t)(rnd_n(4) ? 1 + rnd_n(366) : rnd_n(0x2e0));
+        *(uint16_t *)(global + 0x240) = (uint16_t)(rnd_n(3) ? 1990 + rnd_n(16) : rnd_n(3) ? 2000 : 1900);
+        *(uint16_t *)(global + 0x116e) = light[rnd_n(16) ? rnd_n(3) : 3];
+        global[0x238] = (uint8_t)rnd_n(24);
+        global[0x239] = (uint8_t)rnd_n(60);
+        global[0x23b] = (uint8_t)rnd_n(24);
+        global[0x23c] = (uint8_t)rnd_n(60);
+        *(int16_t *)(global + 0x246) = (int16_t)((int)rnd_n(1500) - 750);
+        *(uint32_t *)(cur->image + 0x7874) = rnd_n(2);  /* a `d' record seen: +0x74's first argument counts */
+    }
+    if (dialog_commands[k] == 0x1202) {            /* tuned in range, the markers' records in place */
+        static const uint16_t words[] = { 0xc58, 0xc68 };
+        uint32_t j;
+        uint32_t *m = (uint32_t *)(fixtures + 0x62000);
+
+        for (j = 0; j < 2; j++)
+            global[words[j]] = (uint8_t)rnd_n(2);
+        {   /* frequencies NUMERIC reads back: refused, .text+0x14840 looks up what its stack held */
+            static const uint16_t bcd[] = { 0x1110, 0x1170, 0x1350, 0x800, 0x1795, 0x1000 };
+            *(uint16_t *)(global + 0x350) = bcd[rnd_n(6)];
+            *(uint16_t *)(global + 0x352) = bcd[rnd_n(6)];
+        }
+        *(uint32_t *)(global + 0x35c) = rnd_n(2);
+        /* in BCD, or the load stops there */
+        *(uint16_t *)(global + 0x34c) = (uint16_t)(rnd_n(8) ? (rnd_n(10) << 8) | (rnd_n(10) << 4) | rnd_n(10) : rnd());
+        *(uint16_t *)(global + 0x356) = (uint16_t)(rnd_n(8) ? 0x100 * rnd_n(2) + rnd_n(10) : rnd());
+        *(uint16_t *)(global + 0xc4e) = (uint16_t)rnd();
+        *(uint16_t *)(global + 0xc5e) = (uint16_t)rnd();
+        global[0xb64] = (uint8_t)rnd_n(2);
+        global[0xb6f] = (uint8_t)rnd_n(2);
+        global[0xb70] = (uint8_t)rnd_n(2);
+        for (j = 0; j < 3; j++) {
+            uint8_t *rec = fixtures + 0x62100 + j * 0x80;
+            m[j] = (uint32_t)(uintptr_t)rec;
+            memset(rec, 0x41 + j, 0x80);
+            rec[0x1c] = (uint8_t)rnd();
+            *(uint16_t *)(rec + 0x18) = (uint16_t)rnd_n(2);
+            rec[0x22 + 5] = 0;
+            rec[0x28 + 0x1b] = 0;
+            rec[0x1a + 5] = 0;
+            rec[0x20 + 0x1b] = 0;
+        }
+        *(uint32_t *)(global + 0x384) = (uint32_t)(uintptr_t)m;
+    }
+    if (dialog_commands[k] == 0x1306 || dialog_commands[k] == 0x1101) {  /* the row in range, and either dialog */
+        *(uint32_t *)(global + 0x1234) = rnd_n(2);
+        *(uint32_t *)(global + 0xf18) = rnd_n(2);
+        global[0xf12] = (uint8_t)(rnd_n(4) ? 0 : 1);
+        global[0xf13] = (uint8_t)(rnd_n(4) ? 0 : 1);
+        *(uint16_t *)(global + 0xc18) = (uint16_t)rnd_n(2);
+        *(uint16_t *)(global + 0xf8c) = (uint16_t)rnd_n(450);  /* the visibility, across the summary's roundings */
+        for (i = 0xf1c; i < 0xf70; i += 2)
+            *(uint16_t *)(global + i) = (uint16_t)(rnd_n(2) ? rnd_n(0x200) : rnd());
+        for (i = 0xf1c + 2; i < 0xf1c + 0x12; i += 6)
+            *(uint16_t *)(global + i) = (uint16_t)rnd_n(0x4000);
+        for (i = 0; i < 7; i++) {                  /* and cloud heights: the same, in the cloud sort */
+            static const uint8_t height[7] = { 0x1a, 0x18, 0xe, 0xc, 2, 0, 0x24 };
+            *(uint16_t *)(global + 0xf4c + height[i]) = (uint16_t)rnd_n(0x2000);
+            *(uint16_t *)(global + 0x1034 + height[i]) = (uint16_t)rnd_n(0x2000);
+        }
+        for (i = 0; i < 4; i++) {                  /* cloud cover NUMERIC reads back: refused, .text+0x1a010 compares its stack */
+            static const uint8_t cover[4] = { 0x1c, 0x10, 4, 0x26 };
+            *(uint16_t *)(global + 0xf4c + cover[i]) = (uint16_t)rnd_n(0xc8);
+            *(uint16_t *)(global + 0x1034 + cover[i]) = (uint16_t)rnd_n(0xc8);
+        }
+        for (i = 0; i < 8; i += 2) {               /* temperature layers: heights NUMERIC can read back, or absent;
+                                                    * refused, retail's lift would compare what its stack held */
+            uint16_t v = (uint16_t)(rnd_n(4) ? rnd_n(0x600) : 0xd8f1);
+            *(uint16_t *)(global + 0xf34 + i * 2) = v;
+            *(uint16_t *)(global + 0x101c + i * 2) = v;
+        }
+        for (i = 0; i < 3; i++) {                  /* each row's wind types, an index into a table of 11 */
+            *(uint16_t *)(global + 0xf7a + i * 6) = (uint16_t)rnd_n(11);
+            *(uint16_t *)(global + 0x1062 + i * 6) = (uint16_t)rnd_n(11);
+        }
+    }
+    if (dialog_commands[k] == 0x1409) {            /* a preset, and GLOBAL agreeing with it or not */
+        static const uint16_t g[][3] = { { 0x5788, 0x39c, 2 }, { 0x578c, 0x39e, 2 }, { 0x5790, 0x398, 4 }, { 0x5794, 0xe84, 2 }, { 0x5798, 0xe82, 2 },
+            { 0x579c, 0x3a4, 4 }, { 0x57a0, 0xdc0, 2 }, { 0x57a4, 0xcd0, 2 }, { 0x57a8, 0x11bc, 2 }, { 0x57ac, 0x11b6, 2 },
+            { 0x57b0, 0x11b4, 2 }, { 0x57b4, 0x556, 2 }, { 0x57b8, 0x11b8, 2 } };
+        uint32_t p = rnd_n(11), j;
+
+        *(uint32_t *)(global + 0x123c) = rnd_n(4) ? p : 0;
+        strcpy((char *)global + 0x24, "Flight");
+        strcpy((char *)global + 0x638, "Plane1");
+        *(uint32_t *)(global + 0x1238) = rnd_n(2);
+        *(uint32_t *)(global + 0x35c) = rnd_n(2);
+        *(uint16_t *)(global + 0x34c) = (uint16_t)(rnd_n(2) ? 0x1ff + rnd_n(3) : rnd());
+        *(uint32_t *)(cur->image + 0x5cc0 + 0xd0 + 0x8) = 0;
+        if (rnd_n(2)) {                            /* the stale preset test: the first differs, the rest agree or nearly */
+            uint32_t at = p << 7, miss = rnd_n(2) ? rnd_n(13) : 99;
+
+            *(uint32_t *)(cur->image + 0x5cc0 + 0xd0 + 8) = p;
+            for (j = 0; j < 13; j++) {
+                uint32_t v = *(uint32_t *)(cur->image + g[j][0] + at) ^ (j == miss);
+                if (g[j][2] == 2) {
+                    *(uint32_t *)(cur->image + g[j][0] + at) = (uint16_t)v;
+                    *(uint16_t *)(global + g[j][1]) = (uint16_t)v;
+                } else {
+                    *(uint32_t *)(global + g[j][1]) = v;
+                }
+            }
+        }
+    }
+    if (dialog_commands[k] == 0x1307) {            /* areas present or not, values it can show */
+        static const uint16_t words[] = { 0xfb4, 0xfb8, 0x109c, 0x10a0 };
+        *(uint16_t *)(global + 0xf90) = (uint16_t)(rnd_n(2) ? 0 : rnd_n(3));
+        *(uint16_t *)(global + 0x1078) = (uint16_t)(rnd_n(2) ? 0 : rnd_n(3));
+        *(uint32_t *)(global + 0xf18) = rnd_n(4);
+        *(uint16_t *)(global + 0xc18) = (uint16_t)rnd_n(2);
+        for (i = 0; i < 4; i++)
+            *(uint32_t *)(global + words[i]) = rnd_n(0x10000);
+        *(uint16_t *)(global + 0xfbe) = (uint16_t)(rnd_n(40) * 132);
+        *(uint16_t *)(global + 0x10a6) = (uint16_t)(rnd_n(40) * 132);
+        *(uint32_t *)(cur->image + 0x1514) = rnd_n(4);
+    }
+    if (dialog_commands[k] == 0x1204) {            /* units, and values in a sensible range */
+        static const uint16_t flags[] = { 0x768, 0x76c, 0x770, 0x774, 0x7c0, 0x7c8, 0x7d8, 0x7fc, 0x800, 0x7c4, 0x804 };
+        *(uint16_t *)(global + 0xc18) = (uint16_t)rnd_n(3);
+        *(int32_t *)(global + 0x7f0) = (int32_t)(rnd_n(0x4000) << 10) * (rnd_n(4) ? 1 : -1);
+        for (i = 0; i < sizeof flags / sizeof flags[0]; i++)
+            *(uint32_t *)(global + flags[i]) = rnd_n(3) ? rnd_n(2) : rnd();
+    }
+    if (dialog_commands[k] == 0x1205) {            /* engines of a size, on tanks that hold something */
+        static const uint16_t blocks[5] = { 0xb84, 0xb7c, 0xb94, 0xb9c, 0xb74 };
+        *(int16_t *)(global + 0xaf4) = (int16_t)(rnd_n(8) ? 256 * (1 + rnd_n(200)) : rnd());
+        *(uint16_t *)(global + 0xc18) = (uint16_t)(rnd_n(2) * (rnd_n(8) ? 1 : 0x100));
+        *(uint16_t *)(global + 0xaec) = (uint16_t)rnd_n(6);
+        *(uint32_t *)(global + 0x798) = 2 + rnd_n(3);
+        for (i = 0; i < 5; i++) {
+            uint32_t *b = (uint32_t *)(global + blocks[i]);
+            b[0] = rnd_n(4) ? rnd_n(0x800000) : rnd();
+            b[1] = rnd_n(4) ? rnd_n(0x10000) : 0;
+        }
+    }
     fixture_arg = (uint32_t)(uintptr_t)(fixtures + 0x22000);
     if (counting) cover_dlg_cmd[k]++;
     put("\n#command(%#x)", dialog_commands[k]);
     r = ((s2)SVC(0x20))(dialog_commands[k], rnd());
     put(" =%#x", r);
+}
+
+static uint32_t STDCALL ar_alert(uint32_t a, uint32_t b, uint32_t c, uint32_t d, uint32_t e, uint32_t f, uint32_t g, uint32_t h)
+{
+    uint32_t r = rnd_n(4) ? 0x40 : 0x80;
+
+    /* an id, or a text on the stack */
+    put(" alert(%#x,%u,%#x,%#x,%u,%u,%u,%u)->%#x", a, b, c < 0x10000 ? c : 0xbad, d < 0x10000 ? d : 0xbad, e, f, g, h, r);
+    return r;
+}
+
+static char *STDCALL dlg_strcat(char *d, const char *t)
+{
+    return strcat(d, t);
 }
 
 static void setup_dialogs(void)
@@ -4691,6 +5574,11 @@ static void setup_dialogs(void)
         use_retail_util(slots, sizeof slots / sizeof slots[0]);
         loaded = 1;
     }
+    SET_SLOT(host, 0x2b0, dlg_strcat);
+    SET_SLOT(util, 0xa4, ar_alert);
+    *(void **)(module_stub[17] + 0x18) = *(void **)(numeric_real + 0x18);
+    *(void **)(module_stub[17] + 0x1c) = *(void **)(numeric_real + 0x1c);
+    *(void **)(module_stub[17] + 0x20) = *(void **)(numeric_real + 0x20);
     for (i = 0; i < sizeof global; i++)
         global[i] = (uint8_t)rnd();
 }
@@ -4825,12 +5713,667 @@ static void setup_flights(void)
     }
 }
 
+static void report_clockdlg(void)
+{
+    printf("  clock dialog: %lu commands, %lu opened, %lu that loaded and were OK, %lu refused; fields %lu that passed %lu\n",
+           cover_dlg_cmd[4], cover_dlg, cover_dlg_ok, cover_dlg_refused, cover_cd_field, cover_cd_field_ok);
+}
+
+static void report_engines(void)
+{
+    printf("  engines: %lu commands, %lu opened, %lu OK, %lu refused\n", cover_dlg_cmd[5], cover_dlg, cover_dlg_ok, cover_dlg_refused);
+}
+
+static void report_limits(void)
+{
+    printf("  limits: %lu commands, %lu opened, %lu OK, %lu refused\n", cover_dlg_cmd[6], cover_dlg, cover_dlg_ok, cover_dlg_refused);
+}
+
+static void report_areas(void)
+{
+    printf("  areas: %lu commands, %lu opened, %lu OK, %lu refused\n", cover_dlg_cmd[7], cover_dlg, cover_dlg_ok, cover_dlg_refused);
+}
+
+/* Host +0x31c: 1 reads the settings, 3 and 4 list the drivers and modes into its +0xe4,
+ * 5 applies, 6 redraws. */
+/* The descriptor's copy, whose code pointers are each side's own. */
+static int32_t STDCALL pf_h21c(uint8_t *d, const uint8_t *s, uint32_t n)
+{
+    if (s == cur->image + 0x5cc0) {
+        put(" descriptor(%#x)", n);
+        memmove(d, s, n);
+        return 0;
+    }
+    return h_memmove(d, s, n);
+}
+
+static uint32_t STDCALL pf_h31c(uint32_t op, uint8_t *block, uint32_t size)
+{
+    static const char *const names[] = { "Driver A", "Driver B", "640x480x16", "640x480x8", "800x600x16" };
+    uint32_t r = rnd_n(4) ? 0 : 3;
+
+    put(" display(%u,%#x)", op, size);
+    if (op == 1) {
+        strcpy((char *)block, rnd_n(2) ? "Driver A" : "None");
+        strcpy((char *)block + 0xa8, rnd_n(2) ? "800x600x16" : "1x1");
+        *(uint32_t *)(block + 0xd0) = rnd_n(4) ? rnd_n(0x800) : rnd();
+    } else if (op == 3 || op == 4) {
+        uint32_t *list = *(uint32_t **)(block + 0xe4), n = rnd_n(5), i;
+
+        pf_entries = n;
+        for (i = 0; i < n; i++) {
+            char *t = arena_get(32);
+            strcpy(t, names[op == 3 ? rnd_n(2) : 2 + rnd_n(3)]);
+            list[i] = (uint32_t)(uintptr_t)t;
+        }
+        list[n] = 0;
+    } else if (op == 5) {
+        put(" [%.20s|%.20s|%x]", (char *)block, (char *)block + 0xa8, *(uint32_t *)(block + 0xd0));
+    }
+    return r;
+}
+static uint32_t STDCALL pf_m7_38(uint32_t *count, uint32_t *list)
+{
+    uint32_t n = rnd_n(4), i;
+    uint8_t *p = arena_get(0xa08 * (n ? n : 1));
+
+    for (i = 0; i < n; i++)
+        sprintf((char *)p + i * 0xa08 + 0x900, "Plane%u", i);
+    *count = n;
+    *list = (uint32_t)(uintptr_t)p;
+    put(" m7+0x38(%u)", n);
+    return 0;
+}
+static uint32_t STDCALL pf_w80(uint32_t *list, uint32_t *count, uint32_t a)
+{
+    static uint32_t items[3] = { 0x11, 0x22, 0x33 };
+
+    put(" window+0x80(%u)", a);
+    *count = rnd_n(4);
+    *list = (uint32_t)(uintptr_t)items;
+    return 0;
+}
+#define PF_LOG1(name, text) static uint32_t STDCALL name(uint32_t a) { put(" " text "(%#x)", a); return 0; }
+PF_LOG1(pf_w70, "window+0x70")
+PF_LOG1(pf_w74, "window+0x74")
+static uint32_t STDCALL pf_s3c(uint32_t a) { put(" sound+0x3c("); put_ptr(a); put(")"); return 0; }
+static uint32_t STDCALL pf_s40(uint32_t a) { put(" sound+0x40("); put_ptr(a); put(")"); return 0; }
+static uint32_t STDCALL pf_p34(void) { put(" panels+0x34"); return 0; }
+static uint32_t STDCALL pf_h28(void) { put(" host+0x28"); return 0; }
+static uint32_t STDCALL pf_h2a0(uint32_t id, char *buf, uint32_t len)
+{
+    put(" loadstring(%#x,%u)", id, len);
+    if (id >= 0x2300 && id < 0x230b)               /* eleven presets; a twelfth's text would land on the descriptor */
+        snprintf(buf, len, "Preset %u", id - 0x2300);
+    else if (len != 0)
+        buf[0] = 0;
+    return 0;
+}
+
+static void setup_prefdlg(void)
+{
+    setup_situations();
+    setup_dialogs();
+    setup_prefs();
+    SET_SLOT(host, 0x31c, pf_h31c);
+    SET_SLOT(host, 0x21c, pf_h21c);
+    SET_SLOT(host, 0x28, pf_h28);
+    SET_SLOT(host, 0x2a0, pf_h2a0);
+    SET_SLOT(module_stub[7], 0x38, pf_m7_38);
+    SET_SLOT(module_stub[10], 0x80, pf_w80);
+    SET_SLOT(module_stub[10], 0x70, pf_w70);
+    SET_SLOT(module_stub[10], 0x74, pf_w74);
+    SET_SLOT(sound, 0x3c, pf_s3c);
+    SET_SLOT(sound, 0x40, pf_s40);
+    SET_SLOT(module_stub[15], 0x34, pf_p34);
+}
+
+static void report_prefdlg(void)
+{
+    printf("  prefs dialog: %lu commands, %lu opened, %lu OK, %lu refused\n", cover_dlg_cmd[8], cover_dlg, cover_dlg_ok, cover_dlg_refused);
+}
+
+/* The windows this command's WINDOW hands over: items, each with a view block at +0x1c
+ * and its draw routine at +0x18. */
+static uint32_t STDCALL vw_draw(uint32_t a, uint32_t rec, uint32_t c, uint32_t d)
+{
+    put(" draw(%u,", a);
+    put_ptr(rec);
+    put(",%u,%u)", c, d);
+    return 0;
+}
+static uint32_t STDCALL vw_w80(uint32_t *list, uint32_t *count, uint32_t a)
+{
+    uint32_t *items = arena_get(16), n = rnd_n(5), i, j;
+
+    put(" window+0x80(%u)->%u", a, n);
+    for (i = 0; i < n; i++) {
+        uint8_t *item = fixtures + 0x60000 + i * 0x200, *v = item + 0x20;
+
+        for (j = 0; j < 0xc0; j++)
+            v[j] = (uint8_t)rnd();
+        *(uint32_t *)item = rnd();
+        *(uint32_t *)(item + 0x18) = (uint32_t)(uintptr_t)vw_draw;
+        *(uint32_t *)(item + 0x1c) = (uint32_t)(uintptr_t)v;
+        *(uint32_t *)(v + 0x10) = rnd_n(2);
+        *(uint32_t *)(v + 0x14) = rnd_n(6);
+        items[i] = (uint32_t)(uintptr_t)item;
+    }
+    *list = (uint32_t)(uintptr_t)items;
+    *count = n;
+    return 0;
+}
+static uint32_t STDCALL vw_w2(uint32_t a, uint32_t b) { put(" window(%x,%x)", in_image(a) ? a - (uint32_t)(uintptr_t)cur->image : a, b); return 0; }
+/* WINDOW +0x24 closes a window's apply, and the preview's draw: the view block as written */
+static uint32_t STDCALL vw_w24(uint32_t v, uint32_t b)
+{
+    put(" window+0x24(%08x,%x)", digest((const void *)(uintptr_t)v, 0xc0, 0x811c9dc5u), b);
+    return 0;
+}
+static uint32_t STDCALL vw_m35_30(void) { uint32_t r = rnd(); put(" m35+0x30->%#x", r); return r; }
+static uint32_t STDCALL vw_h74(uint32_t window, uint8_t *rec)
+{
+    put(" host+0x74(%#x)", window);
+    if (rnd_n(8) == 0)
+        return 5;
+    *(uint32_t *)(rec + 0x60) = 20 + rnd_n(200);
+    *(uint32_t *)(rec + 0x64) = 20 + rnd_n(200);
+    return 0;
+}
+static uint32_t STDCALL vw_h78(uint32_t a) { put(" host+0x78("); put_ptr(a); put(")"); return 11; }
+static uint32_t STDCALL vw_h84(uint32_t a) { put(" host+0x84("); put_ptr(a); put(")"); return 13; }
+static uint32_t STDCALL vw_h27c(uint32_t a, uint32_t b, uint32_t c, uint32_t d) { put(" host+0x27c("); put_ptr(a); put(","); put_ptr(b); put(",%u,%u)", c, d); return 0; }
+static uint32_t STDCALL vw_h284(uint32_t a, uint32_t b) { put(" host+0x284("); put_ptr(a); put(","); put_ptr(b); put(")"); return 0; }
+static uint32_t STDCALL vw_u2c(uint32_t a, int16_t *s, int16_t *c)
+{
+    *s = (int16_t)rnd();
+    *c = (int16_t)rnd();
+    put(" util+0x2c(%#x)->%d,%d", a & 0xffff, *s, *c);
+    return 0;
+}
+static uint32_t STDCALL vw_hg34(uint32_t a, uint32_t b, uint32_t c, uint32_t d, uint32_t e)
+{
+    put(" hg2d+0x34(");
+    put_ptr(a);
+    put(",%u,%u,%u,%u)", b, c, d, e);
+    return 0;
+}
+
+static void setup_viewdlg(void)
+{
+    setup_dialogs();
+    SET_SLOT(module_stub[10], 0x80, vw_w80);
+    SET_SLOT(module_stub[10], 0x5c, vw_w2);
+    SET_SLOT(module_stub[10], 0x58, vw_w2);
+    SET_SLOT(module_stub[10], 0x24, vw_w24);
+    SET_SLOT(multip, 0x30, vw_m35_30);
+    SET_SLOT(host, 0x74, vw_h74);
+    SET_SLOT(host, 0x78, vw_h78);
+    SET_SLOT(host, 0x84, vw_h84);
+    SET_SLOT(host, 0x27c, vw_h27c);
+    SET_SLOT(host, 0x284, vw_h284);
+    SET_SLOT(util, 0x2c, vw_u2c);
+    SET_SLOT(hg2d, 0x34, vw_hg34);
+}
+
+static void report_viewdlg(void)
+{
+    printf("  view dialog: %lu commands, %lu opened\n", cover_dlg_cmd[9], cover_dlg);
+}
+
+/* The logbook's host: a growable array, and a directory walk over the files present. */
+static uint32_t STDCALL lb_a_add(uint8_t *a)
+{
+    uint32_t n = *(uint32_t *)a, size = *(uint32_t *)(a + 0xc);
+    uint8_t **data = (uint8_t **)(a + 0x18), *p;
+
+    if (n >= *(uint32_t *)(a + 4)) {
+        uint32_t cap = *(uint32_t *)(a + 4) + *(uint32_t *)(a + 8);
+        p = arena_get(cap * size);
+        memset(p, 0, cap * size);
+        if (n != 0)
+            memcpy(p, *data, n * size);
+        *data = p;
+        *(uint32_t *)(a + 4) = cap;
+    }
+    *(uint32_t *)a = n + 1;
+    p = *data + n * size;
+    memset(p, 0, size);
+    put(" add(%u)", n);
+    return (uint32_t)(uintptr_t)p;
+}
+static uint32_t STDCALL lb_a_remove(uint8_t *a, uint8_t *e)
+{
+    uint32_t n = *(uint32_t *)a, size = *(uint32_t *)(a + 0xc);
+    uint8_t *data = *(uint8_t **)(a + 0x18);
+
+    /* as host_list_remove_at: an element at or past the last moves nothing */
+    int32_t i = size ? (int32_t)((uint32_t)((uint32_t)(uintptr_t)e - (uint32_t)(uintptr_t)data) / size) : -1, count = (int32_t)n - 1;
+
+    put(" remove(%d)", i);
+    *(uint32_t *)a = (uint32_t)count;
+    if (i >= count)
+        return 0;
+    if (i < 0)                                     /* a stale row, before the block: the real one runs off too */
+        stub_fault("wild");
+    memmove(data + (uint32_t)i * size, data + (uint32_t)(i + 1) * size, (uint32_t)(count - i) * size);
+    return size;
+}
+static uint32_t STDCALL lb_a_clear(uint8_t *a)
+{
+    *(uint32_t *)a = 0;
+    *(uint32_t *)(a + 4) = 0;
+    *(uint32_t *)(a + 0x18) = 0;
+    return 0;
+}
+static uint32_t lb_walk;
+static uint32_t STDCALL lb_h164(uint32_t *out, const char *dir, uint32_t a, uint32_t ext)
+{
+    put(" find(%s,%u,%#x)", dir, a, ext);
+    lb_walk = 0;
+    *out = 0x77;
+    return rnd_n(16) == 0;
+}
+static uint32_t STDCALL lb_h160(uint32_t h, uint8_t *found)
+{
+    (void)h;
+    for (; lb_walk < MAX_FILES; lb_walk++) {
+        struct vfile *f = &files[lb_walk];
+
+        if (f->used && strncmp(f->name, "FLIGHTS\\L", 9) == 0) {
+            strcpy((char *)found, f->name + 8);
+            *(uint32_t *)(found + 0x108) = f->size;
+            lb_walk++;
+            put(" next(%s)", (char *)found);
+            return 0;
+        }
+    }
+    put(" next-end");
+    return 1;
+}
+static uint32_t STDCALL lb_h15c(uint32_t *h) { put(" find-close(%#x)", *h); return 0; }
+static uint32_t lb_room_low;
+static uint32_t STDCALL lb_h150(const char *drive, uint32_t *space)
+{
+    uint32_t k = rnd_n(16);
+
+    put(" space(%s)", drive);
+    if (k == 0)
+        return 1;
+    space[0] = lb_room_low && k <= 3 ? 0x1387 + rnd_n(2) : 0x100000;
+    space[1] = lb_room_low && k == 3 ? 1 : 0;
+    return 0;
+}
+
+/* A logbook file: title, heads, rows, totals */
+static void lb_file(const char *name)
+{
+    struct vfile *f = make_file(name);
+    uint32_t at = 0, n = rnd_n(5), i;
+    static const char *const dates[] = { "01-02-98", "12-25-97", "07-04-00", "03-15-99", "01-02-98" };
+
+    at += (uint32_t)sprintf((char *)f->bytes, rnd_n(3) ? "My Title %u\r\n\r\n" : "\r\n\r\n", rnd_n(100));
+    at += (uint32_t)sprintf((char *)f->bytes + at, "%-80s\r\n\r\n", "  DATE");
+    for (i = 0; i < n; i++)
+        at += (uint32_t)sprintf((char *)f->bytes + at, "%-8s   %-16s %-24s %4u.%u %4u.%u %4u.%u %4u.%u\r\n", dates[rnd_n(5)], "CESSNA", "KSEA-KPDX",
+                                rnd_n(100), rnd_n(10), rnd_n(100), rnd_n(10), rnd_n(100), rnd_n(10), rnd_n(100), rnd_n(10));
+    at += (uint32_t)sprintf((char *)f->bytes + at, "\r\n%-52s\r\n", "TOTALS");
+    /* never cut short: a head with no end leaves .text+0xfd70's counts as its stack held them */
+    f->size = at;
+    f->attr = rnd_n(4) == 0 ? 2 : 0;
+}
+
+/* Retail's sscanf for the rows' dates: what it does not scan reads 0, as in ours, where
+ * retail would compare its stack. */
+static int lb_sscanf(const char *t, const char *fmt, int *a, int *b, int *c)
+{
+    *a = 0;
+    *b = 0;
+    *c = 0;
+    return sscanf(t, fmt, a, b, c);
+}
+
+static uint32_t acft_n;
+static uint32_t STDCALL acft_1c(uint32_t *count, uint32_t *list);
+static uint32_t STDCALL acft_30(uint32_t key, uint32_t a, char *path, uint32_t n);
+
+static void setup_logbook(void)
+{
+    uint32_t i, n = rnd_n(4);
+
+    open_makes = 1;
+    stack_sources = 1;
+    {
+        DWORD old;
+        void **iat = (void **)(retail.image + 0x2f0fc);
+
+        VirtualProtect(iat, 4, PAGE_READWRITE, &old);
+        *iat = (void *)lb_sscanf;
+    }
+    setup_situations();
+    setup_dialogs();
+    SET_SLOT(host, 0x2f8, lb_a_add);
+    SET_SLOT(host, 0x300, lb_a_remove);
+    SET_SLOT(host, 0x304, lb_a_clear);
+    SET_SLOT(host, 0x164, lb_h164);
+    SET_SLOT(host, 0x160, lb_h160);
+    SET_SLOT(host, 0x15c, lb_h15c);
+    SET_SLOT(host, 0x150, lb_h150);
+    SET_SLOT(acontain, 0x1c, acft_1c);
+    SET_SLOT(acontain, 0x30, acft_30);
+    for (i = 0; i < n; i++) {
+        char name[32];
+
+        sprintf(name, "FLIGHTS\\LOG%u", i);
+        lb_file(name);
+    }
+    if (rnd_n(8))                                  /* with none at all, .text+0xf3d0 reads a book that is not there */
+        lb_file("FLIGHTS\\Logbook");
+}
+
+static void op_logbook(void)
+{
+    static const uint16_t words[4] = { 0x230, 0x232, 0x234, 0x236 };
+    uint32_t i;
+
+    /* a row without its CR left the read buffer flagged: the next read of a logbook would
+     * not read, and .text+0xfd70 would go on with the counts its stack held */
+    if (cur->image[0x3c86] != 0) {
+        put(" flagged");
+        return;
+    }
+    acft_n = rnd_n(4);
+    lb_room_low = rnd_n(4) == 0;
+    *(uint32_t *)(global + 0x128) = rnd_n(4) != 0;
+    strcpy((char *)global + 0x12c, rnd_n(3) == 0 ? "" : rnd_n(2) ? "LOG0" : "Logbook");
+    *(uint16_t *)(global + 0x23e) = (uint16_t)(1 + rnd_n(365));
+    *(uint16_t *)(global + 0x240) = (uint16_t)(1990 + rnd_n(16));
+    for (i = 0; i < 4; i++)
+        *(uint16_t *)(global + words[i]) = (uint16_t)(rnd_n(4) ? rnd_n(0x20) : rnd_n(0x800));
+    if (rnd_n(4) == 0)                             /* the logbook's limit on the hours it adds */
+        *(uint16_t *)(global + 0x236) = (uint16_t)(0x7ce + rnd_n(3));
+    if (rnd_n(2)) {
+        run_dialog(10);
+    } else {
+        put("\n#log");
+        ((s0)SVC(0x90))();                         /* void: retail answers what eax held */
+    }
+    dump_files();
+    put(" book=%s", (char *)global + 0x12c);
+}
+
+static void report_logbook(void)
+{
+    printf("  logbook: %lu commands, %lu opened\n", cover_dlg_cmd[10], cover_dlg);
+}
+
+static void setup_weather(void);
+
+static void setup_wxdlg(void)
+{
+    wx_norm = 1;
+    setup_weather();                               /* the host's sort; NUMERIC is the real one */
+    setup_dialogs();
+}
+
+static void report_wxdlg(void)
+{
+    printf("  weather dialog: %lu commands, %lu opened\n", cover_dlg_cmd[11], cover_dlg);
+}
+
+static void setup_radios(void);
+
+static void setup_radiodlg(void)
+{
+    setup_radios();
+    setup_dialogs();
+}
+
+static void report_radiodlg(void)
+{
+    printf("  radios dialog: %lu commands, %lu opened\n", cover_dlg_cmd[12], cover_dlg);
+}
+
+static uint32_t STDCALL cr_dup(const char *t)
+{
+    char *p = arena_get((uint32_t)strlen(t) + 1);
+
+    strcpy(p, t);
+    return (uint32_t)(uintptr_t)p;
+}
+static uint32_t STDCALL cr_facil(uint32_t *strings)
+{
+    uint32_t r = rnd_n(2), i;
+
+    put(" facil+0x24->%u", r);
+    if (r != 0)
+        for (i = 0; i < 6; i++)
+            strings[i] = rnd_n(3) ? cr_dup(i & 1 ? "KSEA" : "Seattle") : 0;
+    return r;
+}
+static uint32_t STDCALL acft_dialog(uint32_t id, uint32_t desc);
+static uint32_t STDCALL cr_dialog(uint32_t id, uint32_t desc)
+{
+    return id == 0x1201 ? acft_dialog(id, desc) : h_dialog(id, desc);
+}
+
+static void op_create(void)
+{
+    acft_n = rnd_n(5);
+    run_dialog(13);
+}
+
+static void setup_aircraft(void);
+static void setup_create(void)
+{
+    setup_aircraft();
+    setup_weather();
+    setup_dialogs();
+    SET_SLOT(host, 0x10c, cr_dialog);
+    SET_SLOT(host, 0x2b4, cr_dup);
+    SET_SLOT(module_stub[37], 0x24, cr_facil);
+    wx_norm = 1;
+    session_empty_strings = 1;                     /* a string not found leaves "", as LoadString does */
+}
+
+static void report_create(void)
+{
+    printf("  create: %lu commands, %lu opened\n", cover_dlg_cmd[13], cover_dlg);
+}
+
 static void report_flights(void)
 {
     printf("  flights: set record %lu, open %lu (+0xc4) + %lu (0x1102), challenges %lu, save %lu; lists empty %lu\n",
            cover_fl[0], cover_fl[1], cover_fl[2], cover_fl[3], cover_fl[4], cover_list_empty);
     printf("  Open: delete %lu, edit %lu, OK %lu; Save: OK %lu, check refused %lu\n", cover_open_delete,
            cover_open_edit, cover_open_ok, cover_save_ok, cover_save_status);
+}
+
+/* ---- suite: aircraft (command 0x1201, slice 34) ------------------------------------ */
+
+static uint32_t acft_n;
+static unsigned long cover_acft_open, cover_acft_draw, cover_acft_moved, cover_acft_ok;
+
+static uint32_t STDCALL acft_1c(uint32_t *count, uint32_t *list)
+{
+    uint32_t i;
+    uint8_t *p = arena_get(0xa08 * (acft_n ? acft_n : 1));
+
+    for (i = 0; i < acft_n; i++)
+        sprintf((char *)p + i * 0xa08, "Plane%u", i);
+    *count = acft_n;
+    *list = (uint32_t)(uintptr_t)p;
+    put(" list(%u)", acft_n);
+    return 0;
+}
+static uint32_t STDCALL acft_30(uint32_t key, uint32_t a, char *path, uint32_t n)
+{
+    (void)key;
+    put(" m23+0x30(%u,%#x)", a, n);
+    if (rnd_n(4) == 0)
+        path[0] = 0;
+    else
+        sprintf(path, "plane%u", rnd_n(acft_n + 2));
+    return 1;
+}
+static uint32_t STDCALL acft_28(const char *rec)
+{
+    put(" m23+0x28(%s)", rec);
+    return 0;
+}
+static uint32_t STDCALL acft_38(uint32_t *obj) { put(" m23+0x38(%u)", (unsigned)(obj == (uint32_t *)(cur->image + 0x7f90))); return 0; }
+static uint32_t STDCALL acft_24(uint32_t *obj) { put(" m23+0x24(%u)", (unsigned)(obj == (uint32_t *)(cur->image + 0x7f90))); return 0; }
+static uint32_t STDCALL acft_20(uint32_t *obj, uint32_t rec)
+{
+    uint32_t *o = (uint32_t *)(fixtures + 0x60000), *e = (uint32_t *)(fixtures + 0x60100);
+
+    put(" m23+0x20(");
+    put_ptr(rec);
+    put(")");
+    o[1] = 0x1234;
+    o[3] = rnd_n(20);
+    obj[0] = (uint32_t)(uintptr_t)o;
+    obj[1] = (uint32_t)(uintptr_t)e;
+    return 0;
+}
+static uint32_t STDCALL acft_34(uint32_t *obj, uint32_t a)
+{
+    uint32_t r = rnd_n(8) != 0;
+    (void)obj;
+    put(" m23+0x34(%u)->%u", a, r);
+    return r;
+}
+static uint32_t STDCALL acft_3c(uint32_t *obj)
+{
+    uint32_t r = rnd_n(8) ? 1 : rnd_n(3);
+    (void)obj;
+    put(" m23+0x3c->%u", r);
+    return r;
+}
+static uint32_t STDCALL acft_h74(uint32_t window, uint8_t *rec)
+{
+    uint32_t w = 4 + rnd_n(8), h = 4 + rnd_n(8);
+
+    put(" host+0x74(%#x,w=%u,h=%u)", window, w, h);
+    if (rnd_n(8) == 0)
+        return 7;
+    *(uint32_t *)(rec + 0x84) = w;
+    *(uint32_t *)(rec + 0x88) = h;
+    *(uint32_t *)(rec + 0x8c) = 0x10;
+    *(uint32_t *)(rec + 0x94) = 0x10 * h;
+    *(uint32_t *)(rec + 0x98) = (uint32_t)(uintptr_t)(fixtures + 0x61000);
+    return 0;
+}
+static uint32_t STDCALL acft_h78(uint32_t rec) { put(" host+0x78("); put_ptr(rec); put(")"); return 0; }
+static uint32_t STDCALL acft_h84(uint8_t *rec)
+{
+    put(" host+0x84(%08x)", digest(fixtures + 0x61000, 0x100, 0x811c9dc5u));
+    (void)rec;
+    return 0;
+}
+static uint32_t STDCALL acft_h38(void) { uint32_t r = rnd(); put(" host+0x38->%#x", r); return r; }
+static uint32_t STDCALL acft_w2c(uint32_t a, uint32_t b, uint32_t c, uint32_t d)
+{
+    put(" window+0x2c(%u,%u,%u,", a, b, c);
+    put_ptr(d);
+    put(")");
+    return 0;
+}
+static uint32_t STDCALL acft_w30(void) { put(" window+0x30"); return 0; }
+static uint32_t STDCALL acft_g18(uint32_t a, uint32_t *e)
+{
+    uint8_t *bits = fixtures + 0x61000;
+    uint32_t i, n = rnd_n(3);
+
+    put(" g3d+0x18(%#x) e=%x,%x,%x,%x,%x", a, e[2], e[7], e[8], e[9], e[26]);
+    for (i = 0; i < n; i++)                        /* the model drawn: on the border now and then */
+        bits[rnd_n(0x100)] = (uint8_t)rnd();
+    if (rnd_n(2)) {                                /* or kept to a pixel off the corner */
+        uint32_t w = 4 + rnd_n(8);
+        bits[0x10 * rnd_n(12) + (rnd_n(2) ? 0 : w - 1)] = 7;
+    }
+    return 0;
+}
+static uint32_t STDCALL acft_dialog(uint32_t id, uint32_t desc)
+{
+    uint32_t *b = (uint32_t *)(uintptr_t)desc, window = 0x7000 + rnd_n(0x100), k, r;
+
+    put(" dialog(%#x,", id);
+    put_ptr(desc);
+    put(")");
+    if (rnd_n(8) == 0) {
+        put(" no");
+        return 0xffffffffu;
+    }
+    if (counting) cover_acft_open++;
+    put(" a=%#x", ((s1)(uintptr_t)b[1])(desc));
+    put(" b=%#x", ((s1)(uintptr_t)b[2])(desc));
+    put(" c=%#x", ((s1)(uintptr_t)b[3])(desc));
+    put(" which=%u", b[5]);
+    r = ((s3)(uintptr_t)b[4])(1, desc, window);
+    put(" open=%#x", r);
+    if (r == 0) {
+        for (k = rnd_n(6); k-- != 0; ) {
+            uint32_t *e = (uint32_t *)(fixtures + 0x60100);
+            uint32_t was = e[2];
+
+            if (rnd_n(2))
+                b[5] = rnd_n(acft_n + 3);
+            put(" box=%#x", ((s3)(uintptr_t)b[4])(3, desc, window));
+            put(" which=%u", b[5]);
+            put(" 1194=");
+            put_ptr(*(uint32_t *)(global + 0x1194));
+            *(uint32_t *)(global + 0x1194) = 0;
+            if (counting) {
+                cover_acft_draw++;
+                if (e[2] != was) cover_acft_moved++;
+            }
+        }
+        put(" close=%#x", ((s3)(uintptr_t)b[4])(2, desc, window));
+    }
+    b[0] = rnd_n(2);
+    if (counting && b[0]) cover_acft_ok++;
+    return 0;
+}
+
+static void setup_aircraft(void)
+{
+    setup_situations();
+    SET_SLOT(acontain, 0x1c, acft_1c);
+    SET_SLOT(acontain, 0x20, acft_20);
+    SET_SLOT(acontain, 0x24, acft_24);
+    SET_SLOT(acontain, 0x28, acft_28);
+    SET_SLOT(acontain, 0x30, acft_30);
+    SET_SLOT(acontain, 0x34, acft_34);
+    SET_SLOT(acontain, 0x38, acft_38);
+    SET_SLOT(acontain, 0x3c, acft_3c);
+    SET_SLOT(host, 0x74, acft_h74);
+    SET_SLOT(host, 0x78, acft_h78);
+    SET_SLOT(host, 0x84, acft_h84);
+    SET_SLOT(host, 0x38, acft_h38);
+    SET_SLOT(host, 0x10c, acft_dialog);
+    SET_SLOT(module_stub[10], 0x2c, acft_w2c);
+    SET_SLOT(module_stub[10], 0x30, acft_w30);
+    SET_SLOT(g3d, 0x18, acft_g18);
+}
+
+static void op_aircraft(void)
+{
+    uint32_t i;
+
+    acft_n = rnd_n(5);
+    for (i = 0x5b0; i < 0x5d4; i++)
+        global[i] = (uint8_t)rnd();
+    *(uint32_t *)(cur->image + 0x2edf4) = rnd_n(3);
+    put("\n#command(0x1201)");
+    ((s2)SVC(0x20))(0x1201, rnd());
+    put(" 608=%u", global[0x608]);
+}
+
+static void report_aircraft(void)
+{
+    printf("  aircraft: opened %lu, drawn %lu, moved back %lu, OK %lu\n", cover_acft_open, cover_acft_draw,
+           cover_acft_moved, cover_acft_ok);
 }
 
 /* ---- running ---------------------------------------------------------------------- */
@@ -5672,8 +7215,14 @@ static uint32_t STDCALL weather_n_put(uint16_t *in, uint32_t type, uint32_t to)
 }
 static uint32_t STDCALL weather_h_2a4(uint32_t id, void **out)
 {
-    void *p = arena_get(0x40);
+    char *p = arena_get(0x40);
     put(" host+0x2a4(%#x)", id);
+    if (id == 0x2032)                              /* the texts Create a Flight fills in */
+        strcpy(p, "%s at %s. ");
+    else if (id == 0x2041)
+        strcpy(p, "%d mi");
+    else if (id == 0x2042)
+        strcpy(p, "%d.%02d mi");
     *out = p;
     return 0;
 }
@@ -5688,8 +7237,14 @@ static uint32_t STDCALL weather_h_22c(uint8_t *base, uint32_t n, uint32_t size, 
     put(",%u,%#x)", n, size);
     for (i = 1; i < n; i++) {
         memcpy(tmp, base + i * size, size);
-        for (j = i; j > 0 && cmp((uint32_t)(uintptr_t)(base + (j - 1) * size), (uint32_t)(uintptr_t)tmp) > 0; j--)
+        for (j = i; j > 0; j--) {
+            int32_t r = cmp((uint32_t)(uintptr_t)(base + (j - 1) * size), (uint32_t)(uintptr_t)tmp);
+
+            put(" cmp=%d", r);
+            if (r <= 0)
+                break;
             memcpy(base + j * size, base + (j - 1) * size, size);
+        }
         memcpy(base + j * size, tmp, size);
     }
     return 0;
@@ -5912,7 +7467,7 @@ static uint32_t STDCALL kb_h3c(uint32_t a, uint32_t b)
     return 0;
 }
 
-static unsigned long cover_kb[8], cover_kb_pages;
+static unsigned long cover_kb[9], cover_kb_pages;
 
 static void kneeboard_stubs(void)
 {
@@ -5953,7 +7508,7 @@ static void setup_kneeboard(void)
 
 static void op_kneeboard(void)
 {
-    uint32_t which = rnd_n(8);
+    uint32_t which = rnd_n(9);
     uint8_t *r = kb_rec();
 
     kb_pages = rnd_n(5);
@@ -5981,6 +7536,15 @@ static void op_kneeboard(void)
         break;
     }
     case 4: put("->%u", ((s2)internal(0x207e2590, "main_kb_close@8"))(0, 0)); break;
+    case 8: {                                      /* a page from the menu */
+        uint32_t page = rnd_n(3), list = page * 0x2108;
+
+        *(uint32_t *)(r + 0x10) = 0;
+        *(uint32_t *)(cur->image + 0x11eac + list) = rnd_n(4);
+        ((s2)SVC(0x20))(0x300 + page, rnd());
+        put(" 129c=%u", *(uint32_t *)(global + 0x129c));
+        break;
+    }
     case 5: {
         static char buf[0x100];
         static const char *const texts[] = { "", " a ", "\t\t", "a,b", " a b ,c", "abc", ",x", "  ,  " };
@@ -6201,6 +7765,17 @@ static const struct suite suites[] = {
     { "radios", op_radios, report_radios, 12, setup_radios, 0x00 },
     { "weather", op_weather, report_weather, 8, setup_weather, 0x00 },
     { "kneeboard", op_kneeboard, report_kneeboard, 12, setup_kneeboard, 0x00 },
+    { "aircraft", op_aircraft, report_aircraft, 6, setup_aircraft, 0x00 },
+    { "clockdlg", op_clockdlg, report_clockdlg, 8, setup_dialogs, 0x00 },
+    { "engines", op_engines, report_engines, 8, setup_dialogs, 0x00 },
+    { "limits", op_limits, report_limits, 8, setup_dialogs, 0x00 },
+    { "areas", op_areas, report_areas, 8, setup_dialogs, 0x00 },
+    { "prefdlg", op_prefdlg, report_prefdlg, 6, setup_prefdlg, 0x00 },
+    { "viewdlg", op_viewdlg, report_viewdlg, 6, setup_viewdlg, 0x00 },
+    { "logbook", op_logbook, report_logbook, 6, setup_logbook, 0x00 },
+    { "wxdlg", op_wxdlg, report_wxdlg, 6, setup_wxdlg, 0x00 },
+    { "radiodlg", op_radiodlg, report_radiodlg, 6, setup_radiodlg, 0x00 },
+    { "create", op_create, report_create, 6, setup_create, 0x00 },
     { "session", op_session, report_session, 1, setup_session, 0x00 },
 };
 
@@ -6248,6 +7823,24 @@ static void drop_kneeboard_bitmap(int last)
     held = last ? 0 : now;
 }
 
+/* A string run off the end of the image lands in the module's import table (retail's
+ * follows .data) or in ours's data beyond it, past what is compared, and shows only as
+ * faults thousands of scenarios later: keep a copy and put it back each time. */
+static void tail_keep(struct side *s)
+{
+    uint8_t *at = s->image + IMAGE_SIZE;
+    MEMORY_BASIC_INFORMATION m;
+
+    s->tail_size = 0;
+    while (at + s->tail_size < s->hi && VirtualQuery(at + s->tail_size, &m, sizeof m) != 0 &&
+           (m.Protect & (PAGE_READWRITE | PAGE_WRITECOPY)) != 0)
+        s->tail_size = (uint32_t)((uint8_t *)m.BaseAddress + m.RegionSize - at);
+    if (s->tail_size > (uint32_t)(s->hi - at))
+        s->tail_size = (uint32_t)(s->hi - at);
+    s->tail = malloc(s->tail_size + 1);
+    memcpy(s->tail, at, s->tail_size);
+}
+
 static void run_side(struct side *s)
 {
     uint32_t i, nops;
@@ -6255,6 +7848,9 @@ static void run_side(struct side *s)
     cur = s;
     s->length = 0;
     memcpy(s->image, s->pristine, IMAGE_SIZE);
+    if (s->tail == NULL)
+        tail_keep(s);
+    memcpy(s->image + IMAGE_SIZE, s->tail, s->tail_size);
     arena_used = 0;
     free_fill = suite->fill;
     memset(arena, suite->fill, ARENA_SIZE);    /* all of it: a runaway walk reads far */
@@ -6274,6 +7870,7 @@ static void run_side(struct side *s)
         op_number = i;
         dispatches_this_op = 0;
         walked_off = 0;
+        load_mark = 0;
         hung = 0;
         call_start = GetTickCount();
         in_main = 1;
@@ -6287,6 +7884,15 @@ static void run_side(struct side *s)
             if (getenv("MAIN_HANG") && cur->length > 300)
                 printf("%s hang: %.300s\n", cur->name, cur->transcript + cur->length - 300);
             if (counting) cover_hangs++;
+            break;
+        }
+        if ((cursor_wild() || walked_off) && load_mark != 0 && table_overwritten()) {
+            /* 0x1101 loads twice in an op: the first wrote over the table, and the second
+             * walked its self-pointers, wild now, into memory the two sides do not share.
+             * Whether it faults there or reads on depends on the map, so compare up to it. */
+            cur->length = load_mark;
+            put(" TABLE OVERWRITTEN");
+            if (counting) cover_table_overwritten++;
             break;
         }
         if (cursor_wild() || walked_off) {

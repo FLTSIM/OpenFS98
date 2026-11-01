@@ -13,7 +13,7 @@ slot is done MAIN is not in `MODULES` and is never installed.
 | 2, the situation reader and writer | `+0x38`..`+0x4c` (assembly, `.text+0x11cd2`..`+0x13104`) | `situations` | verified: 20,000 scenarios, 0 differ; 63 of 69 breaks caught, 6 proven equivalent |
 | 3, range and bearing | `+0x70` (assembly, `.text+0x19507`..`+0x1972f`) | `nav` | verified: 20,000 scenarios, 0 differ; 13 of 14 breaks caught, 1 proven equivalent |
 | 4, the nav read-outs | `+0x78`, `+0x80` (assembly, `.text+0x19c94`, `+0x19f10`) | `navio` | verified: 20,000 scenarios, 0 differ; 12 of 12 breaks caught |
-| 5, the station descriptor | `+0x7c` (assembly, `.text+0x19cd5`..`+0x19db9`) | `navdesc` | verified: 20,000 scenarios, 0 differ; 9 of 9 breaks caught |
+| 5, the station descriptor | `+0x7c` (assembly, `.text+0x19cd5`..`+0x19db9`) | `navdesc` | verified: 20,000 scenarios, 0 differ; 12 of 12 breaks caught |
 | 6, the season, zone and clock | `+0x74` (assembly, `.text+0x18781`..`+0x189c3`) | `season` | verified: 20,000 scenarios, 0 differ; 23 of 24 breaks caught, 1 proven equivalent |
 | 7, the clock as digits | `+0xa4` (assembly, `.text+0x16ddf`..`+0x16e30`) | `clock` | verified: 20,000 scenarios, 0 differ; 6 of 6 breaks caught |
 | 8, the view cycler | `+0xc8` (assembly, `.text+0x18f0`..`+0x193a`) | `view` | verified: 20,000 scenarios, 0 differ; 10 of 10 breaks caught |
@@ -33,7 +33,7 @@ slot is done MAIN is not in `MODULES` and is never installed.
 | 22, init, deinit and the frame callbacks | `+0x04`, `+0x08` (MSVC C, `.text+0x20`, `+0x70`), callbacks `.text+0x2e10`, `+0x7095`, `+0x85ea` (assembly) | `frame` | verified: 20,000 scenarios, 0 differ; 58 of 60 breaks caught, 2 proven equivalent |
 | 23, the timer tick | `+0x24` (MSVC C, `.text+0x16a60`) | `tick` | verified: 20,000 scenarios, 0 differ; 11 of 11 breaks caught |
 | 24, the frame | `+0x18` (MSVC C, `.text+0xc000`..`+0xc51d`) | `step` | verified: 20,000 scenarios, 0 differ; 39 of 40 breaks caught, 1 proven equivalent |
-| 25, the menu command dispatcher | `+0x20` (MSVC C, `.text+0xa090`, `+0xae50`), the dialog handlers pending | `commands` | verified: 20,000 scenarios, 0 differ; 73 of 73 breaks caught |
+| 25, the menu command dispatcher | `+0x20` (MSVC C, `.text+0xa090`, `+0xae50`) | `commands` | verified: 20,000 scenarios, 0 differ; 73 of 73 breaks caught |
 | 26, the first dialogs | commands `0x1203`, `0x1308`, `0x1309`, `0x1607` (MSVC C, `.text+0x8d0`, `+0x4f50`, `+0x2e30`, `+0xa0`, with their check callbacks) | `dialogs` | verified: 20,000 scenarios, 0 differ; 38 of 40 breaks caught, 2 proven equivalent |
 | 27, rewriting a situation file and the Flights dialogs | `+0x50` (assembly, `.text+0x13105`, `+0x13500`, `+0x13612`, `+0x13710`), `+0xac`, `+0xc4` and command `0x1106` (MSVC C, `.text+0xc560`..`+0xc870`, `+0xd180`..`+0xd790`, `+0xea80`..`+0xeb30`) | `flights` | verified: 20,000 scenarios, 0 differ; 96 of 98 breaks caught, 2 proven equivalent |
 | 28, the routines MAIN's G3D programs call | 15 native routines (assembly, `.text+0x73d7`..`+0xa04a`), 53 pointers in `.data` | `natives` | verified: 20,000 scenarios, 0 differ; 95 of 98 breaks caught, 3 proven equivalent |
@@ -42,23 +42,38 @@ slot is done MAIN is not in `MODULES` and is never installed.
 | 31, the weather's layers | `.text+0x1a5f0`, `+0x1a4b0`, `+0x1b260`, `+0x1cf80` (MSVC C) | `weather` | verified: 20,000 scenarios, 0 differ; 50 of 50 breaks caught |
 | 32, the kneeboard | `.text+0xa80`..`+0x1940` (MSVC C), bitmap 101 | `kneeboard` | verified: 20,000 scenarios, 0 differ; 61 of 61 breaks caught |
 | 33, start and shutdown | `+0x28`, `+0x2c` and the welcome dialog (MSVC C, `.text+0x165b0`, `+0x16880`, `+0x14ab0`), command `0x1109` | `session` | verified: 20,000 scenarios, 0 differ; 53 of 53 breaks caught |
+| 34, Select Aircraft and the kneeboard pages | command `0x1201`, `0x300`..`0x3ff` (MSVC C, `.text+0x110`..`+0x690`, `+0x18d0`) | `aircraft` | verified: 20,000 scenarios, 0 differ; 38 of 39 breaks caught, 1 proven equivalent |
+| 35, Time and Season | command `0x1301` (MSVC C, `.text+0x1b20`..) | `clockdlg` | verified: 20,000 scenarios, 0 differ; 84 of 85 breaks caught, 1 proven equivalent |
+| 36, the aircraft's engines | command `0x1205`, dialog `0x1206` (MSVC C, `.text+0x3bf0`..`+0x4f40`) | `engines` | verified: 20,000 scenarios, 0 differ; 66 of 78 breaks caught, 12 proven equivalent |
+| 37, the aircraft's limits | command `0x1204` (MSVC C, `.text+0x2ee0`..`+0x3b60`) | `limits` | verified: 20,000 scenarios, 0 differ; 55 of 63 breaks caught, 8 proven equivalent |
+| 38, the weather areas | command `0x1307`, dialogs `0x1303`, `0x13050001` (MSVC C, `.text+0x5010`..`+0x6441`) | `areas` | verified: 20,000 scenarios, 0 differ; 62 of 67 breaks caught, 5 proven equivalent |
+| 39, General Preferences | command `0x1409`, dialogs `0x14090001`, `0x14090002` (MSVC C, `.text+0x14ce0`..`+0x15c7f`) | `prefdlg` | verified: 20,000 scenarios, 0 differ; 68 of 69 breaks caught, 1 proven equivalent |
+| 40, View Options | command `0x1502`, dialog `0x1508` (MSVC C, `.text+0x16e40`..`+0x17c97`) | `viewdlg` | verified: 20,000 scenarios, 0 differ; 66 of 69 breaks caught, 3 proven equivalent |
+| 41, the logbook | command `0x1407`, dialogs `0x14070001`, `0x14070002`, and `+0x90` (`.text+0xf2f0`..`+0x11cc9`) | `logbook` | verified: 20,000 scenarios, 0 differ; 91 of 111 breaks caught, 20 missed |
+| 42, the weather dialogs | command `0x1306`, dialogs `0x1302`, `0x13040001` (MSVC C, `.text+0x19fb0`..) | `wxdlg` | verified: 20,000 scenarios, 0 differ; 88 of 98 breaks caught, 4 proven equivalent, 6 missed |
+| 43, the radios dialog | command `0x1202` (MSVC C, `.text+0x13870`..`+0x14aa8`; `+0x17ca0`; assembly `+0x19dbc`) | `radiodlg` | verified: 20,000 scenarios, 0 differ; 117 of 118 breaks caught, 1 missed |
+| 44, Create a Flight | command `0x1101` (MSVC C, `.text+0xcaa0`, `+0xcef0`, `+0xd7a0`..`+0xda60`, `+0xdb60`, `+0x1a90`) | `create` | verified: 20,000 scenarios, 0 differ; 96 of 98 breaks caught, 1 proven equivalent, 1 missed |
 
-**What is left** (as of slice 33): `+0x90` (`.text+0x10560`), the one Linkage
-slot still null; and the dialog handlers `+0x20` still reaches through
-`cmd_pending`, which faults on purpose: `0x1101` (`.text+0xdaa0`, also the
-welcome dialog's Create a Flight button), `0x1201` (`+0x110`), `0x1202`
-(`+0x13870`), `0x1204` (`+0x2ee0`), `0x1205` (`+0x3bf0`), `0x1301` (`+0x1b20`),
-`0x1306` (`+0x19fb0`), `0x1307` (`+0x5010`), `0x1407` (`+0xf3d0`), `0x1409`
-(`+0x14ce0`), `0x1502` (`+0x16e40`) and the kneeboard pages `0x300`..`0x3ff`
-(`+0x18d0`). The dialog callbacks and tables those reach are the remaining
-retail code pointers in `.data`. Until then MAIN stays out of `MODULES`, and the
-exports named `main_*` stay for the harness.
+**What is left**: nothing of the module. Every Linkage slot is set, `cmd_pending`
+is gone, and every retail code pointer in `.data` is either installed by `main_install`
+or a routine one of MAIN's own tables reaches (the situation reader's six at
+`.data+0x4672`.., the radio list's six at `.data+0x749e`..). MAIN is ready to go into
+`MODULES`; it is not there yet, and the exports named `main_*` stay for the harness
+for as long as `maindiff` uses them.
 
 **In the game** (`make main-smoke`, which restores the previous DLL byte for
 byte): 27/27 modules and 95 gauges, and with a flight on the command line
 (`/STN:Situatio\STGEORGE.STN`) the sky, cloud layers, panel and menu bar draw as
 they do on retail. Without one it stops at the welcome dialog, drawn correctly.
-No menu or dialog has been driven, and nothing has been flown by hand.
+
+`make main-dialogs` opens all sixteen menu commands in the running game, on retail
+and on ours, first pressing Cancel and then OK: every control and its text the same (the wall clock
+aside), nothing stuck, no crash, and the flight files and `FLTSIM98.CFG` written alike. 11
+of the 16 dialogs match pixel for pixel; the other five show the clock (`0x1101`, `0x1301`),
+a live preview (`0x1201`, `0x1502`) or the flight itself (`0x300`), and differ only there.
+
+The menus are posted as commands, not clicked, and only each dialog's first page is
+looked at; nothing has been flown by hand.
 
 ## Binary and linkage
 
@@ -108,7 +123,7 @@ calls are reached from the host, the `English\` dialog modules, or CHAIN.
 | `+0x74` | `.text+0x18781` | ADVDRV, MULTIP | **slice 6**: the season, the zone and the clock |
 | `+0x78`, `+0x7c` | `.text+0x19c94`, `+0x19cd5` | | `+0x78` **slice 4**, `+0x7c` **slice 5** |
 | `+0x80` | `.text+0x19f10` | ADVDRV, PANELS | **slice 4**: `(which, &tenths)` |
-| `+0x84`..`+0x90` | `.text+0x16100`, `+0x162f0`, `+0x16570`, `+0x10560` | CONTROLS, WINDOW (`+0x88`) | object table at `.data+0x9794`, 0x2d4-byte entries: `+0x84` **slice 13** allocates, `+0x88` **slice 16** steps them all (the smoke trails), `+0x8c` **slice 10** releases |
+| `+0x84`..`+0x90` | `.text+0x16100`, `+0x162f0`, `+0x16570`, `+0x10560` | CONTROLS, WINDOW (`+0x88`) | object table at `.data+0x9794`, 0x2d4-byte entries: `+0x84` **slice 13** allocates, `+0x88` **slice 16** steps them all (the smoke trails), `+0x8c` **slice 10** releases; `+0x90` is **slice 41**, the flight just ended into the logbook. `impscan` finds no module that calls it, which may under-report |
 | `+0x94`..`+0xa0` | `.text+0x7140`, `+0x6f59`, `+0x6de9`, `+0x830d` | WEATHERM (`+0x94`), WINDOW (`+0x98`, `+0x9c`) | `+0x94` is **slice 20** (the cloud layers' textures), `+0x98` is **slice 19** (the cloud layers' draw), `+0x9c` is **slice 15** (the altitude band), `+0xa0` is **slice 12**: the sun direction |
 | `+0xa4`, `+0xa8` | `.text+0x16ddf`, `+0x6450` | ADVDRV, CONTROLS, WINDOW | `+0xa4` is **slice 7**, `+0xa8` is **slice 21** (the spot plane's eye) |
 | `+0xac`..`+0xbc` | `.text+0xc870`, `+0xcdb0`, `+0xdd70`, `+0xe5a0`, `+0xed10` | CONTROLS (`+0xac`), FACIL (`+0xb0`) | `+0xac` is **slice 27** (Save Flight); `+0xb0` is **slice 17** (the quick save); `+0xb4`, `+0xb8`, `+0xbc` are **slice 18** (load, save and default the preferences) |
@@ -1300,10 +1315,75 @@ in `main_start.inc`, with `+0x14ab0`, the welcome dialog at start, which is also
 command `0x1109`. Start loads the preferences, the menus, the weather and the
 kneeboard; takes a flight from `/STN:` or else the default; sets the clock, radios
 and listeners going; runs one frame; and shows the welcome dialog when no flight
-was given and GLOBAL `+0x121c` is clear. The dialog's Create a Flight button
-reaches `cmd_pending`.
+was given and GLOBAL `+0x121c` is clear. The dialog's Create a Flight button is
+command `0x1101` (slice 44).
 
 `session` runs start then shutdown over the models the other suites use. A flight
 with no default to fall back on spins for good in retail too, so about 7% of
 scenarios end in the watchdog.
 
+## The dialogs, slices 34 to 44
+
+The rest of `+0x20`'s commands. Each loads its fields from GLOBAL, shows a dialog
+through the host's `+0x10c` and, when told OK, stores them back; the callbacks in
+each dialog's block are installed by `main_install`. About 77 KB of `.text`, not the
+twelve handlers the slot list suggests. The suites run over retail UTIL and NUMERIC
+with `h_dialog`, a stand-in for what the dialog engine does: edit fields, press
+buttons, call the check, read back the statuses.
+
+A dialog that refuses text leaves retail reading its stack, in several of these: a
+field NUMERIC turned down keeps whatever the slot held. The stand-in keeps those
+fields parseable on the paths where that would be compared, and says so where it
+does; what retail's stack held there is not reproduced.
+
+**Retail's own behaviour, kept:**
+
+- `0x1301`: the clock and engine dialogs test GLOBAL `+0xc18` differently (`== 2` for
+  the units shown, `!= 0` for the clamp), so with `+0xc18` at 1 a field is checked
+  against feet and clamped to metres. `0x1204` does the same.
+- `0x1205`: an argument's slot serves as scratch, so a value NUMERIC does not write
+  leaves retail's address of the block in it (`LM_SLOT` and its like).
+- `0x1306`: the cloud layers' sort keeps its locals across passes and compares stale
+  rows.
+- `0x1307`: the second area is loaded from the same GLOBAL fields as the first
+  (`+0x1004`), and only the first two ever go back by name.
+- `0x1407`: the logbook's test of a write's result is the wrong way up on operations
+  6 and 8; `+0x3b40` shrinks each time it loads; a failed read leaves the file open.
+  `+0x90` sets the attribute on the directory rather than the path.
+- `0x1409`: the first word of a preset's comparison is inverted, so a preset is
+  forgotten only when GLOBAL `+0x11b2` differs from it and every other word agrees. A
+  twelfth preset's string would overwrite the descriptor beside the table.
+
+**A bug of ours they found:** `nav_describe` (`+0x7c`, slice 5) handed UTIL `+0x88`
+one descriptor entry and a count of ten, so real UTIL read nine entries past the end
+of the stack array. Slice 5's stub logged only the first entry and hid it; the radios
+dialog's stub, which logs them all, showed it. It now builds retail's table of ten
+(`.text+0x180ce`). Slices 3, 4 and 5 have been run again.
+
+**Breaks still missed**, all at N=2000, none a known fault: `logbook` 20 (`fd-end`, `fd-3`,
+`fd-6`, `fd-zero`, `fd-limit`, `dt-1`, `dt-3`, `dt-dash`, `en-c`, `en-mode`, `ec-7cf`, `lg-7cf`,
+`lg-z`, `rf-fresh`, `rd-flag`, `rd-1e`, `rt-1e`, `b-2own`, `b-3`, `b-6-sel`), `wxdlg` 6 (`ap-140`,
+`ap-168`, `ld-lift64`, `ck-t65`, `si-cov`, `wl-8`), `radiodlg` 1 (`s-37e`), `create` 1 (`wt-28`:
+the suite keeps the visibility below 450, so `q` never nears 0x28). They are gaps in what the
+stand-ins drive, not proven equivalences; the logbook's row editor and text parsers are
+the least covered code in the module. `rd-flag` cannot show: the suite stops at a row with
+no CR, because retail then goes on with counts from its stack. A logbook that is only its
+heads, which is what "new" writes, has no CR after the column heads, so retail reads its row
+count from the stack there too (ours has 0); `h_read` ends the scenario at one.
+
+**A harness lesson:** `+0x88`'s stub filled 0x58 bytes solid, where the real one writes
+only the fields and leaves a gap after each text. A name with no terminator ran on
+into relocated words and showed as a difference. And `viewdlg` first caught only 44
+of 62 breaks: everything `command_1502` writes goes to the view blocks of WINDOW's
+items, which the harness did not compare, so the stubs now log them.
+
+Four more, each of which looked like something else at first. `+0x300`'s stub was
+unguarded: a stale row on an empty list moved a negative length over the harness's own data
+and ended the process, which `main_breaks.py` counted as caught, so the logbook's first
+"111 of 111" was false (a run that ends without its summary now reports `CRASHED`). The
+`memmove` stub took any stack source for a wild pointer, and the row sort's swap has one: 42% of
+the logbook's scenarios ended there. Create a Flight loads twice in an op, so a table
+overwritten by the first sends the second into unshared memory (the comparison now stops at
+that load). And a string run off the end of the image lands in retail's import table, which
+nothing restored: 15,030 of 20,000 differed, all after scenario 4,970, so `run_side` now puts
+back what follows the image.

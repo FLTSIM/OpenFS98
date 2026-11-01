@@ -301,24 +301,30 @@ static uint32_t FS98_STDCALL lat_clamp(void)
 /* .text+0x19cd5 == Linkage +0x7c: (which, arg2, &out).  FE +0x2c looks the
  * station up into a local buffer (its first argument is pushed as a word over
  * two stale bytes, so only the low word reaches FE); UTIL +0x88 formats it,
- * through a .text descriptor {3, 3, 6, &.data+0x7248}, into .data+0x7248; a
+ * through a .text descriptor of ten fields from .data+0x7248, into there; a
  * HOST memmove hands the 0x58-byte result back.  A failed lookup zeroes the
  * output and answers -1.  The descriptor's fourth word is a relocation into
  * .data, so ours builds the descriptor with its own .data address rather than
  * reading retail's unrelocated pointer out of .text. */
 static uint32_t FS98_STDCALL nav_describe(uint32_t which, uint32_t arg2, uint32_t out)
 {
+    static const uint32_t table[10][4] = {
+        { 3, 3, 6, 0x20807248 }, { 1, 1, 2, 0x20807260 }, { 1, 1, 2, 0x20807262 }, { 1, 0, 0, 0x20807264 }, { 1, 1, 2, 0x20807268 },
+        { 1, 1, 2, 0x20807266 }, { 5, 0, 0, 0x2080726a }, { 0x18, 0, 0, 0x20807270 }, { 8, 0, 0, 0x20807289 }, { 1, 1, 2, 0x20807292 },
+    };
     uint8_t buf[0x190];
-    uint32_t desc[4];
+    uint32_t desc[10][4], i;
 
     if (CALL(FE, 0x2c, f3)(which, arg2, ADDR(buf)) == 0) {
         H_MEMSET(out, 0, 0x58);
         return 0xffffffffu;
     }
-    desc[0] = 3;
-    desc[1] = 3;
-    desc[2] = 6;
-    desc[3] = V(0x20807248);
+    for (i = 0; i < 10; i++) {
+        desc[i][0] = table[i][0];
+        desc[i][1] = table[i][1];
+        desc[i][2] = table[i][2];
+        desc[i][3] = V(table[i][3]);
+    }
     CALL(UTIL, 0x88, f3)(ADDR(buf), ADDR(desc), 0xa);
     return H_MEMMOVE(out, V(0x20807248), 0x58);
 }

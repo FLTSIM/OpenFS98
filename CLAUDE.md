@@ -79,7 +79,7 @@ make main-breaks SUITE=nav           # its breaks -> 14, 13 caught, 1 proven equ
 make maindiff-run SUITE=navio        # MAIN slice 4, the nav read-outs (+0x78,+0x80) -> 20000 scenarios, 0 differ (~3 min)
 make main-breaks SUITE=navio         # its breaks -> 12, all caught (~5 min)
 make maindiff-run SUITE=navdesc      # MAIN slice 5, the station descriptor (+0x7c) -> 20000 scenarios, 0 differ (~3 min)
-make main-breaks SUITE=navdesc       # its breaks -> 9, all caught (~4 min)
+make main-breaks SUITE=navdesc       # its breaks -> 12, all caught (~5 min)
 make maindiff-run SUITE=season       # MAIN slice 6, the season/zone/clock (+0x74) -> 20000 scenarios, 0 differ (~3 min)
 make main-breaks SUITE=season        # its breaks -> 24, 23 caught, 1 proven equivalent (~10 min)
 make maindiff-run SUITE=clock        # MAIN slice 7, the clock as digits (+0xa4) -> 20000 scenarios, 0 differ (~3 min)
@@ -136,7 +136,30 @@ make maindiff-run SUITE=kneeboard    # MAIN slice 32, the kneeboard -> 20000 sce
 make main-breaks SUITE=kneeboard     # its breaks -> 61, all caught (~45 min)
 make maindiff-run SUITE=session      # MAIN slice 33, +0x28 and +0x2c -> 20000 scenarios, 0 differ (~15 min)
 make main-breaks SUITE=session       # its breaks -> 53, all caught (~65 min)
+make maindiff-run SUITE=aircraft # MAIN slice 34, Select Aircraft and the kneeboard pages -> 20000 scenarios, 0 differ
+make main-breaks SUITE=aircraft # its breaks -> 39, 38 caught, 1 proven equivalent
+make maindiff-run SUITE=clockdlg # MAIN slice 35, Time and Season -> 20000 scenarios, 0 differ
+make main-breaks SUITE=clockdlg # its breaks -> 85, 84 caught, 1 proven equivalent
+make maindiff-run SUITE=engines  # MAIN slice 36, the aircraft's engines -> 20000 scenarios, 0 differ
+make main-breaks SUITE=engines  # its breaks -> 78, 66 caught, 12 proven equivalent
+make maindiff-run SUITE=limits   # MAIN slice 37, the aircraft's limits -> 20000 scenarios, 0 differ
+make main-breaks SUITE=limits   # its breaks -> 63, 55 caught, 8 proven equivalent
+make maindiff-run SUITE=areas    # MAIN slice 38, the weather areas -> 20000 scenarios, 0 differ
+make main-breaks SUITE=areas    # its breaks -> 67, 62 caught, 5 proven equivalent
+make maindiff-run SUITE=prefdlg  # MAIN slice 39, General Preferences -> 20000 scenarios, 0 differ
+make main-breaks SUITE=prefdlg  # its breaks -> 69, 68 caught, 1 proven equivalent
+make maindiff-run SUITE=viewdlg  # MAIN slice 40, View Options -> 20000 scenarios, 0 differ
+make main-breaks SUITE=viewdlg  # its breaks -> 69, 66 caught, 3 proven equivalent
+make maindiff-run SUITE=logbook  # MAIN slice 41, the logbook and +0x90 -> 20000 scenarios, 0 differ
+make main-breaks SUITE=logbook  # its breaks -> 111, 91 caught, 20 missed
+make maindiff-run SUITE=wxdlg    # MAIN slice 42, the weather dialogs -> 20000 scenarios, 0 differ
+make main-breaks SUITE=wxdlg    # its breaks -> 98, 88 caught, 4 proven equivalent, 6 missed
+make maindiff-run SUITE=radiodlg # MAIN slice 43, the radios dialog -> 20000 scenarios, 0 differ
+make main-breaks SUITE=radiodlg # its breaks -> 118, 117 caught, 1 missed
+make maindiff-run SUITE=create   # MAIN slice 44, Create a Flight -> 20000 scenarios, 0 differ
+make main-breaks SUITE=create   # its breaks -> 98, 96 caught, 1 proven equivalent, 1 missed
 make main-smoke                      # boots the game on our MAIN.DLL, then restores the previous DLL byte for byte
+make main-dialogs                    # all 16 menu commands in the real game, retail against ours -> same controls, 11 of 16 pictures identical, PASS (~20 min)
 make hostdiff-run N=20000            # HOST (id 1, FLTSIM98.EXE) slices 1-28, all 194 services, real files in bin/difftest/hostfs -> 0 differ (~11 min)
 make host-breaks                     # HOST broken on purpose -> 610 breaks, 580 caught, 26 proven equivalent, 4 rare display paths missed at N=2000 (~6 h)
 make mpchatdiff-run      # whole-module MPCHAT, the chat window -> 20000 scenarios, 0 differ (~20 s)
@@ -338,14 +361,14 @@ x87 precision the game runs G3D under is not established; a native build
 has to set `g3d_mesh_precision` to match. MULTIP, PANELS
 (docs/modules/panels.md) and **MPCHAT are done**; MPCHAT, the chat window,
 is verified against a model of the window system hooked into its import
-table (docs/modules/mpchat.md). **MAIN is in progress**, a slice at a time behind
-`maindiff`'s suites, as MULTIP was; slices 1-27 are verified (among them situation
+table (docs/modules/mpchat.md). **MAIN is done**, a slice at a time behind
+`maindiff`'s suites, as MULTIP was; slices 1-44 are verified, which is the whole module (among them situation
 records, the assembly situation reader and writer, the nav services
 `+0x70`/`+0x78`/`+0x7c`/`+0x80` -- range and bearing, the read-outs and the
 station descriptor -- `+0x74`, the season, zone and clock, `+0xa4`, the clock
 as digits, `+0xc8`, the view cycler, `+0x30`/`+0x34`, the analysis menu
 greying and enabling, `+0x8c`, an object slot release, and `+0x1c`, the
-latitude clamp; the full list is in main.md's table), the rest to go. See
+latitude clamp; the full list is in main.md's table). It is not yet in `MODULES`. See
 [docs/modules/main.md](docs/modules/main.md). The CHAIN ecx fix is done: OpenFS98's CHAIN enters callbacks with
 all of retail's registers and returns its ecx/edx, and `chaindiff` now
 compares them (see [docs/modules/chain.md](docs/modules/chain.md)).

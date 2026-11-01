@@ -25,9 +25,10 @@ static uint32_t weather_compare_values(uint32_t x, uint32_t y)
 
     if (x == 0 || y == 0)
         return 0;
-    a = y;
+    /* a text NUMERIC refuses leaves the other's address here, as retail's process holds it */
+    a = y - D < MAIN_IMAGE_SIZE ? y - D + MAIN_DATA_VA : y;
     N_GET(x, 0, ADDR(&a));
-    b = x;
+    b = x - D < MAIN_IMAGE_SIZE ? x - D + MAIN_DATA_VA : x;
     N_GET(y, 0, ADDR(&b));
     return (a & 0xffff) - (b & 0xffff);
 }
@@ -58,18 +59,15 @@ static uint32_t FS98_STDCALL weather_compare_temps(uint32_t a, uint32_t b)
 static void weather_sort_clouds(uint32_t p)
 {
     uint32_t edi = p + 8, esi, ebp = 0, n = 1, again = 0;
-    uint32_t a12, a14, a16, a18, a1c, i;
+    uint32_t a12 = 0, a14 = 0, a16 = 0, a18 = 0, a1c = 0, i;    /* held from pass to pass, as a text NUMERIC refuses leaves them */
 
     HOST_(0x22c, f4)(edi, 3, 0x64, ADDR(weather_compare_clouds));
     do {
         if (M32(edi + 0x60) == 1) {
-            a12 = 0;
             N_GET(M32(edi + 4), 0x38, ADDR(&a12));
-            a18 = 0;
             N_GET(M32(edi + 0x18), 0x38, ADDR(&a18));
             esi = edi;
             if (ebp == 0 && M32(p + 0x140) == 1) {
-                a1c = 0;
                 N_GET(M32(p + 0x148), 0x38, ADDR(&a1c));
                 if ((uint16_t)a18 <= (uint16_t)a1c) {
                     M32(edi + 0x60) = ebp;
@@ -87,10 +85,8 @@ static void weather_sort_clouds(uint32_t p)
 
                     esi += 0x64;
                     if (d == 1) {
-                        a14 = 0;
                         N_GET(M32(esi + 4), 0x38, ADDR(&a14));
                         if ((uint16_t)a14 < (uint16_t)a18) {
-                            a16 = 0;
                             N_GET(M32(esi + 0x18), 0x38, ADDR(&a16));
                             if ((uint16_t)a16 <= (uint16_t)a18) {
                                 M32(esi + 0x60) = 0;

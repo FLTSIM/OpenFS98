@@ -405,8 +405,7 @@ static uint32_t FS98_STDCALL clock_tick(uint32_t a, uint32_t b)
 
 /* --------------------------------- slice 33: start and shutdown ---------------- */
 
-/* The welcome dialog's buttons.  +0xdaa0 (0x1101, Create a flight) is still
- * pending. */
+/* The welcome dialog's buttons */
 static uint32_t FS98_STDCALL welcome_lesson(uint32_t a)
 {
     (void)a;
@@ -483,7 +482,7 @@ static uint32_t FS98_STDCALL welcome_lessons(uint32_t a)
 static uint32_t FS98_STDCALL welcome_create(uint32_t a)
 {
     (void)a;
-    cmd_pending(0xdaa0);
+    command_1101();
     return 0;
 }
 static uint32_t FS98_STDCALL welcome_multip(uint32_t a)

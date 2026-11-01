@@ -10,9 +10,8 @@
  * { command, handled, argument }, and the answer is whether a listener set
  * handled: that is how the other modules' menus are reached.
  *
- * MAIN's own handlers are done a batch at a time.  One not done yet goes through
- * cmd_pending, which faults on purpose; maindiff's `commands' suite does not
- * issue those commands and docs/modules/main.md lists them. */
+ * MAIN's own dialogs are verified in their own suites; maindiff's `commands' suite
+ * does not issue those commands. */
 
 #define ADVDRV_  M32(V(0x2080001c))
 #define ANALYSIS_ M32(V(0x20800024))
@@ -23,12 +22,19 @@
 #define PANELS_  M32(V(0x2080008c))
 #define WINDOW_  M10
 
-static void cmd_pending(uint32_t retail_text)
-{
-    *(volatile uint32_t *)(uintptr_t)0xdead0000u = retail_text;
-}
-
 static void welcome_cmd(void);
+static void kb_page(uint32_t page);
+static uint32_t command_1201(void);
+static uint32_t command_1301(void);
+static void command_1205(uint32_t id);
+static void command_1204(void);
+static void command_1307(void);
+static uint32_t command_1409(void);
+static uint32_t command_1502(void);
+static void command_1407(void);
+static uint32_t command_1306(void);
+static uint32_t command_1202(void);
+static uint32_t command_1101(void);
 
 /* .text+0xae50: the 0x80000 range; 0x80001 does nothing, as the others do. */
 static void cmd_range8(uint32_t command)
@@ -59,7 +65,7 @@ static uint32_t cmd_other(uint32_t command, uint32_t argument)
         return 1;
     }
     if (command >= 0x300 && command < 0x400) {
-        cmd_pending(0x18d0);
+        kb_page(command - 0x300);
         M32(G + 0x129c) = command - 0x300;
         return 1;
     }
@@ -88,7 +94,7 @@ static uint32_t FS98_STDCALL main_command(uint32_t command, uint32_t argument)
     if (command >= 0x80000 && command <= 0x8ffff)
         cmd_range8(command);
     switch (command) {
-    case 0x1101: cmd_pending(0xdaa0); break;
+    case 0x1101: command_1101(); break;
     case 0x1102: flight_open(); break;
     case 0x1103: H_POST(0x10037, 0); break;
     case 0x1104: H_POST(0x10027, 0); break;
@@ -98,19 +104,19 @@ static uint32_t FS98_STDCALL main_command(uint32_t command, uint32_t argument)
     case 0x1109: welcome_cmd(); break;
     case 0x1180: CALL(MULTIP_, 0x18, f0)(); break;
     case 0x1181: CALL(MULTIP_, 0x1c, f0)(); break;
-    case 0x1201: cmd_pending(0x110); break;
-    case 0x1202: cmd_pending(0x13870); break;
+    case 0x1201: command_1201(); break;
+    case 0x1202: command_1202(); break;
     case 0x1203: command_1203(); break;
-    case 0x1204: cmd_pending(0x2ee0); break;
-    case 0x1205: cmd_pending(0x3bf0); break;
+    case 0x1204: command_1204(); break;
+    case 0x1205: command_1205(0x1206); break;
     case 0x1206: H_POST(0x1002d, 0); break;
     case 0x1207: H_POST(0x10015, 0); break;
-    case 0x1301: cmd_pending(0x1b20); break;
+    case 0x1301: command_1301(); break;
     case 0x1303: CALL(FACIL_, 0x28, f0)(); break;
     case 0x1304: CALL(FACIL_, 0x24, f1)(0); break;
     case 0x1305: CALL(FACIL_, 0x30, f0)(); break;
-    case 0x1306: cmd_pending(0x19fb0); break;
-    case 0x1307: cmd_pending(0x5010); break;
+    case 0x1306: command_1306(); break;
+    case 0x1307: command_1307(); break;
     case 0x1308: command_1308(); break;
     case 0x1309: command_1309(); break;
     case 0x130a: CALL(FE, 0x78, f0)(); break;
@@ -124,9 +130,9 @@ static uint32_t FS98_STDCALL main_command(uint32_t command, uint32_t argument)
         break;
     case 0x1405: CALL(ANALYSIS_, 0x34, f0)(); break;
     case 0x1406: H_POST(0x10017, 0); break;
-    case 0x1407: cmd_pending(0xf3d0); break;
+    case 0x1407: command_1407(); break;
     case 0x1408: H_POST(0x10010, 0); break;
-    case 0x1409: cmd_pending(0x14ce0); break;
+    case 0x1409: command_1409(); break;
     case 0x140a: CALL(CONTROLS_, 0x58, f0)(); break;
     case 0x1421: case 0x1422: case 0x1423: case 0x1424: case 0x1425:
     case 0x1426: case 0x1427: case 0x1428: case 0x1429: case 0x142a:
@@ -137,7 +143,7 @@ static uint32_t FS98_STDCALL main_command(uint32_t command, uint32_t argument)
         M32(gp + 0x1240) = M32(gp + 0x1240) == 0;
         HOST_(0x48, f1)(M32(G + 0x1240));
         break;
-    case 0x1502: cmd_pending(0x16e40); break;
+    case 0x1502: command_1502(); break;
     case 0x1506: H_POST(0x10011, 0); break;
     case 0x1507: H_POST(0x2000f, M32(G + 0x119c)); break;
     case 0x1508: H_POST(0x10120, 0); break;

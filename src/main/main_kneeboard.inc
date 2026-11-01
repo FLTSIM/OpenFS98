@@ -364,6 +364,14 @@ static uint32_t FS98_STDCALL kb_listener(uint32_t message, uint32_t arg)
     return 0;
 }
 
+/* .text+0x18d0: a page from the menu. */
+static void kb_page(uint32_t page)
+{
+    KB_PAGE = page;
+    kb_draw(page);
+    kb_show(1);
+}
+
 /* .text+0x1590: the close box. */
 static uint32_t FS98_STDCALL kb_close(uint32_t a, uint32_t b)
 {

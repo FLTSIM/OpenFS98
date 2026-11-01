@@ -2089,7 +2089,7 @@ establish a full source-versus-retail comparison.
 | Browser | Init `0x22343160`, update/capture `0x22343420/0x22343480`, Back/Join `0x22343000/0x22343060`, virtual wrappers `0x223430d0/0x223430e0`, Details/Settings `0x22343110/0x22343150`, selection/rows `0x22343510/0x22343570`, idle/observer/refresh `0x22343780/0x223437a0/0x22343850`, activation/show/timer `0x223438b0/0x223438d0/0x22343910`. The completed Browser audit and timer reentry cases are above. | Keep its stated allocation, insertion, invalid-pointer, abnormal reentry, refresh-result and physical-input limits; initialization and wrappers do not have an exhaustive focused audit. Do not repeat the completed investigation. |
 | Session Settings | Init `0x22343de0`, update/save `0x223440f0/0x223442a0`, OK/Cancel `0x22343d90/0x22343dc0`, callback handlers `0x22343d60/0x22343d70/0x22343d80`. Twelve block patterns, callback order, six check states, visibility and mutation checks are paired. | There is no documented exhaustive source-to-retail audit of all independent checkbox words and noncanonical values, initialization order, or callback reentry; normal scenarios and the four settings mutations cover only their stated cases. |
 | Session Details | Init `0x223448c0`, update/capture `0x22344d10/0x22344f00`, validate/error `0x223450c0/0x22345020`, OK/Cancel/Remove `0x22344850/0x223448a0/0x22344830`, their map thunks `0x22345120/0x22345130/0x22345140`, refresh/selection `0x22344fa0/0x22344fd0`. The 20 paired scripts cover selected focus, capacity, refresh, selection and teardown cases. | A focused source-to-retail audit remains for independent statuses and callback results, edit-buffer boundaries, list count/selection and reentrant mutation/order, including refresh negative returns. Existing cases are meaningful but do not establish every branch or actual owner integration. |
-| Help and context messages | All seven maps contain `WM_HELP` and `WM_CONTEXTMENU`; their 14 local targets and a confirmed source discrepancy are listed below. | No paired `WinHelpA` argument, return or stack/dispatch coverage is documented. This is an implementation gap independent of DirectPlay and MFC cleanup. |
+| Help and context messages | All seven maps contain `WM_HELP` and `WM_CONTEXTMENU`; their 14 local targets are listed below. The paired message-map, payload and return audit is recorded in the help follow-up. | An actual WinHelp viewer and invalid help-info pointers are not exercised; the fixture intercepts the service call. |
 
 Shared 0x110a helpers `0x22341620`, `0x223416a0`, `0x223417b0`,
 `0x22341710`, `0x22341760`, and callback adapters `0x223417f0/0x22341800`
@@ -2118,11 +2118,11 @@ mapping tables are Intro `0x22346180/0x223461a0` (`0x22348ea8`), Choice
 `0x22344f60/0x22344f80` (`0x223489e0`). All retail pairs call `WinHelpA`
 with `fs98.hlp` and their table: `WM_HELP` uses the HWND at help-info `+0x0c`
 and command `0x0c`; context uses the supplied HWND and command `0x0a`, then
-returns 1. Both retail entries end in `ret 8`. The replacement binds all
-seven pairs to a no-op help function and a context function using
-`HELP_CONTEXTPOPUP` with data 0 and returning the API result; its help
-prototype also accepts only one stack argument. These differences are static
-evidence, not a claim that an actual help viewer was run.
+returns 1. Both retail entries end in `ret 8`. Before the help follow-up,
+the replacement bound all seven pairs to a no-op help function and a context
+function using `HELP_CONTEXTPOPUP` with data 0 and returning the API result;
+its help prototype also accepted only one stack argument. Those differences
+are now corrected and checked by the paired fixture below.
 
 **Previous next-family proposal, now completed:** Choice error `0x22345a40` is one local target. It is
 smaller than a page-wide audit or the 14 help targets. The isolated no-op
@@ -2204,9 +2204,8 @@ and failed the fixture's retail preconditions; it is not counted as evidence of
 a binary difference. The normal full baseline uses the modeled display hook,
 while the real-alert variant is explicitly selected in focused runs.
 
-The seven dialogs' `WM_HELP`/`WM_CONTEXTMENU` targets listed above remain the
-next separate implementation and differential family. Their known source
-mismatches are not addressed by the Choice change. DirectPlay integration,
+The seven dialogs' `WM_HELP`/`WM_CONTEXTMENU` targets listed above were the
+next separate family and are addressed in the help follow-up below. DirectPlay integration,
 genuine MFC partial-Create uncertainty, the unexplained historical timeout,
 the private-prefix boundary and whole-module acceptance limits remain as
 previously documented.
@@ -2228,3 +2227,61 @@ The complete run output is `bin/mpdialog-diff/choice-audit/full-suite.log`.
 This does not invalidate the already-passed baseline or the three Choice
 mutations, and it does not explain the prior historical teardown stall. No
 actual HOST/MULTIP integration was retried. `git diff --check` passed.
+
+### Browser mutation rerun and help/context follow-up
+
+The earlier `flow-browser-accept-return` timeout is preserved in
+`bin/mpdialog-diff/choice-audit/full-suite.log`. A fresh private-prefix isolated
+rerun completed, reported a controlled case-3 difference, and deinitialized
+and unloaded both modules. Its log is
+`bin/mpdialog-diff/choice-audit/browser-accept-rerun.log`: with the modeled
+accept callback returning nonzero, retail records result 1 and closes the
+flow, while the mutant records 0 and remains open. This completes and detects
+the intended difference; it does not explain the earlier timeout.
+
+The help/context source differences listed in the inventory are fixed. The
+replacement binds each of the seven message maps to handlers carrying that
+dialog's own zero-terminated control-ID/context-ID table, with the same table
+contents and ordering as retail. Both entries use MFC message-map signature
+`0x0a` and two stack arguments. `WM_HELP` calls `WinHelpA` once with the
+`HELPINFO` item HWND, `fs98.hlp`, `HELP_WM_HELP` (`0x0c`) and the corresponding
+mapping table, then propagates the service result. `WM_CONTEXTMENU` calls it
+once with the message's HWND, the same file, `HELP_CONTEXTMENU` (`0x0a`) and
+the same per-dialog table, then returns 1 regardless of the service result.
+The replacement uses the raw table entries, including unusual retail values;
+it does not reinterpret them as template IDs.
+
+The isolated paired fixture checks all 14 message-map entries and retail
+handler addresses, signature, module ownership and zero map selectors. It
+sends both messages through MFC for each of the seven created dialogs, wraps
+each DLL's USER32 `WinHelpA` import, and compares exactly one service call per
+message, HWND, filename, command, complete terminated table and message
+return. Service returns 0 and 7 are injected independently for both message
+kinds. Thus the tests verify dispatch and call/return ordering, but they do not
+start a help viewer or claim that 7 is a naturally observed WinHelp result.
+The two-cycle baseline includes these comparisons. The targeted mutations
+exercise incorrect dialog routing, command, HWND, mapping-table word, context
+return and context-table payload.
+
+The actual DirectPlay owner paths, genuine MFC partial-Create cleanup and
+historical timeout remain subject to the existing acceptance limits. The
+replacement, the private prefixes, and the evidence remain isolated; no game
+installation or shared owner-module wiring was changed by this audit.
+
+Validation: `make -f tools/mpdialog.mk mpdialog
+bin/mpdialog-diff/mpdialoguidiff.exe` built both binaries. The final
+`bash tools/run_mpdialogdiff.sh --ui-breaks` run passed the full two-cycle
+24/24 flow, 24/24 settings and 20/20 details baseline, all seven child-tree
+and render captures, 14/14 stable repeats, and the seven-dialog help comparison.
+It caught all 46 mutation checks, including all six help checks and the
+Browser accept-return mutation; the log is
+`bin/mpdialog-diff/help-audit/full-suite.log`.
+
+The preceding complete-suite attempts are retained: one stopped when
+`flow-lifetime-order` timed out at replacement Choice-page destruction
+(`help-audit/suite-lifetime-timeout.log`); another stopped when
+`flow-browser-details-fields` timed out before a lifetime checkpoint
+(`help-audit/suite-browser-details-timeout.log`). Neither timeout counted as a
+caught mutation, and the later completed run does not establish their cause.
+The previously timed-out Browser accept-return mutation completed both in the
+separate rerun and in the final full suite. `git diff --check` passed.

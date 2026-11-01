@@ -65,7 +65,7 @@ BASE_MPCHAT := 0x20840000
 BASE_MAIN   := 0x207e0000
 BASE_HOST   := 0x41000000
 
-MODULES := ACONTAIN ADVDRV ANALYSIS ATC BOOSTER CHAIN CONTROLS DEMO DYNAMIC FACIL FE G3D GLOBAL LANDME MPCHAT MULTIP NUMERIC PANELS REALITY SLEW SOUND UTIL WEATHERM WINDOW WINMSG
+MODULES := ACONTAIN ADVDRV ANALYSIS ATC BOOSTER CHAIN CONTROLS DEMO DYNAMIC FACIL FE G3D GLOBAL LANDME MAIN MPCHAT MULTIP NUMERIC PANELS REALITY SLEW SOUND UTIL WEATHERM WINDOW WINMSG
 ENGLISH_MODULES := WORLD
 ALL_MODULES := $(MODULES) $(ENGLISH_MODULES)
 
@@ -430,8 +430,7 @@ $(BIN)/analysis.res: src/analysis/analysis.rc
 src/analysis/analysis_data.inc src/analysis/analysis_rdata.inc: $(ORIG)/Modules/ANALYSIS.DLL tools/gen_analysis_data.py
 	@python3 tools/gen_analysis_data.py $< src/analysis/analysis_data.inc src/analysis/analysis_rdata.inc
 
-# MAIN, the sim's controller: MSVC C and assembly.  In progress, a slice at a
-# time (docs/modules/main.md); not in MODULES until every slot is done.
+# MAIN, the sim's controller: MSVC C and assembly (docs/modules/main.md).
 MAIN_SOURCES := src/main/main.c src/main/main_records.inc src/main/main_situation.inc src/main/main_nav.inc src/main/main_season.inc src/main/main_sun.inc src/main/main_eye.inc src/main/main_band.inc src/main/main_flights.inc src/main/main_prefs.inc src/main/main_clouds.inc src/main/main_natives.inc src/main/main_spot.inc src/main/main_frame.inc src/main/main_tick.inc src/main/main_step.inc src/main/main_dialogs.inc src/main/main_commands.inc src/main/main_radios.inc src/main/main_weather.inc src/main/main_kneeboard.inc src/main/main_aircraft.inc src/main/main_clockdlg.inc src/main/main_engines.inc src/main/main_limits.inc src/main/main_areas.inc src/main/main_prefdlg.inc src/main/main_viewdlg.inc src/main/main_logbook.inc src/main/main_wxdlg.inc src/main/main_radiodlg.inc src/main/main_create.inc src/main/main_start.inc src/main/main_text_tail.inc
 $(BIN)/MAIN.DLL: $(MAIN_SOURCES) src/main/main.def src/main/main_data.inc \
                  src/main/main_pointers.inc $(BIN)/main.res
@@ -950,8 +949,7 @@ multipdiff-run: multipdiff
 multip-smoke: all $(BIN)/MULTIP.DLL
 	@tools/multip_smoke.sh
 
-# Boot the game with the rebuilt MAIN, then restore the previous DLL.  MAIN is
-# not in MODULES yet (docs/modules/main.md).
+# Boot the game with the rebuilt MAIN, then restore the previous DLL.
 main-smoke: all $(BIN)/MAIN.DLL
 	@tools/main_smoke.sh
 

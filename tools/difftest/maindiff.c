@@ -1894,6 +1894,13 @@ static void wx_good(uint32_t desc)
         snprintf(*(char **)(t + 4), 7, "%u", 500 + i * 1000);
         snprintf(*(char **)(t + 0x18), 7, "10");
     }
+    /* one refused: its limits come from the layer before. Only where the check looks at it:
+     * passed over, .text+0x1ce70 reads it and compares what its stack held */
+    if (rnd_n(3) == 0 && *(uint32_t *)(cur->image + 0x7b54) == 0 && *(uint32_t *)(cur->image + 0x7b58) == 0) {
+        for (i = 0; i < 4; i++)
+            *(uint32_t *)(b + 0x2f8 + i * 0x2c + 0x28) = 1;
+        snprintf(*(char **)(b + 0x2f8 + (1 + rnd_n(2)) * 0x2c + 4), 7, "x");
+    }
     snprintf(*(char **)(misc + 0xc4), 7, "5");
     snprintf(*(char **)(misc + 0xe0), 7, "29.92");
     snprintf(*(char **)(misc + 0xf4), 7, "1013.2");
@@ -2206,15 +2213,19 @@ static uint32_t STDCALL h_dialog(uint32_t id, uint32_t desc)
         uint8_t *b = (uint8_t *)(uintptr_t)desc;
         static const uint16_t cols[3] = { 0x9c, 0xb0, 0xc4 };
         uint32_t k;
-        static const char *const nums[] = { "", "0", "1.5", " 12.3", "99.9", "999.9", "1000", ".5", "1.", "1..2", "12x", "000.0", " .", "99999", "   ", "2.75", "12:5", "1:", "1 2", "1234", "1234.5", "123.4", "12345", "999.", "0.0", "00.5", "001", "1000.0", "9999", "x"};
-        static const char *const dates[] = { "01-01-98", "12-31-99", "13-01-98", "02-29-96", "02-29-97", "04-31-98", "1-1-98", "", "02-30-96", "11-31-00", "09-31-98", "09-30-98", "01-32-98", "01-31-98", "20-01-98", "1x-01-98", "01-40-98", "01/01/98", "01-01-9x", "04-30-98"};
+        static const char *const nums[] = { "", "0", "1.5", " 12.3", "99.9", "999.9", "1000", ".5", "1.", "1..2", "12x", "000.0", " .", "99999", "   ", "2.75", "12:5", "1:", "1 2", "1234", "1234.5", "123.4", "12345", "999.", "0.0", "00.5", "001", "1000.0", "9999", "x", "7", "123.45", "1234567", "100.0", "100", "12.345"};
+        static const char *const dates[] = { "01-01-98", "12-31-99", "13-01-98", "02-29-96", "02-29-97", "04-31-98", "1-1-98", "", "02-30-96", "11-31-00", "09-31-98", "09-30-98", "01-32-98", "01-31-98", "20-01-98", "1x-01-98", "01-40-98", "01/01/98", "01-01-9x", "04-30-98", "01-01/98"};
 
         put(" [%.8s|%.16s|%.24s|%.6s|%.6s|%.6s|%.6s]", *(char **)(b + 0x60), *(char **)(b + 0x74), *(char **)(b + 0x88), *(char **)(b + 0x9c), *(char **)(b + 0xb0), *(char **)(b + 0xc4), *(char **)(b + 0xd8));
         put(" sel=%u", *(uint32_t *)(b + 0xf4));
         *(uint32_t *)(b + 0x54) = rnd_n(4) ? 1 : 0;
         if (rnd_n(2))
             strcpy(*(char **)(b + 0x60), dates[rnd_n(sizeof dates / sizeof dates[0])]);
-        strcpy(*(char **)(b + 0x74), rnd_n(2) ? "CESSNA" : "737");
+        {
+            static const char *const models[] = { "CESSNA", "737", "Plane1 Long Mode", "Plane1 Long Model Name" };
+
+            strcpy(*(char **)(b + 0x74), models[rnd_n(4)]);
+        }
         for (k = 0; k < 3; k++)
             if (rnd_n(2))
                 strcpy(*(char **)(b + cols[k]), nums[rnd_n(sizeof nums / sizeof nums[0])]);
@@ -2227,17 +2238,37 @@ static uint32_t STDCALL h_dialog(uint32_t id, uint32_t desc)
         uint32_t k;
 
         for (k = rnd_n(5); k-- != 0; ) {
-            uint32_t op = rnd_n(10), books = *(uint32_t *)(b + 0x1c), rows = *(uint32_t *)(b + 0x48);
-            uint32_t i;
+            static const uint8_t often[4] = { 2, 3, 6, 7 };
+            uint32_t op = rnd_n(2) ? rnd_n(10) : often[rnd_n(4)], books = *(uint32_t *)(b + 0x1c), rows = *(uint32_t *)(b + 0x48);
+            uint32_t i, j;
 
             if (cur->image[0x3c86] != 0)
                 break;
             i = rnd_n(4) ? rnd_n((op >= 5 && op <= 7 ? rows : books) + 1) : rnd_n(4);
 
-            if (op == 8)
-                strcpy(*(char **)(b + 0xc), rnd_n(2) ? "New title" : "");
+            if (op == 8) {
+                static const char *const titles[] = { "New title", "", "A title of thirty characters..", "A title of thirty-one characters"};
+
+                strcpy(*(char **)(b + 0xc), titles[rnd_n(4)]);
+            }
+            /* the selection past the rows, as deleting a longer logbook leaves it */
+            if (op == 6 && rows != 0 && rnd_n(4) == 0)
+                *(uint32_t *)(b + 0x4c) = rows + rnd_n(2);
             put(" button(%u,%u)=%#x", op, i, ((s3)(uintptr_t)*(uint32_t *)(b + 0x150))(op, i, desc));
             put(" %u/%u %u/%u", *(uint32_t *)(b + 0x20), *(uint32_t *)(b + 0x1c), *(uint32_t *)(b + 0x4c), *(uint32_t *)(b + 0x48));
+            rows = *(uint32_t *)(b + 0x48);
+            if (*(uint32_t *)(b + 0x4c) > rows)
+                *(uint32_t *)(b + 0x4c) = 0;
+            for (j = 0; j < rows && j < 16; j++) {         /* the rows as held: the file keeps only their columns */
+                const uint8_t *row = (const uint8_t *)(uintptr_t)(*(uint32_t *)(b + 0x50) + j * 0x4f);
+                uint32_t h = 0x811c9dc5u, q;
+
+                if (IsBadReadPtr(row, 0x4f))
+                    break;
+                for (q = 0; q < 0x4f; q++)
+                    h = (h ^ row[q]) * 0x01000193u;
+                put(" r%x", h);
+            }
         }
         return 0;
     }
@@ -2263,6 +2294,8 @@ static uint32_t STDCALL h_dialog(uint32_t id, uint32_t desc)
         uint8_t *b = (uint8_t *)(uintptr_t)desc;
         uint32_t k;
 
+        for (k = 0; k < 3; k++)
+            put(" top%x", *(uint16_t *)(b + 0x24 + k * 0x58 + 0x3c));
         for (k = rnd_n(4); k-- != 0; )
             wx_edit(desc);
         for (k = rnd_n(3); k-- != 0; ) {
@@ -2316,6 +2349,7 @@ static uint32_t STDCALL h_dialog(uint32_t id, uint32_t desc)
         return 0;
     }
     if (id == 0x1202) {                            /* the radios: frequencies at their edges, a check */
+        put(" 37e=%x", *(uint16_t *)(global + 0x37e));
         static const char *const adf[] = { "199", "200", "1699", "1699.9", "1700", "999", "1000", "1000.5", "99", "20000", "0999.5", "3a4", "12.5", "1.2", "", " 500 " };
         static const char *const nav[] = { "108.00", "117.95", "118.00", "111.10", "x", "", "122.50" };
         uint32_t b = desc, k;
@@ -3429,6 +3463,7 @@ static const char *string_of(uint32_t id)
     case 0x9100: return "N S E W";
     case 0xf461: return "No default flight";
     case 0xf462: return "Flight will not load";
+    case 0xf4b0: return "Logbook";
     }
     return NULL;
 }
@@ -5388,22 +5423,13 @@ static void run_dialog(uint32_t k)
         *(uint32_t *)(global + f[rnd_n(sizeof f / sizeof f[0])]) = rnd_n(4);
     }
     if (dialog_commands[k] == 0x1202) {            /* the radios' switches, off now and then */
+        *(uint16_t *)(global + 0x37e) = (uint16_t)rnd();
         *(uint32_t *)(global + 0x7a0) = rnd_n(2);
         *(uint32_t *)(global + 0x7a4) = rnd_n(2);
         *(uint32_t *)(global + 0x35c) = rnd_n(2);
         global[0xc58] = (uint8_t)rnd_n(2);
         global[0xc68] = (uint8_t)rnd_n(2);
         global[0xb70] = (uint8_t)rnd_n(2);
-    }
-    if (dialog_commands[k] == 0x1306 && rnd_n(2)) { /* temperatures a hundred apart, a wind's top unset */
-        uint32_t j;
-
-        global[0xf18] = 0;
-        *(uint16_t *)(global + 0xc18) = 2;
-        for (j = 0; j < 4; j++)
-            *(uint16_t *)(global + 0xf34 + j * 4) = (uint16_t)(3000 - j * (rnd_n(2) ? 100 : 99));
-        if (rnd_n(2))
-            *(uint16_t *)(global + 0xf1c + 4 + rnd_n(3) * 8) = 0xffff;
     }
     if ((dialog_commands[k] == 0x1301 || dialog_commands[k] == 0x1101) && rnd_n(8)) {  /* a date and a light it can open on */
         static const uint16_t light[] = { 1, 2, 4, 3 };
@@ -5457,7 +5483,8 @@ static void run_dialog(uint32_t k)
         global[0xf12] = (uint8_t)(rnd_n(4) ? 0 : 1);
         global[0xf13] = (uint8_t)(rnd_n(4) ? 0 : 1);
         *(uint16_t *)(global + 0xc18) = (uint16_t)rnd_n(2);
-        *(uint16_t *)(global + 0xf8c) = (uint16_t)rnd_n(450);  /* the visibility, across the summary's roundings */
+        /* the visibility, across the summary's roundings and past where it stops giving a number */
+        *(uint16_t *)(global + 0xf8c) = (uint16_t)(rnd_n(8) ? rnd_n(450) : 3900 + rnd_n(300));
         for (i = 0xf1c; i < 0xf70; i += 2)
             *(uint16_t *)(global + i) = (uint16_t)(rnd_n(2) ? rnd_n(0x200) : rnd());
         for (i = 0xf1c + 2; i < 0xf1c + 0x12; i += 6)
@@ -5467,10 +5494,17 @@ static void run_dialog(uint32_t k)
             *(uint16_t *)(global + 0xf4c + height[i]) = (uint16_t)rnd_n(0x2000);
             *(uint16_t *)(global + 0x1034 + height[i]) = (uint16_t)rnd_n(0x2000);
         }
+        if (rnd_n(3) == 0) {                       /* no top cloud to begin with */
+            *(uint16_t *)(global + 0xf4c + 0x24) = 0;
+            *(uint16_t *)(global + 0x1034 + 0x24) = 0;
+        }
         for (i = 0; i < 4; i++) {                  /* cloud cover NUMERIC reads back: refused, .text+0x1a010 compares its stack */
             static const uint8_t cover[4] = { 0x1c, 0x10, 4, 0x26 };
-            *(uint16_t *)(global + 0xf4c + cover[i]) = (uint16_t)rnd_n(0xc8);
-            *(uint16_t *)(global + 0x1034 + cover[i]) = (uint16_t)rnd_n(0xc8);
+            static const uint16_t words[4] = { 0, 8, 20, 35 };  /* .data+0x79a8: the simple dialog's steps */
+            uint16_t v = (uint16_t)(rnd_n(2) ? words[rnd_n(4)] : rnd_n(0xc8));
+
+            *(uint16_t *)(global + 0xf4c + cover[i]) = v;
+            *(uint16_t *)(global + 0x1034 + cover[i]) = v;
         }
         for (i = 0; i < 8; i += 2) {               /* temperature layers: heights NUMERIC can read back, or absent;
                                                     * refused, retail's lift would compare what its stack held */
@@ -5478,6 +5512,21 @@ static void run_dialog(uint32_t k)
             *(uint16_t *)(global + 0xf34 + i * 2) = v;
             *(uint16_t *)(global + 0x101c + i * 2) = v;
         }
+        if (rnd_n(2)) {                            /* temperatures a hundred apart, in metres so that the text is the value */
+            static const int16_t apart[6] = { 100, 99, 101, -100, -99, -101 };
+            int32_t d = apart[rnd_n(6)];
+
+            *(uint16_t *)(global + 0xc18) = 2;
+            for (i = 0; i < 4; i++) {
+                *(uint16_t *)(global + 0xf34 + i * 4) = (uint16_t)(1000 + (int32_t)i * d);
+                *(uint16_t *)(global + 0x101c + i * 4) = (uint16_t)(1000 + (int32_t)i * d);
+            }
+        }
+        for (i = 0; i < 3; i++)                    /* a wind's top unset */
+            if (rnd_n(3) == 0) {
+                *(uint16_t *)(global + 0xf1c + 4 + i * 8) = 0xffff;
+                *(uint16_t *)(global + 0x1004 + 4 + i * 8) = 0xffff;
+            }
         for (i = 0; i < 3; i++) {                  /* each row's wind types, an index into a table of 11 */
             *(uint16_t *)(global + 0xf7a + i * 6) = (uint16_t)rnd_n(11);
             *(uint16_t *)(global + 0x1062 + i * 6) = (uint16_t)rnd_n(11);
@@ -6012,7 +6061,12 @@ static void lb_file(const char *name)
     uint32_t at = 0, n = rnd_n(5), i;
     static const char *const dates[] = { "01-02-98", "12-25-97", "07-04-00", "03-15-99", "01-02-98" };
 
-    at += (uint32_t)sprintf((char *)f->bytes, rnd_n(3) ? "My Title %u\r\n\r\n" : "\r\n\r\n", rnd_n(100));
+    switch (rnd_n(6)) {                            /* .text+0x11480 gives up on a title at 30 characters */
+    case 0: at += (uint32_t)sprintf((char *)f->bytes, "\r\n\r\n"); break;
+    case 1: at += (uint32_t)sprintf((char *)f->bytes, "%-29s\r\n\r\n", "Title"); break;
+    case 2: at += (uint32_t)sprintf((char *)f->bytes, "%-30s\r\n\r\n", "Title"); break;
+    default: at += (uint32_t)sprintf((char *)f->bytes, "My Title %u\r\n\r\n", rnd_n(100)); break;
+    }
     at += (uint32_t)sprintf((char *)f->bytes + at, "%-80s\r\n\r\n", "  DATE");
     for (i = 0; i < n; i++)
         at += (uint32_t)sprintf((char *)f->bytes + at, "%-8s   %-16s %-24s %4u.%u %4u.%u %4u.%u %4u.%u\r\n", dates[rnd_n(5)], "CESSNA", "KSEA-KPDX",
@@ -6033,7 +6087,7 @@ static int lb_sscanf(const char *t, const char *fmt, int *a, int *b, int *c)
     return sscanf(t, fmt, a, b, c);
 }
 
-static uint32_t acft_n;
+static uint32_t acft_n, acft_long;                  /* the logbook cuts a model's name at 16 characters */
 static uint32_t STDCALL acft_1c(uint32_t *count, uint32_t *list);
 static uint32_t STDCALL acft_30(uint32_t key, uint32_t a, char *path, uint32_t n);
 
@@ -6043,6 +6097,7 @@ static void setup_logbook(void)
 
     open_makes = 1;
     stack_sources = 1;
+    acft_long = 1;
     {
         DWORD old;
         void **iat = (void **)(retail.image + 0x2f0fc);
@@ -6076,6 +6131,16 @@ static void op_logbook(void)
     static const uint16_t words[4] = { 0x230, 0x232, 0x234, 0x236 };
     uint32_t i;
 
+    /* asked directly, since .text+0xfd70 cannot be: with its flag set the reader does nothing */
+    if (rnd_n(4) == 0) {
+        uint32_t lines = 0x1111, n = 0x2222;
+        uint8_t was = cur->image[0x3c86];
+
+        cur->image[0x3c86] = 1;
+        ((s3)internal(0x207f2480, "main_lb_file_read@12"))((uint32_t)(uintptr_t)"LOG0", (uint32_t)(uintptr_t)&lines, (uint32_t)(uintptr_t)&n);
+        cur->image[0x3c86] = was;
+        put(" flagged-read %x %x", lines, n);
+    }
     /* a row without its CR left the read buffer flagged: the next read of a logbook would
      * not read, and .text+0xfd70 would go on with the counts its stack held */
     if (cur->image[0x3c86] != 0) {
@@ -6090,8 +6155,12 @@ static void op_logbook(void)
     *(uint16_t *)(global + 0x240) = (uint16_t)(1990 + rnd_n(16));
     for (i = 0; i < 4; i++)
         *(uint16_t *)(global + words[i]) = (uint16_t)(rnd_n(4) ? rnd_n(0x20) : rnd_n(0x800));
-    if (rnd_n(4) == 0)                             /* the logbook's limit on the hours it adds */
-        *(uint16_t *)(global + 0x236) = (uint16_t)(0x7ce + rnd_n(3));
+    if (rnd_n(4) == 0) {                           /* the logbook's limit on the hours it adds */
+        uint32_t sum = 0x7ce + rnd_n(3), day = rnd_n(sum + 1);
+
+        *(uint16_t *)(global + 0x230) = (uint16_t)day;
+        *(uint16_t *)(global + 0x234) = (uint16_t)(sum - day);
+    }
     if (rnd_n(2)) {
         run_dialog(10);
     } else {
@@ -6200,7 +6269,7 @@ static uint32_t STDCALL acft_1c(uint32_t *count, uint32_t *list)
     uint8_t *p = arena_get(0xa08 * (acft_n ? acft_n : 1));
 
     for (i = 0; i < acft_n; i++)
-        sprintf((char *)p + i * 0xa08, "Plane%u", i);
+        sprintf((char *)p + i * 0xa08, acft_long && (i & 1) ? "Plane%u Long Model Name" : "Plane%u", i);
     *count = acft_n;
     *list = (uint32_t)(uintptr_t)p;
     put(" list(%u)", acft_n);
@@ -6210,10 +6279,13 @@ static uint32_t STDCALL acft_30(uint32_t key, uint32_t a, char *path, uint32_t n
 {
     (void)key;
     put(" m23+0x30(%u,%#x)", a, n);
-    if (rnd_n(4) == 0)
+    if (rnd_n(4) == 0) {
         path[0] = 0;
-    else
-        sprintf(path, "plane%u", rnd_n(acft_n + 2));
+    } else {
+        uint32_t i = rnd_n(acft_n + 2);
+
+        sprintf(path, acft_long && (i & 1) ? "plane%u long model name" : "plane%u", i);
+    }
     return 1;
 }
 static uint32_t STDCALL acft_28(const char *rec)
@@ -6803,7 +6875,9 @@ static uint32_t STDCALL radios_fe_2c(uint32_t which, uint32_t pos, uint8_t *buf)
     put(" fe+0x2c(%#x)->%u", which & 0xffff, ok);
     for (i = 0; i < 0x190; i++)
         buf[i] = (uint8_t)rnd();
-    *(uint16_t *)(global + 0x37e) = (uint16_t)rnd();
+    i = rnd();                                     /* as FE: only a station it finds sets the word */
+    if (ok && (i & 0x10000))
+        *(uint16_t *)(global + 0x37e) = (uint16_t)i;
     return ok;
 }
 static uint32_t STDCALL radios_fe_28(uint32_t which, uint32_t cl, uint32_t pos, uint8_t *buf)

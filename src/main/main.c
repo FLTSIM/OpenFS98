@@ -491,6 +491,7 @@ __declspec(dllexport) uint32_t FS98_STDCALL main_start_countdown(uint32_t a, uin
 }
 __declspec(dllexport) void FS98_STDCALL main_clock_from_host(void) { clock_from_host(); }
 __declspec(dllexport) void FS98_STDCALL main_clock_logbook(void) { clock_logbook(); }
+__declspec(dllexport) void FS98_STDCALL main_lb_file_read(uint32_t name, uint32_t lines, uint32_t count) { lb_file_read(name, lines, count); }
 __declspec(dllexport) uint32_t FS98_STDCALL main_clock_tick(uint32_t a, uint32_t b)
 {
     return clock_tick(a, b);

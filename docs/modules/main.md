@@ -1,11 +1,10 @@
 # MAIN.DLL — module id 3
 
-**In progress.** MAIN is the sim's controller: situations and flights, the
+**Done, and in `MODULES`.** MAIN is the sim's controller: situations and flights, the
 default aircraft, clouds and smoke, the frame's order of business, and most
-of the menus' commands. It imports every other module, so it is last but
-HG2D, and it is being done the way MULTIP was: a slice at a time behind one
-harness, `tools/difftest/maindiff.c`, with a suite per slice. Until every
-slot is done MAIN is not in `MODULES` and is never installed.
+of the menus' commands. It imports every other module, so it was last but
+HG2D, and it was done the way MULTIP was: a slice at a time behind one
+harness, `tools/difftest/maindiff.c`, with a suite per slice.
 
 | slice | services | suite | status |
 | --- | --- | --- | --- |
@@ -49,17 +48,16 @@ slot is done MAIN is not in `MODULES` and is never installed.
 | 38, the weather areas | command `0x1307`, dialogs `0x1303`, `0x13050001` (MSVC C, `.text+0x5010`..`+0x6441`) | `areas` | verified: 20,000 scenarios, 0 differ; 62 of 67 breaks caught, 5 proven equivalent |
 | 39, General Preferences | command `0x1409`, dialogs `0x14090001`, `0x14090002` (MSVC C, `.text+0x14ce0`..`+0x15c7f`) | `prefdlg` | verified: 20,000 scenarios, 0 differ; 68 of 69 breaks caught, 1 proven equivalent |
 | 40, View Options | command `0x1502`, dialog `0x1508` (MSVC C, `.text+0x16e40`..`+0x17c97`) | `viewdlg` | verified: 20,000 scenarios, 0 differ; 66 of 69 breaks caught, 3 proven equivalent |
-| 41, the logbook | command `0x1407`, dialogs `0x14070001`, `0x14070002`, and `+0x90` (`.text+0xf2f0`..`+0x11cc9`) | `logbook` | verified: 20,000 scenarios, 0 differ; 91 of 111 breaks caught, 20 missed |
-| 42, the weather dialogs | command `0x1306`, dialogs `0x1302`, `0x13040001` (MSVC C, `.text+0x19fb0`..) | `wxdlg` | verified: 20,000 scenarios, 0 differ; 88 of 98 breaks caught, 4 proven equivalent, 6 missed |
-| 43, the radios dialog | command `0x1202` (MSVC C, `.text+0x13870`..`+0x14aa8`; `+0x17ca0`; assembly `+0x19dbc`) | `radiodlg` | verified: 20,000 scenarios, 0 differ; 117 of 118 breaks caught, 1 missed |
-| 44, Create a Flight | command `0x1101` (MSVC C, `.text+0xcaa0`, `+0xcef0`, `+0xd7a0`..`+0xda60`, `+0xdb60`, `+0x1a90`) | `create` | verified: 20,000 scenarios, 0 differ; 96 of 98 breaks caught, 1 proven equivalent, 1 missed |
+| 41, the logbook | command `0x1407`, dialogs `0x14070001`, `0x14070002`, and `+0x90` (`.text+0xf2f0`..`+0x11cc9`) | `logbook` | verified: 20,000 scenarios, 0 differ; 105 of 111 breaks caught, 6 proven equivalent |
+| 42, the weather dialogs | command `0x1306`, dialogs `0x1302`, `0x13040001` (MSVC C, `.text+0x19fb0`..) | `wxdlg` | verified: 20,000 scenarios, 0 differ; 94 of 99 breaks caught, 5 proven equivalent |
+| 43, the radios dialog | command `0x1202` (MSVC C, `.text+0x13870`..`+0x14aa8`; `+0x17ca0`; assembly `+0x19dbc`) | `radiodlg` | verified: 20,000 scenarios, 0 differ; 118 of 118 breaks caught |
+| 44, Create a Flight | command `0x1101` (MSVC C, `.text+0xcaa0`, `+0xcef0`, `+0xd7a0`..`+0xda60`, `+0xdb60`, `+0x1a90`) | `create` | verified: 20,000 scenarios, 0 differ; 97 of 98 breaks caught, 1 proven equivalent |
 
 **What is left**: nothing of the module. Every Linkage slot is set, `cmd_pending`
 is gone, and every retail code pointer in `.data` is either installed by `main_install`
 or a routine one of MAIN's own tables reaches (the situation reader's six at
-`.data+0x4672`.., the radio list's six at `.data+0x749e`..). MAIN is ready to go into
-`MODULES`; it is not there yet, and the exports named `main_*` stay for the harness
-for as long as `maindiff` uses them.
+`.data+0x4672`.., the radio list's six at `.data+0x749e`..). MAIN is in `MODULES`, and
+the exports named `main_*` stay for the harness for as long as `maindiff` uses them.
 
 **In the game** (`make main-smoke`, which restores the previous DLL byte for
 byte): 27/27 modules and 95 gauges, and with a flight on the command line
@@ -1360,16 +1358,20 @@ of the stack array. Slice 5's stub logged only the first entry and hid it; the r
 dialog's stub, which logs them all, showed it. It now builds retail's table of ten
 (`.text+0x180ce`). Slices 3, 4 and 5 have been run again.
 
-**Breaks still missed**, all at N=2000, none a known fault: `logbook` 20 (`fd-end`, `fd-3`,
-`fd-6`, `fd-zero`, `fd-limit`, `dt-1`, `dt-3`, `dt-dash`, `en-c`, `en-mode`, `ec-7cf`, `lg-7cf`,
-`lg-z`, `rf-fresh`, `rd-flag`, `rd-1e`, `rt-1e`, `b-2own`, `b-3`, `b-6-sel`), `wxdlg` 6 (`ap-140`,
-`ap-168`, `ld-lift64`, `ck-t65`, `si-cov`, `wl-8`), `radiodlg` 1 (`s-37e`), `create` 1 (`wt-28`:
-the suite keeps the visibility below 450, so `q` never nears 0x28). They are gaps in what the
-stand-ins drive, not proven equivalences; the logbook's row editor and text parsers are
-the least covered code in the module. `rd-flag` cannot show: the suite stops at a row with
-no CR, because retail then goes on with counts from its stack. A logbook that is only its
-heads, which is what "new" writes, has no CR after the column heads, so retail reads its row
-count from the stack there too (ours has 0); `h_read` ends the scenario at one.
+**No break is left missed.** 28 were (`logbook` 20, `wxdlg` 6, `radiodlg` 1, `create` 1); each was
+a gap in what the stand-ins drove or showed, none a fault in ours. Inputs at the limits close
+most: a title of exactly 30 characters, a 7-character column, `100.0`, a model's name past 16
+characters, `0xf4b0` loading the default logbook's name (without it no book was the default),
+visibility near 4000, temperatures exactly 100 apart. Rows as held and each wind's top are now
+logged. FE `+0x2c`'s stand-in wrote GLOBAL `+0x37e` on every lookup, which hid the reset before
+it; as in FE, only a station found sets it now. `rd-flag` cannot show through `.text+0xfd70`,
+whose counts come from its stack there, so the suite calls `.text+0x11480` directly with the
+flag set (`main_lb_file_read`, harness-only). `lg-7cf` was a bad break: at 0x7cf the clamp assigns
+what is already there; it now tests 0x7d0. Seven are proven equivalent, with the reason beside each
+in `tools/main_breaks.py`: `dt-1`, `dt-3`, `fd-zero`, `ec-7cf`, `en-mode`, `b-3`, and `ap-168`
+(real NUMERIC prints 0x160..0x171 all as `002`), with `ap-168b` added to test that constant. A
+refused temperature must only be fed where the check looks at it: passed over, `.text+0x1ce70`
+compares retail's stack, which showed as false differences at 1,500 scenarios (1 in `wxdlg`, 3 in `create`) before the stand-in held to that.
 
 **A harness lesson:** `+0x88`'s stub filled 0x58 bytes solid, where the real one writes
 only the fields and leaves a gap after each text. A name with no terminator ran on

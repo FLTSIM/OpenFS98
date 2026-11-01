@@ -280,7 +280,7 @@ def run_suite():
         ('help-context-return', '    WinHelpA((HWND)(uintptr_t)window, "fs98.hlp", HELP_CONTEXTMENU, (ULONG_PTR)map);\n    return 1;',
          '    return WinHelpA((HWND)(uintptr_t)window, "fs98.hlp", HELP_CONTEXTMENU, (ULONG_PTR)map);'),
         ('help-context-payload', 'HELP_CONTEXTMENU, (ULONG_PTR)map);',
-         'HELP_CONTEXTMENU, (ULONG_PTR)0);'),
+         'HELP_CONTEXTMENU, (ULONG_PTR)(map + 2));'),
     ):
         if session.count(old_help) != 1:
             raise RuntimeError(f'{name} mutation anchor missing or ambiguous')

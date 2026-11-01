@@ -151,13 +151,13 @@ make main-breaks SUITE=prefdlg  # its breaks -> 69, 68 caught, 1 proven equivale
 make maindiff-run SUITE=viewdlg  # MAIN slice 40, View Options -> 20000 scenarios, 0 differ
 make main-breaks SUITE=viewdlg  # its breaks -> 69, 66 caught, 3 proven equivalent
 make maindiff-run SUITE=logbook  # MAIN slice 41, the logbook and +0x90 -> 20000 scenarios, 0 differ
-make main-breaks SUITE=logbook  # its breaks -> 111, 91 caught, 20 missed
+make main-breaks SUITE=logbook  # its breaks -> 111, 105 caught, 6 proven equivalent
 make maindiff-run SUITE=wxdlg    # MAIN slice 42, the weather dialogs -> 20000 scenarios, 0 differ
-make main-breaks SUITE=wxdlg    # its breaks -> 98, 88 caught, 4 proven equivalent, 6 missed
+make main-breaks SUITE=wxdlg    # its breaks -> 99, 94 caught, 5 proven equivalent
 make maindiff-run SUITE=radiodlg # MAIN slice 43, the radios dialog -> 20000 scenarios, 0 differ
-make main-breaks SUITE=radiodlg # its breaks -> 118, 117 caught, 1 missed
+make main-breaks SUITE=radiodlg # its breaks -> 118, all caught
 make maindiff-run SUITE=create   # MAIN slice 44, Create a Flight -> 20000 scenarios, 0 differ
-make main-breaks SUITE=create   # its breaks -> 98, 96 caught, 1 proven equivalent, 1 missed
+make main-breaks SUITE=create   # its breaks -> 98, 97 caught, 1 proven equivalent
 make main-smoke                      # boots the game on our MAIN.DLL, then restores the previous DLL byte for byte
 make main-dialogs                    # all 16 menu commands in the real game, retail against ours -> same controls, 11 of 16 pictures identical, PASS (~20 min)
 make hostdiff-run N=20000            # HOST (id 1, FLTSIM98.EXE) slices 1-28, all 194 services, real files in bin/difftest/hostfs -> 0 differ (~11 min)
@@ -368,7 +368,7 @@ records, the assembly situation reader and writer, the nav services
 station descriptor -- `+0x74`, the season, zone and clock, `+0xa4`, the clock
 as digits, `+0xc8`, the view cycler, `+0x30`/`+0x34`, the analysis menu
 greying and enabling, `+0x8c`, an object slot release, and `+0x1c`, the
-latitude clamp; the full list is in main.md's table). It is not yet in `MODULES`. See
+latitude clamp; the full list is in main.md's table). It is in `MODULES`. See
 [docs/modules/main.md](docs/modules/main.md). The CHAIN ecx fix is done: OpenFS98's CHAIN enters callbacks with
 all of retail's registers and returns its ecx/edx, and `chaindiff` now
 compares them (see [docs/modules/chain.md](docs/modules/chain.md)).

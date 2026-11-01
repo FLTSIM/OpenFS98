@@ -408,7 +408,7 @@ nothing in it imports anything interesting:
     ~~**`PANELS`** (50,038 bytes)~~ — done, verified and running in-game.
     ~~**`MPCHAT`** (3,104 bytes)~~ — done, verified and running in-game.
     **`MAIN`** (119,648 bytes) — complete: slices 1 to 44 verified, booting and
-    every menu command opening in a temporary install; not yet in `MODULES`
+    every menu command opening in the game; in `MODULES`, not yet flown by hand
     ([docs/modules/main.md](docs/modules/main.md)).
 13. ~~**`HG2D`** (390 KB, the 2D rasteriser)~~ — implementation complete and
     verified standalone; in-game and non-x86 validation remain

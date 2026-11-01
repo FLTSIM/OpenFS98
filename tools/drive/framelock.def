@@ -1,0 +1,4 @@
+LIBRARY FRAMELOCK.DLL
+EXPORTS
+    Linkage DATA
+    ImportTable DATA

@@ -83,6 +83,9 @@ typedef volatile uint32_t __attribute__((may_alias)) dyn_v32;
 #define M32(a)  (*(dyn_v32 *)(uintptr_t)(uint32_t)(a))
 #define SX16(v) ((uint32_t)(int32_t)(int16_t)(v))      /* movsx */
 #define ADDR(p) ((uint32_t)(uintptr_t)(p))
+/* One instruction, as retail's: on a bad edi it faults as a write, not a read. */
+#define AND16(a, v) __asm__ volatile("andw %1,(%0)" : : "r"((uintptr_t)(uint32_t)(a)), "ri"((uint16_t)(v)) : "cc", "memory")
+#define OR16(a, v)  __asm__ volatile("orw %1,(%0)" : : "r"((uintptr_t)(uint32_t)(a)), "ri"((uint16_t)(v)) : "cc", "memory")
 
 /* The image, by retail's offsets (0x206a6xxx is D + 0xxx). */
 #define D           ADDR(&dyn_image)
@@ -470,6 +473,23 @@ static void FS98_STDCALL dyn_players(uint32_t a, uint32_t b)
     } while (--edx != 0);
 }
 
+/* The 1-byte probe of FE +0x40.  A block too big for the buffer takes FE's
+ * broken path (fe.c, fe_dynamic): its first byte is read to the address in the
+ * caller's edi, whatever the buffer argument says, and the call returns with
+ * esi in edi and ebx in esi.  So the real registers go in and come back, and
+ * the declarations that run next see that edi. */
+static int32_t fe_probe(uint8_t *probe, int32_t *size)
+{
+    int32_t result;
+    uint32_t ebx = 0, ecx, edx;
+    __asm__ volatile("pushl %%ecx\n\tpushl $1\n\tpushl %%edx\n\tpushl $0\n\tcall *%%eax"
+                     : "=a"(result), "+D"(edi), "+S"(esi), "+b"(ebx), "=c"(ecx), "=d"(edx)
+                     : "a"(FE_READ), "c"(size), "d"(probe)
+                     : "cc", "memory");
+    (void)ebx; (void)ecx; (void)edx;
+    return result;
+}
+
 /* .text+0x3b2e -- the block: kept while the aircraft is inside its bounds;
  * otherwise, and when the aircraft leaves the box about the last search,
  * FE is asked for the one about the aircraft now. */
@@ -512,7 +532,7 @@ static void load_block(void)
     S_BOX_E = eax;
     S_BOX_W = eax - 0x1c0000;
     FE_SEARCH(edi + 0x560, 0x1388, edi + 0x3e4);
-    if (FE_READ(0, ADDR(&probe), 1, &size) >= 0)
+    if (fe_probe(&probe, &size) >= 0)
         return;
     ALLOC((uint32_t)size, &S_BLOCK, 0);
     FE_READ(0, S_BLOCK, size, &size);
@@ -754,9 +774,9 @@ static int op_flag4(void)
 /* .text+0x221d -- flag 1 (hidden from blocked()) on or off */
 static int op_hide(void)
 {
-    M16(edi + 0x24) = (uint16_t)(M16(edi + 0x24) & 0xfffe);
+    AND16(edi + 0x24, 0xfffe);
     if (M8(esi + 1) != 0)
-        M16(edi + 0x24) = (uint16_t)(M16(edi + 0x24) | 1);
+        OR16(edi + 0x24, 1);
     esi += 2;
     return 0;
 }
@@ -789,7 +809,7 @@ static int op_place(void)
     ecx = M32(esi + 0xf);
     M32(edi + 0x14) = ecx;
     M32(edi + 0x5c) = ecx;
-    M16(edi + 0x24) = (uint16_t)(M16(edi + 0x24) & 0xfffe);
+    AND16(edi + 0x24, 0xfffe);
     esi += 0x13;
     return 0;
 }

@@ -222,6 +222,24 @@ countdown.
 - Dead code left out: `mov eax,[ebp-8]; cdq; sub eax,edx` at
   `.text+0x3cbe`, whose result nothing reads.
 
+## FE and the registers
+
+FE `+0x40` called with a buffer too small for the block does not use the buffer: it
+reads to the address in the caller's edi and returns with esi in edi, ebx in esi and
+ebp in ebx ([fe.md](fe.md)). DYNAMIC's probe always takes that path. In retail edi is
+GLOBAL, so the block's first byte lands on GLOBAL's first byte, and edi comes back as
+the esi that `load_block` set from the old block pointer, which the declarations then
+run with.
+
+DYNAMIC and FE were each verified against a stub of the other, and the stub took the
+buffer it was given. Together they failed: DYNAMIC's C call left edi 0, the read went
+to null, and the host stopped with "Failed to read from file" over any BGL with a
+dynamic block too big for the probe, `NEWYORK5.BGL` for one. `fe_probe` now passes the
+real registers and takes back what returns, and the stub reads to edi and shifts them
+as FE does. The DYNAMIC from before the fix differs at scenario 0 against it. Declarations
+now see retail's edi, which is how the three `andw`/`orw` on `edi + 0x24` came to fault
+as reads rather than writes; they are now one instruction each.
+
 ## The harness
 
 `make dynamicdiff-run` (`tools/difftest/dynamicdiff.c`): both builds in one
@@ -231,7 +249,7 @@ CHAIN. UTIL is retail's behind forwarders that fold every argument and
 result into a digest logged after each step of the script. FE is a stub
 serving the CD's twelve blocks as FE reads them (the probe, then the read;
 with GLOBAL `+0x3e0` bit 0 clear the probe moves past the record, as FE's
-does). G3D logs each draw with a checksum of the object; MULTIP answers
+does; the probe reads to the caller's edi and shifts the registers, as above). G3D logs each draw with a checksum of the object; MULTIP answers
 with the scenario's players. Each scenario runs under a random x87
 precision control.
 

@@ -10,12 +10,14 @@ HG2D uses snake_case and `<stdint.h>`; there is no `types.h` dependency.
 The standalone Win32 implementation is complete; verification results and
 remaining integration limits are recorded below.
 
-HG2D is not in `MODULES` and has not been installed in-game. A live graphics
-smoke test and non-x86 floating precision/status verification remain separate.
+**HG2D is in `MODULES`**, the last of the 27 runtime modules to join, and boots
+and flies in private copies of the game: see [In the game](#in-the-game). It has
+not been flown by hand, its Direct3D path has not run in-game, and non-x86
+floating precision/status verification remains separate.
 
-The implementation and tests occupy HG2D-specific files. The shared Makefile
-and MAIN files are untouched so MAIN can proceed independently. The README records the completed standalone implementation.
-For now build and verify from the repository root with:
+The shared Makefile builds the game's `bin/HG2D.DLL` at retail's base. The
+differential harness stays in `tools/hg2d.mk`; build and verify it from the
+repository root with:
 
 ```sh
 make -f tools/hg2d.mk hg2ddiff-run N=20000              # all suites
@@ -1657,13 +1659,63 @@ mutation is caught specifically by the wide fixtures. The large boundary run
 passes **20,000 scenarios / 7,720,000 operations**, zero differences and zero
 faults.
 
+## In the game
+
+`make bin/HG2D.DLL` uses the compiler options `hg2ddiff` verifies (`-O2`, not the
+shared `-Os`), at retail's base `0x20730000`. `tools/smoketest.sh` over a private
+copy of the game with it installed: 27/27 modules, 95 gauges, PASS.
+
+`tools/hg2d_frames.sh` compares the running game frame by frame. FRAMELOCK
+(`tools/drive/framelock.c`, built by `tools/hg2d.mk`) is a test module that takes
+over the host's clock imports from DllMain: every main-loop pass advances a counter
+33 ms and runs one frame, and the 20 ms multimedia timer is called on the main
+thread when due. Nothing else in the game reads a clock: no module imports a time
+function. It logs a checksum of each blit's whole source DIB and palette. The script
+runs retail HG2D twice, which shows the run is deterministic, then ours, each in its
+own copy of the game, with every other module as installed in `game/`.
+
+Results, software renderer (`Device=` empty, the setting `docs/wine.md` uses):
+
+Each flight ran 900 passes. Blits are the log's lines, distinct the different
+checksums among them.
+
+| flight | blits | distinct | retail against retail | retail against ours |
+| --- | ---: | ---: | --- | --- |
+| `PARIS` | 3,761 | 1,650 | identical | identical |
+| `STGEORGE` | 3,381 | 1,589 | identical | identical |
+| `NEWYORK` | 2,684 | 1,523 | identical | identical |
+| `CVINSON` | 2,559 | 1,361 | identical | identical |
+| `HONGKONG` (spot view of an airliner) | 903 | 901 | identical | identical |
+| `KAUAI` | 1,998 | 475 | identical | identical |
+| `FS98` | 1,161 | 132 | identical | identical |
+| `fs6N` | 1,127 | 116 | identical | identical |
+
+Deliberate breaks, each a one-line change to a copy of `src/hg2d`, on `PARIS`:
+`polygon_close_body` returning at once and `colour_translate`'s rounding bit cleared
+are both caught at the first frame. Two others passed unnoticed over 300 passes of
+`STGEORGE`, a depth-shade clamp and the haze tick's rate (`value >= 14`, `301u *`);
+whether those paths ran in that flight has not been established, so they are not
+counted either way. **A pass means the frames these flights drew match.** The
+aircraft is not flown in these runs and no input is scripted, though FRAMELOCK can
+post messages for it. `KAUAI`, `FS98` and `fs6N` show few distinct frames, so they
+cover little.
+
+Left to do: scripted flying, views, night and weather, for coverage; the Direct3D
+path, under wine; and flying it by hand. HG2D was not installed into `game/` by this
+work: `make install` does that.
+
+**`SEHFIX.DLL` stays.** The wine freeze came from divide faults at retail's HG2D
+`.text+0x66e2`, which ours computes without trapping, so ours might not need the
+fix for those. That could not be tested: retail HG2D without `SEHFIX.DLL` did not
+freeze in the nested X server either (the 3D view kept changing), and both took the
+same 4 swallowed faults over 105 s, in the host's `WM_SIZE` by `docs/wine.md`'s
+account.
+
 ## Completion and integration limits
 
-Every public service and GPU dispatch cell is implemented. HG2D remains outside
-`MODULES`, and no game installation has been performed while MAIN owns the
-shared build files. Standalone COM/GDI fixtures establish call/state behaviour,
-not a live Direct3D/in-game smoke test. Non-x86 floating precision/status is
-also outside the current verification. Arbitrary invalid pointers, corrupted
+Every public service and GPU dispatch cell is implemented. Standalone COM/GDI
+fixtures establish call/state behaviour, not a live Direct3D smoke test. Non-x86
+floating precision/status is also outside the current verification. Arbitrary invalid pointers, corrupted
 code/selector tables and unbounded malformed scanline programs remain outside
 the supported fixture domain. The unreachable private shadow return is
 resolved by the caller proof above, rather than a remaining implementation gap.

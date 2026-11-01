@@ -747,16 +747,31 @@ static void STDCALL fe_search(uint8_t *pos, int32_t radius, uint8_t *box)
     fe_cursor = 0;
 }
 
-static int32_t STDCALL fe_read(int32_t kind, uint8_t *buf, int32_t size, int32_t *out)
+/* The caller's registers at FE +0x40, kept by fe_read_entry.  A block too big
+ * for the buffer takes FE's broken path: size bytes go to the address in the
+ * caller's edi, not to buf, and the call returns with esi in edi, ebx in esi and
+ * ebp in ebx (src/fe/fe.c, fe_dynamic).  A null edi is the host's fatal read. */
+uint32_t fe_in_ebx, fe_in_esi, fe_in_edi, fe_in_ebp, fe_shifted;
+
+int32_t STDCALL fe_read(int32_t kind, uint8_t *buf, int32_t size, int32_t *out)
 {
     int32_t r;
     put(" fe.read(%d,", kind);
     put_ptr((uint32_t)buf);
     put(",%#x)", size);
+    fe_shifted = 0;
     if (fe_cursor >= fe_n) {
         r = 0;
         if (counting) cover_fe[0]++;
     } else if ((uint32_t)size < fe_recs[fe_cursor].size) {
+        uint8_t *to = (uint8_t *)fe_in_edi;
+        put(" edi=");
+        put_ptr(fe_in_edi);
+        if (to >= global && to + size <= global + GLOBAL_SIZE)
+            memcpy(to, fe_recs[fe_cursor].data, (size_t)size);
+        else
+            put(" unreadable");
+        fe_shifted = 1;
         *out = (int32_t)fe_recs[fe_cursor].size;
         if (!(G16(0x3e0) & 1)) fe_cursor++;
         r = -1;
@@ -770,6 +785,25 @@ static int32_t STDCALL fe_read(int32_t kind, uint8_t *buf, int32_t size, int32_t
     put("=%d", r);
     return r;
 }
+
+__asm__(".text\n_fe_read_entry:\n\t"
+        "movl %ebx, _fe_in_ebx\n\t"
+        "movl %esi, _fe_in_esi\n\t"
+        "movl %edi, _fe_in_edi\n\t"
+        "movl %ebp, _fe_in_ebp\n\t"
+        "pushl 16(%esp)\n\t"
+        "pushl 16(%esp)\n\t"
+        "pushl 16(%esp)\n\t"
+        "pushl 16(%esp)\n\t"
+        "call _fe_read@16\n\t"
+        "cmpl $0, _fe_shifted\n\t"
+        "je 1f\n\t"
+        "movl _fe_in_esi, %edi\n\t"
+        "movl _fe_in_ebx, %esi\n\t"
+        "movl _fe_in_ebp, %ebx\n"
+        "1:\n\t"
+        "ret $16\n");
+void fe_read_entry(void);
 
 static uint32_t crc(const uint8_t *p, unsigned n)
 {
@@ -1875,7 +1909,7 @@ int main(int argc, char **argv)
     SET(host_blob, 0x218, h_memset);
     SET(host_blob, 0x21c, h_memmove);
     *(uint32_t *)fe_blob = 18;
-    SET(fe_blob, 0x40, fe_read);
+    SET(fe_blob, 0x40, fe_read_entry);
     SET(fe_blob, 0x54, fe_search);
     *(uint32_t *)g3d_blob = 14;
     SET(g3d_blob, 0x38, g3d_draw);

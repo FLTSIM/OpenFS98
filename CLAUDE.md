@@ -180,7 +180,9 @@ make panels-breaks       # PANELS broken on purpose -> 200 sampled, 2 do not bui
 make g3dmeshdiff-run     # the mesh compiler: instructions vs portable C, x87 and soft float -> 100000 polygons, 0 differ
 make difftest-run        # whole-module SLEW         -> 0/2000 vectors differ
 make ofstest-run         # in-process, via the host  -> passed 68, failed 0
-make smoke               # ACONTAIN, ADVDRV, ANALYSIS, ATC, BOOSTER, CHAIN, CONTROLS, DEMO, DYNAMIC, FACIL, FE, G3D, GLOBAL, LANDME, MPCHAT, NUMERIC, REALITY, SLEW, SOUND, UTIL, WEATHERM, WINDOW, WINMSG installed -> 27/27, 95 gauges, PASS
+make -f tools/hg2d.mk hg2ddiff-run  # whole-module HG2D, a suite per slice -> 59 suite summaries, 0 differ (N=20000 takes hours; docs/modules/hg2d.md)
+tools/hg2d_frames.sh 'Situatio\PARIS.STN' 900  # the running game, retail HG2D twice then ours -> identical frames, PASS; opens a nested X window (needs make -f tools/hg2d.mk bin/hg2d-diff/FRAMELOCK.DLL)
+make smoke               # ACONTAIN, ADVDRV, ANALYSIS, ATC, BOOSTER, CHAIN, CONTROLS, DEMO, DYNAMIC, FACIL, FE, G3D, GLOBAL, HG2D, LANDME, MPCHAT, NUMERIC, REALITY, SLEW, SOUND, UTIL, WEATHERM, WINDOW, WINMSG installed -> 27/27, 95 gauges, PASS
 make util-trace          # which UTIL services the game calls, counted in-game
 ```
 
@@ -372,6 +374,13 @@ latitude clamp; the full list is in main.md's table). It is in `MODULES`. See
 [docs/modules/main.md](docs/modules/main.md). The CHAIN ecx fix is done: OpenFS98's CHAIN enters callbacks with
 all of retail's registers and returns its ecx/edx, and `chaindiff` now
 compares them (see [docs/modules/chain.md](docs/modules/chain.md)).
+
+**HG2D is in `MODULES`, and is the current work**: eight flights match retail frame
+for frame, with what is left listed under
+[In the game](docs/modules/hg2d.md#in-the-game). A frame comparison found that FE and
+DYNAMIC, each verified against a stub of the other, did not work together: see
+[docs/modules/dynamic.md](docs/modules/dynamic.md#fe-and-the-registers). Where a
+verified module's quirk has a reimplemented caller, check the pair.
 
 FE's `+0x40` calling-convention break is now confirmed by `fediff`: the
 one-byte probe writes through the caller's edi and returns with ebx/esi/edi

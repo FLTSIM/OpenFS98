@@ -64,9 +64,10 @@ BASE_G3D    := 0x206e0000
 BASE_MULTIP := 0x20850000
 BASE_MPCHAT := 0x20840000
 BASE_MAIN   := 0x207e0000
+BASE_HG2D   := 0x20730000
 BASE_HOST   := 0x41000000
 
-MODULES := ACONTAIN ADVDRV ANALYSIS ATC BOOSTER CHAIN CONTROLS DEMO DYNAMIC FACIL FE G3D GLOBAL LANDME MAIN MPCHAT MULTIP NUMERIC PANELS REALITY SLEW SOUND UTIL WEATHERM WINDOW WINMSG
+MODULES := ACONTAIN ADVDRV ANALYSIS ATC BOOSTER CHAIN CONTROLS DEMO DYNAMIC FACIL FE G3D GLOBAL HG2D LANDME MAIN MPCHAT MULTIP NUMERIC PANELS REALITY SLEW SOUND UTIL WEATHERM WINDOW WINMSG
 ENGLISH_MODULES := WORLD
 ALL_MODULES := $(MODULES) $(ENGLISH_MODULES)
 
@@ -345,6 +346,17 @@ src/g3d/g3d_mesh.S: $(ORIG)/Modules/G3D.DLL tools/gen_g3d_mesh.py
 	@python3 tools/gen_g3d_mesh.py $< $@
 
 $(BIN)/g3d.res: src/g3d/g3d.rc
+	@mkdir -p $(BIN)
+	$(RC) $< -O coff -o $@
+
+# HG2D: the optimisation hg2ddiff verifies (tools/hg2d.mk), at retail's base.
+$(BIN)/HG2D.DLL: src/hg2d/hg2d.c $(wildcard src/hg2d/*.inc) src/hg2d/hg2d.def $(BIN)/hg2d.res
+	@mkdir -p $(BIN)
+	$(CC) -std=c99 -O2 -Wall -Wextra -fno-strict-aliasing $(LDFLAGS) \
+	      -Wl,--image-base=$(BASE_HG2D) \
+	      -o $@ src/hg2d/hg2d.c $(BIN)/hg2d.res src/hg2d/hg2d.def -lgcc -lkernel32 -lgdi32
+
+$(BIN)/hg2d.res: src/hg2d/hg2d.rc
 	@mkdir -p $(BIN)
 	$(RC) $< -O coff -o $@
 

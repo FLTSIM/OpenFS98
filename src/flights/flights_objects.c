@@ -4,6 +4,7 @@
  * construction in reverse, as the retail compiler's funclets do. */
 #include "flights_objects.h"
 #include "flights_unwind.h"
+#include "flights_internal.h"
 #include "flights_objects_tables.inc"
 #define D32(object, offset) (*(uint32_t *)((uint8_t *)(object) + (offset)))
 #define PTR(object, offset) (*(void **)((uint8_t *)(object) + (offset)))
@@ -55,6 +56,8 @@ static FS98_FLIGHTS_NOINLINE void *fs98_flights_construct(void *object, void *pa
         ++state.constructed;
     }
     PTR(object, 0) = s_vtables[kind];
+    /* 0x2231602b: Save forgets the name it last confirmed, inside the constructor's frame */
+    if (kind == FS98_FLIGHTS_SAVE) s_services->copy_text((char *)object + 0x10dc, fs98_flights_empty_text);
     fs98_flights_unwind_leave(&state.frame);
     return object;
 }
@@ -114,4 +117,7 @@ uint32_t SC fs98_flights_##name##_create(uint32_t parent, void *descriptor) \
 { return fs98_flights_create(parent, descriptor, kind); }
 OBJECT_CLASS(adventures, FS98_FLIGHTS_ADVENTURES)
 OBJECT_CLASS(challenges, FS98_FLIGHTS_CHALLENGES)
+OBJECT_CLASS(save, FS98_FLIGHTS_SAVE)
+OBJECT_CLASS(comms, FS98_FLIGHTS_COMMS)
+OBJECT_CLASS(create, FS98_FLIGHTS_CREATE)
 #undef OBJECT_CLASS

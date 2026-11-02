@@ -10,8 +10,9 @@
  * scenario chooses. In unwind mode each operation is repeated with a C++-style throw at
  * every call position, comparing what the cleanup frames destroy.
  *
- * Covered: the picker family (Adventures 0x1108, Challenges 0x1107) and the helpers every
- * class shares. */
+ * Covered: the pickers (Adventures 0x1108, Challenges 0x1107), Save Flight (0x1104),
+ * Communications (0x1203), Create a Flight (0x1101), and
+ * the helpers every class shares. */
 #include <windows.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -33,12 +34,14 @@
 
 struct fixture {
     uint8_t guard_before[32];
-    uint8_t object[0x15e4];
-    uint8_t descriptor[2][0x18];
+    uint8_t object[0x1fe0];
+    uint8_t descriptor[2][0x40];
+    char names[2][0x110];           /* Save's name and description buffers */
     uint8_t records[5][0xa08];
     uint8_t info[32];
     uint8_t exchange[32];
     uint8_t font[32];
+    struct fs98_flights_create_state create;   /* Create's static font, retail's copied in and out */
     uint8_t guard_after[32];
 };
 static struct fixture s_fixture, s_initial, s_retail_result;
@@ -48,19 +51,22 @@ static uint32_t s_calls, s_log_length, s_throw_at, s_saved_seh;
 static uint32_t s_max_calls, s_throws, s_comparisons, s_swaps, s_allocation_faults, s_no_selection;
 static int s_side;
 static char s_logs[2][LOG_SIZE];
-static void *s_vtable[64], *s_other_vtable[64], *s_jump[5];
+static void *s_vtable[64], *s_other_vtable[64], *s_control_vtable[64], *s_jump[5];
 
 enum signature {
     SIG_EVENT, SIG_HELP, SIG_CONTEXT, SIG_EXCHANGE, SIG_INT, SIG_EMPTY_ARG,
-    SIG_CONSTRUCT, SIG_DESTROY, SIG_DELETE, SIG_CREATE, SIG_ROUNDTRIP, SIG_CONSTRUCT_DELETE
+    SIG_INT_ARG, SIG_EXIT, SIG_INT_TWICE, SIG_CONSTRUCT, SIG_DESTROY, SIG_DELETE, SIG_CREATE, SIG_ROUNDTRIP, SIG_CONSTRUCT_DELETE
 };
 struct operation { uint32_t rva; void *ours; enum signature signature; uint32_t kind; const char *name; };
 #define EVENT(rva, name) {rva, (void *)fs98_flights_##name, SIG_EVENT, 0, #name}
 #define INT(rva, name) {rva, (void *)fs98_flights_##name, SIG_INT, 0, #name}
-#define CLASS(help, context, ddx, name) \
-    {help, (void *)fs98_flights_##name##_help, SIG_HELP, 0, #name "_help"}, \
-    {context, (void *)fs98_flights_##name##_context, SIG_CONTEXT, 0, #name "_context"}, \
-    {ddx, (void *)fs98_flights_##name##_exchange, SIG_EXCHANGE, 0, #name "_exchange"}
+#define SAVE(rva, name, signature) {rva, (void *)fs98_flights_##name, signature, FS98_FLIGHTS_SAVE, #name}
+#define CREATE(rva, name, signature) {rva, (void *)fs98_flights_##name, signature, FS98_FLIGHTS_CREATE, #name}
+#define COMMS(rva, name, signature) {rva, (void *)fs98_flights_##name, signature, FS98_FLIGHTS_COMMS, #name}
+#define CLASS(help, context, ddx, name, kind) \
+    {help, (void *)fs98_flights_##name##_help, SIG_HELP, kind, #name "_help"}, \
+    {context, (void *)fs98_flights_##name##_context, SIG_CONTEXT, kind, #name "_context"}, \
+    {ddx, (void *)fs98_flights_##name##_exchange, SIG_EXCHANGE, kind, #name "_exchange"}
 #define LIFETIME(kind, name) \
     {0, (void *)fs98_flights_##name##_construct, SIG_CONSTRUCT, kind, #name "_construct"}, \
     {0, (void *)fs98_flights_##name##_destroy, SIG_DESTROY, kind, #name "_destroy"}, \
@@ -78,18 +84,43 @@ static const struct operation s_operations[] = {
     {0x2310, (void *)fs98_flights_empty_arg, SIG_EMPTY_ARG, 0, "empty_arg"},
     INT(0x5580, picker_no_error), INT(0x5590, picker_validate),
     INT(0x2ec0, adventures_init), INT(0x52e0, challenges_init),
-    CLASS(0x30b0, 0x30d0, 0x2db0, adventures),
-    CLASS(0x5480, 0x54a0, 0x51a0, challenges),
+    CLASS(0x30b0, 0x30d0, 0x2db0, adventures, FS98_FLIGHTS_ADVENTURES),
+    CLASS(0x5480, 0x54a0, 0x51a0, challenges, FS98_FLIGHTS_CHALLENGES),
     LIFETIME(FS98_FLIGHTS_ADVENTURES, adventures),
     LIFETIME(FS98_FLIGHTS_CHALLENGES, challenges),
+    SAVE(0x6490, save_populate, SIG_EVENT), SAVE(0x6440, save_read, SIG_EVENT),
+    SAVE(0x6390, save_accept, SIG_EVENT), SAVE(0x63e0, save_cancel, SIG_EVENT),
+    SAVE(0x63d0, save_close, SIG_EVENT), SAVE(0x61f0, save_init, SIG_INT),
+    SAVE(0x6500, save_validate, SIG_INT_ARG), SAVE(0x6540, save_error, SIG_INT_ARG),
+    CLASS(0x6400, 0x6420, 0x6140, save, FS98_FLIGHTS_SAVE),
+    LIFETIME(FS98_FLIGHTS_SAVE, save),
+    COMMS(0x5bc0, comms_none, SIG_EVENT), COMMS(0x5bf0, comms_take_off, SIG_EVENT),
+    COMMS(0x5b80, comms_land, SIG_EVENT), COMMS(0x5c30, comms_cancel, SIG_EVENT),
+    COMMS(0x5c50, comms_accept, SIG_EVENT), COMMS(0x5cd0, comms_read, SIG_EVENT),
+    COMMS(0x5d90, comms_populate, SIG_EVENT), COMMS(0x5930, comms_init, SIG_INT),
+    COMMS(0x5e90, comms_validate, SIG_INT_ARG), COMMS(0x5f20, comms_error, SIG_INT_ARG),
+    CLASS(0x5c90, 0x5cb0, 0x5810, comms, FS98_FLIGHTS_COMMS),
+    LIFETIME(FS98_FLIGHTS_COMMS, comms),
+    CREATE(0x29d0, create_save, SIG_EVENT), CREATE(0x29f0, create_aircraft, SIG_EVENT),
+    CREATE(0x2a20, create_location, SIG_EVENT), CREATE(0x2a50, create_weather, SIG_EVENT),
+    CREATE(0x2a80, create_time, SIG_EVENT), CREATE(0x2ab0, create_cancel, SIG_EVENT),
+    CREATE(0x2ae0, create_accept, SIG_EVENT), CREATE(0x2b60, create_refresh, SIG_EVENT),
+    CREATE(0x2c00, create_paint, SIG_EVENT), CREATE(0x26b0, create_init, SIG_INT),
+    CREATE(0x26b0, create_init, SIG_INT_TWICE), CREATE(0x29c0, create_font_destroy, SIG_EXIT),
+    CLASS(0x2b10, 0x2b30, 0x2590, create, FS98_FLIGHTS_CREATE),
+    LIFETIME(FS98_FLIGHTS_CREATE, create),
 };
 #define OP_COUNT (sizeof(s_operations) / sizeof(s_operations[0]))
 #define OP s_operations[s_operation]
 
 static uint32_t next_random(void)
 { s_rng ^= s_rng << 13; s_rng ^= s_rng >> 17; s_rng ^= s_rng << 5; return s_rng; }
+#define RETAIL_FONT 0x12150      /* Create's static CSimsFont in retail .data, guard byte at +0x70 */
 static uint32_t offset(const void *pointer)
-{ return (uint32_t)((const uint8_t *)pointer - (const uint8_t *)&s_fixture); }
+{
+    if (s_retail && pointer == (uint8_t *)s_retail + RETAIL_FONT) pointer = s_fixture.create.font;
+    return (uint32_t)((const uint8_t *)pointer - (const uint8_t *)&s_fixture);
+}
 static void put(const char *format, ...)
 {
     va_list args;
@@ -105,23 +136,40 @@ static void put(const char *format, ...)
 }
 /* At one call per operation: swap the descriptor for the other, shrink the list to two
  * entries with the second selected, replace the vtable, change the list's window. */
+static uint32_t descriptor_offset(void) { return s_classes[s_operations[s_operation].kind].descriptor; }
 static void mutate(void)
 {
     uint8_t *object = s_fixture.object;
-    void *descriptor = PTR(object, 0x10dc);
-    if (s_calls != 1 + (s_scenario % 4)) return;
+    uint32_t at = descriptor_offset();
+    void *descriptor = PTR(object, at);
+    int save = s_operations[s_operation].kind == FS98_FLIGHTS_SAVE;
+    int comms = s_operations[s_operation].kind == FS98_FLIGHTS_COMMS;
+    int create = s_operations[s_operation].kind == FS98_FLIGHTS_CREATE;
+    if (s_calls != 1 + ((s_scenario ^ (s_seed >> 7)) % 4)) return;     /* any position, any script */
     if ((s_script & 1) && (descriptor == s_fixture.descriptor[0] || descriptor == s_fixture.descriptor[1])) {
-        PTR(object, 0x10dc) = descriptor == s_fixture.descriptor[0] ? s_fixture.descriptor[1]
-                                                                    : s_fixture.descriptor[0];
+        PTR(object, at) = descriptor == s_fixture.descriptor[0] ? s_fixture.descriptor[1]
+                                                                : s_fixture.descriptor[0];
         if (!s_side) ++s_swaps;
     }
-    descriptor = PTR(object, 0x10dc);
+    descriptor = PTR(object, at);
     if ((s_script & 2) && (descriptor == s_fixture.descriptor[0] || descriptor == s_fixture.descriptor[1])) {
-        D32(descriptor, 8) = 2;
-        D32(descriptor, 0xc) = 1;
+        if (save) {
+            D32(descriptor, 8) = D32(descriptor, 8) ? 0 : 0x1004;
+            D32(descriptor, 0x1c) ^= 0x1003;
+        } else if (create) {
+            D32(descriptor, 0x2c) ^= 1;
+            PTR(descriptor, 0x20) = 0;
+        } else if (comms) {
+            D32(descriptor, 0x34) ^= 1;
+            D32(descriptor, 0xc) ^= 1;
+            D32(descriptor, 0x2c) ^= 1;
+        } else {
+            D32(descriptor, 8) = 2;
+            D32(descriptor, 0xc) = 1;
+        }
     }
     if (s_script & 4) PTR(object, 0) = s_other_vtable;
-    if (s_script & 8) D32(object, 0x1270) = s_seed ^ 0x12345678;
+    if (s_script & 8) D32(object, save ? 0x1558 : comms ? 0x1d24 : 0x1270) = s_seed ^ 0x12345678;
 }
 
 /* ---- the object's own virtuals --------------------------------------------------------- */
@@ -153,6 +201,44 @@ OTHER_SLOTS(0x0) OTHER_SLOTS(0x1) OTHER_SLOTS(0x2) OTHER_SLOTS(0x3)
 static void (TC *const s_other_slots[64])(void *) = {
     SLOT_ROW(0x0), SLOT_ROW(0x1), SLOT_ROW(0x2), SLOT_ROW(0x3)
 };
+static uint32_t TC virtual_validate(void *object, uint32_t argument)
+{
+    put("virtual.validate %u %x\n", offset(object), argument); mutate();
+    return s_scenario % 3 == 0 ? 0 : 0xcc8 + (s_scenario & 1) * 0x10;
+}
+static uint32_t TC virtual_error(void *object, uint32_t code)
+{ put("virtual.error %u %x\n", offset(object), code); mutate(); return s_scenario & 4 ? 0 : 0xcbd; }
+static int32_t TC virtual_check(void *control, void *font, uint32_t bitmap, void *dib, void *palette, uint32_t module)
+{
+    put("init.check %u font=%u bmp=%x dib=%u pal=%u module=%x\n", offset(control), offset(font),
+        bitmap, offset(dib), offset(palette), module);
+    mutate(); return (int32_t)s_seed;
+}
+#define CREATE_CALLBACK(slot) static uint32_t SC create_callback_##slot(void *descriptor) \
+{ \
+    put("create.callback %x %u ready=%u\n", slot, offset(descriptor), D32(descriptor, 0x2c)); mutate(); \
+    D32(descriptor, 0x2c) = (s_seed >> 9) & 1; \
+    return s_seed; \
+}
+CREATE_CALLBACK(0x8) CREATE_CALLBACK(0xc) CREATE_CALLBACK(0x10) CREATE_CALLBACK(0x14) CREATE_CALLBACK(0x18)
+static uint32_t TC virtual_focus(void *object, uint32_t control)
+{ put("virtual.e0 %u %x\n", offset(object), control); mutate(); return s_seed ^ control; }
+static uint32_t SC comms_check(void *descriptor)
+{
+    put("comms.check %u frequency=[%s] request=%u slow=%u rate=%u\n", offset(descriptor),
+        (char *)PTR(descriptor, 0x10), D32(descriptor, 0x34), D32(descriptor, 0x2c), D32(descriptor, 0x3c));
+    mutate();
+    if (s_scenario % 5 == 2) D32(descriptor, 0xc) = 0xc;
+    return s_scenario & 1 ? 0xffffffff : 0;
+}
+static uint32_t SC save_check(void *descriptor)
+{
+    put("save.check %u name=[%s] description=[%s] default=%u\n", offset(descriptor),
+        (char *)PTR(descriptor, 0xc), (char *)PTR(descriptor, 0x20), D32(descriptor, 0x30));
+    mutate();
+    if (s_scenario % 5 == 1) D32(descriptor, 8) = 0x1004;
+    return s_scenario % 7 == 0 ? 0 : 0x1000 + s_scenario % 0x10;
+}
 static int32_t TC virtual_skin(void *object, int32_t resource, uint32_t module, uint32_t flags)
 {
     put("skin %u resource=%x module=%x flags=%u\n", offset(object), resource, module, flags);
@@ -221,9 +307,97 @@ static void init_edit(void *control, void *font, uint32_t foreground, uint32_t b
 static void *base_font(int32_t id) { put("base.font %d\n", id); mutate(); return s_fixture.font; }
 static void set_window_text(void *window, const char *text)
 { put("set.text %u [%s]\n", offset(window), text); mutate(); }
+static int32_t get_window_text(void *window, char *buffer, int32_t count)
+{
+    char text[64];
+    if ((uint8_t *)buffer >= (uint8_t *)&s_fixture && (uint8_t *)buffer < (uint8_t *)(&s_fixture + 1))
+        put("get.text %u %u count=%d\n", offset(window), offset(buffer), count);
+    else put("get.text %u local count=%d\n", offset(window), count);   /* a caller's stack buffer */
+    if (s_operations[s_operation].kind == FS98_FLIGHTS_COMMS)    /* a frequency, or not quite one */
+        snprintf(text, sizeof(text), s_scenario % 6 ? "1%02u.%u%u5" : "%u..x", s_scenario % 100, s_seed % 10, s_calls % 10);
+    else snprintf(text, sizeof(text), "%s %u", s_scenario % 4 ? "Typed" : "Flight 0 vector", s_scenario);
+    if (count > 0) { strncpy(buffer, text, (size_t)count - 1); buffer[count - 1] = 0; }
+    mutate(); return count > 0 ? (int32_t)strlen(buffer) : 0;
+}
+static int32_t set_checked(void *control, int32_t checked)
+{ put("set.checked %u %d\n", offset(control), checked); mutate(); return (int32_t)s_seed; }
+static int32_t error_dialog(void *object, void *control, uint32_t code)
+{
+    put("error.dialog %u control=%u code=%x fields=%x/%x\n", offset(object), offset(control), code,
+        D32(object, 0x90), D32(object, 0x94));
+    mutate(); return s_scenario & 8 ? 0 : (int32_t)(s_seed | 1);
+}
+static int32_t post_message(uint32_t window, uint32_t message, uint32_t w_param, uint32_t l_param)
+{ put("post %u %x %u %u\n", window, message, w_param, l_param); mutate(); return (int32_t)s_seed; }
+static char *copy_text(char *out, const char *text)
+{ put("copy.text %u [%s]\n", offset(out), text); strcpy(out, text); mutate(); return out; }
+static int32_t compare_text(const char *a, const char *b)
+{ put("compare.text [%s] [%s]\n", a, b); mutate(); return strcmp(a, b); }
+static void close_dialog(void *object) { put("base.close %u\n", offset(object)); mutate(); }
+static int32_t get_window_long(uint32_t window, int32_t index)
+{
+    put("get.window.long %u %d\n", window, index); mutate();
+    return (s_scenario + s_calls) % 3 ? (int32_t)window : (int32_t)(window ^ 1);
+}
+static uint32_t get_focus(void) { put("get.focus\n"); mutate(); return s_seed ^ 0xf0c5; }
+static int32_t enable_control(void *window, int32_t enable)
+{ put("enable.control %u %d\n", offset(window), enable); mutate(); return (int32_t)s_seed; }
+static int32_t set_radio(void *control, int32_t checked)
+{ put("set.radio %u %d\n", offset(control), checked); mutate(); return (int32_t)s_seed; }
+static int32_t init_slider(void *control, uint32_t bitmap, uint32_t thumb, void *dib, void *palette,
+                           uint32_t a, uint32_t b, uint32_t c, uint32_t d, int32_t e, int32_t f, uint32_t module)
+{
+    put("init.slider %u bmp=%x/%x dib=%u pal=%u %u/%u/%u/%u/%d/%d module=%x\n", offset(control), bitmap,
+        thumb, offset(dib), offset(palette), a, b, c, d, e, f, module);
+    mutate(); return (int32_t)s_seed;
+}
+static void slider_range(void *control, int32_t low, int32_t high)
+{ put("slider.range %u %d..%d\n", offset(control), low, high); mutate(); }
+static int32_t slider_position(void *control)
+{ put("slider.position %u\n", offset(control)); mutate(); return (int32_t)(s_seed % 15); }
+static int32_t set_slider_position(void *control, int32_t position)
+{ put("slider.set %u %d\n", offset(control), position); mutate(); return (int32_t)s_seed; }
+static void init_group(void *control, void *font)
+{ put("init.group %u font=%u\n", offset(control), offset(font)); mutate(); }
+static int32_t init_picture(void *control, uint32_t bitmap, void *dib, void *palette, uint32_t module, uint16_t color)
+{
+    put("init.picture %u bmp=%x dib=%u pal=%u module=%x color=%x\n", offset(control), bitmap,
+        offset(dib), offset(palette), module, color);
+    mutate(); return (int32_t)s_seed;
+}
+static void *set_focus(void *window) { put("set.focus %u\n", offset(window)); mutate(); return s_fixture.info; }
+static void set_sims_text(void *control, const char *text)
+{ put("set.sims.text %u [%s]\n", offset(control), text ? text : "(null)"); mutate(); }
+static void font_construct(void *font, void *base_font)
+{
+    uint8_t guard = s_side ? s_fixture.create.guard : *((uint8_t *)s_retail + RETAIL_FONT + 0x70);
+    put("font.construct %u base=%u guard=%u\n", offset(font), offset(base_font), guard);
+    memset(font, s_seed & 255, 0x70); mutate();
+}
+static void font_destroy(void *font)
+{ put("font.destroy %u value=%x/%x\n", offset(font), D32(font, 4), D32(font, 0x50)); mutate(); }
+static void register_exit(void (*handler)(void))
+{
+    put("register.exit owns=%u\n", handler == (s_side ? fs98_flights_create_font_destroy
+                                                    : (void (*)(void))((uint8_t *)s_retail + 0x29c0)));
+    mutate();
+}
+static void default_paint(void *object) { put("default.paint %u\n", offset(object)); mutate(); }
+static double to_number(const char *text)
+{ put("atof [%s]\n", text); mutate(); return atof(text); }
+static int32_t format_number(char *out, const char *format, double value)
+{
+    int32_t length = sprintf(out, format, value);
+    put("sprintf [%s] -> [%s]\n", format, out); mutate();
+    return length;
+}
 static const struct fs98_flights_services s_services = {
     send_message, win_help, enable_window, base_exchange, ddx_control, base_init, init_art,
-    init_button, init_text, init_list, init_edit, base_font, set_window_text
+    init_button, init_text, init_list, init_edit, base_font, set_window_text,
+    get_window_text, set_checked, error_dialog, post_message, copy_text, compare_text, close_dialog,
+    get_window_long, get_focus, enable_control, set_radio, init_slider, slider_range, slider_position,
+    set_slider_position, init_group, to_number, format_number,
+    init_picture, set_focus, set_sims_text, font_construct, font_destroy, register_exit, default_paint
 };
 
 static void *dialog_construct(void *object, int32_t resource, void *parent)
@@ -262,7 +436,7 @@ static int32_t show_dialog(void *object, int32_t show)
 { put("dialog.show %u %d\n", offset(object), show); mutate(); return s_scenario & 2 ? 0 : (int32_t)s_seed; }
 static const struct fs98_flights_object_services s_object_services = {
     dialog_construct, dialog_destroy, construct_control, destroy_control, allocate_object,
-    ui_delete, dialog_delete, create_dialog, show_dialog
+    ui_delete, dialog_delete, create_dialog, show_dialog, copy_text
 };
 
 /* ---- the same stubs behind retail's import ABIs ----------------------------------------- */
@@ -274,6 +448,11 @@ CONTROL_HOOK(list, 0x135bc, 0x135d4)
 CONTROL_HOOK(edit, 0x135c0, 0x135d8)
 CONTROL_HOOK(button, 0x135b4, 0x135cc)
 CONTROL_HOOK(art, 0x135c4, 0x135a8)
+CONTROL_HOOK(check, 0x13558, 0x13560)
+CONTROL_HOOK(radio, 0x1353c, 0x13548)
+CONTROL_HOOK(slider, 0x13538, 0x13544)
+CONTROL_HOOK(group, 0x13540, 0x13534)
+CONTROL_HOOK(picture, 0x13578, 0x1357c)
 #undef CONTROL_HOOK
 static void *TC hook_dialog_construct(void *object, int32_t resource, void *parent)
 { return dialog_construct(object, resource, parent); }
@@ -303,6 +482,44 @@ static void TC hook_init_edit(void *control, void *font, uint32_t foreground, ui
 { init_edit(control, font, foreground, background, error_color, label, flags); }
 static void *SC hook_base_font(int32_t id) { return base_font(id); }
 static void TC hook_set_text(void *window, const char *text) { set_window_text(window, text); }
+static int32_t TC hook_get_text(void *window, char *buffer, int32_t count) { return get_window_text(window, buffer, count); }
+static int32_t TC hook_set_checked(void *control, int32_t checked) { return set_checked(control, checked); }
+static int32_t TC hook_error_dialog(void *object, void *control, uint32_t code) { return error_dialog(object, control, code); }
+static int32_t SC hook_post(uint32_t a, uint32_t b, uint32_t c, uint32_t d) { return post_message(a, b, c, d); }
+static char *SC hook_copy(char *out, const char *text) { return copy_text(out, text); }
+static int32_t SC hook_compare(const char *a, const char *b) { return compare_text(a, b); }
+static void TC hook_close(void *object) { close_dialog(object); }
+static int32_t SC hook_get_long(uint32_t window, int32_t index) { return get_window_long(window, index); }
+static uint32_t SC hook_get_focus(void) { return get_focus(); }
+static int32_t TC hook_enable_control(void *window, int32_t enable) { return enable_control(window, enable); }
+static int32_t TC hook_set_radio(void *control, int32_t checked) { return set_radio(control, checked); }
+static int32_t TC hook_init_slider(void *control, uint32_t bitmap, uint32_t thumb, void *dib, void *palette,
+                                   uint32_t a, uint32_t b, uint32_t c, uint32_t d, int32_t e, int32_t f, uint32_t module)
+{ return init_slider(control, bitmap, thumb, dib, palette, a, b, c, d, e, f, module); }
+static void TC hook_slider_range(void *control, int32_t low, int32_t high) { slider_range(control, low, high); }
+static int32_t TC hook_slider_position(void *control) { return slider_position(control); }
+static int32_t TC hook_set_slider_position(void *control, int32_t position) { return set_slider_position(control, position); }
+static void TC hook_init_group(void *control, void *font) { init_group(control, font); }
+static double hook_atof(const char *text) { return to_number(text); }
+static int32_t TC hook_init_picture(void *control, uint32_t bitmap, void *dib, void *palette, uint32_t module, uint16_t color)
+{ return init_picture(control, bitmap, dib, palette, module, color); }
+static void *TC hook_set_focus(void *window) { return set_focus(window); }
+static void TC hook_set_sims_text(void *control, const char *text) { set_sims_text(control, text); }
+static void *TC hook_font_construct(void *font, void *base_font) { font_construct(font, base_font); return font; }
+static void TC hook_font_destroy(void *font) { font_destroy(font); }
+static void *hook_dll_onexit(void (*handler)(void), void **begin, void **end)
+{ (void)begin; (void)end; register_exit(handler); return (void *)handler; }
+static void *hook_onexit(void (*handler)(void)) { register_exit(handler); return (void *)handler; }
+static void TC hook_paint(void *object) { default_paint(object); }
+static int hook_sprintf(char *out, const char *format, ...)
+{
+    va_list args;
+    double value;
+    va_start(args, format);
+    value = va_arg(args, double);
+    va_end(args);
+    return format_number(out, format, value);
+}
 
 static void patch(uint32_t rva, void *target)
 {
@@ -331,7 +548,21 @@ static void setup_imports(void)
 #define PATCH_CONTROL(name, ctor, dtor) patch(ctor, hook_construct_##name); patch(dtor, hook_destroy_##name)
     PATCH_CONTROL(text, 0x135b8, 0x135d0); PATCH_CONTROL(list, 0x135bc, 0x135d4);
     PATCH_CONTROL(edit, 0x135c0, 0x135d8); PATCH_CONTROL(button, 0x135b4, 0x135cc);
-    PATCH_CONTROL(art, 0x135c4, 0x135a8);
+    PATCH_CONTROL(art, 0x135c4, 0x135a8); PATCH_CONTROL(check, 0x13558, 0x13560);
+    patch(0x133d4, hook_get_text); patch(0x13550, hook_set_checked); patch(0x1354c, hook_error_dialog);
+    patch(0x13630, hook_post); patch(0x13364, hook_copy); patch(0x13360, hook_compare);
+    patch(0x135f8, hook_close);
+    PATCH_CONTROL(radio, 0x1353c, 0x13548); PATCH_CONTROL(slider, 0x13538, 0x13544);
+    PATCH_CONTROL(group, 0x13540, 0x13534);
+    patch(0x1362c, hook_get_long); patch(0x13620, hook_get_focus); patch(0x133ec, hook_enable_control);
+    patch(0x1351c, hook_set_radio); patch(0x13528, hook_init_slider); patch(0x1352c, hook_slider_range);
+    patch(0x13524, hook_slider_position); patch(0x13520, hook_set_slider_position);
+    patch(0x13530, hook_init_group);
+    PATCH_CONTROL(picture, 0x13578, 0x1357c);
+    patch(0x13618, hook_init_picture); patch(0x133f8, hook_set_focus); patch(0x13610, hook_set_sims_text);
+    patch(0x13604, hook_font_construct); patch(0x13614, hook_font_destroy);
+    patch(0x134b8, hook_dll_onexit); patch(0x134c0, hook_onexit); patch(0x133d8, hook_paint);
+    fs98_flights_set_create_state(&s_fixture.create); patch(0x134bc, hook_atof); patch(0x134cc, hook_sprintf);
 #undef PATCH_CONTROL
     patch(0x12134, (void *)RESOURCE_MODULE); fs98_flights_set_resource_module(RESOURCE_MODULE);
     patch(0x1214c, (void *)OBJECT_MODULE); fs98_flights_set_object_module(OBJECT_MODULE);
@@ -348,13 +579,56 @@ static void initialize(void)
     for (index = 0; index < sizeof(s_fixture); ++index) ((uint8_t *)&s_fixture)[index] = (uint8_t)next_random();
     PTR(object, 0) = s_vtable;
     D32(object, 0x20) = s_seed;
-    PTR(object, 0x10dc) = s_fixture.descriptor[0];
+    PTR(object, descriptor_offset()) = s_fixture.descriptor[0];
+    s_fixture.create.guard = (s_seed >> 13) & 3;     /* bit 0: the font already built */
+    if (OP.kind == FS98_FLIGHTS_COMMS) {
+        PTR(object, 0x1b1c) = PTR(object, 0x1c10) = PTR(object, 0x1d04) = PTR(object, 0x1e60) = s_control_vtable;
+        D32(object, 0x1c30) = s_seed ^ 0x1c30;
+        D32(object, 0x1d24) = (s_seed >> 5) % 3 ? s_seed ^ 0x1d24 : D32(object, 0x1c30);
+    } else PTR(object, 0x1704) = s_control_vtable;
     for (index = 0; index < 2; ++index) {
         uint8_t *descriptor = s_fixture.descriptor[index];
-        D32(descriptor, 8) = s_scenario % 6;
-        D32(descriptor, 0xc) = s_scenario % 7 - 1;
-        PTR(descriptor, 0x10) = s_fixture.records;
+        if (OP.kind == FS98_FLIGHTS_CREATE) {
+            static uint32_t (SC *const callbacks[])(void *) = {
+                create_callback_0x8, create_callback_0xc, create_callback_0x10, create_callback_0x14,
+                create_callback_0x18
+            };
+            uint32_t slot;
+            for (slot = 0; slot < 5; ++slot)    /* any of them may be missing */
+                PTR(descriptor, 8 + slot * 4) = ((s_seed >> (17 + slot)) & 3) ? (void *)callbacks[slot] : 0;
+            PTR(descriptor, 0x1c) = s_fixture.names[0];
+            PTR(descriptor, 0x20) = s_fixture.names[1];
+            PTR(descriptor, 0x24) = (char *)s_fixture.records[index];
+            PTR(descriptor, 0x28) = (char *)s_fixture.records[index] + 0x100;
+            D32(descriptor, 0x2c) = (s_seed >> (23 + index)) & 1;
+        } else if (OP.kind == FS98_FLIGHTS_COMMS) {
+            PTR(descriptor, 4) = comms_check;
+            D32(descriptor, 0xc) = (s_scenario + index) % 4 == 0 ? 0xc : 0;
+            PTR(descriptor, 0x10) = s_fixture.names[index];
+            D32(descriptor, 0x14) = 1 + (s_scenario + index * 0x11) % 0x40;
+            D32(descriptor, 0x2c) = (s_seed >> 11) & 1;     /* independent of the request */
+            D32(descriptor, 0x34) = (s_scenario + index) % 4;
+            D32(descriptor, 0x3c) = (s_scenario + index * 3) % 15;
+        } else if (OP.kind == FS98_FLIGHTS_SAVE) {
+            static const uint32_t statuses[] = {0, 0x1003, 0x1004, 0x100d, 0x1001, 0x1004};
+            PTR(descriptor, 4) = save_check;
+            D32(descriptor, 8) = statuses[(s_scenario + index) % 6];
+            PTR(descriptor, 0xc) = s_fixture.names[0];
+            D32(descriptor, 0x10) = 0x10 + (s_scenario + index * 0x35) % 0x100;   /* the two differ */
+            D32(descriptor, 0x1c) = s_scenario % 9 < 4 ? 0 : 0x1003;
+            PTR(descriptor, 0x20) = s_fixture.names[1];
+            D32(descriptor, 0x24) = 1 + (s_scenario + index * 0x13) % 0x40;
+            D32(descriptor, 0x30) = s_scenario % 3;
+        } else {
+            D32(descriptor, 8) = s_scenario % 6;
+            D32(descriptor, 0xc) = s_scenario % 7 - 1;
+            PTR(descriptor, 0x10) = s_fixture.records;
+        }
     }
+    snprintf(s_fixture.names[0], 64, "Flight %u vector %u", s_scenario % 2, s_scenario);
+    snprintf(s_fixture.names[1], 64, "About flight %x", s_seed);
+    if (OP.kind == FS98_FLIGHTS_SAVE)   /* the name already agreed to: often the one typed */
+        snprintf((char *)object + 0x10dc, 0x100, "%s", (s_seed >> 3) % 3 ? s_fixture.names[0] : "Other");
     for (index = 0; index < 5; ++index) {
         snprintf((char *)s_fixture.records[index], 64, "Flight %u vector %u", index, s_scenario);
         snprintf((char *)s_fixture.records[index] + 0x100, 64, "Description %u seed %x", index, s_seed);
@@ -362,6 +636,10 @@ static void initialize(void)
     }
     if (OP.signature == SIG_INT && OP.rva == 0x5590 && s_scenario % 3 == 0) PTR(object, 0x10dc) = 0;
     if ((OP.rva == 0x2ec0 || OP.rva == 0x52e0) && s_scenario % 3 == 0) PTR(object, 0x10dc) = 0;
+    /* Create's handlers test for no descriptor, all but Save and the choices */
+    if (OP.kind == FS98_FLIGHTS_CREATE && OP.rva != 0x29d0 && OP.rva != 0x29f0 && OP.rva != 0x2a20 &&
+        OP.rva != 0x2a50 && OP.rva != 0x2a80 && OP.signature < SIG_CONSTRUCT && (s_seed >> 27) % 5 == 0)
+        PTR(object, 0x10e0) = 0;
     s_initial = s_fixture;
 }
 static LONG WINAPI fatal(EXCEPTION_POINTERS *exception)
@@ -376,20 +654,27 @@ static void land(void)
     __asm__ volatile("movl %0, %%fs:0" : : "r"(s_saved_seh) : "memory");
     __builtin_longjmp(s_jump, 1);
 }
-/* A failed allocation makes the factory store through null on both sides: compare it */
+/* A fault inside an operation is an outcome to compare, not the end of the run: a failed
+ * allocation makes the factory store through null on both sides, and a break that faults
+ * on one side only must show up as a difference. Addresses above the first page are where
+ * each side's code or stack happens to be, so only low ones are logged. */
+static int s_running;
 static LONG CALLBACK expected_fault(EXCEPTION_POINTERS *exception)
 {
     EXCEPTION_RECORD *record = exception->ExceptionRecord;
-    if (OP.signature == SIG_CREATE && s_scenario % 11 == 0 &&
-        record->ExceptionCode == EXCEPTION_ACCESS_VIOLATION) {
-        s_throw_at = 0;
-        put("allocation.fault access=%u address=%x\n", (uint32_t)record->ExceptionInformation[0],
-            (uint32_t)record->ExceptionInformation[1]);
-        if (!s_side) ++s_allocation_faults;
-        exception->ContextRecord->Eip = (DWORD)land;
-        return EXCEPTION_CONTINUE_EXECUTION;
-    }
-    return EXCEPTION_CONTINUE_SEARCH;
+    uint32_t address;
+    if (!s_running || (record->ExceptionCode != EXCEPTION_ACCESS_VIOLATION &&
+                       record->ExceptionCode != EXCEPTION_ILLEGAL_INSTRUCTION &&
+                       record->ExceptionCode != EXCEPTION_PRIV_INSTRUCTION))
+        return EXCEPTION_CONTINUE_SEARCH;
+    s_throw_at = 0;
+    address = record->ExceptionCode == EXCEPTION_ACCESS_VIOLATION ? (uint32_t)record->ExceptionInformation[1] : 0;
+    put("fault code=%lx access=%u address=%x\n", record->ExceptionCode,
+        record->ExceptionCode == EXCEPTION_ACCESS_VIOLATION ? (uint32_t)record->ExceptionInformation[0] : 0,
+        address < 0x10000 ? address : 0xffffffff);
+    if (!s_side && OP.signature == SIG_CREATE) ++s_allocation_faults;
+    exception->ContextRecord->Eip = (DWORD)land;
+    return EXCEPTION_CONTINUE_EXECUTION;
 }
 static EXCEPTION_DISPOSITION __cdecl catch_throw(EXCEPTION_RECORD *record, void *frame,
                                                  CONTEXT *context, void *dispatcher)
@@ -411,6 +696,7 @@ static __attribute__((noinline)) int32_t run(uint32_t throw_at)
     void *object = s_fixture.object;
     volatile int32_t result = 0;
     s_fixture = s_initial;
+    if (!s_side) memcpy((uint8_t *)s_retail + RETAIL_FONT, &s_fixture.create, sizeof(s_fixture.create));
     s_log_length = s_calls = 0; s_logs[s_side][0] = 0; s_throw_at = throw_at;
     if (OP.signature >= SIG_CONSTRUCT && !s_side) {
         uint32_t rva = OP.signature == SIG_DESTROY ? class_info->destructor :
@@ -419,6 +705,7 @@ static __attribute__((noinline)) int32_t run(uint32_t throw_at)
         entry = (uint8_t *)s_retail + rva;
     }
     __asm__ volatile("movl %%fs:0, %0" : "=r"(s_saved_seh));
+    s_running = 1;
     if (__builtin_setjmp(s_jump) == 0) {
         catcher.previous = (void *)s_saved_seh; catcher.handler = catch_throw;
         __asm__ volatile("movl %0, %%fs:0" : : "r"(&catcher) : "memory");
@@ -438,6 +725,16 @@ static __attribute__((noinline)) int32_t run(uint32_t throw_at)
             break;
         case SIG_INT:
             result = ((int32_t (TC *)(void *))entry)(object);
+            break;
+        case SIG_INT_ARG:   /* Comms' validate behaves differently for its edit's own id */
+            result = ((int32_t (TC *)(void *, uint32_t))entry)(object, s_scenario & 2 ? 0xcb3 : s_seed);
+            break;
+        case SIG_INT_TWICE:     /* the second sees the font already built */
+            result = ((int32_t (TC *)(void *))entry)(object);
+            result = ((int32_t (TC *)(void *))entry)(object);
+            break;
+        case SIG_EXIT:
+            ((void (*)(void))entry)();
             break;
         case SIG_EMPTY_ARG:
             ((void (TC *)(void *, uint32_t))entry)(object, s_seed);
@@ -467,6 +764,8 @@ static __attribute__((noinline)) int32_t run(uint32_t throw_at)
         }
     }
     __asm__ volatile("movl %0, %%fs:0" : : "r"(s_saved_seh) : "memory");
+    s_running = 0;
+    if (!s_side) memcpy(&s_fixture.create, (uint8_t *)s_retail + RETAIL_FONT, sizeof(s_fixture.create));
     if (s_calls > s_max_calls) s_max_calls = s_calls;
     return result;
 }
@@ -519,6 +818,11 @@ int main(int argc, char **argv)
     s_vtable[0xd0 / 4] = virtual_cancel; s_other_vtable[0xd0 / 4] = virtual_cancel_other;
     s_vtable[1] = s_other_vtable[1] = virtual_delete;
     s_vtable[0xe4 / 4] = s_other_vtable[0xe4 / 4] = virtual_skin;
+    s_vtable[0xd8 / 4] = s_other_vtable[0xd8 / 4] = virtual_validate;
+    s_vtable[0xdc / 4] = s_other_vtable[0xdc / 4] = virtual_error;
+    s_control_vtable[0xc4 / 4] = virtual_check;
+    s_vtable[0xe0 / 4] = s_other_vtable[0xe0 / 4] = virtual_focus;
+    fs98_flights_set_number_format((const char *)s_retail + 0x12108);
     for (s_scenario = 0; s_scenario < count; ++s_scenario) {
         s_seed = next_random(); s_script = s_scenario & 15;
         for (s_operation = 0; s_operation < OP_COUNT; ++s_operation) {

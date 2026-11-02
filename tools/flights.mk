@@ -4,7 +4,7 @@ FLIGHTS_DIR := bin/flights-diff
 N ?= 20000
 SEED ?= 0x5f1a6c2d
 MODE ?= normal
-FLIGHTS_SOURCES := src/flights/flights_events.c src/flights/flights_objects.c
+FLIGHTS_SOURCES := src/flights/flights_events.c src/flights/flights_objects.c src/flights/flights_save.c src/flights/flights_comms.c src/flights/flights_create.c
 FLIGHTS_HEADERS := src/flights/flights_internal.h src/flights/flights_objects.h src/flights/flights_unwind.h \
                    src/flights/flights_tables.inc src/flights/flights_objects_tables.inc
 .PHONY: flightsevents flightseventsdiff-run flights-tables flights-breaks

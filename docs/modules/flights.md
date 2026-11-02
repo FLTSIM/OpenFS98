@@ -1,9 +1,9 @@
 # Flights.DLL
 
 `orig/English/Flights.DLL`, module `0x80000002`, preferred base `0x22310000`, 51,122 bytes of
-`.text`, 13 dialog registrations. **In progress, one family of dialogs at a time.** Slice 1,
-the pickers (Adventures and Challenges), is verified in its own harness; nothing is built as
-a DLL or installed yet. Like Help, Sim and Views it is MFC dialogs over the CD's SIMSUI and
+`.text`, 13 dialog registrations. **In progress, one family of dialogs at a time.** Slices 1
+to 4, the pickers (Adventures and Challenges), Save Flight, Communications and Create a
+Flight, are verified in their harness; nothing is built as a DLL or installed yet. Like Help, Sim and Views it is MFC dialogs over the CD's SIMSUI and
 MFC42, which stay as dependencies.
 
 ## Building and verifying
@@ -109,22 +109,111 @@ change the list's window mid-call; every vtable slot logs, so a wrong slot diffe
 than faults. Factories see failed allocations (the store through null is compared as an
 outcome).
 
+Results, current for slices 1 to 4 together (93 operations):
+
 | Run | Result |
 | --- | --- |
-| seed `0x5f1a6c2d` | 20,000 scenarios, 720,000 comparisons, 0 differ |
-| seed `0x98a1e7d3` | 20,000 scenarios, 720,000 comparisons, 0 differ |
-| unwind, seed `0x7e51a23b` | 2,000 scenarios, 505,633 comparisons with a throw at every call position (433,269 throws), 0 differ |
-| `tools/flights_breaks.py 400` | 61 of 61 breaks caught; three more proven equivalent, listed in the runner |
+| seed `0x5f1a6c2d` | 20,000 scenarios, 1,860,000 comparisons, 0 differ |
+| seed `0x98a1e7d3` | 20,000 scenarios, 1,860,000 comparisons, 0 differ |
+| unwind, seed `0x7e51a23b` | 2,000 scenarios, 1,701,285 comparisons with a throw at every call position (1,514,375 throws), 0 differ |
+| `tools/flights_breaks.py 400` | 163 of 163 breaks caught; three more proven equivalent, listed in the runner |
+
+A fault inside an operation (an access violation or a bad instruction) is logged as an
+outcome and the run goes on, so a break that crashes one side only is a difference; only
+fault addresses in the first page are logged, since the rest are where each side's code or
+stack happens to be.
 
 Not covered yet: the native DLL (runtime adapters, real controls, `tools/flightsuidiff`),
 which comes once enough classes exist to bind the module, as Help's and Sim's did; and the
 pickers in the running game, which `make main-dialogs` reaches (commands `0x1106`, `0x1107`)
 once the DLL can be installed.
 
+## Slice 2: Save Flight `0x1104`
+
+`src/flights/flights_save.c`; class `0x5f60`, `0x17d0` bytes, descriptor at `+0x17cc`
+(caller: MAIN's Linkage `+0xac`, `flight_save_dialog`). The descriptor: answer `+0`,
+MAIN's check callback `+4` (`save_dialog_check`, stdcall), name status `+8`, name `+0xc`
+with room `+0x10`, description status `+0x1c`, description `+0x20` with room `+0x24`,
+"make it the default flight" `+0x30`.
+
+- **OK** reads the vtable once and asks `+0xd8` (validate) then, on a failure, `+0xdc`
+  (report it); only an unreported failure keeps the dialog open.
+- **Validate** reads both edits and the box into the descriptor and calls MAIN's check. A
+  failure names the edit at fault, the name first; with neither status set the check's
+  own answer stands.
+- **Report** asks through `CSimsDialog::DoErrorDialog`. A name that already exists
+  (`0x1004`) passes silently if it is the name already agreed to, kept at `+0x10dc`;
+  otherwise the question is asked, and agreeing remembers the name and posts `0x5fa` to
+  move to the description, while declining clears it.
+- Its DoDataExchange does not call CSimsDialog's; its buttons sit at 0,0 rather than 1,1;
+  its init checks no descriptor; Close (`+0xec`) is CSimsDialog's own.
+
+The first harness run for Save passed with whole paths unreached: the remembered name
+differed only in scenarios where the status was never `0x1004`, and the stubs' swap point
+never fell on the first call when a swap was due. Both selectors now draw on independent
+seed bits, and the two descriptors differ in their buffer sizes; nine breaks went from
+missed to caught.
+
+## Slice 3: Communications `0x1203`
+
+`src/flights/flights_comms.c`; class `0x55a0`, `0x1fe0` bytes, descriptor at `+0x1fdc`
+(caller: MAIN command `0x1203`, `command_1203`). The descriptor: answer `+0`, MAIN's check
+`+4` (stdcall; the dialog ignores its answer and reads the status), status `+0xc`, the
+frequency text `+0x10` with room `+0x14`, the "slow" box `+0x2c`, the request `+0x34`
+(0 none, 1 take off, 2 land), the rate slider `+0x3c` (range 0..14).
+
+- **The request radios** each move the focus to themselves; only "none" leaves the box
+  usable, the others clear and disable it. A radio is read as checked when its
+  `GWL_USERDATA` equals its own window, as Help's Lessons does.
+- **Populate** restores the focus it found (`GetFocus`, then a posted `0x5fa`); a request
+  above 2 sets no radio at all.
+- **OK** reads the controls before it reads the vtable, unlike Save.
+- **Validate** (`+0xd8`) rewrites the frequency to three decimals (`atof`, then `sprintf`
+  with `.data`'s `"%.3f"`) only when its *argument* is the edit's id `0xcb3`; OnOK passes 0.
+- **Report** (`+0xdc`) gives `DoErrorDialog` the status field's *address* as its code, and
+  answers whatever vtable `+0xe0` returns. Both reproduced.
+
+Its first break run missed one break: the "none" request only ever met a cleared box,
+because both came from the same low bits of the scenario number. Fixture values that
+decide branches now come from independent seed bits.
+
+## Slice 4: Create a Flight `0x1101`
+
+`src/flights/flights_create.c`; class `0x2350`, `0x1c64` bytes, descriptor at `+0x10e0`
+(caller: MAIN command `0x1101`, `command_1101`). The descriptor: answer `+0`, callbacks
+(stdcall, given the descriptor) Save `+8`, Aircraft `+0xc`, Location `+0x10`, Weather
+`+0x14`, Time `+0x18`; the four summaries `+0x1c`..`+0x28`; `+0x2c` set once there is
+something to fly, which enables OK and Save.
+
+- Every handler but Save tests for a null descriptor; any callback may be missing. Each
+  choice calls its callback and redraws the summaries; Save does not redraw.
+- **OnInitDialog answers FALSE**, having put the focus on Select Aircraft itself, and
+  clears `+0x10dc` last.
+- **Module-static state.** The summaries' font is a function-local static `CSimsFont` in
+  `.data` (`0x22322150`, `0x70` bytes, guard bit in `0x223221c0`): built on the first
+  OnInitDialog from `GetSimsBaseFont(8)`, with the guard set before it is built, and its
+  destructor registered through `__dllonexit`. Every OnInitDialog then copies the dialog's
+  colours and sizes into it. The harness keeps this state in its fixture, copies it in
+  and out of retail's `.data` around each run, maps retail's address onto the fixture's
+  in the logs, and runs OnInitDialog twice in a row to see the guard work.
+- WM_PAINT goes straight to MFC's handler (`#2379`).
+
+## Select Aircraft `0x1201`: where to start
+
+Read but not written. Class `0x18a0`, `0x1868` bytes, descriptor at `+0x1864` (caller:
+MAIN command `0x1201`, `command_1201`): answer `+0`, `+4` and `+0xc` do nothing, `+8`
+returns -1, `+0x10` is the preview box `(op, descriptor, window)` (1 open with the
+picture's window `GetDlgItem(0xc87)`, 2 close, 3 draw a frame, from `WM_USER+100`),
+selection `+0x14`, count `+0x18`, and the list `+0x1c` of ACONTAIN's 0xa08-byte records,
+of which the dialog shows `+0x100` and `+0x500` and enables the details button by
+`+0xa04`. New ground: local `CString`s under their own SEH frames (`CListBox::GetText`
+into one), `RemapCtrlRect` and `MoveWindow` on the picture, OnInitDialog reading the
+vtable once and calling populate through `+0xf0`, and `+0x84 = 0xb`.
+
 ## Next
 
-1. The next families, smallest first: Save `0x1104`, Communications `0x1203`, Create
-   `0x1101`, Select Aircraft `0x1201`, the opening menus `0x1109` / `0x11090001` /
+1. The next families, smallest first: Select Aircraft `0x1201` (above), then
+   the opening menus `0x1109` / `0x11090001` /
    `0x11090002`, Select Flight `0x1102`, then the large ones, Autopilot `0x1204` and
    Navigation `0x1202`. Each adds its classes to `CLASSES` in the generator and its
    operations to the harness.

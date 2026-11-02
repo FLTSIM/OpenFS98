@@ -21,9 +21,10 @@ struct fs98_flights_object_services {
     void (*dialog_delete)(void *object);
     int32_t (*create)(void *object, uint32_t resource, void *parent);
     int32_t (*show)(void *object, int32_t show);
+    char *(*copy_text)(char *out, const char *text);
 };
 /* Class indices, in s_classes order (tools/gen_flights_tables.py) */
-enum { FS98_FLIGHTS_ADVENTURES, FS98_FLIGHTS_CHALLENGES, FS98_FLIGHTS_CLASS_COUNT };
+enum { FS98_FLIGHTS_ADVENTURES, FS98_FLIGHTS_CHALLENGES, FS98_FLIGHTS_SAVE, FS98_FLIGHTS_COMMS, FS98_FLIGHTS_CREATE, FS98_FLIGHTS_CLASS_COUNT };
 void fs98_flights_set_object_services(const struct fs98_flights_object_services *services,
                                       void *const *vtables);
 /* Flights' own instance, which each factory stores at object +0x80 */
@@ -35,5 +36,8 @@ void fs98_flights_set_object_module(uint32_t module);
     uint32_t FS98_FLIGHTS_STDCALL fs98_flights_##name##_create(uint32_t parent, void *descriptor)
 FS98_FLIGHTS_OBJECT(adventures);
 FS98_FLIGHTS_OBJECT(challenges);
+FS98_FLIGHTS_OBJECT(save);
+FS98_FLIGHTS_OBJECT(comms);
+FS98_FLIGHTS_OBJECT(create);
 #undef FS98_FLIGHTS_OBJECT
 #endif

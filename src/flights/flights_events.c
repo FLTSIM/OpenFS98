@@ -19,8 +19,11 @@
 static const struct fs98_flights_services *s_services;
 static uint32_t s_resource_module;
 static const char *s_help_file = "fs98.hlp";
+const char fs98_flights_empty_text[] = "";
 
 void fs98_flights_set_services(const struct fs98_flights_services *services) { s_services = services; }
+const struct fs98_flights_services *fs98_flights_services(void) { return s_services; }
+uint32_t fs98_flights_resource_module(void) { return s_resource_module; }
 void fs98_flights_set_resource_module(uint32_t module) { s_resource_module = module; }
 void fs98_flights_set_help_file(const char *file) { s_help_file = file; }
 
@@ -37,7 +40,7 @@ void TC fs98_flights_post_destroy(void *object)
     if (object) ((void *(TC *)(void *, uint32_t))PTR(PTR(object, 0), 4))(object, 1);
 }
 
-#define FLIGHTS_CLASS(name) \
+#define FLIGHTS_CLASS(name, base) \
 int32_t TC fs98_flights_##name##_help(void *object, uint32_t unused, void *info) \
 { \
     (void)object; (void)unused; \
@@ -52,13 +55,16 @@ int32_t TC fs98_flights_##name##_context(void *object, uint32_t window, uint32_t
 void TC fs98_flights_##name##_exchange(void *object, void *exchange) \
 { \
     uint32_t index; \
-    s_services->base_exchange(object, exchange); \
+    if (base) s_services->base_exchange(object, exchange); \
     for (index = 0; index < sizeof(s_ddx_##name) / sizeof(s_ddx_##name[0]); ++index) \
         s_services->ddx_control(exchange, s_ddx_##name[index][1], \
                                 AT(object, s_ddx_##name[index][0])); \
 }
-FLIGHTS_CLASS(adventures)
-FLIGHTS_CLASS(challenges)
+FLIGHTS_CLASS(adventures, 1)
+FLIGHTS_CLASS(challenges, 1)
+FLIGHTS_CLASS(save, 0)          /* 0x22316140 binds its controls without CSimsDialog's */
+FLIGHTS_CLASS(comms, 0)         /* 0x22315810 likewise */
+FLIGHTS_CLASS(create, 0)        /* 0x22312590 likewise */
 #undef FLIGHTS_CLASS
 
 /* ---- the pickers: Adventures (0x1108) and Challenges (0x1107) ------------------------

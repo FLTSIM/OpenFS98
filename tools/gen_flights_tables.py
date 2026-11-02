@@ -17,12 +17,16 @@ IMAGE = 'orig/English/Flights.DLL'
 BASE = 0x22310000
 DIALOG_CONSTRUCT, DIALOG_DESTROY = 0x135b0, 0x135c8      # SIMSUI CSimsDialog ctor/dtor slots
 DDX_THUNK = 0x2231bc0e                                    # jmp MFC42 #2302, DDX_Control
+NOT_MEMBERS = {0x13364}                                   # lstrcpyA: Save's constructor clears a name
 
 # name, object size, template, descriptor offset, constructor, destructor, deleting
 # destructor, factory, vtable, DoDataExchange, its end, context-help table, DDX count
 CLASSES = (
     ('adventures', 0x15e4, 0x200, 0x10dc, 0x2c10, 0x2cf0, 0x2cd0, 0x12f0, 0xe510, 0x2db0, 0x2e40, 0xe4d0, 7),
     ('challenges', 0x15e4, 0x201, 0x10dc, 0x5000, 0x50e0, 0x50c0, 0x1380, 0xe9a0, 0x51a0, 0x5230, 0xe960, 7),
+    ('save', 0x17d0, 0x207, 0x17cc, 0x5f60, 0x6070, 0x6050, 0x1250, 0xed28, 0x6140, 0x61e0, 0xece0, 8),
+    ('comms', 0x1fe0, 0x1fd, 0x1fdc, 0x55a0, 0x56f0, 0x56d0, 0x1530, 0xeba0, 0x5810, 0x5920, 0xeb28, 14),
+    ('create', 0x1c64, 0x1fe, 0x10e0, 0x2350, 0x2480, 0x2460, 0x1130, 0xe360, 0x2590, 0x2690, 0xe210, 13),
 )
 
 
@@ -80,6 +84,8 @@ def object_calls(start, end):
                 if not value or value[0] != 'import':
                     raise SurveyError(f'unrecognised Flights object call: {instruction}')
                 import_slot = value[1]
+            if import_slot in NOT_MEMBERS:
+                continue
             target = registers.get('ecx')
             if not target or target[0] != 'object':
                 raise SurveyError('unrecognised Flights member offset')

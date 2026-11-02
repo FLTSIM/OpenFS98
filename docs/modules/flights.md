@@ -2,9 +2,10 @@
 
 `orig/English/Flights.DLL`, module `0x80000002`, preferred base `0x22310000`, 51,122 bytes of
 `.text`, 13 dialog registrations. **In progress, one family of dialogs at a time.** Slices 1
-to 6, the pickers (Adventures and Challenges), Save Flight, Communications, Create a Flight,
-Select Aircraft, the welcome dialog and the modeless dialog, are verified in their harness
-(9 of 13 registrations); nothing is built as a DLL or installed yet. Like Help, Sim and Views it is MFC dialogs over the CD's SIMSUI and
+to 8, the pickers (Adventures and Challenges), Save Flight, Communications, Create a Flight,
+Select Aircraft, the welcome dialog and its two sub-menus, the modeless dialog and Select
+Flight, are verified in their harness (11 of 13 registrations; Autopilot and Navigation
+remain); nothing is built as a DLL or installed yet. Like Help, Sim and Views it is MFC dialogs over the CD's SIMSUI and
 MFC42, which stay as dependencies.
 
 ## Building and verifying
@@ -67,7 +68,8 @@ are in `.rdata`. In `.text` order:
 | `0x1107` Challenges | `0x5000` | 1,440 | 4 |
 | `0x1203` Communications | `0x55a0` | 2,496 | 5 |
 | `0x1104` Save | `0x5f60` | 1,776 | 2 |
-| `0x1102` Select Flight | `0x6650` | 5,936 | 5 and 8 |
+| `0x1102` Select Flight | `0x6650` | 2,544 | 5 |
+| (Navigation's tab page) | `0x7040` | 3,392 | 8 |
 | `0x1202` Navigation | `0x7d80` | 8,080 | 3, 2 and 2 |
 | `1` modeless | `0x9d10` | 304 | 3 |
 | `0x1109` opening menu | `0x9e40` | 2,960 | 10 |
@@ -110,14 +112,14 @@ change the list's window mid-call; every vtable slot logs, so a wrong slot diffe
 than faults. Factories see failed allocations (the store through null is compared as an
 outcome).
 
-Results, current for slices 1 to 6 together (145 operations):
+Results, current for slices 1 to 8 together (201 operations):
 
 | Run | Result |
 | --- | --- |
-| seed `0x5f1a6c2d` | 20,000 scenarios, 2,900,000 comparisons, 0 differ |
-| seed `0x98a1e7d3` | 20,000 scenarios, 2,900,000 comparisons, 0 differ |
-| unwind, seed `0x7e51a23b` | 2,000 scenarios, 2,526,862 comparisons with a throw at every call position (2,235,406 throws), 0 differ |
-| `tools/flights_breaks.py 400` | 242 of 242 breaks caught; three more proven equivalent, listed in the runner |
+| seed `0x5f1a6c2d` | 20,000 scenarios, 4,020,000 comparisons, 0 differ |
+| seed `0x98a1e7d3` | 20,000 scenarios, 4,020,000 comparisons, 0 differ |
+| unwind, seed `0x7e51a23b` | 2,000 scenarios, 3,498,068 comparisons with a throw at every call position (3,093,460 throws), 0 differ |
+| `tools/flights_breaks.py 400` | 299 of 299 breaks caught; three more proven equivalent, listed in the runner |
 
 The stubs disturb the fixture at two calls per operation, one among the first four and one
 anywhere in the first 32; the replacement vtable's every slot, and each descriptor's
@@ -255,14 +257,61 @@ The harness found a store missed on reading (the constructor's clearing of the b
 flag); the breaks found that a random fixture almost never left the busy flag clear, so
 the buttons' bodies had not run: it now starts clear three times in four.
 
+## Slice 7: the sub-menus `0x11090002` (flights) and `0x11090001` (learning)
+
+Also `src/flights/flights_opening.c`, which now builds all three menus from shared
+helpers: a menu button, the hover hint, and the three static fonts. The welcome dialog
+was moved onto them and re-verified. Both sub-menus are `0x165c` bytes, descriptor
+`+0x1658` (callers MAIN's `welcome_more_2` and `welcome_more_1`), with title art `0x10e0`,
+Back `0x11c8`, shadow buttons `0x12c4`, `0x13b8`, `0x14ac` and the hint `0x15a0`.
+
+- **Flights** (class `0xa9d0`): dual-pilot `+8`, review a challenge `+0x10`, a video
+  `+0x14`. A button disables the other two and Back; a declined choice re-enables all four.
+- **Learning** (class `0xb240`): lessons `+8`, quit `+0xc`, about `+0x10`. A button
+  disables only the other two (Back stays usable), and a declined choice re-enables the
+  three and **puts the focus back on its own button**, which the flights menu does not.
+- OK, Cancel and `WM_CLOSE` are one routine (`0x2231b920`): answer 0 and close, unless a
+  callback is running. OnInitDialog answers TRUE and sets no focus.
+- Each has its own three static fonts and hint memory; together they run on in `.data`
+  from `0x22322328` to `0x223225dc`, kept by the harness as one block.
+
+The learning menu's focus call was missed on reading (my extraction looked only for the
+enable calls) and caught by the first harness run.
+
+## Slice 8: Select Flight `0x1102`
+
+`src/flights/flights_select.c`; class `0x6650`, `0x1810` bytes, descriptor `+0x180c`
+(caller MAIN's `flight_dialog`, Linkage `+0xc4` and others): answer `+0`, delete `+8`
+(stdcall, given the descriptor), edit `+0xc` (stdcall, given the descriptor and a record),
+"make it the default" `+0x10`, selection `+0x14`, count `+0x18`, records `+0x1c`, and
+`+0x20`, the entry that may not be edited or deleted. **`+0x20` is past the end of
+MAIN's eight-word block**, so in the game it is whatever MAIN's stack holds there; the
+dialog reads it and Delete decrements it.
+
+- Each list item carries its record's address as item data (`LB_SETITEMDATA`), and the
+  selection is shown through `LB_GETITEMDATA`. The records' base is read once while
+  filling the list; a selection out of range falls back to the first entry.
+- The title edit and Delete are disabled, and the description made read-only, for a
+  record flagged at `+0xa04` and for the protected entry.
+- Validate (`+0xd8`) acts only while Delete is usable and only for OK or the title edit:
+  it copies the record onto the stack, puts the edited title in, and if the title changed
+  hands the copy to the edit callback; otherwise it hands over the description with the
+  copy's title cleared. Its answer, `0xcbe`, is withheld for "already exists" when asked
+  about the title edit itself. Report (`+0xdc`) asks about an existing title, and on
+  agreement saves only the description; anything else is reported, and the answer is
+  vtable `+0xe0`'s.
+- OnInitDialog sets two edit limits directly in the members (`+0x1644 = 0xff`,
+  `+0x15dc = 0x3ff`), fills the list only with a descriptor, and answers FALSE.
+
+The second message map once counted with Select Flight belongs to a `CSimsTabPage`
+(template `0x202`, class `0x7040`) built by the Navigation dialog.
+
 ## Next
 
-1. The next families, smallest first: the two sub-menus `0x11090001` (learning, class
-   `0xb240`) and `0x11090002` (flights, class `0xa9d0`), the same pattern as the welcome
-   dialog with their own static fonts (`0x22322328`..`0x22322478`, guard `0x22322478`)
-   and hover statics (`0x2232247c`, `0x22322480`); then Select Flight `0x1102`, then the large ones, Autopilot `0x1204` and
-   Navigation `0x1202`. Each adds its classes to `CLASSES` in the generator and its
-   operations to the harness.
+1. The last two families, the large ones: Autopilot `0x1204` (class `0x3180`, 7.8 KB,
+   11 message entries) and Navigation `0x1202` (class `0x7d80`, 8 KB, with its tab page
+   `0x7040`). Each adds its classes to `CLASSES` in the generator and its operations to
+   the harness.
 2. Module init/deinit and the runtime: native vtables and message maps, MFC/SIMSUI import
    adapters, the factories registered with the host (`tools/gen_flights_runtime.py`, after
    `gen_help_runtime.py`).

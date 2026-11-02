@@ -69,6 +69,9 @@ FLIGHTS_CLASS(create, 0)        /* 0x22312590 likewise */
 FLIGHTS_CLASS(aircraft, 1)
 FLIGHTS_CLASS(modeless, 1)     /* its help pair is the welcome dialog's (0x22319e00) */
 FLIGHTS_CLASS(opening, 1)
+FLIGHTS_CLASS(flight_menu, 1)
+FLIGHTS_CLASS(learning_menu, 1)
+FLIGHTS_CLASS(select, 0)        /* 0x22316850 binds without CSimsDialog's */
 #undef FLIGHTS_CLASS
 
 /* ---- the pickers: Adventures (0x1108) and Challenges (0x1107) ------------------------

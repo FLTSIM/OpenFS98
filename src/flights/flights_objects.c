@@ -58,8 +58,9 @@ static FS98_FLIGHTS_NOINLINE void *fs98_flights_construct(void *object, void *pa
     PTR(object, 0) = s_vtables[kind];
     /* 0x2231602b: Save forgets the name it last confirmed, inside the constructor's frame */
     if (kind == FS98_FLIGHTS_SAVE) s_services->copy_text((char *)object + 0x10dc, fs98_flights_empty_text);
-    /* 0x22319ef7: the welcome dialog starts with no button's callback running */
-    if (kind == FS98_FLIGHTS_OPENING) D32(object, 0x10dc) = 0;
+    /* 0x22319ef7, 0x2231aa6b, 0x2231b2db: the menus start with no callback running */
+    if (kind == FS98_FLIGHTS_OPENING || kind == FS98_FLIGHTS_FLIGHT_MENU || kind == FS98_FLIGHTS_LEARNING_MENU)
+        D32(object, 0x10dc) = 0;
     fs98_flights_unwind_leave(&state.frame);
     return object;
 }
@@ -125,4 +126,7 @@ OBJECT_CLASS(create, FS98_FLIGHTS_CREATE)
 OBJECT_CLASS(aircraft, FS98_FLIGHTS_AIRCRAFT)
 OBJECT_CLASS(modeless, FS98_FLIGHTS_MODELESS)
 OBJECT_CLASS(opening, FS98_FLIGHTS_OPENING)
+OBJECT_CLASS(flight_menu, FS98_FLIGHTS_FLIGHT_MENU)
+OBJECT_CLASS(learning_menu, FS98_FLIGHTS_LEARNING_MENU)
+OBJECT_CLASS(select, FS98_FLIGHTS_SELECT)
 #undef OBJECT_CLASS

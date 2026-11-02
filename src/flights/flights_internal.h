@@ -71,7 +71,16 @@ struct fs98_flights_services {
     int32_t (*init_shadow_button)(void *control, void *font, void *alternate_font, uint32_t bitmap,
                                   void *dib, void *palette, uint32_t flags, uint32_t color,
                                   uint32_t module, int32_t x, int32_t y, struct fs98_flights_rect rect);
+    int32_t (*window_enabled)(void *window);                        /* CWnd::IsWindowEnabled */
 };
+
+/* Select Flight (0x1102, MAIN's flight_dialog): answer +0, delete +8 (stdcall, given the
+ * descriptor), edit +0xc (stdcall, given the descriptor and a copy of the record with a
+ * new title, or with no title and a new description), "make it the default" +0x10,
+ * selection +0x14, count +0x18, the 0xa08-byte records +0x1c. The dialog also uses +0x20,
+ * the entry that may not be edited or deleted, which is past the end of MAIN's block. */
+typedef uint32_t (FS98_FLIGHTS_STDCALL *fs98_flights_select_delete_fn)(void *descriptor);
+typedef uint32_t (FS98_FLIGHTS_STDCALL *fs98_flights_select_edit_fn)(void *descriptor, void *record);
 
 /* The welcome dialog (0x1109, MAIN's start and command 0x1109): answer +0, callbacks
  * (stdcall, given the descriptor) more choices +8, lessons +0xc, Create a Flight +0x10,
@@ -90,6 +99,30 @@ void fs98_flights_set_opening_state(struct fs98_flights_opening_state *state);
 void fs98_flights_opening_shadow_destroy(void);
 void fs98_flights_opening_alternate_destroy(void);
 void fs98_flights_opening_hint_destroy(void);
+
+/* The two sub-menus, flights (0x11090002) and learning (0x11090001), from the welcome
+ * dialog's More and Lessons: answer +0, then callbacks (stdcall, given the descriptor).
+ * Flights: dual-pilot +8, review a challenge +0x10, watch a video +0x14. Learning:
+ * lessons +8, quit +0xc, about +0x10. Their statics run on in .data from 0x22322328. */
+struct fs98_flights_menus_state {
+    uint8_t flight_alternate[0x70];     /* 0x22322328, flights guard bit 2 */
+    uint8_t flight_hint[0x70];          /* 0x22322398, bit 4 */
+    uint8_t flight_shadow[0x70];        /* 0x22322408, bit 1 */
+    uint8_t flight_guard, padding0[3];  /* 0x22322478 */
+    uint32_t flight_shown;              /* 0x2232247c */
+    uint8_t learning_guard, padding1[7];/* 0x22322480 */
+    uint8_t learning_shadow[0x70];      /* 0x22322488, learning guard bit 1 */
+    uint8_t learning_hint[0x70];        /* 0x223224f8, bit 4 */
+    uint8_t learning_alternate[0x70];   /* 0x22322568, bit 2 */
+    uint32_t learning_shown;            /* 0x223225d8 */
+};
+void fs98_flights_set_menus_state(struct fs98_flights_menus_state *state);
+void fs98_flights_flight_menu_shadow_destroy(void);
+void fs98_flights_flight_menu_alternate_destroy(void);
+void fs98_flights_flight_menu_hint_destroy(void);
+void fs98_flights_learning_menu_shadow_destroy(void);
+void fs98_flights_learning_menu_alternate_destroy(void);
+void fs98_flights_learning_menu_hint_destroy(void);
 
 /* Select Aircraft (0x1201, MAIN command 0x1201): answer +0, +4 and +0xc unused here,
  * +8 the details callback (stdcall, given the descriptor; zero means it changed the list),
@@ -183,7 +216,27 @@ FS98_FLIGHTS_EVENT(opening_fly);
 FS98_FLIGHTS_EVENT(opening_quit);
 FS98_FLIGHTS_EVENT(opening_refresh);
 FS98_FLIGHTS_EVENT(opening_save);
+FS98_FLIGHTS_EVENT(menu_back);                /* 0x2231b920: both sub-menus' OK, Cancel, WM_CLOSE */
+FS98_FLIGHTS_EVENT(flight_menu_dual);
+FS98_FLIGHTS_EVENT(flight_menu_review);
+FS98_FLIGHTS_EVENT(flight_menu_video);
+FS98_FLIGHTS_EVENT(learning_menu_lessons);
+FS98_FLIGHTS_EVENT(learning_menu_quit);
+FS98_FLIGHTS_EVENT(learning_menu_about);
+FS98_FLIGHTS_EVENT(select_cancel);
+FS98_FLIGHTS_EVENT(select_accept);
+FS98_FLIGHTS_EVENT(select_remove);
+FS98_FLIGHTS_EVENT(select_choose);
+FS98_FLIGHTS_EVENT(select_double_click);
+FS98_FLIGHTS_EVENT(select_populate);
 #undef FS98_FLIGHTS_EVENT
+int32_t FS98_FLIGHTS_THISCALL fs98_flights_select_init(void *object);
+uint32_t FS98_FLIGHTS_THISCALL fs98_flights_select_validate(void *object, uint32_t control);
+uint32_t FS98_FLIGHTS_THISCALL fs98_flights_select_error(void *object, uint32_t code);
+int32_t FS98_FLIGHTS_THISCALL fs98_flights_flight_menu_init(void *object);
+int32_t FS98_FLIGHTS_THISCALL fs98_flights_learning_menu_init(void *object);
+int32_t FS98_FLIGHTS_THISCALL fs98_flights_flight_menu_hover(void *object, uint32_t w_param, uint32_t l_param);
+int32_t FS98_FLIGHTS_THISCALL fs98_flights_learning_menu_hover(void *object, uint32_t w_param, uint32_t l_param);
 int32_t FS98_FLIGHTS_THISCALL fs98_flights_opening_init(void *object);
 int32_t FS98_FLIGHTS_THISCALL fs98_flights_opening_hover(void *object, uint32_t w_param, uint32_t l_param);
 int32_t FS98_FLIGHTS_THISCALL fs98_flights_modeless_init(void *object);
@@ -217,5 +270,8 @@ FS98_FLIGHTS_CLASS(create);
 FS98_FLIGHTS_CLASS(aircraft);
 FS98_FLIGHTS_CLASS(modeless);
 FS98_FLIGHTS_CLASS(opening);
+FS98_FLIGHTS_CLASS(flight_menu);
+FS98_FLIGHTS_CLASS(learning_menu);
+FS98_FLIGHTS_CLASS(select);
 #undef FS98_FLIGHTS_CLASS
 #endif

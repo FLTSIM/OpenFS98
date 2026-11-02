@@ -20,7 +20,8 @@ Total code to account for across the whole product: **1.44 MiB** of `.text`
 across 27 modules plus the host. See [docs/architecture.md](docs/architecture.md)
 for the module map, the ABI, and what was found on the disc.
 
-Known gaps are in [docs/open-differences.md](docs/open-differences.md).
+Known gaps are in [docs/open-differences.md](docs/open-differences.md), and what is still
+retail in [docs/remaining-work.md](docs/remaining-work.md).
 New here? [docs/method.md](docs/method.md) is how work gets done -- the loop
 from retail binary to verified reimplementation, and the conventions that have
 earned their place. [docs/architecture.md](docs/architecture.md) is what FS98
@@ -367,12 +368,12 @@ its depth queue, services and CHAIN callbacks, 20,000 `g3ddiff` scenarios
 with zero differences, and a portable C mesh compiler checked against
 retail's instructions (see [docs/modules/g3d.md](docs/modules/g3d.md)).
 
-**Next: fly it.** The whole game, all retail against all ours, now matches frame for
-frame on eight flights on both renderers, with nobody at the controls. What is still
-open is listed in [docs/open-differences.md](docs/open-differences.md): scripted and
-hand flying first, then UTIL's register preservation. After that, install the finished dialogs
-(Alerts, Help, Views, Sim), then Flights and Options, SIMSUI, and an executable
-around `HOST.DLL`.
+**Next: UTIL's register preservation.** The whole game, all retail against all ours, matches
+frame for frame on all 74 flights with nobody flying, and flown by script on eight flights, on
+both renderers. What is still open is listed in
+[docs/open-differences.md](docs/open-differences.md). After that, install the finished dialogs
+(Alerts, Help, Views, Sim), then Flights and Options, SIMSUI, the gauges and an executable
+around `HOST.DLL`: [docs/remaining-work.md](docs/remaining-work.md).
 
 Other useful work, in no particular order:
 

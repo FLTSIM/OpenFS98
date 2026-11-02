@@ -1751,15 +1751,15 @@ Getting there took three fixes, each found by swapping modules into a retail gam
 What still differs with retail and ours mixed, and what is untested, is in
 [open-differences.md](../open-differences.md).
 
-Left to do for HG2D: scripted flying, views, night and weather, for coverage, and
-flying it by hand. HG2D was not installed into `game/` by this work: `make install`
+Flying by script is done: see [open-differences.md](../open-differences.md). Left to do for
+HG2D: night and weather set by hand, for coverage, and flying it longer by hand. HG2D was not installed into `game/` by this work: `make install`
 does that.
 
 **`SEHFIX.DLL` is not needed with ours.** The wine freeze came from divide faults at
 retail's HG2D `.text+0x66e2`, which ours computes without trapping: the fix's log shows
 no HG2D faults with ours on three flights, where retail's has them on two. Without the
-fix on a real display, all retail freezes and all ours does not. See
-[wine.md](../wine.md).
+fix, all retail freezes and all ours does not, by hand on a real display and in the frame
+comparison, which is why that comparison gives retail the fix. See [wine.md](../wine.md).
 
 ## Completion and integration limits
 

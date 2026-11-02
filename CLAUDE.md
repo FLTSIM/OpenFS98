@@ -34,6 +34,7 @@ possibly Android.
    the detailed ones.
 5. [docs/open-differences.md](docs/open-differences.md) — known differences from retail
    and what has not been tested.
+6. [docs/remaining-work.md](docs/remaining-work.md) — what is still retail, in what order.
 
 ## Orienting fast
 
@@ -420,7 +421,8 @@ reach a boundary.
   for good. `make sehfix-install` hands those faults back to the host's
   filter; `make vd-on` is still needed for focus. Not a decompilation defect.
   See [docs/wine.md](docs/wine.md). Only retail HG2D needs it: without it on a real
-  display all retail freezes and all ours does not. Xvfb never shows the freeze.
+  display all retail freezes and all ours does not. A frame comparison shows it too,
+  once a flight reaches such a divide, so retail's side always runs with the fix there.
 - **Not every FS98 CD is the reference.** A later pressing rebuilt
   `FLTSIM98.EXE` and ten modules at base `0x10000000` (CONTROLS among them,
   with 493 commands instead of 383). If a generator stops with `image base

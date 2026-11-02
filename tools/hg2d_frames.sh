@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 # Frame-exact comparison of the running game: retail HG2D twice, which shows the run
-# is deterministic at all, then ours.  Each run has its own copy of the game and one
+# is deterministic at all, then ours.  Retail always runs with SEHFIX.DLL and ours
+# without: under wine retail's 3D view freezes at the first divide fault it takes
+# (docs/wine.md), so without it the reference is wrong.  Each run has its own copy of the game and one
 # wine prefix copy is shared between them, on a private Xvfb, so neither game/ nor
 # another wine process nor the desktop is disturbed.  The clock and the log are FRAMELOCK's
 # (tools/drive/framelock.c).
@@ -14,6 +16,12 @@
 # HG2D_FRAMES_OUT sets the output directory (default bin/hg2d-frames),
 # HG2D_FRAMES_DISPLAY the Xvfb (default :62), and HG2D_FRAMES_OURS the DLL to test
 # (default bin/HG2D.DLL), which is how a deliberate break is checked.
+#
+# HG2D_FRAMES_NOSOUND=1 runs without DirectSound.  A crash pauses the sim until its sound
+# ends (docs/modules/reality.md), which is real time, so a flight that crashes does not
+# repeat with sound: the pass it resumes on varies.  Without it, it does.
+#
+# HG2D_FRAMES_BIN is the directory of our DLLs (default bin), for testing a broken build.
 #
 # HG2D_FRAMES_ALL=1 compares the whole game instead: every module and World.DLL
 # retail against every one ours, and the verdict is on all of them.
@@ -36,9 +44,10 @@ out=$(realpath -m "${HG2D_FRAMES_OUT:-bin/hg2d-frames}")
 display=${HG2D_FRAMES_DISPLAY:-:62}
 game=$(realpath "${FS98_DIR:-$PWD/game}")
 framelock=bin/hg2d-diff/FRAMELOCK.DLL
-ours=${HG2D_FRAMES_OURS:-bin/HG2D.DLL}
-[ -f "$ours" ] && [ -f "$framelock" ] && [ -f "$game/FLTSIM98.EXE" ] || {
-    echo "needs $ours, $framelock and the staged game" >&2; exit 2;
+ours_bin=${HG2D_FRAMES_BIN:-bin}
+ours=${HG2D_FRAMES_OURS:-$ours_bin/HG2D.DLL}
+[ -f "$ours" ] && [ -f "$framelock" ] && [ -f bin/SEHFIX.DLL ] && [ -f "$game/FLTSIM98.EXE" ] || {
+    echo "needs $ours, $framelock, bin/SEHFIX.DLL and the staged game" >&2; exit 2;
 }
 command -v Xvfb >/dev/null || { echo "needs Xvfb" >&2; exit 2; }
 
@@ -56,6 +65,7 @@ xdpyinfo >/dev/null 2>&1 || { echo "Xvfb did not start" >&2; exit 2; }
 debug=-all
 [ -z "${HG2D_FRAMES_DEVICE:-}" ] || debug=+ddraw
 export WINEDEBUG=-all
+[ -z "${HG2D_FRAMES_NOSOUND:-}" ] || export WINEDLLOVERRIDES="dsound=d"
 
 run() {     # tag hg2d
     local tag=$1 copy=$out/game-$1
@@ -63,14 +73,16 @@ run() {     # tag hg2d
     if [ -n "${HG2D_FRAMES_ALL:-}" ]; then
         local m
         for m in $(make -s modules-of); do
-            if [ "$tag" = ours ]; then cp "bin/$m.DLL" "$copy/Modules/$(make -s installed-name-of M=$m)"
+            if [ "$tag" = ours ]; then cp "$ours_bin/$m.DLL" "$copy/Modules/$(make -s installed-name-of M=$m)"
             else cp "$(make -s orig-module-of M=$m)" "$copy/Modules/$(make -s installed-name-of M=$m)"; fi
         done
-        if [ "$tag" = ours ]; then cp bin/WORLD.DLL "$copy/English/World.DLL"
+        if [ "$tag" = ours ]; then cp "$ours_bin/WORLD.DLL" "$copy/English/World.DLL"
         else cp orig/English/World.DLL "$copy/English/World.DLL"; fi
     fi
     cp "$2" "$copy/Modules/HG2D.DLL"
     cp "$framelock" "$copy/Modules/FRAMELOCK.DLL"
+    rm -f "$copy/Modules/SEHFIX.DLL"
+    [ "$tag" = ours ] || cp bin/SEHFIX.DLL "$copy/Modules/SEHFIX.DLL"
     mkdir -p "$out/$tag"
     [ -z "${HG2D_FRAMES_DEVICE+x}" ] || sed -i "s/^Device=.*/Device=$HG2D_FRAMES_DEVICE\r/" "$copy/FLTSIM98.CFG"
     [ -z "${HG2D_FRAMES_MODE+x}" ] || sed -i "s/^Mode=.*/Mode=$HG2D_FRAMES_MODE\r/" "$copy/FLTSIM98.CFG"

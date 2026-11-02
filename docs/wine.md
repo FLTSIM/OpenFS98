@@ -11,13 +11,15 @@
 > `SEHFIX.DLL`: all retail freezes; all ours does not, and resizing the window works.
 > So keep the fix for any game with retail HG2D, and leave it out of the all-ours game.
 >
-> Under Xvfb the freeze does not happen at all, so frame comparisons cannot show it:
-> 600 passes of `STGEORGE`, `PARIS` and `KAUAI`, all retail and all ours, each with and
-> without the fix, had every frame identical. The fix's log explains the rest: ours took
-> 16 divide faults a flight, all in the host (`0x406525`, `0x406538`, `0x40654a`,
-> `0x40655d`, four each, which is `WM_SIZE`), and none in HG2D, while retail also faulted
-> in HG2D on `STGEORGE` and `PARIS`. Those host faults still go unrepaired without the fix,
-> with no visible effect. Direct3D has not been tried on a real display without it.
+> The frame comparison shows the freeze, once a flight reaches such a divide. Without the
+> fix, retail differed from ours on 8 of 74 flights in 900 passes, first between pass 0 and
+> pass 646, and its 3D view stopped changing at pass 756 of `PARIS` flown by script. With
+> the fix, all of them match ours, which took none of those faults. So
+> `tools/hg2d_frames.sh` gives retail the fix and ours none. Three flights' fix logs: ours
+> took 16 divide faults a flight, all in the host (`0x406525`, `0x406538`, `0x40654a`,
+> `0x40655d`, four each, which is `WM_SIZE`), and none in HG2D. Those host faults go
+> unrepaired without the fix, with no visible effect. Direct3D has not been tried on a real
+> display without it.
 
 ## The cause, and the fix
 

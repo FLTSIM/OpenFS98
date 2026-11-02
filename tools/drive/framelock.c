@@ -9,7 +9,7 @@
  *   timeSetEvent      the 20 ms multimedia timer (0x401950) is not started; it is
  *                     called on the main thread when the main loop's read passes
  *                     its next due time
- *   GetLocalTime, GetMessageTime   derived from the counter
+ *   GetLocalTime, GetMessageTime, QueryPerformanceCounter   derived from the counter
  *   Sleep             returns at once
  *   BitBlt, StretchBlt, StretchDIBits   logged with a hash of the source bits
  *
@@ -301,6 +301,15 @@ static LONG WINAPI hook_getmessagetime(void)
     return (LONG)clock_ms;
 }
 
+/* In the machine's own units, since the host asks it for the frequency. */
+static BOOL WINAPI hook_queryperformancecounter(LARGE_INTEGER *counter)
+{
+    LARGE_INTEGER frequency;
+    QueryPerformanceFrequency(&frequency);
+    counter->QuadPart = (ULONGLONG)(clock_ms - CLOCK_START) * (frequency.LowPart / 1000u);
+    return TRUE;
+}
+
 static void WINAPI hook_sleep(DWORD ms)
 {
     (void)ms;
@@ -479,6 +488,7 @@ BOOL WINAPI DllMain(HINSTANCE inst, DWORD reason, LPVOID reserved)
         patch_import("timeKillEvent", (void *)hook_timekillevent);
         patch_import("GetMessageTime", (void *)hook_getmessagetime);
         patch_import("GetLocalTime", (void *)hook_getlocaltime);
+        patch_import("QueryPerformanceCounter", (void *)hook_queryperformancecounter);
         patch_import("Sleep", (void *)hook_sleep);
         real_bitblt = patch_import("BitBlt", (void *)hook_bitblt);
         real_stretchblt = patch_import("StretchBlt", (void *)hook_stretchblt);

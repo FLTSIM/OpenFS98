@@ -1766,6 +1766,16 @@ static const char fs98_numeric_degrees_2[] = "%d* %2.2f'";
 static const char fs98_numeric_degrees_3[] = "%d* %2.3f'";
 static const char fs98_numeric_degrees_4[] = "%d* %2.4f'";
 
+/* Retail's three leave ecx alone, and retail's ATC prints a wrong ATIS ceiling if +0x18 does
+ * not: see include/fs98/keep.h. */
+#include "fs98/keep.h"
+FS98_KEEP_ECX(numeric_format_entry, "_fs98_numeric_format@12", 12)
+FS98_KEEP_ECX(numeric_parse_entry, "_fs98_numeric_parse@12", 12)
+FS98_KEEP_ECX(numeric_parse_internal_entry, "_fs98_numeric_parse_internal@16", 16)
+void numeric_format_entry(void);
+void numeric_parse_entry(void);
+void numeric_parse_internal_entry(void);
+
 struct {
     uint32_t id;
     void (FS98_STDCALL *init)(void);
@@ -1782,9 +1792,9 @@ struct {
     fs98_numeric_init,
     fs98_numeric_deinit,
     { 0, 0, 0 },
-    fs98_numeric_format,
-    fs98_numeric_parse,
-    fs98_numeric_parse_internal,
+    (char *(FS98_STDCALL *)(const void *, uint32_t, char *))FS98_KEPT(numeric_format_entry, fs98_numeric_format),
+    (int32_t (FS98_STDCALL *)(const char *, uint32_t, void *))FS98_KEPT(numeric_parse_entry, fs98_numeric_parse),
+    (int32_t (FS98_STDCALL *)(const char *, uint32_t, void *, const void *))FS98_KEPT(numeric_parse_internal_entry, fs98_numeric_parse_internal),
     { 0, 0, 0 },
     {
         fs98_numeric_degrees_0,

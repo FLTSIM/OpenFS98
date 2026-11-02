@@ -6997,11 +6997,17 @@ static uint32_t STDCALL radios_sound_24(uint32_t a, uint32_t b)
     put(")");
     return 0;
 }
-static uint32_t STDCALL radios_m24_20(uint32_t a)
+/* ATC +0x20 reads GLOBAL through the caller's edi (docs/modules/atc.md), so the stand-in
+ * logs what edi held. */
+uint32_t radios_m24_edi;
+static uint32_t STDCALL __attribute__((used)) radios_m24_20(uint32_t a)
 {
-    put(" m24+0x20(%#x)", a);
+    put(" m24+0x20(%#x) edi ", a);
+    put_ptr(radios_m24_edi);
     return 0;
 }
+void clean_m24_20(void);
+__asm__(".text\n_clean_m24_20:\n\tmovl %edi, _radios_m24_edi\n\tjmp _radios_m24_20@4\n");
 
 static unsigned long cover_radio[4], cover_radio_masked, cover_radio_lamps, cover_radio_flagged;
 
@@ -7021,7 +7027,7 @@ static void setup_radios(void)
     SET_SLOT(util, 0x2c, radios_util_2c);
     SET_SLOT(util, 0x18, radios_util_18);
     SET_SLOT(sound, 0x24, radios_sound_24);
-    SET_SLOT(module_stub[24], 0x20, radios_m24_20);
+    SET_SLOT(module_stub[24], 0x20, clean_m24_20);
     util88_all = 1;
 }
 

@@ -33,6 +33,9 @@
  *                      to find the first field two runs disagree on
  *   FRAMELOCK_SCRIPT   a file of "pass message wparam lparam" lines, hex, ascending,
  *                      posted to the main window as that pass begins
+ *   FRAMELOCK_REGS     nonzero: wrap every module's Linkage functions and write regs.txt
+ *                      beside the log, what each slot received and left in the registers.
+ *                      tools/reg_contracts.py compares two of them
  *
  * It takes module id 12, which the retail set leaves unused, and imports GLOBAL.
  * It is a test tool: nothing installs it into game/.
@@ -40,6 +43,7 @@
 
 #define _WIN32_WINNT 0x0501
 #include <windows.h>
+#include <tlhelp32.h>
 #include <stdint.h>
 
 #include "fs98/linkage.h"
@@ -221,11 +225,226 @@ static int WINAPI hook_stretchdibits(HDC dest, int x, int y, int w, int h, int s
     return real_stretchdibits(dest, x, y, w, h, sx, sy, sw, sh, bits, info, usage, rop);
 }
 
+/* ---- what each Linkage function leaves in the registers ---------------------
+ *
+ * Each function in a Linkage is replaced by a thunk that pushes the slot's index and
+ * jumps to reg_common.  That records the registers, swaps the return address for
+ * reg_post and goes on to the function; reg_post records what came back and returns
+ * to the caller.  No argument counts are needed, since the function pops its own.  On
+ * the main thread only.  A shadow stack holds the real return addresses, and a fault
+ * that unwinds past some frames is recognised by esp: reg_leave takes the outermost
+ * entry at or below the returning stack.
+ *
+ * For each slot and register: how many calls left it as it came, and a hash of every
+ * value in and out.  With the same callers, the same calls must hash the same.
+ * The eighth "register" is the x87 stack's depth, as a change across the call, and the
+ * ninth the carry flag coming back, which some assembly services return.
+ */
+#define REG_SLOTS   4096
+#define REG_DEPTH   4096
+#define REG_COUNT   9
+#define THUNK_BYTES 10
+#define HASH_STEP   0x01000193u
+
+struct reg_frame {          /* as pushal and pushfl leave them */
+    uint32_t edi, esi, ebp, esp_unused, ebx, edx, ecx, eax, eflags, slot_or_return, return_address;
+};
+
+static struct {
+    char name[16];
+    uint32_t offset, target, calls, in_hash, out_hash[REG_COUNT], kept[REG_COUNT];
+} reg_slots[REG_SLOTS];
+static unsigned reg_slot_count;
+
+static struct {
+    uint32_t slot, return_address, stack, in[REG_COUNT];
+} reg_shadow[REG_DEPTH];
+static unsigned reg_depth;
+static uint32_t reg_thread, reg_wanted, reg_installed;
+
+void reg_post(void);
+
+static uint32_t x87_top(void)
+{
+    uint16_t status;
+    __asm__ volatile("fnstsw %0" : "=a"(status));
+    return (status >> 11) & 7u;
+}
+
+static uint32_t current_thread(void)
+{
+    uint32_t id;
+    __asm__ volatile("movl %%fs:0x24, %0" : "=r"(id));
+    return id;
+}
+
+void __attribute__((stdcall, used)) reg_enter(struct reg_frame *f)
+{
+    unsigned index = f->slot_or_return;
+    f->slot_or_return = reg_slots[index].target;
+    if (current_thread() != reg_thread || reg_depth >= REG_DEPTH)
+        return;
+    reg_shadow[reg_depth].slot = index;
+    reg_shadow[reg_depth].return_address = f->return_address;
+    reg_shadow[reg_depth].stack = (uint32_t)(uintptr_t)&f->return_address;
+    reg_shadow[reg_depth].in[0] = f->eax;
+    reg_shadow[reg_depth].in[1] = f->ecx;
+    reg_shadow[reg_depth].in[2] = f->edx;
+    reg_shadow[reg_depth].in[3] = f->ebx;
+    reg_shadow[reg_depth].in[4] = f->esi;
+    reg_shadow[reg_depth].in[5] = f->edi;
+    reg_shadow[reg_depth].in[6] = f->ebp;
+    reg_shadow[reg_depth].in[7] = x87_top();
+    reg_shadow[reg_depth].in[8] = 0;
+    reg_depth++;
+    f->return_address = (uint32_t)(uintptr_t)reg_post;
+}
+
+void __attribute__((stdcall, used)) reg_leave(struct reg_frame *f)
+{
+    uint32_t returning = (uint32_t)(uintptr_t)&f->slot_or_return + 4;
+    uint32_t out[REG_COUNT];
+    unsigned at = reg_depth - 1, r;
+    while (at > 0 && reg_shadow[at - 1].stack < returning)
+        at--;
+    f->slot_or_return = reg_shadow[at].return_address;
+    reg_depth = at;
+    out[0] = f->eax; out[1] = f->ecx; out[2] = f->edx; out[3] = f->ebx;
+    out[4] = f->esi; out[5] = f->edi; out[6] = f->ebp; out[7] = x87_top();
+    out[8] = f->eflags & 1u;
+    {
+        unsigned index = reg_shadow[at].slot;
+        const uint32_t *in = reg_shadow[at].in;
+        reg_slots[index].calls++;
+        for (r = 0; r < REG_COUNT; r++) {
+            uint32_t seen = r == 7 ? (out[r] - in[r]) & 7u : out[r];
+            if (r == 8 && !out[r])
+                reg_slots[index].kept[r]++;
+            reg_slots[index].in_hash = (reg_slots[index].in_hash ^ in[r]) * HASH_STEP;
+            reg_slots[index].out_hash[r] = (reg_slots[index].out_hash[r] ^ seen) * HASH_STEP;
+            if (r < 8 && out[r] == in[r])
+                reg_slots[index].kept[r]++;
+        }
+    }
+}
+
+__asm__(".text\n_reg_common:\n\t"
+        "pushfl\n\tpushal\n\tcld\n\tpushl %esp\n\tcall _reg_enter@4\n\t"
+        "popal\n\tpopfl\n\tret\n"
+        ".globl _reg_post\n_reg_post:\n\t"
+        "leal -4(%esp), %esp\n\t"
+        "pushfl\n\tpushal\n\tcld\n\tpushl %esp\n\tcall _reg_leave@4\n\t"
+        "popal\n\tpopfl\n\tret\n");
+void reg_common(void);
+
+static void wrap_module(HMODULE module, const char *name)
+{
+    uint8_t *base = (uint8_t *)module;
+    IMAGE_NT_HEADERS *nt = (IMAGE_NT_HEADERS *)(base + ((IMAGE_DOS_HEADER *)base)->e_lfanew);
+    IMAGE_SECTION_HEADER *section = IMAGE_FIRST_SECTION(nt);
+    uint32_t code_low = 0, code_high = 0, image_low = (uint32_t)(uintptr_t)base;
+    uint32_t image_high = image_low + nt->OptionalHeader.SizeOfImage;
+    uint32_t *table = (uint32_t *)GetProcAddress(module, "Linkage");
+    uint8_t *thunks;
+    unsigned s, offset;
+    if (!table)
+        return;
+    for (s = 0; s < nt->FileHeader.NumberOfSections; s++)
+        if (section[s].Characteristics & IMAGE_SCN_CNT_CODE) {
+            code_low = image_low + section[s].VirtualAddress;
+            code_high = code_low + section[s].Misc.VirtualSize;
+            break;
+        }
+    thunks = VirtualAlloc(0, 0x400 * THUNK_BYTES, MEM_COMMIT, PAGE_EXECUTE_READWRITE);
+    if (!thunks)
+        return;
+    /* Past the id, until a dword that is neither zero nor inside the image, as
+     * tools/dumplinkage.py reads a Linkage; a slot may hold a pointer to data. */
+    for (offset = 1; offset < 0x400 && reg_slot_count < REG_SLOTS; offset++) {
+        uint32_t value = table[offset];
+        unsigned c, index;
+        DWORD protection;
+        if (value && (value < image_low || value >= image_high))
+            break;
+        if (value < code_low || value >= code_high)
+            continue;
+        index = reg_slot_count++;
+        for (c = 0; c < 15 && name[c] && name[c] != '.'; c++)
+            reg_slots[index].name[c] = (name[c] >= 'a' && name[c] <= 'z') ? (char)(name[c] - 32) : name[c];
+        reg_slots[index].offset = offset * 4;
+        reg_slots[index].target = value;
+        reg_slots[index].in_hash = 0x811c9dc5u;
+        for (c = 0; c < REG_COUNT; c++)
+            reg_slots[index].out_hash[c] = 0x811c9dc5u;
+        thunks[0] = 0x68;
+        *(uint32_t *)(thunks + 1) = index;
+        thunks[5] = 0xe9;
+        *(int32_t *)(thunks + 6) = (int32_t)((uint8_t *)reg_common - (thunks + THUNK_BYTES));
+        VirtualProtect(&table[offset], 4, PAGE_READWRITE, &protection);
+        table[offset] = (uint32_t)(uintptr_t)thunks;
+        thunks += THUNK_BYTES;
+    }
+}
+
+static void reg_install(void)
+{
+    HANDLE snapshot;
+    MODULEENTRY32 entry;
+    reg_installed = 1;
+    reg_thread = current_thread();
+    snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPMODULE, 0);
+    if (snapshot == INVALID_HANDLE_VALUE)
+        return;
+    entry.dwSize = sizeof entry;
+    if (Module32First(snapshot, &entry))
+        do {
+            const char *n = entry.szModule;
+            if (lstrcmpiA(n, "FRAMELOCK.DLL") && lstrcmpiA(n, "SEHFIX.DLL"))
+                wrap_module(entry.hModule, n);
+        } while (Module32Next(snapshot, &entry));
+    CloseHandle(snapshot);
+}
+
+static void reg_write(void)
+{
+    char path[MAX_PATH + 16], *at = put_text(path, log_dir);
+    HANDLE file;
+    unsigned s, r;
+    put_text(at, "regs.txt")[0] = 0;
+    file = CreateFileA(path, GENERIC_WRITE, 0, 0, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, 0);
+    if (file == INVALID_HANDLE_VALUE)
+        return;
+    for (s = 0; s < reg_slot_count; s++) {
+        char line[300];
+        DWORD wrote;
+        if (!reg_slots[s].calls)
+            continue;
+        at = put_text(line, reg_slots[s].name);
+        *at++ = ' ';
+        at = put_hex(at, reg_slots[s].offset);
+        *at++ = ' ';
+        at = put_hex(at, reg_slots[s].calls);
+        *at++ = ' ';
+        at = put_hex(at, reg_slots[s].in_hash);
+        for (r = 0; r < REG_COUNT; r++) {
+            *at++ = ' ';
+            at = put_hex(at, reg_slots[s].out_hash[r]);
+            *at++ = ' ';
+            at = put_hex(at, reg_slots[s].kept[r]);
+        }
+        *at++ = '\n';
+        WriteFile(file, line, (DWORD)(at - line), &wrote, 0);
+    }
+    CloseHandle(file);
+}
+
 /* ---- the clock ------------------------------------------------------------ */
 
 static void finish(void)
 {
     char line[32], *at = line;
+    if (reg_wanted)
+        reg_write();
     at = put_text(at, "end ");
     at = put_hex(at, passes);
     *at++ = '\n';
@@ -275,6 +494,9 @@ static void main_loop_pass(void)
 
 static DWORD WINAPI hook_timegettime(void)
 {
+    /* the first clock read is UTIL's init: every module is loaded by then */
+    if (reg_wanted && !reg_installed)
+        reg_install();
     if ((uint32_t)(uintptr_t)__builtin_return_address(0) == HOST_MAIN_LOOP_READ)
         main_loop_pass();
     return clock_ms;
@@ -479,6 +701,7 @@ BOOL WINAPI DllMain(HINSTANCE inst, DWORD reason, LPVOID reserved)
         dump_every = environment_number("FRAMELOCK_DUMP", 0);
         dump_at = environment_number("FRAMELOCK_DUMP_AT", 0);
         hold_every = environment_number("FRAMELOCK_HOLD", 0);
+        reg_wanted = environment_number("FRAMELOCK_REGS", 0);
         read_script();
         if (GetEnvironmentVariableA("FRAMELOCK_GLOBAL", path, sizeof path))
             global_handle = CreateFileA(path, GENERIC_WRITE, FILE_SHARE_READ, 0, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, 0);

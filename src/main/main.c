@@ -170,6 +170,13 @@ XCALL_THUNK(3, "pushl 20(%ebp)\n\tpushl 16(%ebp)\n\tpushl 12(%ebp)\n\t");
 XCALL_THUNK(4, "pushl 24(%ebp)\n\tpushl 20(%ebp)\n\tpushl 16(%ebp)\n\tpushl 12(%ebp)\n\t");
 #define SLOT_OF(m, off) M32((m) + (off))
 
+/* A call with GLOBAL in edi, for ATC +0x20, which reads it there (docs/modules/atc.md). */
+uint32_t main_call_edi1(uint32_t fn, uint32_t a, uint32_t edi);
+__asm__(".text\n\t.globl _main_call_edi1\n_main_call_edi1:\n\t"
+        "pushl %ebp\n\tmovl %esp, %ebp\n\tpushl %edi\n\t"
+        "movl 16(%ebp), %edi\n\tpushl 12(%ebp)\n\tcall *8(%ebp)\n\t"
+        "popl %edi\n\tpopl %ebp\n\tret\n");
+
 /* div and idiv, as retail executes them under the host's divide repair
  * (0x4119a0, docs/modules/host.md): a quotient that does not fit, or a
  * divisor of 0, gives all ones for div, the largest quotient (or the most
@@ -306,6 +313,13 @@ static const uint32_t retail_linkage[] = {
 #include "main_create.inc"
 #include "main_start.inc"
 
+/* Retail's +0x94 leaves edx alone, and +0xc0 ecx and edx: see include/fs98/keep.h. */
+#include "fs98/keep.h"
+FS98_KEEP_EDX(clouds_textures_entry, "_clouds_textures@0", 0)
+FS98_KEEP_ECX_EDX(nav_eye_entry, "_nav_eye@4", 4)
+void clouds_textures_entry(void);
+void nav_eye_entry(void);
+
 __asm__(".globl _ImportTable\n\t.set _ImportTable, _main_image + 0x0\n\t"
         ".globl _Linkage\n\t.set _Linkage, _main_image + 0xc0");
 
@@ -349,7 +363,7 @@ static void main_install(void)
         { 0x88, (void *)obj_step },
         { 0x8c, (void *)obj_free },
         { 0x90, (void *)main_log_flight },
-        { 0x94, (void *)clouds_textures },
+        { 0x94, (void *)FS98_KEPT(clouds_textures_entry, clouds_textures) },
         { 0x98, (void *)clouds_draw },
         { 0x9c, (void *)nav_band },
         { 0xa0, (void *)nav_sun },
@@ -359,7 +373,7 @@ static void main_install(void)
         { 0xb4, (void *)prefs_load },
         { 0xb8, (void *)prefs_save },
         { 0xbc, (void *)prefs_defaults },
-        { 0xc0, (void *)nav_eye },
+        { 0xc0, (void *)FS98_KEPT(nav_eye_entry, nav_eye) },
         { 0xc8, (void *)nav_viewcycle },
     };
     uint32_t i;

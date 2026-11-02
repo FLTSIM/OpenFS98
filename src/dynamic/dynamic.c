@@ -2597,6 +2597,11 @@ static int op_turn_to(void)
 
 /* ---- the image ------------------------------------------------------------------- */
 
+/* Retail's +0x18 leaves edx alone: see include/fs98/keep.h. */
+#include "fs98/keep.h"
+FS98_KEEP_EDX(dyn_frame_entry, "_dyn_frame", 0)
+void dyn_frame_entry(void);
+
 struct dyn_image dyn_image = {
     {
         { FS98_MOD_HOST,   0 },
@@ -2609,7 +2614,7 @@ struct dyn_image dyn_image = {
         { 0, 0 }
     },
     {
-        FS98_MOD_DYNAMIC, dyn_init, dyn_teardown, 0, 0, 0, dyn_frame, 0,
+        FS98_MOD_DYNAMIC, dyn_init, dyn_teardown, 0, 0, 0, (void (*)(void))FS98_KEPT(dyn_frame_entry, dyn_frame), 0,
         {
 #define DYN_OPS
 #include "dynamic_data.inc"

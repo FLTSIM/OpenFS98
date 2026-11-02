@@ -1394,3 +1394,7 @@ overwritten by the first sends the second into unshared memory (the comparison n
 that load). And a string run off the end of the image lands in retail's import table, which
 nothing restored: 15,030 of 20,000 differed, all after scenario 4,970, so `run_side` now puts
 back what follows the image.
+
+## Registers
+
+`+0x94` leaves edx alone and `+0xc0` ecx and edx, as retail's do, through `include/fs98/keep.h`; and the COM tuning calls ATC `+0x20` with GLOBAL in edi (`main_call_edi1`), which retail ATC reads. See [open-differences.md](../open-differences.md#our-modules-alone-in-a-retail-game).

@@ -40,7 +40,7 @@ static uint32_t STDCALL texture_remap(uint8_t *pixels)
 }
 
 /* .text+0x5ec50, +0xac. */
-static uint32_t STDCALL texture_create(const uint32_t *descriptor, uint32_t flags)
+static __attribute__((used)) uint32_t STDCALL texture_create(const uint32_t *descriptor, uint32_t flags)
 {
     uint32_t *texture;
     if (descriptor[1] != 0x100 || descriptor[0] != 1 || flags != 0)
@@ -119,7 +119,7 @@ uint32_t STDCALL __attribute__((used)) texture_destroy_body(uint32_t handle, uin
 }
 
 /* .text+0x5edc0, +0xb4: mark accessed and return pixels. */
-static uint32_t STDCALL texture_pixels(uint32_t handle)
+static __attribute__((used)) uint32_t STDCALL texture_pixels(uint32_t handle)
 {
     uint32_t *texture = POINTER(handle);
     if (!texture_inside(handle))
@@ -196,6 +196,24 @@ EAX_ENTRY(texture_update, texture_update_body);
 #include "hg2d_device_disc.inc"
 #include "hg2d_device_scene.inc"
 
+/* What these slots leave is retail's: see include/fs98/keep.h.  +0x24 has its third argument
+ * in ecx throughout. */
+#include "../../include/fs98/keep.h"
+#if defined(__i386__)
+FS98_ENTRY(draw_depth_point_entry, "_draw_depth_point@16", 16, 0, "", "movl 12(%esp), %ecx\n\t")
+#endif
+FS98_KEEP_EDX(colour_convert_entry, "_colour_convert@12", 12)
+FS98_KEEP_ECX_EDX(palette_select_entry, "_palette_select", 4)
+FS98_KEEP_EDX(colour_remap_entry, "_colour_remap", 8)
+FS98_KEEP_EDX(texture_create_entry, "_texture_create@8", 8)
+FS98_KEEP_EDX(texture_pixels_entry, "_texture_pixels@4", 4)
+void draw_depth_point_entry(void);
+void colour_convert_entry(void);
+void palette_select_entry(void);
+void colour_remap_entry(void);
+void texture_create_entry(void);
+void texture_pixels_entry(void);
+
 __asm__(".globl _ImportTable\n.set _ImportTable, _hg2d_image\n"
         ".globl _Linkage\n.set _Linkage, _hg2d_image + 0x38\n");
 
@@ -217,7 +235,7 @@ BOOL WINAPI DllMain(HINSTANCE instance, DWORD reason, LPVOID reserved)
         WORD(0x38 + 0x18) = ADDRESS(draw_flush);
         WORD(0x38 + 0x1c) = ADDRESS(draw_point);
         WORD(0x38 + 0x20) = ADDRESS(draw_nop);
-        WORD(0x38 + 0x24) = ADDRESS(draw_depth_point);
+        WORD(0x38 + 0x24) = ADDRESS(FS98_KEPT(draw_depth_point_entry, draw_depth_point));
         WORD(0x38 + 0x28) = ADDRESS(draw_text);
         WORD(0x38 + 0x2c) = ADDRESS(draw_horizontal);
         WORD(0x38 + 0x30) = ADDRESS(draw_vertical);
@@ -235,22 +253,22 @@ BOOL WINAPI DllMain(HINSTANCE instance, DWORD reason, LPVOID reserved)
         WORD(0x38 + 0x5c) = ADDRESS(palette_realize);
         WORD(0x38 + 0x60) = ADDRESS(palette_refresh_entry);
         WORD(0x38 + 0x64) = ADDRESS(palette_force);
-        WORD(0x38 + 0x70) = ADDRESS(colour_convert);
+        WORD(0x38 + 0x70) = ADDRESS(FS98_KEPT(colour_convert_entry, colour_convert));
         WORD(0x38 + 0x74) = ADDRESS(gouraud_vertex);
         WORD(0x38 + 0x78) = ADDRESS(gouraud_close);
-        WORD(0x38 + 0x7c) = ADDRESS(palette_select);
+        WORD(0x38 + 0x7c) = ADDRESS(FS98_KEPT(palette_select_entry, palette_select));
         WORD(0x38 + 0x80) = ADDRESS(blit_span);
         WORD(0x38 + 0x84) = ADDRESS(disc);
-        WORD(0x38 + 0x88) = ADDRESS(colour_remap);
+        WORD(0x38 + 0x88) = ADDRESS(FS98_KEPT(colour_remap_entry, colour_remap));
         WORD(0x38 + 0x6c) = ADDRESS(texture_remap);
         WORD(0x38 + 0x9c) = ADDRESS(hg2d_device_begin);
         WORD(0x38 + 0xa0) = ADDRESS(hg2d_device_end);
         WORD(0x38 + 0xbc) = ADDRESS(hg2d_device_select);
         WORD(0x38 + 0xa4) = ADDRESS(fan_draw);
         WORD(0x38 + 0xa8) = ADDRESS(texture_load);
-        WORD(0x38 + 0xac) = ADDRESS(texture_create);
+        WORD(0x38 + 0xac) = ADDRESS(FS98_KEPT(texture_create_entry, texture_create));
         WORD(0x38 + 0xb0) = ADDRESS(texture_destroy);
-        WORD(0x38 + 0xb4) = ADDRESS(texture_pixels);
+        WORD(0x38 + 0xb4) = ADDRESS(FS98_KEPT(texture_pixels_entry, texture_pixels));
         WORD(0x38 + 0xb8) = ADDRESS(texture_update);
     }
     return TRUE;

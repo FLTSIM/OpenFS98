@@ -1036,10 +1036,15 @@ static void wx_weather_here(void)
     MAIN_WEATHER();
 }
 
+/* Retail's +0x24 leaves edx alone: see include/fs98/keep.h. */
+#include "fs98/keep.h"
+FS98_KEEP_EDX(wx_reset_entry, "_wx_reset", 0)
+void wx_reset_entry(void);
+
 /* .text+0x1fb3 -- +0x24: reset the global weather's blocks that ask for it --
  * +0xf12 the clouds, +0xf13 the winds, either the temperatures -- and each
  * area's when its +0x30/+0x32 flags are set. */
-static void wx_reset(void)
+static __attribute__((used)) void wx_reset(void)
 {
     static const uint16_t winds[] = {
         0x2710, 0x7d0, 0xa, 0x4000, 0, 0, 0x7d0, 0x3e8, 0xf, 0x4000, 0, 0,
@@ -1535,7 +1540,7 @@ struct wx_image wx_image = {
     },
     {
         FS98_MOD_WEATHERM, wx_init, wx_deinit, 0, 0, 0,
-        wx_weather_at, wx_weather_here, wx_temperature_now, wx_reset, wx_effect,
+        wx_weather_at, wx_weather_here, wx_temperature_now, (void (*)(void))FS98_KEPT(wx_reset_entry, wx_reset), wx_effect,
         wx_list_create, wx_list_destroy, wx_area_new, wx_area_remove, wx_area_copy,
         wx_area_next, wx_area_append, wx_area_count, wx_record_new, wx_record_free,
         wx_records_copy, wx_record_next, wx_record_append

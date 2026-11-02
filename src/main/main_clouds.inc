@@ -550,7 +550,7 @@ written:
  * once GLOBAL +0xe8a reaches 0x7d00, or 0 with no first layer.  WEATHERM
  * calls it.  Everything after a failed write is read through, and the result
  * written into, the texel map (clouds_texture's edi). */
-static uint32_t FS98_STDCALL clouds_textures(void)
+static __attribute__((used)) uint32_t FS98_STDCALL clouds_textures(void)
 {
     uint32_t e = G;
     uint16_t ax;

@@ -121,3 +121,7 @@ all-green result is not a comparison path that silently accepts differences.
 The rebuilt DLL is installed in the test game alongside the OpenFS98 GLOBAL,
 SLEW and UTIL modules. The full `make smoke` boot reaches the panel with all
 27 modules and 95 gauges loaded.
+
+## Registers
+
+Retail's `+0x18`, `+0x1c` and `+0x20` leave ecx alone, and retail ATC reads it after `+0x18`: without that the ATIS ceiling printed as `Scattered -`. The slots enter through `include/fs98/keep.h`; see [open-differences.md](../open-differences.md#our-modules-alone-in-a-retail-game).

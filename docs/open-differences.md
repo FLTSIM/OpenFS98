@@ -39,35 +39,41 @@ them there: `SMOKE_TOGGLE` (twice), `ANTI_ICE_TOGGLE`, `ZOOM_1X`, `PAN_LEFT`, `P
 value, `VIEW_RIGHT` looking the wrong way, gear toggle removed, heading hold removed, slew
 step doubled. Two were not: see [Unsettled questions](#unsettled-questions).
 
-## Differences only with retail and ours mixed
+## Our modules alone in a retail game
 
-Neither shows in the all-ours game on the flights above. They matter when a single
-module is swapped into a retail game to bisect a problem (`HG2D_FRAMES_ONLY`), and each could
-be hiding a real difference. Each of our modules alone against all-retail, software, without
-sound, 300 passes, on `PARIS` and `KAUAI`: all match except these.
+Each of our modules alone, everything else retail (`HG2D_FRAMES_ONLY`), matches all-retail frame
+for frame on `PARIS` flown with `controls`, `LEARLON` with `avionics`, `NEWYORK` with `views`
+and `KAUAI` with nobody flying, 300 passes without sound. This is how a problem is bisected to
+one module, and it is where one module's expectations of another's registers show.
 
-### NUMERIC with retail ATC prints a wrong ceiling
+`tools/reg_contracts.sh` runs that and compares, slot by slot, what every Linkage function
+received and left in all seven registers (FRAMELOCK wraps them; `tools/reg_contracts.py` says
+how to read it). With retail callers, a slot that retail leaves a register alone in and ours
+does not is a broken contract. On 2026-11-01 it found 18, now fixed with entries from
+`include/fs98/keep.h`:
 
-NUMERIC alone on `KAUAI` differs from pass 76, in the message bar only: retail's ATIS reads
-`Scattered 4` and this `Scattered -`. All ours matches retail, so our ATC does not meet it.
+| module | slots | what retail keeps | seen in the game |
+| --- | --- | --- | --- |
+| NUMERIC | `+0x18`, `+0x1c`, `+0x20` | ecx | retail ATC printed the ATIS ceiling as `Scattered -` |
+| ATC | `+0x20`, `+0x24` | eax, ecx, edx | |
+| WEATHERM | `+0x24` | edx | |
+| DYNAMIC | `+0x18` | edx | |
+| MAIN | `+0x94`; `+0xc0` | edx; ecx, edx | |
+| HG2D | `+0x70`, `+0x88`, `+0xac`, `+0xb4`; `+0x7c`; `+0x24` | edx; ecx, edx; ecx holds the third argument | |
 
-**Not explained.** Retail's ATC formats through NUMERIC `+0x18` (`.text+0x6fe`) into a
-six-byte buffer on its stack and then reads it. That call site reads no register afterwards,
-so it is not plainly the bug UTIL had, but NUMERIC is hand-written assembly too, and
-`numericdiff` compares results and not registers.
+and one the other way: retail ATC `+0x20` reads GLOBAL through the caller's edi, which our MAIN's
+COM tuning now loads (`main_call_edi1`); without it MAIN alone faulted in retail ATC on `KAUAI`.
+The `radios` suite's stand-in now logs edi, and catches the old call.
 
-To continue: find which value and format id that call passes, and give `numericdiff` a
-register comparison like `utildiff`'s.
-
-### MAIN with retail ATC faults
-
-MAIN alone on `KAUAI`: an access violation in retail ATC at `0x20641041`, pass 12,
-which ends the frames. Retail ATC `+0x20` reads GLOBAL through edi on entry, and
-retail MAIN's COM tuning (`.text+0x18a17`) has GLOBAL there; `radio_tune_com` in
-`src/main/main_radios.inc` is C and does not. Our ATC does not depend on it. The
-`radios` suite's stand-in for ATC does not read edi, so the harness cannot see it.
-
-To fix: load edi on that call, and have the stand-in read it.
+**What it does not settle:**
+- **Slots not called** on those four flights are not checked, and a register is only seen to be
+  kept on the calls that happened.
+- **77 slots leave different values** in a register retail changes too (`LEAVES`): results that
+  are pointers into each module's own data, and compiled-C leftovers. None is known to be read,
+  and no frame differs, but nothing proves no caller reads one.
+- **The carry flag** comes back differently from 18 slots. Retail's import calls go through a
+  stack-alignment wrapper whose `add` clobbers it, so it is probably never read across modules.
+- **DYNAMIC from `+0x20` on** is its interpreter's dispatch table, not services, and is left out.
 
 ## Not yet tested
 
@@ -107,11 +113,13 @@ other side hid it, so each module passed 20,000 scenarios alone.
 | DYNAMIC | FE `+0x40` | reads to the caller's edi, returns registers shifted | took the buffer argument |
 | MAIN | UTIL `+0x60`, `+0x6c` | keeps ecx across the call | stamped a constant over ecx |
 | retail modules | UTIL `+0x2c` and others | keep their registers | `utildiff` looked only at results |
+| retail ATC | NUMERIC `+0x18` | keeps ecx | `numericdiff` looked only at results |
+| ATC `+0x20` | (MAIN's COM tuning) | GLOBAL in edi | the stand-in ignored edi |
 | FE `+0x1c` | (GLOBAL `+0xcd2`) | a different shape: `fediff` reached only one of two values | |
 
 Worth auditing: the other `CLEAN` thunks in `tools/difftest/maindiff.c`, which fix ecx and
 edx to constants; any harness stub of UTIL or FE; and `fe.md`'s other register-shifting
 entries (`+0x18`). A stub that does something the real callee does not is the thing to
-look for. The cheapest check for any assembly module is what `utildiff` now does: compare all
-seven registers, through the built DLL's table. NUMERIC, DYNAMIC, WINDOW, FE and the assembly
-half of MAIN have not had it.
+look for. `tools/reg_contracts.sh` checks every module at once with the game's own inputs;
+run it after changing any module's entry points, and with more flights and scenarios to reach
+slots it has not seen called.

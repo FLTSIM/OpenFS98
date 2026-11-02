@@ -348,10 +348,17 @@ static char *atc_translate(const char *text)
     return (char *)(D + 0xa00);
 }
 
+/* Retail's +0x20 and +0x24 save everything: see include/fs98/keep.h. */
+#include "fs98/keep.h"
+FS98_KEEP_ALL(atc_atis_entry, "_atc_atis@4", 4)
+FS98_KEEP_ALL(atc_clear_entry, "_atc_clear", 0)
+void atc_atis_entry(void);
+void atc_clear_entry(void);
+
 /* ---- messages ---------------------------------------------------------------- */
 
 /* .text+0x107 -- Linkage +0x24.  pusha/popa around it: preserves everything. */
-static void atc_clear(void)
+static __attribute__((used)) void atc_clear(void)
 {
     WINMSG_CLEAR(2);
     WINMSG_CLEAR(1);
@@ -605,7 +612,7 @@ static void atc_say(const uint8_t *template, uint32_t slot)
  *
  * Retail reads +0xb04 and +0xb68 through the caller's EDI, never loaded here;
  * MAIN, the only caller, has GLOBAL in it. */
-static void FS98_STDCALL atc_atis(const uint8_t *record)
+static __attribute__((used)) void FS98_STDCALL atc_atis(const uint8_t *record)
 {
     uint32_t ground;
 
@@ -874,7 +881,9 @@ struct atc_image atc_image = {
     },
     {
         FS98_MOD_ATC, atc_load_translations, atc_unload_translations, 0, 0, 0,
-        atc_takeoff, atc_landing, atc_atis, atc_clear, atc_busy
+        atc_takeoff, atc_landing,
+        (void (FS98_STDCALL *)(const uint8_t *))FS98_KEPT(atc_atis_entry, atc_atis),
+        (void (*)(void))FS98_KEPT(atc_clear_entry, atc_clear), atc_busy
     },
     0,
     {

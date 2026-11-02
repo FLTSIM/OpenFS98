@@ -206,3 +206,7 @@ catches them. The other 5 cannot change any output:
 - `+0x28` type 4 at exactly hour 12: both branches give 6.
 - The free-by-type previous pointer: it only differs on the path where retail
   writes through null, which the generator keeps clear of.
+
+## Registers
+
+Retail's `+0x24` leaves edx alone, and so does ours, through `include/fs98/keep.h`. See [open-differences.md](../open-differences.md#our-modules-alone-in-a-retail-game).

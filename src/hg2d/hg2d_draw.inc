@@ -72,7 +72,7 @@ void STDCALL __attribute__((used)) draw_point_body(void *surface, uint32_t x, ui
 }
 
 /* +0x24, 0x207313c3. Dithering adds right and upper neighbours. */
-static uint32_t STDCALL draw_depth_point(void *surface, uint32_t x, uint32_t y, uint32_t depth)
+static __attribute__((used)) uint32_t STDCALL draw_depth_point(void *surface, uint32_t x, uint32_t y, uint32_t depth)
 {
     uint8_t *pixel, colour;
     HALF(0x29ae) = (uint16_t)depth;

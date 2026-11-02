@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # Frame-exact comparison of the running game: retail HG2D twice, which shows the run
-# is deterministic at all, then ours.  Retail always runs with SEHFIX.DLL and ours
-# without: under wine retail's 3D view freezes at the first divide fault it takes
-# (docs/wine.md), so without it the reference is wrong.  Each run has its own copy of the game and one
+# is deterministic at all, then ours.  Retail always runs with SEHFIX.DLL, as does any game
+# with a retail module in it, and all ours without: under wine retail's 3D view freezes at
+# the first divide fault it takes (docs/wine.md).  Each run has its own copy of the game and one
 # wine prefix copy is shared between them, on a private Xvfb, so neither game/ nor
 # another wine process nor the desktop is disturbed.  The clock and the log are FRAMELOCK's
 # (tools/drive/framelock.c).
@@ -90,7 +90,8 @@ run() {     # tag hg2d
     cp "$hg2d" "$copy/Modules/HG2D.DLL"
     cp "$framelock" "$copy/Modules/FRAMELOCK.DLL"
     rm -f "$copy/Modules/SEHFIX.DLL"
-    [ "$tag" = ours ] && [ "$hg2d" = "$ours_bin/HG2D.DLL" -o "$hg2d" = "$ours" ] || cp bin/SEHFIX.DLL "$copy/Modules/SEHFIX.DLL"
+    # only all ours is free of the faults: retail's G3D and WINDOW divide into the repair too
+    [ "$tag" = ours ] && [ -n "${HG2D_FRAMES_ALL:-}" ] || cp bin/SEHFIX.DLL "$copy/Modules/SEHFIX.DLL"
     mkdir -p "$out/$tag"
     [ -z "${HG2D_FRAMES_DEVICE+x}" ] || sed -i "s/^Device=.*/Device=$HG2D_FRAMES_DEVICE\r/" "$copy/FLTSIM98.CFG"
     [ -z "${HG2D_FRAMES_MODE+x}" ] || sed -i "s/^Mode=.*/Mode=$HG2D_FRAMES_MODE\r/" "$copy/FLTSIM98.CFG"

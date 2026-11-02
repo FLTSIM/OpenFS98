@@ -379,7 +379,7 @@ static void radio_tune_com(void)
     M8(gp + 0x38a) = 0;
     radio_mark(V(0x208074ba));
     if (CALL(FE_, 0x24, f3)(M16(gp + 0x34e), gp + 0x560, ADDR(&out)) != 0)
-        CALL(MARKERS, 0x20, f1)(out);
+        main_call_edi1(M32(MARKERS + 0x20), out, gp);     /* retail has GLOBAL in edi */
 }
 
 /* .text+0x18989: the season again. */

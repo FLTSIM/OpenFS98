@@ -2107,3 +2107,7 @@ PANELS model and its verified harness remain unchanged.
 
 All forty Linkage services and all eighteen GPU dispatch cells now have native
 implementations. See slices 49–55 for final verification and integration limits.
+
+## Registers
+
+`+0x70`, `+0x88`, `+0xac` and `+0xb4` leave edx alone, `+0x7c` ecx and edx, and `+0x24` has its third argument in ecx, as retail's do, through `include/fs98/keep.h`. See [open-differences.md](../open-differences.md#our-modules-alone-in-a-retail-game).

@@ -33,7 +33,7 @@ static uint32_t colour_translate(uint16_t colour, uint16_t pair, uint16_t *mappe
 }
 
 /* +0x70, 0x20732320. Output is two word stores, in that order. */
-static uint32_t STDCALL colour_convert(uint32_t colour, uint32_t pair, uint16_t *out)
+static __attribute__((used)) uint32_t STDCALL colour_convert(uint32_t colour, uint32_t pair, uint16_t *out)
 {
     uint16_t mapped_pair;
     uint32_t result = colour_translate((uint16_t)colour, (uint16_t)pair, &mapped_pair);

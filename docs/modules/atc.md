@@ -229,3 +229,7 @@ Two breaks were missed on the first harness and became fixes to it:
 - **The ceiling's `<= 30` boundary.** Random 16-bit cloud bases never landed
   exactly 30 above the field. The weather stub now puts a base 26 to 34 above
   it a third of the time.
+
+## Registers
+
+Retail's `+0x20` and `+0x24` save eax, ecx and edx, and so do ours, through `include/fs98/keep.h`. `+0x20` reads GLOBAL through the caller's edi; our MAIN loads it. See [open-differences.md](../open-differences.md#our-modules-alone-in-a-retail-game).

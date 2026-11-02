@@ -374,3 +374,7 @@ false difference, from the harness: its UTIL forwarders were C, which may
 clobber ecx, and retail's loops count in ecx across UTIL. They are thunks
 that keep what UTIL keeps now (`method.md`, "a stub has to keep what the
 real callee keeps").
+
+## Registers
+
+Retail's `+0x18` leaves edx alone, and so does ours, through `include/fs98/keep.h`. See [open-differences.md](../open-differences.md#our-modules-alone-in-a-retail-game).

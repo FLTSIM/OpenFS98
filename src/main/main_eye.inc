@@ -19,7 +19,7 @@
 
 #define HG2D M32(V(0x20800064))
 
-static uint32_t FS98_STDCALL nav_eye(uint32_t view)
+static __attribute__((used)) uint32_t FS98_STDCALL nav_eye(uint32_t view)
 {
     uint32_t gp = G;
     uint32_t box = M32(view + 0x1c);

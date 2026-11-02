@@ -156,7 +156,7 @@ and does not mind).
 ```sh
 make install     # install rebuilt modules, including World.DLL under English/
 make run         # wine FLTSIM98.EXE
-make sehfix-install vd-on   # what a flyable sim needs under wine -- docs/wine.md
+make sehfix-install vd-on   # what a flyable sim with retail HG2D needs under wine -- docs/wine.md
 make revert      # restore retail modules, including English/World.DLL
 make trace       # WINEDEBUG=+loaddll, to see which modules got loaded
 ```
@@ -188,8 +188,8 @@ The end state is native builds -- modern Windows, Linux, Mac, maybe Android --
 at which point wine stops mattering. Running the retail binary under wine is
 scaffolding for the middle of the project, not the destination. Its one real
 problem, the 3D view freezing, was wine swallowing divide faults the host
-repairs; `make sehfix-install` and `make vd-on` give a flyable sim (see
-[docs/wine.md](docs/wine.md)).
+repairs; `make sehfix-install` and `make vd-on` give a flyable sim, and our HG2D
+makes the first unnecessary (see [docs/wine.md](docs/wine.md)).
 
 How far away that is, measured by what each retail module actually calls:
 

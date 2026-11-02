@@ -70,16 +70,13 @@ To fix: load edi on that call, and have the stand-in read it.
   No views changed, no night or weather set by hand, no menus.
 - **Direct3D's limits.** wined3d on llvmpipe, not a 1997 card, and four screenshots a
   flight between the panel logs. Hardware-specific paths in HG2D (real capability bits,
-  texture memory running out) have run only in `hg2ddiff`.
+  texture memory running out) have run only in `hg2ddiff`. Direct3D has also not been
+  run on a real display without `SEHFIX.DLL`; see [wine.md](wine.md).
 - **Non-x86.** HG2D's floating precision and status; see
   [modules/hg2d.md](modules/hg2d.md).
 
 ## Unsettled questions
 
-- **Does our HG2D still need `SEHFIX.DLL`?** Ours computes the divides that froze retail
-  without trapping, but retail did not freeze in the nested X server without
-  `SEHFIX.DLL` either, so there was no control. It stays installed. Both took 4 swallowed
-  faults in 105 s. See [wine.md](wine.md).
 - **Two deliberate HG2D breaks went unnoticed.** The depth-shade clamp (`value >= 14` in
   `hg2d_draw.inc`) and the haze tick's rate (`301u *` in `hg2d_init.inc`), over 300 passes
   of `STGEORGE`. Whether that flight reaches them is not established. Stronger breaks were

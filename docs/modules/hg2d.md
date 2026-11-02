@@ -1755,12 +1755,11 @@ Left to do for HG2D: scripted flying, views, night and weather, for coverage, an
 flying it by hand. HG2D was not installed into `game/` by this work: `make install`
 does that.
 
-**`SEHFIX.DLL` stays.** The wine freeze came from divide faults at retail's HG2D
-`.text+0x66e2`, which ours computes without trapping, so ours might not need the
-fix for those. That could not be tested: retail HG2D without `SEHFIX.DLL` did not
-freeze in the nested X server either (the 3D view kept changing), and both took the
-same 4 swallowed faults over 105 s, in the host's `WM_SIZE` by `docs/wine.md`'s
-account.
+**`SEHFIX.DLL` is not needed with ours.** The wine freeze came from divide faults at
+retail's HG2D `.text+0x66e2`, which ours computes without trapping: the fix's log shows
+no HG2D faults with ours on three flights, where retail's has them on two. Without the
+fix on a real display, all retail freezes and all ours does not. See
+[wine.md](../wine.md).
 
 ## Completion and integration limits
 

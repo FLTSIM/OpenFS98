@@ -130,7 +130,7 @@ else's 1997 build, and it should read that way.
 | `make chaindiff-run` | drive retail and OpenFS98 CHAIN side by side over random re-entrant callback scripts; `N=...` sets the count |
 | `make ofstest-run` | run assertions *inside* the sim, where the host is reachable; `ofstest-remove` takes the module back out |
 | `make world` | build World.DLL into `bin/WORLD.DLL` as part of the shared module build |
-| `make world-install` / `make world-revert` | install World at `English/World.DLL` (saving the retail file as `English/World.DLL.orig`) or restore the retail DLL |
+| `make world-install` / `make world-revert` | install World at `English/World.DLL` (saving the retail file as `English/World.DLL.orig`) or restore the retail DLL; `alerts-`, `help-`, `sim-` and `views-install`/`-revert` do the same for the other English DLLs |
 | `make world-game-ui` | drive the installed World module through the retail game's menus and owner callbacks on a disposable copy; see [docs/modules/world.md](docs/modules/world.md#shared-buildinstall-and-game-owner-acceptance) |
 | `make sehfix-install` | put `SEHFIX.DLL` in `Modules\`, which hands the divide faults wine swallows back to the host's repair, so the 3D view does not freeze; `sehfix-remove` takes it out, `sehfix-log` shows what it repaired (see [docs/wine.md](docs/wine.md)) |
 | `make util-trace` | boot the sim with a UTIL that counts every service call, and list what ran; `UTIL_TRACE_SECS=` for a longer session to play in |
@@ -155,10 +155,10 @@ the game runs from `Z:\` instead (`make smoke` itself runs `game/` directly
 and does not mind).
 
 ```sh
-make install     # install rebuilt modules, including World.DLL under English/
+make install     # install rebuilt modules, including World, Alerts, Help, Sim and Views under English/
 make run         # wine FLTSIM98.EXE
 make sehfix-install vd-on   # what a flyable sim with retail HG2D needs under wine -- docs/wine.md
-make revert      # restore retail modules, including English/World.DLL
+make revert      # restore retail modules, including the English/ DLLs
 make trace       # WINEDEBUG=+loaddll, to see which modules got loaded
 ```
 
@@ -170,7 +170,7 @@ anything the game will not exercise on startup — SLEW's tick, for instance, ru
 only in slew mode.
 
 `make smoke` asserts the game actually comes up: all 27 runtime modules and
-the localized `English/World.DLL` replacement load, followed by at least one
+the localized `English/` replacements (World, Alerts, Help, Sim, Views) load, followed by at least one
 `.GAU`. The gauge check is the point — FS98 reports startup
 failures in *modal dialogs*, so a game wedged behind "Aircraft initialization
 failure" stays alive and looks identical to one that is flying. Gauges only load
@@ -258,8 +258,8 @@ emulate 80-bit arithmetic to preserve a rounding artefact. See
 Retail baseline and the OpenFS98 build -- ACONTAIN, ADVDRV, ANALYSIS, ATC,
 BOOSTER, CHAIN, CONTROLS, DEMO, DYNAMIC, FACIL, FE, GLOBAL, HG2D, LANDME, NUMERIC,
 PANELS, REALITY, SLEW, SOUND, UTIL, WEATHERM, WINDOW and WINMSG installed in
-`Modules/`, with World installed in `English/`, both reach the panel: 27/27
-runtime modules, 95 gauges, `make smoke` PASS.
+`Modules/`, with World, Alerts, Help, Sim and Views installed in `English/`, both reach
+the panel: 27/27 runtime modules, 95 gauges, `make smoke` PASS.
 
 `GLOBAL.DLL`'s 4764-byte shared state block is byte-identical to retail, and the
 module id matches. The remaining differences from the retail binary are
@@ -368,12 +368,11 @@ its depth queue, services and CHAIN callbacks, 20,000 `g3ddiff` scenarios
 with zero differences, and a portable C mesh compiler checked against
 retail's instructions (see [docs/modules/g3d.md](docs/modules/g3d.md)).
 
-**Next: install the finished dialogs.** The whole game, all retail against all ours, matches
+**Next: Flights and Options.** The whole game, all retail against all ours, matches
 frame for frame on all 74 flights with nobody flying, and flown by script on eight flights, on
-both renderers. What is still open is listed in
-[docs/open-differences.md](docs/open-differences.md). Install Alerts, Help, Views and Sim,
-then Flights and Options, SIMSUI, the gauges and an executable
-around `HOST.DLL`: [docs/remaining-work.md](docs/remaining-work.md).
+both renderers. Alerts, Help, Sim and Views were installed on 2026-11-02. What is still open
+is listed in [docs/open-differences.md](docs/open-differences.md). Then SIMSUI, the gauges
+and an executable around `HOST.DLL`: [docs/remaining-work.md](docs/remaining-work.md).
 
 Other useful work, in no particular order:
 

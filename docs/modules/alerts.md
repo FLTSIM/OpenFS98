@@ -121,15 +121,18 @@ and compared.
 
 ## Scope and integration
 
-The standalone DLL can replace the matching retail English module. The
-shared build/install targets are intentionally left to the MAIN integration
-work. The real GUI acceptance runs under Wine with the CD's native MFC42 and
+The DLL replaces the matching retail English module and is installed (below). The real GUI acceptance runs under Wine with the CD's native MFC42 and
 SIMSUI; native Windows and other MFC versions have not been exercised.
 WinHelp's call is transcript-verified, but its external viewer is not driven.
 Nested dialogs through the simulator's complete modal loop, arbitrary host
 callbacks, and double exceptions remain outside these acceptance fixtures.
 The isolated startup smoke establishes loading and initialization, not an
 interactive flight or every alert reachable during one.
+
+**Installed 2026-11-02.** The shared Makefile now builds this DLL into `bin/` and
+`make install` puts it in `English/` (`make alerts-install` / `alerts-revert` alone, keeping the
+first retail copy as `.orig`). `make smoke` requires it to match and load; `make
+main-dialogs` compares it in play against retail, though none of its three dialogs is reached there yet.
 
 The sections below retain the retail boundary notes. Regenerate the broader
 inventory with `python3 -B tools/dialogmap.py --format json`; tool limitations

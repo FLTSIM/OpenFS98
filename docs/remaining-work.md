@@ -1,8 +1,8 @@
 # Remaining work
 
 What is still retail, and what is left before a native build. The 27 simulator modules in
-`Modules\` and `English\World.DLL` are done and in `MODULES`; `make install` puts them in
-the game. Everything below is not. Sizes are `.text` from the reference CD. Differences
+`Modules\` are done and in `MODULES`, and `English\` World, Alerts, Help, Sim and Views
+are in `ENGLISH_MODULES`; `make install` puts them all in the game. Everything below is not. Sizes are `.text` from the reference CD. Differences
 and gaps in the finished modules are in [open-differences.md](open-differences.md).
 Results here are from 2026-11-01.
 
@@ -15,17 +15,17 @@ Results here are from 2026-11-01.
 | `SIMSUI.DLL` | 79,850 | **Not started.** 540 named exports, the common dialog and control widgets. Every dialog imports it | [dialogs.md](modules/dialogs.md) |
 | `Gauges/*.GAU` (120) | 63,472 | **Not started.** No `src/gauges/` and no survey. PANELS, their runtime, is ours | below |
 | `English/Flights.DLL` | 51,122 | **Not started.** Inventory only: 13 registrations, 17 templates. Caller descriptors need recovering first | [flights.md](modules/flights.md) |
-| `English/Sim.DLL` | 33,239 | **Built, not installed** | [sim.md](modules/sim.md) |
+| `English/Sim.DLL` | 33,239 | **Installed** 2026-11-02 | [sim.md](modules/sim.md) |
 | `English/mpdialog.dll` | 25,401 | **Partial,** being worked on separately: registries `0x110a`..`0x110c` | [mpdialog.md](modules/mpdialog.md) |
-| `English/Views.DLL` | 13,090 | **Built, not installed** | [views.md](modules/views.md) |
+| `English/Views.DLL` | 13,090 | **Installed** 2026-11-02 | [views.md](modules/views.md) |
 | `fltsim95.exe` | 11,464 | **Not looked at.** A stub that ships alongside; imports only KERNEL32. Probably not needed | [architecture.md](architecture.md) |
-| `English/Help.DLL` | 10,657 | **Built, not installed** | [help.md](modules/help.md) |
-| `English/Alerts.DLL` | 7,649 | **Built, not installed** | [alerts.md](modules/alerts.md) |
+| `English/Help.DLL` | 10,657 | **Installed** 2026-11-02 | [help.md](modules/help.md) |
+| `English/Alerts.DLL` | 7,649 | **Installed** 2026-11-02 | [alerts.md](modules/alerts.md) |
 | `DIALOG.DLL`, `ENGLISH.FLL` | 406, 438 | **Resources:** bitmaps; strings, a menu and the key tables. To be carried over, not decompiled | [dialogs.md](modules/dialogs.md) |
 
-"Built, not installed" means a standalone replacement in `bin/<module>-diff/` with its own
-harness, outside `MODULES`, so `make install` does not copy it. All of them import retail
-SIMSUI and MFC42.
+The four installed dialogs still build standalone in `tools/<name>.mk`, with their own
+harnesses; the shared build copies each to `bin/<NAME>.DLL`, and `make <name>-install` /
+`<name>-revert` do one alone. All of them import retail SIMSUI and MFC42.
 
 **Third-party dependencies, not ours to decompile but to replace for a native port:**
 `MFC42` (every dialog), Win32, GDI, DirectDraw, Direct3D, DirectSound, DirectInput,
@@ -40,8 +40,15 @@ much code they share, and how much is data a generator could carry over.
 
 ## Order
 
-1. **Install the four finished dialogs** (Alerts, Help, Sim, Views): the cheapest gain, and
-   they have only run alone. Add them to the game comparison in the same step.
+1. **Done 2026-11-02: the four finished dialogs are installed** (Alerts, Help, Sim, Views).
+   `make smoke` loads all five English DLLs from `English\`: 27/27 modules, 95 gauges, PASS.
+   `make main-dialogs` now runs retail MAIN with the retail English DLLs against ours with
+   ours, and reaches Help's About (`0x1607`), View Options (`0x1508`) and Sim's settings
+   pages (`0x1204`, `0x1205`): every control and its text the same, 11 of 16 pictures
+   identical as before, the other five only in the clock or a live preview. Not yet reached
+   in play: any of Alerts' three dialogs, Help's Lessons, Graph and Credits, Sim's crash
+   analysis. `HG2D_FRAMES_ALL`, `tools/reg_contracts.sh` and `tools/fly_coverage.sh` now
+   swap all five English DLLs; they have not been rerun since.
 2. **Flights, then Options.** The largest code still used in play. Scripted menu tests come
    with them: see [open-differences.md](open-differences.md#not-yet-tested).
 3. **SIMSUI.** After the dialogs, because they show which of its 540 exports matter.

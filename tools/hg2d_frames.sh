@@ -23,7 +23,7 @@
 #
 # HG2D_FRAMES_BIN is the directory of our DLLs (default bin), for testing a broken build.
 #
-# HG2D_FRAMES_ALL=1 compares the whole game instead: every module and World.DLL
+# HG2D_FRAMES_ALL=1 compares the whole game instead: every module and the English DLLs
 # retail against every one ours, and the verdict is on all of them.
 # HG2D_FRAMES_ONLY="UTIL MAIN" compares those modules alone: ours has them in an otherwise
 # retail game, with retail's HG2D unless HG2D is named.  It finds which module a difference
@@ -76,10 +76,9 @@ run() {     # tag hg2d
     local hg2d=$2
     if [ -n "${HG2D_FRAMES_ALL:-}${HG2D_FRAMES_ONLY:-}" ]; then
         local m
-        for m in $(make -s modules-of) WORLD; do
+        for m in $(make -s modules-of) $(make -s english-modules-of); do
             local to from
-            if [ "$m" = WORLD ]; then to=English/World.DLL from=orig/English/World.DLL
-            else to=Modules/$(make -s installed-name-of M=$m) from=$(make -s orig-module-of M=$m); fi
+            to=$(make -s installed-path-of M=$m) from=$(make -s orig-module-of M=$m)
             if [ "$tag" = ours ]; then
                 if [ -z "${HG2D_FRAMES_ONLY:-}" ] || [[ " $HG2D_FRAMES_ONLY " == *" $m "* ]]; then from=$ours_bin/$m.DLL; fi
             fi

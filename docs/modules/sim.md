@@ -226,5 +226,9 @@ bytes and loader trace, then stops only that prefix. It never installs into
 The graph callback is a stateful owner fixture, not REALITY's renderer, and
 the settings validator/converters are descriptor fixtures, not MAIN. The
 native suite complements the high-volume core comparisons; it does not claim
-to cover every possible Windows notification or native exception path. Shared
-build/install integration remains separate from this standalone replacement.
+to cover every possible Windows notification or native exception path.
+
+**Installed 2026-11-02.** The shared Makefile now builds this DLL into `bin/` and
+`make install` puts it in `English/` (`make sim-install` / `sim-revert` alone, keeping the
+first retail copy as `.orig`). `make smoke` requires it to match and load; `make
+main-dialogs` compares it in play against retail through the settings pages (commands `0x1204`, `0x1205`); the crash analysis is not reached yet.

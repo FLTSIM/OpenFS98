@@ -17,15 +17,16 @@ rm -rf "$out"; mkdir -p "$out"
 game=$(realpath "${FS98_DIR:-$PWD/game}")
 
 base=$out/base; mkdir -p "$base"
-for m in $(make -s modules-of); do
-    cp "$(make -s orig-module-of M=$m)" "$base/$(make -s installed-name-of M=$m)"
+mkdir -p "$base/Modules" "$base/English"
+for m in $(make -s modules-of) $(make -s english-modules-of); do
+    cp "$(make -s orig-module-of M=$m)" "$base/$(make -s installed-path-of M=$m)"
 done
 
 run_one() {     # tag script
     local tag=$1 script=$2 slot=$out/slot${SLOT:-0} display=:$((110 + ${SLOT:-0})) copy
     [ -d "$slot/prefix" ] || { mkdir -p "$slot"; cp -a "${WINEPREFIX:-$HOME/.wine}" "$slot/prefix"; }
     copy=$slot/game; rm -rf "$copy"; cp -a "$game" "$copy"
-    cp "$base"/* "$copy/Modules/"; cp orig/English/World.DLL "$copy/English/World.DLL"
+    cp "$base"/Modules/* "$copy/Modules/"; cp "$base"/English/* "$copy/English/"
     cp bin/SEHFIX.DLL bin/hg2d-diff/FRAMELOCK.DLL "$copy/Modules/"
     Xvfb "$display" -screen 0 1024x768x24 +extension GLX -ac -noreset >/dev/null 2>&1 &
     local xvfb=$!

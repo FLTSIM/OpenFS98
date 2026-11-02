@@ -3,7 +3,7 @@
 The dialog core and standalone native replacement DLL are implemented. The
 Win32/MFC runtime adapter binds all five factories, native vtables and message
 maps, including the credits placeholder and the cached About font's unload
-lifetime. MAIN, HOST and the shared Makefile are outside this work's scope.
+lifetime. It is installed in the game; see the end of this page's smoke section.
 
 Build and run independently:
 
@@ -266,3 +266,8 @@ game copy, uses the dedicated Help Wine prefix and stops only that prefix. It
 does not alter `game/` or shared build/install integration. The native suite
 complements the high-volume core comparisons; it does not claim every possible
 Windows notification or native exception path.
+
+**Installed 2026-11-02.** The shared Makefile now builds this DLL into `bin/` and
+`make install` puts it in `English/` (`make help-install` / `help-revert` alone, keeping the
+first retail copy as `.orig`). `make smoke` requires it to match and load; `make
+main-dialogs` compares it in play against retail through About (`0x1607`); Lessons, Graph and Credits are not reached yet.

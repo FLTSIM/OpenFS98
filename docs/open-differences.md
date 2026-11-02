@@ -83,6 +83,10 @@ The `radios` suite's stand-in now logs edi, and catches the old call.
 - **The mouse and menus.** No script clicks anything or opens a dialog. Dialogs need a way to
   close them in the script, since a modal one hangs a run until its timeout.
 - **Night, weather and time set by hand.** Only as the flights set them.
+- **The English dialogs in play.** `make main-dialogs` reaches Help's About, View Options
+  and Sim's settings pages, first page only. Alerts' three dialogs, Help's Lessons, Graph and
+  Credits, and Sim's crash analysis have been compared only in their own harnesses and
+  loaded in the game, not opened there.
 - **Sound.** Nothing compares what is heard: `sounddiff` only compares calls.
 - **Direct3D's limits.** wined3d on llvmpipe, not a 1997 card, and four screenshots a
   flight between the panel logs. Hardware-specific paths in HG2D (real capability bits,

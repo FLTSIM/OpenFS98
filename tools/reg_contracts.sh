@@ -3,7 +3,7 @@
 # the registers with what retail's left: tools/reg_contracts.py says how to read the result.
 # Without sound, since a crash's timing would otherwise change which calls happen.
 #
-#   tools/reg_contracts.sh [module...]     default every module and WORLD
+#   tools/reg_contracts.sh [module...]     default every module and the English DLLs
 #
 # REG_CONTRACTS_RUNS   flight:scenario pairs, - for no input
 # REG_CONTRACTS_JOBS   runs at once (default 8; each is three games)
@@ -18,7 +18,8 @@ out=$(realpath -m "${REG_CONTRACTS_OUT:-bin/reg-contracts}")
 rm -rf "$out"; mkdir -p "$out/scripts"
 python3 -B tools/fly_scripts.py "$out/scripts"
 modules=("$@")
-[ ${#modules[@]} -gt 0 ] || modules=($(make -s modules-of) WORLD)
+[ ${#modules[@]} -gt 0 ] || modules=($(make -s modules-of) $(make -s english-modules-of))
+english=" $(make -s english-modules-of) "
 
 one() {     # module flight:scenario
     local m=$1 flight=${2%%:*} scenario=${2##*:} dir args verdict
@@ -41,7 +42,7 @@ for m in "${modules[@]}"; do for r in $runs; do echo "$m $r"; done; done |
 
 status=0
 for m in "${modules[@]}"; do
-    case $m in WORLD) name=WORLD ;; *) name=$(make -s installed-name-of M="$m"); name=${name%.*}; name=${name^^} ;; esac
+    if [[ $english == *" $m "* ]]; then name=$m; else name=$(make -s installed-name-of M="$m"); name=${name%.*}; name=${name^^}; fi
     pairs=()
     for r in $runs; do
         flight=${r%%:*}

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Open every MAIN menu command in the real game, on retail MAIN and on ours, and
-# compare what each shows: controls and their text, and the dialog's pixels.  It
+# Open every MAIN menu command in the real game, on retail MAIN and the retail
+# English dialog DLLs and on ours, and compare what each shows: controls and their text, and the dialog's pixels.  It
 # presses Cancel through all of them, then OK.  Each run has its own copy of the
 # game and of the wine prefix, so no other wine process is disturbed and the game
 # tree is not written to; a nested X server keeps it off a screen that may be locked
@@ -12,8 +12,12 @@ game=$(realpath "${FS98_DIR:-$PWD/game}")
 out=$root/bin/main-dialogs
 display=:97
 commands="1308 1309 1607 1203 1201 1202 1204 1205 1301 1306 1307 1407 1409 1502 1101 300"
-[ -f bin/MAIN.DLL ] && [ -f bin/fsdialogs.exe ] && [ -f "$game/FLTSIM98.EXE" ] || {
-    echo "needs bin/MAIN.DLL, bin/fsdialogs.exe and the staged game" >&2; exit 2;
+english=$(make -s english-modules-of)
+for m in MAIN $english; do
+    [ -f "bin/$m.DLL" ] || { echo "needs bin/$m.DLL" >&2; exit 2; }
+done
+[ -f bin/fsdialogs.exe ] && [ -f "$game/FLTSIM98.EXE" ] || {
+    echo "needs bin/fsdialogs.exe and the staged game" >&2; exit 2;
 }
 command -v Xephyr >/dev/null || { echo "needs Xephyr" >&2; exit 2; }
 
@@ -33,6 +37,11 @@ run() {     # tag dll button
     mkdir -p "$dir"
     cp -a "$game" "$copy"
     cp "$2" "$copy/Modules/MAIN.DLL"
+    local m
+    for m in $english; do      # Alerts, Help, Sim, Views and World: retail's or ours with MAIN
+        if [[ $1 == ours-* ]]; then cp "bin/$m.DLL" "$copy/$(make -s installed-path-of M=$m)"
+        else cp "$(make -s orig-module-of M=$m)" "$copy/$(make -s installed-path-of M=$m)"; fi
+    done
     ( cd "$copy" && WINEDEBUG=err+all timeout 480 wine FLTSIM98.EXE '/STN:Situatio\STGEORGE.STN' >"$dir/game.log" 2>&1 ) &
     local pid=$!
     # shellcheck disable=SC2086

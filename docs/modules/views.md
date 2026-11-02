@@ -5,8 +5,8 @@ one registered dialog (`0x1508`) and one recognised MFC message map with
 19 entries. A standalone Win32 replacement is implemented in `src/views/`
 and builds to `bin/views-diff/VIEWS_ours.dll`. It includes the complete event
 surface, control initialization and binding, all embedded-object lifetimes,
-factory and module lifecycle. The shared build and game install are left
-untouched while other agents finish MAIN and the host.
+factory and module lifecycle. It is installed in the game (see the end of
+"Building and verification").
 
 It imports only HOST and GLOBAL through FS98's numeric ABI. PE imports are
 USER32, SIMSUI, MFC42, MSVCRT and KERNEL32. Preview rendering and simulator
@@ -54,6 +54,11 @@ identical while changing a pixel (255 versus 0).
 `bin/views-diff/`. The smoke boots a disposable game copy with only its
 English Views DLL replaced, verifies the installed bytes against the launch
 snapshot, and stops only this prefix. It retains the copy and trace.
+
+**Installed 2026-11-02.** The shared Makefile now builds this DLL into `bin/` and
+`make install` puts it in `English/` (`make views-install` / `views-revert` alone, keeping the
+first retail copy as `.orig`). `make smoke` requires it to match and load; `make
+main-dialogs` compares it in play against retail through command `0x1502`: every control the same, pixels only in the live preview.
 
 `viewseventsdiff` maps the actual original DLL without its loader startup,
 patches reached imports and compares the original routines against C.

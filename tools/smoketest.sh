@@ -75,17 +75,22 @@ for f in bin/*.DLL; do
         MULTIP.DLL) installed=Modules/MULTIPLAYER.DLL ;;
         MPCHAT.DLL) installed=Modules/mpchat.DLL ;;
         WORLD.DLL)  installed=English/World.DLL ;;
+        ALERTS.DLL) installed=English/Alerts.DLL ;;
+        HELP.DLL)   installed=English/Help.DLL ;;
+        SIM.DLL)    installed=English/Sim.DLL ;;
+        VIEWS.DLL)  installed=English/Views.DLL ;;
         *)          installed="Modules/$m" ;;
     esac
+    english=; case "$installed" in English/*) english=${installed#English/} ;; esac
     if cmp -s "$f" "$GAME/$installed"; then
         echo "  running the OpenFS98 build of $m"
     else
         echo "  NOTE: $m differs from the installed DLL -- this exact build was not tested."
         echo "        run 'make install' to test what you just built."
-        [ "$m" != WORLD.DLL ] || fail=1
+        [ -z "$english" ] || fail=1
     fi
-    if [ "$m" = WORLD.DLL ] && ! grep -qiE 'english.+world\.dll' "$TRACE"; then
-        echo "FAIL: English/World.DLL was not loaded"
+    if [ -n "$english" ] && ! grep -qiE "english.+${english//./\\.}" "$TRACE"; then
+        echo "FAIL: $installed was not loaded"
         fail=1
     fi
 done

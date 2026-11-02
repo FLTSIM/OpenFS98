@@ -27,6 +27,9 @@ CLASSES = (
     ('save', 0x17d0, 0x207, 0x17cc, 0x5f60, 0x6070, 0x6050, 0x1250, 0xed28, 0x6140, 0x61e0, 0xece0, 8),
     ('comms', 0x1fe0, 0x1fd, 0x1fdc, 0x55a0, 0x56f0, 0x56d0, 0x1530, 0xeba0, 0x5810, 0x5920, 0xeb28, 14),
     ('create', 0x1c64, 0x1fe, 0x10e0, 0x2350, 0x2480, 0x2460, 0x1130, 0xe360, 0x2590, 0x2690, 0xe210, 13),
+    ('aircraft', 0x1868, 0x1fb, 0x1864, 0x18a0, 0x19c0, 0x19a0, 0x1410, 0xe118, 0x1ab0, 0x1b90, 0xe000, 11),
+    ('modeless', 0x10e4, 0x20a, 0x10dc, 0x9d10, 0x9d50, 0x9d30, 0x16e0, 0xf8f8, 0x9d60, 0x9d70, 0xf9e8, 0),
+    ('opening', 0x1830, 0x206, 0x1828, 0x9e40, 0x9f40, 0x9f20, 0x1650, 0xfb40, 0xa000, 0xa0b0, 0xf9e8, 8),
 )
 
 
@@ -75,7 +78,7 @@ def object_calls(start, end):
         if match:
             registers[match[1]] = ('import', 0x10000 + int(match[2], 16))
             continue
-        if instruction.startswith('call'):
+        if instruction.startswith('call') or (instruction.startswith('jmp') and 'ds:0x2232' in instruction):
             direct = re.search(r'ds:0x2232([0-9a-f]+)', instruction)
             if direct:
                 import_slot = 0x10000 + int(direct[1], 16)
@@ -115,8 +118,9 @@ def main():
         if len(rows) != ddx_count:
             raise SurveyError(f'{name}: DDX layout moved: {len(rows)} bindings')
         tables.append(f'static const uint16_t s_ddx_{name}[][2] = {{')
-        tables += [f'    {{0x{offset:x}, 0x{control:x}}},' for offset, control in rows]
+        tables += [f'    {{0x{offset:x}, 0x{control:x}}},' for offset, control in rows] or ['    {0, 0},   /* none */']
         tables.append('};')
+        tables.append(f'enum {{ s_ddx_count_{name} = {len(rows)} }};')
 
         constructors = object_calls(ctor, delete)
         destructors = list(reversed(object_calls(dtor, ddx)))
@@ -127,12 +131,15 @@ def main():
         objects.append(f'static const struct fs98_flights_subobject s_controls_{name}[] = {{')
         for (offset, constructor), (_, destructor) in zip(constructors[1:], destructors[1:]):
             objects.append(f'    {{0x{offset:x}, 0x{constructor:x}, 0x{destructor:x}}},')
+        if len(constructors) == 1:
+            objects.append('    {0, 0, 0},   /* none */')
         objects.append('};')
+        objects.append(f'enum {{ s_controls_count_{name} = {len(constructors) - 1} }};')
     objects.append('static const struct fs98_flights_class s_classes[] = {')
     for (name, size, template, descriptor, ctor, dtor, delete, factory, vtable, *_rest) in CLASSES:
         objects.append(f'    {{0x{size:x}, 0x{template:x}, 0x{descriptor:x}, 0x{ctor:x}, 0x{dtor:x}, '
                        f'0x{delete:x}, 0x{factory:x}, 0x{vtable:x}, '
-                       f'sizeof(s_controls_{name}) / sizeof(s_controls_{name}[0]), s_controls_{name}}},')
+                       f's_controls_count_{name}, s_controls_{name}}},')
     objects.append('};')
     Path('src/flights/flights_tables.inc').write_text('\n'.join(tables) + '\n')
     Path('src/flights/flights_objects_tables.inc').write_text('\n'.join(objects) + '\n')

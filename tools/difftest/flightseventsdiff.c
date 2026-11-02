@@ -11,7 +11,8 @@
  * every call position, comparing what the cleanup frames destroy.
  *
  * Covered: the pickers (Adventures 0x1108, Challenges 0x1107), Save Flight (0x1104),
- * Communications (0x1203), Create a Flight (0x1101), and
+ * Communications (0x1203), Create a Flight (0x1101), Select Aircraft (0x1201), the welcome
+ * dialog (0x1109), the modeless dialog (id 1), and
  * the helpers every class shares. */
 #include <windows.h>
 #include <stdio.h>
@@ -37,11 +38,13 @@ struct fixture {
     uint8_t object[0x1fe0];
     uint8_t descriptor[2][0x40];
     char names[2][0x110];           /* Save's name and description buffers */
+    uint8_t record_before[0xa08];   /* record -1: Select Aircraft indexes with an empty selection */
     uint8_t records[5][0xa08];
     uint8_t info[32];
     uint8_t exchange[32];
     uint8_t font[32];
     struct fs98_flights_create_state create;   /* Create's static font, retail's copied in and out */
+    struct fs98_flights_opening_state opening; /* the welcome dialog's statics, likewise */
     uint8_t guard_after[32];
 };
 static struct fixture s_fixture, s_initial, s_retail_result;
@@ -55,12 +58,15 @@ static void *s_vtable[64], *s_other_vtable[64], *s_control_vtable[64], *s_jump[5
 
 enum signature {
     SIG_EVENT, SIG_HELP, SIG_CONTEXT, SIG_EXCHANGE, SIG_INT, SIG_EMPTY_ARG,
-    SIG_INT_ARG, SIG_EXIT, SIG_INT_TWICE, SIG_CONSTRUCT, SIG_DESTROY, SIG_DELETE, SIG_CREATE, SIG_ROUNDTRIP, SIG_CONSTRUCT_DELETE
+    SIG_INT_ARG, SIG_INT_ARG2, SIG_EXIT, SIG_INT_TWICE, SIG_CONSTRUCT, SIG_DESTROY, SIG_DELETE, SIG_CREATE, SIG_ROUNDTRIP, SIG_CONSTRUCT_DELETE
 };
 struct operation { uint32_t rva; void *ours; enum signature signature; uint32_t kind; const char *name; };
 #define EVENT(rva, name) {rva, (void *)fs98_flights_##name, SIG_EVENT, 0, #name}
 #define INT(rva, name) {rva, (void *)fs98_flights_##name, SIG_INT, 0, #name}
 #define SAVE(rva, name, signature) {rva, (void *)fs98_flights_##name, signature, FS98_FLIGHTS_SAVE, #name}
+#define OPENING(rva, name, signature) {rva, (void *)fs98_flights_##name, signature, FS98_FLIGHTS_OPENING, #name}
+#define MODELESS(rva, name, signature) {rva, (void *)fs98_flights_##name, signature, FS98_FLIGHTS_MODELESS, #name}
+#define AIRCRAFT(rva, name, signature) {rva, (void *)fs98_flights_##name, signature, FS98_FLIGHTS_AIRCRAFT, #name}
 #define CREATE(rva, name, signature) {rva, (void *)fs98_flights_##name, signature, FS98_FLIGHTS_CREATE, #name}
 #define COMMS(rva, name, signature) {rva, (void *)fs98_flights_##name, signature, FS98_FLIGHTS_COMMS, #name}
 #define CLASS(help, context, ddx, name, kind) \
@@ -109,6 +115,27 @@ static const struct operation s_operations[] = {
     CREATE(0x26b0, create_init, SIG_INT_TWICE), CREATE(0x29c0, create_font_destroy, SIG_EXIT),
     CLASS(0x2b10, 0x2b30, 0x2590, create, FS98_FLIGHTS_CREATE),
     LIFETIME(FS98_FLIGHTS_CREATE, create),
+    AIRCRAFT(0x1ba0, aircraft_cancel, SIG_EVENT), AIRCRAFT(0x1be0, aircraft_accept, SIG_EVENT),
+    AIRCRAFT(0x1c40, aircraft_frame, SIG_INT_ARG2), AIRCRAFT(0x1f40, aircraft_populate, SIG_EVENT),
+    AIRCRAFT(0x20a0, aircraft_select, SIG_EVENT), AIRCRAFT(0x21c0, aircraft_double_click, SIG_EVENT),
+    AIRCRAFT(0x2220, aircraft_details, SIG_EVENT), AIRCRAFT(0x1c80, aircraft_init, SIG_INT),
+    CLASS(0x21e0, 0x2200, 0x1ab0, aircraft, FS98_FLIGHTS_AIRCRAFT),
+    LIFETIME(FS98_FLIGHTS_AIRCRAFT, aircraft),
+    EVENT(0x2b50, nothing),
+    OPENING(0xa420, opening_multiplayer, SIG_EVENT), OPENING(0xa500, opening_lessons, SIG_EVENT),
+    OPENING(0xa660, opening_more, SIG_EVENT), OPENING(0xa740, opening_new_flight, SIG_EVENT),
+    OPENING(0xa5e0, opening_fly, SIG_EVENT), OPENING(0xa870, opening_fly, SIG_EVENT),
+    OPENING(0xa620, opening_quit, SIG_EVENT), OPENING(0xa820, opening_refresh, SIG_EVENT),
+    OPENING(0xa860, opening_save, SIG_EVENT), OPENING(0xa880, opening_hover, SIG_INT_ARG2),
+    OPENING(0xa0c0, opening_init, SIG_INT), OPENING(0xa0c0, opening_init, SIG_INT_TWICE),
+    OPENING(0xa410, opening_shadow_destroy, SIG_EXIT), OPENING(0xa400, opening_alternate_destroy, SIG_EXIT),
+    OPENING(0xa3f0, opening_hint_destroy, SIG_EXIT),
+    CLASS(0x9e00, 0x9e20, 0xa000, opening, FS98_FLIGHTS_OPENING),
+    LIFETIME(FS98_FLIGHTS_OPENING, opening),
+    MODELESS(0x9d80, modeless_init, SIG_INT), MODELESS(0x9db0, modeless_check, SIG_INT_ARG2),
+    MODELESS(0x9de0, modeless_palette, SIG_EMPTY_ARG),
+    {0x9d60, (void *)fs98_flights_modeless_exchange, SIG_EXCHANGE, FS98_FLIGHTS_MODELESS, "modeless_exchange"},
+    LIFETIME(FS98_FLIGHTS_MODELESS, modeless),
 };
 #define OP_COUNT (sizeof(s_operations) / sizeof(s_operations[0]))
 #define OP s_operations[s_operation]
@@ -116,9 +143,13 @@ static const struct operation s_operations[] = {
 static uint32_t next_random(void)
 { s_rng ^= s_rng << 13; s_rng ^= s_rng >> 17; s_rng ^= s_rng << 5; return s_rng; }
 #define RETAIL_FONT 0x12150      /* Create's static CSimsFont in retail .data, guard byte at +0x70 */
+#define RETAIL_OPENING 0x121c8   /* the welcome dialog's statics */
 static uint32_t offset(const void *pointer)
 {
     if (s_retail && pointer == (uint8_t *)s_retail + RETAIL_FONT) pointer = s_fixture.create.font;
+    if (s_retail && (const uint8_t *)pointer >= (uint8_t *)s_retail + RETAIL_OPENING &&
+        (const uint8_t *)pointer < (uint8_t *)s_retail + RETAIL_OPENING + sizeof(struct fs98_flights_opening_state))
+        pointer = (const uint8_t *)&s_fixture.opening + ((const uint8_t *)pointer - ((uint8_t *)s_retail + RETAIL_OPENING));
     return (uint32_t)((const uint8_t *)pointer - (const uint8_t *)&s_fixture);
 }
 static void put(const char *format, ...)
@@ -145,7 +176,10 @@ static void mutate(void)
     int save = s_operations[s_operation].kind == FS98_FLIGHTS_SAVE;
     int comms = s_operations[s_operation].kind == FS98_FLIGHTS_COMMS;
     int create = s_operations[s_operation].kind == FS98_FLIGHTS_CREATE;
-    if (s_calls != 1 + ((s_scenario ^ (s_seed >> 7)) % 4)) return;     /* any position, any script */
+    int aircraft = s_operations[s_operation].kind == FS98_FLIGHTS_AIRCRAFT;
+    int opening = s_operations[s_operation].kind == FS98_FLIGHTS_OPENING;
+    /* one point among the first calls and one anywhere in the first 32, any script */
+    if (s_calls != 1 + ((s_scenario ^ (s_seed >> 7)) % 4) && s_calls != 5 + ((s_seed >> 12) % 28)) return;
     if ((s_script & 1) && (descriptor == s_fixture.descriptor[0] || descriptor == s_fixture.descriptor[1])) {
         PTR(object, at) = descriptor == s_fixture.descriptor[0] ? s_fixture.descriptor[1]
                                                                 : s_fixture.descriptor[0];
@@ -156,6 +190,13 @@ static void mutate(void)
         if (save) {
             D32(descriptor, 8) = D32(descriptor, 8) ? 0 : 0x1004;
             D32(descriptor, 0x1c) ^= 0x1003;
+        } else if (opening) {
+            D32(descriptor, 0x18) ^= 1;
+            D32(descriptor, 0x20) ^= 1;
+            D32(object, 0x10dc) ^= (s_seed >> 2) & 1;
+        } else if (aircraft) {
+            D32(descriptor, 0x18) = (s_seed >> 3) & 1 ? 0xffffffff : 2;
+            D32(descriptor, 0x14) = 1;
         } else if (create) {
             D32(descriptor, 0x2c) ^= 1;
             PTR(descriptor, 0x20) = 0;
@@ -169,7 +210,7 @@ static void mutate(void)
         }
     }
     if (s_script & 4) PTR(object, 0) = s_other_vtable;
-    if (s_script & 8) D32(object, save ? 0x1558 : comms ? 0x1d24 : 0x1270) = s_seed ^ 0x12345678;
+    if (s_script & 8) D32(object, save ? 0x1558 : comms ? 0x1d24 : aircraft ? 0x151c : 0x1270) = s_seed ^ 0x12345678;
 }
 
 /* ---- the object's own virtuals --------------------------------------------------------- */
@@ -201,6 +242,19 @@ OTHER_SLOTS(0x0) OTHER_SLOTS(0x1) OTHER_SLOTS(0x2) OTHER_SLOTS(0x3)
 static void (TC *const s_other_slots[64])(void *) = {
     SLOT_ROW(0x0), SLOT_ROW(0x1), SLOT_ROW(0x2), SLOT_ROW(0x3)
 };
+/* The replacement vtable's own versions, so a call through the wrong table shows */
+#undef OTHER_SLOT
+#define OTHER_SLOT(n) static void TC replaced_slot_##n(void *object) \
+{ put("replaced.slot %x %u\n", n * 4, offset(object)); mutate(); }
+OTHER_SLOTS(0x0) OTHER_SLOTS(0x1) OTHER_SLOTS(0x2) OTHER_SLOTS(0x3)
+#undef SLOT_ROW
+#define SLOT_ROW(n) replaced_slot_##n##0, replaced_slot_##n##1, replaced_slot_##n##2, replaced_slot_##n##3, \
+    replaced_slot_##n##4, replaced_slot_##n##5, replaced_slot_##n##6, replaced_slot_##n##7, \
+    replaced_slot_##n##8, replaced_slot_##n##9, replaced_slot_##n##a, replaced_slot_##n##b, \
+    replaced_slot_##n##c, replaced_slot_##n##d, replaced_slot_##n##e, replaced_slot_##n##f
+static void (TC *const s_replaced_slots[64])(void *) = {
+    SLOT_ROW(0x0), SLOT_ROW(0x1), SLOT_ROW(0x2), SLOT_ROW(0x3)
+};
 static uint32_t TC virtual_validate(void *object, uint32_t argument)
 {
     put("virtual.validate %u %x\n", offset(object), argument); mutate();
@@ -213,6 +267,26 @@ static int32_t TC virtual_check(void *control, void *font, uint32_t bitmap, void
     put("init.check %u font=%u bmp=%x dib=%u pal=%u module=%x\n", offset(control), offset(font),
         bitmap, offset(dib), offset(palette), module);
     mutate(); return (int32_t)s_seed;
+}
+#define OPENING_CALLBACK(slot) static uint32_t SC opening_callback_##slot(void *descriptor) \
+{ \
+    put("opening.callback %x %u busy=%u\n", slot, offset(descriptor), D32(s_fixture.object, 0x10dc)); mutate(); \
+    return (s_seed >> (slot / 4)) & 1 ? s_seed : 0; \
+}
+OPENING_CALLBACK(0x8) OPENING_CALLBACK(0xc) OPENING_CALLBACK(0x10) OPENING_CALLBACK(0x14)
+static uint32_t SC aircraft_details(void *descriptor)
+{
+    put("aircraft.details %u selection=%d\n", offset(descriptor), (int32_t)D32(descriptor, 0x14)); mutate();
+    return (s_seed >> 15) % 3 ? 0 : s_seed;
+}
+static uint32_t SC aircraft_preview(uint32_t operation, void *descriptor, uint32_t window);
+static uint32_t SC aircraft_preview_other(uint32_t operation, void *descriptor, uint32_t window)
+{ put("other.preview\n"); return aircraft_preview(operation, descriptor, window); }
+static uint32_t SC aircraft_preview(uint32_t operation, void *descriptor, uint32_t window)
+{
+    put("aircraft.preview op=%u %u window=%u selection=%d answer=%u\n", operation, offset(descriptor),
+        window, (int32_t)D32(descriptor, 0x14), D32(descriptor, 0));
+    mutate(); return s_seed;
 }
 #define CREATE_CALLBACK(slot) static uint32_t SC create_callback_##slot(void *descriptor) \
 { \
@@ -239,6 +313,9 @@ static uint32_t SC save_check(void *descriptor)
     if (s_scenario % 5 == 1) D32(descriptor, 8) = 0x1004;
     return s_scenario % 7 == 0 ? 0 : 0x1000 + s_scenario % 0x10;
 }
+static int32_t TC virtual_skin(void *object, int32_t resource, uint32_t module, uint32_t flags);
+static int32_t TC replaced_skin(void *object, int32_t resource, uint32_t module, uint32_t flags)
+{ put("replaced.skin\n"); return virtual_skin(object, resource, module, flags); }
 static int32_t TC virtual_skin(void *object, int32_t resource, uint32_t module, uint32_t flags)
 {
     put("skin %u resource=%x module=%x flags=%u\n", offset(object), resource, module, flags);
@@ -371,16 +448,79 @@ static void set_sims_text(void *control, const char *text)
 static void font_construct(void *font, void *base_font)
 {
     uint8_t guard = s_side ? s_fixture.create.guard : *((uint8_t *)s_retail + RETAIL_FONT + 0x70);
-    put("font.construct %u base=%u guard=%u\n", offset(font), offset(base_font), guard);
+    uint8_t opening = s_side ? s_fixture.opening.guard : *((uint8_t *)s_retail + RETAIL_OPENING + 0x70);
+    put("font.construct %u base=%u guard=%u/%u\n", offset(font), offset(base_font), guard, opening);
     memset(font, s_seed & 255, 0x70); mutate();
 }
 static void font_destroy(void *font)
 { put("font.destroy %u value=%x/%x\n", offset(font), D32(font, 4), D32(font, 0x50)); mutate(); }
 static void register_exit(void (*handler)(void))
 {
-    put("register.exit owns=%u\n", handler == (s_side ? fs98_flights_create_font_destroy
-                                                    : (void (*)(void))((uint8_t *)s_retail + 0x29c0)));
+    static void (*const ours[])(void) = {
+        fs98_flights_create_font_destroy, fs98_flights_opening_shadow_destroy,
+        fs98_flights_opening_alternate_destroy, fs98_flights_opening_hint_destroy
+    };
+    static const uint32_t retail[] = {0x29c0, 0xa410, 0xa400, 0xa3f0};
+    uint32_t which;
+    for (which = 0; which < 4; ++which)
+        if (handler == (s_side ? ours[which] : (void (*)(void))((uint8_t *)s_retail + retail[which]))) break;
+    put("register.exit which=%u\n", which);
     mutate();
+}
+static uint32_t text_offset(const void *text)
+{
+    if ((const uint8_t *)text >= (const uint8_t *)&s_fixture && (const uint8_t *)text < (const uint8_t *)(&s_fixture + 1))
+        return offset(text);
+    return 0xffffffff;
+}
+static void string_construct(void *string)
+{ put("string.construct\n"); ((struct fs98_flights_string *)string)->text = (char *)0x5717; mutate(); }
+static void string_destroy(void *string)
+{ put("string.destroy text=%x\n", text_offset(((struct fs98_flights_string *)string)->text)); mutate(); }
+static void list_text(void *list, int32_t index, void *string)
+{
+    put("list.text %u %d\n", offset(list), index);
+    ((struct fs98_flights_string *)string)->text = (char *)s_fixture.records[(uint32_t)index % 5];
+    mutate();
+}
+static void *dialog_item(void *object, int32_t id)
+{ put("dialog.item %u %x\n", offset(object), id); mutate(); return s_fixture.info; }
+static uint32_t dialog_item_window(uint32_t window, int32_t id)
+{ put("dialog.item.window %u %x\n", window, id); mutate(); return s_seed ^ (uint32_t)id; }
+static void remap_rect(struct fs98_flights_rect *rect, void *control)
+{
+    put("remap.rect %u\n", offset(control));
+    rect->left = (int32_t)(s_seed & 0x3ff); rect->top = (int32_t)((s_seed >> 10) & 0x3ff);
+    rect->right = (int32_t)((s_seed >> 4) & 0x7ff); rect->bottom = (int32_t)((s_seed >> 20) & 0x7ff);
+    mutate();
+}
+static void move_window(void *window, int32_t x, int32_t y, int32_t width, int32_t height, int32_t repaint)
+{ put("move.window %u %d/%d %d/%d repaint=%d\n", offset(window), x, y, width, height, repaint); mutate(); }
+static int32_t redraw_window(uint32_t window, void *rect, void *region, uint32_t flags)
+{
+    put("redraw %u %u %u %x\n", window, (uint32_t)(uintptr_t)rect, (uint32_t)(uintptr_t)region, flags);
+    mutate(); return (int32_t)s_seed;
+}
+static void *window_from_handle(uint32_t window)
+{
+    static const uint32_t buttons[] = {0x11a8, 0x129c, 0x1390, 0x1484, 0x1578, 0x10e0};
+    put("from.handle %u\n", window); mutate();
+    return s_fixture.object + buttons[((s_seed >> 4) + s_calls) % 6];
+}
+static int32_t load_string_resource(void *string, uint32_t id)
+{
+    put("load.string %x\n", id);
+    ((struct fs98_flights_string *)string)->text = s_fixture.names[id & 1];
+    mutate(); return 1;
+}
+static int32_t init_shadow_button(void *control, void *font, void *alternate_font, uint32_t bitmap,
+                                  void *dib, void *palette, uint32_t flags, uint32_t color,
+                                  uint32_t module, int32_t x, int32_t y, struct fs98_flights_rect rect)
+{
+    put("init.shadow %u font=%u/%u bmp=%x dib=%u pal=%u flags=%x color=%x module=%x xy=%d/%d rect=%d/%d/%d/%d\n",
+        offset(control), offset(font), offset(alternate_font), bitmap, offset(dib), offset(palette), flags,
+        color, module, x, y, rect.left, rect.top, rect.right, rect.bottom);
+    mutate(); return (int32_t)s_seed;
 }
 static void default_paint(void *object) { put("default.paint %u\n", offset(object)); mutate(); }
 static double to_number(const char *text)
@@ -397,7 +537,9 @@ static const struct fs98_flights_services s_services = {
     get_window_text, set_checked, error_dialog, post_message, copy_text, compare_text, close_dialog,
     get_window_long, get_focus, enable_control, set_radio, init_slider, slider_range, slider_position,
     set_slider_position, init_group, to_number, format_number,
-    init_picture, set_focus, set_sims_text, font_construct, font_destroy, register_exit, default_paint
+    init_picture, set_focus, set_sims_text, font_construct, font_destroy, register_exit, default_paint,
+    string_construct, string_destroy, list_text, dialog_item, dialog_item_window, remap_rect, move_window,
+    redraw_window, window_from_handle, load_string_resource, init_shadow_button
 };
 
 static void *dialog_construct(void *object, int32_t resource, void *parent)
@@ -453,6 +595,7 @@ CONTROL_HOOK(radio, 0x1353c, 0x13548)
 CONTROL_HOOK(slider, 0x13538, 0x13544)
 CONTROL_HOOK(group, 0x13540, 0x13534)
 CONTROL_HOOK(picture, 0x13578, 0x1357c)
+CONTROL_HOOK(shadow, 0x13574, 0x1360c)
 #undef CONTROL_HOOK
 static void *TC hook_dialog_construct(void *object, int32_t resource, void *parent)
 { return dialog_construct(object, resource, parent); }
@@ -511,6 +654,22 @@ static void *hook_dll_onexit(void (*handler)(void), void **begin, void **end)
 { (void)begin; (void)end; register_exit(handler); return (void *)handler; }
 static void *hook_onexit(void (*handler)(void)) { register_exit(handler); return (void *)handler; }
 static void TC hook_paint(void *object) { default_paint(object); }
+static int32_t SC hook_redraw(uint32_t window, void *rect, void *region, uint32_t flags)
+{ return redraw_window(window, rect, region, flags); }
+static void *SC hook_from_handle(uint32_t window) { return window_from_handle(window); }
+static int32_t TC hook_load_string(void *string, uint32_t id) { return load_string_resource(string, id); }
+static int32_t TC hook_shadow(void *control, void *font, void *alternate_font, uint32_t bitmap,
+                              void *dib, void *palette, uint32_t flags, uint32_t color,
+                              uint32_t module, int32_t x, int32_t y, struct fs98_flights_rect rect)
+{ return init_shadow_button(control, font, alternate_font, bitmap, dib, palette, flags, color, module, x, y, rect); }
+static void *TC hook_string_construct(void *string) { string_construct(string); return string; }
+static void TC hook_string_destroy(void *string) { string_destroy(string); }
+static void TC hook_list_text(void *list, int32_t index, void *string) { list_text(list, index, string); }
+static void *TC hook_dialog_item(void *object, int32_t id) { return dialog_item(object, id); }
+static uint32_t SC hook_dialog_item_window(uint32_t window, int32_t id) { return dialog_item_window(window, id); }
+static void SC hook_remap_rect(struct fs98_flights_rect *rect, void *control) { remap_rect(rect, control); }
+static int32_t TC hook_move_window(void *window, int32_t x, int32_t y, int32_t width, int32_t height, int32_t repaint)
+{ move_window(window, x, y, width, height, repaint); return 1; }
 static int hook_sprintf(char *out, const char *format, ...)
 {
     va_list args;
@@ -562,7 +721,14 @@ static void setup_imports(void)
     patch(0x13618, hook_init_picture); patch(0x133f8, hook_set_focus); patch(0x13610, hook_set_sims_text);
     patch(0x13604, hook_font_construct); patch(0x13614, hook_font_destroy);
     patch(0x134b8, hook_dll_onexit); patch(0x134c0, hook_onexit); patch(0x133d8, hook_paint);
-    fs98_flights_set_create_state(&s_fixture.create); patch(0x134bc, hook_atof); patch(0x134cc, hook_sprintf);
+    fs98_flights_set_create_state(&s_fixture.create);
+    patch(0x133dc, hook_string_construct); patch(0x133e8, hook_string_destroy);
+    patch(0x133e4, hook_list_text); patch(0x133f0, hook_dialog_item); patch(0x13640, hook_dialog_item_window);
+    patch(0x1359c, hook_remap_rect); patch(0x133f4, hook_move_window);
+    PATCH_CONTROL(shadow, 0x13574, 0x1360c);
+    patch(0x13634, hook_redraw); patch(0x13380, hook_from_handle); patch(0x13384, hook_load_string);
+    patch(0x13608, hook_shadow);
+    fs98_flights_set_opening_state(&s_fixture.opening); patch(0x134bc, hook_atof); patch(0x134cc, hook_sprintf);
 #undef PATCH_CONTROL
     patch(0x12134, (void *)RESOURCE_MODULE); fs98_flights_set_resource_module(RESOURCE_MODULE);
     patch(0x1214c, (void *)OBJECT_MODULE); fs98_flights_set_object_module(OBJECT_MODULE);
@@ -581,6 +747,15 @@ static void initialize(void)
     D32(object, 0x20) = s_seed;
     PTR(object, descriptor_offset()) = s_fixture.descriptor[0];
     s_fixture.create.guard = (s_seed >> 13) & 3;     /* bit 0: the font already built */
+    {
+        static const uint32_t shown[] = {0, 0x1f5, 0x1f6, 0x1f8, 0x1f9, 7};
+        s_fixture.opening.guard = (uint8_t)((s_seed >> 24) & 7);
+        s_fixture.opening.shown = shown[(s_seed >> 27) % 6];
+        if (OP.kind == FS98_FLIGHTS_OPENING) {
+            PTR(object, 0x10e0) = s_control_vtable;
+            D32(object, 0x10dc) = (s_seed >> 30) == 0;     /* a button's callback running, one time in four */
+        }
+    }
     if (OP.kind == FS98_FLIGHTS_COMMS) {
         PTR(object, 0x1b1c) = PTR(object, 0x1c10) = PTR(object, 0x1d04) = PTR(object, 0x1e60) = s_control_vtable;
         D32(object, 0x1c30) = s_seed ^ 0x1c30;
@@ -588,7 +763,26 @@ static void initialize(void)
     } else PTR(object, 0x1704) = s_control_vtable;
     for (index = 0; index < 2; ++index) {
         uint8_t *descriptor = s_fixture.descriptor[index];
-        if (OP.kind == FS98_FLIGHTS_CREATE) {
+        if (OP.kind == FS98_FLIGHTS_OPENING) {
+            static uint32_t (SC *const callbacks[])(void *) = {
+                opening_callback_0x8, opening_callback_0xc, opening_callback_0x10, opening_callback_0x14
+            };
+            uint32_t slot;
+            for (slot = 0; slot < 4; ++slot)
+                PTR(descriptor, 8 + slot * 4) = ((s_seed >> (16 + slot)) & 3) ? (void *)callbacks[slot] : 0;
+            D32(descriptor, 0x18) = (s_seed >> 21) & 1;
+            D32(descriptor, 0x1c) = 0x77;
+            D32(descriptor, 0x20) = (s_seed >> (22 + index)) & 1;
+        } else if (OP.kind == FS98_FLIGHTS_MODELESS) {
+            D32(descriptor, 8) = (s_seed >> (9 + index)) & 1;
+        } else if (OP.kind == FS98_FLIGHTS_AIRCRAFT) {
+            static const int32_t counts[] = {0, 1, 3, 5, -1, (int32_t)0x80000000};
+            PTR(descriptor, 8) = aircraft_details;
+            PTR(descriptor, 0x10) = index ? (void *)aircraft_preview_other : (void *)aircraft_preview;
+            D32(descriptor, 0x14) = (uint32_t)((int32_t)((s_seed >> (5 + index)) % 6) - 1);   /* -1..4 */
+            D32(descriptor, 0x18) = (uint32_t)counts[(s_scenario + index) % 6];
+            PTR(descriptor, 0x1c) = s_fixture.records;
+        } else if (OP.kind == FS98_FLIGHTS_CREATE) {
             static uint32_t (SC *const callbacks[])(void *) = {
                 create_callback_0x8, create_callback_0xc, create_callback_0x10, create_callback_0x14,
                 create_callback_0x18
@@ -629,13 +823,21 @@ static void initialize(void)
     snprintf(s_fixture.names[1], 64, "About flight %x", s_seed);
     if (OP.kind == FS98_FLIGHTS_SAVE)   /* the name already agreed to: often the one typed */
         snprintf((char *)object + 0x10dc, 0x100, "%s", (s_seed >> 3) % 3 ? s_fixture.names[0] : "Other");
+    snprintf((char *)s_fixture.record_before, 64, "Before %u", s_scenario);
+    snprintf((char *)s_fixture.record_before + 0x100, 64, "Before description");
+    snprintf((char *)s_fixture.record_before + 0x500, 64, "Before notes %x", s_seed);
     for (index = 0; index < 5; ++index) {
+        snprintf((char *)s_fixture.records[index] + 0x500, 64, "Notes %u %x", index, s_seed);
         snprintf((char *)s_fixture.records[index], 64, "Flight %u vector %u", index, s_scenario);
         snprintf((char *)s_fixture.records[index] + 0x100, 64, "Description %u seed %x", index, s_seed);
         snprintf((char *)s_fixture.records[index] + 0x900, 64, "C:\\flights\\flight%u.stn", index);
     }
     if (OP.signature == SIG_INT && OP.rva == 0x5590 && s_scenario % 3 == 0) PTR(object, 0x10dc) = 0;
     if ((OP.rva == 0x2ec0 || OP.rva == 0x52e0) && s_scenario % 3 == 0) PTR(object, 0x10dc) = 0;
+    /* Select Aircraft's do too, but for populate and the preview frame */
+    if (OP.kind == FS98_FLIGHTS_AIRCRAFT && OP.rva != 0x1f40 && OP.rva != 0x1c40 &&
+        OP.signature < SIG_CONSTRUCT && (s_seed >> 27) % 5 == 0)
+        PTR(object, 0x1864) = 0;
     /* Create's handlers test for no descriptor, all but Save and the choices */
     if (OP.kind == FS98_FLIGHTS_CREATE && OP.rva != 0x29d0 && OP.rva != 0x29f0 && OP.rva != 0x2a20 &&
         OP.rva != 0x2a50 && OP.rva != 0x2a80 && OP.signature < SIG_CONSTRUCT && (s_seed >> 27) % 5 == 0)
@@ -697,6 +899,7 @@ static __attribute__((noinline)) int32_t run(uint32_t throw_at)
     volatile int32_t result = 0;
     s_fixture = s_initial;
     if (!s_side) memcpy((uint8_t *)s_retail + RETAIL_FONT, &s_fixture.create, sizeof(s_fixture.create));
+    if (!s_side) memcpy((uint8_t *)s_retail + RETAIL_OPENING, &s_fixture.opening, sizeof(s_fixture.opening));
     s_log_length = s_calls = 0; s_logs[s_side][0] = 0; s_throw_at = throw_at;
     if (OP.signature >= SIG_CONSTRUCT && !s_side) {
         uint32_t rva = OP.signature == SIG_DESTROY ? class_info->destructor :
@@ -728,6 +931,9 @@ static __attribute__((noinline)) int32_t run(uint32_t throw_at)
             break;
         case SIG_INT_ARG:   /* Comms' validate behaves differently for its edit's own id */
             result = ((int32_t (TC *)(void *, uint32_t))entry)(object, s_scenario & 2 ? 0xcb3 : s_seed);
+            break;
+        case SIG_INT_ARG2:
+            result = ((int32_t (TC *)(void *, uint32_t, uint32_t))entry)(object, s_seed, s_seed ^ 7);
             break;
         case SIG_INT_TWICE:     /* the second sees the font already built */
             result = ((int32_t (TC *)(void *))entry)(object);
@@ -766,6 +972,7 @@ static __attribute__((noinline)) int32_t run(uint32_t throw_at)
     __asm__ volatile("movl %0, %%fs:0" : : "r"(s_saved_seh) : "memory");
     s_running = 0;
     if (!s_side) memcpy(&s_fixture.create, (uint8_t *)s_retail + RETAIL_FONT, sizeof(s_fixture.create));
+    if (!s_side) memcpy(&s_fixture.opening, (uint8_t *)s_retail + RETAIL_OPENING, sizeof(s_fixture.opening));
     if (s_calls > s_max_calls) s_max_calls = s_calls;
     return result;
 }
@@ -811,13 +1018,17 @@ int main(int argc, char **argv)
     {
         uint32_t slot;
         for (slot = 0; slot < 64; ++slot)
-            s_vtable[slot] = s_other_vtable[slot] = (void *)s_other_slots[slot];
+        {
+            s_vtable[slot] = (void *)s_other_slots[slot];
+            s_other_vtable[slot] = (void *)s_replaced_slots[slot];
+        }
     }
     s_vtable[0xec / 4] = virtual_close; s_other_vtable[0xec / 4] = virtual_close_other;
     s_vtable[0xcc / 4] = virtual_accept; s_other_vtable[0xcc / 4] = virtual_accept_other;
     s_vtable[0xd0 / 4] = virtual_cancel; s_other_vtable[0xd0 / 4] = virtual_cancel_other;
     s_vtable[1] = s_other_vtable[1] = virtual_delete;
-    s_vtable[0xe4 / 4] = s_other_vtable[0xe4 / 4] = virtual_skin;
+    s_vtable[0xe4 / 4] = virtual_skin;
+    s_other_vtable[0xe4 / 4] = replaced_skin;
     s_vtable[0xd8 / 4] = s_other_vtable[0xd8 / 4] = virtual_validate;
     s_vtable[0xdc / 4] = s_other_vtable[0xdc / 4] = virtual_error;
     s_control_vtable[0xc4 / 4] = virtual_check;

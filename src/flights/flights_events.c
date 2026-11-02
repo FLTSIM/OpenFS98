@@ -32,6 +32,7 @@ void fs98_flights_set_help_file(const char *file) { s_help_file = file; }
 /* 0x22312310 (vtable +0x8, +0x10), 0x22312320 (+0xc), 0x22312330/0x22312340 (+0x90/+0x94) */
 void TC fs98_flights_empty_arg(void *object, uint32_t unused) { (void)object; (void)unused; }
 void TC fs98_flights_empty(void *object) { (void)object; }
+void TC fs98_flights_nothing(void *object) { (void)object; }
 void TC fs98_flights_disable(void *object) { s_services->enable_window(D32(object, 0x20), 0); }
 void TC fs98_flights_enable(void *object) { s_services->enable_window(D32(object, 0x20), 1); }
 /* 0x223126a0 (+0xac): delete through the deleting destructor */
@@ -56,7 +57,7 @@ void TC fs98_flights_##name##_exchange(void *object, void *exchange) \
 { \
     uint32_t index; \
     if (base) s_services->base_exchange(object, exchange); \
-    for (index = 0; index < sizeof(s_ddx_##name) / sizeof(s_ddx_##name[0]); ++index) \
+    for (index = 0; (int32_t)index < (int32_t)s_ddx_count_##name; ++index) \
         s_services->ddx_control(exchange, s_ddx_##name[index][1], \
                                 AT(object, s_ddx_##name[index][0])); \
 }
@@ -65,6 +66,9 @@ FLIGHTS_CLASS(challenges, 1)
 FLIGHTS_CLASS(save, 0)          /* 0x22316140 binds its controls without CSimsDialog's */
 FLIGHTS_CLASS(comms, 0)         /* 0x22315810 likewise */
 FLIGHTS_CLASS(create, 0)        /* 0x22312590 likewise */
+FLIGHTS_CLASS(aircraft, 1)
+FLIGHTS_CLASS(modeless, 1)     /* its help pair is the welcome dialog's (0x22319e00) */
+FLIGHTS_CLASS(opening, 1)
 #undef FLIGHTS_CLASS
 
 /* ---- the pickers: Adventures (0x1108) and Challenges (0x1107) ------------------------

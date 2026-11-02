@@ -16,7 +16,7 @@ from pathlib import Path
 import subprocess
 import sys
 
-UNITS = ('events', 'objects', 'save', 'comms', 'create')
+UNITS = ('events', 'objects', 'save', 'comms', 'create', 'aircraft', 'opening')
 EVENTS = [
     # the shared helpers
     ('disable-window', 'enable_window(D32(object, 0x20), 0)', 'enable_window(D32(object, 0x20), 1)'),
@@ -211,7 +211,99 @@ CREATE = [
     ('create-init-return', '    D32(object, 0x10dc) = 0;\n    return 0;', '    D32(object, 0x10dc) = 0;\n    return 1;'),
     ('create-font-destroy', 'SERVICES->font_destroy(s_state->font); }', 'SERVICES->font_destroy(s_state->font + 4); }'),
 ]
+AIRCRAFT = [
+    ('aircraft-record-stride', 'D32(descriptor, 0x14) * (uint32_t)0xa08);', 'D32(descriptor, 0x14) * (uint32_t)0xa00);'),
+    ('aircraft-preview-operation-close', '        fs98_flights_aircraft_preview(object, 2);\n    }\n    D32(object, 0x1860) = 2;', '        fs98_flights_aircraft_preview(object, 3);\n    }\n    D32(object, 0x1860) = 2;'),
+    ('aircraft-cancel-state', 'D32(object, 0x1860) = 2;', 'D32(object, 0x1860) = 1;'),
+    ('aircraft-cancel-answer', '        D32(DESCRIPTOR(object), 0) = 0;', '        D32(DESCRIPTOR(object), 0) = 1;'),
+    ('aircraft-cancel-null', '    if (DESCRIPTOR(object)) {\n        D32(DESCRIPTOR(object), 0) = 0;', '    if (1) {\n        D32(DESCRIPTOR(object), 0) = 0;'),
+    ('aircraft-accept-answer', '        D32(DESCRIPTOR(object), 0) = 1;', '        D32(DESCRIPTOR(object), 0) = 2;'),
+    ('aircraft-accept-order', '        D32(DESCRIPTOR(object), 0) = 1;\n        selection = fs98_flights_aircraft_selection(object);',
+     '        selection = fs98_flights_aircraft_selection(object);\n        D32(DESCRIPTOR(object), 0) = 1;'),
+    ('aircraft-accept-state', 'D32(object, 0x1860) = 1;', 'D32(object, 0x1860) = 0;'),
+    ('aircraft-frame-operation', '(3, descriptor, 0);', '(1, descriptor, 0);'),
+    ('aircraft-frame-return', '    return 0;\n}\n\n/* 0x22311f40', '    return 1;\n}\n\n/* 0x22311f40'),
+    ('aircraft-populate-signed', 'index < (int32_t)D32(DESCRIPTOR(object), 0x18);', '(uint32_t)index < D32(DESCRIPTOR(object), 0x18);'),
+    ('aircraft-populate-string-first', '    fs98_flights_string_enter(&title);\n    SERVICES->send_message(D32(object, 0x151c), LB_SETCURSEL',
+     '    SERVICES->send_message(D32(object, 0x151c), LB_SETCURSEL'),
+    ('aircraft-show-second-text', '(char *)fs98_flights_aircraft_record(object) + 0x500);', '(char *)fs98_flights_aircraft_record(object) + 0x400);'),
+    ('aircraft-show-title-index', 'list_text(AT(object, 0x14fc), (int32_t)D32(DESCRIPTOR(object), 0x14), title);', 'list_text(AT(object, 0x14fc), 0, title);'),
+    ('aircraft-show-title-edit', 'set_window_text(AT(object, 0x1544), title->text);', 'set_window_text(AT(object, 0x15ac), title->text);'),
+    ('aircraft-show-details', 'D32(fs98_flights_aircraft_record(object), 0xa04));\n}', 'D32(fs98_flights_aircraft_record(object), 0xa00));\n}'),
+    ('aircraft-select-null', '    if (DESCRIPTOR(object) == 0) return;\n    fs98_flights_string_enter(&title);', '    fs98_flights_string_enter(&title);'),
+    ('aircraft-select-order', '    fs98_flights_string_enter(&title);\n    selection = fs98_flights_aircraft_selection(object);',
+     '    selection = fs98_flights_aircraft_selection(object);\n    fs98_flights_string_enter(&title);'),
+    ('aircraft-double-click-slot', '    fs98_flights_aircraft_select(object);\n    ((void (TC *)(void *))PTR(PTR(object, 0), 0xcc))(object);',
+     '    fs98_flights_aircraft_select(object);\n    ((void (TC *)(void *))PTR(PTR(object, 0), 0xd0))(object);'),
+    ('aircraft-details-answer', 'PTR(descriptor, 8))(descriptor) == 0) {', 'PTR(descriptor, 8))(descriptor) != 0) {'),
+    ('aircraft-details-focus', 'SERVICES->set_focus(AT(object, 0x1544));', 'SERVICES->set_focus(AT(object, 0x14fc));'),
+    ('aircraft-details-refill', '        ((void (TC *)(void *))PTR(PTR(object, 0), 0xf0))(object);\n        selection',
+     '        selection'),
+    ('aircraft-init-vtable', '    SERVICES->base_init(object);\n    vtable = PTR(object, 0);', '    vtable = PTR(object, 0);\n    SERVICES->base_init(object);'),
+    ('aircraft-init-style', 'D32(object, 0x84) = 0xb;', 'D32(object, 0x84) = 0xa;'),
+    ('aircraft-init-details-button', '0x137,\n                          AT(object, 0xff4)', '0x132,\n                          AT(object, 0xff4)'),
+    ('aircraft-init-edit-error', '0xffffff, 0, 0xffffff, AT(object, label), 0);', '0xffffff, 0, 0xff0000, AT(object, label), 0);'),
+    ('aircraft-init-list-label', 'AT(object, 0x450), AT(object, 0x12d4));', 'AT(object, 0x450), AT(object, 0x138c));'),
+    ('aircraft-init-limit', 'EM_LIMITTEXT, 0x100, 0);', 'EM_LIMITTEXT, 0xff, 0);'),
+    ('aircraft-init-item', 'dialog_item(object, 0xc87);', 'dialog_item(object, 0xc86);'),
+    ('aircraft-init-width', 'rect.right - rect.left, rect.bottom - rect.top, 1);', 'rect.right, rect.bottom - rect.top, 1);'),
+    ('aircraft-init-callback-early', '((fs98_flights_aircraft_preview_fn)PTR(early, 0x10))', '((fs98_flights_aircraft_preview_fn)PTR(DESCRIPTOR(object), 0x10))'),
+    ('aircraft-init-open', '(1, descriptor, window);', '(1, early, window);'),
+    ('aircraft-init-focus', 'SERVICES->set_focus(AT(object, 0x14fc));\n    return 0;', 'SERVICES->set_focus(AT(object, 0x1544));\n    return 0;'),
+    ('aircraft-init-return', 'SERVICES->set_focus(AT(object, 0x14fc));\n    return 0;', 'SERVICES->set_focus(AT(object, 0x14fc));\n    return 1;'),
+]
+OPENING = [
+    ('opening-save-field', 'D32(DESCRIPTOR(object), 0x20) = D32(object, 0x119c);', 'D32(DESCRIPTOR(object), 0x20) = D32(object, 0x1198);'),
+    ('opening-refresh-available', "if (D32(DESCRIPTOR(object), 0x18) == 0) SERVICES->enable_control", "if (D32(DESCRIPTOR(object), 0x18) != 0) SERVICES->enable_control"),
+    ('opening-refresh-check', '(int32_t)D32(DESCRIPTOR(object), 0x20));\n}', '(int32_t)D32(DESCRIPTOR(object), 0x1c));\n}'),
+    ('opening-choose-missing', '    if (PTR(DESCRIPTOR(object), slot) == 0 || BUSY(object) != 0) return;', '    if (BUSY(object) != 0) return;'),
+    ('opening-choose-busy', '    if (PTR(DESCRIPTOR(object), slot) == 0 || BUSY(object) != 0) return;', '    if (PTR(DESCRIPTOR(object), slot) == 0) return;'),
+    ('opening-choose-busy-first', '    BUSY(object) = 1;\n    for (index = 0; index < 4; ++index)', '    for (index = 0; index < 4; ++index)'),
+    ('opening-choose-answer', '        D32(DESCRIPTOR(object), 0) = 1;\n        fs98_flights_opening_save(object);\n        VCALL(object, 0xec);\n        return;',
+     '        D32(DESCRIPTOR(object), 0) = 2;\n        fs98_flights_opening_save(object);\n        VCALL(object, 0xec);\n        return;'),
+    ('opening-choose-stay-busy', '        VCALL(object, 0xec);\n        return;\n    }', '        VCALL(object, 0xec);\n        BUSY(object) = 0;\n        return;\n    }'),
+    ('opening-choose-reenable-multiplayer', 'all[] = {0x1484, 0x129c, 0x1578, 0x11a8, 0x1390};', 'all[] = {0x1390, 0x129c, 0x1578, 0x11a8, 0x1390};'),
+    ('opening-choose-not-busy', '    BUSY(object) = 0;\n}\nvoid TC fs98_flights_opening_multiplayer', '}\nvoid TC fs98_flights_opening_multiplayer'),
+    ('opening-multiplayer-others', 'others[] = {0x129c, 0x1578, 0x11a8, 0x1390};', 'others[] = {0x1484, 0x1578, 0x11a8, 0x1390};'),
+    ('opening-lessons-slot', 'fs98_flights_opening_choose(object, 0xc, others);', 'fs98_flights_opening_choose(object, 0x10, others);'),
+    ('opening-more-slot', 'fs98_flights_opening_choose(object, 8, others);', 'fs98_flights_opening_choose(object, 0xc, others);'),
+    ('opening-fly-answer', 'fs98_flights_opening_finish(object, 1, 0); }', 'fs98_flights_opening_finish(object, 1, 1); }'),
+    ('opening-quit-answer', 'fs98_flights_opening_finish(object, 0, 1); }', 'fs98_flights_opening_finish(object, 1, 1); }'),
+    ('opening-finish-busy', '    if (BUSY(object) != 0) return;\n    D32(DESCRIPTOR(object), 0) = answer;', '    D32(DESCRIPTOR(object), 0) = answer;'),
+    ('opening-finish-save', '    D32(DESCRIPTOR(object), 0x1c) = quit;\n    fs98_flights_opening_save(object);', '    D32(DESCRIPTOR(object), 0x1c) = quit;'),
+    ('opening-hover-text', '{0x129c, 0x1f6, 0xf700}', '{0x129c, 0x1f6, 0xf701}'),
+    ('opening-hover-id', '{0x1390, 0x1f9, 0xf6fe}', '{0x1390, 0x1f7, 0xf6fe}'),
+    ('opening-hover-unchanged', '        if (s_state->shown != hints[index].id) {', '        if (1) {'),
+    ('opening-hover-clear', '    } else if (s_state->shown != 0) {', '    } else if (1) {'),
+    ('opening-hover-focus-once', '    for (index = 0; index < 4; ++index)\n        if (SERVICES->window_from_handle(SERVICES->get_focus()) == AT(object, hints[index].button))\n            break;',
+     '    {\n        void *focused = SERVICES->window_from_handle(SERVICES->get_focus());\n        for (index = 0; index < 4; ++index)\n            if (focused == AT(object, hints[index].button)) break;\n    }'),
+    ('opening-hover-return', '    fs98_flights_unwind_leave(&hint.frame);\n    return 0;', '    fs98_flights_unwind_leave(&hint.frame);\n    return 1;'),
+    ('opening-font-guard', '    if (s_state->guard & bit) return;', '    if (s_state->guard & 1) return;'),
+    ('opening-font-guard-order', '    s_state->guard |= bit;\n    SERVICES->font_construct(font, SERVICES->base_font(9));',
+     '    SERVICES->font_construct(font, SERVICES->base_font(9));\n    s_state->guard |= bit;'),
+    ('opening-font-base', 'SERVICES->base_font(9)', 'SERVICES->base_font(8)'),
+    ('opening-font-exit', 'fs98_flights_opening_font(s_state->hint, 4, fs98_flights_opening_hint_destroy);', 'fs98_flights_opening_font(s_state->hint, 4, fs98_flights_opening_shadow_destroy);'),
+    ('opening-font-shadow-colour', 'D32(s_state->shadow, 0x18) = 0xff00;', 'D32(s_state->shadow, 0x14) = 0xff00;'),
+    ('opening-font-alternate-flag', 'D32(s_state->shadow_alternate, 0x48) = 1;', 'D32(s_state->shadow_alternate, 0x48) = 0;'),
+    ('opening-font-hint-copy', 'D32(s_state->hint, 0xc) = D32(object, 0x22c);', 'D32(s_state->hint, 0xc) = D32(object, 0x228);'),
+    ('opening-init-skin', 'object, 0x13e, module, 1)) return 0;', 'object, 0x13e, module, 2)) return 0;'),
+    ('opening-init-shadow-order', 'shadows[] = {0x11a8, 0x1484, 0x129c, 0x1390};', 'shadows[] = {0x1484, 0x11a8, 0x129c, 0x1390};'),
+    ('opening-init-shadow-flags', '0x153, AT(object, 0xff4), AT(object, 0x7e8), 0x42,', '0x153, AT(object, 0xff4), AT(object, 0x7e8), 0x40,'),
+    ('opening-init-check-font', 'check, AT(object, 0x4c0), 0x139,', 'check, AT(object, 0x370), 0x139,'),
+    ('opening-init-not-busy', '    BUSY(object) = 0;\n    SERVICES->set_focus(AT(object, 0x1578));', '    SERVICES->set_focus(AT(object, 0x1578));'),
+    ('opening-init-focus', 'SERVICES->set_focus(AT(object, 0x1578));\n    return 0;', 'SERVICES->set_focus(AT(object, 0x1674));\n    return 0;'),
+    ('modeless-init-skin', 'object, 0x140, fs98_flights_resource_module(), 1) != 0;', 'object, 0x140, fs98_flights_resource_module(), 1);'),
+    ('modeless-check-flag', 'if (D32(PTR(object, 0x10dc), 8) == 0) {', 'if (D32(PTR(object, 0x10dc), 8) != 0) {'),
+    ('modeless-check-vtable', '        ((void (TC *)(void *))vtable[0x60 / 4])(object);', '        ((void (TC *)(void *))PTR(PTR(object, 0), 0x60))(object);'),
+    ('modeless-check-order', '        ((void (TC *)(void *))vtable[0xec / 4])(object);\n        ((void (TC *)(void *))vtable[0x60 / 4])(object);',
+     '        ((void (TC *)(void *))vtable[0x60 / 4])(object);\n        ((void (TC *)(void *))vtable[0xec / 4])(object);'),
+    ('modeless-palette-flags', 'redraw_window(D32(object, 0x20), 0, 0, 0x105);', 'redraw_window(D32(object, 0x20), 0, 0, 0x101);'),
+]
 UNWIND = [
+    ('opening-hint-cleanup', 'opening', "    if (state->live) { state->live = 0; SERVICES->string_destroy(&state->string); }", "    (void)state;"),
+    ('opening-constructor-busy', 'objects', '    if (kind == FS98_FLIGHTS_OPENING) D32(object, 0x10dc) = 0;', '    (void)0;'),
+    ('aircraft-details-string', 'aircraft', '    fs98_flights_string_enter(&unused);\n', '    fs98_flights_string_enter(&unused);\n    unused.live = 0;\n'),
+    ('aircraft-string-cleanup', 'aircraft', "    if (state->live) { state->live = 0; SERVICES->string_destroy(&state->string); }", "    (void)state;"),
     ('save-init-populate-last', 'save', '    PTR(object, 0x11dc) = AT(object, 0x11e4);\n    PTR(object, 0x11e0) = AT(object, 0x1608);\n    fs98_flights_save_populate(object);',
      '    fs98_flights_save_populate(object);\n    PTR(object, 0x11dc) = AT(object, 0x11e4);\n    PTR(object, 0x11e0) = AT(object, 0x1608);'),
     ('constructor-unwind-base', 'objects', '    state.base = 1;', '    state.base = 0;'),
@@ -234,6 +326,8 @@ def main():
     breaks += [(name, 'save', 'normal', before, after) for name, before, after in SAVE]
     breaks += [(name, 'comms', 'normal', before, after) for name, before, after in COMMS]
     breaks += [(name, 'create', 'normal', before, after) for name, before, after in CREATE]
+    breaks += [(name, 'aircraft', 'normal', before, after) for name, before, after in AIRCRAFT]
+    breaks += [(name, 'opening', 'normal', before, after) for name, before, after in OPENING]
     breaks += [(name, unit, 'unwind', before, after) for name, unit, before, after in UNWIND]
     if only:
         breaks = [b for b in breaks if b[0] in only]

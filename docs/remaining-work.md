@@ -14,7 +14,7 @@ Results here are from 2026-11-01.
 | `FLTSIM98.EXE` | 82,016 | **No executable.** All 194 services are reimplemented and verified in-process as `HOST.DLL`; retail's still runs the game | [host.md](modules/host.md) |
 | `SIMSUI.DLL` | 79,850 | **Not started.** 540 named exports, the common dialog and control widgets. Every dialog imports it | [dialogs.md](modules/dialogs.md) |
 | `Gauges/*.GAU` (120) | 63,472 | **Not started.** No `src/gauges/` and no survey. PANELS, their runtime, is ours | below |
-| `English/Flights.DLL` | 51,122 | **In progress.** Callers recovered for all 13 registrations; Adventures, Challenges, Save, Communications and Create verified in their harness (`tools/flights.mk`); no DLL yet | [flights.md](modules/flights.md) |
+| `English/Flights.DLL` | 51,122 | **In progress.** Callers recovered for all 13 registrations; 9 of the 13 dialogs verified in their harness (all but the two sub-menus, Select Flight, Autopilot and Navigation) (`tools/flights.mk`); no DLL yet | [flights.md](modules/flights.md) |
 | `English/Sim.DLL` | 33,239 | **Installed** 2026-11-02 | [sim.md](modules/sim.md) |
 | `English/mpdialog.dll` | 25,401 | **Partial,** being worked on separately: registries `0x110a`..`0x110c` | [mpdialog.md](modules/mpdialog.md) |
 | `English/Views.DLL` | 13,090 | **Installed** 2026-11-02 | [views.md](modules/views.md) |

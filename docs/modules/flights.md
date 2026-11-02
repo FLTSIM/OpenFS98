@@ -2,8 +2,9 @@
 
 `orig/English/Flights.DLL`, module `0x80000002`, preferred base `0x22310000`, 51,122 bytes of
 `.text`, 13 dialog registrations. **In progress, one family of dialogs at a time.** Slices 1
-to 4, the pickers (Adventures and Challenges), Save Flight, Communications and Create a
-Flight, are verified in their harness; nothing is built as a DLL or installed yet. Like Help, Sim and Views it is MFC dialogs over the CD's SIMSUI and
+to 6, the pickers (Adventures and Challenges), Save Flight, Communications, Create a Flight,
+Select Aircraft, the welcome dialog and the modeless dialog, are verified in their harness
+(9 of 13 registrations); nothing is built as a DLL or installed yet. Like Help, Sim and Views it is MFC dialogs over the CD's SIMSUI and
 MFC42, which stay as dependencies.
 
 ## Building and verifying
@@ -109,14 +110,19 @@ change the list's window mid-call; every vtable slot logs, so a wrong slot diffe
 than faults. Factories see failed allocations (the store through null is compared as an
 outcome).
 
-Results, current for slices 1 to 4 together (93 operations):
+Results, current for slices 1 to 6 together (145 operations):
 
 | Run | Result |
 | --- | --- |
-| seed `0x5f1a6c2d` | 20,000 scenarios, 1,860,000 comparisons, 0 differ |
-| seed `0x98a1e7d3` | 20,000 scenarios, 1,860,000 comparisons, 0 differ |
-| unwind, seed `0x7e51a23b` | 2,000 scenarios, 1,701,285 comparisons with a throw at every call position (1,514,375 throws), 0 differ |
-| `tools/flights_breaks.py 400` | 163 of 163 breaks caught; three more proven equivalent, listed in the runner |
+| seed `0x5f1a6c2d` | 20,000 scenarios, 2,900,000 comparisons, 0 differ |
+| seed `0x98a1e7d3` | 20,000 scenarios, 2,900,000 comparisons, 0 differ |
+| unwind, seed `0x7e51a23b` | 2,000 scenarios, 2,526,862 comparisons with a throw at every call position (2,235,406 throws), 0 differ |
+| `tools/flights_breaks.py 400` | 242 of 242 breaks caught; three more proven equivalent, listed in the runner |
+
+The stubs disturb the fixture at two calls per operation, one among the first four and one
+anywhere in the first 32; the replacement vtable's every slot, and each descriptor's
+callbacks, log under their own names, so a call through the wrong table or a stale
+descriptor shows.
 
 A fault inside an operation (an access violation or a bad instruction) is logged as an
 outcome and the run goes on, so a break that crashes one side only is a difference; only
@@ -198,23 +204,63 @@ something to fly, which enables OK and Save.
   in the logs, and runs OnInitDialog twice in a row to see the guard work.
 - WM_PAINT goes straight to MFC's handler (`#2379`).
 
-## Select Aircraft `0x1201`: where to start
+## Slice 5: Select Aircraft `0x1201`
 
-Read but not written. Class `0x18a0`, `0x1868` bytes, descriptor at `+0x1864` (caller:
-MAIN command `0x1201`, `command_1201`): answer `+0`, `+4` and `+0xc` do nothing, `+8`
-returns -1, `+0x10` is the preview box `(op, descriptor, window)` (1 open with the
-picture's window `GetDlgItem(0xc87)`, 2 close, 3 draw a frame, from `WM_USER+100`),
-selection `+0x14`, count `+0x18`, and the list `+0x1c` of ACONTAIN's 0xa08-byte records,
-of which the dialog shows `+0x100` and `+0x500` and enables the details button by
-`+0xa04`. New ground: local `CString`s under their own SEH frames (`CListBox::GetText`
-into one), `RemapCtrlRect` and `MoveWindow` on the picture, OnInitDialog reading the
-vtable once and calling populate through `+0xf0`, and `+0x84 = 0xb`.
+`src/flights/flights_aircraft.c`; class `0x18a0`, `0x1868` bytes, descriptor at `+0x1864`
+(caller: MAIN command `0x1201`, `command_1201`): answer `+0`, `+4` and `+0xc` unused here,
+`+8` the details callback (zero means it changed the list), `+0x10` the preview
+`(op, descriptor, window)` (1 open with the picture's window, 2 close, 3 draw a frame),
+selection `+0x14`, count `+0x18` (signed), and ACONTAIN's 0xa08-byte records `+0x1c`, of
+which it shows `+0x100` and `+0x500`, takes the title back from the list, and enables
+Details by `+0xa04`.
+
+- Populate, select and Details each hold a local `CString` under its own cleanup frame;
+  Details makes one and never uses it.
+- OK and Cancel close the preview (op 2) before closing; `WM_USER+100` draws a frame
+  (op 3) of the aircraft now selected. The selection is stored even when it is -1, and
+  the record at -1 is read: the harness keeps a guard record in front of the list.
+- OnInitDialog reads the vtable once, sets `+0x84 = 0xb`, and with a descriptor fills
+  the list through vtable `+0xf0`, fits the picture (item `0xc87`) to its remapped frame
+  and opens the preview with the picture's window, the callback found through the
+  descriptor read before `GetDlgItem`. It answers FALSE, the focus on the list.
+
+## Slice 6: the welcome dialog `0x1109` and the modeless dialog `1`
+
+`src/flights/flights_opening.c`. **The welcome dialog** (class `0x9e40`, `0x1830` bytes,
+descriptor `+0x1828`; caller MAIN's `welcome`, at start and for command `0x1109`):
+answer `+0`, callbacks More `+8`, Lessons `+0xc`, Create a Flight `+0x10`, Multiplayer
+`+0x14`; multiplayer available `+0x18`; quit asked `+0x1c`; "show at start" `+0x20`.
+
+- A menu button runs only if its callback exists and no other is running (`+0x10dc`).
+  It disables the other buttons while the callback runs; an accepted choice saves
+  "show at start", closes and **stays busy**. A declined one makes all five usable again,
+  **Multiplayer included even when it is not available**. Fly (also `WM_CLOSE`) and Quit
+  set the answer and the quit flag.
+- `WM_USER+100` shows a hint (string resources `0xf6fd`..`0xf700`, through a `CString`
+  under its own frame) for the focused shadow button, asking for the focus afresh before
+  each comparison, and only when it changes: the button last shown is a module static
+  (`0x22322320`), shared by every instance.
+- Three function-local static `CSimsFont`s (shadow `0x22322240`, alternate `0x223221c8`,
+  hint `0x223222b0`) under one guard byte, bits 1, 2 and 4, each from
+  `GetSimsBaseFont(9)` with its own exit destructor. The constructor clears `+0x10dc`.
+
+**The modeless dialog** (class `0x9d10`, `0x10e4` bytes, descriptor `+0x10dc`), which
+nothing in FS98 opens: no members, an empty DDX, init answers whether the skin loaded,
+`WM_USER+100` closes and destroys it (vtable `+0xec`, `+0x60`, read once) when descriptor
+`+8` is clear, `WM_PALETTECHANGED` redraws it, and OK, Cancel and `WM_CLOSE` are the
+shared empty function `0x22312b50`. Its help pair at `0x22319e00` belongs to the welcome
+dialog's map.
+
+The harness found a store missed on reading (the constructor's clearing of the busy
+flag); the breaks found that a random fixture almost never left the busy flag clear, so
+the buttons' bodies had not run: it now starts clear three times in four.
 
 ## Next
 
-1. The next families, smallest first: Select Aircraft `0x1201` (above), then
-   the opening menus `0x1109` / `0x11090001` /
-   `0x11090002`, Select Flight `0x1102`, then the large ones, Autopilot `0x1204` and
+1. The next families, smallest first: the two sub-menus `0x11090001` (learning, class
+   `0xb240`) and `0x11090002` (flights, class `0xa9d0`), the same pattern as the welcome
+   dialog with their own static fonts (`0x22322328`..`0x22322478`, guard `0x22322478`)
+   and hover statics (`0x2232247c`, `0x22322480`); then Select Flight `0x1102`, then the large ones, Autopilot `0x1204` and
    Navigation `0x1202`. Each adds its classes to `CLASSES` in the generator and its
    operations to the harness.
 2. Module init/deinit and the runtime: native vtables and message maps, MFC/SIMSUI import

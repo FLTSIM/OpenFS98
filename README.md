@@ -132,7 +132,7 @@ else's 1997 build, and it should read that way.
 | `make world-game-ui` | drive the installed World module through the retail game's menus and owner callbacks on a disposable copy; see [docs/modules/world.md](docs/modules/world.md#shared-buildinstall-and-game-owner-acceptance) |
 | `make sehfix-install` | put `SEHFIX.DLL` in `Modules\`, which hands the divide faults wine swallows back to the host's repair, so the 3D view does not freeze; `sehfix-remove` takes it out, `sehfix-log` shows what it repaired (see [docs/wine.md](docs/wine.md)) |
 | `make util-trace` | boot the sim with a UTIL that counts every service call, and list what ran; `UTIL_TRACE_SECS=` for a longer session to play in |
-| `tools/hg2d_frames.sh` | the running game on a virtual clock, every frame checksummed: retail HG2D twice, then ours, in private copies, compared frame for frame; opens a nested X window on the desktop |
+| `tools/hg2d_frames.sh` | the running game on a virtual clock, every frame checksummed: retail HG2D twice, then ours, in private copies, compared frame for frame, on a private Xvfb; `HG2D_FRAMES_ALL=1` compares the whole game, all retail against all ours; on Direct3D by screenshots (see the script) |
 | `make graph` | module id and dependency table, read live from `orig/` |
 | `tools/impscan.py FILE` | which imported services a module calls, by import and slot |
 | `make hostmap` | the host's service table: location, classification, and which libraries each service calls |
@@ -249,7 +249,7 @@ emulate 80-bit arithmetic to preserve a rounding artefact. See
 | `ANALYSIS` | 29 | 8,086 | **reimplemented, verified, and running in-game** — landing and manoeuvre analysis and course tracking: the samples, the trail's display list, the three dialogs; 20,000 whole-module scenarios, zero differences — see [docs/modules/analysis.md](docs/modules/analysis.md) |
 | `CONTROLS` | 16 | 48,406 | **reimplemented, verified, and running in-game** — the keyboard, joysticks and mouse: 342 command handlers, the joystick poll and configs, the key bindings, force feedback over DirectInput 5 and the key-assignment dialog's callbacks; 20,000 whole-module scenarios, zero differences — see [docs/modules/controls.md](docs/modules/controls.md) |
 | `PANELS` | 15 | 50,038 | **reimplemented, verified, and running in-game** — the instrument panel and the gauges' runtime: bitmap scalers, eight element types, the gauge variables; 3,000 whole-module scenarios through the CD's gauges and 20,000 cases per image routine, zero differences — see [docs/modules/panels.md](docs/modules/panels.md) |
-| `HG2D` | 13 | 389,734 | **reimplemented, verified, and in `MODULES`** — all 40 public services and 18 GPU dispatch cells; 59 suites pass, 40.64 million large-run operations match retail, and 247 new mutations are caught; in private copies of the game, eight flights match retail frame for frame on the software renderer (`tools/hg2d_frames.sh`); not yet flown by hand, Direct3D in-game and non-x86 validation remain — see [docs/modules/hg2d.md](docs/modules/hg2d.md#in-the-game) |
+| `HG2D` | 13 | 389,734 | **reimplemented, verified, and in `MODULES`** — all 40 public services and 18 GPU dispatch cells; 59 suites pass, 40.64 million large-run operations match retail, and 247 new mutations are caught; in private copies of the game, eight flights match retail frame for frame on the software renderer and six on Direct3D (`tools/hg2d_frames.sh`); not yet flown by hand, non-x86 validation remains — see [docs/modules/hg2d.md](docs/modules/hg2d.md#in-the-game) |
 | `UTIL` | 20 | 11,062 | **reimplemented, verified, and running in-game** — all 47 services; 19 seen called in a hands-on session, the modal alert among them — see [docs/modules/util.md](docs/modules/util.md) |
 | `FLTSIM98.EXE` | 1 (host) | 82,016 | 194 services mapped; **all 194 reimplemented and verified in-process** against the real host (`make hostdiff-run`) — see [docs/modules/host.md](docs/modules/host.md) |
 
@@ -366,10 +366,11 @@ its depth queue, services and CHAIN callbacks, 20,000 `g3ddiff` scenarios
 with zero differences, and a portable C mesh compiler checked against
 retail's instructions (see [docs/modules/g3d.md](docs/modules/g3d.md)).
 
-**Next: HG2D in the game.** It is the last runtime module to join, and
-[docs/modules/hg2d.md](docs/modules/hg2d.md#in-the-game) lists what is left:
-scripted flying, views, night and weather through `tools/hg2d_frames.sh`, the
-Direct3D path, and flying it by hand. After that, install the finished dialogs
+**Next: the panel difference in MAIN.** The whole game, all retail against all ours,
+matches on most flights on both renderers, but MAIN changes a panel rectangle on
+`CVINSON`, and `KAUAI` differs at the same pass, not yet bisected ([docs/modules/hg2d.md](docs/modules/hg2d.md#the-whole-game)).
+Also left are scripted flying, views, night and weather through
+`tools/hg2d_frames.sh`, and flying it by hand. After that, install the finished dialogs
 (Alerts, Help, Views, Sim), then Flights and Options, SIMSUI, and an executable
 around `HOST.DLL`.
 
@@ -421,8 +422,8 @@ nothing in it imports anything interesting:
     every menu command opening in the game; in `MODULES`, not yet flown by hand
     ([docs/modules/main.md](docs/modules/main.md)).
 13. ~~**`HG2D`** (390 KB, the 2D rasteriser)~~ — done and in `MODULES`, the last
-    runtime module; eight flights match retail frame for frame, not yet flown by
-    hand; Direct3D in-game and non-x86 validation remain
+    runtime module; eight flights match retail frame for frame, and six on Direct3D;
+    not yet flown by hand; non-x86 validation remains
     ([docs/modules/hg2d.md](docs/modules/hg2d.md#in-the-game)).
 
 `GLOBAL`'s state block is the shared workspace: every module worked through

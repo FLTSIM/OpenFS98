@@ -230,8 +230,9 @@ long scene run then found the separate `+0x18` preserved-register bug above.
 `+0x1c` removes spaces from HG2D's texture name and tries
 `<dir>\TEXTURE\<name>`, `TEXTURE\<name>`, then `<dir>\<name>`. Kind 10 has a
 final `TEXTURE\FS5.HAZ` fallback. Kind 9 seeks to `0x240` and reads the
-`0xc0`-byte palette tail; kind 10 reads `0x1000` bytes and clears GLOBAL
-`+0xcd2`; ordinary files below 64 KiB go through the 9-bit-code decompressor,
+`0xc0`-byte palette tail; kind 10 reads `0x1000` bytes and sets GLOBAL
+`+0xcd2` to 1 for a file found by name, 0 for the fallback (HG2D's haze and G3D's
+ground texture program read it); ordinary files below 64 KiB go through the 9-bit-code decompressor,
 while files at least 64 KiB read exactly 64 KiB raw. The harness reaches every
 route, including a generated compressed stream whose output must be
 `ABCZZZ`.

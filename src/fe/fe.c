@@ -1372,6 +1372,7 @@ static uint32_t FS98_STDCALL fe_texture(uint32_t out, uint32_t name,
     uint32_t got = 0;
     uint32_t src = name;
     uint32_t dst = ADDR(clean);
+    uint16_t named = 1;     /* ebx: cleared only by the kind-10 fallback */
 
     while (M8(src) != 0) {
         if (M8(src) != ' ')
@@ -1389,6 +1390,7 @@ static uint32_t FS98_STDCALL fe_texture(uint32_t out, uint32_t name,
             if (H_OPEN(ADDR(&file), ADDR(path), 0, 0) != 0) {
                 if (kind != 10)
                     return 0;
+                named = 0;
                 H_JOIN(ADDR(path), 0, D + 0x5cc0, D + 0x3214);
                 if (H_OPEN(ADDR(&file), ADDR(path), kind, 0) != 0)
                     return 0;
@@ -1402,7 +1404,7 @@ static uint32_t FS98_STDCALL fe_texture(uint32_t out, uint32_t name,
         H_READ_F(file, out, 0xc0, ADDR(&got));
     } else if (kind == 10) {
         H_READ_F(file, out, 0x1000, ADDR(&got));
-        M16(G + 0xcd2) = 0;
+        M16(G + 0xcd2) = named;
     } else if (size < 0x10000) {
         decompress(out, file);
     } else {

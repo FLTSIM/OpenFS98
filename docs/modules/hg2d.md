@@ -11,9 +11,9 @@ The standalone Win32 implementation is complete; verification results and
 remaining integration limits are recorded below.
 
 **HG2D is in `MODULES`**, the last of the 27 runtime modules to join, and boots
-and flies in private copies of the game: see [In the game](#in-the-game). It has
-not been flown by hand, its Direct3D path has not run in-game, and non-x86
-floating precision/status verification remains separate.
+and flies in private copies of the game, on the software renderer and on Direct3D:
+see [In the game](#in-the-game). It has not been flown by hand, and non-x86 floating
+precision/status verification remains separate.
 
 The shared Makefile builds the game's `bin/HG2D.DLL` at retail's base. The
 differential harness stays in `tools/hg2d.mk`; build and verify it from the
@@ -1700,9 +1700,62 @@ aircraft is not flown in these runs and no input is scripted, though FRAMELOCK c
 post messages for it. `KAUAI`, `FS98` and `fs6N` show few distinct frames, so they
 cover little.
 
-Left to do: scripted flying, views, night and weather, for coverage; the Direct3D
-path, under wine; and flying it by hand. HG2D was not installed into `game/` by this
-work: `make install` does that.
+### Direct3D
+
+`Device=DirectDraw HAL (Direct3D)` alone changes nothing: HG2D makes a device only
+for a DirectDraw surface, which means full screen, so a run stays on the software
+renderer and compares it. The script posts command `0x1501` (Alt+Enter) from a
+FRAMELOCK script, on a 640x480 Xvfb since wine's mode change fails without that mode;
+wined3d draws through llvmpipe. These frames miss the logged blits, so FRAMELOCK holds
+every 100 passes for a screenshot, and the run fails if a side drew no scenes.
+
+Everything retail but HG2D, 500 passes, four screenshots a flight (all 0 pixels apart,
+retail against retail as well; the frame logs identical too):
+
+| flight | scenes | draws, retail and ours alike |
+| --- | ---: | ---: |
+| `HONGKONG` | 451 | 38,900 |
+| `NEWYORK` | 451 | 21,940 |
+| `CVINSON` | 451 | 21,073 |
+| `KAUAI` | 453 | 16,689 |
+| `PARIS` | 451 | 10,709 |
+| `STGEORGE` | 451 | 9,726 |
+
+A break of the device path alone (`hg2d_device_colour`'s colour with its red inverted)
+differs by about 131,000 pixels in each screenshot of `PARIS`. This is wine's Direct3D
+over llvmpipe, not a 1997 card, and four screenshots a flight are a sample.
+
+### The whole game
+
+`HG2D_FRAMES_ALL=1` compares every module and World.DLL retail against every one ours.
+Retail against retail is identical in every run below.
+
+| flight | software, 900 passes | Direct3D, 500 passes |
+| --- | --- | --- |
+| `PARIS`, `NEWYORK`, `STGEORGE`, `HONGKONG` | identical | scene and draw counts equal, screenshots 0 pixels apart, logs identical |
+| `CVINSON` | differs from pass 14 | counts equal, 157 pixels in the last screenshot |
+| `KAUAI` | differs from pass 14 | counts equal, screenshots 0 pixels apart, log differs |
+| `FS98`, `fs6N` | identical | not run |
+
+**Found by swapping one module into a retail game:**
+
+- **FE, fixed.** Loading a haze file (kind 10), it set GLOBAL `+0xcd2` to 0 always;
+  retail sets 1 for a file found by name and 0 only for the `FS5.HAZ` fallback, and
+  `fediff` reached only the fallback. With 0 G3D chose another ground texture program,
+  and on Direct3D that program's call through variable 0xbc read null: wine swallowed
+  the fault and the 3D view stopped after one scene. `fediff` now has the named case,
+  and the old FE differs in 9 of 100 scenarios against it.
+- **MAIN, open.** Alone in a retail game it gives the difference above: on `CVINSON`
+  a 49 by 49 panel rectangle at (0x1d7, 0x5a) at pass 14. `KAUAI` differs in the same
+  rectangle at the same pass, but was not bisected. Not yet looked into.
+- **UTIL, open, and not seen in the whole game.** Alone in a retail game it differs
+  from the first frame (`PARIS`; on Direct3D 3,994 draws against 8,521), yet all-ours
+  matches retail on that flight, so it depends on a retail caller. Not explained: a
+  register a retail module reads is one candidate.
+
+Left to do for HG2D: scripted flying, views, night and weather, for coverage, and
+flying it by hand. HG2D was not installed into `game/` by this work: `make install`
+does that.
 
 **`SEHFIX.DLL` stays.** The wine freeze came from divide faults at retail's HG2D
 `.text+0x66e2`, which ours computes without trapping, so ours might not need the

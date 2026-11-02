@@ -1472,6 +1472,21 @@ static void fe_run_texture(struct fe_side *side)
             part3_fixture_failures++;
     }
 
+    /* A haze file found by name: only the fallback clears the flag. */
+    memset(output, 0x5a, sizeof(output));
+    *(uint16_t *)(global + 0xcd2) = 0x7b7b;
+    result = load(fe_ptr(output), fe_ptr("fediff-haze.bin"),
+                  fe_ptr(part3_root), 10);
+    fe_put(" TEX_NAMED_HAZ=%#x,flag=%#x,data=", result,
+           *(uint16_t *)(global + 0xcd2));
+    fe_put_blob(output, 0x1000);
+    if (counting) {
+        if (result == 1 && *(uint16_t *)(global + 0xcd2) == 1)
+            texture_loads++;
+        else
+            part3_fixture_failures++;
+    }
+
     result = load(fe_ptr(output), fe_ptr("fediff-missing"),
                   fe_ptr(part3_root), 0);
     fe_put(" TEX_MISSING=%#x", result);
@@ -1931,6 +1946,17 @@ static int fe_make_part3_fixture(void)
     if (!fe_write_fixture_file(path, packed, packed_size))
         return 0;
 
+    {
+        static uint8_t haze[0x1000];
+        unsigned at;
+
+        for (at = 0; at < sizeof(haze); at++)
+            haze[at] = (uint8_t)(at * 7 + (at >> 8));
+        snprintf(path, sizeof(path), "%s\\fediff-haze.bin", part3_root);
+        if (!fe_write_fixture_file(path, haze, sizeof(haze)))
+            return 0;
+    }
+
     memset(bgl, 0, sizeof(bgl));
     offset = 0x100;
     *(uint32_t *)(bgl + offset) = 0x30001;
@@ -1974,6 +2000,8 @@ static void fe_remove_part3_fixture(void)
     char path[MAX_PATH * 2];
 
     snprintf(path, sizeof(path), "%s\\fediff-packed.bin", part3_root);
+    DeleteFileA(path);
+    snprintf(path, sizeof(path), "%s\\fediff-haze.bin", part3_root);
     DeleteFileA(path);
     snprintf(path, sizeof(path), "%s\\Scenery\\fediff_part3.BGL",
              part3_root);

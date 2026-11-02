@@ -13,6 +13,8 @@
  *   Sleep             returns at once
  *   BitBlt, StretchBlt, StretchDIBits   logged with a hash of the source bits
  *
+ * An access violation is logged with the stack, since wine may swallow it.
+ *
  * Two runs that do the same thing then log the same lines, so running retail and a
  * reimplementation is a frame-exact comparison of the whole game.  The harness's
  * first duty is to show that two retail runs agree (tools/hg2d_frames.sh does).
@@ -24,6 +26,9 @@
  *   FRAMELOCK_DUMP     write each source DIB as a BMP beside the log every this many
  *                      passes, and whenever FRAMELOCK_DUMP_AT names the pass
  *   FRAMELOCK_DUMP_AT  one pass to dump
+ *   FRAMELOCK_HOLD     every this many passes, create "hold" beside the log and wait
+ *                      until it is gone, so a screenshot of that frame can be taken:
+ *                      Direct3D frames do not pass through the blits logged here
  *   FRAMELOCK_SCRIPT   a file of "pass message wparam lparam" lines, hex, ascending,
  *                      posted to the main window as that pass begins
  *
@@ -31,6 +36,7 @@
  * It is a test tool: nothing installs it into game/.
  */
 
+#define _WIN32_WINNT 0x0501
 #include <windows.h>
 #include <stdint.h>
 
@@ -48,7 +54,7 @@ struct fs98_import ImportTable[] = {
 };
 
 static uint32_t clock_ms = CLOCK_START;
-static uint32_t passes, pass_limit = 900, dump_every, dump_at;
+static uint32_t passes, pass_limit = 900, dump_every, dump_at, hold_every;
 static uint32_t blits;
 static uint32_t timer_due;
 static LPTIMECALLBACK timer_callback;
@@ -224,11 +230,27 @@ static void finish(void)
     ExitProcess(0);
 }
 
+static void hold_for_screenshot(void)
+{
+    char path[MAX_PATH + 8], *at = put_text(path, log_dir);
+    HANDLE file;
+    at = put_text(at, "hold");
+    *at = 0;
+    file = CreateFileA(path, GENERIC_WRITE, FILE_SHARE_READ | FILE_SHARE_DELETE, 0, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, 0);
+    if (file == INVALID_HANDLE_VALUE)
+        return;
+    CloseHandle(file);
+    while (GetFileAttributesA(path) != INVALID_FILE_ATTRIBUTES)
+        Sleep(20);
+}
+
 static void main_loop_pass(void)
 {
     passes++;
     if (passes >= pass_limit)
         finish();
+    if (hold_every && passes % hold_every == 0)
+        hold_for_screenshot();
     while (script_next < script_count && script[script_next].pass <= passes) {
         HWND window = *(HWND *)HOST_MAIN_WINDOW;
         if (window)
@@ -287,6 +309,30 @@ static void WINAPI hook_getlocaltime(SYSTEMTIME *time)
     time->wMinute = (WORD)((seconds / 60) % 60);
     time->wSecond = (WORD)(seconds % 60);
     time->wMilliseconds = (WORD)((clock_ms - CLOCK_START) % 1000);
+}
+
+/* ---- faults: wine may swallow them, so the log keeps the registers and stack ---- */
+
+static LONG WINAPI log_fault(EXCEPTION_POINTERS *pointers)
+{
+    const CONTEXT *c = pointers->ContextRecord;
+    char line[512], *at = line;
+    const uint32_t *stack = (const uint32_t *)c->Esp;
+    unsigned index;
+    if (pointers->ExceptionRecord->ExceptionCode != EXCEPTION_ACCESS_VIOLATION)
+        return EXCEPTION_CONTINUE_SEARCH;
+    at = put_text(at, "fault pass ");
+    at = put_hex(at, passes);
+    at = put_text(at, " eip ");
+    at = put_hex(at, c->Eip);
+    at = put_text(at, " stack");
+    for (index = 0; index < 40 && !IsBadReadPtr(stack + index, 4); index++) {
+        *at++ = ' ';
+        at = put_hex(at, stack[index]);
+    }
+    *at++ = '\n';
+    log_line(line, at);
+    return EXCEPTION_CONTINUE_SEARCH;
 }
 
 /* ---- the host's import table ---------------------------------------------- */
@@ -411,7 +457,9 @@ BOOL WINAPI DllMain(HINSTANCE inst, DWORD reason, LPVOID reserved)
         pass_limit = environment_number("FRAMELOCK_PASSES", pass_limit);
         dump_every = environment_number("FRAMELOCK_DUMP", 0);
         dump_at = environment_number("FRAMELOCK_DUMP_AT", 0);
+        hold_every = environment_number("FRAMELOCK_HOLD", 0);
         read_script();
+        AddVectoredExceptionHandler(1, log_fault);
         patch_import("timeGetTime", (void *)hook_timegettime);
         patch_import("timeSetEvent", (void *)hook_timesetevent);
         patch_import("timeKillEvent", (void *)hook_timekillevent);

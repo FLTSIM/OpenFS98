@@ -2,10 +2,10 @@
 
 `orig/English/Flights.DLL`, module `0x80000002`, preferred base `0x22310000`, 51,122 bytes of
 `.text`, 13 dialog registrations. **In progress, one family of dialogs at a time.** Slices 1
-to 8, the pickers (Adventures and Challenges), Save Flight, Communications, Create a Flight,
-Select Aircraft, the welcome dialog and its two sub-menus, the modeless dialog and Select
-Flight, are verified in their harness (11 of 13 registrations; Autopilot and Navigation
-remain); nothing is built as a DLL or installed yet. Like Help, Sim and Views it is MFC dialogs over the CD's SIMSUI and
+to 9, the pickers (Adventures and Challenges), Save Flight, Communications, Create a Flight,
+Select Aircraft, the welcome dialog and its two sub-menus, the modeless dialog, Select
+Flight and Autopilot, are verified in their harness (12 of 13 registrations; Navigation
+remains); nothing is built as a DLL or installed yet. Like Help, Sim and Views it is MFC dialogs over the CD's SIMSUI and
 MFC42, which stay as dependencies.
 
 ## Building and verifying
@@ -64,7 +64,7 @@ are in `.rdata`. In `.text` order:
 | `0x1201` Select Aircraft | `0x18a0` | 2,736 | 6 entries |
 | `0x1101` Create | `0x2350` | 2,240 | 8 |
 | `0x1108` Adventures | `0x2c10` | 1,392 | 4 |
-| `0x1204` Autopilot | `0x3180` | 7,808 | 11 |
+| `0x1204` Autopilot | `0x3180` | 7,808 | 11 (9 buttons, help) |
 | `0x1107` Challenges | `0x5000` | 1,440 | 4 |
 | `0x1203` Communications | `0x55a0` | 2,496 | 5 |
 | `0x1104` Save | `0x5f60` | 1,776 | 2 |
@@ -112,14 +112,14 @@ change the list's window mid-call; every vtable slot logs, so a wrong slot diffe
 than faults. Factories see failed allocations (the store through null is compared as an
 outcome).
 
-Results, current for slices 1 to 8 together (201 operations):
+Results, current for slices 1 to 9 together (226 operations):
 
 | Run | Result |
 | --- | --- |
-| seed `0x5f1a6c2d` | 20,000 scenarios, 4,020,000 comparisons, 0 differ |
-| seed `0x98a1e7d3` | 20,000 scenarios, 4,020,000 comparisons, 0 differ |
-| unwind, seed `0x7e51a23b` | 2,000 scenarios, 3,498,068 comparisons with a throw at every call position (3,093,460 throws), 0 differ |
-| `tools/flights_breaks.py 400` | 299 of 299 breaks caught; three more proven equivalent, listed in the runner |
+| seed `0x5f1a6c2d` | 20,000 scenarios, 4,520,000 comparisons, 0 differ |
+| seed `0x98a1e7d3` | 20,000 scenarios, 4,520,000 comparisons, 0 differ |
+| unwind, seed `0x7e51a23b` | 2,000 scenarios, 4,332,073 comparisons with a throw at every call position (3,877,219 throws), 0 differ |
+| `tools/flights_breaks.py 400` | 354 of 354 breaks caught; three more proven equivalent, listed in the runner |
 
 The stubs disturb the fixture at two calls per operation, one among the first four and one
 anywhere in the first 32; the replacement vtable's every slot, and each descriptor's
@@ -306,12 +306,39 @@ dialog reads it and Delete decrements it.
 The second message map once counted with Select Flight belongs to a `CSimsTabPage`
 (template `0x202`, class `0x7040`) built by the Navigation dialog.
 
+## Slice 9: Autopilot `0x1204`
+
+`src/flights/flights_autopilot.c`; class `0x3180`, `0x2178` bytes, 24 members, descriptor
+`+0x2174` (caller MAIN command `0x1204`, which MAIN's source calls "limits"; the
+descriptor is filled by UTIL's exchange). Its fields are listed in `flights_internal.h`:
+active, the heading mode (LVL, ATT, HDG), altitude hold, the speed holds (ASH, MNH), AAT,
+TO/GA, the yaw damper, the navigation mode, the five texts with their rooms and statuses,
+two labels held in place in the descriptor (`+0x30`, `+0xa8`), and the aircraft's
+capabilities at `+0x5c` (2 airspeed hold, 4 Mach hold, 8 vertical speed, `0x10` AAT,
+`0x20` TO/GA, 1 ...).
+
+- **Active** cascades: on, each control becomes usable as the other boxes and the
+  capabilities allow; off, everything is cleared and disabled and the navigation combo
+  set back to entry 0 (`CB_SETCURSEL`).
+- Each box turns off the boxes it excludes (LVL, HDG and ATT; ASH, MNH and AAT), redrawing
+  each, and opens or closes its edit, refilled from the descriptor. AAT off gives back the
+  speed holds the descriptor remembers.
+- **Populate**, with no airspeed hold (capability 2 clear), disables the *Mach* controls a
+  second time instead of the airspeed ones: retail's, kept.
+- **Validate** (`+0xd8`) reads every control back, runs MAIN's check (its answer
+  ignored) and names the edit at fault, but **swapped**: an altitude failure answers the
+  heading edit's id `0xcb1`, a heading failure the altitude edit's `0xcb0`; with nothing
+  at fault it fills the controls again, and inactive nothing is at fault. **Report**
+  (`+0xdc`) takes them the right way round, gives the error dialog the status field's
+  address, and answers vtable `+0xe0`'s, told the edit's id.
+- OnInitDialog limits five edits from the descriptor and answers TRUE.
+
 ## Next
 
-1. The last two families, the large ones: Autopilot `0x1204` (class `0x3180`, 7.8 KB,
-   11 message entries) and Navigation `0x1202` (class `0x7d80`, 8 KB, with its tab page
-   `0x7040`). Each adds its classes to `CLASSES` in the generator and its operations to
-   the harness.
+1. The last family, Navigation `0x1202`: a tab dialog of four classes, the dialog
+   (`0x7d80`, vtable `0xf2f8`, `0x2178` bytes, descriptor `+0x10dc`) and three
+   `CSimsTabPage`s (`0x7040` vtable `0xf158`, then vtables `0xf518` and `0xf6d8`), about
+   3,100 instructions in all (`0x22317040`..`0x22319d10`).
 2. Module init/deinit and the runtime: native vtables and message maps, MFC/SIMSUI import
    adapters, the factories registered with the host (`tools/gen_flights_runtime.py`, after
    `gen_help_runtime.py`).

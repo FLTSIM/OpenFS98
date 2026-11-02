@@ -72,6 +72,7 @@ struct fs98_flights_services {
                                   void *dib, void *palette, uint32_t flags, uint32_t color,
                                   uint32_t module, int32_t x, int32_t y, struct fs98_flights_rect rect);
     int32_t (*window_enabled)(void *window);                        /* CWnd::IsWindowEnabled */
+    void (*init_combo)(void *control, void *font, void *label);     /* CSimsComboBox::Init */
 };
 
 /* Select Flight (0x1102, MAIN's flight_dialog): answer +0, delete +8 (stdcall, given the
@@ -81,6 +82,17 @@ struct fs98_flights_services {
  * the entry that may not be edited or deleted, which is past the end of MAIN's block. */
 typedef uint32_t (FS98_FLIGHTS_STDCALL *fs98_flights_select_delete_fn)(void *descriptor);
 typedef uint32_t (FS98_FLIGHTS_STDCALL *fs98_flights_select_edit_fn)(void *descriptor, void *record);
+
+/* Autopilot (0x1204, MAIN command 0x1204, filled by UTIL's exchange): answer +0, check
+ * +4 (stdcall, given the descriptor; its answer is ignored), active +0x10, heading mode
+ * +0x18 (0 none, 1 LVL, 2 ATT, 3 HDG) with its status +0x1c and text +0x20 (room +0x24),
+ * an altitude label in place +0x30, altitude hold +0x44 with status +0x48 and text +0x4c
+ * (room +0x50), capabilities +0x5c (2 ASH, 4 MNH, 8 vertical speed, 0x10 AAT, 0x20
+ * TO/GA, 1 ...), TO/GA +0x64, AAT status +0x68 and set +0x6c, speed hold +0x74, airspeed
+ * status +0x78 text +0x7c room +0x80, Mach status +0x8c text +0x90 room +0x94, Mach +0xa0,
+ * airspeed +0xa4, a label in place +0xa8, vertical speed set +0xbc status +0xc0 text +0xc4
+ * room +0xc8, yaw damper +0xd8, navigation mode +0xe0 (0..4). */
+typedef uint32_t (FS98_FLIGHTS_STDCALL *fs98_flights_autopilot_check_fn)(void *descriptor);
 
 /* The welcome dialog (0x1109, MAIN's start and command 0x1109): answer +0, callbacks
  * (stdcall, given the descriptor) more choices +8, lessons +0xc, Create a Flight +0x10,
@@ -229,7 +241,23 @@ FS98_FLIGHTS_EVENT(select_remove);
 FS98_FLIGHTS_EVENT(select_choose);
 FS98_FLIGHTS_EVENT(select_double_click);
 FS98_FLIGHTS_EVENT(select_populate);
+FS98_FLIGHTS_EVENT(autopilot_cancel);
+FS98_FLIGHTS_EVENT(autopilot_accept);
+FS98_FLIGHTS_EVENT(autopilot_active);
+FS98_FLIGHTS_EVENT(autopilot_level);
+FS98_FLIGHTS_EVENT(autopilot_heading);
+FS98_FLIGHTS_EVENT(autopilot_altitude);
+FS98_FLIGHTS_EVENT(autopilot_attitude);
+FS98_FLIGHTS_EVENT(autopilot_airspeed);
+FS98_FLIGHTS_EVENT(autopilot_mach);
+FS98_FLIGHTS_EVENT(autopilot_throttle);
+FS98_FLIGHTS_EVENT(autopilot_takeoff);
+FS98_FLIGHTS_EVENT(autopilot_read);
+FS98_FLIGHTS_EVENT(autopilot_populate);
 #undef FS98_FLIGHTS_EVENT
+int32_t FS98_FLIGHTS_THISCALL fs98_flights_autopilot_init(void *object);
+uint32_t FS98_FLIGHTS_THISCALL fs98_flights_autopilot_validate(void *object, uint32_t control);
+uint32_t FS98_FLIGHTS_THISCALL fs98_flights_autopilot_error(void *object, uint32_t code);
 int32_t FS98_FLIGHTS_THISCALL fs98_flights_select_init(void *object);
 uint32_t FS98_FLIGHTS_THISCALL fs98_flights_select_validate(void *object, uint32_t control);
 uint32_t FS98_FLIGHTS_THISCALL fs98_flights_select_error(void *object, uint32_t code);
@@ -273,5 +301,6 @@ FS98_FLIGHTS_CLASS(opening);
 FS98_FLIGHTS_CLASS(flight_menu);
 FS98_FLIGHTS_CLASS(learning_menu);
 FS98_FLIGHTS_CLASS(select);
+FS98_FLIGHTS_CLASS(autopilot);
 #undef FS98_FLIGHTS_CLASS
 #endif

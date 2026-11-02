@@ -25,7 +25,7 @@ struct fs98_flights_object_services {
 };
 /* Class indices, in s_classes order (tools/gen_flights_tables.py) */
 enum { FS98_FLIGHTS_ADVENTURES, FS98_FLIGHTS_CHALLENGES, FS98_FLIGHTS_SAVE, FS98_FLIGHTS_COMMS, FS98_FLIGHTS_CREATE, FS98_FLIGHTS_AIRCRAFT, FS98_FLIGHTS_MODELESS, FS98_FLIGHTS_OPENING, FS98_FLIGHTS_FLIGHT_MENU,
-       FS98_FLIGHTS_LEARNING_MENU, FS98_FLIGHTS_SELECT, FS98_FLIGHTS_CLASS_COUNT };
+       FS98_FLIGHTS_LEARNING_MENU, FS98_FLIGHTS_SELECT, FS98_FLIGHTS_AUTOPILOT, FS98_FLIGHTS_CLASS_COUNT };
 void fs98_flights_set_object_services(const struct fs98_flights_object_services *services,
                                       void *const *vtables);
 /* Flights' own instance, which each factory stores at object +0x80 */
@@ -46,5 +46,6 @@ FS98_FLIGHTS_OBJECT(opening);
 FS98_FLIGHTS_OBJECT(flight_menu);
 FS98_FLIGHTS_OBJECT(learning_menu);
 FS98_FLIGHTS_OBJECT(select);
+FS98_FLIGHTS_OBJECT(autopilot);
 #undef FS98_FLIGHTS_OBJECT
 #endif

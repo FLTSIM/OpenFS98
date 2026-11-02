@@ -13,7 +13,7 @@
  * Covered: the pickers (Adventures 0x1108, Challenges 0x1107), Save Flight (0x1104),
  * Communications (0x1203), Create a Flight (0x1101), Select Aircraft (0x1201), the welcome
  * dialog (0x1109) and its two sub-menus (0x11090001, 0x11090002), the modeless dialog
- * (id 1), Select Flight (0x1102), and
+ * (id 1), Select Flight (0x1102), Autopilot (0x1204), and
  * the helpers every class shares. */
 #include <windows.h>
 #include <stdio.h>
@@ -36,9 +36,10 @@
 
 struct fixture {
     uint8_t guard_before[32];
-    uint8_t object[0x1fe0];
-    uint8_t descriptor[2][0x40];
-    char names[2][0x110];           /* Save's name and description buffers */
+    uint8_t object[0x2178];
+    uint8_t descriptor[2][0x100];
+    char names[2][0x110];
+    char texts[4][0x110];           /* Autopilot's heading, altitude, airspeed and Mach */           /* Save's name and description buffers */
     uint8_t record_before[0xa08];   /* record -1: Select Aircraft indexes with an empty selection */
     uint8_t records[5][0xa08];
     uint8_t info[32];
@@ -67,6 +68,7 @@ struct operation { uint32_t rva; void *ours; enum signature signature; uint32_t 
 #define INT(rva, name) {rva, (void *)fs98_flights_##name, SIG_INT, 0, #name}
 #define SAVE(rva, name, signature) {rva, (void *)fs98_flights_##name, signature, FS98_FLIGHTS_SAVE, #name}
 #define OPENING(rva, name, signature) {rva, (void *)fs98_flights_##name, signature, FS98_FLIGHTS_OPENING, #name}
+#define AUTOPILOT(rva, name, signature) {rva, (void *)fs98_flights_##name, signature, FS98_FLIGHTS_AUTOPILOT, #name}
 #define SELECT(rva, name, signature) {rva, (void *)fs98_flights_##name, signature, FS98_FLIGHTS_SELECT, #name}
 #define FLIGHT_MENU(rva, name, signature) {rva, (void *)fs98_flights_##name, signature, FS98_FLIGHTS_FLIGHT_MENU, #name}
 #define LEARNING_MENU(rva, name, signature) {rva, (void *)fs98_flights_##name, signature, FS98_FLIGHTS_LEARNING_MENU, #name}
@@ -165,6 +167,16 @@ static const struct operation s_operations[] = {
     SELECT(0x6f50, select_error, SIG_INT_ARG),
     CLASS(0x6920, 0x6940, 0x6850, select, FS98_FLIGHTS_SELECT),
     LIFETIME(FS98_FLIGHTS_SELECT, select),
+    AUTOPILOT(0x3af0, autopilot_cancel, SIG_EVENT), AUTOPILOT(0x3b10, autopilot_accept, SIG_EVENT),
+    AUTOPILOT(0x3b50, autopilot_active, SIG_EVENT), AUTOPILOT(0x3ea0, autopilot_level, SIG_EVENT),
+    AUTOPILOT(0x42f0, autopilot_heading, SIG_EVENT), AUTOPILOT(0x43c0, autopilot_altitude, SIG_EVENT),
+    AUTOPILOT(0x44e0, autopilot_attitude, SIG_EVENT), AUTOPILOT(0x3f30, autopilot_airspeed, SIG_EVENT),
+    AUTOPILOT(0x3ff0, autopilot_mach, SIG_EVENT), AUTOPILOT(0x40c0, autopilot_throttle, SIG_EVENT),
+    AUTOPILOT(0x4230, autopilot_takeoff, SIG_EVENT), AUTOPILOT(0x4630, autopilot_read, SIG_EVENT),
+    AUTOPILOT(0x48d0, autopilot_populate, SIG_EVENT), AUTOPILOT(0x36c0, autopilot_init, SIG_INT),
+    AUTOPILOT(0x4db0, autopilot_validate, SIG_INT_ARG), AUTOPILOT(0x4e90, autopilot_error, SIG_INT_ARG),
+    CLASS(0x45f0, 0x4610, 0x34f0, autopilot, FS98_FLIGHTS_AUTOPILOT),
+    LIFETIME(FS98_FLIGHTS_AUTOPILOT, autopilot),
 };
 #define OP_COUNT (sizeof(s_operations) / sizeof(s_operations[0]))
 #define OP s_operations[s_operation]
@@ -364,6 +376,8 @@ static int32_t send_message(uint32_t window, uint32_t message, uint32_t w_param,
     if (message == 0x180) put("message %u %x %u text=%s\n", window, message, w_param, (char *)(uintptr_t)l_param);
     else put("message %u %x %u %u\n", window, message, w_param, l_param);
     mutate();
+    if (message == 0x147)   /* CB_GETCURSEL: none, a valid one, or one past the last */
+        return (int32_t)((s_seed >> (s_calls % 8)) % 7) - 1;
     if (message == 0x199)   /* LB_GETITEMDATA: the record the item was tagged with */
         return (int32_t)(uintptr_t)s_fixture.records[w_param % 5];
     if (message == 0x188) {
@@ -566,6 +580,18 @@ static int32_t init_shadow_button(void *control, void *font, void *alternate_fon
         color, module, x, y, rect.left, rect.top, rect.right, rect.bottom);
     mutate(); return (int32_t)s_seed;
 }
+static void init_combo(void *control, void *font, void *label)
+{ put("init.combo %u font=%u label=%u\n", offset(control), offset(font), offset(label)); mutate(); }
+static uint32_t SC autopilot_check(void *descriptor)
+{
+    put("autopilot.check %u active=%u mode=%u hold=%u speed=%u heading=[%s] altitude=[%s]\n", offset(descriptor),
+        D32(descriptor, 0x10), D32(descriptor, 0x18), D32(descriptor, 0x44), D32(descriptor, 0x74),
+        (char *)PTR(descriptor, 0x20), (char *)PTR(descriptor, 0x4c));
+    mutate();
+    D32(descriptor, 0x1c) = (s_seed >> 3) % 3 == 0;
+    D32(descriptor, 0x48) = (s_seed >> 5) % 3 == 0;
+    return s_seed;
+}
 static int32_t window_enabled(void *window)
 { put("window.enabled %u\n", offset(window)); mutate(); return (s_seed >> (s_calls % 16)) & 1; }
 static uint32_t SC select_delete_callback(void *descriptor)
@@ -598,7 +624,7 @@ static const struct fs98_flights_services s_services = {
     set_slider_position, init_group, to_number, format_number,
     init_picture, set_focus, set_sims_text, font_construct, font_destroy, register_exit, default_paint,
     string_construct, string_destroy, list_text, dialog_item, dialog_item_window, remap_rect, move_window,
-    redraw_window, window_from_handle, load_string_resource, init_shadow_button, window_enabled
+    redraw_window, window_from_handle, load_string_resource, init_shadow_button, window_enabled, init_combo
 };
 
 static void *dialog_construct(void *object, int32_t resource, void *parent)
@@ -655,6 +681,7 @@ CONTROL_HOOK(slider, 0x13538, 0x13544)
 CONTROL_HOOK(group, 0x13540, 0x13534)
 CONTROL_HOOK(picture, 0x13578, 0x1357c)
 CONTROL_HOOK(shadow, 0x13574, 0x1360c)
+CONTROL_HOOK(combo, 0x1355c, 0x13564)
 #undef CONTROL_HOOK
 static void *TC hook_dialog_construct(void *object, int32_t resource, void *parent)
 { return dialog_construct(object, resource, parent); }
@@ -714,6 +741,7 @@ static void *hook_dll_onexit(void (*handler)(void), void **begin, void **end)
 static void *hook_onexit(void (*handler)(void)) { register_exit(handler); return (void *)handler; }
 static void TC hook_paint(void *object) { default_paint(object); }
 static int32_t TC hook_window_enabled(void *window) { return window_enabled(window); }
+static void TC hook_init_combo(void *control, void *font, void *label) { init_combo(control, font, label); }
 static int32_t SC hook_redraw(uint32_t window, void *rect, void *region, uint32_t flags)
 { return redraw_window(window, rect, region, flags); }
 static void *SC hook_from_handle(uint32_t window) { return window_from_handle(window); }
@@ -785,9 +813,9 @@ static void setup_imports(void)
     patch(0x133dc, hook_string_construct); patch(0x133e8, hook_string_destroy);
     patch(0x133e4, hook_list_text); patch(0x133f0, hook_dialog_item); patch(0x13640, hook_dialog_item_window);
     patch(0x1359c, hook_remap_rect); patch(0x133f4, hook_move_window);
-    PATCH_CONTROL(shadow, 0x13574, 0x1360c);
+    PATCH_CONTROL(shadow, 0x13574, 0x1360c); PATCH_CONTROL(combo, 0x1355c, 0x13564);
     patch(0x13634, hook_redraw); patch(0x13380, hook_from_handle); patch(0x13384, hook_load_string);
-    patch(0x13608, hook_shadow); patch(0x133d0, hook_window_enabled);
+    patch(0x13608, hook_shadow); patch(0x133d0, hook_window_enabled); patch(0x13554, hook_init_combo);
     fs98_flights_set_opening_state(&s_fixture.opening);
     fs98_flights_set_menus_state(&s_fixture.menus); patch(0x134bc, hook_atof); patch(0x134cc, hook_sprintf);
 #undef PATCH_CONTROL
@@ -808,6 +836,15 @@ static void initialize(void)
     D32(object, 0x20) = s_seed;
     PTR(object, descriptor_offset()) = s_fixture.descriptor[0];
     s_fixture.create.guard = (s_seed >> 13) & 3;     /* bit 0: the font already built */
+    if (OP.kind == FS98_FLIGHTS_AUTOPILOT) {
+        static const uint32_t boxes[] = {0x15e4, 0x16ac, 0x1774, 0x183c, 0x1ae4, 0x1a1c, 0x1bac, 0x1c74, 0x1d3c, 0x1e04};
+        uint32_t box;
+        for (box = 0; box < 10; ++box) {     /* each box's vtable, and its state from its own seed bit */
+            PTR(object, boxes[box]) = s_control_vtable;
+            D32(object, boxes[box] + 0xbc) = (s_seed >> box) & 1;
+        }
+        if ((s_seed >> 31) == 0) D32(object, 0x1a1c + 0xbc) = 1;     /* active, three times in four */
+    }
     if (OP.kind == FS98_FLIGHTS_SELECT) {
         static const uint32_t statuses[] = {0, 0x1004, 0x1003, 0x1004};
         D32(object, 0x10dc) = statuses[(s_seed >> 25) % 4];
@@ -836,7 +873,36 @@ static void initialize(void)
     } else PTR(object, 0x1704) = s_control_vtable;
     for (index = 0; index < 2; ++index) {
         uint8_t *descriptor = s_fixture.descriptor[index];
-        if (OP.kind == FS98_FLIGHTS_SELECT) {
+        if (OP.kind == FS98_FLIGHTS_AUTOPILOT) {
+            static const uint32_t text_at[] = {0x20, 0x4c, 0x7c, 0x90, 0xc4};
+            uint32_t field;
+            PTR(descriptor, 4) = autopilot_check;
+            for (field = 0; field < 5; ++field)      /* the second descriptor's buffers are other ones */
+                PTR(descriptor, text_at[field]) = s_fixture.texts[(field + index) % 4];
+            D32(descriptor, 0x10) = (s_seed >> 10) & 1;
+            D32(descriptor, 0x18) = (s_seed >> (11 + index)) % 5;          /* 4: no mode */
+            D32(descriptor, 0x1c) = (s_seed >> 13) & 1;
+            D32(descriptor, 0x24) = 1 + (s_seed >> 14) % 0x20 + index;
+            snprintf((char *)descriptor + 0x30, 20, "feet %u", index);
+            D32(descriptor, 0x44) = (s_seed >> 15) & 1;
+            D32(descriptor, 0x48) = (s_seed >> 16) & 1;
+            D32(descriptor, 0x50) = 0x30 + index;
+            D32(descriptor, 0x5c) = (s_seed >> (17 + index)) & 0x3f;
+            D32(descriptor, 0x64) = (s_seed >> 23) & 1;
+            D32(descriptor, 0x68) = (s_seed >> 24) & 1;
+            D32(descriptor, 0x6c) = (s_seed >> 25) & 1;
+            D32(descriptor, 0x78) = (s_seed >> 26) & 1;
+            D32(descriptor, 0x80) = 0x10 + index;
+            D32(descriptor, 0x8c) = (s_seed >> 27) & 1;
+            D32(descriptor, 0x94) = 0x18 - index;
+            D32(descriptor, 0xa0) = (s_seed >> 28) & 1;
+            D32(descriptor, 0xa4) = (s_seed >> 29) & 1;
+            snprintf((char *)descriptor + 0xa8, 20, "fpm %u", index);
+            D32(descriptor, 0xc0) = (s_seed >> 30) & 1;
+            D32(descriptor, 0xc8) = 0x20 + index;
+            D32(descriptor, 0xd8) = (s_seed >> 1) & 1;
+            D32(descriptor, 0xe0) = (s_seed >> (2 + index)) % 6;           /* 5: no mode */
+        } else if (OP.kind == FS98_FLIGHTS_SELECT) {
             PTR(descriptor, 8) = select_delete_callback;
             PTR(descriptor, 0xc) = select_edit;
             D32(descriptor, 0x10) = (s_seed >> (12 + index)) & 1;
@@ -902,6 +968,8 @@ static void initialize(void)
             PTR(descriptor, 0x10) = s_fixture.records;
         }
     }
+    for (index = 0; index < 4; ++index)
+        snprintf(s_fixture.texts[index], 64, "%u%02u", index, (s_seed >> index) % 100);
     snprintf(s_fixture.names[0], 64, "Flight %u vector %u", s_scenario % 2, s_scenario);
     snprintf(s_fixture.names[1], 64, "About flight %x", s_seed);
     if (OP.kind == FS98_FLIGHTS_SAVE)   /* the name already agreed to: often the one typed */
@@ -1018,6 +1086,7 @@ static __attribute__((noinline)) int32_t run(uint32_t throw_at)
             break;
         case SIG_INT_ARG: { /* the validators behave differently for their own edits' ids */
             uint32_t argument = s_scenario & 2 ? 0xcb3 : s_seed;
+            if (OP.kind == FS98_FLIGHTS_AUTOPILOT) argument = (s_seed >> 7) & 1 ? s_seed : 0;
             if (OP.kind == FS98_FLIGHTS_SELECT) {
                 static const uint32_t ids[] = {0, 0xcbe, 0x1234, 0};
                 argument = ids[(s_seed >> 3) % 4];

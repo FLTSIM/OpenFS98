@@ -86,8 +86,9 @@ stores the same caller-owned descriptor pointer in the member shown, copies
 the module instance to object `+0x80`, initializes its resource through the
 MFC ordinal-2086 thunk `0x2234621a`, hides the window with `ShowWindow(0)` via
 `0x22346214`, saves the C++ object in a module global, and returns its HWND at
-object `+0x20`. The supplied parent HWND is passed to each class/base
-constructor. The five object globals are `0x2234a0a0/a4/a8/ac/b0` in the
+object `+0x20`. Each helper passes a null parent to its class constructor;
+the paired base-constructor trace below confirms a null parent for all five.
+The five object globals are `0x2234a0a0/a4/a8/ac/b0` in the
 same page order as the table.
 
 The returned array is exactly `[intro, choice, host-options, connection-type,
@@ -584,7 +585,7 @@ field stores, so allocation failure is not a clean null-window return.
 
 The class constructor initializes the `CSimsDialog` base and its owned control
 objects in order: five `CSims3PieceButton`s at `+0x10dc..+0x14cc`, text at
-`+0x15c8`, group boxes at `+0x1680/+0x1734`, five more buttons at
+`+0x15c8`, group boxes at `+0x1680/+0x1734`, five more text objects at
 `+0x17e8..+0x1ac8`, six check buttons at `+0x1b80..+0x1f68`, and text art at
 `+0x2030`. It then installs vtable `0x223488e8` at `0x22343a83`. The factory
 stores the parameter block after construction and before creating the HWND.
@@ -1627,8 +1628,8 @@ map to this evidence:
 | Native rendering | The five 0x110a pages plus initial 0x110b and 0x110c dialogs are captured with per-child `WM_PRINT` into 32-bit DIBs. Font, styles, enabled/check/selection state, focus, list contents and paint order are recorded alongside pixels. All seven paired dialog captures and per-control records match. Same-HWND redraws are stable for `14/14` captures (seven per side, including seven retail repeats). Causes and fixes are detailed above. | **Pass in isolated suites** |
 | Callbacks, validation, accept/cancel | The 0x110a scripts cover callback arguments/results, forward/back/cancel, validation failure and recovery, Browser refresh/selection/settings, and accept. The 0x110b and 0x110c suites compare callback order/arguments/results and their validation/removal/refresh paths. ABI prototypes are documented against MULTIP callee epilogues. Matched retail/replacement Host runs see three `+0x10` validations returning zero, `+0x0c` accept returning zero, and the nested `+0x04` provider callback returning zero at `0x20852f69`; DirectPlayCreate and both QueryInterface calls also return zero. Actual 0x110b OK and all actual 0x110c callbacks remain unexercised. | **Pass in isolated suites; actual owner callback path partial** |
 | Window and module lifetime | Native hooks observe `WM_NCDESTROY → PostNcDestroy (+0xac) → deleting destructor (+0x04, flag 1)` for all five 0x110a pages and the 0x110b/0x110c windows. The suites execute two DLL load/init/factory/deinit/FreeLibrary cycles and verify registration/release counts and that neither module remains loaded. The paired actual 0x110a cancel runs also observe all five destructor chains before owner return, then MULTIP frees four provider payloads and clears the row count. Actual repeated owner unload is not covered. | **Pass in isolated suites; one owner teardown observed** |
-| Behavioral and rendering mutation acceptance | State/callback/lifetime comparisons have zero differences in all three suites over two load/unload cycles. Fifteen targeted behavioral mutations and one wrong-font render mutation produce their expected differences. The runner requires a clean behavior, control-tree, rendering and repeatability baseline before mutation checks. The lifetime mutation is detected before the harness calls the saved deleting destructor to release the intentionally leaked object; each targeted mutant then deinitializes and unloads both modules. | **Pass for isolated behavior and render gates** |
-| Isolated startup | `bash tools/run_mpdialogdiff.sh --smoke` starts a private copied game tree with the current replacement and a dedicated Wine prefix. It loaded `27/27` Modules DLLs and `95` gauges, observed MP_DIALOG load, reported no trace errors, and verified the private replacement and source game DLL remained unchanged. Log: `bin/mpdialog-diff/smoke-game-7h8f0e_x/mpdialog-smoke.log`; replacement SHA-256 `252f1b8989a1645fafae685eea401a51361c7f4b48d8808b519f1549201da729`. | **Pass for startup/load only** |
+| Behavioral and rendering mutation acceptance | The latest completed isolated run passes the two-cycle baseline and catches all 46 mutation checks, including Choice, help/context and one rendering check. The runner requires the baseline before mutations and rejects timeouts. The lifetime mutation requires controlled cleanup and unload. Evidence and intervening timeouts are recorded in the help follow-up. | **Pass for the exercised isolated gates** |
+| Isolated startup | The refreshed private-copy smoke uses replacement SHA-256 `b229c54cf83b6d597ce13cd6ffa532b73b91705fe88c9b58b47cfa7e7aefa5e0`. It passes the strict trace gate with a private SEHFIX copy; both unshimmed attempts fail that gate on four callback exceptions. Full observations and limits are in the current reconciliation below. | **Pass with private SEHFIX; unshimmed trace gate fails** |
 | Actual HOST/MULTIP dialog workflow | Separate private copies/prefixes complete matched Connect → Cancel runs and matched Host attempts from the same config hash and provider row. The Host traces capture the nested `+0x04` return, successful DirectPlayCreate/QueryInterface calls, then the same `dplayx.dll` `IDirectPlay3::Open` HRESULT `0x80004001` in retail and replacement; `M_CONNECTED` remains zero in both. Both real 0x110b dialogs show Host Settings disabled with block `+0x18=0,+0x1c=1`; no 0x110c list, second player, or UTIL confirmation `1016` is reached. The matched DirectPlay failure establishes an integration limit, not an MP_DIALOG difference. The factory-post path when `+0x1c=0` remains isolated coverage. | **Partial; actual 0x110a cancel and blocked Host path observed, whole-module gate blocked** |
 | Construction-failure cleanup | Static retail and replacement caller paths both ignore MFC Create failure and have no partial-page rollback; both dereference a null allocation rather than returning a clean failure. The prior false-return and allocation probes were injected outside MFC, and missing-DIALOG failure preceded construction. No genuine MFC resource/child creation failure was exercised, so internal partial-window cleanup is unknown. | **Caller-level parity static; genuine cleanup unverified** |
 
@@ -1647,12 +1648,13 @@ Genuine MFC partial-Create cleanup also remains unverified; artificial
 failures outside MFC do not establish framework cleanup. These limits keep
 whole-module acceptance blocked, despite passing isolated comparisons.
 
-Final evidence commands and logs:
+Historical evidence commands and logs (superseded where the later follow-ups
+record newer runs):
 
 - `make -f tools/mpdialog.mk mpdialog`
 - `bash tools/run_mpdialogdiff.sh --ui` → `/tmp/mpdialog-visual-baseline-after-fixes.log`: 24 `0x110a`, 24 `0x110b` and 20 `0x110c` paired scripts match across two load/unload cycles; control trees match `24/24`, `24/24` and `20/20`; all seven render captures match; same-window redraws match `14/14` with zero unstable pairs.
 - `bash tools/run_mpdialogdiff.sh --ui-breaks` → `/tmp/mpdialog-visual-mutations-after-fixes.log`: the runner first requires all behavior, complete child-tree, render and repeatability gates to pass, then runs `15/15` targeted behavioral mutations and one wrong-font rendering mutation. The lifetime mutant also requires controlled leaked-object cleanup and module unload.
-- `bash tools/run_mpdialogdiff.sh --smoke` → `/tmp/mpdialog-visual-smoke-after-fixes.log`: `27/27` Modules DLLs, 95 gauges, replacement loaded, no trace errors, and source/private-copy DLL hashes unchanged. Full trace: `bin/mpdialog-diff/smoke-game-7h8f0e_x/mpdialog-smoke.log`.
+- `bash tools/run_mpdialogdiff.sh --smoke` → `/tmp/mpdialog-visual-smoke-after-fixes.log`: `27/27` Modules DLLs, 95 gauge trace mentions, replacement loaded, no trace errors, and source/private-copy DLL hashes unchanged. The 95 mentions comprise 58 load records for 29 distinct gauge paths plus 37 unload records. Full trace: `bin/mpdialog-diff/smoke-game-7h8f0e_x/mpdialog-smoke.log`.
 
 The source, standalone build, generator, differential harness and probe tools
 remain isolated under `src/mpdialog/`, `tools/` and ignored
@@ -2104,8 +2106,8 @@ compiler support routine or imported framework implementation.
 Choice error `0x22345a40` returns 0 for field 0. For nonzero field with no
 `+0x28` status it sends field 0 to virtual `+0xe0`; with status set and error
 helper returning 0 it sends the original field; with nonzero helper result it
-sends `0x419`. It returns the `+0xe0` result. The current
-prior `fs98_mpdialog_flow_error_choice` instead sent the original field when the
+sends `0x419`. It returns the `+0xe0` result. The prior
+`fs98_mpdialog_flow_error_choice` instead sent the original field when the
 status was clear, sent 0 when the helper returned 0, and returned constant 1.
 
 The seven retail `WM_HELP`/`WM_CONTEXTMENU` pairs and their per-dialog help
@@ -2285,3 +2287,118 @@ The preceding complete-suite attempts are retained: one stopped when
 caught mutation, and the later completed run does not establish their cause.
 The previously timed-out Browser accept-return mutation completed both in the
 separate rerun and in the final full suite. `git diff --check` passed.
+
+### Current implementation and acceptance reconciliation
+
+The reviewed local-target inventory above covers the three registry factories,
+seven page vtables and seven message maps. Its review labels are scoped to the
+listed paths and cases: a bound target, matching control tree or exercised
+normal command does not establish all of that function's branches. The Choice
+error and all seven help/context pairs have since received the focused audits
+above; they are no longer unreviewed families.
+
+**Isolated implementation acceptance — exercised gates pass, not exhaustive
+whole-module acceptance.** The latest completed native comparison reports
+24 flow, 24 Settings and 20 Details paired scripts over two load/unload
+cycles, matching native child trees, seven paired render captures, 14/14
+stable repeats and the seven-dialog help-message comparisons. Its 46 mutation
+checks were all detected, including the Choice, help/context and Browser
+accept-return checks (`bin/mpdialog-diff/help-audit/full-suite.log`). Owner
+services, timer expiry and selected callback values are modeled. The completed
+suite log did not record the replacement DLL hash at run time; it should not
+be used as independent cryptographic proof that a later build has identical
+bytes. The refreshed startup smoke below records the current standalone DLL
+hash separately.
+
+Remaining local review or differential boundaries are:
+
+- Factory helpers, constructors, destructors and the seven DDX maps have
+  normal creation/tree and deleting-flag-1 teardown evidence, but not a
+  complete ordered DDX/control-initialization comparison, destructor flag 0
+  coverage, or exceptional-construction coverage. The shared no-op and
+  enable/disable virtual slots have no focused paired ABI/state-transition
+  fixture.
+- Intro update/capture and Choice route selection, callsign capacities and
+  reentrant update/validation need focused boundary/order review. Choice
+  `0x22345a40` itself has the independent field/status/helper/return and
+  posted-validation coverage described above; that is not a review of the
+  entire Choice page.
+- Connection provider-list boundaries, activation, capture/update ordering
+  and unusual callback reentry remain open. Host Options Back/Settings and
+  wrapper edge paths, unusual descriptor changes and deeper callback nesting
+  remain open beyond the completed Host audits.
+- Browser initialization and wrappers, allocation and list-insertion failure,
+  null/invalid row pointers, abnormal or destructive callback reentry,
+  negative/zero refresh results and physical mouse activation remain outside
+  the documented focused coverage. The completed Browser formatting, field,
+  ordering and timer investigations need not be repeated to recognize these
+  boundaries.
+- Settings independent/noncanonical checkbox words, initialization order and
+  callback reentry, and Details independent status/return combinations,
+  edit-buffer boundaries, list count/selection and reentrant refresh ordering
+  need focused review. Existing synthetic cases exercise selected branches,
+  not every combination. The help fixture intercepts `WinHelpA`; a real help
+  viewer and invalid `HELPINFO` pointers are not exercised.
+
+**Actual HOST/MULTIP integration — partial.** The paired private owner probes
+observed the 0x110a Connect-to-Cancel array and five teardown chains, provider
+cleanup, host-mode validation/accept and provider creation. They used the
+older replacement hash `252f1b8989a1645fafae685eea401a51361c7f4b48d8808b519f1549201da729`,
+not the current Choice/help build. No fresh owner-path comparison is claimed.
+Actual 0x110b OK, active-session 0x110c and service `1016`, the actual
+`+0x1c=0` initial-post branch and repeated actual-owner unload remain
+unobserved.
+
+**Environmental/framework limits — separate from source review.** In the
+matched earlier Host attempts, Wine's `IDirectPlay3::Open` returned
+`E_NOTIMPL` for both binaries after provider/interface creation, blocking the
+active-session path in that environment. This is historical matched evidence,
+not a claim about another DirectPlay implementation or the current smoke run.
+Genuine MFC partial-Create and allocation-fault cleanup remain unknown: the
+injected false-return probe did not exercise MFC's internal failure path.
+The original teardown timeout, the Browser accept-return timeout and the
+later lifetime/Browser Details timeouts retain their logs above. Successful
+isolated or full-suite reruns detect the relevant mutants, but do not explain
+any earlier stall. Whole-module status remains **partial** under the existing
+criteria.
+
+**Refreshed private startup smoke — current DLL.** `make -f
+tools/mpdialog.mk mpdialog bin/mpdialog-diff/mpdialoguidiff.exe` found both
+outputs up to date. The standalone replacement SHA-256 is
+`b229c54cf83b6d597ce13cd6ffa532b73b91705fe88c9b58b47cfa7e7aefa5e0`;
+the source game `English/MP_DIALOG.DLL` hash before and after these runs is
+`dc980acf09df47f64081b7e4775a7dd83eba69a75ae83181eea0ecc724b2a666`.
+
+Two 75-second private-copy attempts without SEHFIX, first on the normal display
+and then under Xvfb, loaded the replacement and all 27 expected Modules DLLs,
+but each failed the unchanged strict error gate with four
+`KiUserCallbackDispatcher ignoring exception` messages. Their traces are
+`bin/mpdialog-diff/smoke-game-5qo8coq1/mpdialog-smoke.log` and
+`bin/mpdialog-diff/smoke-game-s6q2mufw/mpdialog-smoke.log`; their summaries
+are in `bin/mpdialog-diff/current-smoke-audit/`. The four messages occur after
+MP_DIALOG's startup load/unload and before the first gauge load. The repository's
+[Wine investigation](../wine.md) documents matching startup `WM_SIZE` faults,
+but these smoke traces contain no faulting stack and do not independently prove
+the cause or establish an MP_DIALOG defect. Xvfb alone did not remove them.
+
+The comparable run `MPD_SMOKE_SEHFIX=1 xvfb-run -a bash
+tools/run_mpdialogdiff.sh --smoke 75` copied `bin/SEHFIX.DLL` into the
+*private* game tree, verified its hash
+`f50f980e2cf1263ab9d5f93ad599b89a955d99281d9f598937b8c7278a1dc6cd`
+and load, and passed the same strict trace-error gate. All 27 expected
+Modules DLLs and the current MP_DIALOG loaded; the trace contains 95 `.gau`
+mentions: 58 load records for 29 distinct gauge paths and 37 unload records.
+The private MP_DIALOG and SEHFIX copies and the source game MP_DIALOG retained
+their hashes. The trace is
+`bin/mpdialog-diff/smoke-game-tcp6xdlq/mpdialog-smoke.log`, and the summary is
+`bin/mpdialog-diff/current-smoke-audit/xvfb-sehfix.log`. The earlier passing
+smoke also loaded SEHFIX, but used the pre-fix MP_DIALOG hash. This is startup
+and load evidence only, not evidence of a multiplayer session or a complete
+flight workflow.
+
+The opt-in `MPD_SMOKE_SEHFIX=1` copies the shim only to the disposable tree and
+requires its load and unchanged hash; the default remains unshimmed and the
+trace-error criteria are unchanged. The smoke script now labels gauge mentions
+separately from load records and distinct paths. No shared build/install wiring
+or live game files were changed. The current replacement remains isolated
+under `bin/mpdialog-diff/`; no whole-module acceptance claim is added.

@@ -8,6 +8,7 @@ import signal
 import shutil
 import subprocess
 import sys
+import mpdialog_provenance as provenance
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -22,7 +23,16 @@ FLAGS = [
 
 
 def run(command, **kwargs):
-    return subprocess.run(command, check=True, text=True, **kwargs)
+    provenance.event('build-start', command=command, cwd=str(kwargs.get('cwd', ROOT)))
+    try:
+        result = subprocess.run(command, check=True, text=True, **kwargs)
+    except (OSError, subprocess.CalledProcessError) as error:
+        provenance.event('build-finish', command=command, error=str(error))
+        raise
+    output = command[command.index('-o') + 1] if '-o' in command else None
+    provenance.event('build-finish', command=command, exit_code=result.returncode,
+                     output=provenance.digest(output) if output else None)
+    return result
 
 
 @contextlib.contextmanager
@@ -57,6 +67,10 @@ def isolated_wine_prefix():
 def run_wine(command, label, timeout=90):
     if _private_wine_prefix is None or os.environ.get('WINEPREFIX') != _private_wine_prefix:
         raise RuntimeError('Wine comparison requires its own private prefix')
+    provenance.event('comparison-start', label=label, command=command, timeout_seconds=timeout,
+                     replacement=provenance.digest(command[2]),
+                     test_executable=provenance.digest(command[1]),
+                     configuration=provenance.configuration())
     process = subprocess.Popen(command, cwd=ROOT, env=os.environ.copy(), text=True,
                                stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                                start_new_session=True)
@@ -81,8 +95,12 @@ def run_wine(command, label, timeout=90):
             output = output.decode(errors='replace')
         phases = [line for line in output.splitlines() if line.startswith('FLOW LIFETIME PHASE ')]
         phase = phases[-1] if phases else 'no lifetime checkpoint reached'
+        provenance.event('comparison-finish', label=label, timed_out=True,
+                         last_checkpoint=phase, output=output)
         raise RuntimeError(f'{label} timed out; last checkpoint: {phase}; '
                            f'timeouts do not count as detected mutations:\n{output}') from error
+    provenance.event('comparison-finish', label=label, timed_out=False,
+                     exit_code=process.returncode, output=output)
     return subprocess.CompletedProcess(command, process.returncode, output)
 
 

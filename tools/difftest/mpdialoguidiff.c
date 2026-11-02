@@ -5125,6 +5125,8 @@ static uint32_t fs98_run_help_suite(HMODULE *modules, struct fs98_test_linkage *
     return differences;
 }
 
+#include "mpdialogconstruction.inc"
+
 static void fs98_mutation_unload(HMODULE *modules,
                                  struct fs98_test_linkage **linkages)
 {
@@ -5184,12 +5186,14 @@ int main(int argc, char **argv)
             s_render_only = 1;
         } else if (strcmp(argv[arg_index], "--help-only") == 0) {
             s_help_only = 1;
+        } else if (strcmp(argv[arg_index], "--construction-only") == 0) {
+            s_construction_only = 1;
         } else {
             return 2;
         }
     }
     if ((s_flow_mutation_case >= 0) + (s_session_mutation_case >= 0) +
-        (s_details_mutation_case >= 0) + s_render_only + s_help_only > 1) return 2;
+        (s_details_mutation_case >= 0) + s_render_only + s_help_only + s_construction_only > 1) return 2;
     if (s_choice_real_modal && s_flow_mutation_case != 6) return 2;
     setvbuf(stdout, 0, _IONBF, 0);
     SetUnhandledExceptionFilter(fs98_check_fault);
@@ -5269,6 +5273,13 @@ int main(int argc, char **argv)
             printf("MP_DIALOG render-only comparison: %lu differing page(s); modules deinitialized and unloaded\n",
                 (unsigned long)differences);
             return differences ? 1 : 0;
+        }
+        if (s_construction_only) {
+            uint32_t layout_differences = fs98_run_construction_suite(modules, linkages);
+            fs98_mutation_unload(modules, linkages);
+            printf("MP_DIALOG construction comparison: %lu differing classes; modules deinitialized and unloaded\n",
+                (unsigned long)layout_differences);
+            return layout_differences ? 1 : 0;
         }
         if (s_help_only || (s_flow_mutation_case < 0 && s_session_mutation_case < 0 && s_details_mutation_case < 0))
             help_differences += fs98_run_help_suite(modules, linkages);

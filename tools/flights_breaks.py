@@ -16,7 +16,7 @@ from pathlib import Path
 import subprocess
 import sys
 
-UNITS = ('events', 'objects', 'save', 'comms', 'create', 'aircraft', 'opening', 'select')
+UNITS = ('events', 'objects', 'save', 'comms', 'create', 'aircraft', 'opening', 'select', 'autopilot')
 EVENTS = [
     # the shared helpers
     ('disable-window', 'enable_window(D32(object, 0x20), 0)', 'enable_window(D32(object, 0x20), 1)'),
@@ -370,6 +370,66 @@ SELECT = [
     ('select-init-focus', 'SERVICES->set_focus(AT(object, 0x1530));', 'SERVICES->set_focus(AT(object, 0x15e0));'),
     ('select-init-null', '    if (DESCRIPTOR(object)) {\n        fs98_flights_select_populate(object);', '    {\n        fs98_flights_select_populate(object);'),
 ]
+AUTOPILOT = [
+    ('ap-cancel-answer', '    descriptor[0] = 0;', '    descriptor[0] = 1;'),
+    ('ap-accept-handled', '(object, failure) != 0)\n        return;', '(object, failure) == 0)\n        return;'),
+    ('ap-active-flag', '        FIELD(object, 0x10) = 1;\n        enable(object, LEVEL, 1);', '        FIELD(object, 0x10) = 2;\n        enable(object, LEVEL, 1);'),
+    ('ap-active-heading-edit', '        enable(object, HEADING_EDIT, ON(object, HEADING));', '        enable(object, HEADING_EDIT, ON(object, LEVEL));'),
+    ('ap-active-climb-flag', '            if (FIELD(object, 0x5c) & 8) {\n                enable(object, CLIMB_EDIT, 1);\n                enable(object, CLIMB_LABEL, 1);\n            } else {',
+     '            if (FIELD(object, 0x5c) & 0x10) {\n                enable(object, CLIMB_EDIT, 1);\n                enable(object, CLIMB_LABEL, 1);\n            } else {'),
+    ('ap-active-climb-units', '                enable(object, CLIMB_LABEL, 0);\n                enable(object, CLIMB_UNITS, 0);\n            }', '                enable(object, CLIMB_LABEL, 0);\n            }'),
+    ('ap-active-airspeed-edit', '            if (ON(object, AIRSPEED)) enable(object, AIRSPEED_EDIT, 1);', '            enable(object, AIRSPEED_EDIT, 1);'),
+    ('ap-active-takeoff', "        if ((FIELD(object, 0x5c) & 0x20) && !ON(object, TAKEOFF)) {", "        if ((FIELD(object, 0x5c) & 0x20) && ON(object, TAKEOFF)) {"),
+    ('ap-off-mode', '    FIELD(object, 0x18) = 0;\n    check(object, LEVEL, 0);', '    check(object, LEVEL, 0);'),
+    ('ap-off-hold', '    FIELD(object, 0x44) = 0;\n    check(object, ALTITUDE, 0);', '    check(object, ALTITUDE, 0);'),
+    ('ap-off-navigation', '    FIELD(object, 0xe0) = 0;', '    FIELD(object, 0xe0) = 1;'),
+    ('ap-off-select', 'SERVICES->send_message(D32(object, 0x1924), CB_SETCURSEL_, 0, 0);\n    enable(object, NAVIGATION, 0);', 'enable(object, NAVIGATION, 0);'),
+    ('ap-level-redraw-order', '        enable(object, HEADING_LABEL, 0);\n        redraw(object, HEADING);\n    }', '        redraw(object, HEADING);\n        enable(object, HEADING_LABEL, 0);\n    }'),
+    ('ap-level-attitude', '    if (ON(object, ATTITUDE)) uncheck(object, ATTITUDE);\n}\n\n/* 0x223142f0', '}\n\n/* 0x223142f0'),
+    ('ap-heading-text', '        text(object, HEADING_EDIT, FIELD_TEXT(object, 0x20));\n        enable(object, HEADING_LABEL, 1);', '        text(object, HEADING_EDIT, FIELD_TEXT(object, 0x4c));\n        enable(object, HEADING_LABEL, 1);'),
+    ('ap-heading-level', '        if (ON(object, LEVEL)) uncheck(object, LEVEL);\n        if (ON(object, ATTITUDE)) uncheck(object, ATTITUDE);\n        enable(object, HEADING_EDIT, 1);', '        if (ON(object, ATTITUDE)) uncheck(object, ATTITUDE);\n        enable(object, HEADING_EDIT, 1);'),
+    ('ap-altitude-climb', '        climb = (FIELD(object, 0x5c) & 8) != 0;', '        climb = (FIELD(object, 0x5c) & 4) != 0;'),
+    ('ap-altitude-off-climb', '    enable(object, CLIMB_EDIT, 0);\n    enable(object, CLIMB_LABEL, 0);\n}\n\n/* 0x223144e0', '    enable(object, CLIMB_EDIT, 0);\n}\n\n/* 0x223144e0'),
+    ('ap-attitude-altitude', '    if (ON(object, ALTITUDE)) {\n        uncheck(object, ALTITUDE);', '    if (ON(object, HEADING)) {\n        uncheck(object, ALTITUDE);'),
+    ('ap-airspeed-mach-field', '        FIELD(object, 0xa0) = 0;\n        enable(object, AIRSPEED_EDIT, 1);', '        FIELD(object, 0xa4) = 0;\n        enable(object, AIRSPEED_EDIT, 1);'),
+    ('ap-airspeed-off-field', '    enable(object, AIRSPEED_EDIT, 0);\n    FIELD(object, 0xa4) = 0;', '    enable(object, AIRSPEED_EDIT, 0);\n    FIELD(object, 0xa0) = 0;'),
+    ('ap-mach-text', 'text(object, MACH_EDIT, FIELD_TEXT(object, 0x90));\n        check(object, AIRSPEED, 0);', 'text(object, MACH_EDIT, FIELD_TEXT(object, 0x7c));\n        check(object, AIRSPEED, 0);'),
+    ('ap-throttle-restore', '        check(object, AIRSPEED, (int32_t)FIELD(object, 0xa4));', '        check(object, AIRSPEED, (int32_t)FIELD(object, 0xa0));'),
+    ('ap-throttle-active', '        if (FIELD(object, 0x10) != 0 && ON(object, MACH)) enable(object, MACH_EDIT, 1);', '        if (ON(object, MACH)) enable(object, MACH_EDIT, 1);'),
+    ('ap-takeoff-active', '        enable(object, MACH, ON(object, ACTIVE));', '        enable(object, MACH, 1);'),
+    ('ap-takeoff-capability', "    if (FIELD(object, 0x5c) & 0x20) {\n        check(object, AIRSPEED, 0);\n        enable(object, AIRSPEED, 0);", "    if (FIELD(object, 0x5c) & 0x10) {\n        check(object, AIRSPEED, 0);\n        enable(object, AIRSPEED, 0);"),
+    ('ap-read-climb-text', 'SERVICES->get_window_text(AT(object, CLIMB_EDIT), FIELD_TEXT(object, 0xc4), 0xff);', 'SERVICES->get_window_text(AT(object, CLIMB_EDIT), FIELD_TEXT(object, 0xc4), 0xfe);'),
+    ('ap-read-yaw', 'FIELD(object, 0xd8) = D32(object, YAW + 0xbc);', 'FIELD(object, 0xd8) = D32(object, YAW + 0xb8);'),
+    ('ap-read-mode-heading', '        FIELD(object, 0x18) = 3;', '        FIELD(object, 0x18) = 2;'),
+    ('ap-read-mode-order', '    if (ON(object, LEVEL)) {\n        FIELD(object, 0x18) = 1;\n    } else if (ON(object, HEADING)) {',
+     '    if (ON(object, HEADING) && !ON(object, LEVEL)) {\n        FIELD(object, 0x18) = 1;\n    } else if (ON(object, HEADING)) {'),
+    ('ap-read-navigation-range', '        if (mode <= 4) FIELD(object, 0xe0) = mode;', '        if (mode <= 5) FIELD(object, 0xe0) = mode;'),
+    ('ap-read-speed-fields', '        FIELD(object, 0xa4) = 1;\n        FIELD(object, 0xa0) = 0;', '        FIELD(object, 0xa4) = 1;'),
+    ('ap-populate-label', "SERVICES->set_sims_text(AT(object, ALTITUDE_LABEL), (char *)AT(DESCRIPTOR(object), 0x30));", "SERVICES->set_sims_text(AT(object, ALTITUDE_LABEL), (char *)AT(DESCRIPTOR(object), 0x34));"),
+    ('ap-populate-attitude-climb', '        check(object, ATTITUDE, 1);\n        enable(object, CLIMB_EDIT, 0);', '        check(object, ATTITUDE, 1);'),
+    ('ap-populate-navigation', 'if (FIELD(object, 0xe0) <= 4)\n', 'if (FIELD(object, 0xe0) <= 5)\n'),
+    ('ap-populate-retail-bug', "        if (!(FIELD(object, 0x5c) & 2)) {\n            enable(object, MACH, 0);\n            enable(object, MACH_EDIT, 0);",
+     "        if (!(FIELD(object, 0x5c) & 2)) {\n            enable(object, AIRSPEED, 0);\n            enable(object, AIRSPEED_EDIT, 0);"),
+    ('ap-populate-takeoff-flag', '    } else if (!(flags & 1)) {', '    } else if (!(flags & 2)) {'),
+    ('ap-populate-throttle', '    } else if (ON(object, THROTTLE)) {', '    } else if (!ON(object, THROTTLE)) {'),
+    ('ap-populate-inactive', '    if (FIELD(object, 0x10) == 0) {\n        static const uint32_t all[]', '    if (FIELD(object, 0x10) == 1) {\n        static const uint32_t all[]'),
+    ('ap-populate-inactive-order', '            CLIMB_EDIT, CLIMB_LABEL, CLIMB_UNITS\n', '            CLIMB_EDIT, CLIMB_UNITS, CLIMB_LABEL\n'),
+    ('ap-validate-throttle', 'if (ON(object, THROTTLE) && FIELD(object, 0x68) != 0) failure = 0xd25;', 'if (ON(object, THROTTLE) && FIELD(object, 0x6c) != 0) failure = 0xd25;'),
+    ('ap-validate-inactive', '    if (!ON(object, ACTIVE)) return 0;', '    if (!ON(object, ACTIVE)) return failure;'),
+    ('ap-validate-swap', '        failure = 0xcb1;\n    } else if (ON(object, HEADING)', '        failure = 0xcb0;\n    } else if (ON(object, HEADING)'),
+    ('ap-validate-capability', '    } else if (FIELD(object, 0x5c) != 0) {', '    } else {'),
+    ('ap-validate-climb-box', '        if (ON(object, ALTITUDE) && FIELD(object, 0xc0) != 0) failure = 0xd28;', '        if (FIELD(object, 0xc0) != 0) failure = 0xd28;'),
+    ('ap-validate-populate', '    if (failure == 0) fs98_flights_autopilot_populate(object);', '    (void)fs98_flights_autopilot_populate;'),
+    ('ap-error-code', '    if (code != 0 && ON(object, ACTIVE)) {', '    if (ON(object, ACTIVE)) {'),
+    ('ap-error-pointer', '(uint32_t)(uintptr_t)status))', '*status))'),
+    ('ap-error-ids', '{HEADING, 0x1c, HEADING_EDIT, 0xcb1}, {ALTITUDE, 0x48, ALTITUDE_EDIT, 0xcb0},', '{HEADING, 0x1c, HEADING_EDIT, 0xcb0}, {ALTITUDE, 0x48, ALTITUDE_EDIT, 0xcb1},'),
+    ('ap-error-first-only', '                handled = fields[index].id;\n            break;', '                handled = fields[index].id;'),
+    ('ap-init-edit-flags', 'SERVICES->init_edit(AT(object, MACH_EDIT), SERVICES->base_font(2), 0xffffff, 0, 0xff0000, 0, 5);', 'SERVICES->init_edit(AT(object, MACH_EDIT), SERVICES->base_font(2), 0xffffff, 0, 0xff0000, 0, 1);'),
+    ('ap-init-combo-font', 'init_combo(AT(object, NAVIGATION), AT(object, 0x3e0),', 'init_combo(AT(object, NAVIGATION), AT(object, 0x370),'),
+    ('ap-init-limit-mach', 'EM_LIMITTEXT, FIELD(object, 0x94) - 1, 0);', 'EM_LIMITTEXT, FIELD(object, 0x90) - 1, 0);'),
+    ('ap-init-box-order', 'first[] = {LEVEL, HEADING, ALTITUDE, ATTITUDE, YAW};', 'first[] = {HEADING, LEVEL, ALTITUDE, ATTITUDE, YAW};'),
+    ('ap-init-return', '    fs98_flights_autopilot_populate(object);\n    return 1;', '    fs98_flights_autopilot_populate(object);\n    return 0;'),
+]
 UNWIND = [
     ('opening-hint-cleanup', 'opening', "    if (state->live) { state->live = 0; SERVICES->string_destroy(&state->string); }", "    (void)state;"),
     ('menu-constructor-busy', 'objects', '        D32(object, 0x10dc) = 0;', '        (void)0;'),
@@ -400,6 +460,7 @@ def main():
     breaks += [(name, 'aircraft', 'normal', before, after) for name, before, after in AIRCRAFT]
     breaks += [(name, 'opening', 'normal', before, after) for name, before, after in OPENING]
     breaks += [(name, 'select', 'normal', before, after) for name, before, after in SELECT]
+    breaks += [(name, 'autopilot', 'normal', before, after) for name, before, after in AUTOPILOT]
     breaks += [(name, unit, 'unwind', before, after) for name, unit, before, after in UNWIND]
     if only:
         breaks = [b for b in breaks if b[0] in only]

@@ -42,36 +42,22 @@ step doubled. Two were not: see [Unsettled questions](#unsettled-questions).
 ## Differences only with retail and ours mixed
 
 Neither shows in the all-ours game on the flights above. They matter when a single
-module is swapped into a retail game to bisect a problem, and each could be hiding a
-real difference. Each of our modules alone against all-retail, software, 60 passes, on
-`PARIS` and `KAUAI`: all match except these.
+module is swapped into a retail game to bisect a problem (`HG2D_FRAMES_ONLY`), and each could
+be hiding a real difference. Each of our modules alone against all-retail, software, without
+sound, 300 passes, on `PARIS` and `KAUAI`: all match except these.
 
-### UTIL alone differs from the first frame
+### NUMERIC with retail ATC prints a wrong ceiling
 
-On `PARIS`, frame 1 (line 2 of the log); on `KAUAI`, line 3. GLOBAL differs at pass 0
-(`+0x2ea`, `+0x5d2`, `+0xc92`, `+0xc96`, `+0xce8`, `+0xcf4` among others). On Direct3D,
-before the `+0x60` and `+0x6c` fixes, it drew 3,994 times where retail drew 8,521, in the same 191
-scenes.
+NUMERIC alone on `KAUAI` differs from pass 76, in the message bar only: retail's ATIS reads
+`Scattered 4` and this `Scattered -`. All ours matches retail, so our ATC does not meet it.
 
-**Not explained.** The likely cause: retail UTIL preserves registers across most
-services and ours, plain C, does not, while retail's assembly modules keep values in
-those registers across the call. `utildiff` compares results, not registers, so it
-cannot see this. Only `+0x60`, `+0x6c` and `+0x70` have been fixed. Registers each
-retail service pushes in its opening instructions, which is a first cut and not a proof
-that it restores them:
+**Not explained.** Retail's ATC formats through NUMERIC `+0x18` (`.text+0x6fe`) into a
+six-byte buffer on its stack and then reads it. That call site reads no register afterwards,
+so it is not plainly the bug UTIL had, but NUMERIC is hand-written assembly too, and
+`numericdiff` compares results and not registers.
 
-| registers | slots |
-| --- | --- |
-| eax, ecx, edx | `+0x24`, `+0x2c`, `+0x30`, `+0x44`, `+0x48`, `+0x4c`, `+0x64`, `+0x68`, `+0x88`, `+0x94` |
-| eax, edx | `+0x34`, `+0x40` |
-| ecx, edx | `+0x38`, `+0x3c` |
-| edx | `+0x18`, `+0x1c`, `+0x20` |
-| eax | `+0x28` |
-
-To continue: give these slots the same entry thunks as `+0x60`, extend `utildiff`'s
-`keeps_registers` checks to them, and rerun UTIL alone. Our other modules might read a
-register the same way in a path these flights do not reach, so this is not only about
-mixed games.
+To continue: find which value and format id that call passes, and give `numericdiff` a
+register comparison like `utildiff`'s.
 
 ### MAIN with retail ATC faults
 
@@ -120,9 +106,12 @@ other side hid it, so each module passed 20,000 scenarios alone.
 | --- | --- | --- | --- |
 | DYNAMIC | FE `+0x40` | reads to the caller's edi, returns registers shifted | took the buffer argument |
 | MAIN | UTIL `+0x60`, `+0x6c` | keeps ecx across the call | stamped a constant over ecx |
+| retail modules | UTIL `+0x2c` and others | keep their registers | `utildiff` looked only at results |
 | FE `+0x1c` | (GLOBAL `+0xcd2`) | a different shape: `fediff` reached only one of two values | |
 
 Worth auditing: the other `CLEAN` thunks in `tools/difftest/maindiff.c`, which fix ecx and
 edx to constants; any harness stub of UTIL or FE; and `fe.md`'s other register-shifting
 entries (`+0x18`). A stub that does something the real callee does not is the thing to
-look for.
+look for. The cheapest check for any assembly module is what `utildiff` now does: compare all
+seven registers, through the built DLL's table. NUMERIC, DYNAMIC, WINDOW, FE and the assembly
+half of MAIN have not had it.

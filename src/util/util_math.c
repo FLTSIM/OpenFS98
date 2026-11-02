@@ -708,18 +708,6 @@ void FS98_STDCALL fs98_util_unpack_position(const void *src, void *dst)
     }
 }
 
-/* Retail saves eax and ecx around this and leaves edx alone, and MAIN's localiser
- * keeps its course in cx across the call, so the slot preserves all three. */
-#if defined(__i386__)
-__asm__(".text\n.globl _fs98_util_unpack_position_entry\n"
-        "_fs98_util_unpack_position_entry:\n\t"
-        "pushl %eax\n\tpushl %ecx\n\tpushl %edx\n\t"
-        "pushl 20(%esp)\n\tpushl 20(%esp)\n\t"
-        "call _fs98_util_unpack_position@8\n\t"
-        "popl %edx\n\tpopl %ecx\n\tpopl %eax\n\t"
-        "ret $8\n");
-#endif
-
 /* ---- slot 0x3c: angle of a 2D vector (atan2) ------------------------------
  *
  * Returns a 16-bit angle, the same units everything else here uses: 0x4000 is
@@ -930,7 +918,7 @@ void FS98_STDCALL fs98_util_fixed48_to_double(double *out, const void *in48)
 }
 
 /* Slot 0xbc.  Double to 48-bit. */
-void FS98_STDCALL fs98_util_double_to_fixed48(const double *in, void *out48)
+int64_t FS98_STDCALL fs98_util_double_to_fixed48(const double *in, void *out48)
 {
     unsigned char *d = (unsigned char *)out48;
     double v = *in;
@@ -944,6 +932,7 @@ void FS98_STDCALL fs98_util_double_to_fixed48(const double *in, void *out48)
 
     *(int32_t  *)(d + 4) = hi;
     *(uint16_t *)(d + 2) = (uint16_t)lo;
+    return lo;                                    /* edx:eax, as _ftol leaves them */
 }
 
 /* ---- slot 0xb8: a floating-point generator --------------------------------
@@ -1061,7 +1050,7 @@ void FS98_STDCALL fs98_util_init(void)
  * on the x87. So this is the second service that will differ by a unit on ARM,
  * under the decision recorded in the precision note above.
  */
-void FS98_STDCALL fs98_util_double_to_fixed48_signed(const double *in, void *out48)
+int64_t FS98_STDCALL fs98_util_double_to_fixed48_signed(const double *in, void *out48)
 {
     unsigned char *d = (unsigned char *)out48;
     double v = *in;
@@ -1078,6 +1067,7 @@ void FS98_STDCALL fs98_util_double_to_fixed48_signed(const double *in, void *out
 
     *(int32_t  *)(d + 4) = hi;
     *(uint16_t *)(d + 2) = (uint16_t)lo;
+    return lo;                                    /* edx:eax, as _ftol leaves them */
 }
 
 /* ---- slot 0xc8: 32.16 to double, signed -----------------------------------
@@ -1493,3 +1483,95 @@ void FS98_STDCALL fs98_util_marshal(const void *source, const void *descriptors,
         count--;
     }
 }
+
+/* ---- what each slot leaves in the registers -------------------------------
+ *
+ * Retail's services are hand-written assembly, and its assembly modules keep values
+ * in registers across calls to them: MAIN's localiser and radios keep their course in
+ * cx across +0x60 and +0x6c.  So what a service leaves is part of its contract, which C
+ * does not honour, and each slot enters through one of these.  utildiff compares all
+ * seven registers of each.
+ *
+ * Most save everything but their result.  A few leave values of their own, reproduced
+ * below though nothing is known to read them.
+ */
+#if defined(__i386__)
+#define ENTRY_NAME(name) ".text\n.globl _" #name "_entry\n_" #name "_entry:\n\t"
+#define KEEP_ALL(name, bytes) \
+    __asm__(ENTRY_NAME(name) "pushl %eax\n\tpushl %ecx\n\tpushl %edx\n\t" \
+            ".rept " #bytes "/4\n\tpushl 12+" #bytes "(%esp)\n\t.endr\n\t" \
+            "call _" #name "@" #bytes "\n\t" \
+            "popl %edx\n\tpopl %ecx\n\tpopl %eax\n\tret $" #bytes "\n");
+#define KEEP_ECX_EDX(name, bytes) \
+    __asm__(ENTRY_NAME(name) "pushl %ecx\n\tpushl %edx\n\t" \
+            ".rept " #bytes "/4\n\tpushl 8+" #bytes "(%esp)\n\t.endr\n\t" \
+            "call _" #name "@" #bytes "\n\t" \
+            "popl %edx\n\tpopl %ecx\n\tret $" #bytes "\n");
+
+KEEP_ECX_EDX(fs98_util_sqrt64, 4)
+KEEP_ECX_EDX(fs98_util_sqrt32, 4)
+KEEP_ECX_EDX(fs98_util_sqrt16, 4)
+KEEP_ALL(fs98_util_mul48_s16, 12)
+KEEP_ALL(fs98_util_sincos, 12)
+KEEP_ALL(fs98_util_div48_u16, 12)
+KEEP_ALL(fs98_util_rotate2d, 24)
+KEEP_ECX_EDX(fs98_util_angle_from_sin, 8)
+KEEP_ECX_EDX(fs98_util_atan2, 8)
+KEEP_ALL(fs98_util_metres32_to_longitude, 12)
+KEEP_ALL(fs98_util_metres_to_longitude, 12)
+KEEP_ALL(fs98_util_longitude_to_metres, 12)
+KEEP_ALL(fs98_util_rotate3d, 12)
+KEEP_ALL(fs98_util_unpack_position, 8)
+KEEP_ALL(fs98_util_range_and_bearing48, 24)
+KEEP_ALL(fs98_util_range_and_bearing, 20)
+KEEP_ALL(fs98_util_marshal, 12)
+KEEP_ECX_EDX(fs98_util_double_to_int, 8)
+KEEP_ECX_EDX(fs98_util_double_to_int64_low, 8)
+
+/* +0x28: edx is the high half of a square that always fits in eax. */
+__asm__(ENTRY_NAME(fs98_util_hypot) "pushl %ecx\n\tpushl 12(%esp)\n\tpushl 12(%esp)\n\t"
+        "call _fs98_util_hypot@8\n\tpopl %ecx\n\txorl %edx, %edx\n\tret $8\n");
+
+/* +0x80: ecx and edx hold the operands. */
+__asm__(ENTRY_NAME(fs98_util_v48_equal) "pushl 8(%esp)\n\tpushl 8(%esp)\n\t"
+        "call _fs98_util_v48_equal@8\n\t"
+        "movl 4(%esp), %ecx\n\tmovl 8(%esp), %edx\n\tret $8\n");
+
+/* +0x74, +0x78: ecx and edx hold the operands, eax the last high dword stored. */
+#define V48_ENTRY(name) \
+    __asm__(ENTRY_NAME(name) "pushl 12(%esp)\n\tpushl 12(%esp)\n\tpushl 12(%esp)\n\t" \
+            "call _" #name "@12\n\t" \
+            "movl 4(%esp), %eax\n\tmovl 0x14(%eax), %eax\n\t" \
+            "movl 8(%esp), %ecx\n\tmovl 12(%esp), %edx\n\tret $12\n");
+V48_ENTRY(fs98_util_v48_add)
+V48_ENTRY(fs98_util_v48_sub)
+
+/* +0x7c: rep movs runs ecx to zero. */
+__asm__(ENTRY_NAME(fs98_util_copy24) "pushl %eax\n\tpushl %edx\n\t"
+        "pushl 16(%esp)\n\tpushl 16(%esp)\n\t"
+        "call _fs98_util_copy24@8\n\t"
+        "popl %edx\n\tpopl %eax\n\txorl %ecx, %ecx\n\tret $8\n");
+
+/* +0x84: ecx the count, eax and edx the two halves stored. */
+__asm__(ENTRY_NAME(fs98_util_shr48) "pushl 12(%esp)\n\tpushl 12(%esp)\n\tpushl 12(%esp)\n\t"
+        "call _fs98_util_shr48@12\n\t"
+        "movl 4(%esp), %eax\n\tmovzwl 2(%eax), %edx\n\tmovl 4(%eax), %eax\n\t"
+        "movl 12(%esp), %ecx\n\tret $12\n");
+
+/* +0xbc, +0xc4: edx:eax is the last _ftol, which the C returns; ecx is kept. */
+#define FIXED48_ENTRY(name) \
+    __asm__(ENTRY_NAME(name) "pushl %ecx\n\tpushl 12(%esp)\n\tpushl 12(%esp)\n\t" \
+            "call _" #name "@8\n\tpopl %ecx\n\tret $8\n");
+FIXED48_ENTRY(fs98_util_double_to_fixed48)
+FIXED48_ENTRY(fs98_util_double_to_fixed48_signed)
+
+/* +0xc0: eax the output, ecx the high dword, edx the fraction.  +0xc8: eax the input,
+ * ecx the output, edx the high dword. */
+__asm__(ENTRY_NAME(fs98_util_fixed48_to_double) "pushl 8(%esp)\n\tpushl 8(%esp)\n\t"
+        "call _fs98_util_fixed48_to_double@8\n\t"
+        "movl 8(%esp), %eax\n\tmovl 4(%eax), %ecx\n\tmovzwl 2(%eax), %edx\n\t"
+        "movl 4(%esp), %eax\n\tret $8\n");
+__asm__(ENTRY_NAME(fs98_util_fixed48_to_double_signed) "pushl 8(%esp)\n\tpushl 8(%esp)\n\t"
+        "call _fs98_util_fixed48_to_double_signed@8\n\t"
+        "movl 8(%esp), %eax\n\tmovl 4(%eax), %edx\n\tmovl 4(%esp), %ecx\n\tret $8\n");
+#endif

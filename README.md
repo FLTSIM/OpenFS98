@@ -214,7 +214,7 @@ the reimplementation uses the same instructions on x86 so that "the same" is
 not a matter of opinion. There is no x87 on ARM, so a parallel path goes
 through `sqrt` and `nearbyint` instead -- and `make utildiff-portable` holds it
 to the same standard, checking it against the retail DLL with the assembly
-compiled out. It currently passes all 6,222,448 comparisons, so an ARM build
+compiled out. It currently passes all 6,452,880 comparisons, so an ARM build
 will compute the same numbers as an x86 one.
 
 One service is known not to survive the move: UTIL's double-to-fixed-point
@@ -368,11 +368,11 @@ its depth queue, services and CHAIN callbacks, 20,000 `g3ddiff` scenarios
 with zero differences, and a portable C mesh compiler checked against
 retail's instructions (see [docs/modules/g3d.md](docs/modules/g3d.md)).
 
-**Next: UTIL's register preservation.** The whole game, all retail against all ours, matches
+**Next: install the finished dialogs.** The whole game, all retail against all ours, matches
 frame for frame on all 74 flights with nobody flying, and flown by script on eight flights, on
 both renderers. What is still open is listed in
-[docs/open-differences.md](docs/open-differences.md). After that, install the finished dialogs
-(Alerts, Help, Views, Sim), then Flights and Options, SIMSUI, the gauges and an executable
+[docs/open-differences.md](docs/open-differences.md). Install Alerts, Help, Views and Sim,
+then Flights and Options, SIMSUI, the gauges and an executable
 around `HOST.DLL`: [docs/remaining-work.md](docs/remaining-work.md).
 
 Other useful work, in no particular order:

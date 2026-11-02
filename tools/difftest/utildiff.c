@@ -49,8 +49,8 @@ void     FS98_STDCALL fs98_util_unpack_position(const void *, void *);
 int32_t  FS98_STDCALL fs98_util_atan2(int32_t, int32_t);
 int32_t  FS98_STDCALL fs98_util_angle_from_sin(int16_t, int16_t);
 void     FS98_STDCALL fs98_util_fixed48_to_double(double *, const void *);
-void     FS98_STDCALL fs98_util_double_to_fixed48(const double *, void *);
-void     FS98_STDCALL fs98_util_double_to_fixed48_signed(const double *, void *);
+int64_t  FS98_STDCALL fs98_util_double_to_fixed48(const double *, void *);
+int64_t  FS98_STDCALL fs98_util_double_to_fixed48_signed(const double *, void *);
 void     FS98_STDCALL fs98_util_fixed48_to_double_signed(double *, const void *);
 void     FS98_STDCALL fs98_util_range_and_bearing(const int32_t *, const int32_t *,
                                                   int32_t, int32_t *, int16_t *);
@@ -113,8 +113,36 @@ static int unpack_keeps_registers(fn_unpack fn, const void *src, void *dst)
     return a == 0x11223344 && c == 0x55667788 && d == 0x99aabbcc;
 }
 
+void fs98_util_sqrt64_entry(void);
+void fs98_util_sqrt32_entry(void);
+void fs98_util_sqrt16_entry(void);
+void fs98_util_mul48_s16_entry(void);
+void fs98_util_sincos_entry(void);
+void fs98_util_div48_u16_entry(void);
+void fs98_util_rotate2d_entry(void);
+void fs98_util_angle_from_sin_entry(void);
+void fs98_util_atan2_entry(void);
+void fs98_util_metres32_to_longitude_entry(void);
+void fs98_util_metres_to_longitude_entry(void);
+void fs98_util_longitude_to_metres_entry(void);
+void fs98_util_rotate3d_entry(void);
+void fs98_util_range_and_bearing48_entry(void);
+void fs98_util_range_and_bearing_entry(void);
+void fs98_util_marshal_entry(void);
+void fs98_util_v48_add_entry(void);
+void fs98_util_v48_sub_entry(void);
+void fs98_util_copy24_entry(void);
+void fs98_util_shr48_entry(void);
+void fs98_util_double_to_fixed48_entry(void);
+void fs98_util_double_to_fixed48_signed_entry(void);
+void fs98_util_fixed48_to_double_entry(void);
+void fs98_util_fixed48_to_double_signed_entry(void);
 void fs98_util_rand_entry(void);
 void fs98_util_rand32_entry(void);
+void fs98_util_double_to_int_entry(void);
+void fs98_util_double_to_int64_low_entry(void);
+void fs98_util_hypot_entry(void);
+void fs98_util_v48_equal_entry(void);
 typedef uint32_t (FS98_STDCALL *fn_draw)(void);
 /* Calls fn() with known ecx and edx; nonzero if both survive. */
 static int draw_keeps_registers(fn_draw fn)
@@ -399,6 +427,180 @@ static uint32_t rng(void)
     rng_state ^= rng_state << 5;
     return rng_state;
 }
+
+
+/* ---- what each service leaves in the registers ----------------------------
+ *
+ * Retail's assembly services keep most registers, and retail's assembly modules
+ * rely on it: MAIN keeps its course in cx across +0x60.  So a service's contract is
+ * every register it hands back, not only its result.  reg_call loads known values,
+ * pushes the arguments and records all seven registers and how far esp moved. */
+#if defined(__i386__)
+#define REG_COUNT 7
+uint32_t reg_in[REG_COUNT], reg_out[REG_COUNT + 1], reg_fn, reg_esp;
+void reg_call(void *fn, const uint32_t *args, int count);
+__asm__(".text\n_reg_call:\n\t"
+        "pushl %ebp\n\tpushl %ebx\n\tpushl %esi\n\tpushl %edi\n\t"
+        "movl 20(%esp), %eax\n\tmovl %eax, _reg_fn\n\t"
+        "movl 24(%esp), %edx\n\tmovl 28(%esp), %ecx\n\t"
+        "movl %esp, _reg_esp\n"
+        "1:\n\tdecl %ecx\n\tjs 2f\n\tpushl (%edx,%ecx,4)\n\tjmp 1b\n"
+        "2:\n\tmovl _reg_in, %eax\n\tmovl _reg_in+4, %ecx\n\tmovl _reg_in+8, %edx\n\t"
+        "movl _reg_in+12, %ebx\n\tmovl _reg_in+16, %esi\n\tmovl _reg_in+20, %edi\n\t"
+        "movl _reg_in+24, %ebp\n\t"
+        "call *_reg_fn\n\t"
+        "movl %eax, _reg_out\n\tmovl %ecx, _reg_out+4\n\tmovl %edx, _reg_out+8\n\t"
+        "movl %ebx, _reg_out+12\n\tmovl %esi, _reg_out+16\n\tmovl %edi, _reg_out+20\n\t"
+        "movl %ebp, _reg_out+24\n\t"
+        "movl %esp, %eax\n\tsubl _reg_esp, %eax\n\tmovl %eax, _reg_out+28\n\t"
+        "\n_reg_resume:\n\tmovl _reg_esp, %esp\n\t"
+        "popl %edi\n\tpopl %esi\n\tpopl %ebx\n\tpopl %ebp\n\tret\n");
+
+/* Random inputs can divide by zero in either side's arithmetic.  A trial where retail
+ * faults says nothing about registers and is skipped; ours faulting alone is a difference. */
+void reg_resume(void);
+__asm__(".globl _reg_resume\n");
+static volatile int reg_faulted, reg_armed;
+static LONG WINAPI reg_fault(EXCEPTION_POINTERS *pointers)
+{
+    if (!reg_armed)
+        return EXCEPTION_CONTINUE_SEARCH;
+    reg_faulted = 1;
+    pointers->ContextRecord->Eip = (DWORD)(uintptr_t)reg_resume;
+    return EXCEPTION_CONTINUE_EXECUTION;
+}
+
+/* An argument: p a pointer to input, g the same holding three 48-bit values in the range of
+ * latitudes the table covers, m holding one the size of a distance on the globe, o a pointer to output, w a word, d a dword, n a nonzero word,
+ * D a double (two pushes). */
+struct reg_case { unsigned off; const char *args; void *ours; };
+
+#define REG_BUFFERS 4
+static const char *const reg_names[REG_COUNT] = { "eax", "ecx", "edx", "ebx", "esi", "edi", "ebp" };
+
+static void reg_args(const char *shape, uint32_t *args, int *count, unsigned char in[][64], unsigned char out[][64])
+{
+    int n = 0, inputs = 0, outputs = 0;
+    for (; *shape; shape++) {
+        uint32_t v = rng();
+        switch (*shape) {
+        case 'p': args[n++] = (uint32_t)(uintptr_t)in[inputs++]; break;
+        case 'm':
+            *(int32_t *)(in[inputs] + 4) = (int32_t)(rng() & 0x01ffffffu) - 0x01000000;
+            args[n++] = (uint32_t)(uintptr_t)in[inputs++];
+            break;
+        case 'g': {
+            int k;
+            for (k = 0; k < 3; k++)
+                *(int32_t *)(in[inputs] + k * 8 + 4) = (int32_t)(rng() % 0x9c) - 0x4e;
+            args[n++] = (uint32_t)(uintptr_t)in[inputs++];
+            break;
+        }
+        case 'o': args[n++] = (uint32_t)(uintptr_t)out[outputs++]; break;
+        case 'w': args[n++] = v & 0xffff; break;
+        case 'n': args[n++] = (v & 0xffff) | 1; break;
+        case 'd': args[n++] = v; break;
+        case 'D': {
+            double d = (double)(int32_t)v / 16.0;
+            memcpy(&args[n], &d, 8);
+            n += 2;
+            break;
+        }
+        }
+    }
+    *count = n;
+}
+
+/* With `built`, ours is what its Linkage holds at that slot, which is the table the game
+ * uses; without it, the entry itself. */
+static void reg_contracts(HMODULE h, HMODULE built, const struct reg_case *cases, unsigned count,
+                          unsigned trials, unsigned *checked_count, unsigned *bad_count)
+{
+    int verbose = getenv("UTILDIFF_REGS") != 0;
+    unsigned c, t, r;
+    PVOID handler = AddVectoredExceptionHandler(1, reg_fault);
+    for (c = 0; c < count; c++) {
+        unsigned changed = 0, differ[REG_COUNT + 1] = { 0 }, outs = 0, ran = 0, faults = 0;
+        for (t = 0; t < trials; t++) {
+            static unsigned char in[REG_BUFFERS][64], out_r[REG_BUFFERS][64], out_o[REG_BUFFERS][64];
+            uint32_t args[16], saved_r[REG_COUNT + 1], saved_i[REG_COUNT];
+            uint32_t state[16];
+            int n, b;
+            for (r = 0; r < REG_COUNT; r++)
+                saved_i[r] = reg_in[r] = rng();
+            for (b = 0; b < REG_BUFFERS; b++)
+                for (r = 0; r < 64; r++)
+                    in[b][r] = (unsigned char)((t % 3) ? rng() : (r < 4 ? rng() : 0));
+            memset(out_r, 0x5a, sizeof out_r);
+            memset(out_o, 0x5a, sizeof out_o);
+            reg_args(cases[c].args, args, &n, in, out_r);
+            memcpy(state, args, sizeof state);
+            reg_faulted = 0;
+            reg_armed = 1;
+            reg_call(slot(h, cases[c].off), args, n);
+            reg_armed = 0;
+            if (reg_faulted)
+                continue;
+            ran++;
+            memcpy(saved_r, reg_out, sizeof saved_r);
+            for (r = 0; r < REG_COUNT; r++)
+                if (saved_r[r] != saved_i[r])
+                    changed |= 1u << r;
+            /* the same arguments, with outputs moved to the other buffers */
+            for (b = 0; b < n; b++) {
+                uintptr_t at = (uintptr_t)state[b], lo = (uintptr_t)out_r;
+                if (at >= lo && at < lo + sizeof out_r)
+                    state[b] = (uint32_t)((uintptr_t)out_o + (at - lo));
+            }
+            memcpy(reg_in, saved_i, sizeof saved_i);
+            reg_armed = 1;
+            reg_call(built ? slot(built, cases[c].off) : cases[c].ours, state, n);
+            reg_armed = 0;
+            if (reg_faulted) {
+                faults++;
+                continue;
+            }
+            for (r = 0; r <= REG_COUNT; r++) {
+                uintptr_t held = (uintptr_t)saved_r[r], lo = (uintptr_t)out_r;
+                if (held >= lo && held < lo + sizeof out_r)     /* the output pointer */
+                    saved_r[r] = (uint32_t)((uintptr_t)out_o + (held - lo));
+                ++*checked_count;
+                if (saved_r[r] != reg_out[r])
+                    differ[r]++;
+            }
+            ++*checked_count;
+            if (memcmp(out_r, out_o, sizeof out_r))
+                outs++;
+        }
+        if (verbose) {
+            printf("+0x%02x (%u run) retail changes:", cases[c].off, ran);
+            for (r = 0; r < REG_COUNT; r++)
+                if (changed & (1u << r))
+                    printf(" %s", reg_names[r]);
+            printf("; differ:");
+            for (r = 0; r < REG_COUNT; r++)
+                if (differ[r])
+                    printf(" %s %u", reg_names[r], differ[r]);
+            if (differ[REG_COUNT])
+                printf(" esp %u", differ[REG_COUNT]);
+            if (outs)
+                printf(" output %u", outs);
+            printf("\n");
+        }
+        for (r = 0; r <= REG_COUNT; r++)
+            if (differ[r] && (*bad_count)++ < 8)
+                printf("+0x%02x: %s differs in %u of %u\n", cases[c].off,
+                       r < REG_COUNT ? reg_names[r] : "esp", differ[r], trials);
+        if (outs && (*bad_count)++ < 8)
+            printf("+0x%02x: output differs in %u of %u\n", cases[c].off, outs, trials);
+        if (faults && (*bad_count)++ < 8)
+            printf("+0x%02x: ours faulted alone in %u of %u\n", cases[c].off, faults, trials);
+        if (ran < trials / 2 && (*bad_count)++ < 8)
+            printf("+0x%02x: only %u of %u trials ran\n", cases[c].off, ran, trials);
+    }
+    RemoveVectoredExceptionHandler(handler);
+}
+#endif
 
 int main(void)
 {
@@ -1178,6 +1380,22 @@ int main(void)
                 checked++;
                 if (memcmp(da, db, sizeof da) && bad++ < 8)
                     printf("marshal src %u dst %u differs\n", st, dt);
+#if defined(__i386__)
+                {   /* and what each leaves in the registers */
+                    uint32_t args[3], kept[REG_COUNT + 1];
+                    args[0] = (uint32_t)(uintptr_t)srcbuf;
+                    args[1] = (uint32_t)(uintptr_t)desc;
+                    args[2] = 2;
+                    for (k = 0; k < REG_COUNT; k++)
+                        reg_in[k] = rng();
+                    reg_call((void *)r88, args, 3);
+                    memcpy(kept, reg_out, sizeof kept);
+                    reg_call((void *)fs98_util_marshal_entry, args, 3);
+                    checked++;
+                    if (memcmp(kept, reg_out, sizeof kept) && bad++ < 8)
+                        printf("marshal src %u dst %u leaves different registers\n", st, dt);
+                }
+#endif
             }
         {   /* a zero repeat count must touch nothing at all */
             unsigned char srcbuf[16], da[32], db[32];
@@ -1393,6 +1611,51 @@ int main(void)
             }
         }
     }
+
+#if defined(__i386__)
+    {
+        static const struct reg_case cases[] = {
+            { 0x18, "p", (void *)fs98_util_sqrt64_entry },
+            { 0x1c, "d", (void *)fs98_util_sqrt32_entry },
+            { 0x20, "w", (void *)fs98_util_sqrt16_entry },
+            { 0x24, "pwo", (void *)fs98_util_mul48_s16_entry },
+            { 0x28, "ww", (void *)fs98_util_hypot_entry },
+            { 0x2c, "woo", (void *)fs98_util_sincos_entry },
+            { 0x30, "pno", (void *)fs98_util_div48_u16_entry },
+            { 0x34, "ddwwoo", (void *)fs98_util_rotate2d_entry },
+            { 0x38, "ww", (void *)fs98_util_angle_from_sin_entry },
+            { 0x3c, "dd", (void *)fs98_util_atan2_entry },
+            { 0x40, "pgo", (void *)fs98_util_metres32_to_longitude_entry },
+            { 0x44, "mgo", (void *)fs98_util_metres_to_longitude_entry },
+            { 0x48, "mgo", (void *)fs98_util_longitude_to_metres_entry },
+            { 0x4c, "ppo", (void *)fs98_util_rotate3d_entry },
+            { 0x50, "dd", (void *)fs98_util_stub_50 },
+            { 0x54, "dd", (void *)fs98_util_stub_54 },
+            { 0x58, "dd", (void *)fs98_util_stub_58 },
+            { 0x5c, "", (void *)fs98_util_stub_5c },
+            { 0x60, "po", (void *)fs98_util_unpack_position_entry },
+            { 0x64, "ggdooo", (void *)fs98_util_range_and_bearing48_entry },
+            { 0x68, "ppdoo", (void *)fs98_util_range_and_bearing_entry },
+            { 0x74, "opp", (void *)fs98_util_v48_add_entry },
+            { 0x78, "opp", (void *)fs98_util_v48_sub_entry },
+            { 0x7c, "op", (void *)fs98_util_copy24_entry },
+            { 0x80, "pp", (void *)fs98_util_v48_equal_entry },
+            { 0x84, "opd", (void *)fs98_util_shr48_entry },
+            { 0xb0, "D", (void *)fs98_util_double_to_int_entry },
+            { 0xb4, "D", (void *)fs98_util_double_to_int64_low_entry },
+            { 0xbc, "po", (void *)fs98_util_double_to_fixed48_entry },
+            { 0xc0, "op", (void *)fs98_util_fixed48_to_double_entry },
+            { 0xc4, "po", (void *)fs98_util_double_to_fixed48_signed_entry },
+            { 0xc8, "op", (void *)fs98_util_fixed48_to_double_signed_entry },
+        };
+        HMODULE built = LoadLibraryA("UTIL_ours.dll");
+        reg_contracts(h, 0, cases, sizeof cases / sizeof cases[0], 400, &checked, &bad);
+        if (!built && bad++ < 8)
+            printf("UTIL_ours.dll did not load\n");
+        if (built)
+            reg_contracts(h, built, cases, sizeof cases / sizeof cases[0], 400, &checked, &bad);
+    }
+#endif
 
     /* and that null outputs are tolerated the way retail tolerates them */
     r_sincos(1234, NULL, NULL);

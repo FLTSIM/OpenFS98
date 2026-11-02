@@ -45,7 +45,7 @@ address order, so they include any alignment padding.
 | `+0x54` | `0x17d3` | 19 | **stub** — identical to `+0x50` |
 | `+0x58` | `0x17e6` | 19 | **stub** — identical to `+0x50` |
 | `+0x5c` | `0x17f9` | 7 | **stub** — saves three registers, restores them, returns |
-| `+0x60` | `0x1800` | 60 | **unpack position** — 8-byte record to the 24-byte vector; keeps eax, ecx and edx, which MAIN relies on (the other slots do not yet: [open-differences.md](../open-differences.md)) |
+| `+0x60` | `0x1800` | 60 | **unpack position** — 8-byte record to the 24-byte vector |
 | `+0x64` | `0x183c` | 392 | **range and bearing, 48-bit** — with a shared scale |
 | `+0x68` | `0x19c4` | 204 | **range and bearing** — distance and heading between two points |
 | `+0x6c` | `0x1a90` | 39 | **rand** — Lehmer generator, seed in `.data+0x0f0` |
@@ -278,11 +278,43 @@ observable on both sides, so a host stub returning a controlled tick sequence
 -- zeros included -- tests it properly. A version with the retry removed is
 caught, which is the check that makes the passing result mean something.
 
+## What each slot leaves in the registers
+
+Retail's services are hand-written assembly, and retail's assembly modules keep values in
+registers across calls to them, so what a slot leaves is part of its contract. C does not
+honour it, so each slot enters through a stub at the end of `util_math.c` (x86 only).
+`utildiff` calls every one with known values in all seven registers and compares what comes
+back, through the stub and through the built DLL's Linkage, since a wrong table entry is
+the other way to get this wrong.
+
+| leaves | slots |
+| --- | --- |
+| everything | `+0x24`, `+0x2c`, `+0x30`, `+0x34`, `+0x40`, `+0x44`, `+0x48`, `+0x4c`, `+0x5c`, `+0x60`, `+0x64`, `+0x68`, `+0x88` |
+| all but eax, the result | `+0x18`, `+0x1c`, `+0x20`, `+0x38`, `+0x3c`, `+0x50`, `+0x54`, `+0x58`, `+0x6c`, `+0x70`, `+0xb0`, `+0xb4` |
+| eax the result, edx 0 | `+0x28` |
+| eax the result, ecx and edx the operands | `+0x80` |
+| ecx and edx the operands, eax the last high dword | `+0x74`, `+0x78` |
+| ecx 0 | `+0x7c` |
+| ecx the count, eax and edx the two halves | `+0x84` |
+| edx:eax the last `_ftol` | `+0xbc`, `+0xc4` |
+| eax the output, ecx the high dword, edx the fraction | `+0xc0` |
+| eax the input, ecx the output, edx the high dword | `+0xc8` |
+
+The compiled-C slots (`+0x8c` to `+0xac`, `+0xb8`) are not modelled: their ecx and edx are
+whatever the compiler left. `+0x50`..`+0x5c` have no stub because their C clobbers nothing,
+which `utildiff` checks.
+
+Removing one stub at a time from UTIL in an otherwise retail game, 300 passes of `PARIS`,
+`KAUAI` and `NEWYORK`, shows which are read on those flights: `+0x2c` differs from the first
+frame on all three, which was the whole symptom of UTIL alone; `+0x3c` differs on `NEWYORK`;
+`+0x48` and `+0x6c` on `KAUAI`. The rest do not show there, which does not mean nothing
+reads them: MAIN's `+0x60` is read only near a nav station.
+
 ## Status
 
 **All 47 services** reimplemented and verified against retail.
 
-`make utildiff-run` covers 44 of them: **6,222,448 comparisons, zero
+`make utildiff-run` covers 44 of them: **6,452,880 comparisons, zero
 mismatches**, including 400,000 random descriptor tables through the exchange
 engine, 100,000 alert sequences, and all 65,536 sincos angles and all 65,536 sqrt16
 inputs exhaustively, 300,000 draws from the generator with both seeds

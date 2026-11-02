@@ -25,6 +25,9 @@
 #
 # HG2D_FRAMES_ALL=1 compares the whole game instead: every module and World.DLL
 # retail against every one ours, and the verdict is on all of them.
+# HG2D_FRAMES_ONLY="UTIL MAIN" compares those modules alone: ours has them in an otherwise
+# retail game, with retail's HG2D unless HG2D is named.  It finds which module a difference
+# comes from, and what one module expects of another's registers.
 #
 # HG2D_FRAMES_DEVICE and HG2D_FRAMES_MODE set [HARDWARE] Device= and Mode= in each
 # copy's FLTSIM98.CFG, for the Direct3D path.  Its frames do not pass through the
@@ -70,19 +73,24 @@ export WINEDEBUG=-all
 run() {     # tag hg2d
     local tag=$1 copy=$out/game-$1
     cp -a "$game" "$copy"
-    if [ -n "${HG2D_FRAMES_ALL:-}" ]; then
+    local hg2d=$2
+    if [ -n "${HG2D_FRAMES_ALL:-}${HG2D_FRAMES_ONLY:-}" ]; then
         local m
-        for m in $(make -s modules-of); do
-            if [ "$tag" = ours ]; then cp "$ours_bin/$m.DLL" "$copy/Modules/$(make -s installed-name-of M=$m)"
-            else cp "$(make -s orig-module-of M=$m)" "$copy/Modules/$(make -s installed-name-of M=$m)"; fi
+        for m in $(make -s modules-of) WORLD; do
+            local to from
+            if [ "$m" = WORLD ]; then to=English/World.DLL from=orig/English/World.DLL
+            else to=Modules/$(make -s installed-name-of M=$m) from=$(make -s orig-module-of M=$m); fi
+            if [ "$tag" = ours ]; then
+                if [ -z "${HG2D_FRAMES_ONLY:-}" ] || [[ " $HG2D_FRAMES_ONLY " == *" $m "* ]]; then from=$ours_bin/$m.DLL; fi
+            fi
+            cp "$from" "$copy/$to"
+            [ "$m" = HG2D ] && hg2d=$from
         done
-        if [ "$tag" = ours ]; then cp "$ours_bin/WORLD.DLL" "$copy/English/World.DLL"
-        else cp orig/English/World.DLL "$copy/English/World.DLL"; fi
     fi
-    cp "$2" "$copy/Modules/HG2D.DLL"
+    cp "$hg2d" "$copy/Modules/HG2D.DLL"
     cp "$framelock" "$copy/Modules/FRAMELOCK.DLL"
     rm -f "$copy/Modules/SEHFIX.DLL"
-    [ "$tag" = ours ] || cp bin/SEHFIX.DLL "$copy/Modules/SEHFIX.DLL"
+    [ "$tag" = ours ] && [ "$hg2d" = "$ours_bin/HG2D.DLL" -o "$hg2d" = "$ours" ] || cp bin/SEHFIX.DLL "$copy/Modules/SEHFIX.DLL"
     mkdir -p "$out/$tag"
     [ -z "${HG2D_FRAMES_DEVICE+x}" ] || sed -i "s/^Device=.*/Device=$HG2D_FRAMES_DEVICE\r/" "$copy/FLTSIM98.CFG"
     [ -z "${HG2D_FRAMES_MODE+x}" ] || sed -i "s/^Mode=.*/Mode=$HG2D_FRAMES_MODE\r/" "$copy/FLTSIM98.CFG"

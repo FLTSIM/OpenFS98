@@ -677,8 +677,9 @@ $(DIFFDIR)/numericdiff.exe: tools/difftest/numericdiff.c \
 src/util/cos_table.inc: $(ORIG)/Modules/UTIL.DLL tools/gen_util_tables.py
 	@python3 tools/gen_util_tables.py $< $@
 
-utildiff: $(DIFFDIR)/utildiff.exe
+utildiff: $(DIFFDIR)/utildiff.exe $(BIN)/UTIL.DLL
 	@cp $(ORIG)/Modules/UTIL.DLL $(DIFFDIR)/UTIL_retail.dll
+	@cp $(BIN)/UTIL.DLL $(DIFFDIR)/UTIL_ours.dll
 	@cp $(ORIG)/Modules/WINDOW.DLL $(DIFFDIR)/WINDOW_retail.dll
 
 # The same check with the x87 assembly compiled out, which is what an ARM build

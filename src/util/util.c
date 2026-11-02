@@ -55,26 +55,51 @@ void FS98_STDCALL fs98_util_metres32_to_longitude(const int32_t *, const void *,
 void FS98_STDCALL fs98_util_deinit(void);
 void FS98_STDCALL fs98_util_mul48_s16(const void *, int16_t, void *);
 void FS98_STDCALL fs98_util_unpack_position(const void *, void *);
+/* The slots keep what retail's keep: see the end of util_math.c. */
 #if defined(__i386__)
+void fs98_util_sqrt64_entry(void);
+void fs98_util_sqrt32_entry(void);
+void fs98_util_sqrt16_entry(void);
+void fs98_util_mul48_s16_entry(void);
+void fs98_util_sincos_entry(void);
+void fs98_util_div48_u16_entry(void);
+void fs98_util_rotate2d_entry(void);
+void fs98_util_angle_from_sin_entry(void);
+void fs98_util_atan2_entry(void);
+void fs98_util_metres32_to_longitude_entry(void);
+void fs98_util_metres_to_longitude_entry(void);
+void fs98_util_longitude_to_metres_entry(void);
+void fs98_util_rotate3d_entry(void);
 void fs98_util_unpack_position_entry(void);
+void fs98_util_range_and_bearing48_entry(void);
+void fs98_util_range_and_bearing_entry(void);
+void fs98_util_marshal_entry(void);
+void fs98_util_v48_add_entry(void);
+void fs98_util_v48_sub_entry(void);
+void fs98_util_copy24_entry(void);
+void fs98_util_shr48_entry(void);
+void fs98_util_double_to_fixed48_entry(void);
+void fs98_util_double_to_fixed48_signed_entry(void);
+void fs98_util_fixed48_to_double_entry(void);
+void fs98_util_fixed48_to_double_signed_entry(void);
 void fs98_util_rand_entry(void);
+void fs98_util_double_to_int_entry(void);
+void fs98_util_double_to_int64_low_entry(void);
+void fs98_util_hypot_entry(void);
+void fs98_util_v48_equal_entry(void);
 void fs98_util_rand32_entry(void);
-#  define UNPACK_POSITION_SLOT fs98_util_unpack_position_entry
-#  define RAND_SLOT fs98_util_rand_entry
-#  define RAND32_SLOT fs98_util_rand32_entry
+#  define ENTRY(name) fs98_util_##name##_entry
 #else
-#  define UNPACK_POSITION_SLOT fs98_util_unpack_position
-#  define RAND_SLOT fs98_util_rand
-#  define RAND32_SLOT fs98_util_rand32
+#  define ENTRY(name) fs98_util_##name
 #endif
 int32_t FS98_STDCALL fs98_util_atan2(int32_t, int32_t);
 int32_t FS98_STDCALL fs98_util_angle_from_sin(int16_t, int16_t);
 void FS98_STDCALL fs98_util_fixed48_to_double(double *, const void *);
-void FS98_STDCALL fs98_util_double_to_fixed48(const double *, void *);
+int64_t FS98_STDCALL fs98_util_double_to_fixed48(const double *, void *);
 double FS98_STDCALL fs98_util_frand(void);
 const char * FS98_STDCALL fs98_util_longer_string(const char *, const char *);
 void FS98_STDCALL fs98_util_init(void);
-void FS98_STDCALL fs98_util_double_to_fixed48_signed(const double *, void *);
+int64_t FS98_STDCALL fs98_util_double_to_fixed48_signed(const double *, void *);
 void FS98_STDCALL fs98_util_fixed48_to_double_signed(double *, const void *);
 void FS98_STDCALL fs98_util_longitude_to_metres(const void *, const void *, void *);
 void FS98_STDCALL fs98_util_range_and_bearing(const int32_t *, const int32_t *, int32_t, int32_t *, int16_t *);
@@ -100,35 +125,35 @@ struct {
     SLOT(0x04, fs98_util_init),
     SLOT(0x08, fs98_util_deinit),
     /* +0x0c, +0x10 null; +0x14 null: no dialog table */
-    SLOT(0x18, fs98_util_sqrt64),
-    SLOT(0x1c, fs98_util_sqrt32),
-    SLOT(0x20, fs98_util_sqrt16),
-    SLOT(0x24, fs98_util_mul48_s16),
-    SLOT(0x28, fs98_util_hypot),
-    SLOT(0x2c, fs98_util_sincos),
-    SLOT(0x30, fs98_util_div48_u16),
-    SLOT(0x34, fs98_util_rotate2d),
-    SLOT(0x38, fs98_util_angle_from_sin),
-    SLOT(0x3c, fs98_util_atan2),
-    SLOT(0x40, fs98_util_metres32_to_longitude),
-    SLOT(0x44, fs98_util_metres_to_longitude),
-    SLOT(0x48, fs98_util_longitude_to_metres),
-    SLOT(0x4c, fs98_util_rotate3d),
+    SLOT(0x18, ENTRY(sqrt64)),
+    SLOT(0x1c, ENTRY(sqrt32)),
+    SLOT(0x20, ENTRY(sqrt16)),
+    SLOT(0x24, ENTRY(mul48_s16)),
+    SLOT(0x28, ENTRY(hypot)),
+    SLOT(0x2c, ENTRY(sincos)),
+    SLOT(0x30, ENTRY(div48_u16)),
+    SLOT(0x34, ENTRY(rotate2d)),
+    SLOT(0x38, ENTRY(angle_from_sin)),
+    SLOT(0x3c, ENTRY(atan2)),
+    SLOT(0x40, ENTRY(metres32_to_longitude)),
+    SLOT(0x44, ENTRY(metres_to_longitude)),
+    SLOT(0x48, ENTRY(longitude_to_metres)),
+    SLOT(0x4c, ENTRY(rotate3d)),
     SLOT(0x50, fs98_util_stub_50),
     SLOT(0x54, fs98_util_stub_54),
     SLOT(0x58, fs98_util_stub_58),
     SLOT(0x5c, fs98_util_stub_5c),
-    SLOT(0x60, UNPACK_POSITION_SLOT),
-    SLOT(0x64, fs98_util_range_and_bearing48),
-    SLOT(0x68, fs98_util_range_and_bearing),
-    SLOT(0x6c, RAND_SLOT),
-    SLOT(0x70, RAND32_SLOT),
-    SLOT(0x74, fs98_util_v48_add),
-    SLOT(0x78, fs98_util_v48_sub),
-    SLOT(0x7c, fs98_util_copy24),
-    SLOT(0x80, fs98_util_v48_equal),
-    SLOT(0x84, fs98_util_shr48),
-    SLOT(0x88, fs98_util_marshal),
+    SLOT(0x60, ENTRY(unpack_position)),
+    SLOT(0x64, ENTRY(range_and_bearing48)),
+    SLOT(0x68, ENTRY(range_and_bearing)),
+    SLOT(0x6c, ENTRY(rand)),
+    SLOT(0x70, ENTRY(rand32)),
+    SLOT(0x74, ENTRY(v48_add)),
+    SLOT(0x78, ENTRY(v48_sub)),
+    SLOT(0x7c, ENTRY(copy24)),
+    SLOT(0x80, ENTRY(v48_equal)),
+    SLOT(0x84, ENTRY(shr48)),
+    SLOT(0x88, ENTRY(marshal)),
     SLOT(0x8c, fs98_util_exchange_put),
     SLOT(0x90, fs98_util_exchange_get),
     SLOT(0x94, fs98_util_list_tree),
@@ -138,13 +163,13 @@ struct {
     SLOT(0xa4, fs98_util_alert_modal),
     SLOT(0xa8, fs98_util_alert_open),
     SLOT(0xac, fs98_util_alert_close),
-    SLOT(0xb0, fs98_util_double_to_int),
-    SLOT(0xb4, fs98_util_double_to_int64_low),
+    SLOT(0xb0, ENTRY(double_to_int)),
+    SLOT(0xb4, ENTRY(double_to_int64_low)),
     SLOT(0xb8, fs98_util_frand),
-    SLOT(0xbc, fs98_util_double_to_fixed48),
-    SLOT(0xc0, fs98_util_fixed48_to_double),
-    SLOT(0xc4, fs98_util_double_to_fixed48_signed),
-    SLOT(0xc8, fs98_util_fixed48_to_double_signed),
+    SLOT(0xbc, ENTRY(double_to_fixed48)),
+    SLOT(0xc0, ENTRY(fixed48_to_double)),
+    SLOT(0xc4, ENTRY(double_to_fixed48_signed)),
+    SLOT(0xc8, ENTRY(fixed48_to_double_signed)),
 } };
 
 /* ---- FS98_UTIL_TRACE: which services does the game actually call? --------

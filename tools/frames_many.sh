@@ -9,6 +9,7 @@
 #
 # FRAMES_MANY_JOBS   flights at once (default 4; each is three games in turn)
 # FRAMES_MANY_PASSES passes a flight (default 900)
+# HG2D_FRAMES_ONLY   compare these modules alone, not the whole game (tools/hg2d_frames.sh)
 # FRAMES_MANY_OUT    output directory (default bin/frames-many); each flight's verdict is
 #                    in <flight>/verdict, and only a failing flight keeps its logs
 #
@@ -38,13 +39,15 @@ one() {     # flight
     local flight=$1 dir=$out/$1 display=:$((80 + ${SLOT:-0})) distinct verdict
     local args=("Situatio\\$flight.STN" "$passes")
     [ "$script" = - ] || args+=("$script")
-    HG2D_FRAMES_ALL=1 HG2D_FRAMES_OUT="$dir" HG2D_FRAMES_DISPLAY=$display \
+    export HG2D_FRAMES_ALL=${HG2D_FRAMES_ONLY:+}
+    [ -n "${HG2D_FRAMES_ONLY:-}" ] || export HG2D_FRAMES_ALL=1
+    HG2D_FRAMES_OUT="$dir" HG2D_FRAMES_DISPLAY=$display \
         HG2D_FRAMES_TIMEOUT=${FRAMES_MANY_TIMEOUT:-300} \
         tools/hg2d_frames.sh "${args[@]}" >"$dir.txt" 2>&1
     local status=$? quiet=
     if [ "$status" != 0 ] && [ -s "$dir/retail-a/frames.log" ]; then
         quiet=", no sound"
-        HG2D_FRAMES_NOSOUND=1 HG2D_FRAMES_ALL=1 HG2D_FRAMES_OUT="$dir" HG2D_FRAMES_DISPLAY=$display \
+        HG2D_FRAMES_NOSOUND=1 HG2D_FRAMES_OUT="$dir" HG2D_FRAMES_DISPLAY=$display \
             HG2D_FRAMES_TIMEOUT=${FRAMES_MANY_TIMEOUT:-300} \
             tools/hg2d_frames.sh "${args[@]}" >"$dir.txt" 2>&1
         status=$?

@@ -53,7 +53,7 @@ the table.
 ## Verifying
 
 ```sh
-make utildiff-run        # UTIL service by service   -> 6222448 comparisons, 0 mismatches
+make utildiff-run        # UTIL service by service   -> 6452880 comparisons, 0 mismatches
 make utildiff-portable   # the same with x87 compiled out (the ARM path)
 make numericdiff-run     # all NUMERIC formats/ranges -> 545778 comparisons, 0 mismatches
 make chaindiff-run       # whole-module CHAIN        -> 20000 scenarios, 0 differ

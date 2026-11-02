@@ -10,7 +10,8 @@ All retail against all ours (`tools/frames_many.sh`, one `tools/hg2d_frames.sh` 
 Retail runs with `SEHFIX.DLL`, because without it retail is the side that freezes
 ([wine.md](wine.md)), and ours without.
 
-- **Every flight, nobody flying:** all 74, 900 passes, every frame checksum identical.
+- **Every flight, nobody flying:** all 74, 900 passes, every frame checksum identical;
+  rerun 2026-11-02 with every current build and all five English DLLs swapped.
 - **Flown by script, software renderer:** seven scenarios from `tools/fly_scripts.py`
   (`controls`, `systems`, `views`, `avionics`, `slew`, `toggles`, `keys`) on `PARIS`,
   `STGEORGE`, `KAUAI`, `NEWYORK`, `LEARLON`, `HONGKONG`, `BELLWTC` and `CVINSON`, 900 passes:
@@ -83,10 +84,13 @@ The `radios` suite's stand-in now logs edi, and catches the old call.
 - **The mouse and menus.** No script clicks anything or opens a dialog. Dialogs need a way to
   close them in the script, since a modal one hangs a run until its timeout.
 - **Night, weather and time set by hand.** Only as the flights set them.
-- **The English dialogs in play.** `make main-dialogs` reaches Help's About, View Options
-  and Sim's settings pages, first page only. Alerts' three dialogs, Help's Lessons, Graph and
-  Credits, and Sim's crash analysis have been compared only in their own harnesses and
-  loaded in the game, not opened there.
+- **The English dialogs in play.** `make main-dialogs` reaches Help's About, Credits and
+  Lessons, View Options, Sim's Aircraft Settings and crash analysis, and Alerts' modal alert
+  (the Exit confirmation), mostly on their first page. Not yet opened in play: Alerts'
+  dialogs 3 and 4, Help's lesson graph and lesson completion. Their register contracts are
+  not checked in the game: FRAMELOCK wraps Linkage tables, and theirs hold only init and
+  deinit, which run outside its window; the rest is entered through the host's dialog
+  registry and MFC.
 - **Sound.** Nothing compares what is heard: `sounddiff` only compares calls.
 - **Direct3D's limits.** wined3d on llvmpipe, not a 1997 card, and four screenshots a
   flight between the panel logs. Hardware-specific paths in HG2D (real capability bits,

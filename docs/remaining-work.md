@@ -43,12 +43,12 @@ much code they share, and how much is data a generator could carry over.
 1. **Done 2026-11-02: the four finished dialogs are installed** (Alerts, Help, Sim, Views).
    `make smoke` loads all five English DLLs from `English\`: 27/27 modules, 95 gauges, PASS.
    `make main-dialogs` now runs retail MAIN with the retail English DLLs against ours with
-   ours, and reaches Help's About (`0x1607`), View Options (`0x1508`) and Sim's settings
-   pages (`0x1204`, `0x1205`): every control and its text the same, 11 of 16 pictures
-   identical as before, the other five only in the clock or a live preview. Not yet reached
-   in play: any of Alerts' three dialogs, Help's Lessons, Graph and Credits, Sim's crash
-   analysis. `HG2D_FRAMES_ALL`, `tools/reg_contracts.sh` and `tools/fly_coverage.sh` now
-   swap all five English DLLs; they have not been rerun since.
+   ours, and reaches Help's About, Credits and Lessons, View Options, Sim's Aircraft Settings
+   and crash analysis, and Alerts' Exit confirmation: PASS, every control and its text the
+   same, 14 of 20 pictures identical, the rest only in the clock, a live preview or the
+   crash's real-time curve. All 74 flights still match frame for frame with every module
+   and English DLL ours. Not yet reached in play: Alerts' dialogs 3 and 4, Help's lesson
+   graph and lesson completion; see [open-differences.md](open-differences.md#not-yet-tested).
 2. **Flights, then Options.** The largest code still used in play. Scripted menu tests come
    with them: see [open-differences.md](open-differences.md#not-yet-tested).
 3. **SIMSUI.** After the dialogs, because they show which of its 540 exports matter.

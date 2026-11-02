@@ -231,4 +231,8 @@ to cover every possible Windows notification or native exception path.
 **Installed 2026-11-02.** The shared Makefile now builds this DLL into `bin/` and
 `make install` puts it in `English/` (`make sim-install` / `sim-revert` alone, keeping the
 first retail copy as `.orig`). `make smoke` requires it to match and load; `make
-main-dialogs` compares it in play against retail through the settings pages (commands `0x1204`, `0x1205`); the crash analysis is not reached yet.
+main-dialogs` compares it in play against retail: Aircraft Settings (command `0x1205`), and
+the crash analysis after it selects "Detect crash and show graph" on the Crash / Damage tab
+and dives into the ground. Every control and its text match; the analysis differs only in
+its curve and impact speeds, which depend on the real-time dive (masked in the text
+comparison).

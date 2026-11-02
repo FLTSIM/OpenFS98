@@ -66,8 +66,12 @@ they do on retail. Without one it stops at the welcome dialog, drawn correctly.
 
 `make main-dialogs` opens all sixteen menu commands in the running game, on retail
 and on ours, first pressing Cancel and then OK. Since 2026-11-02 each side also has its own
-English DLLs (retail's or ours: World, Alerts, Help, Sim, Views), so Help's About, View
-Options and Sim's settings pages are compared too: every control and its text the same (the wall clock
+English DLLs (retail's or ours: World, Alerts, Help, Sim, Views), and after the sixteen it
+opens About's Credits, sets "Detect crash and show graph", dives into the ground for the
+crash analysis, opens Lessons (`0x1105`) and the Exit confirmation (answered No). Both sides
+run without DirectSound, since a crash waits for its sound. 2026-11-02: 19 commands and
+the crash, every control the same, 14 of 20 pictures identical, the crash analysis differing
+only in its real-time curve and impact speeds. Before that, for the sixteen: every control and its text the same (the wall clock
 aside), nothing stuck, no crash, and the flight files and `FLTSIM98.CFG` written alike. 11
 of the 16 dialogs match pixel for pixel; the other five show the clock (`0x1101`, `0x1301`),
 a live preview (`0x1201`, `0x1502`) or the flight itself (`0x300`), and differ only there.

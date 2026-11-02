@@ -132,7 +132,9 @@ interactive flight or every alert reachable during one.
 **Installed 2026-11-02.** The shared Makefile now builds this DLL into `bin/` and
 `make install` puts it in `English/` (`make alerts-install` / `alerts-revert` alone, keeping the
 first retail copy as `.orig`). `make smoke` requires it to match and load; `make
-main-dialogs` compares it in play against retail, though none of its three dialogs is reached there yet.
+main-dialogs` compares it in play against retail through the Exit confirmation (command
+`0x100c4`), dialog 2, answered No (it ignores `IDCANCEL`): pixel-identical. Dialogs 3
+(modeless) and 4 (advisory with a suppression checkbox) are not reached in play yet.
 
 The sections below retain the retail boundary notes. Regenerate the broader
 inventory with `python3 -B tools/dialogmap.py --format json`; tool limitations

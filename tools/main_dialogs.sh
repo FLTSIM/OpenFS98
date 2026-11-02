@@ -12,6 +12,12 @@ game=$(realpath "${FS98_DIR:-$PWD/game}")
 out=$root/bin/main-dialogs
 display=:97
 commands="1308 1309 1607 1203 1201 1202 1204 1205 1301 1306 1307 1407 1409 1502 1101 300"
+# Then the English dialogs the first list does not reach: About's Credits (Help); the
+# crash analysis (Sim), after setting "Detect crash and show graph" on the Crash / Damage
+# tab, clicked by position since its tab and buttons are owner drawn; the lesson picker
+# (Help, through ADVDRV), after the crash since OK may start a lesson; and the Exit
+# confirmation (Alerts), answered No.  See tools/drive/fsdialogs.c.
+steps="1607/3805 set:1205/@505,190/@80,174 crash 1105 exit"
 english=$(make -s english-modules-of)
 for m in MAIN $english; do
     [ -f "bin/$m.DLL" ] || { echo "needs bin/$m.DLL" >&2; exit 2; }
@@ -24,7 +30,8 @@ command -v Xephyr >/dev/null || { echo "needs Xephyr" >&2; exit 2; }
 rm -rf "$out"
 mkdir -p "$out"
 cp -a "${WINEPREFIX:-$HOME/.wine}" "$out/prefix"
-export WINEPREFIX=$out/prefix WINEDEBUG=-all
+# Without DirectSound: a crash waits for its sound before the analysis comes up
+export WINEPREFIX=$out/prefix WINEDEBUG=-all WINEDLLOVERRIDES=dsound=d
 
 Xephyr "$display" -screen 1024x768x24 -ac -noreset >"$out/xephyr.log" 2>&1 &
 xephyr=$!
@@ -42,16 +49,17 @@ run() {     # tag dll button
         if [[ $1 == ours-* ]]; then cp "bin/$m.DLL" "$copy/$(make -s installed-path-of M=$m)"
         else cp "$(make -s orig-module-of M=$m)" "$copy/$(make -s installed-path-of M=$m)"; fi
     done
-    ( cd "$copy" && WINEDEBUG=err+all timeout 480 wine FLTSIM98.EXE '/STN:Situatio\STGEORGE.STN' >"$dir/game.log" 2>&1 ) &
+    ( cd "$copy" && WINEDEBUG=err+all timeout 720 wine FLTSIM98.EXE '/STN:Situatio\STGEORGE.STN' >"$dir/game.log" 2>&1 ) &
     local pid=$!
     # shellcheck disable=SC2086
-    wine bin/fsdialogs.exe "$(winepath -w "$dir")" 25000 "$3" $commands || echo "$1: the drive exited $?"
+    wine bin/fsdialogs.exe "$(winepath -w "$dir")" 25000 "$3" $commands $steps || echo "$1: the drive exited $?"
     wineserver -k 2>/dev/null || true
     wait "$pid" || true
 }
 
-# The wall clock, on the clock dialog and the Create a Flight summary
-normal() { sed -E 's/[0-9]{2}:[0-9]{2}(:[0-9]{2})?/TIME/g' "$1"; }
+# The wall clock, on the clock dialog and the Create a Flight summary, and the crash's
+# speeds at impact, which depend on how a real-time dive went
+normal() { sed -E -e 's/[0-9]{2}:[0-9]{2}(:[0-9]{2})?/TIME/g' -e "s/(id=(5094|5071) ')[-+0-9]*'/\1IMPACT'/" "$1"; }
 
 fail=0
 for button in cancel ok; do
@@ -61,7 +69,7 @@ for button in cancel ok; do
     if ! diff <(normal "$r/drive.log") <(normal "$o/drive.log") >"$out/$button.diff"; then
         echo "$button: the controls differ, see $out/$button.diff"; fail=1
     fi
-    grep -E 'STUCK|GAME GONE|no window' "$o/drive.log" && fail=1
+    grep -E 'STUCK|GAME GONE|no window|nothing came up|no control' "$o/drive.log" && fail=1
     grep -aE '^wine: Unhandled|Unhandled exception|Unhandled page fault' "$o/game.log" && fail=1
     same=0 total=0 moved=""
     for picture in "$o"/c*.bmp; do

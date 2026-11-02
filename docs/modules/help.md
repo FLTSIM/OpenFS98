@@ -270,4 +270,7 @@ Windows notification or native exception path.
 **Installed 2026-11-02.** The shared Makefile now builds this DLL into `bin/` and
 `make install` puts it in `English/` (`make help-install` / `help-revert` alone, keeping the
 first retail copy as `.orig`). `make smoke` requires it to match and load; `make
-main-dialogs` compares it in play against retail through About (`0x1607`); Lessons, Graph and Credits are not reached yet.
+main-dialogs` compares it in play against retail: About (`0x1607`), its Credits button, and
+Lessons (command `0x1105`, through ADVDRV's lesson picker; command `0x1106` is Flights'
+Challenges). All three pixel-identical. The lesson graph (`0x14050004`) and lesson
+completion (`0x11060001`), which need a lesson flown to its end, are not reached.

@@ -1,42 +1,134 @@
-# Flights.DLL — next-work handoff
+# Flights.DLL
 
-**Not reimplemented; caller/descriptor recovery is the first task.** The static
-inventory identifies 13 registrations and 17 templates, but it is not a UI
-behavior specification. No `src/flights/`, `tools/flights.mk`, differential
-harness or replacement DLL exists yet.
+`orig/English/Flights.DLL`, module `0x80000002`, preferred base `0x22310000`, 51,122 bytes of
+`.text`, 13 dialog registrations. **In progress, one family of dialogs at a time.** Slice 1,
+the pickers (Adventures and Challenges), is verified in its own harness; nothing is built as
+a DLL or installed yet. Like Help, Sim and Views it is MFC dialogs over the CD's SIMSUI and
+MFC42, which stay as dependencies.
 
-Reference: `orig/English/Flights.DLL`, preferred base `0x22310000`, module id
-`0x80000002`. Read [the inventory](dialogs.md#flightsdll),
-[the registry TSV](../dialog_registry.tsv) and
-[the continuation rules](dialogs.md#starting-a-remaining-dialog-in-a-fresh-context).
+## Building and verifying
 
-This DLL covers create/select/save flight, adventures/challenges, aircraft
-selection, navigation/radios, communications, autopilot and opening/learning
-menus. The 13 factories span `0x22311130` through `0x22311800`. Registry id `1`
-is the exceptional modeless registration (flags 4); its template `0x20a` and
-factory `0x223116e0` are separate from the flight-menu factories.
+```sh
+make -f tools/flights.mk flights-tables flightsevents    # tables from the retail image, then the harness
+make -f tools/flights.mk flightseventsdiff-run                     # 20,000 scenarios, seed 0x5f1a6c2d
+make -f tools/flights.mk flightseventsdiff-run SEED=0x98a1e7d3
+make -f tools/flights.mk flightseventsdiff-run N=2000 SEED=0x7e51a23b MODE=unwind
+make -f tools/flights.mk flights-breaks N=400
+```
 
-## Why defer it while MAIN is active
+`tools/run_flightsdiff.sh` runs everything in its own prefix, `bin/flights-diff/wineprefix`,
+behind a lock; nothing touches `game/` or the shared prefix.
 
-Many natural starting points are flight/aircraft/menu orchestration, where
-MAIN owns simulator-side behavior. It is technically possible to recover the
-retail descriptors and use independent fixtures without editing MAIN, but the
-repository does not yet have the same bounded UI handoff as FE's scenery
-contracts, CONTROLS' settings pages or MULTIP's dialog callbacks. World and
-MP_DIALOG therefore have clearer independent starting slices.
+## The callers: who opens each dialog, with what
 
-## First concrete work when selected
+Every caller is now our own code, MAIN's or ADVDRV's, so the descriptors are known from C,
+not from pushes at a call site. All go through host `+0x10c`, run dialog (id, descriptor).
 
-Run `tools/dialogmap.py --callers --format json` and trace the selected
-registration's retail callers, including MAIN's helper-mediated calls that the
-static caller scan misses. Recover descriptor allocation, callback prototypes,
-shared GLOBAL accesses and accept/cancel ownership. Check prototypes at the
-callee; do not infer them from pushes near a call or from resource labels.
-Record a per-family contract here before translating the UI.
+| Registry id | Template | Opened by | Descriptor |
+| --- | --- | --- | --- |
+| `0x1101` Create a Flight | `0x1fe` | MAIN command `0x1101` (`main_create.inc`) | MAIN's block `b` |
+| `0x1102` Select Flight | `0x208` | MAIN (`main_flights.inc`) | `block` |
+| `0x1104` Save Flight | `0x207` | MAIN (`main_flights.inc`) | `.data` `0x208035e8` |
+| `0x1107` Challenges | `0x201` | MAIN command **`0x1106`** (`command_1106`) | picker, below |
+| `0x1108` Adventures | `0x200` | ADVDRV `+0x28` = MAIN command **`0x1107`** (`picker`) | picker, below |
+| `0x1109` opening menu | `0x206` | MAIN `+0x28` (`main_start.inc`) | `b` |
+| `0x11090001` learning menu | `0x209` | MAIN (`main_start.inc`) | `b` |
+| `0x11090002` flight-selection menu | `0x1ff` | MAIN (`main_start.inc`) | `b` |
+| `0x1201` Select Aircraft | `0x1fb` | MAIN command `0x1201` (`main_aircraft.inc`) | `ACFT_DLG` |
+| `0x1202` Navigation / radios | `0x205` | MAIN command `0x1202` (`main_radiodlg.inc`) | `RD_DLG` |
+| `0x1203` Communications | `0x1fd` | MAIN command `0x1203` (`main_dialogs.inc`) | `.data` `0x208001a0` |
+| `0x1204` Autopilot | `0x1fc` | MAIN command `0x1204` (`main_limits.inc`) | `LM_DLG` |
+| `1` modeless, flags 4 | `0x20a` | **no caller** in any module we have | - |
 
-Then recover the chosen class/page lifetimes, DDX, vtables/maps and handlers.
-Use `src/flights/`, standalone `tools/flights.mk`, a private output/prefix and
-new fixtures. Keep MAIN/HOST and their verified harnesses unchanged. The
-modeless id-1 lifetime and nested opening menus need explicit acceptance;
-a successful startup or one translated selection form is not whole-DLL
-completion.
+The menu command numbers and the dialog ids are off by one for the pickers: command
+`0x1106` opens Challenges (`0x1107`), command `0x1107` opens Adventures (`0x1108`), and
+Help's Lessons (`0x1106`) is command `0x1105`.
+
+**The picker descriptor**, shared by both: answer `+0`, a word `+4`, count `+8`, selection
+`+0xc`, list `+0x10` of `0xa08`-byte records (title `+0`, description `+0x100`, path
+`+0x900`). MAIN stores a callback at `+4` and ADVDRV leaves it uninitialised; **neither
+dialog reads `+4`**, so ADVDRV's garbage is harmless. It is the same layout as Help's
+Lessons.
+
+## The classes
+
+Each factory allocates through SIMSUI `ui_new`, constructs, stores the descriptor and
+Flights' instance (`+0x80`), creates from the template and shows; the object's HWND
+(`+0x20`) is the result. Constructors and destructors are listed with their RVAs; vtables
+are in `.rdata`. In `.text` order:
+
+| Id | Constructor | Code until the next | Message map |
+| --- | --- | --- | --- |
+| `0x1201` Select Aircraft | `0x18a0` | 2,736 | 6 entries |
+| `0x1101` Create | `0x2350` | 2,240 | 8 |
+| `0x1108` Adventures | `0x2c10` | 1,392 | 4 |
+| `0x1204` Autopilot | `0x3180` | 7,808 | 11 |
+| `0x1107` Challenges | `0x5000` | 1,440 | 4 |
+| `0x1203` Communications | `0x55a0` | 2,496 | 5 |
+| `0x1104` Save | `0x5f60` | 1,776 | 2 |
+| `0x1102` Select Flight | `0x6650` | 5,936 | 5 and 8 |
+| `0x1202` Navigation | `0x7d80` | 8,080 | 3, 2 and 2 |
+| `1` modeless | `0x9d10` | 304 | 3 |
+| `0x1109` opening menu | `0x9e40` | 2,960 | 10 |
+| `0x11090002` flight menu | `0xa9d0` | 2,160 | 7 |
+| `0x11090001` learning menu | `0xb240` | | 7 |
+
+Module init (`0x1030`) registers the 13 factories through host `+0x298`, loads
+`dialog.dll` (the skins and button art, kept at `.data 0x22322134`) and deinit
+(`0x10b0`) frees it. `fs98.hlp`, the context-help file, is a string in `.data`
+(`0x223220fc`). Shared by every class: `0x2310`/`0x2320` (empty), `0x2330`/`0x2340`
+(disable/enable the window), `0x26a0` (delete through the deleting destructor),
+`0x7fd0` (CSimsDialog's message map).
+
+## Slice 1: the pickers, Adventures `0x1108` and Challenges `0x1107`
+
+`src/flights/flights_events.c`, `flights_objects.c`; tables generated by
+`tools/gen_flights_tables.py`. The two classes have the same members (two texts, a list,
+an edit, two 3-piece buttons, text art, `0x15e4` bytes) and share their selection change
+(`0x3040`), OnCancel (`0x5240`), selection sync (`0x54c0`), error check and descriptor
+check. What differs, and what the transliteration keeps apart:
+
+- **Populate.** Adventures selects the saved entry only when it is in range (unsigned) and
+  then shows the description regardless; Challenges selects the saved entry whenever the
+  list has any entries, in range or not, and shows it only then.
+- **OK with nothing selected.** Adventures cancels through the virtual OnCancel (`+0xd0`),
+  Challenges inline.
+- The skin (`0x13b`, `0x13c`), the template, the DDX ids of the title and art, and the
+  context-help tables.
+
+Retail quirks reproduced: the error check `0x5580` always returns zero, so each OnOK's
+second call to it is unreachable; the descriptor and vtable are read before the state
+writes in OnCancel; the list is filled with the descriptor reloaded after every message.
+
+**Verified** by `tools/difftest/flightseventsdiff.c`, Help's method: retail Flights.DLL
+mapped without its imports, each import slot the slice uses pointed at a logging stub, and
+36 operations (every event, init, help, context and DDX routine, the shared helpers, and
+each class's construct, destroy, delete, factory and round trips) run on both sides from
+one randomised fixture. Stubs swap the descriptor, shrink the list, replace the vtable and
+change the list's window mid-call; every vtable slot logs, so a wrong slot differs rather
+than faults. Factories see failed allocations (the store through null is compared as an
+outcome).
+
+| Run | Result |
+| --- | --- |
+| seed `0x5f1a6c2d` | 20,000 scenarios, 720,000 comparisons, 0 differ |
+| seed `0x98a1e7d3` | 20,000 scenarios, 720,000 comparisons, 0 differ |
+| unwind, seed `0x7e51a23b` | 2,000 scenarios, 505,633 comparisons with a throw at every call position (433,269 throws), 0 differ |
+| `tools/flights_breaks.py 400` | 61 of 61 breaks caught; three more proven equivalent, listed in the runner |
+
+Not covered yet: the native DLL (runtime adapters, real controls, `tools/flightsuidiff`),
+which comes once enough classes exist to bind the module, as Help's and Sim's did; and the
+pickers in the running game, which `make main-dialogs` reaches (commands `0x1106`, `0x1107`)
+once the DLL can be installed.
+
+## Next
+
+1. The next families, smallest first: Save `0x1104`, Communications `0x1203`, Create
+   `0x1101`, Select Aircraft `0x1201`, the opening menus `0x1109` / `0x11090001` /
+   `0x11090002`, Select Flight `0x1102`, then the large ones, Autopilot `0x1204` and
+   Navigation `0x1202`. Each adds its classes to `CLASSES` in the generator and its
+   operations to the harness.
+2. Module init/deinit and the runtime: native vtables and message maps, MFC/SIMSUI import
+   adapters, the factories registered with the host (`tools/gen_flights_runtime.py`, after
+   `gen_help_runtime.py`).
+3. A native UI comparison and a private-copy smoke, then installing it, as for Help.

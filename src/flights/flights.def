@@ -1,0 +1,4 @@
+LIBRARY Flights.DLL
+EXPORTS
+    Linkage=g_flights_linkage DATA
+    ImportTable=g_flights_imports DATA

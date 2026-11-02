@@ -1,7 +1,8 @@
 # Remaining work
 
 What is still retail, and what is left before a native build. The 27 simulator modules in
-`Modules\` are done and in `MODULES`, and `English\` World, Alerts, Help, Sim and Views
+`Modules\` are done and in `MODULES` (two more module DLLs, SIM1 and the `.MDL`s, live
+outside it and are not), and `English\` World, Alerts, Help, Sim and Views
 are in `ENGLISH_MODULES`; `make install` puts them all in the game. Everything below is not. Sizes are `.text` from the reference CD. Differences
 and gaps in the finished modules are in [open-differences.md](open-differences.md).
 Results here are from 2026-11-01.
@@ -13,10 +14,12 @@ Results here are from 2026-11-01.
 | `English/Options.DLL` | 84,381 | **Not started.** Inventory only: 15 registrations, 31 templates | [options.md](modules/options.md) |
 | `FLTSIM98.EXE` | 82,016 | **No executable.** All 194 services are reimplemented and verified in-process as `HOST.DLL`; retail's still runs the game | [host.md](modules/host.md) |
 | `SIMSUI.DLL` | 79,850 | **Not started.** 540 named exports, the common dialog and control widgets. Every dialog imports it | [dialogs.md](modules/dialogs.md) |
+| `Sim/SIM1.sim` | 78,216 | **Not started.** The flight model: every aircraft's `.AIR` names `sim1`. A module DLL, id 25, 15-entry Linkage, wanting 10 modules. Not in `orig/` | [below](#sim1-and-the-mdls) |
 | `Gauges/*.GAU` (120) | 63,472 | **Not started.** No `src/gauges/` and no survey. PANELS, their runtime, is ours | below |
-| `English/Flights.DLL` | 51,122 | **In progress.** Callers recovered for all 13 registrations; 12 of the 13 dialogs verified in their harness (all but Navigation) (`tools/flights.mk`); no DLL yet | [flights.md](modules/flights.md) |
+| `English/Flights.DLL` | 51,122 | **In progress.** All 13 registrations transliterated and verified in their harness (`tools/flights.mk`); no DLL yet | [flights.md](modules/flights.md) |
 | `English/Sim.DLL` | 33,239 | **Installed** 2026-11-02 | [sim.md](modules/sim.md) |
 | `English/mpdialog.dll` | 25,401 | **Partial,** being worked on separately: registries `0x110a`..`0x110c` | [mpdialog.md](modules/mpdialog.md) |
+| `Aircraft/*/model/*.MDL` (9) | 25,014 | **Not started.** The aircraft's visual models, module id 31, 9-entry Linkage. Mostly `.data`. Not in `orig/` | [below](#sim1-and-the-mdls) |
 | `English/Views.DLL` | 13,090 | **Installed** 2026-11-02 | [views.md](modules/views.md) |
 | `fltsim95.exe` | 11,464 | **Not looked at.** A stub that ships alongside; imports only KERNEL32. Probably not needed | [architecture.md](architecture.md) |
 | `English/Help.DLL` | 10,657 | **Installed** 2026-11-02 | [help.md](modules/help.md) |
@@ -38,6 +41,23 @@ to 2,902 (`LEARPFD`). The rest is not surveyed, but is presumably bitmaps and ga
 so these may be far less work than their size suggests. Survey them before planning: how
 much code they share, and how much is data a generator could carry over.
 
+## SIM1 and the MDLs
+
+Both are ordinary module DLLs with their own Linkage, loaded by ACONTAIN through host
+`+0x26c` rather than from `Modules\` ([acontain.md](modules/acontain.md)), so the module
+harness patterns apply to them. Neither is in `orig/` yet: the copies in the installed game
+(`game/Sim`, `game/Aircraft/*/model`, dated 10 August 1997) come from the CD's setup. Copy
+them into `orig/` and check them against the reference CD before writing tools against them.
+
+- **`SIM1.sim`** (base `0x22000000`, `.text` 78,216, `.data` 17,400): imports only KERNEL32
+  and MSVCRT, and links to modules 1, 2, 3, 4, 10, 16, 20, 23, 32 and 39. It calls host
+  `+0x21c` 77 times and reads and writes GLOBAL widely, like DYNAMIC. As large as SIMSUI and
+  in every flight, so it should not wait behind the dialogs.
+- **The `.MDL`s** (one per aircraft and a crash model for the C182 and the Extra): `.text`
+  678 to 982 bytes for the seven normal models and 9,350 and 9,894 for the two crash ones,
+  `.data` 5,800 to 96,488. Presumably a little shared code around model data for G3D;
+  survey how much the code differs between files before planning, as for the gauges.
+
 ## Order
 
 1. **Done 2026-11-02: the four finished dialogs are installed** (Alerts, Help, Sim, Views).
@@ -51,9 +71,11 @@ much code they share, and how much is data a generator could carry over.
    graph and lesson completion; see [open-differences.md](open-differences.md#not-yet-tested).
 2. **Flights, then Options.** The largest code still used in play. Scripted menu tests come
    with them: see [open-differences.md](open-differences.md#not-yet-tested).
-3. **SIMSUI.** After the dialogs, because they show which of its 540 exports matter.
-4. **Survey the gauges early, do them late.** The survey may change this order.
-5. **The executable around `HOST.DLL`.**
-6. **Native builds.** Moving off x86 ends comparison with retail, so the earlier steps come
+3. **SIM1, then the MDLs.** Simulator code in every flight, testable like the modules.
+   Copy them into `orig/` first.
+4. **SIMSUI.** After the dialogs, because they show which of its 540 exports matter.
+5. **Survey the gauges early, do them late.** The survey may change this order.
+6. **The executable around `HOST.DLL`.**
+7. **Native builds.** Moving off x86 ends comparison with retail, so the earlier steps come
    first. Register contracts between modules ([open-differences.md](open-differences.md#a-class-of-bug-to-look-for))
    are x86 behaviour that a port has to remove on both sides of each call.

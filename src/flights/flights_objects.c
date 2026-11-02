@@ -14,6 +14,9 @@
 static const struct fs98_flights_object_services *s_services;
 static void *s_vtables[FS98_FLIGHTS_CLASS_COUNT];
 static uint32_t s_module;
+static void *s_static_vtable;
+#define STATIC_CONSTRUCT 0x1338c     /* MFC CWnd(), under an inline CSimsStatic */
+#define STATIC_DESTROY 0x13388       /* ~CWnd */
 struct fs98_flights_object_unwind {
     struct fs98_flights_unwind frame;
     void *object;
@@ -25,11 +28,14 @@ static void fs98_flights_object_cleanup(struct fs98_flights_unwind *frame)
     struct fs98_flights_object_unwind *state = (void *)frame;
     while (state->constructed) {
         const struct fs98_flights_subobject *control = &state->class_info->controls[--state->constructed];
+        /* 0x22319611: ~CSimsStatic, inline, puts its own vtable back first */
+        if (control->destructor == STATIC_DESTROY) PTR((uint8_t *)state->object + control->offset, 0) = s_static_vtable;
         s_services->destroy((uint8_t *)state->object + control->offset, control->destructor);
     }
     if (state->base) {
         state->base = 0;
-        s_services->dialog_destroy(state->object);
+        if (state->class_info->page) s_services->page_destroy(state->object);
+        else s_services->dialog_destroy(state->object);
     }
 }
 void fs98_flights_set_object_services(const struct fs98_flights_object_services *services,
@@ -40,6 +46,7 @@ void fs98_flights_set_object_services(const struct fs98_flights_object_services 
     for (index = 0; index < FS98_FLIGHTS_CLASS_COUNT; ++index) s_vtables[index] = vtables[index];
 }
 void fs98_flights_set_object_module(uint32_t module) { s_module = module; }
+void fs98_flights_set_static_vtable(void *vtable) { s_static_vtable = vtable; }
 
 /* 0x22312c10 and the like: CSimsDialog(template, parent), then each member in order */
 static FS98_FLIGHTS_NOINLINE void *fs98_flights_construct(void *object, void *parent, uint32_t kind)
@@ -48,11 +55,15 @@ static FS98_FLIGHTS_NOINLINE void *fs98_flights_construct(void *object, void *pa
     state.object = object; state.class_info = &s_classes[kind];
     state.constructed = state.base = 0;
     fs98_flights_unwind_enter(&state.frame, fs98_flights_object_cleanup);
-    s_services->dialog_construct(object, state.class_info->template, parent);
+    if (state.class_info->page) s_services->page_construct(object, state.class_info->template, parent);
+    else s_services->dialog_construct(object, state.class_info->template, parent);
     state.base = 1;
     while (state.constructed < state.class_info->count) {
         const struct fs98_flights_subobject *control = &state.class_info->controls[state.constructed];
         s_services->construct((uint8_t *)object + control->offset, control->constructor);
+        /* 0x22319588: CSimsStatic(), inline, after CWnd(): CStatic's vtable (0x2231f7d0),
+         * at once replaced by its own. The first store is never seen and is left out. */
+        if (control->constructor == STATIC_CONSTRUCT) PTR((uint8_t *)object + control->offset, 0) = s_static_vtable;
         ++state.constructed;
     }
     PTR(object, 0) = s_vtables[kind];
@@ -61,6 +72,8 @@ static FS98_FLIGHTS_NOINLINE void *fs98_flights_construct(void *object, void *pa
     /* 0x22319ef7, 0x2231aa6b, 0x2231b2db: the menus start with no callback running */
     if (kind == FS98_FLIGHTS_OPENING || kind == FS98_FLIGHTS_FLIGHT_MENU || kind == FS98_FLIGHTS_LEARNING_MENU)
         D32(object, 0x10dc) = 0;
+    /* 0x2231716d: the third tab page's CString starts empty */
+    if (kind == FS98_FLIGHTS_NAV_EFIS) s_services->string_assign((uint8_t *)object + 0x1b60, fs98_flights_empty_text);
     fs98_flights_unwind_leave(&state.frame);
     return object;
 }
@@ -71,6 +84,8 @@ static FS98_FLIGHTS_NOINLINE void fs98_flights_destroy(void *object, uint32_t ki
     state.object = object; state.class_info = &s_classes[kind];
     state.constructed = state.class_info->count; state.base = 1;
     fs98_flights_unwind_enter(&state.frame, fs98_flights_object_cleanup);
+    /* 0x22317e7e: Navigation's destructor stores its own vtable back first */
+    if (kind == FS98_FLIGHTS_NAVIGATION) PTR(object, 0) = s_vtables[kind];
     fs98_flights_object_cleanup(&state.frame);
     fs98_flights_unwind_leave(&state.frame);
 }
@@ -105,6 +120,21 @@ static FS98_FLIGHTS_NOINLINE uint32_t fs98_flights_create(uint32_t parent, void 
     fs98_flights_unwind_leave(&state.frame);
     return D32(object, 0x20);
 }
+/* 0x22318146, 0x22318186, 0x223181c0: Navigation's OnInitDialog makes its pages so, with
+ * the block in its frame (state 0, 1, 2) only while the constructor runs */
+void *fs98_flights_new_page(uint32_t kind, void *parent)
+{
+    struct fs98_flights_factory_unwind state;
+    void *object;
+    state.object = 0; state.live = 0;
+    fs98_flights_unwind_enter(&state.frame, fs98_flights_factory_cleanup);
+    object = s_services->allocate(s_classes[kind].size);
+    state.object = object; state.live = 1;
+    if (object) object = fs98_flights_construct(object, parent, kind);
+    state.live = 0;
+    fs98_flights_unwind_leave(&state.frame);
+    return object;
+}
 #define OBJECT_CLASS(name, kind) \
 void *TC fs98_flights_##name##_construct(void *object, void *parent) \
 { return fs98_flights_construct(object, parent, kind); } \
@@ -130,4 +160,20 @@ OBJECT_CLASS(flight_menu, FS98_FLIGHTS_FLIGHT_MENU)
 OBJECT_CLASS(learning_menu, FS98_FLIGHTS_LEARNING_MENU)
 OBJECT_CLASS(select, FS98_FLIGHTS_SELECT)
 OBJECT_CLASS(autopilot, FS98_FLIGHTS_AUTOPILOT)
+OBJECT_CLASS(navigation, FS98_FLIGHTS_NAVIGATION)
+#undef OBJECT_CLASS
+#define OBJECT_CLASS(name, kind) \
+void *TC fs98_flights_##name##_construct(void *object, void *parent) \
+{ return fs98_flights_construct(object, parent, kind); } \
+void TC fs98_flights_##name##_destroy(void *object) \
+{ fs98_flights_destroy(object, kind); } \
+void *TC fs98_flights_##name##_delete(void *object, uint32_t flags) \
+{ \
+    fs98_flights_destroy(object, kind); \
+    if (flags & 1) s_services->ui_delete(object); \
+    return object; \
+}
+OBJECT_CLASS(nav_efis, FS98_FLIGHTS_NAV_EFIS)
+OBJECT_CLASS(nav_radios, FS98_FLIGHTS_NAV_RADIOS)
+OBJECT_CLASS(nav_adf, FS98_FLIGHTS_NAV_ADF)
 #undef OBJECT_CLASS

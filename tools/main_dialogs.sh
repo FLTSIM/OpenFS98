@@ -18,7 +18,7 @@ commands="1308 1309 1607 1203 1201 1202 1204 1205 1301 1306 1307 1407 1409 1502 
 # (Help, through ADVDRV), after the crash since OK may start a lesson; and the Exit
 # confirmation (Alerts), answered No.  See tools/drive/fsdialogs.c.
 steps="1607/3805 set:1205/@505,190/@80,174 crash 1105 exit"
-english=$(make -s english-modules-of)
+english="$(make -s english-modules-of) $(make -s english-candidates-of)"
 for m in MAIN $english; do
     [ -f "bin/$m.DLL" ] || { echo "needs bin/$m.DLL" >&2; exit 2; }
 done
@@ -45,7 +45,7 @@ run() {     # tag dll button
     cp -a "$game" "$copy"
     cp "$2" "$copy/Modules/MAIN.DLL"
     local m
-    for m in $english; do      # Alerts, Help, Sim, Views and World: retail's or ours with MAIN
+    for m in $english; do      # the English DLLs and Flights: retail's or ours with MAIN
         if [[ $1 == ours-* ]]; then cp "bin/$m.DLL" "$copy/$(make -s installed-path-of M=$m)"
         else cp "$(make -s orig-module-of M=$m)" "$copy/$(make -s installed-path-of M=$m)"; fi
     done

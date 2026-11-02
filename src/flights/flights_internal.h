@@ -73,7 +73,35 @@ struct fs98_flights_services {
                                   uint32_t module, int32_t x, int32_t y, struct fs98_flights_rect rect);
     int32_t (*window_enabled)(void *window);                        /* CWnd::IsWindowEnabled */
     void (*init_combo)(void *control, void *font, void *label);     /* CSimsComboBox::Init */
+    void (*ddx_text)(void *exchange, uint32_t id, void *string);    /* DDX_Text into a CString */
+    void (*ddv_max_chars)(void *exchange, void *string, int32_t count);
+    int32_t (*message_box)(const char *text, uint32_t type, uint32_t help);   /* AfxMessageBox */
+    int32_t (*is_kind_of)(void *object, const void *runtime_class);  /* CObject::IsKindOf */
+    int32_t (*show_window)(void *window, int32_t show);             /* CWnd::ShowWindow */
+    int32_t (*tab_init)(void *tabs, void *dialog, void *font, uint32_t bitmap, void *dib, void *palette,
+                        uint32_t a, uint32_t color, int32_t b, int32_t c, int32_t d, int32_t e,
+                        uint32_t module, uint32_t flags);              /* CSimsTabCtrl::Init */
+    void (*tab_add_page)(void *tabs, void *page, char *caption, int32_t flag);   /* AddPage */
+    void (*tab_helper_init)(void *helper, void *tabs);              /* CSimsTabCtrlHelper::Init */
+    int32_t (*tab_set_last_page)(void *tabs, void *page);           /* SetLastPage */
+    int32_t (*tab_set_active)(void *tabs, int32_t index, uint32_t window);   /* SetActiveTab */
+    int32_t (*page_init)(void *page, int32_t value);                /* CSimsTabPage::Init */
+    int32_t (*load_string_a)(uint32_t instance, uint32_t id, char *buffer, int32_t size);   /* USER32 */
 };
+/* MFC's CEdit::classCEdit, a data import: the NAV page asks whether a control is an edit */
+void fs98_flights_set_edit_class(const void *runtime_class);
+const void *fs98_flights_edit_class(void);
+
+/* Navigation (0x1202, MAIN command 0x1202): a tab dialog over three CSimsTabPages, each
+ * given a slice of the descriptor (+0x10, +0x130, +0x1bc) at page +0x1118 and the whole
+ * at +0x111c; answer +0, check callback +4 (stdcall, given the descriptor). A page's base
+ * keeps the parent's DIB at +0x10fc and palette at +0x10dc, and +0x1100 once it exists.
+ * The EFIS tab's slice: master switch +8, plot intercepting path +0x10 (2 when set), the
+ * three combos' choices +0x18 +0x28 +0x20, the lock +0x30 (2 VOR and altitude, 4 ILS/LOC)
+ * and the VOR +0x40 (0 VOR 1, 1 VOR 2), each choice's availability +0x34 (VOR lock) +0x38
+ * (ILS/LOC) +0x44 (VOR 1) +0x48 (VOR 2), the altitude's status +0x4c, text +0x50 and room
+ * +0x54. */
+typedef uint32_t (FS98_FLIGHTS_STDCALL *fs98_flights_navigation_check_fn)(void *descriptor);
 
 /* Select Flight (0x1102, MAIN's flight_dialog): answer +0, delete +8 (stdcall, given the
  * descriptor), edit +0xc (stdcall, given the descriptor and a copy of the record with a
@@ -254,7 +282,31 @@ FS98_FLIGHTS_EVENT(autopilot_throttle);
 FS98_FLIGHTS_EVENT(autopilot_takeoff);
 FS98_FLIGHTS_EVENT(autopilot_read);
 FS98_FLIGHTS_EVENT(autopilot_populate);
+FS98_FLIGHTS_EVENT(navigation_close);
+FS98_FLIGHTS_EVENT(navigation_cancel);
+FS98_FLIGHTS_EVENT(navigation_accept);
+FS98_FLIGHTS_EVENT(navigation_wire);
+FS98_FLIGHTS_EVENT(nav_efis_init);
+FS98_FLIGHTS_EVENT(nav_efis_four);
+FS98_FLIGHTS_EVENT(nav_efis_two);
+FS98_FLIGHTS_EVENT(nav_efis_first);
+FS98_FLIGHTS_EVENT(nav_efis_second);
+FS98_FLIGHTS_EVENT(nav_efis_enable);
+FS98_FLIGHTS_EVENT(nav_efis_refill);
+FS98_FLIGHTS_EVENT(nav_radios_init);
+FS98_FLIGHTS_EVENT(nav_radios_fill);
+FS98_FLIGHTS_EVENT(nav_adf_init);
+FS98_FLIGHTS_EVENT(nav_adf_fill);
 #undef FS98_FLIGHTS_EVENT
+int32_t FS98_FLIGHTS_THISCALL fs98_flights_navigation_validate(void *object, uint32_t control);
+int32_t FS98_FLIGHTS_THISCALL fs98_flights_navigation_init(void *object);
+uint32_t FS98_FLIGHTS_THISCALL fs98_flights_nav_efis_validate(void *object, uint32_t control);
+uint32_t FS98_FLIGHTS_THISCALL fs98_flights_nav_efis_error(void *object, uint32_t code);
+int32_t FS98_FLIGHTS_THISCALL fs98_flights_nav_efis_message(void *object, uint32_t w_param, uint32_t l_param);
+uint32_t FS98_FLIGHTS_THISCALL fs98_flights_nav_radios_validate(void *object, uint32_t control);
+uint32_t FS98_FLIGHTS_THISCALL fs98_flights_nav_radios_error(void *object, uint32_t code);
+uint32_t FS98_FLIGHTS_THISCALL fs98_flights_nav_adf_validate(void *object, uint32_t control);
+uint32_t FS98_FLIGHTS_THISCALL fs98_flights_nav_adf_error(void *object, uint32_t code);
 int32_t FS98_FLIGHTS_THISCALL fs98_flights_autopilot_init(void *object);
 uint32_t FS98_FLIGHTS_THISCALL fs98_flights_autopilot_validate(void *object, uint32_t control);
 uint32_t FS98_FLIGHTS_THISCALL fs98_flights_autopilot_error(void *object, uint32_t code);
@@ -302,5 +354,9 @@ FS98_FLIGHTS_CLASS(flight_menu);
 FS98_FLIGHTS_CLASS(learning_menu);
 FS98_FLIGHTS_CLASS(select);
 FS98_FLIGHTS_CLASS(autopilot);
+FS98_FLIGHTS_CLASS(navigation);
+FS98_FLIGHTS_CLASS(nav_efis);
+FS98_FLIGHTS_CLASS(nav_radios);
+FS98_FLIGHTS_CLASS(nav_adf);
 #undef FS98_FLIGHTS_CLASS
 #endif

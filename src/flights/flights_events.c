@@ -41,7 +41,7 @@ void TC fs98_flights_post_destroy(void *object)
     if (object) ((void *(TC *)(void *, uint32_t))PTR(PTR(object, 0), 4))(object, 1);
 }
 
-#define FLIGHTS_CLASS(name, base) \
+#define FLIGHTS_HELP(name) \
 int32_t TC fs98_flights_##name##_help(void *object, uint32_t unused, void *info) \
 { \
     (void)object; (void)unused; \
@@ -52,7 +52,9 @@ int32_t TC fs98_flights_##name##_context(void *object, uint32_t window, uint32_t
     (void)object; (void)unused; \
     s_services->win_help(window, s_help_file, 0xa, s_help_##name); \
     return 1; \
-} \
+}
+#define FLIGHTS_CLASS(name, base) \
+FLIGHTS_HELP(name) \
 void TC fs98_flights_##name##_exchange(void *object, void *exchange) \
 { \
     uint32_t index; \
@@ -73,7 +75,21 @@ FLIGHTS_CLASS(flight_menu, 1)
 FLIGHTS_CLASS(learning_menu, 1)
 FLIGHTS_CLASS(select, 0)        /* 0x22316850 binds without CSimsDialog's */
 FLIGHTS_CLASS(autopilot, 0)     /* 0x223134f0 likewise */
+FLIGHTS_CLASS(navigation, 0)    /* 0x22317f40 likewise */
+FLIGHTS_CLASS(nav_radios, 0)    /* 0x22318940: the pages bind without CSimsTabPage's */
+FLIGHTS_CLASS(nav_adf, 0)       /* 0x223196f0 */
+FLIGHTS_HELP(nav_efis)
+/* 0x223172f0: its controls, then its CString as the altitude, at most 6 characters */
+void TC fs98_flights_nav_efis_exchange(void *object, void *exchange)
+{
+    uint32_t index;
+    for (index = 0; index < (uint32_t)s_ddx_count_nav_efis; ++index)
+        s_services->ddx_control(exchange, s_ddx_nav_efis[index][1], AT(object, s_ddx_nav_efis[index][0]));
+    s_services->ddx_text(exchange, 0xcb4, AT(object, 0x1b60));
+    s_services->ddv_max_chars(exchange, AT(object, 0x1b60), 6);
+}
 #undef FLIGHTS_CLASS
+#undef FLIGHTS_HELP
 
 /* ---- the pickers: Adventures (0x1108) and Challenges (0x1107) ------------------------
  * The list box's window is at +0x1270, the description edit's at +0x12b8, the answer

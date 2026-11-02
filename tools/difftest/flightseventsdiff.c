@@ -13,7 +13,7 @@
  * Covered: the pickers (Adventures 0x1108, Challenges 0x1107), Save Flight (0x1104),
  * Communications (0x1203), Create a Flight (0x1101), Select Aircraft (0x1201), the welcome
  * dialog (0x1109) and its two sub-menus (0x11090001, 0x11090002), the modeless dialog
- * (id 1), Select Flight (0x1102), Autopilot (0x1204), and
+ * (id 1), Select Flight (0x1102), Autopilot (0x1204), Navigation (0x1202) and its EFIS page, and
  * the helpers every class shares. */
 #include <windows.h>
 #include <stdio.h>
@@ -28,18 +28,25 @@
 #define SC FS98_FLIGHTS_STDCALL
 #define D32(object, offset) (*(uint32_t *)((uint8_t *)(object) + (offset)))
 #define PTR(object, offset) (*(void **)((uint8_t *)(object) + (offset)))
+#define W16(object, offset) (*(uint16_t *)((uint8_t *)(object) + (offset)))
 #define TEST_THROW 0x0e041a22
+/* a harness limit reached: say which, and where */
+#define GIVE_UP() do { fprintf(stderr, "GIVE UP line %d scenario=%u op=%u side=%d\n", __LINE__, s_scenario, s_operation, s_side); exit(2); } while (0)
 #define LOG_SIZE 32768
 #define BASE 0x22310000
 #define RESOURCE_MODULE 0x31415926
 #define OBJECT_MODULE 0x27182818
+#define STATIC_VTABLE 0x5a71c000     /* SIMSUI's CSimsStatic vtable, a data import */
+#define EDIT_CLASS 0xed17c1a5        /* MFC's CEdit::classCEdit, likewise */
 
 struct fixture {
     uint8_t guard_before[32];
     uint8_t object[0x2178];
-    uint8_t descriptor[2][0x100];
+    uint8_t descriptor[2][0x200];   /* the NAV page's slice reaches +0x10c */
     char names[2][0x110];
-    char texts[4][0x110];           /* Autopilot's heading, altitude, airspeed and Mach */           /* Save's name and description buffers */
+    char texts[4][0x110];           /* Autopilot's heading, altitude, airspeed and Mach; the EFIS page's altitude */
+    uint8_t pages[3][0x2450];       /* Navigation's tab pages: NAV, ADF, EFIS, as ui_new hands them out */
+    uint8_t whole[16];              /* the EFIS page's whole descriptor: answer, check */
     uint8_t record_before[0xa08];   /* record -1: Select Aircraft indexes with an empty selection */
     uint8_t records[5][0xa08];
     uint8_t info[32];
@@ -75,6 +82,17 @@ struct operation { uint32_t rva; void *ours; enum signature signature; uint32_t 
 #define MODELESS(rva, name, signature) {rva, (void *)fs98_flights_##name, signature, FS98_FLIGHTS_MODELESS, #name}
 #define AIRCRAFT(rva, name, signature) {rva, (void *)fs98_flights_##name, signature, FS98_FLIGHTS_AIRCRAFT, #name}
 #define CREATE(rva, name, signature) {rva, (void *)fs98_flights_##name, signature, FS98_FLIGHTS_CREATE, #name}
+#define NAVIGATION(rva, name, signature) {rva, (void *)fs98_flights_##name, signature, FS98_FLIGHTS_NAVIGATION, #name}
+#define NAV_RADIOS(rva, name, signature) {rva, (void *)fs98_flights_##name, signature, FS98_FLIGHTS_NAV_RADIOS, #name}
+#define NAV_ADF(rva, name, signature) {rva, (void *)fs98_flights_##name, signature, FS98_FLIGHTS_NAV_ADF, #name}
+#define PAGE_LIFETIME(kind, name) \
+    {0, (void *)fs98_flights_##name##_construct, SIG_CONSTRUCT, kind, #name "_construct"}, \
+    {0, (void *)fs98_flights_##name##_destroy, SIG_DESTROY, kind, #name "_destroy"}, \
+    {0, (void *)fs98_flights_##name##_delete, SIG_DELETE, kind, #name "_delete"}, \
+    {0, (void *)fs98_flights_##name##_construct, SIG_CONSTRUCT, kind, #name "_construct_again"}, \
+    {0, (void *)fs98_flights_##name##_construct, SIG_ROUNDTRIP, kind, #name "_roundtrip"}, \
+    {0, (void *)fs98_flights_##name##_construct, SIG_CONSTRUCT_DELETE, kind, #name "_construct_delete"}
+#define NAV_EFIS(rva, name, signature) {rva, (void *)fs98_flights_##name, signature, FS98_FLIGHTS_NAV_EFIS, #name}
 #define COMMS(rva, name, signature) {rva, (void *)fs98_flights_##name, signature, FS98_FLIGHTS_COMMS, #name}
 #define CLASS(help, context, ddx, name, kind) \
     {help, (void *)fs98_flights_##name##_help, SIG_HELP, kind, #name "_help"}, \
@@ -177,6 +195,27 @@ static const struct operation s_operations[] = {
     AUTOPILOT(0x4db0, autopilot_validate, SIG_INT_ARG), AUTOPILOT(0x4e90, autopilot_error, SIG_INT_ARG),
     CLASS(0x45f0, 0x4610, 0x34f0, autopilot, FS98_FLIGHTS_AUTOPILOT),
     LIFETIME(FS98_FLIGHTS_AUTOPILOT, autopilot),
+    NAVIGATION(0x8350, navigation_close, SIG_EVENT), NAVIGATION(0x8370, navigation_cancel, SIG_EVENT),
+    NAVIGATION(0x8390, navigation_accept, SIG_EVENT), NAVIGATION(0x8460, navigation_wire, SIG_EVENT),
+    NAVIGATION(0x7f20, navigation_validate, SIG_INT_ARG), NAVIGATION(0x7ff0, navigation_init, SIG_INT),
+    CLASS(0x8420, 0x8440, 0x7f40, navigation, FS98_FLIGHTS_NAVIGATION),
+    LIFETIME(FS98_FLIGHTS_NAVIGATION, navigation),
+    NAV_EFIS(0x7480, nav_efis_init, SIG_EVENT), NAV_EFIS(0x76b0, nav_efis_four, SIG_EVENT),
+    NAV_EFIS(0x76f0, nav_efis_two, SIG_EVENT), NAV_EFIS(0x7750, nav_efis_first, SIG_EVENT),
+    NAV_EFIS(0x7760, nav_efis_second, SIG_EVENT), NAV_EFIS(0x7770, nav_efis_enable, SIG_EVENT),
+    NAV_EFIS(0x7b00, nav_efis_refill, SIG_EVENT), NAV_EFIS(0x7d70, nav_efis_message, SIG_INT_ARG2),
+    NAV_EFIS(0x7980, nav_efis_validate, SIG_INT_ARG), NAV_EFIS(0x7af0, nav_efis_error, SIG_INT_ARG),
+    CLASS(0x7440, 0x7460, 0x72f0, nav_efis, FS98_FLIGHTS_NAV_EFIS),
+    /* a page has no factory: its construct stands in that slot, so the round trips line up */
+    PAGE_LIFETIME(FS98_FLIGHTS_NAV_EFIS, nav_efis),
+    NAV_RADIOS(0x8b80, nav_radios_init, SIG_EVENT), NAV_RADIOS(0x9090, nav_radios_fill, SIG_EVENT),
+    NAV_RADIOS(0x8e20, nav_radios_validate, SIG_INT_ARG), NAV_RADIOS(0x8f90, nav_radios_error, SIG_INT_ARG),
+    CLASS(0x8de0, 0x8e00, 0x8940, nav_radios, FS98_FLIGHTS_NAV_RADIOS),
+    PAGE_LIFETIME(FS98_FLIGHTS_NAV_RADIOS, nav_radios),
+    NAV_ADF(0x9810, nav_adf_init, SIG_EVENT), NAV_ADF(0x9ac0, nav_adf_fill, SIG_EVENT),
+    NAV_ADF(0x99b0, nav_adf_validate, SIG_INT_ARG), NAV_ADF(0x9a40, nav_adf_error, SIG_INT_ARG),
+    CLASS(0x9970, 0x9990, 0x96f0, nav_adf, FS98_FLIGHTS_NAV_ADF),
+    PAGE_LIFETIME(FS98_FLIGHTS_NAV_ADF, nav_adf),
 };
 #define OP_COUNT (sizeof(s_operations) / sizeof(s_operations[0]))
 #define OP s_operations[s_operation]
@@ -201,11 +240,11 @@ static void put(const char *format, ...)
 {
     va_list args;
     int length;
-    if (s_log_length > LOG_SIZE - 2048) exit(2);
+    if (s_log_length > LOG_SIZE - 2048) GIVE_UP();
     va_start(args, format);
     length = vsnprintf(s_logs[s_side] + s_log_length, LOG_SIZE - s_log_length, format, args);
     va_end(args);
-    if (length < 0 || (uint32_t)length >= LOG_SIZE - s_log_length) exit(2);
+    if (length < 0 || (uint32_t)length >= LOG_SIZE - s_log_length) GIVE_UP();
     s_log_length += (uint32_t)length;
     ++s_calls;
     if (s_throw_at && s_calls == s_throw_at) RaiseException(TEST_THROW, 0, 0, 0);
@@ -222,6 +261,9 @@ static void mutate(void)
     int comms = s_operations[s_operation].kind == FS98_FLIGHTS_COMMS;
     int create = s_operations[s_operation].kind == FS98_FLIGHTS_CREATE;
     int aircraft = s_operations[s_operation].kind == FS98_FLIGHTS_AIRCRAFT;
+    int efis = s_operations[s_operation].kind == FS98_FLIGHTS_NAV_EFIS;
+    int radios = s_operations[s_operation].kind == FS98_FLIGHTS_NAV_RADIOS;
+    int adf = s_operations[s_operation].kind == FS98_FLIGHTS_NAV_ADF;
     int opening = s_operations[s_operation].kind == FS98_FLIGHTS_OPENING ||
                   s_operations[s_operation].kind == FS98_FLIGHTS_FLIGHT_MENU ||
                   s_operations[s_operation].kind == FS98_FLIGHTS_LEARNING_MENU;
@@ -234,7 +276,21 @@ static void mutate(void)
     }
     descriptor = PTR(object, at);
     if ((s_script & 2) && (descriptor == s_fixture.descriptor[0] || descriptor == s_fixture.descriptor[1])) {
-        if (save) {
+        if (radios) {
+            D32(descriptor, 0x18) ^= 1;
+            D32(descriptor, 4) ^= 1;
+            W16(descriptor, 0x2c) ^= 1;
+            W16(descriptor, 0xb4) ^= 1;
+        } else if (adf) {
+            D32(descriptor, 0x44) ^= 1;
+            D32(descriptor, 8) ^= 1;
+            W16(descriptor, 0x5a) ^= 1;
+        } else if (efis) {
+            D32(descriptor, 0x30) ^= 6;     /* 2 and 4 trade places */
+            D32(descriptor, 0x40) ^= 1;
+            D32(descriptor, 0x4c) ^= 1;
+            D32(descriptor, 0x44) ^= 1;
+        } else if (save) {
             D32(descriptor, 8) = D32(descriptor, 8) ? 0 : 0x1004;
             D32(descriptor, 0x1c) ^= 0x1003;
         } else if (opening) {
@@ -257,7 +313,10 @@ static void mutate(void)
         }
     }
     if (s_script & 4) PTR(object, 0) = s_other_vtable;
-    if (s_script & 8) D32(object, save ? 0x1558 : comms ? 0x1d24 : aircraft ? 0x151c : 0x1270) = s_seed ^ 0x12345678;
+    if (s_script & 8) D32(object, save ? 0x1558 : comms ? 0x1d24 : aircraft ? 0x151c : efis ? 0x1a8c : radios ? 0x2424 : adf ? 0x199c : 0x1270) = s_seed ^ 0x12345678;
+    /* Navigation: its second page swapped for the third, so a stale page pointer shows */
+    if ((s_script & 2) && s_operations[s_operation].kind == FS98_FLIGHTS_NAVIGATION && PTR(object, 0x2164) == s_fixture.pages[1])
+        PTR(object, 0x2164) = s_fixture.pages[2];
 }
 
 /* ---- the object's own virtuals --------------------------------------------------------- */
@@ -309,6 +368,8 @@ static uint32_t TC virtual_validate(void *object, uint32_t argument)
 }
 static uint32_t TC virtual_error(void *object, uint32_t code)
 { put("virtual.error %u %x\n", offset(object), code); mutate(); return s_scenario & 4 ? 0 : 0xcbd; }
+static int32_t TC virtual_init_tab(void *object, int32_t a, int32_t b, int32_t c, int32_t d, int32_t e, uint32_t module)
+{ put("virtual.init.tab %u %d/%d/%d/%d/%d module=%x\n", offset(object), a, b, c, d, e, module); mutate(); return (int32_t)s_seed; }
 static int32_t TC virtual_check(void *control, void *font, uint32_t bitmap, void *dib, void *palette, uint32_t module)
 {
     put("init.check %u font=%u bmp=%x dib=%u pal=%u module=%x\n", offset(control), offset(font),
@@ -378,6 +439,8 @@ static int32_t send_message(uint32_t window, uint32_t message, uint32_t w_param,
     mutate();
     if (message == 0x147)   /* CB_GETCURSEL: none, a valid one, or one past the last */
         return (int32_t)((s_seed >> (s_calls % 8)) % 7) - 1;
+    if (message == 0xb8)    /* EM_GETMODIFY: unmodified, one time in three */
+        return (s_seed >> (s_calls % 16)) % 3 ? 1 : 0;
     if (message == 0x199)   /* LB_GETITEMDATA: the record the item was tagged with */
         return (int32_t)(uintptr_t)s_fixture.records[w_param % 5];
     if (message == 0x188) {
@@ -392,7 +455,7 @@ static int32_t win_help(uint32_t window, const char *file, uint32_t command, con
     char pairs[1024];
     int length = 0;
     do {
-        if (index >= 128 || length > 900) exit(2);
+        if (index >= 128 || length > 900) GIVE_UP();
         length += snprintf(pairs + length, sizeof(pairs) - length, "%x:%x,", table[index], table[index + 1]);
         index += 2;
     } while (table[index - 2] || table[index - 1]);
@@ -540,7 +603,12 @@ static void list_text(void *list, int32_t index, void *string)
     mutate();
 }
 static void *dialog_item(void *object, int32_t id)
-{ put("dialog.item %u %x\n", offset(object), id); mutate(); return s_fixture.info; }
+{
+    put("dialog.item %u %x\n", offset(object), id); mutate();
+    /* the NAV page's focus: none, one time in four */
+    if (s_operations[s_operation].kind == FS98_FLIGHTS_NAV_RADIOS && (s_seed >> 20) % 4 == 0) return 0;
+    return s_fixture.info;
+}
 static uint32_t dialog_item_window(uint32_t window, int32_t id)
 { put("dialog.item.window %u %x\n", window, id); mutate(); return s_seed ^ (uint32_t)id; }
 static void remap_rect(struct fs98_flights_rect *rect, void *control)
@@ -592,6 +660,63 @@ static uint32_t SC autopilot_check(void *descriptor)
     D32(descriptor, 0x48) = (s_seed >> 5) % 3 == 0;
     return s_seed;
 }
+static uint32_t SC navigation_check(void *descriptor)
+{
+    uint8_t *slice = PTR(s_fixture.object, 0x1118);
+    if (s_operations[s_operation].kind == FS98_FLIGHTS_NAV_EFIS)
+        put("navigation.check %u efis=%u/%u/%u altitude=[%s]\n", offset(descriptor), D32(slice, 0x30),
+            D32(slice, 0x40), D32(slice, 0x10), (char *)PTR(slice, 0x50));
+    else if (s_operations[s_operation].kind == FS98_FLIGHTS_NAV_RADIOS)
+        put("navigation.check %u nav=%u [%s] [%s] [%s] [%s]\n", offset(descriptor), D32(slice, 0x9c),
+            (char *)PTR(slice, 0x1c), (char *)PTR(slice, 0x34), (char *)PTR(slice, 0xa4), (char *)PTR(slice, 0xbc));
+    else
+        put("navigation.check %u adf=[%s] transponder=[%s]\n", offset(descriptor), (char *)PTR(slice, 0x48),
+            (char *)PTR(slice, 0x34));
+    mutate();
+    return (s_seed >> 9) % 3 ? s_seed : 0;
+}
+static void ddx_text(void *exchange, uint32_t id, void *string)
+{ put("ddx.text %u %x %u\n", offset(exchange), id, offset(string)); mutate(); }
+static void ddv_max_chars(void *exchange, void *string, int32_t count)
+{ put("ddv.max %u %u %d\n", offset(exchange), offset(string), count); mutate(); }
+static int32_t message_box(const char *text, uint32_t type, uint32_t help)
+{ put("message.box [%s] %x %x\n", text, type, help); mutate(); return (int32_t)s_seed; }
+static int32_t is_kind_of(void *object, const void *runtime_class)
+{
+    put("is.kind.of %u class=%x\n", offset(object), (uint32_t)(uintptr_t)runtime_class); mutate();
+    return (s_seed >> 19) & 1;
+}
+static int32_t show_dialog(void *object, int32_t show);
+static int32_t tab_init(void *tabs, void *dialog, void *font, uint32_t bitmap, void *dib, void *palette,
+                        uint32_t a, uint32_t color, int32_t b, int32_t c, int32_t d, int32_t e,
+                        uint32_t module, uint32_t flags)
+{
+    put("tab.init %u dialog=%u font=%u bmp=%x dib=%u pal=%u %u color=%x %d/%d/%d/%d module=%x flags=%u\n",
+        offset(tabs), offset(dialog), offset(font), bitmap, offset(dib), offset(palette), a, color, b, c, d, e,
+        module, flags);
+    mutate(); return (int32_t)s_seed;
+}
+static void tab_add_page(void *tabs, void *page, char *caption, int32_t flag)
+{ put("tab.add %u page=%u [%s] flag=%d\n", offset(tabs), offset(page), caption, flag); mutate(); }
+static void tab_helper_init(void *helper, void *tabs)
+{ put("tab.helper %u tabs=%u\n", offset(helper), offset(tabs)); mutate(); }
+static int32_t tab_set_last_page(void *tabs, void *page)
+{
+    put("tab.last %u page=%u\n", offset(tabs), offset(page)); mutate();
+    /* the dialog's descriptor gone, now and then, after the tabs have read it */
+    if ((s_seed >> 29) % 3 == 0) PTR(s_fixture.object, 0x10dc) = 0;
+    return (int32_t)s_seed;
+}
+static int32_t tab_set_active(void *tabs, int32_t index, uint32_t window)
+{ put("tab.active %u %d window=%u\n", offset(tabs), index, window); mutate(); return (int32_t)s_seed; }
+static int32_t page_init(void *page, int32_t value)
+{ put("page.init %u %d\n", offset(page), value); mutate(); return (int32_t)s_seed; }
+static int32_t load_string_a(uint32_t instance, uint32_t id, char *buffer, int32_t size)
+{
+    put("load.string.a %x %x size=%d\n", instance, id, size);
+    snprintf(buffer, (size_t)size, "Tab %x %u", id, s_scenario);
+    mutate(); return (int32_t)strlen(buffer);
+}
 static int32_t window_enabled(void *window)
 { put("window.enabled %u\n", offset(window)); mutate(); return (s_seed >> (s_calls % 16)) & 1; }
 static uint32_t SC select_delete_callback(void *descriptor)
@@ -624,7 +749,9 @@ static const struct fs98_flights_services s_services = {
     set_slider_position, init_group, to_number, format_number,
     init_picture, set_focus, set_sims_text, font_construct, font_destroy, register_exit, default_paint,
     string_construct, string_destroy, list_text, dialog_item, dialog_item_window, remap_rect, move_window,
-    redraw_window, window_from_handle, load_string_resource, init_shadow_button, window_enabled, init_combo
+    redraw_window, window_from_handle, load_string_resource, init_shadow_button, window_enabled, init_combo,
+    ddx_text, ddv_max_chars, message_box, is_kind_of, show_dialog, tab_init, tab_add_page,
+    tab_helper_init, tab_set_last_page, tab_set_active, page_init, load_string_a
 };
 
 static void *dialog_construct(void *object, int32_t resource, void *parent)
@@ -635,20 +762,38 @@ static void *dialog_construct(void *object, int32_t resource, void *parent)
 }
 static void dialog_destroy(void *object)
 { put("dialog.destroy %u vtable=%x\n", offset(object), D32(object, 0)); D32(object, 0) = 0xdead0000; mutate(); }
+static void *string_assign(void *string, const char *text)
+{
+    put("string.assign %u [%s] was=%x\n", offset(string), text, text_offset(((struct fs98_flights_string *)string)->text));
+    mutate(); return string;
+}
+static void *page_construct(void *object, int32_t resource, void *parent)
+{
+    put("page.construct %u resource=%x parent=%u\n", offset(object), resource, (uint32_t)(uintptr_t)parent);
+    D32(object, 0) = 0xba5e1111; D32(object, 0x20) = s_seed;
+    mutate(); return object;
+}
+static void page_destroy(void *object)
+{ put("page.destroy %u vtable=%x\n", offset(object), D32(object, 0)); D32(object, 0) = 0xdead1111; mutate(); }
 static void construct_control(void *control, uint32_t import)
 {
+    if (import == 0x133dc) { string_construct(control); return; }    /* a CString member */
     put("control.construct %u import=%x\n", offset(control), import);
     D32(control, 0) = import; D32(control, 4) = s_seed;
     mutate();
 }
 static void destroy_control(void *control, uint32_t import)
 {
+    if (import == 0x133e8) { string_destroy(control); return; }
     put("control.destroy %u import=%x vtable=%x\n", offset(control), import, D32(control, 0));
     D32(control, 0) = import; mutate();
 }
 static void *allocate_object(uint32_t size)
 {
     put("allocate %x\n", size); mutate();
+    if (s_operations[s_operation].kind == FS98_FLIGHTS_NAVIGATION && s_operations[s_operation].rva == 0x7ff0)
+        /* Navigation's pages, each in its own block; any of them may fail */
+        return (s_seed >> (size % 7)) % 9 == 0 ? 0 : s_fixture.pages[size == 0x244c ? 0 : size == 0x1a24 ? 1 : 2];
     return s_scenario % 11 ? s_fixture.object : 0;
 }
 static void ui_delete(void *object) { put("ui.delete %u\n", offset(object)); mutate(); }
@@ -663,7 +808,7 @@ static int32_t show_dialog(void *object, int32_t show)
 { put("dialog.show %u %d\n", offset(object), show); mutate(); return s_scenario & 2 ? 0 : (int32_t)s_seed; }
 static const struct fs98_flights_object_services s_object_services = {
     dialog_construct, dialog_destroy, construct_control, destroy_control, allocate_object,
-    ui_delete, dialog_delete, create_dialog, show_dialog, copy_text
+    ui_delete, dialog_delete, create_dialog, show_dialog, copy_text, page_construct, page_destroy, string_assign
 };
 
 /* ---- the same stubs behind retail's import ABIs ----------------------------------------- */
@@ -682,6 +827,9 @@ CONTROL_HOOK(group, 0x13540, 0x13534)
 CONTROL_HOOK(picture, 0x13578, 0x1357c)
 CONTROL_HOOK(shadow, 0x13574, 0x1360c)
 CONTROL_HOOK(combo, 0x1355c, 0x13564)
+CONTROL_HOOK(tabs, 0x134f0, 0x134f8)
+CONTROL_HOOK(static, 0x1338c, 0x13388)
+CONTROL_HOOK(tab_helper, 0x134f4, 0x134fc)
 #undef CONTROL_HOOK
 static void *TC hook_dialog_construct(void *object, int32_t resource, void *parent)
 { return dialog_construct(object, resource, parent); }
@@ -758,6 +906,24 @@ static uint32_t SC hook_dialog_item_window(uint32_t window, int32_t id) { return
 static void SC hook_remap_rect(struct fs98_flights_rect *rect, void *control) { remap_rect(rect, control); }
 static int32_t TC hook_move_window(void *window, int32_t x, int32_t y, int32_t width, int32_t height, int32_t repaint)
 { move_window(window, x, y, width, height, repaint); return 1; }
+static int32_t TC hook_tab_init(void *tabs, void *dialog, void *font, uint32_t bitmap, void *dib, void *palette,
+                                uint32_t a, uint32_t color, int32_t b, int32_t c, int32_t d, int32_t e,
+                                uint32_t module, uint32_t flags)
+{ return tab_init(tabs, dialog, font, bitmap, dib, palette, a, color, b, c, d, e, module, flags); }
+static void TC hook_tab_add_page(void *tabs, void *page, char *caption, int32_t flag) { tab_add_page(tabs, page, caption, flag); }
+static void TC hook_tab_helper_init(void *helper, void *tabs) { tab_helper_init(helper, tabs); }
+static int32_t TC hook_tab_set_last_page(void *tabs, void *page) { return tab_set_last_page(tabs, page); }
+static int32_t TC hook_tab_set_active(void *tabs, int32_t index, uint32_t window) { return tab_set_active(tabs, index, window); }
+static int32_t TC hook_page_init(void *page, int32_t value) { return page_init(page, value); }
+static int32_t SC hook_load_string_a(uint32_t instance, uint32_t id, char *buffer, int32_t size)
+{ return load_string_a(instance, id, buffer, size); }
+static int32_t TC hook_is_kind_of(void *object, const void *runtime_class) { return is_kind_of(object, runtime_class); }
+static void SC hook_ddx_text(void *exchange, uint32_t id, void *string) { ddx_text(exchange, id, string); }
+static void SC hook_ddv_max(void *exchange, void *string, int32_t count) { ddv_max_chars(exchange, string, count); }
+static int32_t SC hook_message_box(const char *text, uint32_t type, uint32_t help) { return message_box(text, type, help); }
+static void *TC hook_page_construct(void *object, int32_t resource, void *parent) { return page_construct(object, resource, parent); }
+static void TC hook_page_destroy(void *object) { page_destroy(object); }
+static void *TC hook_string_assign(void *string, const char *text) { return string_assign(string, text); }
 static int hook_sprintf(char *out, const char *format, ...)
 {
     va_list args;
@@ -772,7 +938,7 @@ static void patch(uint32_t rva, void *target)
 {
     DWORD old;
     void **slot = (void **)((uint8_t *)s_retail + rva);
-    if (!VirtualProtect(slot, 4, PAGE_READWRITE, &old)) exit(2);
+    if (!VirtualProtect(slot, 4, PAGE_READWRITE, &old)) GIVE_UP();
     *slot = target;
     VirtualProtect(slot, 4, old, &old);
 }
@@ -782,7 +948,7 @@ static void setup_imports(void)
     uint32_t index;
     HMODULE crt = LoadLibraryA("msvcrt.dll");
     void *handler = (void *)GetProcAddress(crt, "__CxxFrameHandler");
-    if (!handler) exit(2);
+    if (!handler) GIVE_UP();
     patch(0x134c4, handler);
     patch(0x13628, hook_send); patch(0x1363c, hook_help); patch(0x13638, hook_enable);
     patch(0x133fc, hook_ddx); patch(0x133e0, hook_set_text);
@@ -818,6 +984,15 @@ static void setup_imports(void)
     patch(0x13608, hook_shadow); patch(0x133d0, hook_window_enabled); patch(0x13554, hook_init_combo);
     fs98_flights_set_opening_state(&s_fixture.opening);
     fs98_flights_set_menus_state(&s_fixture.menus); patch(0x134bc, hook_atof); patch(0x134cc, hook_sprintf);
+    PATCH_CONTROL(tabs, 0x134f0, 0x134f8); PATCH_CONTROL(static, 0x1338c, 0x13388);
+    patch(0x133b4, hook_is_kind_of);
+    patch(0x1356c, hook_tab_init); patch(0x134e4, hook_tab_add_page); patch(0x134e0, hook_tab_helper_init);
+    patch(0x134e8, hook_tab_set_last_page); patch(0x134ec, hook_tab_set_active); patch(0x13570, hook_page_init);
+    patch(0x13624, hook_load_string_a);
+    patch(0x13568, (void *)STATIC_VTABLE); fs98_flights_set_static_vtable((void *)STATIC_VTABLE);
+    patch(0x133b0, (void *)EDIT_CLASS); fs98_flights_set_edit_class((void *)EDIT_CLASS); PATCH_CONTROL(tab_helper, 0x134f4, 0x134fc);
+    patch(0x133bc, hook_ddx_text); patch(0x133c0, hook_ddv_max); patch(0x133b8, hook_message_box);
+    patch(0x13504, hook_page_construct); patch(0x13508, hook_page_destroy); patch(0x133c4, hook_string_assign);
 #undef PATCH_CONTROL
     patch(0x12134, (void *)RESOURCE_MODULE); fs98_flights_set_resource_module(RESOURCE_MODULE);
     patch(0x1214c, (void *)OBJECT_MODULE); fs98_flights_set_object_module(OBJECT_MODULE);
@@ -844,6 +1019,90 @@ static void initialize(void)
             D32(object, boxes[box] + 0xbc) = (s_seed >> box) & 1;
         }
         if ((s_seed >> 31) == 0) D32(object, 0x1a1c + 0xbc) = 1;     /* active, three times in four */
+    }
+    if (OP.kind == FS98_FLIGHTS_NAVIGATION) {
+        for (index = 0; index < 3; ++index) {   /* each page's own vtable: a wrong page shows */
+            PTR(object, 0x2160 + index * 4) = s_fixture.pages[index];
+            PTR(s_fixture.pages[index], 0) = s_vtable;
+        }
+        PTR(object, 0x12d8) = s_vtable;     /* the tab control: its +0xc4 takes nothing */
+        D32(object, 0x2174) = s_seed;
+    }
+    if (OP.kind == FS98_FLIGHTS_NAV_EFIS) {
+        static const uint32_t controls[] = {0x1600, 0x16c8, 0x1790, 0x1884, 0x1978, 0x1a6c};
+        static const uint32_t modes[] = {2, 4, 2, 3};
+        uint8_t *slice = s_fixture.descriptor[0];
+        uint32_t control;
+        for (control = 0; control < 6; ++control) PTR(object, controls[control]) = s_control_vtable;
+        PTR(object, 0x111c) = s_fixture.whole;
+        PTR(s_fixture.whole, 4) = navigation_check;
+        D32(object, 0x1100) = (s_seed >> 28) != 0;          /* not yet created, one time in sixteen */
+        D32(object, 0x16bc) = (s_seed >> 3) & 1;
+        D32(object, 0x1784) = (s_seed >> 4) % 4;            /* the master switch on, any nonzero state */
+        D32(object, 0x1a8c) = s_seed ^ 0x1a8c;
+        D32(object, 0x18a4) = s_seed ^ 0x18a4;
+        for (index = 0; index < 2; ++index) {
+            slice = s_fixture.descriptor[index];
+            D32(slice, 8) = (s_seed >> (5 + index)) & 3;     /* passed through as it is */
+            D32(slice, 0x10) = (s_seed >> 7) % 3;
+            D32(slice, 0x18) = (s_seed >> 8) % 5;
+            D32(slice, 0x20) = (s_seed >> 9) % 5 + index;
+            D32(slice, 0x28) = (s_seed >> 10) % 5;
+            D32(slice, 0x30) = modes[(s_seed >> (11 + index)) % 4];
+            D32(slice, 0x34) = (s_seed >> 13) & 1;
+            D32(slice, 0x38) = (s_seed >> 14) & 1;
+            D32(slice, 0x40) = ((s_seed >> (15 + index)) & 3) == 3 ? 2 : (s_seed >> (15 + index)) & 1;
+            D32(slice, 0x44) = (s_seed >> 17) & 1;
+            D32(slice, 0x48) = (s_seed >> 18) & 1;
+            D32(slice, 0x4c) = (s_seed >> (19 + index)) & 1;
+            PTR(slice, 0x50) = s_fixture.texts[index];
+            D32(slice, 0x54) = 1 + (s_seed >> 21) % 0x20 + index;
+        }
+    }
+    if (OP.kind == FS98_FLIGHTS_NAV_RADIOS || OP.kind == FS98_FLIGHTS_NAV_ADF) {
+        static const uint32_t radio_texts[] = {0x1c, 0x34, 0xa4, 0xbc}, radio_names[] = {0x6c, 0x80, 0xf4, 0x108};
+        int radios = OP.kind == FS98_FLIGHTS_NAV_RADIOS;
+        uint32_t field;
+        PTR(object, 0x111c) = s_fixture.whole;
+        PTR(s_fixture.whole, 4) = navigation_check;
+        D32(object, 0x1100) = (s_seed >> 28) != 0;
+        for (index = 0; index < 2; ++index) {
+            uint8_t *slice = s_fixture.descriptor[index];
+            for (field = 0; field < 4; ++field)     /* which radios are fitted, each from its own bits */
+                D32(slice, 4 + field * 4) = (s_seed >> (field + index)) % 4 != 0;
+            if (radios) {
+                static const uint32_t statuses[] = {0x18, 0x30, 0xa0, 0xb8};
+                for (field = 0; field < 4; ++field) {
+                    D32(slice, statuses[field]) = (s_seed >> (6 + field * 2 + index)) % 3 == 0 ? 0x1000 + field : 0;
+                    PTR(slice, radio_texts[field]) = s_fixture.texts[(field + index) % 4];
+                    D32(slice, radio_texts[field] + 4) = 1 + (s_seed >> (field * 3)) % 0x20 + index;
+                    PTR(slice, radio_names[field]) = s_fixture.names[(field + index) & 1];
+                }
+                snprintf((char *)slice + 0x44, 6, "I%u", index);
+                snprintf((char *)slice + 0x4a, 0x20, "Station %u", index);
+                snprintf((char *)slice + 0xcc, 6, "J%u", index);
+                snprintf((char *)slice + 0xd2, 0x20, "Other %u", index);
+                W16(slice, 0x2c) = (s_seed >> 14) & 1;
+                D32(slice, 0x90) = (s_seed >> 15) & 1;
+                W16(slice, 0x94) = (s_seed >> 16) % 3 ? 7 : 0;
+                D32(slice, 0x9c) = (s_seed >> 17) % 4 + index;
+                W16(slice, 0xb4) = (s_seed >> (18 + index)) & 1;
+            } else {
+                static const uint8_t digits[] = {3, 4, 3, 5};
+                D32(slice, 0x30) = (s_seed >> (6 + index)) % 3 == 0;
+                PTR(slice, 0x34) = s_fixture.texts[index];
+                D32(slice, 0x38) = 1 + (s_seed >> 9) % 8 + index;
+                D32(slice, 0x44) = (s_seed >> (10 + index)) % 3 == 0;
+                PTR(slice, 0x48) = s_fixture.texts[2 + index];
+                D32(slice, 0x4c) = 1 + (s_seed >> 12) % 8 + index;
+                snprintf((char *)slice + 0xc, 6, "A%u", index);
+                snprintf((char *)slice + 0x12, 0x20, "Beacon %u", index);
+                slice[0x58] = digits[(s_seed >> (13 + index)) % 4];
+                W16(slice, 0x5a) = (s_seed >> 15) & 1;
+                PTR(slice, 0x60) = s_fixture.names[index];
+                PTR(slice, 0x74) = s_fixture.names[index ^ 1];
+            }
+        }
     }
     if (OP.kind == FS98_FLIGHTS_SELECT) {
         static const uint32_t statuses[] = {0, 0x1004, 0x1003, 0x1004};
@@ -952,6 +1211,15 @@ static void initialize(void)
             D32(descriptor, 0x2c) = (s_seed >> 11) & 1;     /* independent of the request */
             D32(descriptor, 0x34) = (s_scenario + index) % 4;
             D32(descriptor, 0x3c) = (s_scenario + index * 3) % 15;
+        } else if (OP.kind == FS98_FLIGHTS_NAVIGATION) {
+            /* each slice's first word (the tabs' flags), the tab to show */
+            D32(descriptor, 8) = (s_seed >> (21 + index)) % 4;
+            D32(descriptor, 0x10) = (s_seed >> 23) & 1;
+            D32(descriptor, 0x130) = (s_seed >> (24 + index)) & 1;
+            D32(descriptor, 0x1bc) = (s_seed >> 26) & 1;
+        } else if (OP.kind == FS98_FLIGHTS_NAV_EFIS || OP.kind == FS98_FLIGHTS_NAV_RADIOS ||
+                   OP.kind == FS98_FLIGHTS_NAV_ADF) {
+            /* the slices are filled above */
         } else if (OP.kind == FS98_FLIGHTS_SAVE) {
             static const uint32_t statuses[] = {0, 0x1003, 0x1004, 0x100d, 0x1001, 0x1004};
             PTR(descriptor, 4) = save_check;
@@ -1087,6 +1355,9 @@ static __attribute__((noinline)) int32_t run(uint32_t throw_at)
         case SIG_INT_ARG: { /* the validators behave differently for their own edits' ids */
             uint32_t argument = s_scenario & 2 ? 0xcb3 : s_seed;
             if (OP.kind == FS98_FLIGHTS_AUTOPILOT) argument = (s_seed >> 7) & 1 ? s_seed : 0;
+            /* the pages' reports do nothing for no failure */
+            if ((OP.kind == FS98_FLIGHTS_NAV_RADIOS || OP.kind == FS98_FLIGHTS_NAV_ADF ||
+                 OP.kind == FS98_FLIGHTS_NAV_EFIS) && (s_seed >> 5) % 3 == 0) argument = 0;
             if (OP.kind == FS98_FLIGHTS_SELECT) {
                 static const uint32_t ids[] = {0, 0xcbe, 0x1234, 0};
                 argument = ids[(s_seed >> 3) % 4];
@@ -1192,6 +1463,7 @@ int main(int argc, char **argv)
     s_vtable[0xd0 / 4] = virtual_cancel; s_other_vtable[0xd0 / 4] = virtual_cancel_other;
     s_vtable[1] = s_other_vtable[1] = virtual_delete;
     s_vtable[0xe4 / 4] = virtual_skin;
+    s_vtable[0xe8 / 4] = s_other_vtable[0xe8 / 4] = virtual_init_tab;
     s_other_vtable[0xe4 / 4] = replaced_skin;
     s_vtable[0xd8 / 4] = s_other_vtable[0xd8 / 4] = virtual_validate;
     s_vtable[0xdc / 4] = s_other_vtable[0xdc / 4] = virtual_error;

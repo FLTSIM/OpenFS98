@@ -1,11 +1,11 @@
 # Flights.DLL
 
 `orig/English/Flights.DLL`, module `0x80000002`, preferred base `0x22310000`, 51,122 bytes of
-`.text`, 13 dialog registrations. **In progress, one family of dialogs at a time.** Slices 1
-to 9, the pickers (Adventures and Challenges), Save Flight, Communications, Create a Flight,
-Select Aircraft, the welcome dialog and its two sub-menus, the modeless dialog, Select
-Flight and Autopilot, are verified in their harness (12 of 13 registrations; Navigation
-remains); nothing is built as a DLL or installed yet. Like Help, Sim and Views it is MFC dialogs over the CD's SIMSUI and
+`.text`, 13 dialog registrations. **Every dialog is transliterated and verified in its
+harness; nothing is built as a DLL or installed yet.** Slices 1 to 10 are the pickers
+(Adventures and Challenges), Save Flight, Communications, Create a Flight, Select Aircraft,
+the welcome dialog and its two sub-menus, the modeless dialog, Select Flight, Autopilot and
+Navigation with its three tab pages: all 13 registrations. Like Help, Sim and Views it is MFC dialogs over the CD's SIMSUI and
 MFC42, which stay as dependencies.
 
 ## Building and verifying
@@ -16,7 +16,24 @@ make -f tools/flights.mk flightseventsdiff-run                     # 20,000 scen
 make -f tools/flights.mk flightseventsdiff-run SEED=0x98a1e7d3
 make -f tools/flights.mk flightseventsdiff-run N=2000 SEED=0x7e51a23b MODE=unwind
 make -f tools/flights.mk flights-breaks N=400
+make -f tools/flights.mk flights                 # the native DLL, bin/flights-diff/FLIGHTS_ours.dll
+python3 -B tools/flights_smoke.py 75            # boot private copies, retail's DLL then ours
+make main-dialogs                               # the menus in the game, retail against ours
 ```
+
+The DLL (`src/flights/flights_runtime.c`, tables from `tools/gen_flights_runtime.py`) is
+retail's shape over the CD's SIMSUI and MFC42: the 13 registrations, 16 vtables (60 slots,
+61 for a tab page) bound slot by slot to our functions or to the same imports, 16 message
+maps, module init/deinit as at `0x22311030`/`0x223110b0`, and DllMain's extension-module
+calls. In the shared Makefile it is `ENGLISH_CANDIDATES`: built and compared by
+`main-dialogs`, not installed by `make install`.
+
+In the game (2026-11-02): `tools/flights_smoke.py` boots private copies with retail's DLL
+and ours, PASS (27/27 modules, 95 gauges, no error retail's boot does not log).
+`make main-dialogs` with ours, which opens Create a Flight, Select Aircraft, Navigation,
+Communications and Autopilot among its 19 commands: PASS, every control and its text the
+same as retail in the Cancel and the OK pass, 14 of 20 pictures identical as before (the
+rest are the clock, Select Aircraft's live preview and the crash's curve).
 
 `tools/run_flightsdiff.sh` runs everything in its own prefix, `bin/flights-diff/wineprefix`,
 behind a lock; nothing touches `game/` or the shared prefix.
@@ -69,8 +86,10 @@ are in `.rdata`. In `.text` order:
 | `0x1203` Communications | `0x55a0` | 2,496 | 5 |
 | `0x1104` Save | `0x5f60` | 1,776 | 2 |
 | `0x1102` Select Flight | `0x6650` | 2,544 | 5 |
-| (Navigation's tab page) | `0x7040` | 3,392 | 8 |
-| `0x1202` Navigation | `0x7d80` | 8,080 | 3, 2 and 2 |
+| (Navigation's EFIS page) | `0x7040` | 3,392 | 8 |
+| `0x1202` Navigation | `0x7d80` | 2,016 | 3 |
+| (Navigation's NAV 1 and NAV 2 page) | `0x8560` | 3,888 | 2 |
+| (Navigation's transponder and ADF page) | `0x9490` | 2,176 | 2 |
 | `1` modeless | `0x9d10` | 304 | 3 |
 | `0x1109` opening menu | `0x9e40` | 2,960 | 10 |
 | `0x11090002` flight menu | `0xa9d0` | 2,160 | 7 |
@@ -112,19 +131,29 @@ change the list's window mid-call; every vtable slot logs, so a wrong slot diffe
 than faults. Factories see failed allocations (the store through null is compared as an
 outcome).
 
-Results, current for slices 1 to 9 together (226 operations):
+Results, current for slices 1 to 10 together (286 operations):
 
 | Run | Result |
 | --- | --- |
-| seed `0x5f1a6c2d` | 20,000 scenarios, 4,520,000 comparisons, 0 differ |
-| seed `0x98a1e7d3` | 20,000 scenarios, 4,520,000 comparisons, 0 differ |
-| unwind, seed `0x7e51a23b` | 2,000 scenarios, 4,332,073 comparisons with a throw at every call position (3,877,219 throws), 0 differ |
-| `tools/flights_breaks.py 400` | 354 of 354 breaks caught; three more proven equivalent, listed in the runner |
+| seed `0x5f1a6c2d` | 20,000 scenarios, 5,720,000 comparisons, 0 differ |
+| seed `0x98a1e7d3` | 20,000 scenarios, 5,720,000 comparisons, 0 differ |
+| unwind, seed `0x7e51a23b` | 2,000 scenarios, 6,662,582 comparisons with a throw at every call position (6,087,313 throws), 0 differ |
+| `tools/flights_breaks.py 400` | 502 of 502 breaks caught; four more proven equivalent, listed in the runner |
+
+The 502 were caught over three runs while Navigation's harness grew: 472 in one full run, then
+the 28 OnInitDialog and page-allocator breaks, then the two that needed a harness or break
+fix (a report given no failure, and a break that did not build).
 
 The stubs disturb the fixture at two calls per operation, one among the first four and one
 anywhere in the first 32; the replacement vtable's every slot, and each descriptor's
 callbacks, log under their own names, so a call through the wrong table or a stale
 descriptor shows.
+
+What the harness cannot see is the shape of retail's vtables: its stand-in has a logging
+stub in all 64 slots. The first in-game run of the DLL found the gap. Select Aircraft
+calls its own Populate through `+0xf0`, a 61st slot its class adds, and the runtime had
+given every dialog CSimsDialog's 60, so the game called through null. The runtime's slot
+counts are now per class (`tools/gen_flights_runtime.py`), checked against the image.
 
 A fault inside an operation (an access violation or a bad instruction) is logged as an
 outcome and the run goes on, so a break that crashes one side only is a difference; only
@@ -333,13 +362,48 @@ capabilities at `+0x5c` (2 airspeed hold, 4 Mach hold, 8 vertical speed, `0x10` 
   address, and answers vtable `+0xe0`'s, told the edit's id.
 - OnInitDialog limits five edits from the descriptor and answers TRUE.
 
+## Slice 10: Navigation `0x1202` and its three tab pages
+
+`src/flights/flights_navigation.c`. A tab dialog (class `0x7d80`, `0x2178` bytes, template
+`0x205`, descriptor `+0x10dc`) over three `CSimsTabPage`s, which have no factories: its
+OnInitDialog makes them. The descriptor's layout is in `flights_internal.h`: answer `+0`,
+MAIN's check `+4`, and a slice for each page, `+0x10` (NAV 1 and NAV 2), `+0x130`
+(transponder and ADF) and `+0x1bc` (EFIS). Each page is given its slice at `+0x1118`, the
+whole descriptor at `+0x111c`, and the dialog's buttons.
+
+| Page | Template | Class, vtable | Size | Members |
+| --- | --- | --- | --- | --- |
+| NAV 1 and NAV 2 | `0x203` | `0x8560`, `0xf518` | `0x244c` | 29: labels, two group boxes, four edits, the localizer combo |
+| Transponder and ADF | `0x204` | `0x9490`, `0xf6d8` | `0x1a24` | 14: labels, two edits, a `CSimsStatic` |
+| EFIS | `0x202` | `0x7040`, `0xf158` | `0x1b64` | 16: labels, three combos, two boxes, four radios, an edit, a `CString` |
+
+- **OnInitDialog** reads the vtable once, after `CSimsDialog`'s, for both the skin and
+  `InitTab` (`+0xe8`, six arguments). Each page is `ui_new`, constructed, stored and given
+  `CSimsTabPage::Init(9)` even when `ui_new` failed; a throwing constructor frees its
+  block through `CSimsDialog`'s operator delete. The tabs are captioned with
+  `LoadStringA` and flagged with each slice's first word. Only then is a missing
+  descriptor noticed. The first tab is 2 or 1 when the NAV slice's word is set (2 when
+  the ADF slice's is too), and otherwise the descriptor's `+8`.
+- **OK** asks each page's validate (`+0xd8`, given 0) and, on a failure, its report
+  (`+0xdc`); a report that answers keeps the dialog open. Cancel answers 0 and sets
+  `+0x2174` to 2. Close lets the tab control go first (its `+0xc4`). The dialog's own
+  validate is a leftover `AfxMessageBox("CNavigation::ValidateData()")` that passes.
+- **The pages' validates** do nothing until the page exists (`+0x1100`), read their
+  controls back, run MAIN's check with its answer unused, and name the first edit whose
+  status is set. NAV's asks `GetDlgItem` for the focus first: an edit (`IsKindOf`
+  against `CEdit`'s runtime class, a data import) that is not modified passes at once,
+  and one is marked unmodified when nothing failed. EFIS's answer is MAIN's, replaced by
+  the altitude edit's id when the altitude's status is set. The reports give the error
+  dialog the status's address, as Autopilot's does.
+- **EFIS**: the master switch enables everything; the lock radios choose VOR and altitude
+  (2, which opens the VOR 1/VOR 2 pair and the altitude edit) or ILS/LOC (4). The page
+  reads its radios back by comparing each window's user data with its own handle. Its
+  `CString` (the altitude, at most 6 characters) is exchanged with `DDX_Text`.
+- **ADF**'s `CSimsStatic` is built inline: MFC's `CWnd()`, then `CStatic`'s vtable at
+  once replaced by SIMSUI's (a data import). The first store is never seen and is left
+  out. OnInitDialog moves it to the rectangle `RemapCtrlRect` gives.
+
 ## Next
 
-1. The last family, Navigation `0x1202`: a tab dialog of four classes, the dialog
-   (`0x7d80`, vtable `0xf2f8`, `0x2178` bytes, descriptor `+0x10dc`) and three
-   `CSimsTabPage`s (`0x7040` vtable `0xf158`, then vtables `0xf518` and `0xf6d8`), about
-   3,100 instructions in all (`0x22317040`..`0x22319d10`).
-2. Module init/deinit and the runtime: native vtables and message maps, MFC/SIMSUI import
-   adapters, the factories registered with the host (`tools/gen_flights_runtime.py`, after
-   `gen_help_runtime.py`).
-3. A native UI comparison and a private-copy smoke, then installing it, as for Help.
+1. Reach the dialogs `main-dialogs` does not open (the welcome dialog's menus, Save,
+   Select Flight, the pickers), then install it as for Help.

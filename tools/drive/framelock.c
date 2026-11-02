@@ -29,10 +29,12 @@
  *   FRAMELOCK_HOLD     every this many passes, create "hold" beside the log and wait
  *                      until it is gone, so a screenshot of that frame can be taken:
  *                      Direct3D frames do not pass through the blits logged here
+ *   FRAMELOCK_GLOBAL   a path: GLOBAL's GLOBAL_SIZE bytes appended as each pass begins,
+ *                      to find the first field two runs disagree on
  *   FRAMELOCK_SCRIPT   a file of "pass message wparam lparam" lines, hex, ascending,
  *                      posted to the main window as that pass begins
  *
- * It takes module id 12, which the retail set leaves unused, and imports nothing.
+ * It takes module id 12, which the retail set leaves unused, and imports GLOBAL.
  * It is a test tool: nothing installs it into game/.
  */
 
@@ -48,8 +50,10 @@
 #define TIMER_MS            20u
 #define CLOCK_START         1000000u
 #define MAX_SCRIPT          4096
+#define GLOBAL_SIZE         0x12a8u
 
 struct fs98_import ImportTable[] = {
+    { FS98_MOD_GLOBAL, 0 },
     { 0, 0 }
 };
 
@@ -60,6 +64,7 @@ static uint32_t timer_due;
 static LPTIMECALLBACK timer_callback;
 static DWORD_PTR timer_user;
 static HANDLE log_handle = INVALID_HANDLE_VALUE;
+static HANDLE global_handle = INVALID_HANDLE_VALUE;
 static char log_dir[MAX_PATH];
 
 static struct { uint32_t pass, message, wparam, lparam; } script[MAX_SCRIPT];
@@ -246,6 +251,10 @@ static void hold_for_screenshot(void)
 
 static void main_loop_pass(void)
 {
+    if (global_handle != INVALID_HANDLE_VALUE) {
+        DWORD wrote;
+        WriteFile(global_handle, (const void *)ImportTable[0].link, GLOBAL_SIZE, &wrote, 0);
+    }
     passes++;
     if (passes >= pass_limit)
         finish();
@@ -432,11 +441,14 @@ static void read_script(void)
 static void framelock_init(void) {}
 static void framelock_deinit(void) {}
 
+/* The host reads past init and deinit, so what follows must be zeros: a variable
+ * placed here was taken for a pointer. */
 struct {
     uint32_t id;
     void (*init)(void);
     void (*deinit)(void);
-} Linkage = { 12, framelock_init, framelock_deinit };
+    uint32_t rest[64];
+} Linkage = { 12, framelock_init, framelock_deinit, { 0 } };
 
 BOOL WINAPI DllMain(HINSTANCE inst, DWORD reason, LPVOID reserved)
 {
@@ -459,6 +471,8 @@ BOOL WINAPI DllMain(HINSTANCE inst, DWORD reason, LPVOID reserved)
         dump_at = environment_number("FRAMELOCK_DUMP_AT", 0);
         hold_every = environment_number("FRAMELOCK_HOLD", 0);
         read_script();
+        if (GetEnvironmentVariableA("FRAMELOCK_GLOBAL", path, sizeof path))
+            global_handle = CreateFileA(path, GENERIC_WRITE, FILE_SHARE_READ, 0, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, 0);
         AddVectoredExceptionHandler(1, log_fault);
         patch_import("timeGetTime", (void *)hook_timegettime);
         patch_import("timeSetEvent", (void *)hook_timesetevent);

@@ -32,6 +32,8 @@ possibly Android.
 3. [docs/architecture.md](docs/architecture.md) — the module system and ABI.
 4. `docs/modules/<name>.md` — per-module findings. `host.md` and `util.md` are
    the detailed ones.
+5. [docs/open-differences.md](docs/open-differences.md) — known differences from retail
+   and what has not been tested.
 
 ## Orienting fast
 
@@ -50,7 +52,7 @@ the table.
 ## Verifying
 
 ```sh
-make utildiff-run        # UTIL service by service   -> 6222442 comparisons, 0 mismatches
+make utildiff-run        # UTIL service by service   -> 6222448 comparisons, 0 mismatches
 make utildiff-portable   # the same with x87 compiled out (the ARM path)
 make numericdiff-run     # all NUMERIC formats/ranges -> 545778 comparisons, 0 mismatches
 make chaindiff-run       # whole-module CHAIN        -> 20000 scenarios, 0 differ
@@ -181,7 +183,7 @@ make g3dmeshdiff-run     # the mesh compiler: instructions vs portable C, x87 an
 make difftest-run        # whole-module SLEW         -> 0/2000 vectors differ
 make ofstest-run         # in-process, via the host  -> passed 68, failed 0
 make -f tools/hg2d.mk hg2ddiff-run  # whole-module HG2D, a suite per slice -> 59 suite summaries, 0 differ (N=20000 takes hours; docs/modules/hg2d.md)
-tools/hg2d_frames.sh 'Situatio\PARIS.STN' 900  # the running game, retail HG2D twice then ours -> identical frames, PASS, on a private Xvfb (needs make -f tools/hg2d.mk bin/hg2d-diff/FRAMELOCK.DLL)
+tools/hg2d_frames.sh 'Situatio\PARIS.STN' 900  # the running game, retail HG2D twice then ours -> identical frames, PASS, on a private Xvfb; HG2D_FRAMES_ALL=1 for the whole game (needs make -f tools/hg2d.mk bin/hg2d-diff/FRAMELOCK.DLL)
 make smoke               # ACONTAIN, ADVDRV, ANALYSIS, ATC, BOOSTER, CHAIN, CONTROLS, DEMO, DYNAMIC, FACIL, FE, G3D, GLOBAL, HG2D, LANDME, MPCHAT, NUMERIC, REALITY, SLEW, SOUND, UTIL, WEATHERM, WINDOW, WINMSG installed -> 27/27, 95 gauges, PASS
 make util-trace          # which UTIL services the game calls, counted in-game
 ```
@@ -378,8 +380,9 @@ compares them (see [docs/modules/chain.md](docs/modules/chain.md)).
 **HG2D is in `MODULES`**: eight flights match retail frame for frame, and six on
 Direct3D, with what is left listed under
 [In the game](docs/modules/hg2d.md#in-the-game). **The whole game, all retail against all
-ours, matches on most flights on both renderers; open: MAIN changes a panel rectangle
-on `CVINSON`, and `KAUAI` differs at the same pass** ([details](docs/modules/hg2d.md#the-whole-game)). A frame comparison found that FE and
+ours, matches on eight flights on both renderers**
+([details](docs/modules/hg2d.md#the-whole-game)); **known gaps are in
+[docs/open-differences.md](docs/open-differences.md): keep that list current.** A frame comparison found that FE and
 DYNAMIC, each verified against a stub of the other, did not work together: see
 [docs/modules/dynamic.md](docs/modules/dynamic.md#fe-and-the-registers). Where a
 verified module's quirk has a reimplemented caller, check the pair.

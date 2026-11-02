@@ -20,6 +20,7 @@ Total code to account for across the whole product: **1.44 MiB** of `.text`
 across 27 modules plus the host. See [docs/architecture.md](docs/architecture.md)
 for the module map, the ABI, and what was found on the disc.
 
+Known gaps are in [docs/open-differences.md](docs/open-differences.md).
 New here? [docs/method.md](docs/method.md) is how work gets done -- the loop
 from retail binary to verified reimplementation, and the conventions that have
 earned their place. [docs/architecture.md](docs/architecture.md) is what FS98
@@ -212,7 +213,7 @@ the reimplementation uses the same instructions on x86 so that "the same" is
 not a matter of opinion. There is no x87 on ARM, so a parallel path goes
 through `sqrt` and `nearbyint` instead -- and `make utildiff-portable` holds it
 to the same standard, checking it against the retail DLL with the assembly
-compiled out. It currently passes all 6,222,442 comparisons, so an ARM build
+compiled out. It currently passes all 6,222,448 comparisons, so an ARM build
 will compute the same numbers as an x86 one.
 
 One service is known not to survive the move: UTIL's double-to-fixed-point
@@ -366,11 +367,10 @@ its depth queue, services and CHAIN callbacks, 20,000 `g3ddiff` scenarios
 with zero differences, and a portable C mesh compiler checked against
 retail's instructions (see [docs/modules/g3d.md](docs/modules/g3d.md)).
 
-**Next: the panel difference in MAIN.** The whole game, all retail against all ours,
-matches on most flights on both renderers, but MAIN changes a panel rectangle on
-`CVINSON`, and `KAUAI` differs at the same pass, not yet bisected ([docs/modules/hg2d.md](docs/modules/hg2d.md#the-whole-game)).
-Also left are scripted flying, views, night and weather through
-`tools/hg2d_frames.sh`, and flying it by hand. After that, install the finished dialogs
+**Next: fly it.** The whole game, all retail against all ours, now matches frame for
+frame on eight flights on both renderers, with nobody at the controls. What is still
+open is listed in [docs/open-differences.md](docs/open-differences.md): scripted and
+hand flying first, then UTIL's register preservation. After that, install the finished dialogs
 (Alerts, Help, Views, Sim), then Flights and Options, SIMSUI, and an executable
 around `HOST.DLL`.
 

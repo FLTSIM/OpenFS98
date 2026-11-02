@@ -6963,12 +6963,17 @@ static uint32_t STDCALL radios_util_6c(void)
     put(" util+0x6c->%#x", r);
     return r;
 }
-uint32_t clean_t_util_6c_v, clean_t_util_60_v, clean_ret60;
+uint32_t clean_t_util_6c_v, clean_t_util_60_v;
 void clean_util_6c(void);
 void clean_util_60(void);
-__asm__(".text\n_clean_util_60:\n\tpopl _clean_ret60\n\tcall *_clean_t_util_60_v\n\t"
-        "movl $0x7fff2345, %ecx\n\tmovl $0x22220008, %edx\n\tpushl _clean_ret60\n\tret\n");
-__asm__(".text\n_clean_util_6c:\n\tcall *_clean_t_util_6c_v\n\tmovl $0x7fff1234, %ecx\n\tmovl $0x22220007, %edx\n\tret\n");
+/* The real +0x60 saves eax and ecx and does not touch edx: MAIN's localiser keeps
+ * its course in cx across it, so the stub keeps them too. */
+__asm__(".text\n_clean_util_60:\n\tpushl %eax\n\tpushl %ecx\n\tpushl %edx\n\t"
+        "pushl 20(%esp)\n\tpushl 20(%esp)\n\tcall *_clean_t_util_60_v\n\t"
+        "popl %edx\n\tpopl %ecx\n\tpopl %eax\n\tret $8\n");
+/* The real +0x6c touches only eax and saves edx: the radios keep cx across it. */
+__asm__(".text\n_clean_util_6c:\n\tpushl %ecx\n\tpushl %edx\n\tcall *_clean_t_util_6c_v\n\t"
+        "popl %edx\n\tpopl %ecx\n\tret\n");
 static uint32_t radios_flat, radios_mag, radios_mag_set, radios_mag_stays;
 static uint32_t STDCALL radios_util_18(int64_t *v)
 {

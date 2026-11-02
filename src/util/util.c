@@ -55,6 +55,18 @@ void FS98_STDCALL fs98_util_metres32_to_longitude(const int32_t *, const void *,
 void FS98_STDCALL fs98_util_deinit(void);
 void FS98_STDCALL fs98_util_mul48_s16(const void *, int16_t, void *);
 void FS98_STDCALL fs98_util_unpack_position(const void *, void *);
+#if defined(__i386__)
+void fs98_util_unpack_position_entry(void);
+void fs98_util_rand_entry(void);
+void fs98_util_rand32_entry(void);
+#  define UNPACK_POSITION_SLOT fs98_util_unpack_position_entry
+#  define RAND_SLOT fs98_util_rand_entry
+#  define RAND32_SLOT fs98_util_rand32_entry
+#else
+#  define UNPACK_POSITION_SLOT fs98_util_unpack_position
+#  define RAND_SLOT fs98_util_rand
+#  define RAND32_SLOT fs98_util_rand32
+#endif
 int32_t FS98_STDCALL fs98_util_atan2(int32_t, int32_t);
 int32_t FS98_STDCALL fs98_util_angle_from_sin(int16_t, int16_t);
 void FS98_STDCALL fs98_util_fixed48_to_double(double *, const void *);
@@ -106,11 +118,11 @@ struct {
     SLOT(0x54, fs98_util_stub_54),
     SLOT(0x58, fs98_util_stub_58),
     SLOT(0x5c, fs98_util_stub_5c),
-    SLOT(0x60, fs98_util_unpack_position),
+    SLOT(0x60, UNPACK_POSITION_SLOT),
     SLOT(0x64, fs98_util_range_and_bearing48),
     SLOT(0x68, fs98_util_range_and_bearing),
-    SLOT(0x6c, fs98_util_rand),
-    SLOT(0x70, fs98_util_rand32),
+    SLOT(0x6c, RAND_SLOT),
+    SLOT(0x70, RAND32_SLOT),
     SLOT(0x74, fs98_util_v48_add),
     SLOT(0x78, fs98_util_v48_sub),
     SLOT(0x7c, fs98_util_copy24),

@@ -1728,30 +1728,28 @@ over llvmpipe, not a 1997 card, and four screenshots a flight are a sample.
 ### The whole game
 
 `HG2D_FRAMES_ALL=1` compares every module and World.DLL retail against every one ours.
-Retail against retail is identical in every run below.
+On `PARIS`, `NEWYORK`, `STGEORGE`, `CVINSON`, `HONGKONG`, `KAUAI`, `FS98` and `fs6N`
+all match: every frame on the software renderer over 900 passes, and on Direct3D over
+500 passes equal scene and draw counts, four screenshots each 0 pixels apart and
+identical panel logs. Retail against retail is identical throughout.
 
-| flight | software, 900 passes | Direct3D, 500 passes |
-| --- | --- | --- |
-| `PARIS`, `NEWYORK`, `STGEORGE`, `HONGKONG` | identical | scene and draw counts equal, screenshots 0 pixels apart, logs identical |
-| `CVINSON` | differs from pass 14 | counts equal, 157 pixels in the last screenshot |
-| `KAUAI` | differs from pass 14 | counts equal, screenshots 0 pixels apart, log differs |
-| `FS98`, `fs6N` | identical | not run |
+Getting there took three fixes, each found by swapping modules into a retail game:
 
-**Found by swapping one module into a retail game:**
-
-- **FE, fixed.** Loading a haze file (kind 10), it set GLOBAL `+0xcd2` to 0 always;
+- **DYNAMIC and FE +0x40**: [dynamic.md](dynamic.md#fe-and-the-registers).
+- **FE's haze flag.** Loading a haze file (kind 10), FE set GLOBAL `+0xcd2` to 0 always;
   retail sets 1 for a file found by name and 0 only for the `FS5.HAZ` fallback, and
   `fediff` reached only the fallback. With 0 G3D chose another ground texture program,
   and on Direct3D that program's call through variable 0xbc read null: wine swallowed
   the fault and the 3D view stopped after one scene. `fediff` now has the named case,
   and the old FE differs in 9 of 100 scenarios against it.
-- **MAIN, open.** Alone in a retail game it gives the difference above: on `CVINSON`
-  a 49 by 49 panel rectangle at (0x1d7, 0x5a) at pass 14. `KAUAI` differs in the same
-  rectangle at the same pass, but was not bisected. Not yet looked into.
-- **UTIL, open, and not seen in the whole game.** Alone in a retail game it differs
-  from the first frame (`PARIS`; on Direct3D 3,994 draws against 8,521), yet all-ours
-  matches retail on that flight, so it depends on a retail caller. Not explained: a
-  register a retail module reads is one candidate.
+- **The NAV1 needle.** MAIN keeps its course in cx across UTIL `+0x60` and `+0x6c`, which
+  keep it. MAIN's `xcall` thunks did not pass ecx in, and our UTIL did not keep it, and
+  the `radios` stubs stamped a constant over ecx, so 20,000 scenarios agreed with a wrong
+  needle: [main.md](main.md). The old MAIN differs in 1,356 of 4,000 against the
+  corrected stubs, and `utildiff` now checks those three slots' registers.
+
+What still differs with retail and ours mixed, and what is untested, is in
+[open-differences.md](../open-differences.md).
 
 Left to do for HG2D: scripted flying, views, night and weather, for coverage, and
 flying it by hand. HG2D was not installed into `game/` by this work: `make install`

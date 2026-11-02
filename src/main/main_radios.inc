@@ -7,11 +7,11 @@
  * the geometry, SOUND (39) hears the idents.
  *
  * Retail details, reproduced:
- *   - +0x18b3d's cx survives UTIL +0x6c only as that routine leaves it: +0x19704
- *     saves ebx, esi and edi but not ecx, so a glide slope check that reaches it
- *     hands the course on in what is left there.
- *   - So does its localiser's: UTIL +0x60 runs between the bearing and GLOBAL
- *     +0xc50, which then holds what that call left in cx.
+ *   - +0x18b3d's cx survives UTIL +0x6c, which keeps ecx, only as +0x19704 leaves
+ *     it: that saves ebx, esi and edi but not ecx, so a glide slope check that
+ *     reaches it hands the course on in what is left there.
+ *   - Its localiser's does not change: UTIL +0x60 runs between the bearing and
+ *     GLOBAL +0xc50, and saves ecx, so +0xc50 holds the bearing.
  *   - +0x197b1 compares two record pointers with constants (0x12160, 0xb4dc), as
  *     signed values, where it meant a distance; a module's address always passes.
  *   - +0x1923d's NAV2 mirror steps the "retune" word with `inc` where NAV1's sets

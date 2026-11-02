@@ -45,7 +45,7 @@ address order, so they include any alignment padding.
 | `+0x54` | `0x17d3` | 19 | **stub** — identical to `+0x50` |
 | `+0x58` | `0x17e6` | 19 | **stub** — identical to `+0x50` |
 | `+0x5c` | `0x17f9` | 7 | **stub** — saves three registers, restores them, returns |
-| `+0x60` | `0x1800` | 60 | **unpack position** — 8-byte record to the 24-byte vector |
+| `+0x60` | `0x1800` | 60 | **unpack position** — 8-byte record to the 24-byte vector; keeps eax, ecx and edx, which MAIN relies on (the other slots do not yet: [open-differences.md](../open-differences.md)) |
 | `+0x64` | `0x183c` | 392 | **range and bearing, 48-bit** — with a shared scale |
 | `+0x68` | `0x19c4` | 204 | **range and bearing** — distance and heading between two points |
 | `+0x6c` | `0x1a90` | 39 | **rand** — Lehmer generator, seed in `.data+0x0f0` |
@@ -282,7 +282,7 @@ caught, which is the check that makes the passing result mean something.
 
 **All 47 services** reimplemented and verified against retail.
 
-`make utildiff-run` covers 44 of them: **6,222,442 comparisons, zero
+`make utildiff-run` covers 44 of them: **6,222,448 comparisons, zero
 mismatches**, including 400,000 random descriptor tables through the exchange
 engine, 100,000 alert sequences, and all 65,536 sincos angles and all 65,536 sqrt16
 inputs exhaustively, 300,000 draws from the generator with both seeds

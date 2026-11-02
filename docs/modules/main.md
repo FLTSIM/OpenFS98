@@ -1265,9 +1265,14 @@ The boxes at `.data+0x748a` keep retail's code addresses at `+0x14`, mapped by a
 switch as the situation table's are. The `.text` descriptors for UTIL `+0x88` hold
 pointers into `.data`, so ours builds them.
 
-- **The course survives only as UTIL leaves it.** `cx` crosses UTIL `+0x6c` on the
-  terrain mask and UTIL `+0x60` on a localiser, neither of which saves it, so
-  GLOBAL `+0xc50` holds what those calls left. Ours keeps this through `xcall`.
+- **The course is in cx across UTIL.** `cx` crosses UTIL `+0x6c` on the terrain
+  mask, which keeps ecx and edx, though `+0x19704` around it does not save ecx. It also
+  crosses UTIL `+0x60` on a localiser, which saves eax, ecx and edx, so there GLOBAL
+  `+0xc50` holds the bearing. Ours keeps both through `xcall`, which passes its
+  register variables in as well as taking them back. Until that was so, and while
+  the harness's stub stamped a constant over ecx, the localiser's needle was wrong
+  in the game (found by `tools/hg2d_frames.sh` on `CVINSON`, with 20,000 clean
+  `radios` scenarios behind it).
 - `+0x197b1` compares a record's address with `0x12160` and `0xb4dc`, where it
   meant a distance. An address always passes.
 - NAV2's retune word steps with `inc` where NAV1's is set to 1.

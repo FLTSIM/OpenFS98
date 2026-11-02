@@ -348,6 +348,21 @@ uint32_t FS98_STDCALL fs98_util_rand(void)
  * Takes the low half of each of two draws.  The retail code builds the result
  * in DX, so only sixteen bits of each survive.
  */
+/* Retail's two draws touch only eax and save edx, and MAIN's radios keep their course
+ * in cx across +0x6c, so the slots preserve ecx and edx. */
+#if defined(__i386__)
+__asm__(".text\n.globl _fs98_util_rand_entry\n"
+        "_fs98_util_rand_entry:\n\t"
+        "pushl %ecx\n\tpushl %edx\n\t"
+        "call _fs98_util_rand@0\n\t"
+        "popl %edx\n\tpopl %ecx\n\tret\n"
+        ".globl _fs98_util_rand32_entry\n"
+        "_fs98_util_rand32_entry:\n\t"
+        "pushl %ecx\n\tpushl %edx\n\t"
+        "call _fs98_util_rand32@0\n\t"
+        "popl %edx\n\tpopl %ecx\n\tret\n");
+#endif
+
 uint32_t FS98_STDCALL fs98_util_rand32(void)
 {
     uint32_t hi = fs98_util_rand() & 0xffffu;
@@ -692,6 +707,18 @@ void FS98_STDCALL fs98_util_unpack_position(const void *src, void *dst)
         *(int32_t *)(d + 0x14) = c;
     }
 }
+
+/* Retail saves eax and ecx around this and leaves edx alone, and MAIN's localiser
+ * keeps its course in cx across the call, so the slot preserves all three. */
+#if defined(__i386__)
+__asm__(".text\n.globl _fs98_util_unpack_position_entry\n"
+        "_fs98_util_unpack_position_entry:\n\t"
+        "pushl %eax\n\tpushl %ecx\n\tpushl %edx\n\t"
+        "pushl 20(%esp)\n\tpushl 20(%esp)\n\t"
+        "call _fs98_util_unpack_position@8\n\t"
+        "popl %edx\n\tpopl %ecx\n\tpopl %eax\n\t"
+        "ret $8\n");
+#endif
 
 /* ---- slot 0x3c: angle of a 2D vector (atan2) ------------------------------
  *

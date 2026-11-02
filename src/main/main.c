@@ -143,9 +143,11 @@ uint32_t main_eax, main_ebx, main_ecx, main_edx, main_esi, main_edi, main_ebp;
     static void name##_body(const uint32_t *arg)
 
 /* External calls from the transliterated assembly: through these thunks,
- * the callee's eax, ecx and edx land in the register variables, as they
- * would in the hardware registers retail goes on to read.  N is the
- * number of stdcall arguments; the callee pops them. */
+ * ecx and edx go in from the register variables, and the callee's eax, ecx and
+ * edx land back in them, as they would in the hardware registers retail goes
+ * on to read: a callee that preserves one, as UTIL +0x60 does, must hand back
+ * retail's value and not what C left.  N is the number of stdcall arguments;
+ * the callee pops them. */
 uint32_t main_xcall0(uint32_t fn);
 uint32_t main_xcall1(uint32_t fn, uint32_t a);
 uint32_t main_xcall2(uint32_t fn, uint32_t a, uint32_t b);
@@ -156,6 +158,7 @@ uint32_t main_xcall4(uint32_t fn, uint32_t a, uint32_t b, uint32_t c, uint32_t d
             "_main_xcall" #n ":\n\t"                                         \
             "pushl %ebp\n\tmovl %esp, %ebp\n\t"                             \
             pushes                                                           \
+            "movl _main_ecx, %ecx\n\tmovl _main_edx, %edx\n\t"               \
             "call *8(%ebp)\n\t"                                              \
             "movl %eax, _main_eax\n\tmovl %ecx, _main_ecx\n\t"               \
             "movl %edx, _main_edx\n\t"                                       \

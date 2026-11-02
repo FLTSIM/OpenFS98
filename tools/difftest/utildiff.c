@@ -98,6 +98,34 @@ typedef void     (FS98_STDCALL *fn_div48)(const void *, uint16_t, void *);
 typedef void     (FS98_STDCALL *fn_m32lon)(const int32_t *, const void *, void *);
 typedef void     (FS98_STDCALL *fn_mul48)(const void *, int16_t, void *);
 typedef void     (FS98_STDCALL *fn_unpack)(const void *, void *);
+#if defined(__i386__)
+void fs98_util_unpack_position_entry(void);
+/* Calls fn(src, dst) with known eax, ecx and edx; nonzero if all three survive. */
+static int unpack_keeps_registers(fn_unpack fn, const void *src, void *dst)
+{
+    uint32_t a, c, d;
+    __asm__ volatile("pushl %%edi\n\tpushl %%esi\n\t"
+                     "movl $0x11223344, %%eax\n\tmovl $0x55667788, %%ecx\n\tmovl $0x99aabbcc, %%edx\n\t"
+                     "call *%%ebx"
+                     : "=a"(a), "=c"(c), "=d"(d)
+                     : "b"(fn), "S"(src), "D"(dst)
+                     : "cc", "memory");
+    return a == 0x11223344 && c == 0x55667788 && d == 0x99aabbcc;
+}
+
+void fs98_util_rand_entry(void);
+void fs98_util_rand32_entry(void);
+typedef uint32_t (FS98_STDCALL *fn_draw)(void);
+/* Calls fn() with known ecx and edx; nonzero if both survive. */
+static int draw_keeps_registers(fn_draw fn)
+{
+    uint32_t a, c, d;
+    __asm__ volatile("movl $0x55667788, %%ecx\n\tmovl $0x99aabbcc, %%edx\n\tcall *%%ebx"
+                     : "=a"(a), "=c"(c), "=d"(d) : "b"(fn) : "cc", "memory");
+    (void)a;
+    return c == 0x55667788 && d == 0x99aabbcc;
+}
+#endif
 typedef int32_t  (FS98_STDCALL *fn_atan2)(int32_t, int32_t);
 typedef int32_t  (FS98_STDCALL *fn_asin)(int16_t, int16_t);
 typedef void     (FS98_STDCALL *fn_f48d)(double *, const void *);
@@ -750,6 +778,26 @@ int main(void)
             if (memcmp(da, db, 24) && bad++ < 8)
                 printf("unpack #%u differs\n", i);
         }
+#if defined(__i386__)
+        /* Its callers keep values in these across it. */
+        {
+            unsigned char src[8] = { 1, 2, 3, 4, 5, 6, 7, 8 }, out[24];
+            checked += 2;
+            if (!unpack_keeps_registers(r60, src, out) && bad++ < 8)
+                printf("retail +0x60 does not keep eax, ecx and edx\n");
+            if (!unpack_keeps_registers((fn_unpack)fs98_util_unpack_position_entry, src, out) && bad++ < 8)
+                printf("our +0x60 does not keep eax, ecx and edx\n");
+            checked += 4;
+            if (!draw_keeps_registers((fn_draw)slot(h, 0x6c)) && bad++ < 8)
+                printf("retail +0x6c does not keep ecx and edx\n");
+            if (!draw_keeps_registers((fn_draw)slot(h, 0x70)) && bad++ < 8)
+                printf("retail +0x70 does not keep ecx and edx\n");
+            if (!draw_keeps_registers((fn_draw)fs98_util_rand_entry) && bad++ < 8)
+                printf("our +0x6c does not keep ecx and edx\n");
+            if (!draw_keeps_registers((fn_draw)fs98_util_rand32_entry) && bad++ < 8)
+                printf("our +0x70 does not keep ecx and edx\n");
+        }
+#endif
     }
 
     /* slot 0x3c -- atan2.  Includes the axes, the diagonals and both zeros,

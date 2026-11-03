@@ -79,6 +79,7 @@ for f in bin/*.DLL; do
         HELP.DLL)   installed=English/Help.DLL ;;
         SIM.DLL)    installed=English/Sim.DLL ;;
         VIEWS.DLL)  installed=English/Views.DLL ;;
+        FLIGHTS.DLL) installed=English/Flights.DLL ;;
         *)          installed="Modules/$m" ;;
     esac
     english=; case "$installed" in English/*) english=${installed#English/} ;; esac

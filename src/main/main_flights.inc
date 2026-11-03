@@ -360,10 +360,13 @@ static uint32_t FS98_STDCALL flight_dialog_edit(uint32_t block, uint32_t edit)
 /* .text+0xc6e0: the Open Flight dialog over the flights (0x9004 stock, 0x9002
  * the user's), its selection starting on `current`: the chosen path into `path`,
  * and into GLOBAL +0x24 when the block's +0x10 says it is the new default.
- * With no flights, an alert: retail then answers what the stack held; ours 0. */
+ * With no flights, an alert: retail then answers what the stack held; ours 0.
+ * The block has a ninth word, +0x20, the entry the dialog will not let be renamed
+ * or deleted: `current`'s, stored with the selection when it is found (0x207ed77a).
+ * When it is not, retail leaves the stack's leftover there, and so do we. */
 static uint32_t FS98_STDCALL flight_dialog(uint32_t path, uint32_t current)
 {
-    volatile uint32_t block[8];
+    volatile uint32_t block[9];
     uint32_t i;
 
     block[0] = 0;
@@ -380,6 +383,7 @@ static uint32_t FS98_STDCALL flight_dialog(uint32_t path, uint32_t current)
         for (i = 0; (int32_t)i < (int32_t)block[6]; i++)
             if (H_STRICMP(current, FLIGHT_REC(block[7], i) + 0x900) == 0) {
                 block[5] = i;
+                block[8] = i;
                 break;
             }
     }

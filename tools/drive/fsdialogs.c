@@ -185,6 +185,19 @@ static int click_at(HWND dialog, int x, int y)
     return 1;
 }
 
+/* The first visible button in a dialog, for one that ignores IDCANCEL */
+static BOOL CALLBACK find_button(HWND h, LPARAM found)
+{
+    char name[64];
+
+    GetClassNameA(h, name, sizeof name);
+    if (strcmp(name, "Button") == 0 && IsWindowVisible(h) && GetDlgCtrlID(h) > 0) {
+        *(int *)found = GetDlgCtrlID(h);
+        return FALSE;
+    }
+    return TRUE;
+}
+
 static void post(unsigned command)
 {
     PostMessageA(main_window, WM_COMMAND, command, 0);
@@ -293,12 +306,24 @@ int main(int argc, char **argv)
             capture(dialogs[0], path);
         }
         for (tries = 0; tries < 4 && dialog_count > 0; tries++) {
-            int ok = press_ok && tries == 0 && !cancel_only;
+            int ok = press_ok && tries == 0 && !cancel_only, before = dialog_count;
 
             PostMessageA(dialogs[0], WM_COMMAND, ok ? IDOK : cancel_only ? cancel_only : IDCANCEL, 0);
             Sleep(2500);
             scan_dialogs();
             fprintf(report, "    after %s: %d dialogs\n", ok ? "OK" : cancel_only ? "No" : "cancel", dialog_count);
+            /* A dialog that ignores IDCANCEL, such as an alert that OK raised: press its first
+               button instead, after listing what it is */
+            if (!ok && !cancel_only && dialog_count > 0 && dialog_count >= before) {
+                int count = 0, button = 0;
+
+                EnumChildWindows(dialogs[0], list_control, (LPARAM)&count);
+                EnumChildWindows(dialogs[0], find_button, (LPARAM)&button);
+                if (button != 0 && click(dialogs[0], button)) {
+                    scan_dialogs();
+                    fprintf(report, "    after button %d: %d dialogs\n", button, dialog_count);
+                }
+            }
         }
         if (dialog_count > 0)
             fprintf(report, "    STUCK\n");

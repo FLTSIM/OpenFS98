@@ -11,13 +11,17 @@ root=$PWD
 game=$(realpath "${FS98_DIR:-$PWD/game}")
 out=$root/bin/main-dialogs
 display=:97
-commands="1308 1309 1607 1203 1201 1202 1204 1205 1301 1306 1307 1407 1409 1502 1101 300"
+commands="1308 1309 1607 1203 1201 1202 1204 1205 1301 1306 1307 1407 1409 1502 1101 300 1104"
 # Then the English dialogs the first list does not reach: About's Credits (Help); the
 # crash analysis (Sim), after setting "Detect crash and show graph" on the Crash / Damage
 # tab, clicked by position since its tab and buttons are owner drawn; the lesson picker
 # (Help, through ADVDRV), after the crash since OK may start a lesson; and the Exit
-# confirmation (Alerts), answered No.  See tools/drive/fsdialogs.c.
-steps="1607/3805 set:1205/@505,190/@80,174 crash 1105 exit"
+# confirmation (Alerts), answered No.  After the crash, so that loading a flight cannot
+# unset the crash setting first, Flights' dialogs: Select Flight, the welcome dialog and
+# its two menus (and through them, back into MAIN, Select Flight and Challenges), and the
+# two pickers, whose OK starts a flight.  Save (1104) is in the first list: while a flight
+# loads it opens nothing.  See tools/drive/fsdialogs.c.
+steps="1607/3805 set:1205/@505,190/@80,174 crash 1102 1109 1109/502 1109/504 1109/502/3257 1109/502/3202 1106 1107 1105 exit"
 english="$(make -s english-modules-of) $(make -s english-candidates-of)"
 for m in MAIN $english; do
     [ -f "bin/$m.DLL" ] || { echo "needs bin/$m.DLL" >&2; exit 2; }

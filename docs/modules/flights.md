@@ -2,7 +2,7 @@
 
 `orig/English/Flights.DLL`, module `0x80000002`, preferred base `0x22310000`, 51,122 bytes of
 `.text`, 13 dialog registrations. **Every dialog is transliterated and verified in its
-harness; nothing is built as a DLL or installed yet.** Slices 1 to 10 are the pickers
+harness, and the native DLL is installed (2026-11-02).** Slices 1 to 10 are the pickers
 (Adventures and Challenges), Save Flight, Communications, Create a Flight, Select Aircraft,
 the welcome dialog and its two sub-menus, the modeless dialog, Select Flight, Autopilot and
 Navigation with its three tab pages: all 13 registrations. Like Help, Sim and Views it is MFC dialogs over the CD's SIMSUI and
@@ -25,8 +25,9 @@ The DLL (`src/flights/flights_runtime.c`, tables from `tools/gen_flights_runtime
 retail's shape over the CD's SIMSUI and MFC42: the 13 registrations, 16 vtables (60 slots,
 61 for a tab page) bound slot by slot to our functions or to the same imports, 16 message
 maps, module init/deinit as at `0x22311030`/`0x223110b0`, and DllMain's extension-module
-calls. In the shared Makefile it is `ENGLISH_CANDIDATES`: built and compared by
-`main-dialogs`, not installed by `make install`.
+calls. In the shared Makefile it is in `ENGLISH_MODULES`: `make install` puts it in
+`English\` (`make flights-install` / `flights-revert` alone), and `make smoke` requires it
+to match and load.
 
 In the game (2026-11-02): `tools/flights_smoke.py` boots private copies with retail's DLL
 and ours, PASS (27/27 modules, 95 gauges, no error retail's boot does not log).
@@ -34,6 +35,20 @@ and ours, PASS (27/27 modules, 95 gauges, no error retail's boot does not log).
 Communications and Autopilot among its 19 commands: PASS, every control and its text the
 same as retail in the Cancel and the OK pass, 14 of 20 pictures identical as before (the
 rest are the clock, Select Aircraft's live preview and the crash's curve).
+
+The drive was then extended to the rest of Flights (`tools/main_dialogs.sh`): Save (`0x1104`,
+before the crash, since while a flight loads it opens nothing), Select Flight (`0x1102`), the
+welcome dialog (`0x1109`) and its two menus (502 and 504), through them Select Flight and
+Challenges again, and the two pickers (`0x1106`, `0x1107`), whose OK starts a flight. In the
+OK pass Save's OK with an empty title raises Alerts' "invalid file name" alert, which
+ignores `IDCANCEL`; `tools/drive/fsdialogs.c` now lists a dialog that cancel does not close
+and presses its first visible button (here OK, 2005). Result, retail MAIN and retail English
+DLLs against all ours: PASS, 28 commands, every control and its text the same in both
+passes, 23 of 29 pictures identical; the six that move are the clock, live previews and the
+crash's curve (`c0300`, `c1101`, `c1201`, `c1301`, `c1502`, `ccrash`). This run found one
+bug, in MAIN rather than Flights: Select Flight's block lacked its ninth word (see
+[main.md](main.md)). Installed after it, and `make smoke` PASS with every module and all six
+English DLLs ours.
 
 `tools/run_flightsdiff.sh` runs everything in its own prefix, `bin/flights-diff/wineprefix`,
 behind a lock; nothing touches `game/` or the shared prefix.
@@ -160,10 +175,9 @@ outcome and the run goes on, so a break that crashes one side only is a differen
 fault addresses in the first page are logged, since the rest are where each side's code or
 stack happens to be.
 
-Not covered yet: the native DLL (runtime adapters, real controls, `tools/flightsuidiff`),
-which comes once enough classes exist to bind the module, as Help's and Sim's did; and the
-pickers in the running game, which `make main-dialogs` reaches (commands `0x1106`, `0x1107`)
-once the DLL can be installed.
+Not covered yet: a control-level UI harness (`tools/flightsuidiff`, as Help's and Sim's);
+the modeless dialog, which no module we have calls; Save with a real title (which writes a
+flight); and flying a flight started from the pickers by hand.
 
 ## Slice 2: Save Flight `0x1104`
 
@@ -405,5 +419,5 @@ whole descriptor at `+0x111c`, and the dialog's buttons.
 
 ## Next
 
-1. Reach the dialogs `main-dialogs` does not open (the welcome dialog's menus, Save,
-   Select Flight, the pickers), then install it as for Help.
+1. Fly with it: start flights from the pickers and Select Flight, and save one.
+2. Options, the last English dialog DLL.

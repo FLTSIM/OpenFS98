@@ -2,7 +2,7 @@
 
 What is still retail, and what is left before a native build. The 27 simulator modules in
 `Modules\` are done and in `MODULES` (two more module DLLs, SIM1 and the `.MDL`s, live
-outside it and are not), and `English\` World, Alerts, Help, Sim and Views
+outside it and are not), and `English\` World, Alerts, Help, Sim, Views and Flights
 are in `ENGLISH_MODULES`; `make install` puts them all in the game. Everything below is not. Sizes are `.text` from the reference CD. Differences
 and gaps in the finished modules are in [open-differences.md](open-differences.md).
 Results here are from 2026-11-01.
@@ -16,7 +16,7 @@ Results here are from 2026-11-01.
 | `SIMSUI.DLL` | 79,850 | **Not started.** 540 named exports, the common dialog and control widgets. Every dialog imports it | [dialogs.md](modules/dialogs.md) |
 | `Sim/SIM1.sim` | 78,216 | **Not started.** The flight model: every aircraft's `.AIR` names `sim1`. A module DLL, id 25, 15-entry Linkage, wanting 10 modules. Not in `orig/` | [below](#sim1-and-the-mdls) |
 | `Gauges/*.GAU` (120) | 63,472 | **Not started.** No `src/gauges/` and no survey. PANELS, their runtime, is ours | below |
-| `English/Flights.DLL` | 51,122 | **In progress.** All 13 registrations transliterated and verified in their harness (`tools/flights.mk`); no DLL yet | [flights.md](modules/flights.md) |
+| `English/Flights.DLL` | 51,122 | **Installed** 2026-11-02 | [flights.md](modules/flights.md) |
 | `English/Sim.DLL` | 33,239 | **Installed** 2026-11-02 | [sim.md](modules/sim.md) |
 | `English/mpdialog.dll` | 25,401 | **Partial,** being worked on separately: registries `0x110a`..`0x110c` | [mpdialog.md](modules/mpdialog.md) |
 | `Aircraft/*/model/*.MDL` (9) | 25,014 | **Not started.** The aircraft's visual models, module id 31, 9-entry Linkage. Mostly `.data`. Not in `orig/` | [below](#sim1-and-the-mdls) |
@@ -26,7 +26,7 @@ Results here are from 2026-11-01.
 | `English/Alerts.DLL` | 7,649 | **Installed** 2026-11-02 | [alerts.md](modules/alerts.md) |
 | `DIALOG.DLL`, `ENGLISH.FLL` | 406, 438 | **Resources:** bitmaps; strings, a menu and the key tables. To be carried over, not decompiled | [dialogs.md](modules/dialogs.md) |
 
-The four installed dialogs still build standalone in `tools/<name>.mk`, with their own
+The installed dialogs still build standalone in `tools/<name>.mk`, with their own
 harnesses; the shared build copies each to `bin/<NAME>.DLL`, and `make <name>-install` /
 `<name>-revert` do one alone. All of them import retail SIMSUI and MFC42.
 
@@ -69,7 +69,7 @@ them into `orig/` and check them against the reference CD before writing tools a
    crash's real-time curve. All 74 flights still match frame for frame with every module
    and English DLL ours. Not yet reached in play: Alerts' dialogs 3 and 4, Help's lesson
    graph and lesson completion; see [open-differences.md](open-differences.md#not-yet-tested).
-2. **Flights, then Options.** The largest code still used in play. Scripted menu tests come
+2. **Options** (Flights installed 2026-11-02). The largest code still used in play. Scripted menu tests come
    with them: see [open-differences.md](open-differences.md#not-yet-tested).
 3. **SIM1, then the MDLs.** Simulator code in every flight, testable like the modules.
    Copy them into `orig/` first.

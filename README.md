@@ -368,9 +368,9 @@ its depth queue, services and CHAIN callbacks, 20,000 `g3ddiff` scenarios
 with zero differences, and a portable C mesh compiler checked against
 retail's instructions (see [docs/modules/g3d.md](docs/modules/g3d.md)).
 
-**Next: Flights and Options.** The whole game, all retail against all ours, matches
+**Next: Options.** The whole game, all retail against all ours, matches
 frame for frame on all 74 flights with nobody flying, and flown by script on eight flights, on
-both renderers. Alerts, Help, Sim and Views were installed on 2026-11-02. What is still open
+both renderers. Alerts, Help, Sim, Views and Flights were installed on 2026-11-02. What is still open
 is listed in [docs/open-differences.md](docs/open-differences.md). Then SIMSUI, the gauges
 and an executable around `HOST.DLL`: [docs/remaining-work.md](docs/remaining-work.md).
 

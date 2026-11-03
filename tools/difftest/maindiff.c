@@ -1779,6 +1779,9 @@ static void open_dialog(uint32_t *b)
     uint32_t i, n = rnd_n(4), r;
 
     put(" {sel=%u of %u}", b[5], b[6]);
+    /* +0x20, the entry that may not be changed: the current flight's, when it was found;
+     * otherwise a stack leftover on either side, so only a found one is compared */
+    if (b[5] != 0) put(" protected=%u", b[8]);
     r = ((s1)(uintptr_t)b[1])((uint32_t)(uintptr_t)b);
     put(" nothing=%#x", r);
     for (i = 0; i < n; i++) {

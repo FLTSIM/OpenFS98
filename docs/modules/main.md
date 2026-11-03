@@ -1187,6 +1187,11 @@ Retail behaviours kept or noted:
 
 - With no flights `.text+0xc6e0` alerts and returns its block's first word,
   uninitialised stack. Ours answers 0, and the suite does not compare that answer.
+- The block has a ninth word, `+0x20`, which Flights reads as the entry that may not be
+  renamed or deleted: `current`'s index, stored with the selection when it is found
+  (`0x207ed77a`), and otherwise a stack leftover. Ours declared eight words until
+  Flights' in-game comparison (2026-11-02) showed the temporary flight left editable;
+  the stand-in now logs it whenever the selection is nonzero (break `protected-entry`).
 - The Save check (`.text+0xd6b0`) goes on testing the path length after
   host `+0x170` has failed, so it reads an uninitialised local. The harness's
   stub writes 0 on failure so that both sides read the same thing.
@@ -1203,7 +1208,7 @@ SUITE=flights`: 20,000 scenarios, 0 differences (about 5 minutes): 52,482 record
 set, 39,430 Open Flights (6,520 lists empty), 13,153 challenges, 26,426 Save
 Flights; 25,548 deletes and 25,684 edits pressed, 3,430 saves refused by the check.
 `make
-main-breaks SUITE=flights`: 98 breaks, 96 caught, 2 proven equivalent (`hdr-end`:
+main-breaks SUITE=flights`: 99 breaks, 97 caught, 2 proven equivalent (`hdr-end`:
 the loop leaves on the end tag without reading the length; `blank-size`: at size
 == length the loop writes the one terminator the early path does).
 

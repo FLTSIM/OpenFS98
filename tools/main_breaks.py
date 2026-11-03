@@ -2241,6 +2241,7 @@ BREAKS = {
         ('install-1203', "main.c", 'M32(V(0x208001a4)) = ADDR(dialog_1203_check);', 'M32(V(0x208001a4)) = ADDR(dialog_1305_check);'),
     ],
     "flights": [
+        ("protected-entry", "main_flights.inc", "                block[8] = i;\n", ""),
         ('set-exists', 'main_flights.inc', '    r = H_EXISTS(path, 2);\n    if (r != 0)\n        return r;\n    r = H_SPLIT(path,', '    r = H_EXISTS(path, 2);\n    if (r == 0)\n        return r;\n    r = H_SPLIT(path,'),
         ('set-split', 'main_flights.inc', 'r = H_SPLIT(path, ADDR(drive), ADDR(dir), 0, 0);', 'r = H_SPLIT(path, ADDR(dir), ADDR(drive), 0, 0);'),
         ('set-temp-join', 'main_flights.inc', 'r = H_JOIN(ADDR(temp), 0, 0, ADDR(name));', 'r = H_JOIN(ADDR(temp), ADDR(drive), 0, ADDR(name));'),

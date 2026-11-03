@@ -12,7 +12,8 @@
  *
  * Covered: the helpers every class shares, Video finished (0x14040003), Video message
  * (0x14040002), Save video (0x14040001), Flight video (0x1404) and their CNotify, Add
- * logbook (0x14070001) and Logbook entry (0x14070002). */
+ * logbook (0x14070001), Logbook entry (0x14070002) and the Logbook (0x1407) with its rows
+ * list's class. */
 #include <windows.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -39,17 +40,24 @@
 #define RETAIL_HOST 0x1c0ec                /* the HOST import link: its service table */
 #define RETAIL_VIDEO 0x1c450               /* the name Flight video last saw */
 #define RETAIL_NOTIFY_VTABLE 0x16ab0       /* Options' CNotify */
+#define RETAIL_BOOK 0x1c368                /* the Logbook's static fonts and their guard */
+#define RETAIL_ONEXIT 0x1c564              /* -1: atexit goes to _onexit */
+#define RETAIL_LIST_VTABLE 0x17bb0         /* the Logbook's rows list's class */
 
 struct fixture {
     uint8_t guard_before[32];
     uint8_t object[0x2400];
-    uint8_t descriptor[2][0x100];
+    uint8_t descriptor[2][0x200];   /* MAIN's logbook block reaches +0x154 */
     uint8_t notify[0x2a0];
     uint8_t record_before[0xa08];   /* record -1: with no selection the pick is -1 */
     uint8_t records[5][0xa08];
     char texts[4][0x110];
     struct fs98_options_video_state video;
-    char strings[8][0x40];          /* what the CStrings hold */
+    char strings[8][0x100];         /* what the CStrings hold */
+    uint8_t books[5][0x124];        /* MAIN's logbooks */
+    uint8_t rows[6][0x4f];          /* and a logbook's rows */
+    char fields[7][0x50];           /* what a row opens with */
+    struct fs98_options_book_state book;
     char empty[4];
     uint8_t info[32];
     uint8_t exchange[32];
@@ -68,6 +76,7 @@ static void *s_host_table[0x300 / 4];
 
 enum signature {
     SIG_EVENT, SIG_HELP, SIG_CONTEXT, SIG_EXCHANGE, SIG_INT, SIG_EMPTY_ARG, SIG_INT_ARG, SIG_NOTIFY_DELETE,
+    SIG_EXIT, SIG_SCROLL, SIG_LIST_DELETE,
     SIG_CONSTRUCT, SIG_DESTROY, SIG_DELETE, SIG_CREATE, SIG_ROUNDTRIP, SIG_CONSTRUCT_DELETE
 };
 struct operation { uint32_t rva; void *ours; enum signature signature; uint32_t kind; const char *name; };
@@ -78,6 +87,7 @@ struct operation { uint32_t rva; void *ours; enum signature signature; uint32_t 
 #define FLIGHT_VIDEO(rva, name, signature) {rva, (void *)fs98_options_##name, signature, FS98_OPTIONS_FLIGHT_VIDEO, #name}
 #define ADD_LOGBOOK(rva, name, signature) {rva, (void *)fs98_options_##name, signature, FS98_OPTIONS_ADD_LOGBOOK, #name}
 #define LOGBOOK_ENTRY(rva, name, signature) {rva, (void *)fs98_options_##name, signature, FS98_OPTIONS_LOGBOOK_ENTRY, #name}
+#define BOOK(rva, name, signature) {rva, (void *)fs98_options_##name, signature, FS98_OPTIONS_BOOK, #name}
 #define CLASS(help, context, ddx, name, kind) \
     {help, (void *)fs98_options_##name##_help, SIG_HELP, kind, #name "_help"}, \
     {context, (void *)fs98_options_##name##_context, SIG_CONTEXT, kind, #name "_context"}, \
@@ -134,6 +144,19 @@ static const struct operation s_operations[] = {
     LOGBOOK_ENTRY(0xa150, logbook_entry_validate, SIG_INT_ARG), LOGBOOK_ENTRY(0xa300, logbook_entry_error, SIG_INT_ARG),
     LOGBOOK_ENTRY(0xa500, logbook_entry_fill, SIG_EVENT), LOGBOOK_ENTRY(0xa630, logbook_entry_has_descriptor, SIG_INT),
     LIFETIME(FS98_OPTIONS_LOGBOOK_ENTRY, logbook_entry),
+    CLASS(0x8a50, 0x8a70, 0x83a0, book, FS98_OPTIONS_BOOK),
+    BOOK(0x84d0, book_close, SIG_EVENT), BOOK(0x84f0, book_cancel, SIG_EVENT), BOOK(0x8510, book_accept, SIG_EVENT),
+    BOOK(0x8550, book_init, SIG_INT), BOOK(0x8a90, book_new_row, SIG_EVENT), BOOK(0x8c50, book_edit_row, SIG_EVENT),
+    BOOK(0x93f0, book_edit_row, SIG_EVENT), BOOK(0x8e50, book_delete_row, SIG_EVENT),
+    BOOK(0x8ea0, book_new_book, SIG_EVENT), BOOK(0x8ed0, book_delete_book, SIG_EVENT),
+    BOOK(0x8f40, book_show_book, SIG_EVENT), BOOK(0x9400, book_choose_row, SIG_EVENT),
+    BOOK(0x9440, book_read, SIG_EVENT), BOOK(0x94a0, book_fill_books, SIG_EVENT),
+    BOOK(0x9540, book_refresh, SIG_EVENT), BOOK(0x95e0, book_has_descriptor, SIG_INT),
+    BOOK(0x95f0, book_check, SIG_INT), BOOK(0x9600, book_rename, SIG_EVENT),
+    BOOK(0x96f0, book_scroll, SIG_SCROLL), BOOK(0x8380, book_list_delete, SIG_LIST_DELETE),
+    {0x8a40, (void *)fs98_options_book_total_font_destroy, SIG_EXIT, FS98_OPTIONS_BOOK, "book_total_font_destroy"},
+    {0x8a30, (void *)fs98_options_book_rows_font_destroy, SIG_EXIT, FS98_OPTIONS_BOOK, "book_rows_font_destroy"},
+    LIFETIME(FS98_OPTIONS_BOOK, book),
 };
 #define OP_COUNT (sizeof(s_operations) / sizeof(s_operations[0]))
 #define OP s_operations[s_operation]
@@ -142,6 +165,9 @@ static uint32_t next_random(void)
 { s_rng ^= s_rng << 13; s_rng ^= s_rng >> 17; s_rng ^= s_rng << 5; return s_rng; }
 static uint32_t offset(const void *pointer)
 {
+    if (s_retail && (const uint8_t *)pointer >= (uint8_t *)s_retail + RETAIL_BOOK &&
+        (const uint8_t *)pointer < (uint8_t *)s_retail + RETAIL_BOOK + sizeof(struct fs98_options_book_state))
+        pointer = (const uint8_t *)&s_fixture.book + ((const uint8_t *)pointer - ((uint8_t *)s_retail + RETAIL_BOOK));
     if (s_retail && (const uint8_t *)pointer >= (uint8_t *)s_retail + RETAIL_VIDEO &&
         (const uint8_t *)pointer < (uint8_t *)s_retail + RETAIL_VIDEO + sizeof(struct fs98_options_video_state))
         pointer = (const uint8_t *)&s_fixture.video + ((const uint8_t *)pointer - ((uint8_t *)s_retail + RETAIL_VIDEO));
@@ -213,8 +239,15 @@ static void mutate(void)
             D32(PTR(object, part), 0x44) ^= 0x1003;
         }
     }
+    if (OP.kind == FS98_OPTIONS_BOOK && (s_script & 2)) {
+        uint8_t *block = PTR(object, 0x10fc);
+        if (block == s_fixture.descriptor[0] || block == s_fixture.descriptor[1]) {
+            D32(block, 0x48) = (D32(block, 0x48) + 1) % 5;
+            D32(block, 0x1c) = (D32(block, 0x1c) + 3) % 5;
+        }
+    }
     if (s_script & 4) PTR(object, 0) = s_other_vtable;
-    if (s_script & 8) D32(object, OP.kind == FS98_OPTIONS_SAVE_VIDEO ? 0x1460 :
+    if (s_script & 8) D32(object, OP.kind == FS98_OPTIONS_BOOK ? 0x15dc : OP.kind == FS98_OPTIONS_SAVE_VIDEO ? 0x1460 :
                               OP.kind == FS98_OPTIONS_FLIGHT_VIDEO ? 0x1418 : 0x1100) = s_seed ^ 0x12345678;
 }
 
@@ -283,6 +316,13 @@ static uint32_t SC descriptor_edit(void *descriptor, void *record)
     mutate();
     return (s_seed >> 11) % 3 == 0 ? 0x1004 : (s_seed >> 11) % 3 == 1 ? 0 : 0x100d;
 }
+/* MAIN's lb_button: an operation, an index, the block */
+static uint32_t SC book_button(uint32_t operation, uint32_t index, void *block)
+{
+    put("button %u %d block=%u\n", operation, (int32_t)index, offset(block));
+    mutate();
+    return (s_seed >> (operation + 3)) % 3 == 0 ? 0xffffffff : 0;
+}
 /* MAIN's logbook checks, given their part */
 static uint32_t SC part_check(void *part)
 { put("part.check %u\n", offset(part)); mutate(); return (s_seed >> 9) % 3 == 0 ? s_seed : 0; }
@@ -306,10 +346,11 @@ static int32_t send_message(uint32_t window, uint32_t message, uint32_t w_param,
     if (message == 0x180 || message == 0x19a) put("message %u %x %u record=%u\n", window, message, w_param, offset((void *)(uintptr_t)l_param));
     else put("message %u %x %u %u\n", window, message, w_param, l_param);
     mutate();
-    if (message == 0x188)   /* LB_GETCURSEL: none, or one of the five */
-        return s_scenario % 7 == 0 ? -1 : (int32_t)((s_scenario + s_calls) % 5);
+    if (message == 0x188)   /* LB_GETCURSEL: none (for a whole scenario, or this call alone), or one of the five */
+        return s_scenario % 7 == 0 || (s_seed >> (s_calls % 16)) % 9 == 0 ? -1 : (int32_t)((s_scenario + s_calls) % 5);
     if (message == 0x199)   /* LB_GETITEMDATA: the record the item was tagged with */
-        return (int32_t)(uintptr_t)s_fixture.records[w_param % 5];
+        return OP.kind == FS98_OPTIONS_BOOK ? (int32_t)(uintptr_t)s_fixture.books[w_param % 5]
+                                            : (int32_t)(uintptr_t)s_fixture.records[w_param % 5];
     if (message == 0x147)   /* CB_GETCURSEL */
         return (int32_t)((s_seed >> (s_calls % 8)) % 5) - 1;
     if (message == 0x180)   /* LB_ADDSTRING: its index, or an error */
@@ -482,6 +523,64 @@ static void window_text_string(void *window, void *string)
     snprintf(text, sizeof(text), "%u.%u", (s_seed >> 4) % 100, s_seed % 10);
     string_set(string, text); mutate();
 }
+static uint8_t s_guard_seen(void)
+{ return s_side ? s_fixture.book.guard : *((uint8_t *)s_retail + RETAIL_BOOK + 0xe0); }
+static void font_construct(void *font, void *base_font)
+{
+    put("font.construct %u base=%u guard=%u\n", offset(font), offset(base_font), s_guard_seen());
+    memset(font, s_seed & 255, 0x70); mutate();
+}
+static void font_destroy(void *font)
+{ put("font.destroy %u value=%x/%x\n", offset(font), D32(font, 8), D32(font, 0x50)); mutate(); }
+static void register_exit(void (*handler)(void))
+{
+    uint32_t which = handler == (s_side ? fs98_options_book_total_font_destroy : (void (*)(void))((uint8_t *)s_retail + 0x8a40)) ? 1 :
+                     handler == (s_side ? fs98_options_book_rows_font_destroy : (void (*)(void))((uint8_t *)s_retail + 0x8a30)) ? 2 : 0;
+    put("register.exit which=%u\n", which); mutate();
+}
+static int32_t set_tab_stops(void *font, int32_t count, int32_t *stops)
+{
+    put("tab.stops %u %d [%d %d %d %d] at=%u\n", offset(font), count, stops[0], stops[1], stops[2], stops[3], offset(stops));
+    mutate(); return (int32_t)s_seed;
+}
+static int32_t get_client_rect(uint32_t window, struct fs98_options_rect *rect)
+{
+    put("client.rect %u\n", window); mutate();
+    rect->left = 0; rect->top = 0; rect->right = (int32_t)(s_seed % 700) - 50; rect->bottom = 120;
+    return 1;
+}
+static int32_t get_sims_text_buffer(void *control, char *buffer, int32_t count)
+{
+    put("sims.get.text %u count=%d into %u\n", offset(control), count, offset(buffer)); mutate();
+    return snprintf(buffer, (size_t)count, "Rows %x", s_seed & 0xffff);
+}
+static int32_t text_length(const char *text)
+{ put("lstrlen [%s]\n", shown(text)); mutate(); return (int32_t)strlen(text); }
+static void string_append(void *string, const char *text)
+{
+    char joined[0x200];
+    put("string.append %u [%s]\n", where(string), shown(text));
+    snprintf(joined, sizeof(joined), "%s%s", ((struct fs98_options_string *)string)->text, text);
+    string_set(string, joined); mutate();
+}
+static void string_append_char(void *string, char character)
+{
+    char joined[0x200];
+    put("string.append.char %u %d\n", where(string), character);
+    snprintf(joined, sizeof(joined), "%s%c", ((struct fs98_options_string *)string)->text, character);
+    string_set(string, joined); mutate();
+}
+static void list_text(void *list, int32_t index, void *string)
+{
+    char text[32];
+    put("list.text %u %d into %u\n", offset(list), index, where(string));
+    snprintf(text, sizeof(text), "Logbook %d", index);
+    string_set(string, text); mutate();
+}
+static int32_t format_text(char *out, const char *format, const char *text)
+{ put("sprintf [%s] [%s]\n", format, shown(text)); mutate(); return sprintf(out, format, text); }
+static void destroy_control(void *control, uint32_t import);
+static void list_destroy(void *list) { destroy_control(list, 0x1d6ac); }
 static const struct fs98_options_services s_services = {
     send_message, win_help, enable_window, ddx_control, base_init, init_button, init_text,
     init_edit, base_font, set_window_text, get_window_text, set_focus, is_lead_byte,
@@ -489,7 +588,9 @@ static const struct fs98_options_services s_services = {
     compare_text, copy_text, post_message, enable_control, window_enabled, set_checked,
     host_strcpy, host_strcmpi, allocate_object, notify_construct, notify_free, notify_destroy,
     ui_delete, close_dialog, string_construct, string_destroy, string_assign, ddx_text, ddv_max_chars,
-    show_dialog, load_string_a, init_group, set_sims_text, get_sims_text, window_text_string
+    show_dialog, load_string_a, init_group, set_sims_text, get_sims_text, window_text_string,
+    font_construct, font_destroy, register_exit, set_tab_stops, get_client_rect, get_sims_text_buffer,
+    text_length, string_append, string_append_char, list_text, format_text, list_destroy
 };
 
 static void *dialog_construct(void *object, int32_t resource, void *parent)
@@ -612,6 +713,27 @@ static void TC hook_init_group(void *control, void *font) { init_group(control, 
 static void TC hook_set_sims_text(void *control, const char *text) { set_sims_text(control, text); }
 static void TC hook_get_sims_text(void *control, void *string) { get_sims_text(control, string); }
 static void TC hook_window_text_string(void *window, void *string) { window_text_string(window, string); }
+static void *TC hook_font_construct(void *font, void *base_font) { font_construct(font, base_font); return font; }
+static void TC hook_font_destroy(void *font) { font_destroy(font); }
+static void *hook_onexit(void (*handler)(void)) { register_exit(handler); return (void *)handler; }
+static void *hook_dll_onexit(void (*handler)(void), void *begin, void *end)
+{ (void)begin; (void)end; register_exit(handler); return (void *)handler; }
+static int32_t TC hook_tab_stops(void *font, int32_t count, int32_t *stops) { return set_tab_stops(font, count, stops); }
+static int32_t SC hook_client_rect(uint32_t window, struct fs98_options_rect *rect) { return get_client_rect(window, rect); }
+static int32_t TC hook_sims_get_text(void *control, char *buffer, int32_t count) { return get_sims_text_buffer(control, buffer, count); }
+static int32_t SC hook_lstrlen(const char *text) { return text_length(text); }
+static void *TC hook_string_append(void *string, const char *text) { string_append(string, text); return string; }
+static void *TC hook_string_append_char(void *string, char character) { string_append_char(string, character); return string; }
+static void TC hook_list_text(void *list, int32_t index, void *string) { list_text(list, index, string); }
+static int hook_sprintf(char *out, const char *format, ...)
+{
+    va_list args;
+    const char *text;
+    va_start(args, format);
+    text = va_arg(args, const char *);
+    va_end(args);
+    return format_text(out, format, text);
+}
 
 static void patch(uint32_t rva, void *target)
 {
@@ -655,6 +777,14 @@ static void setup_imports(void)
     patch(0x1d4f8, hook_string_assign); patch(0x1d4d0, hook_ddx_text); patch(0x1d4d4, hook_ddv_max);
     patch(0x1d82c, hook_load_string_a); patch(0x1d740, hook_init_group); patch(0x1d6b8, hook_set_sims_text);
     patch(0x1d68c, hook_get_sims_text); patch(0x1d534, hook_window_text_string);
+    patch(0x1d698, hook_font_construct); patch(0x1d694, hook_font_destroy); patch(0x1d63c, hook_onexit);
+    patch(0x1d624, hook_dll_onexit); patch(RETAIL_ONEXIT, (void *)0xffffffff);
+    patch(0x1d69c, hook_tab_stops); patch(0x1d818, hook_client_rect); patch(0x1d6a4, hook_sims_get_text);
+    patch(0x1d468, hook_lstrlen); patch(0x1d4fc, hook_string_append); patch(0x1d4c8, hook_string_append_char);
+    patch(0x1d4c4, hook_list_text); patch(0x1d620, hook_sprintf);
+    fs98_options_set_book_state(&s_fixture.book);
+    fs98_options_set_book_list_vtable((uint8_t *)s_retail + RETAIL_LIST_VTABLE);
+    fs98_options_set_object_list_vtable((uint8_t *)s_retail + RETAIL_LIST_VTABLE);
     s_host_table[0x2a8 / 4] = (void *)hook_host_strcpy; s_host_table[0x2c0 / 4] = (void *)hook_host_strcmpi;
     patch(RETAIL_HOST, s_host_table);
     fs98_options_set_notify_vtable((uint8_t *)s_retail + RETAIL_NOTIFY_VTABLE);
@@ -777,9 +907,56 @@ static void initialize(void)
             D32(part, 0xa4) = (s_seed >> (24 + index)) % 3 == 0;
         }
     }
+    if (OP.kind == FS98_OPTIONS_BOOK) {
+        static const char *const remarks[] = {"", "XC", "Pattern work", "Night currency at KSEA, three landings"};
+        PTR(object, 0x10fc) = s_fixture.descriptor[0];
+        PTR(object, 0x10f8) = (s_seed >> 22) % 4 ? (void *)s_fixture.notify : 0;
+        PTR(object, 0x1af0) = s_fixture.strings[6];
+        D32(object, 0x152c) = s_seed ^ 0x152c;
+        D32(object, 0x15dc) = s_seed ^ 0x15dc;
+        D32(object, 0x1574) = s_seed ^ 0x1574;
+        D32(object, 0x1720) = s_seed ^ 0x1720;
+        s_fixture.book.guard = (uint8_t)((s_seed >> 13) & 3);     /* each font already built or not */
+        for (index = 0; index < 5; ++index) {
+            snprintf((char *)s_fixture.books[index], 0x1e, "Logbook %u", index);
+            snprintf((char *)s_fixture.books[index] + 0x1f, 0x40, "LOG%u.LOG", index);
+            D32(s_fixture.books[index], 0x120) = (s_seed >> (index + 5)) & 1;
+        }
+        for (index = 0; index < 6; ++index) {
+            uint8_t *row = s_fixture.rows[index];
+            memset(row, 0, 0x4f);
+            snprintf((char *)row, 9, "0%u-1%u-98", index % 9, index);
+            snprintf((char *)row + 9, 17, "%s", index & 1 ? "Cessna 182" : "Learjet");
+            snprintf((char *)row + 0x1a, 25, "%s", remarks[(s_seed >> index) % 4 == 3 && index > 2 ? 3 % 4 : (s_seed >> index) % 3]);
+            snprintf((char *)row + 0x33, 7, "%u.%u", index, (s_seed >> index) % 10);
+            snprintf((char *)row + 0x3a, 7, "0.%u", index);
+            snprintf((char *)row + 0x41, 7, "1.%u", index);
+            snprintf((char *)row + 0x48, 7, "%u.0", index + 2);
+        }
+        for (index = 0; index < 7; ++index) snprintf(s_fixture.fields[index], 0x50, "Field %u", index);
+        for (index = 0; index < 2; ++index) {
+            uint8_t *block = s_fixture.descriptor[index];
+            static const uint32_t opens[] = {0x60, 0x88, 0x9c, 0xb0, 0xc4, 0xd8, 0x74};
+            uint32_t field;
+            PTR(block, 4) = part_check;
+            D32(block, 8) = (s_seed >> (3 + index)) % 3 ? 0 : 0x1004;
+            PTR(block, 0xc) = s_fixture.texts[index];
+            D32(block, 0x10) = 1 + (s_scenario + index) % 0x30;
+            D32(block, 0x1c) = (s_scenario + index) % 5;
+            D32(block, 0x20) = (s_seed >> (16 + index)) % 4;
+            PTR(block, 0x24) = s_fixture.books[index];
+            D32(block, 0x48) = (s_scenario / 5 + index) % 5;
+            D32(block, 0x4c) = (s_seed >> (18 + index)) % 4;
+            PTR(block, 0x50) = s_fixture.rows[index];
+            for (field = 0; field < 7; ++field) PTR(block, opens[field]) = s_fixture.fields[field];
+            D32(block, 0xe8) = 0;
+            for (field = 0; field < 4; ++field) PTR(block, 0x100 + field * 0x14) = s_fixture.texts[(field + index) % 4];
+            PTR(block, 0x150) = book_button;
+        }
+    }
     /* the handlers that test for no descriptor */
     if ((OP.rva == 0xe400 || OP.rva == 0xe1d0 || OP.rva == 0xddf0 || OP.rva == 0xd930 ||
-         OP.rva == 0xd4d0 || OP.rva == 0xcc20) && (s_seed >> 27) % 4 == 0) {
+         OP.rva == 0xd4d0 || OP.rva == 0xcc20 || OP.rva == 0x8550 || OP.rva == 0x95e0) && (s_seed >> 27) % 4 == 0) {
         PTR(object, descriptor_offset()) = 0;
         ++s_no_descriptor;
     }
@@ -840,6 +1017,7 @@ static __attribute__((noinline)) int32_t run(uint32_t throw_at)
     volatile int32_t result = 0;
     s_fixture = s_initial;
     if (!s_side) memcpy((uint8_t *)s_retail + RETAIL_VIDEO, &s_fixture.video, sizeof(s_fixture.video));
+    if (!s_side) memcpy((uint8_t *)s_retail + RETAIL_BOOK, &s_fixture.book, sizeof(s_fixture.book));
     s_log_length = s_calls = 0; s_logs[s_side][0] = 0; s_throw_at = throw_at; s_from_handle_calls = 0; s_string_count = 0;
     if (OP.signature >= SIG_CONSTRUCT && !s_side) {
         uint32_t rva = OP.signature == SIG_DESTROY ? class_info->destructor :
@@ -877,6 +1055,17 @@ static __attribute__((noinline)) int32_t run(uint32_t throw_at)
             result = ((int32_t (TC *)(void *, uint32_t))entry)(object, ids[(s_seed >> 3) % 5]);
             break;
         }
+        case SIG_EXIT:
+            ((void (*)(void))entry)();
+            break;
+        case SIG_SCROLL:
+            ((void (TC *)(void *, uint32_t, uint32_t, uint32_t))entry)(object, s_seed, s_seed ^ 1, s_seed ^ 2);
+            break;
+        case SIG_LIST_DELETE: {
+            void *returned = ((void *(TC *)(void *, uint32_t))entry)(s_fixture.object + 0x150c, s_seed);
+            put("return.object %u\n", offset(returned));
+            break;
+        }
         case SIG_NOTIFY_DELETE: {
             void *returned = ((void *(TC *)(void *, uint32_t))entry)(s_fixture.notify, s_seed);
             put("return.object %u\n", offset(returned));
@@ -908,6 +1097,7 @@ static __attribute__((noinline)) int32_t run(uint32_t throw_at)
     __asm__ volatile("movl %0, %%fs:0" : : "r"(s_saved_seh) : "memory");
     s_running = 0;
     if (!s_side) memcpy(&s_fixture.video, (uint8_t *)s_retail + RETAIL_VIDEO, sizeof(s_fixture.video));
+    if (!s_side) memcpy(&s_fixture.book, (uint8_t *)s_retail + RETAIL_BOOK, sizeof(s_fixture.book));
     if (s_calls > s_max_calls) s_max_calls = s_calls;
     return result;
 }

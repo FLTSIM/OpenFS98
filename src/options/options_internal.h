@@ -34,7 +34,18 @@
  * remarks +0x30/+0x34/+0x38, and the three times +0x44 (day), +0x58 (night), +0x6c
  * (instrument), each +4 and +8 on; the aircraft's name +0x20, the aircraft (0xa08-byte
  * records) +0x98, their count +0x9c and the pick +0xa0, and +0xa4: the totals row, whose
- * remarks alone can be edited. */
+ * remarks alone can be edited.
+ *
+ * The Logbook (0x1407, MAIN command 0x1407) is given the block itself: answer +0, check +4,
+ * the name's status +8 and a name +0xc (room +0x10), the logbooks' count +0x1c, the one
+ * chosen +0x20, the logbooks +0x24 (0x124 each: +0 the title, +0x1f the name, +0x120
+ * deletable), the rows' count +0x48, the one chosen +0x4c, the rows +0x50 (0x4f each: the
+ * date +0, the aircraft +9, the remarks +0x1a, the times +0x33, +0x3a, +0x41, +0x48), the
+ * entry's fields from +0x54 (above) with what a row opens with in +0x60, +0x74, +0x88,
+ * +0x9c, +0xb0, +0xc4, +0xd8, the mode +0xe8 (4 a new row, 5 an edit), the four totals
+ * +0x100, +0x114, +0x128, +0x13c, and +0x150 MAIN's lb_button (stdcall: an operation, an
+ * index, the block): 1 a new logbook, 2 delete one, 3 choose one, 4 a new row, 5 edit
+ * one, 6 delete one, 7 choose one, 8 rename the logbook. */
 struct fs98_options_rect { int32_t left, top, right, bottom; };
 struct fs98_options_services {
     int32_t (*send_message)(uint32_t window, uint32_t message, uint32_t w_param, uint32_t l_param);
@@ -85,7 +96,32 @@ struct fs98_options_services {
     void (*set_sims_text)(void *control, const char *text);         /* CSimsText::SetWindowTextA */
     void (*get_sims_text)(void *control, void *string);             /* CSimsText::GetWindowTextA */
     void (*window_text_string)(void *window, void *string);         /* CWnd::GetWindowText(CString &) */
+    void (*font_construct)(void *font, void *base_font);            /* CSimsFont(CFont *) */
+    void (*font_destroy)(void *font);                               /* ~CSimsFont */
+    void (*register_exit)(void (*handler)(void));                   /* atexit, through _onexit */
+    int32_t (*set_tab_stops)(void *font, int32_t count, int32_t *stops);   /* CSimsFont::SetTabStops */
+    int32_t (*get_client_rect)(uint32_t window, struct fs98_options_rect *rect);   /* USER32 */
+    int32_t (*get_sims_text_buffer)(void *control, char *buffer, int32_t count);   /* CSimsText::GetWindowTextA */
+    int32_t (*text_length)(const char *text);                       /* lstrlenA */
+    void (*string_append)(void *string, const char *text);          /* CString::operator+= */
+    void (*string_append_char)(void *string, char character);       /* CString::operator+=(char) */
+    void (*list_text)(void *list, int32_t index, void *string);     /* CListBox::GetText */
+    int32_t (*format_text)(char *out, const char *format, const char *text);   /* MSVCRT sprintf */
+    void (*list_destroy)(void *list);                               /* ~CSimsListBox */
 };
+/* the Logbook's two function-local static CSimsFonts, laid out as in .data from
+ * 0x223ac368, and the guard byte they share (0x223ac448: bit 1 the first, bit 2 the
+ * second) */
+struct fs98_options_book_state {
+    uint8_t rows_font[0x70];        /* 0x223ac368, guard bit 2: the rows' six tab stops */
+    uint8_t total_font[0x70];       /* 0x223ac3d8, guard bit 1: the totals line's four */
+    uint8_t guard, padding[7];      /* 0x223ac448 */
+};
+void fs98_options_set_book_state(struct fs98_options_book_state *state);
+void fs98_options_book_total_font_destroy(void);
+void fs98_options_book_rows_font_destroy(void);
+/* the rows list's own class: CSimsListBox with Options' vtable (0x223a7bb0) */
+void fs98_options_set_book_list_vtable(void *vtable);
 /* a CString: its text */
 struct fs98_options_string { char *text; };
 /* OnInitDialog's CNotify (options_videos.c): ui_new, CNotify(0x30, 1), Options' vtable */
@@ -120,6 +156,7 @@ FS98_OPTIONS_HANDLERS(save_video);
 FS98_OPTIONS_HANDLERS(flight_video);
 FS98_OPTIONS_HANDLERS(add_logbook);
 FS98_OPTIONS_HANDLERS(logbook_entry);
+FS98_OPTIONS_HANDLERS(book);
 #undef FS98_OPTIONS_HANDLERS
 
 /* shared by every class (0x22392400, 0x22392410, 0x22392420, 0x223943d0, 0x22397c30,
@@ -182,5 +219,27 @@ uint32_t FS98_OPTIONS_THISCALL fs98_options_logbook_entry_validate(void *object,
 uint32_t FS98_OPTIONS_THISCALL fs98_options_logbook_entry_error(void *object, uint32_t code);
 void FS98_OPTIONS_THISCALL fs98_options_logbook_entry_fill(void *object);
 uint32_t FS98_OPTIONS_THISCALL fs98_options_logbook_entry_has_descriptor(void *object);
+
+/* the Logbook (options_book.c) */
+typedef uint32_t (FS98_OPTIONS_STDCALL *fs98_options_book_fn)(uint32_t operation, uint32_t index, void *block);
+void FS98_OPTIONS_THISCALL fs98_options_book_close(void *object);
+void FS98_OPTIONS_THISCALL fs98_options_book_cancel(void *object);
+void FS98_OPTIONS_THISCALL fs98_options_book_accept(void *object);
+int32_t FS98_OPTIONS_THISCALL fs98_options_book_init(void *object);
+void FS98_OPTIONS_THISCALL fs98_options_book_new_row(void *object);
+void FS98_OPTIONS_THISCALL fs98_options_book_edit_row(void *object);
+void FS98_OPTIONS_THISCALL fs98_options_book_delete_row(void *object);
+void FS98_OPTIONS_THISCALL fs98_options_book_new_book(void *object);
+void FS98_OPTIONS_THISCALL fs98_options_book_delete_book(void *object);
+void FS98_OPTIONS_THISCALL fs98_options_book_show_book(void *object);
+void FS98_OPTIONS_THISCALL fs98_options_book_choose_row(void *object);
+void FS98_OPTIONS_THISCALL fs98_options_book_read(void *object);
+void FS98_OPTIONS_THISCALL fs98_options_book_fill_books(void *object);
+void FS98_OPTIONS_THISCALL fs98_options_book_refresh(void *object);
+uint32_t FS98_OPTIONS_THISCALL fs98_options_book_has_descriptor(void *object);
+uint32_t FS98_OPTIONS_THISCALL fs98_options_book_check(void *object);
+void FS98_OPTIONS_THISCALL fs98_options_book_rename(void *object);
+void FS98_OPTIONS_THISCALL fs98_options_book_scroll(void *object, uint32_t a, uint32_t b, uint32_t c);
+void *FS98_OPTIONS_THISCALL fs98_options_book_list_delete(void *list, uint32_t flags);
 void FS98_OPTIONS_THISCALL fs98_options_flight_video_rate(void *object);
 #endif

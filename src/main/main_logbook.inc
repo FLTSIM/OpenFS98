@@ -891,8 +891,9 @@ static void lb_row_from(uint32_t b, uint32_t row, int fresh)
     H_STRCPY(row + 0x48, M32(b + 0xd8));
 }
 
-/* .text+0xf800: the buttons, all by this one routine at block +0x150. A failed write
- * on 6 and 8 answers -1 only if it succeeded: that test is the wrong way round. */
+/* .text+0xf800: the buttons, all by this one routine at block +0x150. RETAIL BUG (kept):
+ * MAIN-1 (docs/retail-bugs.md). A failed write on 6 and 8 answers -1 only if it
+ * succeeded: that test is the wrong way round. */
 static uint32_t FS98_STDCALL lb_button(uint32_t op, uint32_t i, uint32_t b)
 {
     uint32_t r, elem, n;

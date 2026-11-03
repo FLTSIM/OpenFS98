@@ -2,7 +2,7 @@
 
 `orig/English/Options.DLL`, module `0x80000007`, preferred base `0x22390000`, 84,381 bytes of
 `.text`, 15 dialog registrations and 31 templates. **In progress, started 2026-11-03:**
-slices 1 to 3 (the shared helpers, the four video dialogs, Add logbook and Logbook entry)
+slices 1 to 4 (the shared helpers, the four video dialogs and the three logbook dialogs)
 are transliterated and verified in their harness. Nothing is built as a DLL or installed. Like Flights it is MFC dialogs over
 the CD's SIMSUI and MFC42, which stay as dependencies, and it follows Flights' method
 ([flights.md](flights.md)): core C over a service table, generated tables, a differential
@@ -80,7 +80,7 @@ finds nothing) and `0x223943c0` (the descriptor's own check) are called from the
   copies them into the descriptor and is always accepted: a failed check is followed by the
   error check `0x22392f20`, which finds nothing. OnCancel answers 0. The answer state is
   `+0x13f8` (1 accepted, 2 cancelled).
-- **Retail's bug, kept:** with an empty message, OnOK's lead-byte test looks at the byte
+- **Retail's bug, kept** (OPT-1 in [retail-bugs.md](../retail-bugs.md)): with an empty message, OnOK's lead-byte test looks at the byte
   before its buffer, the top byte of the ebp it saved. A stack below 16 MB (wine's and
   Windows' main threads) makes it 0, no lead byte, so nothing is written there; ours passes
   0, and the harness, whose stack is low too, agrees.
@@ -146,7 +146,7 @@ The fields are in `options_internal.h`.
   instead of `0xf74f`, and leaves only the remarks editable. Validate reads every field and
   the aircraft and names the first field whose status is set, else the check's own answer.
   An instrument time over the total (`0x1013`) is shown in its label while it is reported.
-- **Retail's bugs, kept:** the day and night times, and an instrument time failing other
+- **Retail's bugs, kept** (OPT-2 to OPT-5 in [retail-bugs.md](../retail-bugs.md)): the day and night times, and an instrument time failing other
   than `0x1013`, are reported with the address of their status rather than its value.
   Validate copies the aircraft's name from a stack buffer that CB_GETLBTEXT does not fill
   when nothing is picked. OnInitDialog loads the title, up to 0x27 characters, into a
@@ -158,6 +158,40 @@ Breaks: 261, all caught; four proven equivalent and left out. Harness lessons: C
 stubs keep their text in fixture slots handed out in call order, so the counter is reset
 for each side; a branch that needs every status clear is too rare from independent bits,
 so one scenario in four clears them all.
+
+## Slice 4: the Logbook `0x1407`
+
+`src/options/options_book.c`. Class at `0x223980f0`, `0x1c00` bytes, template `0x392`,
+MAIN's block at `+0x10fc` (its fields are in `options_internal.h`), a CNotify at
+`+0x10f8`, the answer state `+0x1af4`.
+
+- **Two lists**: the logbooks (`+0x15bc`), each item tagged with its 0x124-byte record, and
+  the chosen logbook's rows (`+0x150c`), each a CString of tab-separated `sprintf` fields
+  (`%-16s` the aircraft, `%-24s` the remarks with a second tab when they are shorter than
+  three, `%6s` each time) tagged with its 0x4f-byte row; the totals line is string
+  `0xf759` and the block's four totals.
+- **Every button goes through MAIN's `lb_button`** (block `+0x150`: an operation, an index,
+  the block) and then refreshes both lists: new logbook 1, delete it 2, choose it 3, a new
+  row 4 (opening with the first row's fields), edit one 5 (with its own), delete one 6,
+  choose one 7, rename the logbook 8 (when the title edit loses the focus with a changed
+  title). OK and Cancel answer as Video message's do.
+- **The rows list is Options' own class**: CSimsListBox with its vtable `0x223a7bb0`
+  stored over it in the constructor, a WM_HSCROLL that does nothing and CSimsListBox's
+  destructor.
+- **Two function-local static CSimsFonts** (.data `0x223ac368` the rows', `0x223ac3d8` the
+  totals line's, guard byte `0x223ac448`), built once from `GetSimsBaseFont(3)` and `(1)`
+  and destroyed through `atexit`; each OnInitDialog gives them fields of the dialog's own
+  fonts and their tab stops (six at `+0x10e0`, four of them from `+0x10e8`).
+- **Retail's bug, kept** (OPT-6 in [retail-bugs.md](../retail-bugs.md)): the rows list's
+  width and a quarter more is stored at `+0x1af8` and at once overwritten with `0x299`.
+  MAIN's `lb_button` has one of its own (MAIN-1).
+
+Results (2026-11-03): 140 operations; 20,000 scenarios, 2,800,000 comparisons, 0 differ on
+each seed; unwind mode 2,000 scenarios, 3,292,972 comparisons, 3,011,260 throws, 0 differ.
+Breaks: 334 over slices 1 to 4, all caught; seven proven equivalent and left out. Harness
+lessons: a list with no selection has to be possible one call at a time, not only
+for a whole scenario, or a second list's own test is never reached alone; the static fonts
+are copied in and out of retail's .data around each retail run.
 
 ## Customise controls, for when it comes
 
@@ -172,7 +206,6 @@ with their own fixtures.
 
 ## Next
 
-1. The Logbook itself (`0x1407`, and its list box class), the analysis dialogs, Instant
-   replay, Preferences with Display options and `0x14090002`, and Customise controls last.
+1. The analysis dialogs (`0x1405`, `0x14050002`, `0x14050003`), Instant replay, Preferences with Display options and `0x14090002`, and Customise controls last.
 2. The native DLL once enough classes exist to bind the module, as Flights' did; then
    main-dialogs, flights-play-style steps and installation.

@@ -76,7 +76,8 @@ int32_t TC fs98_options_video_message_init(void *object)
  * a lead byte left at its end, then always accepted: a failed check is followed by the
  * error check, which finds nothing.
  *
- * Retail's bug: with an empty message it looks at the byte before its buffer, the top
+ * RETAIL BUG (kept): OPT-1 (docs/retail-bugs.md). With an empty message it looks at the byte
+ * before its buffer, the top
  * byte of the ebp it saved. A stack below 16 MB, as wine's and Windows' main threads have,
  * makes that 0, which is no lead byte, so nothing is written there; this passes 0. */
 void TC fs98_options_video_message_accept(void *object)

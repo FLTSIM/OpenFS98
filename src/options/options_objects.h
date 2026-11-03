@@ -30,11 +30,13 @@ struct fs98_options_object_services {
 /* Class indices, in s_classes order (tools/gen_options_tables.py) */
 enum { FS98_OPTIONS_VIDEO_FINISHED, FS98_OPTIONS_VIDEO_MESSAGE, FS98_OPTIONS_SAVE_VIDEO,
        FS98_OPTIONS_FLIGHT_VIDEO, FS98_OPTIONS_ADD_LOGBOOK, FS98_OPTIONS_LOGBOOK_ENTRY,
-       FS98_OPTIONS_CLASS_COUNT };
+       FS98_OPTIONS_BOOK, FS98_OPTIONS_CLASS_COUNT };
 void fs98_options_set_object_services(const struct fs98_options_object_services *services,
                                       void *const *vtables);
 /* Options' own instance, which each factory stores at object +0x80 */
 void fs98_options_set_object_module(uint32_t module);
+/* the Logbook's rows list: its class's vtable, stored over CSimsListBox's */
+void fs98_options_set_object_list_vtable(void *vtable);
 #define FS98_OPTIONS_OBJECT(name) \
     void *FS98_OPTIONS_THISCALL fs98_options_##name##_construct(void *object, void *parent); \
     void FS98_OPTIONS_THISCALL fs98_options_##name##_destroy(void *object); \
@@ -46,5 +48,6 @@ FS98_OPTIONS_OBJECT(save_video);
 FS98_OPTIONS_OBJECT(flight_video);
 FS98_OPTIONS_OBJECT(add_logbook);
 FS98_OPTIONS_OBJECT(logbook_entry);
+FS98_OPTIONS_OBJECT(book);
 #undef FS98_OPTIONS_OBJECT
 #endif

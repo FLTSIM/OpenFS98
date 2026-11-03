@@ -22,6 +22,7 @@ static uint8_t *fs98_flights_aircraft_record(void *object)
     void *descriptor = DESCRIPTOR(object);
     return AT(PTR(descriptor, 0x1c), D32(descriptor, 0x14) * (uint32_t)0xa08);
 }
+/* RETAIL BUG (kept): FLT-2 (docs/retail-bugs.md), its callers store -1 and read the record there */
 static int32_t fs98_flights_aircraft_selection(void *object)
 {
     return SERVICES->send_message(D32(object, 0x151c), LB_GETCURSEL, 0, 0);

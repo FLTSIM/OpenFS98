@@ -99,8 +99,8 @@ void TC fs98_options_add_logbook_clear(void *object)
 {
     SERVICES->set_window_text(AT(object, 0x1398), fs98_options_empty_text);
 }
-/* 0x2239ab20: the part is MAIN's block + 0x28, so it is never null unless the block is
- * -0x28; a null block gives 0x28, and OnInitDialog reads through it */
+/* 0x2239ab20: the part is MAIN's block + 0x28. RETAIL BUG (kept): OPT-5, it is never null
+ * unless the block is -0x28; a null block gives 0x28, and OnInitDialog reads through it */
 uint32_t TC fs98_options_add_logbook_has_descriptor(void *object)
 {
     NEW_BOOK(object) = (uint8_t *)PTR(object, 0x10e4) + 0x28;
@@ -146,7 +146,7 @@ void TC fs98_options_logbook_entry_accept(void *object)
     D32(ENTRY(object), 0) = 1;
     ((void (TC *)(void *))vtable[0xec / 4])(object);
 }
-/* 0x2239a630: the part is MAIN's block + 0x54 */
+/* 0x2239a630: the part is MAIN's block + 0x54. RETAIL BUG (kept): OPT-5, it is never null */
 uint32_t TC fs98_options_logbook_entry_has_descriptor(void *object)
 {
     ENTRY(object) = (uint8_t *)PTR(object, 0x10e0) + 0x54;
@@ -186,7 +186,7 @@ void TC fs98_options_logbook_entry_fill(void *object)
  * remarks changed, so the other four edits are disabled and the remarks take the focus. */
 int32_t TC fs98_options_logbook_entry_init(void *object)
 {
-    char title[0x28];
+    char title[0x28];     /* RETAIL BUG (kept): OPT-4, retail's slot is 0x18 bytes for room 0x27 */
     SERVICES->base_init(object);
     if (!skin(object, 0xf)) return 0;
     D32(object, 0x84) = 0xb;
@@ -238,7 +238,7 @@ int32_t TC fs98_options_logbook_entry_init(void *object)
  * A failure names the first field whose status is set, in this order; with none, the
  * check's own answer. The totals row reads its remarks alone and always passes.
  *
- * Retail's: the aircraft's name is CB_GETLBTEXT's into a stack buffer it does not
+ * RETAIL BUG (kept): OPT-3. The aircraft's name is CB_GETLBTEXT's into a stack buffer it does not
  * initialise, cut to 16 characters; with no pick (CB_ERR) nothing is written there and
  * whatever the stack held is copied. Ours copies what its own stack holds. */
 uint32_t TC fs98_options_logbook_entry_validate(void *object, uint32_t unused)
@@ -292,7 +292,7 @@ static void entry_error_cleanup(struct fs98_options_unwind *frame)
  * and the focus goes to it when the report is accepted. An instrument time over the
  * total (0x1013) is shown in its label while it is reported.
  *
- * Retail's: the day and night times, and an instrument time failing otherwise, are
+ * RETAIL BUG (kept): OPT-2. The day and night times, and an instrument time failing otherwise, are
  * reported with the address of their status rather than the status. */
 FS98_OPTIONS_NOINLINE uint32_t TC fs98_options_logbook_entry_error(void *object, uint32_t code)
 {

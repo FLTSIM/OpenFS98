@@ -99,8 +99,8 @@ static void fs98_flights_factory_cleanup(struct fs98_flights_unwind *frame)
     struct fs98_flights_factory_unwind *state = (void *)frame;
     if (state->live) { state->live = 0; s_services->dialog_delete(state->object); }
 }
-/* 0x223112f0 and the like. A failed allocation leaves the object null and the
- * descriptor store faults, as retail's does; the parent argument is ignored. */
+/* 0x223112f0 and the like. RETAIL BUG (kept): FLT-3 (docs/retail-bugs.md). A failed
+ * allocation leaves the object null and the descriptor store faults, as retail's does; the parent argument is ignored. */
 static FS98_FLIGHTS_NOINLINE uint32_t fs98_flights_create(uint32_t parent, void *descriptor, uint32_t kind)
 {
     struct fs98_flights_factory_unwind state;

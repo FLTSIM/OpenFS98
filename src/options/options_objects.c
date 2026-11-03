@@ -41,6 +41,9 @@ void fs98_options_set_object_services(const struct fs98_options_object_services 
     for (index = 0; index < FS98_OPTIONS_CLASS_COUNT; ++index) s_vtables[index] = vtables[index];
 }
 void fs98_options_set_object_module(uint32_t module) { s_module = module; }
+static void *s_list_vtable;
+void fs98_options_set_object_list_vtable(void *vtable) { s_list_vtable = vtable; }
+#define LIST_CONSTRUCT 0x1d6a8     /* CSimsListBox() */
 
 /* 0x2239de00 and the like: CSimsDialog(template, parent), then each member in order */
 static FS98_OPTIONS_NOINLINE void *fs98_options_construct(void *object, void *parent, uint32_t kind)
@@ -55,6 +58,9 @@ static FS98_OPTIONS_NOINLINE void *fs98_options_construct(void *object, void *pa
     while (state.constructed < state.class_info->count) {
         const struct fs98_options_subobject *control = &state.class_info->controls[state.constructed];
         s_services->construct((uint8_t *)object + control->offset, control->constructor);
+        /* 0x22398189: the Logbook's rows list is Options' own class, its vtable at once */
+        if (kind == FS98_OPTIONS_BOOK && control->offset == 0x150c && control->constructor == LIST_CONSTRUCT)
+            PTR((uint8_t *)object + control->offset, 0) = s_list_vtable;
         ++state.constructed;
     }
     PTR(object, 0) = s_vtables[kind];
@@ -64,6 +70,7 @@ static FS98_OPTIONS_NOINLINE void *fs98_options_construct(void *object, void *pa
     if (kind == FS98_OPTIONS_FLIGHT_VIDEO) D32(object, 0x10dc) = 0;
     /* 0x2239a6e7, 0x223998c3..0x223998fb: the CStrings start empty */
     if (kind == FS98_OPTIONS_ADD_LOGBOOK) s_services->string_assign((char *)object + 0x1400, fs98_options_empty_text);
+    if (kind == FS98_OPTIONS_BOOK) s_services->string_assign((char *)object + 0x1af0, fs98_options_empty_text);
     if (kind == FS98_OPTIONS_LOGBOOK_ENTRY) {
         uint32_t at;
         for (at = 0x1c90; at <= 0x1ca0; at += 4) s_services->string_assign((char *)object + at, fs98_options_empty_text);
@@ -91,8 +98,8 @@ static void fs98_options_factory_cleanup(struct fs98_options_unwind *frame)
     struct fs98_options_factory_unwind *state = (void *)frame;
     if (state->live) { state->live = 0; s_services->dialog_delete(state->object); }
 }
-/* 0x22391810 and the like. A failed allocation leaves the object null and the stores
- * fault, as retail's do; the parent argument is ignored. Video finished stores no
+/* 0x22391810 and the like. RETAIL BUG (kept): FLT-3 (docs/retail-bugs.md). A failed
+ * allocation leaves the object null and the stores fault, as retail's do; the parent argument is ignored. Video finished stores no
  * descriptor. */
 static FS98_OPTIONS_NOINLINE uint32_t fs98_options_create(uint32_t parent, void *descriptor, uint32_t kind)
 {
@@ -133,4 +140,5 @@ OBJECT_CLASS(save_video, FS98_OPTIONS_SAVE_VIDEO)
 OBJECT_CLASS(flight_video, FS98_OPTIONS_FLIGHT_VIDEO)
 OBJECT_CLASS(add_logbook, FS98_OPTIONS_ADD_LOGBOOK)
 OBJECT_CLASS(logbook_entry, FS98_OPTIONS_LOGBOOK_ENTRY)
+OBJECT_CLASS(book, FS98_OPTIONS_BOOK)
 #undef OBJECT_CLASS

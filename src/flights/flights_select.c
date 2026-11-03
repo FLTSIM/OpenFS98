@@ -54,6 +54,7 @@ void TC fs98_flights_select_choose(void *object)
     SERVICES->send_message(D32(object, 0x1598), EM_SETREADONLY, D32(record, 0xa04) == 0, 0);
     SERVICES->enable_control(AT(object, 0x15e0), (int32_t)D32(record, 0xa04));
     SERVICES->enable_control(AT(object, 0x1648), (int32_t)D32(record, 0xa04));
+    /* RETAIL BUG (kept): FLT-1 (docs/retail-bugs.md), +0x20 is past the end of MAIN's block */
     if (D32(DESCRIPTOR(object), 0x14) == D32(DESCRIPTOR(object), 0x20)) {
         SERVICES->send_message(D32(object, 0x1598), EM_SETREADONLY, 1, 0);
         SERVICES->enable_control(AT(object, 0x15e0), 0);

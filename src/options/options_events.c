@@ -102,6 +102,14 @@ void TC fs98_options_add_logbook_exchange(void *object, void *exchange)
     static const uint32_t texts[][3] = {{0x1400, 0x11a4, 0xf0}};
     exchange_texts(object, exchange, s_ddx_add_logbook, s_ddx_count_add_logbook, texts, 1);
 }
+OPTIONS_HELP(book)                /* 0x22398a50, 0x22398a70 */
+/* 0x223983a0: CSimsDialog's own exchange, the controls, then the title's CString (0x1e) */
+void TC fs98_options_book_exchange(void *object, void *exchange)
+{
+    static const uint32_t texts[][3] = {{0x1af0, 0x119a, 0x1e}};
+    s_services->base_exchange(object, exchange);
+    exchange_texts(object, exchange, s_ddx_book, s_ddx_count_book, texts, 1);
+}
 OPTIONS_HELP(logbook_entry)       /* 0x22399d40, 0x22399d60 */
 /* 0x22399ae0: the day, instrument and night times (6), the remarks (0x18), the date (8) */
 void TC fs98_options_logbook_entry_exchange(void *object, void *exchange)

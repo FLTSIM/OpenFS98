@@ -14,13 +14,16 @@ either, and no call comes between); and OnOK's cut tested with > for >= (at 0x35
 the byte it clears is already the terminator); and Flight video's validate leaving its name
 buffer unzeroed past the first byte (it is read only as a string, and GetWindowText always
 terminates what it writes); and Logbook entry's OnInitDialog ignoring its part test (the
-part is MAIN's block + 0x54, never null).
+part is MAIN's block + 0x54, never null); and the Logbook reading MAIN's block once for
+all of a row's fields rather than for each (no call comes between the reads); its rows
+font's guard set with 3 for 2 (bit 1 is always set by then); and its first measure of the
+rows list left out (OPT-6: overwritten before anything reads it).
 """
 from pathlib import Path
 import subprocess
 import sys
 
-UNITS = ('events', 'objects', 'video', 'videos', 'logbook')
+UNITS = ('events', 'objects', 'video', 'videos', 'logbook', 'book')
 # the two exchange macros, each whole: their loops are alike
 PLAIN = '''    uint32_t index; \\
     for (index = 0; (int32_t)index < (int32_t)s_ddx_count_##name; ++index) \\
@@ -370,7 +373,82 @@ LOGBOOK = [
     ('error-destroy-order', "    if (state->live > 1) { state->live = 1; SERVICES->string_destroy(state->second); }\n    if (state->live > 0) { state->live = 0; SERVICES->string_destroy(state->first); }",
      "    if (state->live > 1) { state->live = 1; SERVICES->string_destroy(state->first); }\n    if (state->live > 0) { state->live = 0; SERVICES->string_destroy(state->second); }"),
 ]
+BOOK = [
+    ('scroll-nothing', '{ (void)object; (void)a; (void)b; (void)c; }', '{ (void)object; (void)a; (void)b; SERVICES->ui_delete(object); (void)c; }'),
+    ('list-delete-flag', '    if (flags & 1) SERVICES->ui_delete(list);', '    if (flags & 2) SERVICES->ui_delete(list);'),
+    ('list-delete-destroy', '    SERVICES->list_destroy(list);\n', ''),
+    ('close-notify-at', '    void *notify = PTR(object, 0x10f8);', '    void *notify = PTR(object, 0x10dc);'),
+    ('cancel-state', '    D32(object, 0x1af4) = 2;', '    D32(object, 0x1af4) = 1;'),
+    ('read-books', '    D32(BLOCK(object), 0x20) = (uint32_t)selection(BOOKS(object));\n    D32(BLOCK(object), 0x4c)', '    D32(BLOCK(object), 0x24) = (uint32_t)selection(BOOKS(object));\n    D32(BLOCK(object), 0x4c)'),
+    ('read-rows', '    D32(BLOCK(object), 0x4c) = (uint32_t)selection(ROWS(object));\n}', '    D32(BLOCK(object), 0x4c) = (uint32_t)selection(BOOKS(object));\n}'),
+    ('accept-state', '    D32(object, 0x1af4) = 1;', '    D32(object, 0x1af4) = 3;'),
+    ('accept-read', '    D32(object, 0x1af4) = 1;\n    fs98_options_book_read(object);', '    D32(object, 0x1af4) = 1;'),
+    ('accept-answer', '        block[0] = 1;', '        block[0] = 2;'),
+    ('fill-stride', '++index, book += BOOK)', '++index, book += BOOK - 4)'),
+    ('fill-count', 'index < D32(BLOCK(object), 0x1c);', 'index <= D32(BLOCK(object), 0x1c);'),
+    ('fill-data', 'LB_SETITEMDATA, entry, (uint32_t)(uintptr_t)book);', 'LB_SETITEMDATA, index, (uint32_t)(uintptr_t)book);'),
+    ('fill-kept', '    D32(object, 0x10dc) = D32(BLOCK(object), 0x20);', '    D32(object, 0x10dc) = D32(BLOCK(object), 0x1c);'),
+    ('show-none', '    if (chosen == -1) {\n        show_cleanup', '    if (chosen == -2) {\n        show_cleanup'),
+    ('show-title', 'SERVICES->set_window_text(AT(object, 0x1554), line.text);', 'SERVICES->set_window_text(AT(object, 0x1554), "");'),
+    ('show-choose', '    call(object, 3, D32(BLOCK(object), 0x20));\n    row', '    row'),
+    ('show-rows-early', '    row = PTR(BLOCK(object), 0x50);\n    SERVICES->enable_control(AT(object, 0x150c), 1);', '    SERVICES->enable_control(AT(object, 0x150c), 1);\n    row = PTR(BLOCK(object), 0x50);'),
+    ('show-aircraft', '"%-16s", (const char *)remarks - 0x11);', '"%-16s", (const char *)remarks - 0x10);'),
+    ('show-remarks-width', '"%-24s", (const char *)remarks);', '"%-23s", (const char *)remarks);'),
+    ('show-short-tab', 'if (SERVICES->text_length((const char *)remarks) < 3)', 'if (SERVICES->text_length((const char *)remarks) < 2)'),
+    ('show-time', '"%6s", (const char *)remarks + 0x27);', '"%6s", (const char *)remarks + 0x20);'),
+    ('show-row-data', 'LB_SETITEMDATA, entry, (uint32_t)(uintptr_t)row);', 'LB_SETITEMDATA, entry, (uint32_t)(uintptr_t)line.text);'),
+    ('show-row-stride', '            row += ROW;', '            row += ROW + 1;'),
+    ('show-count-once', '        } while (index < D32(BLOCK(object), 0x48));', '        } while (index < 2);'),
+    ('show-empty', '    if (D32(BLOCK(object), 0x48) < 1) {', '    if (D32(BLOCK(object), 0x48) < 2) {'),
+    ('show-empty-rows', '        SERVICES->enable_control(AT(object, 0x150c), 0);\n', ''),
+    ('show-totals-string', 'load_string_a(D32(object, 0x80), 0xf759, buffer, 0x18);', 'load_string_a(D32(object, 0x80), 0xf75a, buffer, 0x18);'),
+    ('show-totals-field', 'column(&line, "%6s", PTR(BLOCK(object), 0x128));', 'column(&line, "%6s", PTR(BLOCK(object), 0x13c));'),
+    ('show-first-row', '        D32(BLOCK(object), 0x4c) = 0;\n', ''),
+    ('show-choose-row', '        call(object, 7, 0);', '        call(object, 7, 1);'),
+    ('show-deletable', 'D32(book, 0x120) ? 1 : 0);', 'D32(book, 0x11c) ? 1 : 0);'),
+    ('refresh-none', '    if (D32(BLOCK(object), 0x1c) != 0) {\n        SERVICES->enable_control(AT(object, 0x19f4), 1);', '    if (D32(BLOCK(object), 0x1c) > 1) {\n        SERVICES->enable_control(AT(object, 0x19f4), 1);'),
+    ('refresh-show', '        fs98_options_book_fill_books(object);\n        fs98_options_book_show_book(object);', '        fs98_options_book_fill_books(object);'),
+    ('refresh-clear', '    SERVICES->set_window_text(AT(object, 0x1554), fs98_options_empty_text);\n    SERVICES->send_message(BOOKS', '    SERVICES->send_message(BOOKS'),
+    ('open-field', '{9, 0x74}', '{9, 0x60}'),
+    ('new-row-mode', '    D32(BLOCK(object), 0xe8) = 4;', '    D32(BLOCK(object), 0xe8) = 5;'),
+    ('new-row-template', '    if (D32(BLOCK(object), 0x48) != 0) open_row(object, 0);', '    open_row(object, 0);'),
+    ('new-row-op', '    call(object, 4, (uint32_t)chosen);', '    call(object, 4, D32(BLOCK(object), 0x20) + 1);'),
+    ('new-row-focus', '    SERVICES->set_focus(AT(object, 0x19f4));', '    SERVICES->set_focus(AT(object, 0x18f8));'),
+    ('edit-row-none', '    if (row == -1) return;\n    D32(BLOCK(object), 0x4c) = (uint32_t)row;\n    call(object, 7, (uint32_t)row);', '    D32(BLOCK(object), 0x4c) = (uint32_t)row;\n    call(object, 7, (uint32_t)row);'),
+    ('edit-row-mode', '    D32(BLOCK(object), 0xe8) = 5;', '    D32(BLOCK(object), 0xe8) = 4;'),
+    ('edit-row-offset', '    open_row(object, (uint32_t)row * ROW);', '    open_row(object, (uint32_t)row * ROW + 1);'),
+    ('delete-row-op', '    call(object, 6, D32(BLOCK(object), 0x4c));', '    call(object, 6, (uint32_t)row + 1);'),
+    ('new-book-op', '    call(object, 1, D32(BLOCK(object), 0x20));', '    call(object, 1, 0);'),
+    ('delete-book-focus', '    if (SERVICES->window_enabled(AT(object, 0x17fc)) == 0)', '    if (SERVICES->window_enabled(AT(object, 0x17fc)) != 0)'),
+    ('delete-book-post', 'post_message(D32(object, 0x20), 0x5fa, D32(object, 0x1720), 0);', 'post_message(D32(object, 0x20), 0x5fa, D32(object, 0x1720), 1);'),
+    ('choose-row-op', '    call(object, 7, D32(BLOCK(object), 0x4c));\n}\n/* 0x22399600', '    call(object, 7, 0);\n}\n/* 0x22399600'),
+    ('rename-room', 'title, 0x1f);', 'title, 0x20);'),
+    ('rename-same', 'if (SERVICES->compare_text(title, book) == 0) return;', 'if (SERVICES->compare_text(title, book) != 0) return;'),
+    ('rename-op', 'if (call(object, 8, (uint32_t)chosen) != 0 && D32(BLOCK(object), 8) != 0) {', 'if (call(object, 8, (uint32_t)chosen) == 0 && D32(BLOCK(object), 8) != 0) {'),
+    ('rename-status', 'if (call(object, 8, (uint32_t)chosen) != 0 && D32(BLOCK(object), 8) != 0) {', 'if (call(object, 8, (uint32_t)chosen) != 0) {'),
+    ('rename-select', 'post_message(D32(object, 0x1574), EM_SETSEL, 0, 0xffffffff);', 'post_message(D32(object, 0x1574), EM_SETSEL, 0, 0);'),
+    ('rename-refill', '    fs98_options_book_fill_books(object);\n}\n/* 0x22398550', '}\n/* 0x22398550'),
+    ('init-stops', '    D32(object, 0x10e8) = 0x125;', '    D32(object, 0x10e8) = 0x126;'),
+    ('init-total-guard', '    if (!(s_state->guard & 1)) {\n        s_state->guard |= 1;', '    if (!(s_state->guard & 2)) {\n        s_state->guard |= 1;'),
+    ('init-total-base', 'font_construct(font, SERVICES->base_font(1));', 'font_construct(font, SERVICES->base_font(3));'),
+    ('init-total-exit', 'register_exit(fs98_options_book_total_font_destroy);', 'register_exit(fs98_options_book_rows_font_destroy);'),
+    ('init-total-field', '    D32(font, 0xc) = D32(object, 0x37c);', '    D32(font, 0xc) = D32(object, 0x378);'),
+    ('init-total-stops', 'set_tab_stops(font, 4, (int32_t *)AT(object, 0x10e8));', 'set_tab_stops(font, 4, (int32_t *)AT(object, 0x10e0));'),
+    ('init-rows-field', '    D32(font, 0x24) = D32(object, 0x474);', '    D32(font, 0x24) = D32(object, 0x470);'),
+    ('init-rows-stops', 'set_tab_stops(font, 6, (int32_t *)AT(object, 0x10e0));', 'set_tab_stops(font, 5, (int32_t *)AT(object, 0x10e0));'),
+    ('init-books-list', 'init_list(AT(object, 0x15bc), AT(object, 0x3e0), 0);', 'init_list(AT(object, 0x15bc), AT(object, 0x3e0), AT(object, 0x12e4));'),
+    ('init-totals-font', 'init_text(AT(object, 0x1454), s_state->total_font);', 'init_text(AT(object, 0x1454), s_state->rows_font);'),
+    ('init-rows-list', 'init_list(AT(object, 0x150c), s_state->rows_font, AT(object, 0x139c));', 'init_list(AT(object, 0x150c), s_state->total_font, AT(object, 0x139c));'),
+    ('init-measure-final', '        D32(object, 0x1af8) = 0x299;', '        (void)0;'),
+    ('init-label-room', 'AT(object, 0x1b00), 0xff);', 'AT(object, 0x1b00), 0xfe);'),
+    ('init-label-measure', '        D32(object, 0x1afc) = (uint32_t)(length * 10 / 5);', '        D32(object, 0x1afc) = (uint32_t)(length * 10 / 4);'),
+    ('init-notify', '    PTR(object, 0x10f8) = fs98_options_new_notify();', '    fs98_options_new_notify();'),
+    ('init-limit', 'EM_LIMITTEXT, D32(BLOCK(object), 0x10) - 1, 0);', 'EM_LIMITTEXT, D32(BLOCK(object), 0x10), 0);'),
+    ('init-refresh', '    fs98_options_book_refresh(object);\n    return 1;\n}', '    return 1;\n}'),
+]
 UNWIND = [
+    ('show-unwind-line', 'book', "    if (state->live) { state->live = 0; SERVICES->string_destroy(state->line); }", "    (void)state;"),
+    ('book-list-vtable', 'objects', '            PTR((uint8_t *)object + control->offset, 0) = s_list_vtable;', '            (void)0;'),
     ('entry-error-unwind-second', 'logbook', '    SERVICES->string_construct(&second);\n    state.live = 2;', '    SERVICES->string_construct(&second);\n    state.live = 1;'),
     ('add-constructor-string', 'objects', '    if (kind == FS98_OPTIONS_ADD_LOGBOOK) s_services->string_assign', '    if (kind == 99) s_services->string_assign'),
     ('notify-unwind', 'videos', "    if (state->live) { state->live = 0; SERVICES->notify_free(state->notify); }", "    (void)state;"),
@@ -398,6 +476,7 @@ def main():
     breaks += [(name, 'video', 'normal', before, after) for name, before, after in VIDEO]
     breaks += [(name, 'videos', 'normal', before, after) for name, before, after in VIDEOS]
     breaks += [(name, 'logbook', 'normal', before, after) for name, before, after in LOGBOOK]
+    breaks += [(name, 'book', 'normal', before, after) for name, before, after in BOOK]
     breaks += [(name, unit, 'unwind', before, after) for name, unit, before, after in UNWIND]
     if only:
         breaks = [b for b in breaks if b[0] in only]

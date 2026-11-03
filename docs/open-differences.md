@@ -84,6 +84,11 @@ The `radios` suite's stand-in now logs edi, and catches the old call.
 - **The mouse and menus.** No script clicks anything or opens a dialog. Dialogs need a way to
   close them in the script, since a modal one hangs a run until its timeout.
 - **Night, weather and time set by hand.** Only as the flights set them.
+- **Flights in play.** `make flights-play` loads flights through Select Flight and both
+  pickers, sets the aircraft, radios, autopilot and COM 1, ticks the default flight,
+  deletes a flight and quits, comparing every save and file with retail's. Not reached:
+  EFIS's lock radios (no VOR or ILS at St George), Select Aircraft's Delete, Create a
+  Flight's buttons, Communications' radio messages.
 - **The English dialogs in play.** `make main-dialogs` reaches Help's About, Credits and
   Lessons, View Options, Sim's Aircraft Settings and crash analysis, and Alerts' modal alert
   (the Exit confirmation), mostly on their first page. Not yet opened in play: Alerts'

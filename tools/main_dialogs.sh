@@ -61,9 +61,12 @@ run() {     # tag dll button
     wait "$pid" || true
 }
 
-# The wall clock, on the clock dialog and the Create a Flight summary, and the crash's
-# speeds at impact, which depend on how a real-time dive went
-normal() { sed -E -e 's/[0-9]{2}:[0-9]{2}(:[0-9]{2})?/TIME/g' -e "s/(id=(5094|5071) ')[-+0-9]*'/\1IMPACT'/" "$1"; }
+# The wall clock, on the clock dialog and the Create a Flight summary, and in Time and
+# Season's hour and minute edits (the game takes its time of day from the computer's at
+# startup, and ours starts minutes after retail); and the crash's speeds at impact, which
+# depend on how a real-time dive went
+normal() { sed -E -e 's/[0-9]{2}:[0-9]{2}(:[0-9]{2})?/TIME/g' -e "s/(id=(5094|5071) ')[-+0-9]*'/\1IMPACT'/" \
+    -e "s/(id=(6909|6910|6904|6905) ')[0-9]*'/\1CLOCK'/" "$1"; }
 
 fail=0
 for button in cancel ok; do

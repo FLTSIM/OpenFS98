@@ -16,7 +16,7 @@ Results here are from 2026-11-01.
 | `SIMSUI.DLL` | 79,850 | **Not started.** 540 named exports, the common dialog and control widgets. Every dialog imports it | [dialogs.md](modules/dialogs.md) |
 | `Sim/SIM1.sim` | 78,216 | **Not started.** The flight model: every aircraft's `.AIR` names `sim1`. A module DLL, id 25, 15-entry Linkage, wanting 10 modules. Not in `orig/` | [below](#sim1-and-the-mdls) |
 | `Gauges/*.GAU` (120) | 63,472 | **Not started.** No `src/gauges/` and no survey. PANELS, their runtime, is ours | below |
-| `English/Flights.DLL` | 51,122 | **Installed** 2026-11-02 | [flights.md](modules/flights.md) |
+| `English/Flights.DLL` | 51,122 | **Installed** 2026-11-02; used in play by `make flights-play` 2026-11-03 | [flights.md](modules/flights.md) |
 | `English/Sim.DLL` | 33,239 | **Installed** 2026-11-02 | [sim.md](modules/sim.md) |
 | `English/mpdialog.dll` | 25,401 | **Partial,** being worked on separately: registries `0x110a`..`0x110c` | [mpdialog.md](modules/mpdialog.md) |
 | `Aircraft/*/model/*.MDL` (9) | 25,014 | **Not started.** The aircraft's visual models, module id 31, 9-entry Linkage. Mostly `.data`. Not in `orig/` | [below](#sim1-and-the-mdls) |

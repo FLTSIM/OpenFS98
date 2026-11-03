@@ -19,6 +19,7 @@ make -f tools/flights.mk flights-breaks N=400
 make -f tools/flights.mk flights                 # the native DLL, bin/flights-diff/FLIGHTS_ours.dll
 python3 -B tools/flights_smoke.py 75            # boot private copies, retail's DLL then ours
 make main-dialogs                               # the menus in the game, retail against ours
+make flights-play                               # flights started, set up and saved through them, compared (~10 min)
 ```
 
 The DLL (`src/flights/flights_runtime.c`, tables from `tools/gen_flights_runtime.py`) is
@@ -49,6 +50,74 @@ crash's curve (`c0300`, `c1101`, `c1201`, `c1301`, `c1502`, `ccrash`). This run 
 bug, in MAIN rather than Flights: Select Flight's block lacked its ninth word (see
 [main.md](main.md)). Installed after it, and `make smoke` PASS with every module and all six
 English DLLs ours.
+
+**Flights used in play, `make flights-play`** (2026-11-03, `tools/flights_play.sh`). Where
+main-dialogs only opens each dialog and presses OK or Cancel, this one types and chooses,
+then saves what loaded:
+- Save, with a title typed into it, saves the situation the game started in.
+- Select Flight loads "A Walk in the Park" (chosen by title), Challenges and Adventures
+  load an entry chosen in their lists, and Select Flight loads the flight saved first.
+- After each load the sim is paused (PAUSE_ON, `0x10102`) and Save saves it.
+- Then the settings dialogs, each followed by a save:
+  - Select Aircraft chooses another aircraft.
+  - Navigation: the NAV radios typed; on the other two tabs, the transponder and the ADF,
+    then the EFIS master switch.
+  - Autopilot is switched on, with the heading and altitude holds and their values and a
+    navigation mode.
+  - Communications: the COM 1 frequency.
+- Select Flight loads a saved flight with "Make this the default flight" ticked, then
+  deletes a flight saved for the purpose (Yes to its question).
+- Last it quits (Yes to Exit), so the game writes FLTSIM98.CFG and "Previous Flight".
+
+Retail MAIN and the retail English DLLs run twice and ours twice, all four at once on
+private Xvfb displays. `tools/stn_compare.py` compares the five saved flights
+(`Pilots\Drive*.STN`, records with a 16-bit id and length after a 0x12c-byte header):
+- The record list and every record outside seven live ones must be byte for byte the same.
+- The live records hold the position (0x03), the aircraft's state (0x38e), the time of
+  day (0x1f, 0x20), the clock (0x96) and two more (0x76, 0x94). They differ between two
+  retail runs too, because the sim runs between a load and the pause for however long wine
+  takes.
+- Of the live records, the position must be within about 1 km, 100 m and 1.4 degrees of
+  retail's, and the time of day within two minutes.
+
+Every other file the game changed (FLTSIM98.CFG, a cloud texture) must match one of
+retail's, and the same flights must be left in `Pilots\` after the delete. The dialogs'
+controls, with edits' text, list and combo choices, must match retail's too; pictures are
+counted, as in main-dialogs.
+
+The drive (`tools/drive/fsdialogs.c`) gained the steps for this:
+- `/ID=TEXT` types into an edit.
+- `/#ID=N` or `/#ID=Title_with_underscores` chooses a list item.
+- `/%ID=N` chooses a combo box entry.
+- `/!ID` ticks a box: SIMSUI's owner-drawn boxes keep their own state, so this is a mouse
+  click, and `BM_GETCHECK` does not report it.
+- `pause`, `sleep:N`, and `quit` (Exit answered Yes).
+
+Things learned on the way:
+- A save is written a moment after Save closes, so each one is followed by a wait.
+- Navigation's tabs are clicked where they are drawn (control 3345); the `&N`, `&T`, `&E`
+  buttons are only their keyboard shortcuts.
+- Autopilot's holds are disabled until "Autopilot active" is ticked, so that comes first.
+- EFIS's lock radios are offered only when a VOR or ILS is received, which at St George it
+  is not, in retail too; that path is not reached.
+- A progress message ("Loading ...", "Ending ...") has no buttons and closes by itself. The
+  drive waits for it without logging, since how long it stays up is wine's timing.
+
+Result (2026-11-03): PASS, 21 commands, all twelve saved flights the same as retail's
+outside the live records and within tolerance in them, FLTSIM98.CFG the same, the same
+flights left, the same dialogs; 20 of 21 pictures identical (Select Aircraft's live
+preview moves). Broken DLLs run in place of ours, each FAIL:
+- The pickers' OK storing the selection plus one: the challenge and the adventure saved
+  were other flights (another record list and position), and the adventure's loading
+  message named the next entry.
+- Autopilot's heading hold stored as the wing leveler (1 for 3): the autopilot record
+  (0x98) differs.
+- The ADF page reading three characters where retail reads seven: "35 is an invalid
+  value" when the tab changes, and the run stops there.
+
+The game takes its time of day from the computer's clock at startup. Ours in
+main-dialogs starts some minutes after retail, so Time and Season's hour and minute edits
+are masked there; in flights-play the runs start seconds apart.
 
 `tools/run_flightsdiff.sh` runs everything in its own prefix, `bin/flights-diff/wineprefix`,
 behind a lock; nothing touches `game/` or the shared prefix.
@@ -175,9 +244,12 @@ outcome and the run goes on, so a break that crashes one side only is a differen
 fault addresses in the first page are logged, since the rest are where each side's code or
 stack happens to be.
 
-Not covered yet: a control-level UI harness (`tools/flightsuidiff`, as Help's and Sim's);
-the modeless dialog, which no module we have calls; Save with a real title (which writes a
-flight); and flying a flight started from the pickers by hand.
+Not covered: the modeless dialog, which no module we have calls; EFIS's lock radios (no
+VOR or ILS at St George); Select Aircraft's Delete, which would delete an aircraft; Create
+a Flight's buttons, which open other modules' dialogs; Communications' radio messages; and
+native Windows or other MFC versions. A control-level UI harness (`tools/flightsuidiff`,
+as Help's and Sim's) was not built: flights-play covers what it would. Steve tried the
+dialogs by hand on 2026-11-03 and found nothing wrong.
 
 ## Slice 2: Save Flight `0x1104`
 
@@ -419,5 +491,4 @@ whole descriptor at `+0x111c`, and the dialog's buttons.
 
 ## Next
 
-1. Fly with it: start flights from the pickers and Select Flight, and save one.
-2. Options, the last English dialog DLL.
+1. Options, the last English dialog DLL. Flights is done.

@@ -78,7 +78,7 @@ static void notify_cleanup(struct fs98_options_unwind *frame)
 }
 /* OnInitDialog's: ui_new, CNotify(0x30, 1) and Options' vtable, freed through CNotify's
  * operator delete if the constructor throws; null if ui_new fails */
-static FS98_OPTIONS_NOINLINE void *new_notify(void)
+FS98_OPTIONS_NOINLINE void *fs98_options_new_notify(void)
 {
     struct notify_unwind state;
     void *notify;
@@ -178,7 +178,7 @@ int32_t TC fs98_options_save_video_init(void *object)
     SERVICES->init_text(AT(object, 0x11e8), AT(object, 0x370));
     edit(object, 0x1440, 0x11e8);
     SERVICES->send_message(D32(object, 0x1460), EM_LIMITTEXT, D32(SAVE_DESCRIPTOR(object), 0x20) - 1, 0);
-    PTR(object, 0x10dc) = new_notify();
+    PTR(object, 0x10dc) = fs98_options_new_notify();
     if (!fs98_options_save_video_has_descriptor(object)) return 0;
     fs98_options_save_video_fill(object);
     return 1;
@@ -335,7 +335,7 @@ int32_t TC fs98_options_flight_video_init(void *object)
     check = AT(object, 0x1948);
     ((int32_t (TC *)(void *, void *, uint32_t, void *, void *, uint32_t))PTR(PTR(check, 0), 0xc4))(
         check, AT(object, 0x4c0), 0x139, AT(object, 0xff4), AT(object, 0x7e8), fs98_options_resource_module());
-    PTR(object, 0x10dc) = new_notify();
+    PTR(object, 0x10dc) = fs98_options_new_notify();
     if (!fs98_options_flight_video_has_descriptor(object)) return 0;
     fs98_options_flight_video_populate(object);
     return 1;

@@ -13,13 +13,14 @@ vtable after its stores (to +0x13f8 and the descriptor's answer, neither of whic
 either, and no call comes between); and OnOK's cut tested with > for >= (at 0x35 characters
 the byte it clears is already the terminator); and Flight video's validate leaving its name
 buffer unzeroed past the first byte (it is read only as a string, and GetWindowText always
-terminates what it writes).
+terminates what it writes); and Logbook entry's OnInitDialog ignoring its part test (the
+part is MAIN's block + 0x54, never null).
 """
 from pathlib import Path
 import subprocess
 import sys
 
-UNITS = ('events', 'objects', 'video', 'videos')
+UNITS = ('events', 'objects', 'video', 'videos', 'logbook')
 # the two exchange macros, each whole: their loops are alike
 PLAIN = '''    uint32_t index; \\
     for (index = 0; (int32_t)index < (int32_t)s_ddx_count_##name; ++index) \\
@@ -60,6 +61,17 @@ EVENTS = [
     ('base-ddx-skipped', BASE, BASE.replace('    s_services->base_exchange(object, exchange); \\\n', '')),
     ('base-ddx-last', BASE, BASE.replace('    s_services->base_exchange(object, exchange); \\\n', '').replace(
         'AT(object, s_ddx_##name[index][0])); \\', 'AT(object, s_ddx_##name[index][0])); \\\n    s_services->base_exchange(object, exchange); \\')),
+    # the logbook exchanges: controls, then each CString and its limit
+    ('texts-id', 's_services->ddx_text(exchange, texts[index][1],', 's_services->ddx_text(exchange, texts[index][1] ^ 1,'),
+    ('texts-limit', '(int32_t)texts[index][2]);', '(int32_t)texts[index][2] + 1);'),
+    ('texts-order', '        s_services->ddx_text(exchange, texts[index][1], AT(object, texts[index][0]));\n        s_services->ddv_max_chars(exchange, AT(object, texts[index][0]), (int32_t)texts[index][2]);',
+     '        s_services->ddv_max_chars(exchange, AT(object, texts[index][0]), (int32_t)texts[index][2]);\n        s_services->ddx_text(exchange, texts[index][1], AT(object, texts[index][0]));'),
+    ('texts-controls-first', '    for (index = 0; index < count; ++index)\n        s_services->ddx_control(exchange, controls[index][1], AT(object, controls[index][0]));\n    for (index = 0; index < text_count; ++index) {',
+     '    for (index = 0; index < text_count; ++index) {'),
+    ('add-logbook-name-limit', '{{0x1400, 0x11a4, 0xf0}}', '{{0x1400, 0x11a4, 0xef}}'),
+    ('entry-date-limit', '{0x1ca0, 0x1199, 8}', '{0x1ca0, 0x1199, 6}'),
+    ('entry-remarks-limit', '{0x1c9c, 0x1198, 0x18}', '{0x1c9c, 0x1198, 0x19}'),
+    ('entry-times-order', '{0x1c90, 0x1194, 6}, {0x1c94, 0x1195, 6}', '{0x1c94, 0x1195, 6}, {0x1c90, 0x1194, 6}'),
 ]
 OBJECTS = [
     ('constructor-template', 'dialog_construct(object, state.class_info->template, parent)',
@@ -85,6 +97,7 @@ OBJECTS = [
     ('factory-order', '    s_services->create(object, class_info->template, 0);\n    s_services->show(object, 1);',
      '    s_services->show(object, 1);\n    s_services->create(object, class_info->template, 0);'),
     ('factory-return', 'return D32(object, 0x20);', 'return D32(object, 0x1c);'),
+    ('entry-constructor-strings', 'for (at = 0x1c90; at <= 0x1ca0; at += 4)', 'for (at = 0x1c90; at < 0x1ca0; at += 4)'),
 ]
 ACCEPT_BODY = '''    D32(object, 0x13f8) = 1;
     SERVICES->get_window_text(AT(object, 0x10e0), buffer, MESSAGE_ROOM);
@@ -201,7 +214,7 @@ VIDEOS = [
     ('save-init-description-room', 'D32(SAVE_DESCRIPTOR(object), 0x34) - 1, 0);', 'D32(SAVE_DESCRIPTOR(object), 0x34), 0);'),
     ('save-init-name-room', 'D32(SAVE_DESCRIPTOR(object), 0x20) - 1, 0);', 'D32(SAVE_DESCRIPTOR(object), 0x24) - 1, 0);'),
     ('save-init-label', '    edit(object, 0x1440, 0x11e8);', '    edit(object, 0x1440, 0x12a0);'),
-    ('save-init-notify', '    PTR(object, 0x10dc) = new_notify();\n    if (!fs98_options_save_video_has_descriptor', '    new_notify();\n    if (!fs98_options_save_video_has_descriptor'),
+    ('save-init-notify', '    PTR(object, 0x10dc) = fs98_options_new_notify();\n    if (!fs98_options_save_video_has_descriptor', '    fs98_options_new_notify();\n    if (!fs98_options_save_video_has_descriptor'),
     ('save-init-return', '    fs98_options_save_video_fill(object);\n    return 1;\n}', '    fs98_options_save_video_fill(object);\n    return 0;\n}'),
     ('save-fill-text', 'set_window_text(AT(object, 0x14a8), PTR(SAVE_DESCRIPTOR(object), 0x30));', 'set_window_text(AT(object, 0x14a8), PTR(SAVE_DESCRIPTOR(object), 0x1c));'),
     ('save-has-descriptor', '{ return SAVE_DESCRIPTOR(object) != 0; }', '{ return 1; }'),
@@ -284,7 +297,82 @@ VIDEOS = [
     ('video-error-agreed', 'AT(object, 0x1440), status) == 0) return focus(object, code);', 'AT(object, 0x1440), status) != 0) return focus(object, code);'),
     ('video-error-refill', '    fs98_options_flight_video_populate(object);\n    return 0;\n}', '    return 0;\n}'),
 ]
+LOGBOOK = [
+    # Add logbook
+    ('add-cancel-state', '    D32(object, 0x1404) = 2;', '    D32(object, 0x1404) = 1;'),
+    ('add-cancel-answer', '    part[0] = 0;\n    ((void (TC *)(void *))PTR(vtable, 0xec))(object);\n}\n/* 0x2239aa70',
+     '    part[0] = 2;\n    ((void (TC *)(void *))PTR(vtable, 0xec))(object);\n}\n/* 0x2239aa70'),
+    ('add-read-room', 'PTR(NEW_BOOK(object), 0xc), 0x100);', 'PTR(NEW_BOOK(object), 0xc), (int32_t)D32(NEW_BOOK(object), 0x10));'),
+    ('add-check-argument', '    return ((fs98_options_check_fn)PTR(part, 4))(part);\n}\n/* 0x2239aab0', '    return ((fs98_options_check_fn)PTR(part, 4))(object);\n}\n/* 0x2239aab0'),
+    ('add-error-exists', '    if (status == 0x1004) return D32(part, 0x1c) == 0;', '    if (status == 0x1004) return D32(part, 0x1c) != 0;'),
+    ('add-error-none', '    if (status == 0) return 0;\n    D32(object, 0x8c)', '    D32(object, 0x8c)'),
+    ('add-error-store', '    D32(object, 0x8c) = (uint32_t)SERVICES->error_dialog(object, AT(object, 0x1398), status);\n    if (D32(object, 0x8c) == 0) return 0;',
+     '    if (SERVICES->error_dialog(object, AT(object, 0x1398), status) == 0) return 0;'),
+    ('add-error-focus', '    SERVICES->set_focus(AT(object, 0x1398));\n', ''),
+    ('add-error-select', 'post_message(D32(object, 0x13b8), EM_SETSEL, 0, 0xffffffff);', 'post_message(D32(object, 0x13b8), EM_SETSEL, 0, 0);'),
+    ('add-accept-state', '    D32(object, 0x1404) = 1;', '    D32(object, 0x1404) = 2;'),
+    ('add-accept-read', '    D32(object, 0x1404) = 1;\n    fs98_options_add_logbook_read(object);\n', '    D32(object, 0x1404) = 1;\n'),
+    ('add-accept-error-skipped', 'if (fs98_options_add_logbook_check(object) == 0 || fs98_options_add_logbook_error(object) == 0) {',
+     'if (fs98_options_add_logbook_check(object) == 0) {'),
+    ('add-accept-answer', '        part[0] = 1;', '        part[0] = 2;'),
+    ('add-clear-text', 'set_window_text(AT(object, 0x1398), fs98_options_empty_text);', 'set_window_text(AT(object, 0x1398), " ");'),
+    ('add-part-offset', '(uint8_t *)PTR(object, 0x10e4) + 0x28;', '(uint8_t *)PTR(object, 0x10e4) + 0x2c;'),
+    ('add-init-skin-flags', '    if (!skin(object, 9)) return 0;', '    if (!skin(object, 0xf)) return 0;'),
+    ('add-init-button-order', '    button(object, 0x10e8);\n    button(object, 0x11e4);', '    button(object, 0x11e4);\n    button(object, 0x10e8);'),
+    ('add-init-notify', '    PTR(object, 0x10dc) = fs98_options_new_notify();\n    if (!fs98_options_add_logbook_has', '    fs98_options_new_notify();\n    if (!fs98_options_add_logbook_has'),
+    ('add-init-limit', 'EM_LIMITTEXT, D32(NEW_BOOK(object), 0x10) - 1, 0);', 'EM_LIMITTEXT, D32(NEW_BOOK(object), 0x10), 0);'),
+    ('add-init-clear', '    fs98_options_add_logbook_clear(object);\n    return 1;', '    return 1;'),
+    # Logbook entry
+    ('entry-close', 'void TC fs98_options_logbook_entry_close(void *object) { SERVICES->close(object); }', 'void TC fs98_options_logbook_entry_close(void *object) { (void)object; }'),
+    ('entry-cancel-answer', '    part[0] = 0;\n    ((void (TC *)(void *))PTR(vtable, 0xec))(object);\n}\n/* 0x22399d00', '    part[0] = 1;\n    ((void (TC *)(void *))PTR(vtable, 0xec))(object);\n}\n/* 0x22399d00'),
+    ('entry-accept-answer', '    D32(ENTRY(object), 0) = 1;', '    D32(ENTRY(object), 0) = 2;'),
+    ('entry-part-offset', '(uint8_t *)PTR(object, 0x10e0) + 0x54;', '(uint8_t *)PTR(object, 0x10e0) + 0x50;'),
+    ('fill-totals-label', 'SERVICES->set_sims_text(AT(object, 0x10ec),', 'SERVICES->set_sims_text(AT(object, 0x11a4),'),
+    ('fill-totals-stride', '(const char *)PTR(part, 0x98) + D32(part, 0xa0) * RECORD);', '(const char *)PTR(part, 0x98) + D32(part, 0xa0) * (RECORD - 8));'),
+    ('fill-count-once', '            } while (index < D32(part, 0x9c));', '            } while (index < 3);'),
+    ('fill-reload', '                part = ENTRY(object);\n                ++index;', '                ++index;'),
+    ('fill-stride', '                offset += RECORD;', '                offset += RECORD - 8;'),
+    ('fill-empty', '        if (D32(part, 0x9c) != 0) {', '        if (1) {'),
+    ('fill-pick', 'CB_SETCURSEL, D32(ENTRY(object), 0xa0), 0);', 'CB_SETCURSEL, D32(ENTRY(object), 0x9c), 0);'),
+    ('fill-field', 'set_window_text(AT(object, 0x1be0), PTR(ENTRY(object), 0x48));', 'set_window_text(AT(object, 0x1be0), PTR(ENTRY(object), 0x5c));'),
+    ('init-category', '    D32(object, 0x84) = 0xb;', '    D32(object, 0x84) = 0xc;'),
+    ('init-totals-hides', '        SERVICES->show_window(AT(object, 0x15f4), 0);\n', ''),
+    ('init-totals-title', 'load_string_a(D32(object, 0x80), 0xf744,', 'load_string_a(D32(object, 0x80), 0xf74f,'),
+    ('init-entry-combo', 'init_combo(AT(object, 0x1c48), AT(object, 0x3e0), AT(object, 0x15f4));', 'init_combo(AT(object, 0x1c48), AT(object, 0x3e0), AT(object, 0x1760));'),
+    ('init-title-room', 'title, 0x27);\n    } else', 'title, 0x28);\n    } else'),
+    ('init-title-text', 'SERVICES->set_window_text(AT(object, 0x1454), title);', 'SERVICES->set_window_text(AT(object, 0x1454), "");'),
+    ('init-group', 'init_group(AT(object, 0x16ac), AT(object, 0x220));', 'init_group(AT(object, 0x16ac), AT(object, 0x370));'),
+    ('init-day-flags', '    edit(object, 0x1be0, 0x1988, 5);', '    edit(object, 0x1be0, 0x1988, 4);'),
+    ('init-date-flags', '    edit(object, 0x1aa8, 0x153c, 0x80);', '    edit(object, 0x1aa8, 0x153c, 0);'),
+    ('init-time-room', 'EM_LIMITTEXT, D32(ENTRY(object), 0x60) - 3, 0);', 'EM_LIMITTEXT, D32(ENTRY(object), 0x60) - 1, 0);'),
+    ('init-fill', '    fs98_options_logbook_entry_fill(object);\n    if (D32(ENTRY(object), 0xa4)) {', '    if (D32(ENTRY(object), 0xa4)) {'),
+    ('init-totals-disable', '        SERVICES->enable_control(AT(object, 0x1b10), 0);\n', ''),
+    ('init-totals-focus', '        SERVICES->set_focus(AT(object, 0x1a40));\n', ''),
+    ('validate-totals', '        SERVICES->get_window_text(AT(object, 0x1a40), PTR(part, 0x34), (int32_t)D32(part, 0x38));\n        return 0;',
+     '        SERVICES->get_window_text(AT(object, 0x1a40), PTR(part, 0x34), (int32_t)D32(part, 0x38));\n        return 1;'),
+    ('validate-reload', '    part = ENTRY(object);\n    SERVICES->get_window_text(AT(object, 0x1be0)', '    SERVICES->get_window_text(AT(object, 0x1be0)'),
+    ('validate-pick', 'D32(ENTRY(object), 0xa0) = (uint32_t)SERVICES->send_message(D32(object, 0x1c68), CB_GETCURSEL, 0, 0);', '(void)0;'),
+    ('validate-cut', '    name[0x10] = 0;', '    name[0x11] = 0;'),
+    ('validate-name-at', '    out = PTR(ENTRY(object), 0x20);', '    out = PTR(ENTRY(object), 0x34);'),
+    ('validate-order', '    if (D32(part, 0x30)) return 0x1198;\n    if (D32(part, 0x44)) return 0x1194;', '    if (D32(part, 0x44)) return 0x1194;\n    if (D32(part, 0x30)) return 0x1198;'),
+    ('validate-answer', '    if (D32(part, 0x6c)) return 0x1195;\n    return result;', '    if (D32(part, 0x6c)) return 0x1195;\n    return 0;'),
+    ('validate-reload-after-check', '    result = ((fs98_options_check_fn)PTR(part, 4))(part);\n    part = ENTRY(object);', '    result = ((fs98_options_check_fn)PTR(part, 4))(part);'),
+    ('error-zero', '    if (code == 0) {\n        entry_error_cleanup', '    if (code == 1) {\n        entry_error_cleanup'),
+    ('error-date-accepted', 'AT(object, 0x1aa8), D32(part, 8))) target = 0x1199;', 'AT(object, 0x1aa8), D32(part, 8))) target = 0x1198;'),
+    ('error-day-value', '(uint32_t)(uintptr_t)(part + 0x44))) target = 0x1194;', 'D32(part, 0x44))) target = 0x1194;'),
+    ('error-night-value', '(uint32_t)(uintptr_t)(part + 0x58))) target = 0x1196;', 'D32(part, 0x58))) target = 0x1196;'),
+    ('error-total', '    } else if (D32(part, 0x6c) == 0x1013) {', '    } else if (D32(part, 0x6c) == 0x1014) {'),
+    ('error-total-shows', '        SERVICES->set_sims_text(AT(object, 0x18d0), first.text);\n', ''),
+    ('error-total-restores', '        SERVICES->set_sims_text(AT(object, 0x18d0), second.text);\n', ''),
+    ('error-total-swapped', '        SERVICES->get_sims_text(AT(object, 0x18d0), &second);\n        SERVICES->window_text_string(AT(object, 0x1b78), &first);',
+     '        SERVICES->get_sims_text(AT(object, 0x18d0), &first);\n        SERVICES->window_text_string(AT(object, 0x1b78), &second);'),
+    ('error-instrument-value', '(uint32_t)(uintptr_t)(part + 0x6c))) target = 0x1195;', 'D32(part, 0x6c))) target = 0x1195;'),
+    ('error-destroy-order', "    if (state->live > 1) { state->live = 1; SERVICES->string_destroy(state->second); }\n    if (state->live > 0) { state->live = 0; SERVICES->string_destroy(state->first); }",
+     "    if (state->live > 1) { state->live = 1; SERVICES->string_destroy(state->first); }\n    if (state->live > 0) { state->live = 0; SERVICES->string_destroy(state->second); }"),
+]
 UNWIND = [
+    ('entry-error-unwind-second', 'logbook', '    SERVICES->string_construct(&second);\n    state.live = 2;', '    SERVICES->string_construct(&second);\n    state.live = 1;'),
+    ('add-constructor-string', 'objects', '    if (kind == FS98_OPTIONS_ADD_LOGBOOK) s_services->string_assign', '    if (kind == 99) s_services->string_assign'),
     ('notify-unwind', 'videos', "    if (state->live) { state->live = 0; SERVICES->notify_free(state->notify); }", "    (void)state;"),
     ('notify-unwind-free', 'videos', "SERVICES->notify_free(state->notify); }", "SERVICES->ui_delete(state->notify); }"),
     ('save-constructor-name', 'objects', '    if (kind == FS98_OPTIONS_SAVE_VIDEO) s_services->copy_text', '    if (kind == 99) s_services->copy_text'),
@@ -309,6 +397,7 @@ def main():
     breaks += [(name, 'objects', 'normal', before, after) for name, before, after in OBJECTS]
     breaks += [(name, 'video', 'normal', before, after) for name, before, after in VIDEO]
     breaks += [(name, 'videos', 'normal', before, after) for name, before, after in VIDEOS]
+    breaks += [(name, 'logbook', 'normal', before, after) for name, before, after in LOGBOOK]
     breaks += [(name, unit, 'unwind', before, after) for name, unit, before, after in UNWIND]
     if only:
         breaks = [b for b in breaks if b[0] in only]

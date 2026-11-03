@@ -2,8 +2,8 @@
 
 `orig/English/Options.DLL`, module `0x80000007`, preferred base `0x22390000`, 84,381 bytes of
 `.text`, 15 dialog registrations and 31 templates. **In progress, started 2026-11-03:**
-slices 1 and 2 (the shared helpers and the four video dialogs: Video finished, Video
-message, Save video and Flight video) are transliterated and verified in their harness. Nothing is built as a DLL or installed. Like Flights it is MFC dialogs over
+slices 1 to 3 (the shared helpers, the four video dialogs, Add logbook and Logbook entry)
+are transliterated and verified in their harness. Nothing is built as a DLL or installed. Like Flights it is MFC dialogs over
 the CD's SIMSUI and MFC42, which stay as dependencies, and it follows Flights' method
 ([flights.md](flights.md)): core C over a service table, generated tables, a differential
 harness with deliberate breaks, then the native DLL, then the game.
@@ -127,6 +127,38 @@ fixture's random bytes past the static's end, and retail's lands in its .data, o
 fixture). Each FromHandle call takes its own seed bits, or the second focus test is never
 reached alone.
 
+## Slice 3: Add logbook `0x14070001` and Logbook entry `0x14070002`
+
+`src/options/options_logbook.c`. Both are given MAIN's one logbook block
+(`main_logbook.inc`) and take their part of it in their "has a descriptor" test: Add
+logbook's from `+0x28` into `+0x10e0`, Logbook entry's from `+0x54` into `+0x10dc`. The
+part is never null, so the test always passes (a null block reads through `0x28`/`0x54`).
+The fields are in `options_internal.h`.
+
+- **Add logbook**: a name edit bound to a CString by DDX_Text (at most 0xf0), a CNotify as
+  in slice 2. Its skin's flags are 9, not 0xf. OK reads the name (0x100 whatever its room),
+  runs MAIN's check, and on a failure reports it: a name already there passes when `+0x1c`
+  is zero; any other failure is reported, and once dismissed the name is selected for
+  retyping (`EM_SETSEL 0, -1`).
+- **Logbook entry**: a row's date, remarks, day, night and instrument times and its
+  aircraft (a combo filled from MAIN's aircraft records, the count reloaded after each). The
+  totals row (`+0xa4`) hides the aircraft, shows the row's label, loads title `0xf744`
+  instead of `0xf74f`, and leaves only the remarks editable. Validate reads every field and
+  the aircraft and names the first field whose status is set, else the check's own answer.
+  An instrument time over the total (`0x1013`) is shown in its label while it is reported.
+- **Retail's bugs, kept:** the day and night times, and an instrument time failing other
+  than `0x1013`, are reported with the address of their status rather than its value.
+  Validate copies the aircraft's name from a stack buffer that CB_GETLBTEXT does not fill
+  when nothing is picked. OnInitDialog loads the title, up to 0x27 characters, into a
+  0x18-byte slot of its frame.
+
+Results (2026-11-03): 109 operations; 20,000 scenarios, 2,180,000 comparisons, 0 differ on
+each seed; unwind mode 2,000 scenarios, 1,987,881 comparisons, 1,768,345 throws, 0 differ.
+Breaks: 261, all caught; four proven equivalent and left out. Harness lessons: CString
+stubs keep their text in fixture slots handed out in call order, so the counter is reset
+for each side; a branch that needs every status clear is too rare from independent bits,
+so one scenario in four clears them all.
+
 ## Customise controls, for when it comes
 
 Read [CONTROLS' key-assignment contract](controls.md#the-key-assignment-dialog-0x58-text0x7e400x8e5f-0x9130),
@@ -140,7 +172,7 @@ with their own fixtures.
 
 ## Next
 
-1. The logbook (`0x1407`, `0x14070001`, `0x14070002`), the analysis dialogs, Instant
+1. The Logbook itself (`0x1407`, and its list box class), the analysis dialogs, Instant
    replay, Preferences with Display options and `0x14090002`, and Customise controls last.
 2. The native DLL once enough classes exist to bind the module, as Flights' did; then
    main-dialogs, flights-play-style steps and installation.

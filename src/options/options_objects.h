@@ -25,10 +25,12 @@ struct fs98_options_object_services {
     void *(*page_construct)(void *object, int32_t resource, void *parent);   /* CSimsTabPage */
     void (*page_destroy)(void *object);
     char *(*copy_text)(char *out, const char *text);                         /* lstrcpyA */
+    void (*string_assign)(void *string, const char *text);                   /* CString::operator= */
 };
 /* Class indices, in s_classes order (tools/gen_options_tables.py) */
 enum { FS98_OPTIONS_VIDEO_FINISHED, FS98_OPTIONS_VIDEO_MESSAGE, FS98_OPTIONS_SAVE_VIDEO,
-       FS98_OPTIONS_FLIGHT_VIDEO, FS98_OPTIONS_CLASS_COUNT };
+       FS98_OPTIONS_FLIGHT_VIDEO, FS98_OPTIONS_ADD_LOGBOOK, FS98_OPTIONS_LOGBOOK_ENTRY,
+       FS98_OPTIONS_CLASS_COUNT };
 void fs98_options_set_object_services(const struct fs98_options_object_services *services,
                                       void *const *vtables);
 /* Options' own instance, which each factory stores at object +0x80 */
@@ -42,5 +44,7 @@ FS98_OPTIONS_OBJECT(video_finished);
 FS98_OPTIONS_OBJECT(video_message);
 FS98_OPTIONS_OBJECT(save_video);
 FS98_OPTIONS_OBJECT(flight_video);
+FS98_OPTIONS_OBJECT(add_logbook);
+FS98_OPTIONS_OBJECT(logbook_entry);
 #undef FS98_OPTIONS_OBJECT
 #endif

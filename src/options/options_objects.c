@@ -62,6 +62,12 @@ static FS98_OPTIONS_NOINLINE void *fs98_options_construct(void *object, void *pa
     if (kind == FS98_OPTIONS_SAVE_VIDEO) s_services->copy_text((char *)object + 0x10e4, fs98_options_empty_text);
     /* 0x2239c906: Flight video starts with no CNotify */
     if (kind == FS98_OPTIONS_FLIGHT_VIDEO) D32(object, 0x10dc) = 0;
+    /* 0x2239a6e7, 0x223998c3..0x223998fb: the CStrings start empty */
+    if (kind == FS98_OPTIONS_ADD_LOGBOOK) s_services->string_assign((char *)object + 0x1400, fs98_options_empty_text);
+    if (kind == FS98_OPTIONS_LOGBOOK_ENTRY) {
+        uint32_t at;
+        for (at = 0x1c90; at <= 0x1ca0; at += 4) s_services->string_assign((char *)object + at, fs98_options_empty_text);
+    }
     fs98_options_unwind_leave(&state.frame);
     return object;
 }
@@ -125,4 +131,6 @@ OBJECT_CLASS(video_finished, FS98_OPTIONS_VIDEO_FINISHED)
 OBJECT_CLASS(video_message, FS98_OPTIONS_VIDEO_MESSAGE)
 OBJECT_CLASS(save_video, FS98_OPTIONS_SAVE_VIDEO)
 OBJECT_CLASS(flight_video, FS98_OPTIONS_FLIGHT_VIDEO)
+OBJECT_CLASS(add_logbook, FS98_OPTIONS_ADD_LOGBOOK)
+OBJECT_CLASS(logbook_entry, FS98_OPTIONS_LOGBOOK_ENTRY)
 #undef OBJECT_CLASS

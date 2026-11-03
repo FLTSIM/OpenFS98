@@ -83,4 +83,32 @@ void TC fs98_options_##name##_exchange(void *object, void *exchange) \
 OPTIONS_CLASS_BASE(save_video)    /* 0x2239dbd0, 0x2239dbf0; 0x2239d6f0 */
 OPTIONS_CLASS_BASE(flight_video)  /* 0x2239cf50, 0x2239cf70; 0x2239ca60 */
 #undef OPTIONS_CLASS_BASE
+/* the controls, then each CString with its edit and its limit */
+static void exchange_texts(void *object, void *exchange, const uint16_t (*controls)[2], uint32_t count,
+                           const uint32_t (*texts)[3], uint32_t text_count)
+{
+    uint32_t index;
+    for (index = 0; index < count; ++index)
+        s_services->ddx_control(exchange, controls[index][1], AT(object, controls[index][0]));
+    for (index = 0; index < text_count; ++index) {
+        s_services->ddx_text(exchange, texts[index][1], AT(object, texts[index][0]));
+        s_services->ddv_max_chars(exchange, AT(object, texts[index][0]), (int32_t)texts[index][2]);
+    }
+}
+OPTIONS_HELP(add_logbook)         /* 0x2239ab50, 0x2239ab70 */
+/* 0x2239a7d0: the name's CString, at most 0xf0 */
+void TC fs98_options_add_logbook_exchange(void *object, void *exchange)
+{
+    static const uint32_t texts[][3] = {{0x1400, 0x11a4, 0xf0}};
+    exchange_texts(object, exchange, s_ddx_add_logbook, s_ddx_count_add_logbook, texts, 1);
+}
+OPTIONS_HELP(logbook_entry)       /* 0x22399d40, 0x22399d60 */
+/* 0x22399ae0: the day, instrument and night times (6), the remarks (0x18), the date (8) */
+void TC fs98_options_logbook_entry_exchange(void *object, void *exchange)
+{
+    static const uint32_t texts[][3] = {
+        {0x1c90, 0x1194, 6}, {0x1c94, 0x1195, 6}, {0x1c98, 0x1196, 6}, {0x1c9c, 0x1198, 0x18}, {0x1ca0, 0x1199, 8}
+    };
+    exchange_texts(object, exchange, s_ddx_logbook_entry, s_ddx_count_logbook_entry, texts, 5);
+}
 #undef OPTIONS_HELP

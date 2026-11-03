@@ -164,8 +164,8 @@ make maindiff-run SUITE=create   # MAIN slice 44, Create a Flight -> 20000 scena
 make main-breaks SUITE=create   # its breaks -> 98, 97 caught, 1 proven equivalent
 make main-smoke                      # boots the game on our MAIN.DLL, then restores the previous DLL byte for byte
 make flights-play                    # Flights' dialogs used in the game (loads, settings, default, delete, quit), retail twice and ours twice, saves and files compared -> PASS (~10 min)
-make -f tools/options.mk optionseventsdiff-run   # Options.DLL slices 1-2 (the four video dialogs) -> 20000 scenarios, 1500000 comparisons, 0 differ
-make -f tools/options.mk options-breaks N=400    # its breaks -> 187, all caught, 3 proven equivalent (~40 min)
+make -f tools/options.mk optionseventsdiff-run   # Options.DLL slices 1-3 (video dialogs, add logbook, logbook entry) -> 20000 scenarios, 2180000 comparisons, 0 differ
+make -f tools/options.mk options-breaks N=400    # its breaks -> 261, all caught, 4 proven equivalent (~1 h)
 make main-dialogs                    # 28 menu commands and dialog steps in the real game, retail against ours -> same controls, 23 of 29 pictures identical, PASS (~25 min)
 make hostdiff-run N=20000            # HOST (id 1, FLTSIM98.EXE) slices 1-28, all 194 services, real files in bin/difftest/hostfs -> 0 differ (~11 min)
 make host-breaks                     # HOST broken on purpose -> 610 breaks, 580 caught, 26 proven equivalent, 4 rare display paths missed at N=2000 (~6 h)

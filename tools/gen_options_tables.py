@@ -19,8 +19,8 @@ BASE = 0x22390000
 MODULE_ID = 0x80000007
 DIALOG_CONSTRUCT, DIALOG_DESTROY = 0x1d71c, 0x1d72c      # SIMSUI CSimsDialog ctor/dtor slots
 PAGE_CONSTRUCT, PAGE_DESTROY = None, None                # CSimsTabPage's, once a page is in
-THUNK_SLOTS = {}                                         # member ctors/dtors reached through thunks
-NOT_MEMBER_THUNKS = set()
+THUNK_SLOTS = {0x223a2e80: 0x1d530, 0x223a2e6e: 0x1d53c}  # CString() and ~CString, through thunks
+NOT_MEMBER_THUNKS = {0x223a2ed4}                         # CString::operator=
 DDX_THUNK = 0x223a2e26                                   # jmp MFC42 #2302, DDX_Control
 NOT_MEMBERS = {0x1d464}                                  # lstrcpyA: Save video's constructor clears a name
 
@@ -32,6 +32,8 @@ CLASSES = (
     ('video_message', 0x13fc, 0x3a0, 0x10dc, 0xe030, 0xe0e0, 0xe0c0, 0x18a0, 0x18c48, 0xe170, 0xe1c0, 0x18bd0, 4),
     ('save_video', 0x1900, 0x3a1, 0x11e4, 0xd510, 0xd620, 0xd600, 0x1250, 0x18950, 0xd6f0, 0xd7b0, 0x18778, 9),
     ('flight_video', 0x1a10, 0x3a2, 0x10e4, 0xc800, 0xc950, 0xc930, 0x11c0, 0x18860, 0xca60, 0xcb60, 0x18620, 13),
+    ('add_logbook', 0x1408, 0x394, 0x10e4, 0xa650, 0xa730, 0xa710, 0x1400, 0x17ed8, 0xa7d0, 0xa840, 0x17e60, 4),
+    ('logbook_entry', 0x1ca4, 0x393, 0x10e0, 0x9720, 0x9940, 0x9920, 0x1490, 0x17d70, 0x9ae0, 0x9cc0, 0x17c88, 18),
 )
 
 
@@ -45,7 +47,7 @@ def exchange_controls(start, end):
     rows = []
     offset = control = None
     for line in disassemble(start, end).splitlines():
-        match = re.search(r'(?:lea\s+\w+,\[esi\+0x|add\s+esi,0x)([0-9a-f]+)', line)
+        match = re.search(r'(?:lea\s+\w+,\[e[sd]i\+0x|add\s+e[sd]i,0x)([0-9a-f]+)', line)
         if match:
             offset = int(match[1], 16)
         match = re.search(r'push\s+0x([0-9a-f]+)', line)

@@ -58,6 +58,10 @@ static FS98_OPTIONS_NOINLINE void *fs98_options_construct(void *object, void *pa
         ++state.constructed;
     }
     PTR(object, 0) = s_vtables[kind];
+    /* 0x2239d5e3: Save video forgets the name it last agreed to, inside the frame */
+    if (kind == FS98_OPTIONS_SAVE_VIDEO) s_services->copy_text((char *)object + 0x10e4, fs98_options_empty_text);
+    /* 0x2239c906: Flight video starts with no CNotify */
+    if (kind == FS98_OPTIONS_FLIGHT_VIDEO) D32(object, 0x10dc) = 0;
     fs98_options_unwind_leave(&state.frame);
     return object;
 }
@@ -119,4 +123,6 @@ uint32_t SC fs98_options_##name##_create(uint32_t parent, void *descriptor) \
 { return fs98_options_create(parent, descriptor, kind); }
 OBJECT_CLASS(video_finished, FS98_OPTIONS_VIDEO_FINISHED)
 OBJECT_CLASS(video_message, FS98_OPTIONS_VIDEO_MESSAGE)
+OBJECT_CLASS(save_video, FS98_OPTIONS_SAVE_VIDEO)
+OBJECT_CLASS(flight_video, FS98_OPTIONS_FLIGHT_VIDEO)
 #undef OBJECT_CLASS

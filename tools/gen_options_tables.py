@@ -22,7 +22,7 @@ PAGE_CONSTRUCT, PAGE_DESTROY = None, None                # CSimsTabPage's, once 
 THUNK_SLOTS = {}                                         # member ctors/dtors reached through thunks
 NOT_MEMBER_THUNKS = set()
 DDX_THUNK = 0x223a2e26                                   # jmp MFC42 #2302, DDX_Control
-NOT_MEMBERS = set()
+NOT_MEMBERS = {0x1d464}                                  # lstrcpyA: Save video's constructor clears a name
 
 # name, object size, template, descriptor offset (0: the factory stores none), constructor,
 # destructor, deleting destructor, factory, vtable, DoDataExchange, its end, context-help
@@ -30,6 +30,8 @@ NOT_MEMBERS = set()
 CLASSES = (
     ('video_finished', 0x1290, 0x39f, 0, 0xde00, 0xde90, 0xde70, 0x1810, 0x18ae0, 0xdf00, 0xdf30, 0x18a40, 2),
     ('video_message', 0x13fc, 0x3a0, 0x10dc, 0xe030, 0xe0e0, 0xe0c0, 0x18a0, 0x18c48, 0xe170, 0xe1c0, 0x18bd0, 4),
+    ('save_video', 0x1900, 0x3a1, 0x11e4, 0xd510, 0xd620, 0xd600, 0x1250, 0x18950, 0xd6f0, 0xd7b0, 0x18778, 9),
+    ('flight_video', 0x1a10, 0x3a2, 0x10e4, 0xc800, 0xc950, 0xc930, 0x11c0, 0x18860, 0xca60, 0xcb60, 0x18620, 13),
 )
 
 

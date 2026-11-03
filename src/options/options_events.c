@@ -69,4 +69,18 @@ void TC fs98_options_##name##_exchange(void *object, void *exchange) \
 OPTIONS_CLASS(video_finished)   /* 0x2239dff0, 0x2239e010; 0x2239df00 */
 OPTIONS_CLASS(video_message)    /* 0x2239e430, 0x2239e450; 0x2239e170 */
 #undef OPTIONS_CLASS
+/* the same, after CSimsDialog's own exchange */
+#define OPTIONS_CLASS_BASE(name) \
+OPTIONS_HELP(name) \
+void TC fs98_options_##name##_exchange(void *object, void *exchange) \
+{ \
+    uint32_t index; \
+    s_services->base_exchange(object, exchange); \
+    for (index = 0; (int32_t)index < (int32_t)s_ddx_count_##name; ++index) \
+        s_services->ddx_control(exchange, s_ddx_##name[index][1], \
+                                AT(object, s_ddx_##name[index][0])); \
+}
+OPTIONS_CLASS_BASE(save_video)    /* 0x2239dbd0, 0x2239dbf0; 0x2239d6f0 */
+OPTIONS_CLASS_BASE(flight_video)  /* 0x2239cf50, 0x2239cf70; 0x2239ca60 */
+#undef OPTIONS_CLASS_BASE
 #undef OPTIONS_HELP

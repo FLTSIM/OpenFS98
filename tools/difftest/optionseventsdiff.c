@@ -10,8 +10,8 @@
  * position the scenario chooses. In unwind mode each operation is repeated with a
  * C++-style throw at every call position, comparing what the cleanup frames destroy.
  *
- * Covered: the helpers every class shares, Video finished (0x14040003) and Video message
- * (0x14040002). */
+ * Covered: the helpers every class shares, Video finished (0x14040003), Video message
+ * (0x14040002), Save video (0x14040001), Flight video (0x1404) and their CNotify. */
 #include <windows.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -35,11 +35,19 @@
 #define RETAIL_RESOURCE_MODULE 0x1c344     /* .data: the skin's and buttons' instance */
 #define RETAIL_OBJECT_MODULE 0x1c35c       /* .data: Options' own, stored at +0x80 */
 #define RETAIL_HELP_FILE 0x1c168           /* "fs98.hlp" */
+#define RETAIL_HOST 0x1c0ec                /* the HOST import link: its service table */
+#define RETAIL_VIDEO 0x1c450               /* the name Flight video last saw */
+#define RETAIL_NOTIFY_VTABLE 0x16ab0       /* Options' CNotify */
 
 struct fixture {
     uint8_t guard_before[32];
     uint8_t object[0x2400];
     uint8_t descriptor[2][0x100];
+    uint8_t notify[0x2a0];
+    uint8_t record_before[0xa08];   /* record -1: with no selection the pick is -1 */
+    uint8_t records[5][0xa08];
+    char texts[4][0x110];
+    struct fs98_options_video_state video;
     uint8_t info[32];
     uint8_t exchange[32];
     uint8_t font[32];
@@ -52,16 +60,19 @@ static uint32_t s_calls, s_log_length, s_throw_at, s_saved_seh;
 static uint32_t s_max_calls, s_throws, s_comparisons, s_swaps, s_allocation_faults, s_no_descriptor;
 static int s_side;
 static char s_logs[2][LOG_SIZE];
-static void *s_vtable[64], *s_other_vtable[64], *s_jump[5];
+static void *s_vtable[64], *s_other_vtable[64], *s_control_vtable[64], *s_jump[5];
+static void *s_host_table[0x300 / 4];
 
 enum signature {
-    SIG_EVENT, SIG_HELP, SIG_CONTEXT, SIG_EXCHANGE, SIG_INT, SIG_EMPTY_ARG,
+    SIG_EVENT, SIG_HELP, SIG_CONTEXT, SIG_EXCHANGE, SIG_INT, SIG_EMPTY_ARG, SIG_INT_ARG, SIG_NOTIFY_DELETE,
     SIG_CONSTRUCT, SIG_DESTROY, SIG_DELETE, SIG_CREATE, SIG_ROUNDTRIP, SIG_CONSTRUCT_DELETE
 };
 struct operation { uint32_t rva; void *ours; enum signature signature; uint32_t kind; const char *name; };
 #define SHARED(rva, name, signature) {rva, (void *)fs98_options_##name, signature, FS98_OPTIONS_VIDEO_MESSAGE, #name}
 #define VIDEO_FINISHED(rva, name, signature) {rva, (void *)fs98_options_##name, signature, FS98_OPTIONS_VIDEO_FINISHED, #name}
 #define VIDEO_MESSAGE(rva, name, signature) {rva, (void *)fs98_options_##name, signature, FS98_OPTIONS_VIDEO_MESSAGE, #name}
+#define SAVE_VIDEO(rva, name, signature) {rva, (void *)fs98_options_##name, signature, FS98_OPTIONS_SAVE_VIDEO, #name}
+#define FLIGHT_VIDEO(rva, name, signature) {rva, (void *)fs98_options_##name, signature, FS98_OPTIONS_FLIGHT_VIDEO, #name}
 #define CLASS(help, context, ddx, name, kind) \
     {help, (void *)fs98_options_##name##_help, SIG_HELP, kind, #name "_help"}, \
     {context, (void *)fs98_options_##name##_context, SIG_CONTEXT, kind, #name "_context"}, \
@@ -87,6 +98,25 @@ static const struct operation s_operations[] = {
     VIDEO_MESSAGE(0xe3e0, video_message_cancel, SIG_EVENT),
     VIDEO_MESSAGE(0xe400, video_message_populate, SIG_INT),
     LIFETIME(FS98_OPTIONS_VIDEO_MESSAGE, video_message),
+    SAVE_VIDEO(0x4290, notify_delete, SIG_NOTIFY_DELETE),
+    SAVE_VIDEO(0x6d70, notify_close, SIG_EVENT),
+    CLASS(0xdbd0, 0xdbf0, 0xd6f0, save_video, FS98_OPTIONS_SAVE_VIDEO),
+    SAVE_VIDEO(0xd7c0, save_video_review, SIG_EVENT), SAVE_VIDEO(0xd800, save_video_resume, SIG_EVENT),
+    SAVE_VIDEO(0xd840, save_video_save, SIG_EVENT), SAVE_VIDEO(0xd8b0, save_video_save, SIG_EVENT),
+    SAVE_VIDEO(0xd8c0, save_video_cancel, SIG_EVENT), SAVE_VIDEO(0xd930, save_video_init, SIG_INT),
+    SAVE_VIDEO(0xdc10, save_video_validate, SIG_INT_ARG), SAVE_VIDEO(0xdc80, save_video_error, SIG_INT_ARG),
+    SAVE_VIDEO(0xddc0, save_video_fill, SIG_EVENT), SAVE_VIDEO(0xddf0, save_video_has_descriptor, SIG_INT),
+    LIFETIME(FS98_OPTIONS_SAVE_VIDEO, save_video),
+    CLASS(0xcf50, 0xcf70, 0xca60, flight_video, FS98_OPTIONS_FLIGHT_VIDEO),
+    FLIGHT_VIDEO(0xcb70, flight_video_close, SIG_EVENT), FLIGHT_VIDEO(0xcba0, flight_video_cancel, SIG_EVENT),
+    FLIGHT_VIDEO(0xcbd0, flight_video_accept, SIG_EVENT), FLIGHT_VIDEO(0xcc20, flight_video_init, SIG_INT),
+    FLIGHT_VIDEO(0xcf90, flight_video_delete_entry, SIG_EVENT), FLIGHT_VIDEO(0xcff0, flight_video_play, SIG_EVENT),
+    FLIGHT_VIDEO(0xd030, flight_video_record, SIG_EVENT), FLIGHT_VIDEO(0xd0a0, flight_video_select, SIG_EVENT),
+    FLIGHT_VIDEO(0xd150, flight_video_double_click, SIG_EVENT),
+    FLIGHT_VIDEO(0xd170, flight_video_validate, SIG_INT_ARG), FLIGHT_VIDEO(0xd370, flight_video_error, SIG_INT_ARG),
+    FLIGHT_VIDEO(0xd400, flight_video_populate, SIG_EVENT), FLIGHT_VIDEO(0xd4d0, flight_video_has_descriptor, SIG_INT),
+    FLIGHT_VIDEO(0xd4e0, flight_video_rate, SIG_EVENT),
+    LIFETIME(FS98_OPTIONS_FLIGHT_VIDEO, flight_video),
 };
 #define OP_COUNT (sizeof(s_operations) / sizeof(s_operations[0]))
 #define OP s_operations[s_operation]
@@ -95,8 +125,13 @@ static uint32_t next_random(void)
 { s_rng ^= s_rng << 13; s_rng ^= s_rng >> 17; s_rng ^= s_rng << 5; return s_rng; }
 static uint32_t offset(const void *pointer)
 {
+    if (s_retail && (const uint8_t *)pointer >= (uint8_t *)s_retail + RETAIL_VIDEO &&
+        (const uint8_t *)pointer < (uint8_t *)s_retail + RETAIL_VIDEO + sizeof(struct fs98_options_video_state))
+        pointer = (const uint8_t *)&s_fixture.video + ((const uint8_t *)pointer - ((uint8_t *)s_retail + RETAIL_VIDEO));
     return (uint32_t)((const uint8_t *)pointer - (const uint8_t *)&s_fixture);
 }
+/* a string the stubs print: a fixture one by its offset and text, anything else by text */
+static const char *shown(const char *text) { return text ? text : "(null)"; }
 static void put(const char *format, ...)
 {
     va_list args;
@@ -112,7 +147,11 @@ static void put(const char *format, ...)
 }
 /* At two call points per operation: swap the descriptor for the other, take it away,
  * replace the vtable, change the edit's window. */
-static uint32_t descriptor_offset(void) { return 0x10dc; }
+static uint32_t descriptor_offset(void)
+{
+    uint32_t at = s_classes[OP.kind].descriptor;
+    return at ? at : 0x10dc;
+}
 static void mutate(void)
 {
     uint8_t *object = s_fixture.object;
@@ -127,11 +166,19 @@ static void mutate(void)
     }
     if (s_script & 2) {
         descriptor = PTR(object, descriptor_offset());
-        if (descriptor == s_fixture.descriptor[0] || descriptor == s_fixture.descriptor[1])
+        if (descriptor == s_fixture.descriptor[0] || descriptor == s_fixture.descriptor[1]) {
             D32(descriptor, 0) ^= 0x10;
+            if (OP.kind == FS98_OPTIONS_SAVE_VIDEO) D32(descriptor, 0x18) ^= 0x1004;
+            if (OP.kind == FS98_OPTIONS_FLIGHT_VIDEO) {
+                if (D32(descriptor, 0x28) < 4) D32(descriptor, 0x28) ^= 1;     /* another pick, never before the list */
+                D32(descriptor, 0x2c) = (D32(descriptor, 0x2c) + 1) % 5;
+            }
+        }
+        if (OP.kind == FS98_OPTIONS_FLIGHT_VIDEO) D32(object, 0x10e0) ^= 0x1004;
     }
     if (s_script & 4) PTR(object, 0) = s_other_vtable;
-    if (s_script & 8) D32(object, 0x1100) = s_seed ^ 0x12345678;
+    if (s_script & 8) D32(object, OP.kind == FS98_OPTIONS_SAVE_VIDEO ? 0x1460 :
+                              OP.kind == FS98_OPTIONS_FLIGHT_VIDEO ? 0x1418 : 0x1100) = s_seed ^ 0x12345678;
 }
 
 /* ---- the object's own virtuals --------------------------------------------------------- */
@@ -177,6 +224,28 @@ static int32_t TC virtual_skin(void *object, int32_t resource, uint32_t module, 
     mutate();
     return (s_seed >> 20) % 8 ? (int32_t)(s_seed | 1) : 0;
 }
+static uint32_t TC virtual_validate(void *object, uint32_t argument)
+{ put("virtual.validate %u %x\n", offset(object), argument); mutate(); return (s_seed >> 5) % 3 ? 0 : 0x11a3; }
+static uint32_t TC virtual_error(void *object, uint32_t code)
+{ put("virtual.error %u %x\n", offset(object), code); mutate(); return (s_seed >> 6) & 1; }
+static uint32_t TC virtual_focus(void *object, uint32_t control)
+{ put("virtual.focus %u %x\n", offset(object), control); mutate(); return s_seed ^ control; }
+static int32_t TC virtual_check(void *control, void *font, uint32_t bitmap, void *dib, void *palette, uint32_t module)
+{
+    put("check.init %u font=%u bitmap=%x dib=%u palette=%u module=%x\n", offset(control), offset(font), bitmap,
+        offset(dib), offset(palette), module);
+    mutate(); return (int32_t)s_seed;
+}
+/* DEMO's delete and edit, given the descriptor (and the record): refused one time in three */
+static uint32_t SC descriptor_delete(void *descriptor)
+{ put("delete %u pick=%u\n", offset(descriptor), D32(descriptor, 0x28)); mutate(); return (s_seed >> 10) % 3 ? 0 : s_seed; }
+static uint32_t SC descriptor_edit(void *descriptor, void *record)
+{
+    put("edit %u name=[%.40s] title=[%.40s] writable=%u\n", offset(descriptor), (char *)record,
+        (char *)record + 0x100, D32(record, 0xa04));
+    mutate();
+    return (s_seed >> 11) % 3 == 0 ? 0x1004 : (s_seed >> 11) % 3 == 1 ? 0 : 0x100d;
+}
 /* DEMO's check, given the descriptor: nonzero (a failure) one time in three */
 static uint32_t SC descriptor_check(void *descriptor)
 {
@@ -187,7 +256,20 @@ static uint32_t SC descriptor_check(void *descriptor)
 
 /* ---- the services ---------------------------------------------------------------------- */
 static int32_t send_message(uint32_t window, uint32_t message, uint32_t w_param, uint32_t l_param)
-{ put("message %u %x %u %u\n", window, message, w_param, l_param); mutate(); return (int32_t)s_seed; }
+{
+    if (message == 0x180 || message == 0x19a) put("message %u %x %u record=%u\n", window, message, w_param, offset((void *)(uintptr_t)l_param));
+    else put("message %u %x %u %u\n", window, message, w_param, l_param);
+    mutate();
+    if (message == 0x188)   /* LB_GETCURSEL: none, or one of the five */
+        return s_scenario % 7 == 0 ? -1 : (int32_t)((s_scenario + s_calls) % 5);
+    if (message == 0x199)   /* LB_GETITEMDATA: the record the item was tagged with */
+        return (int32_t)(uintptr_t)s_fixture.records[w_param % 5];
+    if (message == 0x147)   /* CB_GETCURSEL */
+        return (int32_t)((s_seed >> (s_calls % 8)) % 5) - 1;
+    if (message == 0x180)   /* LB_ADDSTRING: its index, or an error */
+        return (s_seed >> (s_calls % 16)) % 8 == 0 ? -1 : (int32_t)(s_calls % 9);
+    return (int32_t)s_seed;
+}
 static int32_t win_help(uint32_t window, const char *file, uint32_t command, const uint32_t *table)
 {
     uint32_t index = 0;
@@ -251,9 +333,64 @@ static int32_t is_lead_byte(int32_t character)
     mutate();
     return (character & 0x80) && ((s_seed >> 3) & 1) ? 0x8000 : 0;
 }
+static void base_exchange(void *object, void *exchange)
+{ put("base.exchange %u %u\n", offset(object), offset(exchange)); mutate(); }
+static int32_t init_art(void *control, uint32_t bitmap, void *dib, void *palette, uint32_t flags)
+{
+    put("init.art %u bitmap=%x dib=%u palette=%u flags=%x\n", offset(control), bitmap, offset(dib), offset(palette), flags);
+    mutate(); return (int32_t)s_seed;
+}
+static void init_list(void *control, void *font, void *label)
+{ put("init.list %u font=%u label=%u\n", offset(control), offset(font), offset(label)); mutate(); }
+static void init_combo(void *control, void *font, void *label)
+{ put("init.combo %u font=%u label=%u\n", offset(control), offset(font), offset(label)); mutate(); }
+static int32_t error_dialog(void *object, void *control, uint32_t code)
+{
+    put("error.dialog %u control=%u code=%x style=%x/%x\n", offset(object), offset(control), code,
+        D32(object, 0x90), D32(object, 0x94));
+    mutate(); return (s_seed >> (s_calls % 16)) & 1 ? (int32_t)s_seed : 0;
+}
+static uint32_t get_focus(void) { put("get.focus\n"); mutate(); return s_seed ^ 0xf0c5; }
+/* the focus on review, on go on, or elsewhere: each call its own seed bits */
+static uint32_t s_from_handle_calls;
+static void *window_from_handle(uint32_t window)
+{
+    static const uint32_t at[] = {0x1510, 0x160c, 0x1440, 0x1440};
+    uint32_t call = s_from_handle_calls++;
+    put("from.handle %x\n", window); mutate();
+    return s_fixture.object + at[(s_seed >> (14 + 2 * (call % 4))) % 4];
+}
+static int32_t compare_text(const char *a, const char *b)
+{ put("compare [%s] [%s]\n", shown(a), shown(b)); mutate(); return strcmp(a, b); }
+static char *copy_text(char *out, const char *text)
+{ put("copy %u [%s]\n", offset(out), shown(text)); mutate(); strcpy(out, text); return out; }
+static int32_t post_message(uint32_t window, uint32_t message, uint32_t w_param, uint32_t l_param)
+{ put("post %u %x %u %u\n", window, message, w_param, l_param); mutate(); return (int32_t)s_seed; }
+static int32_t enable_control(void *window, int32_t enable)
+{ put("enable.control %u %d\n", offset(window), enable); mutate(); return (int32_t)s_seed; }
+static int32_t window_enabled(void *window)
+{ put("window.enabled %u\n", offset(window)); mutate(); return (s_seed >> 15) & 1; }
+static int32_t set_checked(void *control, int32_t checked)
+{ put("set.checked %u %d\n", offset(control), checked); mutate(); return (int32_t)s_seed; }
+static char *host_strcpy(char *out, const char *text)
+{ put("host.strcpy %u [%s]\n", offset(out), shown(text)); mutate(); strcpy(out, text); return out; }
+static int32_t host_strcmpi(const char *a, const char *b)
+{ put("host.strcmpi %u [%s] [%s]\n", offset(a), shown(a), shown(b)); mutate(); return _stricmp(a, b); }
+static void *allocate_object(uint32_t size);
+static void notify_construct(void *notify, uint32_t a, uint32_t b)
+{ put("notify.construct %u %x %x\n", offset(notify), a, b); D32(notify, 0) = 0x2071f700; mutate(); }
+static void notify_free(void *notify) { put("notify.free %u\n", offset(notify)); mutate(); }
+static void notify_destroy(void *notify)
+{ put("notify.destroy %u vtable=%x\n", offset(notify), D32(notify, 0)); D32(notify, 0) = 0xdead2222; mutate(); }
+static void ui_delete(void *object);
+static void close_dialog(void *object) { put("base.close %u notify=%x\n", offset(object), D32(object, 0x10dc)); mutate(); }
 static const struct fs98_options_services s_services = {
     send_message, win_help, enable_window, ddx_control, base_init, init_button, init_text,
-    init_edit, base_font, set_window_text, get_window_text, set_focus, is_lead_byte
+    init_edit, base_font, set_window_text, get_window_text, set_focus, is_lead_byte,
+    base_exchange, init_art, init_list, init_combo, error_dialog, get_focus, window_from_handle,
+    compare_text, copy_text, post_message, enable_control, window_enabled, set_checked,
+    host_strcpy, host_strcmpi, allocate_object, notify_construct, notify_free, notify_destroy,
+    ui_delete, close_dialog
 };
 
 static void *dialog_construct(void *object, int32_t resource, void *parent)
@@ -285,6 +422,7 @@ static void destroy_control(void *control, uint32_t import)
 static void *allocate_object(uint32_t size)
 {
     put("allocate %x\n", size); mutate();
+    if (size == 0x29c) return (s_seed >> 21) % 9 ? s_fixture.notify : 0;   /* the CNotify */
     return s_scenario % 11 ? s_fixture.object : 0;
 }
 static void ui_delete(void *object) { put("ui.delete %u\n", offset(object)); mutate(); }
@@ -299,7 +437,7 @@ static int32_t show_dialog(void *object, int32_t show)
 { put("dialog.show %u %d\n", offset(object), show); mutate(); return s_scenario & 2 ? 0 : (int32_t)s_seed; }
 static const struct fs98_options_object_services s_object_services = {
     dialog_construct, dialog_destroy, construct_control, destroy_control, allocate_object,
-    ui_delete, dialog_delete, create_dialog, show_dialog, page_construct, page_destroy
+    ui_delete, dialog_delete, create_dialog, show_dialog, page_construct, page_destroy, copy_text
 };
 
 /* ---- the same stubs behind retail's import ABIs ----------------------------------------- */
@@ -309,6 +447,10 @@ static void TC hook_destroy_##name(void *control) { destroy_control(control, dto
 CONTROL_HOOK(text, 0x1d78c, 0x1d79c)
 CONTROL_HOOK(button, 0x1d760, 0x1d758)
 CONTROL_HOOK(edit, 0x1d6c8, 0x1d6d0)
+CONTROL_HOOK(art, 0x1d724, 0x1d734)
+CONTROL_HOOK(list, 0x1d6a8, 0x1d6ac)
+CONTROL_HOOK(combo, 0x1d75c, 0x1d764)
+CONTROL_HOOK(check, 0x1d790, 0x1d7a0)
 #undef CONTROL_HOOK
 static void *TC hook_dialog_construct(void *object, int32_t resource, void *parent)
 { return dialog_construct(object, resource, parent); }
@@ -337,6 +479,26 @@ static void TC hook_set_text(void *window, const char *text) { set_window_text(w
 static int32_t TC hook_get_text(void *window, char *buffer, int32_t count) { return get_window_text(window, buffer, count); }
 static void *TC hook_set_focus(void *window) { return set_focus(window); }
 static int hook_is_lead_byte(int character) { return is_lead_byte(character); }
+static void TC hook_exchange(void *a, void *b) { base_exchange(a, b); }
+static int32_t TC hook_art(void *control, uint32_t bitmap, void *dib, void *palette, uint32_t flags)
+{ return init_art(control, bitmap, dib, palette, flags); }
+static void TC hook_init_list(void *control, void *font, void *label) { init_list(control, font, label); }
+static void TC hook_init_combo(void *control, void *font, void *label) { init_combo(control, font, label); }
+static int32_t TC hook_error_dialog(void *object, void *control, uint32_t code) { return error_dialog(object, control, code); }
+static uint32_t SC hook_get_focus(void) { return get_focus(); }
+static void *SC hook_from_handle(uint32_t window) { return window_from_handle(window); }
+static int32_t SC hook_compare(const char *a, const char *b) { return compare_text(a, b); }
+static char *SC hook_copy(char *out, const char *text) { return copy_text(out, text); }
+static int32_t SC hook_post(uint32_t a, uint32_t b, uint32_t c, uint32_t d) { return post_message(a, b, c, d); }
+static int32_t TC hook_enable_control(void *window, int32_t enable) { return enable_control(window, enable); }
+static int32_t TC hook_window_enabled(void *window) { return window_enabled(window); }
+static int32_t TC hook_set_checked(void *control, int32_t checked) { return set_checked(control, checked); }
+static char *SC hook_host_strcpy(char *out, const char *text) { return host_strcpy(out, text); }
+static int32_t SC hook_host_strcmpi(const char *a, const char *b) { return host_strcmpi(a, b); }
+static void TC hook_notify_construct(void *notify, uint32_t a, uint32_t b) { notify_construct(notify, a, b); }
+static void SC hook_notify_free(void *notify) { notify_free(notify); }
+static void TC hook_notify_destroy(void *notify) { notify_destroy(notify); }
+static void TC hook_close(void *object) { close_dialog(object); }
 
 static void patch(uint32_t rva, void *target)
 {
@@ -365,7 +527,19 @@ static void setup_imports(void)
 #define PATCH_CONTROL(name, ctor, dtor) patch(ctor, hook_construct_##name); patch(dtor, hook_destroy_##name)
     PATCH_CONTROL(text, 0x1d78c, 0x1d79c); PATCH_CONTROL(button, 0x1d760, 0x1d758);
     PATCH_CONTROL(edit, 0x1d6c8, 0x1d6d0);
+    PATCH_CONTROL(art, 0x1d724, 0x1d734); PATCH_CONTROL(list, 0x1d6a8, 0x1d6ac);
+    PATCH_CONTROL(combo, 0x1d75c, 0x1d764); PATCH_CONTROL(check, 0x1d790, 0x1d7a0);
 #undef PATCH_CONTROL
+    patch(0x1d718, hook_exchange); patch(0x1d6ec, hook_art); patch(0x1d6a0, hook_init_list);
+    patch(0x1d754, hook_init_combo); patch(0x1d6d4, hook_error_dialog); patch(0x1d814, hook_get_focus);
+    patch(0x1d4bc, hook_from_handle); patch(0x1d460, hook_compare); patch(0x1d464, hook_copy);
+    patch(0x1d824, hook_post); patch(0x1d568, hook_enable_control); patch(0x1d4cc, hook_window_enabled);
+    patch(0x1d76c, hook_set_checked); patch(0x1d6f0, hook_notify_construct); patch(0x1d64c, hook_notify_free);
+    patch(0x1d6e4, hook_notify_destroy); patch(0x1d7d0, hook_close);
+    s_host_table[0x2a8 / 4] = (void *)hook_host_strcpy; s_host_table[0x2c0 / 4] = (void *)hook_host_strcmpi;
+    patch(RETAIL_HOST, s_host_table);
+    fs98_options_set_notify_vtable((uint8_t *)s_retail + RETAIL_NOTIFY_VTABLE);
+    fs98_options_set_video_state(&s_fixture.video);
     patch(RETAIL_RESOURCE_MODULE, (void *)RESOURCE_MODULE); fs98_options_set_resource_module(RESOURCE_MODULE);
     patch(RETAIL_OBJECT_MODULE, (void *)OBJECT_MODULE); fs98_options_set_object_module(OBJECT_MODULE);
     for (index = 0; index < FS98_OPTIONS_CLASS_COUNT; ++index)
@@ -389,8 +563,62 @@ static void initialize(void)
         PTR(descriptor, 4) = descriptor_check;
         snprintf((char *)descriptor + 8, 0x38, "Before %u", index);
     }
-    /* Video message's handlers test for no descriptor, OnInitDialog's populate alone */
-    if ((OP.rva == 0xe400 || OP.rva == 0xe1d0) && (s_seed >> 27) % 4 == 0) {
+    for (index = 0; index < 4; ++index)
+        snprintf(s_fixture.texts[index], 0x40, "%s %u%02u", index & 1 ? "Approach" : "Video", index, (s_seed >> index) % 100);
+    for (index = 0; index < 5; ++index) {
+        uint8_t *record = s_fixture.records[index];
+        snprintf((char *)record, 0x40, "Video %u of %u", index, s_scenario % 3);
+        snprintf((char *)record + 0x100, 0x40, "Title %u seed %x", index, s_seed);
+        snprintf((char *)record + 0x500, 0x40, "Description %u", index);
+        snprintf((char *)record + 0x900, 0x40, "C:\\videos\\video%u.vid", index);
+        D32(record, 0xa04) = (s_seed >> (index + 3)) % 3 != 0;
+    }
+    snprintf((char *)s_fixture.record_before, 0x40, "Before %u", s_scenario);
+    snprintf((char *)s_fixture.record_before + 0x100, 0x40, "Before title");
+    D32(s_fixture.record_before, 0xa04) = (s_seed >> 2) & 1;
+    /* the name last seen: none, one of the records', or another */
+    snprintf(s_fixture.video.last, sizeof(s_fixture.video.last), "%s",
+             (s_seed >> 16) % 3 == 0 ? "" : (s_seed >> 16) % 3 == 1 ? "video 1 OF 0" : "Other");
+    PTR(s_fixture.notify, 0) = s_vtable;
+    PTR(object, 0x1948) = s_control_vtable;
+    if (OP.kind == FS98_OPTIONS_SAVE_VIDEO || OP.kind == FS98_OPTIONS_FLIGHT_VIDEO) {
+        static const uint32_t statuses[] = {0, 0x1004, 0x100d, 0x1004};
+        /* the CNotify, sometimes none */
+        PTR(object, 0x10dc) = (s_seed >> 22) % 4 ? (void *)s_fixture.notify : 0;
+        D32(object, 0x10e0) = statuses[(s_seed >> 23) % 4];
+        D32(object, 0x1a04) = (s_seed >> 25) & 1;
+        D32(object, 0x1418) = s_seed ^ 0x1418;
+        D32(object, 0x1460) = s_seed ^ 0x1460;
+        D32(object, 0x14c8) = s_seed ^ 0x14c8;
+        D32(object, 0x1530) = s_seed ^ 0x1530;
+        for (index = 0; index < 2; ++index) {
+            uint8_t *descriptor = s_fixture.descriptor[index];
+            if (OP.kind == FS98_OPTIONS_SAVE_VIDEO) {
+                D32(descriptor, 0x18) = statuses[(s_seed >> (5 + index)) % 4];
+                PTR(descriptor, 0x1c) = s_fixture.texts[index];
+                D32(descriptor, 0x20) = 1 + (s_scenario + index * 0x13) % 0x40;     /* the two differ */
+                D32(descriptor, 0x2c) = statuses[(s_seed >> (8 + index)) % 4] ^ 1;
+                PTR(descriptor, 0x30) = s_fixture.texts[2 + index];
+                D32(descriptor, 0x34) = 1 + (s_scenario + index * 0x29) % 0x40;
+            } else {
+                static const int32_t counts[] = {0, 1, 3, 5, -1};
+                PTR(descriptor, 8) = descriptor_delete;
+                PTR(descriptor, 0xc) = descriptor_edit;
+                D32(descriptor, 0x18) = (s_seed >> (5 + index)) & 1;
+                D32(descriptor, 0x20) = (s_seed >> (7 + index)) % 5;
+                D32(descriptor, 0x24) = (s_seed >> (9 + index)) & 1;
+                D32(descriptor, 0x28) = (s_seed >> (11 + index)) % 5;
+                D32(descriptor, 0x2c) = (uint32_t)counts[(s_scenario + index) % 5];
+                PTR(descriptor, 0x30) = s_fixture.records[index];   /* the second's list starts one on */
+            }
+        }
+        /* the name already agreed to: often the one typed */
+        snprintf((char *)object + 0x10e4, 0x100, "%s", (s_seed >> 3) % 3 ? s_fixture.texts[0] : "Other");
+        if (OP.kind == FS98_OPTIONS_FLIGHT_VIDEO) PTR(object, 0x10e4) = s_fixture.descriptor[0];
+    }
+    /* the handlers that test for no descriptor */
+    if ((OP.rva == 0xe400 || OP.rva == 0xe1d0 || OP.rva == 0xddf0 || OP.rva == 0xd930 ||
+         OP.rva == 0xd4d0 || OP.rva == 0xcc20) && (s_seed >> 27) % 4 == 0) {
         PTR(object, descriptor_offset()) = 0;
         ++s_no_descriptor;
     }
@@ -450,7 +678,8 @@ static __attribute__((noinline)) int32_t run(uint32_t throw_at)
     void *object = s_fixture.object;
     volatile int32_t result = 0;
     s_fixture = s_initial;
-    s_log_length = s_calls = 0; s_logs[s_side][0] = 0; s_throw_at = throw_at;
+    if (!s_side) memcpy((uint8_t *)s_retail + RETAIL_VIDEO, &s_fixture.video, sizeof(s_fixture.video));
+    s_log_length = s_calls = 0; s_logs[s_side][0] = 0; s_throw_at = throw_at; s_from_handle_calls = 0;
     if (OP.signature >= SIG_CONSTRUCT && !s_side) {
         uint32_t rva = OP.signature == SIG_DESTROY ? class_info->destructor :
                        OP.signature == SIG_DELETE ? class_info->delete :
@@ -482,6 +711,16 @@ static __attribute__((noinline)) int32_t run(uint32_t throw_at)
         case SIG_EMPTY_ARG:
             ((void (TC *)(void *, uint32_t))entry)(object, s_seed);
             break;
+        case SIG_INT_ARG: {     /* each class's own edits' ids, none, or another */
+            static const uint32_t ids[] = {0, 0x11a1, 0x11a3, 0x11a0, 0x1234};
+            result = ((int32_t (TC *)(void *, uint32_t))entry)(object, ids[(s_seed >> 3) % 5]);
+            break;
+        }
+        case SIG_NOTIFY_DELETE: {
+            void *returned = ((void *(TC *)(void *, uint32_t))entry)(s_fixture.notify, s_seed);
+            put("return.object %u\n", offset(returned));
+            break;
+        }
         default: {
             void *returned = 0;
             const struct operation *ours = &OP - (OP.signature == SIG_ROUNDTRIP ? 4 :
@@ -507,6 +746,7 @@ static __attribute__((noinline)) int32_t run(uint32_t throw_at)
     }
     __asm__ volatile("movl %0, %%fs:0" : : "r"(s_saved_seh) : "memory");
     s_running = 0;
+    if (!s_side) memcpy(&s_fixture.video, (uint8_t *)s_retail + RETAIL_VIDEO, sizeof(s_fixture.video));
     if (s_calls > s_max_calls) s_max_calls = s_calls;
     return result;
 }
@@ -555,6 +795,11 @@ int main(int argc, char **argv)
     s_vtable[0xec / 4] = virtual_close; s_other_vtable[0xec / 4] = virtual_close_other;
     s_vtable[1] = s_other_vtable[1] = virtual_delete;
     s_vtable[0xe4 / 4] = virtual_skin; s_other_vtable[0xe4 / 4] = replaced_skin;
+    s_vtable[0xd8 / 4] = s_other_vtable[0xd8 / 4] = virtual_validate;
+    s_vtable[0xdc / 4] = s_other_vtable[0xdc / 4] = virtual_error;
+    s_vtable[0xe0 / 4] = s_other_vtable[0xe0 / 4] = virtual_focus;
+    for (slot = 0; slot < 64; ++slot) s_control_vtable[slot] = (void *)s_other_slots[slot];
+    s_control_vtable[0xc4 / 4] = virtual_check;
     for (s_scenario = 0; s_scenario < count; ++s_scenario) {
         s_seed = next_random(); s_script = s_scenario & 15;
         for (s_operation = 0; s_operation < OP_COUNT; ++s_operation) {

@@ -2,8 +2,8 @@
 
 `orig/English/Options.DLL`, module `0x80000007`, preferred base `0x22390000`, 84,381 bytes of
 `.text`, 15 dialog registrations and 31 templates. **In progress, started 2026-11-03:**
-slice 1 (the shared helpers, Video finished and Video message) is transliterated and verified
-in its harness. Nothing is built as a DLL or installed. Like Flights it is MFC dialogs over
+slices 1 and 2 (the shared helpers and the four video dialogs: Video finished, Video
+message, Save video and Flight video) are transliterated and verified in their harness. Nothing is built as a DLL or installed. Like Flights it is MFC dialogs over
 the CD's SIMSUI and MFC42, which stay as dependencies, and it follows Flights' method
 ([flights.md](flights.md)): core C over a service table, generated tables, a differential
 harness with deliberate breaks, then the native DLL, then the game.
@@ -90,6 +90,43 @@ of seeds `0x5f1a6c2d` and `0x98a1e7d3`; unwind mode 2,000 scenarios, 290,410 com
 228,046 throws, 0 differ. Breaks: 82, all caught; two proven equivalent and left out (in
 `tools/options_breaks.py`'s docstring).
 
+## Slice 2: Save video `0x14040001` and Flight video `0x1404`
+
+`src/options/options_videos.c`. Both make a CNotify in OnInitDialog (`ui_new(0x29c)`,
+`CNotify(0x30, 1)`, Options' vtable `0x223a6ab0`, whose only own slot is the deleting
+destructor `0x22394290`), kept at `+0x10dc` and deleted by their close (`+0xec`): Save
+video's is the shared `0x22396d70`, Flight video's `0x2239cb70` also forgets it. If the
+constructor throws, the block goes back through `CNotify::operator delete`.
+
+- **Save video** (DEMO when a recording stops, `D+0xed0`): the choice words are `+8` save,
+  `+0xc` go on, `+0x10` review, `+0x14` discard, as DEMO's `dialog_finished` reads them.
+  Review (`0x1165`) and go on (`0x113b`) set theirs and close. Save (`0x116c`, and OnOK)
+  validates and reports through the vtable read once, as Flights' Save Flight does.
+  OnCancel asks `0x1011` (style `0xc0`/1) and discards on yes. Validate reads both edits
+  into the descriptor and runs DEMO's check; a failure is `0x11a3` (the name) when its
+  status is set, else `0x11a0`. The report does nothing while review or go on has the focus
+  (GetFocus, FromHandle, each asked again); a name already there passes if it is the one
+  agreed to at `+0x10e4`, else asks, and yes remembers it and posts `0x5fa` to move on.
+- **Flight video** (DEMO's `video_dialog`): a list of DEMO's 0xa08-byte video records,
+  refilled with the count reloaded after every entry. Record, play and delete map onto
+  `+0x14`, `+0x10` and DEMO's delete; the rate combo and the loop box go to `+0x20` and
+  `+0x24`. Selecting shows the pick's name and title and makes the edits, their label and
+  delete usable as the record is writable (`+0xa04`). Validate copies the pick's record,
+  puts in the typed name (or, for the title edit `0x11a1`, no name and the typed title)
+  and gives it to DEMO's edit. For the name edit alone it skips that when the name is the
+  one last seen, which it keeps in .data `0x223ac450` (0x108 bytes) through HOST's
+  `_strcmpi` (`+0x2c0`) and `strcpy` (`+0x2a8`), both stdcall.
+
+Results (2026-11-03): 75 operations; 20,000 scenarios, 1,500,000 comparisons, 0 differ on
+each seed; unwind mode 2,000 scenarios, 1,130,878 comparisons, 979,704 throws, 0 differ.
+Breaks: 187, all caught; three proven equivalent and left out.
+
+Harness lessons: with no selection the pick is -1, so the fixture has a real record before
+the list, and its mutation never moves the pick before it (HOST's `strcpy` would copy the
+fixture's random bytes past the static's end, and retail's lands in its .data, ours in the
+fixture). Each FromHandle call takes its own seed bits, or the second focus test is never
+reached alone.
+
 ## Customise controls, for when it comes
 
 Read [CONTROLS' key-assignment contract](controls.md#the-key-assignment-dialog-0x58-text0x7e400x8e5f-0x9130),
@@ -103,8 +140,7 @@ with their own fixtures.
 
 ## Next
 
-1. The rest of the video family: Save video (`0x14040001`) and Flight video (`0x1404`).
-2. Then the logbook (`0x1407`, `0x14070001`, `0x14070002`), the analysis dialogs, Instant
+1. The logbook (`0x1407`, `0x14070001`, `0x14070002`), the analysis dialogs, Instant
    replay, Preferences with Display options and `0x14090002`, and Customise controls last.
-3. The native DLL once enough classes exist to bind the module, as Flights' did; then
+2. The native DLL once enough classes exist to bind the module, as Flights' did; then
    main-dialogs, flights-play-style steps and installation.

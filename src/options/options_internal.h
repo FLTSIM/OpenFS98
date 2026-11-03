@@ -12,7 +12,19 @@
  *
  * Video message (0x14040002, DEMO's dialog_ask while recording): answer +0, check +4
  * (stdcall, given the descriptor), the message +8 (0x38 bytes). Video finished
- * (0x14040003, DEMO's dialog_stopped) is given no descriptor. */
+ * (0x14040003, DEMO's dialog_stopped) is given no descriptor.
+ *
+ * Save video (0x14040001, DEMO when a recording stops, D+0xed0): answer +0, check +4, the
+ * choice words +8 (save) +0xc (go on) +0x10 (review) +0x14 (discard), the name's status
+ * +0x18 (0x1004: already there), the name +0x1c (room +0x20), the description's status
+ * +0x2c, the description +0x30 (room +0x34).
+ *
+ * Flight video (0x1404, DEMO's video_dialog): answer +0, check +4, delete +8 (stdcall,
+ * given the descriptor), edit +0xc (stdcall, given the descriptor and a copy of the
+ * record with a new name, or with no name and a new title), play +0x10, record +0x14,
+ * "can record" +0x18, +0x1c unused, the rate +0x20, loop +0x24, the pick +0x28, the count
+ * +0x2c and the 0xa08-byte records +0x30 (+0 the name shown, +0x100 the title, +0x500
+ * the description, +0x900 the path, +0xa04 writable). */
 struct fs98_options_rect { int32_t left, top, right, bottom; };
 struct fs98_options_services {
     int32_t (*send_message)(uint32_t window, uint32_t message, uint32_t w_param, uint32_t l_param);
@@ -31,7 +43,37 @@ struct fs98_options_services {
     int32_t (*get_window_text)(void *window, char *buffer, int32_t count);  /* CWnd::GetWindowTextA */
     void *(*set_focus)(void *window);                               /* CWnd::SetFocus */
     int32_t (*is_lead_byte)(int32_t character);                     /* MSVCRT isleadbyte */
+    void (*base_exchange)(void *object, void *exchange);            /* CSimsDialog::DoDataExchange */
+    int32_t (*init_art)(void *control, uint32_t bitmap, void *dib, void *palette, uint32_t flags);
+    void (*init_list)(void *control, void *font, void *label);      /* CSimsListBox::Init */
+    void (*init_combo)(void *control, void *font, void *label);     /* CSimsComboBox::Init */
+    int32_t (*error_dialog)(void *object, void *control, uint32_t code);   /* DoErrorDialog */
+    uint32_t (*get_focus)(void);                                    /* USER32 GetFocus */
+    void *(*window_from_handle)(uint32_t window);                   /* CWnd::FromHandle */
+    int32_t (*compare_text)(const char *a, const char *b);          /* lstrcmpA */
+    char *(*copy_text)(char *out, const char *text);                /* lstrcpyA */
+    int32_t (*post_message)(uint32_t window, uint32_t message, uint32_t w_param, uint32_t l_param);
+    int32_t (*enable_control)(void *window, int32_t enable);        /* CWnd::EnableWindow */
+    int32_t (*window_enabled)(void *window);                        /* CWnd::IsWindowEnabled */
+    int32_t (*set_checked)(void *control, int32_t checked);         /* CSimsCheckButton::SetChecked */
+    char *(*host_strcpy)(char *out, const char *text);              /* HOST +0x2a8 */
+    int32_t (*host_strcmpi)(const char *a, const char *b);          /* HOST +0x2c0 */
+    void *(*allocate)(uint32_t size);                               /* ui_new */
+    void (*notify_construct)(void *notify, uint32_t a, uint32_t b); /* CNotify(a, b) */
+    void (*notify_free)(void *notify);                              /* CNotify::operator delete */
+    void (*notify_destroy)(void *notify);                           /* ~CNotify */
+    void (*ui_delete)(void *object);
+    void (*close)(void *object);                                    /* CSimsDialog::Close */
 };
+/* Options' CNotify, which Save video and Flight video make in OnInitDialog: SIMSUI's,
+ * with its own vtable (0x223a6ab0) whose deleting destructor is ours */
+void fs98_options_set_notify_vtable(void *vtable);
+void *FS98_OPTIONS_THISCALL fs98_options_notify_delete(void *notify, uint32_t flags);
+/* The name Flight video last saw kept, at .data 0x223ac450 */
+struct fs98_options_video_state { char last[0x108]; };
+void fs98_options_set_video_state(struct fs98_options_video_state *state);
+typedef uint32_t (FS98_OPTIONS_STDCALL *fs98_options_delete_fn)(void *descriptor);
+typedef uint32_t (FS98_OPTIONS_STDCALL *fs98_options_edit_fn)(void *descriptor, void *record);
 void fs98_options_set_services(const struct fs98_options_services *services);
 const struct fs98_options_services *fs98_options_services(void);
 /* the resource instance the skin and buttons load from (.data 0x223ac344), and Options'
@@ -49,6 +91,8 @@ typedef uint32_t (FS98_OPTIONS_STDCALL *fs98_options_check_fn)(void *descriptor)
     void FS98_OPTIONS_THISCALL fs98_options_##name##_exchange(void *object, void *exchange)
 FS98_OPTIONS_HANDLERS(video_finished);
 FS98_OPTIONS_HANDLERS(video_message);
+FS98_OPTIONS_HANDLERS(save_video);
+FS98_OPTIONS_HANDLERS(flight_video);
 #undef FS98_OPTIONS_HANDLERS
 
 /* shared by every class (0x22392400, 0x22392410, 0x22392420, 0x223943d0, 0x22397c30,
@@ -68,4 +112,30 @@ int32_t FS98_OPTIONS_THISCALL fs98_options_video_message_init(void *object);
 void FS98_OPTIONS_THISCALL fs98_options_video_message_accept(void *object);
 void FS98_OPTIONS_THISCALL fs98_options_video_message_cancel(void *object);
 uint32_t FS98_OPTIONS_THISCALL fs98_options_video_message_populate(void *object);
+
+/* Save video and Flight video (options_videos.c) */
+void FS98_OPTIONS_THISCALL fs98_options_notify_close(void *object);
+void FS98_OPTIONS_THISCALL fs98_options_save_video_review(void *object);
+void FS98_OPTIONS_THISCALL fs98_options_save_video_resume(void *object);
+void FS98_OPTIONS_THISCALL fs98_options_save_video_save(void *object);
+void FS98_OPTIONS_THISCALL fs98_options_save_video_cancel(void *object);
+int32_t FS98_OPTIONS_THISCALL fs98_options_save_video_init(void *object);
+uint32_t FS98_OPTIONS_THISCALL fs98_options_save_video_validate(void *object, uint32_t unused);
+uint32_t FS98_OPTIONS_THISCALL fs98_options_save_video_error(void *object, uint32_t code);
+void FS98_OPTIONS_THISCALL fs98_options_save_video_fill(void *object);
+uint32_t FS98_OPTIONS_THISCALL fs98_options_save_video_has_descriptor(void *object);
+void FS98_OPTIONS_THISCALL fs98_options_flight_video_close(void *object);
+void FS98_OPTIONS_THISCALL fs98_options_flight_video_cancel(void *object);
+void FS98_OPTIONS_THISCALL fs98_options_flight_video_accept(void *object);
+int32_t FS98_OPTIONS_THISCALL fs98_options_flight_video_init(void *object);
+void FS98_OPTIONS_THISCALL fs98_options_flight_video_delete_entry(void *object);
+void FS98_OPTIONS_THISCALL fs98_options_flight_video_play(void *object);
+void FS98_OPTIONS_THISCALL fs98_options_flight_video_record(void *object);
+void FS98_OPTIONS_THISCALL fs98_options_flight_video_select(void *object);
+void FS98_OPTIONS_THISCALL fs98_options_flight_video_double_click(void *object);
+uint32_t FS98_OPTIONS_THISCALL fs98_options_flight_video_validate(void *object, uint32_t control);
+uint32_t FS98_OPTIONS_THISCALL fs98_options_flight_video_error(void *object, uint32_t code);
+void FS98_OPTIONS_THISCALL fs98_options_flight_video_populate(void *object);
+uint32_t FS98_OPTIONS_THISCALL fs98_options_flight_video_has_descriptor(void *object);
+void FS98_OPTIONS_THISCALL fs98_options_flight_video_rate(void *object);
 #endif

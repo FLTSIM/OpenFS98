@@ -80,3 +80,14 @@ them into `orig/` and check them against the reference CD before writing tools a
    first. That is also when the retail bugs we reproduce get fixed: they are listed in
    [retail-bugs.md](retail-bugs.md), which must first be completed from every module's doc. Register contracts between modules ([open-differences.md](open-differences.md#a-class-of-bug-to-look-for))
    are x86 behaviour that a port has to remove on both sides of each call.
+
+## Other useful work, in no particular order
+
+1. **Reach UTIL's menu paths.** A hands-on session exercised 19 of its 47 services
+   in-game, but the flight, lesson and options screens -- where the file listings and the
+   exchange engine run -- were not reachable under wine. Worth retrying with
+   `make util-trace UTIL_TRACE_SECS=600` whenever the sim gets further, or on Windows.
+2. **Teach `make graph` about the `English\` modules.** `Flights`, `Options`, `Alerts` and
+   the rest own 64 of the host's 65 dialogs; the graph does not see them yet.
+3. **The host's 84 services that call no platform API.** Portable logic, and the
+   specification a native host has to satisfy ([portability.md](portability.md)).

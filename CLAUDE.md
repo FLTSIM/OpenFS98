@@ -26,8 +26,12 @@ possibly Android.
 
 ## Read these, in this order
 
-1. [README.md](README.md) — status table, setup, the full `make` target list,
-   and what to do next.
+1. [README.md](README.md) — the human-facing overview. The detail it used to
+   hold is in [docs/building.md](docs/building.md) (setup, which CD, layout and
+   naming, testing in the game), [docs/tools.md](docs/tools.md) (every make
+   target and script), [docs/status.md](docs/status.md) (per-module status
+   table and round notes) and [docs/portability.md](docs/portability.md) (the
+   native goal, floating point).
 2. [docs/method.md](docs/method.md) — how a service gets from binary to
    verified reimplementation, and the rules that have each caught a real bug.
    **Read this before writing any code.**
@@ -432,5 +436,5 @@ reach a boundary.
 - **Not every FS98 CD is the reference.** A later pressing rebuilt
   `FLTSIM98.EXE` and ten modules at base `0x10000000` (CONTROLS among them,
   with 493 commands instead of 383). If a generator stops with `image base
-  moved`, check `orig/` against README.md's "Which CD" before touching any
+  moved`, check `orig/` against docs/building.md's "Which CD" before touching any
   code.

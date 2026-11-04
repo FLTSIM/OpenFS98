@@ -126,7 +126,7 @@ removed, is caught.
    outside itself reaches here first.
 2. **A native build replaces it.** The host owns the window, the message loop,
    DirectDraw and the MFC user interface -- all the platform dependency the
-   README's portability survey puts outside the 16 portable modules. Whatever
+   [portability.md](../portability.md)'s survey puts outside the 16 portable modules. Whatever
    drives a native OpenFS98 is a reimplementation of this service table on SDL,
    and the table above says how much of it is actually platform work: about
    half.

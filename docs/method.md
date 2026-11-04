@@ -1,6 +1,6 @@
 # How work on this project is done
 
-The state of the decompilation is in the README and the per-module documents.
+The state of the decompilation is in [status.md](status.md) and the per-module documents.
 This is the other half: how a service or a module actually gets from retail
 binary to verified reimplementation, and the conventions that have earned their
 place by catching mistakes.

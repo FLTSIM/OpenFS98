@@ -30,7 +30,7 @@ video records.
 
 ## Binary and layout
 
-- This is the reference pressing's CONTROLS (README.md, "Which CD"). A later
+- This is the reference pressing's CONTROLS ([building.md](../building.md#setup), "Which CD"). A later
   pressing's, dated 17 October 1997 and linked at `0x10000000`, is a
   different build: `.text` 55,654 bytes and 493 commands.
 - Retail image base `0x20670000`. `.text` 48,406 bytes (`0x20671000`..`+0xbd16`),

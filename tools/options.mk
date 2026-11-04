@@ -4,7 +4,7 @@ OPTIONS_DIR := bin/options-diff
 N ?= 20000
 SEED ?= 0x5f1a6c2d
 MODE ?= normal
-OPTIONS_SOURCES := src/options/options_events.c src/options/options_objects.c src/options/options_video.c src/options/options_videos.c src/options/options_logbook.c src/options/options_book.c src/options/options_graphs.c src/options/options_analysis.c src/options/options_replay.c src/options/options_demo.c src/options/options_display.c src/options/options_prefs.c
+OPTIONS_SOURCES := src/options/options_events.c src/options/options_objects.c src/options/options_video.c src/options/options_videos.c src/options/options_logbook.c src/options/options_book.c src/options/options_graphs.c src/options/options_analysis.c src/options/options_replay.c src/options/options_demo.c src/options/options_display.c src/options/options_prefs.c src/options/options_controls.c src/options/options_keys.c
 OPTIONS_HEADERS := src/options/options_internal.h src/options/options_objects.h src/options/options_unwind.h \
                    src/options/options_tables.inc src/options/options_objects_tables.inc
 .PHONY: optionsevents optionseventsdiff-run options-tables options-breaks

@@ -340,16 +340,34 @@ Display options is, with a Defaults button and six pages:
 
 RESULTS_SLICE_10
 
-## Customise controls, for when it comes
+## Slice 11: Customise controls `0x140a` and its three pages
 
-Read [CONTROLS' key-assignment contract](controls.md#the-key-assignment-dialog-0x58-text0x7e400x8e5f-0x9130),
-`src/controls/controls_input.c` and `tools/difftest/controlsdiff.c`, especially `h_run_dialog`
-and its adjacent dialog stand-in. The descriptor is built at CONTROLS `D+0x240`; callback
-`+0x1c` resets sensitivity and `+0x20` recounts joysticks. Callback `+0x2c` is tested by
-CONTROLS' harness but is not called by retail Options: preserve the real call boundary
-rather than adding it. That stand-in verifies CONTROLS, not Options' page construction,
-focus and key capture, widgets, validation or nested lifetimes; those come from Options,
-with their own fixtures.
+`src/options/options_controls.c` (the dialog, Sensitivities, Force Feedback) and
+`src/options/options_keys.c` (Keys). CONTROLS' key-assignment dialog (`+0x58`): the block is
+CONTROLS' `D+0x240`, whose layout was worked out from CONTROLS' side first
+([controls.md](controls.md#the-key-assignment-dialog-0x58-text0x7e400x8e5f-0x9130)), and is
+spelled out at the top of `options_controls.c`. The dialog is built as Display options is,
+but has no CNotify, and its OK calls Options' empty error check where the others call the
+block's own, so OK always closes; the pages' reads are all Options' empty one too, since the
+pages edit CONTROLS' lists in place.
+
+| Page | Template | Class | What it does |
+| --- | --- | --- | --- |
+| Sensitivities | `0x3a3` | `0x2239ec00`, `0x2584` | a devices list (the list's devices, then the mouse), an axes combo, a sensitivity and a null-zone slider and a reverse box; resets a device through CONTROLS (`+0x1c`); runs Windows' joystick control panel (`joy.cpl`, `ShowJoyCPL`) and has CONTROLS count the joysticks again (`+0x20`, then HOST `+0x1c0`) |
+| Keys | `0x3a4` | `0x223a0ab0`, `0x1b64` | flight or slew; the commands beside the keyboard's binding and one joystick's (chosen with a scroll bar), a check box per command for a joystick axis's flags; a `CSimsHotKey` and a `CSimsHotJoy` created over the row to capture a binding, a binding already used elsewhere offered back through the host's message dialog (HOST `+0x10c`, dialog 2); key and input names from HOST `+0x200` and `+0x1d0`; resets a device's bindings (`+0x2c`) |
+| Force Feedback | `0x3a7` | `0x223a27c0`, `0x168c` | six boxes; the first makes the others usable |
+
+- The Keys page has two **inline `CSimsScrollBar`s**, built as Instant replay's spin
+  buttons are: `CWnd()`, Options' `CScrollBar` vtable then SIMSUI's (a data import); torn
+  down by storing it back and MFC `#783`, unwound through `~CSimsScrollBar`. The object code
+  handles both kinds of inline control together.
+- Customise controls declares its destructor (vtable stored first).
+- The Sensitivities page picks its axes combo's row with a routine whose final test looks
+  at the wrong axis for the mouse and the wrong binding for a joystick (OPT-11).
+- The host's message dialog answers in its block's `+0xc`, which Options never sets
+  beforehand: it is an output, not a bug.
+
+RESULTS_SLICE_11
 
 ## Next
 

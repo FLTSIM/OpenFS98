@@ -182,6 +182,36 @@ struct fs98_options_services {
     void (*set_scroll_range)(void *slider, int32_t low, int32_t high);   /* CSimsSlider::SetScrollRange */
     int32_t (*get_scroll_pos)(void *slider);                        /* CSimsSlider::GetScrollPos */
     int32_t (*set_scroll_pos)(void *slider, int32_t position);      /* CSimsSlider::SetScrollPos */
+    int32_t (*string_load)(void *string, uint32_t id);              /* CString::LoadStringA */
+    int32_t (*redraw_window)(uint32_t window, const void *rect, uint32_t region, uint32_t flags);  /* USER32 */
+    uint32_t (*load_library)(const char *name);                     /* KERNEL32 LoadLibraryA */
+    void *(*get_proc_address)(uint32_t library, const char *name);  /* KERNEL32 GetProcAddress */
+    int32_t (*free_library)(uint32_t library);                      /* KERNEL32 FreeLibrary */
+    uint32_t (*host_joystick_count)(void);                          /* HOST +0x1c0 */
+    int32_t (*set_scroll_pos_window)(uint32_t window, int32_t bar, int32_t position, int32_t redraw);  /* USER32 SetScrollPos */
+    int32_t (*get_scroll_pos_window)(uint32_t window, int32_t bar);  /* USER32 GetScrollPos */
+    int32_t (*set_scroll_range_window)(uint32_t window, int32_t bar, int32_t low, int32_t high, int32_t redraw);
+    int32_t (*get_scroll_range_window)(uint32_t window, int32_t bar, int32_t *low, int32_t *high);
+    int32_t (*enable_scroll_bar)(uint32_t window, uint32_t bar, uint32_t arrows);   /* USER32 EnableScrollBar */
+    int32_t (*client_to_screen)(uint32_t window, void *point);      /* USER32 ClientToScreen */
+    int32_t (*update_window)(uint32_t window);                       /* USER32 UpdateWindow */
+    int32_t (*format_two)(char *out, const char *format, const char *a, const char *b);   /* USER32 wsprintfA */
+    void (*string_format)(void *string, uint32_t id, uint32_t value);   /* CString::Format(UINT, ...) */
+    void (*check_list_init)(void *list, void *font, void *label);    /* CSimsCheckListBox::Init */
+    void (*check_list_enable)(void *list, int32_t index, int32_t enable);   /* CCheckListBox::Enable */
+    void (*check_list_set_check)(void *list, int32_t index, int32_t check); /* CCheckListBox::SetCheck */
+    int32_t (*check_list_get_check)(void *list, int32_t index);     /* CCheckListBox::GetCheck */
+    int32_t (*hot_key_create)(void *control, uint32_t style, const struct fs98_options_rect *rect, void *parent, uint32_t id);
+    void (*hot_key_init)(void *control, void *font, uint32_t flags);
+    int32_t (*hot_key_get)(void *control);
+    void (*hot_key_set)(void *control, int32_t key);
+    int32_t (*hot_joy_create)(void *control, uint32_t style, const struct fs98_options_rect *rect, void *parent, uint32_t id);
+    void (*hot_joy_init)(void *control, void *font, uint32_t flags);
+    uint32_t (*hot_joy_get)(void *control);
+    void (*hot_joy_set)(void *control, uint32_t joystick, uint32_t sense);
+    void (*host_key_name)(uint32_t key, char *out, uint32_t size);   /* HOST +0x200 */
+    void (*host_joystick_name)(uint32_t input, char *out, uint32_t size);   /* HOST +0x1d0 */
+    uint32_t (*host_dialog)(uint32_t id, void *block);               /* HOST +0x10c */
 };
 /* the Logbook's two function-local static CSimsFonts, laid out as in .data from
  * 0x223ac368, and the guard byte they share (0x223ac448: bit 1 the first, bit 2 the
@@ -248,6 +278,10 @@ FS98_OPTIONS_HANDLERS(prefs_international);
 FS98_OPTIONS_HANDLERS(prefs_display);
 FS98_OPTIONS_HANDLERS(prefs_sound);
 FS98_OPTIONS_HANDLERS(prefs_flight);
+FS98_OPTIONS_HANDLERS(controls);
+FS98_OPTIONS_HANDLERS(controls_sensitivity);
+FS98_OPTIONS_HANDLERS(controls_keys);
+FS98_OPTIONS_HANDLERS(controls_force);
 #undef FS98_OPTIONS_HANDLERS
 
 /* shared by every class (0x22392400, 0x22392410, 0x22392420, 0x223943d0, 0x22397c30,
@@ -455,5 +489,63 @@ uint32_t FS98_OPTIONS_THISCALL fs98_options_prefs_general_error(void *page);
 uint32_t FS98_OPTIONS_THISCALL fs98_options_prefs_error(void *object);
 void FS98_OPTIONS_THISCALL fs98_options_prefs_sound_box(void *page, uint32_t index);
 int32_t FS98_OPTIONS_THISCALL fs98_options_prefs_init(void *object);
+
+/* Customise controls and its pages (options_controls.c, options_keys.c) */
+void FS98_OPTIONS_THISCALL fs98_options_controls_force_master(void *object);
+void FS98_OPTIONS_THISCALL fs98_options_controls_force_box1(void *object);
+void FS98_OPTIONS_THISCALL fs98_options_controls_force_box2(void *object);
+void FS98_OPTIONS_THISCALL fs98_options_controls_force_box3(void *object);
+void FS98_OPTIONS_THISCALL fs98_options_controls_force_box4(void *object);
+void FS98_OPTIONS_THISCALL fs98_options_controls_force_box5(void *object);
+void FS98_OPTIONS_THISCALL fs98_options_controls_force_populate(void *object);
+void FS98_OPTIONS_THISCALL fs98_options_controls_force_init(void *object);
+void FS98_OPTIONS_THISCALL fs98_options_controls_fill_devices(void *object);
+void FS98_OPTIONS_THISCALL fs98_options_controls_show_mouse(void *object);
+void FS98_OPTIONS_THISCALL fs98_options_controls_show_keyboard(void *object);
+void FS98_OPTIONS_THISCALL fs98_options_controls_show_joystick(void *object);
+void FS98_OPTIONS_THISCALL fs98_options_controls_sensitivity_populate(void *object);
+void FS98_OPTIONS_THISCALL fs98_options_controls_reset(void *object);
+void FS98_OPTIONS_THISCALL fs98_options_controls_axis(void *object);
+void FS98_OPTIONS_THISCALL fs98_options_controls_device(void *object);
+void FS98_OPTIONS_THISCALL fs98_options_controls_scale(void *object);
+void FS98_OPTIONS_THISCALL fs98_options_controls_null_zone(void *object);
+void FS98_OPTIONS_THISCALL fs98_options_controls_reverse(void *object);
+void FS98_OPTIONS_THISCALL fs98_options_controls_joysticks(void *object);
+void FS98_OPTIONS_THISCALL fs98_options_controls_calibrate(void *object);
+void FS98_OPTIONS_THISCALL fs98_options_controls_sensitivity_init(void *object);
+void FS98_OPTIONS_THISCALL fs98_options_controls_cancel(void *object);
+void FS98_OPTIONS_THISCALL fs98_options_controls_read(void *object);
+void FS98_OPTIONS_THISCALL fs98_options_controls_accept(void *object);
+void FS98_OPTIONS_THISCALL fs98_options_controls_close(void *object);
+void FS98_OPTIONS_THISCALL fs98_options_controls_attach(void *object);
+void FS98_OPTIONS_THISCALL fs98_options_controls_force_box(void *page, uint32_t index);
+uint32_t FS98_OPTIONS_THISCALL fs98_options_controls_keyboard_axis(void *page, uint32_t k, uint32_t list);
+uint32_t FS98_OPTIONS_THISCALL fs98_options_controls_mouse_axis(void *page, uint32_t k, uint32_t list);
+uint32_t FS98_OPTIONS_THISCALL fs98_options_controls_row_axis(void *page, uint32_t n);
+int32_t FS98_OPTIONS_THISCALL fs98_options_controls_axis_row(void *page);
+void FS98_OPTIONS_THISCALL fs98_options_controls_fill_axes(void *page, uint32_t unused);
+int32_t FS98_OPTIONS_THISCALL fs98_options_controls_changed(void *page, uint32_t w_param, uint32_t l_param);
+uint32_t FS98_OPTIONS_THISCALL fs98_options_controls_error(void *object);
+int32_t FS98_OPTIONS_THISCALL fs98_options_controls_init(void *object);
+void FS98_OPTIONS_THISCALL fs98_options_keys_flight(void *page);
+void FS98_OPTIONS_THISCALL fs98_options_keys_slew(void *page);
+void FS98_OPTIONS_THISCALL fs98_options_keys_command(void *page);
+void FS98_OPTIONS_THISCALL fs98_options_keys_key(void *page);
+void FS98_OPTIONS_THISCALL fs98_options_keys_stick(void *page);
+void FS98_OPTIONS_THISCALL fs98_options_keys_check(void *page);
+void FS98_OPTIONS_THISCALL fs98_options_keys_clear(void *page);
+void FS98_OPTIONS_THISCALL fs98_options_keys_assign_key(void *page);
+void FS98_OPTIONS_THISCALL fs98_options_keys_assign_stick(void *page);
+void FS98_OPTIONS_THISCALL fs98_options_keys_assign(void *page);
+void FS98_OPTIONS_THISCALL fs98_options_keys_key_captured(void *page);
+void FS98_OPTIONS_THISCALL fs98_options_keys_stick_captured(void *page);
+void FS98_OPTIONS_THISCALL fs98_options_keys_reset(void *page);
+void FS98_OPTIONS_THISCALL fs98_options_keys_populate(void *page);
+void FS98_OPTIONS_THISCALL fs98_options_keys_init(void *page);
+void FS98_OPTIONS_THISCALL fs98_options_keys_top(void *page, int32_t top);
+void FS98_OPTIONS_THISCALL fs98_options_keys_joystick(void *page, uint32_t joystick);
+void FS98_OPTIONS_THISCALL fs98_options_keys_vertical(void *page, uint32_t code, uint32_t position, void *bar);
+void FS98_OPTIONS_THISCALL fs98_options_keys_horizontal(void *page, uint32_t code, uint32_t position, void *bar);
+int32_t FS98_OPTIONS_THISCALL fs98_options_keys_changed(void *page, uint32_t w_param, uint32_t l_param);
 
 #endif

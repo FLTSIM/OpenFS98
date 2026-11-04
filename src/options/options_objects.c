@@ -17,8 +17,11 @@ static uint32_t s_module;
 #define SPIN_CONSTRUCT 0x1d528     /* MFC CWnd(), under an inline CSimsSpinButtonCtrl */
 #define SPIN_DESTROY 0x1d524       /* ~CWnd */
 #define SPIN_UNWIND 0x1d6cc        /* ~CSimsSpinButtonCtrl: the cleanup funclets' (0x223a4202) */
-static void *s_spin_vtable;
+#define SCROLL_DESTROY 0x1d4b0     /* ~CScrollBar (MFC #783), under an inline CSimsScrollBar */
+#define SCROLL_UNWIND 0x1d67c      /* ~CSimsScrollBar: the funclets' (0x223a56ec) */
+static void *s_spin_vtable, *s_scroll_vtable;
 void fs98_options_set_spin_vtable(void *vtable) { s_spin_vtable = vtable; }
+void fs98_options_set_scroll_vtable(void *vtable) { s_scroll_vtable = vtable; }
 struct fs98_options_object_unwind {
     struct fs98_options_unwind frame;
     void *object;
@@ -31,13 +34,16 @@ static void fs98_options_object_cleanup(struct fs98_options_unwind *frame)
     struct fs98_options_object_unwind *state = (void *)frame;
     while (state->constructed) {
         const struct fs98_options_subobject *control = &state->class_info->controls[--state->constructed];
-        if (control->destructor == SPIN_DESTROY && !state->direct) {
-            /* 0x223a4202: an unwind destroys a spin button through SIMSUI's destructor */
-            s_services->destroy((uint8_t *)state->object + control->offset, SPIN_UNWIND);
+        if ((control->destructor == SPIN_DESTROY || control->destructor == SCROLL_DESTROY) && !state->direct) {
+            /* 0x223a4202, 0x223a56ec: an unwind destroys an inline spin button or scroll bar
+             * through SIMSUI's destructor */
+            s_services->destroy((uint8_t *)state->object + control->offset,
+                                control->destructor == SPIN_DESTROY ? SPIN_UNWIND : SCROLL_UNWIND);
             continue;
         }
-        /* 0x22396b82: the destructor puts SIMSUI's vtable back first */
+        /* 0x22396b82, 0x223a0ca3: the destructor puts SIMSUI's vtable back first */
         if (control->destructor == SPIN_DESTROY) PTR((uint8_t *)state->object + control->offset, 0) = s_spin_vtable;
+        if (control->destructor == SCROLL_DESTROY) PTR((uint8_t *)state->object + control->offset, 0) = s_scroll_vtable;
         s_services->destroy((uint8_t *)state->object + control->offset, control->destructor);
     }
     if (state->base) {
@@ -81,7 +87,9 @@ static FS98_OPTIONS_NOINLINE void *fs98_options_construct(void *object, void *pa
         /* 0x22398189: the Logbook's rows list is Options' own class, its vtable at once */
         /* 0x22396a38: a spin button, after CWnd(): Options' CSpinButtonCtrl vtable, at once
          * replaced by SIMSUI's. The first store is never seen and is left out. */
-        if (control->constructor == SPIN_CONSTRUCT) PTR((uint8_t *)object + control->offset, 0) = s_spin_vtable;
+        if (control->constructor == SPIN_CONSTRUCT)     /* 0x223a0bb8: a scroll bar likewise */
+            PTR((uint8_t *)object + control->offset, 0) =
+                control->destructor == SCROLL_DESTROY ? s_scroll_vtable : s_spin_vtable;
         if (kind == FS98_OPTIONS_BOOK && control->offset == 0x150c && control->constructor == LIST_CONSTRUCT)
             PTR((uint8_t *)object + control->offset, 0) = s_list_vtable;
         ++state.constructed;
@@ -118,9 +126,10 @@ static FS98_OPTIONS_NOINLINE void fs98_options_destroy(void *object, uint32_t ki
     state.object = object; state.class_info = &s_classes[kind];
     state.constructed = state.class_info->count; state.base = 1; state.direct = 1;
     fs98_options_unwind_enter(&state.frame, fs98_options_object_unwind);
-    /* 0x22393c3e, 0x2239b5be: Display options and Preferences declare their destructors,
-     * which store their vtables first */
-    if (kind == FS98_OPTIONS_DISPLAY || kind == FS98_OPTIONS_PREFS) PTR(object, 0) = s_vtables[kind];
+    /* 0x22393c3e, 0x2239b5be, 0x2239e56e: Display options, Preferences and Customise controls
+     * declare their destructors, which store their vtables first */
+    if (kind == FS98_OPTIONS_DISPLAY || kind == FS98_OPTIONS_PREFS || kind == FS98_OPTIONS_CONTROLS)
+        PTR(object, 0) = s_vtables[kind];
     fs98_options_object_cleanup(&state.frame);
     fs98_options_unwind_leave(&state.frame);
 }
@@ -207,4 +216,8 @@ OBJECT_CLASS(prefs_international, FS98_OPTIONS_PREFS_INTERNATIONAL)
 OBJECT_CLASS(prefs_display, FS98_OPTIONS_PREFS_DISPLAY)
 OBJECT_CLASS(prefs_sound, FS98_OPTIONS_PREFS_SOUND)
 OBJECT_CLASS(prefs_flight, FS98_OPTIONS_PREFS_FLIGHT)
+OBJECT_CLASS(controls, FS98_OPTIONS_CONTROLS)
+OBJECT_CLASS(controls_sensitivity, FS98_OPTIONS_CONTROLS_SENSITIVITY)
+OBJECT_CLASS(controls_keys, FS98_OPTIONS_CONTROLS_KEYS)
+OBJECT_CLASS(controls_force, FS98_OPTIONS_CONTROLS_FORCE)
 #undef OBJECT_CLASS

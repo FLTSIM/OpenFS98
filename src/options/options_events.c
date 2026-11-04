@@ -81,6 +81,9 @@ OPTIONS_CLASS(prefs_international) /* 0x223967e0, 0x22396800; 0x223965d0 */
 OPTIONS_CLASS(prefs_display)      /* 0x22392850, 0x22392870; 0x22392620 */
 OPTIONS_CLASS(prefs_sound)        /* 0x22391f70, 0x22391f90; 0x22391c00 */
 OPTIONS_CLASS(prefs_flight)       /* 0x2239b390, 0x2239b3b0; 0x2239b230 */
+OPTIONS_CLASS(controls_sensitivity) /* 0x2239f380, 0x2239f3a0; 0x2239eef0 */
+OPTIONS_CLASS(controls_keys)      /* 0x223a0ef0, 0x223a0f10; 0x223a0db0 */
+OPTIONS_CLASS(controls_force)     /* 0x223a29f0, 0x223a2a10; 0x223a2950 */
 #undef OPTIONS_CLASS
 /* the same, after CSimsDialog's own exchange */
 #define OPTIONS_CLASS_BASE(name) \
@@ -98,6 +101,7 @@ OPTIONS_CLASS_BASE(flight_video)  /* 0x2239cf50, 0x2239cf70; 0x2239ca60 */
 OPTIONS_CLASS_BASE(analysis)      /* 0x22395140, 0x22395160; 0x22394d00 */
 OPTIONS_CLASS_BASE(display)       /* 0x22393e60, 0x22393e80; 0x22393cf0 */
 OPTIONS_CLASS_BASE(prefs)         /* 0x2239b840, 0x2239b860; 0x2239b690 */
+OPTIONS_CLASS_BASE(controls)      /* 0x2239e750, 0x2239e770; 0x2239e610 */
 #undef OPTIONS_CLASS_BASE
 /* the controls, then each CString with its edit and its limit */
 static void exchange_texts(void *object, void *exchange, const uint16_t (*controls)[2], uint32_t count,

@@ -37,7 +37,8 @@ enum { FS98_OPTIONS_VIDEO_FINISHED, FS98_OPTIONS_VIDEO_MESSAGE, FS98_OPTIONS_SAV
        FS98_OPTIONS_DISPLAY_SCENERY, FS98_OPTIONS_DISPLAY_HARDWARE,
        FS98_OPTIONS_PREFS, FS98_OPTIONS_PREFS_GENERAL, FS98_OPTIONS_PREFS_INSTRUMENT,
        FS98_OPTIONS_PREFS_INTERNATIONAL, FS98_OPTIONS_PREFS_DISPLAY, FS98_OPTIONS_PREFS_SOUND,
-       FS98_OPTIONS_PREFS_FLIGHT, FS98_OPTIONS_CLASS_COUNT };
+       FS98_OPTIONS_PREFS_FLIGHT, FS98_OPTIONS_CONTROLS, FS98_OPTIONS_CONTROLS_SENSITIVITY,
+       FS98_OPTIONS_CONTROLS_KEYS, FS98_OPTIONS_CONTROLS_FORCE, FS98_OPTIONS_CLASS_COUNT };
 void fs98_options_set_object_services(const struct fs98_options_object_services *services,
                                       void *const *vtables);
 /* Options' own instance, which each factory stores at object +0x80 */
@@ -46,6 +47,8 @@ void fs98_options_set_object_module(uint32_t module);
 void fs98_options_set_object_list_vtable(void *vtable);
 /* SIMSUI's CSimsSpinButtonCtrl vtable, a data import: Instant replay builds two inline */
 void fs98_options_set_spin_vtable(void *vtable);
+/* SIMSUI's CSimsScrollBar vtable, a data import: the Keys page builds two inline */
+void fs98_options_set_scroll_vtable(void *vtable);
 #define FS98_OPTIONS_OBJECT(name) \
     void *FS98_OPTIONS_THISCALL fs98_options_##name##_construct(void *object, void *parent); \
     void FS98_OPTIONS_THISCALL fs98_options_##name##_destroy(void *object); \
@@ -75,5 +78,9 @@ FS98_OPTIONS_OBJECT(prefs_international);
 FS98_OPTIONS_OBJECT(prefs_display);
 FS98_OPTIONS_OBJECT(prefs_sound);
 FS98_OPTIONS_OBJECT(prefs_flight);
+FS98_OPTIONS_OBJECT(controls);
+FS98_OPTIONS_OBJECT(controls_sensitivity);
+FS98_OPTIONS_OBJECT(controls_keys);
+FS98_OPTIONS_OBJECT(controls_force);
 #undef FS98_OPTIONS_OBJECT
 #endif

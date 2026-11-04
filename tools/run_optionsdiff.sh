@@ -12,4 +12,4 @@ if [[ "${1:-}" == --breaks ]]; then
     wineserver -p60      # one server across the mutants' builds
     exec python3 -B tools/options_breaks.py "${2:-400}" "${@:3}"
 fi
-exec timeout 600s wine bin/options-diff/optionseventsdiff.exe "${1:-20000}" "${2:-0x5f1a6c2d}" "${3:-normal}"
+exec timeout 3600s wine bin/options-diff/optionseventsdiff.exe "${1:-20000}" "${2:-0x5f1a6c2d}" "${3:-normal}"

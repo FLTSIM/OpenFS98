@@ -68,6 +68,19 @@ void TC fs98_options_##name##_exchange(void *object, void *exchange) \
 }
 OPTIONS_CLASS(video_finished)   /* 0x2239dff0, 0x2239e010; 0x2239df00 */
 OPTIONS_CLASS(video_message)    /* 0x2239e430, 0x2239e450; 0x2239e170 */
+OPTIONS_CLASS(landing)          /* 0x22397fd0, 0x22397ff0; 0x22397ab0 */
+OPTIONS_CLASS(manoeuvre)        /* 0x2239b050, 0x2239b070; 0x2239ace0 */
+OPTIONS_CLASS(demo)             /* 0x2239c6c0, 0x2239c6e0; 0x2239c300 */
+OPTIONS_CLASS(display_aircraft)   /* 0x22392e30, 0x22392e50; 0x22392c30 */
+OPTIONS_CLASS(display_map)        /* 0x22393180, 0x223931a0; 0x22393070 */
+OPTIONS_CLASS(display_scenery)    /* 0x223948a0, 0x223948c0; 0x223945d0 */
+OPTIONS_CLASS(display_hardware)   /* 0x22393710, 0x22393730; 0x22393450 */
+OPTIONS_CLASS(prefs_general)      /* 0x22395ea0, 0x22395ec0; 0x22395a80 */
+OPTIONS_CLASS(prefs_instrument)   /* 0x223977d0, 0x223977f0; 0x22397650 */
+OPTIONS_CLASS(prefs_international) /* 0x223967e0, 0x22396800; 0x223965d0 */
+OPTIONS_CLASS(prefs_display)      /* 0x22392850, 0x22392870; 0x22392620 */
+OPTIONS_CLASS(prefs_sound)        /* 0x22391f70, 0x22391f90; 0x22391c00 */
+OPTIONS_CLASS(prefs_flight)       /* 0x2239b390, 0x2239b3b0; 0x2239b230 */
 #undef OPTIONS_CLASS
 /* the same, after CSimsDialog's own exchange */
 #define OPTIONS_CLASS_BASE(name) \
@@ -82,6 +95,9 @@ void TC fs98_options_##name##_exchange(void *object, void *exchange) \
 }
 OPTIONS_CLASS_BASE(save_video)    /* 0x2239dbd0, 0x2239dbf0; 0x2239d6f0 */
 OPTIONS_CLASS_BASE(flight_video)  /* 0x2239cf50, 0x2239cf70; 0x2239ca60 */
+OPTIONS_CLASS_BASE(analysis)      /* 0x22395140, 0x22395160; 0x22394d00 */
+OPTIONS_CLASS_BASE(display)       /* 0x22393e60, 0x22393e80; 0x22393cf0 */
+OPTIONS_CLASS_BASE(prefs)         /* 0x2239b840, 0x2239b860; 0x2239b690 */
 #undef OPTIONS_CLASS_BASE
 /* the controls, then each CString with its edit and its limit */
 static void exchange_texts(void *object, void *exchange, const uint16_t (*controls)[2], uint32_t count,
@@ -101,6 +117,17 @@ void TC fs98_options_add_logbook_exchange(void *object, void *exchange)
 {
     static const uint32_t texts[][3] = {{0x1400, 0x11a4, 0xf0}};
     exchange_texts(object, exchange, s_ddx_add_logbook, s_ddx_count_add_logbook, texts, 1);
+}
+OPTIONS_HELP(replay)              /* 0x22397110, 0x22397130 */
+/* 0x22396c30: CSimsDialog's own exchange, the controls, then the speed as an int, 0..100 */
+void TC fs98_options_replay_exchange(void *object, void *exchange)
+{
+    uint32_t index;
+    s_services->base_exchange(object, exchange);
+    for (index = 0; index < (uint32_t)s_ddx_count_replay; ++index)
+        s_services->ddx_control(exchange, s_ddx_replay[index][1], AT(object, s_ddx_replay[index][0]));
+    s_services->ddx_int(exchange, 0x119d, (int32_t *)AT(object, 0x1a34));
+    s_services->ddv_min_max(exchange, *(int32_t *)AT(object, 0x1a34), 0, 0x64);
 }
 OPTIONS_HELP(book)                /* 0x22398a50, 0x22398a70 */
 /* 0x223983a0: CSimsDialog's own exchange, the controls, then the title's CString (0x1e) */

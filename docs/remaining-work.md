@@ -11,7 +11,7 @@ Results here are from 2026-11-01.
 
 | Binary | `.text` | Status | Where |
 | --- | --- | --- | --- |
-| `English/Options.DLL` | 84,381 | **In progress** (2026-11-03): 7 of 15 registrations (the video and logbook dialogs) verified in its harness (`tools/options.mk`); no DLL yet | [options.md](modules/options.md) |
+| `English/Options.DLL` | 84,381 | **In progress** (2026-11-03): 10 of 15 registrations (the video, logbook and analysis dialogs) verified in its harness (`tools/options.mk`); no DLL yet | [options.md](modules/options.md) |
 | `FLTSIM98.EXE` | 82,016 | **No executable.** All 194 services are reimplemented and verified in-process as `HOST.DLL`; retail's still runs the game | [host.md](modules/host.md) |
 | `SIMSUI.DLL` | 79,850 | **Not started.** 540 named exports, the common dialog and control widgets. Every dialog imports it | [dialogs.md](modules/dialogs.md) |
 | `Sim/SIM1.sim` | 78,216 | **Not started.** The flight model: every aircraft's `.AIR` names `sim1`. A module DLL, id 25, 15-entry Linkage, wanting 10 modules. Not in `orig/` | [below](#sim1-and-the-mdls) |

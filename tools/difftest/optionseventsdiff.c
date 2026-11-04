@@ -13,7 +13,10 @@
  * Covered: the helpers every class shares, Video finished (0x14040003), Video message
  * (0x14040002), Save video (0x14040001), Flight video (0x1404) and their CNotify, Add
  * logbook (0x14070001), Logbook entry (0x14070002) and the Logbook (0x1407) with its rows
- * list's class. */
+ * list's class, and ANALYSIS's landing (0x14050002) and manoeuvre (0x14050003) graphs and
+ * its options, Flight analysis (0x1405), DEMO's Instant replay (0x1403), and MAIN's Select
+ * demo (0x14090002), and Display options (0x14090001) and Preferences (0x1409) with their tab
+ * pages. */
 #include <windows.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -46,7 +49,7 @@
 
 struct fixture {
     uint8_t guard_before[32];
-    uint8_t object[0x2400];
+    uint8_t object[0x3000];         /* up to the Sound page's 0x2dbc */
     uint8_t descriptor[2][0x200];   /* MAIN's logbook block reaches +0x154 */
     uint8_t notify[0x2a0];
     uint8_t record_before[0xa08];   /* record -1: with no selection the pick is -1 */
@@ -58,10 +61,15 @@ struct fixture {
     uint8_t rows[6][0x4f];          /* and a logbook's rows */
     char fields[7][0x50];           /* what a row opens with */
     struct fs98_options_book_state book;
+    uint8_t graph[0x40];            /* the graph control GetDlgItem finds */
+    uint8_t dc[0x60];               /* a paint DC given to the landing's scale */
+    char buffer[0x110];             /* a CString's GetBuffer */
     char empty[4];
     uint8_t info[32];
     uint8_t exchange[32];
     uint8_t font[32];
+    uint8_t pages[6][0x2e00];       /* the pages Display options and Preferences make */
+    char *names[2][7];              /* MAIN's driver and mode lists */
     uint8_t guard_after[32];
 };
 static struct fixture s_fixture, s_initial, s_retail_result;
@@ -71,12 +79,12 @@ static uint32_t s_calls, s_log_length, s_throw_at, s_saved_seh;
 static uint32_t s_max_calls, s_throws, s_comparisons, s_swaps, s_allocation_faults, s_no_descriptor;
 static int s_side;
 static char s_logs[2][LOG_SIZE];
-static void *s_vtable[64], *s_other_vtable[64], *s_control_vtable[64], *s_jump[5];
+static void *s_vtable[64], *s_other_vtable[64], *s_control_vtable[64], *s_dc_vtable[64], *s_jump[5];
 static void *s_host_table[0x300 / 4];
 
 enum signature {
     SIG_EVENT, SIG_HELP, SIG_CONTEXT, SIG_EXCHANGE, SIG_INT, SIG_EMPTY_ARG, SIG_INT_ARG, SIG_NOTIFY_DELETE,
-    SIG_EXIT, SIG_SCROLL, SIG_LIST_DELETE,
+    SIG_EXIT, SIG_SCROLL, SIG_LIST_DELETE, SIG_DRAW, SIG_SCALE,
     SIG_CONSTRUCT, SIG_DESTROY, SIG_DELETE, SIG_CREATE, SIG_ROUNDTRIP, SIG_CONSTRUCT_DELETE
 };
 struct operation { uint32_t rva; void *ours; enum signature signature; uint32_t kind; const char *name; };
@@ -88,6 +96,13 @@ struct operation { uint32_t rva; void *ours; enum signature signature; uint32_t 
 #define ADD_LOGBOOK(rva, name, signature) {rva, (void *)fs98_options_##name, signature, FS98_OPTIONS_ADD_LOGBOOK, #name}
 #define LOGBOOK_ENTRY(rva, name, signature) {rva, (void *)fs98_options_##name, signature, FS98_OPTIONS_LOGBOOK_ENTRY, #name}
 #define BOOK(rva, name, signature) {rva, (void *)fs98_options_##name, signature, FS98_OPTIONS_BOOK, #name}
+#define LANDING(rva, name, signature) {rva, (void *)fs98_options_##name, signature, FS98_OPTIONS_LANDING, #name}
+#define MANOEUVRE(rva, name, signature) {rva, (void *)fs98_options_##name, signature, FS98_OPTIONS_MANOEUVRE, #name}
+#define ANALYSIS(rva, name, signature) {rva, (void *)fs98_options_##name, signature, FS98_OPTIONS_ANALYSIS, #name}
+#define REPLAY(rva, name, signature) {rva, (void *)fs98_options_##name, signature, FS98_OPTIONS_REPLAY, #name}
+#define DEMO(rva, name, signature) {rva, (void *)fs98_options_##name, signature, FS98_OPTIONS_DEMO, #name}
+#define DISPLAY(rva, name, signature, kind) {rva, (void *)fs98_options_##name, signature, kind, #name}
+#define SPIN_VTABLE 0x5b1a0000      /* SIMSUI's CSimsSpinButtonCtrl vtable, a data import */
 #define CLASS(help, context, ddx, name, kind) \
     {help, (void *)fs98_options_##name##_help, SIG_HELP, kind, #name "_help"}, \
     {context, (void *)fs98_options_##name##_context, SIG_CONTEXT, kind, #name "_context"}, \
@@ -97,6 +112,14 @@ struct operation { uint32_t rva; void *ours; enum signature signature; uint32_t 
     {0, (void *)fs98_options_##name##_destroy, SIG_DESTROY, kind, #name "_destroy"}, \
     {0, (void *)fs98_options_##name##_delete, SIG_DELETE, kind, #name "_delete"}, \
     {0, (void *)fs98_options_##name##_create, SIG_CREATE, kind, #name "_create"}, \
+    {0, (void *)fs98_options_##name##_construct, SIG_ROUNDTRIP, kind, #name "_roundtrip"}, \
+    {0, (void *)fs98_options_##name##_construct, SIG_CONSTRUCT_DELETE, kind, #name "_construct_delete"}
+/* a tab page has no factory: its place in the six is a second construction */
+#define PAGE_LIFETIME(kind, name) \
+    {0, (void *)fs98_options_##name##_construct, SIG_CONSTRUCT, kind, #name "_construct"}, \
+    {0, (void *)fs98_options_##name##_destroy, SIG_DESTROY, kind, #name "_destroy"}, \
+    {0, (void *)fs98_options_##name##_delete, SIG_DELETE, kind, #name "_delete"}, \
+    {0, (void *)fs98_options_##name##_construct, SIG_CONSTRUCT, kind, #name "_construct_again"}, \
     {0, (void *)fs98_options_##name##_construct, SIG_ROUNDTRIP, kind, #name "_roundtrip"}, \
     {0, (void *)fs98_options_##name##_construct, SIG_CONSTRUCT_DELETE, kind, #name "_construct_delete"}
 static const struct operation s_operations[] = {
@@ -157,6 +180,121 @@ static const struct operation s_operations[] = {
     {0x8a40, (void *)fs98_options_book_total_font_destroy, SIG_EXIT, FS98_OPTIONS_BOOK, "book_total_font_destroy"},
     {0x8a30, (void *)fs98_options_book_rows_font_destroy, SIG_EXIT, FS98_OPTIONS_BOOK, "book_rows_font_destroy"},
     LIFETIME(FS98_OPTIONS_BOOK, book),
+    CLASS(0x7fd0, 0x7ff0, 0x7ab0, landing, FS98_OPTIONS_LANDING),
+    LANDING(0x7b70, landing_draw, SIG_DRAW), LANDING(0x7ba0, landing_accept, SIG_EVENT),
+    LANDING(0x7bf0, landing_cancel, SIG_EVENT), LANDING(0x7c40, landing_init, SIG_INT),
+    LANDING(0x7d90, landing_scale, SIG_SCALE), LANDING(0x8060, landing_paint, SIG_EVENT),
+    LANDING(0x8010, landing_set_up, SIG_EVENT), LANDING(0x8030, landing_has_descriptor, SIG_INT),
+    LIFETIME(FS98_OPTIONS_LANDING, landing),
+    CLASS(0xb050, 0xb070, 0xace0, manoeuvre, FS98_OPTIONS_MANOEUVRE),
+    MANOEUVRE(0xad50, manoeuvre_draw, SIG_DRAW), MANOEUVRE(0xae90, manoeuvre_accept, SIG_EVENT),
+    MANOEUVRE(0xaee0, manoeuvre_cancel, SIG_EVENT), MANOEUVRE(0xaf20, manoeuvre_init, SIG_INT),
+    MANOEUVRE(0xb090, manoeuvre_set_up, SIG_EVENT), MANOEUVRE(0xb0b0, manoeuvre_has_descriptor, SIG_INT),
+    LIFETIME(FS98_OPTIONS_MANOEUVRE, manoeuvre),
+    CLASS(0x5140, 0x5160, 0x4d00, analysis, FS98_OPTIONS_ANALYSIS),
+    ANALYSIS(0x4e10, analysis_cancel, SIG_EVENT), ANALYSIS(0x4e30, analysis_accept, SIG_EVENT),
+    ANALYSIS(0x4e70, analysis_init, SIG_INT), ANALYSIS(0x5180, analysis_off, SIG_EVENT),
+    ANALYSIS(0x5200, analysis_third, SIG_EVENT), ANALYSIS(0x5280, analysis_first, SIG_EVENT),
+    ANALYSIS(0x5300, analysis_second, SIG_EVENT), ANALYSIS(0x5380, analysis_nothing, SIG_EVENT),
+    ANALYSIS(0x5390, analysis_read, SIG_EVENT), ANALYSIS(0x54e0, analysis_populate, SIG_EVENT),
+    ANALYSIS(0x5620, analysis_error, SIG_INT), ANALYSIS(0x57e0, has_descriptor, SIG_INT),
+    LIFETIME(FS98_OPTIONS_ANALYSIS, analysis),
+    CLASS(0x7110, 0x7130, 0x6c30, replay, FS98_OPTIONS_REPLAY),
+    REPLAY(0x6d70, notify_close, SIG_EVENT), REPLAY(0x6d90, replay_cancel, SIG_EVENT),
+    REPLAY(0x6db0, replay_accept, SIG_EVENT), REPLAY(0x6df0, replay_init, SIG_INT),
+    REPLAY(0x7150, replay_populate, SIG_EVENT), REPLAY(0x72d0, replay_has_descriptor, SIG_INT),
+    REPLAY(0x72e0, replay_validate, SIG_INT_ARG), REPLAY(0x73d0, replay_error, SIG_INT_ARG),
+    LIFETIME(FS98_OPTIONS_REPLAY, replay),
+    CLASS(0xc6c0, 0xc6e0, 0xc300, demo, FS98_OPTIONS_DEMO),
+    DEMO(0x6d70, notify_close, SIG_EVENT), DEMO(0xc660, demo_cancel, SIG_EVENT),
+    DEMO(0xc690, demo_accept, SIG_EVENT), DEMO(0xc3b0, demo_init, SIG_INT),
+    DEMO(0xc5a0, demo_select, SIG_EVENT), DEMO(0xc700, demo_read, SIG_EVENT),
+    DEMO(0xc730, demo_populate, SIG_EVENT), DEMO(0xc7c0, demo_has_descriptor, SIG_INT),
+    LIFETIME(FS98_OPTIONS_DEMO, demo),
+    CLASS(0x3e60, 0x3e80, 0x3cf0, display, FS98_OPTIONS_DISPLAY),
+    DISPLAY(0x3da0, display_cancel, SIG_EVENT, FS98_OPTIONS_DISPLAY), DISPLAY(0x3dc0, display_accept, SIG_EVENT, FS98_OPTIONS_DISPLAY),
+    DISPLAY(0x3e20, display_close, SIG_EVENT, FS98_OPTIONS_DISPLAY), DISPLAY(0x3ea0, display_init, SIG_INT, FS98_OPTIONS_DISPLAY),
+    DISPLAY(0x42b0, display_read, SIG_EVENT, FS98_OPTIONS_DISPLAY), DISPLAY(0x42f0, display_attach, SIG_EVENT, FS98_OPTIONS_DISPLAY),
+    DISPLAY(0x4360, display_error, SIG_INT, FS98_OPTIONS_DISPLAY),
+    LIFETIME(FS98_OPTIONS_DISPLAY, display),
+    CLASS(0x2e30, 0x2e50, 0x2c30, display_aircraft, FS98_OPTIONS_DISPLAY_AIRCRAFT),
+    DISPLAY(0x2d50, display_aircraft_init, SIG_EVENT, FS98_OPTIONS_DISPLAY_AIRCRAFT),
+    DISPLAY(0x2e70, display_aircraft_read, SIG_EVENT, FS98_OPTIONS_DISPLAY_AIRCRAFT),
+    DISPLAY(0x2ec0, display_aircraft_populate, SIG_EVENT, FS98_OPTIONS_DISPLAY_AIRCRAFT),
+    PAGE_LIFETIME(FS98_OPTIONS_DISPLAY_AIRCRAFT, display_aircraft),
+    CLASS(0x3180, 0x31a0, 0x3070, display_map, FS98_OPTIONS_DISPLAY_MAP),
+    DISPLAY(0x30e0, display_map_init, SIG_EVENT, FS98_OPTIONS_DISPLAY_MAP),
+    DISPLAY(0x31c0, display_map_read, SIG_EVENT, FS98_OPTIONS_DISPLAY_MAP),
+    DISPLAY(0x3200, display_map_populate, SIG_EVENT, FS98_OPTIONS_DISPLAY_MAP),
+    PAGE_LIFETIME(FS98_OPTIONS_DISPLAY_MAP, display_map),
+    CLASS(0x48a0, 0x48c0, 0x45d0, display_scenery, FS98_OPTIONS_DISPLAY_SCENERY),
+    DISPLAY(0x46c0, display_scenery_init, SIG_EVENT, FS98_OPTIONS_DISPLAY_SCENERY),
+    DISPLAY(0x48e0, display_scenery_read, SIG_EVENT, FS98_OPTIONS_DISPLAY_SCENERY),
+    DISPLAY(0x4990, display_scenery_populate, SIG_EVENT, FS98_OPTIONS_DISPLAY_SCENERY),
+    DISPLAY(0x4a60, display_scenery_enable, SIG_EVENT, FS98_OPTIONS_DISPLAY_SCENERY),
+    PAGE_LIFETIME(FS98_OPTIONS_DISPLAY_SCENERY, display_scenery),
+    CLASS(0x3710, 0x3730, 0x3450, display_hardware, FS98_OPTIONS_DISPLAY_HARDWARE),
+    DISPLAY(0x3540, display_hardware_init, SIG_EVENT, FS98_OPTIONS_DISPLAY_HARDWARE),
+    DISPLAY(0x3750, display_hardware_read, SIG_EVENT, FS98_OPTIONS_DISPLAY_HARDWARE),
+    DISPLAY(0x37e0, display_hardware_populate, SIG_EVENT, FS98_OPTIONS_DISPLAY_HARDWARE),
+    DISPLAY(0x38d0, display_hardware_fill_drivers, SIG_EVENT, FS98_OPTIONS_DISPLAY_HARDWARE),
+    DISPLAY(0x3950, display_hardware_list_drivers, SIG_EVENT, FS98_OPTIONS_DISPLAY_HARDWARE),
+    DISPLAY(0x3990, display_hardware_fill_modes, SIG_EVENT, FS98_OPTIONS_DISPLAY_HARDWARE),
+    DISPLAY(0x3a10, display_hardware_list_modes, SIG_EVENT, FS98_OPTIONS_DISPLAY_HARDWARE),
+    DISPLAY(0x3a80, display_hardware_accelerate, SIG_EVENT, FS98_OPTIONS_DISPLAY_HARDWARE),
+    DISPLAY(0x3ac0, display_hardware_refresh, SIG_EVENT, FS98_OPTIONS_DISPLAY_HARDWARE),
+    DISPLAY(0x3af0, display_hardware_driver, SIG_EVENT, FS98_OPTIONS_DISPLAY_HARDWARE),
+    DISPLAY(0x3b10, display_hardware_changed, SIG_EVENT, FS98_OPTIONS_DISPLAY_HARDWARE),
+    PAGE_LIFETIME(FS98_OPTIONS_DISPLAY_HARDWARE, display_hardware),
+    CLASS(0xb840, 0xb860, 0xb690, prefs, FS98_OPTIONS_PREFS),
+    DISPLAY(0xb780, prefs_cancel, SIG_EVENT, FS98_OPTIONS_PREFS), DISPLAY(0xb7a0, prefs_accept, SIG_EVENT, FS98_OPTIONS_PREFS),
+    DISPLAY(0xb800, prefs_close, SIG_EVENT, FS98_OPTIONS_PREFS), DISPLAY(0xb880, prefs_defaults, SIG_EVENT, FS98_OPTIONS_PREFS),
+    DISPLAY(0xb9d0, prefs_init, SIG_INT, FS98_OPTIONS_PREFS), DISPLAY(0xbef0, prefs_read, SIG_EVENT, FS98_OPTIONS_PREFS),
+    DISPLAY(0xbf40, prefs_attach, SIG_EVENT, FS98_OPTIONS_PREFS), DISPLAY(0xc0b0, prefs_error, SIG_INT, FS98_OPTIONS_PREFS),
+    LIFETIME(FS98_OPTIONS_PREFS, prefs),
+    CLASS(0x5ea0, 0x5ec0, 0x5a80, prefs_general, FS98_OPTIONS_PREFS_GENERAL),
+    DISPLAY(0x6390, prefs_general_choose, SIG_EVENT, FS98_OPTIONS_PREFS_GENERAL),
+    DISPLAY(0x5bc0, prefs_general_first, SIG_EVENT, FS98_OPTIONS_PREFS_GENERAL),
+    DISPLAY(0x5be0, prefs_general_second, SIG_EVENT, FS98_OPTIONS_PREFS_GENERAL),
+    DISPLAY(0x5ee0, prefs_general_read, SIG_EVENT, FS98_OPTIONS_PREFS_GENERAL),
+    DISPLAY(0x5fd0, prefs_general_populate, SIG_EVENT, FS98_OPTIONS_PREFS_GENERAL),
+    DISPLAY(0x5c00, prefs_general_init, SIG_EVENT, FS98_OPTIONS_PREFS_GENERAL),
+    DISPLAY(0x60d0, prefs_general_error, SIG_INT, FS98_OPTIONS_PREFS_GENERAL),
+    PAGE_LIFETIME(FS98_OPTIONS_PREFS_GENERAL, prefs_general),
+    CLASS(0x77d0, 0x77f0, 0x7650, prefs_instrument, FS98_OPTIONS_PREFS_INSTRUMENT),
+    DISPLAY(0x7810, prefs_instrument_read, SIG_EVENT, FS98_OPTIONS_PREFS_INSTRUMENT),
+    DISPLAY(0x7880, prefs_instrument_populate, SIG_EVENT, FS98_OPTIONS_PREFS_INSTRUMENT),
+    DISPLAY(0x76d0, prefs_instrument_init, SIG_EVENT, FS98_OPTIONS_PREFS_INSTRUMENT),
+    PAGE_LIFETIME(FS98_OPTIONS_PREFS_INSTRUMENT, prefs_instrument),
+    CLASS(0x67e0, 0x6800, 0x65d0, prefs_international, FS98_OPTIONS_PREFS_INTERNATIONAL),
+    DISPLAY(0x6820, prefs_international_read, SIG_EVENT, FS98_OPTIONS_PREFS_INTERNATIONAL),
+    DISPLAY(0x68e0, prefs_international_populate, SIG_EVENT, FS98_OPTIONS_PREFS_INTERNATIONAL),
+    DISPLAY(0x66b0, prefs_international_init, SIG_EVENT, FS98_OPTIONS_PREFS_INTERNATIONAL),
+    PAGE_LIFETIME(FS98_OPTIONS_PREFS_INTERNATIONAL, prefs_international),
+    CLASS(0x2850, 0x2870, 0x2620, prefs_display, FS98_OPTIONS_PREFS_DISPLAY),
+    DISPLAY(0x2890, prefs_display_read, SIG_EVENT, FS98_OPTIONS_PREFS_DISPLAY),
+    DISPLAY(0x2910, prefs_display_populate, SIG_EVENT, FS98_OPTIONS_PREFS_DISPLAY),
+    DISPLAY(0x26d0, prefs_display_button, SIG_EVENT, FS98_OPTIONS_PREFS_DISPLAY),
+    DISPLAY(0x29d0, prefs_display_preset, SIG_EVENT, FS98_OPTIONS_PREFS_DISPLAY),
+    DISPLAY(0x2a10, prefs_display_other, SIG_EVENT, FS98_OPTIONS_PREFS_DISPLAY),
+    DISPLAY(0x2a60, prefs_display_box, SIG_EVENT, FS98_OPTIONS_PREFS_DISPLAY),
+    DISPLAY(0x2700, prefs_display_init, SIG_EVENT, FS98_OPTIONS_PREFS_DISPLAY),
+    PAGE_LIFETIME(FS98_OPTIONS_PREFS_DISPLAY, prefs_display),
+    CLASS(0x1f70, 0x1f90, 0x1c00, prefs_sound, FS98_OPTIONS_PREFS_SOUND),
+    DISPLAY(0x2050, prefs_sound_read, SIG_EVENT, FS98_OPTIONS_PREFS_SOUND),
+    DISPLAY(0x2190, prefs_sound_populate, SIG_EVENT, FS98_OPTIONS_PREFS_SOUND),
+    DISPLAY(0x1fb0, prefs_sound_box0, SIG_EVENT, FS98_OPTIONS_PREFS_SOUND),
+    DISPLAY(0x1fd0, prefs_sound_box1, SIG_EVENT, FS98_OPTIONS_PREFS_SOUND),
+    DISPLAY(0x1ff0, prefs_sound_box2, SIG_EVENT, FS98_OPTIONS_PREFS_SOUND),
+    DISPLAY(0x2010, prefs_sound_box3, SIG_EVENT, FS98_OPTIONS_PREFS_SOUND),
+    DISPLAY(0x2030, prefs_sound_box4, SIG_EVENT, FS98_OPTIONS_PREFS_SOUND),
+    DISPLAY(0x1d10, prefs_sound_init, SIG_EVENT, FS98_OPTIONS_PREFS_SOUND),
+    PAGE_LIFETIME(FS98_OPTIONS_PREFS_SOUND, prefs_sound),
+    CLASS(0xb390, 0xb3b0, 0xb230, prefs_flight, FS98_OPTIONS_PREFS_FLIGHT),
+    DISPLAY(0xb3d0, prefs_flight_read, SIG_EVENT, FS98_OPTIONS_PREFS_FLIGHT),
+    DISPLAY(0xb420, prefs_flight_populate, SIG_EVENT, FS98_OPTIONS_PREFS_FLIGHT),
+    DISPLAY(0xb2b0, prefs_flight_init, SIG_EVENT, FS98_OPTIONS_PREFS_FLIGHT),
+    PAGE_LIFETIME(FS98_OPTIONS_PREFS_FLIGHT, prefs_flight),
 };
 #define OP_COUNT (sizeof(s_operations) / sizeof(s_operations[0]))
 #define OP s_operations[s_operation]
@@ -199,6 +337,8 @@ static void put(const char *format, ...)
 static uint32_t descriptor_offset(void)
 {
     uint32_t at = s_classes[OP.kind].descriptor;
+    if (OP.kind == FS98_OPTIONS_PREFS_SOUND) return 0x111c;
+    if (s_classes[OP.kind].page) return 0x1118;     /* a page's part of the block */
     return at ? at : 0x10dc;
 }
 static void mutate(void)
@@ -216,7 +356,9 @@ static void mutate(void)
     if (s_script & 2) {
         descriptor = PTR(object, descriptor_offset());
         if (descriptor == s_fixture.descriptor[0] || descriptor == s_fixture.descriptor[1]) {
-            D32(descriptor, 0) ^= 0x10;
+            /* the answer; on the Hardware page MAIN's callbacks, so another word */
+            if (OP.kind == FS98_OPTIONS_DISPLAY_HARDWARE) D32(descriptor, 0x14) ^= 0x10;
+            else D32(descriptor, 0) ^= 0x10;
             if (OP.kind == FS98_OPTIONS_SAVE_VIDEO) D32(descriptor, 0x18) ^= 0x1004;
             if (OP.kind == FS98_OPTIONS_FLIGHT_VIDEO) {
                 if (D32(descriptor, 0x28) < 4) D32(descriptor, 0x28) ^= 1;     /* another pick, never before the list */
@@ -239,6 +381,20 @@ static void mutate(void)
             D32(PTR(object, part), 0x44) ^= 0x1003;
         }
     }
+    if (OP.kind == FS98_OPTIONS_DISPLAY_HARDWARE && (s_script & 2)) {      /* the lists' rooms */
+        uint8_t *block = PTR(object, 0x1118);
+        if (block == s_fixture.descriptor[0] || block == s_fixture.descriptor[1]) {
+            D32(block, 0x18) ^= 1;
+            D32(block, 0x24) ^= 2;
+        }
+    }
+    if (OP.kind == FS98_OPTIONS_DEMO && (s_script & 2)) {
+        uint8_t *block = PTR(object, 0x10e0);
+        if (block == s_fixture.descriptor[0] || block == s_fixture.descriptor[1]) {
+            D32(block, 0x14) = (D32(block, 0x14) + 1) % 5;
+            D32(block, 0x10) ^= 1;
+        }
+    }
     if (OP.kind == FS98_OPTIONS_BOOK && (s_script & 2)) {
         uint8_t *block = PTR(object, 0x10fc);
         if (block == s_fixture.descriptor[0] || block == s_fixture.descriptor[1]) {
@@ -248,7 +404,9 @@ static void mutate(void)
     }
     if (s_script & 4) PTR(object, 0) = s_other_vtable;
     if (s_script & 8) D32(object, OP.kind == FS98_OPTIONS_BOOK ? 0x15dc : OP.kind == FS98_OPTIONS_SAVE_VIDEO ? 0x1460 :
-                              OP.kind == FS98_OPTIONS_FLIGHT_VIDEO ? 0x1418 : 0x1100) = s_seed ^ 0x12345678;
+                              OP.kind == FS98_OPTIONS_FLIGHT_VIDEO ? 0x1418 :
+                              OP.kind == FS98_OPTIONS_DEMO ? 0x1554 :
+                              OP.kind == FS98_OPTIONS_DISPLAY_MAP || OP.kind == FS98_OPTIONS_DISPLAY_HARDWARE ? 0x12b4 : 0x1100) = s_seed ^ 0x12345678;
 }
 
 /* ---- the object's own virtuals --------------------------------------------------------- */
@@ -306,6 +464,31 @@ static int32_t TC virtual_check(void *control, void *font, uint32_t bitmap, void
         offset(dib), offset(palette), module);
     mutate(); return (int32_t)s_seed;
 }
+/* vtable +0xe8, the dialog's frame: six arguments */
+static int32_t TC virtual_frame(void *object, int32_t a, int32_t b, int32_t c, int32_t d, int32_t e, uint32_t module)
+{ put("virtual.frame %u %d %d %d %d %d %x\n", offset(object), a, b, c, d, e, module); mutate(); return (int32_t)s_seed; }
+static int32_t TC replaced_frame(void *object, int32_t a, int32_t b, int32_t c, int32_t d, int32_t e, uint32_t module)
+{ put("other.frame\n"); return virtual_frame(object, a, b, c, d, e, module); }
+/* MAIN's driver block's callbacks, given the block: list the drivers, the modes, refresh */
+static uint32_t SC driver_list(void *block)
+{
+    put("drivers %u chosen=%u\n", offset(block), D32(block, 0x20)); mutate();
+    D32(block, 0x20) = (s_seed >> 3) % 4; D32(block, 0x30) = (s_seed >> 7) & 1;
+    return 0;
+}
+static uint32_t SC driver_modes(void *block)
+{
+    put("modes %u chosen=%u\n", offset(block), D32(block, 0x2c)); mutate();
+    D32(block, 0x2c) = (s_seed >> 4) % 5; D32(block, 0x24) = (D32(block, 0x24) + 1) % 8;
+    return 0;
+}
+static uint32_t SC driver_refresh(void *block)
+{ put("refresh %u\n", offset(block)); mutate(); D32(block, 0x18) = (s_seed >> 9) % 8; return 0; }
+/* MAIN's Preferences callbacks, each given the block */
+#define BLOCK_CALLBACK(n) static uint32_t SC block_callback_##n(void *block) \
+{ put("callback %u %u\n", n, offset(block)); mutate(); return s_seed; }
+BLOCK_CALLBACK(0) BLOCK_CALLBACK(1) BLOCK_CALLBACK(2) BLOCK_CALLBACK(3) BLOCK_CALLBACK(4)
+#undef BLOCK_CALLBACK
 /* DEMO's delete and edit, given the descriptor (and the record): refused one time in three */
 static uint32_t SC descriptor_delete(void *descriptor)
 { put("delete %u pick=%u\n", offset(descriptor), D32(descriptor, 0x28)); mutate(); return (s_seed >> 10) % 3 ? 0 : s_seed; }
@@ -316,6 +499,14 @@ static uint32_t SC descriptor_edit(void *descriptor, void *record)
     mutate();
     return (s_seed >> 11) % 3 == 0 ? 0x1004 : (s_seed >> 11) % 3 == 1 ? 0 : 0x100d;
 }
+/* ANALYSIS's graph control: an operation, the block, the graph's window */
+static uint32_t SC graph_control(uint32_t operation, void *block, uint32_t window)
+{ put("graph %u block=%u window=%u\n", operation, offset(block), window); mutate(); return s_seed; }
+/* the paint DC's own virtuals */
+static uint32_t TC dc_text_color(void *dc, uint32_t color)
+{ put("dc.color %u %x\n", where(dc), color); mutate(); return 0; }
+static int32_t TC dc_text_out(void *dc, int32_t x, int32_t y, const char *text, int32_t length)
+{ put("dc.text %u %d,%d [%.*s] %d\n", where(dc), x, y, length, text, length); mutate(); return 1; }
 /* MAIN's lb_button: an operation, an index, the block */
 static uint32_t SC book_button(uint32_t operation, uint32_t index, void *block)
 {
@@ -435,6 +626,9 @@ static int32_t error_dialog(void *object, void *control, uint32_t code)
 {
     put("error.dialog %u control=%u code=%x style=%x/%x\n", offset(object), offset(control), code,
         D32(object, 0x90), D32(object, 0x94));
+    if (where((void *)(uintptr_t)code) != 0xffffffff)   /* an error block: its status, text and limit */
+        put("  block %x [%s] %d\n", D32((void *)(uintptr_t)code, 0), (char *)PTR((void *)(uintptr_t)code, 4),
+            (int32_t)D32((void *)(uintptr_t)code, 8));
     mutate(); return (s_seed >> (s_calls % 16)) & 1 ? (int32_t)s_seed : 0;
 }
 static uint32_t get_focus(void) { put("get.focus\n"); mutate(); return s_seed ^ 0xf0c5; }
@@ -581,6 +775,99 @@ static int32_t format_text(char *out, const char *format, const char *text)
 { put("sprintf [%s] [%s]\n", format, shown(text)); mutate(); return sprintf(out, format, text); }
 static void destroy_control(void *control, uint32_t import);
 static void list_destroy(void *list) { destroy_control(list, 0x1d6ac); }
+static void *dialog_item(void *object, int32_t id)
+{ put("dialog.item %u %x\n", offset(object), id); mutate(); return s_fixture.graph; }
+static void remap_rect(struct fs98_options_rect *rect, void *control)
+{
+    put("remap.rect %u\n", offset(control)); mutate();
+    rect->left = 10 + (int32_t)(s_seed % 30); rect->top = 20; rect->right = 300 + (int32_t)(s_seed % 50); rect->bottom = 200;
+}
+static void move_window(void *window, int32_t x, int32_t y, int32_t width, int32_t height, int32_t repaint)
+{ put("move.window %u %d,%d %dx%d %d\n", offset(window), x, y, width, height, repaint); mutate(); }
+static char *get_buffer(void *string, int32_t size)
+{ put("string.buffer %u %d\n", where(string), size); mutate(); s_fixture.buffer[0] = 0; return s_fixture.buffer; }
+static void release_buffer(void *string, int32_t size)
+{ put("string.release %u %d [%s]\n", where(string), size, s_fixture.buffer); string_set(string, s_fixture.buffer); mutate(); }
+static void string_append_string(void *string, const void *other)
+{ string_append(string, ((const struct fs98_options_string *)other)->text); }
+static int32_t message_box(const char *text, uint32_t type, uint32_t help)
+{ put("message.box [%s] %x %x\n", text, type, help); mutate(); return 1; }
+static void paint_construct(void *dc, void *window)
+{ put("paint.construct %u window=%u\n", where(dc), offset(window)); PTR(dc, 0) = s_dc_vtable; mutate(); }
+static void paint_destroy(void *dc) { put("paint.destroy %u\n", where(dc)); mutate(); }
+static int32_t dc_mode(void *dc, int32_t mode) { put("dc.mode %u %d\n", where(dc), mode); mutate(); return 2; }
+static uint32_t dc_align(void *dc, uint32_t align) { put("dc.align %u %u\n", where(dc), align); mutate(); return 0; }
+static int32_t get_window_rect(uint32_t window, struct fs98_options_rect *rect)
+{
+    put("window.rect %u\n", window); mutate();
+    rect->left = 400; rect->top = 300 - (int32_t)(s_seed % 40); rect->right = 700;
+    rect->bottom = (s_seed >> 3) % 4 == 0 ? 250 - (int32_t)(s_seed % 90) : 420 + (int32_t)(s_seed % 100);   /* sometimes upside down */
+    return 1;
+}
+static int32_t screen_to_client(uint32_t window, void *point)
+{
+    put("screen.to.client %u %d,%d\n", window, ((int32_t *)point)[0], ((int32_t *)point)[1]); mutate();
+    ((int32_t *)point)[0] -= 100; ((int32_t *)point)[1] -= 60;
+    return 1;
+}
+static int32_t to_int(const char *text) { put("atoi [%s]\n", shown(text)); mutate(); return atoi(text); }
+static int32_t format_int(char *out, const char *format, int32_t value)
+{ put("sprintf [%s] %d\n", format, value); mutate(); return sprintf(out, format, value); }
+/* a radio on (its user data is its own handle) or off, each window from its own bits */
+static int32_t get_window_long(uint32_t window, int32_t index)
+{
+    put("window.long %u %d\n", window, index); mutate();
+    return (s_seed >> (window % 29)) & 1 ? (int32_t)window : (int32_t)(window ^ 0x40);
+}
+static int32_t set_radio(void *control, int32_t checked)
+{ put("set.radio %u %d\n", offset(control), checked); mutate(); return (int32_t)s_seed; }
+static char *long_to_text(int32_t value, char *out, int32_t radix)
+{ put("ltoa %d %d\n", value, radix); mutate(); sprintf(out, "%ld", (long)value); return out; }
+static int32_t to_long(const char *text) { put("atol [%s]\n", shown(text)); mutate(); return atol(text); }
+static void ddx_int(void *exchange, uint32_t id, int32_t *value)
+{ put("ddx.int %u %x %u %d\n", offset(exchange), id, offset(value), *value); mutate(); }
+static void ddv_min_max(void *exchange, int32_t value, int32_t low, int32_t high)
+{ put("ddv.minmax %u %d %d %d\n", offset(exchange), value, low, high); mutate(); }
+static int32_t notify_send(void *notify, const char *title, const char *format, void *value)
+{ put("notify.send %u [%s] [%s] %x\n", offset(notify), shown(title), shown(format), (uint32_t)(uintptr_t)value); mutate(); return (int32_t)s_seed; }
+static int16_t async_key_state(int32_t key)
+{   /* pressed since the last call (bit 0) and down now (bit 15), each its own bit */
+    static const uint16_t states[] = {0, 1, 0x8000, 0x8001};
+    put("async.key %d\n", key); mutate(); return (int16_t)states[(s_seed >> (s_calls % 8)) % 4];
+}
+static int32_t tab_init(void *tab, void *dialog, void *font, uint32_t bitmap, void *dib, void *palette,
+                        uint32_t a, uint32_t color, int32_t x, int32_t y, int32_t width, int32_t height,
+                        uint32_t module, uint32_t b)
+{
+    put("tab.init %u dialog=%u font=%u bitmap=%x dib=%u palette=%u %x %x %d,%d %dx%d module=%x %x\n", offset(tab),
+        offset(dialog), offset(font), bitmap, offset(dib), offset(palette), a, color, x, y, width, height, module, b);
+    mutate(); return (int32_t)s_seed;
+}
+static int32_t page_init(void *page, int32_t value)
+{ put("page.init %u %d\n", offset(page), value); mutate(); return (int32_t)s_seed; }
+static void add_page(void *tab, void *page, char *title, int32_t value)
+{ put("tab.add %u page=%u [%s] %d\n", offset(tab), offset(page), shown(title), value); mutate(); }
+static void helper_init(void *helper, void *tab)
+{ put("helper.init %u tab=%u\n", offset(helper), offset(tab)); mutate(); }
+static int32_t set_last_page(void *tab, void *page)
+{ put("tab.last %u page=%u\n", offset(tab), offset(page)); mutate(); return (int32_t)s_seed; }
+static int32_t set_active_tab(void *tab, int32_t index, uint32_t window)
+{ put("tab.active %u %d %x\n", offset(tab), index, window); mutate(); return (int32_t)s_seed; }
+static int32_t get_active_tab(void *tab)
+{ put("tab.get %u\n", offset(tab)); mutate(); return (int32_t)((s_seed >> (s_calls % 8)) % 8) - 1; }
+static int32_t slider_init(void *slider, uint32_t bitmap, uint32_t thumb, void *dib, void *palette, uint32_t a,
+                           uint32_t b, uint32_t c, uint32_t d, int32_t e, int32_t f, uint32_t module)
+{
+    put("slider.init %u %x %x dib=%u palette=%u %u %u %u %u %d %d %x\n", offset(slider), bitmap, thumb, offset(dib),
+        offset(palette), a, b, c, d, e, f, module);
+    mutate(); return (int32_t)s_seed;
+}
+static void set_scroll_range(void *slider, int32_t low, int32_t high)
+{ put("slider.range %u %d %d\n", offset(slider), low, high); mutate(); }
+static int32_t get_scroll_pos(void *slider)
+{ put("slider.get %u\n", offset(slider)); mutate(); return (int32_t)((s_seed >> (s_calls % 16)) % 103) - 1; }
+static int32_t set_scroll_pos(void *slider, int32_t position)
+{ put("slider.set %u %d\n", offset(slider), position); mutate(); return (int32_t)s_seed; }
 static const struct fs98_options_services s_services = {
     send_message, win_help, enable_window, ddx_control, base_init, init_button, init_text,
     init_edit, base_font, set_window_text, get_window_text, set_focus, is_lead_byte,
@@ -590,7 +877,12 @@ static const struct fs98_options_services s_services = {
     ui_delete, close_dialog, string_construct, string_destroy, string_assign, ddx_text, ddv_max_chars,
     show_dialog, load_string_a, init_group, set_sims_text, get_sims_text, window_text_string,
     font_construct, font_destroy, register_exit, set_tab_stops, get_client_rect, get_sims_text_buffer,
-    text_length, string_append, string_append_char, list_text, format_text, list_destroy
+    text_length, string_append, string_append_char, list_text, format_text, list_destroy,
+    dialog_item, remap_rect, move_window, get_buffer, release_buffer, string_append_string, message_box,
+    paint_construct, paint_destroy, dc_mode, dc_align, get_window_rect, screen_to_client, to_int, format_int,
+    get_window_long, set_radio, long_to_text, to_long, ddx_int, ddv_min_max, notify_send,
+    async_key_state, tab_init, page_init, add_page, helper_init, set_last_page, set_active_tab,
+    get_active_tab, slider_init, set_scroll_range, get_scroll_pos, set_scroll_pos
 };
 
 static void *dialog_construct(void *object, int32_t resource, void *parent)
@@ -625,6 +917,17 @@ static void *allocate_object(uint32_t size)
 {
     put("allocate %x\n", size); mutate();
     if (size == 0x29c) return (s_seed >> 21) % 9 ? s_fixture.notify : 0;   /* the CNotify */
+    {   /* Display options' pages, each failing now and then */
+        static const uint32_t sizes[] = {0x168c, 0x13a4, 0x19ac, 0x18ac};
+        static const uint32_t prefs_sizes[] = {0x1c4c, 0x150c, 0x1714, 0x16ec, 0x2dbc, 0x14f8};
+        uint32_t index;
+        for (index = 0; index < 4; ++index)
+            if (size == sizes[index] && OP.kind == FS98_OPTIONS_DISPLAY)
+                return (s_seed >> (24 + index)) % 11 ? s_fixture.pages[index] : 0;
+        for (index = 0; index < 6; ++index)
+            if (size == prefs_sizes[index] && OP.kind == FS98_OPTIONS_PREFS)
+                return (s_seed >> (23 + index)) % 11 ? s_fixture.pages[index] : 0;
+    }
     return s_scenario % 11 ? s_fixture.object : 0;
 }
 static void ui_delete(void *object) { put("ui.delete %u\n", offset(object)); mutate(); }
@@ -640,7 +943,7 @@ static int32_t show_dialog(void *object, int32_t show)
 static const struct fs98_options_object_services s_object_services = {
     dialog_construct, dialog_destroy, construct_control, destroy_control, allocate_object,
     ui_delete, dialog_delete, create_dialog, show_dialog, page_construct, page_destroy, copy_text,
-    string_assign
+    string_assign, message_box
 };
 
 /* ---- the same stubs behind retail's import ABIs ----------------------------------------- */
@@ -656,6 +959,12 @@ CONTROL_HOOK(combo, 0x1d75c, 0x1d764)
 CONTROL_HOOK(check, 0x1d790, 0x1d7a0)
 CONTROL_HOOK(group, 0x1d748, 0x1d744)
 CONTROL_HOOK(string, 0x1d530, 0x1d53c)
+CONTROL_HOOK(radio, 0x1d6dc, 0x1d6e0)
+CONTROL_HOOK(spin, 0x1d528, 0x1d524)
+CONTROL_HOOK(tab, 0x1d720, 0x1d730)
+CONTROL_HOOK(helper, 0x1d728, 0x1d738)
+CONTROL_HOOK(slider, 0x1d794, 0x1d7a4)
+static void TC hook_destroy_spin_unwind(void *control) { destroy_control(control, 0x1d6cc); }
 #undef CONTROL_HOOK
 static void *TC hook_dialog_construct(void *object, int32_t resource, void *parent)
 { return dialog_construct(object, resource, parent); }
@@ -728,12 +1037,62 @@ static void TC hook_list_text(void *list, int32_t index, void *string) { list_te
 static int hook_sprintf(char *out, const char *format, ...)
 {
     va_list args;
-    const char *text;
+    uint32_t value;
     va_start(args, format);
-    text = va_arg(args, const char *);
+    value = va_arg(args, uint32_t);
     va_end(args);
-    return format_text(out, format, text);
+    if (strchr(format, 'd')) return format_int(out, format, (int32_t)value);
+    return format_text(out, format, (const char *)(uintptr_t)value);
 }
+static void *TC hook_dialog_item(void *object, int32_t id) { return dialog_item(object, id); }
+static void SC hook_remap_rect(struct fs98_options_rect *rect, void *control) { remap_rect(rect, control); }
+static int32_t TC hook_move_window(void *window, int32_t x, int32_t y, int32_t width, int32_t height, int32_t repaint)
+{ move_window(window, x, y, width, height, repaint); return 1; }
+static char *TC hook_get_buffer(void *string, int32_t size) { return get_buffer(string, size); }
+static void TC hook_release_buffer(void *string, int32_t size) { release_buffer(string, size); }
+static void *TC hook_append_string(void *string, const void *other) { string_append_string(string, other); return string; }
+static int32_t SC hook_message_box(const char *text, uint32_t type, uint32_t help) { return message_box(text, type, help); }
+static void *TC hook_paint_construct(void *dc, void *window) { paint_construct(dc, window); return dc; }
+static void TC hook_paint_destroy(void *dc) { paint_destroy(dc); }
+static int32_t TC hook_dc_mode(void *dc, int32_t mode) { return dc_mode(dc, mode); }
+static uint32_t TC hook_dc_align(void *dc, uint32_t align) { return dc_align(dc, align); }
+static int32_t SC hook_window_rect(uint32_t window, struct fs98_options_rect *rect) { return get_window_rect(window, rect); }
+static int32_t SC hook_screen_to_client(uint32_t window, void *point) { return screen_to_client(window, point); }
+static int hook_atoi(const char *text) { return to_int(text); }
+static int32_t SC hook_window_long(uint32_t window, int32_t index) { return get_window_long(window, index); }
+static int32_t TC hook_set_radio(void *control, int32_t checked) { return set_radio(control, checked); }
+static char *hook_ltoa(long value, char *out, int radix) { return long_to_text((int32_t)value, out, radix); }
+static long hook_atol(const char *text) { return to_long(text); }
+static void SC hook_ddx_int(void *exchange, uint32_t id, int32_t *value) { ddx_int(exchange, id, value); }
+static int hook_notify_send(void *notify, const char *title, const char *format, ...)
+{
+    va_list args;
+    void *value;
+    va_start(args, format);
+    value = va_arg(args, void *);
+    va_end(args);
+    return notify_send(notify, title, format, value);
+}
+static int16_t SC hook_async_key(int32_t key) { return async_key_state(key); }
+static int32_t TC hook_tab_init(void *tab, void *dialog, void *font, uint32_t bitmap, void *dib, void *palette,
+                                uint32_t a, uint32_t color, int32_t x, int32_t y, int32_t width, int32_t height,
+                                uint32_t module, uint32_t b)
+{ return tab_init(tab, dialog, font, bitmap, dib, palette, a, color, x, y, width, height, module, b); }
+static int32_t TC hook_page_init(void *page, int32_t value) { return page_init(page, value); }
+static void TC hook_add_page(void *tab, void *page, char *title, int32_t value) { add_page(tab, page, title, value); }
+static void TC hook_helper_init(void *helper, void *tab) { helper_init(helper, tab); }
+static int32_t TC hook_set_last_page(void *tab, void *page) { return set_last_page(tab, page); }
+static int32_t TC hook_set_active_tab(void *tab, int32_t index, uint32_t window) { return set_active_tab(tab, index, window); }
+static void *TC hook_page_construct(void *object, int32_t resource, void *parent) { return page_construct(object, resource, parent); }
+static void TC hook_page_destroy(void *object) { page_destroy(object); }
+static int32_t TC hook_get_active_tab(void *tab) { return get_active_tab(tab); }
+static int32_t TC hook_slider_init(void *slider, uint32_t bitmap, uint32_t thumb, void *dib, void *palette, uint32_t a,
+                                   uint32_t b, uint32_t c, uint32_t d, int32_t e, int32_t f, uint32_t module)
+{ return slider_init(slider, bitmap, thumb, dib, palette, a, b, c, d, e, f, module); }
+static void TC hook_set_scroll_range(void *slider, int32_t low, int32_t high) { set_scroll_range(slider, low, high); }
+static int32_t TC hook_get_scroll_pos(void *slider) { return get_scroll_pos(slider); }
+static int32_t TC hook_set_scroll_pos(void *slider, int32_t position) { return set_scroll_pos(slider, position); }
+static void SC hook_ddv_min_max(void *exchange, int32_t value, int32_t low, int32_t high) { ddv_min_max(exchange, value, low, high); }
 
 static void patch(uint32_t rva, void *target)
 {
@@ -782,6 +1141,26 @@ static void setup_imports(void)
     patch(0x1d69c, hook_tab_stops); patch(0x1d818, hook_client_rect); patch(0x1d6a4, hook_sims_get_text);
     patch(0x1d468, hook_lstrlen); patch(0x1d4fc, hook_string_append); patch(0x1d4c8, hook_string_append_char);
     patch(0x1d4c4, hook_list_text); patch(0x1d620, hook_sprintf);
+    patch(0x1d510, hook_dialog_item); patch(0x1d6c0, hook_remap_rect); patch(0x1d518, hook_move_window);
+    patch(0x1d514, hook_get_buffer); patch(0x1d500, hook_release_buffer); patch(0x1d504, hook_append_string);
+    patch(0x1d4a8, hook_message_box); patch(0x1d4f0, hook_paint_construct); patch(0x1d4f4, hook_paint_destroy);
+    patch(0x1d508, hook_dc_mode); patch(0x1d50c, hook_dc_align); patch(0x1d81c, hook_window_rect);
+    patch(0x1d820, hook_screen_to_client); patch(0x1d628, hook_atoi);
+    patch(0x1d828, hook_window_long); patch(0x1d6d8, hook_set_radio);
+    patch(0x1d6dc, hook_construct_radio); patch(0x1d6e0, hook_destroy_radio);
+    patch(0x1d528, hook_construct_spin); patch(0x1d524, hook_destroy_spin); patch(0x1d6cc, hook_destroy_spin_unwind);
+    patch(0x1d6c4, (void *)SPIN_VTABLE); fs98_options_set_spin_vtable((void *)SPIN_VTABLE);
+    patch(0x1d618, hook_ltoa); patch(0x1d61c, hook_atol); patch(0x1d51c, hook_ddx_int); patch(0x1d520, hook_ddv_min_max);
+    patch(0x1d684, hook_notify_send);
+    patch(0x1d830, hook_async_key); patch(0x1d6f8, hook_tab_init); patch(0x1d6fc, hook_page_init);
+    patch(0x1d700, hook_add_page); patch(0x1d704, hook_helper_init); patch(0x1d708, hook_set_last_page);
+    patch(0x1d70c, hook_set_active_tab); patch(0x1d788, hook_page_construct); patch(0x1d798, hook_page_destroy);
+    patch(0x1d720, hook_construct_tab); patch(0x1d730, hook_destroy_tab);
+    patch(0x1d728, hook_construct_helper); patch(0x1d738, hook_destroy_helper);
+    patch(0x1d688, hook_get_active_tab); patch(0x1d778, hook_slider_init); patch(0x1d77c, hook_set_scroll_range);
+    patch(0x1d770, hook_get_scroll_pos); patch(0x1d768, hook_set_scroll_pos);
+    patch(0x1d794, hook_construct_slider); patch(0x1d7a4, hook_destroy_slider);
+    patch(0x1d614, (void *)GetProcAddress(crt, "_ftol"));        /* the real one: its argument is in st0 */
     fs98_options_set_book_state(&s_fixture.book);
     fs98_options_set_book_list_vtable((uint8_t *)s_retail + RETAIL_LIST_VTABLE);
     fs98_options_set_object_list_vtable((uint8_t *)s_retail + RETAIL_LIST_VTABLE);
@@ -954,9 +1333,214 @@ static void initialize(void)
             PTR(block, 0x150) = book_button;
         }
     }
-    /* the handlers that test for no descriptor */
+    if (OP.kind == FS98_OPTIONS_LANDING || OP.kind == FS98_OPTIONS_MANOEUVRE) {
+        int landing = OP.kind == FS98_OPTIONS_LANDING;
+        static const char *const numbers[] = {"120", "-45", "0", "9999", "abc"};
+        PTR(object, landing ? 0x10e4 : 0x10e0) = s_fixture.descriptor[0];
+        if (landing) D32(object, 0x10e0) = (s_seed >> 22) & 1;     /* the caption still to make */
+        else D32(object, 0x1440) = (s_seed >> 22) & 1;             /* the scale's label made */
+        D32(object, 0x10dc) = s_seed ^ 0x10dc;
+        D32(s_fixture.graph, 0x20) = s_seed ^ 0x6a;
+        PTR(s_fixture.dc, 0) = s_dc_vtable;
+        for (index = 0; index < 2; ++index) {
+            uint8_t *block = s_fixture.descriptor[index];
+            PTR(block, 8) = graph_control;
+            D32(block, 0xc) = (s_seed >> (5 + index)) & 1;
+            if (landing) {
+                PTR(block, 0x10) = s_fixture.texts[index];
+                PTR(block, 0x14) = (void *)numbers[(s_seed >> (7 + index)) % 5];
+                PTR(block, 0x18) = (void *)numbers[(s_seed >> (10 + index)) % 5];
+                PTR(block, 0x1c) = s_fixture.texts[2 + index];
+            } else {
+                D32(block, 0x10) = (s_seed >> (7 + index)) & 1;
+                PTR(block, 0x14) = s_fixture.texts[index];
+            }
+        }
+    }
+    if (OP.kind == FS98_OPTIONS_REPLAY) {
+        PTR(object, 0x10e0) = s_fixture.descriptor[0];
+        PTR(object, 0x10dc) = (s_seed >> 22) % 4 ? (void *)s_fixture.notify : 0;
+        PTR(object, 0x1774) = s_control_vtable;
+        D32(object, 0x1830) = (s_seed >> 3) & 1;
+        D32(object, 0x1a34) = (s_seed >> 4) % 120;
+        for (index = 0; index < 2; ++index) {
+            uint8_t *block = s_fixture.descriptor[index];
+            PTR(block, 4) = part_check;
+            D32(block, 8) = (s_seed >> (5 + index)) % 4 == 0;          /* a replay running */
+            D32(block, 0xc) = 20 + (s_seed >> 8) % 40;
+            D32(block, 0x10) = (s_seed >> (10 + index)) % 3 == 0 ? 5 + index : 0;
+            D32(block, 0x14) = (s_seed >> 12) % 300 + ((s_seed >> 25) & 1 ? 0x10000 : 0);   /* past 16 bits now and then */
+            D32(block, 0x2c) = (s_seed >> (14 + index)) % 3 == 0 ? 6 : 0;
+            D32(block, 0x30) = (s_seed >> 16) % 150 + ((s_seed >> 26) & 1 ? 0x30000 : 0);
+            D32(block, 0x4c) = (s_seed >> (18 + index)) % 3;
+        }
+    }
+    if (OP.kind == FS98_OPTIONS_DEMO) {      /* MAIN's block: the pick and the demos */
+        static const int32_t counts[] = {0, 1, 3, 5, -1};
+        PTR(object, 0x10e0) = s_fixture.descriptor[0];
+        PTR(object, 0x10dc) = (s_seed >> 22) % 4 ? (void *)s_fixture.notify : 0;
+        D32(object, 0x1554) = s_seed ^ 0x1554;
+        for (index = 0; index < 2; ++index) {
+            uint8_t *block = s_fixture.descriptor[index];
+            D32(block, 0x10) = (uint32_t)((int32_t)((s_seed >> (5 + index)) % 7) - 1);   /* -1..5 */
+            D32(block, 0x14) = (uint32_t)counts[(s_scenario + index) % 5];
+            PTR(block, 0x18) = s_fixture.records[index];
+        }
+    }
+    if (OP.kind >= FS98_OPTIONS_DISPLAY && OP.kind <= FS98_OPTIONS_DISPLAY_HARDWARE) {
+        /* each page's check boxes, the parts' words, MAIN's driver block and its lists */
+        static const uint32_t checks[][11] = {
+            {0},
+            {0x11dc, 0x12a4, 0x136c, 0x1434, 0x14fc, 0x15c4},
+            {0x12dc},
+            {0x11dc, 0x12a4, 0x136c, 0x1434, 0x14fc, 0x15c4, 0x168c, 0x1754, 0x181c, 0x18e4},
+            {0x13dc, 0x15a0, 0x1668, 0x1730},
+        };
+        static const uint32_t parts[] = {0xc, 0x38, 0x4c, 0xa0};
+        uint32_t page, list, at;
+        for (list = 0; list < 2; ++list) {
+            for (at = 0; at < 7; ++at) s_fixture.names[list][at] = s_fixture.strings[(at + list) % 8];
+            s_fixture.names[list][(s_seed >> (10 + list)) % 7] = 0;     /* the list's end */
+        }
+        for (index = 0; index < 2; ++index) {
+            uint8_t *block = s_fixture.descriptor[index];
+            D32(block, 8) = (s_seed >> (5 + index)) % 5;               /* the tab shown first */
+            for (page = 0; page < 4; ++page) D32(block, parts[page]) = (s_seed >> (page + index)) & 1;
+            D32(block, 0xac) = (s_seed >> 13) % 3;
+            if (OP.kind == FS98_OPTIONS_DISPLAY_HARDWARE || OP.kind == FS98_OPTIONS_DISPLAY) {
+                uint8_t *driver = OP.kind == FS98_OPTIONS_DISPLAY ? block + 0xa0 : block;
+                static const uint32_t rooms[] = {0, 1, 3, 7, 0x80000001};
+                PTR(driver, 0) = driver_list; PTR(driver, 4) = driver_modes; PTR(driver, 8) = driver_refresh;
+                D32(driver, 0x10) = (s_seed >> (14 + index)) & 1;
+                D32(driver, 0x14) = s_seed & 0xff;
+                D32(driver, 0x18) = rooms[(s_scenario + index) % 5];
+                PTR(driver, 0x1c) = s_fixture.names[0];
+                D32(driver, 0x20) = (s_seed >> 16) % 5;
+                D32(driver, 0x24) = rooms[(s_scenario + index + 2) % 5];
+                PTR(driver, 0x28) = s_fixture.names[1];
+                D32(driver, 0x2c) = (s_seed >> 19) % 5;
+                D32(driver, 0x30) = (s_seed >> (21 + index)) & 1;
+            }
+        }
+        if (OP.kind == FS98_OPTIONS_DISPLAY) {
+            PTR(object, 0x12dc) = s_other_vtable;                       /* the tab control's +0xc4 */
+            PTR(object, 0x21ac) = (s_seed >> 22) % 4 ? (void *)s_fixture.notify : 0;
+            for (page = 0; page < 4; ++page) {
+                uint8_t *at_page = s_fixture.pages[page];
+                PTR(object, 0x21b0 + page * 4) = at_page;
+                PTR(at_page, 0x1118) = s_fixture.descriptor[0] + parts[page];
+                D32(at_page, 0x1100) = (s_seed >> (9 + page)) % 4 != 0;
+            }
+        } else {
+            uint32_t kind = OP.kind - FS98_OPTIONS_DISPLAY;
+            D32(object, 0x1100) = (s_seed >> 9) % 4 != 0;               /* the page shown */
+            for (at = 0; at < 11 && checks[kind][at]; ++at) {     /* each box on or off */
+                PTR(object, checks[kind][at]) = s_control_vtable;
+                D32(object, checks[kind][at] + 0xbc) = (s_seed >> (at + 3)) & 1;
+            }
+            D32(object, 0x12b4) = s_seed ^ 0x12b4;
+            D32(object, 0x13b4) = s_seed ^ 0x13b4;
+        }
+    }
+    if (OP.kind >= FS98_OPTIONS_PREFS) {
+        /* the pages' boxes, MAIN's callbacks, the presets, the volumes */
+        static const uint32_t checks[][8] = {
+            {0},
+            {0x1128, 0x15a4, 0x1864, 0x192c, 0x19f4, 0x1abc, 0x1b84},
+            {0x1124, 0x11ec, 0x12b4, 0x137c, 0x1444},
+            {0x164c},
+            {0x1128},
+            {0x1354, 0x189c, 0x1de4, 0x232c, 0x2874},
+            {0x11d8, 0x12a0, 0x1368, 0x1430},
+        };
+        /* 0.29 times 100 truncates to 28 in extended precision, to 29 rounded to double first */
+        static const double volumes[] = {0.0, 0.5, -0.25, 1.0, -1.0, 0.333, 0.999, -0.001, 1e10, __builtin_nan(""),
+                                         0.29, -0.57};
+        static const uint32_t defaults[] = {0, 0xcdcdcdcd, 1, 1};
+        static const int32_t counts[] = {0, 1, 3, 5, -1};
+        static const uint32_t pages[] = {0x2338, 0x233c, 0x2340, 0x2344, 0x2348, 0x234c};
+        uint32_t page, at, kind = OP.kind - FS98_OPTIONS_PREFS;
+        for (index = 0; index < 2; ++index) {
+            uint8_t *block = s_fixture.descriptor[index];
+            static const uint32_t statuses[] = {0x34, 0x3c, 0x44, 0x4c, 0x54, 0x5c, 0x64};
+            D32(block, 8) = (s_seed >> (5 + index)) % 7;
+            at = defaults[(s_seed >> (12 + index)) % 4];
+            D32(block, 0xc) = at == 1 ? (uint32_t)(uintptr_t)block_callback_0 : at;
+            PTR(block, 0x14) = block_callback_1; PTR(block, 0x18) = block_callback_2;   /* General's buttons */
+            for (at = 0; at < 7; ++at)       /* General's statuses, each set one time in three */
+                D32(block, statuses[at]) = (s_seed >> (at * 2 + index)) % 3 == 0 ? 0x1000 + at : 0;
+            PTR(block, 0xc4) = block_callback_3; PTR(block, 0xd4) = block_callback_4;   /* Display's */
+            PTR(block, 0xc8) = s_fixture.records[0];
+            D32(block, 0xcc) = (uint32_t)counts[(s_scenario + index) % 5];
+            D32(block, 0xb4) = (s_seed >> (16 + index)) % 3;          /* International's codes */
+            D32(block, 0xa8) = (s_seed >> (18 + index)) % 4 + 1;
+            D32(block, 0xb0) = (s_seed >> (20 + index)) & 1;
+            for (at = 0; at < 5; ++at)
+                *(double *)(block + 0xfc + at * 8) = volumes[(s_seed >> (at * 3 + index)) % 12];
+        }
+        if (OP.kind == FS98_OPTIONS_PREFS) {
+            PTR(object, 0x13d4) = s_other_vtable;
+            PTR(object, 0x2334) = (s_seed >> 22) % 4 ? (void *)s_fixture.notify : 0;
+            for (page = 0; page < 6; ++page) {
+                static const uint32_t parts[] = {0x10, 0x6c, 0x98, 0xc0, 0xf8, 0x124};
+                uint8_t *at_page = s_fixture.pages[page];
+                PTR(object, pages[page]) = at_page;
+                PTR(at_page, page == 4 ? 0x111c : 0x1118) = s_fixture.descriptor[0] + parts[page];
+                PTR(at_page, page == 4 ? 0x1120 : 0x111c) = s_fixture.descriptor[0];
+                D32(at_page, 0x1100) = (s_seed >> (9 + page)) % 4 != 0;
+            }
+        } else {
+            D32(object, 0x1100) = (s_seed >> 9) % 4 != 0;
+            if (OP.kind == FS98_OPTIONS_PREFS_GENERAL) {
+                PTR(object, 0x1118) = s_fixture.descriptor[0] + 0x10;
+                PTR(object, 0x111c) = s_fixture.descriptor[0];
+            }
+            if (OP.kind == FS98_OPTIONS_PREFS_DISPLAY) {
+                PTR(object, 0x1118) = s_fixture.descriptor[0] + 0xc0;
+                PTR(object, 0x111c) = s_fixture.descriptor[0];
+            }
+            if (OP.kind == FS98_OPTIONS_PREFS_INTERNATIONAL) PTR(object, 0x1118) = s_fixture.descriptor[0] + 0x98;
+            if (OP.kind == FS98_OPTIONS_PREFS_SOUND) PTR(object, 0x111c) = s_fixture.descriptor[0] + 0xf8;
+            for (at = 0; at < 8 && checks[kind][at]; ++at) {
+                PTR(object, checks[kind][at]) = s_control_vtable;
+                D32(object, checks[kind][at] + 0xbc) = (s_seed >> (at + 3)) % 3;     /* off, on, or another true */
+            }
+        }
+    }
+    if (OP.kind == FS98_OPTIONS_ANALYSIS) {
+        static const uint32_t controls[] = {0x1834, 0x14bc, 0x13c8, 0x1678, 0x15b0, 0x176c};
+        static const uint32_t windows[] = {0x1854, 0x14dc, 0x13e8, 0x1698, 0x15d0, 0x178c, 0x1358, 0x13a0};
+        static const uint32_t statuses[] = {8, 0x10, 0x18, 0x28, 0x30, 0x38};
+        for (index = 0; index < 6; ++index) PTR(object, controls[index]) = s_control_vtable;
+        for (index = 0; index < 8; ++index) D32(object, windows[index]) = (s_seed ^ (index * 0x111)) & 0xffff0;
+        D32(object, 0x166c) = (s_seed >> 3) & 1;
+        D32(object, 0x1828) = (s_seed >> 4) & 1;
+        for (index = 0; index < 2; ++index) {
+            uint8_t *block = s_fixture.descriptor[index];
+            uint32_t field;
+            PTR(block, 4) = part_check;
+            for (field = 0; field < 6; ++field)      /* each status set one time in three, from its own bits */
+                D32(block, statuses[field]) = (s_seed >> (field * 2 + index)) % 3 == 0 ? 0x1000 + field : 0;
+            if ((s_seed >> 29) % 4 == 0) for (field = 0; field < 6; ++field) D32(block, statuses[field]) = 0;
+            D32(block, 0xc) = (s_seed >> (14 + index)) & 1;
+            D32(block, 0x14) = (uint32_t)((int32_t)((s_seed >> (16 + index)) % 5) - 1);   /* -1..3 */
+            D32(block, 0x1c) = (s_seed >> 19) & 1;
+            D32(block, 0x2c) = (s_seed >> 20) & 1;
+            D32(block, 0x34) = (s_seed >> 21) % 4;
+            D32(block, 0x3c) = (s_seed >> 23) % 4;
+        }
+    }
+    /* the handlers that test for no descriptor; the graphs' also for MSVC's debug fill */
+    if ((OP.rva == 0x7c40 || OP.rva == 0x8030 || OP.rva == 0xaf20 || OP.rva == 0xb0b0 ||
+         OP.rva == 0xc3b0 || OP.rva == 0xc7c0) && OP.kind < FS98_OPTIONS_DISPLAY && (s_seed >> 27) % 4 == 1)
+        PTR(object, descriptor_offset()) = (void *)(uintptr_t)0xcdcdcdcd;
     if ((OP.rva == 0xe400 || OP.rva == 0xe1d0 || OP.rva == 0xddf0 || OP.rva == 0xd930 ||
-         OP.rva == 0xd4d0 || OP.rva == 0xcc20 || OP.rva == 0x8550 || OP.rva == 0x95e0) && (s_seed >> 27) % 4 == 0) {
+         OP.rva == 0xd4d0 || OP.rva == 0xcc20 || OP.rva == 0x8550 || OP.rva == 0x95e0 || OP.rva == 0x7c40 ||
+         OP.rva == 0x8030 || OP.rva == 0xaf20 || OP.rva == 0xb0b0 || OP.rva == 0x4e70 || OP.rva == 0x57e0 ||
+         OP.rva == 0x6df0 || OP.rva == 0x72d0 || OP.rva == 0xc3b0 || OP.rva == 0xc7c0 ||
+         OP.rva == 0xc660 || OP.rva == 0xc690 || (OP.rva == 0x3ea0 && OP.kind == FS98_OPTIONS_DISPLAY) ||
+         (OP.rva == 0xb9d0 && OP.kind == FS98_OPTIONS_PREFS)) &&
+        (s_seed >> 27) % 4 == 0) {
         PTR(object, descriptor_offset()) = 0;
         ++s_no_descriptor;
     }
@@ -1055,6 +1639,12 @@ static __attribute__((noinline)) int32_t run(uint32_t throw_at)
             result = ((int32_t (TC *)(void *, uint32_t))entry)(object, ids[(s_seed >> 3) % 5]);
             break;
         }
+        case SIG_DRAW:
+            result = ((int32_t (TC *)(void *, uint32_t, uint32_t))entry)(object, s_seed, s_seed ^ 3);
+            break;
+        case SIG_SCALE:
+            ((void (TC *)(void *, void *))entry)(object, s_fixture.dc);
+            break;
         case SIG_EXIT:
             ((void (*)(void))entry)();
             break;
@@ -1096,6 +1686,19 @@ static __attribute__((noinline)) int32_t run(uint32_t throw_at)
     }
     __asm__ volatile("movl %0, %%fs:0" : : "r"(s_saved_seh) : "memory");
     s_running = 0;
+    if (OP.kind == FS98_OPTIONS_REPLAY) {      /* OPT-8: each side's own stack, by address */
+        uint32_t index;
+        for (index = 0; index < 2; ++index) {
+            static const uint32_t at[] = {0x1c, 0x38};
+            uint32_t field;
+            for (field = 0; field < 2; ++field) {
+                uint8_t *text = PTR(s_fixture.descriptor[index], at[field]);
+                if (where(text) == 0xffffffff && (uintptr_t)text > 0x10000 && (uintptr_t)text < 0x10000000 &&
+                    (uintptr_t)text != (uintptr_t)s_initial.descriptor[index][at[field]])
+                    PTR(s_fixture.descriptor[index], at[field]) = (void *)(uintptr_t)0x5ac50000;
+            }
+        }
+    }
     if (!s_side) memcpy(&s_fixture.video, (uint8_t *)s_retail + RETAIL_VIDEO, sizeof(s_fixture.video));
     if (!s_side) memcpy(&s_fixture.book, (uint8_t *)s_retail + RETAIL_BOOK, sizeof(s_fixture.book));
     if (s_calls > s_max_calls) s_max_calls = s_calls;
@@ -1146,11 +1749,14 @@ int main(int argc, char **argv)
     s_vtable[0xec / 4] = virtual_close; s_other_vtable[0xec / 4] = virtual_close_other;
     s_vtable[1] = s_other_vtable[1] = virtual_delete;
     s_vtable[0xe4 / 4] = virtual_skin; s_other_vtable[0xe4 / 4] = replaced_skin;
+    s_vtable[0xe8 / 4] = virtual_frame; s_other_vtable[0xe8 / 4] = replaced_frame;
     s_vtable[0xd8 / 4] = s_other_vtable[0xd8 / 4] = virtual_validate;
     s_vtable[0xdc / 4] = s_other_vtable[0xdc / 4] = virtual_error;
     s_vtable[0xe0 / 4] = s_other_vtable[0xe0 / 4] = virtual_focus;
     for (slot = 0; slot < 64; ++slot) s_control_vtable[slot] = (void *)s_other_slots[slot];
     s_control_vtable[0xc4 / 4] = virtual_check;
+    for (slot = 0; slot < 64; ++slot) s_dc_vtable[slot] = (void *)s_replaced_slots[slot];
+    s_dc_vtable[0x38 / 4] = dc_text_color; s_dc_vtable[0x64 / 4] = dc_text_out;
     for (s_scenario = 0; s_scenario < count; ++s_scenario) {
         s_seed = next_random(); s_script = s_scenario & 15;
         for (s_operation = 0; s_operation < OP_COUNT; ++s_operation) {

@@ -2,8 +2,8 @@
 
 `orig/English/Options.DLL`, module `0x80000007`, preferred base `0x22390000`, 84,381 bytes of
 `.text`, 15 dialog registrations and 31 templates. **In progress, started 2026-11-03:**
-slices 1 to 4 (the shared helpers, the four video dialogs and the three logbook dialogs)
-are transliterated and verified in their harness. Nothing is built as a DLL or installed. Like Flights it is MFC dialogs over
+slices 1 to 6 (the shared helpers, the four video dialogs, the three logbook dialogs and
+the three analysis dialogs: 10 of 15) are transliterated and verified in their harness. Nothing is built as a DLL or installed. Like Flights it is MFC dialogs over
 the CD's SIMSUI and MFC42, which stay as dependencies, and it follows Flights' method
 ([flights.md](flights.md)): core C over a service table, generated tables, a differential
 harness with deliberate breaks, then the native DLL, then the game.
@@ -193,6 +193,153 @@ lessons: a list with no selection has to be possible one call at a time, not onl
 for a whole scenario, or a second list's own test is never reached alone; the static fonts
 are copied in and out of retail's .data around each retail run.
 
+## Slice 5: the landing `0x14050002` and manoeuvre `0x14050003` graphs
+
+`src/options/options_graphs.c`. Each finds its graph control (`0x11a8`, `0x11af`), sizes
+it to its remapped frame, keeps its window at `+0x10dc`, and lets ANALYSIS draw through
+the block's control (`+8`: 0 set up, 1 draw, 2 closing) on WM_USER+100, on OK and Cancel,
+and at the end of OnInitDialog. A block that is missing or `0xcdcdcdcd` (MSVC's debug
+fill) gets an AfxMessageBox ("Bad m_pliveInfo passed to dialog by core code").
+- The **landing** graph also paints (WM_PAINT with a CPaintDC): its scale's two ends
+  (`atoi`, `%4d`) and a zero, right-aligned in white beside the graph at a seventh and
+  five sixteenths of its height, through the DC's own `SetTextColor` and `TextOut`
+  (vtable `+0x38`, `+0x64`) and MFC `#5875`/`#6170`; and the first time, the caption
+  (the block's text, two spaces and string `0xf750`) and the touchdown label.
+- The **manoeuvre** graph makes its scale's label the first time it draws with one: the
+  block's text and string `0xf751` or `0xf750`.
+- Their **factories** differ from every other one: no module stored at `+0x80`, and the
+  block stored after the frame's end (OPT-7, suspected, in
+  [retail-bugs.md](../retail-bugs.md)).
+
+## Slice 6: Flight analysis `0x1405`
+
+`src/options/options_analysis.c`. ANALYSIS's options, filled by UTIL's exchange. An "off"
+radio and three mode radios (read as SIMSUI's are: on when the window's user data is its
+own handle), two boxes and two combos. Off or the first two modes disable the six
+controls that depend on the third; the third enables them. OK reads everything into the
+block and runs the check; the first failing field is reported on its control and, once
+dismissed, takes the focus (the mode's is reported against no control). Its descriptor
+test `0x223957e0` is shared with Display options, Preferences and Customise controls.
+
+Results for slices 1 to 6 (2026-11-03): 193 operations; 20,000 scenarios, 3,860,000
+comparisons, 0 differ on each seed; unwind mode 2,000 scenarios, 4,220,157 comparisons,
+3,831,901 throws, 0 differ. Breaks: 431, all caught; nine proven equivalent and left out.
+Harness lessons: a window rectangle that is never upside down hides a signed division;
+`sprintf`'s hook tells `%d` from `%s` by the format.
+
+## Slice 7: Instant replay `0x1403`
+
+`src/options/options_replay.c`. DEMO's replay dialog: the length and the speed in two edits,
+each with a spin button, and a loop box. While a replay is already running everything is
+disabled and the caption is string `0xf757` (else `0xf752`). OK runs the descriptor's
+check, then reports the length's failure (against its maximum) or the speed's (against
+100) on its edit, with the value as text in an error block in DEMO's block.
+- Its two **spin buttons** are members built inline: MFC `CWnd()` (`#567`), Options' own
+  `CSpinButtonCtrl` vtable stored and at once replaced by SIMSUI's `CSimsSpinButtonCtrl`
+  vtable (a data import, `0x223ad6c4`). The destructor stores that vtable back and calls
+  `~CWnd` (`#793`); an unwind destroys them through `~CSimsSpinButtonCtrl` instead, so the
+  object code keeps a separate unwind entry that tells the two apart.
+- The speed is also bound by **DDX as an int** (`0x1a34`, DDV 0..100), which the
+  constructor zeroes.
+- The spin buttons are given their positions masked to 16 bits; the fixture's lengths and
+  speeds pass 16 bits now and then, or the masks go untested.
+- Its error report leaves the address of its own stack buffer in DEMO's block (OPT-8 in
+  [retail-bugs.md](../retail-bugs.md)); the harness compares those words as "a stack
+  address" rather than by value.
+
+Results for slices 1 to 7 (2026-11-03): 210 operations; 20,000 scenarios, 4,200,000
+comparisons, 0 differ on each seed; unwind mode 2,000 scenarios, 4,659,862 comparisons,
+4,237,437 throws, 0 differ. Breaks: 476, all caught; nine proven equivalent and left out.
+
+## Slice 8: Select demo `0x14090002`
+
+`src/options/options_demo.c`. Class `CSelectDemo`; MAIN's `pf_aircraft`
+([main_prefdlg.inc](../../src/main/main_prefdlg.inc)) opens it for General Preferences'
+default aircraft, with a block of seven words: the answer, three callbacks that do
+nothing, the pick (always 0), the count and the 0xa08-byte records (the name `+0`, the
+path `+0x900`). The list holds the records' names, each item tagged with its record; a
+pick shows the list's text in one edit and the tagged record's text in the other. OK puts
+the pick back in the block.
+- Its descriptor test is its own: a block that is null or `0xcdcdcdcd` is reported through
+  the CNotify (`CNotify::Send`, a cdecl variadic: "In CSelectDemo::InitializeData", "Bad
+  m_pliveInfo = %lx\npassed to dialog by core code") instead of a message box.
+- The buttons are placed at 0,0 rather than 1,1 as everywhere else, and the edits have
+  no label.
+- With nothing picked, the pick's handler shows `LB_ERR` as a text pointer (OPT-9).
+
+RESULTS_SLICE_8
+
+## Slice 9: Display options `0x14090001` and its four pages
+
+`src/options/options_display.c`. MAIN's `pf_display` (General Preferences' Display button)
+opens it with its preferences block. It is the first dialog with tab pages: a
+`CSimsTabCtrl` (`0x12dc`), four `CSimsTabCtrlHelper`s, and four `CSimsTabPage` classes
+that OnInitDialog makes itself (`ui_new`, the page's constructor given the dialog,
+`CSimsTabPage::Init(9)`), gives each its part of the block (`+0x1118`), and adds to the
+tab control with its title (strings `0xf75a`, `0xf760`, `0xf762`, `0xf765`) and a word of
+the block. The pages are classes like the dialogs (generated members, help, DDX), built on
+`CSimsTabPage` rather than `CSimsDialog`, with no factory:
+
+| Page | Template | Class | Part | What it has |
+| --- | --- | --- | --- | --- |
+| Aircraft | `0x386` | `0x22392aa0`, `0x168c` | `+0xc` | four check boxes (of six members) |
+| Map | `0x387` | `0x22392f30`, `0x13a4` | `+0x38` | a combo and a check box |
+| Scenery | `0x388` | `0x223943e0`, `0x19ac` | `+0x4c` | ten check boxes; one enables two others |
+| Hardware Acceleration | `0x3a6` | `0x22393240`, `0x18ac` | `+0xa0` | MAIN's driver block: drivers and modes combos, Refresh, acceleration and three boxes that need it |
+
+- A page reads its controls into its part only once it has been shown (`+0x1100`), so OK
+  keeps the block's values for a page never opened.
+- The Hardware page calls MAIN's three stdcall callbacks in its part (list the drivers,
+  list the chosen driver's modes, refresh), fills its combos from MAIN's null-ended name
+  lists up to their room, and counts every change at part `+0x14` (MAIN applies the
+  driver and mode only if it is nonzero).
+- OK with Return held (`GetAsyncKeyState`'s low bit) moves the focus to OK first; the
+  pages' error checks are all Options' empty one, so OK fails only on the block's check.
+- Unlike the dialogs before it, Display options declares its destructor (it stores its
+  vtable first), its factory shows "CDisplayOptions::Create() failed" in a message box when
+  `Create` fails, and the vtable it reads for the skin (`+0xe4`) is used again for the frame
+  (`+0xe8`, six arguments).
+- Page `0x386`'s message map is filled in at run time by a static initialiser (it holds
+  `CSimsTabPage::OnActivate`, an import); nothing to transliterate there.
+- A failed page allocation is stored and `Init` called on it all the same (FLT-3).
+
+RESULTS_SLICE_9
+
+## Slice 10: Preferences `0x1409` and its six pages
+
+`src/options/options_prefs.c`. MAIN's General Preferences (`main_prefdlg.inc`), built as
+Display options is, with a Defaults button and six pages:
+
+| Page | Template | Class | Part | What it has |
+| --- | --- | --- | --- | --- |
+| General | `0x398` | `0x223957f0`, `0x1c4c` | `+0x10` | three combos, seven boxes, two buttons for MAIN's default aircraft and flight; a real error check |
+| Instrument | `0x399` | `0x22397500`, `0x150c` | `+0x6c` | five boxes |
+| International | `0x39a` | `0x223963f0`, `0x1714` | `+0x98` | three combos (two stand for codes 1/0 and 2/3), a box hidden unless the part asks for it |
+| Display | `0x396` | `0x22392430`, `0x16ec` | `+0xc0` | MAIN's presets (0x80-byte names), two combos, a box and the Display options button; any change drops the preset |
+| Sound | `0x395` | `0x223919d0`, `0x2dbc` | `+0xf8` | five boxes, each with a `CSimsSlider` (1 to 100) |
+| Flight Options | `0x397` | `0x2239b0e0`, `0x14f8` | `+0x124` | a group and four boxes |
+
+- Pages are given more than their part (`+0x1118`): the block, OK and Cancel at `+0x111c`
+  on, in an order of each page's own; Sound's part is at `+0x111c`.
+- **Defaults** (`0x1131`) records the tab shown (when `GetActiveTab` gives 0..5), calls
+  MAIN's defaults (block `+0xc`; a null or `0xcdcdcdcd` one gets a message box instead), then
+  fills again every page that has been shown.
+- **General's error check** (the only real one among the pages): the first field whose
+  status is set is reported on its box; once dismissed, its tab is shown, the box takes
+  the focus and its text is selected.
+- **Sound's volumes** are doubles, a slider's position times 0.01, negative while its box is
+  off (x87: `fild`, `fmul` by the double 0.01, `fimul` by ±1, `fstp`). Filling a slider takes
+  the volume's magnitude times 100 through MSVCRT `_ftol`, which truncates to 64 bits and
+  keeps the low 32, so a huge volume wraps rather than saturating. Two things a C build has
+  to get right: under `-std=c99` on x87 GCC evaluates a literal `0.01` in long double, so the
+  constants are `static const double`s as in retail's `.rdata`; and the conversion goes
+  through `int64_t` as `_ftol` does.
+- Preferences declares its destructor (vtable stored first) and its factory shows
+  "CPreferences::Create() failed", as Display options' do.
+- The General page gives its third combo the first combo's label (OPT-10, suspected).
+
+RESULTS_SLICE_10
+
 ## Customise controls, for when it comes
 
 Read [CONTROLS' key-assignment contract](controls.md#the-key-assignment-dialog-0x58-text0x7e400x8e5f-0x9130),
@@ -206,6 +353,6 @@ with their own fixtures.
 
 ## Next
 
-1. The analysis dialogs (`0x1405`, `0x14050002`, `0x14050003`), Instant replay, Preferences with Display options and `0x14090002`, and Customise controls last.
+1. Instant replay (`0x1403`), Preferences with Display options and `0x14090002`, and Customise controls last.
 2. The native DLL once enough classes exist to bind the module, as Flights' did; then
    main-dialogs, flights-play-style steps and installation.

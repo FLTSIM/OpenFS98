@@ -45,7 +45,42 @@
  * +0x9c, +0xb0, +0xc4, +0xd8, the mode +0xe8 (4 a new row, 5 an edit), the four totals
  * +0x100, +0x114, +0x128, +0x13c, and +0x150 MAIN's lb_button (stdcall: an operation, an
  * index, the block): 1 a new logbook, 2 delete one, 3 choose one, 4 a new row, 5 edit
- * one, 6 delete one, 7 choose one, 8 rename the logbook. */
+ * one, 6 delete one, 7 choose one, 8 rename the logbook.
+ *
+ * The two graphs are given ANALYSIS's blocks (analysis.c): answer +0, check +4, the
+ * graph's control +8 (stdcall: an operation, the block, the graph's window; 0 set up, 1
+ * draw, 2 done). The landing graph's (0x14050002, S_LBLOCK): +0xc set when there is a
+ * landing to draw, its four texts +0x10 (the touchdown label), +0x14 and +0x18 (the
+ * scale's two ends, as numbers), +0x1c (the caption). The manoeuvre graph's (0x14050003,
+ * S_MBLOCK): +0xc which caption (string 0xf751, or 0xf750), +0x10 set when there is a
+ * scale, +0x14 its text.
+ *
+ * Flight analysis (0x1405, ANALYSIS's options, S_OBLOCK, filled by UTIL's exchange):
+ * answer +0, check +4, then each choice with the status its failure is reported by: on
+ * +0xc (status +8), the mode +0x14 (0, 1 or 2; -1 none; status +0x10, reported against no
+ * control), the first box +0x1c (+0x18), the third mode as a flag +0x24, the second box
+ * +0x2c (+0x28), the two combos' choices +0x34 (+0x30) and +0x3c (+0x38).
+ *
+ * Instant replay (0x1403, DEMO's replay_dialog, D+0xe80): answer +0, check +4, +8 set
+ * when a replay is already running (then nothing can be changed), the length's maximum
+ * +0xc, its status +0x10, the length +0x14 and an error block from +0x18 (the status, the
+ * text and the maximum), the speed's status +0x2c, the speed +0x30 and its error block
+ * from +0x34, and the loop flag +0x4c.
+ *
+ * Select demo (0x14090002, MAIN's pf_aircraft, main_prefdlg.inc): answer +0, +4..+0xc
+ * unused here (MAIN sets them to do nothing), the pick +0x10, the count +0x14 and the
+ * 0xa08-byte records +0x18 (the name shown +0, the path +0x900).
+ *
+ * Display options (0x14090001, MAIN's pf_display, its block PF_DISP filled by UTIL's
+ * exchange): answer +0, check +4 (stdcall, given the block), the tab shown first +8, and each
+ * page's part: Aircraft from +0xc (its first word, +0xc, also given to AddPage), Map from
+ * +0x38, Scenery from +0x4c, Hardware Acceleration from +0xa0 (MAIN's driver block; AddPage
+ * is given +0xac). The parts' words are listed with each page in options_display.c.
+ *
+ * Preferences (0x1409, MAIN's PF_DLG, main_prefdlg.inc, filled by UTIL's exchange): answer +0,
+ * check +4, the tab shown first +8, MAIN's defaults +0xc (stdcall, given the block), and the
+ * pages' parts: General from +0x10, Instrument +0x6c, International +0x98, Display +0xc0
+ * (MAIN's presets), Sound +0xf8 and Flight Options +0x124 (options_prefs.c). */
 struct fs98_options_rect { int32_t left, top, right, bottom; };
 struct fs98_options_services {
     int32_t (*send_message)(uint32_t window, uint32_t message, uint32_t w_param, uint32_t l_param);
@@ -108,6 +143,45 @@ struct fs98_options_services {
     void (*list_text)(void *list, int32_t index, void *string);     /* CListBox::GetText */
     int32_t (*format_text)(char *out, const char *format, const char *text);   /* MSVCRT sprintf */
     void (*list_destroy)(void *list);                               /* ~CSimsListBox */
+    void *(*dialog_item)(void *object, int32_t id);                 /* CWnd::GetDlgItem */
+    void (*remap_rect)(struct fs98_options_rect *rect, void *control);  /* SIMSUI RemapCtrlRect */
+    void (*move_window)(void *window, int32_t x, int32_t y, int32_t width, int32_t height,
+                        int32_t repaint);                           /* CWnd::MoveWindow */
+    char *(*get_buffer)(void *string, int32_t size);                /* CString::GetBuffer */
+    void (*release_buffer)(void *string, int32_t size);             /* CString::ReleaseBuffer */
+    void (*string_append_string)(void *string, const void *other);  /* CString::operator+=(CString &) */
+    int32_t (*message_box)(const char *text, uint32_t type, uint32_t help);   /* AfxMessageBox */
+    void (*paint_construct)(void *dc, void *window);                /* CPaintDC(CWnd *) */
+    void (*paint_destroy)(void *dc);                                /* ~CPaintDC */
+    int32_t (*dc_mode)(void *dc, int32_t mode);                     /* MFC #5875, given 1 */
+    uint32_t (*dc_align)(void *dc, uint32_t align);                 /* MFC #6170, given 2 */
+    int32_t (*get_window_rect)(uint32_t window, struct fs98_options_rect *rect);   /* USER32 */
+    int32_t (*screen_to_client)(uint32_t window, void *point);      /* USER32 */
+    int32_t (*to_int)(const char *text);                            /* MSVCRT atoi */
+    int32_t (*format_int)(char *out, const char *format, int32_t value);   /* MSVCRT sprintf */
+    int32_t (*get_window_long)(uint32_t window, int32_t index);     /* USER32 GetWindowLongA */
+    int32_t (*set_radio)(void *control, int32_t checked);           /* CSimsRadioButton::SetChecked */
+    char *(*long_to_text)(int32_t value, char *out, int32_t radix); /* MSVCRT _ltoa */
+    int32_t (*to_long)(const char *text);                           /* MSVCRT atol */
+    void (*ddx_int)(void *exchange, uint32_t id, int32_t *value);   /* DDX_Text into an int */
+    void (*ddv_min_max)(void *exchange, int32_t value, int32_t low, int32_t high);   /* DDV_MinMaxInt */
+    /* CNotify::Send(title, format, ...), cdecl with the CNotify first; given one value */
+    int32_t (*notify_send)(void *notify, const char *title, const char *format, void *value);
+    int16_t (*async_key_state)(int32_t key);                        /* USER32 GetAsyncKeyState */
+    int32_t (*tab_init)(void *tab, void *dialog, void *font, uint32_t bitmap, void *dib, void *palette,
+                        uint32_t a, uint32_t color, int32_t x, int32_t y, int32_t width, int32_t height,
+                        uint32_t module, uint32_t b);                /* CSimsTabCtrl::Init */
+    int32_t (*page_init)(void *page, int32_t value);               /* CSimsTabPage::Init */
+    void (*add_page)(void *tab, void *page, char *title, int32_t value);   /* CSimsTabCtrl::AddPage */
+    void (*helper_init)(void *helper, void *tab);                   /* CSimsTabCtrlHelper::Init */
+    int32_t (*set_last_page)(void *tab, void *page);                /* CSimsTabCtrl::SetLastPage */
+    int32_t (*set_active_tab)(void *tab, int32_t index, uint32_t window);  /* CSimsTabCtrl::SetActiveTab */
+    int32_t (*get_active_tab)(void *tab);                           /* CSimsTabCtrl::GetActiveTab */
+    int32_t (*slider_init)(void *slider, uint32_t bitmap, uint32_t thumb, void *dib, void *palette, uint32_t a,
+                           uint32_t b, uint32_t c, uint32_t d, int32_t e, int32_t f, uint32_t module);   /* CSimsSlider::Init */
+    void (*set_scroll_range)(void *slider, int32_t low, int32_t high);   /* CSimsSlider::SetScrollRange */
+    int32_t (*get_scroll_pos)(void *slider);                        /* CSimsSlider::GetScrollPos */
+    int32_t (*set_scroll_pos)(void *slider, int32_t position);      /* CSimsSlider::SetScrollPos */
 };
 /* the Logbook's two function-local static CSimsFonts, laid out as in .data from
  * 0x223ac368, and the guard byte they share (0x223ac448: bit 1 the first, bit 2 the
@@ -157,6 +231,23 @@ FS98_OPTIONS_HANDLERS(flight_video);
 FS98_OPTIONS_HANDLERS(add_logbook);
 FS98_OPTIONS_HANDLERS(logbook_entry);
 FS98_OPTIONS_HANDLERS(book);
+FS98_OPTIONS_HANDLERS(landing);
+FS98_OPTIONS_HANDLERS(manoeuvre);
+FS98_OPTIONS_HANDLERS(analysis);
+FS98_OPTIONS_HANDLERS(replay);
+FS98_OPTIONS_HANDLERS(demo);
+FS98_OPTIONS_HANDLERS(display);
+FS98_OPTIONS_HANDLERS(display_aircraft);
+FS98_OPTIONS_HANDLERS(display_map);
+FS98_OPTIONS_HANDLERS(display_scenery);
+FS98_OPTIONS_HANDLERS(display_hardware);
+FS98_OPTIONS_HANDLERS(prefs);
+FS98_OPTIONS_HANDLERS(prefs_general);
+FS98_OPTIONS_HANDLERS(prefs_instrument);
+FS98_OPTIONS_HANDLERS(prefs_international);
+FS98_OPTIONS_HANDLERS(prefs_display);
+FS98_OPTIONS_HANDLERS(prefs_sound);
+FS98_OPTIONS_HANDLERS(prefs_flight);
 #undef FS98_OPTIONS_HANDLERS
 
 /* shared by every class (0x22392400, 0x22392410, 0x22392420, 0x223943d0, 0x22397c30,
@@ -241,5 +332,128 @@ uint32_t FS98_OPTIONS_THISCALL fs98_options_book_check(void *object);
 void FS98_OPTIONS_THISCALL fs98_options_book_rename(void *object);
 void FS98_OPTIONS_THISCALL fs98_options_book_scroll(void *object, uint32_t a, uint32_t b, uint32_t c);
 void *FS98_OPTIONS_THISCALL fs98_options_book_list_delete(void *list, uint32_t flags);
+
+/* the landing and manoeuvre graphs (options_graphs.c) */
+typedef uint32_t (FS98_OPTIONS_STDCALL *fs98_options_graph_fn)(uint32_t operation, void *block, uint32_t window);
+void FS98_OPTIONS_THISCALL fs98_options_landing_accept(void *object);
+void FS98_OPTIONS_THISCALL fs98_options_landing_cancel(void *object);
+int32_t FS98_OPTIONS_THISCALL fs98_options_landing_init(void *object);
+int32_t FS98_OPTIONS_THISCALL fs98_options_landing_draw(void *object, uint32_t w_param, uint32_t l_param);
+void FS98_OPTIONS_THISCALL fs98_options_landing_scale(void *object, void *dc);
+void FS98_OPTIONS_THISCALL fs98_options_landing_paint(void *object);
+void FS98_OPTIONS_THISCALL fs98_options_landing_set_up(void *object);
+uint32_t FS98_OPTIONS_THISCALL fs98_options_landing_has_descriptor(void *object);
+void FS98_OPTIONS_THISCALL fs98_options_manoeuvre_accept(void *object);
+void FS98_OPTIONS_THISCALL fs98_options_manoeuvre_cancel(void *object);
+int32_t FS98_OPTIONS_THISCALL fs98_options_manoeuvre_init(void *object);
+int32_t FS98_OPTIONS_THISCALL fs98_options_manoeuvre_draw(void *object, uint32_t w_param, uint32_t l_param);
+void FS98_OPTIONS_THISCALL fs98_options_manoeuvre_set_up(void *object);
+uint32_t FS98_OPTIONS_THISCALL fs98_options_manoeuvre_has_descriptor(void *object);
+
+/* Flight analysis (options_analysis.c); 0x223957e0 is shared with Display options,
+ * Preferences and Customise controls */
+uint32_t FS98_OPTIONS_THISCALL fs98_options_has_descriptor(void *object);
+void FS98_OPTIONS_THISCALL fs98_options_analysis_cancel(void *object);
+void FS98_OPTIONS_THISCALL fs98_options_analysis_accept(void *object);
+int32_t FS98_OPTIONS_THISCALL fs98_options_analysis_init(void *object);
+void FS98_OPTIONS_THISCALL fs98_options_analysis_off(void *object);
+void FS98_OPTIONS_THISCALL fs98_options_analysis_third(void *object);
+void FS98_OPTIONS_THISCALL fs98_options_analysis_first(void *object);
+void FS98_OPTIONS_THISCALL fs98_options_analysis_second(void *object);
+void FS98_OPTIONS_THISCALL fs98_options_analysis_nothing(void *object);
+void FS98_OPTIONS_THISCALL fs98_options_analysis_read(void *object);
+void FS98_OPTIONS_THISCALL fs98_options_analysis_populate(void *object);
+uint32_t FS98_OPTIONS_THISCALL fs98_options_analysis_error(void *object);
+
+/* Instant replay (options_replay.c); its close is the shared fs98_options_notify_close */
+void FS98_OPTIONS_THISCALL fs98_options_replay_cancel(void *object);
+void FS98_OPTIONS_THISCALL fs98_options_replay_accept(void *object);
+int32_t FS98_OPTIONS_THISCALL fs98_options_replay_init(void *object);
+void FS98_OPTIONS_THISCALL fs98_options_replay_populate(void *object);
+uint32_t FS98_OPTIONS_THISCALL fs98_options_replay_has_descriptor(void *object);
+uint32_t FS98_OPTIONS_THISCALL fs98_options_replay_validate(void *object, uint32_t unused);
+uint32_t FS98_OPTIONS_THISCALL fs98_options_replay_error(void *object, uint32_t code);
 void FS98_OPTIONS_THISCALL fs98_options_flight_video_rate(void *object);
+/* Select demo (options_demo.c) */
+void FS98_OPTIONS_THISCALL fs98_options_demo_cancel(void *object);
+void FS98_OPTIONS_THISCALL fs98_options_demo_accept(void *object);
+void FS98_OPTIONS_THISCALL fs98_options_demo_read(void *object);
+void FS98_OPTIONS_THISCALL fs98_options_demo_select(void *object);
+void FS98_OPTIONS_THISCALL fs98_options_demo_populate(void *object);
+uint32_t FS98_OPTIONS_THISCALL fs98_options_demo_has_descriptor(void *object);
+int32_t FS98_OPTIONS_THISCALL fs98_options_demo_init(void *object);
+
+/* Display options and its pages (options_display.c) */
+void fs98_options_dialog_delete(void *object);                      /* CSimsDialog::operator delete */
+void FS98_OPTIONS_THISCALL fs98_options_display_aircraft_read(void *object);
+void FS98_OPTIONS_THISCALL fs98_options_display_aircraft_populate(void *object);
+void FS98_OPTIONS_THISCALL fs98_options_display_aircraft_init(void *object);
+void FS98_OPTIONS_THISCALL fs98_options_display_map_read(void *object);
+void FS98_OPTIONS_THISCALL fs98_options_display_map_populate(void *object);
+void FS98_OPTIONS_THISCALL fs98_options_display_map_init(void *object);
+void FS98_OPTIONS_THISCALL fs98_options_display_scenery_read(void *object);
+void FS98_OPTIONS_THISCALL fs98_options_display_scenery_enable(void *object);
+void FS98_OPTIONS_THISCALL fs98_options_display_scenery_populate(void *object);
+void FS98_OPTIONS_THISCALL fs98_options_display_scenery_init(void *object);
+void FS98_OPTIONS_THISCALL fs98_options_display_hardware_read(void *object);
+void FS98_OPTIONS_THISCALL fs98_options_display_hardware_fill_drivers(void *object);
+void FS98_OPTIONS_THISCALL fs98_options_display_hardware_fill_modes(void *object);
+void FS98_OPTIONS_THISCALL fs98_options_display_hardware_list_drivers(void *object);
+void FS98_OPTIONS_THISCALL fs98_options_display_hardware_list_modes(void *object);
+void FS98_OPTIONS_THISCALL fs98_options_display_hardware_populate(void *object);
+void FS98_OPTIONS_THISCALL fs98_options_display_hardware_accelerate(void *object);
+void FS98_OPTIONS_THISCALL fs98_options_display_hardware_refresh(void *object);
+void FS98_OPTIONS_THISCALL fs98_options_display_hardware_driver(void *object);
+void FS98_OPTIONS_THISCALL fs98_options_display_hardware_changed(void *object);
+void FS98_OPTIONS_THISCALL fs98_options_display_hardware_init(void *object);
+void FS98_OPTIONS_THISCALL fs98_options_display_cancel(void *object);
+void FS98_OPTIONS_THISCALL fs98_options_display_read(void *object);
+void FS98_OPTIONS_THISCALL fs98_options_display_accept(void *object);
+void FS98_OPTIONS_THISCALL fs98_options_display_close(void *object);
+void FS98_OPTIONS_THISCALL fs98_options_display_attach(void *object);
+uint32_t FS98_OPTIONS_THISCALL fs98_options_display_error(void *object);
+int32_t FS98_OPTIONS_THISCALL fs98_options_display_init(void *object);
+
+/* Preferences and its pages (options_prefs.c) */
+void FS98_OPTIONS_THISCALL fs98_options_prefs_general_choose(void *object);
+void FS98_OPTIONS_THISCALL fs98_options_prefs_general_first(void *object);
+void FS98_OPTIONS_THISCALL fs98_options_prefs_general_second(void *object);
+void FS98_OPTIONS_THISCALL fs98_options_prefs_general_read(void *object);
+void FS98_OPTIONS_THISCALL fs98_options_prefs_general_populate(void *object);
+void FS98_OPTIONS_THISCALL fs98_options_prefs_general_init(void *object);
+void FS98_OPTIONS_THISCALL fs98_options_prefs_instrument_read(void *object);
+void FS98_OPTIONS_THISCALL fs98_options_prefs_instrument_populate(void *object);
+void FS98_OPTIONS_THISCALL fs98_options_prefs_instrument_init(void *object);
+void FS98_OPTIONS_THISCALL fs98_options_prefs_international_read(void *object);
+void FS98_OPTIONS_THISCALL fs98_options_prefs_international_populate(void *object);
+void FS98_OPTIONS_THISCALL fs98_options_prefs_international_init(void *object);
+void FS98_OPTIONS_THISCALL fs98_options_prefs_display_read(void *object);
+void FS98_OPTIONS_THISCALL fs98_options_prefs_display_populate(void *object);
+void FS98_OPTIONS_THISCALL fs98_options_prefs_display_button(void *object);
+void FS98_OPTIONS_THISCALL fs98_options_prefs_display_preset(void *object);
+void FS98_OPTIONS_THISCALL fs98_options_prefs_display_other(void *object);
+void FS98_OPTIONS_THISCALL fs98_options_prefs_display_box(void *object);
+void FS98_OPTIONS_THISCALL fs98_options_prefs_display_init(void *object);
+void FS98_OPTIONS_THISCALL fs98_options_prefs_sound_read(void *object);
+void FS98_OPTIONS_THISCALL fs98_options_prefs_sound_populate(void *object);
+void FS98_OPTIONS_THISCALL fs98_options_prefs_sound_box0(void *object);
+void FS98_OPTIONS_THISCALL fs98_options_prefs_sound_box1(void *object);
+void FS98_OPTIONS_THISCALL fs98_options_prefs_sound_box2(void *object);
+void FS98_OPTIONS_THISCALL fs98_options_prefs_sound_box3(void *object);
+void FS98_OPTIONS_THISCALL fs98_options_prefs_sound_box4(void *object);
+void FS98_OPTIONS_THISCALL fs98_options_prefs_sound_init(void *object);
+void FS98_OPTIONS_THISCALL fs98_options_prefs_flight_read(void *object);
+void FS98_OPTIONS_THISCALL fs98_options_prefs_flight_populate(void *object);
+void FS98_OPTIONS_THISCALL fs98_options_prefs_flight_init(void *object);
+void FS98_OPTIONS_THISCALL fs98_options_prefs_cancel(void *object);
+void FS98_OPTIONS_THISCALL fs98_options_prefs_read(void *object);
+void FS98_OPTIONS_THISCALL fs98_options_prefs_accept(void *object);
+void FS98_OPTIONS_THISCALL fs98_options_prefs_close(void *object);
+void FS98_OPTIONS_THISCALL fs98_options_prefs_defaults(void *object);
+void FS98_OPTIONS_THISCALL fs98_options_prefs_attach(void *object);
+uint32_t FS98_OPTIONS_THISCALL fs98_options_prefs_general_error(void *page);
+uint32_t FS98_OPTIONS_THISCALL fs98_options_prefs_error(void *object);
+void FS98_OPTIONS_THISCALL fs98_options_prefs_sound_box(void *page, uint32_t index);
+int32_t FS98_OPTIONS_THISCALL fs98_options_prefs_init(void *object);
+
 #endif

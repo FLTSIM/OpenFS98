@@ -245,13 +245,19 @@ void FS98_MPDIALOG_THISCALL fs98_mpdialog_details_update(void *object)
     if (!block || !list) return;
     old_selection = (uint32_t)SendMessageA(list, LB_GETCURSEL, 0, 0);
     SendMessageA(list, LB_RESETCONTENT, 0, 0);
-    rows = (uint8_t *)D32(block, 0x4c);
-    count = D32(block, 0x50);
-    for (index = 0; rows && index < count; ++index)
+    for (index = 0; index < D32(PTR(object, 0x1d78), 0x50); ++index) {
+        block = PTR(object, 0x1d78);
+        rows = (uint8_t *)D32(block, 0x4c);
         SendMessageA(list, LB_ADDSTRING, 0, (LPARAM)*(char **)(rows + index * 16 + 12));
-    SendMessageA(list, LB_SETCURSEL, count ? old_selection : (WPARAM)-1, 0);
-    S32(block, 0x58) = (int32_t)SendMessageA(list, LB_GETCURSEL, 0, 0);
-    if (!count) fs98_mpdialog_enable(AT(object, 0x13d0), 0);
+    }
+    SendMessageA(list, LB_SETCURSEL, old_selection, 0);
+    block = PTR(object, 0x1d78);
+    count = D32(block, 0x50);
+    if (!count) SendMessageA(list, LB_SETCURSEL, (WPARAM)-1, 0);
+    if (count > 1 && D32(block, 0x14)) {
+        fs98_mpdialog_enable(AT(object, 0x13d0), 1);
+        fs98_mpdialog_details_on_selection(object);
+    } else fs98_mpdialog_enable(AT(object, 0x13d0), 0);
     if (D32(block, 0x18)) SetWindowTextA((HWND)D32(object, 0x1844 + 0x20), (const char *)D32(block, 0x18));
     if (D32(block, 0x44)) SetWindowTextA((HWND)D32(object, 0x19ac + 0x20), (const char *)D32(block, 0x44));
     if (D32(block, 0x48)) SetWindowTextA((HWND)D32(object, 0x1a64 + 0x20), (const char *)D32(block, 0x48));
@@ -265,8 +271,6 @@ void FS98_MPDIALOG_THISCALL fs98_mpdialog_details_update(void *object)
     range = MAKELPARAM((uint16_t)details_atoi((const char *)D32(block, 0x40)),
                        (uint16_t)details_atoi((const char *)D32(block, 0x3c)));
     SendMessageA((HWND)D32(object, 0x150c + 0x20), UDM_SETRANGE, 0, range);
-    if (D32(block, 0x14) && count > 1) fs98_mpdialog_enable(AT(object, 0x13d0), 1);
-    fs98_mpdialog_details_on_selection(object);
 }
 
 void FS98_MPDIALOG_THISCALL fs98_mpdialog_details_capture(void *object)
@@ -284,9 +288,11 @@ int32_t FS98_MPDIALOG_THISCALL fs98_mpdialog_details_validate(void *object, uint
     uint8_t *block = PTR(object, 0x1d78);
     (void)control_id;
     if (!IsWindowVisible((HWND)D32(object, 0x20))) return 0;
-    fs98_mpdialog_details_capture(object);
+    ((void (TC *)(void *))PTR(PTR(object, 0), 0xfc))(object);
+    block = PTR(object, 0x1d78);
     if (!block || !D32(block, 4)) return 0;
     if (((fs98_mpdialog_callback)D32(block, 4))(block)) {
+        block = PTR(object, 0x1d78);
         if (D32(block, 0x1c)) return 0x40b;
         if (D32(block, 0x30)) return 0x40d;
     }
@@ -295,9 +301,19 @@ int32_t FS98_MPDIALOG_THISCALL fs98_mpdialog_details_validate(void *object, uint
 
 int32_t FS98_MPDIALOG_THISCALL fs98_mpdialog_details_validation_result(void *object, int32_t result)
 {
+    uint8_t *block = PTR(object, 0x1d78);
+    uint32_t status = 0, control = 0;
     if (!result) return 0;
-    SetFocus(GetDlgItem((HWND)D32(object, 0x20), result));
-    return 1;
+    if (D32(block, 0x1c)) { status = 0x1c; control = 0x16bc; }
+    else if (D32(block, 0x30)) { status = 0x30; control = 0x1724; }
+    if (status) {
+        int32_t helper = ((int32_t (TC *)(void *, void *, uint32_t))
+            fs98_mpdialog_import_va(0x2234b414))(
+                object, AT(object, control), (uint32_t)(uintptr_t)AT(block, status));
+        D32(object, 0x8c) = helper;
+        if (helper) result = status == 0x1c ? 0x40b : 0x40d;
+    } else result = 0;
+    return ((int32_t (TC *)(void *, int32_t))PTR(PTR(object, 0), 0xe0))(object, result);
 }
 
 void FS98_MPDIALOG_THISCALL fs98_mpdialog_details_on_ok(void *object)
@@ -305,9 +321,10 @@ void FS98_MPDIALOG_THISCALL fs98_mpdialog_details_on_ok(void *object)
     uint8_t *block = PTR(object, 0x1d78);
     void **vtable = PTR(object, 0);
     int32_t result;
-    fs98_mpdialog_details_capture(object);
+    ((void (TC *)(void *))vtable[0xfc / 4])(object);
     result = ((int32_t (TC *)(void *, uint32_t))vtable[0xd8 / 4])(object, 0);
     if (((int32_t (TC *)(void *, int32_t))vtable[0xdc / 4])(object, result)) return;
+    block = PTR(object, 0x1d78);
     D32(block, 0) = 1;
     ((fs98_mpdialog_callback)D32(block, 8))(block);
     ((void (TC *)(void *))vtable[0xec / 4])(object);
@@ -323,37 +340,36 @@ void FS98_MPDIALOG_THISCALL fs98_mpdialog_details_on_cancel(void *object)
 void FS98_MPDIALOG_THISCALL fs98_mpdialog_details_on_remove(void *object)
 {
     uint8_t *block = PTR(object, 0x1d78);
-    fs98_mpdialog_details_capture(object);
+    ((void (TC *)(void *))PTR(PTR(object, 0), 0xfc))(object);
+    block = PTR(object, 0x1d78);
     ((fs98_mpdialog_callback)D32(block, 0x0c))(block);
 }
 
-void FS98_MPDIALOG_THISCALL fs98_mpdialog_details_on_refresh(void *object, uint32_t wparam, uint32_t lparam)
+int32_t FS98_MPDIALOG_THISCALL fs98_mpdialog_details_on_refresh(void *object, uint32_t wparam, uint32_t lparam)
 {
     uint8_t *block = PTR(object, 0x1d78);
     (void)wparam; (void)lparam;
-    if (!IsWindowVisible((HWND)D32(object, 0x20))) return;
+    if (!IsWindowVisible((HWND)D32(object, 0x20))) return 0;
     if (((fs98_mpdialog_callback)D32(block, 0x10))(block))
         ((void (TC *)(void *))PTR(PTR(object, 0), 0xf8))(object);
+    return 0;
 }
 
 void FS98_MPDIALOG_THISCALL fs98_mpdialog_details_on_selection(void *object)
 {
     uint8_t *block = PTR(object, 0x1d78);
     int32_t selected = (int32_t)SendMessageA((HWND)D32(object, 0x1984), LB_GETCURSEL, 0, 0);
-    uint32_t count = D32(block, 0x50);
     uint8_t *rows = (uint8_t *)D32(block, 0x4c);
-    int32_t disabled = !D32(block, 0x14) || count <= 1;
-    if (!disabled && selected >= 0 && (uint32_t)selected < count && rows &&
-        D32(rows + selected * 16, 8)) disabled = 1;
-    fs98_mpdialog_enable(AT(object, 0x13d0), !disabled);
+    /* Retail indexes the selected row directly, including its -1 predecessor. */
+    fs98_mpdialog_enable(AT(object, 0x13d0),
+        D32(rows + (uint32_t)selected * 16, 8) == 0);
 }
 
 uint32_t FS98_MPDIALOG_STDCALL fs98_mpdialog_details_create(uint32_t parent, void *descriptor)
 {
     void *object = fs98_mpdialog_allocate(0x1d80);
     (void)parent;
-    if (!object) return 0;
-    details_construct(object);
+    if (object) details_construct(object);
     PTR(object, 0x1d78) = descriptor;
     D32(object, 0x80) = fs98_mpdialog_instance();
     fs98_mpdialog_create_window(object, 0x6b, 0);

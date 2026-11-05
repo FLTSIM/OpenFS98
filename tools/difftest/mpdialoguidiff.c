@@ -2887,7 +2887,7 @@ static void fs98_setup_details(uint32_t side, uint32_t case_index)
 static void fs98_modeled_host_idle_tick(HWND window)
 {
     /* Static HOST evidence: single-modal idle calls SendMessageA(hwnd,0x464,0,0). */
-    SendMessageA(window, 0x464, 0, 0);
+    if (SendMessageA(window, 0x464, 0, 0) != 0) fs98_fail("Details idle message return");
 }
 
 static void fs98_modeled_host_flow_idle_tick(HWND *windows)
@@ -2895,7 +2895,8 @@ static void fs98_modeled_host_flow_idle_tick(HWND *windows)
     uint32_t index;
     /* The flag-2 loop broadcasts the idle message over the terminating HWND array. */
     for (index = 0; index < 5; ++index)
-        SendMessageA(windows[index], 0x464, 0, 0);
+        if (SendMessageA(windows[index], 0x464, 0, 0) != 0 && index == 4)
+            fs98_fail("Browser idle message return");
 }
 
 static void fs98_capture_details(HWND window, uint32_t side)
@@ -3894,8 +3895,12 @@ static uint32_t fs98_run_flow_case(uint32_t cycle, uint32_t case_index,
             if (!IsWindow(windows[page])) result->array_valid = 0;
         result->browser_initial_count = (uint32_t)SendDlgItemMessageA(
             windows[4], 0x3fd, LB_GETCOUNT, 0, 0);
-        if (side == 0 && result->browser_initial_count != D32(block, 0xb0))
+        if (side == 0 && result->browser_initial_count != D32(block, 0xb0)) {
+            fprintf(stderr, "BROWSER INIT actual=%lu expected=%lu hwnd=%p list=%p rows=%p error=%lu\n",
+                (unsigned long)result->browser_initial_count, (unsigned long)D32(block, 0xb0),
+                windows[4], GetDlgItem(windows[4], 0x3fd), PTR(block, 0xac), (unsigned long)GetLastError());
             fs98_fail("retail Browser fixture must contain every descriptor row");
+        }
         if (case_index == 1 || case_index == 11) {
             static const int ids[] = {0x40f, 0x410, 0x41a};
             uint32_t i;
@@ -4243,6 +4248,8 @@ static uint32_t fs98_run_flow_case(uint32_t cycle, uint32_t case_index,
         if (case_index == 7) {
             static const uint32_t expected_modal[13] = {1, 0x41a, 1, 1, 1, 0x41a, 1, 0x41a, 0x41a, 0, 0x41a, 8, 0};
             uint32_t i;
+            for (i = 0; i < 13; ++i) fprintf(stderr, "HOST MODAL CHECK index=%lu retail=%lx replacement=%lx\n",
+                (unsigned long)i, (unsigned long)s_real_modal[0][i], (unsigned long)s_real_modal[1][i]);
             if (memcmp(s_real_modal[0], expected_modal, sizeof(expected_modal)) ||
                 !retail->blocked_next[0] || !(retail->after_initial_mask & 1))
                 fs98_fail("retail Alerts modal validation fixture");
@@ -4811,6 +4818,8 @@ static uint32_t fs98_run_flow_suite(uint32_t cycle, HMODULE *modules,
     return differences;
 }
 
+#include "mpdialogdetailsaudit.inc"
+
 static uint32_t fs98_run_details_suite(uint32_t cycle, HMODULE *modules,
                                       struct fs98_test_linkage **linkages)
 {
@@ -4854,6 +4863,7 @@ static uint32_t fs98_run_details_suite(uint32_t cycle, HMODULE *modules,
             if (!IsWindow(window) || !IsWindowVisible(window)) fs98_fail("0x110c factory HWND");
             fs98_pump();
             fs98_details_focus_checkpoint("after-pump");
+            if (case_index == 0 && s_details_mutation_case == 0) { fs98_details_error_matrix(window, side); fs98_details_update_matrix(window, side); fs98_details_validate_matrix(window, side); }
             fs98_patch_dialog_vtable(window, modules[side], 0);
             fs98_capture_details(window, side);
             fs98_capture_native_child_tree(window, &result->native_child_count,
@@ -4962,6 +4972,18 @@ static uint32_t fs98_run_details_suite(uint32_t cycle, HMODULE *modules,
                             (long)right->y, right->text);
                 }
             }
+        }
+        if (case_index == 0 && s_details_mutation_case == 0 && memcmp(s_details_validate_matrix[0], s_details_validate_matrix[1], sizeof(s_details_validate_matrix[0]))) {
+            ++differences;
+            fprintf(stderr, "MP_DIALOG DETAILS VALIDATE MATRIX DIFFER\n");
+        }
+        if (case_index == 0 && s_details_mutation_case == 0 && memcmp(s_details_update_matrix[0], s_details_update_matrix[1], sizeof(s_details_update_matrix[0]))) {
+            ++differences;
+            fprintf(stderr, "MP_DIALOG DETAILS UPDATE MATRIX DIFFER\n");
+        }
+        if (case_index == 0 && s_details_mutation_case == 0 && memcmp(s_details_error_matrix[0], s_details_error_matrix[1], sizeof(s_details_error_matrix[0]))) {
+            ++differences;
+            fprintf(stderr, "MP_DIALOG DETAILS ERROR MATRIX DIFFER\n");
         }
         if (memcmp(&s_details_results[0], &s_details_results[1],
                 offsetof(struct fs98_details_result, native_child_count)) != 0) {
@@ -5125,6 +5147,7 @@ static uint32_t fs98_run_help_suite(HMODULE *modules, struct fs98_test_linkage *
     return differences;
 }
 
+#include "mpdialogboundaries.inc"
 #include "mpdialogconstruction.inc"
 
 static void fs98_mutation_unload(HMODULE *modules,

@@ -459,12 +459,13 @@ void TC fs98_mpdialog_flow_update_choice(void *object)
     if (!block) return;
     mode = D32(block, 0x24);
     if (D32(block, 0x2c)) SetWindowTextA((HWND)D32(object, 0x17cc), (const char *)D32(block, 0x2c));
+    if (mode > 2) return;
     set_checked(AT(object, mode == 1 ? 0x1908 : (mode == 2 ? 0x19fc : 0x1814)), 1);
     if (mode == 2) {
         fs98_mpdialog_enable(AT(object, 0x13d0), 1);
         fs98_mpdialog_show_control(AT(object, 0x13d0), SW_SHOW);
-        fs98_mpdialog_enable(AT(object, 0x11d8), 0);
         fs98_mpdialog_show_control(AT(object, 0x11d8), SW_HIDE);
+        fs98_mpdialog_enable(AT(object, 0x11d8), 0);
         fs98_mpdialog_enable(AT(object, 0x17ac), 0);
     } else {
         fs98_mpdialog_show_control(AT(object, 0x11d8), SW_SHOW);
@@ -521,8 +522,8 @@ static void flow_choice_route_update(void *object, uint32_t online)
     if (online) {
         fs98_mpdialog_enable(AT(object, 0x13d0), 1);
         fs98_mpdialog_show_control(AT(object, 0x13d0), SW_SHOW);
-        fs98_mpdialog_enable(AT(object, 0x11d8), 0);
         fs98_mpdialog_show_control(AT(object, 0x11d8), SW_HIDE);
+        fs98_mpdialog_enable(AT(object, 0x11d8), 0);
         fs98_mpdialog_enable(AT(object, 0x17ac), 0);
     } else {
         fs98_mpdialog_show_control(AT(object, 0x11d8), SW_SHOW);
@@ -534,21 +535,13 @@ static void flow_choice_route_update(void *object, uint32_t online)
 }
 
 void TC fs98_mpdialog_flow_route_standard(void *object)
-{ fs98_mpdialog_flow_capture_choice(object); flow_choice_route_update(object, 0); }
-static void flow_route_choice(void *object, uint32_t mode)
-{
-    uint32_t selected = D32(object, mode == 1 ? 0x1928 : (mode == 2 ? 0x1a1c : 0x1834));
-    void *block = flow_block(object, 1);
-    SetWindowLongA((HWND)D32(object, 0x1834), GWL_USERDATA, (LONG)selected);
-    SetWindowLongA((HWND)D32(object, 0x1928), GWL_USERDATA, (LONG)selected);
-    SetWindowLongA((HWND)D32(object, 0x1a1c), GWL_USERDATA, (LONG)selected);
-    if (block) D32(block, 0x24) = mode;
-    flow_choice_route_update(object, mode == 2);
-}
-void TC fs98_mpdialog_flow_route_join(void *object) { flow_route_choice(object, 0); }
-void TC fs98_mpdialog_flow_route_host(void *object) { flow_route_choice(object, 1); }
+{ flow_choice_route_update(object, 0); }
+void TC fs98_mpdialog_flow_route_join(void *object)
+{ flow_choice_route_update(object, 0); }
+void TC fs98_mpdialog_flow_route_host(void *object)
+{ flow_choice_route_update(object, 0); }
 void TC fs98_mpdialog_flow_route_online(void *object)
-{ flow_route_choice(object, 2); }
+{ flow_choice_route_update(object, 1); }
 
 void TC fs98_mpdialog_flow_next_intro(void *object)
 { flow_capture(object); (void)flow_advance(flow_block(object, 0)); }
@@ -702,24 +695,19 @@ void TC fs98_mpdialog_flow_capture_connection(void *object)
 
 void TC fs98_mpdialog_flow_update_connection(void *object)
 {
-    void *block = flow_block(object, 3);
+    void *block;
     HWND combo = (HWND)D32(object, 0x1714);
-    uint32_t index, count;
-    if (!block) return;
+    uint32_t index;
+    flow_connection_mode(object, 0);
     SendMessageA(combo, LB_RESETCONTENT, 0, 0);
-    count = D32(block, 0x88);
-    for (index = 0; index < count; ++index) {
-        char **providers = (char **)(uintptr_t)D32(block, 0x84);
-        if (providers) SendMessageA(combo, LB_ADDSTRING, 0, (LPARAM)providers[index * 7]);
+    for (index = 0; index < D32(flow_block(object, 3), 0x88); ++index) {
+        char **providers;
+        block = flow_block(object, 3);
+        providers = (char **)(uintptr_t)D32(block, 0x84);
+        SendMessageA(combo, LB_ADDSTRING, 0, (LPARAM)providers[index * 7]);
     }
+    block = flow_block(object, 3);
     SendMessageA(combo, LB_SETCURSEL, D32(block, 0x90), 0);
-    if (D32(block, 0x24) == 1) {
-        fs98_mpdialog_show_control(AT(object, 0x12d4), SW_SHOW);
-        fs98_mpdialog_show_control(AT(object, 0x11d8), SW_HIDE);
-    } else {
-        fs98_mpdialog_show_control(AT(object, 0x12d4), SW_HIDE);
-        fs98_mpdialog_show_control(AT(object, 0x11d8), SW_SHOW);
-    }
 }
 
 void TC fs98_mpdialog_flow_provider_connection(void *object)
@@ -951,11 +939,12 @@ void TC fs98_mpdialog_flow_observer_browser(void *object)
     flow_browser_update_join(object);
     if (block) D32(block, 0x40) = D32(object, 0x1ad8) ? 2 : 1;
 }
-void TC fs98_mpdialog_flow_idle_browser(void *object, uint32_t wparam, uint32_t lparam)
+int32_t TC fs98_mpdialog_flow_idle_browser(void *object, uint32_t wparam, uint32_t lparam)
 {
     void *block = flow_block(object, 4);
     (void)wparam; (void)lparam;
     if (block) D32(block, 0x14) = 0;
+    return 0;
 }
 
 int32_t TC fs98_mpdialog_flow_mouse_activate_browser(void *object, uint32_t active,

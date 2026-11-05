@@ -121,7 +121,7 @@ int32_t FS98_MPDIALOG_THISCALL fs98_mpdialog_details_validation_result(void *obj
 void FS98_MPDIALOG_THISCALL fs98_mpdialog_details_on_ok(void *object);
 void FS98_MPDIALOG_THISCALL fs98_mpdialog_details_on_cancel(void *object);
 void FS98_MPDIALOG_THISCALL fs98_mpdialog_details_on_remove(void *object);
-void FS98_MPDIALOG_THISCALL fs98_mpdialog_details_on_refresh(void *object, uint32_t wparam, uint32_t lparam);
+int32_t FS98_MPDIALOG_THISCALL fs98_mpdialog_details_on_refresh(void *object, uint32_t wparam, uint32_t lparam);
 void FS98_MPDIALOG_THISCALL fs98_mpdialog_details_on_selection(void *object);
 
 uint32_t FS98_MPDIALOG_STDCALL fs98_mpdialog_flow_create(uint32_t parent, void *descriptor);
@@ -195,7 +195,7 @@ void FS98_MPDIALOG_THISCALL fs98_mpdialog_flow_refresh_browser(void *object);
 void FS98_MPDIALOG_THISCALL fs98_mpdialog_flow_observer_browser(void *object);
 void FS98_MPDIALOG_THISCALL fs98_mpdialog_flow_select_browser(void *object);
 void FS98_MPDIALOG_THISCALL fs98_mpdialog_flow_select_type_browser(void *object);
-void FS98_MPDIALOG_THISCALL fs98_mpdialog_flow_idle_browser(void *object, uint32_t wparam, uint32_t lparam);
+int32_t FS98_MPDIALOG_THISCALL fs98_mpdialog_flow_idle_browser(void *object, uint32_t wparam, uint32_t lparam);
 int32_t FS98_MPDIALOG_THISCALL fs98_mpdialog_flow_mouse_activate_browser(void *object, uint32_t active, uint32_t hit_test, uint32_t message);
 void FS98_MPDIALOG_THISCALL fs98_mpdialog_flow_show_browser(void *object, uint32_t show, uint32_t status);
 void FS98_MPDIALOG_THISCALL fs98_mpdialog_flow_timer_browser(void *object, uint32_t timer_id);

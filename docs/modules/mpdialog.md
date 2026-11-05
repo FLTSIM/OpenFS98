@@ -2402,3 +2402,239 @@ trace-error criteria are unchanged. The smoke script now labels gauge mentions
 separately from load records and distinct paths. No shared build/install wiring
 or live game files were changed. The current replacement remains isolated
 under `bin/mpdialog-diff/`; no whole-module acceptance claim is added.
+
+### Primary-context review continuation (2026-11-05)
+
+This checkpoint extends the earlier inventory; it does not turn sampled
+comparisons into an exhaustive equivalence claim.
+
+The existing provenance runner is now used for all verification below. Its
+manifest records retail/replacement/test hashes, Wine version, command and
+selected runtime configuration; comparison events record mutant hashes as
+well. The following implementation corrections came from direct retail
+instruction traces and independent paired matrices:
+
+- Details error `0x22345020..0x223450ba` calls the SIMSUI error helper for the
+  first nonzero status (`+0x1c`, then `+0x30`), records its return at object
+  `+0x8c`, preserves the incoming field when the helper returns zero, forwards
+  zero when neither status is set, and propagates virtual `+0xe0`'s return.
+  The previous focus-only handler omitted this behavior. The 72-case matrix
+  varies both statuses, incoming zero/nonzero field, helper return and
+  downstream return independently. The pre-fix DLL differed; the fixed one
+  matches. Injected returns are test values, not natural-helper claims.
+- Details update `0x22344d10..0x22344efb` preserves descriptor `+0x58`, rereads
+  list storage/count while inserting, restores the old selection and performs
+  Remove enable/selection work before updating text/ranges. Its selection
+  handler `0x22344fd0` directly reads the selected row's flag, without the
+  replacement's extra host/count gates. The 12-case matrix varies host mode,
+  count and row flags and detects the former descriptor write. A readable
+  predecessor row makes retail's selection -1 lookup defined within the
+  fixture allocation; this does not claim arbitrary invalid pointers are safe.
+- Details validation `0x223450c0` and OK/Remove wrappers `0x22344830/0x22344850`
+  capture through virtual `+0xfc` and reload the descriptor after callouts.
+  Sixteen paired validation cases vary hidden/visible, independent statuses
+  and callback result, and check virtual capture dispatch. The Details factory
+  null-allocation path also now follows retail's faulting caller behavior;
+  framework exception unwinding remains outside this evidence.
+- Choice update `0x223458a0` preserves radio/button state for modes other than
+  0/1/2. Its route methods `0x22345b00/0x22345b50` only update control state;
+  they do not write descriptor/radio userdata or capture the callsign. The
+  generator now retains the retail message-map routing instead of substituting
+  synthetic per-radio handlers. Real radio click fixtures continue to test
+  the SIMSUI state transition.
+- Connection update `0x22341e60` applies `0x22341f60`'s enable/visibility state
+  before rebuilding its provider list, rereads provider storage/count, and
+  leaves button state alone for unsupported modes. Five independent mode
+  cases exposed the previous mismatch. Intro noncanonical checked words and
+  128 independent Settings field/checked-word combinations match unchanged.
+- Browser idle `0x22343780` and Details refresh `0x22344fa0` explicitly return
+  zero. Their C declarations and implementations now preserve that return;
+  the modeled idle dispatcher checks it.
+
+Reusable cases live in `mpdialogboundaries.inc` and `mpdialogdetailsaudit.inc`.
+The boundary matrix runs with `--construction-only`; Details matrices run in
+Details case 0. `--review-breaks` requires clean paired baselines and then
+checks five targeted mutations (error field, error return, saved selection,
+Choice unsupported mode, Connection mode update), requiring controlled module
+cleanup. All five were caught in
+`bin/mpdialog-diff/runs/isolated-mss4gvga/output.log`.
+
+The ordinary construction/DDX/destruction comparison and its five mutations
+also passed (`bin/mpdialog-diff/runs/isolated-bdnpc75n/output.log`). This checks
+seven classes' ordered constructor types/offsets, DDX order, descriptor and
+instance attachment, reverse destruction and ordinary deleting teardown.
+It does not establish exceptional construction cleanup or destructor flag 0.
+The expanded Choice/Connection boundary matrices failed before their fixes
+and passed afterward (`isolated-4tvvnwje` / `isolated-5z7bgi2h`). The Details
+error/update failing-before runs are `isolated-uqv1zt_2` and
+`isolated-oulzwaq2`; the corrected paired matrices pass.
+
+The attempted full run under Xvfb, `isolated-uqqwt81t`, failed the existing
+real Alerts modal fixture in flow case 7. It is retained as a failed run;
+the subsequent normal-display run completed its full behavior, control-tree,
+render, repeatability and help baseline. The cause of that Xvfb failure was
+not established, and it is not counted as a mutation detection.
+
+The final review runner is `isolated-mss4gvga`'s successor recorded in
+`/tmp/mpdialog-final-review.log`; it repeats all five detections with the
+expanded 16-case validation matrix compiled in. An intermediate rebuild
+failed because that matrix's callback name duplicated an existing helper;
+those preceding executable runs do not establish coverage of the newly added
+matrix. The helper was renamed and the harness rebuilt successfully before
+the final review run. Both independent baseline groups and all five targeted
+mutations pass with the rebuilt harness.
+
+The final DLL SHA-256 is
+`01507dec60328c37067bfd2e2359db75a48936b49a060d1ff51f168cb3ed7d92`.
+Its strict private SEHFIX smoke passed at
+`bin/mpdialog-diff/runs/smoke-sehfix-1vzxob_7/output.log`: 27/27 modules,
+58 gauge loads / 29 distinct paths, replacement and SEHFIX loaded and
+unchanged, and the retail game DLL unchanged. This remains shimmed startup
+coverage. Existing actual-owner traces predate these source changes.
+
+The first current-hash full mutation attempt passed its complete baseline
+and caught 32 mutations, then timed out on the retail side of
+`flow-browser-reentrant-row-count` before a lifetime checkpoint
+(`isolated-mx65p9wd`). A subsequent attempt failed the existing real Alerts
+fixture in its baseline; neither failed attempt establishes full mutation
+acceptance. These failures remain recorded, with their causes unresolved.
+The real Host Alerts case now receives an independent owner window, as the
+Choice real-alert case already did, and prints all checkpoint values before
+its retail self-check. This change does not remove any assertion or relax
+its expected values; it makes setup independent and failure evidence visible.
+
+**Latest validation limit:** the completed debug baseline
+`/tmp/mpdialog-retail-init-debug.log` matches flow, Settings, rendering,
+repeatability and help, but has one Details difference (cycle 1, case 4):
+focus 2 versus 0, with all other printed state/callback/lifetime values equal.
+Two intervening baseline attempts failed the retail Browser initial-count
+self-check in cycle 1, case 2. A diagnostic now prints count, expected count,
+Browser/list HWND, row pointer and last error before that assertion.
+The later activation experiment `isolated-47ke00ad` faulted in MFC at
+`0x5f40219e`; explicit modal activation and the additional isolated Host-alert
+owner did not establish a reliable correction and were removed. Checkpoint
+printing remains. These experiments are failures, not accepted equivalence.
+
+Intrusive Details matrices now execute only in the dedicated Details-case-0
+comparison process (`--details-mutation-case 0`), avoiding changing focus and
+virtual-call fixtures within the ordinary multi-family baseline. The review
+runner independently requires these matrices plus construction/boundary
+baselines. Current full-suite acceptance remains unresolved: the prior 46/46
+pass is historical, and this checkpoint must not be reported as a current
+46/46 pass. The source changes remain isolated and whole-module status stays
+partial. Remaining actual-owner/session and MFC exception-cleanup limits in
+the acceptance inventory remain open.
+
+### Current-hash suite completion (2026-11-05)
+
+The unresolved current-suite gate above now has a completed passing run.
+No implementation or fixture changes were needed in this continuation;
+the DLL remains SHA-256
+`01507dec60328c37067bfd2e2359db75a48936b49a060d1ff51f168cb3ed7d92`.
+`make -f tools/mpdialog.mk mpdialog bin/mpdialog-diff/mpdialoguidiff.exe`
+found both outputs up to date.
+
+- `bash tools/run_mpdialogdiff.sh --ui` passed in
+  `bin/mpdialog-diff/runs/isolated-_at_d3o_/output.log`: 24 flow, 24 Settings
+  and 20 Details paired scripts over two load/unload cycles, all child trees,
+  seven render captures, 14/14 stable repeats and all help comparisons match.
+- `bash tools/run_mpdialogdiff.sh --ui-breaks` passed in
+  `bin/mpdialog-diff/runs/isolated-buvmgtso/output.log`. Its independent
+  fresh-prefix baseline passed the same gates and all 46 mutations were
+  caught, including lifetime order, Browser Details fields, accept return and
+  reentrant row count. The provenance manifest records the current DLL and
+  harness hashes; comparison events record individual mutant hashes/results.
+- `bash tools/run_mpdialogdiff.sh --review-breaks` passed in
+  `bin/mpdialog-diff/runs/isolated-5exm7eq7/output.log`: both independent
+  construction/boundary and Details matrix baselines passed, followed by all
+  five targeted detections with controlled module cleanup.
+
+The first sandboxed Wine launch (`isolated-2e8xbkdy`) ended with a bad-system-call
+termination before test execution. The completed runs used the same runner
+outside that sandbox on the normal display. `git diff --check` passed.
+
+These results restore the current isolated baseline and mutation gates; they
+do not explain the earlier focus difference, retail self-check failures or
+timeouts. Those failed runs remain evidence of unresolved intermittent
+behavior. No actual-owner integration or startup smoke was repeated here,
+and no live game DLL or shared installation wiring was changed. Whole-module
+status remains **partial**, with the existing actual-owner/session and MFC
+exception-cleanup limits still open.
+
+### Current-hash actual-owner refresh (2026-11-05)
+
+The actual HOST/MULTIP Connect → Cancel and Host attempts have now been
+repeated against retail and the current replacement SHA-256
+`01507dec60328c37067bfd2e2359db75a48936b49a060d1ff51f168cb3ed7d92`.
+Final evidence is under `bin/mpdialog-diff/owner-current-nu7irwyh/`:
+`cancel-retail/`, `cancel-replacement/`, `host-retail/` and
+`host-replacement/` each retain `controller.log`, `hook.log`, Wine logs,
+their private game tree and dedicated Wine prefix. `manifest.json` records
+commands, Wine version, probe hashes, initial/final DLL and configuration
+hashes, and controller results. `runner.py`, probe binaries, hook source,
+`source-tree.json`, `compare.py` and `comparison-summary.json` are retained
+beside them. The comparison script passes all four recorded runs.
+
+Each run starts from a fresh copy of the earlier private retail tree, with
+only the tested DLL differing between each pair. The starting CFG hash is
+`f03392aa0a7e40aa0356f288716704c6f20cce4b5e06c0e898e80fd8d0855744`.
+The runner writes `HOST_SESSION=0` in that file, but the actual owner
+descriptor still reports mode 1 at factory entry in both binaries; the
+runtime descriptor, rather than this CFG key, defines the observed mode.
+Both private copies include the same SEHFIX shim from the earlier private
+tree; its hash is recorded. These are shimmed Wine owner probes, not an
+unshimmed compatibility claim. Controllers run in a private Wine desktop;
+cleanup stops only their dedicated Wine servers.
+
+**Matched cancel lifecycle.** Both controllers report
+`CONNECT_CANCEL END result=0 returned=1`, with modal return after about
+4.3–4.5 seconds. Both actual arrays are
+`[000101fa,000101d2,00010180,000d00ec,000101b2,00000000]`; the array storage
+is retail `2234a0b8` versus current replacement `2234e01c`. All five pages
+are hidden at factory return. Descriptor `+0x1c=1` still selects the
+suppressed initial-post branch. Each flow records five PostNcDestroy and
+five deleting-destructor flag-1 calls before owner return, no accept or
+validation callbacks, four provider payload frees and provider count 0 at
+nested browser cleanup. The comparison scopes flow teardown to events before
+`OWNER HOST RETURN`: retail later reuses a freed flow-object address for
+Settings, whose shared PostNcDestroy hook can print a stale saved flow HWND.
+That later event is not a sixth flow-page destruction.
+
+**Matched Host attempt and unchanged external limit.** Both controllers
+complete Intro → Choice → Host Options → Connection Type → Host, return to
+the game, open actual 0x110b, observe Host Settings disabled and cancel it.
+The callbacks match: three `+0x10` validation returns of zero, followed by
+one `+0x0c` accept return of zero. Provider row 0 is the same Internet TCP/IP
+DirectPlay provider; provider creation and both interface queries succeed.
+Both then receive `HRESULT=80004001` from `IDirectPlay3::Open` in Wine's
+`C:\windows\system32\dplayx.dll`. Both 0x110b blocks have `+0x18=0,+0x1c=1`;
+both controllers report `result=0 flow_returned=1 details=0 returned_to_game=1`.
+The Host runs also match the five-page flow teardown and four provider frees.
+Their final CFG hashes match each other, and all four tested DLL hashes and
+the source game's retail DLL hash remain unchanged.
+
+The hook now recognizes the current replacement's ordinal-1 ImportTable RVA
+`0x7018`, factory RVAs `0x1a80/0x4500/0x54f0`, object array `0xe008` and HWND
+array `0xe01c`, checked against this build's exports/linker symbols. It still
+supports the earlier replacement. The three probe binaries compile with
+`-std=c99 -O2 -Wall -Wextra -Werror`; the hook additionally requires
+`-shared -Wl,--kill-at` for the controller's undecorated export names.
+`git diff --check` passes. No implementation DLL was rebuilt or installed
+into the live game by this refresh.
+
+Initial setup failures are retained under `owner-current-y1srnop1` (hook
+exports decorated incorrectly) and `owner-current-65_mob_m` (controller
+workflows complete, but replacement internal tracing missed because the
+ordinal-1 fingerprint used Linkage's RVA instead of ImportTable's). Neither
+is counted as a complete paired internal-trace comparison. The final four
+runs above use the corrected hook and have no unresolved layout records.
+
+This supersedes the earlier statement that all actual-owner evidence predates
+the current source changes. It refreshes the reachable owner paths without
+establishing active-session 0x110c/1016, actual 0x110b OK, the actual initial
+post branch, repeated unload within one owner process, or exceptional MFC
+cleanup. Whole-module status remains **partial**. The next integration step
+requires an environment where retail can successfully create a DirectPlay
+session; forcing the owner state would provide modeled coverage rather than
+resolve that acceptance gate. Independent remaining source-boundary and MFC
+failure-path review can proceed in this environment.

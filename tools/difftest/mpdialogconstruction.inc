@@ -232,6 +232,7 @@ static uint32_t fs98_run_construction_suite(HMODULE *modules, struct fs98_test_l
                 (HWND)D32(s_layout_object[side][page], 0x20) != windows[page])
                 fs98_fail("layout flow object and HWND");
         }
+        for (page = 0; page < 5; ++page) fs98_boundary_probe(s_layout_object[side][page], side, page);
         for (page = 0; page < 5; ++page)
             if (!DestroyWindow(windows[page])) fs98_fail("layout flow teardown");
         s_flow_owner_active[side] = 0;
@@ -240,6 +241,7 @@ static uint32_t fs98_run_construction_suite(HMODULE *modules, struct fs98_test_l
         window = (HWND)(uintptr_t)linkages[side]->dialogs[1].create(
             (uint32_t)(uintptr_t)s_main_window, &s_blocks[side]);
         if (!IsWindow(window) || !s_layout_live[side][5]) fs98_fail("layout Settings factory");
+        fs98_boundary_probe(s_layout_object[side][5], side, 5);
         if (!DestroyWindow(window)) fs98_fail("layout Settings teardown");
         s_details_active = 1;
         fs98_setup_details(side, 0);
@@ -275,6 +277,10 @@ static uint32_t fs98_run_construction_suite(HMODULE *modules, struct fs98_test_l
             !a->count || a->events[0].kind != 0 || a->events[a->count - 1].kind != 5 ||
             constructed != expected_controls[page] || control_dtors != expected_controls[page])
             fs98_fail("retail construction trace completeness");
+        if (memcmp(s_boundary[0][page], s_boundary[1][page], sizeof(s_boundary[0][page]))) {
+            ++differences;
+            fprintf(stderr, "MP_DIALOG BOUNDARY DIFFER page=%lu\n", (unsigned long)page);
+        }
         if (a->count != b->count || memcmp(a->events, b->events, sizeof(a->events))) {
             ++differences;
             fprintf(stderr, "MP_DIALOG CONSTRUCTION DIFFER page=%lu retail_count=%lu replacement_count=%lu\n",

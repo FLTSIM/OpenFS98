@@ -1165,6 +1165,17 @@ static void hosthook_install_mp_probes(HMODULE module)
             HOSTHOOK_BP_OTHER_DIALOG_FACTORY, "retail 0x110b settings factory");
         hosthook_add_breakpoint(module_base + 0x1270,
             HOSTHOOK_BP_OTHER_DIALOG_FACTORY, "retail 0x110c details factory");
+    } else if (export_rva == 0x7018) {
+        /* Current reviewed build; offsets checked against its linker symbols. */
+        s_mp_layout = "replacement-current";
+        s_mp_array_offset = 0xe01c;
+        s_mp_objects_offset = 0xe008;
+        hosthook_add_breakpoint(module_base + 0x1a80,
+            HOSTHOOK_BP_FLOW_FACTORY, "replacement 0x110a factory");
+        hosthook_add_breakpoint(module_base + 0x4500,
+            HOSTHOOK_BP_OTHER_DIALOG_FACTORY, "replacement 0x110b settings factory");
+        hosthook_add_breakpoint(module_base + 0x54f0,
+            HOSTHOOK_BP_OTHER_DIALOG_FACTORY, "replacement 0x110c details factory");
     } else if (export_rva == 0x6018) {
         s_mp_layout = "replacement";
         s_mp_array_offset = 0xd01c;

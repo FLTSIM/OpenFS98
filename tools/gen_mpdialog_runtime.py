@@ -250,12 +250,6 @@ def main():
             # by button 0x3e8. The map entry must retain that indirect route.
             if getter == 0x22341af0 and item['handler_va'] == 0x22341c10:
                 handler = 'fs98_mpdialog_flow_provider_connection'
-            if getter == 0x223454c0:
-                handler = {
-                    0x41c: 'fs98_mpdialog_flow_route_join',
-                    0x41e: 'fs98_mpdialog_flow_route_host',
-                    0x41d: 'fs98_mpdialog_flow_route_online',
-                }.get(item['first_id'], handler)
             values = (item['message'], item['code'], item['first_id'], item['last_id'],
                       item['signature'])
             lines.append('    {' + ', '.join(f'0x{value:x}' for value in values) +

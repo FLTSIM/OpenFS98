@@ -233,6 +233,7 @@ static uint32_t fs98_run_construction_suite(HMODULE *modules, struct fs98_test_l
                 fs98_fail("layout flow object and HWND");
         }
         for (page = 0; page < 5; ++page) fs98_boundary_probe(s_layout_object[side][page], side, page);
+        for (page = 0; page < 5; ++page) fs98_common_probe(s_layout_object[side][page], side, page);
         for (page = 0; page < 5; ++page)
             if (!DestroyWindow(windows[page])) fs98_fail("layout flow teardown");
         s_flow_owner_active[side] = 0;
@@ -242,6 +243,7 @@ static uint32_t fs98_run_construction_suite(HMODULE *modules, struct fs98_test_l
             (uint32_t)(uintptr_t)s_main_window, &s_blocks[side]);
         if (!IsWindow(window) || !s_layout_live[side][5]) fs98_fail("layout Settings factory");
         fs98_boundary_probe(s_layout_object[side][5], side, 5);
+        fs98_common_probe(s_layout_object[side][5], side, 5);
         if (!DestroyWindow(window)) fs98_fail("layout Settings teardown");
         s_details_active = 1;
         fs98_setup_details(side, 0);
@@ -249,6 +251,7 @@ static uint32_t fs98_run_construction_suite(HMODULE *modules, struct fs98_test_l
         window = (HWND)(uintptr_t)linkages[side]->dialogs[2].create(
             (uint32_t)(uintptr_t)s_main_window, s_details_blocks[side]);
         if (!IsWindow(window) || !s_layout_live[side][6]) fs98_fail("layout Details factory");
+        fs98_common_probe(s_layout_object[side][6], side, 6);
         if (!DestroyWindow(window)) fs98_fail("layout Details teardown");
         s_details_owner_active[side] = 0;
         s_details_active = 0;
@@ -258,6 +261,7 @@ static uint32_t fs98_run_construction_suite(HMODULE *modules, struct fs98_test_l
         fs98_pump();
     }
     for (page = 0; page < 7; ++page) {
+        differences += fs98_common_compare(page);
         struct fs98_layout_trace *a = &s_layout_trace[0][page], *b = &s_layout_trace[1][page];
         static const uint32_t expected_controls[7] = {11,14,18,10,12,20,19};
         static const uint32_t expected_ddx[7] = {11,14,18,10,12,15,19};

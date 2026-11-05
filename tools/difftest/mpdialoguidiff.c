@@ -5148,6 +5148,7 @@ static uint32_t fs98_run_help_suite(HMODULE *modules, struct fs98_test_linkage *
 }
 
 #include "mpdialogboundaries.inc"
+#include "mpdialogcommon.inc"
 #include "mpdialogconstruction.inc"
 
 static void fs98_mutation_unload(HMODULE *modules,

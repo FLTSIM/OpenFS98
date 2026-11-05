@@ -2638,3 +2638,60 @@ requires an environment where retail can successfully create a DirectPlay
 session; forcing the owner state would provide modeled coverage rather than
 resolve that acceptance gate. Independent remaining source-boundary and MFC
 failure-path review can proceed in this environment.
+
+### Shared virtual-method audit (2026-11-05)
+
+The next bounded source review covers the common local virtual methods in all
+seven classes. Direct retail disassembly confirms `0x22342040` is a bare
+`ret`, while `0x22342cb0` is `ret 4`. Vtable offsets `+0x08/+0x10` use the
+one-argument no-op and `+0x0c` uses the no-argument no-op. Offsets `+0x90/+0x94`
+target `0x22342050/0x22342060`: each reads the HWND from object `+0x20` and
+unconditionally calls USER32 `EnableWindow` with exactly 0/1. They change
+enabled state despite the replacement symbols' historical `hide/show` names.
+The existing implementation and generated bindings match; no DLL source fix
+was needed. A regenerated registry matches `docs/dialog_registry.tsv`.
+
+`tools/difftest/mpdialogcommon.inc` now runs within `--construction-only`,
+using each freshly constructed class's actual vtable. Every target must belong
+to the module under test. Calls use a sentinel-filled synthetic object with
+that vtable and a private ordinary STATIC HWND, so state transitions cannot
+invoke multiplayer dialog callbacks. The module's `EnableWindow` IAT entry
+is intercepted to record call count, HWND and exact BOOL, then forwarded to
+real USER32. The entry is restored and the private window destroyed before
+ordinary dialog teardown.
+
+There are 26 cases per class, 182 paired cases total: both initial enabled
+states for each method, with independent arguments 0, 1, 2, `0x80000000` and
+`0xffffffff` for each one-argument no-op. The fixture compares stack cleanup,
+EBX/ESI/EDI preservation, call count/arguments, final enabled state, hidden
+window style, object bytes and window survival. An explicit thiscall caller
+recovers ESP after a wrong `ret`/`ret 4`, allowing those ABI mutations to
+produce controlled differences and complete unload. EAX is excluded because
+these methods are void. Each case restores the synthetic object first.
+The retail side independently asserts the recovered contract.
+
+`bash tools/run_mpdialogdiff.sh --common-breaks` passes with the rebuilt
+harness in `bin/mpdialog-diff/runs/isolated-liz94jr8/`. Its baseline also
+passes the existing seven-class ordered construction/DDX/destruction and
+descriptor boundary comparisons. All six targeted mutations are detected:
+reversed disable direction, omitted enable, skipped redundant disable,
+no-op object write, missing argument cleanup and excess argument cleanup.
+Every comparison returns normally through module deinitialization/unload;
+no fault or timeout is counted as a detection. The manifest and events retain
+the DLL/harness/mutant hashes, commands and comparison output. The earlier
+version also passed at `isolated-t_2iuxvv`; the final run adds per-case object
+reset and detailed field diagnostics. The sandboxed launch
+`isolated-ke3ny8a5` terminated before test output and is not a passing run;
+completed runs used the same isolated runner outside the sandbox.
+
+The DLL remains SHA-256
+`01507dec60328c37067bfd2e2359db75a48936b49a060d1ff51f168cb3ed7d92`;
+only the harness was rebuilt with `-Wall -Wextra -Werror`. `git diff --check`
+passes. This closes the focused common no-op/enable/disable boundary from the
+earlier inventory. It does not establish arbitrary invalid objects/HWNDs,
+visible-window activation, destructor flag 0 or exceptional construction.
+No full behavior/render/mutation suite, startup smoke or actual-owner run was
+repeated for this harness-only slice. The current DLL's earlier evidence still
+applies; whole-module status remains **partial**. A next independent lifecycle
+slice is destructor flag 0 with ordered destruction and retained-allocation
+checks; genuine MFC failure cleanup and the actual-session gate remain open.

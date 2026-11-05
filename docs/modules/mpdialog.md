@@ -16,9 +16,11 @@ callbacks. Matched retail and replacement Host attempts now trace the nested
 provider callback through its return: provider/interface creation succeeds,
 then Wine `dplayx.dll` returns `E_NOTIMPL` from `IDirectPlay3::Open` in both
 binaries, leaving 0x110b Host Settings disabled. `0x110c` and confirmation
-service `1016` remain unreachable through this external failure. Genuine MFC
-partial-Create cleanup also remains unverified. MP_DIALOG is still partial
-pending these owner-path limits and whole-module acceptance review.
+service `1016` remain unreachable through this external failure. Native
+child-Create failure cleanup now matches under deferred-free instrumentation; immediate-free diagnostics expose post-destruction factory
+accesses, and constructor exception unwinding remains unverified. MP_DIALOG
+is still partial pending these lifecycle/owner limits and whole-module
+acceptance review.
 
 Reference input: `orig/English/mpdialog.dll`, preferred base `0x22340000`,
 module id `0x8000000a`. Installed name: `English/MP_DIALOG.DLL`. This is distinct
@@ -47,9 +49,11 @@ rendering, repeatability, mutation, repeated-unload and private-startup checks
 pass for the isolated harness. Separate private-copy owner probes now observe
 the actual 0x110a Connect → Cancel lifecycle through MULTIP cleanup and actual
 host-mode validation/accept callbacks. Actual 0x110b entry/cancel is also
-observed. Active-session 0x110c/1016 integration and genuine MFC construction
-failure remain outside the observed coverage. The native differential
-harness still models owner services for its repeatable comparisons.
+observed. Active-session 0x110c/1016 integration remains outside observed
+coverage. Native child-Create cleanup is now compared with deferred frees;
+immediate-free factory access and constructor exception unwinding remain
+unresolved. The native differential harness still models owner services for
+its repeatable comparisons.
 
 ## Connection flow (`0x110a`) contract and partial implementation
 
@@ -2774,3 +2778,115 @@ wiring changed. Whole-module status remains **partial**. The next independent
 lifecycle slice is genuine MFC Create/constructor failure cleanup. Actual
 active-session 0x110c/1016 coverage still requires a retail-capable DirectPlay
 environment; the other documented owner-path limits also remain open.
+
+
+### Native child-Create failure audit (2026-11-05)
+
+The new `--create-failure` fixture reaches MFC's real partial-Create cleanup.
+A thread-local `WH_CBT` hook vetoes native `HCBT_CREATEWND` for a chosen direct
+child of the target dialog. It does not replace the MFC Create method or
+synthesize its return. Every class is tested at the first, middle and last
+resource child: 21 paired cases total. Child counts come from each loaded
+module's dialog resource header and must match. Immediately before vetoing,
+the fixture verifies the parent and every earlier child are live. After the
+factory returns, the failed HWND and every earlier child must be gone.
+
+`tools/difftest/mpdialogcreatefailure.inc` uses the existing ordered
+SIMSUI/MFC construction/destruction hooks. On native parent creation it wraps
+the target class's actual module-owned PostNcDestroy and deleting-destructor
+slots, forwards both original methods and restores both slots after factory
+return. Traces compare allocation, all base/control constructors, attempted
+native child IDs, PostNcDestroy, flag-1 deleting destruction, reverse
+base/control destructor order, one free request and the original destructor
+return pointer. The retail oracle independently requires this full sequence
+and no DDX: the veto occurs before `WM_INITDIALOG`. Both modules match.
+
+For Flow, every failed page yields a null array entry while all four other
+pages remain live, including entries beyond the hole. The five-page factory
+continues its existing creation order; it does not roll back. Settings and
+Details return null HWNDs with no surviving dialog tree. Fixture cleanup
+walks all seven recorded object slots rather than using HOST's
+null-terminated array walk. The initial Flow Next post is suppressed through
+descriptor `+0x1c=1` to keep it outside this failure boundary.
+
+**Deferred-free comparison scope.** In `--create-failure`, module-local
+`ui_delete` requests are recorded and deferred until the factory has returned.
+This preserves the allocation for the helpers' post-Create accesses without
+changing MFC's window teardown, destructor dispatch or free-request order.
+The original allocator releases every quarantined allocation once during
+fixture cleanup. Snapshots are taken before cleanup; missing-free and
+wrong-flag mutants whose destructors already ran are not destructed twice.
+Thus the passing gate establishes native partial-window cleanup and ordered
+module behavior under allocation quarantine, not uninstrumented factory
+memory safety or the real HOST allocator's behavior. The ordinary and
+flag-0 fixtures retain their previous allocator behavior.
+
+`bash tools/run_mpdialogdiff.sh --create-failure-breaks` adds independent
+native-failure, ordinary construction and retained-destruction baselines,
+then seven controlled mutations: missing frees in each of Flow, Settings and
+Details; wrong PostNcDestroy deleting flags in the Settings/shared-Flow and
+Details wrappers; reversed Intro destructor offsets; and an omitted Intro
+control destructor. Every mutation must produce an expected class difference
+and complete normal module deinitialization/unload. A crash or timeout never
+counts as a detection.
+
+**Immediate-free diagnostic remains unresolved.** The optional
+`--create-failure-native-free` mode forwards `ui_delete` immediately through
+SIMSUI to the harness's existing modeled HOST `malloc`/`free` services. It
+performs no fixture release of already-freed storage. This is not an actual
+owner allocator probe. The first run, `isolated-rktmp00i`, completed retail
+Intro-first-child failure, then faulted on the replacement side at MFC
+`0x5f4036b3`, with ECX `0x01af0020`. A second run with explicit free/return
+checkpoints, `isolated-wrgabd8n`, passed all 15 paired Flow cases, then retail
+Settings-first-child failure freed object `0x02820020`, returned the same
+pointer from its destructor and faulted at that same MFC instruction with
+ECX equal to the freed object address. Both runs terminate with fault code
+`0xc0000005`; neither is an accepted baseline or mutation detection.
+
+Disassembly identifies `0x5f4036b3` as MFC ShowWindow's initial read from
+`this+0x3c`. Retail helpers call ShowWindow after Create without checking its
+result, then read `this+0x20`; the replacement follows those same accesses.
+The checkpointed retail failure demonstrates post-free access, and the two
+runs show that the side/case reaching a fault varies with allocation history.
+This establishes a shared lifetime hazard; it does not establish parity of
+all unquarantined outcomes or explain every heap-layout difference. No
+implementation change that bypasses the retail call sequence is made here.
+
+
+Final validation: `make -f tools/mpdialog.mk mpdialog
+bin/mpdialog-diff/mpdialoguidiff.exe` keeps the implementation DLL unchanged
+and builds the harness with `-Wall -Wextra -Werror`.
+`bash tools/run_mpdialogdiff.sh --create-failure-breaks` passes in
+`bin/mpdialog-diff/runs/isolated-rrs36k8l/`: the 21-case native-failure
+comparison, independent ordinary construction/boundary/common-virtual
+baseline and retained-destruction baseline all pass, followed by all seven
+mutation detections with normal module cleanup. The provenance manifest and
+events retain baseline and mutant hashes, commands, outputs and results.
+The DLL remains SHA-256
+`01507dec60328c37067bfd2e2359db75a48936b49a060d1ff51f168cb3ed7d92`;
+the final harness is
+`69a9e9386875f7de007330d8b22b55e3e16c4f359ec8b872a0ef3f303d2ad16d`.
+Regenerated JSON/registry inventory agrees with the committed registry;
+`bash -n tools/run_mpdialogdiff.sh` and `git diff --check` pass.
+
+Earlier exploration is retained: `isolated-h32e1wy6` is the first paired
+Settings/fourth-child probe; `isolated-v0p2_ftr` passes the initial 21-case
+matrix before adding the independent prior-child-live checkpoints.
+`isolated-03riadu0` passes three baselines but its first missing-free mutant
+stops at a fixture cleanup assertion because the object was already
+destructed; it is not a controlled detection. Cleanup was corrected to
+recognize destructor events, snapshot before fixture cleanup and avoid double
+destruction. `isolated-dyrykllh` subsequently passes all three baselines and
+seven mutations; the final run repeats them after adding the immediate-free
+diagnostic and final cleanup bookkeeping. Completed runs use the isolated
+runner outside the Wine-restricting sandbox on the normal display.
+
+No implementation DLL, shared build/install wiring or live game file changed.
+No full behavior/render suite, startup smoke or actual-owner run was repeated.
+The formerly unobserved native partial-child cleanup now has scoped paired
+evidence; unquarantined factory failure acceptance remains open because of
+the demonstrated post-free accesses. C++ constructor-exception unwinding and
+actual active-session integration are also still unverified. Whole-module
+status remains **partial**. The next independent lifecycle work is constructor
+exception unwinding; immediate-free factory behavior needs separate allocator
+and owner analysis before any broader failure-path acceptance claim.

@@ -5150,6 +5150,7 @@ static uint32_t fs98_run_help_suite(HMODULE *modules, struct fs98_test_linkage *
 #include "mpdialogboundaries.inc"
 #include "mpdialogcommon.inc"
 #include "mpdialogconstruction.inc"
+#include "mpdialogcreatefailure.inc"
 
 static void fs98_mutation_unload(HMODULE *modules,
                                  struct fs98_test_linkage **linkages)
@@ -5212,6 +5213,10 @@ int main(int argc, char **argv)
             s_help_only = 1;
         } else if (strcmp(argv[arg_index], "--retained-destruction") == 0) {
             s_retained_destructor = s_construction_only = 1;
+        } else if (strcmp(argv[arg_index], "--create-failure") == 0) {
+            s_create_failure = s_construction_only = 1;
+        } else if (strcmp(argv[arg_index], "--create-failure-native-free") == 0) {
+            s_create_failure_native_free = s_create_failure = s_construction_only = 1;
         } else if (strcmp(argv[arg_index], "--construction-only") == 0) {
             s_construction_only = 1;
         } else {
@@ -5301,10 +5306,12 @@ int main(int argc, char **argv)
             return differences ? 1 : 0;
         }
         if (s_construction_only) {
-            uint32_t layout_differences = fs98_run_construction_suite(modules, linkages);
+            uint32_t layout_differences = s_create_failure ? fs98_run_create_failure(modules, linkages) :
+                fs98_run_construction_suite(modules, linkages);
             fs98_mutation_unload(modules, linkages);
-            printf("MP_DIALOG construction comparison: %lu differing classes; modules deinitialized and unloaded\n",
-                (unsigned long)layout_differences);
+            printf("MP_DIALOG %s comparison: %lu differing %s; modules deinitialized and unloaded\n",
+                s_create_failure ? "native Create failure" : "construction",
+                (unsigned long)layout_differences, s_create_failure ? "cases" : "classes");
             return layout_differences ? 1 : 0;
         }
         if (s_help_only || (s_flow_mutation_case < 0 && s_session_mutation_case < 0 && s_details_mutation_case < 0))

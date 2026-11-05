@@ -7,6 +7,7 @@ static struct fs98_layout_trace s_layout_trace[2][7];
 static void *s_layout_object[2][7], *s_layout_exchange[2][7], *s_layout_descriptor[2][7];
 static uint32_t s_layout_live[2][7], s_construction_only;
 static uint32_t s_retained_destructor, s_retained_call, s_retained_post_calls;
+static uint32_t s_create_failure, s_create_failure_native_free;
 static const uint32_t s_layout_size[7] = {0x19f0,0x1cb0,0x1d5c,0x18fc,0x1af0,0x2120,0x1d80};
 static const uint32_t s_layout_descriptor_offset[7] = {0x19ec,0x1cac,0x1d58,0x18f8,0x1ae8,0x211c,0x1d78};
 static struct fs98_layout_hook s_layout_hooks[26];
@@ -151,6 +152,12 @@ static void fs98_layout_free(void *object)
     if (page >= 0) fs98_layout_record((uint32_t)page, 5, 0, object, 1);
     /* Record an erroneous flag-0 free without allowing a mutant to cause UAF. */
     if (s_retained_call && page >= 0) return;
+    if (s_create_failure && page >= 0) {
+        s_layout_live[s_side][page] = 0;
+        if (!s_create_failure_native_free) return;
+        fprintf(stderr, "CREATE_FAILURE IMMEDIATE_FREE side=%lu page=%ld object=%p\n",
+            (unsigned long)s_side, (long)page, object);
+    }
     fs98_layout_patch(25, 0);
     ((void (*)(void *))s_layout_hooks[25].target)(object);
     fs98_layout_patch(25, 1);

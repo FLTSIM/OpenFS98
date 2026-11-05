@@ -39,6 +39,10 @@ if [[ "${1:-}" == --common-breaks ]]; then
     python3 -B tools/mpdialog_common_breaks.py "${@:2}" 2>&1 | tee "$MPD_PROVENANCE_DIR/output.log"
     exit $?
 fi
+if [[ "${1:-}" == --retained-breaks ]]; then
+    python3 -B tools/mpdialog_retained_breaks.py "${@:2}" 2>&1 | tee "$MPD_PROVENANCE_DIR/output.log"
+    exit $?
+fi
 if [[ "${1:-}" == --construction-breaks ]]; then
     python3 -B tools/mpdialog_construction_breaks.py "${@:2}" 2>&1 | tee "$MPD_PROVENANCE_DIR/output.log"
     exit $?

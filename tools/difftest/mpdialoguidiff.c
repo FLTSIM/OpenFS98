@@ -5210,6 +5210,8 @@ int main(int argc, char **argv)
             s_render_only = 1;
         } else if (strcmp(argv[arg_index], "--help-only") == 0) {
             s_help_only = 1;
+        } else if (strcmp(argv[arg_index], "--retained-destruction") == 0) {
+            s_retained_destructor = s_construction_only = 1;
         } else if (strcmp(argv[arg_index], "--construction-only") == 0) {
             s_construction_only = 1;
         } else {

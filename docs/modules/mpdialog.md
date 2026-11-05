@@ -2695,3 +2695,82 @@ repeated for this harness-only slice. The current DLL's earlier evidence still
 applies; whole-module status remains **partial**. A next independent lifecycle
 slice is destructor flag 0 with ordered destruction and retained-allocation
 checks; genuine MFC failure cleanup and the actual-session gate remain open.
+
+
+### Retained-allocation destructor audit (2026-11-05)
+
+This slice covers deleting-destructor flag 0 for all seven classes. Direct
+retail disassembly at `0x22345c90`, `0x22345270`, `0x223421f0`,
+`0x22341910`, `0x22342de0`, `0x22343aa0` and `0x22344510` shows the same
+wrapper contract: call the class destructor body, test flag bit 0, call
+SIMSUI `ui_delete` only when that bit is set, return the original object
+pointer in EAX and finish with `ret 4`. The replacement already implements
+this contract; no implementation DLL change was needed.
+
+The new `--retained-destruction` mode reuses the seven-class native
+construction fixture in `tools/difftest/mpdialogconstruction.inc`. Each
+factory creates its real object and HWND with retail SIMSUI/MFC. The fixture
+saves the object's actual module-owned deleting-destructor target at vtable
+`+0x04`, temporarily replaces only `PostNcDestroy` at `+0xac`, destroys the
+HWND, and restores the original slot. Exactly one suppressed PostNcDestroy,
+a destroyed HWND and a still-live allocation are required before calling
+the saved destructor with flag 0. The normal destruction mode is unchanged.
+
+Ordered imported destructor calls, subobject offsets/types, base destruction,
+free requests and return-pointer equality are recorded and compared between
+retail and replacement. Retail independently requires every constructed
+control and the base to be destroyed exactly once, in reverse construction
+order, no `ui_delete` request and the original pointer as the return value.
+The fixture writes and reads the first and last allocation bytes afterward,
+then releases the raw storage exactly once through the original allocator.
+An erroneous module-local free request is recorded but suppressed during the
+flag-0 call so an unwanted-free mutation can finish the comparison without
+use-after-free. Thus retained-storage evidence is specifically no observed
+module-local `ui_delete` request plus readable/writable retained bytes under
+this instrumentation; it is not arbitrary allocator or invalid-object
+coverage. Fixture release is excluded from DLL destruction events.
+
+`tools/mpdialog_retained_breaks.py`, exposed by
+`bash tools/run_mpdialogdiff.sh --retained-breaks`, requires independent
+retained and ordinary construction baselines before eight targeted mutations:
+unwanted flag-0 frees and incorrect return pointers in each of the Flow,
+Settings and Details implementations, reversed Intro control destruction,
+and an omitted Intro control destructor. Flow's shared wrapper mutation
+covers all five flow classes. Each detection must report the expected class
+difference and return normally through module deinitialization/unload;
+faults, timeouts and compiler failures do not count as detections.
+
+Validation: `make -f tools/mpdialog.mk mpdialog
+bin/mpdialog-diff/mpdialoguidiff.exe` kept the DLL unchanged and rebuilt the
+harness with `-Wall -Wextra -Werror`. The final
+`bash tools/run_mpdialogdiff.sh --retained-breaks` run passes in
+`bin/mpdialog-diff/runs/isolated-8p4a1zqc/`: both independent baselines pass,
+all seven flag-0 traces match, and all eight mutations are caught with normal
+module cleanup. The ordinary baseline also retains the construction, DDX,
+boundary and 182 shared-virtual comparisons. The provenance manifest/events
+record DLL, harness and mutant hashes and comparison commands/results. The
+DLL remains SHA-256
+`01507dec60328c37067bfd2e2359db75a48936b49a060d1ff51f168cb3ed7d92`;
+the rebuilt harness is
+`8c0ea37d76e42a8f7b120b0878158f0dad9aa5b417932978f89c18bffffb002d`.
+Regenerated JSON/registry inventory agrees with the committed registry;
+`bash -n tools/run_mpdialogdiff.sh` and `git diff --check` pass.
+
+The initial sandboxed launch (`isolated-wayf52t9`) terminated with a bad
+system call before test execution. A first mutation run
+(`isolated-wcu6j5j0`) passed both baselines and three detections, then stopped
+because the Settings return mutant triggered `-Werror=misleading-indentation`.
+Its generated source formatting was corrected before the complete final run;
+the compiler failure is not counted as a detection. Completed Wine runs used
+the isolated runner outside the sandbox on the normal display.
+
+This closes the focused destructor-flag-0 boundary for freshly constructed
+objects after native HWND detachment. It does not cover destruction with a
+live HWND, other flag words, destructor ABI mutations, arbitrary object
+bytes or genuine MFC partial-construction/exception unwinding. No full
+behavior/render suite, startup smoke or actual-owner run was repeated for
+this harness-only slice, and no live game files or shared build/install
+wiring changed. Whole-module status remains **partial**. The next independent
+lifecycle slice is genuine MFC Create/constructor failure cleanup. Actual
+active-session 0x110c/1016 coverage still requires a retail-capable DirectPlay
+environment; the other documented owner-path limits also remain open.

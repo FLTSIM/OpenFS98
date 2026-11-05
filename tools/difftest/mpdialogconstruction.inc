@@ -6,6 +6,7 @@ struct fs98_layout_hook { const char *dll, *symbol; uint32_t ordinal; void *targ
 static struct fs98_layout_trace s_layout_trace[2][7];
 static void *s_layout_object[2][7], *s_layout_exchange[2][7], *s_layout_descriptor[2][7];
 static uint32_t s_layout_live[2][7], s_construction_only;
+static uint32_t s_retained_destructor, s_retained_call, s_retained_post_calls;
 static const uint32_t s_layout_size[7] = {0x19f0,0x1cb0,0x1d5c,0x18fc,0x1af0,0x2120,0x1d80};
 static const uint32_t s_layout_descriptor_offset[7] = {0x19ec,0x1cac,0x1d58,0x18f8,0x1ae8,0x211c,0x1d78};
 static struct fs98_layout_hook s_layout_hooks[26];
@@ -148,6 +149,8 @@ static void fs98_layout_free(void *object)
     int32_t page = local ? fs98_layout_page(object) : -1;
     if (local && page < 0) fs98_fail("layout free object");
     if (page >= 0) fs98_layout_record((uint32_t)page, 5, 0, object, 1);
+    /* Record an erroneous flag-0 free without allowing a mutant to cause UAF. */
+    if (s_retained_call && page >= 0) return;
     fs98_layout_patch(25, 0);
     ((void (*)(void *))s_layout_hooks[25].target)(object);
     fs98_layout_patch(25, 1);
@@ -209,6 +212,52 @@ static void fs98_layout_uninstall(void)
     for (i = 0; i < 26; ++i) fs98_layout_patch(i, 0);
 }
 
+/* Detach the real HWND first, retaining the actual constructed object. Only
+ * PostNcDestroy is suppressed; the destructor under test is the saved +0x04
+ * target from that object's module-owned vtable. */
+static void TC fs98_retained_post_destroy(void *object)
+{
+    (void)object;
+    ++s_retained_post_calls;
+}
+
+static void fs98_layout_destroy(HWND window, uint32_t page)
+{
+    void *object, *target, *post;
+    void **slot;
+    void *result;
+    uint32_t offset;
+    if (!s_retained_destructor) {
+        if (!DestroyWindow(window)) fs98_fail("layout ordinary teardown");
+        return;
+    }
+    object = s_layout_object[s_side][page];
+    target = PTR(PTR(object, 0), 4);
+    slot = (void **)((uint8_t *)PTR(object, 0) + 0xac);
+    if (!fs98_layout_local(target) || !fs98_layout_local(*slot))
+        fs98_fail("retained destructor ownership");
+    s_retained_post_calls = 0;
+    fs98_patch_slot(slot, (void *)fs98_retained_post_destroy, &post);
+    if (!DestroyWindow(window)) fs98_fail("retained HWND teardown");
+    fs98_restore_slot(slot, post);
+    if (IsWindow(window) || s_retained_post_calls != 1 || !s_layout_live[s_side][page])
+        fs98_fail("retained object detachment");
+    s_retained_call = 1;
+    result = ((void *(TC *)(void *, uint32_t))target)(object, 0);
+    s_retained_call = 0;
+    fs98_layout_record(page, 6, 0, object, result == object);
+    /* Probe both ends of the retained allocation, then release it once using
+     * the original allocator. This release is fixture cleanup, not DLL work. */
+    for (offset = 0; offset < s_layout_size[page]; offset += s_layout_size[page] - 1) {
+        ((volatile uint8_t *)object)[offset] = 0xa5;
+        if (((volatile uint8_t *)object)[offset] != 0xa5) fs98_fail("retained storage");
+    }
+    fs98_layout_patch(25, 0);
+    ((void (*)(void *))s_layout_hooks[25].target)(object);
+    fs98_layout_patch(25, 1);
+    s_layout_live[s_side][page] = 0;
+}
+
 static uint32_t fs98_run_construction_suite(HMODULE *modules, struct fs98_test_linkage **linkages)
 {
     uint32_t side, page, i, differences = 0;
@@ -235,7 +284,7 @@ static uint32_t fs98_run_construction_suite(HMODULE *modules, struct fs98_test_l
         for (page = 0; page < 5; ++page) fs98_boundary_probe(s_layout_object[side][page], side, page);
         for (page = 0; page < 5; ++page) fs98_common_probe(s_layout_object[side][page], side, page);
         for (page = 0; page < 5; ++page)
-            if (!DestroyWindow(windows[page])) fs98_fail("layout flow teardown");
+            fs98_layout_destroy(windows[page], page);
         s_flow_owner_active[side] = 0;
         fs98_setup_block(0);
         s_layout_descriptor[side][5] = &s_blocks[side];
@@ -244,7 +293,7 @@ static uint32_t fs98_run_construction_suite(HMODULE *modules, struct fs98_test_l
         if (!IsWindow(window) || !s_layout_live[side][5]) fs98_fail("layout Settings factory");
         fs98_boundary_probe(s_layout_object[side][5], side, 5);
         fs98_common_probe(s_layout_object[side][5], side, 5);
-        if (!DestroyWindow(window)) fs98_fail("layout Settings teardown");
+        fs98_layout_destroy(window, 5);
         s_details_active = 1;
         fs98_setup_details(side, 0);
         s_layout_descriptor[side][6] = s_details_blocks[side];
@@ -252,7 +301,7 @@ static uint32_t fs98_run_construction_suite(HMODULE *modules, struct fs98_test_l
             (uint32_t)(uintptr_t)s_main_window, s_details_blocks[side]);
         if (!IsWindow(window) || !s_layout_live[side][6]) fs98_fail("layout Details factory");
         fs98_common_probe(s_layout_object[side][6], side, 6);
-        if (!DestroyWindow(window)) fs98_fail("layout Details teardown");
+        fs98_layout_destroy(window, 6);
         s_details_owner_active[side] = 0;
         s_details_active = 0;
         fs98_layout_uninstall();
@@ -277,10 +326,24 @@ static uint32_t fs98_run_construction_suite(HMODULE *modules, struct fs98_test_l
             if (e->kind == 3) { ++exchange; if (e->value != 3) fs98_fail("retail descriptor or instance attachment"); }
             if (e->kind == 4) ++controls;
         }
-        if (base != 1 || destroyed != 1 || allocations != 1 || frees != 1 || exchange != 1 || controls != expected_ddx[page] ||
-            !a->count || a->events[0].kind != 0 || a->events[a->count - 1].kind != 5 ||
+        if (base != 1 || destroyed != 1 || allocations != 1 || frees != (s_retained_destructor ? 0u : 1u) || exchange != 1 || controls != expected_ddx[page] ||
+            !a->count || a->events[0].kind != 0 || a->events[a->count - 1].kind != (s_retained_destructor ? 6u : 5u) ||
             constructed != expected_controls[page] || control_dtors != expected_controls[page])
             fs98_fail("retail construction trace completeness");
+        if (s_retained_destructor && a->events[a->count - 1].value != 1)
+            fs98_fail("retail retained destructor return");
+        if (s_retained_destructor) {
+            uint32_t next = a->count;
+            for (i = 0; i < a->count; ++i) {
+                const struct fs98_layout_event *ctor = &a->events[i], *dtor;
+                if (ctor->kind != 1) continue;
+                do { if (!next) fs98_fail("retail retained destructor order missing"); --next; }
+                while (a->events[next].kind != 2);
+                dtor = &a->events[next];
+                if (ctor->type != dtor->type || ctor->offset != dtor->offset)
+                    fs98_fail("retail retained destructor reverse order");
+            }
+        }
         if (memcmp(s_boundary[0][page], s_boundary[1][page], sizeof(s_boundary[0][page]))) {
             ++differences;
             fprintf(stderr, "MP_DIALOG BOUNDARY DIFFER page=%lu\n", (unsigned long)page);
@@ -300,6 +363,10 @@ static uint32_t fs98_run_construction_suite(HMODULE *modules, struct fs98_test_l
                 }
             }
         }
+        if (s_retained_destructor)
+            fprintf(stderr, "RETAINED page=%lu flags=0 frees=%lu return_object=%lu reverse_dtors=%lu storage_released=1\n",
+                (unsigned long)page, (unsigned long)frees,
+                (unsigned long)a->events[a->count - 1].value, (unsigned long)(control_dtors + destroyed));
         fprintf(stderr, "LAYOUT page=%lu constructor_base=%lu ddx_base=%lu ddx_controls=%lu destructor_base=%lu events=%lu\n",
             (unsigned long)page, (unsigned long)base, (unsigned long)exchange,
             (unsigned long)controls, (unsigned long)destroyed, (unsigned long)a->count);

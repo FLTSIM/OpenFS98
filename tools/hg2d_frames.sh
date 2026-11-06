@@ -28,6 +28,14 @@
 # when testing the gauge alone.
 # HG2D_FRAMES_GAUGES=1 compares the entire rebuilt collection instead;
 # tools/stage_gauges.py restores retail inputs on the baseline sides.
+# HG2D_FRAMES_MDLS=1 compares the eight rebuilt normal aircraft MDLs too,
+# restoring retail on baseline sides and requiring a normal MDL load in each run.
+# HG2D_FRAMES_MDL_MANIFEST selects an alternate generated set for deliberate breaks.
+# HG2D_FRAMES_EXPECT_MDL additionally requires that specific model to load.
+# HG2D_FRAMES_CRASH_TEST=1 enables crash detection without a modal graph in
+# the selected flight of each private copy (the source game stays unchanged).
+# HG2D_FRAMES_CRASH_ALTITUDE optionally sets that private fixture's altitude in metres.
+# HG2D_FRAMES_CRASH_COCKPIT_ONLY removes saved non-cockpit views from that fixture.
 #
 # HG2D_FRAMES_ALL=1 compares the whole game instead: every module and the English DLLs
 # retail against every one ours, and the verdict is on all of them.
@@ -49,6 +57,10 @@ root=$PWD
 flight=${1:-'Situatio\STGEORGE.STN'}
 passes=${2:-900}
 script=${3:-}
+if [ -n "$script" ]; then
+    script=$(realpath "$script")
+    [ -f "$script" ] || { echo "no FRAMELOCK script: $script" >&2; exit 2; }
+fi
 out=$(realpath -m "${HG2D_FRAMES_OUT:-bin/hg2d-frames}")
 display=${HG2D_FRAMES_DISPLAY:-:62}
 game=$(realpath "${FS98_DIR:-$PWD/game}")
@@ -81,8 +93,9 @@ xdpyinfo >/dev/null 2>&1 || { echo "Xvfb did not start" >&2; exit 2; }
 debug=-all
 [ -z "$gauge_name" ] || debug=+loaddll
 [ -z "${HG2D_FRAMES_GAUGES:-}" ] || debug=+loaddll
+[ -z "${HG2D_FRAMES_MDLS:-}" ] || debug=+loaddll
 [ -z "${HG2D_FRAMES_DEVICE:-}" ] || debug=+ddraw
-[ -z "${gauge_name}${HG2D_FRAMES_GAUGES:-}" ] || [ -z "${HG2D_FRAMES_DEVICE:-}" ] || debug=+loaddll,+ddraw
+[ -z "${gauge_name}${HG2D_FRAMES_GAUGES:-}${HG2D_FRAMES_MDLS:-}" ] || [ -z "${HG2D_FRAMES_DEVICE:-}" ] || debug=+loaddll,+ddraw
 export WINEDEBUG=-all
 [ -z "${HG2D_FRAMES_NOSOUND:-}" ] || export WINEDLLOVERRIDES="dsound=d"
 
@@ -90,23 +103,37 @@ run() {     # tag hg2d
     local tag=$1 copy=$out/game-$1
     cp -a "$game" "$copy"
     local hg2d=$2
-    if [ -n "${HG2D_FRAMES_ALL:-}${HG2D_FRAMES_ONLY:-}" ]; then
+    if [ -n "${HG2D_FRAMES_ALL:-}${HG2D_FRAMES_ONLY:-}${HG2D_FRAMES_MDLS:-}" ]; then
         local m
         for m in $(make -s modules-of) $(make -s english-modules-of); do
             local to from
             to=$(make -s installed-path-of M=$m) from=$(make -s orig-module-of M=$m)
             if [ "$tag" = ours ]; then
-                if [ -z "${HG2D_FRAMES_ONLY:-}" ] || [[ " $HG2D_FRAMES_ONLY " == *" $m "* ]]; then from=$ours_bin/$m.DLL; fi
+                if [ -n "${HG2D_FRAMES_ALL:-}${HG2D_FRAMES_ONLY:-}" ] && {
+                    [ -z "${HG2D_FRAMES_ONLY:-}" ] || [[ " $HG2D_FRAMES_ONLY " == *" $m "* ]]
+                }; then from=$ours_bin/$m.DLL; fi
             fi
             cp "$from" "$copy/$to"
             [ "$m" = HG2D ] && hg2d=$from
         done
     fi
     cp "$hg2d" "$copy/Modules/HG2D.DLL"
+    if [ -n "${HG2D_FRAMES_CRASH_TEST:-}" ]; then
+        local fixture_altitude=()
+        [ -z "${HG2D_FRAMES_CRASH_ALTITUDE:-}" ] || fixture_altitude=(--altitude "$HG2D_FRAMES_CRASH_ALTITUDE")
+        [ -z "${HG2D_FRAMES_CRASH_COCKPIT_ONLY:-}" ] || fixture_altitude+=(--cockpit-only)
+        python3 -B tools/mdl_crash_fixture.py "$copy" "$flight" "${fixture_altitude[@]}" || exit 2
+    fi
     if [ -n "${HG2D_FRAMES_GAUGES:-}" ]; then
         local gauge_mode=(--retail)
         [ "$tag" != ours ] || gauge_mode=()
         python3 -B tools/stage_gauges.py "$copy" "${gauge_mode[@]}" || exit 2
+    fi
+    if [ -n "${HG2D_FRAMES_MDLS:-}" ]; then
+        local mdl_mode=(--retail)
+        [ "$tag" != ours ] || mdl_mode=()
+        python3 -B tools/stage_mdls.py "$copy" "${mdl_mode[@]}" \
+            --manifest "${HG2D_FRAMES_MDL_MANIFEST:-bin/mdl-diff/modules.json}" || exit 2
     fi
     if [ -n "$gauge_name" ]; then
         local gauge=$HG2D_FRAMES_GAUGE_RETAIL
@@ -142,6 +169,22 @@ run() {     # tag hg2d
     kill $watcher 2>/dev/null
     [ -s "$out/$tag/frames.log" ] || { echo "$tag: exit $status and no frames logged" >&2; exit 2; }
     echo "$tag: exit $status, $(grep -c . "$out/$tag/frames.log") lines, $(tail -1 "$out/$tag/frames.log")"
+    local expected_end
+    expected_end=$(printf 'end %08x' "$passes")
+    [ "$status" -eq 0 ] && [ "$(tail -1 "$out/$tag/frames.log")" = "$expected_end" ] || {
+        echo "$tag: game did not complete the requested passes cleanly" >&2; exit 2;
+    }
+    if [ -n "${HG2D_FRAMES_MDLS:-}" ]; then
+        local mdl_loads
+        mdl_loads=$(grep -ai 'Loaded L"' "$out/$tag/game.log" | grep -ic '_N\.mdl"')
+        echo "$tag: successful normal MDL loads $mdl_loads"
+        [ "$mdl_loads" -gt 0 ] || { echo "no normal MDL loaded" >&2; exit 2; }
+        if [ -n "${HG2D_FRAMES_EXPECT_MDL:-}" ]; then
+            mdl_loads=$(grep -ai 'Loaded L"' "$out/$tag/game.log" | grep -icF "$HG2D_FRAMES_EXPECT_MDL")
+            echo "$tag: $HG2D_FRAMES_EXPECT_MDL successful loads $mdl_loads"
+            [ "$mdl_loads" -gt 0 ] || { echo "expected MDL never loaded" >&2; exit 2; }
+        fi
+    fi
     if [ -n "${HG2D_FRAMES_GAUGES:-}" ]; then
         local gauge_loads
         gauge_loads=$(grep -ai 'Loaded L"' "$out/$tag/game.log" | grep -ic '\.gau"')

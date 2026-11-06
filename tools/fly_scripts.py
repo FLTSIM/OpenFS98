@@ -26,6 +26,27 @@ ROOT = pathlib.Path(__file__).resolve().parent.parent
 # A scenario flies one thing long enough for it to reach the picture.  None needs a
 # particular flight; tools/frames_many.sh runs them on several.
 SCENARIOS = {
+    # Drive the aircraft into the ground; acceptance requires its crash MDL.
+    "crash_models": [
+        (32, "THROTTLE_FULL"),
+        (40, "NUMPAD8", 240),
+        (320, "NUMPAD8", 120),
+    ],
+    # Change the active view while exercising the aircraft's model state.
+    "models": [
+        (40, "VIEW_MODE_REV"),
+        (60, "THROTTLE_FULL"),
+        (80, "FLAPS_DOWN"),
+        (140, "GEAR_TOGGLE"),
+        (200, "GEAR_TOGGLE"),
+        (240, "FLAPS_UP"),
+        (280, "NUMPAD4", 12),
+        (340, "NUMPAD6", 24),
+        (400, "ALL_LIGHTS_TOGGLE"),
+        (440, "LANDING_LIGHTS_TOGGLE"),
+        (480, "RUDDER_LEFT", 10),
+        (520, "RUDDER_RIGHT", 10),
+    ],
     # Throttle, pitch and roll: the flight model, then the terrain moving under it.
     "controls": [
         (60, "THROTTLE_FULL"),

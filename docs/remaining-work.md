@@ -19,7 +19,7 @@ Results updated through 2026-11-06; individual rows retain their acceptance date
 | `English/Flights.DLL` | 51,122 | **Installed** 2026-11-02; used in play by `make flights-play` 2026-11-03 | [flights.md](modules/flights.md) |
 | `English/Sim.DLL` | 33,239 | **Installed** 2026-11-02 | [sim.md](modules/sim.md) |
 | `English/MP_DIALOG.DLL` | 25,401 | **Installed** 2026-11-05; all three registrations, native exception/UI acceptance and paired actual-owner peer session | [mpdialog.md](modules/mpdialog.md) |
-| `Aircraft/*/model/*.MDL` (9) | 25,014 | **Not started.** The aircraft's visual models, module id 31, 9-entry Linkage. Mostly `.data`. Not in `orig/` | [below](#sim1-and-the-mdls) |
+| `Aircraft/*/{model,MODEL.RG}/*.MDL` (11) | 35,074 | **Implemented and verified; private copies only** 2026-11-06; all eleven drop-in MDLs built. Eight normal models: 1,680,000 module scenarios and eight matching scripted flights. Three crash models: 12,000 lifecycle scenarios, all 32 functions/model reached, eight caught defects plus a rendered-pose mutation, and three matching 1,200-pass crash flights. No default installation | [mdl.md](modules/mdl.md) |
 | `English/Views.DLL` | 13,090 | **Installed** 2026-11-02 | [views.md](modules/views.md) |
 | `fltsim95.exe` | 11,464 | **Not looked at.** A stub that ships alongside; imports only KERNEL32. Probably not needed | [architecture.md](architecture.md) |
 | `English/Help.DLL` | 10,657 | **Installed** 2026-11-02 | [help.md](modules/help.md) |
@@ -47,18 +47,20 @@ Their current 32-bit ABI still needs adaptation with the rest of the native port
 
 Both are ordinary module DLLs with their own Linkage, loaded by ACONTAIN through host
 `+0x26c` rather than from `Modules\` ([acontain.md](modules/acontain.md)), so the module
-harness patterns apply to them. Neither is in `orig/` yet: the copies in the installed game
-(`game/Sim`, `game/Aircraft/*/model`, dated 10 August 1997) come from the CD's setup. Copy
-them into `orig/` and check them against the reference CD before writing tools against them.
+harness patterns apply to them. SIM1 is not in `orig/` yet; verify it against the
+reference CD before writing tools against it. All eleven MDLs, including
+`C182/MODEL.RG`, have been byte-compared with their mapped CD files and copied
+to `orig/Aircraft/` (2026-11-06).
 
 - **`SIM1.sim`** (base `0x22000000`, `.text` 78,216, `.data` 17,400): imports only KERNEL32
   and MSVCRT, and links to modules 1, 2, 3, 4, 10, 16, 20, 23, 32 and 39. It calls host
   `+0x21c` 77 times and reads and writes GLOBAL widely, like DYNAMIC. As large as SIMSUI and
   in every flight, so it should not wait behind the dialogs.
-- **The `.MDL`s** (one per aircraft and a crash model for the C182 and the Extra): `.text`
-  678 to 982 bytes for the seven normal models and 9,350 and 9,894 for the two crash ones,
-  `.data` 5,800 to 96,488. Presumably a little shared code around model data for G3D;
-  survey how much the code differs between files before planning, as for the gauges.
+- **The `.MDL`s**: eight normal models (`.text` 678–982 bytes) and three crash
+  models (9,110–9,894 bytes), mostly `.data`. Shared Linkage scaffolding wraps
+  distinct header update callbacks; crash models also register with CHAIN.
+  All eleven now have C implementations and standalone differential verification;
+  see [MDL verification](modules/mdl.md) for game acceptance and remaining limits.
 
 ## Order
 

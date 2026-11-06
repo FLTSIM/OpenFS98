@@ -20,6 +20,9 @@
 
 CC      := i686-w64-mingw32-gcc
 .DEFAULT_GOAL := all
+
+# Aircraft-model build and verification workbench; no default installation.
+include tools/mdl.mk
 RC      := i686-w64-mingw32-windres
 OBJDUMP := i686-w64-mingw32-objdump
 CFLAGS  := -std=c99 -Os -Wall -Wextra -Iinclude -ffreestanding \

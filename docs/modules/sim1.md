@@ -5,10 +5,11 @@ chunk `0x100`, loads `Sim\<name>.SIM` through host `+0x26c`, and publishes its
 Linkage at GLOBAL `+0x11d4`. This is simulator code outside `Modules\`, not
 `English/Sim.DLL` (the aircraft-settings UI).
 
-**Partial, 2026-11-06:** six bounded services are implemented in an isolated
-test DLL. Initialization, shutdown, the aircraft loader and simulation callbacks
-remain retail. There is no install target, shared Makefile entry or game
-acceptance for the partial build.
+**Partial, 2026-11-06:** six bounded services, modern situation-record loading,
+record saving, retained state and shutdown are implemented and compared in
+isolation. Initialization, legacy record loading, the aircraft loader and frame
+callbacks remain retail. There is no install target, shared Makefile entry or
+game acceptance for the partial build.
 
 ## Reference and shape
 
@@ -35,7 +36,7 @@ body sizes.
 | --- | --- | --- | --- |
 | `+0x00` | `25` | module identity | reproduced |
 | `+0x04` | `0x22001060` | init: restore state, register CHAIN callbacks, load aircraft data, publish descriptor | pending |
-| `+0x08` | `0x220010a0` | deinit: remove callbacks and retain simulation state | pending |
+| `+0x08` | `0x220010a0` | deinit: remove callbacks, retain state and restore engine flags | implemented and compared |
 | `+0x0c/+0x10/+0x14` | zero | reserved; no dialogs | reproduced |
 | `+0x18` | `0x2200ac0d` | copy 44-byte descriptor to one output pointer; `ret 4` | implemented and compared |
 | `+0x1c` | `0x2200fc40` | aircraft/simulation setup; full contract unrecovered | pending |
@@ -135,9 +136,113 @@ for situation record `0x38e` and falls back to `0x5a`. Init registers callbacks
 on CHAIN lists 1, 5 and 20. List 20 handles situation load/save events
 `0x22/0x23`. Deinit removes the callbacks and serializes retained state.
 
-Next: recover the record readers/writers and their exact host ownership
-contracts, then aircraft-data loading, initialization and callback execution.
-Those need dependency transcripts and separate mutable dependency state, not
-the unbound tables sufficient for the first six services. Full-module mutation
-acceptance, real aircraft fixtures, long state trajectories and isolated game
-acceptance remain before SIM1 can join installation.
+The modern reader, writer, save callback and retained-state/shutdown paths
+are now covered below. Next: legacy record `0x5a`, the non-`0xc0` modern-reader
+fallback and its velocity transform, then startup restoration, aircraft-data
+loading and frame callbacks. Full-module mutation acceptance, real aircraft
+fixtures, long state trajectories and isolated game acceptance remain before
+SIM1 can join installation.
+
+## Saved state and shutdown
+
+`src/sim1/sim1_state.inc` adds the internal state paths without changing the
+retail offsets. `sim1_state_stack.S` preserves explicit register contexts
+around the C logic and seeds/captures imported EAX/ECX/EDX values. These
+functions include observable compiled-C register leftovers; the import bridge
+does not replace them with constants.
+
+| Retail VA | Operation | Accepted boundary |
+| --- | --- | --- |
+| `0x220110a0` | serialize the `0xc0`-byte state record | complete writer |
+| `0x22011290` | restore a modern record and recompute orientation/heading | exactly `0xc0` bytes; other sizes pending |
+| `0x22011050` | begin MAIN record `0x38e`, then write its body | success and nonzero begin-error returns |
+| `0x22010d50` | replace GLOBAL `+0x11d8` with retained state | null/existing allocation; repeated saves |
+| `0x22010da0` | CHAIN list 20 callback | save, modern load, unknown messages/tags; legacy load pending |
+| `0x220010a0` | deinit | all three removals, retained state and both flag gates |
+
+The serialized layout, with offsets relative to `.data`:
+
+| Record offset | Source |
+| --- | --- |
+| `+0x00/+0x08/+0x10` | `+0x1538/+0x1540/+0x1548` |
+| `+0x18/+0x20/+0x28` | `+0x13e8/+0x13f0/+0x13f8` |
+| `+0x30/+0x38/+0x40` | `+0x13a0/+0x13a8/+0x13b0` |
+| `+0x48` | double at `+0x15a8` |
+| `+0x50` | DWORD at `+0x1d18` |
+| `+0x54` | GLOBAL `+0x366`, zero-extended to a DWORD |
+| `+0x58/+0x60/+0x68` | `+0x1358/+0x1360/+0x1368` |
+| `+0x70/+0x78/+0x80` | `+0x1328/+0x1330/+0x1338` |
+| `+0x88/+0x90/+0x98` | `+0x1418/+0x1420/+0x1428` |
+| `+0xa0/+0xa8/+0xb0` | `+0x13b8/+0x13c0/+0x13c8` |
+| `+0xb8` | double at `+0x1760` |
+
+The writer performs an x87 load/store for the first double only. All later
+double-shaped fields are raw pairs of integer loads/stores: signalling NaNs
+are quieted in the first field but preserved in those later fields. Both
+DWORD halves of a pair are loaded before its stores, including when the
+destination overlaps state. The reader likewise retains the original order
+and uses MSVCRT `_ftol` directly for its three angle conversions. It restores
+the cached sine/cosine values and six fixed-point words through the original
+x87 sequence, then uses **real retail UTIL `+0x3c`** for its heading calculation.
+That service is stateless and is shared by the two sides. The padding after
+each cached fixed-point word is preserved, not cleared by a wider store.
+
+The callback sets `.data+0x1778` on every load message, even for a record tag
+it does not recognize. It writes only the low byte of the saved engine flag
+back to GLOBAL. Saving instead writes that byte as a DWORD in the record.
+MAIN `+0x5c(0x38e, 0xc0)` returning nonzero suppresses the body write;
+otherwise `+0x60(body, 0xc0, NULL)` is called and its result survives.
+
+Retaining state frees an existing GLOBAL `+0x11d8` allocation through host
+`+0x214`, then calls `+0x20c(1, 0xc0, &slot, 1)` and fills all 192 bytes.
+Deinit first removes the list 1, 5 and 20 callbacks, ignoring removal return
+values. It then retains state, restores GLOBAL `+0x278` from `.data+0x1c80`
+only when GLOBAL `+0x604 == 1`, and resets four WORD engine selectors to 3
+only when GLOBAL `+0x609 == 1` and `.data+0x1778 == 0`.
+
+### State verification
+
+```sh
+make -f tools/sim1.mk sim1state-run N=20000
+make -f tools/sim1.mk sim1state-breaks
+```
+
+The state test DLL has additional helper exports only in
+`tools/sim1_state_test.def`. The production partial DLL retains the two
+ordinary module exports. The harness calls retail's known helper RVAs beside
+the corresponding owned functions in the test DLL; deinit uses the actual
+Linkage entry. All imports are checked through a reset host model, except
+the real stateless UTIL angle service. Before each side, GLOBAL, the model
+heap, import transcript and output buffers are reset to the same input.
+
+Nine operations cover direct writing, saving through MAIN, retained state,
+unknown/save callbacks, deinit, direct modern loading, modern-load callbacks,
+and two successive retained-state or deinit calls. Compares include the full
+seeded state, import/Linkage prefix, GLOBAL, heap and input/output guards,
+all integer register results/ESP, import order/arguments, written record and
+the same meaningful x87 state as the first suite. Only the direct writer's
+known image-relative output-pointer result is normalized.
+
+Teardown control inputs cover the **54-way Cartesian product** of saved-mode
+flag `0/1/2`, engine flag `0/1/2`, loaded flag `0/1/2` and null/existing retained
+allocation. A non-one engine-gate mutation initially escaped because a correlated
+generator never placed engine flag 2 beside loaded flag 0. Independent gate
+generation now catches it; the harness rejects runs missing any of the 54
+combinations. The mutation suite includes width/order/NaN behavior, register
+results, MAIN errors, host ownership, teardown gates, angle conversions and
+heading calculations. Results are recorded in `bin/sim1-diff/state-acceptance.log`
+and `state-mutations.log`; individual rebuilt defects and their diagnostics
+are under `state-breaks/`.
+
+At `N=20000`, all nine operations run 240,000 times per load arrangement.
+Retail-first, rebuilt-first and forced relocation pass: **6,480,000 state
+comparisons, zero differences**. The two repeated-lifetime operations each
+invoke their helper twice per comparison. **All 22 rebuilt state mutations
+are caught.** The original six-service suite was rerun on the extended
+partial DLL: its 4,516,608 comparisons still match, and all sixteen original
+mutations remain detected.
+
+This remains isolated acceptance: malformed/null record bodies, allocation
+failure, unmasked x87 exceptions, legacy records and live-game owner flows
+are not covered by this slice. Tick/frame callbacks remain explicit traps
+and are not registered by the partial build.

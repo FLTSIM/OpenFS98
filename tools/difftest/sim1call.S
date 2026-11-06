@@ -19,8 +19,11 @@ _sim1_call:
     cmpl $3, _call_argc
     jne 2f
     pushl _call_args+8
-    pushl _call_args+4
 2:
+    cmpl $2, _call_argc
+    jb 4f
+    pushl _call_args+4
+4:
     cmpl $0, _call_argc
     je 3f
     pushl _call_args

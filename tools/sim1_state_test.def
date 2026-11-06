@@ -1,0 +1,11 @@
+LIBRARY SIM1_STATE_TEST.DLL
+EXPORTS
+    Linkage DATA
+    ImportTable DATA
+    Sim1RecordWrite=sim1_record_write
+    Sim1RecordRead=sim1_record_read
+    Sim1SaveSituation=sim1_save_situation
+    Sim1RetainState=sim1_retain_state
+    Sim1SituationCallback=sim1_situation_callback
+    Sim1TickCallback=sim1_chain_tick
+    Sim1FrameCallback=sim1_chain_frame

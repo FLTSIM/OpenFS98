@@ -67,9 +67,9 @@ def main():
             dll = directory / "SIM1_PARTIAL.DLL"
             dll.unlink(missing_ok=True)
             built = run(["i686-w64-mingw32-gcc", "-std=c99", "-O2", "-Wall", "-Wextra",
-                         "-fno-strict-aliasing", "-Iinclude", "-Ibin/sim1-diff", "-shared",
+                         "-fno-strict-aliasing", "-Iinclude", "-Isrc/sim1", "-Ibin/sim1-diff", "-shared",
                          "-Wl,--disable-dynamicbase", "-Wl,--image-base,0x22000000", "-o", str(dll),
-                         str(c_file), str(s_file), "src/sim1/sim1.def"])
+                         str(c_file), str(s_file), "src/sim1/sim1_state_stack.S", "src/sim1/sim1.def"])
             (directory / "build.log").write_text(built.stdout)
             if built.returncode:
                 raise SystemExit(f"{name}: build failed:\n{built.stdout}")

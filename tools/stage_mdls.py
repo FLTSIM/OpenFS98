@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Copy a generated normal/crash MDL set into an explicitly selected game tree.
 
-Used by private frame comparisons. All inputs are checked before any copy;
-The companion set is restored to retail when its manifest is available.
+All inputs are checked before any copy. Private frame comparisons restore
+the companion set to retail; --all installs or restores both families together.
 """
 import argparse
 import hashlib
@@ -18,21 +18,24 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('game', type=Path)
     parser.add_argument('--retail', action='store_true')
-    parser.add_argument('--manifest', type=Path, default=Path('bin/mdl-diff/modules.json'))
+    selection = parser.add_mutually_exclusive_group()
+    selection.add_argument('--manifest', type=Path)
+    selection.add_argument('--all', action='store_true', help='install or restore all eleven MDLs')
     args = parser.parse_args()
-    records = json.loads(args.manifest.read_text())
+    manifest = args.manifest or Path('bin/mdl-diff/modules.json')
+    records = json.loads(manifest.read_text())
     names=tuple(Path(record['installed']).stem for record in records)
     if names not in (NAMES,CRASH_NAMES):
         raise ValueError('expected a complete normal or crash reference model set')
     family='normal' if names==NAMES else 'crash'
     selected=[(record,args.retail) for record in records]
     companion=Path('bin/mdl-crash/modules.json' if family=='normal' else 'bin/mdl-diff/modules.json')
-    if companion.is_file():
+    if args.all or companion.is_file():
         others=json.loads(companion.read_text())
         expected=CRASH_NAMES if family=='normal' else NAMES
         if tuple(Path(record['installed']).stem for record in others)!=expected:
             raise ValueError('companion model manifest changed')
-        selected += [(record,True) for record in others]
+        selected += [(record,args.retail if args.all else True) for record in others]
     plan = []
     for record,retail in selected:
         relative = Path(record['installed'])
@@ -52,7 +55,10 @@ def main():
         temporary.replace(target)
         if source.read_bytes() != target.read_bytes():
             raise ValueError(f'copied model differs: {target}')
-    print(f'{len(records)} {"retail" if args.retail else "rebuilt"} {family} MDLs staged in {args.game}; {len(plan)-len(records)} retail companions')
+    if args.all:
+        print(f'{len(plan)} {"retail" if args.retail else "rebuilt"} MDLs staged in {args.game}')
+    else:
+        print(f'{len(records)} {"retail" if args.retail else "rebuilt"} {family} MDLs staged in {args.game}; {len(plan)-len(records)} retail companions')
 
 
 if __name__ == '__main__':

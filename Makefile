@@ -21,7 +21,7 @@
 CC      := i686-w64-mingw32-gcc
 .DEFAULT_GOAL := all
 
-# Aircraft-model build and verification workbench; no default installation.
+# Aircraft-model builds, installation and verification.
 include tools/mdl.mk
 RC      := i686-w64-mingw32-windres
 OBJDUMP := i686-w64-mingw32-objdump
@@ -170,7 +170,7 @@ orig_module = $(if $(filter MP_DIALOG,$(1)),$(ORIG)/English/mpdialog.dll,$(if $(
   $(if $(filter MULTIP,$(1)),multip.dll,\
   $(if $(filter MPCHAT,$(1)),mpchat.DLL,$(1).DLL))))))
 
-all: $(addprefix $(BIN)/,$(addsuffix .DLL,$(ALL_MODULES))) gauges
+all: $(addprefix $(BIN)/,$(addsuffix .DLL,$(ALL_MODULES))) gauges mdls
 
 # Gauge source/data generation and acceptance stay separate from dialog work.
 .PHONY: gauges gauges-check gauges-breaks gauges-panels gauges-install gauges-revert
@@ -1622,6 +1622,7 @@ install: all
 	done
 	$(MAKE) $(foreach m,$(ENGLISH_MODULES),$(call english_target,$(m))-install) FS98_DIR="$(FS98_DIR)"
 	$(MAKE) gauges-install FS98_DIR="$(FS98_DIR)"
+	$(MAKE) mdls-install FS98_DIR="$(FS98_DIR)"
 
 revert:
 	@for m in $(MODULES); do \
@@ -1630,6 +1631,7 @@ revert:
 	done
 	$(MAKE) $(foreach m,$(ENGLISH_MODULES),$(call english_target,$(m))-revert) FS98_DIR="$(FS98_DIR)"
 	$(MAKE) gauges-revert FS98_DIR="$(FS98_DIR)"
+	$(MAKE) mdls-revert FS98_DIR="$(FS98_DIR)"
 
 modules-of:
 	@echo $(MODULES)

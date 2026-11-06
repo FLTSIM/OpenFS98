@@ -13,6 +13,7 @@ verification commands with their expected results and run times is in
 | `make numericdiff-run` | compare all NUMERIC formatter/parser ids and ranged parses against retail |
 | `make atcdiff-run` | drive retail and OpenFS98 ATC side by side over random scripts of ATIS, clearances and frames, comparing every import call and the whole `.data` image; `N=...` sets the count |
 | `make acontaindiff-run` | the same for ACONTAIN, against generated aircraft trees: loads, lists, queries and models, with file I/O passed through and fake `.SIM`/`.MDL` modules, comparing every import call, GLOBAL, the heap and the `.data` image |
+| `make mdls` / `make mdls-install` / `make mdls-revert` | build, install or restore all eleven normal/crash MDLs; included in shared build/install/revert targets and used by `make run` |
 | `make mdl-normal-diff-run` | all eight normal MDL update callbacks against retail, at preferred and forced-relocation addresses: state, entire `.data`, GLOBAL, copy calls and preserved registers; `N=...` sets inputs per model (70,000 by default); callback slice only, no MDL installation |
 | `make mdl-normal-breaks` | six isolated callback mutations, each required to produce its expected behavioral mismatch |
 | `make mdl-normal-modules` / `mdl-normal-modules-run` | build all eight drop-in normal MDLs and compare their loaded lifecycle, update callbacks, relocated data and resources against retail (70,000 scenarios per model in three address modes by default) |

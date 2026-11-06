@@ -287,5 +287,30 @@ the source situations and primary game remain untouched.
 **Limits:** longer flights, Direct3D model acceptance and native pointer-width
 adaptation remain unverified. G3D program data remains retail bytecode for the
 existing interpreter; its detailed contents have not been separately surveyed.
-The primary `game/` tree retains all eleven retail MDLs. These workbench targets
-build and test private copies and do not change default installation.
+The frame-comparison targets build and test private copies. They do not
+change the primary game tree.
+
+## Install and restore
+
+`make` builds all eleven MDLs alongside modules and gauges. `make install`
+installs them into `FS98_DIR`, and `make revert` restores all eleven retail
+files from the verified `orig/Aircraft/` references. `make run` launches that
+same game tree, so aircraft selection exercises the installed replacements.
+
+```sh
+make install
+make run
+# Restore modules, gauges and aircraft MDLs:
+make revert
+```
+
+`make mdls-install` and `make mdls-revert` operate on just the eleven MDLs;
+`make mdls` builds them without the differential test executables. Set
+`FS98_DIR=/path/to/FS98` consistently for installation, running and restoration
+when using a tree other than the default `~/.wine/drive_c/FS98`.
+
+`tools/stage_mdls.py --all` validates both complete families and every input
+before copying, then replaces each file through a temporary sibling and verifies
+the resulting bytes. Its default single-family mode still restores the other
+family to retail for isolated frame tests. A disposable full-game install/revert
+roundtrip checks all eleven MDLs, all 120 gauges and the shared module set.

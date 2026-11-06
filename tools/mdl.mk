@@ -1,4 +1,4 @@
-# Aircraft MDL callback and module workbench; no default game installation.
+# Aircraft MDL builds, installation and verification.
 MDL_DIR := bin/mdl-diff
 MDL_CC := i686-w64-mingw32-gcc
 MDL_ORIGINALS := $(shell find orig/Aircraft -iname '*_N.MDL' 2>/dev/null)
@@ -66,3 +66,12 @@ mdl-crash-game: mdl-crash-modules
 
 mdl-crash-render-break: mdl-crash-modules
 	PYTHONDONTWRITEBYTECODE=1 python3 tools/mdl_crash_render_break.py
+
+.PHONY: mdls mdls-install mdls-revert
+mdls: $(MDL_MODULE_FILES) $(MDL_CRASH_FILES) $(MDL_DIR)/modules.json $(MDL_CRASH_DIR)/modules.json
+
+mdls-install: mdls
+	python3 -B tools/stage_mdls.py "$(FS98_DIR)" --all
+
+mdls-revert: $(MDL_DIR)/modules.json $(MDL_CRASH_DIR)/modules.json
+	python3 -B tools/stage_mdls.py "$(FS98_DIR)" --all --retail

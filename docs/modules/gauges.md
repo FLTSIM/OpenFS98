@@ -136,4 +136,6 @@ Both commands use `tools/stage_gauges.py`, which validates the full collection
 and installed filenames before copying. Retail restoration verifies reference
 hashes. Copies use temporary files and replacement, then verify the bytes.
 The same steps are included in the shared `make install` and `make revert`.
-An isolated fixture roundtrip checks all 120 installed names and file contents.
+A disposable full-game `make install` / `make revert` roundtrip checks all
+120 installed names and file contents alongside the eleven MDLs and modules.
+`make run` launches the same `FS98_DIR`, using those installed gauges.

@@ -465,7 +465,6 @@ are separate from their native harness and startup acceptance.
 
 | Target | Independent starting boundary | Handoff |
 | --- | --- | --- |
-| MP_DIALOG | `0x110a`, `0x110b` and `0x110c` pass isolated state/callback/lifetime, full child-tree, per-control rendering and repeatability checks, along with behavioral mutations, repeated unload and private-copy startup. Actual private-copy HOST/MULTIP runs cover matched Connect → Cancel teardown/owner cleanup and matched retail/replacement Host attempts through the nested provider callback. DirectPlayCreate and QueryInterface succeed, then both binaries receive `E_NOTIMPL` from Wine `dplayx.dll` `IDirectPlay3::Open`; Host Settings stays disabled and actual 0x110c/1016 remain unreachable. Genuine MFC construction-failure cleanup remains unverified. | [mpdialog.md](mpdialog.md) |
 | Options, customise controls | CONTROLS' shared data and callbacks are established, but the container has three child pages and device/key-capture behavior. | [options.md](options.md) |
 | Flights | Static inventory exists; caller descriptors and flight/menu ownership need more recovery alongside MAIN. Less convenient while MAIN is active. | [flights.md](flights.md) |
 
@@ -555,14 +554,13 @@ modules and 95 gauges with the replacement loaded. See
 [World acceptance](world.md#advanced-weather-native-ui-acceptance) for the
 native contract and [the game-owner acceptance](world.md#shared-buildinstall-and-game-owner-acceptance)
 for installed integration, exercised owner flows and remaining boundaries.
-MP_DIALOG's three registrations, five-window flag-2 factory, real child
-controls, callback comparisons, teardown, behavioral mutation suite, repeated
-unload and private-copy startup have isolated evidence. Native child-tree and
-all seven per-control render captures match retail, with stable repeated
-captures. Private-copy HOST/MULTIP runs now verify the actual 0x110a cancel
-teardown and provider-row cleanup, plus validation/accept callback entry for
-host mode. They do not reach an active session: actual 0x110c, confirmation
-service `1016`, actual 0x110b OK, and genuine MFC construction-failure cleanup
-remain open. See [the MP_DIALOG audit](mpdialog.md#whole-module-criteria-audit)
-for exact results and boundaries; do not treat modeled owner callbacks as
-game integration.
+MP_DIALOG is complete and integrated at `English/MP_DIALOG.DLL` (2026-11-05).
+All three registrations and seven pages pass native behavior, complete control
+trees, rendering, lifetime and exception-cleanup comparisons, with 89 negative
+comparisons detected. Paired actual HOST/MULTIP sessions use the CD's native
+DirectPlay in private prefixes: a real peer joins, receives removal message
+`0x1016` after the actual confirmation, and both Settings/Details OK callbacks
+commit capacity changes. The automatic initial-page transition also passes
+paired owner tests. Shared build/install/revert and private startup are
+verified. See [MP_DIALOG completion](mpdialog.md#completion-and-integration-2026-11-05)
+for hashes, commands, artifacts and the preserved retail failed-Create hazard.

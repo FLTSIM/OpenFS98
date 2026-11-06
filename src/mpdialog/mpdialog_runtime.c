@@ -3,6 +3,7 @@
 #include <stdint.h>
 #include <string.h>
 #include "mpdialog_internal.h"
+#include "mpdialog_unwind.h"
 
 #define TC FS98_MPDIALOG_THISCALL
 #define SC FS98_MPDIALOG_STDCALL
@@ -143,16 +144,37 @@ static void mpdialog_bind(void)
     fs98_mpdialog_maps[6].entries = s_flow_messages_browser;
 }
 
-static void mpdialog_module_init(void)
+struct mpdialog_init_scope {
+    struct fs98_mpdialog_unwind frame;
+    void *dynamic;
+    volatile uint32_t live;
+};
+
+static void mpdialog_init_cleanup(struct fs98_mpdialog_unwind *frame)
 {
+    struct mpdialog_init_scope *state = (void *)frame;
+    if (state->live) {
+        state->live = 0;
+        ((void (*)(void *))fs98_mpdialog_mfc(825))(state->dynamic);
+    }
+}
+
+static MPD_NOINLINE void mpdialog_module_init(void)
+{
+    struct mpdialog_init_scope state;
     void *dynamic;
     void (SC *register_module)(void *, uint32_t *) =
         (void (SC *)(void *, uint32_t *))(*(void **)((uint8_t *)ImportTable[0].link + 0x298));
+    state.dynamic = 0; state.live = 0;
+    fs98_mpdialog_unwind_enter(&state.frame, mpdialog_init_cleanup);
     register_module(&Linkage, &s_registered_module);
     dynamic = ((void *(*)(uint32_t))fs98_mpdialog_mfc(823))(0x40);
+    state.dynamic = dynamic; state.live = 1;
     if (dynamic)
         ((void *(TC *)(void *, void *, int32_t))fs98_mpdialog_mfc(342))(dynamic, s_extension, 0);
+    state.live = 0;
     s_resource_module = (uint32_t)LoadLibraryA("dialog.dll");
+    fs98_mpdialog_unwind_leave(&state.frame);
 }
 
 static void mpdialog_module_deinit(void)

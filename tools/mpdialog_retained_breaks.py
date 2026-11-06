@@ -35,8 +35,8 @@ def main():
              '            flow_call_control(control->dtor, object, page == 0 && control->offset == 0x10dc ? 0x11d8 :\n'
              '                page == 0 && control->offset == 0x11d8 ? 0x10dc : control->offset);'),
             ('retained-flow-omitted-control',
-             '        else if (control->dtor)',
-             '        else if (control->dtor && !(page == 0 && control->offset == 0x10dc))'),
+             '    else if (control->dtor)',
+             '    else if (control->dtor && !(page == 0 && control->offset == 0x10dc))'),
         ]:
             dll = ui.build_flow(name, replace_once(flow, old, new, name), tables)
             compare(name, dll, args, 'MP_DIALOG CONSTRUCTION DIFFER page=0 ')

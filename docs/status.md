@@ -1,15 +1,17 @@
 # Module status
 
 Moved out of the README: one row per module, with the evidence. Results are as
-of 2026-11-03; later work is in the per-module documents. What is still retail
+of 2026-11-05; later work is in the per-module documents. What is still retail
 is in [remaining-work.md](remaining-work.md), known gaps in
 [open-differences.md](open-differences.md).
 
 Retail baseline and the OpenFS98 build -- ACONTAIN, ADVDRV, ANALYSIS, ATC,
 BOOSTER, CHAIN, CONTROLS, DEMO, DYNAMIC, FACIL, FE, GLOBAL, HG2D, LANDME, NUMERIC,
 PANELS, REALITY, SLEW, SOUND, UTIL, WEATHERM, WINDOW and WINMSG installed in
-`Modules/`, with World, Alerts, Help, Sim, Views and Flights installed in `English/`,
-both reach the panel: 27/27 runtime modules, 95 gauges, `make smoke` PASS.
+`Modules/`, with World, Alerts, Help, Sim, Views, Flights and MP_DIALOG installed in `English/`,
+both reach the panel: 27/27 runtime modules, 95 gauge trace mentions, `make smoke` PASS.
+MP_DIALOG post-install private startup also passes with the private Wine SEHFIX
+shim; its 95 mentions contain 58 load records for 29 distinct gauge paths.
 (MAIN, G3D, MULTIP and MPCHAT are also in `MODULES`; see their documents.)
 
 | module | id | `.text` | state |
@@ -24,6 +26,7 @@ both reach the panel: 27/27 runtime modules, 95 gauges, `make smoke` PASS.
 | `DYNAMIC` | 6 | 12,300 | **reimplemented, verified, and running in-game** — dynamic scenery: an interpreter for the airport traffic programs in scenery files, three of whose opcodes write programs of their own; 20,000 whole-module differential scripts comparing GLOBAL, the heap and its whole `.data` image, zero differences — see [modules/dynamic.md](modules/dynamic.md) |
 | `FE` | 18 | 49,016 | **reimplemented, verified, and running in-game** — the grid conversions, assembly engine, compiled-C file services (20,000 whole-module scenarios) and the Scenery Library (20,000 scenarios through a World.DLL stand-in), zero differences — see [modules/fe.md](modules/fe.md) |
 | `WORLD` | `0x80000006` | 115,275 | **reimplemented and integrated at `English/World.DLL`** — all 19 registrations have native acceptance; real MAIN/FE/FACIL owner flows and both weather modes pass the installed-game UI runner — see [modules/world.md](modules/world.md) |
+| `MP_DIALOG` | `0x8000000a` | 25,401 | **complete and integrated at `English/MP_DIALOG.DLL`** — three registrations/seven pages; native UI/lifetime/exception acceptance, 89 negative comparisons, paired actual-owner session with peer removal and capacity/OK callbacks; private startup — see [modules/mpdialog.md](modules/mpdialog.md#completion-and-integration-2026-11-05) |
 | `LANDME` | 26 | 4,094 | **reimplemented, verified, and running in-game** — nearest-runway selection and all eleven nonzero landing-guidance phases; 20,000 whole-module scenarios over retail FE and real scenery, zero differences — see [modules/landme.md](modules/landme.md) |
 | `BOOSTER` | 34 | 8,024 | **reimplemented, verified, and running in-game** — the performance boosters: CD scenery copied to a disk cache on a worker thread, nearest first, and evicted out of reach; 20,000 whole-module scenarios, zero differences — see [modules/booster.md](modules/booster.md) |
 | `DEMO` | 7 | 16,864 | **reimplemented, verified, and running in-game** — flight videos (record and play), instant replay and the four dialogs' callbacks; 20,000 whole-module scenarios, zero differences — see [modules/demo.md](modules/demo.md) |

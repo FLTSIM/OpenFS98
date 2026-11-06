@@ -67,6 +67,8 @@ static uint8_t s_global[0x1400];
 static uint8_t s_application[0x400];
 static HMODULE s_mfc, s_ui, s_current_module;
 static uint32_t s_side, s_case, s_callback_count, s_host_init[2], s_host_release[2];
+static uint32_t s_module_init_exceptions, s_init_case, s_init_count;
+static char s_init_events[2][32];
 static uint32_t s_details_active;
 static uint32_t s_callback_returns[5];
 static struct fs98_mpdialog_owner_block s_blocks[2];
@@ -1042,6 +1044,13 @@ static uint32_t SC fs98_host_free(void **block_out)
     return 0;
 }
 
+static void fs98_init_note(char event)
+{
+    if (s_init_count >= 31) fs98_fail("module init trace overflow");
+    s_init_events[s_side][s_init_count++] = event;
+    s_init_events[s_side][s_init_count] = 0;
+}
+
 static uint32_t SC fs98_host_register(void *linkage, uint32_t *module_out)
 {
     struct fs98_test_linkage *entry = linkage;
@@ -1053,6 +1062,7 @@ static uint32_t SC fs98_host_register(void *linkage, uint32_t *module_out)
         fs98_fail("HOST +0x298 registration arguments");
     *module_out = (uint32_t)s_current_module;
     ++s_host_init[s_side];
+    if (s_module_init_exceptions) fs98_init_note('R');
     return 0;
 }
 
@@ -1061,6 +1071,7 @@ static uint32_t SC fs98_host_release(uint32_t module)
     if (module == (uint32_t)s_alert_module && s_alert_module) return 0;
     if (module != (uint32_t)s_current_module) fs98_fail("HOST +0x29c release handle");
     ++s_host_release[s_side];
+    if (s_module_init_exceptions) fs98_init_note('L');
     return 0;
 }
 
@@ -5151,6 +5162,8 @@ static uint32_t fs98_run_help_suite(HMODULE *modules, struct fs98_test_linkage *
 #include "mpdialogcommon.inc"
 #include "mpdialogconstruction.inc"
 #include "mpdialogcreatefailure.inc"
+#include "mpdialogexceptions.inc"
+#include "mpdialoginitexceptions.inc"
 
 static void fs98_mutation_unload(HMODULE *modules,
                                  struct fs98_test_linkage **linkages)
@@ -5217,6 +5230,14 @@ int main(int argc, char **argv)
             s_create_failure = s_construction_only = 1;
         } else if (strcmp(argv[arg_index], "--create-failure-native-free") == 0) {
             s_create_failure_native_free = s_create_failure = s_construction_only = 1;
+        } else if (strcmp(argv[arg_index], "--module-init-exceptions") == 0) {
+            s_module_init_exceptions = 1;
+        } else if (strcmp(argv[arg_index], "--exception-cpp") == 0) {
+            s_exception_cpp = 1;
+        } else if (strcmp(argv[arg_index], "--destructor-exceptions") == 0) {
+            s_destructor_exceptions = s_constructor_exceptions = s_construction_only = 1;
+        } else if (strcmp(argv[arg_index], "--constructor-exceptions") == 0) {
+            s_constructor_exceptions = s_construction_only = 1;
         } else if (strcmp(argv[arg_index], "--construction-only") == 0) {
             s_construction_only = 1;
         } else {
@@ -5224,7 +5245,7 @@ int main(int argc, char **argv)
         }
     }
     if ((s_flow_mutation_case >= 0) + (s_session_mutation_case >= 0) +
-        (s_details_mutation_case >= 0) + s_render_only + s_help_only + s_construction_only > 1) return 2;
+        (s_details_mutation_case >= 0) + s_render_only + s_help_only + s_construction_only + s_module_init_exceptions > 1) return 2;
     if (s_choice_real_modal && s_flow_mutation_case != 6) return 2;
     setvbuf(stdout, 0, _IONBF, 0);
     SetUnhandledExceptionFilter(fs98_check_fault);
@@ -5289,6 +5310,14 @@ int main(int argc, char **argv)
             }
             fs98_check_public_factories(side, modules[side], linkages[side]);
         }
+        if (s_module_init_exceptions) {
+            uint32_t init_differences = fs98_run_init_exceptions(modules, linkages);
+            s_module_init_exceptions = 0;
+            fs98_mutation_unload(modules, linkages);
+            printf("MP_DIALOG module init comparison: %lu differing cases; modules deinitialized and unloaded\n",
+                (unsigned long)init_differences);
+            return init_differences ? 1 : 0;
+        }
         for (side = 0; side < 2; ++side) {
             s_side = side;
             s_current_module = modules[side];
@@ -5306,7 +5335,9 @@ int main(int argc, char **argv)
             return differences ? 1 : 0;
         }
         if (s_construction_only) {
-            uint32_t layout_differences = s_create_failure ? fs98_run_create_failure(modules, linkages) :
+            uint32_t layout_differences = s_destructor_exceptions ? fs98_run_destructor_exceptions(modules, linkages) :
+                s_constructor_exceptions ? fs98_run_constructor_exceptions(modules, linkages) :
+                s_create_failure ? fs98_run_create_failure(modules, linkages) :
                 fs98_run_construction_suite(modules, linkages);
             fs98_mutation_unload(modules, linkages);
             printf("MP_DIALOG %s comparison: %lu differing %s; modules deinitialized and unloaded\n",

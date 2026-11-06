@@ -7,6 +7,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include "mpdialog_internal.h"
+#include "mpdialog_unwind.h"
 
 #define D32(object, offset) (*(uint32_t *)((uint8_t *)(object) + (offset)))
 #define S32(object, offset) (*(int32_t *)((uint8_t *)(object) + (offset)))
@@ -91,13 +92,27 @@ static void flow_call_control(const char *symbol, void *object, uint32_t offset)
     ((void (TC *)(void *))fs98_mpdialog_simsui(symbol))(AT(object, offset));
 }
 
-static void flow_construct(void *object, uint32_t page, uint32_t parent)
+static void flow_destroy_control(void *object, uint32_t index, uint32_t page)
 {
-    (void)parent;
+    const struct fs98_flow_control *control = &s_flow_controls[page][index];
+    if (page == 2 && (control->offset == 0x16f4 || control->offset == 0x1734))
+        ((void (TC *)(void *))fs98_mpdialog_mfc(793))(AT(object, control->offset));
+    else if (control->dtor)
+            flow_call_control(control->dtor, object, control->offset);
+}
+
+static MPD_NOINLINE void flow_construct(void *object, uint32_t page, uint32_t parent)
+{
+    struct fs98_mpdialog_object_scope state;
     uint32_t index;
+    (void)parent;
+    state.object = object; state.page = page; state.destroy_control = flow_destroy_control;
+    state.completed = state.base = 0;
+    fs98_mpdialog_unwind_enter(&state.frame, fs98_mpdialog_object_cleanup);
     ((void *(TC *)(void *, int32_t, void *))
         fs98_mpdialog_simsui("??0CSimsDialog@@QAE@HPAVCWnd@@@Z"))(
             object, (int32_t)s_flow_templates[page], 0);
+    state.base = 1;
     for (index = 0; index < 20 && s_flow_controls[page][index].offset; ++index) {
         const struct fs98_flow_control *control = &s_flow_controls[page][index];
         if (page == 2 && (control->offset == 0x16f4 || control->offset == 0x1734)) {
@@ -106,24 +121,21 @@ static void flow_construct(void *object, uint32_t page, uint32_t parent)
         } else if (control->ctor) {
             flow_call_control(control->ctor, object, control->offset);
         }
+        state.completed = index + 1;
     }
     PTR(object, 0) = fs98_mpdialog_flow_vtables[page];
+    fs98_mpdialog_unwind_leave(&state.frame);
 }
 
-static void flow_destroy_body(void *object, uint32_t page)
+static MPD_NOINLINE void flow_destroy_body(void *object, uint32_t page)
 {
-    uint32_t index = 20;
-    while (index) {
-        const struct fs98_flow_control *control;
-        --index;
-        control = &s_flow_controls[page][index];
-        if (!control->offset) continue;
-        if (page == 2 && (control->offset == 0x16f4 || control->offset == 0x1734))
-            ((void (TC *)(void *))fs98_mpdialog_mfc(793))(AT(object, control->offset));
-        else if (control->dtor)
-            flow_call_control(control->dtor, object, control->offset);
-    }
-    ((void (TC *)(void *))fs98_mpdialog_simsui("??1CSimsDialog@@UAE@XZ"))(object);
+    struct fs98_mpdialog_object_scope state;
+    state.object = object; state.page = page; state.destroy_control = flow_destroy_control;
+    state.completed = 0; state.base = 1;
+    while (state.completed < 20 && s_flow_controls[page][state.completed].offset) ++state.completed;
+    fs98_mpdialog_unwind_enter(&state.frame, fs98_mpdialog_object_cleanup);
+    fs98_mpdialog_object_cleanup(&state.frame);
+    fs98_mpdialog_unwind_leave(&state.frame);
 }
 
 #define FLOW_DELETE_BODY(name, page) \
@@ -136,15 +148,22 @@ FLOW_DELETE_BODY(connection, 3) FLOW_DELETE_BODY(browser, 4)
 FLOW_DELETE(intro, 0) FLOW_DELETE(choice, 1) FLOW_DELETE(host, 2)
 FLOW_DELETE(connection, 3) FLOW_DELETE(browser, 4)
 
-static uint32_t flow_create_page(uint32_t page, uint32_t parent, void *descriptor)
+static MPD_NOINLINE uint32_t flow_create_page(uint32_t page, uint32_t parent, void *descriptor)
 {
-    void *object = fs98_mpdialog_allocate(s_flow_sizes[page]);
-    flow_construct(object, page, parent);
+    struct fs98_mpdialog_factory_scope state;
+    void *object;
+    state.object = 0; state.live = 0;
+    fs98_mpdialog_unwind_enter(&state.frame, fs98_mpdialog_factory_cleanup);
+    object = fs98_mpdialog_allocate(s_flow_sizes[page]);
+    state.object = object; state.live = 1;
+    if (object) flow_construct(object, page, parent);
     PTR(object, s_flow_descriptor_offsets[page]) = descriptor;
     D32(object, 0x80) = fs98_mpdialog_instance();
+    state.live = 0;
     (void)fs98_mpdialog_create_window(object, s_flow_templates[page], 0);
     (void)fs98_mpdialog_show_window(object, SW_HIDE);
     s_flow_objects[page] = object;
+    fs98_mpdialog_unwind_leave(&state.frame);
     return D32(object, 0x20);
 }
 

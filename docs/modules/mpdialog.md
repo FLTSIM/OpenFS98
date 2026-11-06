@@ -1,26 +1,19 @@
-# MP_DIALOG.DLL — next-work handoff
+# MP_DIALOG.DLL — implementation and integration
 
-**Partial isolated implementation: registries `0x110a`, `0x110b` and
-`0x110c`.** The state, callback and lifetime comparisons for the three
-factories pass, as do the targeted behavioral mutations, two unload cycles and
-private-copy startup smoke. Complete native child-tree comparisons pass for
-all three factories; all seven captured dialog states render identically to
-retail, and 14/14 unchanged same-window repeat captures are stable. The
-replacement stays in ignored `bin/mpdialog-diff/` and has not been copied to
-the game install. Bounded actual HOST/MULTIP probes now pair retail and
-replacement Connect → Cancel runs: both return the same five-HWND array,
-observe `+0x1c=1` suppressing the queued Next, cancel Intro, destroy all five
-pages through their MFC hooks, return to the owner, and clear provider
-payloads. A separate actual host-mode attempt reaches validation and accept
-callbacks. Matched retail and replacement Host attempts now trace the nested
-provider callback through its return: provider/interface creation succeeds,
-then Wine `dplayx.dll` returns `E_NOTIMPL` from `IDirectPlay3::Open` in both
-binaries, leaving 0x110b Host Settings disabled. `0x110c` and confirmation
-service `1016` remain unreachable through this external failure. Native
-child-Create failure cleanup now matches under deferred-free instrumentation; immediate-free diagnostics expose post-destruction factory
-accesses, and constructor exception unwinding remains unverified. MP_DIALOG
-is still partial pending these lifecycle/owner limits and whole-module
-acceptance review.
+**Complete and integrated, 2026-11-05.** All three registrations (`0x110a`,
+`0x110b`, `0x110c`) and seven pages are implemented. Native behavior, real
+control trees, rendering, module lifetime, construction/destruction and
+exception cleanup pass paired retail comparisons. Actual HOST/MULTIP sessions
+pass with a native DirectPlay peer, including removal delivery and both OK
+callbacks. The accepted DLL is installed at `game/English/MP_DIALOG.DLL` and
+included in the shared build/install targets.
+
+[Completion and integration](#completion-and-integration-2026-11-05) is the
+current status. Dated investigations below retain earlier partial results and
+failed experiments as history; their old status statements are superseded by
+that section and the current criteria audit. Acceptance describes the tested
+PE32 retail-compatible module; it does not claim a native non-Windows port or
+exhaustive behavior for invalid pointers and destructive callback reentry.
 
 Reference input: `orig/English/mpdialog.dll`, preferred base `0x22340000`,
 module id `0x8000000a`. Installed name: `English/MP_DIALOG.DLL`. This is distinct
@@ -34,26 +27,129 @@ and [the static inventory](dialogs.md#mpdialogdll).
 | `0x110b`, session settings | `0x223411e0` | `0x6a` | `0` |
 | `0x110c`, session details | `0x22341270` | `0x6b` | `0` |
 
-With three registrations, seven templates and 25,401 text bytes, this is the
-smallest remaining whole English DLL by code size. It is a good independent
-whole-module candidate, but the connection flow is not one ordinary dialog.
+The retail image has three registrations, seven templates and 25,401 text
+bytes. The connection flow is a five-page array factory.
 Flag 2 means the factory returns a zero-terminated HWND array. Its five-window
 creation order and initial command are recorded in
 [the array-factory section](dialogs.md#the-multiplayer-array-factory).
 
-## Starting boundary
+## Completion and integration (2026-11-05)
 
-The 0x110a, 0x110b and 0x110c slices are built independently in the private
-dialog workspace. State/callback/lifetime, complete native child-tree,
-rendering, repeatability, mutation, repeated-unload and private-startup checks
-pass for the isolated harness. Separate private-copy owner probes now observe
-the actual 0x110a Connect → Cancel lifecycle through MULTIP cleanup and actual
-host-mode validation/accept callbacks. Actual 0x110b entry/cancel is also
-observed. Active-session 0x110c/1016 integration remains outside observed
-coverage. Native child-Create cleanup is now compared with deferred frees;
-immediate-free factory access and constructor exception unwinding remain
-unresolved. The native differential harness still models owner services for
-its repeatable comparisons.
+Accepted replacement SHA-256:
+`6057bad7795a25756e2bad84f497e4d5eea426e71e880a8a5cdac996969692a7`.
+The standalone DLL, `bin/MP_DIALOG.DLL` and installed DLL are byte-identical.
+Retail input/backup SHA-256:
+`dc980acf09df47f64081b7e4775a7dd83eba69a75ae83181eea0ecc724b2a666`.
+
+Current-hash native acceptance is recorded under `bin/mpdialog-diff/runs/`:
+
+| Gate | Artifact | Result |
+| --- | --- | --- |
+| Behavior, control trees, rendering, help, repeated unload | `isolated-58g8874_` | 24 flow, 24 Settings and 20 Details scripts across two cycles; seven renders; 14 stable repeats; 46 mutations detected |
+| Independent callback/boundary review | `isolated-c8cwmftg` | Both baselines pass; five mutations detected |
+| Ordered constructors, DDX and destructors | `isolated-u85cjmht` | All seven classes pass; five mutations detected |
+| Common virtual methods | `isolated-147o801r` | 182 cases pass; six mutations detected |
+| Retained allocation and deleting flags | `isolated-hju_bjwg` | Baselines pass; eight mutations detected |
+| Real MFC child-Create failure cleanup | `isolated-xa2t4wyo` | 21 cases pass with deferred frees; seven mutations detected |
+| SEH/C++ constructor, destructor and module-init unwind | `isolated-mk4r4ey3` | 448 paired exception/init cases pass; ordinary construction passes; 12 negative comparisons detected with controlled unload |
+| Private startup before installation | `smoke-sehfix-nrsnz0hc` | PASS, 27/27 modules, 58 gauge loads/29 distinct paths |
+
+These gates detect **89 negative comparisons** in total. Exceptions use real
+Windows unwind through the outer handler, rather than calling the cleanup
+routine directly. Completed members unwind in reverse order, followed by the
+base and the matching factory allocation delete. The dynamic-link allocation
+is also freed when its module-init constructor throws.
+
+Actual-owner acceptance uses `tools/mpdialog_owner_acceptance.py`, immutable
+probe binaries and separate disposable retail game trees/Wine prefixes:
+
+- `owner-acceptance-tsk34pgi`: retail and replacement PASS. Native
+  DirectPlayCreate, both interface queries, session Open and both group creates
+  succeed. The real 0x110b Host Settings opens real 0x110c with a foreign peer.
+  Selecting Remove reaches the actual UTIL/Alerts confirmation; Yes sends
+  message `0x1016`, which the peer receives. Refresh, capacity edits (4 pilots,
+  2 observers), actual 0x110c validation/accept and actual 0x110b OK complete,
+  returning to the game. Read-only owner memory confirms capacities 4/2.
+- `owner-acceptance-td_xb3ru`: retail and replacement PASS. With only the
+  private profile's `ALWAYS_SHOW_INITIAL_DIALOG=0`, the factory posts Next and
+  HOST shows Choice automatically. Cancel returns through owner teardown.
+  This complements the earlier actual `+0x1c=1` Intro/Cancel comparison.
+- `owner-acceptance-6d47wchf`: installed replacement owners and MP_DIALOG
+  PASS Connect → automatic Choice → Cancel → owner return in a private copy
+  of the installed game. No retail-owner overlay is used in this mode. The
+  private splash screen is disabled, as in startup smoke. An earlier run
+  (`owner-acceptance-3wc3_j0n`) left the startup welcome dialog underneath the
+  multiplayer dialog: all five multiplayer pages were destroyed and HOST
+  returned, but the welcome dialog kept the main window disabled. That failed
+  readiness check is retained and is not counted as acceptance.
+
+The peer joins through public DirectPlay APIs and implements FS98's initial
+player/aircraft handshake. Its only host-process access reads identifiers and
+state; neither probe writes descriptors or forces connection state. Tracing
+uses per-thread single-step state and an idempotent PostMessage IAT hook.
+The probes record native runtime, source, executable and tested-DLL hashes.
+Wine's built-in DirectPlay still returns `E_NOTIMPL`; the CD's native
+`dplayx.dll`, `dpwsockx.dll` and `dplaysvr.exe` are installed only inside the
+private prefixes. Native helper shutdown and mixed-module native networking
+can stall; this is not a certification of all multiplayer protocols or of
+native DirectPlay with replacement MULTIP. The passing owner comparison uses
+retail owners to establish MP_DIALOG's contract independently.
+
+Shared integration adds `MP_DIALOG` to `ENGLISH_MODULES`, preserves the
+standalone build, maps the installed uppercase filename and the lowercase
+retail input correctly, and provides `make mpdialog`, `mpdialog-install` and
+`mpdialog-revert`. Installation used:
+
+```sh
+make mpdialog-install FS98_DIR="$PWD/game"
+MPD_SMOKE_SEHFIX=1 bash tools/run_mpdialogdiff.sh --smoke
+```
+
+`integration-before.json` and `integration-after.json` in
+`bin/mpdialog-diff/` confirm only `game/English/MP_DIALOG.DLL` changed among
+English/Modules files, the game executable and configuration. The retained
+`MP_DIALOG.DLL.orig` matches the retail input. Post-install startup `runs/smoke-sehfix-5azdrpja` passes: 27/27 modules,
+95 gauge trace mentions (58 load records, 29 paths), replacement loaded,
+and replacement/source/shim hashes unchanged. The private SEHFIX shim is a Wine startup
+compatibility input; unshimmed startup previously failed the strict trace gate
+on existing callback exceptions. No native DirectPlay files or new shim were
+installed into the live game by this work.
+
+The retail post-Create lifetime hazard is preserved: failed MFC Create can
+delete the object before the factory accesses it again. The native failure
+matrix quarantines free requests to compare the real cleanup sequence.
+Immediate-free diagnostics fault in MFC on both sides; arbitrary heap reuse
+outcomes are not claimed equivalent. This retail defect is distinct from the
+missing replacement exception cleanup, which is fixed and verified.
+
+Reproduction commands:
+
+```sh
+make -f tools/mpdialog.mk mpdialog bin/mpdialog-diff/mpdialoguidiff.exe
+bash tools/run_mpdialogdiff.sh --ui-breaks
+bash tools/run_mpdialogdiff.sh --review-breaks
+bash tools/run_mpdialogdiff.sh --construction-breaks
+bash tools/run_mpdialogdiff.sh --common-breaks
+bash tools/run_mpdialogdiff.sh --retained-breaks
+bash tools/run_mpdialogdiff.sh --create-failure-breaks
+bash tools/run_mpdialogdiff.sh --exception-breaks
+python3 -B tools/mpdialog_owner_acceptance.py
+python3 -B tools/mpdialog_owner_acceptance.py --initial-post-only
+python3 -B tools/mpdialog_owner_acceptance.py --installed-connect-cancel
+```
+
+The owner runner defaults to `game/`; the recorded runs used
+`--seed bin/mpdialog-diff/integration-retail-copy`. It restores matching retail
+files from `orig/` into each private seed before swapping only the tested
+MP_DIALOG. `--installed-connect-cancel` instead preserves the installed owner
+modules and uses only private profile changes. Build and probe artifacts
+remain under ignored `bin/`.
+
+## Historical slice recovery
+
+The following contracts and dated investigations document the implementation
+work. Earlier partial statuses are historical; see the completion section
+above for final acceptance and integration.
 
 ## Connection flow (`0x110a`) contract and partial implementation
 
@@ -1622,35 +1718,26 @@ guarantee is claimed.
 ### Whole-module criteria audit
 
 The acceptance gates in [the dialog continuation rules](dialogs.md#starting-a-remaining-dialog-in-a-fresh-context)
-map to this evidence:
+map to the current-hash evidence in the completion section:
 
 | Criterion | Evidence | Status |
 | --- | --- | --- |
-| All public registrations and factories | Retail/replacement registry tables are checked for ids `0x110a/0x110b/0x110c`, flags `2/0/0`, and terminator. Each factory pointer is checked for ownership by its own loaded module; the retail pointers are checked against `0x22341130`, `0x223411e0`, `0x22341270`. All three factories are invoked by their corresponding native suites. | **Pass** |
-| Complete flag-2 factory output | The isolated 0x110a harness requires five live HWNDs and a null sixth slot; the paired runtime hook also reads the actual six slots from retail and replacement as `[intro, choice, host options, connection type, browser, NULL]`. Both owner runs observe `+0x1c=1`, no posted/dispatched Next, HOST showing Intro, and successful Cancel. The factory-post branch for `+0x1c=0` and the rest of transitions remain isolated-suite coverage. | **Pass for output and observed owner case; initial-post owner case partial** |
-| Native binding and complete real-control trees | Vtables, message maps, callback targets and module ownership are checked before handlers are wrapped. All five 0x110a child trees match on `24/24` paired scripts (page counts `13/17/20/12/14`); all 0x110b trees match on `24/24`; all 21 0x110c child controls match on `20/20` pairs. `0x110c` resource creation, automatic spin buddy sizing, `RemapCtrlRect`, and `MoveWindow` now match in traced order. | **Pass in isolated suites** |
-| Native rendering | The five 0x110a pages plus initial 0x110b and 0x110c dialogs are captured with per-child `WM_PRINT` into 32-bit DIBs. Font, styles, enabled/check/selection state, focus, list contents and paint order are recorded alongside pixels. All seven paired dialog captures and per-control records match. Same-HWND redraws are stable for `14/14` captures (seven per side, including seven retail repeats). Causes and fixes are detailed above. | **Pass in isolated suites** |
-| Callbacks, validation, accept/cancel | The 0x110a scripts cover callback arguments/results, forward/back/cancel, validation failure and recovery, Browser refresh/selection/settings, and accept. The 0x110b and 0x110c suites compare callback order/arguments/results and their validation/removal/refresh paths. ABI prototypes are documented against MULTIP callee epilogues. Matched retail/replacement Host runs see three `+0x10` validations returning zero, `+0x0c` accept returning zero, and the nested `+0x04` provider callback returning zero at `0x20852f69`; DirectPlayCreate and both QueryInterface calls also return zero. Actual 0x110b OK and all actual 0x110c callbacks remain unexercised. | **Pass in isolated suites; actual owner callback path partial** |
-| Window and module lifetime | Native hooks observe `WM_NCDESTROY → PostNcDestroy (+0xac) → deleting destructor (+0x04, flag 1)` for all five 0x110a pages and the 0x110b/0x110c windows. The suites execute two DLL load/init/factory/deinit/FreeLibrary cycles and verify registration/release counts and that neither module remains loaded. The paired actual 0x110a cancel runs also observe all five destructor chains before owner return, then MULTIP frees four provider payloads and clears the row count. Actual repeated owner unload is not covered. | **Pass in isolated suites; one owner teardown observed** |
-| Behavioral and rendering mutation acceptance | The latest completed isolated run passes the two-cycle baseline and catches all 46 mutation checks, including Choice, help/context and one rendering check. The runner requires the baseline before mutations and rejects timeouts. The lifetime mutation requires controlled cleanup and unload. Evidence and intervening timeouts are recorded in the help follow-up. | **Pass for the exercised isolated gates** |
-| Isolated startup | The refreshed private-copy smoke uses replacement SHA-256 `b229c54cf83b6d597ce13cd6ffa532b73b91705fe88c9b58b47cfa7e7aefa5e0`. It passes the strict trace gate with a private SEHFIX copy; both unshimmed attempts fail that gate on four callback exceptions. Full observations and limits are in the current reconciliation below. | **Pass with private SEHFIX; unshimmed trace gate fails** |
-| Actual HOST/MULTIP dialog workflow | Separate private copies/prefixes complete matched Connect → Cancel runs and matched Host attempts from the same config hash and provider row. The Host traces capture the nested `+0x04` return, successful DirectPlayCreate/QueryInterface calls, then the same `dplayx.dll` `IDirectPlay3::Open` HRESULT `0x80004001` in retail and replacement; `M_CONNECTED` remains zero in both. Both real 0x110b dialogs show Host Settings disabled with block `+0x18=0,+0x1c=1`; no 0x110c list, second player, or UTIL confirmation `1016` is reached. The matched DirectPlay failure establishes an integration limit, not an MP_DIALOG difference. The factory-post path when `+0x1c=0` remains isolated coverage. | **Partial; actual 0x110a cancel and blocked Host path observed, whole-module gate blocked** |
-| Construction-failure cleanup | Static retail and replacement caller paths both ignore MFC Create failure and have no partial-page rollback; both dereference a null allocation rather than returning a clean failure. The prior false-return and allocation probes were injected outside MFC, and missing-DIALOG failure preceded construction. No genuine MFC resource/child creation failure was exercised, so internal partial-window cleanup is unknown. | **Caller-level parity static; genuine cleanup unverified** |
+| Public registrations/factories | All ids, flags, terminator and module ownership checked; all factories invoked | Pass |
+| Flag-2 output and initial command | Five live HWNDs plus null terminator; actual-owner Intro/Cancel and automatic Choice/Cancel branches | Pass |
+| Native binding/control trees | Seven distinct class vtables/maps; complete child trees match across all paired scripts | Pass |
+| Rendering | Seven paired captures and per-control records match; 14 unchanged repeats stable | Pass |
+| Callbacks/validation/accept/cancel | Native isolated scripts plus actual-owner session, removal confirmation, peer receipt, refresh, capacity edits and both OK callbacks | Pass |
+| Window/module lifetime | All seven teardown chains; two init/create/deinit/unload cycles; retained/deleting flags and actual owner return | Pass |
+| Deliberate mutations | 89 negative comparisons detected with required baselines and controlled cleanup | Pass |
+| Startup | Current replacement passes strict private startup with private SEHFIX; unshimmed trace failure remains documented | Pass in stated environment |
+| Actual HOST/MULTIP workflow | Paired native active-session acceptance and initial-post branch; retail owners, public DirectPlay peer | Pass |
+| Construction/destruction failures | Ordered normal lifetime, 21 native child failures, 448 exception/init pairs; preserved retail immediate-free hazard | Pass with documented retail limitation |
+| Shared integration | Shared build/install/revert, installed hash and retail backup verified; unrelated game files unchanged | Pass |
 
-**Why MP_DIALOG remains incomplete despite passing comparisons:** the
-isolated suites cover all three factories and their modeled behaviors, and the
-paired owner runs verify the actual 0x110a array, observed `+0x1c=1` branch,
-cancellation teardown, and MULTIP provider-row cleanup. Matched retail and
-replacement Host attempts now establish that provider/interface creation
-succeeds but Wine `dplayx.dll` returns `E_NOTIMPL` from the first session
-`Open` call in both binaries. The owner therefore leaves `M_CONNECTED=0`, and
-0x110b receives a block whose `+0x18=0` gate disables Host Settings. Actual
-0x110c refresh, capacity edits, removal, confirmation service `1016`, and
-actual 0x110b OK remain unreachable through this external failure. The
-`+0x1c=0` factory-post branch is represented by the isolated suite only.
-Genuine MFC partial-Create cleanup also remains unverified; artificial
-failures outside MFC do not establish framework cleanup. These limits keep
-whole-module acceptance blocked, despite passing isolated comparisons.
+The module is complete within these acceptance gates. Coverage does not
+exhaust malformed input, arbitrary allocator reuse, destructive callback
+reentry, physical mouse behavior or every third-party help viewer. Earlier
+failure logs and partial conclusions below remain historical evidence.
 
 Historical evidence commands and logs (superseded where the later follow-ups
 record newer runs):
@@ -2890,3 +2977,124 @@ actual active-session integration are also still unverified. Whole-module
 status remains **partial**. The next independent lifecycle work is constructor
 exception unwinding; immediate-free factory behavior needs separate allocator
 and owner analysis before any broader failure-path acceptance claim.
+
+### Completion continuation: native unwind scopes (2026-11-05)
+
+This continuation implements the previously missing exception cleanup rather
+than extending only the normal-path fixtures. The replacement now has
+cleanup-only x86 SEH registration scopes in `mpdialog_unwind.h`, following the
+established Views approach. Each constructor records the completed base and
+controls; actual Windows unwinding destroys only completed subobjects in
+reverse order. Each destructor decrements that state before its callouts so
+a dependency exception still unwinds the remaining controls and base.
+Factory construction failure frees the original allocation through SIMSUI's
+`CSimsDialog::operator delete`, matching retail's cleanup thunk rather than
+ordinary deleting-destructor `ui_delete`. Module initialization separately
+frees its MFC allocation through ordinal 825 when the dynamic-link constructor
+throws. The scopes do not catch or translate exceptions.
+
+The failing-before constructor matrix is
+`bin/mpdialog-diff/runs/isolated-ldgfyevm/`: all 111 cases differ because the
+old replacement neither destroys completed subobjects nor frees the factory
+allocation. Initial instrumentation missed retail tail-jump cleanup calls;
+`isolated-w0hjj8kx` and `isolated-ls24a56z` are diagnostic failures, not
+accepted matrices. During actual unwind, imported destructor calls whose
+return address belongs to MSVCRT are now recognized alongside direct local
+calls; SIMSUI/MFC internal destructor calls remain excluded. The corrected
+retail oracle independently requires the expected number of constructors,
+destructors and one class-delete request. The module-init failing-before
+run is `isolated-zgg54_0r`: case 3 records retail `RACDXL` versus replacement
+`RACXL`, exposing the missing free after constructor failure.
+
+The current implementation DLL SHA-256 is
+`6057bad7795a25756e2bad84f497e4d5eea426e71e880a8a5cdac996969692a7`.
+The harness SHA-256 is
+`60d8daf8c25f37a29eec27e390d63fa3e7e01b454f242965479555fa3a60aea4`.
+`bash tools/run_mpdialogdiff.sh --exception-breaks` passes in
+`bin/mpdialog-diff/runs/isolated-mk4r4ey3/`: 111 constructor and 111 destructor
+boundaries under both raw SEH and typed Microsoft C++ throws (444 paired
+cases), plus the four module-init allocation/throw/deinit cases. Ordinary
+construction also passes. Nine per-family mutations omit base cleanup,
+completed-control tracking or allocation cleanup; a disabled-unwind mutation
+is independently detected by constructor, destructor and module-init modes.
+All 12 negative comparisons return normally through module cleanup/unload.
+The outer test handler performs actual `RtlUnwind`; fixture cleanup of an
+interrupted dependency occurs after the compared snapshot.
+
+Current-hash acceptance reruns also pass:
+
+- `--ui-breaks`, `isolated-58g8874_`: complete two-cycle behavior, child trees,
+  seven renders, 14/14 stable repeats and help baseline, all 46 mutations.
+- `--review-breaks`, `isolated-c8cwmftg`: both independent matrix baselines and
+  all five targeted detections.
+- `--construction-breaks`, `isolated-u85cjmht`: ordinary ordered construction,
+  DDX and destruction baseline plus five detections.
+- `--common-breaks`, `isolated-147o801r`: all seven classes/182 cases and six
+  targeted detections.
+- `--retained-breaks`, `isolated-hju_bjwg`: retained and ordinary destruction
+  baselines, all eight detections.
+- `--create-failure-breaks`, `isolated-xa2t4wyo`: all 21 native child-failure
+  cases and seven detections. Two old omitted-control mutation anchors needed
+  their indentation updated after extracting the unwind cleanup callback;
+  earlier `0085637e...` attempts stopped at that anchor check, and do not count
+  as complete passes.
+- `MPD_SMOKE_SEHFIX=1 bash tools/run_mpdialogdiff.sh --smoke`,
+  `smoke-sehfix-nrsnz0hc`: strict private startup PASS, 27/27 modules, 58 gauge
+  load records/29 distinct paths; replacement, shim and source game unchanged.
+
+The old post-Create lifetime hazard remains a documented retail behavior:
+Create may delete the object before the factory's ShowWindow/HWND access.
+No source change bypasses that retail sequence, and the quarantined native
+failure matrix does not claim arbitrary allocator-dependent use-after-free
+outcomes match. This differs from missing unwind cleanup, which was an
+implementation defect and is now corrected.
+
+### Completion continuation: active-session owner investigation (2026-11-05)
+
+The CD contains a compatible native DirectPlay runtime and helper. A private
+prefix using native `dplayx.dll`, `dpwsockx.dll` **and** `dplaysvr.exe` can
+create a session. Merely copying the helper is insufficient: Wine otherwise
+selects its built-in stub executable. The bounded standalone probe and loader
+logs are retained in `bin/mpdialog-diff/dplay-runtime-240t0y_j/`. The native
+helper override allowed `Open=0`; Close/Release can still stall in that
+standalone probe. These files are copied only into disposable prefixes.
+
+The native provider order differs from Wine's: TCP/IP is row 3 in the
+observed native list, while row 0 is Serial and returns `DPERR_UNAVAILABLE`.
+The controller now retrieves the Unicode list text and selects TCP/IP by
+name. It does not alter owner descriptors or force a session state.
+
+The old private seed contains accepted replacement modules, including
+MULTIP; it is not an entirely retail game tree. The hook's old fixed MULTIP
+addresses also did not identify this reference retail image. They have been
+recovered again directly from retail disassembly: e.g. session host
+`0x20854890`, Open return `0x20854918`, provider creation `0x2085ad50`, and
+retail `.data` at RVA `0xd000`. Fixed owner probes are now guarded by the
+retail linkage layout, while descriptor-derived callback targets are traced
+directly. Unsupported owner layouts are explicitly skipped. Earlier native
+attempts with stale owner offsets or Serial selection are exploratory
+failures, not paired acceptance evidence.
+
+A wholly retail private tree, reconstructed by replacing the seed's matching
+files from `orig/`, now completes Host → actual 0x110b → actual 0x110c →
+Cancel → return to the game in `owner-native-zz1kusny/retail/`. Native session
+Open and both group creations succeed; Host Settings is enabled and the
+actual Details list contains the local player. This is retail setup evidence
+only, not a replacement acceptance claim. A mixed-module seed can instead
+stall after session creation, so this experiment does not certify that
+configuration with native DirectPlay.
+
+The reusable `tools/mpdialog_owner_acceptance.py` builds immutable probes,
+creates private retail trees/prefixes, records input/runtime/probe hashes and
+requires actual capacity changes and both OK callbacks. Its optional peer
+uses only read access to the private host's application GUID and public
+DirectPlay APIs; it does not write game memory. Initial peer discovery in
+`owner-acceptance-14clamuu/retail/` waited without joining, so no Remove/1016
+coverage is claimed from that attempt. That run nevertheless reaches actual
+0x110c validation/refresh/accept, updates owner capacity to 4/2, invokes
+actual 0x110b OK and returns cleanly. A loopback compound address is being
+checked to remove interactive address selection from peer discovery.
+
+No shared build/install wiring or live game file has been changed by this
+continuation yet. Status remains partial until the paired active-session
+acceptance and integration work below is completed.

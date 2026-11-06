@@ -104,12 +104,14 @@ def run_wine(command, label, timeout=90):
     return subprocess.CompletedProcess(command, process.returncode, output)
 
 
-def build(name, session_text, tables_text, details_text=None):
+def build(name, session_text, tables_text, details_text=None, unwind_text=None):
     work = WORK / name
     source = work / 'src/mpdialog'
     source.mkdir(parents=True, exist_ok=True)
-    for filename in ('mpdialog_runtime.c', 'mpdialog_internal.h', 'mpdialog.def'):
+    for filename in ('mpdialog_runtime.c', 'mpdialog_internal.h', 'mpdialog_unwind.h', 'mpdialog.def'):
         shutil.copyfile(ROOT / 'src/mpdialog' / filename, source / filename)
+    if unwind_text is not None:
+        (source / 'mpdialog_unwind.h').write_text(unwind_text)
     shutil.copyfile(ROOT / 'src/mpdialog/mpdialog_flow.c', source / 'mpdialog_flow.c')
     (source / 'mpdialog_session.c').write_text(session_text)
     if details_text is None:
@@ -142,7 +144,7 @@ def build_flow(name, flow_text, tables_text):
     work = WORK / name
     source = work / 'src/mpdialog'
     source.mkdir(parents=True, exist_ok=True)
-    for filename in ('mpdialog_runtime.c', 'mpdialog_internal.h', 'mpdialog.def'):
+    for filename in ('mpdialog_runtime.c', 'mpdialog_internal.h', 'mpdialog_unwind.h', 'mpdialog.def'):
         shutil.copyfile(ROOT / 'src/mpdialog' / filename, source / filename)
     shutil.copyfile(ROOT / 'src/mpdialog/mpdialog_session.c', source / 'mpdialog_session.c')
     shutil.copyfile(ROOT / 'src/mpdialog/mpdialog_details.c', source / 'mpdialog_details.c')

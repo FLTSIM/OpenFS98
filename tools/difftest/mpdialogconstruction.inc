@@ -10,7 +10,28 @@ static uint32_t s_retained_destructor, s_retained_call, s_retained_post_calls;
 static uint32_t s_create_failure, s_create_failure_native_free;
 static const uint32_t s_layout_size[7] = {0x19f0,0x1cb0,0x1d5c,0x18fc,0x1af0,0x2120,0x1d80};
 static const uint32_t s_layout_descriptor_offset[7] = {0x19ec,0x1cac,0x1d58,0x18f8,0x1ae8,0x211c,0x1d78};
-static struct fs98_layout_hook s_layout_hooks[26];
+static struct fs98_layout_hook s_layout_hooks[27];
+
+static uint32_t s_constructor_exceptions, s_exception_page, s_exception_at, s_exception_calls, s_exception_unwinding, s_destructor_exceptions, s_exception_cpp;
+#define MPD_CONSTRUCTOR_THROW 0xe0429813u
+static void fs98_layout_maybe_throw(uint32_t page, uint32_t kind)
+{
+    if (s_constructor_exceptions && page == s_exception_page && kind == (s_destructor_exceptions ? 2u : 1u) && ++s_exception_calls == s_exception_at) {
+        if (s_exception_cpp) {
+            static struct { void *vtable, *spare; char name[8]; } type = {0, 0, ".PAX"};
+            static uint32_t catchable[7] = {1, 0, 0, 0xffffffff, 0, 4, 0};
+            static uint32_t types[2] = {1, 0}, info[4];
+            catchable[1] = (uint32_t)(uintptr_t)&type;
+            types[1] = (uint32_t)(uintptr_t)catchable;
+            info[3] = (uint32_t)(uintptr_t)types;
+            void *value = (void *)(uintptr_t)(0x12340000u + page);
+            void (SC *throw_cpp)(void *, void *) = (void *)GetProcAddress(GetModuleHandleA("msvcrt.dll"), "_CxxThrowException");
+            if (!throw_cpp) fs98_fail("resolve typed C++ throw");
+            throw_cpp(&value, info);
+        }
+        RaiseException(MPD_CONSTRUCTOR_THROW, 0, 0, 0);
+    }
+}
 
 static void fs98_layout_patch(uint32_t index, int hooked)
 {
@@ -27,6 +48,13 @@ static int fs98_layout_local(void *address)
     HMODULE owner = 0;
     return GetModuleHandleExA(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS |
         GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT, address, &owner) && owner == s_current_module;
+}
+
+static int fs98_layout_unwind_caller(void *address)
+{
+    HMODULE owner = 0;
+    return s_exception_unwinding && GetModuleHandleExA(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS |
+        GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT, address, &owner) && owner == GetModuleHandleA("msvcrt.dll");
 }
 
 static int32_t fs98_layout_page(void *address)
@@ -55,11 +83,12 @@ static void fs98_layout_record(uint32_t page, uint32_t kind, uint32_t type, void
 
 #define LAYOUT_CONTROL_HOOK(n) \
 static void *TC fs98_layout_control_##n(void *object) { \
-    int local = fs98_layout_local(__builtin_return_address(0)); \
+    int local = fs98_layout_local(__builtin_return_address(0)) || ((n) >= 10 && fs98_layout_unwind_caller(__builtin_return_address(0))); \
     int32_t page = local ? fs98_layout_page(object) : -1; \
     void *result; \
     if (local && page < 0) fs98_fail("layout control outside dialog"); \
     if (page >= 0) fs98_layout_record((uint32_t)page, (n) < 10 ? 1 : 2, (n) % 10, object, 0); \
+    if (page >= 0) fs98_layout_maybe_throw((uint32_t)page, (n) < 10 ? 1 : 2); \
     fs98_layout_patch(n, 0); \
     result = ((void *(TC *)(void *))s_layout_hooks[n].target)(object); \
     fs98_layout_patch(n, 1); \
@@ -82,6 +111,7 @@ static void *TC fs98_layout_dialog_ctor(void *object, int32_t template_id, void 
         if (page >= 7 || !s_layout_live[s_side][page] || s_layout_object[s_side][page] != object)
             fs98_fail("layout base constructor page");
         fs98_layout_record(page, 1, 10, object, parent != 0);
+        fs98_layout_maybe_throw(page, 1);
     }
     fs98_layout_patch(20, 0);
     result = ((void *(TC *)(void *, int32_t, void *))s_layout_hooks[20].target)(object, template_id, parent);
@@ -91,9 +121,13 @@ static void *TC fs98_layout_dialog_ctor(void *object, int32_t template_id, void 
 
 static void *TC fs98_layout_dialog_dtor(void *object)
 {
-    int32_t page = fs98_layout_local(__builtin_return_address(0)) ? fs98_layout_page(object) : -1;
+    int32_t page = (fs98_layout_local(__builtin_return_address(0)) ||
+        fs98_layout_unwind_caller(__builtin_return_address(0))) ? fs98_layout_page(object) : -1;
     void *result;
-    if (page >= 0) fs98_layout_record((uint32_t)page, 2, 10, object, 0);
+    if (page >= 0) {
+        fs98_layout_record((uint32_t)page, 2, 10, object, 0);
+        fs98_layout_maybe_throw((uint32_t)page, 2);
+    }
     fs98_layout_patch(21, 0);
     result = ((void *(TC *)(void *))s_layout_hooks[21].target)(object);
     fs98_layout_patch(21, 1);
@@ -164,6 +198,16 @@ static void fs98_layout_free(void *object)
     if (page >= 0) s_layout_live[s_side][page] = 0;
 }
 
+static void SC fs98_layout_class_free(void *object)
+{
+    int32_t page = fs98_layout_local(__builtin_return_address(0)) ? fs98_layout_page(object) : -1;
+    if (page >= 0) fs98_layout_record((uint32_t)page, 11, 0, object, 1);
+    fs98_layout_patch(26, 0);
+    ((void (SC *)(void *))s_layout_hooks[26].target)(object);
+    fs98_layout_patch(26, 1);
+    if (page >= 0) s_layout_live[s_side][page] = 0;
+}
+
 static void fs98_layout_install(void)
 {
     static const char *const ctor[] = {
@@ -187,10 +231,10 @@ static void fs98_layout_install(void)
         fs98_layout_control_12,fs98_layout_control_13,fs98_layout_control_14,fs98_layout_control_15,
         fs98_layout_control_16,fs98_layout_control_17,fs98_layout_control_18,fs98_layout_control_19,
         fs98_layout_dialog_ctor,fs98_layout_dialog_dtor,fs98_layout_base_exchange,fs98_layout_ddx_control,
-        fs98_layout_allocate,fs98_layout_free
+        fs98_layout_allocate,fs98_layout_free,fs98_layout_class_free
     };
     uint32_t i, j;
-    for (i = 0; i < 26; ++i) {
+    for (i = 0; i < 27; ++i) {
         struct fs98_layout_hook *hook = &s_layout_hooks[i];
         HMODULE module = (i == 9 || i == 19 || i == 23) ? s_mfc : s_ui;
         hook->dll = module == s_mfc ? "MFC42.DLL" : "SIMSUI.DLL";
@@ -198,7 +242,7 @@ static void fs98_layout_install(void)
             i == 20 ? "??0CSimsDialog@@QAE@HPAVCWnd@@@Z" :
             i == 21 ? "??1CSimsDialog@@UAE@XZ" :
             i == 22 ? "?DoDataExchange@CSimsDialog@@MAEXPAVCDataExchange@@@Z" :
-            i == 24 ? "?ui_new@@YAPAXI@Z" : i == 25 ? "?ui_delete@@YAXPAX@Z" : 0;
+            i == 24 ? "?ui_new@@YAPAXI@Z" : i == 25 ? "?ui_delete@@YAXPAX@Z" : i == 26 ? "??3CSimsDialog@@SGXPAX@Z" : 0;
         hook->ordinal = i == 9 ? 567 : i == 19 ? 793 : i == 23 ? 2302 : 0;
         hook->target = (void *)GetProcAddress(module, hook->ordinal ?
             (const char *)(uintptr_t)hook->ordinal : hook->symbol);
@@ -216,7 +260,7 @@ static void fs98_layout_install(void)
 static void fs98_layout_uninstall(void)
 {
     uint32_t i;
-    for (i = 0; i < 26; ++i) fs98_layout_patch(i, 0);
+    for (i = 0; i < 27; ++i) fs98_layout_patch(i, 0);
 }
 
 /* Detach the real HWND first, retaining the actual constructed object. Only

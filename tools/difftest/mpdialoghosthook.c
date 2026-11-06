@@ -6,7 +6,7 @@
 #include <stdint.h>
 #include <string.h>
 
-#define HOSTHOOK_MAX_BREAKPOINTS 64
+#define HOSTHOOK_MAX_BREAKPOINTS 128
 #define HOSTHOOK_PAGE_COUNT 5
 
 enum hosthook_break_kind {
@@ -52,6 +52,8 @@ static BOOL s_owner_return_hook_set;
 static DWORD s_mp_array_offset;
 static DWORD s_mp_objects_offset;
 static const char *s_mp_layout;
+static DWORD s_multip_data_offset;
+static BOOL s_multip_fixed_probes;
 static BOOL s_flow_snapshot_done;
 static BOOL s_flow_snapshot_deferred_logged;
 static volatile LONG s_callback_wrapped;
@@ -68,9 +70,7 @@ static volatile LONG s_mp_probes_installed;
 static volatile LONG s_multip_probes_installed;
 static volatile LONG s_loader_probe_installed;
 static struct hosthook_breakpoint s_breakpoints[HOSTHOOK_MAX_BREAKPOINTS];
-static volatile LONG s_step_active;
-static DWORD s_step_address;
-static DWORD s_step_thread;
+static DWORD s_step_tls = TLS_OUT_OF_INDEXES;
 static PVOID s_vectored_handler;
 static volatile LONG s_owner_clear_depth;
 static DWORD s_pending_free_slot;
@@ -106,9 +106,13 @@ static void hosthook_log(const char *format, ...)
     va_start(args, format);
     wvsprintfA(line, format, args);
     va_end(args);
-    file = CreateFileA("Z:\\tmp\\mpdialog-host-integration.log",
+    {
+        char path[MAX_PATH];
+        DWORD length = GetEnvironmentVariableA("MPD_OWNER_LOG", path, sizeof(path));
+        file = CreateFileA(length && length < sizeof(path) ? path : "Z:\\tmp\\mpdialog-host-integration.log",
         FILE_APPEND_DATA, FILE_SHARE_READ | FILE_SHARE_WRITE, NULL,
         OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
+    }
     if (file == INVALID_HANDLE_VALUE) return;
     WriteFile(file, line, lstrlenA(line), &written, NULL);
     WriteFile(file, "\r\n", 2, &written, NULL);
@@ -223,31 +227,31 @@ static void hosthook_log_multip_state(const char *stage)
 {
     DWORD directplay, directplay_vtable = 0, global;
     if (!s_multip_base) return;
-    directplay = hosthook_read_dword((void *)(uintptr_t)(s_multip_base + 0xbb88));
+    directplay = hosthook_read_dword((void *)(uintptr_t)(s_multip_base + s_multip_data_offset + 0x988));
     if (directplay)
         directplay_vtable = hosthook_read_dword((void *)(uintptr_t)directplay);
-    global = hosthook_read_dword((void *)(uintptr_t)(s_multip_base + 0xb20c));
+    global = hosthook_read_dword((void *)(uintptr_t)(s_multip_base + s_multip_data_offset + 0xc));
     hosthook_log("MULTIP STATE stage=%s directplay=%08lx vtable=%08lx queried=%08lx loaded=%08lx host_intent=%08lx connected=%08lx flow_state=%08lx player_count=%08lx players=%08lx",
         stage, (unsigned long)directplay, (unsigned long)directplay_vtable,
-        (unsigned long)hosthook_read_dword((void *)(uintptr_t)(s_multip_base + 0xbc44)),
-        (unsigned long)hosthook_read_dword((void *)(uintptr_t)(s_multip_base + 0xbc48)),
-        (unsigned long)hosthook_read_dword((void *)(uintptr_t)(s_multip_base + 0xbca8)),
-        (unsigned long)hosthook_read_dword((void *)(uintptr_t)(s_multip_base + 0xbcac)),
-        (unsigned long)hosthook_read_dword((void *)(uintptr_t)(s_multip_base + 0xb3a4)),
-        (unsigned long)hosthook_read_dword((void *)(uintptr_t)(s_multip_base + 0xb860)),
-        (unsigned long)hosthook_read_dword((void *)(uintptr_t)(s_multip_base + 0xb878)));
+        (unsigned long)hosthook_read_dword((void *)(uintptr_t)(s_multip_base + s_multip_data_offset + 0xa44)),
+        (unsigned long)hosthook_read_dword((void *)(uintptr_t)(s_multip_base + s_multip_data_offset + 0xa48)),
+        (unsigned long)hosthook_read_dword((void *)(uintptr_t)(s_multip_base + s_multip_data_offset + 0xaa8)),
+        (unsigned long)hosthook_read_dword((void *)(uintptr_t)(s_multip_base + s_multip_data_offset + 0xaac)),
+        (unsigned long)hosthook_read_dword((void *)(uintptr_t)(s_multip_base + s_multip_data_offset + 0x1a4)),
+        (unsigned long)hosthook_read_dword((void *)(uintptr_t)(s_multip_base + s_multip_data_offset + 0x660)),
+        (unsigned long)hosthook_read_dword((void *)(uintptr_t)(s_multip_base + s_multip_data_offset + 0x678)));
     hosthook_log("MULTIP OPTIONS INPUT stage=%s global=%08lx global_764=%08lx global_84c=%08lx enable_word=%08lx",
         stage, (unsigned long)global,
         (unsigned long)hosthook_read_dword((void *)(uintptr_t)(global + 0x764)),
         (unsigned long)hosthook_read_dword((void *)(uintptr_t)(global + 0x84c)),
-        (unsigned long)hosthook_read_dword((void *)(uintptr_t)(s_multip_base + 0xb410)));
+        (unsigned long)hosthook_read_dword((void *)(uintptr_t)(s_multip_base + s_multip_data_offset + 0x210)));
 }
 
 static void hosthook_log_options_block(const char *stage)
 {
     DWORD descriptor;
     if (!s_multip_base) return;
-    descriptor = s_multip_base + 0xb3e0;
+    descriptor = s_multip_base + s_multip_data_offset + 0x1e0;
     if (!hosthook_readable((void *)(uintptr_t)descriptor, 0x34)) return;
     hosthook_log("MULTIP 0x110b block stage=%s ptr=%08lx +00=%08lx +04=%08lx +08=%08lx +0c=%08lx +10=%08lx +14=%08lx +18=%08lx +1c=%08lx +20=%08lx +24=%08lx +28=%08lx +2c=%08lx +30=%08lx",
         stage, (unsigned long)descriptor,
@@ -534,14 +538,15 @@ static const char *hosthook_loaded_library_kind(DWORD name_address)
 static LONG CALLBACK hosthook_veh(PEXCEPTION_POINTERS exception)
 {
     DWORD exception_code = exception->ExceptionRecord->ExceptionCode;
-    DWORD thread_id = GetCurrentThreadId();
+    DWORD saved_error = GetLastError();
+    DWORD step_address = s_step_tls != TLS_OUT_OF_INDEXES ?
+        (DWORD)(uintptr_t)TlsGetValue(s_step_tls) : 0;
     unsigned index;
-    if (exception_code == EXCEPTION_SINGLE_STEP &&
-        s_step_active && s_step_thread == thread_id) {
+    if (exception_code == EXCEPTION_SINGLE_STEP && step_address) {
         BYTE breakpoint = 0xcc;
         for (index = 0; index < HOSTHOOK_MAX_BREAKPOINTS; ++index) {
             struct hosthook_breakpoint *bp = &s_breakpoints[index];
-            if (bp->address == s_step_address) {
+            if (bp->address == step_address) {
                 hosthook_write_protected((void *)(uintptr_t)bp->address,
                     &breakpoint, 1);
                 bp->armed = TRUE;
@@ -549,12 +554,14 @@ static LONG CALLBACK hosthook_veh(PEXCEPTION_POINTERS exception)
             }
         }
         exception->ContextRecord->EFlags &= ~0x100;
-        s_step_address = 0;
-        s_step_thread = 0;
-        InterlockedExchange(&s_step_active, 0);
+        TlsSetValue(s_step_tls, NULL);
+        SetLastError(saved_error);
         return EXCEPTION_CONTINUE_EXECUTION;
     }
-    if (exception_code != EXCEPTION_BREAKPOINT) return EXCEPTION_CONTINUE_SEARCH;
+    if (exception_code != EXCEPTION_BREAKPOINT) {
+        SetLastError(saved_error);
+        return EXCEPTION_CONTINUE_SEARCH;
+    }
     for (index = 0; index < HOSTHOOK_MAX_BREAKPOINTS; ++index) {
         struct hosthook_breakpoint *bp = &s_breakpoints[index];
         DWORD address = (DWORD)(uintptr_t)exception->ExceptionRecord->ExceptionAddress;
@@ -579,14 +586,21 @@ static LONG CALLBACK hosthook_veh(PEXCEPTION_POINTERS exception)
             DWORD parent = stack[1];
             DWORD descriptor = stack[2];
             s_flow_descriptor = descriptor;
+            s_created_page_count = 0;
+            s_flow_snapshot_done = s_flow_snapshot_deferred_logged = FALSE;
+            memset(s_created_pages, 0, sizeof(s_created_pages));
+            memset(s_flow_object_addresses, 0, sizeof(s_flow_object_addresses));
+            memset(s_flow_object_hwnds, 0, sizeof(s_flow_object_hwnds));
             hosthook_log("FACTORY ENTRY label=%s parent=%08lx descriptor=%08lx return=%08lx",
                 bp->label ? bp->label : "?", (unsigned long)parent,
                 (unsigned long)descriptor, (unsigned long)stack[0]);
             hosthook_log_descriptor("factory-entry", descriptor);
-            hosthook_add_breakpoint(s_multip_base + 0x16f9,
-                HOSTHOOK_BP_OWNER_CLEAR, "multip_configuration_clear after modal");
-            hosthook_add_breakpoint(s_multip_base + 0x14e0,
-                HOSTHOOK_BP_OWNER_CLEAR, "multip_browser_clear nested cleanup");
+            if (s_multip_fixed_probes) {
+                hosthook_add_breakpoint(s_multip_base + 0x57a0,
+                    HOSTHOOK_BP_OWNER_CLEAR, "multip_configuration_clear entry");
+                hosthook_add_breakpoint(s_multip_base + 0x54c0,
+                    HOSTHOOK_BP_OWNER_CLEAR, "multip_browser_clear nested cleanup");
+            }
             hosthook_trace_owner_return(exception->ContextRecord);
             hosthook_install_descriptor_callback_probes(descriptor);
             hosthook_add_breakpoint(stack[0], HOSTHOOK_BP_FLOW_RETURN,
@@ -640,10 +654,10 @@ static LONG CALLBACK hosthook_veh(PEXCEPTION_POINTERS exception)
                 "0x110b OK", "0x110b Host Details", "0x110b Get Weather",
                 "0x110b Set Weather", "0x110b Read"
             };
-            static const DWORD details_offsets[5] = { 0x04, 0x08, 0x0c, 0x10, 0x14 };
-            static const char *details_labels[5] = {
+            static const DWORD details_offsets[4] = { 0x04, 0x08, 0x0c, 0x10 };
+            static const char *details_labels[4] = {
                 "0x110c validation", "0x110c accept", "0x110c remove-confirm",
-                "0x110c refresh", "0x110c player-provider"
+                "0x110c refresh"
             };
             const DWORD *offsets;
             const char **labels;
@@ -677,7 +691,7 @@ static LONG CALLBACK hosthook_veh(PEXCEPTION_POINTERS exception)
             if (bp->label && strstr(bp->label, "0x110b")) {
                 offsets = options_offsets; labels = options_labels; count = 5;
             } else {
-                offsets = details_offsets; labels = details_labels; count = 5;
+                offsets = details_offsets; labels = details_labels; count = 4;
             }
             for (callback_index = 0; callback_index < count; ++callback_index) {
                 DWORD target = hosthook_read_dword((void *)(uintptr_t)
@@ -725,12 +739,12 @@ static LONG CALLBACK hosthook_veh(PEXCEPTION_POINTERS exception)
             hosthook_log("OWNER CLEAR ENTRY addr=%08lx label=%s descriptor=%08lx count=%lu list=%08lx return=%08lx",
                 (unsigned long)bp->address, bp->label ? bp->label : "?",
                 (unsigned long)descriptor,
-                (unsigned long)hosthook_read_dword((void *)(uintptr_t)(s_multip_base + 0xb630)),
-                (unsigned long)hosthook_read_dword((void *)(uintptr_t)(s_multip_base + 0xb62c)),
+                (unsigned long)hosthook_read_dword((void *)(uintptr_t)(s_multip_base + s_multip_data_offset + 0x430)),
+                (unsigned long)hosthook_read_dword((void *)(uintptr_t)(s_multip_base + s_multip_data_offset + 0x42c)),
                 (unsigned long)(hosthook_readable(stack_values, sizeof(DWORD)) ? stack_values[0] : 0));
             if (depth == 1) {
                 DWORD service_table = hosthook_read_dword(
-                    (void *)(uintptr_t)(s_multip_base + 0xb204));
+                    (void *)(uintptr_t)(s_multip_base + s_multip_data_offset + 0x4));
                 DWORD free_service = hosthook_read_dword(
                     (void *)(uintptr_t)(service_table + 0x214));
                 if (free_service)
@@ -803,7 +817,17 @@ static LONG CALLBACK hosthook_veh(PEXCEPTION_POINTERS exception)
             else
                 hosthook_log("MULTIP CALLBACK entry=%s descriptor=%08lx",
                     bp->label ? bp->label : "?", (unsigned long)descriptor);
-            hosthook_log_descriptor("callback-entry", descriptor);
+            if (bp->label && (strstr(bp->label, "0x110b") || strstr(bp->label, "0x110c"))) {
+                hosthook_add_breakpoint(stack[0], HOSTHOOK_BP_MULTIP_RUNTIME_RETURN, bp->label);
+                hosthook_log("DIALOG CALLBACK STATE label=%s descriptor=%08lx result=%08lx pilot_status=%08lx observer_status=%08lx rows=%08lx count=%08lx selection=%08lx",
+                    bp->label, (unsigned long)descriptor,
+                    (unsigned long)hosthook_read_dword((void *)(uintptr_t)descriptor),
+                    (unsigned long)hosthook_read_dword((void *)(uintptr_t)(descriptor + 0x1c)),
+                    (unsigned long)hosthook_read_dword((void *)(uintptr_t)(descriptor + 0x30)),
+                    (unsigned long)hosthook_read_dword((void *)(uintptr_t)(descriptor + 0x4c)),
+                    (unsigned long)hosthook_read_dword((void *)(uintptr_t)(descriptor + 0x50)),
+                    (unsigned long)hosthook_read_dword((void *)(uintptr_t)(descriptor + 0x58)));
+            } else hosthook_log_descriptor("callback-entry", descriptor);
             if (bp->label && strstr(bp->label, "+0x04"))
                 hosthook_log_selected_provider(descriptor);
         } else if (bp->kind == HOSTHOOK_BP_MULTIP_RUNTIME) {
@@ -814,9 +838,9 @@ static LONG CALLBACK hosthook_veh(PEXCEPTION_POINTERS exception)
                 hosthook_log("MULTIP DirectPlayCreate API return hr=%08lx esp=%08lx api=%08lx",
                     (unsigned long)exception->ContextRecord->Eax,
                     (unsigned long)esp,
-                    (unsigned long)hosthook_read_dword((void *)(uintptr_t)(s_multip_base + 0xbb8c)));
+                    (unsigned long)hosthook_read_dword((void *)(uintptr_t)(s_multip_base + s_multip_data_offset + 0x98c)));
                 hosthook_log_function_owner("DirectPlayCreate API",
-                    hosthook_read_dword((void *)(uintptr_t)(s_multip_base + 0xbb8c)));
+                    hosthook_read_dword((void *)(uintptr_t)(s_multip_base + s_multip_data_offset + 0x98c)));
             } else if (strstr(label, "QueryInterface")) {
                 hosthook_log("MULTIP %s hr=%08lx esp=%08lx",
                     label, (unsigned long)exception->ContextRecord->Eax,
@@ -848,7 +872,7 @@ static LONG CALLBACK hosthook_veh(PEXCEPTION_POINTERS exception)
                 hosthook_log_descriptor("provider-callback-return", descriptor);
                 hosthook_log_multip_state("provider-callback-return");
             } else if (strstr(label, "session host Open return")) {
-                DWORD directplay = hosthook_read_dword((void *)(uintptr_t)(s_multip_base + 0xbb88));
+                DWORD directplay = hosthook_read_dword((void *)(uintptr_t)(s_multip_base + s_multip_data_offset + 0x988));
                 DWORD vtable = hosthook_read_dword((void *)(uintptr_t)directplay);
                 DWORD open_target = hosthook_read_dword((void *)(uintptr_t)(vtable + 0x60));
                 hosthook_log("MULTIP %s HRESULT=%08lx",
@@ -924,13 +948,17 @@ static LONG CALLBACK hosthook_veh(PEXCEPTION_POINTERS exception)
                 (unsigned long)hosthook_read_dword((void *)(uintptr_t)(object + 0x20)),
                 (unsigned long)(hosthook_readable(arguments, 2 * sizeof(DWORD)) ? arguments[1] : 0));
         }
-        s_step_address = bp->address;
-        s_step_thread = thread_id;
-        InterlockedExchange(&s_step_active, 1);
+        if (!TlsSetValue(s_step_tls, (void *)(uintptr_t)bp->address)) {
+            hosthook_log("HOOK STEP TLS FAILED error=%lu", (unsigned long)GetLastError());
+            SetLastError(saved_error);
+            return EXCEPTION_CONTINUE_SEARCH;
+        }
         exception->ContextRecord->Eip = bp->address;
         exception->ContextRecord->EFlags |= 0x100;
+        SetLastError(saved_error);
         return EXCEPTION_CONTINUE_EXECUTION;
     }
+    SetLastError(saved_error);
     return EXCEPTION_CONTINUE_SEARCH;
 }
 
@@ -982,6 +1010,12 @@ static BOOL hosthook_patch_postmessage_iat(HMODULE module)
                     if (lstrcmpiA((const char *)name->Name, "PostMessageA") == 0) {
                         DWORD replacement = (DWORD)(uintptr_t)hosthook_postmessage;
                         DWORD old_protect, ignored;
+                        if (first->u1.Function == replacement) {
+                            /* A later DLL load can revisit this image. Keep
+                             * the real API, never chain the hook to itself. */
+                            return s_postmessage_slot == &first->u1.Function &&
+                                s_original_postmessage && s_original_postmessage != replacement;
+                        }
                         s_postmessage_slot = &first->u1.Function;
                         s_original_postmessage = first->u1.Function;
                         if (!VirtualProtect(s_postmessage_slot, sizeof(DWORD),
@@ -1140,7 +1174,7 @@ static BOOL hosthook_is_flow_page(HWND window)
 static void hosthook_install_mp_probes(HMODULE module)
 {
     FARPROC export_one;
-    DWORD module_base, export_rva, image_size;
+    DWORD module_base, export_rva, image_size, factory_rva = 0;
     char path[MAX_PATH] = {0};
     if (!module) return;
     module_base = (DWORD)(uintptr_t)module;
@@ -1154,6 +1188,12 @@ static void hosthook_install_mp_probes(HMODULE module)
     }
     export_one = GetProcAddress(module, (LPCSTR)1);
     export_rva = export_one ? (DWORD)(uintptr_t)export_one - module_base : 0;
+    {
+        BYTE *linkage = (BYTE *)GetProcAddress(module, "Linkage");
+        DWORD *dialogs = linkage && hosthook_readable(linkage, 24) ?
+            *(DWORD **)(linkage + 20) : NULL;
+        if (dialogs && hosthook_readable(dialogs, 12)) factory_rva = dialogs[1] - module_base;
+    }
     s_mp_base = module_base;
     if (export_rva == 0xa048) {
         s_mp_layout = "retail";
@@ -1165,7 +1205,18 @@ static void hosthook_install_mp_probes(HMODULE module)
             HOSTHOOK_BP_OTHER_DIALOG_FACTORY, "retail 0x110b settings factory");
         hosthook_add_breakpoint(module_base + 0x1270,
             HOSTHOOK_BP_OTHER_DIALOG_FACTORY, "retail 0x110c details factory");
-    } else if (export_rva == 0x7018) {
+    } else if (export_rva == 0x7018 && factory_rva == 0x1c80) {
+        /* Unwind-enabled build; checked against its public factories and nm. */
+        s_mp_layout = "replacement-unwind";
+        s_mp_array_offset = 0xf01c;
+        s_mp_objects_offset = 0xf008;
+        hosthook_add_breakpoint(module_base + 0x1c80,
+            HOSTHOOK_BP_FLOW_FACTORY, "replacement 0x110a factory");
+        hosthook_add_breakpoint(module_base + 0x48f0,
+            HOSTHOOK_BP_OTHER_DIALOG_FACTORY, "replacement 0x110b settings factory");
+        hosthook_add_breakpoint(module_base + 0x59e0,
+            HOSTHOOK_BP_OTHER_DIALOG_FACTORY, "replacement 0x110c details factory");
+    } else if (export_rva == 0x7018 && factory_rva == 0x1a80) {
         /* Current reviewed build; offsets checked against its linker symbols. */
         s_mp_layout = "replacement-current";
         s_mp_array_offset = 0xe01c;
@@ -1212,37 +1263,44 @@ static void hosthook_install_multip_probes(HMODULE module)
         return;
     }
     s_multip_base = mult_base;
+    s_multip_data_offset = (DWORD)(uintptr_t)GetProcAddress(module, "ImportTable") - mult_base;
     hosthook_log("RUNTIME MODULE MULTIPLAYER=%p size=%08lx",
         module, (unsigned long)image_size);
+    if ((DWORD)(uintptr_t)GetProcAddress(module, "Linkage") - mult_base != 0xd058) {
+        hosthook_log("RUNTIME MULTIPLAYER fixed-offset probes skipped: unsupported owner layout");
+        return;
+    }
+    s_multip_fixed_probes = TRUE;
+    hosthook_log("RUNTIME MULTIPLAYER retail layout data_rva=%08lx", (unsigned long)s_multip_data_offset);
     hosthook_log("RUNTIME MULTIPLAYER base=%08lx owner-clear-bps=deferred-to-factory",
         (unsigned long)mult_base);
-    hosthook_add_breakpoint(mult_base + 0x1d1d,
+    hosthook_add_breakpoint(mult_base + 0x49e0,
         HOSTHOOK_BP_MULTIP_RUNTIME, "multip_options_init entry");
-    hosthook_add_breakpoint(mult_base + 0x1d84,
+    hosthook_add_breakpoint(mult_base + 0x49b0,
         HOSTHOOK_BP_MULTIP_RUNTIME, "multip_options_dialog entry");
-    hosthook_add_breakpoint(mult_base + 0x1e15,
+    hosthook_add_breakpoint(mult_base + 0x9e60,
         HOSTHOOK_BP_MULTIP_RUNTIME, "multip_session_toggle entry");
-    hosthook_add_breakpoint(mult_base + 0x2e60,
+    hosthook_add_breakpoint(mult_base + 0xad50,
         HOSTHOOK_BP_MULTIP_RUNTIME, "multip_directplay_create entry");
-    hosthook_add_breakpoint(mult_base + 0x2e85,
+    hosthook_add_breakpoint(mult_base + 0xad6d,
         HOSTHOOK_BP_MULTIP_RUNTIME, "DirectPlayCreate API return");
-    hosthook_add_breakpoint(mult_base + 0x2eac,
+    hosthook_add_breakpoint(mult_base + 0xad8b,
         HOSTHOOK_BP_MULTIP_RUNTIME, "DirectPlay QueryInterface 2A return");
-    hosthook_add_breakpoint(mult_base + 0x2ed0,
+    hosthook_add_breakpoint(mult_base + 0xada9,
         HOSTHOOK_BP_MULTIP_RUNTIME, "DirectPlay QueryInterface 3A return");
-    hosthook_add_breakpoint(mult_base + 0x2f01,
+    hosthook_add_breakpoint(mult_base + 0xadcd,
         HOSTHOOK_BP_MULTIP_RUNTIME, "DirectPlay create return");
-    hosthook_add_breakpoint(mult_base + 0x2f69,
+    hosthook_add_breakpoint(mult_base + 0x4f91,
         HOSTHOOK_BP_MULTIP_RUNTIME, "provider callback +04 return");
-    hosthook_add_breakpoint(mult_base + 0x3394,
+    hosthook_add_breakpoint(mult_base + 0x4940,
         HOSTHOOK_BP_MULTIP_RUNTIME, "multip_session_create_groups entry");
-    hosthook_add_breakpoint(mult_base + 0x33d2,
+    hosthook_add_breakpoint(mult_base + 0x4965,
         HOSTHOOK_BP_MULTIP_RUNTIME, "session group create first return");
-    hosthook_add_breakpoint(mult_base + 0x3419,
+    hosthook_add_breakpoint(mult_base + 0x4992,
         HOSTHOOK_BP_MULTIP_RUNTIME, "session group create second return");
-    hosthook_add_breakpoint(mult_base + 0x3424,
+    hosthook_add_breakpoint(mult_base + 0x4890,
         HOSTHOOK_BP_MULTIP_RUNTIME, "multip_session_host entry");
-    hosthook_add_breakpoint(mult_base + 0x34ca,
+    hosthook_add_breakpoint(mult_base + 0x4918,
         HOSTHOOK_BP_MULTIP_RUNTIME, "session host Open return");
     hosthook_log_multip_state("multip-probes-installed");
 }
@@ -1510,10 +1568,14 @@ BOOL WINAPI DllMain(HINSTANCE instance, DWORD reason, LPVOID reserved)
     (void)reserved;
     if (reason == DLL_PROCESS_ATTACH) {
         DisableThreadLibraryCalls(instance);
+        s_step_tls = TlsAlloc();
+        if (s_step_tls == TLS_OUT_OF_INDEXES) return FALSE;
         s_vectored_handler = AddVectoredExceptionHandler(1, hosthook_veh);
+        if (!s_vectored_handler) { TlsFree(s_step_tls); return FALSE; }
     } else if (reason == DLL_PROCESS_DETACH) {
         hosthook_restore_runtime_patches();
         if (s_vectored_handler) RemoveVectoredExceptionHandler(s_vectored_handler);
+        if (s_step_tls != TLS_OUT_OF_INDEXES) TlsFree(s_step_tls);
     }
     return TRUE;
 }

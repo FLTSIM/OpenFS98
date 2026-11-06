@@ -6,6 +6,7 @@
 #include <string.h>
 #include <stdlib.h>
 #include "mpdialog_internal.h"
+#include "mpdialog_unwind.h"
 
 #define D32(object, offset) (*(uint32_t *)((uint8_t *)(object) + (offset)))
 #define S32(object, offset) (*(int32_t *)((uint8_t *)(object) + (offset)))
@@ -44,57 +45,87 @@ static void details_call_ctor(const char *symbol, void *object, uint32_t offset)
     ((void (TC *)(void *))fs98_mpdialog_simsui(symbol))(AT(object, offset));
 }
 
-static void details_construct(void *object)
+static const char *const s_details_ctors[19] = {
+    "??0CSims3PieceButton@@QAE@XZ",
+    "??0CSims3PieceButton@@QAE@XZ",
+    "??0CSims3PieceButton@@QAE@XZ",
+    "??0CSims3PieceButton@@QAE@XZ",
+    0,
+    0,
+    "??0CSimsText@@QAE@XZ",
+    "??0CSimsText@@QAE@XZ",
+    "??0CSimsEdit@@QAE@XZ",
+    "??0CSimsEdit@@QAE@XZ",
+    "??0CSimsText@@QAE@XZ",
+    "??0CSimsEdit@@QAE@XZ",
+    "??0CSimsText@@QAE@XZ",
+    "??0CSimsListBox@@QAE@XZ",
+    "??0CSimsText@@QAE@XZ",
+    "??0CSimsText@@QAE@XZ",
+    "??0CSimsText@@QAE@XZ",
+    "??0CSimsText@@QAE@XZ",
+    "??0CSimsTextArt@@QAE@XZ",
+};
+static const char *const s_details_dtors[19] = {
+    "??1CSims3PieceButton@@UAE@XZ",
+    "??1CSims3PieceButton@@UAE@XZ",
+    "??1CSims3PieceButton@@UAE@XZ",
+    "??1CSims3PieceButton@@UAE@XZ",
+    0,
+    0,
+    "??1CSimsText@@UAE@XZ",
+    "??1CSimsText@@UAE@XZ",
+    "??1CSimsEdit@@UAE@XZ",
+    "??1CSimsEdit@@UAE@XZ",
+    "??1CSimsText@@UAE@XZ",
+    "??1CSimsEdit@@UAE@XZ",
+    "??1CSimsText@@UAE@XZ",
+    "??1CSimsListBox@@UAE@XZ",
+    "??1CSimsText@@UAE@XZ",
+    "??1CSimsText@@UAE@XZ",
+    "??1CSimsText@@UAE@XZ",
+    "??1CSimsText@@UAE@XZ",
+    "??1CSimsTextArt@@UAE@XZ",
+};
+
+static void details_destroy_control(void *object, uint32_t index, uint32_t page)
 {
-    uint32_t index;
-    ((void *(TC *)(void *, int32_t, void *))
-        fs98_mpdialog_simsui("??0CSimsDialog@@QAE@HPAVCWnd@@@Z"))(object, 0x6b, 0);
-    for (index = 0; index < 4; ++index)
-        details_call_ctor("??0CSims3PieceButton@@QAE@XZ", object, s_offsets[index]);
-    for (index = 4; index <= 5; ++index) {
-        void *spin = AT(object, s_offsets[index]);
-        ((void (TC *)(void *))fs98_mpdialog_mfc(567))(spin);
-        *(void **)spin = fs98_mpdialog_import_va(0x2234b42c);
-    }
-    details_call_ctor("??0CSimsText@@QAE@XZ", object, 0x154c);
-    details_call_ctor("??0CSimsText@@QAE@XZ", object, 0x1604);
-    details_call_ctor("??0CSimsEdit@@QAE@XZ", object, 0x16bc);
-    details_call_ctor("??0CSimsEdit@@QAE@XZ", object, 0x1724);
-    details_call_ctor("??0CSimsText@@QAE@XZ", object, 0x178c);
-    details_call_ctor("??0CSimsEdit@@QAE@XZ", object, 0x1844);
-    details_call_ctor("??0CSimsText@@QAE@XZ", object, 0x18ac);
-    details_call_ctor("??0CSimsListBox@@QAE@XZ", object, 0x1964);
-    details_call_ctor("??0CSimsText@@QAE@XZ", object, 0x19ac);
-    details_call_ctor("??0CSimsText@@QAE@XZ", object, 0x1a64);
-    details_call_ctor("??0CSimsText@@QAE@XZ", object, 0x1b1c);
-    details_call_ctor("??0CSimsText@@QAE@XZ", object, 0x1bd4);
-    details_call_ctor("??0CSimsTextArt@@QAE@XZ", object, 0x1c8c);
-    PTR(object, 0) = fs98_mpdialog_details_vtables;
+    (void)page;
+    if (s_details_dtors[index]) details_call_ctor(s_details_dtors[index], object, s_offsets[index]);
+    else ((void (TC *)(void *))fs98_mpdialog_mfc(793))(AT(object, s_offsets[index]));
 }
 
-void FS98_MPDIALOG_THISCALL fs98_mpdialog_details_delete_body(void *object)
+static MPD_NOINLINE void details_construct(void *object)
 {
-    details_call_ctor("??1CSimsTextArt@@UAE@XZ", object, 0x1c8c);
-    details_call_ctor("??1CSimsText@@UAE@XZ", object, 0x1bd4);
-    details_call_ctor("??1CSimsText@@UAE@XZ", object, 0x1b1c);
-    details_call_ctor("??1CSimsText@@UAE@XZ", object, 0x1a64);
-    details_call_ctor("??1CSimsText@@UAE@XZ", object, 0x19ac);
-    details_call_ctor("??1CSimsListBox@@UAE@XZ", object, 0x1964);
-    details_call_ctor("??1CSimsText@@UAE@XZ", object, 0x18ac);
-    details_call_ctor("??1CSimsEdit@@UAE@XZ", object, 0x1844);
-    details_call_ctor("??1CSimsText@@UAE@XZ", object, 0x178c);
-    details_call_ctor("??1CSimsEdit@@UAE@XZ", object, 0x1724);
-    details_call_ctor("??1CSimsEdit@@UAE@XZ", object, 0x16bc);
-    details_call_ctor("??1CSimsText@@UAE@XZ", object, 0x1604);
-    details_call_ctor("??1CSimsText@@UAE@XZ", object, 0x154c);
-    /* CSimsSpinButtonCtrl uses its retail imported vtable and destructor. */
-    ((void (TC *)(void *))fs98_mpdialog_mfc(793))(AT(object, 0x150c));
-    ((void (TC *)(void *))fs98_mpdialog_mfc(793))(AT(object, 0x14cc));
-    details_call_ctor("??1CSims3PieceButton@@UAE@XZ", object, 0x13d0);
-    details_call_ctor("??1CSims3PieceButton@@UAE@XZ", object, 0x12d4);
-    details_call_ctor("??1CSims3PieceButton@@UAE@XZ", object, 0x11d8);
-    details_call_ctor("??1CSims3PieceButton@@UAE@XZ", object, 0x10dc);
-    ((void (TC *)(void *))fs98_mpdialog_simsui("??1CSimsDialog@@UAE@XZ"))(object);
+    struct fs98_mpdialog_object_scope state;
+    uint32_t index;
+    state.object = object; state.page = 0; state.destroy_control = details_destroy_control;
+    state.completed = state.base = 0;
+    fs98_mpdialog_unwind_enter(&state.frame, fs98_mpdialog_object_cleanup);
+    ((void *(TC *)(void *, int32_t, void *))
+        fs98_mpdialog_simsui("??0CSimsDialog@@QAE@HPAVCWnd@@@Z"))(object, 0x6b, 0);
+    state.base = 1;
+    for (index = 0; index < 19; ++index) {
+        if (s_details_ctors[index]) details_call_ctor(s_details_ctors[index], object, s_offsets[index]);
+        else {
+            void *spin = AT(object, s_offsets[index]);
+            ((void (TC *)(void *))fs98_mpdialog_mfc(567))(spin);
+            PTR(spin, 0) = fs98_mpdialog_import_va(0x2234b42c);
+        }
+        state.completed = index + 1;
+    }
+    PTR(object, 0) = fs98_mpdialog_details_vtables;
+    fs98_mpdialog_unwind_leave(&state.frame);
+}
+
+MPD_NOINLINE void FS98_MPDIALOG_THISCALL fs98_mpdialog_details_delete_body(void *object)
+{
+    struct fs98_mpdialog_object_scope state;
+    state.object = object; state.page = 0; state.destroy_control = details_destroy_control;
+    state.completed = 19; state.base = 1;
+    fs98_mpdialog_unwind_enter(&state.frame, fs98_mpdialog_object_cleanup);
+    fs98_mpdialog_object_cleanup(&state.frame);
+    fs98_mpdialog_unwind_leave(&state.frame);
 }
 
 void *FS98_MPDIALOG_THISCALL fs98_mpdialog_details_delete(void *object, uint32_t flags)
@@ -365,14 +396,21 @@ void FS98_MPDIALOG_THISCALL fs98_mpdialog_details_on_selection(void *object)
         D32(rows + (uint32_t)selected * 16, 8) == 0);
 }
 
-uint32_t FS98_MPDIALOG_STDCALL fs98_mpdialog_details_create(uint32_t parent, void *descriptor)
+MPD_NOINLINE uint32_t FS98_MPDIALOG_STDCALL fs98_mpdialog_details_create(uint32_t parent, void *descriptor)
 {
-    void *object = fs98_mpdialog_allocate(0x1d80);
+    struct fs98_mpdialog_factory_scope state;
+    void *object;
     (void)parent;
+    state.object = 0; state.live = 0;
+    fs98_mpdialog_unwind_enter(&state.frame, fs98_mpdialog_factory_cleanup);
+    object = fs98_mpdialog_allocate(0x1d80);
+    state.object = object; state.live = 1;
     if (object) details_construct(object);
     PTR(object, 0x1d78) = descriptor;
     D32(object, 0x80) = fs98_mpdialog_instance();
+    state.live = 0;
     fs98_mpdialog_create_window(object, 0x6b, 0);
     fs98_mpdialog_show_window(object, 1);
+    fs98_mpdialog_unwind_leave(&state.frame);
     return D32(object, 0x20);
 }

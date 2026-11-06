@@ -3,6 +3,7 @@
 #include <windows.h>
 #include <string.h>
 #include "mpdialog_internal.h"
+#include "mpdialog_unwind.h"
 
 #define D32(object, offset) (*(uint32_t *)((uint8_t *)(object) + (offset)))
 #define PTR(object, offset) (*(void **)((uint8_t *)(object) + (offset)))
@@ -61,27 +62,40 @@ static const char *const s_control_dtors[20] = {
     "??1CSimsCheckButton@@UAE@XZ", "??1CSimsTextArt@@UAE@XZ"
 };
 
-static void mpdialog_construct(void *object)
+static void mpdialog_destroy_control(void *object, uint32_t index, uint32_t page)
 {
-    uint32_t index;
-    ((void *(FS98_MPDIALOG_THISCALL *)(void *, int32_t, void *))
-        fs98_mpdialog_simsui("??0CSimsDialog@@QAE@HPAVCWnd@@@Z"))(object, 0x6a, 0);
-    for (index = 0; index < 20; ++index)
-        ((void (FS98_MPDIALOG_THISCALL *)(void *))
-            fs98_mpdialog_simsui(s_control_ctors[index]))(AT(object, s_control_offsets[index]));
-    PTR(object, 0) = fs98_mpdialog_vtables;
+    (void)page;
+    ((void (FS98_MPDIALOG_THISCALL *)(void *))
+        fs98_mpdialog_simsui(s_control_dtors[index]))(AT(object, s_control_offsets[index]));
 }
 
-static void mpdialog_destroy_controls(void *object)
+static MPD_NOINLINE void mpdialog_construct(void *object)
 {
-    uint32_t index = 20;
-    while (index != 0) {
-        --index;
+    struct fs98_mpdialog_object_scope state;
+    uint32_t index;
+    state.object = object; state.page = 0; state.destroy_control = mpdialog_destroy_control;
+    state.completed = state.base = 0;
+    fs98_mpdialog_unwind_enter(&state.frame, fs98_mpdialog_object_cleanup);
+    ((void *(FS98_MPDIALOG_THISCALL *)(void *, int32_t, void *))
+        fs98_mpdialog_simsui("??0CSimsDialog@@QAE@HPAVCWnd@@@Z"))(object, 0x6a, 0);
+    state.base = 1;
+    for (index = 0; index < 20; ++index) {
         ((void (FS98_MPDIALOG_THISCALL *)(void *))
-            fs98_mpdialog_simsui(s_control_dtors[index]))(AT(object, s_control_offsets[index]));
+            fs98_mpdialog_simsui(s_control_ctors[index]))(AT(object, s_control_offsets[index]));
+        state.completed = index + 1;
     }
-    ((void (FS98_MPDIALOG_THISCALL *)(void *))
-        fs98_mpdialog_simsui("??1CSimsDialog@@UAE@XZ"))(object);
+    PTR(object, 0) = fs98_mpdialog_vtables;
+    fs98_mpdialog_unwind_leave(&state.frame);
+}
+
+static MPD_NOINLINE void mpdialog_destroy_controls(void *object)
+{
+    struct fs98_mpdialog_object_scope state;
+    state.object = object; state.page = 0; state.destroy_control = mpdialog_destroy_control;
+    state.completed = 20; state.base = 1;
+    fs98_mpdialog_unwind_enter(&state.frame, fs98_mpdialog_object_cleanup);
+    fs98_mpdialog_object_cleanup(&state.frame);
+    fs98_mpdialog_unwind_leave(&state.frame);
 }
 
 void *FS98_MPDIALOG_THISCALL fs98_mpdialog_delete(void *object, uint32_t flags)
@@ -408,14 +422,21 @@ MPD_HELP_HANDLERS(settings)
 MPD_HELP_HANDLERS(details)
 #undef MPD_HELP_HANDLERS
 
-uint32_t FS98_MPDIALOG_STDCALL fs98_mpdialog_create(uint32_t parent, void *descriptor)
+MPD_NOINLINE uint32_t FS98_MPDIALOG_STDCALL fs98_mpdialog_create(uint32_t parent, void *descriptor)
 {
-    void *object = fs98_mpdialog_allocate(0x2120);
+    struct fs98_mpdialog_factory_scope state;
+    void *object;
     (void)parent;
+    state.object = 0; state.live = 0;
+    fs98_mpdialog_unwind_enter(&state.frame, fs98_mpdialog_factory_cleanup);
+    object = fs98_mpdialog_allocate(0x2120);
+    state.object = object; state.live = 1;
     if (object) mpdialog_construct(object);
     PTR(object, 0x211c) = descriptor;
     D32(object, 0x80) = fs98_mpdialog_instance();
+    state.live = 0;
     fs98_mpdialog_create_window(object, 0x6a, 0);
     fs98_mpdialog_show_window(object, 1);
+    fs98_mpdialog_unwind_leave(&state.frame);
     return D32(object, 0x20);
 }

@@ -2,10 +2,10 @@
 
 What is still retail, and what is left before a native build. The 27 simulator modules in
 `Modules\` are done and in `MODULES` (two more module DLLs, SIM1 and the `.MDL`s, live
-outside it and are not), and `English\` World, Alerts, Help, Sim, Views and Flights
-are in `ENGLISH_MODULES`; `make install` puts them all in the game. Everything below is not. Sizes are `.text` from the reference CD. Differences
+outside it and are not), and `English\` World, Alerts, Help, Sim, Views, Flights and MP_DIALOG
+are in `ENGLISH_MODULES`; `make install` puts them all in the game. Installed rows below are retained for context. Sizes are `.text` from the reference CD. Differences
 and gaps in the finished modules are in [open-differences.md](open-differences.md).
-Results here are from 2026-11-01.
+Results updated through 2026-11-05; individual rows retain their acceptance dates.
 
 ## Binaries
 
@@ -18,7 +18,7 @@ Results here are from 2026-11-01.
 | `Gauges/*.GAU` (120) | 63,472 | **Not started.** No `src/gauges/` and no survey. PANELS, their runtime, is ours | below |
 | `English/Flights.DLL` | 51,122 | **Installed** 2026-11-02; used in play by `make flights-play` 2026-11-03 | [flights.md](modules/flights.md) |
 | `English/Sim.DLL` | 33,239 | **Installed** 2026-11-02 | [sim.md](modules/sim.md) |
-| `English/mpdialog.dll` | 25,401 | **Partial,** being worked on separately: registries `0x110a`..`0x110c` | [mpdialog.md](modules/mpdialog.md) |
+| `English/MP_DIALOG.DLL` | 25,401 | **Installed** 2026-11-05; all three registrations, native exception/UI acceptance and paired actual-owner peer session | [mpdialog.md](modules/mpdialog.md) |
 | `Aircraft/*/model/*.MDL` (9) | 25,014 | **Not started.** The aircraft's visual models, module id 31, 9-entry Linkage. Mostly `.data`. Not in `orig/` | [below](#sim1-and-the-mdls) |
 | `English/Views.DLL` | 13,090 | **Installed** 2026-11-02 | [views.md](modules/views.md) |
 | `fltsim95.exe` | 11,464 | **Not looked at.** A stub that ships alongside; imports only KERNEL32. Probably not needed | [architecture.md](architecture.md) |

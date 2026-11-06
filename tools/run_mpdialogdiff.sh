@@ -47,6 +47,10 @@ if [[ "${1:-}" == --create-failure-breaks ]]; then
     python3 -B tools/mpdialog_create_failure_breaks.py "${@:2}" 2>&1 | tee "$MPD_PROVENANCE_DIR/output.log"
     exit $?
 fi
+if [[ "${1:-}" == --exception-breaks ]]; then
+    python3 -B tools/mpdialog_exception_breaks.py "${@:2}" 2>&1 | tee "$MPD_PROVENANCE_DIR/output.log"
+    exit $?
+fi
 if [[ "${1:-}" == --construction-breaks ]]; then
     python3 -B tools/mpdialog_construction_breaks.py "${@:2}" 2>&1 | tee "$MPD_PROVENANCE_DIR/output.log"
     exit $?

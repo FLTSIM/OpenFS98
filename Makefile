@@ -68,7 +68,7 @@ BASE_HG2D   := 0x20730000
 BASE_HOST   := 0x41000000
 
 MODULES := ACONTAIN ADVDRV ANALYSIS ATC BOOSTER CHAIN CONTROLS DEMO DYNAMIC FACIL FE G3D GLOBAL HG2D LANDME MAIN MPCHAT MULTIP NUMERIC PANELS REALITY SLEW SOUND UTIL WEATHERM WINDOW WINMSG
-ENGLISH_MODULES := WORLD ALERTS HELP SIM VIEWS FLIGHTS
+ENGLISH_MODULES := WORLD ALERTS HELP SIM VIEWS FLIGHTS MP_DIALOG
 # Built, and compared in the game by main-dialogs, but not yet installed by `make install`
 # (empty: Flights moved to ENGLISH_MODULES on 2026-11-02)
 ENGLISH_CANDIDATES :=
@@ -81,7 +81,8 @@ english_name = $(strip \
   $(if $(filter HELP,$(1)),Help,\
   $(if $(filter SIM,$(1)),Sim,\
   $(if $(filter VIEWS,$(1)),Views,\
-  $(if $(filter FLIGHTS,$(1)),Flights)))))))
+  $(if $(filter FLIGHTS,$(1)),Flights,\
+  $(if $(filter MP_DIALOG,$(1)),MP_DIALOG))))))))
 installed_path = $(if $(filter $(ENGLISH_MODULES) $(ENGLISH_CANDIDATES),$(1)),English/$(call english_name,$(1)).DLL,Modules/$(call installed_name,$(1)))
 
 # Keep the accepted World build flags and dependency graph in one place.
@@ -95,7 +96,7 @@ world: $(BIN)/WORLD.DLL
 world-game-ui: world
 	$(MAKE) -f tools/world.mk world-game-ui FS98_DIR="$(FS98_DIR)"
 
-# The four finished dialog DLLs build standalone in tools/<name>.mk, as World
+# The finished dialog DLLs build standalone in tools/<name>.mk, as World
 # does; the shared build copies each result to $(BIN)/<NAME>.DLL.
 # $(1) NAME, $(2) name, $(3) the standalone build's output
 define dialog_build
@@ -112,6 +113,7 @@ $(eval $(call dialog_build,HELP,help,$(BIN)/help-diff/HELP_ours.dll))
 $(eval $(call dialog_build,SIM,sim,$(BIN)/sim-diff/SIM_ours.dll))
 $(eval $(call dialog_build,VIEWS,views,$(BIN)/views-diff/VIEWS_ours.dll))
 $(eval $(call dialog_build,FLIGHTS,flights,$(BIN)/flights-diff/FLIGHTS_ours.dll))
+$(eval $(call dialog_build,MP_DIALOG,mpdialog,$(BIN)/mpdialog-diff/MP_DIALOG_ours.dll))
 
 # Install and revert one English DLL: world-install, alerts-revert, ...
 # The first install keeps the game's own copy beside it as <name>.DLL.orig;
@@ -126,7 +128,7 @@ $(2)-install: $(BIN)/$(1).DLL
 $(2)-revert:
 	cp "$$(call orig_module,$(1))" "$$(FS98_DIR)/$$(call installed_path,$(1))"
 endef
-$(foreach m,$(ENGLISH_MODULES) $(ENGLISH_CANDIDATES),$(eval $(call english_install,$(m),$(shell echo $(m) | tr A-Z a-z))))
+$(foreach m,$(ENGLISH_MODULES) $(ENGLISH_CANDIDATES),$(eval $(call english_install,$(m),$(if $(filter MP_DIALOG,$(m)),mpdialog,$(shell echo $(m) | tr A-Z a-z)))))
 
 # MULTIP installs as MULTIPLAYER.DLL; its acceptance harness is below.
 $(BIN)/MULTIP.DLL: src/multip/multip.c src/multip/multip_callbacks.inc src/multip/multip_motion.inc src/multip/multip_commands.inc src/multip/multip_weather.inc src/multip/multip_tick.inc src/multip/multip_system.inc src/multip/multip_app_players.inc src/multip/multip_updates.inc src/multip/multip_textures.inc src/multip/multip_texture_receive.inc src/multip/multip_transfer_messages.inc src/multip/multip_texture_send.inc src/multip/multip_model_send.inc src/multip/multip_model_cache.inc src/multip/multip_model_receive.inc src/multip/multip_title_receive.inc src/multip/multip_state_messages.inc src/multip/multip_control_updates.inc src/multip/multip_lifecycle.inc src/multip/multip_dispatch.inc src/multip/multip_dispatch_cases.inc src/multip/multip_weather_fields.inc src/multip/multip_frame_actions.inc src/multip/multip_players.inc src/multip/multip_nametag.inc src/multip/multip_messages.inc src/multip/multip_tracking.inc src/multip/multip_records.inc src/multip/multip_aircraft.inc src/multip/multip_session.inc src/multip/multip_profile.inc src/multip/multip_profile_fields.inc src/multip/multip.def src/multip/multip_data.inc src/multip/multip_rdata.inc src/multip/multip_pointers.inc $(BIN)/multip.res src/multip/multip_providers.inc src/multip/multip_browser.inc src/multip/multip_configuration.inc src/multip/multip_details.inc src/multip/multip_options.inc src/multip/multip_lobby.inc src/multip/multip_toggle.inc src/multip/multip_init.inc
@@ -159,10 +161,10 @@ installed_name = $(strip \
   $(if $(filter MPCHAT,$(1)),mpchat.DLL,$(1).DLL))))
 
 # The CD's own file names are not all upper case either: facil.dll, multip.dll.
-orig_module = $(if $(filter $(ENGLISH_MODULES) $(ENGLISH_CANDIDATES),$(1)),$(ORIG)/$(call installed_path,$(1)),$(ORIG)/Modules/$(strip \
+orig_module = $(if $(filter MP_DIALOG,$(1)),$(ORIG)/English/mpdialog.dll,$(if $(filter $(ENGLISH_MODULES) $(ENGLISH_CANDIDATES),$(1)),$(ORIG)/$(call installed_path,$(1)),$(ORIG)/Modules/$(strip \
   $(if $(filter FACIL,$(1)),facil.dll,\
   $(if $(filter MULTIP,$(1)),multip.dll,\
-  $(if $(filter MPCHAT,$(1)),mpchat.DLL,$(1).DLL)))))
+  $(if $(filter MPCHAT,$(1)),mpchat.DLL,$(1).DLL))))))
 
 all: $(addprefix $(BIN)/,$(addsuffix .DLL,$(ALL_MODULES)))
 

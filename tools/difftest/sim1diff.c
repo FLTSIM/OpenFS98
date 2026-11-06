@@ -11,7 +11,7 @@
 #define DATA_SIZE 0x43f8u
 #define HEADER_SIZE 0x94u
 
-uint32_t call_target, call_argc, call_args[3], call_inputs[7], call_registers[8];
+uint32_t call_target, call_argc, call_args[9], call_inputs[7], call_registers[8];
 uint32_t call_sp, call_preload;
 uint16_t call_control;
 uint8_t call_fp[108] __attribute__((aligned(16)));

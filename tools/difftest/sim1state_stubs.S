@@ -18,3 +18,4 @@ stub state_write, state_write_core, 12
 stub state_alloc, state_alloc_core, 16
 stub state_free, state_free_core, 4
 stub state_remove, state_remove_core, 8
+stub state_find, state_find_core, 12

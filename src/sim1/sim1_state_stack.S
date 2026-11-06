@@ -22,6 +22,8 @@ _\name:
 
 state_entry sim1_record_write, sim1_record_write_core, 4
 state_entry sim1_record_read, sim1_record_read_core, 8
+state_entry sim1_legacy_read, sim1_legacy_read_core, 4
+state_entry sim1_restore_state, sim1_restore_state_core, 0
 state_entry sim1_save_situation, sim1_save_situation_core, 0
 state_entry sim1_retain_state, sim1_retain_state_core, 0
 state_entry sim1_deinit, sim1_deinit_core, 0

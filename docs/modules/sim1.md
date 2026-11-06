@@ -5,9 +5,9 @@ chunk `0x100`, loads `Sim\<name>.SIM` through host `+0x26c`, and publishes its
 Linkage at GLOBAL `+0x11d4`. This is simulator code outside `Modules\`, not
 `English/Sim.DLL` (the aircraft-settings UI).
 
-**Partial, 2026-11-06:** six bounded services, modern situation-record loading,
-record saving, retained state and shutdown are implemented and compared in
-isolation. Initialization, legacy record loading, the aircraft loader and frame
+**Partial, 2026-11-06:** six bounded services, both situation formats, startup
+state restoration, saving, retained state and shutdown are implemented and
+compared in isolation. Module initialization, aircraft loading and frame
 callbacks remain retail. There is no install target, shared Makefile entry or
 game acceptance for the partial build.
 
@@ -136,12 +136,11 @@ for situation record `0x38e` and falls back to `0x5a`. Init registers callbacks
 on CHAIN lists 1, 5 and 20. List 20 handles situation load/save events
 `0x22/0x23`. Deinit removes the callbacks and serializes retained state.
 
-The modern reader, writer, save callback and retained-state/shutdown paths
-are now covered below. Next: legacy record `0x5a`, the non-`0xc0` modern-reader
-fallback and its velocity transform, then startup restoration, aircraft-data
-loading and frame callbacks. Full-module mutation acceptance, real aircraft
-fixtures, long state trajectories and isolated game acceptance remain before
-SIM1 can join installation.
+Both readers, the velocity transform, startup state restoration, save callback
+and retained-state/shutdown paths are now covered below. Next: aircraft-data
+loading, the rest of module initialization and frame callbacks. Full-module
+mutation acceptance, real aircraft fixtures, long state trajectories and
+isolated game acceptance remain before SIM1 can join installation.
 
 ## Saved state and shutdown
 
@@ -154,10 +153,13 @@ does not replace them with constants.
 | Retail VA | Operation | Accepted boundary |
 | --- | --- | --- |
 | `0x220110a0` | serialize the `0xc0`-byte state record | complete writer |
-| `0x22011290` | restore a modern record and recompute orientation/heading | exactly `0xc0` bytes; other sizes pending |
+| `0x22011290` | restore a modern record and recompute orientation/heading | extended `0xc0` record and non-`0xc0` fallback |
+| `0x22010df0` | restore legacy record `0x5a` | fixed 64-byte body; advertised callback size ignored |
+| `0x22002ac0` | transform body velocities | both coordinate conventions, intermediate stores and output aliasing |
+| `0x22010cc0` | startup state restore | retained state, modern/legacy lookup, missing records and buffer ownership |
 | `0x22011050` | begin MAIN record `0x38e`, then write its body | success and nonzero begin-error returns |
 | `0x22010d50` | replace GLOBAL `+0x11d8` with retained state | null/existing allocation; repeated saves |
-| `0x22010da0` | CHAIN list 20 callback | save, modern load, unknown messages/tags; legacy load pending |
+| `0x22010da0` | CHAIN list 20 callback | save, both load formats, unknown messages/tags |
 | `0x220010a0` | deinit | all three removals, retained state and both flag gates |
 
 The serialized layout, with offsets relative to `.data`:
@@ -200,6 +202,52 @@ values. It then retains state, restores GLOBAL `+0x278` from `.data+0x1c80`
 only when GLOBAL `+0x604 == 1`, and resets four WORD engine selectors to 3
 only when GLOBAL `+0x609 == 1` and `.data+0x1778 == 0`.
 
+### Legacy loading, fallback and startup restoration
+
+Legacy record `0x5a` is 64 bytes. Its first three orientation values are
+unsigned split DWORDs: high words at `+0/+2/+4`, low words at **`+0x32/+0x30/+0x34`**.
+They are zero-extended to qwords for `fild`. The product of `.data+0x690` and
+`+0x680` stays on the x87 stack across all three conversions; rounding that
+scale to a double first would change behavior. The raw DWORDs are also stored
+at `+0x1550/+0x1554/+0x1558` for later signed conversions to cached trigonometry.
+
+The three rates instead use **signed** words at `+6/+0xa/+8`. Body velocities
+combine high words at `+0xc/+0xe/+0x10` with low words at `+0x12/+0x14/+0x16`
+and use signed DWORD conversion, multiplying first by `.data+0x720`, then
+`+0x690`. The DWORD at `+0x3c` is unsigned and supplies `+0x15a8`; `+0x18`
+supplies `+0x1d18`. The reader clears the extended state and GLOBAL's engine
+flag, computes cached orientation, transforms velocity and recomputes the
+orientation/heading helper. All of those stores and both trigonometry passes
+are retained.
+
+The constants are extracted as their original doubles. For example, retail
+uses `9.5873e-05`, `1.52590219e-05` and `3.28083` in these conversions; replacing
+them with more exact angular or unit-conversion constants is a behavior change.
+
+For modern records, only a size **equal to `0xc0`** restores the extended
+fields directly. Every other advertised size clears those fields and
+reconstructs world velocities from the base fields. The reader still reads
+through body `+0x54`; smaller sizes are tested with sufficient mapped backing,
+not by assuming they bound its memory access. Values above `0xc0` also take
+the fallback. A legacy callback does not consult its advertised body size.
+
+`src/sim1/sim1_velocity.S` keeps the transform's x87 sequence. Selector
+`.data+0x7c0 == 1` takes one convention; every other value takes the other.
+With identity orientation, the results are `(x,y,z)` and `(y,-x,z)` respectively.
+The function rewrites stack argument copies as intermediate doubles, so
+retaining only higher-precision intermediate expressions is not equivalent.
+Outputs are stored in order and may overlap each other or cached orientation.
+Arguments are marshalled as raw DWORDs to preserve NaN encodings until the
+actual x87 loads. This remains an x86 verification boundary for native FP work.
+
+Startup restoration borrows a `0xc0`-byte buffer from GLOBAL `+0x11d8` when
+present, without looking up records or freeing that buffer. Otherwise MAIN
+`+0x6c` looks for `0x38e`, then `0x5a` only if the modern lookup failed.
+Both present means modern wins; both missing means neither reader runs.
+A buffer returned by MAIN is freed through host `+0x214` using the local
+pointer slot. This helper is implemented independently; the module's init
+entry still traps until aircraft loading and callback registration are ready.
+
 ### State verification
 
 ```sh
@@ -215,13 +263,24 @@ Linkage entry. All imports are checked through a reset host model, except
 the real stateless UTIL angle service. Before each side, GLOBAL, the model
 heap, import transcript and output buffers are reset to the same input.
 
-Nine operations cover direct writing, saving through MAIN, retained state,
+Fifteen operations cover direct writing, saving through MAIN, retained state,
 unknown/save callbacks, deinit, direct modern loading, modern-load callbacks,
-and two successive retained-state or deinit calls. Compares include the full
+two successive retained-state or deinit calls, legacy readers/callbacks,
+modern fallback readers/callbacks, the velocity transform and startup restore.
+Compares include the full
 seeded state, import/Linkage prefix, GLOBAL, heap and input/output guards,
 all integer register results/ESP, import order/arguments, written record and
 the same meaningful x87 state as the first suite. Only the direct writer's
-known image-relative output-pointer result is normalized.
+known image-relative output pointer and the transform's three proven output
+pointer results are normalized; arbitrary numeric register values are not.
+
+Legacy inputs include directed zero, carry-boundary, signed-limit and unsigned
+limit values, plus unaligned and state-overlapping bodies. The transform runs
+selector values `0/1/2`, distinct/overlapping/state-overlapping outputs, special
+FP encodings and cancellation cases, with independent identity-orientation
+oracles for both conventions. Modern fallback sizes include `0`, `0x54`,
+`0x55`, `0x58`, `0xbf`, `0xc1`, `0xffffffff` and `0x80000000`. The harness
+requires every convention, size and startup restore path to be exercised.
 
 Teardown control inputs cover the **54-way Cartesian product** of saved-mode
 flag `0/1/2`, engine flag `0/1/2`, loaded flag `0/1/2` and null/existing retained
@@ -234,15 +293,15 @@ heading calculations. Results are recorded in `bin/sim1-diff/state-acceptance.lo
 and `state-mutations.log`; individual rebuilt defects and their diagnostics
 are under `state-breaks/`.
 
-At `N=20000`, all nine operations run 240,000 times per load arrangement.
-Retail-first, rebuilt-first and forced relocation pass: **6,480,000 state
+At `N=20000`, all fifteen operations run 240,000 times per load arrangement.
+Retail-first, rebuilt-first and forced relocation pass: **10,800,000 state
 comparisons, zero differences**. The two repeated-lifetime operations each
-invoke their helper twice per comparison. **All 22 rebuilt state mutations
+invoke their helper twice per comparison. **All 41 rebuilt state mutations
 are caught.** The original six-service suite was rerun on the extended
 partial DLL: its 4,516,608 comparisons still match, and all sixteen original
 mutations remain detected.
 
 This remains isolated acceptance: malformed/null record bodies, allocation
-failure, unmasked x87 exceptions, legacy records and live-game owner flows
+failure, unmasked x87 exceptions and live-game owner flows
 are not covered by this slice. Tick/frame callbacks remain explicit traps
 and are not registered by the partial build.

@@ -16,17 +16,13 @@ _sim1_call:
     fld1
     fldpi
 1:
-    cmpl $3, _call_argc
-    jne 2f
-    pushl _call_args+8
-2:
-    cmpl $2, _call_argc
-    jb 4f
-    pushl _call_args+4
-4:
-    cmpl $0, _call_argc
+    movl _call_argc, %ecx
+1:
+    testl %ecx, %ecx
     je 3f
-    pushl _call_args
+    decl %ecx
+    pushl _call_args(,%ecx,4)
+    jmp 1b
 3:
     movl _call_inputs, %eax
     movl _call_inputs+4, %ebx

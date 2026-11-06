@@ -4,6 +4,9 @@ EXPORTS
     ImportTable DATA
     Sim1RecordWrite=sim1_record_write
     Sim1RecordRead=sim1_record_read
+    Sim1LegacyRead=sim1_legacy_read
+    Sim1Velocity=sim1_velocity
+    Sim1RestoreState=sim1_restore_state
     Sim1SaveSituation=sim1_save_situation
     Sim1RetainState=sim1_retain_state
     Sim1SituationCallback=sim1_situation_callback

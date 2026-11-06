@@ -2,7 +2,7 @@
 SIM1_DIR := bin/sim1-diff
 SIM1_CC := i686-w64-mingw32-gcc
 SIM1_CFLAGS := -std=c99 -O2 -Wall -Wextra -fno-strict-aliasing -Iinclude -Isrc/sim1 -I$(SIM1_DIR)
-SIM1_SOURCES := src/sim1/sim1.c src/sim1/sim1_stack.S src/sim1/sim1_state_stack.S
+SIM1_SOURCES := src/sim1/sim1.c src/sim1/sim1_stack.S src/sim1/sim1_state_stack.S src/sim1/sim1_velocity.S
 SIM1_DEPS := $(SIM1_SOURCES) src/sim1/sim1_state.inc tools/sim1.mk $(SIM1_DIR)/sim1_data.inc
 N ?= 20000
 

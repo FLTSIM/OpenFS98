@@ -207,12 +207,50 @@ static void sim1_read_pair(const uint8_t *record, uint32_t source, uint32_t dest
     sim1_write32(D + destination + 4, high);
 }
 
-/* 0x22011290: modern 0xc0-byte record. The non-c0 legacy reconstruction path
- * is intentionally unsupported until its velocity-transform helper is done.
+void sim1_velocity(void);
+
+static void sim1_clear_extended_state(uint32_t clear_velocity)
+{
+    static const uint32_t offsets[] = {
+        0x1358, 0x1360, 0x1368, 0x1328, 0x1330, 0x1338,
+        0x1418, 0x1420, 0x1428, 0x1760
+    };
+    uint32_t i;
+    /* Modern fallback clears these before +1760; the legacy reader does not
+     * clear them before its transform overwrites them. Keep the store order.
+     */
+    for (i = 0; i < 9; ++i) {
+        sim1_write32(D + offsets[i], 0);
+        sim1_write32(D + offsets[i] + 4, 0);
+    }
+    if (clear_velocity) {
+        for (i = 0; i < 3; ++i) {
+            sim1_write32(D + 0x13b8 + 8 * i, 0);
+            sim1_write32(D + 0x13bc + 8 * i, 0);
+        }
+    }
+    sim1_write32(D + 0x1760, 0);
+    sim1_write32(D + 0x1764, 0);
+}
+
+static void sim1_reconstruct_velocity(struct sim1_registers *registers)
+{
+    uintptr_t arguments[9];
+    uint32_t i;
+    sim1_angles();
+    for (i = 0; i < 6; ++i)
+        arguments[i] = sim1_read32(D + 0x13a0 + 4 * i);
+    arguments[6] = (uintptr_t)(D + 0x13b8);
+    arguments[7] = (uintptr_t)(D + 0x13c0);
+    arguments[8] = (uintptr_t)(D + 0x13c8);
+    sim1_import(registers, (uintptr_t)sim1_velocity, 9, arguments);
+}
+
+/* 0x22011290: only size exactly 0xc0 selects the extended fields. Retail
+ * reads the base through +0x54 even when the advertised size is smaller.
  */
 void sim1_record_read_core(struct sim1_registers *registers, const uint8_t *record, uint32_t size)
 {
-    if (size != 0xc0) sim1_unsupported();
     sim1_read_pair(record, 0, 0x1538);
     /* MSVCRT _ftol consumes ST0, returns EDX:EAX, and retains its own precise
      * x87 exception behavior. No intermediate double store may be inserted.
@@ -234,6 +272,12 @@ void sim1_record_read_core(struct sim1_registers *registers, const uint8_t *reco
     sim1_read_pair(record, 0x48, 0x15a8);
     sim1_write32(D + 0x1d18, sim1_read32(record + 0x50));
     *(volatile uint8_t *)(sim1_dependency(1) + 0x366) = record[0x54];
+    if (size != 0xc0) {
+        sim1_clear_extended_state(1);
+        sim1_reconstruct_velocity(registers);
+        sim1_finish_record_read(registers);
+        return;
+    }
     sim1_read_pair(record, 0x58, 0x1358);
     sim1_read_pair(record, 0x60, 0x1360);
     sim1_read_pair(record, 0x68, 0x1368);
@@ -250,6 +294,92 @@ void sim1_record_read_core(struct sim1_registers *registers, const uint8_t *reco
     sim1_finish_record_read(registers);
 }
 
+/* 0x22010df0: record 0x5a, split-word orientation and velocities. */
+void sim1_legacy_read_core(struct sim1_registers *registers, const uint8_t *record)
+{
+    static const uint32_t rate_sources[] = {6, 10, 8};
+    uint32_t i, packed;
+    int32_t value;
+    uint64_t wide;
+    /* Keep the product of the two scales on the x87 stack across all three
+     * unsigned qword conversions. A temporary double would round too soon.
+     */
+    __asm__ volatile("subl $8, %%esp\n\tmovl $0, 4(%%esp)\n\t"
+        "fldl 0x690(%1)\n\tfmull 0x680(%1)\n\t"
+        "movzwl (%0), %%eax\n\tshll $16, %%eax\n\tmovzwl 0x32(%0), %%ecx\n\t"
+        "addl %%ecx, %%eax\n\tmovl %%eax, (%%esp)\n\tfildq (%%esp)\n\t"
+        "movl %%eax, 0x1550(%1)\n\tfmul %%st(1), %%st\n\tfstpl 0x1538(%1)\n\t"
+        "movzwl 2(%0), %%eax\n\tshll $16, %%eax\n\tmovzwl 0x30(%0), %%ecx\n\t"
+        "addl %%ecx, %%eax\n\tmovl %%eax, (%%esp)\n\tmovl %%eax, 0x1554(%1)\n\t"
+        "fildq (%%esp)\n\tfmul %%st(1), %%st\n\tfstpl 0x1540(%1)\n\t"
+        "movzwl 4(%0), %%eax\n\tshll $16, %%eax\n\tmovzwl 0x34(%0), %%ecx\n\t"
+        "addl %%ecx, %%eax\n\tmovl %%eax, (%%esp)\n\tmovl %%eax, 0x1558(%1)\n\t"
+        "fildq (%%esp)\n\tfmul %%st(1), %%st\n\tfstpl 0x1548(%1)\n\t"
+        "fstp %%st(0)\n\taddl $8, %%esp"
+        : : "r"(record), "r"(D) : "eax", "ecx", "st", "st(1)", "memory", "cc");
+    for (i = 0; i < 3; ++i) {
+        value = (int16_t)*(const volatile uint16_t *)(record + rate_sources[i]);
+        __asm__ volatile("fildl %0\n\tfmull %1\n\tfstpl %2"
+            : : "m"(value), "m"(*(double *)(D + 0x680)),
+                "m"(*(double *)(D + 0x13e8 + 8 * i)) : "st", "memory");
+    }
+    for (i = 0; i < 3; ++i) {
+        packed = ((uint32_t)*(const volatile uint16_t *)(record + 0xc + 2 * i) << 16) +
+                 *(const volatile uint16_t *)(record + 0x12 + 2 * i);
+        value = (int32_t)packed;
+        __asm__ volatile("fildl %0\n\tfmull %1\n\tfmull %2\n\tfstpl %3"
+            : : "m"(value), "m"(*(double *)(D + 0x720)), "m"(*(double *)(D + 0x690)),
+                "m"(*(double *)(D + 0x13a0 + 8 * i)) : "st", "memory");
+    }
+    wide = (uint64_t)sim1_read32(record + 0x3c);
+    __asm__ volatile("fildq %0\n\tfmull %1\n\tfstpl %2"
+        : : "m"(wide), "m"(*(double *)(D + 0x690)),
+            "m"(*(double *)(D + 0x15a8)) : "st", "memory");
+    sim1_write32(D + 0x1d18, sim1_read32(record + 0x18));
+    sim1_clear_extended_state(0);
+    *(volatile uint8_t *)(sim1_dependency(1) + 0x366) = 0;
+    sim1_reconstruct_velocity(registers);
+    sim1_finish_record_read(registers);
+}
+
+/* 0x22010cc0: use retained state first, otherwise prefer a modern situation
+ * record over a legacy one. MAIN's returned buffer is owned here and freed;
+ * GLOBAL's retained buffer is borrowed and survives the restore.
+ */
+void sim1_restore_state_core(struct sim1_registers *registers)
+{
+    uintptr_t arguments[3], record = 0;
+    uint32_t size = 0;
+    registers->eax = (uintptr_t)sim1_dependency(1);
+    registers->eax = sim1_read32(sim1_dependency(1) + 0x11d8);
+    if (registers->eax != 0) {
+        sim1_record_read_core(registers, (const uint8_t *)(uintptr_t)registers->eax, 0xc0);
+        return;
+    }
+    registers->eax = (uintptr_t)sim1_dependency(5);
+    registers->ecx = (uintptr_t)&size;
+    registers->edx = (uintptr_t)&record;
+    arguments[0] = 0x38e;
+    arguments[1] = (uintptr_t)&record;
+    arguments[2] = (uintptr_t)&size;
+    sim1_import_call(registers, 5, 0x6c, 3, arguments);
+    if (registers->eax == 0) {
+        sim1_record_read_core(registers, (const uint8_t *)record, size);
+    } else {
+        registers->ecx = (uintptr_t)sim1_dependency(5);
+        registers->edx = (uintptr_t)&size;
+        registers->eax = (uintptr_t)&record;
+        arguments[0] = 0x5a;
+        sim1_import_call(registers, 5, 0x6c, 3, arguments);
+        if (registers->eax != 0) return;
+        sim1_legacy_read_core(registers, (const uint8_t *)record);
+    }
+    registers->ecx = (uintptr_t)sim1_dependency(0);
+    registers->eax = (uintptr_t)&record;
+    arguments[0] = (uintptr_t)&record;
+    sim1_import_call(registers, 0, 0x214, 1, arguments);
+}
+
 void sim1_situation_core(struct sim1_registers *registers, uint32_t message, uint8_t *record)
 {
     registers->eax = message;
@@ -261,7 +391,7 @@ void sim1_situation_core(struct sim1_registers *registers, uint32_t message, uin
             sim1_record_read_core(registers, (const uint8_t *)(uintptr_t)sim1_read32(record + 12),
                                   sim1_read32(record + 8));
         else if (registers->eax == 0x5a)
-            sim1_unsupported(); /* legacy reader remains */
+            sim1_legacy_read_core(registers, (const uint8_t *)(uintptr_t)sim1_read32(record + 12));
     } else if (message == 0x23) {
         sim1_save_situation_core(registers);
     }

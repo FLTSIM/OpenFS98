@@ -95,6 +95,11 @@ can stall; this is not a certification of all multiplayer protocols or of
 native DirectPlay with replacement MULTIP. The passing owner comparison uses
 retail owners to establish MP_DIALOG's contract independently.
 
+The final bulk-target review caught a spelling mismatch: bulk install/revert
+initially generated `mp_dialog-*`, while individual targets used `mpdialog-*`.
+A shared `english_target` mapping now drives both target definitions and bulk
+invocations; full install/revert dry runs verify the corrected paths.
+
 Shared integration adds `MP_DIALOG` to `ENGLISH_MODULES`, preserves the
 standalone build, maps the installed uppercase filename and the lowercase
 retail input correctly, and provides `make mpdialog`, `mpdialog-install` and

@@ -128,7 +128,8 @@ $(2)-install: $(BIN)/$(1).DLL
 $(2)-revert:
 	cp "$$(call orig_module,$(1))" "$$(FS98_DIR)/$$(call installed_path,$(1))"
 endef
-$(foreach m,$(ENGLISH_MODULES) $(ENGLISH_CANDIDATES),$(eval $(call english_install,$(m),$(if $(filter MP_DIALOG,$(m)),mpdialog,$(shell echo $(m) | tr A-Z a-z)))))
+english_target = $(if $(filter MP_DIALOG,$(1)),mpdialog,$(shell echo $(1) | tr A-Z a-z))
+$(foreach m,$(ENGLISH_MODULES) $(ENGLISH_CANDIDATES),$(eval $(call english_install,$(m),$(call english_target,$(m)))))
 
 # MULTIP installs as MULTIPLAYER.DLL; its acceptance harness is below.
 $(BIN)/MULTIP.DLL: src/multip/multip.c src/multip/multip_callbacks.inc src/multip/multip_motion.inc src/multip/multip_commands.inc src/multip/multip_weather.inc src/multip/multip_tick.inc src/multip/multip_system.inc src/multip/multip_app_players.inc src/multip/multip_updates.inc src/multip/multip_textures.inc src/multip/multip_texture_receive.inc src/multip/multip_transfer_messages.inc src/multip/multip_texture_send.inc src/multip/multip_model_send.inc src/multip/multip_model_cache.inc src/multip/multip_model_receive.inc src/multip/multip_title_receive.inc src/multip/multip_state_messages.inc src/multip/multip_control_updates.inc src/multip/multip_lifecycle.inc src/multip/multip_dispatch.inc src/multip/multip_dispatch_cases.inc src/multip/multip_weather_fields.inc src/multip/multip_frame_actions.inc src/multip/multip_players.inc src/multip/multip_nametag.inc src/multip/multip_messages.inc src/multip/multip_tracking.inc src/multip/multip_records.inc src/multip/multip_aircraft.inc src/multip/multip_session.inc src/multip/multip_profile.inc src/multip/multip_profile_fields.inc src/multip/multip.def src/multip/multip_data.inc src/multip/multip_rdata.inc src/multip/multip_pointers.inc $(BIN)/multip.res src/multip/multip_providers.inc src/multip/multip_browser.inc src/multip/multip_configuration.inc src/multip/multip_details.inc src/multip/multip_options.inc src/multip/multip_lobby.inc src/multip/multip_toggle.inc src/multip/multip_init.inc
@@ -1600,14 +1601,14 @@ install: all
 	  n=$$(make -s installed-name-of M=$$m); \
 	  cp $(BIN)/$$m.DLL "$(FS98_DIR)/Modules/$$n"; echo "installed $$m -> $$n"; \
 	done
-	$(MAKE) $(foreach m,$(ENGLISH_MODULES),$(shell echo $(m) | tr A-Z a-z)-install) FS98_DIR="$(FS98_DIR)"
+	$(MAKE) $(foreach m,$(ENGLISH_MODULES),$(call english_target,$(m))-install) FS98_DIR="$(FS98_DIR)"
 
 revert:
 	@for m in $(MODULES); do \
 	  n=$$(make -s installed-name-of M=$$m); \
 	  cp "$$(make -s orig-module-of M=$$m)" "$(FS98_DIR)/Modules/$$n"; echo "reverted $$n"; \
 	done
-	$(MAKE) $(foreach m,$(ENGLISH_MODULES),$(shell echo $(m) | tr A-Z a-z)-revert) FS98_DIR="$(FS98_DIR)"
+	$(MAKE) $(foreach m,$(ENGLISH_MODULES),$(call english_target,$(m))-revert) FS98_DIR="$(FS98_DIR)"
 
 modules-of:
 	@echo $(MODULES)

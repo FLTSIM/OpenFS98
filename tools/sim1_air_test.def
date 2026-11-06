@@ -1,0 +1,10 @@
+LIBRARY SIM1_AIR_TEST.DLL
+EXPORTS
+    Linkage DATA
+    ImportTable DATA
+    Sim1LoadAir=sim1_load_air
+    Sim1Publish=sim1_publish
+    Sim1TickCallback=sim1_chain_tick
+    Sim1FrameCallback=sim1_chain_frame
+    Sim1SituationCallback=sim1_situation_callback
+    Sim1AirParserFixture=sim1_air_parser_fixture DATA

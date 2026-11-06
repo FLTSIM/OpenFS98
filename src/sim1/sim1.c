@@ -1,6 +1,6 @@
 /* SIM1.sim -- module 25, partial services/state lifecycle. Not installable.
  * The mapped state follows retail .data (0x22016000, virtual size 0x43f8).
- * Unrecovered initialization/aircraft entries fail immediately rather than silently
+ * Unrecovered decoder/frame entries fail immediately rather than silently
  * behaving as no-ops. Unused pointers in extracted state remain reference VAs;
  * only the explicitly recovered services below may read this partial image.
  */
@@ -16,6 +16,7 @@ void sim1_descriptor(void), sim1_word(void), sim1_scaled(void);
 void sim1_vector(void), sim1_reset(void), sim1_wind(void);
 void sim1_deinit(void), sim1_record_write(void), sim1_save_situation(void), sim1_retain_state(void);
 void sim1_chain_tick(void), sim1_chain_frame(void), sim1_situation_callback(void);
+void sim1_init(void);
 
 void sim1_unsupported(void)
 {
@@ -32,7 +33,7 @@ struct sim1_state {
 struct sim1_state sim1_image = {
     {{1, 0}, {2, 0}, {23, 0}, {4, 0}, {16, 0}, {3, 0},
      {32, 0}, {39, 0}, {20, 0}, {10, 0}, {0, 0}},
-    {25, (uintptr_t)sim1_unsupported, (uintptr_t)sim1_deinit, 0, 0, 0,
+    {25, (uintptr_t)sim1_init, (uintptr_t)sim1_deinit, 0, 0, 0,
      (uintptr_t)sim1_descriptor, (uintptr_t)sim1_unsupported,
      (uintptr_t)((uint8_t *)&sim1_image + 0x1150),
      (uintptr_t)((uint8_t *)&sim1_image + 0x1158),
@@ -116,3 +117,4 @@ double sim1_wind_core(void)
 }
 
 #include "sim1_state.inc"
+#include "sim1_air.inc"

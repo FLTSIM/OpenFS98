@@ -12,7 +12,10 @@ static uint8_t record_header[16];
 static uint8_t input_record[256], record_initial[256];
 static uint8_t input_expected[256];
 static uint8_t written[0xc0], written_expected[0xc0];
-static uint32_t calls[16][5], calls_expected[16][5], call_count, expected_call_count;
+#ifndef SIM1_TRANSCRIPT_CAPACITY
+#define SIM1_TRANSCRIPT_CAPACITY 16
+#endif
+static uint32_t calls[SIM1_TRANSCRIPT_CAPACITY][5], calls_expected[SIM1_TRANSCRIPT_CAPACITY][5], call_count, expected_call_count;
 static uint32_t callbacks[2][3], helpers[2][8], begin_result, write_result;
 static uint32_t operation, operation_counts[15], gate_counts[54], old_allocation;
 static uint32_t registers_expected[8];
@@ -48,7 +51,7 @@ static void legacy_fixture(uint8_t *record)
 static uint32_t *event(uint32_t kind)
 {
     uint32_t *row;
-    if (call_count >= 16) fail("import transcript overflow", call_count);
+    if (call_count >= SIM1_TRANSCRIPT_CAPACITY) fail("import transcript overflow", call_count);
     row = calls[call_count++];
     row[0] = kind;
     return row;
@@ -265,7 +268,7 @@ static void state_case(void)
                         find_mode & 2 ? 3 : 4];
 }
 
-int main(int argc, char **argv)
+int sim1_state_main(int argc, char **argv)
 {
     static const char *names[] = {"Sim1RecordWrite", "Sim1SaveSituation", "Sim1RetainState", "Sim1SituationCallback", "Sim1RecordRead", "Sim1LegacyRead", "Sim1Velocity", "Sim1RestoreState"};
     static const uint32_t helper_rvas[] = {0x110a0, 0x11050, 0x10d50, 0x10da0, 0x11290, 0x10df0, 0x2ac0, 0x10cc0};
@@ -373,3 +376,7 @@ int main(int argc, char **argv)
     if (reservation) VirtualFree(reservation, 0, MEM_RELEASE);
     return 0;
 }
+
+#ifndef SIM1_STATE_REFERENCE_ONLY
+int main(int argc, char **argv) { return sim1_state_main(argc, argv); }
+#endif

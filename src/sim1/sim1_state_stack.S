@@ -28,9 +28,12 @@ state_entry sim1_save_situation, sim1_save_situation_core, 0
 state_entry sim1_retain_state, sim1_retain_state_core, 0
 state_entry sim1_deinit, sim1_deinit_core, 0
 state_entry sim1_situation_callback, sim1_situation_core, 8
+state_entry sim1_load_air, sim1_load_air_core, 0
+state_entry sim1_publish, sim1_publish_core, 0
+state_entry sim1_init, sim1_init_core, 0
 
-/* Not registered until init is implemented; distinct identities are needed
- * when verifying the retail deinit's three CHAIN removal calls.
+/* Init/deinit register/remove these identities. Execution of tick/frame
+ * callbacks remains unsupported until the simulation routines are recovered.
  */
 .globl _sim1_chain_tick
 _sim1_chain_tick:

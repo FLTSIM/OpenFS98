@@ -14,7 +14,7 @@ Results updated through 2026-11-06; individual rows retain their acceptance date
 | `English/Options.DLL` | 84,381 | **In progress** (2026-11-03): 10 of 15 registrations (the video, logbook and analysis dialogs) verified in its harness (`tools/options.mk`); no DLL yet | [options.md](modules/options.md) |
 | `FLTSIM98.EXE` | 82,016 | **No executable.** All 194 services are reimplemented and verified in-process as `HOST.DLL`; retail's still runs the game | [host.md](modules/host.md) |
 | `SIMSUI.DLL` | 79,850 | **Not started.** 540 named exports, the common dialog and control widgets. Every dialog imports it | [dialogs.md](modules/dialogs.md) |
-| `Sim/SIM1.sim` | 78,216 | **Partial** 2026-11-06: six services, both state formats, velocity reconstruction, startup state restoration, saving and shutdown implemented and compared. Module initialization, aircraft loading and frame callbacks remain retail; no install target | [sim1.md](modules/sim1.md) |
+| `Sim/SIM1.sim` | 78,216 | **Partial** 2026-11-06: six services, both state formats, velocity reconstruction, restoration, saving and shutdown compared. AIR file ownership, descriptor publication and init coordination also verified at an explicit decoder-fixture boundary. AIR decoding/setup and frame callbacks remain pending; no install target | [sim1.md](modules/sim1.md) |
 | `Gauges/*.GAU` (120) | 63,472 | **All 120 rebuilt**, included in build/install/revert; standalone callback/data/resource/FP, PANELS and frame comparisons | [gauges.md](modules/gauges.md) |
 | `English/Flights.DLL` | 51,122 | **Installed** 2026-11-02; used in play by `make flights-play` 2026-11-03 | [flights.md](modules/flights.md) |
 | `English/Sim.DLL` | 33,239 | **Installed** 2026-11-02 | [sim.md](modules/sim.md) |
@@ -57,7 +57,8 @@ to `orig/Aircraft/` (2026-11-06).
   `+0x21c` 77 times and reads and writes GLOBAL widely, like DYNAMIC. As large as SIMSUI and
   in every flight, so it should not wait behind the dialogs. The first six
   services and saved-state/restoration/shutdown paths now have isolated differential
-  verification; module initialization, aircraft loading and full simulation remain:
+  verification; AIR file/init callers also have explicit decoder-fixture acceptance.
+  Actual AIR decoding/setup and full simulation remain:
   [SIM1](modules/sim1.md).
 - **The `.MDL`s**: eight normal models (`.text` 678–982 bytes) and three crash
   models (9,110–9,894 bytes), mostly `.data`. Shared Linkage scaffolding wraps

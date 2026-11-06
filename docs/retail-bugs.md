@@ -56,6 +56,12 @@ Behaviour that is odd but harmless (Navigation's leftover "ValidateData" message
 always passes, OnOKs whose second check is never reached) is documented in
 [flights.md](modules/flights.md) and is not listed as a bug.
 
+## SIM1.sim
+
+| Id | Where | What retail does | When | Fix at porting |
+| --- | --- | --- | --- | --- |
+| SIM1-AIR-SIZE-HANDLE | AIR file loader `0x2200aef3 -> 0x2200af7e`; `src/sim1/sim1_air.inc` | Returns zero without calling HOST `+0x13c`, leaking the already opened file handle and its host block. | The AIR file opens successfully but HOST `+0x1a4` fails to obtain its size. The isolated caller harness confirms that ownership remains open on this exit. | Close the opened file on the size-error path before returning. |
+
 ## Other modules
 
 Each module's doc records the retail bugs it reproduces. These have a section for them:

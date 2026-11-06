@@ -96,7 +96,7 @@ def main():
             dll = directory / "SIM1_STATE_TEST.DLL"
             dll.unlink(missing_ok=True)
             built = run(["i686-w64-mingw32-gcc", "-std=c99", "-O2", "-Wall", "-Wextra",
-                         "-fno-strict-aliasing", "-Iinclude", "-Ibin/sim1-diff", "-shared",
+                         "-fno-strict-aliasing", "-Iinclude", "-Isrc/sim1", "-Ibin/sim1-diff", "-shared",
                          "-Wl,--disable-dynamicbase", "-Wl,--image-base,0x22000000", "-o", str(dll),
                          str(directory / "sim1.c"), "src/sim1/sim1_stack.S", "src/sim1/sim1_state_stack.S",
                          str(directory / "sim1_velocity.S"), "tools/sim1_state_test.def"])

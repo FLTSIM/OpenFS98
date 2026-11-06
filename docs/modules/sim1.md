@@ -7,9 +7,10 @@ Linkage at GLOBAL `+0x11d4`. This is simulator code outside `Modules\`, not
 
 **Partial, 2026-11-06:** six bounded services, both situation formats, startup
 state restoration, saving, retained state and shutdown are implemented and
-compared in isolation. Module initialization, aircraft loading and frame
-callbacks remain retail. There is no install target, shared Makefile entry or
-game acceptance for the partial build.
+compared in isolation. The AIR file wrapper, descriptor publication and init
+coordination also match at an explicit decoder-fixture boundary. The AIR record
+decoder and frame callbacks remain unimplemented. There is no install target,
+shared Makefile entry or game acceptance for the partial build.
 
 ## Reference and shape
 
@@ -35,7 +36,7 @@ body sizes.
 | Linkage | Address | What is known | State |
 | --- | --- | --- | --- |
 | `+0x00` | `25` | module identity | reproduced |
-| `+0x04` | `0x22001060` | init: restore state, register CHAIN callbacks, load aircraft data, publish descriptor | pending |
+| `+0x04` | `0x22001060` | init: restore state, register CHAIN callbacks, load aircraft data, publish descriptor | caller verified; decoder modeled |
 | `+0x08` | `0x220010a0` | deinit: remove callbacks, retain state and restore engine flags | implemented and compared |
 | `+0x0c/+0x10/+0x14` | zero | reserved; no dialogs | reproduced |
 | `+0x18` | `0x2200ac0d` | copy 44-byte descriptor to one output pointer; `ret 4` | implemented and compared |
@@ -137,10 +138,12 @@ on CHAIN lists 1, 5 and 20. List 20 handles situation load/save events
 `0x22/0x23`. Deinit removes the callbacks and serializes retained state.
 
 Both readers, the velocity transform, startup state restoration, save callback
-and retained-state/shutdown paths are now covered below. Next: aircraft-data
-loading, the rest of module initialization and frame callbacks. Full-module
-mutation acceptance, real aircraft fixtures, long state trajectories and
-isolated game acceptance remain before SIM1 can join installation.
+and retained-state/shutdown paths are now covered below. Init/file ownership
+and publication have also been compared with the pending decoder replaced by
+an explicit fixture. Next: implement the actual AIR record decoder, complete
+aircraft setup and frame callbacks, then repeat initialization with the real
+decoder. Full-module mutation acceptance, real aircraft fixtures, long state
+trajectories and isolated game acceptance remain before SIM1 can join installation.
 
 ## Saved state and shutdown
 
@@ -245,8 +248,8 @@ present, without looking up records or freeing that buffer. Otherwise MAIN
 `+0x6c` looks for `0x38e`, then `0x5a` only if the modern lookup failed.
 Both present means modern wins; both missing means neither reader runs.
 A buffer returned by MAIN is freed through host `+0x214` using the local
-pointer slot. This helper is implemented independently; the module's init
-entry still traps until aircraft loading and callback registration are ready.
+pointer slot. This helper is implemented independently; it is also exercised by
+the init caller comparison described below.
 
 ### State verification
 
@@ -303,5 +306,103 @@ mutations remain detected.
 
 This remains isolated acceptance: malformed/null record bodies, allocation
 failure, unmasked x87 exceptions and live-game owner flows
-are not covered by this slice. Tick/frame callbacks remain explicit traps
-and are not registered by the partial build.
+are not covered by this slice. Tick/frame callbacks remain explicit traps.
+The init caller now registers those identities, but the partial build is
+not suitable for running them in the game.
+
+## AIR file wrapper, publication and init coordination
+
+`src/sim1/sim1_air.inc` implements three caller-side boundaries:
+
+| Retail VA | Operation | Acceptance |
+| --- | --- | --- |
+| `0x2200ae90` | query aircraft AIR path, open/size/allocate/read, invoke decoder, free/close | file ownership and decoder call boundary |
+| `0x22010c40` | publish the 44-byte descriptor | real copy, x87 conversions and register results |
+| `0x22001060` | restore state, register three callbacks, load AIR, publish | real restore/publication, modeled decoder |
+
+**The record decoder at `0x2200af90` is not implemented.** The ordinary
+partial DLL traps if a successful full read reaches that boundary. A separate
+`SIM1_AIR_TEST.DLL`, built with `SIM1_AIR_TEST`, exposes one decoder-fixture
+pointer. The harness replaces only retail's direct decoder call at
+`0x2200af48` in its own process memory, after checking the expected instruction
+and target. Both callers then invoke the same explicit fixture, which checks
+all input bytes and publishes controlled state changes. The original call is
+restored afterward. No binary on disk or live game is patched. This proves
+the callers' ownership, ordering and call arguments, not AIR decoding or a
+complete initializer. The normal DLL has no fixture export or bypass.
+
+The file wrapper asks ACONTAIN `+0x30` for key 2 with a `0x100`-byte path
+buffer, opens extension `0x0f` in mode 0, obtains the size, allocates with
+host `+0x20c(1, size, &buffer, 0)`, and reads the whole file. It invokes the
+decoder only when both read status and byte count match; a successful
+zero-byte read also invokes it. Read errors and short reads still free the
+buffer and close the file. The decoder result is returned unchanged after
+cleanup. Open errors return zero.
+
+**RETAIL BUG (kept): SIM1-AIR-SIZE-HANDLE.** When open succeeds and size fails,
+the wrapper returns zero without closing the file or freeing its host block.
+The harness retains that open ownership in its model and catches an attempted
+cleanup "fix" as a difference. See [retail-bugs.md](../retail-bugs.md#sim1sim).
+
+Publication copies exactly `0x24` bytes from GLOBAL `+0x560` to `.data+0x1730`,
+then converts doubles at `+0x13b8/+0x13c0/+0x13c8/+0x13b0` using the mutable
+scale at `+0x728` and MSVCRT `_ftol`. Their low words go to
+`+0x1754/+0x1756/+0x1758/+0x175a`. Each next product is loaded before the
+previous AX is stored. The last conversion's full EAX/EDX result and the
+actual imported ECX survive; the return is not normalized to a boolean.
+
+Initialization restores state, registers list 1, 5 and 20 callbacks in that
+order, calls the AIR wrapper, then publishes the descriptor **even if loading
+failed or the decoder returned zero**. Init/deinit comparisons also check
+callback identities, paired removal and retained-state ownership. The frame
+and tick callback bodies are still traps, so registration is not evidence
+that the partial module can simulate a frame.
+
+### Caller verification
+
+```sh
+make -f tools/sim1.mk sim1air-run N=20000
+make -f tools/sim1.mk sim1air-breaks
+python3 -B tools/sim1_air_survey.py
+```
+
+The new caller harness reuses the reset host/MAIN state model and real
+stateless UTIL service, then adds ACONTAIN path queries, file ownership,
+uninitialized-buffer allocation, read outcomes, decoder fixture, descriptor
+copy and CHAIN registration. It compares direct loading, direct publication,
+init, and init followed by deinit across all twelve x87 modes and the three
+load arrangements. All integer register results/ESP, meaningful x87 state,
+the complete seeded image, GLOBAL, retained heap, file-buffer guards, import
+transcript and model ownership/registration state are compared.
+
+Inputs cross open failure, size failure, read failure, short read and full
+read against eleven sizes from zero to 512 bytes; paths include lengths
+1, 15, 254 and 255. The decoder fixture uses distinct pre/post-load values
+so early publication cannot pass by coincidence. Parsed output values are
+modeled; actual disk I/O, failed aircraft-path queries and allocation failure
+are outside this caller test. The source manifests, rather than these small
+I/O fixtures, supply real AIR contents for future decoder acceptance.
+
+The caller suite's logs are `bin/sim1-diff/air-acceptance.log` and
+`air-mutations.log`; rebuilt defects and their results are under `air-breaks/`.
+These results are explicitly labeled **decoder modeled**, separately from
+the real state/service comparisons.
+
+At `N=20000`, all four caller operations run 240,000 times per load layout:
+**2,880,000 comparisons, zero differences** over retail-first, rebuilt-first
+and forced relocation. All **20 rebuilt caller mutations** are detected,
+covering query/open arguments, allocation, read status/count, cleanup,
+decoder result forwarding, descriptor copy/conversion/registers and init
+ordering. The state and six-service suites are also rerun against the
+extended build; their acceptance remains separate from this modeled boundary.
+
+### AIR reference inventory
+
+`tools/sim1_air_survey.py` walks the reference CD's eight aircraft AIR files,
+checking each chunk's header and length without assuming alignment. It emits
+ordered offsets, tags, sizes, per-file hashes and matching installed paths
+to ignored `bin/sim1-diff/aircraft-survey.json`, without copying payloads into
+tracked source. The current reference has **732 chunks and 105 distinct tags**;
+all eight installed AIR files have byte-identical CD counterparts despite
+their renamed installed filenames. This inventory is input evidence for the
+pending decoder, not a decoding or in-game acceptance result.

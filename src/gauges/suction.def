@@ -1,0 +1,4 @@
+LIBRARY "CESSNA_182.SUCTION.GAU"
+EXPORTS
+    ImportTable DATA
+    Linkage DATA

@@ -12,6 +12,14 @@ happen, what the fix should be, and where the code is.
 
 New bugs found while reimplementing go here as well as in the module's own doc.
 
+## Gauges
+
+| Id | Where | What retail does | When | Fix at porting |
+| --- | --- | --- | --- | --- |
+| GAUGE-COMPASS-WRAP-HANG | `SCHCMP.GAU` and `SOPCOMP.GAU`, RVA `0x1020`; generated C in `tools/gen_gauges.py` | Wraps headings by repeatedly subtracting 360 or -360. Infinity and NaN do not progress; sufficiently large finite values also stop changing at the current x87 precision. The callback never returns. | Non-finite or extremely large heading values. Ordinary bounded headings return normally. | Reject non-finite input and use a bounded remainder operation, retaining the historical endpoint convention. |
+| GAUGE-TURN-EMPTY-RETURN | `BELLTURN`, `CESSTURN`, `EXTURN`, RVA `0x1020` | The floating-point selector returns without putting a value on the x87 stack for selectors other than 0 and 1. With an empty incoming stack, the caller's store produces the x87 indefinite NaN and stack-fault status. | An invalid turn-indicator selector. The normal two selector values return their constants. | Define a fallback value and return it explicitly. |
+| PANEL-ZOOM-ADDRESS | PANELS `0x10008070`, variable `0x151`; `src/panels/panels.c` | For a non-map view mode past 4, scales the MODULE_VAR's own address by 1/64 instead of a zoom field. Its numeric/text result consequently changes when a gauge is relocated. | An unsupported view mode. The whole-panel test verifies the raw address-derived result, then canonicalizes the address for the relocated-gauge comparison; runtime behavior remains unchanged. | Supply a defined zoom fallback from the view rather than the argument slot. |
+
 ## Options.DLL
 
 | Id | Where | What retail does | When | Fix at porting |

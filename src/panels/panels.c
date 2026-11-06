@@ -3205,7 +3205,8 @@ static uint32_t FS98_STDCALL v_7ff0(uint32_t v, uint32_t op)
 /* 0x10008070 -- the active view's zoom (GLOBAL +0x11a0's view block: the
  * map's, or the mode's), in 1/64ths; nothing without a view.  For a mode
  * past 4 retail scales the variable's own address (its first argument's
- * slot, which it reads for the op's). */
+ * slot, which it reads for the op's).
+ * RETAIL BUG (kept): PANEL-ZOOM-ADDRESS. */
 static uint32_t FS98_STDCALL v_8070(uint32_t v, uint32_t op)
 {
     uint32_t w, x = v;

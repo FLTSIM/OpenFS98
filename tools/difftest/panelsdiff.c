@@ -93,6 +93,10 @@ static uint32_t rnd(void)
 static uint32_t arena_base;
 
 enum { K_HEAP, K_PIXELS };
+#ifdef GAUGES_ALL_DIFF
+#define K_BYTES 2
+static int gauge_text_allocation(const void *slot);
+#endif
 
 struct blk {
     uint32_t off, size;
@@ -177,10 +181,20 @@ static uint8_t host_blob[0x320 + 16], global_blob[0x2000], chain_blob[0x40],
     acontain_blob[0x40], main_blob[0x100], sound_blob[0x100], window_blob[0x100];
 
 static int dib_of(uint32_t v);
+#ifdef GAUGES_DIFF
+static int gauge_pointer(uint32_t value, uint32_t *offset);
+#endif
 
 static void put_ptr(uint32_t v)
 {
     int r;
+#ifdef GAUGES_DIFF
+    uint32_t offset;
+    if ((r = gauge_pointer(v, &offset)) >= 0) {
+        put("mod%d+%x", r, offset);
+        return;
+    }
+#endif
 
     if (v >= arena_base && v < arena_base + ARENA_SIZE)
         put("arena+%x", v - arena_base);
@@ -208,6 +222,11 @@ static uint32_t norm(uint32_t v)
     if (v < 0x00100000u)
         return v;
     r = region_of(v);
+#ifdef GAUGES_DIFF
+    if ((r = gauge_pointer(v, &lo)) >= 0)
+        return 0xe0000000u | ((uint32_t)r << 24) | lo;
+    r = region_of(v);
+#endif
     if ((v & 3) && r != 1 && r != 3)
         return v;           /* a pointer to a record is aligned; an odd pattern is not one */
 
@@ -452,6 +471,10 @@ static int32_t STDCALL h_alloc(int32_t f, uint32_t n, void **out, int32_t z)
     }
     memset(p, z ? 0 : scen->fill, n);
     *out = p;
+#ifdef GAUGES_ALL_DIFF
+    if (gauge_text_allocation(out))
+        blks[nblks - 1].kind = K_BYTES;
+#endif
     put("=");
     put_ptr((uint32_t)(uintptr_t)p);
     return 0;
@@ -489,8 +512,23 @@ static int32_t STDCALL h_memmove(void *d, const void *s, uint32_t n)
     if (region_of((uint32_t)(uintptr_t)s) >= 0 ||
         ((uint32_t)(uintptr_t)s >= arena_base && (uint32_t)(uintptr_t)s < arena_base + ARENA_SIZE))
         put_ptr((uint32_t)(uintptr_t)s);
+#ifdef GAUGES_DIFF
+    else {
+        struct blk *block = blk_of(d);
+        uint32_t destination = (uint32_t)(uintptr_t)d;
+        int pixels = dib_of(destination) >= 0 || dib_of((uint32_t)(uintptr_t)s) >= 0;
+        if (destination >= arena_base && destination < arena_base + arena_used &&
+            block && block->live && block->kind == K_PIXELS &&
+            destination - arena_base - block->off < block->size)
+            pixels = 1;
+        /* A pixel word can equal the replacement's module base (seed 149).
+         * Compare pixels literally, as the surface hashes already do. */
+        put("local:%016llx", (unsigned long long)hash_words(s, n < 0x1000 ? n : 0x1000, !pixels));
+    }
+#else
     else
         put("local:%016llx", (unsigned long long)hash_words(s, n < 0x1000 ? n : 0x1000, 1));
+#endif
     put(",%#x)", n);
     memmove(d, s, n);
     return 0;
@@ -1214,6 +1252,14 @@ struct gauge {
     char name[260];
     uint32_t wlo, whi;          /* its writable sections, for the compare */
     uint32_t wlo2, whi2;
+#ifdef GAUGES_DIFF
+    unsigned gauge_kind;
+    uint32_t gauge_code[64], gauge_text_lo, gauge_text_hi;
+#endif
+#ifdef GAUGES_ALL_DIFF
+    uint32_t text_slots[128];
+    unsigned ntext;
+#endif
 };
 
 #define MAXGAUGE 96
@@ -1248,6 +1294,10 @@ static void find_sections(HMODULE h, uint32_t *tlo, uint32_t *thi, uint32_t *wlo
         }
     }
 }
+
+#ifdef GAUGES_DIFF
+#include "gauges_panels.inc"
+#endif
 
 static void set_links(uint32_t *imports)
 {
@@ -1314,6 +1364,9 @@ static int32_t STDCALL h_module_load(uint32_t *slot, const char *path, uint32_t 
     struct gauge *g;
     HMODULE h;
     uint32_t *imp;
+#ifdef GAUGES_DIFF
+    const char *load_path;
+#endif
 
     nmodules++;
     snprintf(full, sizeof full, "%s%s", path, ext == 0x10 ? ".GAU" : "");
@@ -1326,7 +1379,14 @@ static int32_t STDCALL h_module_load(uint32_t *slot, const char *path, uint32_t 
         put("=FULL");
         return -1;
     }
+#ifdef GAUGES_DIFF
+    load_path = full;
+    if (cur == &sides[1] && gauge_replacement(full))
+        load_path = gauge_replacement(full);
+    h = LoadLibraryA(load_path);
+#else
     h = LoadLibraryA(full);
+#endif
     if (!h) {
         put("=NOFILE");
         return -1;
@@ -1346,12 +1406,18 @@ static int32_t STDCALL h_module_load(uint32_t *slot, const char *path, uint32_t 
     g->linkage = (uint32_t *)GetProcAddress(h, "Linkage");
     g->loaded = 1;
     snprintf(g->name, sizeof g->name, "%s", full);
+#ifdef GAUGES_DIFF
+    snprintf(g->name, sizeof g->name, "%s", load_path);
+#endif
     g->region = nregions;
     regions[nregions].lo = (uint32_t)(uintptr_t)h;
     regions[nregions].hi = regions[nregions].lo + *(uint32_t *)((uint8_t *)h + *(uint32_t *)((uint8_t *)h + 0x3c) + 24 + 56);
     regions[nregions].live = 1;
     nregions++;
     find_sections(h, NULL, NULL, &g->wlo, &g->whi, &g->wlo2, &g->whi2);
+#ifdef GAUGES_DIFF
+    gauge_loaded(g, full);
+#endif
     *slot = (uint32_t)(uintptr_t)g->linkage;
     put("=ok mod%u", g->region);
     return 0;
@@ -1414,6 +1480,9 @@ static void free_gauges(void)
             FreeLibrary(GetModuleHandleA(gauges[i].name));
     }
     ngauges = 0;
+#ifdef GAUGES_DIFF
+    gauge_count = 0;
+#endif
 }
 
 /* ---- CHAIN, ACONTAIN, MAIN, SOUND, WINDOW --------------------------------------------- */
@@ -1508,6 +1577,13 @@ static const char *const aircraft_dirs[7] = {
 static int32_t STDCALL ac_query(uint32_t a, uint32_t key, char *buf, uint32_t n)
 {
     put(" acontain(%u,%u)", a, key);
+#ifdef GAUGES_ALL_DIFF
+    if (a == 8 && (key == 5 || key == 6)) {
+        snprintf(buf, n, "%s\\Aircraft\\C182\\PANEL.RG%s", GAME_DIR,
+                 key == 6 ? "\\PANEL.CFG" : "");
+        return 1;
+    }
+#endif
     if (a < 1 || a > 7 || (key != 5 && key != 6))
         return 0;
     snprintf(buf, n, "%s\\Aircraft\\%s\\panel%s", GAME_DIR, aircraft_dirs[a - 1],
@@ -1941,6 +2017,12 @@ static uint32_t data_word(uint32_t off)
 {
     uint32_t w = *(const uint32_t *)((const uint8_t *)cur->imports + off);
 
+#ifdef GAUGES_ALL_DIFF
+    /* The 32 packed RGB triples are bytes, including when a four-byte
+     * window happens to equal a loaded gauge's data address. */
+    if (off >= 0x16040 && off < 0x160a0)
+        return w;
+#endif
     return off >= 0x1ee0 && off < 0x11ee0 ? w : norm(w);
 }
 
@@ -1975,7 +2057,11 @@ static void put_state(void)
         if (!blks[i].live)
             continue;
         live++;
+#ifdef GAUGES_ALL_DIFF
+        bh = gauge_heap_hash(&blks[i]);
+#else
         bh = hash_words(arena + blks[i].off, blks[i].size, blks[i].kind == K_HEAP);
+#endif
         h = fnv(h, (uint32_t)bh);
         h = fnv(h, (uint32_t)(bh >> 32));
         h = fnv(h, blks[i].off);
@@ -2002,7 +2088,11 @@ static void put_state(void)
             uint64_t gh = 0xcbf29ce484222325ull;
 
             if (gauges[i].whi > gauges[i].wlo)
+#ifdef GAUGES_ALL_DIFF
+                gh = gauge_data_hash(&gauges[i]);
+#else
                 gh = hash_words((const uint8_t *)(uintptr_t)gauges[i].wlo, gauges[i].whi - gauges[i].wlo, 1);
+#endif
             if (gauges[i].whi2 > gauges[i].wlo2)
                 gh ^= hash_words((const uint8_t *)(uintptr_t)gauges[i].wlo2, gauges[i].whi2 - gauges[i].wlo2, 1);
             put(" g%u=%016llx", i, (unsigned long long)gh);
@@ -2013,7 +2103,11 @@ static void put_state(void)
                 for (k = 0; k + 4 <= gauges[i].whi - gauges[i].wlo; k += 4) {
                     uint32_t raw = *(uint32_t *)(uintptr_t)(gauges[i].wlo + k);
 
+#ifdef GAUGES_ALL_DIFF
+                    put(" %x", gauge_data_word(&gauges[i], k));
+#else
                     put(" %x", norm(raw));
+#endif
                     if (getenv("PANELS_RAW") && norm(raw) != raw)
                         put("[%x]", raw);
                 }
@@ -2117,7 +2211,11 @@ static void run_op(const struct op *o)
 
     switch (o->kind) {
     case OP_AIRCRAFT:
+#ifdef GAUGES_ALL_DIFF
+        k = o->a == UINT32_MAX ? 8 : 1 + o->a % 7;
+#else
         k = 1 + o->a % 7;
+#endif
         put("\nAIRCRAFT %u", k);
         r = ((f1_t)LK(0x18))(k);
         put("=%#x", r);
@@ -3186,6 +3284,9 @@ int main(int argc, char **argv)
     static struct scenario sc;
     unsigned n = argc > 1 ? (unsigned)atoi(argv[1]) : 200, start = argc > 2 ? (unsigned)atoi(argv[2]) : 0;
     unsigned v, bad = 0, i, failed[64];
+#ifdef GAUGES_DIFF
+    unsigned missing_gauges = 0;
+#endif
     const char *only = getenv("PANELS_SCENARIO");
     int unit_mode;
     const char *only_fn = getenv("PANELS_UNIT");
@@ -3231,6 +3332,9 @@ int main(int argc, char **argv)
     arm_cover();
     for (i = 0; i < 2; i++) {
         set_links(sides[i].imports);
+#ifdef GAUGES_ALL_DIFF
+        gauge_canonical_install(&sides[i], i);
+#endif
         memcpy(sides[i].pristine, sides[i].imports, IMAGE_SIZE);
     }
     if (only) {
@@ -3291,6 +3395,18 @@ int main(int argc, char **argv)
     }
     for (v = start; v < start + n; v++) {
         make_scenario(&sc, v);
+#ifdef GAUGES_ALL_DIFF
+        /* The seven-aircraft random scripts omit C182/PANEL.RG. Give it
+         * a directed load and four frames before testing the other panels. */
+        if (!v) {
+            sc.fail_alloc = sc.fail_surface = sc.fail_module = sc.fail_exists = 0;
+            sc.nops = 2;
+            sc.op[0].kind = OP_AIRCRAFT;
+            sc.op[0].a = UINT32_MAX;
+            sc.op[1].kind = OP_FRAMES;
+            sc.op[1].a = 3;
+        }
+#endif
         scenario_no = v;
         last_progress = GetTickCount();
         if (getenv("PANELS_PROGRESS")) {
@@ -3350,5 +3466,23 @@ int main(int argc, char **argv)
     printf("\n");
     if (!bad)
         printf("IDENTICAL\n");
+#ifdef GAUGES_DIFF
+#ifdef GAUGES_ALL_DIFF
+    printf("verified/canonicalized address-derived zoom results: %u/%u\n", canonical_zoom_calls[0], canonical_zoom_calls[1]);
+#endif
+    for (i = 0; i < sizeof gauge_specs / sizeof gauge_specs[0]; i++) {
+        printf("%s successful loads: retail %u, rebuilt %u\n",
+               gauge_specs[i].name, gauge_loads[i][0], gauge_loads[i][1]);
+        if ((!gauge_loads[i][0] || !gauge_loads[i][1])
+#ifdef GAUGES_ALL_DIFF
+            && n >= 1000 && !getenv("GAUGES_ONLY") &&
+            strcmp(gauge_specs[i].name, "737-400.X-FEED.GAU") &&
+            strcmp(gauge_specs[i].name, "CESSNA_182.VACUUM_AMPS.GAU")
+#endif
+        )
+            missing_gauges++;
+    }
+    if (missing_gauges) return 2;
+#endif
     return bad != 0;
 }

@@ -167,7 +167,23 @@ orig_module = $(if $(filter MP_DIALOG,$(1)),$(ORIG)/English/mpdialog.dll,$(if $(
   $(if $(filter MULTIP,$(1)),multip.dll,\
   $(if $(filter MPCHAT,$(1)),mpchat.DLL,$(1).DLL))))))
 
-all: $(addprefix $(BIN)/,$(addsuffix .DLL,$(ALL_MODULES)))
+all: $(addprefix $(BIN)/,$(addsuffix .DLL,$(ALL_MODULES))) gauges
+
+# Gauge source/data generation and acceptance stay separate from dialog work.
+.PHONY: gauges gauges-check gauges-breaks gauges-panels gauges-install gauges-revert
+gauges:
+	$(MAKE) -f tools/gauges.mk all-gauges
+gauges-check:
+	$(MAKE) -f tools/gauges.mk all-gauges-check N=$(if $(N),$(N),20000)
+gauges-breaks:
+	$(MAKE) -f tools/gauges.mk all-gauges-breaks
+gauges-panels:
+	$(MAKE) -f tools/gauges.mk all-gauges-panels N=$(if $(N),$(N),1000)
+gauges-install: gauges
+	python3 -B tools/stage_gauges.py "$(FS98_DIR)"
+gauges-revert:
+	$(MAKE) -f tools/gauges.mk bin/gauges-all/generated.stamp
+	python3 -B tools/stage_gauges.py "$(FS98_DIR)" --retail
 
 $(BIN)/GLOBAL.DLL: src/global/global.c src/global/global.def src/global/global_state.inc $(BIN)/global.res
 	@mkdir -p $(BIN)
@@ -1602,6 +1618,7 @@ install: all
 	  cp $(BIN)/$$m.DLL "$(FS98_DIR)/Modules/$$n"; echo "installed $$m -> $$n"; \
 	done
 	$(MAKE) $(foreach m,$(ENGLISH_MODULES),$(call english_target,$(m))-install) FS98_DIR="$(FS98_DIR)"
+	$(MAKE) gauges-install FS98_DIR="$(FS98_DIR)"
 
 revert:
 	@for m in $(MODULES); do \
@@ -1609,6 +1626,7 @@ revert:
 	  cp "$$(make -s orig-module-of M=$$m)" "$(FS98_DIR)/Modules/$$n"; echo "reverted $$n"; \
 	done
 	$(MAKE) $(foreach m,$(ENGLISH_MODULES),$(call english_target,$(m))-revert) FS98_DIR="$(FS98_DIR)"
+	$(MAKE) gauges-revert FS98_DIR="$(FS98_DIR)"
 
 modules-of:
 	@echo $(MODULES)

@@ -1,7 +1,7 @@
 # Module status
 
 Moved out of the README: one row per module, with the evidence. Results are as
-of 2026-11-05; later work is in the per-module documents. What is still retail
+of 2026-11-06; later work is in the per-module documents. What is still retail
 is in [remaining-work.md](remaining-work.md), known gaps in
 [open-differences.md](open-differences.md).
 
@@ -39,6 +39,7 @@ shim; its 95 mentions contain 58 load records for 29 distinct gauge paths.
 | `ANALYSIS` | 29 | 8,086 | **reimplemented, verified, and running in-game** — landing and manoeuvre analysis and course tracking: the samples, the trail's display list, the three dialogs; 20,000 whole-module scenarios, zero differences — see [modules/analysis.md](modules/analysis.md) |
 | `CONTROLS` | 16 | 48,406 | **reimplemented, verified, and running in-game** — the keyboard, joysticks and mouse: 342 command handlers, the joystick poll and configs, the key bindings, force feedback over DirectInput 5 and the key-assignment dialog's callbacks; 20,000 whole-module scenarios, zero differences — see [modules/controls.md](modules/controls.md) |
 | `PANELS` | 15 | 50,038 | **reimplemented, verified, and running in-game** — the instrument panel and the gauges' runtime: bitmap scalers, eight element types, the gauge variables; 3,000 whole-module scenarios through the CD's gauges and 20,000 cases per image routine, zero differences — see [modules/panels.md](modules/panels.md) |
+| `Gauges/*.GAU` | 19 | 63,472 total | **120 of 120 rebuilt from C:** all exposed callbacks, data and bitmap resources; 26,687,688 standalone vectors at preferred addresses and under forced relocation, 348 mutations caught, 1,000 strict PANELS scenarios and 74/74 matching flight comparisons. Included in build/install/revert — see [modules/gauges.md](modules/gauges.md) |
 | `HG2D` | 13 | 389,734 | **reimplemented, verified, and in `MODULES`** — all 40 public services and 18 GPU dispatch cells; 59 suites pass, 40.64 million large-run operations match retail, and 247 new mutations are caught; in private copies of the game, eight flights match retail frame for frame on the software renderer and six on Direct3D (`tools/hg2d_frames.sh`); not yet flown by hand, non-x86 validation remains — see [modules/hg2d.md](modules/hg2d.md#in-the-game) |
 | `UTIL` | 20 | 11,062 | **reimplemented, verified, and running in-game** — all 47 services; 19 seen called in a hands-on session, the modal alert among them — see [modules/util.md](modules/util.md) |
 | `FLTSIM98.EXE` | 1 (host) | 82,016 | 194 services mapped; **all 194 reimplemented and verified in-process** against the real host (`make hostdiff-run`) — see [modules/host.md](modules/host.md) |
@@ -142,5 +143,5 @@ retail's instructions (see [modules/g3d.md](modules/g3d.md)).
 **Next: Options.** The whole game, all retail against all ours, matches
 frame for frame on all 74 flights with nobody flying, and flown by script on eight flights, on
 both renderers. Alerts, Help, Sim, Views and Flights were installed on 2026-11-02. What is still open
-is listed in [open-differences.md](open-differences.md). Then SIMSUI, the gauges
-and an executable around `HOST.DLL`: [remaining-work.md](remaining-work.md).
+is listed in [open-differences.md](open-differences.md). All 120 gauges are now rebuilt. SIM1, the aircraft models, SIMSUI
+and an executable around `HOST.DLL` remain: [remaining-work.md](remaining-work.md).

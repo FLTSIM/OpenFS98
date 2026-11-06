@@ -22,6 +22,12 @@
 # repeat with sound: the pass it resumes on varies.  Without it, it does.
 #
 # HG2D_FRAMES_BIN is the directory of our DLLs (default bin), for testing a broken build.
+# HG2D_FRAMES_GAUGE and HG2D_FRAMES_GAUGE_RETAIL optionally compare one rebuilt
+# .GAU too. Both paths are required; the rebuilt basename is its installed name.
+# Each run must actually load that gauge. Set HG2D_FRAMES_OURS to retail HG2D
+# when testing the gauge alone.
+# HG2D_FRAMES_GAUGES=1 compares the entire rebuilt collection instead;
+# tools/stage_gauges.py restores retail inputs on the baseline sides.
 #
 # HG2D_FRAMES_ALL=1 compares the whole game instead: every module and the English DLLs
 # retail against every one ours, and the verdict is on all of them.
@@ -49,6 +55,13 @@ game=$(realpath "${FS98_DIR:-$PWD/game}")
 framelock=bin/hg2d-diff/FRAMELOCK.DLL
 ours_bin=${HG2D_FRAMES_BIN:-bin}
 ours=${HG2D_FRAMES_OURS:-$ours_bin/HG2D.DLL}
+gauge_name=
+if [ -n "${HG2D_FRAMES_GAUGE:-}${HG2D_FRAMES_GAUGE_RETAIL:-}" ]; then
+    [ -f "${HG2D_FRAMES_GAUGE:-}" ] && [ -f "${HG2D_FRAMES_GAUGE_RETAIL:-}" ] || {
+        echo "gauge comparison needs both rebuilt and retail .GAU paths" >&2; exit 2;
+    }
+    gauge_name=$(basename "$HG2D_FRAMES_GAUGE")
+fi
 [ -f "$ours" ] && [ -f "$framelock" ] && [ -f bin/SEHFIX.DLL ] && [ -f "$game/FLTSIM98.EXE" ] || {
     echo "needs $ours, $framelock, bin/SEHFIX.DLL and the staged game" >&2; exit 2;
 }
@@ -66,7 +79,10 @@ for _ in $(seq 20); do xdpyinfo >/dev/null 2>&1 && break; sleep 0.5; done
 xdpyinfo >/dev/null 2>&1 || { echo "Xvfb did not start" >&2; exit 2; }
 
 debug=-all
+[ -z "$gauge_name" ] || debug=+loaddll
+[ -z "${HG2D_FRAMES_GAUGES:-}" ] || debug=+loaddll
 [ -z "${HG2D_FRAMES_DEVICE:-}" ] || debug=+ddraw
+[ -z "${gauge_name}${HG2D_FRAMES_GAUGES:-}" ] || [ -z "${HG2D_FRAMES_DEVICE:-}" ] || debug=+loaddll,+ddraw
 export WINEDEBUG=-all
 [ -z "${HG2D_FRAMES_NOSOUND:-}" ] || export WINEDLLOVERRIDES="dsound=d"
 
@@ -87,6 +103,17 @@ run() {     # tag hg2d
         done
     fi
     cp "$hg2d" "$copy/Modules/HG2D.DLL"
+    if [ -n "${HG2D_FRAMES_GAUGES:-}" ]; then
+        local gauge_mode=(--retail)
+        [ "$tag" != ours ] || gauge_mode=()
+        python3 -B tools/stage_gauges.py "$copy" "${gauge_mode[@]}" || exit 2
+    fi
+    if [ -n "$gauge_name" ]; then
+        local gauge=$HG2D_FRAMES_GAUGE_RETAIL
+        [ "$tag" != ours ] || gauge=$HG2D_FRAMES_GAUGE
+        cp "$gauge" "$copy/Gauges/$gauge_name"
+        cmp -s "$gauge" "$copy/Gauges/$gauge_name" || exit 2
+    fi
     cp "$framelock" "$copy/Modules/FRAMELOCK.DLL"
     rm -f "$copy/Modules/SEHFIX.DLL"
     # only all ours is free of the faults: retail's G3D and WINDOW divide into the repair too
@@ -115,6 +142,18 @@ run() {     # tag hg2d
     kill $watcher 2>/dev/null
     [ -s "$out/$tag/frames.log" ] || { echo "$tag: exit $status and no frames logged" >&2; exit 2; }
     echo "$tag: exit $status, $(grep -c . "$out/$tag/frames.log") lines, $(tail -1 "$out/$tag/frames.log")"
+    if [ -n "${HG2D_FRAMES_GAUGES:-}" ]; then
+        local gauge_loads
+        gauge_loads=$(grep -ai 'Loaded L"' "$out/$tag/game.log" | grep -ic '\.gau"')
+        echo "$tag: collection successful gauge loads $gauge_loads"
+        [ "$gauge_loads" -gt 0 ] || { echo "no collection gauge loaded" >&2; exit 2; }
+    fi
+    if [ -n "$gauge_name" ]; then
+        local loads
+        loads=$(grep -ai 'Loaded L"' "$out/$tag/game.log" | grep -icF "$gauge_name")
+        echo "$tag: $gauge_name successful loads $loads"
+        [ "$loads" -gt 0 ] || { echo "selected gauge never loaded" >&2; exit 2; }
+    fi
     if [ -n "${HG2D_FRAMES_DEVICE:-}" ]; then
         local scenes draws
         scenes=$(grep -ac d3d_device7_BeginScene "$out/$tag/game.log")

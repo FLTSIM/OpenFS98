@@ -78,6 +78,10 @@ The `radios` suite's stand-in now logs edi, and catches the old call.
 
 ## Not yet tested
 
+- **Gauge replacements.** All 120 are rebuilt and included in `make install`.
+  Standalone comparisons cover all entries. Stock panel files exercise 118;
+  `737XFEED` and `CESSVAC` have no stock panel references. See
+  [gauges.md](modules/gauges.md) for verification and preserved retail quirks.
 - **Flying for long.** The scripts run 900 passes, about 30 seconds of sim time, and fly no
   route or landing. By hand it has been flown only briefly. Long flights, scenery loading far
   from the start and a real approach are untested.

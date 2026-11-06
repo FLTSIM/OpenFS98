@@ -42,6 +42,11 @@ objdump -p orig/Modules/CONTROLS.DLL | grep -E 'Time/Date|ImageBase'
 # reference: Wed Aug  6 21:46:24 1997, ImageBase 20670000
 ```
 
+`make` also builds all 120 gauges from generated C. `make install` installs their
+exact setup filenames and `make revert` restores their retail versions. Use
+`make gauges`, `make gauges-install` or `make gauges-revert` for gauges alone.
+See [modules/gauges.md](modules/gauges.md) for verification commands.
+
 The Makefile's `BASE_*` give the reference's base for each module OpenFS98
 builds.
 

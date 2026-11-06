@@ -5,7 +5,7 @@ What is still retail, and what is left before a native build. The 27 simulator m
 outside it and are not), and `English\` World, Alerts, Help, Sim, Views, Flights and MP_DIALOG
 are in `ENGLISH_MODULES`; `make install` puts them all in the game. Installed rows below are retained for context. Sizes are `.text` from the reference CD. Differences
 and gaps in the finished modules are in [open-differences.md](open-differences.md).
-Results updated through 2026-11-05; individual rows retain their acceptance dates.
+Results updated through 2026-11-06; individual rows retain their acceptance dates.
 
 ## Binaries
 
@@ -15,7 +15,7 @@ Results updated through 2026-11-05; individual rows retain their acceptance date
 | `FLTSIM98.EXE` | 82,016 | **No executable.** All 194 services are reimplemented and verified in-process as `HOST.DLL`; retail's still runs the game | [host.md](modules/host.md) |
 | `SIMSUI.DLL` | 79,850 | **Not started.** 540 named exports, the common dialog and control widgets. Every dialog imports it | [dialogs.md](modules/dialogs.md) |
 | `Sim/SIM1.sim` | 78,216 | **Not started.** The flight model: every aircraft's `.AIR` names `sim1`. A module DLL, id 25, 15-entry Linkage, wanting 10 modules. Not in `orig/` | [below](#sim1-and-the-mdls) |
-| `Gauges/*.GAU` (120) | 63,472 | **Not started.** No `src/gauges/` and no survey. PANELS, their runtime, is ours | below |
+| `Gauges/*.GAU` (120) | 63,472 | **All 120 rebuilt**, included in build/install/revert; standalone callback/data/resource/FP, PANELS and frame comparisons | [gauges.md](modules/gauges.md) |
 | `English/Flights.DLL` | 51,122 | **Installed** 2026-11-02; used in play by `make flights-play` 2026-11-03 | [flights.md](modules/flights.md) |
 | `English/Sim.DLL` | 33,239 | **Installed** 2026-11-02 | [sim.md](modules/sim.md) |
 | `English/MP_DIALOG.DLL` | 25,401 | **Installed** 2026-11-05; all three registrations, native exception/UI acceptance and paired actual-owner peer session | [mpdialog.md](modules/mpdialog.md) |
@@ -36,10 +36,12 @@ DirectPlay.
 
 ## The gauges
 
-120 files, 12,973,568 bytes, of which only 63,472 are `.text`, from 208 bytes (`737WARNG`)
-to 2,902 (`LEARPFD`). The rest is not surveyed, but is presumably bitmaps and gauge tables,
-so these may be far less work than their size suggests. Survey them before planning: how
-much code they share, and how much is data a generator could carry over.
+All 120 reference-CD modules are rebuilt from C with extracted data and bitmap
+resources. The shared build, install and revert targets include them. Standalone
+verification covers every exposed callback, all x87 precision/rounding modes,
+full data/resource comparisons and forced relocation; PANELS and real-game
+checks exercise the collection together. See [gauges.md](modules/gauges.md).
+Their current 32-bit ABI still needs adaptation with the rest of the native port.
 
 ## SIM1 and the MDLs
 
@@ -74,7 +76,7 @@ them into `orig/` and check them against the reference CD before writing tools a
 3. **SIM1, then the MDLs.** Simulator code in every flight, testable like the modules.
    Copy them into `orig/` first.
 4. **SIMSUI.** After the dialogs, because they show which of its 540 exports matter.
-5. **Survey the gauges early, do them late.** The survey may change this order.
+5. **Gauges completed independently of Options.** All 120 are in the shared build.
 6. **The executable around `HOST.DLL`.**
 7. **Native builds.** Moving off x86 ends comparison with retail, so the earlier steps come
    first. That is also when the retail bugs we reproduce get fixed: they are listed in

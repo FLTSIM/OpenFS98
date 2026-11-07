@@ -13,6 +13,11 @@ verification commands with their expected results and run times is in
 | `make numericdiff-run` | compare all NUMERIC formatter/parser ids and ranged parses against retail |
 | `make atcdiff-run` | drive retail and OpenFS98 ATC side by side over random scripts of ATIS, clearances and frames, comparing every import call and the whole `.data` image; `N=...` sets the count |
 | `make acontaindiff-run` | the same for ACONTAIN, against generated aircraft trees: loads, lists, queries and models, with file I/O passed through and fake `.SIM`/`.MDL` modules, comparing every import call, GLOBAL, the heap and the `.data` image |
+| `make sim1` / `sim1-install` / `sim1-revert` | build SIM1 into `bin/SIM1.sim`, install at `Sim/SIM1.sim`, or restore the verified original; included in shared build/install/revert |
+| `make -f tools/sim1.mk sim1decode-run` | real AIR decoder over 1,012 arrangements in twelve FP modes and three load layouts; direct aircraft setup and independent native ABI/stack/FP probes |
+| `make -f tools/sim1.mk sim1-regression-run N=20000` | the complete DLL's six services and fifteen state operations, including forced relocation |
+| `make -f tools/sim1.mk sim1-lift-breaks` | rebuilt decoder, native ABI, setup and callback defects; require value differences or clean game divergence |
+| `make -f tools/sim1.mk sim1flights-run` | all 74 stock flights, 1,200 passes with controls, comparing per-pass SIM1 numeric state and rendered frames in disposable game copies |
 | `make mdls` / `make mdls-install` / `make mdls-revert` | build, install or restore all eleven normal/crash MDLs; included in shared build/install/revert targets and used by `make run` |
 | `make mdl-normal-diff-run` | all eight normal MDL update callbacks against retail, at preferred and forced-relocation addresses: state, entire `.data`, GLOBAL, copy calls and preserved registers; `N=...` sets inputs per model (70,000 by default); callback slice only, no MDL installation |
 | `make mdl-normal-breaks` | six isolated callback mutations, each required to produce its expected behavioral mismatch |

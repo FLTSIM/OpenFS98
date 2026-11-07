@@ -120,6 +120,7 @@ int main(int argc, char **argv)
     uint32_t cases = 0, trial, chunks[128], lengths[128], chunk_count, original_size, position, order[128], j;
     void *reservation = NULL;
     int orientation = argc > 3 && !strcmp(argv[3], "orientation");
+    int setup = argc > 3 && !strcmp(argv[3], "setup");
     HMODULE util;
     SetUnhandledExceptionFilter(fault);
     AddVectoredExceptionHandler(1, decode_fault);
@@ -131,6 +132,7 @@ int main(int argc, char **argv)
     if(!util) fail("decoder UTIL load",GetLastError());
     host[0x21c/4]=(uintptr_t)decode_move;
     host[0x3c/4]=(uintptr_t)decode_message;
+    host[0x40/4]=(uintptr_t)decode_message;
     scenery[0x18/4]=(uintptr_t)decode_scenery;
     memcpy(util_table,GetProcAddress(util,"Linkage"),sizeof util_table);
     util_table[0x70/4]=(uintptr_t)decode_rand;
@@ -172,6 +174,7 @@ int main(int argc, char **argv)
          * retain their actual record lengths and remain fully backed.
          */
         for(trial=0;trial<chunk_count+35;trial++) {
+            if(setup && trial) continue;
             size=0; memset(aircraft,0xa5,sizeof aircraft);
             for(i=0;i<chunk_count;i++) order[i]=i;
             if(trial>=3 && trial<34)
@@ -202,7 +205,20 @@ int main(int argc, char **argv)
                 decode_exception=decode_access=0; decode_active=1;
                 sim1_call();
                 decode_active=0;
-                if(!orientation && file==6 && trial==0 && read32(global+0x57c)!=(decode_random?0xb0000u:0xfff50000u))
+                if(setup && !decode_exception) {
+                    /* Seed nonzero state so clearing already-zero defaults
+                     * cannot make a missing setup call look equivalent. */
+                    static const uint32_t fields[]={0x1538,0x1540,0x1548,0x13a0,0x13a8,0x13b0,
+                        0x13b8,0x13c0,0x13c8,0x13e8,0x13f0,0x13f8,0x1358,0x1360,0x1368};
+                    for(i=0;i<sizeof fields/sizeof fields[0];i++) {
+                        write32(sides[role].image+fields[i],0x12345678u+i);
+                        write32(sides[role].image+fields[i]+4,0x3ff00000u+i);
+                    }
+                    write32(global+0xbe8,mode&1?0x3ffe:0x3fff);
+                    call_target=sides[role].link[7]; call_argc=0;
+                    sim1_call();
+                }
+                if(!orientation && !setup && file==6 && trial==0 && read32(global+0x57c)!=(decode_random?0xb0000u:0xfff50000u))
                     fail("glider initial pitch oracle",read32(global+0x57c));
                 compare(sides[role].pristine,sides[role].image,HEADER_SIZE,"decoder import/Linkage prefix");
                 compare(aircraft_expected,aircraft,sizeof aircraft,"AIR input modified");
@@ -234,9 +250,9 @@ int main(int argc, char **argv)
             ++cases;
         }
         }
-        printf("AIR %s: %u record arrangements, 12 FP modes, real decoder matches\n",files[file],chunk_count+35);
+        printf("AIR %s: %u record arrangements, 12 FP modes, real decoder%s matches\n",files[file],setup?1:chunk_count+35,setup?" + setup":"");
     }
-    printf("PASS: %u real AIR decoder comparisons (%u paired invalid-input access faults)\n",cases,fault_cases);
+    printf("PASS: %u real AIR%s comparisons (%u paired invalid-input access faults)\n",cases,setup?" + aircraft setup":" decoder",fault_cases);
     FreeLibrary(sides[1].module); FreeLibrary(sides[0].module); FreeLibrary(util);
     if(reservation) VirtualFree(reservation,0,MEM_RELEASE);
     return 0;

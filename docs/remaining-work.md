@@ -14,7 +14,7 @@ Results updated through 2026-11-06; individual rows retain their acceptance date
 | `English/Options.DLL` | 84,381 | **In progress** (2026-11-03): 10 of 15 registrations (the video, logbook and analysis dialogs) verified in its harness (`tools/options.mk`); no DLL yet | [options.md](modules/options.md) |
 | `FLTSIM98.EXE` | 82,016 | **No executable.** All 194 services are reimplemented and verified in-process as `HOST.DLL`; retail's still runs the game | [host.md](modules/host.md) |
 | `SIMSUI.DLL` | 79,850 | **Not started.** 540 named exports, the common dialog and control widgets. Every dialog imports it | [dialogs.md](modules/dialogs.md) |
-| `Sim/SIM1.sim` | 78,216 | **Partial** 2026-11-06: six services, both state formats, velocity reconstruction, restoration, saving and shutdown compared. AIR file ownership, descriptor publication and init coordination also verified at an explicit decoder-fixture boundary. AIR decoding/setup and frame callbacks remain pending; no install target | [sim1.md](modules/sim1.md) |
+| `Sim/SIM1.sim` | 78,216 | **Installed** 2026-11-06: complete services, AIR decoder, aircraft setup, state lifecycle and simulation callbacks. 36,432 real decoder comparisons, 288 direct setup comparisons, ten new caught defects and 74 matching scripted flights with per-pass physics state. Included in shared build/install/revert; current ABI/x87 implementation is x86 | [sim1.md](modules/sim1.md) |
 | `Gauges/*.GAU` (120) | 63,472 | **All 120 rebuilt**, included in build/install/revert; standalone callback/data/resource/FP, PANELS and frame comparisons | [gauges.md](modules/gauges.md) |
 | `English/Flights.DLL` | 51,122 | **Installed** 2026-11-02; used in play by `make flights-play` 2026-11-03 | [flights.md](modules/flights.md) |
 | `English/Sim.DLL` | 33,239 | **Installed** 2026-11-02 | [sim.md](modules/sim.md) |
@@ -55,11 +55,11 @@ to `orig/Aircraft/` (2026-11-06).
 - **`SIM1.sim`** (base `0x22000000`, `.text` 78,216, `.data` 17,400): imports only KERNEL32
   and MSVCRT, and links to modules 1, 2, 3, 4, 10, 16, 20, 23, 32 and 39. It calls host
   `+0x21c` 77 times and reads and writes GLOBAL widely, like DYNAMIC. As large as SIMSUI and
-  in every flight, so it should not wait behind the dialogs. The first six
-  services and saved-state/restoration/shutdown paths now have isolated differential
-  verification; AIR file/init callers also have explicit decoder-fixture acceptance.
-  Actual AIR decoding/setup and full simulation remain:
-  [SIM1](modules/sim1.md).
+  in every flight. It is now implemented and installed: six services and the
+  state lifecycle have isolated comparisons; the real AIR decoder, aircraft
+  setup and simulation callbacks add standalone and game acceptance. All 74
+  scripted flights match numeric state and frames. Native-platform ABI and FP
+  work remains; see [SIM1](modules/sim1.md).
 - **The `.MDL`s**: eight normal models (`.text` 678–982 bytes) and three crash
   models (9,110–9,894 bytes), mostly `.data`. Shared Linkage scaffolding wraps
   distinct header update callbacks; crash models also register with CHAIN.
@@ -79,8 +79,8 @@ to `orig/Aircraft/` (2026-11-06).
    graph and lesson completion; see [open-differences.md](open-differences.md#not-yet-tested).
 2. **Options** (Flights installed 2026-11-02). The largest code still used in play. Scripted menu tests come
    with them: see [open-differences.md](open-differences.md#not-yet-tested).
-3. **SIM1** (partial; the MDLs are completed). Simulator code in every flight,
-   testable like the modules; continue from [SIM1](modules/sim1.md).
+3. **SIM1 and the MDLs completed 2026-11-06.** Both are included in shared
+   build/install/revert. Their current x86 ABI/FP paths still need native-port work.
 4. **SIMSUI.** After the dialogs, because they show which of its 540 exports matter.
 5. **Gauges completed independently of Options.** All 120 are in the shared build.
 6. **The executable around `HOST.DLL`.**

@@ -36,6 +36,9 @@ sim1decode-run: $(SIM1_DIR)/SIM1_COMPLETE_TEST.DLL $(SIM1_DIR)/sim1decodediff.ex
 	WINEPREFIX="$(CURDIR)/$(SIM1_DIR)/wineprefix" WINEARCH=win32 WINEDEBUG=-all flock $(SIM1_DIR)/wine.lock timeout 180s wine $(SIM1_DIR)/sim1decodediff.exe retail-first
 	WINEPREFIX="$(CURDIR)/$(SIM1_DIR)/wineprefix" WINEARCH=win32 WINEDEBUG=-all flock $(SIM1_DIR)/wine.lock timeout 180s wine $(SIM1_DIR)/sim1decodediff.exe ours-first
 	WINEPREFIX="$(CURDIR)/$(SIM1_DIR)/wineprefix" WINEARCH=win32 WINEDEBUG=-all flock $(SIM1_DIR)/wine.lock timeout 180s wine $(SIM1_DIR)/sim1decodediff.exe relocate
+	@for order in retail-first ours-first relocate; do \
+	 WINEPREFIX="$(CURDIR)/$(SIM1_DIR)/wineprefix" WINEARCH=win32 WINEDEBUG=-all flock $(SIM1_DIR)/wine.lock timeout 180s wine $(SIM1_DIR)/sim1decodediff.exe $$order $(SIM1_DIR)/SIM1_COMPLETE_TEST.DLL setup || exit $$?; \
+	done
 
 .PHONY: sim1-install sim1-revert sim1-regression-run
 sim1-install: sim1-complete

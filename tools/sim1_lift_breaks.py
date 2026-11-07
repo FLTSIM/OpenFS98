@@ -62,6 +62,10 @@ def main():
         baseline = run(['wine', 'bin/sim1-diff/sim1decodediff.exe', 'relocate'], OUTPUT, 'baseline.log', env)
         if baseline.returncode or 'PASS:' not in baseline.stdout:
             raise RuntimeError('decoder baseline failed: ' + baseline.stdout)
+        baseline = run(['wine', 'bin/sim1-diff/sim1decodediff.exe', 'relocate',
+                        'bin/sim1-diff/SIM1_COMPLETE_TEST.DLL', 'setup'], OUTPUT, 'baseline-setup.log', env)
+        if baseline.returncode or 'PASS:' not in baseline.stdout:
+            raise RuntimeError('setup baseline failed: ' + baseline.stdout)
         cases = [
             ('decoder-return', 'source', 'f->eax = (uint32_t)(0x1u);\ngoto label_c5b2;', 'f->eax = 0;\ngoto label_c5b2;'),
             ('decoder-copy-destination', 'source', 'label_b5c3: /* push 0x22018c04 */\n' + lift.lower(0xb5c3), 'label_b5c3: /* deliberate defect */\n' + lift.lower(0xb5c3).replace('0x18c04', '0x18c05')),
@@ -90,7 +94,18 @@ def main():
             print(f'{name}: {"caught" if caught else "FAILED"}', flush=True)
             if not caught:
                 raise RuntimeError(result.stdout)
-    for index, (name, root) in enumerate((('aircraft-setup', 0xfc40), ('tick', 0x1020), ('frame', 0x1040))):
+        name='aircraft-setup'
+        anchor='_sim1_entry_fc40:\npushfl'
+        if entries.count(anchor)!=1: raise ValueError('setup entry anchor changed')
+        directory=OUTPUT/name
+        dll=build(directory,source,entries.replace(anchor,'_sim1_entry_fc40:\nret\npushfl',1),native,reuse=True)
+        result=run(['wine','bin/sim1-diff/sim1decodediff.exe','relocate',str(dll),'setup'],directory,'result.log',env)
+        caught=result.returncode==1 and 'side=1' in result.stdout and bool(re.search(
+            r'decoded image|decoded GLOBAL|decoder registers|decoder imports|x87',result.stdout))
+        results.append(dict(name=name,caught=caught))
+        print(f'{name}: {"caught by direct setup comparison" if caught else "FAILED"}',flush=True)
+        if not caught: raise RuntimeError(result.stdout)
+    for index, (name, root) in enumerate((('tick', 0x1020), ('frame', 0x1040))):
         anchor = f'_sim1_entry_{root:x}:\npushfl'
         if entries.count(anchor) != 1:
             raise ValueError('entry anchor changed')

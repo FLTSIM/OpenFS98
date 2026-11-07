@@ -43,6 +43,12 @@ hundredth of a millimetre -- and the decision is to accept it rather than
 emulate 80-bit arithmetic to preserve a rounding artefact. See
 [modules/util.md](modules/util.md).
 
+SIM1's current simulation path is verified on 32-bit x86: explicit integer C
+retains register widths and flags, while x87 instructions and native stack
+bridges retain retail's ABI and arithmetic. Its completed x86 replacement is
+installed, but those bridges, pointer widths and FP operations still need a
+native-platform implementation. See [modules/sim1.md](modules/sim1.md#complete-simulation).
+
 ## What is left that differs from the retail binary
 
 `GLOBAL.DLL`'s 4764-byte shared state block is byte-identical to retail, and the

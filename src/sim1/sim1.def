@@ -1,4 +1,4 @@
-LIBRARY SIM1_PARTIAL.DLL
+LIBRARY SIM1.sim
 EXPORTS
     Linkage DATA
     ImportTable DATA

@@ -5,12 +5,12 @@ chunk `0x100`, loads `Sim\<name>.SIM` through host `+0x26c`, and publishes its
 Linkage at GLOBAL `+0x11d4`. This is simulator code outside `Modules\`, not
 `English/Sim.DLL` (the aircraft-settings UI).
 
-**Partial, 2026-11-06:** six bounded services, both situation formats, startup
-state restoration, saving, retained state and shutdown are implemented and
-compared in isolation. The AIR file wrapper, descriptor publication and init
-coordination also match at an explicit decoder-fixture boundary. The AIR record
-decoder and frame callbacks remain unimplemented. There is no install target,
-shared Makefile entry or game acceptance for the partial build.
+**Implemented, 2026-11-06:** AIR decoding, aircraft setup and the tick/frame
+callbacks now join the six services and state lifecycle. The production build
+has the two ordinary module exports and the original version resource.
+`make sim1` builds `bin/SIM1.sim`; shared build/install/revert include it.
+The earlier partial harnesses below remain useful isolated tests. Complete
+build verification and installation are described at the end of this document.
 
 ## Reference and shape
 
@@ -129,7 +129,7 @@ reset clears/arithmetic, and wind source. Logs and the machine-readable summary
 live under `bin/sim1-diff/breaks/`. The final positive run is recorded in
 `bin/sim1-diff/acceptance.log`, the negative run in `mutations.log` beside it.
 
-## What follows
+## Boundaries recovered after the initial services
 
 Initialization is not a small no-op slice. At `0x22010cc0`, SIM1 restores a
 retained `0xc0`-byte record through GLOBAL `+0x11d8`, or asks MAIN `+0x6c`
@@ -138,12 +138,10 @@ on CHAIN lists 1, 5 and 20. List 20 handles situation load/save events
 `0x22/0x23`. Deinit removes the callbacks and serializes retained state.
 
 Both readers, the velocity transform, startup state restoration, save callback
-and retained-state/shutdown paths are now covered below. Init/file ownership
-and publication have also been compared with the pending decoder replaced by
-an explicit fixture. Next: implement the actual AIR record decoder, complete
-aircraft setup and frame callbacks, then repeat initialization with the real
-decoder. Full-module mutation acceptance, real aircraft fixtures, long state
-trajectories and isolated game acceptance remain before SIM1 can join installation.
+and retained-state/shutdown paths are covered below. Init/file ownership and
+publication were first compared with an explicit decoder fixture. The complete
+build subsequently adds the real decoder and simulation; its acceptance is
+separate from that earlier modeled boundary.
 
 ## Saved state and shutdown
 
@@ -320,7 +318,7 @@ not suitable for running them in the game.
 | `0x22010c40` | publish the 44-byte descriptor | real copy, x87 conversions and register results |
 | `0x22001060` | restore state, register three callbacks, load AIR, publish | real restore/publication, modeled decoder |
 
-**The record decoder at `0x2200af90` is not implemented.** The ordinary
+**This caller-only suite substitutes the decoder at `0x2200af90`.** The
 partial DLL traps if a successful full read reaches that boundary. A separate
 `SIM1_AIR_TEST.DLL`, built with `SIM1_AIR_TEST`, exposes one decoder-fixture
 pointer. The harness replaces only retail's direct decoder call at

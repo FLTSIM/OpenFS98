@@ -50,6 +50,15 @@ echo "modules loaded: $mods/$want"
 echo "gauges loaded:  $gaus"
 [ ${#missing[@]} -eq 0 ] || { printf 'FAIL: never loaded: %s\n' "${missing[*]}"; fail=1; }
 [ "$gaus" -gt 0 ] || { echo "FAIL: no gauges -- startup stopped before the panel was built"; fail=1; }
+if [ -f bin/SIM1.sim ]; then
+    if python3 -B tools/stage_sim1.py "$GAME" --check &&
+       grep -qiE 'Loaded L".*sim1\.sim"' "$TRACE"; then
+        echo "SIM1: exact rebuilt module loaded"
+    else
+        echo "FAIL: rebuilt SIM1 was not installed and loaded"
+        fail=1
+    fi
+fi
 
 # "KiUserCallbackDispatcher ignoring exception" is wine swallowing a divide
 # fault the host would have repaired (docs/wine.md).  Without SEHFIX it is

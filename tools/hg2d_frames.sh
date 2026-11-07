@@ -32,6 +32,8 @@
 # restoring retail on baseline sides and requiring a normal MDL load in each run.
 # HG2D_FRAMES_MDL_MANIFEST selects an alternate generated set for deliberate breaks.
 # HG2D_FRAMES_EXPECT_MDL additionally requires that specific model to load.
+# HG2D_FRAMES_SIM1 selects a rebuilt SIM1.sim for the private ours copy;
+# both baseline copies use orig/Sim/SIM1.sim. Its load is required.
 # HG2D_FRAMES_CRASH_TEST=1 enables crash detection without a modal graph in
 # the selected flight of each private copy (the source game stays unchanged).
 # HG2D_FRAMES_CRASH_ALTITUDE optionally sets that private fixture's altitude in metres.
@@ -52,6 +54,11 @@
 # wine's mode change fails on an Xvfb without that mode.  The run fails if a side drew
 # no Direct3D scenes, because otherwise it silently compares the software renderer.
 set -uo pipefail
+# Bash may otherwise read later commands from a file edited during a long
+# run. Execute a complete in-memory snapshot before starting any games.
+if [ -z "${BASH_EXECUTION_STRING:-}" ]; then
+    exec bash -c "$(cat -- "$0")" "$0" "$@"
+fi
 cd "$(dirname "$0")/.."
 root=$PWD
 flight=${1:-'Situatio\STGEORGE.STN'}
@@ -81,6 +88,13 @@ command -v Xvfb >/dev/null || { echo "needs Xvfb" >&2; exit 2; }
 
 rm -rf "$out"
 mkdir -p "$out"
+cp "$framelock" "$out/FRAMELOCK.DLL"
+framelock=$out/FRAMELOCK.DLL
+if [ -n "${HG2D_FRAMES_SIM1:-}" ]; then
+    cp "$HG2D_FRAMES_SIM1" "$out/SIM1_candidate.sim" || exit 2
+    export HG2D_FRAMES_SIM1=$out/SIM1_candidate.sim
+    sha256sum "$HG2D_FRAMES_SIM1" > "$out/sim1-build.sha256"
+fi
 cp -a "${WINEPREFIX:-$HOME/.wine}" "$out/prefix"
 export WINEPREFIX=$out/prefix
 Xvfb "$display" -screen 0 "${HG2D_FRAMES_SCREEN:-1024x768}x24" +extension GLX -ac -noreset >"$out/xvfb.log" 2>&1 &
@@ -94,6 +108,7 @@ debug=-all
 [ -z "$gauge_name" ] || debug=+loaddll
 [ -z "${HG2D_FRAMES_GAUGES:-}" ] || debug=+loaddll
 [ -z "${HG2D_FRAMES_MDLS:-}" ] || debug=+loaddll
+[ -z "${HG2D_FRAMES_SIM1:-}" ] || debug=+loaddll
 [ -z "${HG2D_FRAMES_DEVICE:-}" ] || debug=+ddraw
 [ -z "${gauge_name}${HG2D_FRAMES_GAUGES:-}${HG2D_FRAMES_MDLS:-}" ] || [ -z "${HG2D_FRAMES_DEVICE:-}" ] || debug=+loaddll,+ddraw
 export WINEDEBUG=-all
@@ -118,6 +133,15 @@ run() {     # tag hg2d
         done
     fi
     cp "$hg2d" "$copy/Modules/HG2D.DLL"
+    if [ -n "${HG2D_FRAMES_SIM1:-}" ]; then
+        local sim1=orig/Sim/SIM1.sim
+        [ "$tag" != ours ] || sim1=$HG2D_FRAMES_SIM1
+        cp "$sim1" "$copy/Sim/SIM1.sim" || exit 2
+        cmp -s "$sim1" "$copy/Sim/SIM1.sim" || exit 2
+        # Preserve detection settings while preventing retail's modal crash
+        # graph from blocking an unattended simulation trajectory comparison.
+        python3 -B tools/mdl_crash_fixture.py "$copy" "$flight" --suppress-analysis-only || exit 2
+    fi
     if [ -n "${HG2D_FRAMES_CRASH_TEST:-}" ]; then
         local fixture_altitude=()
         [ -z "${HG2D_FRAMES_CRASH_ALTITUDE:-}" ] || fixture_altitude=(--altitude "$HG2D_FRAMES_CRASH_ALTITUDE")
@@ -162,6 +186,7 @@ run() {     # tag hg2d
       FRAMELOCK_LOG="$(winepath -w "$out/$tag/frames.log")" FRAMELOCK_PASSES=$passes \
       FRAMELOCK_DUMP=${HG2D_FRAMES_DUMP:-0} FRAMELOCK_DUMP_AT=${HG2D_FRAMES_DUMP_AT:-0} \
       FRAMELOCK_HOLD=${HG2D_FRAMES_HOLD:-0} \
+      FRAMELOCK_SIM1=${HG2D_FRAMES_SIM1:+1} \
       FRAMELOCK_SCRIPT=${script:+$(winepath -w "$script")} \
       WINEDEBUG=$debug \
       timeout "${HG2D_FRAMES_TIMEOUT:-600}" wine FLTSIM98.EXE "/STN:$flight" >"$out/$tag/game.log" 2>&1 )
@@ -174,6 +199,16 @@ run() {     # tag hg2d
     [ "$status" -eq 0 ] && [ "$(tail -1 "$out/$tag/frames.log")" = "$expected_end" ] || {
         echo "$tag: game did not complete the requested passes cleanly" >&2; exit 2;
     }
+    if [ -n "${HG2D_FRAMES_SIM1:-}" ]; then
+        local sim1_loads
+        sim1_loads=$(grep -ai 'Loaded L"' "$out/$tag/game.log" | grep -ic 'sim1\.sim"')
+        echo "$tag: successful SIM1 loads $sim1_loads"
+        [ "$sim1_loads" -gt 0 ] || { echo "SIM1 never loaded" >&2; exit 2; }
+        local sim1_samples
+        sim1_samples=$(grep -Ec '^sim1 [0-9a-f]{8} [0-9a-f]{16}' "$out/$tag/frames.log")
+        echo "$tag: SIM1 numeric state samples $sim1_samples"
+        [ "$sim1_samples" -gt 0 ] || { echo "no SIM1 state observed" >&2; exit 2; }
+    fi
     if [ -n "${HG2D_FRAMES_MDLS:-}" ]; then
         local mdl_loads
         mdl_loads=$(grep -ai 'Loaded L"' "$out/$tag/game.log" | grep -ic '_N\.mdl"')

@@ -170,7 +170,18 @@ orig_module = $(if $(filter MP_DIALOG,$(1)),$(ORIG)/English/mpdialog.dll,$(if $(
   $(if $(filter MULTIP,$(1)),multip.dll,\
   $(if $(filter MPCHAT,$(1)),mpchat.DLL,$(1).DLL))))))
 
-all: $(addprefix $(BIN)/,$(addsuffix .DLL,$(ALL_MODULES))) gauges mdls
+all: $(addprefix $(BIN)/,$(addsuffix .DLL,$(ALL_MODULES))) gauges mdls sim1
+
+.PHONY: sim1 sim1-install sim1-revert
+sim1:
+	$(MAKE) -f tools/sim1.mk sim1-complete
+	@cmp -s bin/sim1-diff/SIM1_COMPLETE.DLL $(BIN)/SIM1.sim || cp bin/sim1-diff/SIM1_COMPLETE.DLL $(BIN)/SIM1.sim
+
+sim1-install: sim1
+	python3 -B tools/stage_sim1.py "$(FS98_DIR)"
+
+sim1-revert:
+	$(MAKE) -f tools/sim1.mk sim1-revert FS98_DIR="$(FS98_DIR)"
 
 # Gauge source/data generation and acceptance stay separate from dialog work.
 .PHONY: gauges gauges-check gauges-breaks gauges-panels gauges-install gauges-revert
@@ -1623,6 +1634,7 @@ install: all
 	$(MAKE) $(foreach m,$(ENGLISH_MODULES),$(call english_target,$(m))-install) FS98_DIR="$(FS98_DIR)"
 	$(MAKE) gauges-install FS98_DIR="$(FS98_DIR)"
 	$(MAKE) mdls-install FS98_DIR="$(FS98_DIR)"
+	$(MAKE) sim1-install FS98_DIR="$(FS98_DIR)"
 
 revert:
 	@for m in $(MODULES); do \
@@ -1632,6 +1644,7 @@ revert:
 	$(MAKE) $(foreach m,$(ENGLISH_MODULES),$(call english_target,$(m))-revert) FS98_DIR="$(FS98_DIR)"
 	$(MAKE) gauges-revert FS98_DIR="$(FS98_DIR)"
 	$(MAKE) mdls-revert FS98_DIR="$(FS98_DIR)"
+	$(MAKE) sim1-revert FS98_DIR="$(FS98_DIR)"
 
 modules-of:
 	@echo $(MODULES)

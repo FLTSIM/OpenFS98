@@ -16,6 +16,8 @@ def main():
     parser.add_argument('flight')
     parser.add_argument('--altitude',type=int)
     parser.add_argument('--cockpit-only',action='store_true')
+    parser.add_argument('--suppress-analysis-only',action='store_true',
+                        help='change crash mode 2 to 1; preserve modes 0 and 1')
     args=parser.parse_args()
     relative=Path(args.flight.replace('\\','/'))
     if relative.is_absolute() or '..' in relative.parts: raise ValueError('invalid flight path')
@@ -27,7 +29,9 @@ def main():
         if size<4 or cursor+size>len(data): raise ValueError('invalid situation record')
         if tag==0x16:
             if size!=5: raise ValueError('crash mode record changed size')
-            data[cursor+4]=1;changed+=1
+            if not args.suppress_analysis_only or data[cursor+4]==2:
+                data[cursor+4]=1
+            changed+=1
         if tag==3 and args.altitude is not None:
             if size!=34: raise ValueError('position record changed size')
             data[cursor+16:cursor+22]=(args.altitude*65536).to_bytes(6,'little',signed=True)
@@ -47,7 +51,9 @@ def main():
         raise ValueError('expected cockpit and non-cockpit window records')
     for start,end in reversed(remove): del data[start:end]
     path.write_bytes(data)
-    print(f'Private crash fixture: {relative}, detection enabled, analysis graph disabled, altitude={args.altitude}, removed windows={len(remove)}')
+    print(f'Private crash fixture: {relative}, analysis graph disabled, '
+          f'detection={"preserved" if args.suppress_analysis_only else "enabled"}, '
+          f'altitude={args.altitude}, removed windows={len(remove)}')
 
 
 if __name__=='__main__': main()

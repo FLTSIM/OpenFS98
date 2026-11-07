@@ -1,0 +1,18 @@
+LIBRARY SIM1_COMPLETE_TEST.DLL
+EXPORTS
+    Linkage DATA
+    ImportTable DATA
+    Sim1AirDecoder=sim1_entry_af90
+    Sim1Address=sim1_lift_address
+    Sim1TickCallback=sim1_chain_tick
+    Sim1FrameCallback=sim1_chain_frame
+    Sim1Orientation=sim1_entry_40d0
+    Sim1RecordWrite=sim1_record_write
+    Sim1RecordRead=sim1_record_read
+    Sim1LegacyRead=sim1_legacy_read
+    Sim1Velocity=sim1_velocity
+    Sim1RestoreState=sim1_restore_state
+    Sim1SaveSituation=sim1_save_situation
+    Sim1RetainState=sim1_retain_state
+    Sim1SituationCallback=sim1_situation_callback
+    Sim1NativeProbe=sim1_native_probe

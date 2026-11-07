@@ -69,6 +69,7 @@ static LPTIMECALLBACK timer_callback;
 static DWORD_PTR timer_user;
 static HANDLE log_handle = INVALID_HANDLE_VALUE;
 static HANDLE global_handle = INVALID_HANDLE_VALUE;
+static uint32_t sim1_states;
 static char log_dir[MAX_PATH];
 
 static struct { uint32_t pass, message, wparam, lparam; } script[MAX_SCRIPT];
@@ -470,6 +471,34 @@ static void hold_for_screenshot(void)
 
 static void main_loop_pass(void)
 {
+    if (sim1_states) {
+        /* Numeric fields of SIM1's 0xc0-byte saved-state record. Recording
+         * them directly avoids calling a module while observing it and
+         * excludes pointers whose addresses differ between processes.
+         */
+        static const uint32_t offsets[] = {
+            0x1538, 0x1540, 0x1548, 0x13e8, 0x13f0, 0x13f8,
+            0x13a0, 0x13a8, 0x13b0, 0x15a8, 0x1358, 0x1360,
+            0x1368, 0x1328, 0x1330, 0x1338, 0x1418, 0x1420,
+            0x1428, 0x13b8, 0x13c0, 0x13c8, 0x1760
+        };
+        HMODULE module = GetModuleHandleA("SIM1.sim");
+        const uint8_t *image = module ? (const uint8_t *)GetProcAddress(module, "ImportTable") : 0;
+        char line[512], *at = put_text(line, "sim1 ");
+        uint32_t index;
+        at = put_hex(at, passes);
+        if (image) {
+            for (index = 0; index < sizeof offsets / sizeof offsets[0]; index++) {
+                const uint32_t *value = (const uint32_t *)(image + offsets[index]);
+                *at++ = ' '; at = put_hex(at, value[0]); at = put_hex(at, value[1]);
+            }
+            *at++ = ' '; at = put_hex(at, *(const uint32_t *)(image + 0x1d18));
+            *at++ = ' '; at = put_hex(at, ((const uint8_t *)ImportTable[0].link)[0x366]);
+        } else {
+            at = put_text(at, " absent");
+        }
+        *at++ = '\n'; log_line(line, at);
+    }
     if (global_handle != INVALID_HANDLE_VALUE) {
         DWORD wrote;
         WriteFile(global_handle, (const void *)ImportTable[0].link, GLOBAL_SIZE, &wrote, 0);
@@ -701,6 +730,7 @@ BOOL WINAPI DllMain(HINSTANCE inst, DWORD reason, LPVOID reserved)
         dump_every = environment_number("FRAMELOCK_DUMP", 0);
         dump_at = environment_number("FRAMELOCK_DUMP_AT", 0);
         hold_every = environment_number("FRAMELOCK_HOLD", 0);
+        sim1_states = environment_number("FRAMELOCK_SIM1", 0);
         reg_wanted = environment_number("FRAMELOCK_REGS", 0);
         read_script();
         if (GetEnvironmentVariableA("FRAMELOCK_GLOBAL", path, sizeof path))

@@ -12,3 +12,16 @@ void SC fs98_simsui_vector_destroy(void *array, uint32_t size, int32_t count, vo
         destroy(element);
     }
 }
+/* 0x20483310, `eh vector constructor iterator': each of count elements, first first. Were a
+ * constructor to throw, the ones made would be destroyed (0x20483388); none here throws. */
+void SC fs98_simsui_vector_construct(void *array, uint32_t size, int32_t count, void *(TC *construct)(void *),
+                                     void (TC *destroy)(void *))
+{
+    uint8_t *element = array;
+    int32_t at;
+    (void)destroy;
+    for (at = 0; at < count; ++at) {
+        construct(element);
+        element += size;
+    }
+}

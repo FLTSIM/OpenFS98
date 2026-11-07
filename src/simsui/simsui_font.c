@@ -125,16 +125,16 @@ FS98_SIMSUI_NOINLINE void TC fs98_simsui_font_draw_text(void *font, void *dc, ui
     CALL_THIS(MFC_283, void *, (void *, uint32_t))(brush, colour_back);
     VIRTUAL(dc, DC_FONT, void *, (void *, void *))(dc, PTR(font, 4));
     if (!D32(font, 0x54)) {
-        int32_t width, half, corner;
+        int32_t height, half, corner;
         VIRTUAL(dc, DC_STOCK, void *, (void *, int32_t))(dc, 8);
         CALL_THIS(MFC_5787, void *, (void *, void *))(dc, brush);
-        width = rect.right - rect.left;
-        half = width / 2;
+        height = rect.bottom - rect.top;     /* a pill's ends are round: the height is their size */
+        half = height / 2;
         if (D32(font, 0x50)) {
             uint16_t shape = D16(font, 0x58);
             corner = 0;
-            I32(font, 0x40) = width;
-            if ((shape & 5) && !(shape & 0xa)) corner = width;
+            I32(font, 0x40) = height;
+            if ((shape & 5) && !(shape & 0xa)) corner = height;
             if (corner) {
 #define RECTANGLE(a, b, c, d) CALL_STD(Rectangle, int32_t, (uint32_t, int32_t, int32_t, int32_t, int32_t))(D32(dc, 4), a, b, c, d)
 #define PIE(a, b, c, d, e, f, g, h) CALL_STD(Pie, int32_t, (uint32_t, int32_t, int32_t, int32_t, int32_t, int32_t, int32_t, \

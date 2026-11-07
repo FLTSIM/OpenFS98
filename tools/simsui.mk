@@ -3,7 +3,7 @@ CC := i686-w64-mingw32-gcc
 SIMSUI_DIR := bin/simsui-diff
 N ?= 2000
 SEED ?= 0x51c5e1
-SIMSUI_SOURCES := src/simsui/simsui_crt.c src/simsui/simsui_util.c src/simsui/simsui_dib.c src/simsui/simsui_fonts.c src/simsui/simsui_dibsection.c src/simsui/simsui_small.c src/simsui/simsui_font.c
+SIMSUI_SOURCES := src/simsui/simsui_crt.c src/simsui/simsui_util.c src/simsui/simsui_dib.c src/simsui/simsui_fonts.c src/simsui/simsui_dibsection.c src/simsui/simsui_small.c src/simsui/simsui_font.c src/simsui/simsui_button.c src/simsui/simsui_check.c src/simsui/simsui_combo.c src/simsui/simsui_dialog.c src/simsui/simsui_tabs.c src/simsui/simsui_edit.c src/simsui/simsui_groupbox.c src/simsui/simsui_listbox.c src/simsui/simsui_picture.c src/simsui/simsui_radio.c src/simsui/simsui_shadowbutton.c src/simsui/simsui_shadow.c src/simsui/simsui_slider.c src/simsui/simsui_text.c src/simsui/simsui_textart.c
 SIMSUI_HEADERS := src/simsui/simsui_internal.h src/simsui/simsui_tables.inc
 SIMSUI_HARNESS := tools/difftest/simsuidiff.c tools/difftest/simsui_semantics.inc tools/difftest/simsui_operations.inc
 # loops stay loops, in retail's order: no library calls or vectors made of them

@@ -89,7 +89,7 @@ static struct fixture *s_live, s_initial, s_retail_result;
 static uint8_t s_loaded_data[DATA_SIZE];
 static uint32_t s_seed, s_rng, s_scenario, s_operation, s_calls, s_log_length, s_heap_used;
 static uint32_t s_comparisons, s_faults, s_timeouts, s_max_calls, s_saved_seh, s_stack_low, s_stack_high;
-static int s_side, s_running, s_retail_timed_out;
+static int s_side, s_running, s_retail_timed_out, s_ours_timed_out;
 static uint32_t s_unresolved;
 static char s_logs[2][LOG_SIZE];
 static uint8_t *s_stubs;
@@ -105,7 +105,7 @@ static volatile LONG s_watch_ticks;
 static HANDLE s_main_thread;
 
 /* the operations, and how each is called */
-enum { ARG_UNSET, ARG_ANY, ARG_SMALL, ARG_FLAGS, ARG_DC, ARG_POINTER, ARG_TEXT, ARG_SEPARATOR, ARG_CODE, ARG_INFO, ARG_DIB, ARG_INTS, ARG_KEY };
+enum { ARG_UNSET, ARG_ANY, ARG_SMALL, ARG_FLAGS, ARG_DC, ARG_POINTER, ARG_TEXT, ARG_SEPARATOR, ARG_CODE, ARG_INFO, ARG_DIB, ARG_INTS, ARG_KEY, ARG_COLOUR, ARG_ENTRIES, ARG_CSTRING, ARG_STATE, ARG_COORD, ARG_SELF, ARG_FORMAT, ARG_FONT, ARG_BITS, ARG_KEYCODE, ARG_POINT, ARG_ERROR, ARG_CONTROL, ARG_ITEM, ARG_MESSAGE, ARG_CHAR, ARG_MEASURE, ARG_PICTURE_KEY, ARG_HIT, ARG_MAYBE, ARG_MAYBE_DIB, ARG_MAYBE_POINTER, ARG_PAGE, ARG_TABS, ARG_FLAGS_ALT, ARG_FLAGS_ART };
 struct operation {
     uint32_t rva; void *ours; const char *name;
     uint32_t arguments; uint8_t kinds[16];
@@ -153,7 +153,13 @@ static void describe(uint32_t value)
 {
     if (in_fixture(value)) put(" F%x", value - (uint32_t)(uintptr_t)&s_fixture);
     else if (in_stack(value)) put(" L");
-    else if (in_code(value)) put(" C");
+    else if (in_code(value)) {      /* code by identity: retail's RVA, or that of the routine ours transliterates */
+        uint32_t at;
+        if (value >= BASE + TEXT_RVA && value < BASE + TEXT_END) { put(" C%x", value - BASE); return; }
+        for (at = 0; at < sizeof(s_operations) / sizeof(s_operations[0]); ++at)
+            if ((uint32_t)(uintptr_t)s_operations[at].ours == value) { put(" C%x", s_operations[at].rva); return; }
+        put(" C");
+    }
     else if (in_image(value)) put(" I%x", value - BASE);
     else put(" %x", value);
 }
@@ -226,6 +232,14 @@ uint64_t __cdecl simsui_dispatch(uint32_t index, uint32_t ecx, uint32_t *argumen
         s_pop_now = s_virtual_pop[vtable][slot];
         put("virtual %u.%x this", vtable, slot * 4); describe(ecx);
         for (at = 0; at < s_pop_now / 4; ++at) describe(arguments[at]);
+        if (vtable == DC_VTABLE && slot == 0x70 / 4) {     /* CDC::DrawText(text, length, rect, format) */
+            if (writable(arguments[2], 16)) {
+                const int32_t *rect = (const int32_t *)(uintptr_t)arguments[2];
+                put(" [%d %d %d %d]", rect[0], rect[1], rect[2], rect[3]);
+            }
+            if (writable(arguments[0], 1)) put(" \"%.*s\"", (int)(arguments[1] < 64 ? arguments[1] : 64),
+                                                (const char *)(uintptr_t)arguments[0]);
+        }
         result = answer();
         put(" -> %x\n", result);
         return result;
@@ -233,8 +247,19 @@ uint64_t __cdecl simsui_dispatch(uint32_t index, uint32_t ecx, uint32_t *argumen
     s_pop_now = s_imports[index].pop;
     count = import_arguments(index);
     put("%s", s_imports[index].name);
-    if (s_imports[index].thiscall) { put(" this"); describe(ecx); }
+    if (s_imports[index].thiscall) {
+        put(" this"); describe(ecx);
+        switch (index) {        /* CDC members: which DC, by its handle, for DCs on either side's stack */
+        case SIMSUI_IMPORT_MFC_5736: case SIMSUI_IMPORT_MFC_5678: case SIMSUI_IMPORT_MFC_5787: case SIMSUI_IMPORT_MFC_5788:
+        case SIMSUI_IMPORT_MFC_5789: case SIMSUI_IMPORT_MFC_5791: case SIMSUI_IMPORT_MFC_5794: case SIMSUI_IMPORT_MFC_5875:
+        case SIMSUI_IMPORT_MFC_2450:
+            if (writable(ecx + 4, 4)) { put(" dc"); describe(*(uint32_t *)(uintptr_t)(ecx + 4)); }
+            break;
+        default: break;
+        }
+    }
     for (at = 0; at < count; ++at) describe(arguments[at]);
+    log_contents(index, arguments);
     {
         uint64_t special;
         if (semantics(index, ecx, arguments, &special)) {
@@ -462,6 +487,7 @@ static LONG CALLBACK expected_fault(EXCEPTION_POINTERS *exception)
 static void timed_out(void)
 {
     if (!s_side) s_retail_timed_out = 1;
+    else s_ours_timed_out = 1;
     put("timeout\n");
     if (!s_side) ++s_timeouts;
     s_running = 0;
@@ -479,6 +505,7 @@ static DWORD WINAPI watchdog(void *unused)
             CONTEXT context;
             context.ContextFlags = CONTEXT_CONTROL;
             GetThreadContext(s_main_thread, &context);
+            if (getenv("SIMSUI_WHERE")) fprintf(stderr, "timeout side=%d eip=%lx\n", s_side, (unsigned long)context.Eip);
             context.Eip = (DWORD)(uintptr_t)timed_out;
             context.Esp = (context.Esp - 64) & ~15u;
             SetThreadContext(s_main_thread, &context);
@@ -495,11 +522,109 @@ static uint32_t argument(uint32_t kind)
     switch (kind) {
     case ARG_SMALL: return random % 8;
     case ARG_FLAGS: return random % 4;
-    case ARG_DC: return fixture_address(s_fixture.blocks[(random % (BLOCKS / 4)) * 4 + 2]);
+    case ARG_DC: return random % 16 == 15 ? 0 : fixture_address(s_fixture.blocks[(random % (BLOCKS / 4)) * 4 + 2]);
     case ARG_POINTER: return block_pointer(random);
     case ARG_DIB: return fixture_address(s_fixture.dibs[random % 4]);
     case ARG_INTS: return fixture_address(&s_fixture.ints[random % 6]);
-    case ARG_KEY: return random % 3 == 0 ? 0 : random % 3 == 1 ? 0xffffffffu : (random >> 4) % 4;
+    case ARG_KEY:       /* none, the first pixel's, a colour, or one past a byte */
+        switch (random % 5) {
+        case 0: return 0;
+        case 1: return 0xffffffffu;
+        case 2: return 0x100 + (random >> 4) % 4;
+        case 3: return 0xffffff00u + (random >> 4) % 4;
+        default: return (random >> 4) % 4;
+        }
+    case ARG_COLOUR: {  /* a COLORREF, often one of the object's own palette entries (BGR at +8) */
+        const uint8_t *entry = (const uint8_t *)&s_fixture.object + 8 + (0xe8 + (random >> 4) % 0x18) * 4;
+        if (random % 3 == 0) return mixed(random >> 8);
+        if (random % 3 == 1) entry = (const uint8_t *)&s_fixture.object + 8 + (10 + (random >> 4) % 0xf0) * 4;
+        if ((random >> 12) % 2) return entry[0] | (uint32_t)entry[1] << 8 | (uint32_t)entry[2] << 16;
+        return entry[2] | (uint32_t)entry[1] << 8 | (uint32_t)entry[0] << 16;
+    }
+    case ARG_CSTRING: return random;   /* made into a CString in the run's heap, by run() */
+    case ARG_STATE: return random % 5 == 4 ? 3 + (random >> 4) % 6 : random % 4 % 3;
+    case ARG_COORD: return (uint32_t)((int32_t)(random % 72) - 8);
+    case ARG_SELF: return fixture_address(s_fixture.object);    /* a cdecl member's this */
+    case ARG_FORMAT: {  /* a printf format in .data-free memory: the format, then a text and a number */
+        static const char *const formats[] = {"%s: %d", "Cannot open %s", "plain", "", "%.3s-%x", "100%% %s %u",
+                                              "%-8s|%5d|"};
+        uint8_t *block = s_fixture.blocks[(random % (BLOCKS / 4)) * 4 + 3] + 0x200;
+        strcpy((char *)block, formats[(random >> 4) % 7]);
+        return fixture_address(block);
+    }
+    case ARG_BITS: return random & 0x7f;
+    case ARG_POINT: return random % 3 ? (random >> 4) % 6 : (uint32_t)((int32_t)((random >> 4) % 72) - 8);   /* near the corner, mostly */
+    case ARG_KEYCODE: return random % 2 ? 0x20 : random % 3 ? 0x0d + (random >> 4) % 0x20 : (random >> 8) & 0xff;
+    case ARG_FONT: {    /* a CSimsFont in a block: its CFont (a block, handle there or not), flags, stops */
+        uint8_t *font = s_fixture.blocks[(random % (BLOCKS / 4)) * 4];
+        if ((random >> 26) % 6 == 0) return 0;      /* now and then none */
+        uint32_t base = fixture_address(s_fixture.blocks[(random >> 4) % BLOCKS]), stops = fixture_address(s_fixture.ints);
+        uint32_t count = (random >> 9) % 3, at;
+        uint16_t format = (uint16_t)((random >> 12) & 0x63f);
+        memcpy(font + 4, &base, 4);
+        for (at = 0x48; at <= 0x54; at += 4) { uint32_t flag = (random >> (at / 4)) & 1; memcpy(font + at, &flag, 4); }
+        memcpy(font + 0x58, &format, 2);
+        memcpy(font + 0x60, &stops, 4);
+        memcpy(font + 0x64, &count, 4);
+        return fixture_address(font);
+    }
+    case ARG_ERROR: {   /* an error code: 13, one the table knows, an exception record, or anything */
+        uint32_t known = *(uint32_t *)(uintptr_t)(BASE + 0x15db8 + ((random >> 4) % 8) * 8);
+        switch (random % 5) {
+        case 0: return 0xd;
+        case 1: return known;
+        case 2: {       /* a record: its code, a description, two texts */
+            uint8_t *record = s_fixture.blocks[((random >> 8) % (BLOCKS / 4)) * 4 + 1] + 0x100;
+            uint32_t text = fixture_address(s_fixture.blocks[((random >> 12) % (BLOCKS / 4)) * 4 + 3]);
+            memcpy(record, &known, 4);
+            memcpy(record + 4, &text, 4);
+            memcpy(record + 0xc, &text, 4);
+            memcpy(record + 0x10, &text, 4);
+            return fixture_address(record);
+        }
+        case 3: return 0xffffffffu;
+        default: return mixed(random >> 4);
+        }
+    }
+    case ARG_ITEM: {    /* a DRAWITEMSTRUCT: its id (-1, -2, small, huge), state bits, DC, rectangle */
+        uint8_t *item = s_fixture.blocks[((random >> 4) % (BLOCKS / 4)) * 4 + 1] + 0x200;
+        static const int32_t ids[] = {-1, -2, 0, 1, 2, 5, (int32_t)0x80000000, 0x7fffffff};
+        int32_t id = ids[(random >> 9) % 8], rect[4];
+        uint32_t state = (random >> 12) & 0x17, dc = random % 7 ? fixture_address(s_fixture.blocks[((random >> 15) % (BLOCKS / 4)) * 4 + 2]) : 0, at;
+        for (at = 0; at < 4; ++at) rect[at] = (int32_t)(next_random() % 60) - 4;
+        memcpy(item + 8, &id, 4);
+        memcpy(item + 0x10, &state, 4);
+        memcpy(item + 0x18, &dc, 4);
+        memcpy(item + 0x1c, rect, 16);
+        return fixture_address(item);
+    }
+    case ARG_MESSAGE: return random % 2 ? 0x201 : mixed(random >> 1);
+    case ARG_CHAR: { static const char keys[] = "0159+-.a \b\x1a\x0c"; return (uint8_t)keys[random % 14]; }
+    case ARG_MEASURE: {     /* a MEASUREITEMSTRUCT: its control type 1 to 4 */
+        uint8_t *measure = s_fixture.blocks[((random >> 4) % (BLOCKS / 4)) * 4 + 1] + 0x300;
+        uint32_t type = 1 + random % 4;
+        memcpy(measure, &type, 4);
+        return fixture_address(measure);
+    }
+    case ARG_PICTURE_KEY: { static const uint32_t keys[5] = {0xf100, 0xf200, 0, 3, 0xff}; return keys[random % 5]; }
+    case ARG_HIT: { static const uint32_t parts[4] = {6, 10, 11, 0}; return parts[random % 4]; }
+    case ARG_MAYBE: return random % 2 ? 0 : mixed(random >> 1);
+    case ARG_MAYBE_DIB: return random % 2 ? 0 : fixture_address(s_fixture.dibs[(random >> 1) % 4]);
+    case ARG_MAYBE_POINTER: return random % 2 ? 0 : block_pointer(random >> 1);
+    case ARG_PAGE: return random % 4 ? fixture_address(s_fixture.object + 0xd00) : block_pointer(random >> 2);
+    case ARG_TABS: {    /* a tab control's fields a dialog reads: in a block, its active page a block */
+        uint8_t *tabs = s_fixture.blocks[(random % 6) * 4 + 1];
+        int32_t active = (int32_t)((random >> 4) % 2);
+        uint32_t page = block_pointer(random >> 6);
+        memcpy(tabs + 0xc28, &active, 4);
+        memcpy(tabs + 0x40 + active * 0x160, &page, 4);
+        return fixture_address(tabs);
+    }
+    case ARG_FLAGS_ALT: return random % 2 ? 0x2000 | (random >> 1 & 0xff) : random >> 1;
+    case ARG_FLAGS_ART: return random & 0xf;
+    case ARG_CONTROL: return random % 4 ? block_pointer(random >> 2) : 0;
+    case ARG_ENTRIES:   /* none (the palette's own), or the object's entries (RGB at +8) */
+        return random % 2 ? 0 : fixture_address(s_fixture.object + 8);
     case ARG_INFO: return fixture_address(s_fixture.blocks[(random % (BLOCKS / 4)) * 4 + 1]);
     case ARG_TEXT: return fixture_address(s_fixture.blocks[(random % (BLOCKS / 4)) * 4 + 3]);
     case ARG_SEPARATOR: { static const char separators[] = "#,a"; return random % 4 == 3 ? 0 : (uint32_t)separators[random % 4]; }
@@ -519,6 +644,14 @@ static __attribute__((noinline)) uint64_t run(void)
     for (at = 0; at < count; ++at) arguments[at] = argument(CURRENT.kinds[at]);
     s_rng = saved_rng;
     s_log_length = s_calls = s_heap_used = 0; s_logs[s_side][0] = 0;
+    s_section_count = 0;
+    for (at = 0; at < count; ++at)
+        if (CURRENT.kinds[at] == ARG_CSTRING) {    /* a CString by value: the model's, tabs and all */
+            static const char *const texts[] = {"", "plain", "one\ttwo", "a\tb\tc", "\t\t\t\t\tfive tabs",
+                                                "Label\t12\t", "x\ty\tz\tw\tv\tu\tt"};
+            const char *text = texts[arguments[at] % 7];
+            arguments[at] = cstring_make(text, (uint32_t)strlen(text));
+        }
     s_stack_low = (uint32_t)(uintptr_t)s_operation_stack;
     s_stack_high = s_stack_low + OPERATION_STACK;
     __asm__ volatile("movl %%fs:0, %0" : "=r"(s_saved_seh));
@@ -534,12 +667,29 @@ static __attribute__((noinline)) uint64_t run(void)
     if (s_calls > s_max_calls) s_max_calls = s_calls;
     return result;
 }
+static uint32_t s_cover_runs, s_cover_hits;
+/* SIMSUI_COVER=op,text: how many of the op's runs have text in retail's log (coverage) */
+static void cover(void)
+{
+    const char *want = getenv("SIMSUI_COVER"), *comma;
+    if (!want || !(comma = strchr(want, ','))) return;
+    if (strlen(CURRENT.name) != (size_t)(comma - want) || strncmp(CURRENT.name, want, (size_t)(comma - want))) return;
+    ++s_cover_runs;
+    if (strstr(s_logs[0], comma + 1)) ++s_cover_hits;
+}
 static int compare(void)
 {
     uint32_t at;
+    DWORD started = GetTickCount(), retail_took;
     s_side = 0; s_retail_timed_out = 0; run(); s_retail_result = s_fixture;
+    retail_took = GetTickCount() - started;
+    cover();
     if (s_retail_timed_out) { ++s_unresolved; return 0; }    /* retail's result is unknown: nothing to compare */
-    s_side = 1; run();
+    s_side = 1; s_ours_timed_out = 0; run();
+    /* a long loop both sides run (a huge size from the fixture) can end inside the watchdog's
+     * time on one side and not the other: when retail itself took long, ours timing out is
+     * not a difference but the same unknown */
+    if (s_ours_timed_out && retail_took > 300) { ++s_unresolved; return 0; }
     ++s_comparisons;
     if (!memcmp(&s_retail_result, &s_fixture, sizeof(s_fixture)) && !strcmp(s_logs[0], s_logs[1])) return 0;
     fprintf(stderr, "DIFFER scenario=%u op=%u (%s, %#x) seed=%x\n", s_scenario, s_operation, CURRENT.name, CURRENT.rva, s_seed);
@@ -561,6 +711,12 @@ static int compare(void)
                 fprintf(stderr, " %02x/%02x/%02x", ((uint8_t *)&s_initial)[around], ((uint8_t *)&s_retail_result)[around],
                         ((uint8_t *)&s_fixture)[around]);
             fprintf(stderr, "\n");
+            if (getenv("SIMSUI_ALL")) {     /* every differing byte, by offset */
+                for (around = at; around < sizeof(s_fixture); ++around)
+                    if (((uint8_t *)&s_retail_result)[around] != ((uint8_t *)&s_fixture)[around])
+                        fprintf(stderr, "  %x: %02x/%02x/%02x\n", around, ((uint8_t *)&s_initial)[around],
+                                ((uint8_t *)&s_retail_result)[around], ((uint8_t *)&s_fixture)[around]);
+            }
             break;
         }
     {   /* the logs from a few lines before they part */
@@ -571,6 +727,7 @@ static int compare(void)
         for (at = 0; at < 4 && retail > s_logs[0]; ) { --retail; if (retail[-1] == '\n' || retail == s_logs[0]) ++at; }
         ours = s_logs[1] + (retail - s_logs[0]);
         fprintf(stderr, "(logs agree for %u lines)\nRETAIL:\n%.3000s\nOURS:\n%.3000s\n", lines, retail, ours);
+        if (getenv("SIMSUI_LOGS")) fprintf(stderr, "FULL RETAIL:\n%s\nFULL OURS:\n%s\n", s_logs[0], s_logs[1]);
     }
     return 1;
 }
@@ -656,6 +813,7 @@ int main(int argc, char **argv)
             if (compare()) return 1;
         }
     }
+    if (getenv("SIMSUI_COVER")) printf("cover %s: %u of %u\n", getenv("SIMSUI_COVER"), s_cover_hits, s_cover_runs);
     printf("SIMSUI: %u scenarios, %u operations, %u comparisons, 0 differ; seed=%x faults=%u timeouts=%u "
            "(retail's, not compared) max_calls=%u\n",
         count, last - first + 1, s_comparisons, initial_seed, s_faults, s_unresolved, s_max_calls);

@@ -86,6 +86,59 @@ def mfc_pops():
     return pops
 
 
+# members whose code opens with a call (so ecx is not seen read) and whose callers set ecx
+# further back than the vote looks: ~CPaintDC
+MEMBERS_SEEN = {755}
+
+
+def reads_ecx(instructions, addresses, target):
+    """Whether a routine reads ecx before it writes it (or calls out): MFC's members, which
+    take this in ecx, do; its static and global functions do not."""
+    address, seen = target, 0
+    positions = {value: index for index, value in enumerate(addresses)}
+    while address in instructions and seen < 60:
+        mnemonic, operands = instructions[address]
+        seen += 1
+        destination, _, source = operands.partition(',')
+        if mnemonic in ('call', 'ret', 'int3'):
+            return False
+        if mnemonic == 'jmp':
+            if re.match(r'^0x[0-9a-f]+$', operands) and int(operands, 16) in instructions:
+                address = int(operands, 16)
+                continue
+            return 'ecx' in operands
+        if mnemonic == 'pop' and operands == 'ecx':
+            return False
+        if mnemonic == 'xor' and operands == 'ecx,ecx':
+            return False
+        if mnemonic in ('mov', 'lea', 'movzx', 'movsx') and destination == 'ecx':
+            return 'ecx' in source
+        if 'ecx' in operands:
+            return True
+        index = positions.get(address)
+        if index is None or index + 1 >= len(addresses):
+            return False
+        address = addresses[index + 1]
+    return False
+
+
+def mfc_members():
+    pe = Fs98Pe(MFC)
+    rva, _ = pe.directory(0)
+    offset = pe.file_offset(rva, 40)
+    ordinal_base = pe.read_uint32(offset + 16)
+    count = pe.read_uint32(offset + 20)
+    functions = pe.read_uint32(offset + 28)
+    instructions = disassemble(pe)
+    addresses = sorted(instructions)
+    members = set()
+    for index in range(count):
+        target = pe.uiBase + pe.read_uint32(pe.file_offset(functions + index * 4, 4))
+        if target in instructions and reads_ecx(instructions, addresses, target):
+            members.add(index + ordinal_base)
+    return members
+
+
 def ident(dll, name):
     if dll == 'MFC42.DLL':
         return 'MFC_' + name[1:]
@@ -156,6 +209,7 @@ def main():
     import_pops = {}
     win32 = win32_pops()
     mfc = mfc_pops()
+    members = mfc_members()
     rows = []
     for index, entry in enumerate(imports):
         dll, name = entry['dll'].upper(), entry['name']
@@ -167,9 +221,12 @@ def main():
             pop = win32[name]
         import_pops[index] = pop
         votes = member.get(index, [])
-        thiscall = int(dll == 'MFC42.DLL' and bool(votes) and sum(votes) * 2 > len(votes))
+        # a member: its code reads ecx first, or its callers load ecx just before (for those
+        # that open with __EH_prolog, a call that keeps ecx)
+        thiscall = int(dll == 'MFC42.DLL' and (int(name[1:]) in members or int(name[1:]) in MEMBERS_SEEN or
+                                               (bool(votes) and sum(votes) * 2 > len(votes))))
         # a caller-cleaned import's arguments: the least its callers remove after it
-        arguments = min(cleanup[index]) // 4 if pop == 0 and index in cleanup else pop // 4
+        arguments = min(cleanup[index]) // 4 if pop == 0 and index in cleanup and not thiscall else pop // 4
         rows.append(f'SIMSUI_IMPORT({index}, {ident(dll, name)}, "{dll}", "{name}", {entry["iat_va"] - base:#x}, '
                     f'{pop}, {thiscall}, {arguments})')
 

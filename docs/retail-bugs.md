@@ -51,6 +51,7 @@ New bugs found while reimplementing go here as well as in the module's own doc.
 | SUI-9 | CSimsSlider::OnMouseMove, `0x2047e480`; `src/simsui/simsui_slider.c` | Clamps the dragged thumb's offset from the track's start to the margin plus the travel, where the travel alone is the end: past the end the thumb can go a margin too far. | Dragging past a slider's right end. | Clamp to the travel. |
 | SUI-10 | CSimsSlider::OnSliderClicked, `0x2047eef0`; `src/simsui/simsui_slider.c` | Stepping right past the last position sets the position to the travel less 6 (a pixel count, not a position) and does not move the thumb. | A click on the track after the thumb at the last position. | Clamp to the last position and move the thumb. |
 | SUI-11 | CSimsText::GetWindowTextA(char *, int), `0x204819a0`; `src/simsui/simsui_text.c` | Once the text has a font, copies its own text whole into the buffer without looking at the buffer's size. | A caller's buffer shorter than the text. | Copy at most the room less one, and end it. |
+| SUI-12 | CDIB::Load(resource id, instance), `0x20476fc0`; `src/simsui/simsui_cdib.c` | Measures a 1-bit row as the width shifted right by 7 (plus one if the width is not a multiple of 8) instead of by 3, so it copies an eighth of a 1-bit bitmap's bits. | Loading a 1-bit bitmap resource into the unexported CDIB class, which nothing in FS98 does (it is creatable only by its runtime class's name). | Shift by 3. |
 
 ## MAIN.DLL
 

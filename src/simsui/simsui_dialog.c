@@ -581,3 +581,110 @@ void TC fs98_simsui_dialog_post_kill_focus(void *dialog, uint32_t id)
     uint32_t window = PTR(dialog, 0x7c) ? D32(fs98_simsui_tabs_active_page(PTR(dialog, 0x7c)), 0x20) : D32(dialog, 0x20);
     CALL_STD(PostMessageA, int32_t, (uint32_t, uint32_t, uint32_t, uint32_t))(window, 0x5f4, id, 0);
 }
+/* 0x20476290, OnActivate(state, other, minimised): the palette realised and its colours set
+ * into a memory DC's table (the identity table when the screen has a palette), validating
+ * set while active; the tab control redrawn and its page told; the focus kept while inactive
+ * and given back (0x5fa) once active again, unless an edit is being validated. The windows
+ * active and in the foreground have their threads asked and the answers dropped. */
+void TC fs98_simsui_dialog_activate(void *dialog, uint32_t state, void *other, uint32_t minimised)
+{
+    uint8_t memory[0x10], client[0x14];
+    uint32_t threads[2], active, foreground, page_window;
+    uint8_t *pal = AT(dialog, 0x7e8);
+    void *old_pal;
+    CALL_THIS(MFC_323, void *, (void *))(memory);
+    CALL_THIS(MFC_289, void *, (void *, void *))(client, dialog);
+    old_pal = CALL_THIS(MFC_5791, void *, (void *, void *, int32_t))(client, pal, 0);
+    CALL_STD(RealizePalette, uint32_t, (uint32_t))(D32(client, 4));
+    CALL_THIS(MFC_1640, int32_t, (void *, uint32_t))(memory, CALL_STD(CreateCompatibleDC, uint32_t, (uint32_t))(D32(client, 4)));
+    CALL_STD(ReleaseCapture, int32_t, (void))();
+    threads[0] = 0;
+    D32(dialog, 0x7dc) = state != 0;
+    D32(pal, 0x808) = state != 0;
+    threads[1] = 0;
+    active = CALL_STD(GetActiveWindow, uint32_t, (void))();
+    foreground = CALL_STD(GetForegroundWindow, uint32_t, (void))();
+    if (active) CALL_STD(GetWindowThreadProcessId, uint32_t, (uint32_t, uint32_t *))(active, &threads[0]);
+    if (foreground) CALL_STD(GetWindowThreadProcessId, uint32_t, (uint32_t, uint32_t *))(foreground, &threads[1]);
+    if (!D32(pal, 0x808) && CALL_STD(GetDeviceCaps, int32_t, (uint32_t, int32_t))(D32(memory, 8), 0x26) & 0x100)
+        CALL_STD(SetDIBColorTable, uint32_t, (uint32_t, uint32_t, uint32_t, const void *))(D32(memory, 4), 0, 0x100, pal + 0x408);
+    else
+        CALL_STD(SetDIBColorTable, uint32_t, (uint32_t, uint32_t, uint32_t, const void *))(D32(memory, 4), 0, 0x100, pal + 8);
+    if (old_pal) CALL_THIS(MFC_5791, void *, (void *, void *, int32_t))(client, old_pal, 1);
+    if (PTR(dialog, 0x7c)) {
+        void *page = fs98_simsui_tabs_active_page(PTR(dialog, 0x7c));
+        page_window = page ? D32(page, 0x20) : 0;
+        CALL_STD(RedrawWindow, int32_t, (uint32_t, const void *, uint32_t, uint32_t))(D32(PTR(dialog, 0x7c), 0x20), 0, 0, 0x105);
+        CALL_STD(PostMessageA, int32_t, (uint32_t, uint32_t, uint32_t, uint32_t))(
+            page_window, 6, state, (minimised & 0xffff) << 16 | ((other ? D32(other, 0x20) : 0) & 0xffff));
+    }
+    if (!state)
+        D32(dialog, 0x7d4) = CALL_STD(GetFocus, uint32_t, (void))();
+    else {
+        if (!D32(dialog, 0x7d0) && D32(dialog, 0x7d4) && CALL_STD(IsWindowEnabled, int32_t, (uint32_t))(D32(dialog, 0x7d4)))
+            CALL_STD(PostMessageA, int32_t, (uint32_t, uint32_t, uint32_t, uint32_t))(D32(dialog, 0x20), 0x5fa, D32(dialog, 0x7d4), 0);
+        D32(dialog, 0x7d4) = 0;
+    }
+    CALL_STD(InvalidateRect, int32_t, (uint32_t, const void *, int32_t))(D32(dialog, 0x20), 0, 1);
+    CALL_THIS(MFC_613, void, (void *))(client);
+    CALL_THIS(MFC_640, void, (void *))(memory);
+}
+/* whether an id is OK, Cancel or Help */
+static int closing_id(uint32_t id) { return id == 2 || id == 1 || id == 0x2711; }
+/* 0x204764c0, OnCommand(wparam, lparam): with tabs, accelerators 3 and 4 step to the next or
+ * previous tab; a click on OK, Cancel or Help noted (others swallowed while an edit is being
+ * validated), and passed to the active page when the control there is a 3-piece button;
+ * edits validated as the focus leaves them for anything but OK, Cancel or Help, the selection
+ * kept for a list box's double click; then CDialog's */
+int32_t TC fs98_simsui_dialog_command(void *dialog, uint32_t wparam, int32_t lparam)
+{
+    uint32_t focus = CALL_STD(GetDlgCtrlID, uint32_t, (uint32_t))(CALL_STD(GetFocus, uint32_t, (void))());
+    uint32_t id = wparam & 0xffff, code = wparam >> 16 & 0xffff;
+    void *tabs = PTR(dialog, 0x7c);
+    if (tabs && code == 1) {
+        if (id == 3) fs98_simsui_tabs_next(tabs);
+        else if (id == 4) fs98_simsui_tabs_previous(tabs);
+    } else if (code == 0x100) {
+        fs98_simsui_dialog_set_validate(dialog, 1);
+    } else if (code == 0x200) {
+        if (!D32(dialog, 0x7d0) || id == D32(dialog, 0x7d0)) {
+            uint32_t failed;
+            if (closing_id(focus))
+                failed = VIRTUAL(dialog, 0xd8, uint32_t, (void *, uint32_t))(dialog, id);
+            else {
+                failed = VIRTUAL(dialog, 0xd8, uint32_t, (void *, uint32_t))(dialog, id);
+                if (failed) fs98_simsui_dialog_post_kill_focus(dialog, failed);
+            }
+            fs98_simsui_dialog_set_edit(dialog, failed);
+        }
+    } else switch (code) {
+    case 0:
+        if (closing_id(id)) fs98_simsui_dialog_set_clicked(dialog, 1);
+        else if (D32(dialog, 0x7d0)) return 1;
+        if (PTR(dialog, 0x7c)) {
+            void *item = CALL_THIS(MFC_3092, void *, (void *, int32_t))(fs98_simsui_tabs_active_page(PTR(dialog, 0x7c)), (int32_t)id);
+            if (item && CALL_THIS(MFC_4083, int32_t, (void *, const void *))(item, IMAGE(RUNTIME_3PIECE)))
+                CALL_STD(PostMessageA, int32_t, (uint32_t, uint32_t, uint32_t, int32_t))(
+                    D32(fs98_simsui_tabs_active_page(PTR(dialog, 0x7c)), 0x20), 0x111, wparam, lparam);
+        }
+        break;
+    case 1:
+        if (D32(dialog, 0x7d0)) return 1;
+        break;
+    case 4:
+        if (D32(dialog, 0x7d0) && !D32(dialog, 0x7e4)) {
+            I32(dialog, 0x7e4) = lparam;
+            D32(dialog, 0x7d8) = CALL_STD(SendDlgItemMessageA, uint32_t, (uint32_t, int32_t, uint32_t, uint32_t, int32_t))(
+                dialog ? D32(dialog, 0x20) : 0, (int32_t)id, 0x188, 0, 0);
+        }
+        break;
+    case 7:
+        fs98_simsui_dialog_set_validate(dialog, 1);
+        if (!D32(dialog, 0x7e0) && closing_id(id) && !closing_id(focus) && focus != D32(dialog, 0x7d0) && D32(dialog, 0x7d0))
+            fs98_simsui_dialog_post_kill_focus(dialog, D32(dialog, 0x7d0));
+        break;
+    default:
+        break;
+    }
+    return CALL_THIS(MFC_4441, int32_t, (void *, uint32_t, int32_t))(dialog, wparam, lparam);
+}

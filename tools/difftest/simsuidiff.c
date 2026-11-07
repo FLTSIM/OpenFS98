@@ -63,6 +63,8 @@ static const struct vtable_info s_vtables[] = {
 #define VTABLE_COUNT (sizeof(s_vtables) / sizeof(s_vtables[0]))
 #define GENERIC_VTABLE VTABLE_COUNT           /* the blocks' own: CSimsStatic's, a plain CWnd */
 #define DC_VTABLE (VTABLE_COUNT + 1)          /* a CDC's */
+#define FILE_VTABLE (VTABLE_COUNT + 2)        /* a CFile's, over s_file */
+#define FAKE_VTABLES (VTABLE_COUNT + 3)
 
 void *fs98_simsui_imports[SIMSUI_IMPORT_COUNT];
 uint8_t *fs98_simsui_image;
@@ -92,9 +94,13 @@ static uint32_t s_comparisons, s_faults, s_timeouts, s_max_calls, s_saved_seh, s
 static int s_side, s_running, s_retail_timed_out, s_ours_timed_out;
 static uint32_t s_unresolved;
 static char s_logs[2][LOG_SIZE];
+uint32_t s_ftol_calls;    /* _ftol bypasses the dispatcher: counted, and logged per run */
 static uint8_t *s_stubs;
-static void **s_fake_vtables[VTABLE_COUNT + 2];
-static uint8_t s_virtual_pop[VTABLE_COUNT + 2][128];
+static void **s_fake_vtables[FAKE_VTABLES];
+static uint8_t s_virtual_pop[FAKE_VTABLES][128];
+/* the file a CFile (ARG_FILE) reads: a .BMP made for the scenario, maybe cut short or wrong */
+static uint8_t s_file[0x1400];
+static uint32_t s_file_size, s_file_at;
 static uint32_t s_pop_now;
 uint32_t s_harness_esp, s_operation_stack_top;
 static uint8_t *s_operation_stack;
@@ -105,7 +111,7 @@ static volatile LONG s_watch_ticks;
 static HANDLE s_main_thread;
 
 /* the operations, and how each is called */
-enum { ARG_UNSET, ARG_ANY, ARG_SMALL, ARG_FLAGS, ARG_DC, ARG_POINTER, ARG_TEXT, ARG_SEPARATOR, ARG_CODE, ARG_INFO, ARG_DIB, ARG_INTS, ARG_KEY, ARG_COLOUR, ARG_ENTRIES, ARG_CSTRING, ARG_STATE, ARG_COORD, ARG_SELF, ARG_FORMAT, ARG_FONT, ARG_BITS, ARG_KEYCODE, ARG_POINT, ARG_ERROR, ARG_CONTROL, ARG_ITEM, ARG_MESSAGE, ARG_CHAR, ARG_MEASURE, ARG_PICTURE_KEY, ARG_HIT, ARG_MAYBE, ARG_MAYBE_DIB, ARG_MAYBE_POINTER, ARG_PAGE, ARG_TABS, ARG_FLAGS_ALT, ARG_FLAGS_ART };
+enum { ARG_UNSET, ARG_ANY, ARG_SMALL, ARG_FLAGS, ARG_DC, ARG_POINTER, ARG_TEXT, ARG_SEPARATOR, ARG_CODE, ARG_INFO, ARG_DIB, ARG_INTS, ARG_KEY, ARG_COLOUR, ARG_ENTRIES, ARG_CSTRING, ARG_STATE, ARG_COORD, ARG_SELF, ARG_FORMAT, ARG_FONT, ARG_BITS, ARG_KEYCODE, ARG_POINT, ARG_ERROR, ARG_CONTROL, ARG_ITEM, ARG_MESSAGE, ARG_CHAR, ARG_MEASURE, ARG_PICTURE_KEY, ARG_HIT, ARG_MAYBE, ARG_MAYBE_DIB, ARG_MAYBE_POINTER, ARG_PAGE, ARG_TABS, ARG_FLAGS_ALT, ARG_FLAGS_ART, ARG_COMMAND, ARG_FILE, ARG_BOUNDED };
 struct operation {
     uint32_t rva; void *ours; const char *name;
     uint32_t arguments; uint8_t kinds[16];
@@ -208,6 +214,7 @@ static void *heap_allocate(uint32_t size)
 #include "simsui_semantics.inc"
 static uint32_t class_vtable(uint32_t rva);
 static void fill(uint8_t *memory, uint32_t size);
+static uint32_t argument(uint32_t kind);
 #include "simsui_fixture.inc"
 
 /* the dispatcher every stub jumps to: index, the caller's ECX, its arguments */
@@ -232,6 +239,23 @@ uint64_t __cdecl simsui_dispatch(uint32_t index, uint32_t ecx, uint32_t *argumen
         s_pop_now = s_virtual_pop[vtable][slot];
         put("virtual %u.%x this", vtable, slot * 4); describe(ecx);
         for (at = 0; at < s_pop_now / 4; ++at) describe(arguments[at]);
+        if (vtable == FILE_VTABLE) {         /* GetPosition, Seek(offset, from start), Read(buffer, count) */
+            switch (slot * 4) {
+            case 0x14: result = s_file_at; break;
+            case 0x30: s_file_at = arguments[0] < s_file_size ? arguments[0] : s_file_size; result = s_file_at; break;
+            case 0x3c: {
+                uint32_t count = arguments[1] < s_file_size - s_file_at ? arguments[1] : s_file_size - s_file_at;
+                if (count && !writable(arguments[0], count)) count = 0;
+                if (count) memcpy((void *)(uintptr_t)arguments[0], s_file + s_file_at, count);
+                s_file_at += count;
+                result = count;
+                break;
+            }
+            default: result = answer(); break;
+            }
+            put(" => %x\n", result);
+            return result;
+        }
         if (vtable == DC_VTABLE && slot == 0x70 / 4) {     /* CDC::DrawText(text, length, rect, format) */
             if (writable(arguments[2], 16)) {
                 const int32_t *rect = (const int32_t *)(uintptr_t)arguments[2];
@@ -293,6 +317,7 @@ __asm__(
     /* _ftol: st(0) truncated to edx:eax, popped */
     ".globl _simsui_ftol\n"
     "_simsui_ftol:\n"
+    "    incl _s_ftol_calls\n"
     "    subl $12, %esp\n"
     "    fnstcw 8(%esp)\n"
     "    movw 8(%esp), %ax\n"
@@ -366,15 +391,23 @@ static uint32_t routine_pop(uint32_t address)
 }
 static void build_vtables(void)
 {
-    uint32_t vtable, slot;
-    for (vtable = 0; vtable < VTABLE_COUNT + 2; ++vtable) {
+    uint32_t vtable, slot, widest = 0;
+    /* a slot past a class's own (a block given a smaller class than its caller expects, a
+     * CDC's block taken for a page) pops as CSimsTabPage's does (pages and dialogs are what
+     * make such calls; CSimsDialog's own vtable runs on into CDIB's), so the stack stays
+     * balanced on both sides */
+    for (vtable = 0; vtable < VTABLE_COUNT; ++vtable) if (!strcmp(s_vtables[vtable].name, "??_7CSimsTabPage@@6B@")) widest = vtable;
+    for (vtable = 0; vtable < FAKE_VTABLES; ++vtable) {
         uint32_t source = vtable < VTABLE_COUNT ? vtable : 3;      /* CSimsStatic's */
         s_fake_vtables[vtable] = calloc(128, sizeof(void *));
         for (slot = 0; slot < 128; ++slot) {
             s_fake_vtables[vtable][slot] = make_stub(VIRTUAL_BASE + vtable * 128 + slot);
-            if (vtable == DC_VTABLE) s_virtual_pop[vtable][slot] = dc_slot_pop(slot);
-            else if (slot < s_vtables[source].slots)
+            if (vtable == DC_VTABLE && slot < 31) s_virtual_pop[vtable][slot] = dc_slot_pop(slot);
+            else if (vtable == FILE_VTABLE) s_virtual_pop[vtable][slot] = slot == 0x30 / 4 || slot == 0x3c / 4 ? 8 : 0;
+            else if (slot < s_vtables[source].slots && vtable != DC_VTABLE)
                 s_virtual_pop[vtable][slot] = (uint8_t)routine_pop(*(uint32_t *)(uintptr_t)(BASE + s_vtables[source].rva + slot * 4));
+            else if (slot < s_vtables[widest].slots)
+                s_virtual_pop[vtable][slot] = (uint8_t)routine_pop(*(uint32_t *)(uintptr_t)(BASE + s_vtables[widest].rva + slot * 4));
         }
     }
 }
@@ -438,6 +471,7 @@ static void initialize(void)
         void **vtable = s_fake_vtables[class_vtable(CURRENT.rva)];
         memcpy(s_fixture.object, &vtable, 4);
     }
+    make_file();
     shape_object(s_fixture.object);
     shape_dibs();
     memcpy(s_fixture.data, s_loaded_data, DATA_SIZE);
@@ -554,6 +588,18 @@ static uint32_t argument(uint32_t kind)
     }
     case ARG_BITS: return random & 0x7f;
     case ARG_POINT: return random % 3 ? (random >> 4) % 6 : (uint32_t)((int32_t)((random >> 4) % 72) - 8);   /* near the corner, mostly */
+    case ARG_FILE: {       /* a CFile over s_file, now and then none */
+        uint8_t *file = s_fixture.blocks[28];
+        void **vtable = s_fake_vtables[FILE_VTABLE];
+        memcpy(file, &vtable, 4);
+        return fixture_address(file);
+    }
+    case ARG_BOUNDED: return random % 4 ? random % 48 : (uint32_t)((int32_t)(random % 96) - 48);
+    case ARG_COMMAND: {    /* WM_COMMAND's wparam: a notification CSimsDialog acts on, for OK, Cancel, Help, 3, 4 or another id */
+        static const uint32_t codes[8] = {0, 1, 4, 7, 0x100, 0x200, 2, 0x300};
+        static const uint32_t ids[6] = {1, 2, 0x2711, 3, 4, 0x3e8};
+        return codes[random % 8] << 16 | (random % 5 ? ids[(random >> 3) % 6] : (random >> 8) & 0xffff);
+    }
     case ARG_KEYCODE: return random % 2 ? 0x20 : random % 3 ? 0x0d + (random >> 4) % 0x20 : (random >> 8) & 0xff;
     case ARG_FONT: {    /* a CSimsFont in a block: its CFont (a block, handle there or not), flags, stops */
         uint8_t *font = s_fixture.blocks[(random % (BLOCKS / 4)) * 4];
@@ -645,6 +691,8 @@ static __attribute__((noinline)) uint64_t run(void)
     s_rng = saved_rng;
     s_log_length = s_calls = s_heap_used = 0; s_logs[s_side][0] = 0;
     s_section_count = 0;
+    s_file_at = 0;
+    s_ftol_calls = 0;
     for (at = 0; at < count; ++at)
         if (CURRENT.kinds[at] == ARG_CSTRING) {    /* a CString by value: the model's, tabs and all */
             static const char *const texts[] = {"", "plain", "one\ttwo", "a\tb\tc", "\t\t\t\t\tfive tabs",
@@ -662,6 +710,7 @@ static __attribute__((noinline)) uint64_t run(void)
         if (CURRENT.returns == RET_VALUE) { put("return"); describe((uint32_t)result); put("\n"); }
     }
     s_running = 0;
+    if (s_ftol_calls) put("ftol x%u\n", s_ftol_calls);
     __asm__ volatile("movl %0, %%fs:0" : : "r"(s_saved_seh) : "memory");
     memcpy(s_fixture.data, (uint8_t *)(uintptr_t)(BASE + DATA_RVA), DATA_SIZE);
     if (s_calls > s_max_calls) s_max_calls = s_calls;
@@ -675,6 +724,7 @@ static void cover(void)
     if (!want || !(comma = strchr(want, ','))) return;
     if (strlen(CURRENT.name) != (size_t)(comma - want) || strncmp(CURRENT.name, want, (size_t)(comma - want))) return;
     ++s_cover_runs;
+    if (getenv("SIMSUI_SHOW") && s_cover_runs <= 3) fprintf(stderr, "--- %s:\n%s", CURRENT.name, s_logs[0]);
     if (strstr(s_logs[0], comma + 1)) ++s_cover_hits;
 }
 static int compare(void)

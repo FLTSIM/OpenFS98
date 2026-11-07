@@ -324,6 +324,8 @@ const void *TC fs98_simsui_dialog_message_map(const void *dialog);
 void TC fs98_simsui_dialog_set_validate(void *dialog, uint32_t value);
 void TC fs98_simsui_dialog_set_edit(void *dialog, uint32_t value);
 void TC fs98_simsui_dialog_set_clicked(void *dialog, uint32_t value);
+void TC fs98_simsui_dialog_activate(void *dialog, uint32_t state, void *other, uint32_t minimised);
+int32_t TC fs98_simsui_dialog_command(void *dialog, uint32_t wparam, int32_t lparam);
 int32_t TC fs98_simsui_dialog_init_tab(void *dialog, int32_t id, int32_t x, int32_t y, int32_t width, int32_t height, uint32_t instance);
 
 /* src/simsui/simsui_tabs.c */
@@ -506,6 +508,7 @@ uint32_t TC fs98_simsui_slider_clicked(void *slider, uint32_t part, uint32_t lpa
 /* src/simsui/simsui_text.c */
 const void *TC fs98_simsui_static_message_map(const void *window);
 const void *TC fs98_simsui_spin_message_map(const void *window);
+const void *TC fs98_simsui_scroll_message_map(const void *control);
 void *TC fs98_simsui_text_construct(void *text);
 void TC fs98_simsui_text_destroy(void *text);
 void *TC fs98_simsui_text_delete(void *text, uint32_t flags);
@@ -523,5 +526,54 @@ void *TC fs98_simsui_text_art_delete(void *art, uint32_t flags);
 const void *TC fs98_simsui_text_art_message_map(const void *art);
 int32_t TC fs98_simsui_text_art_init(void *art, uint32_t spec_id, void *background, void *pal, uint32_t flags);
 void TC fs98_simsui_text_art_paint(void *art);
+/* simsui_cdib.c */
+void *SC fs98_simsui_cdib_create_object(void);
+void *SC fs98_simsui_cdib_base_class(void);
+const void *TC fs98_simsui_cdib_runtime_class(const void *dib);
+void fs98_simsui_cdib_register(void);
+void *TC fs98_simsui_cdib_construct(void *dib);
+int32_t TC fs98_simsui_cdib_width(const void *dib);
+int32_t TC fs98_simsui_cdib_storage_width(const void *dib);
+int32_t TC fs98_simsui_cdib_height(const void *dib);
+void TC fs98_simsui_cdib_destroy(void *dib);
+void *TC fs98_simsui_cdib_delete(void *dib, uint32_t flags);
+int32_t TC fs98_simsui_cdib_create(void *dib, int32_t width, int32_t height);
+int32_t SC fs98_simsui_cdib_is_win(const void *header);
+int32_t SC fs98_simsui_cdib_colour_entries(const void *info);
+int32_t TC fs98_simsui_cdib_load_file(void *dib, void *file);
+int32_t TC fs98_simsui_cdib_load_resource(void *dib, uint32_t id, uint32_t instance);
+int32_t TC fs98_simsui_cdib_load_name(void *dib, const char *name);
+int32_t TC fs98_simsui_cdib_draw(void *dib, void *dc, int32_t x, int32_t y, int32_t width, int32_t height,
+                                 int32_t source_x, int32_t source_y);
+int32_t TC fs98_simsui_cdib_colours(const void *dib);
+int32_t TC fs98_simsui_cdib_map_to_palette(void *dib, void *pal);
+void TC fs98_simsui_file_exception_destroy(void *exception);
+void *TC fs98_simsui_file_exception_delete(void *exception, uint32_t flags);
+void TC fs98_simsui_object_destroy(void *object);
+/* simsui_hotkey.c */
+void *TC fs98_simsui_hot_key_construct(void *key);
+void TC fs98_simsui_hot_key_destroy(void *key);
+void *TC fs98_simsui_hot_key_delete(void *key, uint32_t flags);
+const void *TC fs98_simsui_hot_key_message_map(const void *key);
+int32_t TC fs98_simsui_hot_key_on_help(void *key, uint32_t wparam, int32_t lparam);
+void TC fs98_simsui_hot_key_init(void *key, void *font, uint32_t flags);
+void TC fs98_simsui_hot_key_set(void *key, int32_t code);
+int32_t TC fs98_simsui_hot_key_get(void *key);
+void TC fs98_simsui_hot_key_paint(void *key);
+void TC fs98_simsui_hot_key_key_down(void *key, uint32_t code, uint32_t repeat, uint32_t flags);
+void TC fs98_simsui_hot_key_sys_key_down(void *key, uint32_t code, uint32_t repeat, uint32_t flags);
+void TC fs98_simsui_hot_key_key_up(void *key, uint32_t code, uint32_t repeat, uint32_t flags);
+void TC fs98_simsui_hot_key_sys_key_up(void *key, uint32_t code, uint32_t repeat, uint32_t flags);
+uint32_t TC fs98_simsui_hot_key_get_dlg_code(void *key);
+void TC fs98_simsui_hot_joy_kill_focus(void *joy, void *next);
+void *TC fs98_simsui_hot_joy_construct(void *joy);
+void TC fs98_simsui_hot_joy_destroy(void *joy);
+void *TC fs98_simsui_hot_joy_delete(void *joy, uint32_t flags);
+const void *TC fs98_simsui_hot_joy_message_map(const void *joy);
+int32_t TC fs98_simsui_hot_joy_create(void *joy, uint32_t style, const void *rect, void *parent, uint32_t id);
+void TC fs98_simsui_hot_joy_init(void *joy, void *font, uint32_t flags);
+void TC fs98_simsui_hot_joy_set(void *joy, uint32_t joystick, uint32_t sense);
+uint32_t TC fs98_simsui_hot_joy_get(void *joy);
+void TC fs98_simsui_hot_joy_paint(void *joy);
 
 #endif

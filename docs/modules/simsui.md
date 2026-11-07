@@ -63,8 +63,35 @@ CDIBSection and CSimsFont first; the controls next; CSimsDialog and the tab clas
 2026-11-07 (overnight): the harness (`tools/gen_simsui_tables.py`, `tools/difftest/simsuidiff.c` with
 `simsui_semantics.inc`, `simsui_fixture.inc`, `simsui_operations.inc`, `tools/simsui.mk`,
 `tools/run_simsuidiff.sh`, `tools/simsui_breaks.py`) and 125 routines: the CRT helpers, the spec
-parsers and heap, fonts, remapping and DllMain, CDIBPal, CDIBSection, CSimsFont (but DrawSimsText's
-operation), CNotify (but Send's), and the small accessors and plain controls. All agree over 1000+
-scenarios. Retail bugs SUI-1 to SUI-5 registered; SUI-6 and SUI-7 are marked in the code but not yet
-registered. Left: the controls from CSims3PieceButton (0x2390) on, CSimsDialog, the tab classes, the
-native DLL, in-game checks.
+parsers and heap, fonts, remapping and DllMain, CDIBPal, CDIBSection, CSimsFont, CNotify, and the
+small accessors and plain controls.
+
+2026-11-07 (day): **every routine is transliterated** (`src/simsui/`, one file per class family),
+including the unexported CDIB class (`simsui_cdib.c`, the MFC samples' DIB, DYNCREATE but used by
+nothing) and the CRT entry. `make -f tools/simsui.mk simsuidiff-run`: 444 operations, every exported
+routine and every routine a vtable, message map or runtime class reaches, 2000 scenarios, 0 differ.
+Retail bugs SUI-1 to SUI-12 are registered in [retail-bugs.md](../retail-bugs.md).
+
+### The native DLL
+
+`make -f tools/simsui.mk simsui` builds `bin/simsui-native/SIMSUI_ours.dll` (the shared build copies
+it to `bin/SIMSUI.DLL`). Retail's data (vtables, message maps, runtime classes, strings, statics,
+`Linkage` and `ImportTable`) is not rewritten: `tools/gen_simsui_native.py` takes retail's `.rdata`
+and `.data` from RVA 0x15000 as an image (under `bin/`, never tracked) and lists in
+`src/simsui/simsui_native_tables.inc` what each of the 2,129 pointers retail's relocations mark there
+becomes at load (`src/simsui/simsui_native.c`):
+
+- 130 into the image itself: the same RVA in our copy;
+- 486 to routines: our transliteration of each, taken from the harness's operation table, so a
+  routine is bound only if `simsuidiff` verifies it (the generator stops on any other);
+- 1,234 to import thunks (MFC base classes' virtuals): the import itself;
+- 279 into C++ exception tables (unwind funclets, handlers): 0, since only retail's code used them.
+
+All 540 exports keep retail's names and ordinals: routines bound to ours, the 92 data exports to
+their place in the image. Imports are found by name (MFC42's by ordinal) before anything runs; one
+static import from each library keeps retail's load order. Retail's resources (but its version
+block) are copied in. The entry transliterates the CRT's (`0x20483490`, `0x204833c0`: MFC's raw
+DllMain, the onexit table, `_initterm` over retail's initialiser table, DllMain).
+
+SIMSUI is a shared module (`SHARED_CANDIDATES`/`SHARED_MODULES` in the Makefile, installed as
+`SIMSUI.DLL` beside `FLTSIM98.EXE`; `make simsui-install`/`simsui-revert`).

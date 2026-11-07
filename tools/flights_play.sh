@@ -42,7 +42,7 @@ steps="1104/3272=DriveStart sleep:15
 1102/#3267=DriveRadios/!3346 sleep:30 pause 1104/3272=DriveDefault sleep:15
 1104/3272=DriveDelete sleep:15 1102/#3267=DriveDelete/3221/2004 sleep:5
 quit"
-english=$(make -s english-modules-of)
+english="$(make -s english-modules-of) $(make -s shared-modules-of)"
 for m in MAIN $english; do
     [ -f "bin/$m.DLL" ] || { echo "needs bin/$m.DLL" >&2; exit 2; }
 done

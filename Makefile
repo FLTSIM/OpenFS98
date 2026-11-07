@@ -75,7 +75,11 @@ ENGLISH_MODULES := WORLD ALERTS HELP SIM VIEWS FLIGHTS MP_DIALOG OPTIONS
 # Built, and compared in the game by main-dialogs, but not yet installed by `make install`
 # (empty: Flights moved to ENGLISH_MODULES on 2026-11-02, Options on 2026-11-07)
 ENGLISH_CANDIDATES :=
-ALL_MODULES := $(MODULES) $(ENGLISH_MODULES)
+# Shared libraries beside FLTSIM98.EXE: SIMSUI, the widget library every dialog imports.
+# Candidates are built and compared in the game by main-dialogs but not yet installed.
+SHARED_MODULES :=
+SHARED_CANDIDATES := SIMSUI
+ALL_MODULES := $(MODULES) $(ENGLISH_MODULES) $(SHARED_MODULES)
 
 # Localised dialog DLLs live in English/, outside Modules/, under mixed-case names.
 english_name = $(strip \
@@ -87,7 +91,7 @@ english_name = $(strip \
   $(if $(filter FLIGHTS,$(1)),Flights,\
   $(if $(filter MP_DIALOG,$(1)),MP_DIALOG,\
   $(if $(filter OPTIONS,$(1)),Options)))))))))
-installed_path = $(if $(filter $(ENGLISH_MODULES) $(ENGLISH_CANDIDATES),$(1)),English/$(call english_name,$(1)).DLL,Modules/$(call installed_name,$(1)))
+installed_path = $(if $(filter $(SHARED_MODULES) $(SHARED_CANDIDATES),$(1)),$(1).DLL,$(if $(filter $(ENGLISH_MODULES) $(ENGLISH_CANDIDATES),$(1)),English/$(call english_name,$(1)).DLL,Modules/$(call installed_name,$(1))))
 
 # Keep the accepted World build flags and dependency graph in one place.
 # Check its incremental build even when invoked through the shared Makefile.
@@ -119,6 +123,7 @@ $(eval $(call dialog_build,VIEWS,views,$(BIN)/views-diff/VIEWS_ours.dll))
 $(eval $(call dialog_build,FLIGHTS,flights,$(BIN)/flights-diff/FLIGHTS_ours.dll))
 $(eval $(call dialog_build,MP_DIALOG,mpdialog,$(BIN)/mpdialog-diff/MP_DIALOG_ours.dll))
 $(eval $(call dialog_build,OPTIONS,options,$(BIN)/options-diff/OPTIONS_ours.dll))
+$(eval $(call dialog_build,SIMSUI,simsui,$(BIN)/simsui-native/SIMSUI_ours.dll))
 
 # Install and revert one English DLL: world-install, alerts-revert, ...
 # The first install keeps the game's own copy beside it as <name>.DLL.orig;
@@ -134,7 +139,7 @@ $(2)-revert:
 	cp "$$(call orig_module,$(1))" "$$(FS98_DIR)/$$(call installed_path,$(1))"
 endef
 english_target = $(if $(filter MP_DIALOG,$(1)),mpdialog,$(shell echo $(1) | tr A-Z a-z))
-$(foreach m,$(ENGLISH_MODULES) $(ENGLISH_CANDIDATES),$(eval $(call english_install,$(m),$(call english_target,$(m)))))
+$(foreach m,$(ENGLISH_MODULES) $(ENGLISH_CANDIDATES) $(SHARED_MODULES) $(SHARED_CANDIDATES),$(eval $(call english_install,$(m),$(call english_target,$(m)))))
 
 # MULTIP installs as MULTIPLAYER.DLL; its acceptance harness is below.
 $(BIN)/MULTIP.DLL: src/multip/multip.c src/multip/multip_callbacks.inc src/multip/multip_motion.inc src/multip/multip_commands.inc src/multip/multip_weather.inc src/multip/multip_tick.inc src/multip/multip_system.inc src/multip/multip_app_players.inc src/multip/multip_updates.inc src/multip/multip_textures.inc src/multip/multip_texture_receive.inc src/multip/multip_transfer_messages.inc src/multip/multip_texture_send.inc src/multip/multip_model_send.inc src/multip/multip_model_cache.inc src/multip/multip_model_receive.inc src/multip/multip_title_receive.inc src/multip/multip_state_messages.inc src/multip/multip_control_updates.inc src/multip/multip_lifecycle.inc src/multip/multip_dispatch.inc src/multip/multip_dispatch_cases.inc src/multip/multip_weather_fields.inc src/multip/multip_frame_actions.inc src/multip/multip_players.inc src/multip/multip_nametag.inc src/multip/multip_messages.inc src/multip/multip_tracking.inc src/multip/multip_records.inc src/multip/multip_aircraft.inc src/multip/multip_session.inc src/multip/multip_profile.inc src/multip/multip_profile_fields.inc src/multip/multip.def src/multip/multip_data.inc src/multip/multip_rdata.inc src/multip/multip_pointers.inc $(BIN)/multip.res src/multip/multip_providers.inc src/multip/multip_browser.inc src/multip/multip_configuration.inc src/multip/multip_details.inc src/multip/multip_options.inc src/multip/multip_lobby.inc src/multip/multip_toggle.inc src/multip/multip_init.inc
@@ -167,7 +172,7 @@ installed_name = $(strip \
   $(if $(filter MPCHAT,$(1)),mpchat.DLL,$(1).DLL))))
 
 # The CD's own file names are not all upper case either: facil.dll, multip.dll.
-orig_module = $(if $(filter MP_DIALOG,$(1)),$(ORIG)/English/mpdialog.dll,$(if $(filter $(ENGLISH_MODULES) $(ENGLISH_CANDIDATES),$(1)),$(ORIG)/$(call installed_path,$(1)),$(ORIG)/Modules/$(strip \
+orig_module = $(if $(filter MP_DIALOG,$(1)),$(ORIG)/English/mpdialog.dll,$(if $(filter $(ENGLISH_MODULES) $(ENGLISH_CANDIDATES) $(SHARED_MODULES) $(SHARED_CANDIDATES),$(1)),$(ORIG)/$(call installed_path,$(1)),$(ORIG)/Modules/$(strip \
   $(if $(filter FACIL,$(1)),facil.dll,\
   $(if $(filter MULTIP,$(1)),multip.dll,\
   $(if $(filter MPCHAT,$(1)),mpchat.DLL,$(1).DLL))))))
@@ -1042,12 +1047,12 @@ $(BIN)/fsdialogs.exe: tools/drive/fsdialogs.c | $(BIN)
 	$(CC) -O1 -Wall -o $@ $< -lgdi32 -luser32
 
 # every menu command in the real game, retail then ours, in private copies on a nested X server
-main-dialogs: $(BIN)/MAIN.DLL $(addprefix $(BIN)/,$(addsuffix .DLL,$(ENGLISH_MODULES) $(ENGLISH_CANDIDATES))) $(BIN)/fsdialogs.exe
+main-dialogs: $(BIN)/MAIN.DLL $(addprefix $(BIN)/,$(addsuffix .DLL,$(ENGLISH_MODULES) $(ENGLISH_CANDIDATES) $(SHARED_MODULES) $(SHARED_CANDIDATES))) $(BIN)/fsdialogs.exe
 	@tools/main_dialogs.sh
 
 # flights started and saved through Flights' dialogs, retail twice and ours twice, on Xvfb;
 # the saved flights compared (tools/stn_compare.py)
-flights-play: $(BIN)/MAIN.DLL $(addprefix $(BIN)/,$(addsuffix .DLL,$(ENGLISH_MODULES))) $(BIN)/fsdialogs.exe
+flights-play: $(BIN)/MAIN.DLL $(addprefix $(BIN)/,$(addsuffix .DLL,$(ENGLISH_MODULES) $(SHARED_MODULES))) $(BIN)/fsdialogs.exe
 	@tools/flights_play.sh
 
 multip-acceptance: all multipdiff
@@ -1634,7 +1639,7 @@ install: all
 	  n=$$(make -s installed-name-of M=$$m); \
 	  cp $(BIN)/$$m.DLL "$(FS98_DIR)/Modules/$$n"; echo "installed $$m -> $$n"; \
 	done
-	$(MAKE) $(foreach m,$(ENGLISH_MODULES),$(call english_target,$(m))-install) FS98_DIR="$(FS98_DIR)"
+	$(MAKE) $(foreach m,$(ENGLISH_MODULES) $(SHARED_MODULES),$(call english_target,$(m))-install) FS98_DIR="$(FS98_DIR)"
 	$(MAKE) gauges-install FS98_DIR="$(FS98_DIR)"
 	$(MAKE) mdls-install FS98_DIR="$(FS98_DIR)"
 	$(MAKE) sim1-install FS98_DIR="$(FS98_DIR)"
@@ -1644,7 +1649,7 @@ revert:
 	  n=$$(make -s installed-name-of M=$$m); \
 	  cp "$$(make -s orig-module-of M=$$m)" "$(FS98_DIR)/Modules/$$n"; echo "reverted $$n"; \
 	done
-	$(MAKE) $(foreach m,$(ENGLISH_MODULES),$(call english_target,$(m))-revert) FS98_DIR="$(FS98_DIR)"
+	$(MAKE) $(foreach m,$(ENGLISH_MODULES) $(SHARED_MODULES),$(call english_target,$(m))-revert) FS98_DIR="$(FS98_DIR)"
 	$(MAKE) gauges-revert FS98_DIR="$(FS98_DIR)"
 	$(MAKE) mdls-revert FS98_DIR="$(FS98_DIR)"
 	$(MAKE) sim1-revert FS98_DIR="$(FS98_DIR)"
@@ -1657,6 +1662,12 @@ english-modules-of:
 
 english-candidates-of:
 	@echo $(ENGLISH_CANDIDATES)
+
+shared-modules-of:
+	@echo $(SHARED_MODULES)
+
+shared-candidates-of:
+	@echo $(SHARED_CANDIDATES)
 
 installed-name-of:
 	@echo $(call installed_name,$(M))
@@ -1674,4 +1685,4 @@ smoke: all
 clean:
 	rm -rf $(BIN)
 
-.PHONY: stage-scenery main-smoke main-dialogs flights-play multip-acceptance multip-smoke multip-directplay-breaks multip-worker-breaks multip-breaks multip-receive-breaks multip-send-breaks all stage setup-map graph hostmap compare run trace trace-render trace-ddraw kill window-reset wm-unmanaged wm-managed vd-on vd-off mode8 mode16 ddraw-gdi ddraw-default smoke difftest difftest-run utildiff utildiff-run utildiff-portable numericdiff numericdiff-run chaindiff chaindiff-run atcdiff atcdiff-run weathermdiff weathermdiff-run acontaindiff acontaindiff-run sounddiff sounddiff-run dynamicdiff dynamicdiff-run fegriddiff fegriddiff-run fediff fediff-run fesldiff fesldiff-run boosterdiff boosterdiff-run demodiff demodiff-run windowdiff windowdiff-run g3ddiff g3ddiff-run multipdiff multipdiff-run g3d-break-build g3d-breaks g3dmeshdiff g3dmeshdiff-run g3ddiff-meshc-run hg2dmodeldiff-run panelsdiff panelsdiff-run panelsunit panelsunit-run panels-breaks panels-break-build window-breaks window-break-build maindiff maindiff-run main-break-build main-breaks hostdiff hostdiff-run host-break-build host-breaks mpchatdiff mpchatdiff-run mpchat-breaks mpchat-break-build winmsgdiff winmsgdiff-run winmsg-breaks winmsg-break-build realitydiff realitydiff-run reality-breaks reality-break-build analysisdiff analysisdiff-run analysis-breaks analysis-break-build controlsdiff controlsdiff-run controls-breaks controls-break-build advdrvdiff advdrvdiff-run advdrv-cover landmediff landmediff-run facildiff facildiff-run facildiff-fe-run ofstest ofstest-run ofstest-remove sehfix sehfix-install sehfix-remove sehfix-log util-trace install revert modules-of english-modules-of english-candidates-of installed-name-of installed-path-of orig-module-of clean
+.PHONY: stage-scenery main-smoke main-dialogs flights-play multip-acceptance multip-smoke multip-directplay-breaks multip-worker-breaks multip-breaks multip-receive-breaks multip-send-breaks all stage setup-map graph hostmap compare run trace trace-render trace-ddraw kill window-reset wm-unmanaged wm-managed vd-on vd-off mode8 mode16 ddraw-gdi ddraw-default smoke difftest difftest-run utildiff utildiff-run utildiff-portable numericdiff numericdiff-run chaindiff chaindiff-run atcdiff atcdiff-run weathermdiff weathermdiff-run acontaindiff acontaindiff-run sounddiff sounddiff-run dynamicdiff dynamicdiff-run fegriddiff fegriddiff-run fediff fediff-run fesldiff fesldiff-run boosterdiff boosterdiff-run demodiff demodiff-run windowdiff windowdiff-run g3ddiff g3ddiff-run multipdiff multipdiff-run g3d-break-build g3d-breaks g3dmeshdiff g3dmeshdiff-run g3ddiff-meshc-run hg2dmodeldiff-run panelsdiff panelsdiff-run panelsunit panelsunit-run panels-breaks panels-break-build window-breaks window-break-build maindiff maindiff-run main-break-build main-breaks hostdiff hostdiff-run host-break-build host-breaks mpchatdiff mpchatdiff-run mpchat-breaks mpchat-break-build winmsgdiff winmsgdiff-run winmsg-breaks winmsg-break-build realitydiff realitydiff-run reality-breaks reality-break-build analysisdiff analysisdiff-run analysis-breaks analysis-break-build controlsdiff controlsdiff-run controls-breaks controls-break-build advdrvdiff advdrvdiff-run advdrv-cover landmediff landmediff-run facildiff facildiff-run facildiff-fe-run ofstest ofstest-run ofstest-remove sehfix sehfix-install sehfix-remove sehfix-log util-trace install revert modules-of english-modules-of english-candidates-of shared-modules-of shared-candidates-of installed-name-of installed-path-of orig-module-of clean

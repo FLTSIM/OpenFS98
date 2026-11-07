@@ -72,6 +72,50 @@ static void shape_page(uint8_t *page, uint32_t random)
     memcpy(page + 0x10f4, &owner, 4);
 }
 /* the object under test: a CDIBSection's header at +0x1c, or the whole of one */
+/* the .BMP behind ARG_FILE: a Windows or OS/2 header, 1, 4, 8 or 24 bits, its colours and
+ * rows; now and then the wrong magic, a header of neither size, offsets past the end, or
+ * cut short */
+static void make_file(void)
+{
+    static const uint16_t depths[] = {1, 4, 8, 24, 8, 2};
+    uint32_t random = next_random(), core = random % 4 == 0, depth = depths[(random >> 2) % 6];
+    int32_t width = 1 + (int32_t)((random >> 5) % 40), height = 1 + (int32_t)((random >> 11) % 30);
+    uint32_t header = core ? 0xc : 0x28, entries = depth == 1 ? 2 : depth == 4 ? 16 : depth == 8 ? 256 : 0;
+    uint32_t used = 0, table, stride, bits, offset, size, at;
+    if (!core && (random >> 16) % 4 == 0) used = (random >> 18) % 300;
+    if (!core && used) entries = used;
+    table = entries * (core ? 3 : 4);
+    stride = (((uint32_t)width * depth + 31) / 32) * 4;
+    bits = stride * (uint32_t)height;
+    offset = 0xe + header + table;
+    size = offset + bits;
+    memset(s_file, 0, sizeof(s_file));
+    s_file[0] = 'B'; s_file[1] = 'M';
+    memcpy(s_file + 2, &size, 4);
+    memcpy(s_file + 0xa, &offset, 4);
+    memcpy(s_file + 0xe, &header, 4);
+    if (core) {
+        uint16_t w = (uint16_t)width, h = (uint16_t)height, planes = 1, d = depth;
+        memcpy(s_file + 0x12, &w, 2); memcpy(s_file + 0x14, &h, 2);
+        memcpy(s_file + 0x16, &planes, 2); memcpy(s_file + 0x18, &d, 2);
+    } else {
+        uint16_t planes = 1, d = depth;
+        if ((random >> 27) % 4 == 0) height = -height;
+        memcpy(s_file + 0x12, &width, 4); memcpy(s_file + 0x16, &height, 4);
+        memcpy(s_file + 0x1a, &planes, 2); memcpy(s_file + 0x1c, &d, 2);
+        memcpy(s_file + 0x2e, &used, 4);
+    }
+    for (at = 0xe + header; at < size && at < sizeof(s_file); ++at) s_file[at] = (uint8_t)next_random();
+    s_file_size = size < sizeof(s_file) ? size : sizeof(s_file);
+    switch (next_random() % 12) {
+    case 0: s_file[1] = 'X'; break;
+    case 1: { uint32_t odd = 0x20; memcpy(s_file + 0xe, &odd, 4); break; }
+    case 2: s_file_size = next_random() % (s_file_size + 1); break;
+    case 3: { uint32_t past = size + 1 + next_random() % 64; memcpy(s_file + 0xa, &past, 4); break; }
+    case 4: { uint32_t short_size = offset - 1 - next_random() % 4; memcpy(s_file + 2, &short_size, 4); break; }
+    default: break;
+    }
+}
 static void shape_object(uint8_t *object)
 {
     uint32_t vtable = class_vtable(CURRENT.rva);
@@ -151,7 +195,24 @@ static void shape_object(uint8_t *object)
         shape_dib(object + 0xff4, s_fixture.pixels[(random >> 8) % 4]);
         shape_dib(object + 0x1064, s_fixture.pixels[(random >> 10) % 4]);
         memcpy(object + 0x7c, &tabs, 4);
-        if (tabs) {
+        if (tabs && (random >> 24) % 2) {
+            /* a whole tab control (blocks 20 to 23) of up to four tabs sharing one page (blocks
+             * 14 to 18), tab 0 enabled, so its searches end and its pages call as pages */
+            uint8_t *control = s_fixture.blocks[20], *page = s_fixture.blocks[14];
+            int32_t last = (int32_t)((random >> 25) % 4), active = (int32_t)((random >> 27) % (uint32_t)(last + 1)), tab;
+            uint32_t page_address = fixture_address(page), window = 0x7000;
+            tabs = fixture_address(control);
+            memcpy(object + 0x7c, &tabs, 4);
+            memcpy(control + 0x20, &window, 4);
+            memcpy(control + 0xc20, &last, 4);
+            memcpy(control + 0xc28, &active, 4);
+            for (tab = 0; tab < 7; ++tab) {
+                uint32_t disabled = tab && next_random() % 3 == 0;
+                memcpy(control + 0x40 + tab * 0x160, &page_address, 4);
+                memcpy(control + 0x19c + tab * 0x160, &disabled, 4);
+            }
+            shape_page(page, next_random());
+        } else if (tabs) {
             uint8_t *control = (uint8_t *)(uintptr_t)tabs;
             int32_t active = (int32_t)((random >> 12) % 2);
             uint32_t page = fixture_address(s_fixture.blocks[(random >> 13) % BLOCKS]);
@@ -171,6 +232,33 @@ static void shape_object(uint8_t *object)
         memcpy(object + 0xb0, &font, 4);
         memcpy(object + 0x44, &base, 4);
         memset(object + 0x64 + 0x40, 0, 4);
+        return;
+    }
+    if (vtable < VTABLE_COUNT && (!strcmp(s_vtables[vtable].name, "??_7CSimsHotKey@@6B@") ||
+                                  !strcmp(s_vtables[vtable].name, "??_7CSimsHotJoy@@6B@"))) {
+        /* its font (a CSimsFont, or now and then none), a key and its modifiers */
+        uint32_t random = next_random(), font = argument(ARG_FONT), code = random & 0xff, modifiers = (random >> 8) % 16;
+        memcpy(object + 0x4c, &font, 4);
+        memcpy(object + 0x58, &code, 4);
+        memcpy(object + 0x5c, &modifiers, 4);
+        return;
+    }
+    if (!strncmp(CURRENT.name, "cdib_", 5)) {
+        /* a CDIB: its info (small, 8 bits, a few colours used) in a block, its bits a pixel
+         * buffer, owned or not; its vtable the class's */
+        uint32_t random = next_random(), info = fixture_address(s_fixture.blocks[1 + 4 * ((random >> 4) % 6)]);
+        uint32_t bits = fixture_address(s_fixture.pixels[(random >> 8) % 4]), owned = random % 2;
+        int32_t width = 1 + (int32_t)((random >> 10) % 40), height = 1 + (int32_t)((random >> 16) % 40);
+        uint8_t *at = (uint8_t *)(uintptr_t)info;
+        uint32_t header = 0x28, used = (random >> 22) % 3 == 0 ? (random >> 24) % 0x100 : 0;
+        uint16_t planes = 1, depth = (random >> 30) % 2 ? 8 : 4;
+        uint32_t vtable = BASE + 0x15fe0;
+        memcpy(at, &header, 4); memcpy(at + 4, &width, 4); memcpy(at + 8, &height, 4);
+        memcpy(at + 0xc, &planes, 2); memcpy(at + 0xe, &depth, 2); memcpy(at + 0x20, &used, 4);
+        memcpy(object, &vtable, 4);
+        memcpy(object + 4, &info, 4);
+        memcpy(object + 8, &bits, 4);
+        memcpy(object + 0xc, &owned, 4);
         return;
     }
     if (vtable < VTABLE_COUNT && !strcmp(s_vtables[vtable].name, "??_7CSimsTextArt@@6B@")) {

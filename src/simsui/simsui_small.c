@@ -79,6 +79,8 @@ void *TC fs98_simsui_scroll_construct(void *control)
     PTR(control, 0) = IMAGE(VTABLE_SCROLL);
     return control;
 }
+/* 0x2047afd0, CSimsScrollBar::GetMessageMap */
+const void *TC fs98_simsui_scroll_message_map(const void *control) { (void)control; return IMAGE(0x16640); }
 void TC fs98_simsui_scroll_destroy(void *control)
 {
     PTR(control, 0) = IMAGE(VTABLE_SCROLL);

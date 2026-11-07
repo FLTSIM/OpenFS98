@@ -23,6 +23,7 @@ in SIMSUI, which load ECX last.
 from pathlib import Path
 import re
 import struct
+import subprocess
 import sys
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -169,6 +170,26 @@ def main():
     def in_text(value):
         return text_start <= value < text_end
 
+    def resync(start):
+        """a linear pass lost after a jump table's data: disassembled again from a code
+        pointer in .rdata (a vtable slot) to the routine's first ret"""
+        result = subprocess.run(['objdump', '-d', '-M', 'intel', '--no-show-raw-insn', f'--start-address={start:#x}',
+                                 f'--stop-address={min(start + 0x1000, text_end):#x}', IMAGE],
+                                check=True, capture_output=True, text=True)
+        found = False
+        for line in result.stdout.splitlines():
+            match = re.match(r'\s*([0-9a-f]+):\s+(\S+)\s*(.*)', line)
+            if not match:
+                continue
+            address = int(match[1], 16)
+            if address in instructions and found:
+                break
+            instructions[address] = (match[2], match[3].strip())
+            found = True
+            if match[2] == 'ret':
+                break
+        return found
+
     imports = pe.imports()
     slots = {entry['iat_va']: index for index, entry in enumerate(imports)}
     thunks = {}
@@ -249,6 +270,9 @@ def main():
         raw = pe.read_bytes(section['raw_offset'], min(section['virtual_size'], section['raw_size']))
         for at in range(0, len(raw) - 3, 4):
             value = struct.unpack_from('<I', raw, at)[0]
+            if in_text(value) and value not in thunks and value not in instructions and section is rdata \
+                    and pe.read_bytes(pe.file_offset(value - base, 1), 1) != b'\xcc' and resync(value):
+                addresses = sorted(instructions)
             if in_text(value) and value not in thunks and value in instructions:
                 functions.add(value)
     # the entry point, and code whose address is pushed (atexit handlers, destructors given

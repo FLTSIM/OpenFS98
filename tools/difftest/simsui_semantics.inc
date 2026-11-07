@@ -522,6 +522,9 @@ static uint32_t host_pop(uint32_t offset)
     case 0x20c: return 16;      /* allocate(pool, size, &block, flag) */
     case 0x214: return 4;       /* free(&block) */
     case 0x10c: return 8;       /* run dialog(id, block) */
+    case 0x200: return 12;      /* key name(code, buffer, room) */
+    case 0x208: return 16;      /* fold the keypad(&key, &unused, &flags, &extended) */
+    case 0x1cc: return 12;      /* wait for a joystick control(joystick, sense, &control) */
     default: return 0;
     }
 }
@@ -545,6 +548,31 @@ static int host_semantics(uint32_t offset, uint32_t *arguments, uint64_t *result
             { static const uint32_t answers[6] = {0, 1, 2, 0x40, 3, 7}; box[3] = answers[value % 6]; }
         }
         *result = 0;
+        return 1;
+    case 0x200:                            /* a name made from the code, as long as the room allows */
+        if (arguments[2] && writable(arguments[1], arguments[2] < 0x40 ? arguments[2] : 0x40))
+            snprintf((char *)(uintptr_t)arguments[1], arguments[2] < 0x40 ? arguments[2] : 0x40, "K%x+%u", arguments[0], value % 7);
+        *result = value % 2;
+        return 1;
+    case 0x208:                            /* the host's own rule (host.c host_208) */
+        if (writable(arguments[0], 4) && writable(arguments[2], 4) && writable(arguments[3], 4)) {
+            static const uint8_t pad[10] = {0x2d, 0x23, 0x28, 0x22, 0x25, 0x0c, 0x27, 0x24, 0x26, 0x21};
+            uint32_t *key = (uint32_t *)(uintptr_t)arguments[0];
+            put(" key %x flags %x extended %x", *key, *(uint32_t *)(uintptr_t)arguments[2], *(uint32_t *)(uintptr_t)arguments[3]);
+            if (*key >= 0x60 && *key <= 0x69) *key = pad[*key - 0x60];
+            else if (*key == 0x6e) *key = 0x2e;
+            else {
+                if (*key == 0x0d && *(uint32_t *)(uintptr_t)arguments[3]) *key = 0x87;
+                *result = arguments[0];
+                return 1;
+            }
+            *(uint32_t *)(uintptr_t)arguments[2] |= 1;
+        }
+        *result = arguments[2];
+        return 1;
+    case 0x1cc:                            /* a control moved, or none in time */
+        if (writable(arguments[2], 4)) *(uint32_t *)(uintptr_t)arguments[2] = value % 3 ? 1 + value % 0x50 : 0;
+        *result = value;
         return 1;
     default:
         return 0;

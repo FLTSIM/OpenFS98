@@ -517,9 +517,12 @@ int main(int argc, char **argv)
                 command = strtoul(step, NULL, 16);
                 slash = strchr(step, '/');
                 control = slash != NULL;
-                if (control)
-                    snprintf(name, sizeof name, "%04x-%s", command, strrchr(step, '/') + 1);
-                else
+                if (control) {      /* every control in the name, so no two steps share a picture */
+                    char *at;
+                    snprintf(name, sizeof name, "%04x-%s", command, slash + 1);
+                    for (at = name; *at; ++at)
+                        if (*at == '/') *at = '-';
+                } else
                     snprintf(name, sizeof name, "%04x", command);
             }
             fprintf(report, "== %scommand %#x\n", setting ? "set: " : "", command);

@@ -141,9 +141,9 @@ its depth queue, services and CHAIN callbacks, 20,000 `g3ddiff` scenarios
 with zero differences, and a portable C mesh compiler checked against
 retail's instructions (see [modules/g3d.md](modules/g3d.md)).
 
-**Next: Options.** The whole game, all retail against all ours, matches
+**Options is done and installed (2026-11-07)**; next: SIMSUI. The whole game, all retail against all ours, matches
 frame for frame on all 74 flights with nobody flying, and flown by script on eight flights, on
-both renderers. Alerts, Help, Sim, Views and Flights were installed on 2026-11-02. What is still open
+both renderers. Alerts, Help, Sim, Views and Flights were installed on 2026-11-02, Options on 2026-11-07. What is still open
 is listed in [open-differences.md](open-differences.md). All 120 gauges and all eleven aircraft models are now rebuilt.
 SIM1 is installed, with all 74 scripted flights matching its numeric state and frames.
 The host executable is implemented and verified; SIMSUI and native platform replacement remain: [remaining-work.md](remaining-work.md).

@@ -100,6 +100,13 @@ The `radios` suite's stand-in now logs edi, and catches the old call.
   not checked in the game: FRAMELOCK wraps Linkage tables, and theirs hold only init and
   deinit, which run outside its window; the rest is entered through the host's dialog
   registry and MFC.
+- **Options in play.** Installed 2026-11-07. `make main-dialogs` opens on it the Logbook with
+  Add Logbook and Add Entry, Preferences and each of its six pages, Select demo, Display options
+  and each of its four pages, Flight video, Flight analysis, Customise controls and its three
+  pages, and Instant replay: same controls and pictures as retail. Not reached: the analysis
+  graphs (after a landing or a manoeuvre with analysis on), Save video and the video messages
+  (around a recording), and using the controls beyond opening and OK or Cancel: assigning a key,
+  moving a slider, choosing a display driver.
 - **Sound.** Nothing compares what is heard: `sounddiff` only compares calls.
 - **Direct3D's limits.** wined3d on llvmpipe, not a 1997 card, and four screenshots a
   flight between the panel logs. Hardware-specific paths in HG2D (real capability bits,
@@ -118,6 +125,13 @@ The `radios` suite's stand-in now logs edi, and catches the old call.
 - **A weak gear break went uncaught.** The gear toggle's `0x3fff` changed to `0x3000` on
   `LEARLON` with `systems`, though removing the toggle is caught. The target may only be tested
   for nonzero; that has not been checked.
+
+- **A window order once differed in Display options.** In two `main-dialogs` runs, on the Cancel
+  pass, clicking the Hardware Acceleration tab right after a cancelled visit to the Scenery tab
+  left ours with the Hardware page lower in its window order than retail's (same controls, same
+  picture: only the order child windows enumerate). With one more plain reopen of Display options
+  in between, which the script now has, the two agree. Not explained; it may be SIMSUI's tab
+  control and when it raises a page, met through slightly different timing.
 
 ## A class of bug to look for
 

@@ -1,10 +1,10 @@
 # Options.DLL
 
 `orig/English/Options.DLL`, module `0x80000007`, preferred base `0x22390000`, 84,381 bytes of
-`.text`, 15 dialog registrations and 31 templates. **Transliterated and verified, 2026-11-03 to 2026-11-06:** all 15 registrations and the 13
-tab pages behind them (slices 1 to 11), 0 differences in the harness, 859 breaks caught. The
-native DLL is built and compared in the game for the Logbook and Preferences; not yet
-installed. Like Flights it is MFC dialogs over
+`.text`, 15 dialog registrations and 31 templates. **Done and installed (2026-11-07):** all 15 registrations and the 13 tab pages behind them
+(slices 1 to 11), 0 differences in the harness, 859 breaks caught; the native DLL is in
+`ENGLISH_MODULES`, and `main-dialogs` opens 23 of its dialogs and pages in the game, identical to
+retail's. Like Flights it is MFC dialogs over
 the CD's SIMSUI and MFC42, which stay as dependencies, and it follows Flights' method
 ([flights.md](flights.md)): core C over a service table, generated tables, a differential
 harness with deliberate breaks, then the native DLL, then the game.
@@ -363,8 +363,8 @@ pages edit CONTROLS' lists in place.
   beforehand: it is an output, not a bug.
 
 Results for slices 1 to 11, the whole module (2026-11-06): 493 operations; 20,000 scenarios,
-9,860,000 comparisons, 0 differ on each seed; unwind mode 2,000 scenarios, 0 differ (about
-10 million throws). Breaks: 859, all caught; seventeen proven equivalent and left out (listed in
+9,860,000 comparisons, 0 differ on each seed; unwind mode 2,000 scenarios, 11,282,088
+comparisons, 10,291,381 throws, 0 differ. Breaks: 859, all caught; seventeen proven equivalent and left out (listed in
 `tools/options_breaks.py`). Each slice's breaks were first run on their own, and every miss was
 either a fixture that could not tell the difference (widened, then rechecked) or a proven
 equivalence. Harness lessons from these slices: a check box's state word must be 0, 1 and
@@ -385,21 +385,17 @@ vtables and message maps at load (page `0x386`'s `WM_ACTIVATE` entry gets
 module init, deinit and `DllMain` do, as Flights' runtime does. `make -f tools/options.mk
 options` builds `bin/options-diff/OPTIONS_ours.dll` at retail's base.
 
-It is an `ENGLISH_CANDIDATES` module: built, and compared in the game by `make main-dialogs`,
-not yet installed by `make install`. `main-dialogs` opens on it the Logbook with its Add
-Logbook and Add Entry dialogs, Preferences (General) with Select Video (MAIN's Select demo),
-Flight video, Flight analysis, Customise controls and Instant replay (last: OK on it starts a
-replay; its length, the seconds recorded so far, is normalised as the clocks are). All show
-the same controls as retail's and identical pictures (2026-11-06, PASS, 30 of 36 pictures
-identical, the six others MAIN's known ones). Not yet reached: Preferences' and Display
-options' other pages, Customise controls' other pages, the analysis graphs, Save video and the
-video messages.
+It is in `ENGLISH_MODULES` (installed 2026-11-07). `main-dialogs` opens on it the Logbook with
+its Add Logbook and Add Entry dialogs; Preferences and each of its six pages, with Select Video
+(MAIN's Select demo); Display options (from Preferences' Display page) and each of its four
+pages; Flight video; Flight analysis; Customise controls and each of its three pages; and Instant
+replay last (OK on it starts a replay; its length, the seconds recorded so far, is normalised as
+the clocks are). All show the same controls and pictures as retail's (2026-11-07, PASS, 47
+commands, 41 of 47 pictures identical, the six others MAIN's known ones). The tab pages are
+reached by clicking their owner-drawn tabs by position. One window-order difference was seen and
+not explained ([open-differences.md](../open-differences.md#unsettled-questions)).
 
 ## Next
 
-1. Reach the rest in the game: Preferences' other pages and Display options (its tabs are owner
-   drawn: clicks by position, as `main-dialogs` does on Sim's Crash / Damage tab), Customise
-   controls' other pages, the analysis graphs (after a landing or a manoeuvre with analysis
-   on), Save video and the video messages (around a recording).
-2. Then move OPTIONS from `ENGLISH_CANDIDATES` to `ENGLISH_MODULES` so `make install` puts it
-   in place, and fly with it.
+Not reached in play: the analysis graphs (after a landing or a manoeuvre with analysis on), Save
+video and the video messages (around a recording), and using the controls beyond OK and Cancel.

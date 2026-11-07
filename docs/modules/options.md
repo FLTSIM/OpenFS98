@@ -1,9 +1,10 @@
 # Options.DLL
 
 `orig/English/Options.DLL`, module `0x80000007`, preferred base `0x22390000`, 84,381 bytes of
-`.text`, 15 dialog registrations and 31 templates. **In progress, started 2026-11-03:**
-slices 1 to 6 (the shared helpers, the four video dialogs, the three logbook dialogs and
-the three analysis dialogs: 10 of 15) are transliterated and verified in their harness. Nothing is built as a DLL or installed. Like Flights it is MFC dialogs over
+`.text`, 15 dialog registrations and 31 templates. **Transliterated and verified, 2026-11-03 to 2026-11-06:** all 15 registrations and the 13
+tab pages behind them (slices 1 to 11), 0 differences in the harness, 859 breaks caught. The
+native DLL is built and compared in the game for the Logbook and Preferences; not yet
+installed. Like Flights it is MFC dialogs over
 the CD's SIMSUI and MFC42, which stay as dependencies, and it follows Flights' method
 ([flights.md](flights.md)): core C over a service table, generated tables, a differential
 harness with deliberate breaks, then the native DLL, then the game.
@@ -267,8 +268,6 @@ the pick back in the block.
   no label.
 - With nothing picked, the pick's handler shows `LB_ERR` as a text pointer (OPT-9).
 
-RESULTS_SLICE_8
-
 ## Slice 9: Display options `0x14090001` and its four pages
 
 `src/options/options_display.c`. MAIN's `pf_display` (General Preferences' Display button)
@@ -303,8 +302,6 @@ the block. The pages are classes like the dialogs (generated members, help, DDX)
   `CSimsTabPage::OnActivate`, an import); nothing to transliterate there.
 - A failed page allocation is stored and `Init` called on it all the same (FLT-3).
 
-RESULTS_SLICE_9
-
 ## Slice 10: Preferences `0x1409` and its six pages
 
 `src/options/options_prefs.c`. MAIN's General Preferences (`main_prefdlg.inc`), built as
@@ -338,8 +335,6 @@ Display options is, with a Defaults button and six pages:
   "CPreferences::Create() failed", as Display options' do.
 - The General page gives its third combo the first combo's label (OPT-10, suspected).
 
-RESULTS_SLICE_10
-
 ## Slice 11: Customise controls `0x140a` and its three pages
 
 `src/options/options_controls.c` (the dialog, Sensitivities, Force Feedback) and
@@ -367,10 +362,44 @@ pages edit CONTROLS' lists in place.
 - The host's message dialog answers in its block's `+0xc`, which Options never sets
   beforehand: it is an output, not a bug.
 
-RESULTS_SLICE_11
+Results for slices 1 to 11, the whole module (2026-11-06): 493 operations; 20,000 scenarios,
+9,860,000 comparisons, 0 differ on each seed; unwind mode 2,000 scenarios, 0 differ (about
+10 million throws). Breaks: 859, all caught; seventeen proven equivalent and left out (listed in
+`tools/options_breaks.py`). Each slice's breaks were first run on their own, and every miss was
+either a fixture that could not tell the difference (widened, then rechecked) or a proven
+equivalence. Harness lessons from these slices: a check box's state word must be 0, 1 and
+another true value; a fixture must stay within states the code can create (a mouse axis of
+`0xffffffff` sends the axes routine through memory on both sides); `mutate` must never flip a
+callback pointer; and a test copy must be frozen before anything else in the same command.
+
+## The native DLL
+
+`tools/gen_options_runtime.py` writes `src/options/options_runtime_tables.inc`: the imports,
+each of the 28 classes' vtables slot by slot (an import or ours), their message maps, the
+registrations, and the vtables of Options' own `CNotify` and the Logbook's rows list.
+Which of our functions a retail routine is comes from the harness's operation table, so a
+routine the harness does not test cannot be bound. `src/options/options_runtime.c` gives each
+service the import retail calls (or the Win32 or C runtime function directly), builds the
+vtables and message maps at load (page `0x386`'s `WM_ACTIVATE` entry gets
+`CSimsTabPage::OnActivate`, as retail's static initialiser fills it), and does what retail's
+module init, deinit and `DllMain` do, as Flights' runtime does. `make -f tools/options.mk
+options` builds `bin/options-diff/OPTIONS_ours.dll` at retail's base.
+
+It is an `ENGLISH_CANDIDATES` module: built, and compared in the game by `make main-dialogs`,
+not yet installed by `make install`. `main-dialogs` opens on it the Logbook with its Add
+Logbook and Add Entry dialogs, Preferences (General) with Select Video (MAIN's Select demo),
+Flight video, Flight analysis, Customise controls and Instant replay (last: OK on it starts a
+replay; its length, the seconds recorded so far, is normalised as the clocks are). All show
+the same controls as retail's and identical pictures (2026-11-06, PASS, 30 of 36 pictures
+identical, the six others MAIN's known ones). Not yet reached: Preferences' and Display
+options' other pages, Customise controls' other pages, the analysis graphs, Save video and the
+video messages.
 
 ## Next
 
-1. Instant replay (`0x1403`), Preferences with Display options and `0x14090002`, and Customise controls last.
-2. The native DLL once enough classes exist to bind the module, as Flights' did; then
-   main-dialogs, flights-play-style steps and installation.
+1. Reach the rest in the game: Preferences' other pages and Display options (its tabs are owner
+   drawn: clicks by position, as `main-dialogs` does on Sim's Crash / Damage tab), Customise
+   controls' other pages, the analysis graphs (after a landing or a manoeuvre with analysis
+   on), Save video and the video messages (around a recording).
+2. Then move OPTIONS from `ENGLISH_CANDIDATES` to `ENGLISH_MODULES` so `make install` puts it
+   in place, and fly with it.

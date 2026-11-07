@@ -32,6 +32,8 @@
 # restoring retail on baseline sides and requiring a normal MDL load in each run.
 # HG2D_FRAMES_MDL_MANIFEST selects an alternate generated set for deliberate breaks.
 # HG2D_FRAMES_EXPECT_MDL additionally requires that specific model to load.
+# HG2D_FRAMES_HOST selects a rebuilt executable for ours; baselines use retail.
+# Its observation export provides the runtime clock, imports and HWND.
 # HG2D_FRAMES_SIM1 selects a rebuilt SIM1.sim for the private ours copy;
 # both baseline copies use orig/Sim/SIM1.sim. Its load is required.
 # HG2D_FRAMES_CRASH_TEST=1 enables crash detection without a modal graph in
@@ -110,7 +112,7 @@ debug=-all
 [ -z "${HG2D_FRAMES_MDLS:-}" ] || debug=+loaddll
 [ -z "${HG2D_FRAMES_SIM1:-}" ] || debug=+loaddll
 [ -z "${HG2D_FRAMES_DEVICE:-}" ] || debug=+ddraw
-[ -z "${gauge_name}${HG2D_FRAMES_GAUGES:-}${HG2D_FRAMES_MDLS:-}" ] || [ -z "${HG2D_FRAMES_DEVICE:-}" ] || debug=+loaddll,+ddraw
+[ -z "${gauge_name}${HG2D_FRAMES_GAUGES:-}${HG2D_FRAMES_MDLS:-}${HG2D_FRAMES_SIM1:-}" ] || [ -z "${HG2D_FRAMES_DEVICE:-}" ] || debug=+loaddll,+ddraw
 export WINEDEBUG=-all
 [ -z "${HG2D_FRAMES_NOSOUND:-}" ] || export WINEDLLOVERRIDES="dsound=d"
 
@@ -165,10 +167,17 @@ run() {     # tag hg2d
         cp "$gauge" "$copy/Gauges/$gauge_name"
         cmp -s "$gauge" "$copy/Gauges/$gauge_name" || exit 2
     fi
+    if [ -n "${HG2D_FRAMES_HOST:-}" ]; then
+        local host=orig/FLTSIM98.EXE
+        [ "$tag" != ours ] || host=$HG2D_FRAMES_HOST
+        cp "$host" "$copy/FLTSIM98.EXE" || exit 2
+        cmp -s "$host" "$copy/FLTSIM98.EXE" || exit 2
+        sha256sum "$copy/FLTSIM98.EXE" > "$out/host-$tag.sha256"
+    fi
     cp "$framelock" "$copy/Modules/FRAMELOCK.DLL"
     rm -f "$copy/Modules/SEHFIX.DLL"
     # only all ours is free of the faults: retail's G3D and WINDOW divide into the repair too
-    [ "$tag" = ours ] && [ -n "${HG2D_FRAMES_ALL:-}" ] || cp bin/SEHFIX.DLL "$copy/Modules/SEHFIX.DLL"
+    [ "$tag" = ours ] && [ -n "${HG2D_FRAMES_ALL:-}${HG2D_FRAMES_HOST:-}" ] || cp bin/SEHFIX.DLL "$copy/Modules/SEHFIX.DLL"
     mkdir -p "$out/$tag"
     [ -z "${HG2D_FRAMES_DEVICE+x}" ] || sed -i "s/^Device=.*/Device=$HG2D_FRAMES_DEVICE\r/" "$copy/FLTSIM98.CFG"
     [ -z "${HG2D_FRAMES_MODE+x}" ] || sed -i "s/^Mode=.*/Mode=$HG2D_FRAMES_MODE\r/" "$copy/FLTSIM98.CFG"

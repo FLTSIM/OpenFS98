@@ -1,0 +1,7 @@
+LIBRARY HOST_ours.dll
+EXPORTS
+    host_runtime_init
+    host_runtime_address
+    host_image DATA
+    HostTable DATA
+    OpenFS98Host DATA

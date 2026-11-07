@@ -1,0 +1,4 @@
+LIBRARY Options.DLL
+EXPORTS
+    Linkage=g_options_linkage DATA
+    ImportTable=g_options_imports DATA

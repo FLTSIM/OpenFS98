@@ -804,32 +804,173 @@ their low byte is a digit), `ds-mmx-hal` and `ds-mode-mem` (caught in targeted
 runs at N=3000), and `dd-mode640` (a secondary driver asked for a 640-wide
 mode that is not 480 high).
 
-### Continuing the reimplementation
+## The executable (2026-11-06)
 
-To add the next service: find it in the table with `python3 tools/hostmap.py`
-(it sizes every slot and names the imports each one uses, so a pure or
-self-contained service is easy to spot), read its body with `python3
-tools/hostdis.py <addr>` (the service table's addresses are retail's), add a
-`host_###` function and table entry in `src/host/host.c`, a check in
-`tools/difftest/hostdiff.c`, and a break in `tools/host_breaks.py`. Then `make
-hostdiff-run N=20000` (0 differ) and `make host-breaks`. A service that reads a
-global proves nothing unless the global varies, which the harness's per-call
-`.data` seeding takes care of; one that calls `malloc` or a window/GDI/DDRAW
-API is not out-of-process testable this way and waits for a model or the
-`ofstest` harness.
+`make host-exe` now builds `bin/OPENFS98.EXE`, a 32-bit Windows GUI
+executable. It starts the installed game using the existing 194 service
+implementations together with recovered startup, window procedures, timer,
+message loop and shutdown. It retains SIMSUI/MFC and the current Windows
+multimedia dependencies; the native platform port remains separate work.
 
-Easiest remaining, roughly in order: the other pure accessors and getters (many
-read one global and return it, with an early-out); the remaining C-runtime
-services (`sprintf`-family and friends) -- with the imports bound, anything
-that calls only MSVCRT, or a window-system call the harness can hook as it
-hooks `GetCommandLineA`, is as testable as the pure services; then the ones
-that call a host-internal helper that is itself pure. `+0x204` (a key-name
-parser) waits on the strings the host loads at run time into 0x41bec0 and
-its neighbours; the file services (`+0x1a4`/`+0x1a8` and the rest) want a
-sandboxed directory. Nothing is left: every slot is reimplemented. What remains is the
-harness's reach -- the paths noted above that only a scripted model covers --
-and the move from verifying in process to running OpenFS98's host in the
-game.
+`tools/gen_host_runtime.py` verifies the reference executable's SHA-256 and
+uses the project's SIM1/model lowering primitives to generate explicit C
+operations and branches. There is no runtime instruction decoder and no
+retail executable payload. The output covers 402 routine boundaries and
+13,081 instruction locations; boundaries corresponding to existing services
+call the verified C bodies. Only identified switch tables, their three byte
+index maps, `.rdata` and the 12 resources are retained as data. The generated
+C, assembly entry boundaries, resources and survey live in `bin/host-runtime/`.
+
+The generated runtime shares `host_image` with the service implementation.
+Initialization replaces the embedded data/code pointers, binds the retained
+import slots and publishes the rebuilt service table in the image. Calls to
+Windows, MFC and modules cross an assembly boundary that transfers the general
+registers and flags, including MFC's `this` in ECX. TLS preserves the active
+context through nested callbacks, using a probed region of the real thread
+stack so Windows SEH can see the host's protected frame. The existing service
+DLL and its differential harness remain available independently.
+
+Host implementation findings, progress and verification remain in this file.
+
+### Runtime map
+
+The following retail addresses identify the recovered runtime boundaries.
+The generated survey records reachable instructions, callable entries and
+switch tables; coverage evidence below is narrower than the recovered code.
+
+| Retail address | Responsibility |
+| --- | --- |
+| `0x401150` | Platform setup: window classes, paths/CFG, main window and key-name resources |
+| `0x401850` | Platform cleanup |
+| `0x401950` | WINMM timer callback; calls the published callback at `0x418838` when allowed by pause/busy state |
+| `0x401a70` | MFC startup orchestration |
+| `0x4027e0` | Main window procedure |
+| `0x403f80` | Child frame procedure |
+| `0x405270`, `0x4058a0` | Other view/window procedures |
+| `0x4060ee` | View sizing: render dimensions and surface setup |
+| `0x407920` | Host registration and module-directory scanning |
+| `0x4079b0` | Startup import binding and initialization |
+| `0x4079f0` | Module shutdown/unload |
+| `0x407cc0`, `0x407d60` | Dependency traversal for startup initialization |
+| `0x4119a0` | Integer-divide repair filter |
+
+### Startup and exception delivery
+
+Startup loads/registers the simulator DLLs, SIMSUI and the English dialog
+modules, binds **all** imports, then initializes in the order recovered from
+`0x407d60`. Dynamic `host_mod_acquire` alone is not a substitute, especially
+with cyclic imports. Shutdown handles the unprioritized callbacks and walks
+the prioritized list in reverse. The new harness compares those sequences
+and the resulting import/init/deinit fields over randomized priorities.
+
+`src/host/host_main.c` supplies the executable shell: VC5-compatible onexit
+sentinels, the three global constructors in their original order, then MFC's
+`AfxWinMain`. MinGW's default `FNINIT` uses 64-bit x87 precision, while the
+retail process starts at 53 bits. This produced small SIM1 state differences
+at pass 48 in ATHENS and other flights even when the pictures looked right.
+Initializing the main thread's control word to `0x027f` restores identical
+numeric trajectories. Per-pass SIM1 state logging was essential to seeing it.
+
+A vectored handler delivers divide faults to the recovered filter only while
+the host's SEH scope is active. This is the rebuilt equivalent of SEHFIX's
+Wine workaround: Wine otherwise swallows window-procedure faults before the
+host filter gets them. The original filter's instruction decoding and context
+repair are generated C, and are compared independently against retail over
+register-divisor fixtures, including byte/word/dword sizes and declined
+non-divide exceptions. Broader memory-addressing forms remain exercised by
+actual game paths rather than an exhaustive decoder fixture sweep.
+
+### Deterministic observation
+
+`include/fs98/host_runtime.h` defines the optional `OpenFS98Host` export:
+version, image pointer, import-patching function and main-loop observation
+callback. FRAMELOCK uses it to patch the runtime's retained import slots and
+tick at the recovered loop's clock read. It still uses the original fixed
+addresses for retail, so both sides pass through the same frame/state logger.
+The callback runs before the loop's clock read, matching retail's observed
+return-address boundary. Scripted commands use the rebuilt HWND location.
+
+`HG2D_FRAMES_HOST=/absolute/path/to/OPENFS98.EXE` selects the candidate in
+`tools/hg2d_frames.sh`; each baseline receives the original executable.
+Executable hashes are retained, copied binaries are checked, and the rebuilt
+side uses its own divide repair. Set `HG2D_FRAMES_ONLY=HOST` to restore retail
+simulator/dialog modules while testing the host alone, or
+`HG2D_FRAMES_ALL=1` to test with rebuilt modules. SIM1 logging also verifies
+its actual load; Direct3D runs now retain both renderer and load traces.
+
+### Commands
+
+```sh
+make host-exe                          # bin/OPENFS98.EXE; no installation
+make host-runtime-diff N=20000          # isolated timer/lifecycle/divide checks
+make host-runtime-breaks N=20000        # baseline, then four broken variants
+make host-runtime-ui FS98_DIR=game      # dialogs, resize, cancelled/accepted exit
+make host-runtime-flights FS98_DIR=game # all stock flights, scripted controls/state
+make host-runtime-d3d FS98_DIR=game     # full-screen renderer, frames and screenshots
+make host-runtime-boot FS98_DIR=game    # bounded diagnostic boot; not acceptance
+make host-install FS98_DIR=game         # adds game/OPENFS98.EXE
+make host-run FS98_DIR=game             # installs that name, then launches it
+```
+
+The host build is included in `make all`. `host-install` preserves
+`FLTSIM98.EXE`; existing module install/revert targets continue to use retail's
+executable. The executable must live beside the installed assets because
+retail setup derives paths from its own location.
+
+The standalone targets are in `tools/host_runtime.mk`. Runtime differential
+checks copy MFC from the staged game and use a private copy of the configured
+Wine prefix. The retail image mapper needs the WoW64 configuration used by
+the existing host harness; the older 32-bit test prefix could not protect the
+region at `0x400000`. Game acceptance uses separate private prefixes and
+Xvfb displays, leaving the staged game untouched. All generated evidence is
+under `bin/host-runtime/`.
+
+### Verification
+
+- Planning baseline at `94cf6b6e520d95740096e3994e49f894e5bf386e`:
+  `make hostdiff-run N=1`, zero differences.
+- Runtime harness: **60,000 comparisons, zero differences**, 20,000 each for
+  timer behavior, startup/import/init/deinit ordering and divide repair.
+  Evidence: `bin/host-runtime/runtime-diff.log`.
+- Four deliberate defects **all caught**: removed timer callback, skipped
+  startup import binding, init pointer not cleared, and forward rather than
+  reverse shutdown traversal. Evidence: `bin/host-runtime/breaks/results.json`.
+- Existing 194-service regression: **2,000 iterations, zero differences**.
+- Initial integration: two retail runs and the candidate have identical
+  STGEORGE frame logs over 150 passes; ATHENS also matches per-pass SIM1 state
+  after correcting x87 initialization.
+- Dialog/exit integration: Credits, Time/Season, Aircraft Settings and the
+  Exit confirmation have matching control transcripts after normalizing the
+  same four clock edit fields as `main_dialogs.sh`. Credits and Exit captures
+  have **zero differing pixels**. Both cancelled exit and confirmed normal
+  process shutdown complete. The final GUI executable also resizes to an
+  800x600 client and back to 640x480, matching retail. Evidence:
+  `bin/host-runtime/ui-resize/`.
+- **All 74 stock flights match** over 900 passes each with scripted controls,
+  per-pass SIM1 numeric state and frame logs. The comparison restores retail
+  simulator/dialog modules and uses the same staged model/gauge assets on
+  both sides. All runs disable sound; the runner may retry failures, and the
+  completed batch has 74 matching verdicts, zero differences and zero
+  unresolved nondeterministic/missing runs. Evidence:
+  `bin/host-runtime/flights-fp53/summary.txt` (individual result files retain
+  executable hashes and load/state counts).
+- Final GUI build: PARIS with the keyboard script and LEARLON with the views
+  script match all 900 passes, state and frames. LEARLON also uses rebuilt
+  simulator/dialog modules and rebuilt SIM1 on the candidate side. Evidence:
+  `bin/host-runtime/final-keys/` and `bin/host-runtime/final-views/`.
+- PARIS full-screen Direct3D with scripted controls: 900 passes, **872 scenes
+  and 37,757 draws on every side**, identical state/frame logs and five
+  pixel-identical screenshots. Evidence:
+  `bin/host-runtime/direct3d-verified/`.
+- Full-screen/windowed round trip: 300 passes, **162 scenes and 13,482 draws
+  on every side**, matching logs and three pixel-identical screenshots across
+  the transition. Evidence: `bin/host-runtime/display-transition/`.
+
+This phase remains x86 Windows/Wine work: it does not establish
+native Linux/macOS/ARM behavior, hardware-specific device behavior, long-flight
+stability, every UI path or audible sound equivalence. The generated runtime
+retains retail behavior and still needs those platform dependencies replaced
+for the native port.
 
 ## Status
 
@@ -842,3 +983,7 @@ registry's contents are checked in-process too. 13 more are named from their
 shape alone, and all 194 are classified by subsystem. Sizes reported by the
 mapper are upper bounds: they are the gap to the next table-referenced address,
 and internal helpers that no slot points at fall inside those gaps.
+
+**Executable:** implemented as `bin/OPENFS98.EXE`; integration evidence and
+remaining verification limits are recorded above. The retail executable stays
+available for comparisons and the established module install/revert workflow.

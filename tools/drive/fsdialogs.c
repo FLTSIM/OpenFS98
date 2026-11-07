@@ -15,6 +15,7 @@
  *                           a CTRL of @X,Y clicks the mouse there in the dialog instead
  *             set:COMMAND/CTRL...  click the controls and press OK, to change a setting
  *             crash         full throttle and the elevator down until a dialog comes up
+ *             resize:WxH    set and verify the main client dimensions
  *             exit          the Exit command; its confirmation is always answered No
  */
 #include <windows.h>
@@ -449,6 +450,30 @@ int main(int argc, char **argv)
         if (strncmp(step, "sleep:", 6) == 0) {     /* a flight loading: Save opens nothing meanwhile */
             fprintf(report, "== sleep %s\n", step + 6);
             Sleep(atoi(step + 6) * 1000);
+            continue;
+        }
+        if (strncmp(step, "resize:", 7) == 0) {
+            unsigned width, height;
+            RECT rectangle;
+            if (sscanf(step + 7, "%ux%u", &width, &height) != 2 ||
+                width > 4096 || height > 4096 || !width || !height)
+                return 2;
+            rectangle.left = rectangle.top = 0;
+            rectangle.right = (LONG)width;
+            rectangle.bottom = (LONG)height;
+            if (!AdjustWindowRectEx(&rectangle, GetWindowLongA(main_window, GWL_STYLE),
+                                    GetMenu(main_window) != NULL,
+                                    GetWindowLongA(main_window, GWL_EXSTYLE)) ||
+                !SetWindowPos(main_window, NULL, 0, 0,
+                              rectangle.right - rectangle.left, rectangle.bottom - rectangle.top,
+                              SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE))
+                return 3;
+            Sleep(2000);
+            GetClientRect(main_window, &rectangle);
+            fprintf(report, "== resize %ux%u: client %ldx%ld\n", width, height,
+                    rectangle.right, rectangle.bottom);
+            if (rectangle.right != (LONG)width || rectangle.bottom != (LONG)height)
+                return 3;
             continue;
         }
         if (strcmp(step, "quit") == 0) {           /* Exit, answered Yes: the game saves its settings */

@@ -11,8 +11,8 @@ Results updated through 2026-11-06; individual rows retain their acceptance date
 
 | Binary | `.text` | Status | Where |
 | --- | --- | --- | --- |
-| `English/Options.DLL` | 84,381 | **In progress** (2026-11-03): 10 of 15 registrations (the video, logbook and analysis dialogs) verified in its harness (`tools/options.mk`); no DLL yet | [options.md](modules/options.md) |
-| `FLTSIM98.EXE` | 82,016 | **No executable.** All 194 services are reimplemented and verified in-process as `HOST.DLL`; retail's still runs the game | [host.md](modules/host.md) |
+| `English/Options.DLL` | 84,381 | **Transliterated and verified** (2026-11-06): all 15 registrations and 13 tab pages, 0 differ, 859 breaks caught (`tools/options.mk`); native DLL built, an `ENGLISH_CANDIDATES` module; `main-dialogs` compares nine of its dialogs in the game (identical); not yet installed | [options.md](modules/options.md) |
+| `FLTSIM98.EXE` | 82,016 | **Executable implemented** (2026-11-06): `OPENFS98.EXE`, all 194 services plus startup/windows/loop/shutdown; 74 matching scripted flights, runtime differential and UI/Direct3D acceptance. Retail remains available; native platform work remains | [host.md](modules/host.md) |
 | `SIMSUI.DLL` | 79,850 | **Not started.** 540 named exports, the common dialog and control widgets. Every dialog imports it | [dialogs.md](modules/dialogs.md) |
 | `Sim/SIM1.sim` | 78,216 | **Installed** 2026-11-06: complete services, AIR decoder, aircraft setup, state lifecycle and simulation callbacks. 36,432 real decoder comparisons, 288 direct setup comparisons, ten new caught defects and 74 matching scripted flights with per-pass physics state. Included in shared build/install/revert; current ABI/x87 implementation is x86 | [sim1.md](modules/sim1.md) |
 | `Gauges/*.GAU` (120) | 63,472 | **All 120 rebuilt**, included in build/install/revert; standalone callback/data/resource/FP, PANELS and frame comparisons | [gauges.md](modules/gauges.md) |
@@ -77,13 +77,18 @@ to `orig/Aircraft/` (2026-11-06).
    crash's real-time curve. All 74 flights still match frame for frame with every module
    and English DLL ours. Not yet reached in play: Alerts' dialogs 3 and 4, Help's lesson
    graph and lesson completion; see [open-differences.md](open-differences.md#not-yet-tested).
-2. **Options** (Flights installed 2026-11-02). The largest code still used in play. Scripted menu tests come
-   with them: see [open-differences.md](open-differences.md#not-yet-tested).
+2. **Options** (Flights installed 2026-11-02). All of it verified in its harness and built as a
+   DLL (2026-11-06); `main-dialogs` compares nine of its dialogs on it (the Logbook and its two,
+   Preferences and Select demo, Flight video, Flight analysis, Customise controls, Instant
+   replay), all identical. Left: steps that reach its tab pages and the graphs and video
+   messages in the game, then installing it (moving it to
+   `ENGLISH_MODULES`). See [options.md](modules/options.md#next) and
+   [open-differences.md](open-differences.md#not-yet-tested).
 3. **SIM1 and the MDLs completed 2026-11-06.** Both are included in shared
    build/install/revert. Their current x86 ABI/FP paths still need native-port work.
 4. **SIMSUI.** After the dialogs, because they show which of its 540 exports matter.
 5. **Gauges completed independently of Options.** All 120 are in the shared build.
-6. **The executable around `HOST.DLL`.**
+6. **Host executable completed 2026-11-06.** Build/run and verification are in [host.md](modules/host.md); native platform replacement remains.
 7. **Native builds.** Moving off x86 ends comparison with retail, so the earlier steps come
    first. That is also when the retail bugs we reproduce get fixed: they are listed in
    [retail-bugs.md](retail-bugs.md), which must first be completed from every module's doc. Register contracts between modules ([open-differences.md](open-differences.md#a-class-of-bug-to-look-for))

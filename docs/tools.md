@@ -10,6 +10,7 @@ verification commands with their expected results and run times is in
 | `make difftest-run` | drive a rebuilt module and retail over identical synthetic state and diff the result; `N=...` sets the vector count |
 | `make utildiff-run` | compare individual rebuilt UTIL services against retail's, service by service |
 | `make utildiff-portable` | the same with the x87 assembly compiled out, as an ARM build would use |
+| `make -f tools/options.mk optionseventsdiff-run` | Options.DLL's dialogs and tab pages: retail's routines and ours over the same logged stubs of MFC, SIMSUI, Win32 and HOST, with randomised fixtures, mid-call mutations and (`MODE=unwind`) a throw at every call; `make -f tools/options.mk options-breaks` breaks it on purpose; `make -f tools/options.mk options` builds the native DLL |
 | `make numericdiff-run` | compare all NUMERIC formatter/parser ids and ranged parses against retail |
 | `make atcdiff-run` | drive retail and OpenFS98 ATC side by side over random scripts of ATIS, clearances and frames, comparing every import call and the whole `.data` image; `N=...` sets the count |
 | `make acontaindiff-run` | the same for ACONTAIN, against generated aircraft trees: loads, lists, queries and models, with file I/O passed through and fake `.SIM`/`.MDL` modules, comparing every import call, GLOBAL, the heap and the `.data` image |

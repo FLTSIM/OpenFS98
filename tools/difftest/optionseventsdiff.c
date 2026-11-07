@@ -1674,9 +1674,9 @@ static void initialize(void)
         } else {
             uint32_t kind = OP.kind - FS98_OPTIONS_DISPLAY;
             D32(object, 0x1100) = (s_seed >> 9) % 4 != 0;               /* the page shown */
-            for (at = 0; at < 11 && checks[kind][at]; ++at) {     /* each box on or off */
+            for (at = 0; at < 11 && checks[kind][at]; ++at) {     /* each box off, on, or another true */
                 PTR(object, checks[kind][at]) = s_control_vtable;
-                D32(object, checks[kind][at] + 0xbc) = (s_seed >> (at + 3)) & 1;
+                D32(object, checks[kind][at] + 0xbc) = (s_seed >> (at + 3)) % 3;
             }
             D32(object, 0x12b4) = s_seed ^ 0x12b4;
             D32(object, 0x13b4) = s_seed ^ 0x13b4;
@@ -1770,7 +1770,7 @@ static void initialize(void)
                 for (at = 0; at < 8; ++at) {     /* bound or not, an axis (2) or a button */
                     s_fixture.bindings[list][device][at * 2] = (s_seed >> ((at + device) % 16)) % 3 ? 0x11 + at : 0;
                     s_fixture.bindings[list][device][at * 2 + 1] =      /* the keyboard's mostly keys (0) */
-                        device == 0 ? ((s_seed >> ((at * 3) % 16)) % 3 ? 0 : 2) : (s_seed >> ((at * 3 + device) % 16)) % 3 ? 2 : 1;
+                        device == 0 ? (uint32_t[]){0, 0, 1, 2}[(s_seed >> ((at * 3) % 16)) % 4] : (s_seed >> ((at * 3 + device) % 16)) % 3 ? 2 : 1;
                 }
                 for (at = 0; at < 24; ++at)
                     s_fixture.settings[list][device][at] = (uint32_t)((int32_t)((s_seed >> (at % 16)) % 255) - 127);

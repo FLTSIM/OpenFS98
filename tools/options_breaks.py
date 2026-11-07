@@ -22,7 +22,8 @@ frame ended after its block's store rather than before (no call comes between); 
 Preferences' Display page reading its box's state before its first combo's pick rather than
 after (CB_GETCURSEL cannot change a check box's state word); and the Sound page rounding a
 slider's product to double before _ftol (equivalent while the x87 runs at 53 bits, as MSVC's
-runtime sets it in the game and the harness); Customise controls' reverse box testing a scale
+runtime sets it in the game and the harness), or a volume to double before its sign (a
+multiplication by 1 or -1 is exact); Customise controls' reverse box testing a scale
 with >= 0 for > 0 (negating 0 is 0); and its OK dropping one of the pages' empty reads; and the mouse's axis tested signed (the
 page only ever sets it to 0..2; a negative one loops the axes routine through memory); the Keys page testing the device
 chosen != 0 for > 0 (only 0 or a joystick's number is ever stored), and SB_LEFT going to 0

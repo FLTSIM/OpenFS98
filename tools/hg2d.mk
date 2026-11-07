@@ -26,5 +26,5 @@ $(HG2D_DIR)/UTIL_retail.dll: orig/Modules/UTIL.DLL | $(HG2D_DIR)
 
 # The game on a virtual clock, every frame checksummed (tools/drive/framelock.c);
 # tools/hg2d_frames.sh compares runs of it.
-$(HG2D_DIR)/FRAMELOCK.DLL: tools/drive/framelock.c tools/drive/framelock.def | $(HG2D_DIR)
+$(HG2D_DIR)/FRAMELOCK.DLL: tools/drive/framelock.c tools/drive/framelock.def include/fs98/host_runtime.h | $(HG2D_DIR)
 	$(CC) -std=c99 -Os -Wall -Wextra -Iinclude -shared -nostdlib -Wl,--enable-stdcall-fixup -Wl,--entry=_DllMain@12 -Wl,--image-base=0x20970000 -Wl,--disable-dynamicbase -Wl,--disable-nxcompat -o $@ tools/drive/framelock.c tools/drive/framelock.def -lkernel32 -luser32 -lgdi32

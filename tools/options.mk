@@ -20,3 +20,16 @@ optionseventsdiff-run: optionsevents
 	bash tools/run_optionsdiff.sh $(N) $(SEED) $(MODE)
 options-breaks: optionsevents
 	bash tools/run_optionsdiff.sh --breaks $(N)
+
+# The native DLL: our dialogs over the CD's SIMSUI and MFC42, at retail's base
+.PHONY: options options-runtime-tables
+options: $(OPTIONS_DIR)/OPTIONS_ours.dll
+options-runtime-tables: src/options/options_runtime_tables.inc $(OPTIONS_DIR)/options.res $(OPTIONS_DIR)/simsui-anchor.def
+src/options/options_runtime_tables.inc $(OPTIONS_DIR)/options.res $(OPTIONS_DIR)/simsui-anchor.def &: tools/gen_options_runtime.py tools/gen_options_tables.py tools/difftest/optionseventsdiff.c tools/dialogmap.py orig/English/Options.DLL orig/SIMSUI.DLL | $(OPTIONS_DIR)
+	python3 -B tools/gen_options_runtime.py
+$(OPTIONS_DIR)/liboptions-simsui.a: $(OPTIONS_DIR)/simsui-anchor.def
+	i686-w64-mingw32-dlltool -d $< -l $@
+$(OPTIONS_DIR)/options-res.o: $(OPTIONS_DIR)/options.res
+	i686-w64-mingw32-windres -J res -O coff $< $@
+$(OPTIONS_DIR)/OPTIONS_ours.dll: $(OPTIONS_SOURCES) src/options/options_runtime.c src/options/options.def $(OPTIONS_HEADERS) src/options/options_runtime_tables.inc $(OPTIONS_DIR)/options-res.o $(OPTIONS_DIR)/liboptions-simsui.a
+	$(CC) -std=c99 -O2 -Wall -Wextra -Werror -fno-strict-aliasing -fno-delete-null-pointer-checks -shared -nostdlib -Wl,--entry=_DllMain@12 -Wl,--disable-dynamicbase -Wl,--image-base=0x22390000 -o $@ $(OPTIONS_SOURCES) src/options/options_runtime.c src/options/options.def $(OPTIONS_DIR)/options-res.o $(OPTIONS_DIR)/liboptions-simsui.a -lkernel32 -luser32 -lmsvcrt

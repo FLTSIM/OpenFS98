@@ -73,8 +73,8 @@ BASE_HOST   := 0x41000000
 MODULES := ACONTAIN ADVDRV ANALYSIS ATC BOOSTER CHAIN CONTROLS DEMO DYNAMIC FACIL FE G3D GLOBAL HG2D LANDME MAIN MPCHAT MULTIP NUMERIC PANELS REALITY SLEW SOUND UTIL WEATHERM WINDOW WINMSG
 ENGLISH_MODULES := WORLD ALERTS HELP SIM VIEWS FLIGHTS MP_DIALOG
 # Built, and compared in the game by main-dialogs, but not yet installed by `make install`
-# (empty: Flights moved to ENGLISH_MODULES on 2026-11-02)
-ENGLISH_CANDIDATES :=
+# (Flights moved to ENGLISH_MODULES on 2026-11-02; Options added 2026-11-06)
+ENGLISH_CANDIDATES := OPTIONS
 ALL_MODULES := $(MODULES) $(ENGLISH_MODULES)
 
 # Localised dialog DLLs live in English/, outside Modules/, under mixed-case names.
@@ -85,7 +85,8 @@ english_name = $(strip \
   $(if $(filter SIM,$(1)),Sim,\
   $(if $(filter VIEWS,$(1)),Views,\
   $(if $(filter FLIGHTS,$(1)),Flights,\
-  $(if $(filter MP_DIALOG,$(1)),MP_DIALOG))))))))
+  $(if $(filter MP_DIALOG,$(1)),MP_DIALOG,\
+  $(if $(filter OPTIONS,$(1)),Options)))))))))
 installed_path = $(if $(filter $(ENGLISH_MODULES) $(ENGLISH_CANDIDATES),$(1)),English/$(call english_name,$(1)).DLL,Modules/$(call installed_name,$(1)))
 
 # Keep the accepted World build flags and dependency graph in one place.
@@ -117,6 +118,7 @@ $(eval $(call dialog_build,SIM,sim,$(BIN)/sim-diff/SIM_ours.dll))
 $(eval $(call dialog_build,VIEWS,views,$(BIN)/views-diff/VIEWS_ours.dll))
 $(eval $(call dialog_build,FLIGHTS,flights,$(BIN)/flights-diff/FLIGHTS_ours.dll))
 $(eval $(call dialog_build,MP_DIALOG,mpdialog,$(BIN)/mpdialog-diff/MP_DIALOG_ours.dll))
+$(eval $(call dialog_build,OPTIONS,options,$(BIN)/options-diff/OPTIONS_ours.dll))
 
 # Install and revert one English DLL: world-install, alerts-revert, ...
 # The first install keeps the game's own copy beside it as <name>.DLL.orig;
@@ -1238,6 +1240,7 @@ main-breaks: maindiff
 	@python3 tools/main_breaks.py $(if $(N),$(N),2000) $(if $(SUITE),$(SUITE),records)
 
 # HOST (module id 1, FLTSIM98.EXE), a slice at a time (docs/modules/host.md).
+include tools/host_runtime.mk
 src/host/host_data.inc src/host/host_pointers.inc &: $(ORIG)/FLTSIM98.EXE tools/gen_host_data.py
 	python3 tools/gen_host_data.py
 

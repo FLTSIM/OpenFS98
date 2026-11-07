@@ -47,6 +47,7 @@
 #include <stdint.h>
 
 #include "fs98/linkage.h"
+#include "fs98/host_runtime.h"
 
 #define HOST_MAIN_LOOP_READ 0x402177u
 #define HOST_MAIN_WINDOW    0x41880cu
@@ -61,6 +62,7 @@ struct fs98_import ImportTable[] = {
     { 0, 0 }
 };
 
+static struct fs98_host_runtime *runtime;
 static uint32_t clock_ms = CLOCK_START;
 static uint32_t passes, pass_limit = 900, dump_every, dump_at, hold_every;
 static uint32_t blits;
@@ -509,7 +511,7 @@ static void main_loop_pass(void)
     if (hold_every && passes % hold_every == 0)
         hold_for_screenshot();
     while (script_next < script_count && script[script_next].pass <= passes) {
-        HWND window = *(HWND *)HOST_MAIN_WINDOW;
+        HWND window = runtime ? *(HWND *)(runtime->image + 0x180c) : *(HWND *)HOST_MAIN_WINDOW;
         if (window)
             PostMessageA(window, script[script_next].message, script[script_next].wparam, script[script_next].lparam);
         script_next++;
@@ -526,7 +528,7 @@ static DWORD WINAPI hook_timegettime(void)
     /* the first clock read is UTIL's init: every module is loaded by then */
     if (reg_wanted && !reg_installed)
         reg_install();
-    if ((uint32_t)(uintptr_t)__builtin_return_address(0) == HOST_MAIN_LOOP_READ)
+    if (!runtime && (uint32_t)(uintptr_t)__builtin_return_address(0) == HOST_MAIN_LOOP_READ)
         main_loop_pass();
     return clock_ms;
 }
@@ -615,6 +617,7 @@ static int same_name(const char *a, const char *b)
 
 static void *patch_import(const char *name, void *hook)
 {
+    void *runtime_previous = runtime ? runtime->patch_import(name, hook) : 0;
     uint8_t *base = (uint8_t *)GetModuleHandleA(0);
     IMAGE_NT_HEADERS *nt = (IMAGE_NT_HEADERS *)(base + ((IMAGE_DOS_HEADER *)base)->e_lfanew);
     IMAGE_IMPORT_DESCRIPTOR *library = (IMAGE_IMPORT_DESCRIPTOR *)
@@ -638,7 +641,7 @@ static void *patch_import(const char *name, void *hook)
             }
         }
     }
-    return 0;
+    return runtime_previous;
 }
 
 static uint32_t parse_hex(const char **text)
@@ -732,6 +735,11 @@ BOOL WINAPI DllMain(HINSTANCE inst, DWORD reason, LPVOID reserved)
         hold_every = environment_number("FRAMELOCK_HOLD", 0);
         sim1_states = environment_number("FRAMELOCK_SIM1", 0);
         reg_wanted = environment_number("FRAMELOCK_REGS", 0);
+        runtime = (struct fs98_host_runtime *)GetProcAddress(GetModuleHandleA(NULL), "OpenFS98Host");
+        if (runtime && runtime->version != 1)
+            return FALSE;
+        if (runtime)
+            runtime->main_loop_pass = main_loop_pass;
         read_script();
         if (GetEnvironmentVariableA("FRAMELOCK_GLOBAL", path, sizeof path))
             global_handle = CreateFileA(path, GENERIC_WRITE, FILE_SHARE_READ, 0, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, 0);

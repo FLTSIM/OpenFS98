@@ -182,8 +182,8 @@ all: $(addprefix $(BIN)/,$(addsuffix .DLL,$(ALL_MODULES))) gauges mdls sim1
 
 .PHONY: sim1 sim1-install sim1-revert
 sim1:
-	$(MAKE) -f tools/sim1.mk sim1-complete
-	@cmp -s bin/sim1-diff/SIM1_COMPLETE.DLL $(BIN)/SIM1.sim || cp bin/sim1-diff/SIM1_COMPLETE.DLL $(BIN)/SIM1.sim
+	$(MAKE) -f tools/sim1.mk sim1-native
+	@cmp -s bin/sim1-native/SIM1_ours.sim $(BIN)/SIM1.sim || cp bin/sim1-native/SIM1_ours.sim $(BIN)/SIM1.sim
 
 sim1-install: sim1
 	python3 -B tools/stage_sim1.py "$(FS98_DIR)"

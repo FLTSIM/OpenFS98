@@ -36,7 +36,7 @@ IMAGE = 'orig/Sim/SIM1.sim'
 OUTPUT = 'src/sim1/sim1_tables.inc'
 BASE = 0x22000000
 TEXT_END = 0x22014160
-CRT_START = 0x22013340          # MSVC runtime pieces linked in at the end of .text
+CRT_START = 0x22014160          # the MSVC runtime's import thunks at the end of .text (SIM1's own code runs to 0x2201415d)
 REGS = ['eax', 'ecx', 'edx', 'ebx', 'esp', 'ebp', 'esi', 'edi']
 ALIASES = {'eax': ('eax', 'ax', 'al', 'ah'), 'ecx': ('ecx', 'cx', 'cl', 'ch'),
            'edx': ('edx', 'dx', 'dl', 'dh'), 'ebx': ('ebx', 'bx', 'bl', 'bh'),

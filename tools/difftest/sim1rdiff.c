@@ -98,6 +98,12 @@ static uint32_t s_seed, s_rng, s_scenario, s_operation, s_calls, s_log_length, s
 static uint32_t s_comparisons, s_faults, s_timeouts, s_max_calls, s_saved_seh, s_stack_low, s_stack_high;
 static int s_side, s_running, s_retail_timed_out, s_ours_timed_out;
 static uint32_t s_unresolved;
+/* a scenario whose perturbation planted a signalling NaN: there, where that NaN meets another on
+ * the stack, retail's `fmul QWORD PTR` style memory operand returns the stack's NaN while
+ * GCC may have loaded the operand first (quieting it), and the larger significand wins. Memory
+ * never holds a signalling NaN in the game (the x87 cannot store one), so in such a scenario a
+ * difference confined to doubles that are quiet NaNs on both sides is counted, not failed. */
+static uint32_t s_injected_snan, s_nan_collisions;
 static char s_logs[2][LOG_SIZE];
 static uint8_t *s_stubs;
 static void *s_service_tables[IMPORTS][256];
@@ -145,6 +151,8 @@ struct operation {
 static uint32_t next_random(void);
 static struct regs s_entry_regs;
 static void *s_util[64];     /* (defined below) */
+/* the AIR file the HOST file services stand for: a shaper's blob and its size (0: none) */
+static const uint8_t *s_air_blob; static uint32_t s_air_size;
 #include "sim1r_operations.inc"
 #define OP_COUNT (sizeof(s_operations) / sizeof(s_operations[0]))
 #define CURRENT s_operations[s_operation]
@@ -212,7 +220,9 @@ uint64_t __cdecl sim1r_dispatch(uint32_t index, uint32_t ecx, uint32_t edx, uint
     for (at = 0; at < s_pop_now / 4; ++at) {
         /* UTIL's word arguments (sincos's angle, angle-from-sine's pair): callers push a word
          * over stack garbage, and UTIL reads the word */
-        int word = module_id == 20 && ((offset == 0x2c && at == 0) || offset == 0x38);
+        int word = (module_id == 20 && ((offset == 0x2c && at == 0) || offset == 0x38))
+                   || (module_id == 10 && offset == 0x2c && at < 3)      /* WINDOW's matrix: three angle words */
+                   || (module_id == 39 && offset == 0x28 && at > 0);     /* SOUND's wind: two words pushed over garbage (it ignores all three) */
         describe(word ? arguments[at] & 0xffff : arguments[at]);
     }
     s_answer_ecx = script() ^ 0x5a5a; s_answer_edx = script() ^ 0xa5a5;
@@ -236,6 +246,30 @@ uint64_t __cdecl sim1r_dispatch(uint32_t index, uint32_t ecx, uint32_t edx, uint
         if (block) { memset(block, 0, arguments[0] * arguments[1]); memcpy((void *)(uintptr_t)arguments[2], &block, 4); }
         put(" => %s\n", block ? "0" : "-1");
         return block ? 0 : 0xffffffffu;
+    }
+    if (module_id == 1 && offset == 0x17c) {     /* HOST open(&file, path, mode, flags): a handle, or a failure */
+        uint32_t answer = script(), handle = 0x4d1e;
+        if (answer % 6 && writable(arguments[0], 4)) { memcpy((void *)(uintptr_t)arguments[0], &handle, 4); put(" => 0\n"); return 0; }
+        put(" => 1\n");
+        return 1;
+    }
+    if (module_id == 1 && offset == 0x1a4) {     /* HOST size(file, &size): the blob's */
+        uint32_t answer = script();
+        if (answer % 6 && writable(arguments[1], 4)) { memcpy((void *)(uintptr_t)arguments[1], &s_air_size, 4); put(" => 0 %x\n", s_air_size); return 0; }
+        put(" => 1\n");
+        return 1;
+    }
+    if (module_id == 1 && offset == 0x19c) {     /* HOST read(file, buffer, size, &got): the blob, whole or short */
+        uint32_t answer = script(), size = arguments[2], got = size;
+        if (answer % 8 == 0) got = size ? size - 1 : 0;
+        if (answer % 6 && s_air_blob && size <= s_air_size && writable(arguments[1], size) && writable(arguments[3], 4)) {
+            memcpy((void *)(uintptr_t)arguments[1], s_air_blob, got);
+            memcpy((void *)(uintptr_t)arguments[3], &got, 4);
+            put(" => 0 %x\n", got);
+            return 0;
+        }
+        put(" => 1\n");
+        return 1;
     }
     if (module_id == 1 && offset == 0x214) {     /* HOST free(&pointer): cleared */
         if (writable(arguments[0], 4)) memset((void *)(uintptr_t)arguments[0], 0, 4);
@@ -310,11 +344,14 @@ uint64_t __cdecl sim1r_dispatch(uint32_t index, uint32_t ecx, uint32_t edx, uint
             if (!writable(arguments[0], 6) || !writable(arguments[1], 0x18) || !writable(arguments[2], 8)) { put(" (refused)\n"); return 0; }
             ((void (__stdcall *)(const void *, const void *, void *))s_util[offset / 4])((const void *)(uintptr_t)arguments[0],
                 (const void *)(uintptr_t)arguments[1], (void *)(uintptr_t)arguments[2]);
-            put(" =>");
-            for (at = 0; at < 8; ++at) put(" %02x", ((uint8_t *)(uintptr_t)arguments[2])[at]);
+            put(" =>");     /* bytes 2..7: UTIL writes those only (and reads the input's 2..7), so 0 and 1 are the caller's stack */
+            for (at = 2; at < 8; ++at) put(" %02x", ((uint8_t *)(uintptr_t)arguments[2])[at]);
             put("\n");
             (void)size;
             return 0;
+        case 0x70:      /* the generator's sign, as the AIR decoder asks it: scripted */
+            result = script();
+            break;
         default:
             result = 0;
             break;
@@ -523,6 +560,7 @@ static void perturb_double(uint8_t *at)
         static const uint64_t specials[6] = {0x7ff0000000000001ull, 0xfff8000000000000ull, 0x7ff0000000000000ull,
                                              0x0000000000000001ull, 0x8000000000000000ull, 0x000fffffffffffffull};
         memcpy(at, &specials[(random >> 8) % 6], 8);
+        if ((random >> 8) % 6 == 0) ++s_injected_snan;
         return;
     }
     switch (random % 10) {
@@ -588,6 +626,7 @@ static void initialize(void)
     memcpy(s_fixture.data, record + 8, DATA_SIZE);
     memcpy(s_fixture.global, record + 8 + DATA_SIZE, GLOBAL_SIZE);
     /* nudge a few values: doubles at 8-byte alignment, words and bytes elsewhere */
+    s_injected_snan = 0;
     count = next_random() % 12;
     for (at = 0; at < count; ++at) {
         uint32_t random = next_random(), where;
@@ -656,7 +695,7 @@ static uint32_t pick(uint32_t kind, uint32_t random)
         case 3: return (random >> 8) & 0xffff;
         case 4: return (uint32_t)(uintptr_t)s_fixture.global;
         case 5: return (uint32_t)(uintptr_t)s_fixture.blocks[(random >> 8) % BLOCKS];
-        default: return random;
+        default: return random | 0x80000000u;   /* wild: never the harness's own memory, which neither side resets */
         }
     }
 }
@@ -724,6 +763,9 @@ static LONG CALLBACK expected_fault(EXCEPTION_POINTERS *exception)
      * instruction faults as a read or a write, are the compiler's */
     put("fault code=%lx address=%s\n", record->ExceptionCode,
         address < 0x10000 ? "low" : in_fixture(address) ? "fixture" : "wild");
+    if (getenv("SIM1R_EIP"))     /* where faults are (ebx and [esp+0x10]: a table lookup's table and caller) */
+        fprintf(stderr, "eip %08lx address %08x edi %08lx ebx %08lx esp+10 %08x\n", exception->ContextRecord->Eip, address,
+                exception->ContextRecord->Edi, exception->ContextRecord->Ebx, ((uint32_t *)(uintptr_t)exception->ContextRecord->Esp)[4]);
     if (!s_side) ++s_faults;
     s_running = 0;
     exception->ContextRecord->Eip = (DWORD)(uintptr_t)land;
@@ -835,6 +877,24 @@ static void result_log(void)
     x87_log(&s_results[s_side].x87, info ? (int)info->cc_out : 1);
 }
 static void show(void);
+/* every differing byte inside a double that is a quiet NaN on both sides */
+static int quiet_nans_only(void)
+{
+    const uint8_t *retail = (const uint8_t *)&s_retail_result, *ours = (const uint8_t *)&s_fixture;
+    uint32_t at, size = sizeof(s_fixture);
+    for (at = 0; at < size; ++at) {
+        uint32_t window;
+        int covered = 0;
+        if (retail[at] == ours[at]) continue;
+        for (window = at >= 7 ? at - 7 : 0; window <= at && window + 8 <= size && !covered; ++window) {
+            uint64_t a, b;
+            memcpy(&a, retail + window, 8); memcpy(&b, ours + window, 8);
+            covered = ((a >> 51) & 0xfff) == 0xfff && ((b >> 51) & 0xfff) == 0xfff;
+        }
+        if (!covered) return 0;
+    }
+    return 1;
+}
 static int compare(void)
 {
     uint32_t at;
@@ -847,6 +907,7 @@ static int compare(void)
     ++s_comparisons;
     show();
     if (!memcmp(&s_retail_result, &s_fixture, sizeof(s_fixture)) && !strcmp(s_logs[0], s_logs[1])) return 0;
+    if (s_injected_snan && !strcmp(s_logs[0], s_logs[1]) && quiet_nans_only()) { ++s_nan_collisions; return 0; }
     fprintf(stderr, "DIFFER scenario=%u op=%u (%s, %#x) seed=%x\n", s_scenario, s_operation, CURRENT.name, CURRENT.rva, s_seed);
     for (at = 0; at < sizeof(s_fixture); ++at)
         if (((uint8_t *)&s_retail_result)[at] != ((uint8_t *)&s_fixture)[at]) {
@@ -971,7 +1032,7 @@ int main(int argc, char **argv)
         }
     }
     printf("SIM1: %u scenarios, %u operations, %u comparisons, 0 differ; seed=%x snapshots=%u faults=%u timeouts=%u "
-           "(retail's, not compared) max_calls=%u\n",
-        count, last - first + 1, s_comparisons, initial_seed, s_snapshot_count, s_faults, s_unresolved, s_max_calls);
+           "(retail's, not compared) max_calls=%u nan_collisions=%u\n",
+        count, last - first + 1, s_comparisons, initial_seed, s_snapshot_count, s_faults, s_unresolved, s_max_calls, s_nan_collisions);
     return 0;
 }

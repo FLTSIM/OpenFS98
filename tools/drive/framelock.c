@@ -363,6 +363,8 @@ static void wrap_module(HMODULE module, const char *name)
             code_high = code_low + section[s].Misc.VirtualSize;
             break;
         }
+    if (table[1] && (table[1] < image_low || table[1] >= image_high))
+        return;     /* wrapped already (the first slot is a thunk) */
     thunks = VirtualAlloc(0, 0x400 * THUNK_BYTES, MEM_COMMIT, PAGE_EXECUTE_READWRITE);
     if (!thunks)
         return;
@@ -376,14 +378,24 @@ static void wrap_module(HMODULE module, const char *name)
             break;
         if (value < code_low || value >= code_high)
             continue;
-        index = reg_slot_count++;
-        for (c = 0; c < 15 && name[c] && name[c] != '.'; c++)
-            reg_slots[index].name[c] = (name[c] >= 'a' && name[c] <= 'z') ? (char)(name[c] - 32) : name[c];
-        reg_slots[index].offset = offset * 4;
+        {   /* a module loaded again (SIM1, per aircraft) keeps its slots */
+            char upper[16] = {0};
+            for (c = 0; c < 15 && name[c] && name[c] != '.'; c++)
+                upper[c] = (name[c] >= 'a' && name[c] <= 'z') ? (char)(name[c] - 32) : name[c];
+            for (index = 0; index < reg_slot_count; index++)
+                if (reg_slots[index].offset == offset * 4 && !lstrcmpA(reg_slots[index].name, upper))
+                    break;
+            if (index == reg_slot_count) {
+                index = reg_slot_count++;
+                for (c = 0; c < 16; c++)
+                    reg_slots[index].name[c] = upper[c];
+                reg_slots[index].offset = offset * 4;
+                reg_slots[index].in_hash = 0x811c9dc5u;
+                for (c = 0; c < REG_COUNT; c++)
+                    reg_slots[index].out_hash[c] = 0x811c9dc5u;
+            }
+        }
         reg_slots[index].target = value;
-        reg_slots[index].in_hash = 0x811c9dc5u;
-        for (c = 0; c < REG_COUNT; c++)
-            reg_slots[index].out_hash[c] = 0x811c9dc5u;
         thunks[0] = 0x68;
         *(uint32_t *)(thunks + 1) = index;
         thunks[5] = 0xe9;
@@ -544,8 +556,16 @@ static DWORD WINAPI hook_timegettime(void)
     /* the first clock read is UTIL's init: every module is loaded by then */
     if (reg_wanted && !reg_installed)
         reg_install();
-    if (!runtime && (uint32_t)(uintptr_t)__builtin_return_address(0) == HOST_MAIN_LOOP_READ)
+    if (!runtime && (uint32_t)(uintptr_t)__builtin_return_address(0) == HOST_MAIN_LOOP_READ) {
+        /* SIM1.sim is loaded after the first clock read, and again for each aircraft, with its
+         * Linkage fresh: wrap it once more (a wrapped table stops wrap_module at once) */
+        if (reg_installed) {
+            HMODULE sim1 = GetModuleHandleA("SIM1.sim");
+            if (sim1)
+                wrap_module(sim1, "SIM1.sim");
+        }
         main_loop_pass();
+    }
     return clock_ms;
 }
 
@@ -629,6 +649,28 @@ static int same_name(const char *a, const char *b)
     while (*a && *a == *b)
         a++, b++;
     return *a == *b;
+}
+
+/* FRAMELOCK_REGS: SIM1.sim is loaded per aircraft and its init called at once; wrap it as soon
+ * as the host's load returns */
+static HMODULE (WINAPI *real_loadlibrarya)(LPCSTR);
+static HMODULE (WINAPI *real_loadlibraryexa)(LPCSTR, HANDLE, DWORD);
+static void reg_wrap_sim1(HMODULE loaded)
+{
+    if (loaded && reg_installed && loaded == GetModuleHandleA("SIM1.sim"))
+        wrap_module(loaded, "SIM1.sim");
+}
+static HMODULE WINAPI hook_loadlibrarya(LPCSTR name)
+{
+    HMODULE loaded = real_loadlibrarya(name);
+    reg_wrap_sim1(loaded);
+    return loaded;
+}
+static HMODULE WINAPI hook_loadlibraryexa(LPCSTR name, HANDLE file, DWORD flags)
+{
+    HMODULE loaded = real_loadlibraryexa(name, file, flags);
+    reg_wrap_sim1(loaded);
+    return loaded;
 }
 
 static void *patch_import(const char *name, void *hook)
@@ -773,6 +815,12 @@ BOOL WINAPI DllMain(HINSTANCE inst, DWORD reason, LPVOID reserved)
         real_bitblt = patch_import("BitBlt", (void *)hook_bitblt);
         real_stretchblt = patch_import("StretchBlt", (void *)hook_stretchblt);
         real_stretchdibits = patch_import("StretchDIBits", (void *)hook_stretchdibits);
+        if (reg_wanted) {
+            real_loadlibrarya = LoadLibraryA;
+            real_loadlibraryexa = LoadLibraryExA;
+            patch_import("LoadLibraryA", (void *)hook_loadlibrarya);
+            patch_import("LoadLibraryExA", (void *)hook_loadlibraryexa);
+        }
     }
     return TRUE;
 }

@@ -146,3 +146,24 @@ sim1rdiff-run: sim1rdiff
 	WINEDEBUG=-all timeout 7200 wine $(SIM1_DIR)/sim1rdiff.exe $(SIM1R_N) $(SIM1R_SEED)
 sim1r-breaks: sim1rdiff
 	python3 -B tools/sim1r_breaks.py
+
+# The native SIM1.sim: the decompiled routines (src/sim1/sim1_small.c) over retail's data
+# (src/sim1/sim1_native.c; tools/gen_sim1_native.py takes the bytes from the CD's SIM1).
+SIM1_NATIVE_DIR := bin/sim1-native
+SIM1_NATIVE_CFLAGS := $(SIM1R_CFLAGS) -Iinclude -Isrc/sim1 -I$(SIM1_NATIVE_DIR)
+.PHONY: sim1-native
+sim1-native: $(SIM1_NATIVE_DIR)/SIM1_ours.sim
+$(SIM1_NATIVE_DIR)/sim1_data.inc $(SIM1_NATIVE_DIR)/sim1_rdata.inc $(SIM1_NATIVE_DIR)/sim1.res &: tools/gen_sim1_native.py tools/impscan.py orig/Sim/SIM1.sim
+	python3 -B tools/gen_sim1_native.py
+$(SIM1_NATIVE_DIR)/sim1-res.o: $(SIM1_NATIVE_DIR)/sim1.res
+	i686-w64-mingw32-windres -J res -O coff $< $@
+$(SIM1_NATIVE_DIR)/SIM1_ours.sim: src/sim1/sim1_native.c $(SIM1R_SOURCES) $(SIM1R_HEADERS) src/sim1/sim1.def $(SIM1_NATIVE_DIR)/sim1_data.inc $(SIM1_NATIVE_DIR)/sim1_rdata.inc $(SIM1_NATIVE_DIR)/sim1-res.o
+	$(SIM1_CC) $(SIM1_NATIVE_CFLAGS) -shared -nostdlib -Wl,--entry=_sim1_native_entry@12 -Wl,--disable-dynamicbase \
+	    -Wl,--disable-nxcompat -Wl,--image-base,0x22000000 -o $@ src/sim1/sim1_native.c $(SIM1R_SOURCES) \
+	    $(SIM1_NATIVE_DIR)/sim1-res.o src/sim1/sim1.def -lmsvcrt -lkernel32 -lgcc
+# its game acceptance: the 74 scripted flights, retail SIM1 against it, frame for frame
+.PHONY: sim1native-flights
+sim1native-flights: sim1-native sim1-frame-observer
+	python3 -B tools/fly_scripts.py $(SIM1_NATIVE_DIR)/scripts
+	FS98_DIR="$(CURDIR)/game" HG2D_FRAMES_ONLY=SIM1 HG2D_FRAMES_SIM1="$(CURDIR)/$(SIM1_NATIVE_DIR)/SIM1_ours.sim" HG2D_FRAMES_NOSOUND=1 FRAMES_MANY_OUT=$(SIM1_NATIVE_DIR)/flights FRAMES_MANY_PASSES=1200 FRAMES_MANY_JOBS=8 tools/frames_many.sh $(SIM1_NATIVE_DIR)/scripts/controls.txt
+	@test "$$(grep -c ': match' $(SIM1_NATIVE_DIR)/flights/summary.txt)" -eq 74

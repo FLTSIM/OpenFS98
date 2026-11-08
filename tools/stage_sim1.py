@@ -41,10 +41,13 @@ def main():
     parser.add_argument('game', type=Path)
     parser.add_argument('--retail', action='store_true')
     parser.add_argument('--check', action='store_true')
+    parser.add_argument('--lifted', action='store_true',
+                        help='the lifted build (bin/sim1-diff/SIM1_COMPLETE.DLL), kept as an oracle')
     args = parser.parse_args()
     reference = ROOT / 'orig/Sim/SIM1.sim'
     validate(reference, retail=True)
-    source = reference if args.retail else ROOT / 'bin/sim1-diff/SIM1_COMPLETE.DLL'
+    source = (reference if args.retail else ROOT / 'bin/sim1-diff/SIM1_COMPLETE.DLL' if args.lifted
+              else ROOT / 'bin/sim1-native/SIM1_ours.sim')
     content = validate(source, retail=args.retail)
     directory = args.game / 'Sim'
     if not directory.is_dir() or not (args.game / 'FLTSIM98.EXE').is_file():

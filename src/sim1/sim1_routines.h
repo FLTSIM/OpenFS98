@@ -149,5 +149,44 @@ void sim1_ground_bumps(void);                                                   
 void sim1_body_accelerations(void);                                                /* 0x22002eb0 */
 void sim1_angle_follow(void);                                                      /* 0x22006460 */
 void sim1_rotor_forces(void);                                                      /* 0x22013030 */
+void sim1_integrate(void);                                                         /* 0x220032a0 */
+void __stdcall sim1_engine_strike(uint8_t *record);                                /* 0x22004380 */
+void sim1_pitch_sum_moment(void);                                                  /* 0x220057b0 */
+void sim1_flaps(void);                                                             /* 0x220016d0 */
+uint8_t *sim1_autopilot_pass(uint8_t *global);                                     /* 0x2200daf1, edi in and out */
+void sim1_ground_pass(uint8_t *global);                                            /* 0x220096d0, edi */
+void sim1_engines_pass(void);                                                      /* 0x22004260 (and its tail 0x22004d80) */
+void sim1_autopilot(void);                                                         /* 0x2200d8c7 */
+void sim1_spoilers(void);                                                          /* 0x22001360 */
+void sim1_landing_gear(void);                                                      /* 0x220017f0 */
+void sim1_air_motion(uint8_t *global);                                             /* 0x22008bd4, edi */
+void sim1_rotor_terms(void);                                                       /* 0x22011f50 */
+void sim1_ground_systems(uint8_t *global);                                         /* 0x2200ac8a, edi */
+uint8_t *sim1_controls_pass(uint8_t *global);                                      /* 0x22001320 (and 0x22002260), edi in and out */
+void sim1_jet_engine(uint8_t *global, uint8_t *engine);                            /* 0x2200769d, edi, ebx */
+void sim1_jets(uint8_t *global);                                                   /* 0x22007530, edi */
+void sim1_ground_or_turbulence(uint8_t *global);                                   /* 0x2200ac4a, edi */
+void sim1_attitude_step(void);                                                     /* 0x220039d0 */
+void sim1_piston_engine(uint8_t *global, uint8_t *engine, uint8_t *extra);         /* 0x22007ef1, edi, ebx, esi */
+void sim1_rotor_blades(void);                                                      /* 0x220127b0 */
+void sim1_aero_coefficients(void);                                                 /* 0x2200fe80 */
+void sim1_pistons(uint8_t *global);                                                /* 0x22007e80, edi */
+void sim1_local_flow(uint8_t *global);                                             /* 0x22001100, edi */
+uint32_t __stdcall sim1_air_decode(const uint8_t *data, int32_t size);              /* 0x2200af90 */
+void __stdcall sim1_engines_frame(uint32_t first, uint32_t second);                 /* 0x2200d790 */
+uint32_t sim1_load_air(void);                                                      /* 0x2200ae90 */
+void sim1_tail_rotor_blades(void);                                                 /* 0x22013b30 */
+void sim1_heli_power(void);                                                       /* 0x220135f0 */
+void sim1_rotor_frame(void);                                                      /* 0x22013340 */
+uint8_t *sim1_simulation_step(uint8_t *edi);                                      /* 0x22002752, edi in and out */
+uint8_t *sim1_tick_step(uint8_t *edi);                                              /* 0x2200ab16, edi in and out */
+void __stdcall sim1_chain_tick(uint32_t first, uint32_t second);                    /* 0x2200a84b (and its wrapper 0x22001020), CHAIN list 1 */
+uint32_t sim1_init_core(void);                                                     /* 0x22001060, Linkage +0x04 */
+void __stdcall sim1_service_descriptor(uint8_t *out);                             /* 0x2200ac0d, Linkage +0x18 */
+uint16_t __stdcall sim1_service_word(uint8_t *out);                                /* 0x2200ac2f, Linkage +0x28 */
+uint32_t __stdcall sim1_service_scaled(double *out);                               /* 0x220117c0, Linkage +0x2c */
+uint32_t __stdcall sim1_service_vector(double *a, double *b, double *c);           /* 0x220117e0, Linkage +0x30 */
+uint32_t __stdcall sim1_service_reset(uint32_t value);                             /* 0x22011750, Linkage +0x34 */
+long double sim1_service_wind(void);                                               /* 0x220096b8, Linkage +0x38 */
 
 #endif

@@ -2886,7 +2886,7 @@ done:
 /* 0x22004c10: seven contact points' stiffness terms (+0x2000, +0x23e0, +0x26c0, +0x1d00,
  * +0x1de0, +0x2580, +0x2aa0): GLOBAL's pairs of words (+0xb74.. +0xba8) multiplied as unsigned
  * 64-bit integers, times the scale word +0xaf4 * +0x698 * +0x690. (0x22004d80, the tail of
- * 0x22004380, turns them back.) */
+ * 0x22004260, turns them back.) */
 void sim1_contact_terms(void)
 {
     static const uint16_t pairs[7][3] = {{0xb78, 0xb74, 0x2000}, {0xb7c, 0xb80, 0x23e0}, {0xb88, 0xb84, 0x26c0}, {0xb8c, 0xb90, 0x1d00},
@@ -3115,4 +3115,2922 @@ void sim1_rotor_forces(void)
     SF64(0x1c20) = (double)(((long double)forward * power) * RF64(0x15518) + SF64(0x1a38));
     SF64(0x1c50) = (double)((((long double)lateral * power + SF64(0x1a28)) + SF64(0x1a18)) + SF64(0x19e8));
     SF64(0x1c10) = (double)(((sim1_fchs(SF64(0x1c08)) * speed - (((long double)SF64(0x738) * SF64(0x3de8)) * SF64(0x1c18)) * RF64(0x15520)) + SF64(0x1a30)) + SF64(0x1a20));
+}
+
+/* 0x220032a0: one integration step: the body velocities (+0x13a0, +0x13a8, +0x13b0) less the
+ * linear accelerations' trapezoid (this pass's and the last's, times dt and +0x15058), within
+ * +-4500; the rates (+0x13e8..) the same from the angular ones, within +-8.73; and the rates in
+ * the stability axes (+0x1400.. +0x1410, turned through +0x14a8/+0x14b0, negated outside the
+ * angle of attack's band +0x768 * [+0x15078, +0x15070]), within +-8.73. The first velocity's
+ * upper bound is tested before it is rounded, as retail does. */
+void sim1_integrate(void)
+{
+    static const uint16_t rates[6] = {0x13e8, 0x13f0, 0x13f8, 0x1400, 0x1408, 0x1410};
+    long double x, cosine, sine;
+    uint32_t at;
+    x = (long double)SF64(0x13a0) - (((long double)SF64(0x1340) + SF64(0x1328)) * SF64(0x16f0)) * RF64(0x15058);
+    SF64(0x13a0) = (double)x;
+    SF64(0x13b0) = (double)((long double)SF64(0x13b0) - (((long double)SF64(0x1350) + SF64(0x1338)) * SF64(0x16f0)) * RF64(0x15058));
+    SF64(0x13a8) = (double)((long double)SF64(0x13a8) - (((long double)SF64(0x1348) + SF64(0x1330)) * SF64(0x16f0)) * RF64(0x15058));
+    if (!X87_C0C3(x, (long double)RF64(0x15060))) { S32(0x13a0) = 0; S32(0x13a4) = 0x40b19400; }
+    if (X87_C0((long double)SF64(0x13a0), (long double)RF64(0x15068))) { S32(0x13a0) = 0; S32(0x13a4) = 0xc0b19400; }
+    sim1_clamp_stored(0x13a8, 0x15060, 0x15068, 0, 0x40b19400);
+    sim1_clamp_stored(0x13b0, 0x15060, 0x15068, 0, 0x40b19400);
+    SF64(0x13e8) = (double)((long double)SF64(0x13e8) - (((long double)SF64(0x1370) + SF64(0x1358)) * SF64(0x16f0)) * RF64(0x15058));
+    SF64(0x13f0) = (double)((long double)SF64(0x13f0) - (((long double)SF64(0x1378) + SF64(0x1360)) * SF64(0x16f0)) * RF64(0x15058));
+    SF64(0x13f8) = (double)((long double)SF64(0x13f8) - (((long double)SF64(0x1380) + SF64(0x1368)) * SF64(0x16f0)) * RF64(0x15058));
+    if (X87_C0((long double)SF64(0x1490), (long double)SF64(0x768) * RF64(0x15070))
+        || X87_C0((long double)SF64(0x768) * RF64(0x15078), (long double)SF64(0x1490))) {
+        cosine = sim1_fchs(SF64(0x14a8)); sine = sim1_fchs(SF64(0x14b0));
+    } else {
+        cosine = SF64(0x14a8); sine = SF64(0x14b0);
+    }
+    SF64(0x1400) = sim1_x87(SF64(0x13e8));
+    SF64(0x1408) = (double)(cosine * SF64(0x13f0) - sine * SF64(0x13f8));
+    SF64(0x1410) = (double)(cosine * SF64(0x13f8) + sine * SF64(0x13f0));
+    for (at = 0; at < 6; ++at) sim1_clamp_stored(rates[at], 0x15080, 0x15088, 0x8f5c28f6, 0x402175c2);
+}
+
+/* A contact point (for 0x22004380) whose compression (+0) is past its limit (+8). */
+static int sim1_point_over(uint32_t point)
+{
+    return !X87_C0C3((long double)SF64(point), (long double)SF64(point + 8));
+}
+
+/* A point taken into an engine record's mask (+0x84, the point's bit +0x14) and count (+0x88). */
+static void sim1_point_add(uint8_t *record, uint32_t point)
+{
+    P32(record, 0x84) |= S32(point + 0x14);
+    P32(record, 0x88) += 1;
+}
+
+/* 0x22004380, stdcall: which contact points an engine (its record) strikes: the layout
+ * (+0x80: GLOBAL +0xaf8 for the gear type +0x33a 1, else 1) picks the points to test; the
+ * first that is past its limit sets the mask (+0x84) and count (+0x88), and for layouts 1 and
+ * 7 more are added. Layout 7 goes by which engine the record is. */
+void __stdcall sim1_engine_strike(uint8_t *record)
+{
+    uint8_t *global;
+    P32(record, 0x84) = 0;
+    P32(record, 0x88) = 0;
+    global = SIM1_GLOBAL;
+    P32(record, 0x80) = P16(global, 0x33a) == 1 ? P32(global, 0xaf8) : 1;
+    switch (P32(record, 0x80)) {
+    case 0:
+        P32(record, 0x84) = 0;
+        return;
+    case 2:
+        if (sim1_point_over(0x26c0)) goto point_26c0;
+        if (sim1_point_over(0x23e0)) { P32(record, 0x88) = 1; P32(record, 0x84) = S32(0x23f4); }
+        return;
+    case 3:
+        if (sim1_point_over(0x2580)) { P32(record, 0x88) = 1; P32(record, 0x84) = S32(0x2594); return; }
+        if (sim1_point_over(0x1de0)) { P32(record, 0x88) = 1; P32(record, 0x84) = S32(0x1df4); }
+        return;
+    case 4:
+        if (!sim1_point_over(0x26c0)) return;
+point_26c0:
+        P32(record, 0x88) = 1; P32(record, 0x84) = S32(0x26d4);
+        return;
+    case 5:
+        if (sim1_point_over(0x2580)) { P32(record, 0x88) = 1; P32(record, 0x84) = S32(0x2594); }
+        return;
+    case 6:
+        if (sim1_point_over(0x2000)) { P32(record, 0x88) = 1; P32(record, 0x84) = S32(0x2014); }
+        return;
+    case 7:
+        global = SIM1_GLOBAL;
+        if (record == global + 0x88c && sim1_point_over(0x1de0)) { P32(record, 0x88) = 1; P32(record, 0x84) = S32(0x1df4); global = SIM1_GLOBAL; }
+        if (P16(global, 0xaec) == 2 && record == global + 0x924 && sim1_point_over(0x23e0)) { sim1_point_add(record, 0x23e0); global = SIM1_GLOBAL; }
+        if (P16(global, 0xaec) == 3 && record == global + 0x9bc && sim1_point_over(0x23e0)) { sim1_point_add(record, 0x23e0); global = SIM1_GLOBAL; }
+        if (P16(global, 0xaec) != 4) return;
+        if (record == global + 0x924 && sim1_point_over(0x1de0)) { sim1_point_add(record, 0x1de0); global = SIM1_GLOBAL; }
+        if ((record == global + 0x9bc || record == global + 0xa54) && sim1_point_over(0x23e0)) sim1_point_add(record, 0x23e0);
+        return;
+    default:    /* 1, and past 7 */
+        if (sim1_point_over(0x2000)) { P32(record, 0x88) = 1; P32(record, 0x84) = S32(0x2014); }
+        if (sim1_point_over(0x26c0)) sim1_point_add(record, 0x26c0);
+        else if (sim1_point_over(0x23e0)) sim1_point_add(record, 0x23e0);
+        if (sim1_point_over(0x2580)) { sim1_point_add(record, 0x2580); return; }
+        if (sim1_point_over(0x1de0)) sim1_point_add(record, 0x1de0);
+        return;
+    }
+}
+
+/* 0x220057b0: the pitching moment's sum +0x12c8: the table at +0x2da0 (by the angle of attack
+ * +0x1490), the surfaces, flaps, rates and trim; the propellers' torque (by rpm, as in the
+ * rolling moment, but from the pitch rate); the gear points' compressions times their
+ * stiffness; each engine's throttle term (+0x1fd0..); the stall region's term; and the buffet
+ * (+0x3c8, reversing each +0x15160 seconds) above +0x15150 between the angles. Retail keeps
+ * the sum unrounded on the x87 from the table through the gear points, storing a rounded copy
+ * after each engine but the fourth. */
+void sim1_pitch_sum_moment(void)
+{
+    uint8_t *global;
+    long double moment;
+    uint32_t engine;
+    moment = sim1_table_lookup(sim1_data + 0x2da0, SF64(0x1490));
+    {
+        long double surfaces = (((long double)SF64(0x1680) + SF64(0x1678)) * SF64(0x2ab8) + ((long double)SF64(0x1660) + SF64(0x1658)) * SF64(0x37f8)) * SF64(0x768)
+                               - ((((long double)SF64(0x16a8) + SF64(0x16a0)) + SF64(0x1698)) * SF64(0x2b70)) * RF64(0x15130);
+        moment = (((((moment + surfaces) + ((long double)(int32_t)(uint32_t)S16(0x3812) * SF64(0x680)) * SF64(0x1840))
+                    + (long double)SF64(0x1630) * SF64(0x1818)) + (long double)SF64(0x1650) * SF64(0x1820)) + SF64(0x1830)) * SF64(0x15c8)
+                 + ((long double)SF64(0x1528) * SF64(0x1838) + (long double)SF64(0x1400) * SF64(0x1828)) * SF64(0x1128);
+    }
+    SF64(0x12c8) = (double)moment;
+    global = SIM1_GLOBAL;
+    if (!P8(global, 0x609) && !P32(global, 0x278) && P16(global, 0xc44)) {
+        static const uint16_t rpms[3] = {0x930, 0x9c8, 0xa60};
+        long double torque = (long double)(int32_t)(uint32_t)P16(global, 0x8c8) * SF64(0x13f8) * SF64(0x760) * SF64(0x690) * SF64(0x3710);
+        torque = torque * (long double)(int32_t)(uint32_t)P16(global, 0xc44) * RF64(0x15138);
+        moment += (long double)(int32_t)(uint32_t)P16(global, 0x898) * torque;
+        SF64(0x12c8) = (double)moment;
+        for (engine = 0; engine < 3; ++engine) {
+            if (P16(global, 0xaec) < engine + 2) break;
+            moment += (long double)(int32_t)(uint32_t)P16(global, rpms[engine]) * torque;
+            if (engine < 2) SF64(0x12c8) = (double)moment;
+        }
+    }
+    SF64(0x12c8) = (double)((((((long double)SF64(0x1de0) + SF64(0x23e0)) * (long double)SI32(0x2c58) + ((long double)SF64(0x2580) + SF64(0x26c0)) * (long double)SI32(0x2b98))
+                              + ((long double)SF64(0x2aa0) + SF64(0x1d00)) * (long double)SI32(0x3638)) + (long double)SI32(0x3858) * SF64(0x2000)) * SF64(0x738) + moment);
+    for (engine = 0; engine < P16(global, 0xaec); ++engine) {
+        const uint8_t *throttle = (const uint8_t *)(uintptr_t)S32(0x1fd0 + engine * 4);
+        SF64(0x12c8) = (double)((long double)PI32(throttle, 0x1c) * (long double)(int32_t)PI16(throttle, 0x38) * SF64(0x738) + SF64(0x12c8));
+    }
+    if (!X87_C0C3((long double)SF64(0x768) * RF64(0x15140), (long double)SF64(0x1490)) && X87_C0((long double)SF64(0x768) * RF64(0x15148), (long double)SF64(0x1490))) {
+        long double mass = (long double)(int64_t)(uint64_t)((uint32_t)S16(0x3b78) * S32(0x4158)) * SF64(0x1630) * SF64(0x15d0) * SF64(0x2b58);
+        SF64(0x12c8) = (double)(((((long double)SF64(0x1130) * SF64(0x1400)) * SF64(0x2b78) + mass) * SF64(0x14a8)) * SF64(0x14a8) + SF64(0x12c8));
+    }
+    if (X87_C0((long double)SF64(0x1388), (long double)RF64(0x15150))) { S32(0x1768) = 0; S32(0x176c) = 0; return; }
+    if (X87_C0((long double)SF64(0x1490), (long double)(int32_t)SI16(0x3802) * SF64(0x680) - RF64(0x15158))) {
+        S32(0x1768) = 0; S32(0x176c) = 0; S32(0x1148) = 0; S32(0x114c) = 0;
+        return;
+    }
+    if (!X87_C0((long double)SF64(0x1148), (long double)RF64(0x15160))) { sim1_negate(0x3c8); S32(0x1148) = 0; S32(0x114c) = 0; }
+    {
+        long double buffet = (long double)SF64(0x3c8) * SF64(0x16f0) + SF64(0x1768);
+        SF64(0x1148) = (double)((long double)SF64(0x1148) + SF64(0x16f0));
+        SF64(0x1768) = (double)buffet;
+        SF64(0x12c8) = (double)(buffet + SF64(0x12c8));
+    }
+}
+
+/* 0x220016d0: the flaps: the target (GLOBAL +0xbdc times +0x4028 and +0x6a0) for both sides
+ * (+0x1688, +0x1690); unless GLOBAL +0xb6a is 1, each side (+0x1678, +0x1680) moves toward it
+ * at +0x4028 over +0x43d8 a second (0x22002200); the sides back into GLOBAL +0xbe0 and +0xbe4. */
+void sim1_flaps(void)
+{
+    long double target = (long double)(int64_t)(uint64_t)P32(SIM1_GLOBAL, 0xbdc) * SF64(0x4028) * SF64(0x6a0);
+    SF64(0x1688) = (double)target;
+    SF64(0x1690) = (double)target;
+    if (P8(SIM1_GLOBAL, 0xb6a) != 1) {
+        SF64(0x1678) = (double)sim1_rate_limit(SF64(0x1678), SF64(0x1688), SF64(0x43d8), SF64(0x4028));
+        SF64(0x1680) = (double)sim1_rate_limit(SF64(0x1680), SF64(0x1690), SF64(0x43d8), SF64(0x4028));
+    }
+    P32(SIM1_GLOBAL, 0xbe0) = (uint32_t)sim1_ftol((long double)SF64(0x1678) * SF64(0x6e8) / SF64(0x4028));
+    P32(SIM1_GLOBAL, 0xbe4) = (uint32_t)sim1_ftol((long double)SF64(0x1680) * SF64(0x6e8) / SF64(0x4028));
+}
+
+/* 0x2200daf1 (edi GLOBAL): the autopilot's pass: the station's distance and the annunciators;
+ * with GLOBAL +0x854 (on the ground) the limits, course, glideslope capture, flare, rudder and
+ * heading holds, ground stop and autothrottle; else the flare throttle, coupler, glideslope and
+ * the autothrottle's modes; then the altitude capture, turn hold, ground attitude, wing
+ * leveller, pitch hold and yaw damper. The rudder and aileron inputs (0x220051dc, 0x220051b4)
+ * leave edi GLOBAL where they run, so the holds after them get GLOBAL; returns retail's edi. */
+uint8_t *sim1_autopilot_pass(uint8_t *global)
+{
+    sim1_station_distance(global);
+    sim1_annunciators(global);
+    if (P32(global, 0x854)) {
+        int held;
+        sim1_set_limits(global);
+        sim1_track_course(global);
+        sim1_glideslope_capture(global);
+        sim1_flare(global);
+        held = S16(0x996) != 0;
+        sim1_rudder_hold(global);
+        if (held) global = SIM1_GLOBAL;     /* the rudder input left edi GLOBAL */
+        sim1_heading_hold();
+        sim1_ground_stop(global);
+        sim1_autothrottle(global);
+    } else {
+        sim1_flare_throttle(global);
+        sim1_coupler(global);
+        sim1_glideslope(global);
+        sim1_autothrottle_modes(global);
+    }
+    sim1_altitude_capture(global);
+    sim1_turn_hold(global);
+    sim1_ground_attitude(global);
+    if (sim1_wing_leveller(global)) global = SIM1_GLOBAL;     /* the aileron input did */
+    sim1_pitch_hold(global);
+    sim1_yaw_damper(global);
+    if (S32(0x318) == 1) global = SIM1_GLOBAL;                /* the rudder input did */
+    return global;
+}
+
+/* 0x220096d0 (edi GLOBAL): the ground pass: the part counter +0x812 from 0; the bumps, the
+ * points below the ground (which leaves edi GLOBAL), the attitude matrix, the cross term and
+ * the pairs cleared; the steering words (GLOBAL +0xbc4..) cleared without +0x79c; the wheels
+ * (+0x2400, +0x29e0, then +0x1f20 and +0x2200 with their steering words), then (+0x816 set) the
+ * other points; mode 3's zeroing; with GLOBAL +0x120a, SOUND's 0x13 with +0x869; GLOBAL +0x368
+ * halved; the crash count. Retail leaves edi GLOBAL. */
+void sim1_ground_pass(uint8_t *global)
+{
+    static const uint16_t others[6] = {0x2020, 0x2140, 0x22c0, 0x27a0, 0x1e00, 0x26e0};
+    uint32_t at;
+    sim1_set_u32(0x812, 0);
+    sim1_ground_bumps();
+    sim1_contacts_below(global);
+    global = SIM1_GLOBAL;
+    sim1_attitude_matrix();
+    sim1_cross_term();
+    sim1_clear_pairs();
+    if (!P32(global, 0x79c)) { P16(global, 0xbc4) = 0; P16(global, 0xbc6) = 0; P16(global, 0xbc8) = 0; }
+    S8(0x816) = 0;
+    sim1_part_pass(global, sim1_data + 0x2400, 0);
+    sim1_part_pass(global, sim1_data + 0x29e0, 0);
+    sim1_part_pass(global, sim1_data + 0x1f20, P16(global, 0xbc4));
+    sim1_part_pass(global, sim1_data + 0x2200, P16(global, 0xbc6));
+    S8(0x816) = 1;
+    for (at = 0; at < 6; ++at) sim1_part_pass(global, sim1_data + others[at], 0);
+    sim1_mode3_zero();
+    if (P16(global, 0x120a)) SIM1_CALL(SIM1_SOUND, 0x24, uint32_t (__stdcall *)(uint32_t, uint32_t))(0x13, sim1_u32(0x869));
+    P32(global, 0x368) >>= 1;
+    sim1_crash_count(global);
+}
+
+/* 0x22004260: the engines' pass (not for GLOBAL +0x609 2): the parts' bits and clearing, the
+ * contact points' stiffness terms (0x22004c10); for each engine fitted its power, the points it
+ * strikes and its timers; the gear's travel; then (0x22004d80, its tail) the stiffness terms
+ * turned back into GLOBAL's words: each term over its partner word, times +0x6e0 * +0x6d8
+ * over the scale word +0xaf4, where the partner is not 0. */
+void sim1_engines_pass(void)
+{
+    static const uint16_t engines[4] = {0x88c, 0x924, 0x9bc, 0xa54};
+    static const uint16_t pairs[7][3] = {{0xb78, 0x2000, 0xb74}, {0xb80, 0x23e0, 0xb7c}, {0xb88, 0x26c0, 0xb84}, {0xb90, 0x1d00, 0xb8c},
+                                         {0xb98, 0x1de0, 0xb94}, {0xba0, 0x2580, 0xb9c}, {0xba8, 0x2aa0, 0xba4}};
+    long double scale;
+    uint32_t at;
+    if (P8(SIM1_GLOBAL, 0x609) == 2) return;
+    sim1_part_bits();
+    sim1_part_clear();
+    sim1_contact_terms();
+    for (at = 0; at < 4; ++at) {
+        if (!(P16(SIM1_GLOBAL, 0xaec) > at)) continue;
+        sim1_engine_power(SIM1_GLOBAL + engines[at]);
+        sim1_engine_strike(SIM1_GLOBAL + engines[at]);
+        sim1_part_timers(SIM1_GLOBAL + engines[at]);
+    }
+    sim1_gear_travel();
+    scale = (long double)SF64(0x6e0) * SF64(0x6d8) / (long double)(int32_t)PI16(SIM1_GLOBAL, 0xaf4);
+    for (at = 0; at < 7; ++at) {
+        uint32_t partner = P32(SIM1_GLOBAL, pairs[at][0]);
+        if (partner) P32(SIM1_GLOBAL, pairs[at][2]) = (uint32_t)sim1_ftol((long double)SF64(pairs[at][1]) / (long double)(int64_t)(uint64_t)partner * scale);
+    }
+}
+
+/* A filter record's hold reset (for 0x2200d8c7): its limit word 0x2000, its last word -1,
+ * its count 0. */
+static void sim1_hold_reset(uint32_t record)
+{
+    S16(record + 0xe) = 0x2000;
+    S32(record + 0x10) = 0xffffffffu;
+    S16(record + 0x14) = 0;
+}
+
+/* 0x2200d8c7: the autopilot's entry: the hold record at +0x2d8 reset, the limit check and the
+ * over-limit alert; the full pass (0x2200daf1) when on the ground with GLOBAL +0x84c, or with
+ * the autopilot on (+0x7bc, not +0xb6a) and any mode; else, without +0xb6a, the yaw damper and
+ * the autothrottle's modes and the attitude's high words kept (+0x9e2, +0x9e4). Turned off
+ * (+0x84c or +0x7bc cleared since the last pass), both hold records reset and CONTROLS'
+ * +0x30 and +0x28 told 0. The last pass's +0x7bc and +0x84c kept. */
+void sim1_autopilot(void)
+{
+    uint8_t *global = SIM1_GLOBAL;
+    sim1_hold_reset(0x2d8);
+    sim1_check_874(global);
+    sim1_overlimit_alert(global);
+    if ((P32(global, 0x854) && P32(global, 0x84c))
+        || (!P8(global, 0xb6a) && P32(global, 0x7bc)
+            && (P32(global, 0x7c8) | P32(global, 0x800) | P32(global, 0x7c4) | P32(global, 0x804) | P32(global, 0x7c0) | P32(global, 0x7d8) | P32(global, 0x7d0) | P32(global, 0x7fc))))
+        global = sim1_autopilot_pass(global);
+    else {
+        if (!P8(global, 0xb6a)) {
+            sim1_yaw_damper(global);
+            sim1_autothrottle_modes(global);
+        }
+        S16(0x9e2) = (uint16_t)(S32(0x1550) >> 16);
+        S16(0x9e4) = (uint16_t)(S32(0x1554) >> 16);
+    }
+    if ((sim1_u32(0xaef) && !P32(global, 0x84c)) || (sim1_u32(0xaf3) && !P32(global, 0x7bc))) {
+        sim1_hold_reset(0x2d8);
+        sim1_hold_reset(0x308);
+        SIM1_CALL(SIM1_CONTROLS, 0x30, uint32_t (__stdcall *)(uint32_t))(0);
+        SIM1_CALL(SIM1_CONTROLS, 0x28, uint32_t (__stdcall *)(uint32_t))(0);
+    }
+    sim1_set_u32(0xaf3, P32(global, 0x7bc));
+    sim1_set_u32(0xaef, P32(global, 0x84c));
+}
+
+/* 0x22001360: the spoilers. Armed (+0x2c04 1): GLOBAL +0xbcc's arming deploys the lever
+ * (+0xbd0) to 0x12c0 and disarming stows it from there; on the ground (+0x1624 2) armed, no
+ * engine's throttle above 0 deploys it fully (+0x1038 marking that), and a throttle opened again
+ * stows and disarms it; the lever past 0x12c0 then maps onto 0..0x3fff (retail's magic-number
+ * divide by 11583). The lever's position (+0x1668, +0x1670 each side) plus, with +0x4054 and
+ * the flaps not both below +0x3860, each aileron's share past +0x4160, what passes +0x3718
+ * moved to the other side; each side rate-limited (0x22002200) and back into GLOBAL +0xbd4
+ * and +0xbd8. */
+void sim1_spoilers(void)
+{
+    uint8_t *global = SIM1_GLOBAL;
+    uint32_t lever;
+    long double value;
+    if (S32(0x2c04) == 1) {
+        if (P32(global, 0xbcc) == 1 && !S32(0x103c)) { P32(global, 0xbd0) = 0x12c0; global = SIM1_GLOBAL; }
+        if (!P32(global, 0xbcc) && S32(0x103c) == 1 && P32(global, 0xbd0) == 0x12c0) { P32(global, 0xbd0) = 0; global = SIM1_GLOBAL; }
+        S32(0x103c) = P32(global, 0xbcc);
+        if (P32(global, 0xbcc) == 1 && S32(0x1624) == 2) {
+            if (PI16(global, 0x88c) <= 0 && PI16(global, 0x924) <= 0 && PI16(global, 0x9bc) <= 0 && PI16(global, 0xa54) <= 0) {
+                P32(global, 0xbd0) = 0x3fff;
+                S32(0x1038) = 1;
+                global = SIM1_GLOBAL;
+            } else if (S32(0x1038) == 1) {
+                P32(global, 0xbd0) = 0;
+                P32(SIM1_GLOBAL, 0xbcc) = 0;
+                S32(0x1038) = 0;
+                global = SIM1_GLOBAL;
+            }
+        }
+        lever = P32(global, 0xbd0);
+        if (lever > 0x12c0) {
+            uint32_t n = lever * 0x3fff - 0x4afed40, h = (uint32_t)(((uint64_t)n * 0x6a1bcdb3u) >> 32);
+            lever = (((n - h) >> 1) + h) >> 13;
+        } else lever = 0;
+    } else lever = P32(global, 0xbd0);
+    SF64(0x1668) = (double)((long double)(int64_t)(uint64_t)lever * SF64(0x3718) * SF64(0x6a0));
+    S32(0x1670) = S32(0x1668); S32(0x1674) = S32(0x166c);
+    if (S32(0x4054) && (!X87_C0((long double)SF64(0x1678), (long double)SF64(0x3860)) || !X87_C0((long double)SF64(0x1680), (long double)SF64(0x3860)))) {
+        if (!X87_C0C3((long double)SF64(0x1640), (long double)SF64(0x4160))) {
+            value = ((long double)SF64(0x1640) - SF64(0x4160)) * SF64(0x3fa8) + SF64(0x1668);
+            SF64(0x1670) = (double)value;
+            if (!X87_C0(value, (long double)SF64(0x3718))) {
+                long double over = (long double)SF64(0x1670) - SF64(0x3718);
+                SF64(0x1670) = sim1_x87(SF64(0x3718));
+                value = (long double)SF64(0x1668) - over;
+                SF64(0x1668) = (double)value;
+                if (X87_C0C3(value, (long double)RF64(0x15000))) { S32(0x1668) = 0; S32(0x166c) = 0; }
+            }
+        }
+        if (X87_C0((long double)SF64(0x1638), sim1_fchs(SF64(0x4160)))) {
+            value = (sim1_fchs(SF64(0x1638)) - SF64(0x4160)) * SF64(0x3fa8) + SF64(0x1668);
+            SF64(0x1668) = (double)value;
+            if (!X87_C0(value, (long double)SF64(0x3718))) {
+                long double over = (long double)SF64(0x1668) - SF64(0x3718);
+                SF64(0x1668) = sim1_x87(SF64(0x3718));
+                value = (long double)SF64(0x1670) - over;
+                SF64(0x1670) = (double)value;
+                if (X87_C0C3(value, (long double)RF64(0x15000))) { S32(0x1670) = 0; S32(0x1674) = 0; }
+            }
+        }
+    }
+    SF64(0x1658) = (double)sim1_rate_limit(SF64(0x1658), SF64(0x1668), SF64(0x4240), SF64(0x3718));
+    SF64(0x1660) = (double)sim1_rate_limit(SF64(0x1660), SF64(0x1670), SF64(0x4240), SF64(0x3718));
+    P32(SIM1_GLOBAL, 0xbd4) = (uint32_t)sim1_ftol((long double)SF64(0x1658) * SF64(0x6e8) / SF64(0x3718));
+    P32(SIM1_GLOBAL, 0xbd8) = (uint32_t)sim1_ftol((long double)SF64(0x1660) * SF64(0x6e8) / SF64(0x3718));
+}
+
+/* One gear leg's events (for 0x220017f0): arrived at its target, CONTROLS +0x5c's event once
+ * (the flag +stopped); moving away from it, the stopped flag cleared; short of it, the event
+ * once more (the flag +moving). */
+static void sim1_leg_events(uint32_t position, uint32_t target, uint32_t moving, uint32_t stopped, uint32_t event)
+{
+    if (X87_C3((long double)SF64(position), (long double)SF64(target))) {
+        uint32_t was = S32(stopped);
+        S32(moving) = 0;
+        if (!was) { S32(stopped) = 1; SIM1_CALL(SIM1_CONTROLS, 0x5c, uint32_t (__stdcall *)(uint32_t, uint32_t))(event, 0); }
+    } else if (!X87_C0C3((long double)SF64(position), (long double)SF64(target))) S32(stopped) = 0;
+    else if (!S32(moving)) { S32(moving) = 1; SIM1_CALL(SIM1_CONTROLS, 0x5c, uint32_t (__stdcall *)(uint32_t, uint32_t))(event, 0); }
+}
+
+/* One working leg's target moved by the handle's step (for 0x220017f0): position and target
+ * both, within 1.0 (tested before rounding). */
+static long double sim1_leg_step(long double step, uint32_t position, uint32_t target)
+{
+    long double value = step + SF64(position);
+    SF64(position) = (double)value;
+    SF64(target) = (double)value;
+    if (!X87_C0C3(value, (long double)RF64(0x15030))) { S32(target) = 0; S32(target + 4) = 0x3ff00000; S32(position) = 0; S32(position + 4) = 0x3ff00000; }
+    return step;
+}
+
+/* 0x220017f0: the landing gear: a new failure (GLOBAL +0xbfc set) draws which legs work
+ * (+0x1040, +0x1044, +0x1048, by UTIL's generator against 0.28, 0.52, 0.76 and 0.88); cleared,
+ * all work. The handle (+0xbe8) down: each working leg's position (+0x1698, +0x16a0, +0x16a8)
+ * steps by +0xbf8 (taken, times +0x15028) toward 1, a stuck one's target 1; up: on the ground
+ * with the gear not all down, the targets 1, else the working legs' targets their positions and
+ * the stuck ones' 0. Each leg moves to its target at its rate (+0x4148, +0x2d70, +0x3c08) and
+ * into GLOBAL +0xbec, +0xbf0, +0xbf4; CONTROLS +0x5c's events 5, 6, 7 as they arrive or set
+ * out. With +0x3584, the gear horn (SOUND 5, on a change): on the ground the handle not up;
+ * in the air a leg not down and the flaps past +0x3f98, or flaps past +0x3e68 and a throttle
+ * below +0x3e10. RETAIL BUG (kept, suspected): SIM1-GEAR-HORN-ENGINES (docs/retail-bugs.md):
+ * the throttle test looks at the first engine and (two or more fitted) the second only. */
+void sim1_landing_gear(void)
+{
+    uint8_t *global = SIM1_GLOBAL;
+    uint32_t handle_step, horn = 0;
+    if (P32(global, 0xbfc) == 1 && !S32(0x104c)) {
+        long double draw;
+        S32(0x104c) = 1;
+        draw = SIM1_CALL(SIM1_UTIL, 0xb8, double (__stdcall *)(void))();
+        if (X87_C0(draw, (long double)RF64(0x15008))) { S32(0x1040) = 1; S32(0x1044) = 1; S32(0x1048) = 1; }
+        else if (X87_C0(draw, (long double)RF64(0x15010))) { S32(0x1040) = 1; S32(0x1044) = 0; S32(0x1048) = 0; }
+        else if (X87_C0(draw, (long double)RF64(0x15018))) { S32(0x1040) = 0; S32(0x1044) = 1; S32(0x1048) = 1; }
+        else {
+            S32(0x1040) = 0;
+            if (X87_C0(draw, (long double)RF64(0x15020))) { S32(0x1044) = 1; S32(0x1048) = 0; }
+            else { S32(0x1044) = 0; S32(0x1048) = 1; }
+        }
+    } else if (!P32(global, 0xbfc)) { S32(0x1040) = 0; S32(0x1044) = 0; S32(0x1048) = 0; S32(0x104c) = 0; }
+    global = SIM1_GLOBAL;
+    handle_step = P32(global, 0xbf8);
+    P32(global, 0xbf8) = 0;
+    global = SIM1_GLOBAL;
+    if (!P32(global, 0xbe8)) {
+        if (P8(global, 0x366) == 1 && !X87_C3((long double)SF64(0x16a8) * SF64(0x16a0) * SF64(0x1698), (long double)RF64(0x15030))) {
+            S32(0x16b0) = 0; S32(0x16b4) = 0x3ff00000; S32(0x16b8) = 0; S32(0x16bc) = 0x3ff00000;
+            S32(0x16c0) = 0; S32(0x16c4) = 0x3ff00000;
+        } else {
+            if (S32(0x1040)) { S32(0x16b0) = S32(0x1698); S32(0x16b4) = S32(0x169c); } else { S32(0x16b0) = 0; S32(0x16b4) = 0; }
+            if (S32(0x1044)) { S32(0x16b8) = S32(0x16a0); S32(0x16bc) = S32(0x16a4); } else { S32(0x16b8) = 0; S32(0x16bc) = 0; }
+            if (S32(0x1048)) { S32(0x16c0) = S32(0x16a8); S32(0x16c4) = S32(0x16ac); } else { S32(0x16c0) = 0; S32(0x16c4) = 0; }
+        }
+    } else {
+        long double step = (long double)(int64_t)(uint64_t)handle_step * RF64(0x15028);
+        if (S32(0x1040) == 1) sim1_leg_step(step, 0x1698, 0x16b0); else { S32(0x16b0) = 0; S32(0x16b4) = 0x3ff00000; }
+        if (S32(0x1044) == 1) sim1_leg_step(step, 0x16a0, 0x16b8); else { S32(0x16b8) = 0; S32(0x16bc) = 0x3ff00000; }
+        if (S32(0x1048) == 1) sim1_leg_step(step, 0x16a8, 0x16c0); else { S32(0x16c0) = 0; S32(0x16c4) = 0x3ff00000; }
+    }
+    {   /* the rate 1.0 kept opaque: inlined, GCC would drop the limiter's multiply by it, which
+         * rounds at the game's 24-bit precision (Direct3D sets it) */
+        double one = sim1_x87(1.0);
+        SF64(0x1698) = (double)sim1_rate_limit(SF64(0x1698), SF64(0x16b0), SF64(0x4148), one);
+        SF64(0x16a0) = (double)sim1_rate_limit(SF64(0x16a0), SF64(0x16b8), SF64(0x2d70), one);
+        SF64(0x16a8) = (double)sim1_rate_limit(SF64(0x16a8), SF64(0x16c0), SF64(0x3c08), one);
+    }
+    P32(SIM1_GLOBAL, 0xbec) = (uint32_t)sim1_ftol((long double)SF64(0x1698) * SF64(0x6e8)) & 0xffff;
+    P32(SIM1_GLOBAL, 0xbf0) = (uint32_t)sim1_ftol((long double)SF64(0x16a0) * SF64(0x6e8)) & 0xffff;
+    P32(SIM1_GLOBAL, 0xbf4) = (uint32_t)sim1_ftol((long double)SF64(0x16a8) * SF64(0x6e8)) & 0xffff;
+    sim1_leg_events(0x1698, 0x16b0, 0xbc, 0xc0, 5);
+    sim1_leg_events(0x16a0, 0x16b8, 0xc4, 0xc8, 6);
+    sim1_leg_events(0x16a8, 0x16c0, 0xcc, 0xd0, 7);
+    if (S32(0x3584) != 1) return;
+    if (S32(0x1624) == 2) horn = P32(SIM1_GLOBAL, 0xbe8) != 0x3fff;
+    else if (X87_C0((long double)SF64(0x1698), (long double)RF64(0x15030)) || X87_C0((long double)SF64(0x16a0), (long double)RF64(0x15030))
+             || X87_C0((long double)SF64(0x16a8), (long double)RF64(0x15030))) {
+        if (!X87_C0C3((long double)SF64(0x1678), (long double)SF64(0x3f98))) horn = 1;
+        else if (!X87_C0((long double)SF64(0x1678), (long double)SF64(0x3e68))) {
+            int32_t closed = SI32(0x3e10);
+            global = SIM1_GLOBAL;
+            if ((int32_t)PI16(global, 0x88c) < closed) horn = 1;
+            else if (P16(global, 0xaec) > 1) horn = (int32_t)PI16(global, 0x924) < closed;
+        }
+    }
+    if (horn == 1) {
+        if (!S32(0x1014)) SIM1_CALL(SIM1_SOUND, 0x24, uint32_t (__stdcall *)(uint32_t, uint32_t))(5, 1);
+    } else if (S32(0x1014) == 1) SIM1_CALL(SIM1_SOUND, 0x24, uint32_t (__stdcall *)(uint32_t, uint32_t))(5, horn);
+    S32(0x1014) = horn;
+}
+
+/* An engine-load term (for 0x22008bd4): GLOBAL's word a times the scale word +0xaf4 (its low
+ * 32 bits), times word b / 256, shifted down 23. */
+static uint32_t sim1_load_term(const uint8_t *global, uint32_t a, uint32_t b)
+{
+    uint32_t low = P32(global, a) * (uint32_t)P16(global, 0xaf4);
+    return (uint32_t)(((uint64_t)low * (P32(global, b) >> 8)) >> 23);
+}
+
+/* 0x22008bd4 (edi GLOBAL): the air-relative motion: the wind (GLOBAL +0xe94.. against
+ * +0x60c..) turned into the body axes and added to the velocities (+0x1388, +0x1390,
+ * +0x1398); the true airspeed's square, value and ratio (+0x1448, +0x1450, +0x1458) and its
+ * word (+0x1460, GLOBAL +0x11c6, at most 0xffff); the propeller's rpm words (GLOBAL +0x2b8,
+ * +0x2bc, +0x2c4: through the efficiency curve and carburettor, or the fixed prop's limit) and
+ * the power-on flag (+0x36d, SOUND 3); the angle of attack (+0x1518, +0x1490 with its sine and
+ * cosine, and words) and sideslip (+0x151c, +0x1498, ...), the flight path and the elevator's
+ * angle (+0x1510, +0x14a0, +0x1508); the turn and climb rates; the stall horn's word (GLOBAL
+ * +0x11be) and flag (+0x36c, the trim hold, SOUND 8 on a change); dynamic pressure
+ * (+0x15a8, +0x15b0), the pitch rate's word, the climb word; the load factor word (GLOBAL
+ * +0x11d0); the engine-load sums (+0x15f8.., +0x1724, +0x1728); the drag sums and height;
+ * and gravity turned into the body axes (+0x1288..). */
+void sim1_air_motion(uint8_t *global)
+{
+    uint32_t speed, limit, rpm, power, flag, old, product, remainder;
+    uint16_t word, alpha;
+    long double value, angle;
+    SF64(0x5fc) = (double)(sim1_fchs((long double)(int32_t)PI16(global, 0xe94) * SF64(0x720) * SF64(0x6c0)) + SF64(0x614));
+    SF64(0x5f4) = (double)(sim1_fchs((long double)(int32_t)PI16(global, 0xe96) * SF64(0x720) * SF64(0x6c0)) + SF64(0x60c));
+    SF64(0x604) = (double)(sim1_fchs((long double)(int32_t)PI16(global, 0xe98) * SF64(0x720) * SF64(0x6c0)) + SF64(0x61c));
+    sim1_rotate_a(SF64(0x5fc), SF64(0x604), SF64(0x5f4), &SF64(0x62c), &SF64(0x634), &SF64(0x624));
+    SF64(0x1388) = (double)((long double)SF64(0x624) + SF64(0x13b0));
+    SF64(0x1390) = (double)((long double)SF64(0x62c) + SF64(0x13a0));
+    SF64(0x1398) = (double)((long double)SF64(0x634) + SF64(0x13a8));
+    value = (long double)SF64(0x1388) * SF64(0x1388) + (long double)SF64(0x1390) * SF64(0x1390) + (long double)SF64(0x1398) * SF64(0x1398);
+    SF64(0x1448) = (double)value;
+    value = sim1_fsqrt(value);
+    SF64(0x1450) = (double)value;
+    value /= SF64(0x1468);
+    SF64(0x1458) = (double)value;
+    speed = (uint32_t)(SI32(0x1718) = sim1_fistp32(value * sim1_f64(0x65e)));
+    word = speed >= 0xffff ? 0xffff : (uint16_t)speed;
+    S16(0x1460) = word;
+    P16(global, 0x11c6) = word;
+    PI32(global, 0x2b8) = sim1_fistp32((long double)SF64(0x1388) * SF64(0x748) * SF64(0x700));
+    if (PI32(global, 0x2b8) < 0) P32(global, 0x2b8) = 0;
+    SF64(0x1718) = (double)((long double)SF64(0x1388) * SF64(0x748));
+    value = sim1_prop_efficiency(SF64(0x1718));
+    SF64(0x1718) = (double)value;
+    SF64(0x640) = (double)value;
+    PI32(global, 0x2bc) = sim1_fistp32(sim1_carburettor(SF64(0x1718)) * SF64(0x700));
+    if (P16(global, 0x612)) {
+        SF64(0x1718) = (double)((long double)PI32(global, 0xb0c) * sim1_f64(0x666) * SF64(0x1468) * SF64(0x748));
+        limit = (uint32_t)(SI32(0x1718) = sim1_fistp32(sim1_prop_efficiency(SF64(0x1718)) * SF64(0x700)));
+        if (!((int32_t)limit < SI32(0x3d04))) limit = S32(0x3d04);
+    } else {
+        uint32_t root = sim1_isqrt64((int64_t)(uint64_t)S32(0x1700));
+        uint64_t load = (uint64_t)S32(0x63c) * P32(global, 0xb0c);
+        uint32_t cap = sim1_div32((uint32_t)(load >> 32), (uint32_t)load, 0x52524c, &remainder);
+        limit = sim1_div32(S32(0x3d04) >> 24, S32(0x3d04) << 8, root, &remainder);
+        if (!(limit < cap)) limit = cap;
+    }
+    P32(global, 0x2c4) = limit;
+    rpm = P16(global, 0x612) ? P32(global, 0x2bc) : P32(global, 0x2b8);
+    power = 0;
+    if (!((int32_t)rpm < (int32_t)limit)) {
+        power = 1;
+        if (P16(global, 0x338) && P16(global, 0xc44)) S32(0x2510) += (uint32_t)P16(global, 0xc44) * S32(0x16fc);
+    }
+    SIM1_CALL(SIM1_SOUND, 0x24, uint32_t (__stdcall *)(uint32_t, uint32_t))(3, power);
+    P8(global, 0x36d) = (uint8_t)power;
+    SF64(0x1718) = (double)((long double)PI32(global, 0x2c4) * SF64(0x6c8));
+    S16(0x1518) = (uint16_t)(S16(0x3900) - sim1_bearing_of(SF64(0x1388), SF64(0x1398)));
+    angle = (long double)(int32_t)SI16(0x1518) * SF64(0x680);
+    SF64(0x1490) = (double)angle;
+    SF64(0x14a8) = (double)sim1_fcos(angle);
+    SF64(0x14b0) = (double)sim1_fsin(angle);
+    SI16(0x1524) = sim1_fistp16((long double)SF64(0x14a8) * SF64(0x6e0));
+    SI16(0x1520) = sim1_fistp16((long double)SF64(0x14b0) * SF64(0x6e0));
+    S16(0x151c) = sim1_bearing_of(SF64(0x1388), SF64(0x1390));
+    angle = (long double)(int32_t)SI16(0x151c) * SF64(0x680);
+    SF64(0x1498) = (double)angle;
+    SF64(0x14b8) = (double)sim1_fcos(angle);
+    SF64(0x14c0) = (double)sim1_fsin(angle);
+    SI16(0x64a) = sim1_fistp16((long double)SF64(0x14b8) * SF64(0x6e0));
+    SI16(0x648) = sim1_fistp16((long double)SF64(0x14c0) * SF64(0x6e0));
+    word = (uint16_t)(SI32(0x1718) = sim1_fistp32(sim1_fchs(SF64(0x1398)) / SF64(0x1450) * SF64(0x6e0)));
+    word = (uint16_t)SIM1_CALL(SIM1_UTIL, 0x38, uint32_t (__stdcall *)(int32_t, int32_t))(word, 0);
+    S16(0x1718) = word;
+    SF64(0x1510) = (double)((long double)(int32_t)(int16_t)word * SF64(0x680));
+    SF64(0x1718) = (double)((long double)(int32_t)SI16(0x4150) * SF64(0x13f8) + SF64(0x1390));
+    S16(0x1718) = sim1_bearing_of(SF64(0x1388), SF64(0x1718));
+    angle = (long double)(int32_t)SI16(0x1718) * SF64(0x680);
+    SF64(0x14a0) = (double)angle;
+    SF64(0x1508) = (double)sim1_fcos(angle);
+    sim1_turn_climb_rates();
+    alpha = S16(0x1518);
+    if (!((SI32(0x1718) = sim1_fistp32((long double)SF64(0x1388) * SF64(0x728))) > 0xc)) alpha = 0xc001;
+    word = 0;
+    if (!(alpha & 0x8000)) {
+        uint32_t wide = 0x5333u * alpha;
+        uint16_t rest;
+        word = sim1_div16((uint16_t)(wide >> 16), (uint16_t)wide, S16(0x3802), &rest);
+        if (word > 0x7fff) word = 0x7fff;
+    }
+    P16(global, 0x11be) = (uint16_t)(0x7fff - word);
+    flag = 0;
+    if (P32(global, 0x604) != 1) {
+        alpha = S16(0x1518);
+        if (!((SI32(0x1718) = sim1_fistp32((long double)SF64(0x1388) * SF64(0x728))) < 0xc) && !((int16_t)alpha < (int16_t)S16(0x3802))) flag = 1;
+    }
+    if (S32(0x423c)) sim1_trim_hold(global, flag, 0);
+    old = P8(global, 0x36c);
+    P8(global, 0x36c) = (uint8_t)flag;
+    if (flag != old && P32(global, 0x77c)) SIM1_CALL(SIM1_SOUND, 0x24, uint32_t (__stdcall *)(uint32_t, uint32_t))(8, flag);
+    SF64(0x15a8) = (double)((long double)SF64(0x798) * SF64(0x1448) * SF64(0x768));
+    SF64(0x15b0) = (double)((long double)SF64(0x798) * SF64(0x1398) * SF64(0x1398) * SF64(0x768));
+    SI16(0x1718) = sim1_fistp16((long double)SF64(0x13f8) * SF64(0x678));
+    P16(global, 0x37c) = S16(0x1718);
+    PI32(global, 0x2c8) = SI32(0x1718) = sim1_fistp32((long double)SF64(0x13c0) * SF64(0x728) * SF64(0x6f8));
+    {
+        uint32_t base = (uint32_t)(int32_t)PI16(global, 0xe8c) + S32(0x590), squared = (uint32_t)P16(global, 0x11c6) * P16(global, 0x11c6);
+        uint32_t factor = (uint32_t)(((uint64_t)squared * 0x20c4a) >> 32) + 0x10000;
+        P32(global, 0x11d0) = (uint32_t)(((uint64_t)factor * base) >> 16) - S32(0x590);
+    }
+    S32(0x15f8) = sim1_load_term(global, 0xb78, 0xb74);
+    S32(0x15fc) = sim1_load_term(global, 0xb98, 0xb94);
+    S32(0x1600) = sim1_load_term(global, 0xb80, 0xb7c);
+    S32(0x1604) = sim1_load_term(global, 0xba0, 0xb9c);
+    S32(0x1608) = sim1_load_term(global, 0xb88, 0xb84);
+    product = S32(0x30e4) + S32(0x15f8) + S32(0x15fc) + S32(0x1600) + S32(0x1604) + S32(0x1608);
+    product += (uint32_t)(SI32(0x1718) = sim1_fistp32(SF64(0x1610)));
+    S32(0x1724) = product;
+    sim1_drag_sums();
+    S32(0x1728) = (uint32_t)(((uint64_t)S32(0x1724) * 0x7f5) >> 16);
+    sim1_height(global);
+    SF64(0x1718) = (double)sim1_fchs((long double)SI32(0x1724));
+    sim1_rotate_a(sim1_f64(0x66e), SF64(0x1718), sim1_f64(0x66e), &SF64(0x1288), &SF64(0x1290), &SF64(0x1298));
+}
+
+/* 0x22011f50: the helicopter's rotor and tail rotor terms: the main rotor's thrust (by the
+ * collective +0x4390 and the rotor speed +0x1af0) and its tilt (+0x1ae0) into the forces
+ * +0x19c8.. +0x19e8; the torque's yaw term +0x12b8 (turning, the rotor above +0x15398); the
+ * tail rotor's thrust (+0x3b80, the angle +0x2c70 less the pedals +0x1ad8) into +0x19f8.. +0x1a20
+ * and its moments; the fuselage's damping by the tables at +0xc08.. +0xd50 (by +0x1ac0) into
+ * +0x1a28.. +0x1a50. Retail parks most terms as doubles in its frame and keeps some unrounded
+ * on the x87 (the angles to fsin and fcos among them); the C does the same, the locals named
+ * by frame offset. */
+void sim1_rotor_terms(void)
+{
+    long double lift, base, rotor_sin, rotor_cos, theta, tail, tail_lift, tail_base, theta_cos, theta_sin;
+    double l8_lift, l18_base, l0_span, l38_sin, l20_drag, l8_cos, l10_moment, l20_side, l10_cos, l18_sin, l28_pedal_sin, l30_pedal_cos;
+    double l20_tail, l0_tail_span, l0_theta_cos, l20_tail_moment, l18_tail_base, l10_theta_sin;
+    double l18_table, l20_fin, l8_density, l38_damp, l30_roll, l0_roll2, l38_yaw, l0_yaw2, l0_cross;
+    long double k = (long double)SF64(0x4390) * RF64(0x15380) / ((long double)SF64(0x4390) - RF64(0x15388));
+    lift = (k * ((long double)SF64(0x2c70) + SF64(0x1af0))) * SF64(0x3fe0) + SF64(0x2b80);
+    l8_lift = (double)lift;
+    base = fabsl(lift + SF64(0x2b80)) / ((long double)SF64(0x4390) * RF64(0x15390));
+    l18_base = (double)base;
+    l0_span = (double)((long double)SF64(0x4170) * SF64(0x1af8));
+    rotor_sin = sim1_fsin(SF64(0x1ae0));
+    l38_sin = (double)rotor_sin;
+    l20_drag = (double)((base + SF64(0x2c90)) * l0_span);
+    rotor_cos = sim1_fcos(SF64(0x1ae0));
+    l8_cos = (double)rotor_cos;
+    l10_moment = (double)((long double)l8_lift * l0_span);
+    l20_side = (double)(rotor_sin * l20_drag);
+    l10_cos = (double)(rotor_cos * l10_moment);
+    l18_sin = (double)(rotor_sin * l10_moment);
+    l28_pedal_sin = (double)sim1_fsin(SF64(0x1ad8));
+    l30_pedal_cos = (double)sim1_fcos(SF64(0x1ad8));
+    SF64(0x19c8) = (double)sim1_fchs((((long double)l18_base + SF64(0x3b48)) * l8_cos) * l0_span - l18_sin);
+    SF64(0x19d0) = RF64(0x15398);
+    SF64(0x19d8) = (double)sim1_fchs((long double)l20_side + l10_cos);
+    SF64(0x19e8) = (double)(((((long double)l8_cos * l20_drag) - l18_sin) * SF64(0x738)) * SF64(0x3d08)
+                            + ((sim1_fchs(rotor_sin * l20_drag) - l10_cos) * SF64(0x738)) * SF64(0x3d08));
+    SF64(0x19e0) = RF64(0x15398);
+    SF64(0x19f0) = RF64(0x15398);
+    if (!X87_C0C3((long double)SF64(0x1af0), (long double)RF64(0x15398)) && !X87_C0((long double)SF64(0x1ac0), (long double)RF64(0x15398)))
+        SF64(0x12b8) = (double)((((sim1_fsin(SF64(0x1af0)) * ((long double)SF64(0xe40) / SF64(0x2c08))) * SF64(0x36c8)) * SF64(0x1af8)) * RF64(0x153a0));
+    else { S32(0x12b8) = 0; S32(0x12bc) = 0; }
+    k = (long double)SF64(0x3b80) * RF64(0x15380) / ((long double)SF64(0x3b80) - RF64(0x15388));
+    theta = (long double)SF64(0x2c70) - SF64(0x1ad8);
+    tail = k * theta;
+    l20_tail = (double)tail;
+    tail_lift = tail + SF64(0x3808);
+    l20_tail = (double)tail_lift;
+    l0_tail_span = (double)((long double)SF64(0x36b8) * SF64(0x1af8));
+    theta_cos = sim1_fcos(theta);
+    l0_theta_cos = (double)theta_cos;
+    l20_tail_moment = (double)(((long double)SF64(0x36b8) * SF64(0x1af8)) * l20_tail);
+    tail_base = fabsl(tail_lift) / (((long double)SF64(0x3fc8) * SF64(0x3b80)) * RF64(0x15390));
+    l18_tail_base = (double)((tail_base + SF64(0x3b48)) * l0_tail_span);
+    theta_sin = sim1_fsin(theta);
+    l10_theta_sin = (double)theta_sin;
+    SF64(0x19f8) = (double)((((long double)SF64(0x36b8) * SF64(0x1af8)) * l20_tail) * l0_theta_cos + ((tail_base + SF64(0x3b48)) * l0_tail_span) * l10_theta_sin);
+    SF64(0x1a00) = (double)sim1_fchs((long double)l18_tail_base * l0_theta_cos - (long double)l20_tail_moment * l10_theta_sin);
+    SF64(0x1a08) = RF64(0x15398);
+    SF64(0x1a18) = RF64(0x15398);
+    SF64(0x1a20) = (double)sim1_fchs(((long double)SF64(0x738) * SF64(0x2c80)) * SF64(0x19f8));
+    SF64(0x1a10) = (double)(((long double)SF64(0x738) * SF64(0x2ac0)) * SF64(0x19f8));
+    l18_table = (double)sim1_table_lookup(sim1_data + 0xc08, SF64(0x1ac0));
+    l20_fin = (double)((((long double)l28_pedal_sin * SF64(0x3cb8)) * SF64(0x3fb8)) * SF64(0x1af8));
+    l8_density = (double)((long double)SF64(0x3d48) / SF64(0x1ab8));
+    l38_damp = (double)((long double)l38_sin * SF64(0x3730));
+    l30_roll = (double)(((long double)SF64(0x13e8) * SF64(0x738)) * SF64(0x3e08));
+    SF64(0x1a40) = (double)((sim1_fchs(((((long double)l18_table + SF64(0x30a8)) * l30_pedal_cos) * l8_cos) * SF64(0x3e28) * SF64(0x1af8)) - fabsl((long double)l20_fin))
+                            - ((long double)SF64(0x3e18) * SF64(0x1af8)) * l38_damp);
+    SF64(0x1a48) = (double)(sim1_fchs(l20_fin) - ((((long double)l28_pedal_sin * l8_cos) * SF64(0x30a8)) * SF64(0x3e28)) * SF64(0x1af8));
+    SF64(0x1a50) = (double)(sim1_fchs(((long double)SF64(0x3730) * SF64(0x1af8)) * l38_damp) - ((((long double)l30_pedal_cos * l38_sin) * SF64(0x30a8)) * SF64(0x3e28)) * SF64(0x1af8));
+    l0_roll2 = (double)((long double)l30_roll * l30_roll);
+    {
+        long double table = sim1_table_lookup(sim1_data + 0xce0, SF64(0x1ac0));
+        l38_yaw = (double)(((long double)SF64(0x13f8) * SF64(0x738)) * SF64(0x3de8));
+        SF64(0x1a28) = (double)((((((table * l8_density) * l0_roll2) * SF64(0x798)) * SF64(0x13e8)) * SF64(0x768)) * SF64(0x36c8));
+        l0_yaw2 = (double)((long double)l38_yaw * l38_yaw);
+        SF64(0x1a28) = (double)((long double)SF64(0x1a28) - ((((long double)l8_density * SF64(0x13e8)) * SF64(0x36c8)) * SF64(0x1af8)) * RF64(0x153a8));
+    }
+    SF64(0x1a30) = (double)((((((sim1_table_lookup(sim1_data + 0xd18, SF64(0x1ac0)) * l8_density) * l0_yaw2) * SF64(0x798)) * SF64(0x13f8)) * SF64(0x768)) * SF64(0x36b8));
+    SF64(0x1a30) = (double)((((sim1_table_lookup(sim1_data + 0xd50, SF64(0x1ac0)) * l8_density) * SF64(0x13f8)) * SF64(0x36b8)) * SF64(0x1af8));
+    l0_cross = (double)((((long double)SF64(0x13f0) * SF64(0x738)) * SF64(0x3e08)) * (((long double)SF64(0x13f8) * SF64(0x738)) * SF64(0x3e08)));
+    SF64(0x1a38) = (double)((((((sim1_table_lookup(sim1_data + 0xc70, SF64(0x1ac0)) * l8_density) * l0_cross) * SF64(0x798)) * SF64(0x13f0)) * SF64(0x768)) * SF64(0x36c8));
+    SF64(0x1a38) = (double)((((sim1_table_lookup(sim1_data + 0xca8, SF64(0x1ac0)) * l8_density) * SF64(0x13f0)) * SF64(0x36c8)) * SF64(0x1af8));
+    (void)l20_tail;
+}
+
+/* 0x2200ac8a (edi GLOBAL): the ground systems: the fuel rate +0x16fc to 0x1555, the gear,
+ * flaps and spoilers, the height (through the caller's edi, which they keep). */
+void sim1_ground_systems(uint8_t *global)
+{
+    S32(0x16fc) = 0x1555;
+    sim1_landing_gear();
+    sim1_flaps();
+    sim1_spoilers();
+    sim1_height(global);
+}
+
+/* 0x22001320 (edi GLOBAL): the controls' pass: the autopilot; the elevator, aileron and rudder
+ * controls (the elevator's input leaves edi GLOBAL, so the rest get it); the surfaces, force
+ * feedback, spoilers, flaps, gear and the brakes' hold check; then (0x22002260, init's tail)
+ * GLOBAL +0x11c0, +0x11c2, +0x11c4 into +0xbb8, +0xbb4, +0xbbc. Returns retail's edi. */
+uint8_t *sim1_controls_pass(uint8_t *global)
+{
+    sim1_autopilot();
+    sim1_elevator_control(global);
+    global = SIM1_GLOBAL;
+    sim1_aileron_control(global);
+    sim1_rudder_control(global);
+    sim1_surfaces();
+    sim1_force_feedback(global);
+    sim1_spoilers();
+    sim1_flaps();
+    sim1_landing_gear();
+    sim1_hold_check();
+    P16(SIM1_GLOBAL, 0xbb8) = P16(SIM1_GLOBAL, 0x11c0);
+    P16(SIM1_GLOBAL, 0xbb4) = P16(SIM1_GLOBAL, 0x11c2);
+    P16(SIM1_GLOBAL, 0xbbc) = P16(SIM1_GLOBAL, 0x11c4);
+    return global;
+}
+
+/* A 16-bit spool rate clamped to +-limit (for 0x2200769d): the signed product's high word. */
+static uint16_t sim1_spool_step(uint16_t value, uint16_t gain, int16_t low, int16_t high)
+{
+    int16_t step = (int16_t)(((int32_t)(int16_t)value * (int16_t)gain) >> 16);
+    if (!(step > low)) return (uint16_t)low;
+    if (!(step < high)) return (uint16_t)high;
+    return (uint16_t)step;
+}
+
+/* The high word of a 16x16 unsigned product (mul WORD). */
+#define MUL16_HIGH(a, b) ((uint16_t)(((uint32_t)(uint16_t)(a) * (uint16_t)(b)) >> 16))
+
+/* One thrust term of 0x2200769d: the pressure ratio from the spool word through the inlet
+ * (0x8440000 / +0x476, times +0x3d50 twice), less the bleed 0x844, its root times 0x1d, less
+ * the temperature's share (0xdf4 times +0x468). */
+static uint32_t sim1_thrust_pressure(uint16_t spool)
+{
+    uint32_t remainder, value = sim1_div32(0, 0x8440000, S16(0x476), &remainder);
+    uint64_t product;
+    value = (value * S32(0x3d50)) << 1;
+    product = (uint64_t)value * spool;
+    value = sim1_div32((uint32_t)(product >> 48), (uint32_t)(product >> 16), 0x2800, &remainder);
+    value = sim1_isqrt(value - 0x844) * 0x1d;
+    return value - (uint32_t)(((uint64_t)0xdf4 * S16(0x468)) >> 16);
+}
+
+/* The other thrust term of 0x2200769d: the jet's velocity from the spool word (times +0x478,
+ * +0x3d50 doubled, 0xcccd, less one, times 0x1b3384), rooted, less the temperature's share,
+ * at least 0; times the flow word, 6 / 0xc1 and +0x490. */
+static uint16_t sim1_thrust_velocity(uint16_t spool, uint16_t flow)
+{
+    uint32_t value, remainder;
+    uint64_t product = (uint64_t)spool * S32(0x478);
+    value = (uint32_t)(product >> 4);
+    product = (uint64_t)value * (S32(0x3d50) << 1);
+    value = (uint32_t)(product >> 16);
+    value = (uint32_t)(((uint64_t)value * 0xcccd) >> 25) - 0x10000;
+    value = sim1_isqrt((uint32_t)(((uint64_t)value * 0x1b3384) >> 16));
+    value -= (uint32_t)(((uint64_t)0xdf4 * S16(0x468)) >> 16);
+    if ((int32_t)value < 0) value = 0;
+    product = (uint64_t)(flow * value) * 6;
+    value = sim1_div32((uint32_t)(product >> 32), (uint32_t)product, 0xc1, &remainder);
+    return (uint16_t)(((uint64_t)value * S32(0x490)) >> 16);
+}
+
+/* 0x2200769d (ebx the engine record, edi GLOBAL): a jet engine's pass: running (+8) when the
+ * starter (+6) or running with N2 (+4) past 0x2000, unless high on the ground with GLOBAL
+ * +0x33e or starved (+0x94, GLOBAL +0x33c); the fuel flow from the throttle (+0, its reverse
+ * scaled) into the N1 target and flow (+0xe, +0x10, the fuel word +0x450); N1 (+0xa) and N2
+ * (+0xc) spooling at clamped rates through the tables at +0x4260, +0x3ba0, +0x3640, +0x4060,
+ * +0x35c0, +0x4000; the starter off at +0x3540; EGT (+0x32), thrust (+0x1c, both spools' terms,
+ * negated in reverse), the oil pressure and temperature lags (+0x2c, +0x2e, out of fuel ends
+ * running), the fuel left (+0x44, GLOBAL +0x364 bit 2 draining), the gauges' words (+0x49c..)
+ * and the temperatures (+0x4c, +0x48). 16-bit sums saturate at 0x7fff/0x8001 as retail's jno
+ * does where retail tests it. */
+void sim1_jet_engine(uint8_t *global, uint8_t *engine)
+{
+    uint16_t ax, dx, cx;
+    uint32_t eax, ecx, remainder;
+    uint64_t product;
+    int32_t signed_value;
+    P16(engine, 0x3c) = 0xffff;
+    ax = 0;
+    if (!(P16(global, 0x33e) && P32(global, 0x574) > S32(0x3fa0)) && !(!P32(engine, 0x94) && P16(global, 0x33c))
+        && P16(engine, 4) >= 0x2000 && (P16(engine, 6) == 1 || P16(engine, 8) == 1)) ax = 1;
+    P16(engine, 8) = ax;
+    signed_value = (int32_t)PI16(engine, 0);
+    eax = (uint32_t)signed_value;
+    if (signed_value < 0) eax = ((uint32_t)-signed_value * S32(0x2d64)) >> 13;
+    ax = sim1_sub16_saturated((uint16_t)(S16(0x3622) + MUL16_HIGH(eax, S16(0x43e4))), P16(engine, 0xa));
+    dx = sim1_spool_step(ax, S16(0x3df0), (int16_t)0xe890, 0x1770);
+    ax = sim1_div16((uint16_t)(P16(engine, 0xe) >> 8), (uint16_t)(P16(engine, 0xe) << 8), S16(0x2d7a), &cx);
+    ax = sim1_add16_saturated(ax, dx);
+    if ((int16_t)ax < 0) ax = 0;
+    if (P16(engine, 8) != 1) ax = 0;
+    S16(0x450) = ax;
+    eax = (uint32_t)ax * S16(0x2d7a);
+    ax = (uint16_t)(eax >> 8);
+    if ((uint16_t)(eax >> 24)) ax = 0xffff;
+    P16(engine, 0xe) = ax;
+    product = (uint64_t)ax * S32(0x16cc);
+    eax = (uint32_t)(product >> 26);
+    P32(engine, 0x10) = (uint32_t)(((uint64_t)S32(0x4104) * eax) >> 8);
+    ecx = (uint32_t)(((uint64_t)((int64_t)SI32(0x490) * SI32(0x48c))) >> 16);
+    eax = sim1_div32(S16(0x450), 0, ecx, &remainder);
+    dx = (uint16_t)(eax >> 16);
+    if (dx >= 0x8000) dx = 0x7fff;
+    P16(engine, 0x14) = dx;
+    S16(0x452) = dx;
+    ax = sim1_table16(sim1_data + 0x4260, (uint16_t)(dx << 1));
+    S16(0x44e) = ax;
+    ax = (uint16_t)((uint32_t)(int32_t)(int16_t)ax * S32(0x48c) >> 16);
+    if (ax >= 0x8000) ax = 0x7fff;
+    ax = sim1_sub16_saturated(ax, P16(engine, 0xa));
+    if (P16(engine, 6) == 1) ax = sim1_add16_saturated(ax, S16(0x2c68));
+    dx = sim1_spool_step(ax, S16(0x3e02), (int16_t)0xe890, 0x1770);
+    ax = sim1_add16_saturated(P16(engine, 0xa), dx);
+    if ((int16_t)ax < 0) ax = 0;
+    P16(engine, 0xa) = ax;
+    S16(0x44c) = ax;
+    if (P16(engine, 6) == 1 && !((int16_t)P16(engine, 0xa) < (int16_t)S16(0x3540))) P16(engine, 6) = 0;
+    dx = MUL16_HIGH(sim1_table16(sim1_data + 0x3ba0, (uint16_t)(S16(0x44e) << 1)), 0x280);
+    S16(0x454) = dx;
+    product = (uint64_t)(uint32_t)(int32_t)(int16_t)dx * S32(0x490);
+    ax = (uint16_t)sim1_idiv32((uint32_t)(product >> 32), (uint32_t)product, S32(0x48c), &remainder);
+    if (ax >= 0x8000) ax = 0x7fff;
+    S16(0x456) = ax;
+    dx = MUL16_HIGH(S16(0x454), S16(0x4154));
+    S16(0x494) = dx;
+    S16(0x496) = (uint16_t)(S16(0x454) - dx);
+    ax = sim1_table16(sim1_data + 0x3640, (uint16_t)(S16(0x44e) << 1));
+    P16(engine, 0x30) = ax;
+    S16(0x458) = ax;
+    ax = P16(engine, 8) ? S16(0x44e) : 0;
+    S16(0x460) = sim1_table16(sim1_data + 0x4060, (uint16_t)(ax << 1));
+    S16(0x45a) = sim1_table16(sim1_data + 0x35c0, (uint16_t)(S16(0x460) << 1));
+    ax = (uint16_t)(((uint32_t)S16(0x460) * S32(0x48c)) >> 16);
+    S16(0x45e) = ax;
+    dx = sim1_spool_step((uint16_t)(ax - P16(engine, 0xc)), S16(0x3a50), (int16_t)0xfa24, 0x5dc);
+    ax = (uint16_t)(P16(engine, 0xc) + dx);
+    P16(engine, 0xc) = ax;
+    S16(0x45c) = ax;
+    ax = 0;
+    if (P16(engine, 8)) {
+        ax = sim1_table16(sim1_data + 0x4000, P16(engine, 0x30));
+        S16(0x464) = ax;
+        ax = (uint16_t)((uint32_t)(int32_t)(int16_t)ax * S32(0x488) >> 16);
+        S16(0x466) = ax;
+        cx = sim1_div16(0x111, 0, S16(0x3582), &dx);
+        ax = (uint16_t)(S16(0x466) - cx);
+        if (!((int16_t)ax > 0)) ax = 0;
+    }
+    eax = (uint32_t)ax * S16(0x30e2);
+    dx = (uint16_t)(eax >> 16);
+    ax = (uint16_t)(eax >> 8);
+    if (dx > 0x7f || (dx == 0x7f && ax > 0x7fff)) ax = 0x7fff;
+    P16(engine, 0x32) = ax;
+    ecx = sim1_thrust_pressure(P16(engine, 0x30));
+    if ((int32_t)ecx < 0) ecx = 0;
+    S16(0x46e) = (uint16_t)ecx;
+    S16(0x498) = sim1_thrust_velocity(P16(engine, 0x30), S16(0x494));
+    S16(0x46c) = (uint16_t)sim1_thrust_pressure(S16(0x45a));
+    S16(0x49a) = sim1_thrust_velocity(S16(0x45a), S16(0x496));
+    eax = (uint32_t)(((uint64_t)((uint32_t)S16(0x49a) + S16(0x498)) * S32(0x4104)) >> 8);
+    if (PI16(engine, 0) < 0) eax = 0u - eax;
+    P32(engine, 0x1c) = eax;
+    ax = P16(engine, 0xa);
+    if (!((int16_t)ax > 0)) ax = 0;
+    S16(0x16d0) = MUL16_HIGH(ax, S16(0x439a));
+    ax = S16(0x16d0);
+    if (P16(engine, 8)) {
+        int32_t sum = (int16_t)ax + (int16_t)S16(0x2d68);
+        ax = (sum > 0x7fff || sum < -0x8000) ? 0x7fff : (uint16_t)sum;
+    }
+    eax = (uint32_t)ax * S16(0x3fb0);
+    ax = (eax >> 16) || (uint16_t)eax > 0x7fff ? 0x7fff : (uint16_t)eax;
+    S16(0x442) = ax;
+    if (P8(global, 0x364) & 1) { ax = (uint16_t)(S16(0x44a) + 0x64); if (ax > 0x6000) ax = 0x6000; S16(0x44a) = ax; }
+    else S16(0x44a) = 0;
+    ax = (uint16_t)(S16(0x442) + S16(0x44a));
+    if (ax > 0x7fff) ax = 0x7fff;
+    P16(engine, 0x2c) = (uint16_t)(P16(engine, 0x2c) + (uint16_t)(((int32_t)(int16_t)(uint16_t)(ax - P16(engine, 0x2c)) * 0x40) >> 16));
+    ax = S16(0x16d0);
+    if (P16(engine, 8)) ax = sim1_add16_saturated(ax, S16(0x3728));
+    eax = (uint32_t)ax * S16(0x4050);
+    ax = (eax >> 16) || ((uint16_t)eax & 0x8000) ? 0x7fff : (uint16_t)eax;
+    S16(0x444) = ax;
+    if (P8(global, 0x364) & 2) S16(0x446) = sim1_sub16_saturated(S16(0x446), S16(0x448));
+    else S16(0x446) = 0;
+    ax = sim1_add16_saturated(S16(0x444), S16(0x446));
+    if ((int16_t)ax < 0) ax = 0;
+    P16(engine, 0x2e) = (uint16_t)(P16(engine, 0x2e) + (uint16_t)(((int32_t)(int16_t)(uint16_t)(ax - P16(engine, 0x2e)) * 0x1400) >> 16));
+    if (!P16(engine, 0x2e)) P16(engine, 8) = 0;
+    ecx = 0x3fff;
+    if (P8(global, 0x364) & 2) {
+        eax = ((uint32_t)S16(0x448) * S32(0x16fc)) >> 15;
+        ecx = P32(engine, 0x44) - eax;
+        if (!((int32_t)ecx > 0)) ecx = 0;
+    }
+    P32(engine, 0x44) = ecx;
+    S16(0x4a4) = S16(0x456);
+    S16(0x49c) = MUL16_HIGH(S16(0x44c), 0x190);
+    S16(0x49e) = MUL16_HIGH(S16(0x45c), 0x190);
+    dx = (uint16_t)(MUL16_HIGH(S16(0x462), 0xfa0) - 0x111);
+    if (!((int16_t)dx > 0)) dx = 0;
+    S16(0x4a2) = dx;
+    S16(0x4a0) = MUL16_HIGH(S16(0x450), 0x1d10);
+    P32(engine, 0x50) = 0x3fff;
+    eax = (uint32_t)(((uint64_t)P16(engine, 0xc) * sim1_u32(0x4a6)) >> 16) + sim1_u32(0x4aa) - P32(engine, 0x4c);
+    eax = (uint32_t)((uint64_t)((int64_t)(int32_t)eax * (int32_t)sim1_u32(0x4ae)) >> 16);
+    eax = (uint32_t)((uint64_t)((int64_t)(int32_t)eax * SI32(0x16fc)) >> 15);
+    P32(engine, 0x4c) += eax;
+    P32(engine, 0x48) = (uint32_t)(((uint64_t)P16(engine, 0xa) * sim1_u32(0x4b2)) >> 16) + sim1_u32(0x4b6);
+}
+
+/* 0x22007530 (edi GLOBAL): the jets' atmosphere and engines: the airspeed word (+0x1460, its
+ * part past 0x6aaa quartered) into +0x440 and +0x468 and the inlet tables at +0x4de and +0x4bc;
+ * the pressure factor +0x47c; the density (+0x488) by the temperature GLOBAL +0xe8c and its
+ * root (+0x48c); the velocity factor (+0x478), and the pressure GLOBAL +0xe8e into +0x490 and
+ * +0x480, the temperature into +0x484; then each fitted engine (0x2200769d). (Retail leaves
+ * +0x374a / 4 in ax; no caller reads it.) */
+void sim1_jets(uint8_t *global)
+{
+    static const uint16_t engines[4] = {0x88c, 0x924, 0x9bc, 0xa54};
+    uint16_t ax = S16(0x1460);
+    uint32_t eax, remainder, at;
+    int64_t wide;
+    if (ax > 0x6aaa) ax = (uint16_t)(((int16_t)(uint16_t)(ax - 0x6aaa) >> 2) + 0x6aaa);
+    S16(0x440) = ax;
+    S16(0x468) = ax;
+    S16(0x474) = sim1_table16(sim1_data + 0x4de, S16(0x468));
+    S16(0x476) = sim1_table16(sim1_data + 0x4bc, S16(0x468));
+    eax = (uint32_t)S16(0x440) * S16(0x440);
+    S32(0x47c) = (uint32_t)(((uint64_t)eax * 0x20c4a) >> 32) + 0x10000;
+    wide = (int64_t)((int32_t)PI16(global, 0xe8c) + 0x11126) * SI32(0x47c);
+    S32(0x488) = sim1_idiv32((uint32_t)((uint64_t)wide >> 32), (uint32_t)wide, 0x12026, &remainder);
+    S32(0x48c) = sim1_isqrt(S32(0x488)) << 8;
+    eax = sim1_isqrt(S32(0x47c)) << 8;
+    for (at = 0; at < 3; ++at) eax = (uint32_t)(((uint64_t)eax * S32(0x47c)) >> 16);
+    S32(0x478) = eax;
+    {
+        uint64_t product = (uint64_t)eax * P16(global, 0xe8e);
+        S32(0x490) = sim1_idiv32((uint32_t)(product >> 32), (uint32_t)product, 0x3f5b, &remainder);
+    }
+    eax = (uint32_t)P16(global, 0xe8e) << 16;
+    S32(0x480) = sim1_idiv32((int32_t)eax < 0 ? 0xffffffffu : 0, eax, 0x3f5b, &remainder);
+    wide = (int64_t)((int32_t)PI16(global, 0xe8c) + 0x11126) * 0x10000;
+    S32(0x484) = sim1_idiv32((uint32_t)((uint64_t)wide >> 32), (uint32_t)wide, 0x12026, &remainder);
+    sim1_jet_engine(global, global + engines[0]);
+    for (at = 1; at < 4; ++at) {
+        if (P16(global, 0xaec) < at + 1) break;
+        sim1_jet_engine(global, global + engines[at]);
+    }
+}
+
+/* 0x2200ac4a (edi GLOBAL): on the ground (GLOBAL +0x270), the forward speed from the rpm
+ * word (+0x2b8) into +0x1388 and the ground systems (0x2200ac8a); else the turbulence every
+ * sixth pass (+0x8e0 counting down). */
+void sim1_ground_or_turbulence(uint8_t *global)
+{
+    if (P32(global, 0x270)) {
+        SF64(0x1388) = (double)((long double)PI32(global, 0x2b8) * SF64(0x6c8) * SF64(0x740));
+        sim1_ground_systems(global);
+        return;
+    }
+    if (--S32(0x8e0)) return;
+    S32(0x8e0) = 6;
+    sim1_turbulence(global);
+}
+
+/* A clamp of a cosine ratio to [-1, 1] as 0x220039d0 does it, on the double it parks. */
+static double sim1_unit_clamp(double value)
+{
+    if (!X87_C0C3((long double)value, (long double)RF64(0x150c8))) value = 1.0;
+    if (X87_C0((long double)value, (long double)RF64(0x150d0))) value = -1.0;
+    return value;
+}
+
+/* An angle from its cosine (for 0x220039d0): 0 where the numerator is 0, else _CIacos of the
+ * clamped ratio, negated where the sign term is negative. */
+static void sim1_angle_from_cosine(uint32_t offset, double numerator, double sign, double ratio)
+{
+    if (X87_C3((long double)numerator, (long double)RF64(0x150c0))) { S32(offset) = 0; S32(offset + 4) = 0; return; }
+    if (X87_C0((long double)sign, (long double)RF64(0x150c0))) SF64(offset) = (double)sim1_fchs(sim1_ciacos(ratio));
+    else SF64(offset) = (double)sim1_ciacos(ratio);
+}
+
+/* 0x220039d0: the attitude's step: the quaternion's rates (+0x1070.., from the body rates
+ * +0x13e8..), a trapezoid step of the quaternion (+0x1050..) normalised; its direction
+ * cosines (parked as doubles in retail's frame) turning the body velocities into the earth's
+ * (+0x13b8, +0x13c0, +0x13c8); pitch (+0x1090, by _CIasin within its limits), bank and
+ * heading (+0x1098, +0x10a0, by _CIacos) and the pitch's cosine (+0x10a8); the angles negated
+ * into +0x1538.. and as 16.16 words into +0x1550.. and GLOBAL +0x578... */
+void sim1_attitude_step(void)
+{
+    long double norm, x;
+    double old_70 = SF64(0x1070), old_78 = SF64(0x1078), old_80 = SF64(0x1080), old_88 = SF64(0x1088);
+    double l1c_first, l24, l2c, l44, l54, l3c, l4c, l1c, l34, l4, l14, l5c, l64, lc_sine, l6c, l24_cos, l14_w, l4_u, l1c_v, l4_ratio, lc_ratio;
+    int32_t word;
+    SF64(0x1070) = (double)sim1_fchs(((long double)SF64(0x1068) * SF64(0x13f8) - ((long double)SF64(0x1060) * SF64(0x13e8) + (long double)SF64(0x1058) * SF64(0x13f0))) * SF64(0x768));
+    SF64(0x1078) = (double)((((long double)SF64(0x1060) * SF64(0x13f8) - (long double)SF64(0x1050) * SF64(0x13f0)) + (long double)SF64(0x1068) * SF64(0x13e8)) * SF64(0x768));
+    SF64(0x1080) = (double)(((sim1_fchs((long double)SF64(0x1050) * SF64(0x13e8)) - (long double)SF64(0x1068) * SF64(0x13f0)) - (long double)SF64(0x1058) * SF64(0x13f8)) * SF64(0x768));
+    SF64(0x1088) = (double)((((long double)SF64(0x1050) * SF64(0x13f8) - (long double)SF64(0x1058) * SF64(0x13e8)) + (long double)SF64(0x1060) * SF64(0x13f0)) * SF64(0x768));
+    SF64(0x1050) = (double)((((long double)old_70 + SF64(0x1070)) * SF64(0x16f0)) * SF64(0x768) + SF64(0x1050));
+    SF64(0x1058) = (double)((((long double)old_78 + SF64(0x1078)) * SF64(0x16f0)) * SF64(0x768) + SF64(0x1058));
+    SF64(0x1060) = (double)((((long double)old_80 + SF64(0x1080)) * SF64(0x16f0)) * SF64(0x768) + SF64(0x1060));
+    SF64(0x1068) = (double)((((long double)old_88 + SF64(0x1088)) * SF64(0x16f0)) * SF64(0x768) + SF64(0x1068));
+    norm = (long double)RF64(0x150c8) / sim1_fsqrt((long double)SF64(0x1050) * SF64(0x1050) + (long double)SF64(0x1058) * SF64(0x1058)
+                                                    + (long double)SF64(0x1060) * SF64(0x1060) + (long double)SF64(0x1068) * SF64(0x1068));
+    {
+        double scale = (double)norm, q50 = SF64(0x1050), q60 = SF64(0x1060), q68 = SF64(0x1068);
+        x = norm * q50;
+        SF64(0x1050) = (double)x;
+        SF64(0x1058) = (double)((long double)scale * SF64(0x1058));
+        SF64(0x1060) = (double)((long double)scale * q60);
+        SF64(0x1068) = (double)((long double)scale * q68);
+        l1c_first = (double)(x * SF64(0x1050));
+        l24 = (double)((long double)SF64(0x1058) * SF64(0x1058));
+        l2c = (double)(((long double)scale * q60) * SF64(0x1058));
+        l44 = (double)(((long double)scale * q68) * SF64(0x1058));
+        l54 = (double)((long double)SF64(0x1058) * SF64(0x1050));
+        l3c = (double)(x * SF64(0x1050) - l24);
+    }
+    l4c = (double)((long double)SF64(0x1068) * SF64(0x1050));
+    l1c = (double)((long double)SF64(0x1060) * SF64(0x1050));
+    l34 = (double)((long double)SF64(0x1068) * SF64(0x1060));
+    l4 = (double)((long double)SF64(0x1060) * SF64(0x1060));
+    l14 = (double)((long double)SF64(0x1068) * SF64(0x1068));
+    l5c = (double)((((long double)l24 + l1c_first) - l4) - l14);
+    l64 = (double)(((long double)l2c + l4c) * SF64(0x770));
+    lc_sine = (double)(((long double)l44 - l1c) * SF64(0x770));
+    l6c = (double)(((long double)l54 + l34) * SF64(0x770));
+    l24_cos = (double)(((long double)l3c - l4) + l14);
+    l14_w = sim1_x87(SF64(0x13b0));
+    l4_u = sim1_x87(SF64(0x13a0));
+    l1c_v = (double)sim1_fchs(SF64(0x13a8));
+    SF64(0x13b8) = (double)(((((long double)l3c + l4) - l14) * l4_u + (((long double)l34 - l54) * SF64(0x770)) * l1c_v) + (long double)l14_w * l64);
+    SF64(0x13c0) = (double)sim1_fchs(((long double)SF64(0x13a0) * l6c + (long double)SF64(0x13b0) * lc_sine) + (long double)l1c_v * l24_cos);
+    SF64(0x13c8) = (double)((((((long double)l1c + l44) * SF64(0x770)) * l1c_v) + (((long double)l2c - l4c) * SF64(0x770)) * l4_u) + (long double)l14_w * l5c);
+    if (!X87_C0C3((long double)lc_sine, (long double)RF64(0x150d0))) {
+        if (!X87_C0((long double)lc_sine, (long double)RF64(0x150c8))) SF64(0x1090) = (double)((long double)SF64(0x768) * RF64(0x15070));
+        else SF64(0x1090) = (double)sim1_ciasin(sim1_fchs(lc_sine));
+    } else SF64(0x1090) = (double)((long double)SF64(0x768) * RF64(0x15078));
+    SF64(0x10a8) = (double)sim1_fcos(SF64(0x1090));
+    l4_ratio = sim1_unit_clamp((double)((long double)l5c / SF64(0x10a8)));
+    x = (long double)l24_cos / SF64(0x10a8);
+    lc_ratio = (double)x;
+    if (!X87_C0C3(x, (long double)RF64(0x150c8))) { x = RF64(0x150c8); lc_ratio = (double)x; }
+    if (X87_C0(x, (long double)RF64(0x150d0))) lc_ratio = -1.0;
+    sim1_angle_from_cosine(0x10a0, l5c, l64, l4_ratio);
+    sim1_angle_from_cosine(0x1098, l24_cos, l6c, lc_ratio);
+    SF64(0x1538) = (double)sim1_fchs(SF64(0x1090));
+    SF64(0x1540) = (double)sim1_fchs(SF64(0x1098));
+    SF64(0x1548) = sim1_x87(SF64(0x10a0));
+    word = -sim1_ftol((long double)SF64(0x1090) * SF64(0x6d8) * SF64(0x678));
+    S32(0x1550) = (uint32_t)word;
+    S32(0x1554) = (uint32_t)-sim1_ftol((long double)SF64(0x1098) * SF64(0x6d8) * SF64(0x678));
+    S32(0x1558) = (uint32_t)sim1_ftol((long double)SF64(0x10a0) * SF64(0x6d8) * SF64(0x678));
+    P32(SIM1_GLOBAL, 0x578) = (uint32_t)word;
+    P32(SIM1_GLOBAL, 0x57c) = (uint32_t)-sim1_ftol((long double)SF64(0x1098) * SF64(0x6d8) * SF64(0x678));
+    P32(SIM1_GLOBAL, 0x580) = (uint32_t)sim1_ftol((long double)SF64(0x10a0) * SF64(0x6d8) * SF64(0x678));
+}
+
+/* 0x22007ef1 (edi GLOBAL, ebx the engine record, esi its second record): a piston engine's
+ * pass: rpm (+0xc, through the prop's gear +0x2b54) into +0x16d0; running (+8) by the
+ * magnetos and starter (+6: its count +2 of the second record), the fuel (+0x94, GLOBAL
+ * +0x33c), the mixture's flow (+0x14), the oil (GLOBAL +0x364); the fuel flow (+0xe) and the
+ * manifold pressure (+0x34, by the throttle +0, the altitude GLOBAL +0xe8e); the carburettor's
+ * icing (the second record's +4, +6) and the heat; the power (+0x512, the table at +0x3560),
+ * the cylinder head (+0x32) and oil temperatures (+0x2c, +0x2e) lagging; the torque word
+ * (+0x16), the rpm stepping (+0x16d0, within 0..9999); the prop's pitch (+0x20, GLOBAL +0xaf0
+ * the governor); the EGT (+0x5c); the thrust (+0x1c, through the tables at +0x4180 and
+ * +0x3440 and the power 0x3cc00 of the density +0x4024), negated once after a stall (+0x516);
+ * then the rpm back into +0xc and +0xa and the starter's spring (0x22008a77). */
+void sim1_piston_engine(uint8_t *global, uint8_t *engine, uint8_t *extra)
+{
+    uint16_t ax, dx, cx, rest;
+    uint32_t eax, ecx, edx, remainder;
+    uint64_t product;
+    int64_t signed_product;
+    uint8_t stalled;
+    if (!P32(global, 0x784)) P16(engine, 0x26) = 0;
+    ax = (uint16_t)((uint16_t)((S16(0x3cc0) >> 2) + S16(0x38a2)) << 2);
+    P16(engine, 0x3c) = ax;
+    S16(0x2b54) = ax;
+    ax = P16(engine, 0xc);
+    if (ax >= 0xea60) ax = 0xea60;
+    eax = (uint32_t)ax * S16(0x2b54);
+    S16(0x16d0) = (uint16_t)((eax >> 16) + ((eax >> 15) & 1));
+    S16(0x502) = 0xa;
+    if ((P8(global, 0x364) & 1) && P16(engine, 0x2c) > 0x3e80) goto stop;
+    if ((P8(global, 0x364) & 2) && (int16_t)P16(engine, 0x2e) <= 0x5dc) goto stop;
+    if (!P16(engine, 8)) {
+        if (!P16(global, 0x340)) { if (!P16(engine, 6)) goto next; }
+        else if (P8(global, 0x608) != 0x33 && P16(engine, 6) != 4 && !S16(0x16d0)) goto next;
+        if (!P32(engine, 0x94) && P16(global, 0x33c)) goto next;
+        if (!P16(engine, 0x14)) goto next;
+        P16(engine, 8) = 1;
+    }
+    if (P16(engine, 6) == 4 || P16(engine, 6) == 3) { P16(engine, 0x22) = 1; P16(engine, 0x24) = 1; }
+    else if (!P16(engine, 6)) { P16(engine, 0x22) = 0; P16(engine, 0x24) = 0; P16(engine, 8) = 0; goto next; }
+    else if (P16(engine, 6) == 2) { P16(engine, 0x22) = 1; P16(engine, 0x24) = 0; }
+    else { P16(engine, 0x24) = 1; P16(engine, 0x22) = 0; }
+    if (!P32(engine, 0x94) && P16(global, 0x33c)) goto stop;
+    if (P16(engine, 0x14)) goto next;
+stop:
+    P16(engine, 8) = 0;
+next:
+    if (P16(engine, 6) == 4) {
+        ax = (uint16_t)(P16(extra, 2) + 1);
+        if (!(ax < 7)) { P16(engine, 6) = 3; ax = 0; }
+        P16(extra, 2) = ax;
+    }
+    cx = (uint16_t)(MUL16_HIGH(P16(engine, 0) << 2, S16(0x3530)) + S16(0x3dd4));
+    ax = P16(global, 0x342) == 1 ? P16(engine, 4) : 0x3400;
+    S16(0x504) = MUL16_HIGH((uint16_t)(ax << 2), S16(0x3fe8));
+    ax = P16(global, 0x342) == 1 ? P16(engine, 4) : 0x3400;
+    dx = MUL16_HIGH(ax, cx);
+    P16(engine, 0x14) = dx;
+    if (!P16(engine, 8)) dx = 0;
+    P16(engine, 0xe) = MUL16_HIGH(dx, S16(0x514));
+    dx = (uint16_t)(MUL16_HIGH(P16(engine, 0) << 2, S16(0x3530)) + S16(0x3dd4));
+    S16(0x512) = MUL16_HIGH((uint16_t)S32(0x3b08), dx);
+    if ((uint16_t)(P16(engine, 0x22) + P16(engine, 0x24)) != 2) S16(0x512) = MUL16_HIGH(S16(0x512), S16(0x4398));
+    if (P16(global, 0x342)) {
+        dx = MUL16_HIGH(P16(engine, 0), 0x1bdc);
+        if ((int16_t)P16(engine, 4) < 0x708) goto starved;
+        if ((int16_t)P16(engine, 4) > (int16_t)dx) goto fed;
+        dx = MUL16_HIGH(S16(0x3fe8), 0x1bdc);
+        if ((int16_t)P16(extra, 0xc) > (int16_t)dx) goto fed;
+        S16(0x512) = 0;
+        if (S16(0x16d0)) goto fed;
+starved:
+        P16(engine, 8) = 0;
+        S16(0x512) = 0;
+    }
+fed:
+    if (!(S16(0x500) < 0x510)) {
+        if (!P32(global, 0x784)) goto heated;
+        if (!P16(global, 0x5dc)) {
+            if ((P16(global, 0xf10) & 1) && (P16(global, 0xf0e) & 1) && !(PI16(global, 0xe8c) > 0x500) && !P16(engine, 0x26)) {
+                eax = (uint32_t)(uint16_t)(7 * P16(global, 0xc44)) * S16(0x16f8);
+                P32(extra, 4) -= eax;
+                if (PI16(extra, 6) < 0) P32(extra, 4) = 0;
+            } else {
+                int64_t sum;
+                ax = 0x834;
+                if (P16(engine, 0x26)) ax = (uint16_t)(ax + 0xea60);
+                eax = (uint32_t)ax * S16(0x16f8);
+                sum = (int64_t)PI32(extra, 4) + (int32_t)eax;
+                P32(extra, 4) = sum > 0x7fffffff || sum < -0x7fffffff - 1 ? 0x7fffffffu : (uint32_t)sum;
+            }
+        }
+        S16(0x512) = MUL16_HIGH((uint16_t)(P16(extra, 6) << 1), S16(0x512));
+    }
+    if (P16(engine, 0x26)) S16(0x512) = MUL16_HIGH(S16(0x512), S16(0x2d3a));
+heated:
+    eax = (uint32_t)P16(global, 0xe8e) * 0xf1ec;
+    dx = (uint16_t)(eax >> 15);
+    S16(0x508) = dx;
+    if (!P16(engine, 8)) {
+        if (S16(0x16d0) >= 0xc8) {
+            ecx = (uint32_t)(int32_t)(int16_t)dx;
+            product = (uint64_t)(0x4000u - (uint32_t)(int32_t)PI16(engine, 0)) * ecx;
+            ecx -= (uint32_t)(product >> 14);
+            dx = (uint16_t)(((uint64_t)0xe666 * ecx) >> 16);
+        }
+    } else {
+        uint16_t saved;
+        cx = (uint16_t)(0x4000 - P16(engine, 0xc));
+        if ((int16_t)cx < 0) cx = 0;
+        ax = (uint16_t)((S16(0x3cc0) >> 2) + S16(0x38a2));
+        eax = (uint32_t)ax * cx;
+        saved = (uint16_t)((uint32_t)((uint64_t)eax * 0x14) >> 16);
+        eax = sim1_div32(0, (uint32_t)S16(0x512) << 16, S32(0x3b08), &remainder);
+        edx = (uint32_t)(((uint64_t)eax * S16(0x508)) >> 16) + saved;
+        if (!(edx < S16(0x508))) edx = S16(0x508);
+        dx = (uint16_t)edx;
+        if (!(dx > 0xc00)) dx = 0xc00;
+    }
+    dx = (uint16_t)(((int32_t)(int16_t)(uint16_t)(dx - P16(engine, 0x34)) * 0x2800) >> 16);
+    if (dx) P16(engine, 0x34) = (uint16_t)(P16(engine, 0x34) + dx);
+    eax = sim1_div32(0, (uint32_t)S16(0x504) << 16, S16(0x514), &remainder);
+    P16(extra, 0xc) = (uint16_t)eax;
+    ax = (uint16_t)eax;
+    if ((int16_t)ax > (int16_t)S16(0x3fe8)) ax = S16(0x3fe8);
+    ax = sim1_table16(sim1_data + 0x3560, (uint16_t)((uint32_t)ax * S16(0x374e)));
+    S16(0x512) = MUL16_HIGH(ax, S16(0x512));
+    dx = MUL16_HIGH(S16(0x512), S16(0x1704));
+    if (dx < 1) dx = 1;
+    if (!P16(engine, 8)) dx = 0;
+    S16(0x506) = dx;
+    eax = sim1_div32(0, (uint32_t)S16(0x512) * 0xeb, S32(0x3b08), &remainder) << 16;
+    if (!P16(engine, 8)) eax = 0;
+    ecx = P16(global, 0x342) ? P16(engine, 4) : 0x3400;
+    if (!((int32_t)ecx > 0x32)) ecx = 0x32;
+    eax = sim1_div32(0, eax, ecx, &remainder) >> 1;
+    eax = (uint32_t)(((uint64_t)eax * S16(0x1704)) >> 16);
+    eax = (eax * S32(0x2c14)) >> 8;
+    if (!(eax < 0x4000)) eax = 0x4000;
+    ax = (uint16_t)((uint32_t)((int64_t)(int32_t)(eax - (uint32_t)(int32_t)PI16(engine, 0x32)) * 0x1400) >> 16);
+    if (ax) P16(engine, 0x32) = (uint16_t)(P16(engine, 0x32) + ax);
+    ecx = S16(0x16d0);
+    if (!((int32_t)ecx > 0x64)) ecx = 0x64;
+    eax = sim1_div32(0, (uint32_t)S16(0x506) * 0x1484, ecx, &remainder);
+    if (!(eax < 0x7fff)) eax = 0x7fff;
+    P16(engine, 0x16) = (uint16_t)eax;
+    ax = (uint16_t)eax;
+    if (!((int16_t)ax > 0) && S16(0x16d0)) {
+        S8(0x516) = (uint8_t)((uint8_t)ax + 1);
+        SI16(0x1718) = sim1_fistp16((long double)SF64(0x1388) * SF64(0x728));
+        ax = (uint16_t)(S16(0x1718) << 1);
+    }
+    ax = sim1_sub16_saturated(ax, P16(engine, 0x18));
+    if (!P16(engine, 8)) ax = sim1_sub16_saturated(ax, 0x4b);
+    if (P16(engine, 6) == 4) {
+        cx = (uint16_t)(0xc8 - S16(0x16d0));
+        if (!((int16_t)cx < 0)) { ax = (uint16_t)(ax + cx); if (!P16(engine, 8)) ax = (uint16_t)(ax + 0x4b); }
+    }
+    dx = (uint16_t)((uint32_t)((int32_t)(int16_t)ax * (int16_t)S16(0x2c7a)) >> 15);
+    if (!((int16_t)dx > (int16_t)0xfe37)) dx = 0xfe37;
+    else if (!((int16_t)dx < 0x1c9)) dx = 0x1c9;
+    if ((P16(global, 0xc46) & 0x10) && (int16_t)(uint16_t)(P16(engine, 0) - P16(extra, 0)) > 0x1000 && !((int16_t)dx < 0x14)) dx = 0x14;
+    else P16(extra, 0) = P16(engine, 0);
+    S16(0x16d0) = (uint16_t)(S16(0x16d0) + dx);
+    if (!((int16_t)S16(0x16d0) < 0x270f)) S16(0x16d0) = 0x270f;
+    if (!((int16_t)S16(0x16d0) > 0)) S16(0x16d0) = 0;
+    ax = (uint16_t)(((uint32_t)S16(0x16d0) * S16(0x36b2)) >> 12);
+    if (P16(engine, 8)) ax = sim1_add16_saturated(ax, S16(0x3b88));
+    eax = (uint32_t)ax * S16(0x4082);
+    S16(0x510) = (eax >> 16) || (uint16_t)eax > 0x3fff ? 0x3fff : (uint16_t)eax;
+    if (P8(global, 0x364) & 2) P16(extra, 8) = sim1_sub16_saturated(P16(extra, 8), 0x200);
+    else {
+        P16(extra, 8) = 0;
+        if (!(S16(0x510) < 0x3c8c)) {
+            P16(extra, 0xe) = (uint16_t)(P16(extra, 0xe) + 0x40);
+            if (!(P16(extra, 0xe) < 0x4000)) P16(extra, 0xe) = 0;
+        } else {
+            P16(extra, 0xe) = (uint16_t)(P16(extra, 0xe) - 8);
+            if (PI16(extra, 0xe) < 0) P16(extra, 0xe) = 0;
+        }
+    }
+    ax = sim1_add16_saturated(S16(0x510), P16(extra, 8));
+    if ((int16_t)ax < 0) ax = 0;
+    ax = (uint16_t)(ax - P16(engine, 0x2e));
+    if (ax) {
+        dx = (uint16_t)(((int32_t)(int16_t)ax * 0x1400) >> 16);
+        if (!dx) dx = 1;
+        P16(engine, 0x2e) = (uint16_t)(P16(engine, 0x2e) + dx);
+    }
+    ax = 0;
+    if (P16(engine, 8)) {
+        ax = sim1_div16(S16(0x512), 0, (uint16_t)S32(0x3b08), &rest);
+        ax = sim1_add16_saturated(MUL16_HIGH(ax, S16(0x3fd0)), S16(0x4354));
+        ax = (uint16_t)(((uint32_t)ax * S16(0x3800)) >> 12);
+        if ((int16_t)ax < 0) ax = 0x7fff;
+    }
+    SI16(0x1718) = sim1_fistp16((long double)SF64(0x1388) * SF64(0x728));
+    ax = (uint16_t)(ax - (uint16_t)(S16(0x1718) << 4));
+    if ((int16_t)ax < 0) ax = 0;
+    S16(0x50e) = ax;
+    ax = (uint16_t)(((int16_t)(uint16_t)(P16(global, 0xe8c) - 0xf00) >> 1) + S16(0x50e));
+    if ((int16_t)ax < 0) ax = 0;
+    if (ax > 0x3fff) ax = 0x3fff;
+    S16(0x50e) = ax;
+    if (P8(global, 0x364) & 1) { cx = (uint16_t)(P16(extra, 0xa) + 0x64); if (cx > 0x3fff) cx = 0x3fff; P16(extra, 0xa) = cx; }
+    else P16(extra, 0xa) = 0;
+    ax = (uint16_t)(S16(0x50e) + P16(extra, 0xa));
+    if (ax > 0x3fff) ax = 0x3fff;
+    if ((int16_t)ax < 0) ax = 0;
+    ax = (uint16_t)(ax - P16(engine, 0x2c));
+    if (ax) {
+        dx = (uint16_t)(((int32_t)(int16_t)ax * 0x40) >> 16);
+        if (!dx) dx = 1;
+        P16(engine, 0x2c) = (uint16_t)(P16(engine, 0x2c) + dx);
+    }
+    PF64(engine, 0x5c) = (double)((((long double)(int32_t)SI16(0x506) / (long double)SI32(0x3b08)) * sim1_f64(0x56b) + (long double)(int32_t)PI16(engine, 0x2c) * sim1_f64(0x573)
+                                   + SF64(0x16e0) - PF64(engine, 0x5c)) * sim1_f64(0x57b) + PF64(engine, 0x5c));
+    cx = S16(0x16d0);
+    if (!((int16_t)cx > 0x64)) cx = 0x64;
+    eax = (uint32_t)(SI32(0x1718) = sim1_fistp32((long double)SF64(0x1388) * SF64(0x728) * SF64(0x6d8)));
+    dx = (uint16_t)(eax >> 16);
+    ax = (uint16_t)eax;
+    if ((int16_t)dx < 0) { dx = 0; ax = 0; }
+    ax = sim1_div16(dx, ax, cx, &rest);
+    eax = (uint32_t)ax * 0x2e8;
+    ax = sim1_div16((uint16_t)(eax >> 16), (uint16_t)eax, (uint16_t)S32(0x4024), &rest);
+    S16(0x16c8) = ax;
+    sim1_set_u16(0x529, (uint16_t)(ax << 1));
+    if (P32(global, 0xaf0) == 1) {
+        P16(engine, 2) = (uint16_t)(P16(engine, 2) + 0x400);
+        ax = P16(engine, 2);
+        if (!((int16_t)ax > 0)) ax = 0;
+        else if ((int16_t)ax > 0x3fff) ax = 0x3fff;
+        P16(engine, 2) = ax;
+    }
+    if (P32(global, 0xaf0)) {
+        dx = (uint16_t)(MUL16_HIGH(P16(engine, 2), S16(0x3cc0)) + S16(0x38a2));
+        ax = (uint16_t)((uint16_t)(S16(0x16d0) - dx) << 1);
+        if (!((int16_t)ax > (int16_t)0xff06)) ax = 0xff06;
+        else if (!((int16_t)ax < 0xfa)) ax = 0xfa;
+        ax = (uint16_t)(ax + P16(engine, 0x20));
+        if (!((int16_t)ax > (int16_t)S16(0x43e0))) ax = S16(0x43e0);
+        else if (!((int16_t)ax < (int16_t)S16(0x3d10))) ax = S16(0x3d10);
+        P16(engine, 0x20) = ax;
+    } else {
+        ax = S16(0x35b4);
+        P16(engine, 0x20) = ax;
+    }
+    sim1_set_u16(0x527, (uint16_t)((uint32_t)(uint16_t)(ax - S16(0x43e0)) * S16(0x3e30)));
+    S16(0x50a) = sim1_table2d(sim1_data + 0x4180);
+    S16(0x50c) = sim1_table2d(sim1_data + 0x3440);
+    eax = (uint32_t)S16(0x16d0) * S16(0x16d0);
+    ax = sim1_div16((uint16_t)(eax >> 16), (uint16_t)eax, 0xe10, &rest);
+    {
+        uint32_t density = S32(0x4024), low = density * density * density;
+        uint64_t power = (uint64_t)low * density * density;
+        eax = sim1_div32((uint32_t)(power >> 32), (uint32_t)power, 0x3cc00, &remainder);
+        eax = (uint32_t)(((uint64_t)eax * ax) >> 8);
+    }
+    eax = (uint32_t)(((uint64_t)eax * S16(0x50a)) >> 8);
+    product = (uint64_t)eax * S16(0x1704);
+    eax = sim1_div32((uint32_t)(product >> 48), (uint32_t)(product >> 16), 0x1a5, &remainder);
+    ax = (uint16_t)eax;
+    if (!(eax < 0x7fff)) ax = 0x7fff;
+    if (!((int16_t)ax > 0xa)) ax = 0xa;
+    P16(engine, 0x18) = ax;
+    SI32(0x1718) = sim1_fistp32((long double)SF64(0x1388) * SF64(0x728) * SF64(0x6d8));
+    ax = (uint16_t)((uint64_t)((int64_t)SI32(0x1718) * 0x1f) >> 20);
+    if (!((int16_t)ax > 0xa)) ax = 0xa;
+    cx = ax;
+    ax = sim1_div16((int16_t)S16(0x16d0) < 0 ? 0xffff : 0, S16(0x16d0), cx, &rest);
+    eax = (uint32_t)ax * P16(engine, 0x18);
+    signed_product = (int64_t)(int32_t)eax * (int32_t)(uint32_t)S16(0x50c);
+    eax = (uint32_t)((uint64_t)signed_product >> 20);
+    stalled = S8(0x516);
+    S8(0x516) = 0;
+    if (stalled) eax = 0u - eax;
+    P32(engine, 0x1c) = eax;
+    ax = sim1_div16(S16(0x16d0), 0, S16(0x2b54), &rest);
+    if (ax != P16(engine, 0xc)) { P16(engine, 0xc) = ax; P16(engine, 0xa) = ax; }
+    sim1_contact_rise(engine);
+}
+
+/* 0x220127b0: the rotor blades: the collective's lift slope (+0x19a8, +0x19b0); the air's
+ * density ratio to a power (+0x1960, _CIpow); the inflow and thrust coefficients (+0x1950,
+ * +0x1990, +0x1958 the induced velocity, +0x1970 its inverse) and the tip-loss factor (+0x1948,
+ * within 0.2..40); the flapping (+0x19c0 the azimuth): the cyclic's flap angles (+0x1938,
+ * +0x1940, +0x1980, +0x1918, +0x1978), the coning (+0x1bf8), the blade's drag (+0x1998,
+ * +0x1c30), the advance ratios (+0x1920, +0x1928, +0x1930) and their powers; the rotor's
+ * torque and thrust terms (+0x1c70, +0x1988, +0x1c28, +0x1c08, +0x1bf0) and the moment +0x12c0.
+ * Retail keeps some terms unrounded on the x87 and parks others in its frame; the C does the
+ * same, the frame's locals by offset. */
+void sim1_rotor_blades(void)
+{
+    long double lift, value;
+    double l0_ratio, l18_inflow, l8_cos, l10_sin, l20_density, l10_advance, l8_thrust, l28_power, l18_power, l10_power, l18_area, l20_cone;
+    double old_cone;
+    lift = (long double)SF64(0x36a8) * RF64(0x15400) / ((long double)SF64(0x36a8) - RF64(0x15408));
+    SF64(0x19a8) = (double)lift;
+    SF64(0x19b0) = (double)(lift * SF64(0x1c78) + SF64(0x3720));
+    value = sim1_cipow(SF64(0x3d48), SF64(0xd88));
+    {
+        long double inflow = sim1_fsin(SF64(0x1af0)) * SF64(0x1ab8) + SF64(0x1948);
+        SF64(0x1968) = (double)((long double)SF64(0x3d48) * SF64(0xe40));
+        inflow /= SF64(0x1968);
+        SF64(0x1950) = (double)inflow;
+        SF64(0x1960) = (double)(value * SF64(0x798) * SF64(0x3720) / SF64(0x2c20));
+        SF64(0x1990) = (double)((long double)SF64(0x1ac8) / SF64(0x1968));
+        l18_inflow = (double)sim1_cipow(inflow, RF64(0x15410));
+    }
+    value = sim1_cipow(SF64(0x1990), RF64(0x15410));
+    l0_ratio = (double)value;
+    value = sim1_cipow(value + l18_inflow, RF64(0x15418));
+    SF64(0x1958) = (double)value;
+    if (X87_C3(value, (long double)RF64(0x15420))) { S32(0x1970) = 0; S32(0x1974) = 0; }
+    else SF64(0x1970) = (double)((long double)RF64(0x15428) / SF64(0x1958));
+    if (X87_C0((long double)SF64(0x1ac8), (long double)RF64(0x15430))) SF64(0x1948) = (double)(sim1_cipow((long double)SF64(0x1bf8) * RF64(0x15418), RF64(0x15418)) * SF64(0x1968));
+    else SF64(0x1948) = (double)((((long double)SF64(0x1968) * SF64(0x1bf8)) * RF64(0x15418)) * SF64(0x1970));
+    if (X87_C0C3((long double)SF64(0x1948), (long double)RF64(0x15438))) { S32(0x1948) = 0x9999999a; S32(0x194c) = 0x3fc99999; }
+    else if (!X87_C0((long double)SF64(0x1948), (long double)RF64(0x15440))) { S32(0x1948) = 0; S32(0x194c) = 0x40440000; }
+    old_cone = SF64(0x1bf8);
+    l8_cos = (double)sim1_fcos(SF64(0x19c0));
+    l10_sin = (double)sim1_fsin(SF64(0x19c0));
+    SF64(0x1938) = (double)(((long double)SF64(0x1920) - (long double)SF64(0x1928) * l8_cos) - (long double)SF64(0x1930) * l10_sin);
+    l20_density = (double)((long double)SF64(0x19b0) * SF64(0x798));
+    SF64(0x1bf8) = (double)((((long double)SF64(0x1c78) * l0_ratio) * RF64(0x15418) + (long double)SF64(0x1c78) * RF64(0x15448)) - (long double)SF64(0x1950) * RF64(0x15450));
+    SF64(0x1940) = (double)(((long double)SF64(0x1928) * l10_sin - (long double)SF64(0x1930) * l8_cos) * SF64(0xe40));
+    SF64(0x1998) = (double)((long double)SF64(0x43f0) * SF64(0x1bf8));
+    {
+        long double moment = (long double)SF64(0x1968) * SF64(0x1950);
+        SF64(0x1980) = (double)(moment - (moment * SF64(0x1938)) * l8_cos);
+    }
+    SF64(0x1918) = (double)((((long double)old_cone * RF64(0x15418)) * SF64(0x1970) + SF64(0x1950)) / SF64(0x1990));
+    SF64(0x1978) = (double)(((long double)SF64(0x1990) * SF64(0x1968)) * l10_sin + SF64(0x1968));
+    SF64(0x1980) = (double)((long double)SF64(0x1980) - (long double)SF64(0x1940) * SF64(0x3d48));
+    SF64(0x1bf8) = (double)((((long double)SF64(0x19b0) * SF64(0x3598)) * RF64(0x15418)) * SF64(0x1bf8));
+    SF64(0x1998) = (double)(((((long double)SF64(0x19b0) * SF64(0x798)) * RF64(0x15418)) * SF64(0x1998)) * ((long double)SF64(0x3b00) * SF64(0x3d48)));
+    l10_advance = (double)((long double)l0_ratio - RF64(0x15458));
+    SF64(0x1920) = (double)(((((long double)SF64(0x1c78) * l10_advance) * RF64(0x15460) + (long double)SF64(0x1950) * RF64(0x15468)) * SF64(0x1960)) * RF64(0x15418));
+    l8_thrust = (double)((long double)SF64(0x1990) * SF64(0x1920));
+    SF64(0x1c30) = (double)((((((long double)SF64(0x1998) * SF64(0x1968)) * SF64(0x1968)) * SF64(0x2c30)) * SF64(0x3b00)) * SF64(0xe40) / SF64(0x2c08));
+    SF64(0x1928) = (double)((((long double)SF64(0x1950) + SF64(0x1950)) + (long double)SF64(0x1c78) * RF64(0x15470)) * SF64(0x1990) / ((long double)RF64(0x15428) - (long double)l0_ratio * RF64(0x15418)));
+    SF64(0x1930) = (double)((((long double)SF64(0x1990) * SF64(0x1920)) * RF64(0x15478)) / (((long double)RF64(0x15428) - (long double)l0_ratio * RF64(0x15450)) * RF64(0x15480)));
+    SF64(0x1c70) = (double)((((((long double)SF64(0x30a0) * RF64(0x15460)) / SF64(0x19b0)) * l10_advance) - ((long double)SF64(0x1950) * SF64(0x1c78)) * RF64(0x15468)) - (long double)l18_inflow * RF64(0x15418));
+    l28_power = (double)sim1_cipow(SF64(0x1920), RF64(0x15410));
+    l18_power = (double)sim1_cipow(SF64(0x1930), RF64(0x15410));
+    l10_power = (double)sim1_cipow(SF64(0x1928), RF64(0x15410));
+    value = (long double)SF64(0x19b0) / ((long double)SF64(0x36a8) * RF64(0x154a0));
+    SF64(0x19b8) = (double)value;
+    l18_area = (double)((long double)SF64(0x1990) * SF64(0x1950));
+    SF64(0x1988) = (double)(((((long double)l10_power * RF64(0x15488) + (long double)l18_power * RF64(0x15490)) + (long double)l28_power * RF64(0x15418)) * RF64(0x15418)) * l0_ratio);
+    SF64(0x1c70) = (double)(((((long double)SF64(0x1c70) - ((long double)l18_power + l10_power) * RF64(0x15490)) - SF64(0x1988)) - ((long double)SF64(0x1928) * l18_area) * RF64(0x15418))
+                            + (((long double)SF64(0x1990) * SF64(0x1930)) * SF64(0x1920)) * RF64(0x15498));
+    SF64(0x1c28) = (double)((((value + SF64(0x30a0)) * SF64(0x1990)) * RF64(0x15418)) / SF64(0x19b0) + ((long double)SF64(0x1928) * SF64(0x1c78)) * RF64(0x15498));
+    l20_cone = (double)((long double)SF64(0x1968) * SF64(0x1968));
+    SF64(0x1c08) = (double)((((((long double)SF64(0x3d48) * SF64(0x1c70)) * l20_density) * RF64(0x15418)) * SF64(0x3d48)) * l20_cone);
+    SF64(0x1c28) = (double)((((long double)SF64(0x1c28) - ((long double)SF64(0x1c78) * l18_area) * RF64(0x15418)) + ((long double)SF64(0x1990) * l10_power) * RF64(0x15460))
+                            + ((long double)SF64(0x1950) * SF64(0x1928)) * RF64(0x154a8));
+    {
+        long double square = (long double)SF64(0x1990) * SF64(0x1990);
+        SF64(0x12c0) = (double)((((((long double)SF64(0x1930) * square) * RF64(0x15418)) - ((long double)l8_thrust * RF64(0x154a8) - (long double)SF64(0x1930) * RF64(0x154b8))) * SF64(0x1c78))
+                                - (((((((long double)SF64(0x1930) * SF64(0x1928)) * RF64(0x15460)) - ((long double)SF64(0x1950) * SF64(0x1920)) * RF64(0x154c0)) * SF64(0x1990))
+                                    - ((long double)SF64(0x1928) * SF64(0x1920)) * RF64(0x154c8)) + (long double)SF64(0x1950) * SF64(0x1930)));
+        SF64(0x1c28) = (double)(((long double)SF64(0x1c28) - ((long double)SF64(0x1930) * SF64(0x1920)) * RF64(0x154b0)) + ((long double)SF64(0x1990) * l28_power) * RF64(0x15460));
+        SF64(0x1bf0) = (double)((((((((long double)SF64(0x798) * SF64(0x3720)) * SF64(0x3d48)) * SF64(0x1c28)) * RF64(0x15418)) * SF64(0x2c30)) * SF64(0x3b00)) * l20_cone);
+        SF64(0x12c0) = (double)((((((((((long double)SF64(0x12c0) - ((long double)SF64(0x1928) * SF64(0x1920)) * square) * SF64(0x19b0)) * SF64(0x1968)) * SF64(0x1968)) * SF64(0x798))
+                                   * SF64(0x2c30)) * SF64(0x3b00)) * SF64(0x3d48)) * RF64(0x15418));
+    }
+}
+
+/* A table term of 0x2200fe80: the table's value (0x2200a786) plus a word times +0x6b0. */
+static long double sim1_table_term(uint32_t table, int32_t word)
+{
+    return sim1_table_scaled(sim1_data + table) + (long double)word * SF64(0x6b0);
+}
+
+/* A deflection's fold of 0x2200fe80 (|angle| past +0xb50: what is left of pi at the top,
+ * else +0xb50), on the unrounded value, a NaN to +0xb50. */
+static long double sim1_fold_deflection(long double value)
+{
+    if (X87_C0(value, (long double)SF64(0xb50))) return value;
+    if (X87_C0C3(value, (long double)RF64(0x152a0) - SF64(0xb50))) return SF64(0xb50);
+    return (long double)RF64(0x152a0) - value;
+}
+
+/* 0x2200fe80: the aerodynamic coefficients: the limits' fraction (0x22010920); the lift, drag,
+ * side and moment curves' tables (0x2200a786) plus their trim words (+0x17a8.. +0x17c8,
+ * +0x18b0.. +0x18c8, +0x1828.. +0x1840, ...); the angle of attack less the trim (+0x4178),
+ * folded about +0xb50, and the flaps' and slats' deflections (+0x14d0, +0x14e0, +0x14d8,
+ * +0x14c8 less it, folded) into +0x17e8.. +0x1808 by the density +0x2d90; the ground effect
+ * (+0x1810, the table at +0x3100, with +0x2c98); the rate terms by the tables at +0x2cc0,
+ * +0x2ae0, +0x3a60, +0x3760, +0x3920, +0x3c20 (by the angle +0x1490 * +0x688); the tail's
+ * downwash (+0x1890); and the propellers' slipstream over the tail (+0x1898: the engines'
+ * thrust over the dynamic pressure, faded out with speed past +0x3702 * +0x740), none for a
+ * turbine, on the ground or slow. Retail keeps several terms unrounded on the x87 and parks
+ * others in its frame; the C does the same. */
+void sim1_aero_coefficients(void)
+{
+    static const uint16_t engines[3][2] = {{0x940, 0x944}, {0x9d8, 0x9dc}, {0xa70, 0xa74}};
+    uint8_t *global;
+    long double value, flap, speed, sum;
+    double trim, folded, density, parked;
+    uint32_t at;
+    sim1_limit_fraction();
+    SF64(0x17a8) = (double)sim1_table_term(0x2ba0, SI32(0x3b58));
+    SF64(0x17b0) = (double)(sim1_table_scaled(sim1_data + 0x3e40) * SF64(0x14a8) + (long double)(int32_t)SI16(0x2c28) * SF64(0x6b0));
+    SF64(0x17b8) = (double)sim1_table_term(0x3d20, SI32(0x3dd8));
+    SF64(0x17c0) = (double)sim1_table_term(0x3600, (int32_t)SI16(0x4152));
+    value = sim1_table_scaled(sim1_data + 0x3500);
+    trim = (double)((long double)(int32_t)SI16(0x4178) * SF64(0x680));
+    folded = (double)fabsl((long double)SF64(0x1490) - trim);
+    SF64(0x17c8) = (double)(value + (long double)(int32_t)(uint32_t)S16(0x3810) * SF64(0x6b0));
+    SF64(0x17d0) = (double)((long double)(int32_t)(uint32_t)S16(0x3e00) * SF64(0x6b0));
+    SF64(0x17d8) = (double)((long double)(int32_t)(uint32_t)S16(0x4044) * SF64(0x6b0));
+    SF64(0x17e0) = (double)((long double)(int32_t)(uint32_t)S16(0x3bc2) * SF64(0x6b0));
+    if (X87_C0((long double)folded, (long double)SF64(0xb50))) value = folded;
+    else if (X87_C0((long double)RF64(0x152a0) - SF64(0xb50), (long double)folded)) value = (long double)RF64(0x152a0) - folded;
+    else value = SF64(0xb50);
+    {
+        long double lift = ((long double)SF64(0x1680) + SF64(0x1678)) * SF64(0x3e20) * SF64(0x768) + value * SF64(0x25f0);
+        double lift_d = (double)lift;
+        density = (double)(long double)(int64_t)(uint64_t)S32(0x2d90);
+        SF64(0x17e8) = (double)(((lift * lift_d) * SF64(0x690)) * density);
+    }
+    flap = sim1_fold_deflection(fabsl((long double)SF64(0x14d0) - trim));
+    parked = (double)(flap * SF64(0x25f0));
+    SF64(0x17f0) = (double)((((long double)SF64(0x690) * parked) * parked) * density);
+    flap = sim1_fold_deflection(fabsl((long double)SF64(0x14e0) - trim));
+    parked = (double)(flap * SF64(0x25f0));
+    SF64(0x17f8) = (double)((((long double)SF64(0x690) * parked) * parked) * density);
+    flap = sim1_fold_deflection(fabsl((long double)SF64(0x14d8) - trim));
+    parked = (double)(flap * SF64(0x25f0));
+    SF64(0x1800) = (double)((((long double)SF64(0x690) * parked) * parked) * density);
+    value = fabsl((long double)SF64(0x14c8) - trim);
+    if (X87_C0(value, (long double)SF64(0xb50))) SF64(0x18e0) = (double)value;
+    else if (X87_C0C3(value, (long double)RF64(0x152a0) - SF64(0xb50))) { S32(0x18e0) = S32(0xb50); S32(0x18e4) = S32(0xb54); }
+    else SF64(0x18e0) = (double)((long double)RF64(0x152a0) - value);
+    value = (long double)SF64(0x18e0) * SF64(0x25f0);
+    SF64(0x1808) = (double)((((long double)SF64(0x690) * value) * value) * density);
+    if (S16(0x2c98) == 1) {
+        parked = (double)sim1_table_lookup(sim1_data + 0x3100, SF64(0x1490));
+        SF64(0x1810) = (double)((long double)RF64(0x152b0) - (sim1_table_lookup(sim1_data + 0x3100, SF64(0x1490)) * parked) * RF64(0x152a8));
+    } else { S32(0x1810) = 0; S32(0x1814) = 0; }
+    SF64(0x18b8) = (double)sim1_table_term(0x2be0, SI32(0x3094));
+    SF64(0x18b0) = (double)sim1_table_term(0x39e0, (int32_t)SI16(0x3dd6));
+    SF64(0x18c0) = (double)sim1_table_term(0x3ce0, SI32(0x3098));
+    SF64(0x18c8) = (double)sim1_table_term(0x3b20, (int32_t)SI16(0x4084));
+    value = sim1_table_scaled(sim1_data + 0x3be0);
+    parked = (double)(value + ((long double)SI32(0x4238) * SF64(0x6b0) - fabsl((long double)SF64(0x1650)) * SF64(0x1770)));
+    SF64(0x1818) = (double)((sim1_table_lookup(sim1_data + 0x2cc0, SF64(0x1630)) * parked) * SF64(0x14a8));
+    SF64(0x1828) = (double)sim1_table_term(0x3680, SI32(0x2cb0));
+    SF64(0x1830) = (double)sim1_table_term(0x30c0, SI32(0x2c38));
+    SF64(0x1838) = (double)sim1_table_term(0x40a0, SI32(0x3f94));
+    SF64(0x1840) = (double)sim1_table_term(0x3400, SI32(0x3b54));
+    if (S32(0x3b68)) { S32(0x1820) = S32(0x3fd8); S32(0x1824) = S32(0x3fdc); }
+    else { S32(0x1820) = 0; S32(0x1824) = 0; }
+    value = sim1_table_scaled(sim1_data + 0x3a20);
+    parked = (double)(value + ((long double)(int32_t)SI16(0x3748) * SF64(0x768)) * SF64(0x6b0));
+    SF64(0x1850) = (double)((sim1_table_lookup(sim1_data + 0x2ae0, SF64(0x1638)) * parked) * SF64(0x14f0));
+    value = sim1_table_scaled(sim1_data + 0x3a20);
+    parked = (double)(value + ((long double)(int32_t)SI16(0x3748) * SF64(0x768)) * SF64(0x6b0));
+    value = (sim1_table_lookup(sim1_data + 0x2ae0, SF64(0x1640)) * parked) * SF64(0x1500);
+    SF64(0x1858) = (double)value;
+    parked = (double)sim1_table_lookup(sim1_data + 0x3a60, (double)((long double)SF64(0x1490) * SF64(0x688)));
+    SF64(0x1848) = (double)(sim1_table_term(0x40e0, SI32(0x2ca8)) * parked);
+    SF64(0x1860) = (double)sim1_table_term(0x3820, SI32(0x2cac));
+    value = sim1_table_term(0x43a0, SI32(0x3738));
+    {
+        double angle = (double)((long double)SF64(0x1490) * SF64(0x688));
+        SF64(0x1868) = (double)(value * SF64(0x14a8));
+        parked = (double)sim1_table_lookup(sim1_data + 0x3760, angle);
+    }
+    SF64(0x1870) = (double)(sim1_table_term(0x2d40, (int32_t)SI16(0x3fc0)) * parked);
+    value = sim1_table_term(0x4120, SI32(0x39c0));
+    {
+        double angle = (double)((long double)SF64(0x1490) * SF64(0x688));
+        SF64(0x1888) = (double)(value * SF64(0x1508));
+        parked = (double)sim1_table_lookup(sim1_data + 0x3920, angle);
+    }
+    SF64(0x18a0) = (double)(sim1_table_term(0x4360, (int32_t)SI16(0x2d38)) * parked);
+    value = sim1_table_term(0x3880, SI32(0x2c2c));
+    {
+        double angle = (double)((long double)SF64(0x1490) * SF64(0x688));
+        SF64(0x1880) = (double)value;
+        SF64(0x1880) = (double)(sim1_table_lookup(sim1_data + 0x3c20, angle) * SF64(0x1880));
+    }
+    SF64(0x1878) = (double)sim1_table_term(0x38c0, SI32(0x2d34));
+    value = sim1_table_scaled(sim1_data + 0x36e0);
+    SF64(0x18a8) = (double)((long double)SI32(0x3b0c) * SF64(0x690));
+    SF64(0x1890) = (double)(((value + ((long double)(int32_t)SI16(0x3842) * SF64(0x768)) * SF64(0x6b0)) * SF64(0x14a8)) * RF64(0x152c0));
+    global = SIM1_GLOBAL;
+    if (P8(global, 0x609) || P32(global, 0x278) || X87_C0C3((long double)SF64(0x1448), (long double)RF64(0x152b8))) { S32(0x1898) = 0; S32(0x189c) = 0; return; }
+    {
+        long double mass = (long double)SF64(0x738) * SF64(0x738), area = (long double)(int64_t)(uint64_t)S32(0x4024);
+        SF64(0x18d8) = (double)((mass * area) * area);
+    }
+    value = (long double)SF64(0x18d8) * SF64(0x798) * SF64(0x1448);
+    SF64(0x1898) = (double)(((long double)(int32_t)(0u - P32(global, 0x8a8)) / value) * ((long double)(int32_t)(uint32_t)P16(global, 0x8ac) * SF64(0xb58) * SF64(0x680)));
+    for (at = 0; at < 3; ++at) {
+        if (P16(global, 0xaec) < at + 2) break;
+        sum = ((long double)PI32(global, engines[at][0]) / value) * ((long double)(int32_t)(uint32_t)P16(global, engines[at][1]) * SF64(0xb58) * SF64(0x680));
+        SF64(0x1898) = (double)((long double)SF64(0x1898) - sum);
+    }
+    speed = (long double)(int32_t)(uint32_t)S16(0x3702) * SF64(0x740);
+    SF64(0x1898) = (double)(((long double)(int32_t)(uint32_t)P16(global, 0xc44) * SF64(0x1898)) * RF64(0x152c8));
+    if (!X87_C0C3((long double)SF64(0x1388), speed + speed)) { S32(0x1898) = 0; S32(0x189c) = 0; return; }
+    if (X87_C0C3((long double)SF64(0x1388), speed)) return;
+    SF64(0x1898) = (double)(((long double)RF64(0x152d0) - (long double)SF64(0x1388) / speed) * SF64(0x1898));
+}
+
+/* 0x22007e80 (edi GLOBAL): the piston engines: the fuel-flow scale +0x514 from +0x1704; each
+ * fitted engine (0x22007ef1, with its second record at +0x52b + 16 per engine). (Retail leaves
+ * +0x3fe8 in ax; no caller reads it.) */
+void sim1_pistons(uint8_t *global)
+{
+    uint32_t at;
+    S16(0x514) = S16(0x1704);
+    sim1_piston_engine(global, global + 0x88c, sim1_data + 0x52b);
+    for (at = 1; at < 4; ++at) {
+        if (P16(global, 0xaec) < at + 1) break;
+        sim1_piston_engine(global, global + 0x88c + at * 0x98, sim1_data + 0x52b + at * 0x10);
+    }
+}
+
+/* 0x22001100 (edi GLOBAL): the local flow: the dynamic pressure's term +0x15d0 (by GLOBAL
+ * +0x8e0); the wing tips' and the tail's angles of attack (+0x0a2, +0x0a6, +0x0a0, +0x0a4: the
+ * velocities plus and less the rates times the arm +0x38f2 * +0x738, through 0x2200a599, plus
+ * the trim +0x3900 and for the tips +0x2c10) into +0x14d0.., the sines and cosines of the
+ * first and last; then the coefficients and the forces and moments (0x2200fe80, 0x220052b0,
+ * 0x220054a0, 0x22005640, 0x22005740, 0x220056e0, 0x22006100, 0x220057b0, 0x22005c00,
+ * 0x22005e20). The flow's components pass through retail's frame as doubles. */
+void sim1_local_flow(uint8_t *global)
+{
+    long double x = PF64(global, 0x8e0);
+    double roll_arm, yaw_arm, across, along;
+    SF64(0x15d0) = (double)(((x * x + (x * SF64(0x1450) + x * SF64(0x1450))) * SF64(0x768)) * SF64(0x798));
+    roll_arm = (double)((long double)(int32_t)SI16(0x38f2) * SF64(0x738) * SF64(0x13f0));
+    yaw_arm = (double)((long double)(int32_t)SI16(0x38f2) * SF64(0x738) * SF64(0x13f8));
+    across = (double)((long double)roll_arm - SF64(0x1398));
+    along = (double)((long double)yaw_arm + SF64(0x1388));
+    S16(0xa2) = (uint16_t)(sim1_bearing_of(along, across) + S16(0x3900) + S16(0x2c10));
+    across = (double)((long double)roll_arm * SF64(0x768) - SF64(0x1398));
+    along = (double)((long double)yaw_arm * SF64(0x768) + SF64(0x1388));
+    S16(0xa6) = (uint16_t)(sim1_bearing_of(along, across) + S16(0x3900));
+    across = (double)(sim1_fchs(roll_arm) - SF64(0x1398));
+    along = (double)(sim1_fchs(yaw_arm) + SF64(0x1388));
+    S16(0xa0) = (uint16_t)(sim1_bearing_of(along, across) + S16(0x3900) + S16(0x2c10));
+    across = (double)(sim1_fchs((long double)roll_arm * SF64(0x768)) - SF64(0x1398));
+    along = (double)(sim1_fchs((long double)yaw_arm * SF64(0x768)) + SF64(0x1388));
+    S16(0xa4) = (uint16_t)(sim1_bearing_of(along, across) + S16(0x3900));
+    SF64(0x14d0) = (double)((long double)(int32_t)SI16(0xa2) * SF64(0x680));
+    SF64(0x14e0) = (double)((long double)(int32_t)SI16(0xa6) * SF64(0x680));
+    SF64(0x14d8) = (double)((long double)(int32_t)SI16(0xa4) * SF64(0x680));
+    SF64(0x14c8) = (double)((long double)(int32_t)SI16(0xa0) * SF64(0x680));
+    SF64(0x14e8) = (double)sim1_fsin(SF64(0x14d0));
+    SF64(0x14f0) = (double)sim1_fcos(SF64(0x14d0));
+    SF64(0x14f8) = (double)sim1_fsin(SF64(0x14c8));
+    SF64(0x1500) = (double)sim1_fcos(SF64(0x14c8));
+    sim1_aero_coefficients();
+    sim1_inertia();
+    sim1_pitch_moment();
+    sim1_pitch_sum();
+    sim1_thrust_sum();
+    sim1_side_sum();
+    sim1_turn_pair();
+    sim1_pitch_sum_moment();
+    sim1_yaw_moment();
+    sim1_roll_moment();
+}
+
+/* The AIR decoder's plain records: a record copied whole into GLOBAL (1) or .data (0). */
+static const struct { uint16_t id; uint8_t global; uint16_t offset; } sim1_air_copies[] = {
+        {0x310, 1, 0x609},
+        {0x311, 1, 0xaec},
+        {0x312, 1, 0xaf4},
+        {0x314, 1, 0x850},
+        {0x316, 1, 0xb0c},
+        {0x319, 1, 0x77c},
+        {0x322, 1, 0x780},
+        {0x323, 1, 0x784},
+        {0x328, 1, 0x790},
+        {0x331, 1, 0x794},
+        {0x332, 1, 0x79c},
+        {0x334, 1, 0x7b4},
+        {0x338, 0, 0x36c0},
+        {0x341, 0, 0x2cc0},
+        {0x342, 0, 0x2ae0},
+        {0x343, 0, 0x3d60},
+        {0x400, 0, 0x42a0},
+        {0x401, 0, 0x3e80},
+        {0x404, 0, 0x3100},
+        {0x410, 0, 0x3e40},
+        {0x411, 0, 0x3d20},
+        {0x412, 0, 0x2ba0},
+        {0x413, 0, 0x3600},
+        {0x420, 0, 0x3be0},
+        {0x421, 0, 0x40a0},
+        {0x422, 0, 0x3680},
+        {0x423, 0, 0x3400},
+        {0x430, 0, 0x3500},
+        {0x433, 0, 0x30c0},
+        {0x440, 0, 0x3b20},
+        {0x441, 0, 0x39e0},
+        {0x442, 0, 0x3ce0},
+        {0x443, 0, 0x2be0},
+        {0x450, 0, 0x2d40},
+        {0x451, 0, 0x3760},
+        {0x452, 0, 0x43a0},
+        {0x453, 0, 0x3a20},
+        {0x454, 0, 0x3820},
+        {0x455, 0, 0x40e0},
+        {0x456, 0, 0x3a60},
+        {0x459, 0, 0x3880},
+        {0x460, 0, 0x3c20},
+        {0x461, 0, 0x4120},
+        {0x462, 0, 0x36e0},
+        {0x463, 0, 0x4360},
+        {0x464, 0, 0x3920},
+        {0x465, 0, 0x38c0},
+        {0x473, 0, 0x2da0},
+        {0x501, 0, 0x3560},
+        {0x503, 0, 0x4180},
+        {0x504, 0, 0x3440},
+        {0x601, 0, 0x4260},
+        {0x602, 0, 0x3ba0},
+        {0x603, 0, 0x3640},
+        {0x604, 0, 0x4060},
+        {0x605, 0, 0x35c0},
+        {0x606, 0, 0x4000}
+};
+
+/* A point's contact ratio (for 0x2200af90): the stiffness over its radius (the two doubles at
+ * +0x30, +0x40 of its record), into +0x18 and a quarter of it into +0x1c, where it is on. */
+static void sim1_contact_ratio(uint32_t point, long double stiffness, int both, uint32_t other)
+{
+    int32_t ratio;
+    if (S32(point + 4) != 1) return;
+    ratio = sim1_ftol(stiffness / sim1_fsqrt((long double)SF64(point + 0x30) * SF64(point + 0x30) + (long double)SF64(point + 0x40) * SF64(point + 0x40)));
+    S32(point + 0x18) = (uint32_t)ratio;
+    if (both) S32(other + 0x18) = (uint32_t)ratio;
+    ratio = (ratio + (int32_t)((uint32_t)(ratio >> 31) & 3)) >> 2;
+    S32(point + 0x1c) = (uint32_t)ratio;
+    if (both) S32(other + 0x1c) = (uint32_t)ratio;
+}
+
+#define RB(p, o) P8(p, o)
+#define RW(p, o) P16(p, o)
+#define RS16(p, o) PI16(p, o)
+#define RD(p, o) P32(p, o)
+#define RF(p, o) PF64(p, o)
+#define SIM1_MEMMOVE SIM1_CALL(SIM1_HOST, 0x21c, uint32_t (__stdcall *)(void *, const void *, uint32_t))
+
+/* 0x2200af90, stdcall: the aircraft (.AIR) file's records decoded: each a 4-byte id, a 4-byte
+ * length and the data (read through HOST's memmove, +0x21c, as retail does). Most records are
+ * copied whole into GLOBAL or a table in .data (sim1_air_copies); the rest set fields, flags
+ * and the contact points (0x1004 the gear's, 0x1005 the others', through 0x2200ad20 and their
+ * ratios). Afterwards a larger engine count copies engine 1's record to the new engines
+ * (0x2200ada0), the starters are capped by the engine type, empty lists cleared, GLOBAL +0x368
+ * set, the stall angle and the pass's setup made (0x2200d750, 0x2200a7b0). Returns 1.
+ * Retail's frame buffers: an id 0x302 record longer than its 0x1c bytes overruns retail's
+ * stack; the C copies at most 0x1c (SIM1-AIR-FRAME-OVERRUN, fixed, docs/retail-bugs.md), and a
+ * shorter one leaves stale frame bytes in retail where the C has zeros. */
+uint32_t __stdcall sim1_air_decode(const uint8_t *data, int32_t size)
+{
+    uint8_t *global = SIM1_GLOBAL;
+    uint16_t engines = P16(global, 0xaec);
+    uint32_t offset = 0, id, length, at;
+    S32(0x3cc4) = 1;
+    P32(global, 0x82c) = 0;
+    P32(SIM1_GLOBAL, 0x290) = 0;
+    P32(SIM1_GLOBAL, 0x294) = 0;
+    P32(SIM1_GLOBAL, 0x298) = 0;
+    S32(0x2510) = 0;
+    if (size > 0) do {
+        uint8_t *record;
+        SIM1_MEMMOVE(&id, data + offset, 4);
+        offset += 4;
+        SIM1_MEMMOVE(&length, data + offset, 4);
+        offset += 4;
+        record = (uint8_t *)data + offset;
+        global = SIM1_GLOBAL;
+        for (at = 0; at < sizeof sim1_air_copies / sizeof sim1_air_copies[0]; ++at)
+            if (sim1_air_copies[at].id == id) break;
+        if (at < sizeof sim1_air_copies / sizeof sim1_air_copies[0]) {
+            SIM1_MEMMOVE((sim1_air_copies[at].global ? SIM1_GLOBAL : sim1_data) + sim1_air_copies[at].offset, record, length);
+            goto next;
+        }
+        switch (id) {
+        case 0x103:
+            P32(SIM1_GLOBAL, 0x82c) = 1;
+            break;
+        case 0x105:
+            SIM1_MEMMOVE(SIM1_GLOBAL + 0x604, record, length);
+            if (P32(SIM1_GLOBAL, 0x604) == 1) { S32(0x1c80) = P32(SIM1_GLOBAL, 0x278); P32(SIM1_GLOBAL, 0x278) = 0; }
+            break;
+        case 0x300: {
+            uint16_t words[6];
+            for (at = 0; at < 6; ++at) words[at] = RW(record, at * 2);
+            SIM1_CALL(SIM1_CONTROLS, 0x18, uint32_t (__stdcall *)(void *))(words);
+            break;
+        }
+        case 0x301: {
+            uint32_t word = 0;
+            SIM1_MEMMOVE(SIM1_GLOBAL + 0xdb0, record, 2);
+            SIM1_MEMMOVE(SIM1_GLOBAL + 0xdb2, record + 2, 2);
+            SIM1_MEMMOVE(SIM1_GLOBAL + 0xdb4, record + 4, 2);
+            SIM1_MEMMOVE(SIM1_GLOBAL + 0x120c, record + 6, 4);
+            SIM1_MEMMOVE(&word, record + 0xa, 2);
+            S32(0x34f0) = word << 16;
+            break;
+        }
+        case 0x302: {
+            uint32_t pairs[7] = {0};
+            static const uint16_t into[7] = {0xb78, 0xb80, 0xb98, 0xb88, 0xba0, 0xb90, 0xba8};
+            SIM1_MEMMOVE(pairs, record, length < sizeof pairs ? length : sizeof pairs);
+            for (at = 0; at < 7; ++at) P32(SIM1_GLOBAL, into[at]) = pairs[at];
+            break;
+        }
+        case 0x313: {
+            static const uint16_t throttles[4] = {0x88c, 0x924, 0x9bc, 0xa54};
+            SIM1_MEMMOVE(SIM1_GLOBAL + 0xb00, record, length);
+            for (at = 0; at < 4; ++at)
+                if (PI16(SIM1_GLOBAL, throttles[at]) < PI16(SIM1_GLOBAL, 0xb00)) P16(SIM1_GLOBAL, throttles[at]) = P16(SIM1_GLOBAL, 0xb00);
+            break;
+        }
+        case 0x315: {
+            uint16_t word = 0;
+            SIM1_MEMMOVE(&word, record, 2);
+            SIM1_CALL(SIM1_HOST, 0x3c, uint32_t (__stdcall *)(uint32_t, uint32_t))(0x100e0, (uint32_t)(int32_t)(int16_t)word);
+            break;
+        }
+        case 0x317:
+            P32(SIM1_GLOBAL, 0x764) = RD(record, 0);
+            P32(SIM1_GLOBAL, 0x768) = RD(record, 4);
+            S32(0x3fd4) = RD(record, 8);
+            S32(0x4040) = RD(record, 0xc);
+            if (!P32(SIM1_GLOBAL, 0x764)) { P32(SIM1_GLOBAL, 0x7bc) = 0; P32(SIM1_GLOBAL, 0x808) = 0; }
+            if (!P32(SIM1_GLOBAL, 0x768)) P32(SIM1_GLOBAL, 0x7ec) = 0;
+            break;
+        case 0x318:
+            SIM1_MEMMOVE(SIM1_GLOBAL + 0x778, record, length);
+            if (!P32(SIM1_GLOBAL, 0x778)) { P32(SIM1_GLOBAL, 0xbdc) = 0; P32(SIM1_GLOBAL, 0xbe0) = 0; P32(SIM1_GLOBAL, 0xbe4) = 0; }
+            break;
+        case 0x324:
+            SIM1_MEMMOVE(SIM1_GLOBAL + 0x788, record, length);
+            if (!P32(SIM1_GLOBAL, 0x788)) P32(SIM1_GLOBAL, 0x29c) = 0;
+            break;
+        case 0x327:
+            SIM1_MEMMOVE(SIM1_GLOBAL + 0x78c, record, length);
+            if (!P32(SIM1_GLOBAL, 0x78c)) { P32(SIM1_GLOBAL, 0xbd0) = 0; P32(SIM1_GLOBAL, 0xbd4) = 0; P32(SIM1_GLOBAL, 0xbd8) = 0; }
+            break;
+        case 0x329:
+            P32(SIM1_GLOBAL, 0x76c) = RD(record, 0);
+            P32(SIM1_GLOBAL, 0x770) = RD(record, 4);
+            P32(SIM1_GLOBAL, 0x774) = RD(record, 8);
+            if (!P32(SIM1_GLOBAL, 0x774)) { P32(SIM1_GLOBAL, 0x810) = 0; P32(SIM1_GLOBAL, 0x80c) = 0; }
+            if (!P32(SIM1_GLOBAL, 0x76c)) P32(SIM1_GLOBAL, 0x7dc) = 0;
+            break;
+        case 0x330:
+            SIM1_MEMMOVE(SIM1_GLOBAL + 0x798, record, length);
+            if (P32(SIM1_GLOBAL, 0x798) == 1) P32(SIM1_GLOBAL, 0xaf0) = 0;
+            else if (P32(SIM1_GLOBAL, 0x798) == 2) P32(SIM1_GLOBAL, 0xaf0) = 2;
+            break;
+        case 0x333:
+            SIM1_MEMMOVE(SIM1_GLOBAL + 0x7ac, record, 4);
+            SIM1_MEMMOVE(SIM1_GLOBAL + 0x7b0, record + 4, 4);
+            if (!P32(SIM1_GLOBAL, 0x7ac) && !P32(SIM1_GLOBAL, 0x7b0)) P16(SIM1_GLOBAL, 0xe5a) = 0;
+            break;
+        case 0x335:
+            P32(SIM1_GLOBAL, 0x7a0) = RD(record, 0);
+            P32(SIM1_GLOBAL, 0x7a4) = RD(record, 4);
+            P32(SIM1_GLOBAL, 0x7a8) = RD(record, 8);
+            if (!P32(SIM1_GLOBAL, 0x7a0) && !P32(SIM1_GLOBAL, 0x7a4)) P16(SIM1_GLOBAL, 0xe5a) = 0;
+            break;
+        case 0x337:
+            SIM1_MEMMOVE(sim1_data + 0x2c04, record, length);
+            if (!S32(0x2c04)) P32(SIM1_GLOBAL, 0xbcc) = 0;
+            break;
+        case 0x344:
+            SIM1_MEMMOVE(SIM1_GLOBAL + 0x5d4, record, length);
+            if (!P32(SIM1_GLOBAL, 0x5d4) && P32(SIM1_GLOBAL, 0x5d8)) SIM1_CALL(SIM1_HOST, 0x3c, uint32_t (__stdcall *)(uint32_t, uint32_t))(0x10017, 0);
+            break;
+        case 0x1004: {
+            uint32_t points;
+            P32(global, 0x60c) = RD(record, 0);
+            P8(SIM1_GLOBAL, 0x610) = P32(SIM1_GLOBAL, 0x60c) == 1;
+            S32(0x23d0) = RD(record, 4);
+            S32(0x2224) = RD(record, 8);
+            S32(0x2228) = RD(record, 0xc);
+            S32(0x222c) = RD(record, 0x10);
+            S32(0x1f4c) = RD(record, 0x10);
+            S32(0x2424) = RD(record, 0x14);
+            S32(0x2428) = RD(record, 0x18);
+            S32(0x242c) = RD(record, 0x1c);
+            S32(0x4148) = RD(record, 0x20); S32(0x414c) = RD(record, 0x24);
+            S32(0x2d70) = RD(record, 0x28); S32(0x2d74) = RD(record, 0x2c);
+            S32(0x3c08) = RD(record, 0x30); S32(0x3c0c) = RD(record, 0x34);
+            S32(0x2218) = RD(record, 0x38);
+            S32(0x221c) = RD(record, 0x3c);
+            S32(0x2220) = RD(record, 0x40);
+            S32(0x2418) = RD(record, 0x44);
+            S32(0x241c) = RD(record, 0x48);
+            S32(0x2420) = RD(record, 0x4c);
+            if (RD(record, 8)) {   /* the left leg mirrored */
+                S32(0x1f48) = RD(record, 0xc);
+                S32(0x1f44) = 0u - RD(record, 8);
+                S32(0x1f4c) = S32(0x222c);
+                S32(0x1f3c) = S32(0x221c);
+                S32(0x1f38) = RD(record, 0x38);
+                S32(0x1f40) = S32(0x2220);
+            } else { S32(0x1f44) = 0; S32(0x1f48) = 0; S32(0x1f4c) = 0; }
+            if (RD(record, 0x14)) {   /* the right one */
+                S32(0x29fc) = RD(record, 0x48);
+                S32(0x2a04) = 0u - RD(record, 0x14);
+                S32(0x2a08) = S32(0x2428);
+                S32(0x2a0c) = S32(0x242c);
+                S32(0x29f8) = S32(0x2418);
+                S32(0x2a00) = RD(record, 0x4c);
+            } else { S32(0x2a04) = 0; S32(0x2a08) = 0; S32(0x2a0c) = 0; }
+            points = sim1_contact_offsets(sim1_data + 0x2400, 0);
+            points += sim1_contact_offsets(sim1_data + 0x1f20, 0);
+            points += sim1_contact_offsets(sim1_data + 0x2200, 0);
+            points += sim1_contact_offsets(sim1_data + 0x29e0, 0);
+            if (P32(SIM1_GLOBAL, 0x60c) != 1) {
+                P32(SIM1_GLOBAL, 0xbec) = 0x3fff; P32(SIM1_GLOBAL, 0xbf0) = 0x3fff; P32(SIM1_GLOBAL, 0xbf4) = 0x3fff; P32(SIM1_GLOBAL, 0xbe8) = 0x3fff;
+            }
+            if (points == 1 && !P32(SIM1_GLOBAL, 0x57c))
+                P32(SIM1_GLOBAL, 0x57c) = SIM1_CALL(SIM1_UTIL, 0x70, uint32_t (__stdcall *)(void))() >> 31 != 1 ? 0xfff50000u : 0xb0000u;
+            break;
+        }
+        case 0x1005: {
+            long double stiffness;
+            S32(0x27c4) = RD(record, 0x20); S32(0x22e4) = 0u - RD(record, 0x20);
+            S32(0x27c8) = RD(record, 0x24); S32(0x22e8) = RD(record, 0x24);
+            S32(0x27cc) = RD(record, 0x28); S32(0x22ec) = RD(record, 0x28);
+            S32(0x27c0) = RD(record, 0x2c); S32(0x22e0) = RD(record, 0x2c);
+            S32(0x2164) = RD(record, 0); S32(0x2168) = RD(record, 4); S32(0x216c) = RD(record, 8); S32(0x2160) = RD(record, 0xc);
+            S32(0x2044) = RD(record, 0x10); S32(0x2048) = RD(record, 0x14); S32(0x204c) = RD(record, 0x18); S32(0x2040) = RD(record, 0x1c);
+            S32(0x1e24) = RD(record, 0x30); S32(0x1e28) = RD(record, 0x34); S32(0x1e2c) = RD(record, 0x38); S32(0x1e20) = RD(record, 0x3c);
+            S32(0x2704) = RD(record, 0x40); S32(0x2708) = RD(record, 0x44); S32(0x270c) = RD(record, 0x48); S32(0x2700) = RD(record, 0x4c);
+            sim1_contact_offsets(sim1_data + 0x27a0, 1);
+            sim1_contact_offsets(sim1_data + 0x22c0, 1);
+            sim1_contact_offsets(sim1_data + 0x2140, 1);
+            sim1_contact_offsets(sim1_data + 0x2020, 1);
+            sim1_contact_offsets(sim1_data + 0x1e00, 1);
+            sim1_contact_offsets(sim1_data + 0x26e0, 1);
+            global = SIM1_GLOBAL;
+            stiffness = (((long double)(int64_t)(uint64_t)(P32(global, 0xb78) + P32(global, 0xb98) + P32(global, 0xb90) + P32(global, 0xb88) + P32(global, 0xb80) + P32(global, 0xba8) + P32(global, 0xba0))
+                          * (long double)(int32_t)PI16(global, 0xaf4)) * SF64(0x6c0) + (long double)(int64_t)(uint64_t)S32(0x30e4)) * RF64(0x15280);
+            sim1_contact_ratio(0x2140, stiffness, 0, 0);
+            sim1_contact_ratio(0x27a0, stiffness, 1, 0x22c0);
+            sim1_contact_ratio(0x2020, stiffness, 0, 0);
+            sim1_contact_ratio(0x1e00, stiffness, 0, 0);
+            sim1_contact_ratio(0x26e0, stiffness, 0, 0);
+            break;
+        }
+        case 0x340:
+            S32(0x4054) = RD(record, 0x0);
+            SF64(0x3860) = sim1_x87(RF(record, 0x4));
+            SF64(0x4160) = sim1_x87(RF(record, 0xc));
+            SF64(0x3fa8) = sim1_x87(RF(record, 0x14));
+            break;
+        case 0x325:
+            S32(0x3584) = RD(record, 0x0);
+            S32(0x3e10) = RD(record, 0x4);
+            SF64(0x3f98) = sim1_x87(RF(record, 0x8));
+            SF64(0x3e68) = sim1_x87(RF(record, 0x10));
+            break;
+        case 0x339:
+            S32(0x423c) = RD(record, 0x0);
+            S32(0x3e04) = RD(record, 0x4);
+            break;
+        case 0x320:
+            S32(0x39b8) = RD(record, 0x0);
+            S32(0x39bc) = RD(record, 0x4);
+            SF64(0x34e8) = sim1_x87(RF(record, 0x8));
+            SF64(0x4038) = sim1_x87(RF(record, 0x10));
+            SF64(0x3708) = sim1_x87(RF(record, 0x18));
+            SF64(0x3df8) = sim1_x87(RF(record, 0x20));
+            SF64(0x4228) = sim1_x87(RF(record, 0x28));
+            SF64(0x3de0) = sim1_x87(RF(record, 0x30));
+            SF64(0x35a8) = sim1_x87(RF(record, 0x38));
+            SF64(0x3b60) = sim1_x87(RF(record, 0x40));
+            S32(0x3b68) = RD(record, 0x48);
+            SF64(0x35a0) = sim1_x87(RF(record, 0x4c));
+            SF64(0x38e8) = sim1_x87(RF(record, 0x54));
+            SF64(0x4030) = sim1_x87(RF(record, 0x5c));
+            SF64(0x4058) = sim1_x87(RF(record, 0x64));
+            SF64(0x38a8) = sim1_x87(RF(record, 0x6c));
+            SF64(0x2d80) = sim1_x87(RF(record, 0x74));
+            SF64(0x4028) = sim1_x87(RF(record, 0x7c));
+            SF64(0x3718) = sim1_x87(RF(record, 0x84));
+            break;
+        case 0x500:
+            S16(0x4082) = RW(record, 0x0);
+            S16(0x3800) = RW(record, 0x2);
+            S16(0x3b88) = RW(record, 0x4);
+            S16(0x4354) = RW(record, 0x6);
+            S16(0x3e30) = RW(record, 0xa);
+            S16(0x35b4) = RW(record, 0xc);
+            S16(0x3cc0) = RW(record, 0xe);
+            S16(0x38a2) = RW(record, 0x14);
+            S16(0x3d10) = RW(record, 0x10);
+            S16(0x43e0) = RW(record, 0x12);
+            S16(0x4398) = RW(record, 0x16);
+            S16(0x374e) = RW(record, 0x1c);
+            S32(0x3b08) = (uint32_t)RW(record, 0x1e);
+            S16(0x3fe8) = RW(record, 0x20);
+            S32(0x4024) = (uint32_t)RW(record, 0x22);
+            S32(0x2c14) = (uint32_t)RW(record, 0x2c);
+            S16(0x2c7a) = RW(record, 0x2e);
+            S16(0x3dd4) = RW(record, 0x30);
+            S16(0x3530) = RW(record, 0x32);
+            S16(0x2b54) = RW(record, 0x38);
+            S16(0x2d3a) = RW(record, 0x3a);
+            S16(0x36b2) = RW(record, 0x3e);
+            S16(0x3fd0) = RW(record, 0x40);
+            SF64(0x3710) = sim1_x87(RF(record, 0x24));
+            P16(global, 0x8c8) = RW(record, 0x38);
+            break;
+        case 0x600:
+            S16(0x4050) = RW(record, 0x0);
+            S16(0x3fb0) = RW(record, 0x4);
+            S16(0x3728) = RW(record, 0x8);
+            S16(0x2d68) = RW(record, 0xc);
+            S16(0x4154) = RW(record, 0x10);
+            S16(0x3df0) = RW(record, 0x14);
+            S16(0x3e02) = RW(record, 0x18);
+            S16(0x3a50) = RW(record, 0x1c);
+            S16(0x439a) = RW(record, 0x20);
+            S16(0x374a) = RW(record, 0x24);
+            S16(0x3582) = RW(record, 0x28);
+            S32(0x3d50) = RD(record, 0x2c);
+            S16(0x2c68) = RW(record, 0x30);
+            S16(0x3540) = RW(record, 0x34);
+            S16(0x3622) = RW(record, 0x38);
+            S16(0x43e4) = RW(record, 0x3c);
+            S32(0x3fa0) = RD(record, 0x40);
+            S32(0x4104) = RD(record, 0x44);
+            S16(0x30e2) = RW(record, 0x48);
+            S16(0x2d7a) = RW(record, 0x4c);
+            S32(0x2d64) = RD(record, 0x50);
+            break;
+        case 0x1001:
+            S32(0x35b0) = RD(record, 0x0);
+            S32(0x35bc) = RD(record, 0x4);
+            S32(0x35e4) = RD(record, 0x8);
+            S32(0x35b8) = RD(record, 0xc);
+            break;
+        case 0x1003:
+            S32(0x3850) = RD(record, 0x0);
+            S32(0x3854) = RD(record, 0x4);
+            S32(0x3858) = RD(record, 0x8);
+            S32(0x2c50) = RD(record, 0xc);
+            S32(0x2c54) = RD(record, 0x10);
+            S32(0x2c58) = RD(record, 0x14);
+            S32(0x2b90) = RD(record, 0x18);
+            S32(0x2b94) = RD(record, 0x1c);
+            S32(0x2b98) = RD(record, 0x20);
+            S32(0x3630) = RD(record, 0x24);
+            S32(0x3634) = RD(record, 0x28);
+            S32(0x3638) = RD(record, 0x2c);
+            break;
+        case 0x1002:
+            P16(global, 0x8c2) = RW(record, 0x0);
+            P16(global, 0x8c4) = RW(record, 0x4);
+            P16(global, 0x8c6) = RW(record, 0x8);
+            P16(global, 0x95a) = RW(record, 0xc);
+            P16(global, 0x95c) = RW(record, 0x10);
+            P16(global, 0x95e) = RW(record, 0x14);
+            P16(global, 0x9f2) = RW(record, 0x18);
+            P16(global, 0x9f4) = RW(record, 0x1c);
+            P16(global, 0x9f6) = RW(record, 0x20);
+            P16(global, 0xa8a) = RW(record, 0x24);
+            P16(global, 0xa8c) = RW(record, 0x28);
+            P16(global, 0xa8e) = RW(record, 0x2c);
+            break;
+        case 0x1101:
+            S16(0x43d0) = (uint16_t)RB(record, 0x0);
+            S16(0x3702) = RW(record, 0x2);
+            S32(0x3d04) = RD(record, 0x4);
+            S16(0x2c18) = RW(record, 0x8);
+            S16(0x2c78) = RW(record, 0xa);
+            SF64(0x43d8) = sim1_x87(RF(record, 0xc));
+            SF64(0x4240) = sim1_x87(RF(record, 0x14));
+            S32(0x30e4) = RD(record, 0x1c);
+            S16(0x3802) = RW(record, 0x20);
+            S32(0x3b50) = RD(record, 0x22);
+            S16(0x43e2) = RW(record, 0x26);
+            S16(0x2b60) = RW(record, 0x28);
+            S16(0x363c) = RW(record, 0x2a);
+            S16(0x3588) = RW(record, 0x2c);
+            S16(0x35f0) = RW(record, 0x2e);
+            S16(0x3810) = RW(record, 0x30);
+            S16(0x3e00) = RW(record, 0x32);
+            S16(0x4044) = RW(record, 0x34);
+            S16(0x3bc2) = RW(record, 0x36);
+            SF64(0x3818) = sim1_x87(RF(record, 0x38));
+            SF64(0x2c60) = sim1_x87(RF(record, 0x40));
+            SF64(0x3668) = sim1_x87(RF(record, 0x48));
+            S16(0x4178) = RW(record, 0x50);
+            S32(0x3dd8) = RD(record, 0x52);
+            S32(0x3b58) = RD(record, 0x56);
+            S16(0x2c28) = RW(record, 0x5a);
+            S16(0x4152) = RW(record, 0x5c);
+            SF64(0x3e20) = sim1_x87(RF(record, 0x5e));
+            SF64(0x3b70) = sim1_x87(RF(record, 0x66));
+            S16(0x3fc0) = RW(record, 0x6e);
+            S16(0x3748) = RW(record, 0x70);
+            S32(0x3738) = RD(record, 0x72);
+            S32(0x2ca8) = RD(record, 0x76);
+            S32(0x2cac) = RD(record, 0x7a);
+            SF64(0x2c88) = sim1_x87(RF(record, 0x7e));
+            S32(0x2c38) = RD(record, 0x86);
+            S32(0x3f94) = RD(record, 0x8a);
+            S32(0x4238) = RD(record, 0x8e);
+            S32(0x3b54) = RD(record, 0x92);
+            S32(0x2cb0) = RD(record, 0x96);
+            SF64(0x2b58) = sim1_x87(RF(record, 0x9a));
+            SF64(0x2b78) = sim1_x87(RF(record, 0xa2));
+            SF64(0x3fd8) = sim1_x87(RF(record, 0xaa));
+            SF64(0x2ab8) = sim1_x87(RF(record, 0xb2));
+            SF64(0x2b70) = sim1_x87(RF(record, 0xba));
+            SF64(0x37f8) = sim1_x87(RF(record, 0xc2));
+            S32(0x2c2c) = RD(record, 0xca);
+            S16(0x3842) = RW(record, 0xce);
+            S32(0x39c0) = RD(record, 0xd0);
+            SF64(0x38f8) = sim1_x87(RF(record, 0xd4));
+            SF64(0x30b8) = sim1_x87(RF(record, 0xdc));
+            S32(0x2d34) = RD(record, 0xe4);
+            S16(0x2d38) = RW(record, 0xe8);
+            S32(0x3b0c) = RD(record, 0xea);
+            S16(0x4084) = RW(record, 0xee);
+            S16(0x3dd6) = RW(record, 0xf0);
+            S32(0x3094) = RD(record, 0xf2);
+            S32(0x3098) = RD(record, 0xf6);
+            P8(global, 0x608) = RB(record, 0x0);
+            break;
+        case 0x1199:
+            S32(0x2520) = RD(record, 0x0);
+            S32(0x2524) = RD(record, 0x4);
+            SF64(0x2528) = sim1_x87(RF(record, 0x8));
+            SF64(0x2530) = sim1_x87(RF(record, 0x10));
+            SF64(0x2538) = sim1_x87(RF(record, 0x18));
+            SF64(0x2540) = sim1_x87(RF(record, 0x20));
+            SF64(0x2548) = sim1_x87(RF(record, 0x28));
+            SF64(0x2550) = sim1_x87(RF(record, 0x30));
+            SF64(0x2860) = sim1_x87(RF(record, 0x38));
+            SF64(0x2868) = sim1_x87(RF(record, 0x40));
+            SF64(0x2870) = sim1_x87(RF(record, 0x48));
+            SF64(0x2878) = sim1_x87(RF(record, 0x50));
+            SF64(0x2880) = sim1_x87(RF(record, 0x58));
+            SF64(0x2888) = sim1_x87(RF(record, 0x60));
+            SF64(0x2890) = sim1_x87(RF(record, 0x68));
+            SF64(0x28c0) = sim1_x87(RF(record, 0x70));
+            SF64(0x28c8) = sim1_x87(RF(record, 0x78));
+            SF64(0x28d0) = sim1_x87(RF(record, 0x80));
+            SF64(0x28d8) = sim1_x87(RF(record, 0x88));
+            SF64(0x28e0) = sim1_x87(RF(record, 0x90));
+            SF64(0x28e8) = sim1_x87(RF(record, 0x98));
+            SF64(0x28f0) = sim1_x87(RF(record, 0xa0));
+            SF64(0x2380) = sim1_x87(RF(record, 0xa8));
+            SF64(0x2388) = sim1_x87(RF(record, 0xb0));
+            SF64(0x2390) = sim1_x87(RF(record, 0xb8));
+            SF64(0x2398) = sim1_x87(RF(record, 0xc0));
+            SF64(0x23a0) = sim1_x87(RF(record, 0xc8));
+            SF64(0x23a8) = sim1_x87(RF(record, 0xd0));
+            SF64(0x23b0) = sim1_x87(RF(record, 0xd8));
+            SF64(0x2920) = sim1_x87(RF(record, 0xe0));
+            SF64(0x2928) = sim1_x87(RF(record, 0xe8));
+            SF64(0x2930) = sim1_x87(RF(record, 0xf0));
+            SF64(0x2938) = sim1_x87(RF(record, 0xf8));
+            SF64(0x2940) = sim1_x87(RF(record, 0x100));
+            SF64(0x2948) = sim1_x87(RF(record, 0x108));
+            SF64(0x2950) = sim1_x87(RF(record, 0x110));
+            SF64(0x2600) = sim1_x87(RF(record, 0x118));
+            SF64(0x2608) = sim1_x87(RF(record, 0x120));
+            SF64(0x2610) = sim1_x87(RF(record, 0x128));
+            SF64(0x2618) = sim1_x87(RF(record, 0x130));
+            SF64(0x2620) = sim1_x87(RF(record, 0x138));
+            SF64(0x2628) = sim1_x87(RF(record, 0x140));
+            SF64(0x2630) = sim1_x87(RF(record, 0x148));
+            SF64(0x1d20) = sim1_x87(RF(record, 0x150));
+            SF64(0x1d28) = sim1_x87(RF(record, 0x158));
+            SF64(0x1d30) = sim1_x87(RF(record, 0x160));
+            SF64(0x1d38) = sim1_x87(RF(record, 0x168));
+            SF64(0x1d40) = sim1_x87(RF(record, 0x170));
+            SF64(0x1d48) = sim1_x87(RF(record, 0x178));
+            SF64(0x1d50) = sim1_x87(RF(record, 0x180));
+            SF64(0x2980) = sim1_x87(RF(record, 0x188));
+            SF64(0x2988) = sim1_x87(RF(record, 0x190));
+            SF64(0x2990) = sim1_x87(RF(record, 0x198));
+            SF64(0x2998) = sim1_x87(RF(record, 0x1a0));
+            SF64(0x29a0) = sim1_x87(RF(record, 0x1a8));
+            SF64(0x29a8) = sim1_x87(RF(record, 0x1b0));
+            SF64(0x29b0) = sim1_x87(RF(record, 0x1b8));
+            SF64(0x20e0) = sim1_x87(RF(record, 0x1c0));
+            SF64(0x20e8) = sim1_x87(RF(record, 0x1c8));
+            SF64(0x20f0) = sim1_x87(RF(record, 0x1d0));
+            SF64(0x20f8) = sim1_x87(RF(record, 0x1d8));
+            SF64(0x2100) = sim1_x87(RF(record, 0x1e0));
+            SF64(0x2108) = sim1_x87(RF(record, 0x1e8));
+            SF64(0x2110) = sim1_x87(RF(record, 0x1f0));
+            SF64(0x1ec0) = sim1_x87(RF(record, 0x1f8));
+            SF64(0x1ec8) = sim1_x87(RF(record, 0x200));
+            SF64(0x1ed0) = sim1_x87(RF(record, 0x208));
+            SF64(0x1ed8) = sim1_x87(RF(record, 0x210));
+            SF64(0x1ee0) = sim1_x87(RF(record, 0x218));
+            SF64(0x1ee8) = sim1_x87(RF(record, 0x220));
+            SF64(0x1ef0) = sim1_x87(RF(record, 0x228));
+            SF64(0x2660) = sim1_x87(RF(record, 0x230));
+            SF64(0x2668) = sim1_x87(RF(record, 0x238));
+            SF64(0x2670) = sim1_x87(RF(record, 0x240));
+            SF64(0x2678) = sim1_x87(RF(record, 0x248));
+            SF64(0x2680) = sim1_x87(RF(record, 0x250));
+            SF64(0x2688) = sim1_x87(RF(record, 0x258));
+            SF64(0x2690) = sim1_x87(RF(record, 0x260));
+            SF64(0x25a0) = sim1_x87(RF(record, 0x268));
+            SF64(0x25a8) = sim1_x87(RF(record, 0x270));
+            SF64(0x25b0) = sim1_x87(RF(record, 0x278));
+            SF64(0x25b8) = sim1_x87(RF(record, 0x280));
+            SF64(0x25c0) = sim1_x87(RF(record, 0x288));
+            SF64(0x25c8) = sim1_x87(RF(record, 0x290));
+            SF64(0x25d0) = sim1_x87(RF(record, 0x298));
+            SF64(0x24c0) = sim1_x87(RF(record, 0x2a0));
+            SF64(0x24c8) = sim1_x87(RF(record, 0x2a8));
+            SF64(0x24d0) = sim1_x87(RF(record, 0x2b0));
+            SF64(0x24d8) = sim1_x87(RF(record, 0x2b8));
+            SF64(0x24e0) = sim1_x87(RF(record, 0x2c0));
+            SF64(0x24e8) = sim1_x87(RF(record, 0x2c8));
+            SF64(0x24f0) = sim1_x87(RF(record, 0x2d0));
+            SF64(0x1d80) = sim1_x87(RF(record, 0x2d8));
+            SF64(0x1d88) = sim1_x87(RF(record, 0x2e0));
+            SF64(0x1d90) = sim1_x87(RF(record, 0x2e8));
+            SF64(0x1d98) = sim1_x87(RF(record, 0x2f0));
+            SF64(0x1da0) = sim1_x87(RF(record, 0x2f8));
+            SF64(0x1da8) = sim1_x87(RF(record, 0x300));
+            SF64(0x1db0) = sim1_x87(RF(record, 0x308));
+            SF64(0x1ca0) = sim1_x87(RF(record, 0x310));
+            SF64(0x1ca8) = sim1_x87(RF(record, 0x318));
+            SF64(0x1cb0) = sim1_x87(RF(record, 0x320));
+            SF64(0x1cb8) = sim1_x87(RF(record, 0x328));
+            SF64(0x1cc0) = sim1_x87(RF(record, 0x330));
+            SF64(0x1cc8) = sim1_x87(RF(record, 0x338));
+            SF64(0x1cd0) = sim1_x87(RF(record, 0x340));
+            break;
+        case 0x1202:
+            S32(0x1dd0) = RD(record, 0x0);
+            break;
+        case 0x1204:
+            S32(0x4158) = RD(record, 0x0);
+            S16(0x38f2) = RW(record, 0x4);
+            S16(0x3b78) = RW(record, 0x8);
+            S16(0x374c) = RW(record, 0xc);
+            S16(0x3900) = RW(record, 0xe);
+            S16(0x2c10) = RW(record, 0x10);
+            S32(0x2d90) = RD(record, 0x12);
+            S16(0x3ddc) = RW(record, 0x16);
+            S16(0x2c98) = RW(record, 0x1a);
+            break;
+        case 0x1205:
+            S16(0x38f0) = RW(record, 0x0);
+            S16(0x36b0) = RW(record, 0x4);
+            S16(0x36d0) = RW(record, 0x8);
+            S16(0x2d78) = RW(record, 0xc);
+            S16(0x3812) = RW(record, 0x10);
+            break;
+        case 0x1206:
+            S16(0x3a52) = RW(record, 0x0);
+            S16(0x2c6a) = RW(record, 0x4);
+            S16(0x4150) = RW(record, 0x8);
+            S16(0x3750) = RW(record, 0xc);
+            break;
+        case 0x1203:
+            S32(0x1780) = RD(record, 0x0);
+            S32(0x1784) = RD(record, 0x4);
+            SF64(0x1788) = sim1_x87(RF(record, 0x8));
+            SF64(0x1790) = sim1_x87(RF(record, 0x10));
+            SF64(0x1798) = sim1_x87(RF(record, 0x18));
+            S16(0x1fe0) = RW(record, 0x20);
+            S16(0x1f10) = RW(record, 0x22);
+            break;
+        case 0x1400:
+            S32(0x36b8) = RD(record, 0x0);
+            S32(0x36bc) = RD(record, 0x4);
+            S32(0x3b80) = RD(record, 0x8);
+            S32(0x3b84) = RD(record, 0xc);
+            S32(0x2c70) = RD(record, 0x10);
+            S32(0x2c74) = RD(record, 0x14);
+            S32(0x2c80) = RD(record, 0x18);
+            S32(0x2c84) = RD(record, 0x1c);
+            S32(0x2ac0) = RD(record, 0x20);
+            S32(0x2ac4) = RD(record, 0x24);
+            S32(0x3808) = RD(record, 0x28);
+            S32(0x380c) = RD(record, 0x2c);
+            S32(0x3b48) = RD(record, 0x30);
+            S32(0x3b4c) = RD(record, 0x34);
+            S32(0x3fc8) = RD(record, 0x38);
+            S32(0x3fcc) = RD(record, 0x3c);
+            break;
+        case 0x1401:
+            S32(0x4170) = RD(record, 0x0);
+            S32(0x4174) = RD(record, 0x4);
+            S32(0x4390) = RD(record, 0x8);
+            S32(0x4394) = RD(record, 0xc);
+            S32(0x3af8) = RD(record, 0x10);
+            S32(0x3afc) = RD(record, 0x14);
+            S32(0x3d08) = RD(record, 0x18);
+            S32(0x3d0c) = RD(record, 0x1c);
+            S32(0x3538) = RD(record, 0x20);
+            S32(0x353c) = RD(record, 0x24);
+            S32(0x2b80) = RD(record, 0x28);
+            S32(0x2b84) = RD(record, 0x2c);
+            S32(0x2c90) = RD(record, 0x30);
+            S32(0x2c94) = RD(record, 0x34);
+            S32(0x3fe0) = RD(record, 0x38);
+            S32(0x3fe4) = RD(record, 0x3c);
+            break;
+        case 0x1402:
+            S32(0x4388) = RD(record, 0x0);
+            S32(0x438c) = RD(record, 0x4);
+            S32(0x3c10) = RD(record, 0x8);
+            S32(0x3c14) = RD(record, 0xc);
+            S32(0x3e08) = RD(record, 0x10);
+            S32(0x3e0c) = RD(record, 0x14);
+            S32(0x43e8) = RD(record, 0x18);
+            S32(0x43ec) = RD(record, 0x1c);
+            S32(0x4048) = RD(record, 0x20);
+            S32(0x404c) = RD(record, 0x24);
+            S32(0x3d48) = RD(record, 0x28);
+            S32(0x3d4c) = RD(record, 0x2c);
+            S32(0x3b00) = RD(record, 0x30);
+            S32(0x3b04) = RD(record, 0x34);
+            S32(0x2c30) = RD(record, 0x38);
+            S32(0x2c34) = RD(record, 0x3c);
+            S32(0x2c20) = RD(record, 0x40);
+            S32(0x2c24) = RD(record, 0x44);
+            S32(0x43f0) = RD(record, 0x48);
+            S32(0x43f4) = RD(record, 0x4c);
+            S32(0x3720) = RD(record, 0x50);
+            S32(0x3724) = RD(record, 0x54);
+            S32(0x30a0) = RD(record, 0x58);
+            S32(0x30a4) = RD(record, 0x5c);
+            S32(0x3598) = RD(record, 0x60);
+            S32(0x359c) = RD(record, 0x64);
+            S32(0x36c8) = RD(record, 0x68);
+            S32(0x36cc) = RD(record, 0x6c);
+            S32(0x36a8) = RD(record, 0x70);
+            S32(0x36ac) = RD(record, 0x74);
+            S32(0x2c08) = RD(record, 0x78);
+            S32(0x2c0c) = RD(record, 0x7c);
+            break;
+        case 0x1403:
+            S32(0x3528) = RD(record, 0x0);
+            S32(0x352c) = RD(record, 0x4);
+            S32(0x3de8) = RD(record, 0x8);
+            S32(0x3dec) = RD(record, 0xc);
+            S32(0x3a48) = RD(record, 0x10);
+            S32(0x3a4c) = RD(record, 0x14);
+            S32(0x4168) = RD(record, 0x18);
+            S32(0x416c) = RD(record, 0x1c);
+            S32(0x30b0) = RD(record, 0x20);
+            S32(0x30b4) = RD(record, 0x24);
+            S32(0x3590) = RD(record, 0x28);
+            S32(0x3594) = RD(record, 0x2c);
+            S32(0x3740) = RD(record, 0x30);
+            S32(0x3744) = RD(record, 0x34);
+            S32(0x43c8) = RD(record, 0x38);
+            S32(0x43cc) = RD(record, 0x3c);
+            S32(0x4230) = RD(record, 0x40);
+            S32(0x4234) = RD(record, 0x44);
+            S32(0x2c40) = RD(record, 0x48);
+            S32(0x2c44) = RD(record, 0x4c);
+            S32(0x35e8) = RD(record, 0x50);
+            S32(0x35ec) = RD(record, 0x54);
+            S32(0x2ca0) = RD(record, 0x58);
+            S32(0x2ca4) = RD(record, 0x5c);
+            S32(0x2d88) = RD(record, 0x60);
+            S32(0x2d8c) = RD(record, 0x64);
+            break;
+        case 0x1404:
+            S32(0x3e28) = RD(record, 0x0);
+            S32(0x3e2c) = RD(record, 0x4);
+            S32(0x3fb8) = RD(record, 0x8);
+            S32(0x3fbc) = RD(record, 0xc);
+            S32(0x3e18) = RD(record, 0x10);
+            S32(0x3e1c) = RD(record, 0x14);
+            S32(0x30a8) = RD(record, 0x18);
+            S32(0x30ac) = RD(record, 0x1c);
+            S32(0x3cb8) = RD(record, 0x20);
+            S32(0x3cbc) = RD(record, 0x24);
+            S32(0x3730) = RD(record, 0x28);
+            S32(0x3734) = RD(record, 0x2c);
+            break;
+        default:
+            break;
+        }
+next:
+        offset += length;
+    } while ((int32_t)offset < size);
+    global = SIM1_GLOBAL;
+    if (P16(global, 0xaec) > engines) {
+        if (P16(global, 0xaec) > 1) sim1_copy_contact(global + 0x924, global + 0x88c);
+        if (P16(SIM1_GLOBAL, 0xaec) > 2) sim1_copy_contact(SIM1_GLOBAL + 0x9bc, SIM1_GLOBAL + 0x88c);
+        if (P16(SIM1_GLOBAL, 0xaec) > 3) sim1_copy_contact(SIM1_GLOBAL + 0xa54, SIM1_GLOBAL + 0x88c);
+    }
+    {
+        static const uint16_t starters[4] = {0x892, 0x92a, 0x9c2, 0xa5a};
+        global = SIM1_GLOBAL;
+        if (!P8(global, 0x609)) { for (at = 0; at < 4; ++at) if (P16(SIM1_GLOBAL, starters[at]) > 4) P16(SIM1_GLOBAL, starters[at]) = 3; }
+        else if (P8(global, 0x609) == 1) { for (at = 0; at < 4; ++at) if (P16(SIM1_GLOBAL, starters[at]) > 2) P16(SIM1_GLOBAL, starters[at]) = 2; }
+    }
+    if (!P32(SIM1_GLOBAL, 0x7a0)) P32(SIM1_GLOBAL, 0x7ac) = 0;
+    if (!P32(SIM1_GLOBAL, 0x7a4)) { P32(SIM1_GLOBAL, 0x7b0) = 0; P32(SIM1_GLOBAL, 0x7b4) = 0; }
+    P32(SIM1_GLOBAL, 0x368) = 0xfff;
+    sim1_angle_2b68();
+    sim1_pass_setup();
+    return 1;
+}
+#undef RB
+#undef RW
+#undef RS16
+#undef RD
+#undef RF
+#undef SIM1_MEMMOVE
+
+/* 0x2200d790, stdcall (two arguments, unread): the engines' frame: the pitch schedule
+ * (0x2200d7f0); unless parked (GLOBAL +0x365) or slewing (+0x268), the ground systems or the
+ * turbulence (0x2200ac4a) and the engines by type (+0x609: 0 pistons, 1 jets). */
+void __stdcall sim1_engines_frame(uint32_t first, uint32_t second)
+{
+    uint8_t *global = SIM1_GLOBAL;
+    (void)first; (void)second;
+    sim1_pitch_schedule();
+    if (P8(global, 0x365) || P32(global, 0x268)) return;
+    sim1_ground_or_turbulence(global);
+    if (!P8(global, 0x609)) sim1_pistons(global);
+    else if (P8(global, 0x609) == 1) sim1_jets(global);
+}
+
+/* 0x2200ae90: the aircraft's .AIR file loaded: its path (ACONTAIN +0x30 from GLOBAL +0x11e0),
+ * opened (HOST +0x17c), sized, read whole into an allocation and decoded (0x2200af90), freed
+ * and closed. Returns the decoder's 1, else 0. RETAIL BUG (kept): SIM1-AIR-SIZE-HANDLE
+ * (docs/retail-bugs.md): when sizing fails the file is left open. */
+uint32_t sim1_load_air(void)
+{
+    char path[0x100];
+    uint32_t file, size, got, result = 0;
+    uint8_t *buffer;
+    SIM1_CALL(SIM1_ACONTAIN, 0x30, uint32_t (__stdcall *)(void *, uint32_t, char *, uint32_t))(SIM1_GLOBAL + 0x11e0, 2, path, 0x100);
+    if (SIM1_CALL(SIM1_HOST, 0x17c, uint32_t (__stdcall *)(uint32_t *, char *, uint32_t, uint32_t))(&file, path, 0xf, 0)) return 0;
+    if (SIM1_CALL(SIM1_HOST, 0x1a4, uint32_t (__stdcall *)(uint32_t, uint32_t *))(file, &size)) return 0;
+    SIM1_CALL(SIM1_HOST, 0x20c, uint32_t (__stdcall *)(uint32_t, uint32_t, uint8_t **, uint32_t))(1, size, &buffer, 0);
+    if (!SIM1_CALL(SIM1_HOST, 0x19c, uint32_t (__stdcall *)(uint32_t, uint8_t *, uint32_t, uint32_t *))(file, buffer, size, &got) && got == size)
+        result = sim1_air_decode(buffer, (int32_t)size);
+    SIM1_CALL(SIM1_HOST, 0x214, uint32_t (__stdcall *)(void *))(&buffer);
+    SIM1_CALL(SIM1_HOST, 0x13c, uint32_t (__stdcall *)(uint32_t))(file);
+    return result;
+}
+
+/* 0x22013b30: the tail rotor's blades, as 0x220127b0 does the main rotor's: the density ratio
+ * to a power (+0x1b70), the inflow (+0x1b60, +0x1ba0, +0x1b68 and its inverse +0x1b80), the
+ * flapping by the azimuth +0x19c0 (+0x1b48, +0x1b50, +0x1b90, +0x1b88, +0x1b20, +0x1b18), the
+ * coning (+0x1bb8, +0x1bc0), the advance ratios (+0x1b28, +0x1b30, +0x1b38) and their powers,
+ * the torque and thrust terms (+0x1bb0, +0x1b98, +0x1bd0) and the rotor's forces +0x1c18,
+ * +0x1be8, +0x1c38. Retail keeps some terms unrounded on the x87 and parks others in its frame;
+ * the C does the same. */
+void sim1_tail_rotor_blades(void)
+{
+    long double value, inflow, base, work, power28;
+    double l10_inflow, l0_cos, l8_sin, l0_ratio, l18_density, l8_advance, l10_power, l8_power, l10_area, l18_scale;
+    value = sim1_cipow(SF64(0x3590), SF64(0x1008));
+    SF64(0x1b78) = (double)((long double)SF64(0x3590) * SF64(0xe38));
+    inflow = (sim1_fsin(SF64(0x1ad8)) * SF64(0x1ab8) - SF64(0x1b58)) / SF64(0x1b78);
+    SF64(0x1b60) = (double)inflow;
+    SF64(0x1b70) = (double)(value * SF64(0x798) * SF64(0x35e8) / SF64(0x4230));
+    SF64(0x1ba0) = (double)((long double)SF64(0x1ac8) / SF64(0x1b78));
+    l10_inflow = (double)sim1_cipow(inflow, RF64(0x15670));
+    value = sim1_cipow(sim1_cipow(SF64(0x1b58), RF64(0x15670)) + l10_inflow, RF64(0x15678));
+    SF64(0x1b68) = (double)value;
+    if (X87_C3(value, (long double)RF64(0x15680))) { S32(0x1b80) = 0; S32(0x1b84) = 0; }
+    else SF64(0x1b80) = (double)((long double)RF64(0x15688) / SF64(0x1b68));
+    l0_cos = (double)sim1_fcos(SF64(0x19c0));
+    l8_sin = (double)sim1_fsin(SF64(0x19c0));
+    SF64(0x1b48) = (double)(((long double)SF64(0x1b28) - (long double)SF64(0x1b30) * l0_cos) - (long double)SF64(0x1b38) * l8_sin);
+    SF64(0x1b50) = (double)(((long double)SF64(0x1b30) * l8_sin - (long double)SF64(0x1b38) * l0_cos) * SF64(0xe38));
+    {
+        long double moment = (long double)SF64(0x1b78) * SF64(0x1b60);
+        SF64(0x1b90) = (double)(moment - (moment * SF64(0x1b48)) * l0_cos);
+    }
+    work = (long double)SF64(0x1b90) - (long double)SF64(0x1b50) * SF64(0x3590);
+    SF64(0x1b90) = (double)work;
+    SF64(0x1b88) = (double)(((long double)SF64(0x1ba0) * SF64(0x1b78)) * l8_sin + SF64(0x1b78));
+    SF64(0x1b58) = RF64(0x15690);
+    SF64(0x1b20) = (double)((((long double)SF64(0x1bb8) * RF64(0x15678)) * SF64(0x1b80) + SF64(0x1b60)) / SF64(0x1ba0));
+    SF64(0x1b18) = (double)(work / SF64(0x1b88) + SF64(0x1c40));
+    l0_ratio = (double)sim1_cipow(SF64(0x1ba0), RF64(0x15670));
+    l18_density = (double)((long double)SF64(0x798) * SF64(0x35e8));
+    base = (((long double)SF64(0x1c40) * l0_ratio) * RF64(0x15678) + (long double)SF64(0x1c40) * RF64(0x15698)) - (long double)SF64(0x1b60) * RF64(0x156a0);
+    SF64(0x1bb8) = (double)base;
+    SF64(0x1bc0) = (double)((base * SF64(0x2c40)) * (((long double)SF64(0x798) * SF64(0x35e8)) * RF64(0x15678)));
+    l8_advance = (double)((long double)l0_ratio - RF64(0x156a8));
+    SF64(0x1b28) = (double)(((((long double)SF64(0x1c40) * l8_advance) * RF64(0x156b0) + (long double)SF64(0x1b60) * RF64(0x156b8)) * SF64(0x1b70)) * RF64(0x15678));
+    value = ((long double)SF64(0x3740) * SF64(0x3590)) * SF64(0x1bc0);
+    SF64(0x1bc0) = (double)value;
+    SF64(0x1b38) = (double)((((long double)SF64(0x1ba0) * SF64(0x1b28)) * RF64(0x156c8)) / (((long double)RF64(0x15688) - (long double)l0_ratio * RF64(0x156a0)) * RF64(0x156d0)));
+    SF64(0x1b30) = (double)(((((long double)SF64(0x1b60) + SF64(0x1b60)) + (long double)SF64(0x1c40) * RF64(0x156c0)) * SF64(0x1ba0)) / ((long double)RF64(0x15688) - (long double)l0_ratio * RF64(0x15678)));
+    SF64(0x1bb0) = (double)((((((long double)SF64(0x2ca0) * RF64(0x156b0)) / SF64(0x35e8)) * l8_advance) - ((long double)SF64(0x1b60) * SF64(0x1c40)) * RF64(0x156b8)) - (long double)l10_inflow * RF64(0x15678));
+    SF64(0x1c18) = (double)(((((value * SF64(0x1b78)) * SF64(0x1b78)) * SF64(0x43c8)) * SF64(0x3740)));
+    l10_power = (double)sim1_cipow(SF64(0x1b38), RF64(0x15670));
+    l8_power = (double)sim1_cipow(SF64(0x1b30), RF64(0x15670));
+    power28 = sim1_cipow(SF64(0x1b28), RF64(0x15670));
+    l10_area = (double)((long double)SF64(0x1ba0) * SF64(0x1b60));
+    SF64(0x1b98) = (double)(((((long double)l8_power * RF64(0x156d8) + (long double)l10_power * RF64(0x156e0)) + power28 * RF64(0x15678)) * RF64(0x15678)) * l0_ratio);
+    SF64(0x1bb0) = (double)(((long double)SF64(0x1bb0) - ((long double)l10_power + l8_power) * RF64(0x156e0)) - SF64(0x1b98));
+    work = ((long double)SF64(0x1bb0) - ((long double)SF64(0x1b30) * l10_area) * RF64(0x15678)) + (((long double)SF64(0x1ba0) * SF64(0x1b38)) * SF64(0x1b28)) * RF64(0x156e8);
+    SF64(0x1bb0) = (double)work;
+    l18_scale = (double)((long double)SF64(0x3590) * l18_density);
+    SF64(0x1bd0) = (double)((((long double)SF64(0x1ba0) * SF64(0x2ca0)) * RF64(0x15678)) / SF64(0x35e8) + ((long double)SF64(0x1b30) * SF64(0x1c40)) * RF64(0x156e8));
+    SF64(0x1be8) = (double)((((work * l18_scale) * RF64(0x15678)) * SF64(0x3590)) * ((long double)SF64(0x1b78) * SF64(0x1b78)));
+    SF64(0x1bd0) = (double)((((long double)SF64(0x1bd0) - ((long double)SF64(0x1c40) * l10_area) * RF64(0x15678)) + ((long double)SF64(0x1ba0) * l8_power) * RF64(0x156b0))
+                            + ((long double)SF64(0x1b60) * SF64(0x1b30)) * RF64(0x156f0));
+    work = ((long double)SF64(0x1bd0) - ((long double)SF64(0x1b38) * SF64(0x1b28)) * RF64(0x156f8)) + ((long double)SF64(0x1ba0) * power28) * RF64(0x156b0);
+    SF64(0x1bd0) = (double)work;
+    SF64(0x1c38) = (double)((((((work * l18_scale) * RF64(0x15678)) * SF64(0x43c8)) * SF64(0x3740)) * ((long double)SF64(0x1b78) * SF64(0x1b78))));
+}
+
+/* 0x220135f0: the helicopter's power and torque. With collective (+0x1c00) at or above
+ * R15550 the governed engine: a lag on the table value of the rotor's load (+0x1b00), the
+ * power table (0xe50) against it, and the rotor speed (+0xe40) falling by the shortfall,
+ * capped at its nominal (+0x2c08). Below, the idle branch: +0x1b00 follows collective,
+ * the power is the lesser of the table and a collective line (plus a forward-speed term
+ * when +0x1ad0 is positive), accumulated through +0x1b08, and the rotor speed held
+ * between 15.64 and 41.36. Then the torque (+0x1aa8), its six coefficients
+ * (+0xe38, +0x1a58..+0x1a80) and three tables (0xeb8, 0xf20, 0xf88) for the tail rotor,
+ * the yaw lag (+0x1b10, +0x1ab0) and GLOBAL+0x918. */
+void sim1_heli_power(void)
+{
+    uint8_t *global;
+    long double root, power, load, value, near0, near1, t;
+    double l0, l8, l10, l18, l20, l28, w;
+    root = sim1_fsqrt(SF64(0x7a0));
+    power = (long double)SF64(0x688) * SF64(0x1c78);
+    load = (((long double)SF64(0x1c08) + SF64(0x1be8)) * RF64(0x15540)) / SF64(0x7a8);
+    l10 = (double)power;
+    l0 = (double)load;
+    l20 = (double)root;
+    l18 = (double)(power * power);
+    l8 = (double)((long double)SF64(0x3d48) * SF64(0xe40));
+    if (X87_C0(load, (long double)RF64(0x15548))) l0 = 0.0;
+    if (!X87_C0((long double)SF64(0x1c00), (long double)RF64(0x15550))) {
+        l28 = (double)sim1_table_lookup(sim1_data + 0xeb8, l0);
+        SF64(0x1b00) = (double)((long double)SF64(0x1b00) - ((long double)SF64(0x1b00) - l28) * RF64(0x15558));
+        t = sim1_table_lookup(sim1_data + 0xe50, SF64(0x1b00));
+        SF64(0xff8) = (double)t;
+        value = (long double)SF64(0x2c08) - ((t - l0) * RF64(0x15560)) / ((long double)SF64(0x2c20) * SF64(0x2c30));
+        SF64(0xe40) = (double)value;
+        if (!X87_C0C3(value, (long double)SF64(0x2c08))) SF64(0xe40) = SF64(0x2c08);
+        near0 = (((((long double)l8 * l8) * SF64(0x798)) * SF64(0x3d48)) * RF64(0x155a0)) - RF64(0x155a8);
+        near1 = (((((long double)l10 * RF64(0x15570)) - (((long double)l18 * l10) * RF64(0x15578))) - (long double)l18 * RF64(0x15580)) - RF64(0x15588))
+                - ((long double)RF64(0x15590) - SF64(0x1c00)) * RF64(0x15598);
+        SF64(0x1a98) = (double)((long double)SF64(0xe40) * RF64(0x15568));
+    } else {
+        long double follow, bound;
+        follow = (long double)SF64(0x1c00) * RF64(0x155b0) - RF64(0x155b8);
+        l10 = (double)follow;
+        l0 = (double)(((fabsl((long double)SF64(0x1c08)) + fabsl((long double)SF64(0x1be8))) * RF64(0x15540)) / SF64(0x7a8));
+        bound = (long double)RF64(0x155d0) - (long double)SF64(0x1c00) * RF64(0x155c8);
+        value = (follow - SF64(0xe40)) * RF64(0x155c0) + SF64(0x1b00);
+        SF64(0x1b00) = (double)value;
+        if (!X87_C0C3(value, bound)) SF64(0x1b00) = (double)bound;
+        if (X87_C0((long double)SF64(0x1b00), (long double)RF64(0x15548))) SF64(0x1b00) = 0.0;
+        t = sim1_table_lookup(sim1_data + 0xe50, SF64(0x1b00));
+        SF64(0xff8) = (double)t;
+        l18 = (double)((long double)RF64(0x155e0) - (long double)SF64(0x1c00) * RF64(0x155d8));
+        w = X87_C0C3(t, (long double)l18) ? SF64(0xff8) : l18;
+        value = w;
+        if (!X87_C0C3((long double)SF64(0x1ad0), (long double)RF64(0x15548)))
+            value = value + (((long double)SF64(0x1ab8) * SF64(0x1c30)) * RF64(0x155e8)) * ((long double)SF64(0xe40) / SF64(0x2c08));
+        value = ((long double)SF64(0x1b08) + value) * RF64(0x155f0);
+        SF64(0xff8) = (double)value;
+        SF64(0x1b08) = SF64(0xff8);
+        SF64(0xe40) = (double)((long double)SF64(0xe40) - ((value - l0) * RF64(0x15560)) / ((long double)SF64(0x2c20) * SF64(0x2c30)));
+        if (!X87_C0C3((long double)SF64(0xe40), (long double)RF64(0x155f8))) { S32(0xe40) = 0x7ae147ae; S32(0xe44) = 0x4044ae14; }
+        else if (X87_C0C3((long double)SF64(0xe40), (long double)RF64(0x15600))) { S32(0xe40) = 0x147ae148; S32(0xe44) = 0x402f47ae; }
+        near0 = (((((long double)l8 * l8) * SF64(0x798)) * SF64(0x3d48)) * RF64(0x155a0)) - RF64(0x15618);
+        near1 = (long double)RF64(0x15610) - (long double)SF64(0x1c00) * RF64(0x15608);
+        SF64(0x1a98) = (double)((long double)l10 * RF64(0x15568));
+    }
+    SF64(0x1aa8) = (double)(near1 * near0);
+    {
+        long double rotor = SF64(0xe40);
+        double torque_arg = (double)((long double)SF64(0x1aa8) * RF64(0x15658));
+        double t3, t4;
+        long double t5, old;
+        SF64(0xe38) = (double)(rotor * RF64(0x15620));
+        SF64(0x1a60) = (double)(rotor * RF64(0x15628));
+        SF64(0x1a58) = RF64(0x15630);
+        SF64(0x1a70) = (double)(rotor * RF64(0x15638));
+        SF64(0x1a68) = RF64(0x15640);
+        SF64(0x1a78) = RF64(0x15648);
+        SF64(0x1a80) = RF64(0x15650);
+        t3 = (double)sim1_table_lookup(sim1_data + 0xeb8, torque_arg);
+        t4 = (double)sim1_table_lookup(sim1_data + 0xf20, t3);
+        t5 = sim1_table_lookup(sim1_data + 0xf88, t4) * SF64(0x7a0);
+        old = SF64(0x1b10);
+        l18 = (double)t5;
+        SF64(0x1aa0) = (double)((long double)SF64(0xe40) * RF64(0x15568));
+        SF64(0x1a90) = (double)(((long double)t4 * l20) * RF64(0x15660));
+        SF64(0x1ab0) = (double)(old - (old - l18) * RF64(0x15668));
+        SF64(0x1b10) = l18;
+        global = SIM1_GLOBAL;
+        PF64(global, 0x918) = (double)(((long double)t3 * l20) * SF64(0x7a8));
+    }
+}
+
+/* 0x22013340: the helicopter's frame. The forward speed (+0x1450, at least 0.01) and the
+ * body's rates and speeds into the rotor's inputs (+0x1ab8..+0x1af8, +0x1ae8 from GLOBAL
+ * +0x57c), the rotor's routines in their order, the rotor's forces and moments back to the
+ * body (+0x1228..+0x1238, +0x12c8..+0x12d8), and its outputs to GLOBAL as integers (scaled
+ * by +0x6e8; the four words at +0x896..+0x8ba and seven dwords at +0x8f0..+0x908). */
+void sim1_rotor_frame(void)
+{
+    uint8_t *global;
+    if (!X87_C0C3((long double)SF64(0x1450), (long double)RF64(0x15528))) SF64(0x1ab8) = SF64(0x1450);
+    else { S32(0x1ab8) = 0x47ae147b; S32(0x1abc) = 0x3f847ae1; }
+    SF64(0x1ac0) = SF64(0x1388);
+    SF64(0x1ac8) = SF64(0x1390);
+    SF64(0x1ad0) = (double)sim1_fchs(SF64(0x1398));
+    SF64(0x1ad8) = SF64(0x1498);
+    SF64(0x1af0) = SF64(0x1510);
+    SF64(0x1af8) = SF64(0x15a8);
+    SF64(0x1ae0) = SF64(0x1490);
+    global = SIM1_GLOBAL;
+    SF64(0x1ae8) = (double)sim1_fchs(((long double)P32(global, 0x57c) * SF64(0x690)) * SF64(0x680));
+    sim1_rotor_mixing();
+    sim1_rotor_terms();
+    sim1_rotor_blades();
+    sim1_tail_rotor_blades();
+    sim1_rotor_forces();
+    sim1_heli_power();
+    SF64(0x1228) = SF64(0x1c68);
+    SF64(0x1230) = (double)sim1_fchs(SF64(0x1be0));
+    SF64(0x1238) = SF64(0x1c60);
+    SF64(0x12d0) = (double)sim1_fchs(SF64(0x1c20));
+    SF64(0x12c8) = (double)sim1_fchs(SF64(0x1c50));
+    SF64(0x12d8) = SF64(0x1c10);
+    P16(SIM1_GLOBAL, 0x898) = (uint16_t)sim1_ftol((long double)SF64(0x6e8) * SF64(0x1a98));
+    P16(SIM1_GLOBAL, 0x896) = (uint16_t)sim1_ftol((long double)SF64(0x6e8) * SF64(0x1a90));
+    P16(SIM1_GLOBAL, 0x8b8) = (uint16_t)sim1_ftol(((long double)SF64(0x6e8) * SF64(0x1a58)) * RF64(0x15530));
+    P16(SIM1_GLOBAL, 0x8ba) = (uint16_t)sim1_ftol(((long double)SF64(0x6e8) * SF64(0x1a60)) * RF64(0x15538));
+    P32(SIM1_GLOBAL, 0x908) = (uint32_t)sim1_ftol((long double)SF64(0x6e8) * SF64(0x1aa0));
+    P32(SIM1_GLOBAL, 0x8f0) = (uint32_t)sim1_ftol((long double)SF64(0x6e8) * SF64(0x1ab0));
+    P32(SIM1_GLOBAL, 0x8f4) = (uint32_t)sim1_ftol((long double)SF64(0x6e8) * SF64(0x1aa8));
+    P32(SIM1_GLOBAL, 0x8f8) = (uint32_t)sim1_ftol((long double)SF64(0x6e8) * SF64(0x1a80));
+    P32(SIM1_GLOBAL, 0x904) = (uint32_t)sim1_ftol((long double)SF64(0x6e8) * SF64(0x1a68));
+    P32(SIM1_GLOBAL, 0x900) = (uint32_t)sim1_ftol((long double)SF64(0x6e8) * SF64(0x1a70));
+    P32(SIM1_GLOBAL, 0x8fc) = (uint32_t)sim1_ftol((long double)SF64(0x6e8) * SF64(0x1a78));
+}
+
+/* A 48-bit position (a word of fraction at +0, the whole part's dword at +2) moved by a
+ * 64-bit step in the same units: fistp QWORD, then shld edx,eax,16 and add WORD / adc DWORD. */
+static void sim1_position_add(uint8_t *position, int64_t step)
+{
+    uint32_t low = (uint32_t)P16(position, 0) + (uint16_t)step;
+    P16(position, 0) = (uint16_t)low;
+    P32(position, 2) += (uint32_t)((uint64_t)step >> 16) + (low >> 16);
+}
+
+/* 0x22002752: the simulation's step (edi GLOBAL). The attitude's trigonometry, and when the
+ * attitude's high words (+0x578..+0x580) moved since the last step (+0x122..+0x126) the
+ * quaternion, the angles as doubles (+0x1538..+0x1548) and the trigonometry again; the flow
+ * (or, with +0x604 1, the helicopter's frame), the stall warning, the ground, the gear,
+ * the structure, the sums, the accelerations and the integration; the velocities kept
+ * (+0x13d0..+0x13e0) and the attitude stepped; the ground speed (+0x2b4); and unless paused
+ * (+0x830 with +0x832 and not +0x83c), the position moved by the mean of the old and new
+ * velocities over the frame's time (+0x16f0) times the rate (+0xc1a / 0x400, or 1 before
+ * +0x1d18 reaches 0xf0000; east-west over the cosine of the latitude), the attitude's high
+ * words kept and WINDOW's matrix rebuilt (+0xd18). Returns edi, GLOBAL. */
+uint8_t *sim1_simulation_step(uint8_t *edi)
+{
+    uint8_t *global;
+    uint16_t rate;
+    long double step;
+    int64_t whole;
+    sim1_attitude_trig();
+    if ((uint16_t)(P32(edi, 0x578) >> 16) != sim1_u16(0x122) || (uint16_t)(P32(edi, 0x57c) >> 16) != sim1_u16(0x124)
+        || (uint16_t)(P32(edi, 0x580) >> 16) != sim1_u16(0x126)) {
+        sim1_quaternion();
+        S32(0x1550) = P32(edi, 0x578);
+        SF64(0x1538) = (double)(((long double)SI32(0x1550) * SF64(0x680)) * SF64(0x690));
+        S32(0x1554) = P32(edi, 0x57c);
+        SF64(0x1540) = (double)(((long double)SI32(0x1554) * SF64(0x680)) * SF64(0x690));
+        S32(0x1558) = P32(edi, 0x580);
+        SF64(0x1548) = (double)(((long double)SI32(0x1558) * SF64(0x680)) * SF64(0x690));
+        sim1_set_7c0();
+        sim1_attitude_trig();
+    }
+    global = SIM1_GLOBAL;
+    if (P32(global, 0x604) == 1) sim1_rotor_frame();
+    else sim1_local_flow(global);
+    sim1_stall_warning();
+    sim1_ground_pass(global);
+    sim1_gear_force();
+    sim1_structure();
+    sim1_vector_sums();
+    sim1_body_accelerations();
+    sim1_integrate();
+    sim1_attitude_trig();
+    SF64(0x13d0) = SF64(0x13b8);
+    SF64(0x13d8) = SF64(0x13c0);
+    SF64(0x13e0) = SF64(0x13c8);
+    sim1_park();
+    sim1_attitude_step();
+    P32(global, 0x2b4) = (uint32_t)sim1_fistp32((sim1_fsqrt((long double)SF64(0x13b8) * SF64(0x13b8) + (long double)SF64(0x13c8) * SF64(0x13c8)) * SF64(0x728)) * SF64(0x6d8));
+    if (P16(global, 0x830) && !P32(global, 0x83c) && P16(global, 0x832)) return global;
+    if (SI32(0x1d18) < 0xf0000) rate = 1;
+    else {
+        rate = (uint16_t)(P16(global, 0xc1a) / 0x400);
+        if (!rate) rate = 1;
+    }
+    sim1_set_u16(0xe0, rate);
+    sim1_set_f64(0xe2, (double)(int16_t)rate);
+    step = (((((long double)SF64(0x13c8) + SF64(0x13e0)) * SF64(0x768)) * SF64(0x16f0)) * sim1_f64(0xe2)) * SF64(0x728);
+    whole = sim1_fistp64(step * SF64(0x6d8));
+    memcpy(sim1_data + 0x1718, &whole, 8);
+    sim1_position_add(global + 0x562, whole);
+    step = (((((long double)SF64(0x13b8) + SF64(0x13d0)) * SF64(0x768)) * SF64(0x16f0)) * sim1_f64(0xe2)) * SF64(0x130);
+    step = step / sim1_fcos(fabsl(((long double)PI32(global, 0x564) + (long double)(int16_t)P16(global, 0x562) * SF64(0x690)) * SF64(0x128)));
+    whole = sim1_fistp64(((step * SF64(0x678)) * SF64(0x6d8)) * SF64(0x6d8));
+    memcpy(sim1_data + 0x1718, &whole, 8);
+    sim1_position_add(global + 0x56a, whole);
+    step = (((((long double)SF64(0x13c0) + SF64(0x13d8)) * SF64(0x768)) * SF64(0x16f0)) * sim1_f64(0xe2)) * SF64(0x728);
+    whole = sim1_fistp64(step * SF64(0x6d8));
+    memcpy(sim1_data + 0x1718, &whole, 8);
+    sim1_position_add(global + 0x572, whole);
+    S32(0x7c0) = 1;
+    sim1_set_u16(0x122, (uint16_t)(P32(global, 0x578) >> 16)); sim1_set_u16(0x11a, (uint16_t)(P32(global, 0x578) >> 16));
+    sim1_set_u16(0x124, (uint16_t)(P32(global, 0x57c) >> 16)); sim1_set_u16(0x11c, (uint16_t)(P32(global, 0x57c) >> 16));
+    sim1_set_u16(0x126, (uint16_t)(P32(global, 0x580) >> 16)); sim1_set_u16(0x11e, (uint16_t)(P32(global, 0x580) >> 16));
+    global = SIM1_GLOBAL;
+    SIM1_CALL(9, 0x2c, void (__stdcall *)(uint32_t, uint32_t, uint32_t, void *))
+        (P32(global, 0x578) >> 16, P32(global, 0x57c) >> 16, P32(global, 0x580) >> 16, global + 0xd18);
+    P32(global, 0xd2c) = 1;
+    return global;
+}
+
+/* 0x2200ab16 (edi GLOBAL): one step of the simulation over +0x16fc ticks: the ticks counted
+ * (+0x17a0) and kept as a time (+0x16f0, +0x16f8); the air, icing and its motion, the controls,
+ * the step itself, the yaw rate, the engines' ratio, the followers, the heading term and the
+ * engines. Returns retail's edi (the controls' and the step's, GLOBAL). */
+uint8_t *sim1_tick_step(uint8_t *edi)
+{
+    S32(0x17a0) += S32(0x16fc);
+    SF64(0x16f0) = (double)((long double)SI32(0x16fc) * SF64(0x698));
+    S16(0x16f8) = (uint16_t)S32(0x16fc);
+    sim1_air_data(edi);
+    sim1_icing();
+    sim1_air_motion(edi);
+    edi = sim1_controls_pass(edi);
+    edi = sim1_simulation_step(edi);
+    sim1_yaw_rate(edi);
+    sim1_engine_ratio();
+    sim1_angle_follow();
+    sim1_flag_follow();
+    sim1_heading_term();
+    sim1_engines_pass();
+    return edi;
+}
+
+/* 0x2200a84b, stdcall (and its CHAIN list 1 wrapper 0x22001020): the frame's tick. Paused
+ * (+0x5dc) clears +0x3cc4 and the jet's +0x1778. Slewing (+0x365) or once after +0x3cc4: the
+ * record's words, and in the slew's altitude mode (+0x366) the height (+0x572, +0x574) from
+ * GLOBAL +0x20 and +0x120c and the bank from +0x34f0. Otherwise, with the crash, the replay or
+ * +0x838: the time from +0x2aa, the air, gear, flaps, followers and heading term (a
+ * helicopter's frame too when +0x758). Otherwise the time (+0x2aa ticks times the rate
+ * +0xc1a, at most 0x400, over 0x100, with the carry +0x8ec) cut into steps: under 0x420 carried
+ * to the next tick, up to 0x800 one step, to 0x1000 two halves, past it 0x800 at a time.
+ * Then the ticks counted (+0x17a4), the gear model, SOUND's wind from the speed and the
+ * angles, and CONTROLS' force feedback block 9 (+0x8f4..+0x900) when flying.
+ * RETAIL BUG (kept): SIM1-SLEW-HEIGHT-EAX (docs/retail-bugs.md): the height's shrd takes its
+ * low byte from eax, the second argument (or the record words' result), not (presumably) GLOBAL +0x1c. */
+void __stdcall sim1_chain_tick(uint32_t first, uint32_t second)
+{
+    uint8_t *edi = SIM1_GLOBAL;
+    uint32_t eax = second, high, ecx, low;
+    (void)first;
+    P16(edi, 0x120a) = 0;
+    if (P16(edi, 0x5dc)) { S32(0x3cc4) = 0; S32(0x1778) = 0; }
+    if (!P8(edi, 0x365)) {
+        if (!S32(0x3cc4)) goto run;
+        S32(0x3cc4) = 0;
+    } else eax = sim1_record_words();
+    if (P8(edi, 0x366)) {
+        high = P32(edi, 0x20);
+        eax = (eax >> 24) | (high << 8);
+        high = (uint32_t)((int32_t)high >> 8);
+        ecx = P32(edi, 0x120c);
+        low = (uint32_t)(uint16_t)eax + (uint16_t)ecx;
+        P16(edi, 0x572) = (uint16_t)low;
+        P32(edi, 0x574) = high + (ecx >> 16) + (low >> 16);
+        P32(edi, 0x578) = S32(0x34f0);
+    }
+    if (P8(edi, 0x365)) goto tail;
+run:
+    S32(0x17a0) = 0;
+    if (P8(edi, 0x838) || P32(edi, 0x268) || P32(edi, 0x270)) {
+        S32(0x16fc) = (uint32_t)(int32_t)PI16(edi, 0x2aa);
+        SF64(0x16f0) = (double)((long double)SI32(0x16fc) * SF64(0x698));
+        S32(0x8f0) = 1;
+        sim1_air_data(edi);
+        sim1_landing_gear();
+        sim1_flaps();
+        sim1_angle_follow();
+        sim1_heading_term();
+        if (P32(edi, 0x604) == 1 && P32(edi, 0x758)) sim1_rotor_frame();
+        goto tail;
+    }
+    {
+        uint32_t was = S32(0x8f0), ticks = P16(edi, 0x2aa), rate = P16(edi, 0xc1a);
+        S32(0x8f0) = 0;
+        if (was) { sim1_quaternion(); goto tail; }     /* its flags leave ZF clear: the jne is taken */
+        if (rate >= 0x400) rate = 0x400;
+        P32(edi, 0x274) = S32(0x8ec) + ticks;
+        eax = (uint32_t)(((uint64_t)rate * ticks) >> 8) + S32(0x8ec);
+        S32(0x16fc) = eax;
+        S32(0x8ec) = 0;
+        for (;;) {
+            if (eax <= 0x800) {
+                if (eax < 0x420) { S32(0x8ec) = eax; P32(edi, 0x274) = 0; }
+                else edi = sim1_tick_step(edi);
+                break;
+            }
+            if (eax <= 0x1000) {
+                S32(0x16fc) = eax >> 1;
+                edi = sim1_tick_step(edi);
+                edi = sim1_tick_step(edi);
+                break;
+            }
+            S32(0x16fc) = 0x800;
+            edi = sim1_tick_step(edi);
+            eax -= 0x800;
+        }
+    }
+tail:
+    S32(0x17a4) = S32(0x17a0);
+    if (P8(edi, 0x365)) { S32(0x8e4) = 0; S32(0x8e8) = 0; }
+    sim1_gear_model(edi);
+    S32(0x1718) = (uint32_t)sim1_fistp32(((long double)SF64(0x1450) * SF64(0x728)) * SF64(0x6d8));
+    SIM1_CALL(SIM1_SOUND, 0x28, void (__stdcall *)(uint32_t, uint32_t, uint32_t))(S32(0x1718), S16(0x1518), S16(0x151c));
+    edi = SIM1_GLOBAL;
+    if (!(P8(edi, 0x838) || P32(edi, 0x268) || P32(edi, 0x270))) {
+        S32(0x8f4) = S32(0x1628);
+        S32(0x8f8) = P8(edi, 0x11ec);
+        S32(0x8fc) = P32(edi, 0x2b4);
+        S32(0x900) = 0;
+        SIM1_CALL(SIM1_CONTROLS, 0x5c, uint32_t (__stdcall *)(uint32_t, void *))(9, sim1_data + 0x8f4);
+    }
+}
+
+/* 0x22001060, Linkage +0x04, init: the situation's start, SIM1's three CHAIN callbacks added
+ * (the tick to list 1, the engines' frame to list 5, the situation messages to list 0x14), the
+ * aircraft's AIR file loaded; then (a jmp) the record's words. Returns their eax. */
+uint32_t sim1_init_core(void)
+{
+    sim1_situation_start();
+    SIM1_CALL(SIM1_CHAIN, 0x18, uint32_t (__stdcall *)(uint32_t, uint32_t))(1, sim1_callbacks[0]);
+    SIM1_CALL(SIM1_CHAIN, 0x18, uint32_t (__stdcall *)(uint32_t, uint32_t))(5, sim1_callbacks[1]);
+    SIM1_CALL(SIM1_CHAIN, 0x18, uint32_t (__stdcall *)(uint32_t, uint32_t))(0x14, sim1_callbacks[2]);
+    sim1_load_air();
+    return sim1_record_words();
+}
+
+/* The six Linkage services (sim1.c has the other agent's versions of these, in inline asm
+ * over its own image; these are the same in C over sim1_data, for the native build). */
+
+/* 0x2200ac0d, Linkage +0x18, stdcall: the situation record's 0x2c bytes (+0x1730) copied
+ * out a byte at a time (rep movsb, so an overlapping destination sees its own copy). eax is
+ * the caller's. */
+void __stdcall sim1_service_descriptor(uint8_t *out)
+{
+    volatile const uint8_t *source = sim1_data + 0x1730;
+    volatile uint8_t *destination = out;
+    uint32_t at;
+    for (at = 0; at < 0x2c; ++at) destination[at] = source[at];
+}
+
+/* 0x2200ac2f, Linkage +0x28, stdcall: the word +0x1518 written out; it is left in ax (the
+ * rest of eax is the caller's). */
+uint16_t __stdcall sim1_service_word(uint8_t *out)
+{
+    uint16_t value = sim1_u16(0x1518);
+    memcpy(out, &value, 2);
+    return value;
+}
+
+/* 0x220117c0, Linkage +0x2c, stdcall: the ticks counted (+0x17a4) as a double, times R152f0
+ * (1/2). Returns 0. */
+uint32_t __stdcall sim1_service_scaled(double *out)
+{
+    *out = (double)((long double)SI32(0x17a4) * RF64(0x152f0));
+    return 0;
+}
+
+/* 0x220117e0, Linkage +0x30, stdcall: the three velocities (+0x13c8, +0x13b8, +0x13c0) out,
+ * each through the x87 (a signalling NaN comes out quiet). Returns 0. */
+uint32_t __stdcall sim1_service_vector(double *a, double *b, double *c)
+{
+    *a = sim1_x87(SF64(0x13c8));
+    *b = sim1_x87(SF64(0x13b8));
+    *c = sim1_x87(SF64(0x13c0));
+    return 0;
+}
+
+/* 0x22011750, Linkage +0x34, stdcall: a reset to a speed: +0x13b0 the value (unsigned) times
+ * +0x740, the other velocities and rates (+0x13a0, +0x13a8, +0x13e8..+0x13f8) R152e8 (0).
+ * Returns the value. */
+uint32_t __stdcall sim1_service_reset(uint32_t value)
+{
+    SF64(0x13b0) = (double)((long double)value * SF64(0x740));
+    SF64(0x13a0) = sim1_x87(RF64(0x152e8));
+    SF64(0x13a8) = sim1_x87(RF64(0x152e8));
+    SF64(0x13e8) = sim1_x87(RF64(0x152e8));
+    SF64(0x13f0) = sim1_x87(RF64(0x152e8));
+    SF64(0x13f8) = sim1_x87(RF64(0x152e8));
+    return value;
+}
+
+/* 0x220096b8, Linkage +0x38: the wind's double (+0x640) in st0. */
+long double sim1_service_wind(void)
+{
+    return sim1_x87(SF64(0x640));
 }

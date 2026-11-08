@@ -180,8 +180,9 @@ make -f tools/options.mk options-breaks N=400    # its breaks -> 859, all caught
 make -f tools/options.mk options                 # the native Options.DLL (bin/options-diff/OPTIONS_ours.dll); main-dialogs compares it in the game
 make -f tools/simsui.mk simsuidiff-run N=2000    # SIMSUI.DLL, every routine -> 444 operations, 0 differ (~10 min)
 make -f tools/simsui.mk simsui-breaks N=400      # its breaks, per class (tools/simsui_breaks.py; run from a frozen copy)
-make -f tools/sim1.mk sim1rdiff-run             # SIM1 decompiled routines against retail over in-flight snapshots -> 130 routines, 260000 comparisons, 0 differ (~5 min)
-make -f tools/sim1.mk sim1r-breaks               # their breaks -> 113, all caught, 7 proven equivalent listed (tools/sim1r_breaks.py; run from a frozen copy)
+make -f tools/sim1.mk sim1rdiff-run             # SIM1 decompiled routines against retail over in-flight snapshots -> 186 operations, 372000 comparisons, 0 differ (~10 min)
+make -f tools/sim1.mk sim1r-breaks               # their breaks -> 882, all caught; proven equivalents listed in its docstring (tools/sim1r_breaks.py; run from a frozen copy)
+make -f tools/sim1.mk sim1native-flights        # the native SIM1.sim (make sim1, installed) against retail on the 74 scripted flights -> 74 match (~15 min)
 make -f tools/simsui.mk simsui                   # the native SIMSUI.DLL (bin/simsui-native/SIMSUI_ours.dll), installed beside FLTSIM98.EXE
 make main-dialogs                    # 47 menu commands and dialog steps in the real game (with Options' dialogs and tab pages), retail against ours -> same controls, 41 of 47 pictures identical, PASS (~30 min)
 make hostdiff-run N=20000            # HOST (id 1, FLTSIM98.EXE) slices 1-28, all 194 services, real files in bin/difftest/hostfs -> 0 differ (~11 min)

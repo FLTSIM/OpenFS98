@@ -144,6 +144,8 @@ static inline int32_t sim1_ftol(long double value)
 {
     uint16_t control, chop;
     int64_t result;
+    /* the value made first: GCC could otherwise compute it after the fldcw, rounding it by chop */
+    __asm__ volatile("" : "+t"(value));
     __asm__ volatile("fnstcw %0" : "=m"(control));
     chop = (uint16_t)(control | 0x0c00);
     __asm__ volatile("fldcw %0" : : "m"(chop));
@@ -159,6 +161,20 @@ static inline long double sim1_cipow(long double base, long double exponent)
     long double result;
     __asm__ volatile("call *%3" : "=t"(result) : "0"(exponent), "u"(base), "m"(sim1_crt_cipow)
                      : "st(1)", "eax", "ecx", "edx", "memory");
+    return result;
+}
+/* _CIasin: the arcsine of st0, in st0 */
+static inline long double sim1_ciasin(long double value)
+{
+    long double result;
+    __asm__ volatile("call *%2" : "=t"(result) : "0"(value), "m"(sim1_crt_ciasin) : "eax", "ecx", "edx", "memory");
+    return result;
+}
+/* _CIacos: the arccosine of st0, in st0 */
+static inline long double sim1_ciacos(long double value)
+{
+    long double result;
+    __asm__ volatile("call *%2" : "=t"(result) : "0"(value), "m"(sim1_crt_ciacos) : "eax", "ecx", "edx", "memory");
     return result;
 }
 /* SIM1's own callbacks as CHAIN knows them (tick, frame, situation): the DLL's entries, or in

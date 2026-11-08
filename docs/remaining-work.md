@@ -6,7 +6,7 @@ binary now has a replacement: the 27 simulator modules in `Modules\` are in `MOD
 `ENGLISH_MODULES`; SIMSUI is in `SHARED_MODULES`; SIM1, the gauges and the MDLs have their own
 targets. `make install` puts them all in the game. Sizes are `.text` from the reference CD.
 Differences and gaps in the finished modules are in [open-differences.md](open-differences.md).
-Results updated through 2026-11-07; individual rows retain their acceptance dates.
+Results updated through 2026-11-08; individual rows retain their acceptance dates.
 
 ## Lifted, not decompiled
 
@@ -18,10 +18,11 @@ repository holds no readable source for this code. It matches retail and passes 
 for it, but it is not a decompilation: nobody can read or change it, and it cannot leave x86. Each
 is to be decompiled by the usual method (hand-written C, a differential harness, deliberate breaks),
 keeping the lifted build as a second oracle until the hand-written one replaces it.
+SIM1, the first, was replaced on 2026-11-08; three remain.
 
 | What | Lifted part | Generator | Hand-written already | Order |
 | --- | --- | --- | --- | --- |
-| `Sim/SIM1.sim` | AIR decoder, aircraft setup, tick/frame simulation: 190 routines, 17,836 instructions (most of 78,216 bytes) | `tools/gen_sim1_lift.py` | six services and the state lifecycle (`src/sim1/sim1.c`, `sim1_state.inc`, `sim1_air.inc`); 130 of the 183 simulation routines so far (`src/sim1/sim1_small.c`, [sim1.md](modules/sim1.md#decompilation-started-2026-11-07)) | **1, started 2026-11-07** |
+| `Sim/SIM1.sim` | AIR decoder, aircraft setup, tick/frame simulation: 190 routines, 17,836 instructions (most of 78,216 bytes) | `tools/gen_sim1_lift.py` | six services and the state lifecycle (`src/sim1/sim1.c`, `sim1_state.inc`, `sim1_air.inc`); **all of it, done 2026-11-08**: all 186 routines decompiled and verified one by one (`src/sim1/sim1_small.c`, 186 operations, 0 differ, 882 breaks), built as the native SIM1.sim over retail's data (`src/sim1/sim1_native.c`, `make sim1`), 74 scripted flights frame for frame; installed, the lift kept only as an oracle ([sim1.md](modules/sim1.md#the-native-build)) | **1, done 2026-11-08** |
 | `Gauges/*.GAU` (120) | every gauge's code, 1,318 routines, 63,472 bytes | `tools/gen_gauges.py` | `src/gauges/warning.c`, `suction.c` | 2 |
 | Crash MDLs (3) | the three crash models, about 28 KB | `tools/gen_mdl_crash.py` | the eight normal models (`src/mdl/mdl_normal.c`) | 3 |
 | `FLTSIM98.EXE` | startup, window procedures, timer, message loop, shutdown: 402 routines, 13,081 instructions | `tools/gen_host_runtime.py` | all 194 services (`src/host/host.c`) | 4 |
@@ -36,7 +37,7 @@ deliberate one for x87 rounding, with a portable C version checked against it.
 | `English/Options.DLL` | 84,381 | **Done and installed** (2026-11-07): all 15 registrations and 13 tab pages verified (0 differ, 859 breaks caught, `tools/options.mk`); in `ENGLISH_MODULES`; `main-dialogs` opens 23 of its dialogs and pages, identical | [options.md](modules/options.md) |
 | `FLTSIM98.EXE` | 82,016 | **Executable built** (2026-11-06): `OPENFS98.EXE`, all 194 services decompiled; startup/windows/loop/shutdown lifted (see above); 74 matching scripted flights, runtime differential and UI/Direct3D acceptance. Retail remains available; native platform work remains | [host.md](modules/host.md) |
 | `SIMSUI.DLL` | 79,850 | **Done and installed** (2026-11-07): every routine transliterated, 444 operations verified (0 differ, `tools/simsui.mk`), deliberate breaks per class; native DLL with all 540 exports at retail's ordinals; in `SHARED_MODULES`, installed beside `FLTSIM98.EXE`; `main-dialogs` with it: same controls, 41 of 47 pictures identical (as before) | [simsui.md](modules/simsui.md) |
-| `Sim/SIM1.sim` | 78,216 | **Lifted** (see above); installed 2026-11-06: complete services, AIR decoder, aircraft setup, state lifecycle and simulation callbacks. 36,432 real decoder comparisons, 288 direct setup comparisons, ten new caught defects and 74 matching scripted flights with per-pass physics state. Included in shared build/install/revert; current ABI/x87 implementation is x86 | [sim1.md](modules/sim1.md) |
+| `Sim/SIM1.sim` | 78,216 | **Decompiled and installed** (2026-11-08): every routine hand-written C (`src/sim1/sim1_small.c`), 186 operations against retail over in-flight snapshots (0 differ, 882 breaks); the native DLL over retail's data matches retail on all 74 scripted flights, numeric state and frames. The lifted build (installed 2026-11-06) stays as a second oracle (`tools/stage_sim1.py --lifted`). x87 and the 32-bit ABI are still assumed, as for every module | [sim1.md](modules/sim1.md) |
 | `Gauges/*.GAU` (120) | 63,472 | **All 120 lifted** (see above), included in build/install/revert; standalone callback/data/resource/FP, PANELS and frame comparisons | [gauges.md](modules/gauges.md) |
 | `English/Flights.DLL` | 51,122 | **Installed** 2026-11-02; used in play by `make flights-play` 2026-11-03 | [flights.md](modules/flights.md) |
 | `English/Sim.DLL` | 33,239 | **Installed** 2026-11-02 | [sim.md](modules/sim.md) |
@@ -102,8 +103,8 @@ to `orig/Aircraft/` (2026-11-06).
 2. **Options: done and installed 2026-11-07.** Not reached in play: the analysis graphs, Save
    video and the video messages, and using controls beyond OK and Cancel
    ([open-differences.md](open-differences.md#not-yet-tested)).
-3. **SIM1 and the MDLs built 2026-11-06** (SIM1's simulation and the crash models lifted). Both are included in shared
-   build/install/revert. Their current x86 ABI/FP paths still need native-port work.
+3. **SIM1 decompiled and installed 2026-11-08** (it was lifted 2026-11-06); **the MDLs built 2026-11-06** (the crash
+   models still lifted). Both are included in shared build/install/revert.
 4. **SIMSUI: done and installed 2026-11-07.** All 540 exports; the English dialogs, retail's and ours, run on it in `main-dialogs`.
 5. **Gauges completed independently of Options.** All 120 are in the shared build.
 6. **Host executable built 2026-11-06** (startup and windows lifted). Build/run and verification are in [host.md](modules/host.md); native platform replacement remains.

@@ -559,7 +559,7 @@ the other modules used. The lifted build stays installed, and serves as a second
 the hand-written one has every routine and passes the same game acceptance.
 
 **The routines and their contracts.** `tools/gen_sim1_tables.py` writes
-`src/sim1/sim1_tables.inc` from the CD's SIM1 and the retail modules it calls: 183 routines
+`src/sim1/sim1_tables.inc` from the CD's SIM1 and the retail modules it calls: 186 routines
 (the Linkage entries, every call target, code addresses held as data) with the bytes each pops,
 and 35 module services with what each pops. Much of SIM1 is old hand-written assembly that
 passes values in registers (edi holding GLOBAL, esi a table, ax a 16-bit position) and leaves
@@ -608,31 +608,96 @@ not library functions; comparisons use the `X87_C0`/`X87_C3`/`X87_C0C3` macros, 
 retail's `fnstsw`/`test ah` sequences mean, NaN included; an adapter passes a double argument
 by its bits, since loading it on the x87 could raise flags or quiet a NaN retail never touches.
 
-**Progress (2026-11-07).** `src/sim1/sim1_small.c`: 130 of the 183 routines (state resets, the
+**Progress (2026-11-08).** `src/sim1/sim1_small.c` has all 186 routines (state resets, the
 16-bit and two-dimensional table interpolation of the hand-written flight model, integer and
 48-bit fixed-point helpers, the parts' forces and moments, the control surfaces and their
 weighted inputs, the brakes' hold, the heading hold's filter, the stall warning, the autopilot's
 pitch schedule, the gear's model state, a contact's spring rise, the autopilot's holds, coupler and
 autothrottle, the air data, the attitude matrix, the parts' winds, slips and side forces, the
-structural limits, the inertias, the quaternion, the pitching moment, the propeller, the
-aircraft setup (Linkage +0x1c), deinit (Linkage +0x08), the autopilot's course, altitude
-and flare, the carburettor, the rotor's mixing). 2,000 scenarios, 260,000 comparisons, 0 differ. Deliberate breaks: `tools/sim1r_breaks.py` (run it from a frozen copy;
-`ONLY=` picks breaks): 113, all caught; seven more left out as proven equivalent, listed in its
-docstring. Operation shapers in
-`sim1r_operations.inc` steer fixtures onto the edges a flight rarely reaches (equalities in
-compares, unsigned high bits, special doubles, list terminators). Retail bug
-SIM1-SCALE-DISCARDED is registered.
+structural limits, the inertias, the quaternion, the pitching, rolling and yawing moments, the
+propeller and its governor, the aircraft setup (Linkage +0x1c), init and deinit (Linkage +0x04,
++0x08), the six other Linkage services (+0x18, +0x28..+0x38; `sim1.c` has the other agent's asm
+versions), the situation's save, restore and startup, the three CHAIN callbacks (the tick, list
+1; the engines' frame, list 5; the situation messages, list 0x14), the AIR file's loading and
+decoding, the autopilot's course, altitude and flare, the carburettor, the rotor's mixing and
+forces, the body accelerations, the contact points' ground test and stiffness, the ground's
+roughness, a rate limiter, an angle follower, the integration step, the flaps, spoilers and
+landing gear, the air-relative motion, the engines', ground and autopilot passes and the
+autopilot's entry, the helicopter's rotor terms, blades, tail rotor, power and frame, the jet
+and piston engines and the jets' atmosphere, the controls' pass, the attitude's quaternion
+step, the simulation step and the tick's substeps). `make -f tools/sim1.mk sim1rdiff-run`: 186
+operations, one per routine (the two CHAIN wrappers 0x22001020 and 0x22001040 run their
+routines' C), 2,000 scenarios each, 372,000 comparisons, 0 differ. Deliberate breaks: `tools/sim1r_breaks.py` (run
+it from a frozen copy; `ONLY=` picks breaks): 882, each caught when added; the ones left out
+as proven equivalent (a few only equivalent in practice, one unreachable through its caller) are
+listed with the reasons in its docstring. Operation shapers in `sim1r_operations.inc` steer
+fixtures onto the edges a flight rarely reaches (equalities in compares, unsigned high bits,
+special doubles and signed zeros, list terminators, the tick's cuts at 0x420, 0x800 and 0x1000
+ticks). Retail bugs SIM1-SCALE-DISCARDED, SIM1-GOVERNOR-RPM, SIM1-AUTOTHROTTLE-ENGINES,
+SIM1-GEAR-HORN-ENGINES (the last three suspected) and SIM1-SLEW-HEIGHT-EAX are registered;
+SIM1-AIR-FRAME-OVERRUN is registered as fixed, not kept. The routine table had stopped at
+0x22013340, taking the CRT's start for SIM1's end; `gen_sim1_tables.py`'s `CRT_START` is now
+0x22014160, which added 0x22013340, 0x220135f0 and 0x22013b30 (the helicopter's frame, power and
+tail rotor).
 
 Lessons so far: GCC merges or moves stores past loads, which changes where a wild pointer
 faults, so where retail stores before it reads the C says so (a compiler barrier in
-`sim1_height`); `xor r, r`, `fnstsw` and 16-bit partial writes needed care in the contract
+`sim1_height`); GCC folds `-x + y` into `y - x`, which keeps a NaN x's sign where retail's
+`fchs` flips it, so a retail negation is `sim1_fchs`, placed where retail places it; and GCC drops identities such as a multiply by a constant 1.0, which are exact only at full
+precision: the game runs the x87 at 24 bits (Direct3D sets it; snapshots carry the control word), where that
+multiply rounds, so such a constant goes in opaque (`sim1_x87(1.0)`); `sim1_ftol` pins its value into st0
+before switching to chop rounding, since GCC may otherwise compute the value after the `fldcw` and
+round it toward zero (caught in the AIR decoder's contact ratios at 24-bit precision); where a signalling NaN in memory
+meets a NaN on the stack, retail's memory-operand `fmul` returns the stack's while GCC may have
+loaded and quieted the operand first, so the larger significand wins: the game never holds a
+signalling NaN in memory, so sim1rdiff counts such a difference (`nan_collisions`, only in a
+scenario whose perturbation planted one, only between quiet NaNs) instead of failing it; a
+register's wild value is kept in the upper half of the address space, since a write through one
+into the harness's own memory (which neither side resets) made retail's run change ours; a
+break for an edge one scenario in a thousand reaches names its scenario count and routine; a
+shaper that points a register into .data gives the image's address (BASE + DATA_RVA + offset),
+not the fixture buffer's, since the fixture is copied into the image and back around each run; `xor r, r`, `fnstsw` and 16-bit partial writes needed care in the contract
 analysis, and each over-approximation there showed up as a register a routine "had" to leave.
 
-**Open.** 53 routines to go, the biggest the AIR decoder (0x2200af90, 19 KB, a 32-case switch),
-0x22007ef1 (2.8 KB) and the simulation entries' trees. 0x2200a7fe is the tail of deinit (0x220010a0, reached by a jmp) and goes with it. 0x2200a40e
+### The native build
+
+`make sim1` (`make -f tools/sim1.mk sim1-native`) builds `bin/sim1-native/SIM1_ours.sim` from
+`src/sim1/sim1_small.c` and `src/sim1/sim1_native.c`; `make sim1-install` installs it
+(`tools/stage_sim1.py`; `--lifted` installs the lifted build instead, `--retail` the CD's). The
+image is retail's: `sim1_native.c` lays out the ImportTable, the Linkage and retail's `.data`
+bytes as one 0x43f8-byte block, as retail's `.data` is, and points `sim1_base` at a copy of
+retail's `.rdata`, so every `SF64`/`RF64` offset is retail's. `tools/gen_sim1_native.py` takes
+those bytes and the resources from the CD's SIM1 into `bin/sim1-native`, and checks retail's
+relocations: the only pointers in `.data` are the Linkage's, and `.rdata` has none, so nothing
+else needs relocating. MSVCRT's `_CIpow`, `_CIacos` and `_CIasin` are found at attach;
+`_ftol` is `sim1_ftol`. Three Linkage entries go through small thunks that keep the caller's eax,
+which C cannot express: +0x18 (eax untouched), +0x28 (only ax set) and +0x38 (eax untouched, the
+result in st0). CHAIN registers the C functions themselves.
+
+Its acceptance is the lifted build's: `make -f tools/sim1.mk sim1native-flights`, the 74
+scripted flights of `tools/fly_scripts.py`, retail SIM1 twice against ours, 1,200 passes each,
+compared frame for frame and on SIM1's numeric state every pass: **74 match, 0 differ** (the first
+build, 2026-11-08; STGEORGE alone matched first). With every other module ours too (`frames_many.sh` without
+`HG2D_FRAMES_ONLY`), the whole game matches retail on the same 74 flights, no faults on either side. The register check (`tools/reg_contracts.sh SIM1` with
+`HG2D_FRAMES_SIM1` set) needed FRAMELOCK to wrap SIM1's Linkage when the host loads it (it is
+loaded per aircraft, after FRAMELOCK's first wrap); it reports one leftover, no breaks: init
+(+0x04) leaves edx differently. Retail's init ends in the record words' `_ftol`, which leaves the
+conversion's high dword in edx; no caller of a Linkage entry reads edx (`sim1_tables.inc`), and
+the games run identical.
+
+**Open.** Nothing is lifted in the installed SIM1 now. The lifted build stays buildable
+(`make -f tools/sim1.mk sim1-complete`) as a second oracle. The remaining portability work is
+SIM1's x87 dependence (`sim1_fsin` and the other instruction helpers, the `X87_C*` comparisons,
+precision control) and the 32-bit layout of its image, which every module shares.
+0x2200a7fe is the tail of deinit (0x220010a0, reached by a jmp) and goes with it. 0x2200a40e
 (a hypotenuse), 0x2200a642 (ten to a power) and 0x22005293 (a clamp) have no references at all:
-dead code, left out. CHAIN passes a callback's edx
+dead code, left out; so are 0x220022a0 and 0x22002468 (16-bit attitude code after the rate
+limiter). 0x22002260 is init's tail (a jmp from 0x22001352) and 0x22004d80 the tail of
+0x22004260 (a jmp from 0x2200437a); each goes with its routine. CHAIN passes a callback's edx
 on to the next callback and returns its ecx/edx (chain.md); the contract treats SIM1's
 callbacks as leaving only the callee-saved registers, which the game-level register check
-(`tools/reg_contracts.sh` with FRAMELOCK_REGS) must confirm once the C replaces the lift.
-Until then the lifted build stays the installed one.
+(`tools/reg_contracts.sh` with FRAMELOCK_REGS) confirms (above). Harness notes from the last routines: the
+snapshots hold the game's own pointers (+0x1fd0's four engine records), so an operation that
+reaches code using them points them into the fixture first; a service called with words pushed
+over stack garbage (`sub esp,2; push dx`) is logged by its low words (UTIL +0x2c/+0x38, WINDOW
++0x2c, SOUND +0x28); and `SIM1R_EIP=1` prints where each fault is.

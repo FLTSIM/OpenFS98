@@ -29,6 +29,9 @@
  *   FRAMELOCK_HOLD     every this many passes, create "hold" beside the log and wait
  *                      until it is gone, so a screenshot of that frame can be taken:
  *                      Direct3D frames do not pass through the blits logged here
+ *   FRAMELOCK_SIM1_SNAPSHOT  a path, and FRAMELOCK_SIM1_EVERY n (default 50): every n passes once
+ *                      SIM1 is loaded, "S1SN", the pass, SIM1's whole .data (0x43f8) and GLOBAL
+ *                      (GLOBAL_SIZE), appended: real in-flight states for tools/difftest/sim1rdiff.c
  *   FRAMELOCK_GLOBAL   a path: GLOBAL's GLOBAL_SIZE bytes appended as each pass begins,
  *                      to find the first field two runs disagree on
  *   FRAMELOCK_SCRIPT   a file of "pass message wparam lparam" lines, hex, ascending,
@@ -72,6 +75,8 @@ static DWORD_PTR timer_user;
 static HANDLE log_handle = INVALID_HANDLE_VALUE;
 static HANDLE global_handle = INVALID_HANDLE_VALUE;
 static uint32_t sim1_states;
+static HANDLE snapshot_handle = INVALID_HANDLE_VALUE;
+static uint32_t snapshot_every = 50;
 static char log_dir[MAX_PATH];
 
 static struct { uint32_t pass, message, wparam, lparam; } script[MAX_SCRIPT];
@@ -501,6 +506,17 @@ static void main_loop_pass(void)
         }
         *at++ = '\n'; log_line(line, at);
     }
+    if (snapshot_handle != INVALID_HANDLE_VALUE && snapshot_every && passes % snapshot_every == 0) {
+        HMODULE module = GetModuleHandleA("SIM1.sim");
+        const uint8_t *image = module ? (const uint8_t *)GetProcAddress(module, "ImportTable") : 0;
+        if (image) {
+            DWORD wrote;
+            uint32_t head[2] = {0x4e533153u, passes};
+            WriteFile(snapshot_handle, head, sizeof head, &wrote, 0);
+            WriteFile(snapshot_handle, image, 0x43f8, &wrote, 0);
+            WriteFile(snapshot_handle, (const void *)ImportTable[0].link, GLOBAL_SIZE, &wrote, 0);
+        }
+    }
     if (global_handle != INVALID_HANDLE_VALUE) {
         DWORD wrote;
         WriteFile(global_handle, (const void *)ImportTable[0].link, GLOBAL_SIZE, &wrote, 0);
@@ -741,6 +757,9 @@ BOOL WINAPI DllMain(HINSTANCE inst, DWORD reason, LPVOID reserved)
         if (runtime)
             runtime->main_loop_pass = main_loop_pass;
         read_script();
+        snapshot_every = environment_number("FRAMELOCK_SIM1_EVERY", snapshot_every);
+        if (GetEnvironmentVariableA("FRAMELOCK_SIM1_SNAPSHOT", path, sizeof path))
+            snapshot_handle = CreateFileA(path, GENERIC_WRITE, FILE_SHARE_READ, 0, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, 0);
         if (GetEnvironmentVariableA("FRAMELOCK_GLOBAL", path, sizeof path))
             global_handle = CreateFileA(path, GENERIC_WRITE, FILE_SHARE_READ, 0, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, 0);
         AddVectoredExceptionHandler(1, log_fault);

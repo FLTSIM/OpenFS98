@@ -100,7 +100,7 @@ static void **s_fake_vtables[FAKE_VTABLES];
 static uint8_t s_virtual_pop[FAKE_VTABLES][128];
 /* the file a CFile (ARG_FILE) reads: a .BMP made for the scenario, maybe cut short or wrong */
 static uint8_t s_file[0x1400];
-static uint32_t s_file_size, s_file_at;
+static uint32_t s_file_size, s_file_at, s_file_start;
 static uint32_t s_pop_now;
 uint32_t s_harness_esp, s_operation_stack_top;
 static uint8_t *s_operation_stack;
@@ -600,7 +600,7 @@ static uint32_t argument(uint32_t kind)
         static const uint32_t ids[6] = {1, 2, 0x2711, 3, 4, 0x3e8};
         return codes[random % 8] << 16 | (random % 5 ? ids[(random >> 3) % 6] : (random >> 8) & 0xffff);
     }
-    case ARG_KEYCODE: return random % 2 ? 0x20 : random % 3 ? 0x0d + (random >> 4) % 0x20 : (random >> 8) & 0xff;
+    case ARG_KEYCODE: return random % 7 == 0 ? 9 : random % 2 ? 0x20 : random % 3 ? 0x0d + (random >> 4) % 0x20 : (random >> 8) & 0xff;
     case ARG_FONT: {    /* a CSimsFont in a block: its CFont (a block, handle there or not), flags, stops */
         uint8_t *font = s_fixture.blocks[(random % (BLOCKS / 4)) * 4];
         if ((random >> 26) % 6 == 0) return 0;      /* now and then none */
@@ -636,7 +636,7 @@ static uint32_t argument(uint32_t kind)
         uint8_t *item = s_fixture.blocks[((random >> 4) % (BLOCKS / 4)) * 4 + 1] + 0x200;
         static const int32_t ids[] = {-1, -2, 0, 1, 2, 5, (int32_t)0x80000000, 0x7fffffff};
         int32_t id = ids[(random >> 9) % 8], rect[4];
-        uint32_t state = (random >> 12) & 0x17, dc = random % 7 ? fixture_address(s_fixture.blocks[((random >> 15) % (BLOCKS / 4)) * 4 + 2]) : 0, at;
+        uint32_t state = (random >> 12) & 0x1f, dc = random % 7 ? fixture_address(s_fixture.blocks[((random >> 15) % (BLOCKS / 4)) * 4 + 2]) : 0, at;
         for (at = 0; at < 4; ++at) rect[at] = (int32_t)(next_random() % 60) - 4;
         memcpy(item + 8, &id, 4);
         memcpy(item + 0x10, &state, 4);
@@ -691,7 +691,7 @@ static __attribute__((noinline)) uint64_t run(void)
     s_rng = saved_rng;
     s_log_length = s_calls = s_heap_used = 0; s_logs[s_side][0] = 0;
     s_section_count = 0;
-    s_file_at = 0;
+    s_file_at = s_file_start;
     s_ftol_calls = 0;
     for (at = 0; at < count; ++at)
         if (CURRENT.kinds[at] == ARG_CSTRING) {    /* a CString by value: the model's, tabs and all */
@@ -724,8 +724,10 @@ static void cover(void)
     if (!want || !(comma = strchr(want, ','))) return;
     if (strlen(CURRENT.name) != (size_t)(comma - want) || strncmp(CURRENT.name, want, (size_t)(comma - want))) return;
     ++s_cover_runs;
-    if (getenv("SIMSUI_SHOW") && s_cover_runs <= 3) fprintf(stderr, "--- %s:\n%s", CURRENT.name, s_logs[0]);
-    if (strstr(s_logs[0], comma + 1)) ++s_cover_hits;
+    if (strstr(s_logs[0], comma + 1)) {
+        ++s_cover_hits;     /* SIMSUI_SHOW=1: the first three such logs of retail's */
+        if (getenv("SIMSUI_SHOW") && s_cover_hits <= 3) fprintf(stderr, "--- %s:\n%s", CURRENT.name, s_logs[0]);
+    }
 }
 static int compare(void)
 {

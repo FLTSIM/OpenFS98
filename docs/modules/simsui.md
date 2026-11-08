@@ -70,7 +70,13 @@ small accessors and plain controls.
 including the unexported CDIB class (`simsui_cdib.c`, the MFC samples' DIB, DYNCREATE but used by
 nothing) and the CRT entry. `make -f tools/simsui.mk simsuidiff-run`: 444 operations, every exported
 routine and every routine a vtable, message map or runtime class reaches, 2000 scenarios, 0 differ.
-Retail bugs SUI-1 to SUI-12 are registered in [retail-bugs.md](../retail-bugs.md).
+Retail bugs SUI-1 to SUI-12 are registered in [retail-bugs.md](../retail-bugs.md). Deliberate
+breaks (`tools/simsui_breaks.py`, one suite per source file; run from a frozen copy): the last
+suites, for the tab classes, Text, the shadow, HotKey/HotJoy, CDIB and CSimsDialog's OnActivate and
+OnCommand, are 119 breaks, all caught (one only at N=2000) but one proven equivalent, after the
+fixture was widened for the ten first missed (child windows enumerated through the callback, command
+ids, the tab strip's frame count, CString lengths, static styles, header sizes, a file read from
+part-way). The proven equivalents are listed in the script's docstring.
 
 ### The native DLL
 
@@ -93,5 +99,8 @@ static import from each library keeps retail's load order. Retail's resources (b
 block) are copied in. The entry transliterates the CRT's (`0x20483490`, `0x204833c0`: MFC's raw
 DllMain, the onexit table, `_initterm` over retail's initialiser table, DllMain).
 
-SIMSUI is a shared module (`SHARED_CANDIDATES`/`SHARED_MODULES` in the Makefile, installed as
-`SIMSUI.DLL` beside `FLTSIM98.EXE`; `make simsui-install`/`simsui-revert`).
+SIMSUI is a shared module (`SHARED_MODULES` in the Makefile since 2026-11-07, installed as
+`SIMSUI.DLL` beside `FLTSIM98.EXE` by `make install`; alone by `make simsui-install`/`simsui-revert`).
+`make main-dialogs` and `make flights-play` run ours on the "ours" side. With it, `main-dialogs`
+passes as before: 47 commands, the same controls and text, 41 of 47 pictures identical (the six
+others the clock, live previews and the crash's curve, as without it).

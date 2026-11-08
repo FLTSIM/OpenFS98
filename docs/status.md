@@ -1,7 +1,7 @@
 # Module status
 
 Moved out of the README: one row per module, with the evidence. Results are as
-of 2026-11-06; later work is in the per-module documents. What is still retail
+of 2026-11-07; later work is in the per-module documents. What is still retail
 is in [remaining-work.md](remaining-work.md), known gaps in
 [open-differences.md](open-differences.md).
 
@@ -27,6 +27,10 @@ shim; its 95 mentions contain 58 load records for 29 distinct gauge paths.
 | `FE` | 18 | 49,016 | **reimplemented, verified, and running in-game** — the grid conversions, assembly engine, compiled-C file services (20,000 whole-module scenarios) and the Scenery Library (20,000 scenarios through a World.DLL stand-in), zero differences — see [modules/fe.md](modules/fe.md) |
 | `WORLD` | `0x80000006` | 115,275 | **reimplemented and integrated at `English/World.DLL`** — all 19 registrations have native acceptance; real MAIN/FE/FACIL owner flows and both weather modes pass the installed-game UI runner — see [modules/world.md](modules/world.md) |
 | `MP_DIALOG` | `0x8000000a` | 25,401 | **complete and integrated at `English/MP_DIALOG.DLL`** — three registrations/seven pages; native UI/lifetime/exception acceptance, 89 negative comparisons, paired actual-owner session with peer removal and capacity/OK callbacks; private startup — see [modules/mpdialog.md](modules/mpdialog.md#completion-and-integration-2026-11-05) |
+| `English/Alerts.DLL`, `Help.DLL`, `Sim.DLL`, `Views.DLL` | dialogs | 7,649 / 10,657 / 33,239 / 13,090 | **reimplemented, verified and installed** (2026-11-02) — see [alerts.md](modules/alerts.md), [help.md](modules/help.md), [sim.md](modules/sim.md), [views.md](modules/views.md) |
+| `English/Flights.DLL` | dialogs | 51,122 | **reimplemented, verified and installed** (2026-11-02) — all 13 registrations; `make flights-play` uses them in play — see [modules/flights.md](modules/flights.md) |
+| `English/Options.DLL` | dialogs | 84,381 | **reimplemented, verified and installed** (2026-11-07) — 15 registrations and 13 tab pages, 9.86 million comparisons, 859 breaks caught — see [modules/options.md](modules/options.md) |
+| `SIMSUI.DLL` | shared | 79,850 | **reimplemented, verified and installed** (2026-11-07) — every routine, 444 operations, all 540 exports at retail's ordinals — see [modules/simsui.md](modules/simsui.md) |
 | `LANDME` | 26 | 4,094 | **reimplemented, verified, and running in-game** — nearest-runway selection and all eleven nonzero landing-guidance phases; 20,000 whole-module scenarios over retail FE and real scenery, zero differences — see [modules/landme.md](modules/landme.md) |
 | `BOOSTER` | 34 | 8,024 | **reimplemented, verified, and running in-game** — the performance boosters: CD scenery copied to a disk cache on a worker thread, nearest first, and evicted out of reach; 20,000 whole-module scenarios, zero differences — see [modules/booster.md](modules/booster.md) |
 | `DEMO` | 7 | 16,864 | **reimplemented, verified, and running in-game** — flight videos (record and play), instant replay and the four dialogs' callbacks; 20,000 whole-module scenarios, zero differences — see [modules/demo.md](modules/demo.md) |
@@ -39,11 +43,11 @@ shim; its 95 mentions contain 58 load records for 29 distinct gauge paths.
 | `ANALYSIS` | 29 | 8,086 | **reimplemented, verified, and running in-game** — landing and manoeuvre analysis and course tracking: the samples, the trail's display list, the three dialogs; 20,000 whole-module scenarios, zero differences — see [modules/analysis.md](modules/analysis.md) |
 | `CONTROLS` | 16 | 48,406 | **reimplemented, verified, and running in-game** — the keyboard, joysticks and mouse: 342 command handlers, the joystick poll and configs, the key bindings, force feedback over DirectInput 5 and the key-assignment dialog's callbacks; 20,000 whole-module scenarios, zero differences — see [modules/controls.md](modules/controls.md) |
 | `PANELS` | 15 | 50,038 | **reimplemented, verified, and running in-game** — the instrument panel and the gauges' runtime: bitmap scalers, eight element types, the gauge variables; 3,000 whole-module scenarios through the CD's gauges and 20,000 cases per image routine, zero differences — see [modules/panels.md](modules/panels.md) |
-| `Sim/SIM1.sim` | 25 | 78,216 | **reimplemented, verified and installed** — services, AIR decoding, aircraft setup, state lifecycle and tick/frame simulation; 36,432 decoder comparisons, 288 direct setup comparisons, ten caught simulation/ABI defects and all 74 scripted flights matching numeric state and rendered frames. Included in build/install/revert; x86 ABI/x87 port work remains — see [modules/sim1.md](modules/sim1.md) |
-| `Gauges/*.GAU` | 19 | 63,472 total | **120 of 120 rebuilt from C:** all exposed callbacks, data and bitmap resources; 26,687,688 standalone vectors at preferred addresses and under forced relocation, 348 mutations caught, 1,000 strict PANELS scenarios and 74/74 matching flight comparisons. Included in build/install/revert — see [modules/gauges.md](modules/gauges.md) |
+| `Sim/SIM1.sim` | 25 | 78,216 | **lifted, not yet decompiled** — six services and the state lifecycle are hand-written C; the AIR decoder, aircraft setup and the tick/frame simulation (190 routines, 17,836 instructions) are machine-translated by `tools/gen_sim1_lift.py` into register-emulating C generated at build time. Matches retail: 36,432 decoder comparisons, 288 setup comparisons, ten caught defects, all 74 scripted flights matching numeric state and frames. Installed. Real decompilation started 2026-11-07 — see [modules/sim1.md](modules/sim1.md) |
+| `Gauges/*.GAU` | 19 | 63,472 total | **lifted, not yet decompiled** — all 120 rebuilt by `tools/gen_gauges.py`, a machine translation of retail's instructions into register-emulating C generated at build time (only `warning.c` and `suction.c` are hand-written). Matches retail: 26,687,688 standalone vectors, 348 mutations caught, 1,000 PANELS scenarios, 74/74 flights. Installed — see [modules/gauges.md](modules/gauges.md) |
 | `HG2D` | 13 | 389,734 | **reimplemented, verified, and in `MODULES`** — all 40 public services and 18 GPU dispatch cells; 59 suites pass, 40.64 million large-run operations match retail, and 247 new mutations are caught; in private copies of the game, eight flights match retail frame for frame on the software renderer and six on Direct3D (`tools/hg2d_frames.sh`); not yet flown by hand, non-x86 validation remains — see [modules/hg2d.md](modules/hg2d.md#in-the-game) |
 | `UTIL` | 20 | 11,062 | **reimplemented, verified, and running in-game** — all 47 services; 19 seen called in a hands-on session, the modal alert among them — see [modules/util.md](modules/util.md) |
-| `FLTSIM98.EXE` | 1 (host) | 82,016 | **Executable implemented as `OPENFS98.EXE`** — 194 verified services plus startup/windows/loop/shutdown; 60,000 runtime comparisons, four caught mutations, 74 matching scripted flights and UI/Direct3D acceptance — see [modules/host.md](modules/host.md) |
+| `FLTSIM98.EXE` | 1 (host) | 82,016 | **194 services decompiled; the executable's startup, window procedures, loop and shutdown lifted** — `OPENFS98.EXE` runs the hand-written services with 402 machine-translated routines from `tools/gen_host_runtime.py`; 60,000 runtime comparisons, four caught mutations, 74 matching scripted flights — see [modules/host.md](modules/host.md) |
 | `MAIN` | 3 | 119,648 | **complete** — slices 1 to 44 verified, booting and every menu command opening in the game; in `MODULES`, not yet flown by hand — see [modules/main.md](modules/main.md) |
 | `G3D` | 14 | 92,518 | **reimplemented, verified, and running in-game** — the whole bytecode machine, its depth queue, services and CHAIN callbacks, 20,000 `g3ddiff` scenarios, 0 differ; a portable C mesh compiler checked against retail's instructions — see [modules/g3d.md](modules/g3d.md) |
 | `MULTIP` | 35 | 43,318 | **done** — whole-module acceptance and startup smoke passed: all eleven public entries, workers, protocols, CHAIN callbacks and dialogs, 43 suites of 20,000 scenarios plus eight dispatch-family reruns, 0 differ, all 456 mutations caught; in `MODULES`, installed as `MULTIPLAYER.DLL` — see [modules/multip.md](modules/multip.md) |
@@ -141,9 +145,11 @@ its depth queue, services and CHAIN callbacks, 20,000 `g3ddiff` scenarios
 with zero differences, and a portable C mesh compiler checked against
 retail's instructions (see [modules/g3d.md](modules/g3d.md)).
 
-**Options is done and installed (2026-11-07)**; next: SIMSUI. The whole game, all retail against all ours, matches
-frame for frame on all 74 flights with nobody flying, and flown by script on eight flights, on
-both renderers. Alerts, Help, Sim, Views and Flights were installed on 2026-11-02, Options on 2026-11-07. What is still open
-is listed in [open-differences.md](open-differences.md). All 120 gauges and all eleven aircraft models are now rebuilt.
-SIM1 is installed, with all 74 scripted flights matching its numeric state and frames.
-The host executable is implemented and verified; SIMSUI and native platform replacement remain: [remaining-work.md](remaining-work.md).
+**Every binary has a replacement as of 2026-11-07**, and the whole game, all retail against all
+ours, matches frame for frame on all 74 flights. Not all of it is decompiled: SIM1's simulation,
+the 120 gauges, the three crash models and the host executable's startup and window code are
+*lifted* (machine-translated instruction by instruction into C that emulates the x86 registers and
+flags, generated at build time from the CD's binaries). They behave as retail but are not readable
+source and cannot be ported off x86; decompiling them is the remaining work
+([remaining-work.md](remaining-work.md)). What is still open is listed in
+[open-differences.md](open-differences.md).

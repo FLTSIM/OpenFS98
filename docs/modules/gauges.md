@@ -1,5 +1,11 @@
 # Gauges
 
+
+> **Lifted, not decompiled (2026-11-07).** All gauge code but `warning.c` and `suction.c` is machine-translated from retail's
+> instructions into C that emulates the x86 registers and flags, generated into ignored `bin/` at
+> build time. It matches retail but is not readable source and cannot leave x86. Decompiling it is
+> listed in [remaining-work.md](../remaining-work.md#lifted-not-decompiled).
+
 All **120** reference-CD `.GAU` modules are rebuilt from C. `make` builds them
 and `make install` installs them alongside the other replacements. The outputs
 are `bin/gauges-all/Gauges/`, using the exact installed filenames from

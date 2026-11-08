@@ -1,5 +1,12 @@
 # SIM1.sim — module id 25
 
+
+> **Lifted, not decompiled (2026-11-07).** Everything but the six services and the state lifecycle (the AIR decoder, aircraft setup and the simulation callbacks) is machine-translated from retail's
+> instructions into C that emulates the x86 registers and flags, generated into ignored `bin/` at
+> build time. It matches retail but is not readable source and cannot leave x86. Decompiling it is
+> listed in [remaining-work.md](../remaining-work.md#lifted-not-decompiled), and under way: see
+> [Decompilation](#decompilation-started-2026-11-07) at the end of this document.
+
 The flight model named by the stock aircraft's `.AIR` files. ACONTAIN reads
 chunk `0x100`, loads `Sim\<name>.SIM` through host `+0x26c`, and publishes its
 Linkage at GLOBAL `+0x11d4`. This is simulator code outside `Modules\`, not
@@ -544,3 +551,88 @@ loaded**. The log is `bin/sim1-diff/install-smoke/result.log`.
 These are short scripted trajectories, not long flights or landing acceptance.
 Direct3D-specific rendering and unmasked FP exceptions are not covered by this
 SIM1 run. The module's renderer-independent state is observed directly.
+
+## Decompilation (started 2026-11-07)
+
+The lifted simulation is being replaced routine by routine with hand-written C, by the method
+the other modules used. The lifted build stays installed, and serves as a second oracle, until
+the hand-written one has every routine and passes the same game acceptance.
+
+**The routines and their contracts.** `tools/gen_sim1_tables.py` writes
+`src/sim1/sim1_tables.inc` from the CD's SIM1 and the retail modules it calls: 183 routines
+(the Linkage entries, every call target, code addresses held as data) with the bytes each pops,
+and 35 module services with what each pops. Much of SIM1 is old hand-written assembly that
+passes values in registers (edi holding GLOBAL, esi a table, ax a 16-bit position) and leaves
+results in them, so a routine's contract is what its **callers** read: the generator walks
+every path from each call site (through jumps and switch tables) until each register is read or
+written, and lists the registers read, whether the flags are tested and whether the x87
+condition codes are read (`fnstsw` before a compare of the caller's own). What reaches a `ret`
+counts for the caller's own callers, to a fixed point. Partial writes (`mov dx, ...`) count as
+writes of the low part only. No routine's callers read the condition codes. Linkage entries leave
+eax and the callee-saved registers; CHAIN callbacks only the callee-saved (CHAIN sets eax before
+each and ignores what it returns), which is what took 0x22008a77's eax, the x87 status word, off
+its contract.
+
+**The fixtures are real flights.** FRAMELOCK can now write SIM1's whole `.data` and GLOBAL every
+n passes (`FRAMELOCK_SIM1_SNAPSHOT`, `HG2D_FRAMES_SNAPSHOT=n` in `tools/hg2d_frames.sh`). Eight
+retail flights, one per stock aircraft type (STGEORGE, BELLSFR, LEARLON, EXTRARIO, CESSROME, SAIL1,
+KENNEDY, PARIS), 1,200 passes of the `controls` script, a snapshot every 40: 240 states in
+`bin/sim1-diff/snapshots.bin` (the two retail runs of each flight are identical; `make -f tools/sim1.mk sim1-snapshots` remakes it, `tools/sim1_snapshots.sh`). The floating
+point then runs on values the flight model meets, which random doubles would not give.
+
+**The harness**, `tools/difftest/sim1rdiff.c` (`make -f tools/sim1.mk sim1rdiff-run`): retail
+SIM1 mapped at its base, its MSVCRT imports real, every module service a logging stub that pops
+what the retail service pops (HOST's memmove modelled). Each scenario takes a snapshot and
+perturbs it (a few doubles nudged, negated, zeroed or scaled, a few bytes changed; one scenario
+in four scribbles over many words too, for fields a flight leaves zero). Each operation runs
+retail then ours from the same fixture and entry registers, x87 precision control 53, 64 or 24
+bits. Compared: `.data`, GLOBAL, the heap and blocks, the service log, the registers the callers
+read, and the x87 stack (depth and every value; the condition codes only where callers read
+them). The sticky exception flags are not compared: all are masked, SIM1 tests only C0/C3 of the
+status word, and the compiler may load an operand early (a denormal raises DE) or compare with
+`fcomi`. UTIL's pure arithmetic (sincos, angle from sine, atan2,
+longitude to metres) runs OpenFS98's own verified UTIL (`bin/UTIL.DLL`) inside the stubs, so the
+values SIM1 gets back are real; MAIN's nav read-out (+0x78) writes a scripted word; HOST's allocator and free work on the
+fixture's heap; CONTROLS' force feedback (+0x5c) answers its three axes and logs the forces it
+is given; MAIN's record write (+0x60) logs a hash of the record. Retail's
+integer-divide faults are repaired as the host's filter repairs them in the
+game; ours does the same arithmetic in C (`sim1_div32`, `sim1_idiv32`, `sim1_div16`,
+`sim1_idiv16` in `src/sim1/sim1_internal.h`, without the fault). Faults are compared coarsely
+(code, and whether the address was low, in the fixture or wild).
+
+Each operation's adapter in `tools/difftest/sim1r_operations.inc` calls the C as a C caller will
+and sets what it returns into the registers retail leaves it in. Rules the first slices taught:
+copies through the x87 quiet signalling NaNs, so a C copy of a double goes through `sim1_x87`;
+`fsin`, `fcos`, `fsqrt` and `fistp` are the instructions themselves (`sim1_fsin` and the others),
+not library functions; comparisons use the `X87_C0`/`X87_C3`/`X87_C0C3` macros, which are what
+retail's `fnstsw`/`test ah` sequences mean, NaN included; an adapter passes a double argument
+by its bits, since loading it on the x87 could raise flags or quiet a NaN retail never touches.
+
+**Progress (2026-11-07).** `src/sim1/sim1_small.c`: 130 of the 183 routines (state resets, the
+16-bit and two-dimensional table interpolation of the hand-written flight model, integer and
+48-bit fixed-point helpers, the parts' forces and moments, the control surfaces and their
+weighted inputs, the brakes' hold, the heading hold's filter, the stall warning, the autopilot's
+pitch schedule, the gear's model state, a contact's spring rise, the autopilot's holds, coupler and
+autothrottle, the air data, the attitude matrix, the parts' winds, slips and side forces, the
+structural limits, the inertias, the quaternion, the pitching moment, the propeller, the
+aircraft setup (Linkage +0x1c), deinit (Linkage +0x08), the autopilot's course, altitude
+and flare, the carburettor, the rotor's mixing). 2,000 scenarios, 260,000 comparisons, 0 differ. Deliberate breaks: `tools/sim1r_breaks.py` (run it from a frozen copy;
+`ONLY=` picks breaks): 113, all caught; seven more left out as proven equivalent, listed in its
+docstring. Operation shapers in
+`sim1r_operations.inc` steer fixtures onto the edges a flight rarely reaches (equalities in
+compares, unsigned high bits, special doubles, list terminators). Retail bug
+SIM1-SCALE-DISCARDED is registered.
+
+Lessons so far: GCC merges or moves stores past loads, which changes where a wild pointer
+faults, so where retail stores before it reads the C says so (a compiler barrier in
+`sim1_height`); `xor r, r`, `fnstsw` and 16-bit partial writes needed care in the contract
+analysis, and each over-approximation there showed up as a register a routine "had" to leave.
+
+**Open.** 53 routines to go, the biggest the AIR decoder (0x2200af90, 19 KB, a 32-case switch),
+0x22007ef1 (2.8 KB) and the simulation entries' trees. 0x2200a7fe is the tail of deinit (0x220010a0, reached by a jmp) and goes with it. 0x2200a40e
+(a hypotenuse), 0x2200a642 (ten to a power) and 0x22005293 (a clamp) have no references at all:
+dead code, left out. CHAIN passes a callback's edx
+on to the next callback and returns its ecx/edx (chain.md); the contract treats SIM1's
+callbacks as leaving only the callee-saved registers, which the game-level register check
+(`tools/reg_contracts.sh` with FRAMELOCK_REGS) must confirm once the C replaces the lift.
+Until then the lifted build stays the installed one.

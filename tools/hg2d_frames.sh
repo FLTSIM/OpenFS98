@@ -34,6 +34,8 @@
 # HG2D_FRAMES_EXPECT_MDL additionally requires that specific model to load.
 # HG2D_FRAMES_HOST selects a rebuilt executable for ours; baselines use retail.
 # Its observation export provides the runtime clock, imports and HWND.
+# HG2D_FRAMES_SNAPSHOT=n writes SIM1's .data and GLOBAL every n passes to <tag>/sim1.snap
+# (FRAMELOCK_SIM1_SNAPSHOT), the fixtures of tools/difftest/sim1rdiff.c.
 # HG2D_FRAMES_SIM1 selects a rebuilt SIM1.sim for the private ours copy;
 # both baseline copies use orig/Sim/SIM1.sim. Its load is required.
 # HG2D_FRAMES_CRASH_TEST=1 enables crash detection without a modal graph in
@@ -196,6 +198,8 @@ run() {     # tag hg2d
       FRAMELOCK_DUMP=${HG2D_FRAMES_DUMP:-0} FRAMELOCK_DUMP_AT=${HG2D_FRAMES_DUMP_AT:-0} \
       FRAMELOCK_HOLD=${HG2D_FRAMES_HOLD:-0} \
       FRAMELOCK_SIM1=${HG2D_FRAMES_SIM1:+1} \
+      FRAMELOCK_SIM1_SNAPSHOT=${HG2D_FRAMES_SNAPSHOT:+$(winepath -w "$out/$tag/sim1.snap")} \
+      FRAMELOCK_SIM1_EVERY=${HG2D_FRAMES_SNAPSHOT:-50} \
       FRAMELOCK_SCRIPT=${script:+$(winepath -w "$script")} \
       WINEDEBUG=$debug \
       timeout "${HG2D_FRAMES_TIMEOUT:-600}" wine FLTSIM98.EXE "/STN:$flight" >"$out/$tag/game.log" 2>&1 )

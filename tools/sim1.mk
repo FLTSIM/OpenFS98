@@ -123,3 +123,26 @@ sim1diff-run: sim1-partial
 
 sim1-breaks: sim1-partial
 	python3 -B tools/sim1_breaks.py
+
+# The decompilation: the hand-written routines against retail's, one at a time
+# (tools/difftest/sim1rdiff.c over in-flight snapshots; docs/modules/sim1.md "Decompilation").
+SIM1R_SOURCES := src/sim1/sim1_small.c
+SIM1R_HEADERS := src/sim1/sim1_internal.h src/sim1/sim1_routines.h src/sim1/sim1_tables.inc
+SIM1R_CFLAGS := -std=c99 -O2 -Wall -Wextra -Werror -fno-strict-aliasing -fno-math-errno \
+                -fno-tree-loop-distribute-patterns -fno-tree-vectorize
+SIM1R_N ?= 2000
+SIM1R_SEED ?= 0x51e1
+.PHONY: sim1rdiff sim1rdiff-run sim1-tables sim1r-breaks sim1-snapshots
+sim1-snapshots: sim1-complete sim1-frame-observer
+	bash tools/sim1_snapshots.sh
+sim1-tables: src/sim1/sim1_tables.inc
+src/sim1/sim1_tables.inc: tools/gen_sim1_tables.py tools/dialogmap.py orig/Sim/SIM1.sim
+	python3 -B tools/gen_sim1_tables.py
+$(SIM1_DIR)/sim1rdiff.exe: tools/difftest/sim1rdiff.c tools/difftest/sim1r_operations.inc $(SIM1R_SOURCES) $(SIM1R_HEADERS)
+	@mkdir -p $(SIM1_DIR)
+	$(SIM1_CC) $(SIM1R_CFLAGS) -Wl,--image-base=0x400000 -o $@ tools/difftest/sim1rdiff.c $(SIM1R_SOURCES)
+sim1rdiff: $(SIM1_DIR)/sim1rdiff.exe
+sim1rdiff-run: sim1rdiff
+	WINEDEBUG=-all timeout 7200 wine $(SIM1_DIR)/sim1rdiff.exe $(SIM1R_N) $(SIM1R_SEED)
+sim1r-breaks: sim1rdiff
+	python3 -B tools/sim1r_breaks.py

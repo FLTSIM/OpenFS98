@@ -1,5 +1,11 @@
 # Aircraft MDLs
 
+
+> **Lifted, not decompiled (2026-11-07).** The three crash models' code (the eight normal models are hand-written) is machine-translated from retail's
+> instructions into C that emulates the x86 registers and flags, generated into ignored `bin/` at
+> build time. It matches retail but is not readable source and cannot leave x86. Decompiling it is
+> listed in [remaining-work.md](../remaining-work.md#lifted-not-decompiled).
+
 All eleven MDLs are built as drop-in DLLs, 2026-11-06. Normal callbacks and
 crash lifecycle, simulation and drawing operations are implemented in C.
 `python3 tools/mdl_survey.py` emits the measured boundaries and

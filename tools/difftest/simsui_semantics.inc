@@ -441,6 +441,28 @@ static int semantics(uint32_t index, uint32_t ecx, uint32_t *arguments, uint64_t
         if ((int32_t)arguments[1] == -16) { *result = 0x50000000u | (value & 3) << 16 | ((value >> 8) & 0xff); return 1; }
         if ((int32_t)arguments[1] == -21) { *result = 0x5000 + ((value >> 2) % 4) * 0x10; return 1; }
         return 0;
+    case SIMSUI_IMPORT_MFC_3797: {             /* GetStyle: a static's alignment (left, centre, right, no wrap) often */
+        static const uint32_t kinds[5] = {0, 1, 2, 0xc, 0xb};
+        *result = (value & ~0x1fu) | (value % 4 ? kinds[(value >> 2) % 5] : value & 0x1f);
+        return 1;
+    }
+    case SIMSUI_IMPORT_GetDlgCtrlID: {         /* now and then OK, Cancel, Help or another id commands use */
+        static const uint32_t ids[6] = {1, 2, 0x2711, 3, 4, 0x3e8};
+        *result = value % 3 == 0 ? value >> 4 : ids[(value >> 4) % 6];
+        return 1;
+    }
+    case SIMSUI_IMPORT_EnumChildWindows: {     /* up to four children, each given to the callback until it says stop */
+        uint32_t count = value % 5, at, saved = s_pop_now;
+        int32_t (__stdcall *callback)(uint32_t, uint32_t) = (int32_t (__stdcall *)(uint32_t, uint32_t))(uintptr_t)arguments[1];
+        *result = 1;
+        if (!arguments[1]) return 1;
+        for (at = 0; at < count; ++at) {
+            put(" child %x", 0x6100 + at * 0x10);
+            if (!callback(0x6100 + at * 0x10, arguments[2])) break;
+        }
+        s_pop_now = saved;
+        return 1;
+    }
     case SIMSUI_IMPORT_GetNextDlgGroupItem:    /* a window of the group */
         *result = 0x5000 + ((value >> 2) % 4) * 0x10;
         return 1;

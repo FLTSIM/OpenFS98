@@ -76,9 +76,10 @@ ENGLISH_MODULES := WORLD ALERTS HELP SIM VIEWS FLIGHTS MP_DIALOG OPTIONS
 # (empty: Flights moved to ENGLISH_MODULES on 2026-11-02, Options on 2026-11-07)
 ENGLISH_CANDIDATES :=
 # Shared libraries beside FLTSIM98.EXE: SIMSUI, the widget library every dialog imports.
-# Candidates are built and compared in the game by main-dialogs but not yet installed.
-SHARED_MODULES :=
-SHARED_CANDIDATES := SIMSUI
+# Candidates are built and compared in the game by main-dialogs but not yet installed
+# (empty: SIMSUI moved to SHARED_MODULES on 2026-11-07).
+SHARED_MODULES := SIMSUI
+SHARED_CANDIDATES :=
 ALL_MODULES := $(MODULES) $(ENGLISH_MODULES) $(SHARED_MODULES)
 
 # Localised dialog DLLs live in English/, outside Modules/, under mixed-case names.

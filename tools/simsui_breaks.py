@@ -27,7 +27,11 @@ Left out as proven equivalent:
   reach CreateDIBSection as -|h|.
 - paint-attrib (the group box's text measured on m_hDC against m_hAttribDC): CPaintDC
   attaches the one handle as both.
-Caught only at more scenarios: 3piece-init-rest (scenario 1016 of 3piece_init alone).
+- shadow-hard (flags & 0x30 against & 0x20): it is the else of flags & 0x10, so bit 0x10 is clear
+  and the two tests agree.
+Caught only at more scenarios: 3piece-init-rest (scenario 1016 of 3piece_init alone),
+command-seven-same (N=2000: OnCommand's EN_KILLFOCUS-like case 7 with the focus on the edit
+being validated).
 """
 from pathlib import Path
 import re
@@ -295,7 +299,7 @@ BREAKS = {
         ('wrap-last', '        if (at > I32(tabs, 0xc20)) at = 0;\n        if (at < 0)', '        if (at >= I32(tabs, 0xc20)) at = 0;\n        if (at < 0)'),
         ('key-end', 'enabled_tab(tabs, I32(tabs, 0xc20) + 1, -1)', 'enabled_tab(tabs, I32(tabs, 0xc20), -1)'),
         ('key-home', 'enabled_tab(tabs, -1, 1), D32(tabs, 0x20)', 'enabled_tab(tabs, 0, 1), D32(tabs, 0x20)'),
-        ('key-shift', 'if (shift) target = around[1]', 'if (shift) target = around[0]'),
+        ('tabs-key-shift', 'if (shift) target = around[1] ? around[1]', 'if (shift) target = around[0] ? around[0]'),
         ('set-first', 'first = D32(page, 0x1100) == 0;', 'first = D32(page, 0x1100) == 1;'),
         ('set-how', 'uint32_t how = (changed ? 4 : 0) | (first ? 2 : 0) | (from_self ? 1 : 0);', 'uint32_t how = (changed ? 4 : 0) | (first ? 2 : 0);'),
         ('set-show-flags', '0, 0, 0, 0, 0x43);', '0, 0, 0, 0, 0x41);'),
@@ -588,7 +592,6 @@ BREAKS = {
         ('shadow-depth', 'D16(info, 0xe) = 8;', 'D16(info, 0xe) = 4;'),
         ('shadow-first-pixel', 'first_pixel = flags & 4;', 'first_pixel = flags & 8;'),
         ('shadow-blur', 'if (flags & 0x10) fs98_simsui_dib_blur_shadow', 'if (flags & 0x40) fs98_simsui_dib_blur_shadow'),
-        ('shadow-hard', 'else if (flags & 0x20) {', 'else if (flags & 0x30) {'),
         ('shadow-mask-sense', 'width, height, 0, 0, 0, 1, 0);', 'width, height, 0, 0, 0, -1, 0);'),
         ('shadow-cast-fill', 'fs98_simsui_dib_fill(cast, 0xff);', 'fs98_simsui_dib_fill(cast, 0xfe);'),
         ('shadow-face-key', '(shadow, 0x80), 0, 0, key);', '(shadow, 0x80), 0, 0, -1);'),

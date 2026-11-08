@@ -806,6 +806,12 @@ mode that is not 480 high).
 
 ## The executable (2026-11-06)
 
+
+> **Lifted, not decompiled (2026-11-07).** Everything in the executable but the 194 services is machine-translated from retail's
+> instructions into C that emulates the x86 registers and flags, generated into ignored `bin/` at
+> build time. It matches retail but is not readable source and cannot leave x86. Decompiling it is
+> listed in [remaining-work.md](../remaining-work.md#lifted-not-decompiled).
+
 `make host-exe` now builds `bin/OPENFS98.EXE`, a 32-bit Windows GUI
 executable. It starts the installed game using the existing 194 service
 implementations together with recovered startup, window procedures, timer,

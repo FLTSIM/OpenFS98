@@ -6,7 +6,7 @@ static void shape_info(uint8_t *info)
 {
     static const uint16_t depths[] = {1, 4, 8, 16, 24, 32, 2, 0};
     uint32_t random = next_random();
-    uint32_t size = random % 5 == 0 ? 0xc : 0x28;
+    uint32_t size = random % 5 == 0 ? 0xc : random % 9 == 1 ? 0x6c : 0x28;    /* now and then a V4 header */
     memcpy(info, &size, 4);
     memcpy(info + (size == 0xc ? 0xa : 0xe), &depths[(random >> 4) % 8], 2);
     if (size == 0x28) {
@@ -107,12 +107,21 @@ static void make_file(void)
     }
     for (at = 0xe + header; at < size && at < sizeof(s_file); ++at) s_file[at] = (uint8_t)next_random();
     s_file_size = size < sizeof(s_file) ? size : sizeof(s_file);
+    {   /* the .BMP where the file stands, after a few bytes of something else */
+        uint32_t start = next_random() % 4 ? 0 : 1 + next_random() % 16;
+        if (s_file_size + start <= sizeof(s_file)) {
+            memmove(s_file + start, s_file, s_file_size);
+            memset(s_file, 0x5a, start);
+            s_file_size += start;
+            s_file_start = start;
+        } else s_file_start = 0;
+    }
     switch (next_random() % 12) {
-    case 0: s_file[1] = 'X'; break;
-    case 1: { uint32_t odd = 0x20; memcpy(s_file + 0xe, &odd, 4); break; }
+    case 0: s_file[s_file_start + 1] = 'X'; break;
+    case 1: { uint32_t odd = 0x20; memcpy(s_file + s_file_start + 0xe, &odd, 4); break; }
     case 2: s_file_size = next_random() % (s_file_size + 1); break;
-    case 3: { uint32_t past = size + 1 + next_random() % 64; memcpy(s_file + 0xa, &past, 4); break; }
-    case 4: { uint32_t short_size = offset - 1 - next_random() % 4; memcpy(s_file + 2, &short_size, 4); break; }
+    case 3: { uint32_t past = size + 1 + next_random() % 64; memcpy(s_file + s_file_start + 0xa, &past, 4); break; }
+    case 4: { uint32_t short_size = offset - 1 - next_random() % 4; memcpy(s_file + s_file_start + 2, &short_size, 4); break; }
     default: break;
     }
 }
@@ -220,6 +229,16 @@ static void shape_object(uint8_t *object)
             memcpy(control + 0x40 + active * 0x160, &page, 4);
         }
         if ((random >> 16) % 4 == 0) { int32_t none = -1; memcpy(object + 0x88, &none, 4); }
+        {   /* the edit being validated: none, or an id commands use */
+            static const uint32_t ids[7] = {0, 1, 2, 0x2711, 3, 4, 0x3e8};
+            uint32_t edit = ids[next_random() % 7], kept = next_random() % 2 ? 0 : 0x5100;
+            memcpy(object + 0x7d0, &edit, 4);
+            memcpy(object + 0x7e4, &kept, 4);
+            {   /* OK or Cancel clicked, mostly not */
+                uint32_t clicked = next_random() % 4 == 0;
+                memcpy(object + 0x7e0, &clicked, 4);
+            }
+        }
         for (at = 0; at < 4; ++at) small[at] = (int32_t)(next_random() % 40);
         memcpy(object + 0x14c, small, 8);
         memcpy(object + 0x210, small + 2, 8);
@@ -278,7 +297,7 @@ static void shape_object(uint8_t *object)
         memcpy(object + 0x60 + 0x40, &stops, 4);
         memcpy(object + 0x64 + 0x40, &none, 4);
         { uint32_t text = fixture_address(s_fixture.blocks[((random >> 8) % (BLOCKS / 4)) * 4 + 3] + 0x100);
-          static const char words[] = "\x01\0\0\0\x05\0\0\0\x05\0\0\0Hello";
+          static const char words[] = "\x01\0\0\0\x05\0\0\0\x08\0\0\0Hello";
           memcpy(s_fixture.blocks[((random >> 8) % (BLOCKS / 4)) * 4 + 3] + 0xf4, words, sizeof(words));
           memcpy(object + 0xb4, &text, 4); }
         return;
@@ -301,6 +320,11 @@ static void shape_object(uint8_t *object)
             memcpy(entry + 0x15c, &disabled, 4);
         }
         for (at = 0; at < 5; ++at) shape_dib(object + (at ? 0xa54 + (at - 1) * 0x70 : 0x9e0), s_fixture.pixels[at % 4]);
+        {   /* the strip's height: under 0xa0 it holds two frames a tab, else four */
+            static const int32_t heights[4] = {0x9f, 0xa0, 0xc8, 0};
+            int32_t height = heights[next_random() % 4];
+            if (height) memcpy(object + 0x9ec, &height, 4);
+        }
         memcpy(object + 0xa50, &background, 4);
         memcpy(object + 0xc14, &mask, 4);
         memcpy(object + 0xc20, counts, 12);

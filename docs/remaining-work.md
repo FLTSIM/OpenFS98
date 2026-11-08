@@ -1,25 +1,47 @@
 # Remaining work
 
-What is still retail, and what is left before a native build. The 27 simulator modules in
-`Modules\` are done and in `MODULES` (two more module DLLs, SIM1 and the `.MDL`s, live
-outside it and are not), and `English\` World, Alerts, Help, Sim, Views, Flights and MP_DIALOG
-are in `ENGLISH_MODULES`; `make install` puts them all in the game. Installed rows below are retained for context. Sizes are `.text` from the reference CD. Differences
-and gaps in the finished modules are in [open-differences.md](open-differences.md).
-Results updated through 2026-11-06; individual rows retain their acceptance dates.
+What is still retail, what is not yet decompiled, and what is left before a native build. Every
+binary now has a replacement: the 27 simulator modules in `Modules\` are in `MODULES`;
+`English\` World, Alerts, Help, Sim, Views, Flights, MP_DIALOG and Options are in
+`ENGLISH_MODULES`; SIMSUI is in `SHARED_MODULES`; SIM1, the gauges and the MDLs have their own
+targets. `make install` puts them all in the game. Sizes are `.text` from the reference CD.
+Differences and gaps in the finished modules are in [open-differences.md](open-differences.md).
+Results updated through 2026-11-07; individual rows retain their acceptance dates.
+
+## Lifted, not decompiled
+
+Found 2026-11-07. Four replacements made by other agents are **lifted**: a Python generator reads
+retail's instructions and writes C that emulates them one by one, with the x86 registers and flags
+in a struct and the jumps as `goto`s (`f->eax = mdl_read(f, ...); if (f->flags & 0x40) goto
+label_437f;`). The C is generated into ignored `bin/` at build time from the CD's binaries, so the
+repository holds no readable source for this code. It matches retail and passes every test listed
+for it, but it is not a decompilation: nobody can read or change it, and it cannot leave x86. Each
+is to be decompiled by the usual method (hand-written C, a differential harness, deliberate breaks),
+keeping the lifted build as a second oracle until the hand-written one replaces it.
+
+| What | Lifted part | Generator | Hand-written already | Order |
+| --- | --- | --- | --- | --- |
+| `Sim/SIM1.sim` | AIR decoder, aircraft setup, tick/frame simulation: 190 routines, 17,836 instructions (most of 78,216 bytes) | `tools/gen_sim1_lift.py` | six services and the state lifecycle (`src/sim1/sim1.c`, `sim1_state.inc`, `sim1_air.inc`); 130 of the 183 simulation routines so far (`src/sim1/sim1_small.c`, [sim1.md](modules/sim1.md#decompilation-started-2026-11-07)) | **1, started 2026-11-07** |
+| `Gauges/*.GAU` (120) | every gauge's code, 1,318 routines, 63,472 bytes | `tools/gen_gauges.py` | `src/gauges/warning.c`, `suction.c` | 2 |
+| Crash MDLs (3) | the three crash models, about 28 KB | `tools/gen_mdl_crash.py` | the eight normal models (`src/mdl/mdl_normal.c`) | 3 |
+| `FLTSIM98.EXE` | startup, window procedures, timer, message loop, shutdown: 402 routines, 13,081 instructions | `tools/gen_host_runtime.py` | all 194 services (`src/host/host.c`) | 4 |
+
+G3D's mesh compiler (`src/g3d/g3d_mesh.S`, `tools/gen_g3d_mesh.py`) is a transcription too, but a
+deliberate one for x87 rounding, with a portable C version checked against it.
 
 ## Binaries
 
 | Binary | `.text` | Status | Where |
 | --- | --- | --- | --- |
 | `English/Options.DLL` | 84,381 | **Done and installed** (2026-11-07): all 15 registrations and 13 tab pages verified (0 differ, 859 breaks caught, `tools/options.mk`); in `ENGLISH_MODULES`; `main-dialogs` opens 23 of its dialogs and pages, identical | [options.md](modules/options.md) |
-| `FLTSIM98.EXE` | 82,016 | **Executable implemented** (2026-11-06): `OPENFS98.EXE`, all 194 services plus startup/windows/loop/shutdown; 74 matching scripted flights, runtime differential and UI/Direct3D acceptance. Retail remains available; native platform work remains | [host.md](modules/host.md) |
-| `SIMSUI.DLL` | 79,850 | **Not started.** 540 named exports, the common dialog and control widgets. Every dialog imports it | [dialogs.md](modules/dialogs.md) |
-| `Sim/SIM1.sim` | 78,216 | **Installed** 2026-11-06: complete services, AIR decoder, aircraft setup, state lifecycle and simulation callbacks. 36,432 real decoder comparisons, 288 direct setup comparisons, ten new caught defects and 74 matching scripted flights with per-pass physics state. Included in shared build/install/revert; current ABI/x87 implementation is x86 | [sim1.md](modules/sim1.md) |
-| `Gauges/*.GAU` (120) | 63,472 | **All 120 rebuilt**, included in build/install/revert; standalone callback/data/resource/FP, PANELS and frame comparisons | [gauges.md](modules/gauges.md) |
+| `FLTSIM98.EXE` | 82,016 | **Executable built** (2026-11-06): `OPENFS98.EXE`, all 194 services decompiled; startup/windows/loop/shutdown lifted (see above); 74 matching scripted flights, runtime differential and UI/Direct3D acceptance. Retail remains available; native platform work remains | [host.md](modules/host.md) |
+| `SIMSUI.DLL` | 79,850 | **Done and installed** (2026-11-07): every routine transliterated, 444 operations verified (0 differ, `tools/simsui.mk`), deliberate breaks per class; native DLL with all 540 exports at retail's ordinals; in `SHARED_MODULES`, installed beside `FLTSIM98.EXE`; `main-dialogs` with it: same controls, 41 of 47 pictures identical (as before) | [simsui.md](modules/simsui.md) |
+| `Sim/SIM1.sim` | 78,216 | **Lifted** (see above); installed 2026-11-06: complete services, AIR decoder, aircraft setup, state lifecycle and simulation callbacks. 36,432 real decoder comparisons, 288 direct setup comparisons, ten new caught defects and 74 matching scripted flights with per-pass physics state. Included in shared build/install/revert; current ABI/x87 implementation is x86 | [sim1.md](modules/sim1.md) |
+| `Gauges/*.GAU` (120) | 63,472 | **All 120 lifted** (see above), included in build/install/revert; standalone callback/data/resource/FP, PANELS and frame comparisons | [gauges.md](modules/gauges.md) |
 | `English/Flights.DLL` | 51,122 | **Installed** 2026-11-02; used in play by `make flights-play` 2026-11-03 | [flights.md](modules/flights.md) |
 | `English/Sim.DLL` | 33,239 | **Installed** 2026-11-02 | [sim.md](modules/sim.md) |
 | `English/MP_DIALOG.DLL` | 25,401 | **Installed** 2026-11-05; all three registrations, native exception/UI acceptance and paired actual-owner peer session | [mpdialog.md](modules/mpdialog.md) |
-| `Aircraft/*/{model,MODEL.RG}/*.MDL` (11) | 35,074 | **Implemented and verified; included in install/revert** 2026-11-06; all eleven drop-in MDLs built. Eight normal models: 1,680,000 module scenarios and eight matching scripted flights. Three crash models: 12,000 lifecycle scenarios, all 32 functions/model reached, eight caught defects plus a rendered-pose mutation, and three matching 1,200-pass crash flights. Shared install/revert integration verified in a disposable game tree | [mdl.md](modules/mdl.md) |
+| `Aircraft/*/{model,MODEL.RG}/*.MDL` (11) | 35,074 | **Built and verified; included in install/revert** 2026-11-06; the eight normal models decompiled, the three crash models lifted (see above). Eight normal models: 1,680,000 module scenarios and eight matching scripted flights. Three crash models: 12,000 lifecycle scenarios, all 32 functions/model reached, eight caught defects plus a rendered-pose mutation, and three matching 1,200-pass crash flights. Shared install/revert integration verified in a disposable game tree | [mdl.md](modules/mdl.md) |
 | `English/Views.DLL` | 13,090 | **Installed** 2026-11-02 | [views.md](modules/views.md) |
 | `fltsim95.exe` | 11,464 | **Not looked at.** A stub that ships alongside; imports only KERNEL32. Probably not needed | [architecture.md](architecture.md) |
 | `English/Help.DLL` | 10,657 | **Installed** 2026-11-02 | [help.md](modules/help.md) |
@@ -28,7 +50,7 @@ Results updated through 2026-11-06; individual rows retain their acceptance date
 
 The installed dialogs still build standalone in `tools/<name>.mk`, with their own
 harnesses; the shared build copies each to `bin/<NAME>.DLL`, and `make <name>-install` /
-`<name>-revert` do one alone. All of them import retail SIMSUI and MFC42.
+`<name>-revert` do one alone. All of them import SIMSUI (ours once installed) and MFC42.
 
 **Third-party dependencies, not ours to decompile but to replace for a native port:**
 `MFC42` (every dialog), Win32, GDI, DirectDraw, Direct3D, DirectSound, DirectInput,
@@ -36,8 +58,8 @@ DirectPlay.
 
 ## The gauges
 
-All 120 reference-CD modules are rebuilt from C with extracted data and bitmap
-resources. The shared build, install and revert targets include them. Standalone
+All 120 reference-CD modules are lifted to generated C (see above), with extracted data and
+bitmap resources. The shared build, install and revert targets include them. Standalone
 verification covers every exposed callback, all x87 precision/rounding modes,
 full data/resource comparisons and forced relocation; PANELS and real-game
 checks exercise the collection together. See [gauges.md](modules/gauges.md).
@@ -80,12 +102,13 @@ to `orig/Aircraft/` (2026-11-06).
 2. **Options: done and installed 2026-11-07.** Not reached in play: the analysis graphs, Save
    video and the video messages, and using controls beyond OK and Cancel
    ([open-differences.md](open-differences.md#not-yet-tested)).
-3. **SIM1 and the MDLs completed 2026-11-06.** Both are included in shared
+3. **SIM1 and the MDLs built 2026-11-06** (SIM1's simulation and the crash models lifted). Both are included in shared
    build/install/revert. Their current x86 ABI/FP paths still need native-port work.
-4. **SIMSUI.** After the dialogs, because they show which of its 540 exports matter.
+4. **SIMSUI: done and installed 2026-11-07.** All 540 exports; the English dialogs, retail's and ours, run on it in `main-dialogs`.
 5. **Gauges completed independently of Options.** All 120 are in the shared build.
-6. **Host executable completed 2026-11-06.** Build/run and verification are in [host.md](modules/host.md); native platform replacement remains.
-7. **Native builds.** Moving off x86 ends comparison with retail, so the earlier steps come
+6. **Host executable built 2026-11-06** (startup and windows lifted). Build/run and verification are in [host.md](modules/host.md); native platform replacement remains.
+7. **Decompile the lifted code**, in the order of the table above.
+8. **Native builds.** Moving off x86 ends comparison with retail, so the earlier steps come
    first. That is also when the retail bugs we reproduce get fixed: they are listed in
    [retail-bugs.md](retail-bugs.md), which must first be completed from every module's doc. Register contracts between modules ([open-differences.md](open-differences.md#a-class-of-bug-to-look-for))
    are x86 behaviour that a port has to remove on both sides of each call.

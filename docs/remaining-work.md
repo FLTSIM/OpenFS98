@@ -18,13 +18,13 @@ repository holds no readable source for this code. It matches retail and passes 
 for it, but it is not a decompilation: nobody can read or change it, and it cannot leave x86. Each
 is to be decompiled by the usual method (hand-written C, a differential harness, deliberate breaks),
 keeping the lifted build as a second oracle until the hand-written one replaces it.
-SIM1 and the gauges were replaced on 2026-11-08; the crash models and the host's startup remain.
+SIM1, the gauges and the crash models were replaced on 2026-11-08; the host's startup remains.
 
 | What | Lifted part | Generator | Hand-written already | Order |
 | --- | --- | --- | --- | --- |
 | `Sim/SIM1.sim` | AIR decoder, aircraft setup, tick/frame simulation: 190 routines, 17,836 instructions (most of 78,216 bytes) | `tools/gen_sim1_lift.py` | six services and the state lifecycle (`src/sim1/sim1.c`, `sim1_state.inc`, `sim1_air.inc`); **all of it, done 2026-11-08**: all 186 routines decompiled and verified one by one (`src/sim1/sim1_small.c`, 186 operations, 0 differ, 882 breaks), built as the native SIM1.sim over retail's data (`src/sim1/sim1_native.c`, `make sim1`), 74 scripted flights frame for frame; installed, the lift kept only as an oracle ([sim1.md](modules/sim1.md#the-native-build)) | **1, done 2026-11-08** |
 | `Gauges/*.GAU` (120) | every gauge's code, 1,318 routines, 63,472 bytes | `tools/gen_gauges.py` | **all of it, done 2026-11-08**: every gauge hand-written C (`src/gauges/<name>.c` over the generated data image, `src/gauges/gauge.h`), 120 of 120 against retail at 20,000 vectors on a strengthened harness, 67 breaks, 74 flights frame for frame; installed ([gauges.md](modules/gauges.md#decompilation)) | **2, done 2026-11-08** |
-| Crash MDLs (3) | the three crash models, about 28 KB | `tools/gen_mdl_crash.py` | the eight normal models (`src/mdl/mdl_normal.c`) | 3 |
+| Crash MDLs (3) | the three crash models, about 28 KB | `tools/gen_mdl_crash.py` | **all of it, done 2026-11-08**: one hand-written source for the three (`src/mdl/mdl_crash.c`, per-model tables), 12,000 lifecycle scenarios against retail with 0 differences, 82 breaks (78 caught, 4 proven equivalent), the three crash flights frame for frame; installed, the lift kept only as an oracle ([mdl.md](modules/mdl.md#crash-models)) | **3, done 2026-11-08** |
 | `FLTSIM98.EXE` | startup, window procedures, timer, message loop, shutdown: 402 routines, 13,081 instructions | `tools/gen_host_runtime.py` | all 194 services (`src/host/host.c`) | 4 |
 
 G3D's mesh compiler (`src/g3d/g3d_mesh.S`, `tools/gen_g3d_mesh.py`) is a transcription too, but a
@@ -42,7 +42,7 @@ deliberate one for x87 rounding, with a portable C version checked against it.
 | `English/Flights.DLL` | 51,122 | **Installed** 2026-11-02; used in play by `make flights-play` 2026-11-03 | [flights.md](modules/flights.md) |
 | `English/Sim.DLL` | 33,239 | **Installed** 2026-11-02 | [sim.md](modules/sim.md) |
 | `English/MP_DIALOG.DLL` | 25,401 | **Installed** 2026-11-05; all three registrations, native exception/UI acceptance and paired actual-owner peer session | [mpdialog.md](modules/mpdialog.md) |
-| `Aircraft/*/{model,MODEL.RG}/*.MDL` (11) | 35,074 | **Built and verified; included in install/revert** 2026-11-06; the eight normal models decompiled, the three crash models lifted (see above). Eight normal models: 1,680,000 module scenarios and eight matching scripted flights. Three crash models: 12,000 lifecycle scenarios, all 32 functions/model reached, eight caught defects plus a rendered-pose mutation, and three matching 1,200-pass crash flights. Shared install/revert integration verified in a disposable game tree | [mdl.md](modules/mdl.md) |
+| `Aircraft/*/{model,MODEL.RG}/*.MDL` (11) | 35,074 | **Built and verified; included in install/revert** 2026-11-06; all eleven decompiled (the crash models on 2026-11-08). Eight normal models: 1,680,000 module scenarios and eight matching scripted flights. Three crash models: 12,000 lifecycle scenarios, all 32 functions/model reached, eight caught defects plus a rendered-pose mutation, and three matching 1,200-pass crash flights. Shared install/revert integration verified in a disposable game tree | [mdl.md](modules/mdl.md) |
 | `English/Views.DLL` | 13,090 | **Installed** 2026-11-02 | [views.md](modules/views.md) |
 | `fltsim95.exe` | 11,464 | **Not looked at.** A stub that ships alongside; imports only KERNEL32. Probably not needed | [architecture.md](architecture.md) |
 | `English/Help.DLL` | 10,657 | **Installed** 2026-11-02 | [help.md](modules/help.md) |

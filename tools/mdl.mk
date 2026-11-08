@@ -45,20 +45,29 @@ mdl-normal-render-break: mdl-normal-modules
 MDL_CRASH_DIR := bin/mdl-crash
 MDL_CRASH_ORIGINALS := $(shell find orig/Aircraft -iname '*_C.MDL' 2>/dev/null)
 MDL_CRASH_FILES := $(addprefix $(MDL_CRASH_DIR)/models/,$(notdir $(MDL_CRASH_ORIGINALS)))
-$(MDL_CRASH_DIR)/crashes.inc $(MDL_CRASH_DIR)/modules.json $(MDL_CRASH_FILES) &: tools/gen_mdl_crash.py tools/build_mdls.py tools/mdl_survey.py tools/gen_gauges.py tools/dialogmap.py src/mdl/mdl_crash_lift.h src/mdl/mdl_crash_native.S $(MDL_CRASH_ORIGINALS)
+$(MDL_CRASH_DIR)/crashes.inc $(MDL_CRASH_DIR)/modules.json $(MDL_CRASH_FILES) &: tools/gen_mdl_crash.py tools/build_mdls.py tools/mdl_survey.py tools/gen_gauges.py tools/dialogmap.py src/mdl/mdl_crash_lift.h src/mdl/mdl_crash_native.S src/mdl/mdl_crash.c src/mdl/mdl_crash_entry.S include/fs98/linkage.h $(MDL_CRASH_ORIGINALS)
 	PYTHONDONTWRITEBYTECODE=1 python3 tools/gen_mdl_crash.py
 
 $(MDL_CRASH_DIR)/mdlcrashdiff.exe: tools/difftest/mdlcrashdiff.c tools/difftest/mdldlldiff.c $(MDL_CRASH_DIR)/crashes.inc $(MDL_DIR)/modules.inc
 	$(MDL_CC) -std=c99 -O2 -Wall -Wextra -I$(MDL_CRASH_DIR) -I$(MDL_DIR) -o $@ tools/difftest/mdlcrashdiff.c
 
-.PHONY: mdl-crash-modules mdl-crash-diff-run mdl-crash-breaks
+.PHONY: mdl-crash-modules mdl-crash-diff-run mdl-crash-lifted-run mdl-crash-breaks
 mdl-crash-modules: $(MDL_CRASH_FILES) $(MDL_CRASH_DIR)/mdlcrashdiff.exe
 mdl-crash-diff-run: mdl-crash-modules
 	WINEPREFIX="$(CURDIR)/$(MDL_DIR)/wineprefix" WINEARCH=win32 WINEDEBUG=-all timeout 300s wine $(MDL_CRASH_DIR)/mdlcrashdiff.exe $(or $(N),2000) retail-first
 	WINEPREFIX="$(CURDIR)/$(MDL_DIR)/wineprefix" WINEARCH=win32 WINEDEBUG=-all timeout 300s wine $(MDL_CRASH_DIR)/mdlcrashdiff.exe $(or $(N),2000) relocate
 
+# the lifted oracle (bin/mdl-crash/lifted/) against retail, all registers, with routine coverage
+mdl-crash-lifted-run: mdl-crash-modules
+	WINEPREFIX="$(CURDIR)/$(MDL_DIR)/wineprefix" WINEARCH=win32 WINEDEBUG=-all timeout 300s wine $(MDL_CRASH_DIR)/mdlcrashdiff.exe $(or $(N),2000) lifted-retail-first
+	WINEPREFIX="$(CURDIR)/$(MDL_DIR)/wineprefix" WINEARCH=win32 WINEDEBUG=-all timeout 300s wine $(MDL_CRASH_DIR)/mdlcrashdiff.exe $(or $(N),2000) lifted-relocate
+
 mdl-crash-breaks: mdl-crash-modules
 	PYTHONDONTWRITEBYTECODE=1 python3 tools/mdl_crash_breaks.py
+
+.PHONY: mdl-crash-lift-breaks
+mdl-crash-lift-breaks: mdl-crash-modules
+	PYTHONDONTWRITEBYTECODE=1 python3 tools/mdl_crash_lift_breaks.py
 
 .PHONY: mdl-crash-game mdl-crash-render-break
 mdl-crash-game: mdl-crash-modules

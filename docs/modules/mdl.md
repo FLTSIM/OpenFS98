@@ -1,13 +1,13 @@
 # Aircraft MDLs
 
 
-> **Lifted, not decompiled (2026-11-07).** The three crash models' code (the eight normal models are hand-written) is machine-translated from retail's
-> instructions into C that emulates the x86 registers and flags, generated into ignored `bin/` at
-> build time. It matches retail but is not readable source and cannot leave x86. Decompiling it is
-> listed in [remaining-work.md](../remaining-work.md#lifted-not-decompiled).
+> **Decompiled (2026-11-08).** All eleven models are hand-written C: the eight normal ones in
+> `src/mdl/mdl_normal.c`, the three crash ones in `src/mdl/mdl_crash.c` (see
+> [Crash models](#crash-models)). The crash models were first lifted (C generated from retail's
+> instructions, 2026-11-06); that build is kept only as a second oracle.
 
-All eleven MDLs are built as drop-in DLLs, 2026-11-06. Normal callbacks and
-crash lifecycle, simulation and drawing operations are implemented in C.
+All eleven MDLs are built as drop-in DLLs, 2026-11-06; all eleven are decompiled C
+since 2026-11-08.
 `python3 tools/mdl_survey.py` emits the measured boundaries and
 SHA-256 fingerprints as JSON, using the existing `impscan.py` PE reader.
 
@@ -235,66 +235,94 @@ successful rendering check (`bin/mdl-render-break/invalid-end.result.txt`).
 
 ## Crash models
 
-`make mdl-crash-modules` builds CESSNA182RRG_C, CESSNA182S_C and EXTRA300S_C
-under `bin/mdl-crash/models/`. `tools/gen_mdl_crash.py` follows each model's
-six exported/callback roots and direct helpers, emitting 32 C functions per
-model. Generated control flow uses explicit operations and labels, including
-backward jumps into shared tails. There is no runtime instruction decoder.
-Objdump supplies boundaries; PE relocations identify address operands, and
-unsupported operations, native signatures and flag dependencies fail generation.
-Generated source and extracted retail data/resources stay in ignored `bin/`.
+`src/mdl/mdl_crash.c` is the three crash models (CESSNA182RRG_C, CESSNA182S_C, EXTRA300S_C)
+decompiled, one source built three times (`-DCRASH_MODEL=0/1/2`) by `tools/gen_mdl_crash.py`
+into `bin/mdl-crash/models/`, over each model's generated data image (retail's `.data` at its
+RVAs, the relocated code pointers bound to the C entries; 64-KiB aligned as before).
+`make mdl-crash-modules` builds them.
 
-`src/mdl/mdl_crash_lift.h` supplies width-specific integer operations and x86
-flags. `mdl_crash_native.S` bridges the models' nonstandard register contract
-to native services while preserving input and output registers. A heap shadow
-retains numeric caller-stack addresses, including partial-register pointer
-operations. Native service argument masks distinguish pointers from packed
-scalar angles; translating angles by their numeric address range was a defect
-found during differential testing. The private data section retains its low
-16 address bits through 64 KiB alignment. This remains an i386 implementation.
+**One program, three tables.** Retail's three are the same hand-written assembly (32 routines,
+3,394 to 3,952 instructions) assembled with different data: the module variables (`0x5034` to
+`0x50e4`) are shared; C182S keeps its flag and phase words at state `+0x80`/`+0x82` instead of
+`+0x7e`/`+0x80`, copies GLOBAL `+0x11b8` into state `+0x7e` each frame, and seeds every debris
+piece's attitude from the aircraft; the Extra throws 17 pieces to the Cessnas' 13, so its
+variables after the per-piece sink rates sit 0x10 later (written `T(k)` in the C), and its piece
+list differs. The code names retail's addresses by C182RG RVA, as the gauges do.
 
-`make mdl-crash-diff-run` passes **12,000 complete lifecycle scenarios**:
-2,000 per model in retail-first and forced-relocation modes. Every model
-reaches all 32 generated functions. Scenarios include initialization, CHAIN
-registration/dispatch, repeated update/draw, enabled/disabled drawing, signed
-cleanup reasons, detach and reinitialization. Boundary pitch, bank, velocity
-and delta cases precede random inputs. Comparisons include active model data,
-state and canaries, GLOBAL, resources, stack balance, all general registers
-and typed import events. UTIL calls use the real retail implementation behind
-register-preserving logging proxies; other services use matched controlled
-stubs. Function coverage establishes reachability, not exhaustive path coverage.
+**What it does.** Linkage `+0x1c` (once until `+0x20`) registers the CHAIN list 15 draw, has the
+flight model fill a snapshot (SIM `+0x18`), and clamps three speeds from it. Each frame while
+GLOBAL byte `+0x838` is 6 the update copies the aircraft into the state and steps one of six
+animations, picked by GLOBAL `+0x834` (6, 12: impacts) or the snapshot's pitch and bank: a level
+slide that bounces to a stop, a wing torn off and a yaw to a stop (|bank| 10 to 30 degrees), a
+cartwheel (over 30), a nose-in that goes over on its back (pitch 15 to 40), or a break-up (over
+40, and both impacts) that throws the pieces, 0x24-byte position records from state `+0x84`.
+Retail unrolls the debris pass piece by piece; the C has one routine and a table per model, in
+retail's order. The crash ends with `+0x838` set to 4. The CHAIN callback draws the wreck program,
+or the debris one once the phase word is 2.
 
-`make mdl-crash-breaks` rejects **eight isolated behavioral defects**: wrong
-shared-tail entry, scalar-angle pointer translation, signed multiplication,
-subtract carry, skipped initialization, unsigned cleanup reason, wrong drawing
-phase, and a bank boundary. Each must produce its expected mismatch.
-`make mdl-crash-render-break` also catches a valid quarter-turn crash-pose
-mutation at pass 199 in real frames. Both retail baselines match and all
-three games complete 1,200 passes cleanly; a fault is not accepted as proof.
+**Registers.** The C's entries are stdcall; `src/mdl/mdl_crash_entry.S` adds what the callers
+read beyond that, established from the callers: the update returns with edi = GLOBAL (retail
+loads it; WINDOW reads edi right after, `0x20906a49`), and the CHAIN callback ends with the G3D
+`+0x18` call entered with G3D's Linkage in eax and its own ecx/edx, so it returns with G3D's eax,
+ecx and edx, which CHAIN hands on. Retail's update also leaves ebx and esi changed; WINDOW pops
+both unread, and ours keeps them. ACONTAIN (compiled C) reloads eax/ecx/edx after attach, init
+and detach. Omitted as without effect: retail's stack-alignment wrapper round every imported
+call (a store below esp and a pushed 4 the callee never reads) and dead loads.
 
-`make mdl-crash-game` runs ANTILLES (C182RG), PARIS (C182S) and EXTRARIO
-(Extra) in independent private games, using otherwise-retail modules and normal
-MDLs. It requires the intended crash MDL to load on all three sides, matching
-retail baselines, matching rebuilt frames, clean exits and the exact final pass.
-Each run lasts 1,200 passes; `JOBS=1..3` and `MDL_GAME_DISPLAY=:86` control
-concurrency and displays. Logs stay under `bin/mdl-crash-frames/`.
-**All three flights passed on 2026-11-06**, with the intended crash MDL loaded
-on every side, identical frames, clean exits and all 1,200 requested passes.
+**Retail bugs kept** (all in [retail-bugs.md](../retail-bugs.md#crash-mdls)): the nose-in
+pitch and the wing-loss heading turn by the high half of a leftover eax (in the nose-in's first
+frame, UTIL's Linkage address, since UTIL `+0x44` preserves eax), piece `0x114` stops piece
+`0xf0`'s tumbling instead of its own, the Extra skips two pieces while piece `0x210` flies and
+sinks piece `0x234` for `0x2a0`, the slide's pitch comes from a byte (`cbw`), and the settle
+compares altitudes in halves, unsigned, and drops a carry.
+
+### Verification
+
+`make mdl-crash-diff-run` (`tools/difftest/mdlcrashdiff.c`): retail and the decompiled DLLs
+side by side over the same lifecycle scripts, 2,000 scenarios per model, retail first and both
+forced away from their preferred bases: **12,000 scenarios, 0 differences** (2026-11-08).
+Scenarios include initialization, CHAIN registration and dispatch, repeated update/draw, enabled
+and disabled drawing, signed cleanup reasons, detach and reinitialization; 198 boundary pitch, bank,
+speed and time-step cases precede random ones, whose attitudes are spread over the animations'
+ranges (pitch for the slides, the nose-in and the dive; bank within 10 or 30 degrees) or are
+anything, and half of whose speeds are within the clamps; the ground is none, near the aircraft, small and
+signed, or anything, the aircraft starts at 100 m or near or below the ground, a fifth of them
+turn the aircraft every frame (three turns in four onto or beside one of retail's pitch
+thresholds), and some start with the wing-loss words after the piece rates as earlier crashes
+leave them (init never resets them, so in the game they carry over from crash to crash). Compared: model data, state and canaries, GLOBAL, resources,
+stack balance, each entry's live registers (above) and every import call (CHAIN, the snapshot,
+HOST moves, G3D draws with a hash of the state, and UTIL `+0x2c`/`+0x44` with their arguments;
+UTIL is retail's own, behind logging proxies).
+
+`make mdl-crash-lifted-run` runs the lifted oracle (`bin/mdl-crash/lifted/`, all registers,
+`tools/mdl_crash_lift_breaks.py` its own eight breaks) over the same scenarios: 0 differences,
+**32 of 32 retail routines reached**, which is the scenarios' coverage of retail.
+
+`python3 tools/mdl_crash_breaks.py` (`make mdl-crash-breaks`; run from a frozen copy) breaks the
+decompiled C on purpose, 82 single edits (every helper, each animation's thresholds and signs,
+the debris tables, the retail bugs fixed one at a time, the register outputs in the entry
+stubs), each built for the models it applies to and run over 2,000 relocated scenarios: **78
+caught, 4 proven equivalent** (listed in the script; 2026-11-08). Three of them were caught only
+after the scenarios were widened: the ground had always been 0, the aircraft never turned between
+frames, and init does not reset two words that carry over from crash to crash.
+
+In the game, `make mdl-crash-game` (ANTILLES, PARIS and EXTRARIO, 1,200 passes each, otherwise
+retail modules, the intended crash model loaded on all three sides): **identical frames on all
+three with the decompiled models**, 2026-11-08. `make mdl-crash-render-break` turns the
+decompiled C182RG's crash pose a quarter turn and requires the frames to differ.
 
 The private flight fixture enables crash detection without the modal analysis
 graph. EXTRARIO additionally starts at 100 metres and removes its saved
 non-cockpit view. REALITY only enables animated crashes when the currently
 painted window is a 3D window with view kind zero; changing the active window
-alone did not suffice. Earlier Extra runs that never loaded its crash MDL
-and the PARIS run stopped by the graph are excluded from acceptance.
-`tools/mdl_crash_fixture.py` validates the situation records before writing;
-the source situations and primary game remain untouched.
+alone did not suffice. `tools/mdl_crash_fixture.py` validates the situation records before
+writing; the source situations and primary game remain untouched.
 
-**Limits:** longer flights, Direct3D model acceptance and native pointer-width
-adaptation remain unverified. G3D program data remains retail bytecode for the
-existing interpreter; its detailed contents have not been separately surveyed.
-The frame-comparison targets build and test private copies. They do not
-change the primary game tree.
+**Limits:** longer flights and Direct3D model acceptance remain unverified. The G3D programs
+stay retail bytecode in the data image, for the existing interpreter. The 48-bit positions are
+explicit 16/32-bit arithmetic and the imports are called through their stdcall pointers, so the
+C itself is portable; the entry stubs' register outputs are x86 conventions only retail asm
+callers need.
 
 ## Install and restore
 

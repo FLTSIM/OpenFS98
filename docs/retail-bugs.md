@@ -86,6 +86,21 @@ always passes, OnOKs whose second check is never reached) is documented in
 | SIM1-AIR-FRAME-OVERRUN (fixed, not kept) | AIR decoder `0x2200af90`, record 0x302; `src/sim1/sim1_small.c` (`sim1_air_decode`) | The contact stiffness record is copied with its own length into a 0x1c-byte frame buffer: a longer record overruns retail's stack (its saved registers and return address), a shorter one leaves stale frame bytes in the seven words. The C copies at most 0x1c bytes into a zeroed buffer; a stack overrun cannot be reproduced. | A malformed or modified .AIR file with a 0x302 record not 0x1c bytes long. | Check the length. |
 | SIM1-SLEW-HEIGHT-EAX | CHAIN tick `0x2200a84b` (`0x2200a8b4`); `src/sim1/sim1_small.c` (`sim1_chain_tick`) | Slewing in the height mode (GLOBAL +0x366), the height's 48-bit position (+0x572, +0x574) is GLOBAL +0x1c:+0x20 shifted right 24 plus +0x120c; retail loads only the high dword into edx, so the `shrd eax,edx,0x18` takes the fraction's low byte from whatever is in eax: the callback's second argument, or after a slew frame the record words' `_ftol` result. | Every slew frame in the height mode: the low 8 bits of the height's fraction word are stale. | Load the position's low dword (presumably GLOBAL +0x1c) into eax first. |
 
+## Crash MDLs
+
+The three crash models (`CESSNA182RRG_C`, `CESSNA182S_C`, `EXTRA300S_C`), all in `src/mdl/mdl_crash.c`; RVAs are C182RG's.
+
+| Id | Where | What retail does | When | Fix at porting |
+| --- | --- | --- | --- | --- |
+| CRASH-PITCH-LEFTOVER | Nose-in `0x1b37`; `crash_nose` | Adds the high half of whatever eax holds to the pitch: after the first frame the high word of GLOBAL `+0xd48` (left by the update), in the first frame the high half of UTIL's Linkage address (UTIL `+0x44` preserves eax, which held it for the call), so the first frame depends on where UTIL is loaded. The helper `0x2e19` was evidently meant to return the turn. | Every nose-in crash (pitch 15 to 40 degrees) while its speed word is at least 0x320. | Turn the pitch by a defined amount (probably the decayed speed word). |
+| CRASH-HEADING-LEFTOVER | Wing loss `0x1637`; `crash_wing` | Adds the high half of eax to the heading, which there is the high word of the longitude step just made (`0x29b2`'s eax). | A banked crash (10 to 30 degrees) to the left, while it slides. | As above, for the heading. |
+| CRASH-PIECE-STOP-FIELD | Debris pass, piece `0x114`; `ZERO_F0` | A grounded piece `0x114` zeroes `0x108`/`0x10c`, the pitch and bank of piece `0xf0`, instead of its own `0x12c`/`0x130`, so it keeps tumbling on the ground and `0xf0` stops. | Every debris crash once piece `0x114` lands. | Zero `0x12c`/`0x130`. |
+| CRASH-EXTRA-SKIP | Extra debris pass `0x27a6`; `DEBRIS_SKIP_FROM` | While piece `0x210` flies, the pass jumps on to piece `0x27c`, so pieces `0x234` and `0x258` move only once `0x210` has landed. | Every Extra debris crash. | Go on to the next piece. |
+| CRASH-EXTRA-PIECE-2A0 | Extra debris pass `0x296e`, `0x298f`; the `0x2a0` row | Piece `0x2a0` sinks piece `0x234` instead of itself and tumbles `0x234`'s pitch (`0x24c`), so `0x2a0` never falls and `0x234` falls twice. | Every Extra debris crash. | Sink and tumble `0x2a0` (`0x2b8`). |
+| CRASH-SLIDE-CBW | Level slide `0x140c`; `crash_slide` | The pitch is computed from the climb word with `cbw`, its low byte sign-extended, not the word. | Every level slide frame. | `cwde` the word (check the scale against the result). |
+| CRASH-GROUND-COMPARE | `0x30ef`, `0x316d`; `settle_altitude` | Clamping a settling altitude to the ground compares the whole and the fraction separately and unsigned: a piece below the ground with a larger fraction, or a negative ground, is left where it is. | Pieces and the aircraft settling after a cartwheel. | One signed 48-bit comparison. |
+| CRASH-GROUND-OFFSET-CARRY | `0x316d`; `settle_aircraft` | The ground offset GLOBAL `+0x120c` is added to the 48-bit ground without the fraction's carry. | Settling after a cartwheel, by up to one unit. | Carry into the whole part. |
+
 ## Other modules
 
 Each module's doc records the retail bugs it reproduces. These have a section for them:

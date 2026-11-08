@@ -1,29 +1,29 @@
 #!/usr/bin/env python3
-"""Require a valid crash-pose mutation to change real-game rendered frames."""
+"""Require a valid crash-pose mutation of the decompiled C182RG crash model to change
+real-game rendered frames: a quarter turn of the state's heading and every piece's."""
 import json
 import os
 from pathlib import Path
 import re
 import subprocess
 
-from gen_mdl_crash import CrashLift,build_crash
+from gen_mdl_crash import build_hand
 
 
 def main():
     root=Path.cwd();output=root/'bin/mdl-crash-render-break';directory=output/'mutation'
     records=json.loads(Path('bin/mdl-crash/modules.json').read_text())
-    record=CrashLift(Path(records[0]['path'])).emit(directory)
-    source=(directory/'crash.c').read_text()
-    anchor='saved[7]=f.eax;'
-    if source.count(anchor)!=1: raise ValueError('crash return boundary changed')
-    source=source.replace(anchor,
-        'if(entry==0x1164) { uint8_t *pose=(uint8_t *)(uintptr_t)*(uint32_t *)(uintptr_t)(saved[3]+8); '
-        '*(uint32_t *)(pose+0x24)+=0x40000000u; '
-        'for(i=0;i<13;i++) *(uint32_t *)(pose+0x84+i*0x24+0x20)+=0x40000000u; }\n'+anchor)
-    (directory/'crash.c').write_text(source)
-    record['rebuilt']=str(directory/'CESSNA182RRG_C.MDL')
+    record=dict(records[0]); directory.mkdir(parents=True,exist_ok=True)
+    source=Path('src/mdl/mdl_crash.c').read_text()
+    anchor='    crash_step(st, G32(0xd48));\n}'
+    if source.count(anchor)!=1: raise ValueError('crash update boundary changed')
+    source=source.replace(anchor,'    crash_step(st, G32(0xd48));\n'
+        '    { int i; SET_S32(0x24, S32(0x24) + 0x40000000u);\n'
+        '      for (i = 0; i < 13; i++) SET_S32(0x84 + i * 0x24 + 0x20, S32(0x84 + i * 0x24 + 0x20) + 0x40000000u); }\n}')
+    (directory/'mdl_crash.c').write_text(source)
+    record['rebuilt']=str((directory/'CESSNA182RRG_C.MDL').resolve())
     Path(record['rebuilt']).unlink(missing_ok=True)
-    build_crash(record,directory,'-O1')
+    build_hand(record,Path('bin/mdl-crash')/'CESSNA182RRG_C',0,source=directory/'mdl_crash.c')
     records[0]=record
     manifest=output/'modules.json';manifest.write_text(json.dumps(records,indent=2)+'\n')
     subprocess.run(['python3','-B','tools/fly_scripts.py','bin/mdl-diff/scripts'],check=True)

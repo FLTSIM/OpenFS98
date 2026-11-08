@@ -1,9 +1,13 @@
 #!/usr/bin/env python3
-"""Transliterate the three crash models into explicit integer C operations.
+"""Build the three crash models: the decompiled C, and the lifted oracle.
 
-Objdump provides instruction boundaries. This accepts only the observed
-integer operations and checked service signatures; no executable bytecode is
-copied. Generated sources, model data and DLLs stay in ignored bin/mdl-crash/.
+The models are src/mdl/mdl_crash.c (hand-written, one source built per model)
+over each model's generated data image, into bin/mdl-crash/models/. The lifted
+build -- C generated from retail's instructions, registers and flags in a
+struct -- is kept as a second oracle in bin/mdl-crash/lifted/; mdlcrashdiff
+runs it in the `lifted` mode. Objdump provides its instruction boundaries; it
+accepts only the observed integer operations and checked service signatures.
+Generated sources, model data and DLLs stay in ignored bin/mdl-crash/.
 """
 from collections import deque
 from bisect import bisect_right
@@ -316,18 +320,46 @@ def build_crash(record,directory,optimize='-O2'):
     if result.returncode or result.stderr: raise RuntimeError(result.stdout+result.stderr)
 
 
+def hand_record(path,directory,lift):
+    """The decompiled model's data image, its code pointers bound to mdl_crash.c's entries."""
+    survey_record=lift.record
+    bindings={int(survey_record['linkage'][slot],16):symbol for slot,symbol in
+              (('0x4','_crash_nop'),('0x8','_crash_nop'),('0x18','_crash_attach@4'),
+               ('0x1c','_crash_init@4'),('0x20','_crash_detach'))}
+    bindings[int(survey_record['update_rva'],16)]='_crash_update_entry'
+    return generate(path,directory,8,bindings)
+
+
+def build_hand(record,directory,model,source='src/mdl/mdl_crash.c',optimize='-O2',defines=(),entry='src/mdl/mdl_crash_entry.S'):
+    destination=Path(record['rebuilt']); destination.parent.mkdir(parents=True,exist_ok=True)
+    subprocess.run(['i686-w64-mingw32-windres','-J','res','-O','coff',str(directory/'model.res'),str(directory/'resource.o')],check=True)
+    result=subprocess.run(['i686-w64-mingw32-gcc','-std=c99',optimize,'-Wall','-Wextra','-fno-strict-aliasing',
+            '-ffreestanding','-fno-builtin','-fno-asynchronous-unwind-tables',f'-DCRASH_MODEL={model}',*defines,
+            '-Iinclude','-Isrc/mdl','-shared','-nostdlib','-Wl,--entry=_DllMain@12',
+            '-Wl,--disable-dynamicbase','-Wl,--disable-nxcompat','-Wl,--section-alignment=65536','-Wl,--image-base='+record['image_base'],
+            '-o',str(destination),str(source),str(entry),str(directory/'model_data.S'),
+            str(directory/'model.def'),str(directory/'resource.o'),'-lkernel32','-lgcc'],text=True,capture_output=True)
+    (directory/'build.log').write_text(result.stdout+result.stderr)
+    if result.returncode or result.stderr: raise RuntimeError(result.stdout+result.stderr)
+
+
 def main():
     output=Path('bin/mdl-crash'); records=[]
     paths=sorted(Path('orig/Aircraft').rglob('*_C.MDL'))
     if tuple(path.stem for path in paths)!=CRASH_NAMES: raise ValueError('expected the three reference crash models')
     for path in paths:
-        lift=CrashLift(path); directory=output/path.stem
+        lift=CrashLift(path); directory=output/'lifted-src'/path.stem
         record=lift.emit(directory)
-        destination=output/'models'/path.name
-        record['rebuilt']=str(destination.resolve())
+        record['rebuilt']=str((output/'lifted'/path.name).resolve())
         build_crash(record,directory)
-        print(f'{path.name}: {record["functions"]} functions, {record["instructions"]} explicit C operations',flush=True)
-        records.append(record)
+        print(f'{path.name}: lifted oracle, {record["functions"]} functions, {record["instructions"]} explicit C operations',flush=True)
+        hand=hand_record(path,output/path.stem,lift)
+        hand['rebuilt']=str((output/'models'/path.name).resolve())
+        build_hand(hand,output/path.stem,CRASH_NAMES.index(path.stem))
+        print(f'{path.name}: decompiled, src/mdl/mdl_crash.c (CRASH_MODEL={CRASH_NAMES.index(path.stem)})',flush=True)
+        for key in ('chain_rva','entry_args','function_rvas','functions','instructions'): hand[key]=record[key]
+        hand['lifted']=record['rebuilt']
+        records.append(hand)
     if len(records)!=3: raise ValueError('expected three crash models')
     (output/'modules.json').write_text(json.dumps(records,indent=2)+'\n')
     lines=['/* Generated crash model metadata, no retail payloads. */']
@@ -344,7 +376,8 @@ def main():
         flag=0x80 if index==1 else 0x7e
         lines += ['{{'+json.dumps(str(Path(record['path']).resolve()))+','+json.dumps(record['rebuilt'])+','+','.join(hex(v) for v in values)
                   +f',crash_relocs_{index},{len(record["model_relocs"])},crash_resources_{index},{len(record["resources"])}}},'
-                  +f'0x{record["chain_rva"]:x},0x{flag:x},0x{flag+2:x},crash_functions_{index},{len(record["function_rvas"])}'+'},']
+                  +f'0x{record["chain_rva"]:x},0x{flag:x},0x{flag+2:x},crash_functions_{index},{len(record["function_rvas"])},'
+                  +json.dumps(record['lifted'])+'},']
     lines += ['};']
     (output/'crashes.inc').write_text('\n'.join(lines)+'\n')
 

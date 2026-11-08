@@ -146,8 +146,8 @@ with zero differences, and a portable C mesh compiler checked against
 retail's instructions (see [modules/g3d.md](modules/g3d.md)).
 
 **Every binary has a replacement as of 2026-11-07**, and the whole game, all retail against all
-ours, matches frame for frame on all 74 flights. Not all of it is decompiled: the three crash models and the host executable's startup and window code are
-*lifted* (SIM1's simulation and the 120 gauges were too, until their decompilation replaced them on 2026-11-08) (machine-translated instruction by instruction into C that emulates the x86 registers and
+ours, matches frame for frame on all 74 flights. Not all of it is decompiled: the host executable's startup and window code is
+*lifted* (SIM1's simulation, the 120 gauges and the three crash models were too, until their decompilation replaced them on 2026-11-08) (machine-translated instruction by instruction into C that emulates the x86 registers and
 flags, generated at build time from the CD's binaries). They behave as retail but are not readable
 source and cannot be ported off x86; decompiling them is the remaining work
 ([remaining-work.md](remaining-work.md)). What is still open is listed in

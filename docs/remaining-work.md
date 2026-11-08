@@ -18,12 +18,12 @@ repository holds no readable source for this code. It matches retail and passes 
 for it, but it is not a decompilation: nobody can read or change it, and it cannot leave x86. Each
 is to be decompiled by the usual method (hand-written C, a differential harness, deliberate breaks),
 keeping the lifted build as a second oracle until the hand-written one replaces it.
-SIM1, the first, was replaced on 2026-11-08; three remain.
+SIM1 and the gauges were replaced on 2026-11-08; the crash models and the host's startup remain.
 
 | What | Lifted part | Generator | Hand-written already | Order |
 | --- | --- | --- | --- | --- |
 | `Sim/SIM1.sim` | AIR decoder, aircraft setup, tick/frame simulation: 190 routines, 17,836 instructions (most of 78,216 bytes) | `tools/gen_sim1_lift.py` | six services and the state lifecycle (`src/sim1/sim1.c`, `sim1_state.inc`, `sim1_air.inc`); **all of it, done 2026-11-08**: all 186 routines decompiled and verified one by one (`src/sim1/sim1_small.c`, 186 operations, 0 differ, 882 breaks), built as the native SIM1.sim over retail's data (`src/sim1/sim1_native.c`, `make sim1`), 74 scripted flights frame for frame; installed, the lift kept only as an oracle ([sim1.md](modules/sim1.md#the-native-build)) | **1, done 2026-11-08** |
-| `Gauges/*.GAU` (120) | every gauge's code, 1,318 routines, 63,472 bytes | `tools/gen_gauges.py` | `src/gauges/warning.c`, `suction.c` | 2 |
+| `Gauges/*.GAU` (120) | every gauge's code, 1,318 routines, 63,472 bytes | `tools/gen_gauges.py` | **all of it, done 2026-11-08**: every gauge hand-written C (`src/gauges/<name>.c` over the generated data image, `src/gauges/gauge.h`), 120 of 120 against retail at 20,000 vectors on a strengthened harness, 67 breaks, 74 flights frame for frame; installed ([gauges.md](modules/gauges.md#decompilation)) | **2, done 2026-11-08** |
 | Crash MDLs (3) | the three crash models, about 28 KB | `tools/gen_mdl_crash.py` | the eight normal models (`src/mdl/mdl_normal.c`) | 3 |
 | `FLTSIM98.EXE` | startup, window procedures, timer, message loop, shutdown: 402 routines, 13,081 instructions | `tools/gen_host_runtime.py` | all 194 services (`src/host/host.c`) | 4 |
 
@@ -38,7 +38,7 @@ deliberate one for x87 rounding, with a portable C version checked against it.
 | `FLTSIM98.EXE` | 82,016 | **Executable built** (2026-11-06): `OPENFS98.EXE`, all 194 services decompiled; startup/windows/loop/shutdown lifted (see above); 74 matching scripted flights, runtime differential and UI/Direct3D acceptance. Retail remains available; native platform work remains | [host.md](modules/host.md) |
 | `SIMSUI.DLL` | 79,850 | **Done and installed** (2026-11-07): every routine transliterated, 444 operations verified (0 differ, `tools/simsui.mk`), deliberate breaks per class; native DLL with all 540 exports at retail's ordinals; in `SHARED_MODULES`, installed beside `FLTSIM98.EXE`; `main-dialogs` with it: same controls, 41 of 47 pictures identical (as before) | [simsui.md](modules/simsui.md) |
 | `Sim/SIM1.sim` | 78,216 | **Decompiled and installed** (2026-11-08): every routine hand-written C (`src/sim1/sim1_small.c`), 186 operations against retail over in-flight snapshots (0 differ, 882 breaks); the native DLL over retail's data matches retail on all 74 scripted flights, numeric state and frames. The lifted build (installed 2026-11-06) stays as a second oracle (`tools/stage_sim1.py --lifted`). x87 and the 32-bit ABI are still assumed, as for every module | [sim1.md](modules/sim1.md) |
-| `Gauges/*.GAU` (120) | 63,472 | **All 120 lifted** (see above), included in build/install/revert; standalone callback/data/resource/FP, PANELS and frame comparisons | [gauges.md](modules/gauges.md) |
+| `Gauges/*.GAU` (120) | 63,472 | **Decompiled and installed** (2026-11-08): every gauge hand-written C, verified against retail (120 of 120, 0 differ at 20,000 vectors each; 67 deliberate breaks) and in the game (74 flights match) | [gauges.md](modules/gauges.md) |
 | `English/Flights.DLL` | 51,122 | **Installed** 2026-11-02; used in play by `make flights-play` 2026-11-03 | [flights.md](modules/flights.md) |
 | `English/Sim.DLL` | 33,239 | **Installed** 2026-11-02 | [sim.md](modules/sim.md) |
 | `English/MP_DIALOG.DLL` | 25,401 | **Installed** 2026-11-05; all three registrations, native exception/UI acceptance and paired actual-owner peer session | [mpdialog.md](modules/mpdialog.md) |
@@ -106,7 +106,7 @@ to `orig/Aircraft/` (2026-11-06).
 3. **SIM1 decompiled and installed 2026-11-08** (it was lifted 2026-11-06); **the MDLs built 2026-11-06** (the crash
    models still lifted). Both are included in shared build/install/revert.
 4. **SIMSUI: done and installed 2026-11-07.** All 540 exports; the English dialogs, retail's and ours, run on it in `main-dialogs`.
-5. **Gauges completed independently of Options.** All 120 are in the shared build.
+5. **Gauges decompiled and installed 2026-11-08** (they were lifted 2026-11-06). All 120 are in the shared build.
 6. **Host executable built 2026-11-06** (startup and windows lifted). Build/run and verification are in [host.md](modules/host.md); native platform replacement remains.
 7. **Decompile the lifted code**, in the order of the table above.
 8. **Native builds.** Moving off x86 ends comparison with retail, so the earlier steps come

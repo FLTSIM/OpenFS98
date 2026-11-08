@@ -7,6 +7,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <math.h>
 
 struct function_spec { uint32_t rva, bytes, fp; int32_t pointer; uint32_t is_void, arg_pointer; };
 struct module_spec {
@@ -18,6 +19,7 @@ struct module_spec {
     const uint32_t *prints; unsigned nprints;
     const uint32_t *bitmaps; unsigned nbitmaps;
     const uint32_t *indirect; unsigned nindirect;
+    const uint32_t *ints; unsigned nints;      /* (offset, width) pairs: integers the code reads */
 };
 #include "all_gauges.inc"
 
@@ -184,6 +186,77 @@ static void setup(struct side *side, uint64_t bits)
     number = (double)(int32_t)(current_case % 1024) - 100;
     for (index = 0; index < spec->nfloats; index++)
         memcpy(side->data + spec->floats[index], &number, 8);
+    /* Every other case gives each slot its own value, so branches that need two slots to
+     * differ, or one to equal one of the gauge's constants, are reached too: a different
+     * integer, a half, slot 0's value again, or a finite constant from the gauge's .rdata
+     * (taken from the retail side, so both sides get the same). */
+    if (((uint32_t)(current_case + 7) * 2654435761u) >> 31) {
+        const uint8_t *rdata = 0;
+        uint32_t rdata_size = 0;
+        {
+            const uint8_t *base = (const uint8_t *)sides[0].module;
+            const IMAGE_NT_HEADERS *nt = (const IMAGE_NT_HEADERS *)(base + ((const IMAGE_DOS_HEADER *)base)->e_lfanew);
+            const IMAGE_SECTION_HEADER *section = IMAGE_FIRST_SECTION(nt);
+            unsigned at;
+            for (at = 0; at < nt->FileHeader.NumberOfSections; at++)
+                if (!memcmp(section[at].Name, ".rdata", 6)) { rdata = base + section[at].VirtualAddress; rdata_size = section[at].Misc.VirtualSize; }
+        }
+        for (index = 0; index < spec->nfloats; index++) {
+            uint32_t mix = (uint32_t)(current_case + 1) * 2654435761u ^ (uint32_t)(index + 1) * 0x9e3779b9u;
+            double value = (double)(int32_t)((mix >> 8) % 1024) - 100;
+            mix ^= mix >> 15;
+            if ((mix >> 20) % 4 == 0 && number == number && number >= -100000.0 && number <= 100000.0) {
+                /* the variable's own value: states compared with the element's variable */
+                memcpy(&value, &bits, 8);
+                if (value >= -100000.0 && value <= 100000.0 && (value == 0.0 || fabs(value) >= 2.2250738585072014e-308)) {
+                    memcpy(side->data + spec->floats[index], &value, 8);
+                    continue;
+                }
+                value = (double)(int32_t)((mix >> 8) % 1024) - 100;
+            }
+            switch (mix % 6) {
+            case 1: value += 0.5; break;
+            case 4: value = value * 97.0 + 0.25; break;                  /* beyond the small range: caps */
+            case 2: if (index) memcpy(&value, side->data + spec->floats[0], 8); break;
+            case 3:
+                if (rdata_size >= 8) {
+                    double constant;
+                    memcpy(&constant, rdata + ((mix >> 4) % (rdata_size / 8)) * 8, 8);
+                    /* normal numbers only: .rdata's other bytes read as doubles can be denormal, and
+                     * with a NaN on the stack a denormal memory operand raises nothing more where
+                     * loading it first raises DE; a gauge's data holds no denormals in the game */
+                    if (constant >= -100000.0 && constant <= 100000.0 && (constant == 0.0 || fabs(constant) >= 2.2250738585072014e-308)) value = constant;
+                }
+                break;
+            case 5:                                                       /* next to a constant */
+                if (rdata_size >= 8) {
+                    double constant;
+                    memcpy(&constant, rdata + ((mix >> 4) % (rdata_size / 8)) * 8, 8);
+                    if (constant >= -100000.0 && constant <= 100000.0 && (constant == 0.0 || fabs(constant) >= 2.2250738585072014e-308))
+                        value = constant + ((mix >> 9) & 1 ? 1.0 : -1.0);
+                }
+                break;
+            }
+            memcpy(side->data + spec->floats[index], &value, 8);
+        }
+    }
+    /* The integers the code reads (states, flags, BCD frequencies) start where the image has
+     * them in a quarter of the cases, otherwise 0 to 3, a 16-bit word or any word. */
+    for (index = 0; index < spec->nints; index++) {
+        uint32_t mix = (uint32_t)(current_case + 3) * 0x9e3779b9u ^ (uint32_t)(index + 1) * 2654435761u, value;
+        uint32_t offset = spec->ints[2 * index], width = spec->ints[2 * index + 1];
+        mix ^= mix >> 13; mix *= 0x85ebca6bu; mix ^= mix >> 16;
+        switch (mix % 4) {
+        case 0: continue;
+        case 1: value = (mix >> 4) % 8; break;
+        case 2: value = (mix >> 8) & 0xffff; break;
+        default: value = mix * 0x27d4eb2du | 0x80000000u; break;   /* above any user address: a word
+                                                                     * passed on is never normalised as one */
+        }
+        if (width == 8) side->data[offset] = (uint8_t)value;
+        else if (width == 16) memcpy(side->data + offset, &value, 2);
+        else memcpy(side->data + offset, &value, 4);
+    }
     memset(text_buffers, 0, spec->nprints * sizeof text_buffers[0]);
     for (index = 0; index < spec->nprints; index++)
         put_word(side->data + spec->prints[index], (uint32_t)(uintptr_t)text_buffers[index]);
@@ -192,6 +265,9 @@ static void setup(struct side *side, uint64_t bits)
         put_word(side->data + spec->indirect[index], (uint32_t)(uintptr_t)scratch[index]);
         put_word(scratch[index] + 4, 320);
         put_word(scratch[index] + 8, 240);
+        /* now and then another height, so a lever's arithmetic lands on its band's edges */
+        if (((uint32_t)(current_case + 11) * 0x9e3779b9u) >> 30 == 0)
+            put_word(scratch[index] + 8, 1 + ((uint32_t)(current_case + index) * 2654435761u >> 8) % 1000);
     }
     current = side;
     transcript = 0xcbf29ce484222325ull;
@@ -207,7 +283,7 @@ static int test_module(unsigned count, const char *replacement)
         1, 0x8000000000000001ull, 0x7ff0000000000000ull, 0xfff0000000000000ull,
         0x7ff8000000000000ull, 0xfff8000000000000ull, 0x7ff0000000000001ull,
         0x409f400000000000ull, 0xc09f400000000000ull, 0x4076800000000000ull,
-        0x405e000000000000ull, 0x40c3880000000000ull
+        0x405e000000000000ull, 0x40c3880000000000ull, 0x40cfff8000000000ull   /* 16383, a gear light's code */
     };
     char path[512];
     unsigned index, vectors = 0, entries = 0, calls = 0;
@@ -243,6 +319,16 @@ static int test_module(unsigned count, const char *replacement)
         fprintf(stderr, "RETURNED instead of hanging\n");
         ExitProcess(3);
     }
+    const uint8_t *rdata = 0;
+    uint32_t rdata_size = 0;
+    {
+        const uint8_t *image = (const uint8_t *)sides[0].module;
+        const IMAGE_NT_HEADERS *nt = (const IMAGE_NT_HEADERS *)(image + ((const IMAGE_DOS_HEADER *)image)->e_lfanew);
+        const IMAGE_SECTION_HEADER *section = IMAGE_FIRST_SECTION(nt);
+        unsigned at;
+        for (at = 0; at < nt->FileHeader.NumberOfSections; at++)
+            if (!memcmp(section[at].Name, ".rdata", 6)) { rdata = image + section[at].VirtualAddress; rdata_size = section[at].Misc.VirtualSize; }
+    }
     for (current_function = 0; current_function < spec->nfunctions; current_function++) {
         const struct function_spec *function = &spec->functions[current_function];
         if (!sides[0].functions[current_function]) continue;
@@ -250,6 +336,16 @@ static int test_module(unsigned count, const char *replacement)
         for (current_case = 0; current_case < count + edge_count * 12; current_case++) {
             uint64_t bits = current_case < edge_count * 12 ? edges[current_case / 12] :
                 ((uint64_t)random_word() << 32) | random_word();
+            /* a quarter of the random cases take one of the gauge's normal .rdata constants, exactly
+             * or half off, so the arguments reach the gauge's own thresholds and bands */
+            if (current_case >= edge_count * 12 && (bits >> 62) == 0 && rdata_size >= 8) {
+                double constant;
+                memcpy(&constant, rdata + (uint32_t)(bits % (rdata_size / 8)) * 8, 8);
+                if (constant >= -100000.0 && constant <= 100000.0 && (constant == 0.0 || fabs(constant) >= 2.2250738585072014e-308)) {
+                    constant += (bits >> 40) % 3 == 0 ? 0.0 : (bits >> 40) % 3 == 1 ? 0.5 : -0.5;
+                    memcpy(&bits, &constant, 8);
+                }
+            }
             control = (saved & ~0xf00u) | precisions[current_case % 3] | (((current_case / 3) % 4) << 10) | 0x3f;
             __asm__ volatile("fldcw %0" : : "m"(control));
             /* These two retail compass formatters wrap by subtraction. NaN,

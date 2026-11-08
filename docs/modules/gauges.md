@@ -1,6 +1,12 @@
 # Gauges
 
 
+> **Decompiled (2026-11-08).** All 120 gauges are hand-written C, one file per gauge
+> (`src/gauges/<name>.c` over the generated `image.inc`, sharing `src/gauges/gauge.h`; see
+> [Decompilation](#decompilation)); `tools/build_gauges.py` builds each from its hand file. The
+> lift below is history: `tools/gen_gauges.py` still writes it, as an oracle, but nothing builds
+> from it while every gauge has a hand file.
+>
 > **Lifted, not decompiled (2026-11-07).** All gauge code but `warning.c` and `suction.c` is machine-translated from retail's
 > instructions into C that emulates the x86 registers and flags, generated into ignored `bin/` at
 > build time. It matches retail but is not readable source and cannot leave x86. Decompiling it is
@@ -145,3 +151,55 @@ The same steps are included in the shared `make install` and `make revert`.
 A disposable full-game `make install` / `make revert` roundtrip checks all
 120 installed names and file contents alongside the eleven MDLs and modules.
 `make run` launches the same `FS98_DIR`, using those installed gauges.
+
+## Decompilation
+
+Started 2026-11-08, by the same method as the other modules: hand-written C checked against
+retail by the harness, then deliberately broken.
+
+**The layout.** `tools/gen_gauges.py` also writes each gauge's `image.inc`: retail's `.data` and
+`.rdata` at their RVAs, the `ImportTable`/`Linkage` exports, and a DllMain that rebinds every
+relocated pointer, the code ones through the gauge's `gauge_routine(rva)`. A gauge's file names
+retail's addresses by RVA (`GD64(0x37a8)`, a constant `GR64(0x2000)`), lists its routines in
+`GAUGE_ROUTINES`, and writes the gauge header's standard callbacks (install, initialise,
+update, generate, draw, kill, query, the empty module init) as `gauge.h`'s macros: the SDK's
+own header macros generated them, and they differ between gauges only in five addresses. Every
+other routine is written out. Hand files build with `-fexcess-precision=standard -Werror`.
+
+**x87 fidelity**, since the harness compares the 80-bit result and all six exception flags
+under every precision and rounding mode: a comparison is `fcom`'s (`gauge_fcom`, `GAUGE_TEST`;
+C's compile to `fucomi`, which raises invalid only for a signalling NaN); `_ftol` is `fistp` under
+chop rounding (`gauge_ftol`); a store retail makes and then overwrites still raises its rounding
+flags, so it is kept (`gauge_fst`), and so is the order retail stores before it tests (GCC sank
+one such store into the branch that used it, which lost an underflow flag); a rounding store
+whose unrounded value is used again goes through `gauge_fst`, since GCC otherwise rounds by
+storing and reloading, and reloading a denormal raises DE where retail's `fst` raises nothing.
+Two retail behaviours C cannot state go through small thunks: the turn coordinators' empty x87
+return (`GAUGE_MAYBE_FP`, GAUGE-TURN-EMPTY-RETURN) and nothing else so far. The compasses'
+non-terminating wrap (GAUGE-COMPASS-WRAP-HANG) is reproduced as written.
+
+**The harness, strengthened** (`tools/difftest/allgaugesdiff.c`). Breaks of the first gauges went
+unseen because every data double got the same small integer each case and no integer data
+varied. Now: about half the cases give each data double its own value (an integer, a half, a
+larger value, another slot's, the argument's own, or one of the gauge's finite normal `.rdata`
+constants or one next to it); the integers the code reads (`int_slots`, recorded by the
+generator, pointers excluded) take 0..3, a 16-bit word or a word above any user address; a
+quarter of the cases vary the PANELS rectangles' heights; and 16383.0 is an edge value. The
+lift passes all of it but EXGMETER and LRFLAPS, whose generated C reloads a denormal (both are
+hand-written now).
+
+**Result.** All 120 gauges against retail, `bash tools/run_gaugesdiff.sh --all 20000` (`make
+gauges-check N=20000`): 120 checked, 0 differ, on the strengthened harness. Breaks:
+`tools/gauge_breaks.py` (run from a frozen copy; it rewrites `src/gauges/`): 67, all caught; one
+proven equivalent and one not observable through the PANELS stub are in its docstring. In the
+game, the 74 staged flights, retail gauges twice against the hand-written collection for 900
+passes each (`HG2D_FRAMES_GAUGES=1 ... tools/frames_many.sh -`, as above): **74 match**, no faults. Installed
+2026-11-08 (`make gauges-install`).
+
+More lessons: the shapes of two routines can be identical while their constants differ, so each
+routine's addresses come from its own listing; constants are read through `volatile`
+(`GR64`), since GCC folded `1000 - 1000` at compile time to +0 where retail's rounding-down mode
+gives -0, and narrowed constants to floats; GCC hoisted an argument's load to a function's entry,
+where retail loads it on one path only (a denormal's DE), so that load is volatile too; and a
+store retail makes before possibly overwriting it is kept with `gauge_fst` (GCC dropped one, and
+its precision flag with it).

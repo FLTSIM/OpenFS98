@@ -14,8 +14,13 @@ def build(item):
     index, gauge = item
     directory = ROOT / gauge['name']
     output = ROOT / 'Gauges' / gauge['installed']
-    dependencies = [directory / 'gauge.c', directory / 'gauge.def',
-                    directory / 'gauge.res', Path('src/gauges/gauge_lift.h')]
+    # a decompiled gauge (src/gauges/<name>.c over the generated image.inc) replaces its lift
+    hand = Path('src/gauges') / (gauge['name'].lower() + '.c')
+    source = hand if hand.exists() else directory / 'gauge.c'
+    dependencies = [source, directory / 'gauge.def', directory / 'gauge.res',
+                    Path('src/gauges/gauge_lift.h'), Path('src/gauges/gauge.h')]
+    if hand.exists():
+        dependencies.append(directory / 'image.inc')
     if output.exists() and output.stat().st_mtime >= max(path.stat().st_mtime for path in dependencies):
         return gauge['name'] + ' up to date'
     resource = directory / 'resource.o'
@@ -23,11 +28,13 @@ def build(item):
                     str(directory / 'gauge.res'), str(resource)], check=True, capture_output=True)
     command = ['i686-w64-mingw32-gcc', '-std=gnu99', '-O2', '-Wall', '-Wextra',
                '-Wno-unused-function', '-Wno-unused-label', '-fno-strict-aliasing',
-               '-fno-asynchronous-unwind-tables', '-Isrc/gauges', '-shared', '-nostdlib',
+               '-fno-asynchronous-unwind-tables', '-Isrc/gauges', f'-I{directory}', '-shared', '-nostdlib',
                '-Wl,--entry=_DllMain@12', '-Wl,--disable-dynamicbase', '-Wl,--disable-nxcompat',
                f'-Wl,--image-base={0x30000000 + index * 0x200000:#x}', '-o', str(output),
-               str(directory / 'gauge.c'), str(directory / 'gauge.def'), str(resource),
+               str(source), str(directory / 'gauge.def'), str(resource),
                '-luser32', '-lkernel32', '-lmsvcrt', '-lgcc']
+    if hand.exists():   # a cast or assignment to double rounds, as retail's stores do
+        command[1:1] = ['-fexcess-precision=standard', '-Werror']
     run = subprocess.run(command, capture_output=True, text=True)
     (directory / 'build.log').write_text(run.stdout + run.stderr)
     if run.returncode:
@@ -42,9 +49,11 @@ def harness_include(gauges):
         for function in gauge['functions']:
             lines.append(f'{{0x{function["rva"]:x}, {function["args"]}, {function["fp"]}, {function["pointer"]}, {int(function["is_void"])}, {int(function["arg_pointer"])}}},')
         lines.append('};')
-        for field in ['relocs', 'float_slots', 'print_slots', 'bitmaps', 'indirect_slots']:
+        for field in ['relocs', 'float_slots', 'print_slots', 'bitmaps', 'indirect_slots', 'int_slots']:
             if field == 'relocs':
                 values = [offset for offset, target in gauge[field]]
+            elif field == 'int_slots':   # (offset, width) pairs
+                values = [value for slot in gauge.get(field, []) for value in slot]
             elif field == 'bitmaps':
                 values = [value for bitmap in gauge[field] for value in bitmap]
             else:
@@ -59,7 +68,8 @@ def harness_include(gauges):
                      f'float_slots_{index}, {len(gauge["float_slots"])}, '
                      f'print_slots_{index}, {len(gauge["print_slots"])}, '
                      f'bitmaps_{index}, {len(gauge["bitmaps"])}, '
-                     f'indirect_slots_{index}, {len(gauge["indirect_slots"])}' + '},')
+                     f'indirect_slots_{index}, {len(gauge["indirect_slots"])}, '
+                     f'int_slots_{index}, {len(gauge.get("int_slots", []))}' + '},')
     lines.append('};')
     (ROOT / 'all_gauges.inc').write_text('\n'.join(lines) + '\n')
     panels = ['/* Generated callback pointer pairs for whole-PANELS comparison. */']

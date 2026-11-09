@@ -812,6 +812,36 @@ mode that is not 480 high).
 > build time. It matches retail but is not readable source and cannot leave x86. Decompiling it is
 > listed in [remaining-work.md](../remaining-work.md#lifted-not-decompiled).
 
+## The runtime, decompiled
+
+Begun 2026-11-08, to replace the lifted runtime above with hand-written C in
+`src/host/runtime/`, one routine at a time, as SIMSUI's was. Of the 166 runtime routines
+`tools/gen_host_rt_tables.py` lists (the lift's 402 boundaries less the services and import
+thunks), **34 are done and verified**: the DirectDraw device list, opening and releasing,
+the palette, locking, fills and blits, the render surface (`host_rt_ddraw.c`), the HARDWARE
+settings reader the runtime calls (`host_rt_config.c`), the full-screen cursor and the
+floating windows drawn over the back buffer (`host_rt_cursor.c`), one static initialiser
+(`host_rt_startup.c`) and the window walk (`host_rt_window.c`). Names are retail's addresses
+until what a routine does is known; each has its address in the comment above it.
+
+The C calls every import through `fs98_host_rt_imports` (retail's import order, from
+`host_rt_tables.inc`) and reads retail's data through `fs98_host_rt_image` at retail's
+addresses, and it calls a HOST service through the service table in that image. Several of
+these routines also exist in `host.c` as part of the display-settings service `+0x31c`
+(`0x4121a0`, `0x412210`, `0x412250`, `0x412340`, `0x412420`, `0x414400`, `0x4144c0`,
+`0x414510`); the two copies are to become one when the runtime is linked with the services.
+
+**Verifying.** `make -f tools/host_rt.mk hostrtdiff-run N=20000` maps retail FLTSIM98.EXE at
+0x400000 without its imports, points every import slot and every service entry at logging
+stubs, and runs each routine retail then ours from one randomised fixture (memory blocks
+shaped as the routine's structures, fake DirectDraw/Direct3D COM objects, the EXE's `.data`).
+The call logs, with what rectangles, surface descriptions and strings point to, the results
+and every fixture byte must agree: 20,000 scenarios, 34 operations, 680,000 comparisons, 0
+differ. `python3 tools/host_rt_breaks.py` (from a frozen copy) breaks them on purpose: 91
+breaks, 87 caught at N=2000, 2 more at N=20000 (rare display paths), 2 proven equivalent.
+`HOSTRT_COVER=op,text` counts an operation's runs whose retail log holds text (`@changed`:
+that changed fixture memory).
+
 `make host-exe` now builds `bin/OPENFS98.EXE`, a 32-bit Windows GUI
 executable. It starts the installed game using the existing 194 service
 implementations together with recovered startup, window procedures, timer,

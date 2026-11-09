@@ -1,0 +1,41 @@
+/* The decompiled runtime routines hostrtdiff runs against retail: OP(rva, name, argument kinds)
+ * for a routine with a result, OPV for one without (src/host/runtime/). */
+/* host_rt_ddraw.c */
+OPV(0x121a0, device_name, ARG_OUT, ARG_TEXT, ARG_DRIVER, ARG_MAYBE_TEXT),
+OP(0x12210, device_is, ARG_MAYBE, ARG_ANY, ARG_DRIVER),
+OP(0x12340, device_suffix, ARG_DEVICE_NAME, ARG_MAYBE_OUT, ARG_FLAGS),
+OP(0x12250, device_found, ARG_MAYBE, ARG_TEXT, ARG_DRIVER, ARG_SEARCH),
+OP(0x12420, device_create, ARG_MAYBE_DEVICE_NAME, ARG_MAYBE_OUT),
+OPV(0x12bf0, display_size, ARG_INTS, ARG_INTS, ARG_INTS),
+OP(0x124d0, device_3d),
+OP(0x12590, d3d_device_found, ARG_MAYBE, ARG_TEXT, ARG_TEXT, ARG_DESC, ARG_DESC, ARG_OUT),
+OP(0x125f0, d3d_hardware),
+OP(0x12a20, tell_window, ARG_WINDOW, ARG_MESSAGE),
+OPV(0x140b0, leave_full_screen),
+OPV(0x12a70, release_surfaces),
+OPV(0x12b10, release_directdraw),
+OPV(0x12b50, set_palette, ARG_POINTER),
+OP(0x12fb0, lock, ARG_SURFACE, ARG_OUT, ARG_OUT2),
+OP(0x13030, unlock, ARG_SURFACE),
+OP(0x13050, fill, ARG_SURFACE, ARG_MAYBE, ARG_ANY),
+OP(0x13090, fill_clipped, ARG_SURFACE, ARG_COORD, ARG_COORD, ARG_COORD, ARG_COORD, ARG_ANY),
+OP(0x13130, blit, ARG_SURFACE, ARG_COORD, ARG_COORD, ARG_COORD, ARG_COORD, ARG_SURFACE, ARG_COORD, ARG_COORD, ARG_COORD, ARG_COORD, ARG_FLAGS),
+OP(0x12690, open_directdraw),
+OP(0x12ce0, render_surface, ARG_COORD, ARG_COORD),
+/* host_rt_config.c */
+OPV(0x144c0, flag_read, ARG_POINTER, ARG_ANY, ARG_TEXT, ARG_SMALL),
+OP(0x14400, primary_found, ARG_MAYBE, ARG_TEXT, ARG_DRIVER, ARG_POINTER),
+OP(0x14510, read_display, ARG_POINTER, ARG_FLAGS),
+/* host_rt_cursor.c */
+OPV(0x13700, move_cursor),
+OPV(0x138b0, draw_cursor, ARG_ANY),
+OPV(0x13910, frame_rect, ARG_ANY),
+OPV(0x13960, copy_8_to_16, ARG_POINTER, ARG_PITCH, ARG_POINTER, ARG_PITCH, ARG_COUNT, ARG_COUNT, ARG_POINTER),
+OPV(0x139d0, copy_8_to_16_keyed, ARG_POINTER, ARG_PITCH, ARG_POINTER, ARG_PITCH, ARG_COUNT, ARG_COUNT, ARG_ANY, ARG_POINTER),
+OPV(0x13a50, draw_piece, ARG_WINDOW_DATA, ARG_PICTURE, ARG_POINT, ARG_SOURCE_PICTURE, ARG_RECT),
+OPV(0x13bb0, draw_floating, ARG_ANY),
+/* host_rt_startup.c */
+OPV(0x13220, 413220),
+/* host_rt_window.c */
+OPV(0x7850, for_each_window, ARG_WINDOW, ARG_CALLBACK, ARG_ANY),
+OP(0x78b0, visit_floating, ARG_WINDOW, ARG_VISIT),

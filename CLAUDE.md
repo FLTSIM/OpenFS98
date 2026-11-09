@@ -202,6 +202,8 @@ make g3ddiff-run         # whole-module G3D, the 3D pipeline -> 20000 scenarios,
 make g3d-breaks N=1000   # G3D broken on purpose -> 317 breaks, 279 caught, 7 proven equivalent, 31 missed (19 at N=4000; ~4 h)
 make mdl-crash-diff-run  # the three decompiled crash MDLs against retail -> 12000 scenarios, 0 differ (~3 min)
 python3 tools/mdl_crash_breaks.py # (from a frozen copy) the crash MDLs broken on purpose -> 82, 78 caught, 4 proven equivalent (~4 min)
+make -f tools/host_rt.mk hostrtdiff-run N=20000 # the decompiled host runtime so far (src/host/runtime/) -> 34 operations, 680000 comparisons, 0 differ (~2 min)
+python3 tools/host_rt_breaks.py # (from a frozen copy) its breaks -> 91, 87 caught at N=2000 (2 more at 20000), 2 proven equivalent (~3 min)
 make mdl-crash-game  # the three crash flights, retail against the decompiled MDLs -> identical frames
 make gauges-check N=20000 # all 120 hand-written gauges against retail, every exposed callback/data/resource/FP result -> 120 checked, 0 differ
 python3 tools/gauge_breaks.py # (from a frozen copy) the hand-written gauges broken on purpose -> 67, all caught

@@ -115,6 +115,12 @@ The `radios` suite's stand-in now logs edi, and catches the old call.
 - **Non-x86.** HG2D's floating precision and status; see
   [modules/hg2d.md](modules/hg2d.md).
 
+- **The host runtime's failed GetDC under 0x413910.** When the back buffer's GetDC fails,
+  retail frames the rectangle with a DC that is never set, its caller's ecx left on the stack;
+  ours passes an uninitialised local. FrameRect fails harmlessly either way. `hostrtdiff`'s
+  GetDC writes 0 on failure under that routine alone (elsewhere a failure leaves the out as it
+  was, which `0x4138b0` depends on).
+
 ## Unsettled questions
 
 - **Two deliberate HG2D breaks are nearly or wholly unreached.** The depth-shade clamp

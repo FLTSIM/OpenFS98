@@ -815,32 +815,53 @@ mode that is not 480 high).
 ## The runtime, decompiled
 
 Begun 2026-11-08, to replace the lifted runtime above with hand-written C in
-`src/host/runtime/`, one routine at a time, as SIMSUI's was. Of the 166 runtime routines
+`src/host/runtime/`, one routine at a time, as SIMSUI's was. Of the 165 runtime routines
 `tools/gen_host_rt_tables.py` lists (the lift's 402 boundaries less the services and import
-thunks), **34 are done and verified**: the DirectDraw device list, opening and releasing,
-the palette, locking, fills and blits, the render surface (`host_rt_ddraw.c`), the HARDWARE
-settings reader the runtime calls (`host_rt_config.c`), the full-screen cursor and the
-floating windows drawn over the back buffer (`host_rt_cursor.c`), one static initialiser
-(`host_rt_startup.c`) and the window walk (`host_rt_window.c`). Names are retail's addresses
-until what a routine does is known; each has its address in the comment above it.
+thunks), **58 are done and verified**:
+
+| File | What |
+| --- | --- |
+| `host_rt_ddraw.c` | the DirectDraw device list, opening and releasing DirectDraw, the palette, locking, fills, blits and the overlay flip, the render surface |
+| `host_rt_config.c` | the HARDWARE settings reader the runtime calls |
+| `host_rt_cursor.c` | the full-screen cursor, the 8-to-16-bit palette copies, the floating windows drawn over the back buffer |
+| `host_rt_fullscreen.c` | the 15/16-bit palettes, a full-screen frame begun and ended (regions, flip), giving the screen to GDI and back, floating windows redrawn and moved |
+| `host_rt_divide.c` | the integer divide repair filter `0x4119a0`, its SIB decoder and the guarded call `0x412140` |
+| `host_rt_startup.c` | the C runtime's exit list, MFC's module state, the globals' constructors and destructors, the application class's |
+| `host_rt_window.c` | the walk over the game's windows |
+
+Names are retail's addresses until what a routine does is known; each has its address in the
+comment above it.
 
 The C calls every import through `fs98_host_rt_imports` (retail's import order, from
 `host_rt_tables.inc`) and reads retail's data through `fs98_host_rt_image` at retail's
-addresses, and it calls a HOST service through the service table in that image. Several of
-these routines also exist in `host.c` as part of the display-settings service `+0x31c`
-(`0x4121a0`, `0x412210`, `0x412250`, `0x412340`, `0x412420`, `0x414400`, `0x4144c0`,
-`0x414510`); the two copies are to become one when the runtime is linked with the services.
+addresses, and it calls a HOST service through the service table in that image. Eight of
+these routines also exist in `host.c` as part of the display-settings service `+0x31c`;
+[remaining-work.md](../remaining-work.md#routines-written-twice-until-the-runtime-is-linked-with-the-services)
+lists them, and both copies carry a note until they are merged.
+
+Retail's divide repair is an SEH frame (`__try` around the call, filter `0x4119a0`, a
+handler that can never run because the filter returns only -1 or 0). The decompiled
+`0x412140` counts the calls under way instead, and `fs98_host_rt_divide_handler`, installed as
+a vectored handler, applies the same filter while one is
+([open-differences.md](../open-differences.md)). The filter keeps two retail bugs,
+`DIVIDE-DISP8-UNSIGNED` and `DIVIDE-BYTE-REGISTER` ([retail-bugs.md](../retail-bugs.md)).
+
+Left for later, because each calls the game's own startup, loop step or shutdown under the
+guard: the application's overrides `0x4010f0`, `0x401110` and `0x401120`. The C runtime's
+entry (`0x414ce0`) and its `__except` pieces (`0x414e42`, `0x414e57`) are not decompiled: as in
+the lifted build, the toolchain's own C runtime takes their place and runs the three
+constructors before MFC's `AfxWinMain`.
 
 **Verifying.** `make -f tools/host_rt.mk hostrtdiff-run N=20000` maps retail FLTSIM98.EXE at
 0x400000 without its imports, points every import slot and every service entry at logging
 stubs, and runs each routine retail then ours from one randomised fixture (memory blocks
-shaped as the routine's structures, fake DirectDraw/Direct3D COM objects, the EXE's `.data`).
-The call logs, with what rectangles, surface descriptions and strings point to, the results
-and every fixture byte must agree: 20,000 scenarios, 34 operations, 680,000 comparisons, 0
-differ. `python3 tools/host_rt_breaks.py` (from a frozen copy) breaks them on purpose: 91
-breaks, 87 caught at N=2000, 2 more at N=20000 (rare display paths), 2 proven equivalent.
-`HOSTRT_COVER=op,text` counts an operation's runs whose retail log holds text (`@changed`:
-that changed fixture memory).
+shaped as the routine's structures, fake DirectDraw/Direct3D COM objects, exception records
+and contexts at generated `div`/`idiv` instructions, the EXE's `.data`). The call logs (with
+what rectangles, surface descriptions and strings point to), the results and every fixture
+byte must agree: 20,000 scenarios, 58 operations, 1,160,000 comparisons, 0 differ.
+`python3 tools/host_rt_breaks.py` (from a frozen copy) breaks them on purpose: 150 breaks,
+147 caught at N=2000, 3 proven equivalent. `HOSTRT_COVER=op,text` counts an operation's runs
+whose retail log holds text (`@changed`: that changed fixture memory; `@data`: `.data`).
 
 `make host-exe` now builds `bin/OPENFS98.EXE`, a 32-bit Windows GUI
 executable. It starts the installed game using the existing 194 service

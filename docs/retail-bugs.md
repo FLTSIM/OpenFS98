@@ -101,6 +101,13 @@ The three crash models (`CESSNA182RRG_C`, `CESSNA182S_C`, `EXTRA300S_C`), all in
 | CRASH-GROUND-COMPARE | `0x30ef`, `0x316d`; `settle_altitude` | Clamping a settling altitude to the ground compares the whole and the fraction separately and unsigned: a piece below the ground with a larger fraction, or a negative ground, is left where it is. | Pieces and the aircraft settling after a cartwheel. | One signed 48-bit comparison. |
 | CRASH-GROUND-OFFSET-CARRY | `0x316d`; `settle_aircraft` | The ground offset GLOBAL `+0x120c` is added to the 48-bit ground without the fraction's carry. | Settling after a cartwheel, by up to one unit. | Carry into the whole part. |
 
+## FLTSIM98.EXE runtime
+
+| Id | Where | What retail does | When | Fix at porting |
+| --- | --- | --- | --- | --- |
+| DIVIDE-DISP8-UNSIGNED | Divide repair filter `0x4119a0`; `src/host/runtime/host_rt_divide.c` | Decoding an `idiv` with an 8-bit displacement (`[reg+d8]`, mod 1), it adds the byte zero-extended, so a negative displacement reads the divisor 256 bytes too far on. Only the divisor's sign is used, to choose the saturated quotient. | An `idiv` by zero or into overflow through a memory operand with a negative 8-bit displacement. | Sign-extend the displacement. |
+| DIVIDE-BYTE-REGISTER | Divide repair filter `0x4119a0`; `src/host/runtime/host_rt_divide.c` | For a byte `idiv` by a register, registers 4-7 (AH, CH, DH, BH) are read as ESP, EBP, ESI and EDI, whose low byte then decides the quotient's sign. | A byte `idiv` by AH, CH, DH or BH that faults. | Read the high byte of EAX, ECX, EDX or EBX. |
+
 ## Other modules
 
 Each module's doc records the retail bugs it reproduces. These have a section for them:

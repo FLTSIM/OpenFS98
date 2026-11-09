@@ -1,6 +1,10 @@
 /* The display settings the runtime reads from the HARDWARE section of the configuration
  * (the service +0x31c reads and writes them for the options dialogs: src/host/host.c, "display
- * settings", whose block layout this shares). */
+ * settings", whose block layout this shares).
+ *
+ * Written twice until the runtime is linked with the services: host.c has 0x414400, 0x4144c0
+ * and 0x414510 too (docs/remaining-work.md, "Routines written twice"). A change to one must go
+ * to both. */
 #include "host_rt.h"
 
 #define HARDWARE STR(0x416120)

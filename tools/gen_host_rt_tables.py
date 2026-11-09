@@ -30,6 +30,9 @@ from gen_host_runtime import HostRuntime  # noqa: E402
 OUTPUT = 'src/host/runtime/host_rt_tables.inc'
 # caller-cleaned (wsprintfA, MCIWndCreateA: VFWAPIV) or argumentless by ordinal (COMCTL32 #17, InitCommonControls)
 CDECL_WIN32 = {'wsprintfA', 'MCIWndCreateA', '#17'}
+# MFC members the runtime reaches only by a tail jump, with ecx set by its caller: CWinApp's
+# constructor (#561) and destructor (#815), and the destructor #818 of the global at 0x418798
+HOST_MEMBERS = {561, 815, 818}
 WIN32_LIBRARIES = ['user32', 'gdi32', 'kernel32', 'winmm', 'advapi32', 'ddraw', 'comctl32', 'shell32',
                    'msvfw32', 'imm32', 'msacm32']
 
@@ -91,6 +94,8 @@ def main():
                     match = re.match(r'^esp,(0x[0-9a-f]+)$', next_operands)
                     if next_mnemonic == 'add' and match:
                         cleanup.setdefault(target, []).append(int(match[1], 16))
+                    elif next_mnemonic == 'pop' and next_operands in ('ecx', 'edx'):   # one argument popped away
+                        cleanup.setdefault(target, []).append(4)
         previous = (previous + [(mnemonic, operands)])[-6:]
     win32, mfc, members = win32_pops(), mfc_pops(), mfc_members()
     rows = []
@@ -107,7 +112,7 @@ def main():
         else:
             raise ValueError(f'{dll} {name}: no stdcall decoration and not a known cdecl import')
         votes = member.get(index, [])
-        thiscall = int(dll == 'MFC42.DLL' and (int(name[1:]) in members or int(name[1:]) in MEMBERS_SEEN or
+        thiscall = int(dll == 'MFC42.DLL' and (int(name[1:]) in members or int(name[1:]) in MEMBERS_SEEN or int(name[1:]) in HOST_MEMBERS or
                                                (bool(votes) and sum(votes) * 2 > len(votes))))
         arguments = min(cleanup[index]) // 4 if pop == 0 and index in cleanup and not thiscall else pop // 4
         rows.append(f'HOST_RT_IMPORT({index}, {ident(dll, name)}, "{dll}", "{name}", {entry["iat_va"] - base:#x}, '

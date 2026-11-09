@@ -1,5 +1,9 @@
 /* The DirectDraw device list: naming the devices DirectDrawEnumerate reports, and picking the
- * one the configuration names. */
+ * one the configuration names; then opening DirectDraw and its surfaces.
+ *
+ * Written twice until the runtime is linked with the services: src/host/host.c has 0x4121a0,
+ * 0x412210, 0x412250, 0x412340 and 0x412420 too, for the display-settings service +0x31c
+ * (docs/remaining-work.md, "Routines written twice"). A change to one must go to both. */
 #include "host_rt.h"
 
 /* 0x4121a0: a device's name for the list. A driver ("\\.\DISPLAY2") is shown as

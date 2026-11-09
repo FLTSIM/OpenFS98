@@ -49,8 +49,11 @@ static void log_contents(uint32_t index, const uint32_t *arguments)
         log_text(arguments[1]); break;
     case HOST_RT_IMPORT_GetPrivateProfileStringA: case HOST_RT_IMPORT_GetPrivateProfileIntA:
         log_text(arguments[0]); log_text(arguments[1]); break;
-    case HOST_RT_IMPORT_atoi:
+    case HOST_RT_IMPORT_atoi: case HOST_RT_IMPORT_LoadLibraryA: case HOST_RT_IMPORT__strdup: case HOST_RT_IMPORT__strupr:
+    case HOST_RT_IMPORT_FindFirstFileA:
         log_text(arguments[0]); break;
+    case HOST_RT_IMPORT_GetProcAddress:
+        log_text(arguments[1]); break;
     default: break;
     }
 }
@@ -135,6 +138,62 @@ static int semantics(uint32_t index, uint32_t ecx, uint32_t *arguments, uint64_t
         ((char *)(uintptr_t)arguments[3])[length] = 0;
         put(" now \"%.80s\"", (char *)(uintptr_t)arguments[3]);
         *result = (uint32_t)length;
+        return 1;
+    }
+    case HOST_RT_IMPORT_LoadLibraryA: {         /* a module, by which of four, or none */
+        uint32_t value = script();
+        *result = value % 5 ? 0x10000000u + (value >> 4) % 4 * 0x10000 : 0;
+        return 1;
+    }
+    case HOST_RT_IMPORT_GetProcAddress: {       /* a module's Linkage or ImportTable (blocks 15, 19), or none */
+        uint32_t value = script(), which = (arguments[0] >> 16) & 3;
+        if (!readable_text(arguments[1])) return 0;
+        if (!strcmp((char *)(uintptr_t)arguments[1], "Linkage"))
+            *result = value % 8 ? fixture_address(s_fixture.blocks[15] + which * 0x80) : 0;
+        else if (!strcmp((char *)(uintptr_t)arguments[1], "ImportTable"))
+            *result = value % 3 ? fixture_address(s_fixture.blocks[19] + which * 0x80) : 0;
+        else return 0;
+        return 1;
+    }
+    case HOST_RT_IMPORT__strdup: {
+        uint8_t *copy;
+        if (!readable_text(arguments[0])) return 0;
+        copy = heap_allocate((uint32_t)strlen((char *)(uintptr_t)arguments[0]) + 1);
+        if (copy) strcpy((char *)copy, (char *)(uintptr_t)arguments[0]);
+        put(" =>"); describe(fixture_address(copy)); put("\n   ");
+        *result = fixture_address(copy);
+        return 1;
+    }
+    case HOST_RT_IMPORT__strupr:
+        if (!readable_text(arguments[0]) || !writable(arguments[0], (uint32_t)strlen((char *)(uintptr_t)arguments[0]) + 1)) return 0;
+        _strupr((char *)(uintptr_t)arguments[0]);
+        *result = arguments[0];
+        return 1;
+    case HOST_RT_IMPORT_memmove:
+        if (!writable(arguments[0], arguments[2]) || !readable(arguments[1], arguments[2]) || arguments[2] > 0x10000) return 0;
+        memmove((void *)(uintptr_t)arguments[0], (void *)(uintptr_t)arguments[1], arguments[2]);
+        *result = arguments[0];
+        return 1;
+    case HOST_RT_IMPORT_FindFirstFileA: case HOST_RT_IMPORT_FindNextFileA: {   /* a file or directory, or the end */
+        static const char *const names[] = {"A.DLL", "b.dll", "SUB", "C.DLL"};
+        uint32_t value = script(), found = arguments[1], attributes = value % 4 == 2 ? 0x10 : 0x20;
+        if (!writable(found, 0x140)) return 0;
+        if (value % 4 == 3 || (index == HOST_RT_IMPORT_FindFirstFileA && value % 8 == 7)) {
+            *result = index == HOST_RT_IMPORT_FindFirstFileA ? 0xffffffffu : 0;
+            return 1;
+        }
+        memcpy((void *)(uintptr_t)found, &attributes, 4);
+        strcpy((char *)(uintptr_t)found + 0x2c, names[(value >> 3) % 4]);
+        *result = index == HOST_RT_IMPORT_FindFirstFileA ? 0x7700 : 1;
+        return 1;
+    }
+    case HOST_RT_IMPORT_GetPrivateProfileSectionA: {    /* (section, buffer, size, file): lines, or full */
+        static const char contents[3][40] = {"MODULE=a.dll\0x=1\0module=B.DLL\0", "\0", "Module=c.dll\0MODULE\0"};
+        static const uint32_t lengths[3] = {30, 0, 20};
+        uint32_t value = script(), pick = (value >> 2) % 3;
+        if (!writable(arguments[1], arguments[2]) || arguments[2] < 40) return 0;
+        memcpy((void *)(uintptr_t)arguments[1], contents[pick], 40);
+        *result = value % 3 == 0 && arguments[2] < 0xc00 ? arguments[2] - 2 : lengths[pick];
         return 1;
     }
     case HOST_RT_IMPORT_GetCursorPos: {         /* (point): somewhere on a 640x480 screen, or off it */
@@ -233,16 +292,134 @@ static int semantics(uint32_t index, uint32_t ecx, uint32_t *arguments, uint64_t
     }
 }
 
+/* memory a model may read: writable memory or retail's image */
+static int readable(uint32_t address, uint32_t size)
+{
+    return writable(address, size) || (address >= BASE && address + size <= BASE + s_image_size && address + size >= address);
+}
+/* the growable array (host.c's +0x2f8 and its neighbours), on a header that looks like one */
+static int list_sane(uint32_t list)
+{
+    uint32_t *header = (uint32_t *)(uintptr_t)list;
+    if (!writable(list, 0x1c)) return 0;
+    return header[0] <= 64 && header[1] <= 128 && header[2] <= 0x40 && header[3] <= 0x100 &&
+           (header[6] == 0 || writable(header[6], header[0] * header[3]));
+}
 static int service_semantics(uint32_t offset, uint32_t *arguments, uint64_t *result)
 {
-    (void)offset; (void)arguments; (void)result;
-    return 0;
+    switch (offset) {
+    case 0x20c: {   /* (flags, size, out, zero): *out = an allocation, zeroed if asked; 0 */
+        uint8_t *p;
+        if (!writable(arguments[2], 4) || arguments[1] > 0x4000) return 0;
+        p = heap_allocate(arguments[1]);
+        memcpy((void *)(uintptr_t)arguments[2], &p, 4);
+        if (p && arguments[3]) memset(p, 0, arguments[1]);
+        put(" now"); describe(fixture_address(p));
+        *result = 0;
+        return 1;
+    }
+    case 0x214:     /* (pp): freed, nulled; 0 */
+        if (!writable(arguments[0], 4)) return 0;
+        memset((void *)(uintptr_t)arguments[0], 0, 4);
+        *result = 0;
+        return 1;
+    case 0x2b8:     /* strlen, 0 for null */
+        if (!arguments[0]) { *result = 0; return 1; }
+        if (!readable_text(arguments[0])) return 0;
+        *result = strlen((char *)(uintptr_t)arguments[0]);
+        return 1;
+    case 0x2f8: {   /* (list): a zeroed element appended */
+        uint32_t *header = (uint32_t *)(uintptr_t)arguments[0], element;
+        if (!list_sane(arguments[0])) return 0;
+        if (header[0] == header[1]) {
+            uint8_t *data;
+            header[1] += header[2];
+            data = heap_allocate(header[1] * header[3]);
+            if (!data) return 0;
+            if (header[6]) memcpy(data, (void *)(uintptr_t)header[6], header[0] * header[3]);
+            header[6] = fixture_address(data);
+        }
+        element = header[6] + header[0] * header[3];
+        memset((void *)(uintptr_t)element, 0, header[3]);
+        ++header[0];
+        put(" =>"); describe(element); put("\n");
+        *result = element;
+        put("   ");
+        return 1;
+    }
+    case 0x2fc: {   /* (list): its data freed */
+        uint32_t *header = (uint32_t *)(uintptr_t)arguments[0];
+        if (!writable(arguments[0], 0x1c)) return 0;
+        if (!header[6]) { *result = arguments[0] + 0x18; return 1; }
+        header[6] = 0;
+        *result = 0;
+        return 1;
+    }
+    case 0x308: {   /* (list, context, fn): fn(element, context) in order until one is not 0 */
+        uint32_t *header = (uint32_t *)(uintptr_t)arguments[0], at, back = 0;
+        if (!list_sane(arguments[0])) return 0;
+        ++header[4];
+        put("\n");
+        for (at = 0; at < header[0] && at < 64; ++at) {
+            back = (uint32_t)call_back2(arguments[2], header[6] + at * header[3], arguments[1]);
+            put("\n");
+            if (back) break;
+        }
+        --header[4];
+        *result = back;
+        return 1;
+    }
+    case 0x310: {   /* (list, offset, key, length, indirect): the first element matching, or 0 */
+        uint32_t *header = (uint32_t *)(uintptr_t)arguments[0], at, size = arguments[3];
+        if (!list_sane(arguments[0]) || size > 0x400) return 0;
+        for (at = 0; at < header[0]; ++at) {
+            uint32_t a = header[6] + at * header[3] + arguments[1], b = arguments[2];
+            if (arguments[4]) {
+                if (!readable(a, 4) || !readable(b, 4)) return 0;
+                a = *(uint32_t *)(uintptr_t)a; b = *(uint32_t *)(uintptr_t)b;
+            }
+            if (size && (!readable(a, size) || !readable(b, size))) return 0;
+            if (!memcmp((void *)(uintptr_t)a, (void *)(uintptr_t)b, size)) {
+                *result = header[6] + at * header[3];
+                return 1;
+            }
+        }
+        *result = 0;
+        return 1;
+    }
+    case 0x184: {   /* (out, drive, directory, name): directory\\name */
+        char path[0x300] = "";
+        if (!writable(arguments[0], 0x104)) return 0;
+        if (arguments[2] && readable_text(arguments[2])) strcpy(path, (char *)(uintptr_t)arguments[2]);
+        if (path[0] && path[strlen(path) - 1] != '\\') strcat(path, "\\");
+        if (arguments[3] && readable_text(arguments[3])) strcat(path, (char *)(uintptr_t)arguments[3]);
+        path[0x103] = 0;
+        strcpy((char *)(uintptr_t)arguments[0], path);
+        put(" now \"%.80s\"", path);
+        *result = 0;
+        return 1;
+    }
+    case 0x2a0: {   /* (id, out, size): a string from the resources */
+        static const char *const texts[] = {"C:\\FS98\\MODULES", "", "C:\\FS98\\GAUGES\\"};
+        const char *text = texts[script() % 3];
+        if (!writable(arguments[1], arguments[2] ? arguments[2] : 1) || arguments[2] < 32) return 0;
+        strcpy((char *)(uintptr_t)arguments[1], text);
+        *result = strlen(text);
+        return 1;
+    }
+    default:
+        return 0;
+    }
 }
 
 /* .data a scenario may give values of its own where retail's are zero: not the service table,
  * nor the COM objects (none is none: a random one would run the fixture as code) */
 static int data_may_vary(uint32_t rva)
 {
+    if (rva == 0x18830) return 0;       /* the frame callback: shape_data's */
+    if ((rva >= 0x17ae8 && rva < 0x17b04) || (rva >= 0x17b30 && rva < 0x17b4c) || (rva >= 0x17ee0 && rva < 0x17f1c) ||
+        (rva >= 0x18380 && rva < 0x1839c) || (rva >= 0x18800 && rva < 0x18830) || rva == 0x1bb28 || rva == 0x1889c)
+        return 0;                       /* the lists, the host's import table, the order: shape_modules's */
     if (rva >= 0x1a4dc && rva < 0x1a500 && rva != 0x1a4ec && rva != 0x1a4f0 && rva != 0x1a4f4) return 0;
     return rva < 0x17ba0 || rva >= 0x17ba0 + 0x320;
 }
@@ -331,6 +508,20 @@ static void com_log_contents(uint32_t kind, uint32_t slot, const uint32_t *argum
     default: break;
     }
 }
+/* whether a return address is in 0x413910, retail's or ours (to its ret 4, found at setup) */
+static uint32_t s_frame_rect_end;
+static int from_frame_rect(uint32_t back)
+{
+    uint32_t ours = (uint32_t)(uintptr_t)fs98_host_rt_frame_rect;
+    if (!s_frame_rect_end) {
+        const uint8_t *code = (const uint8_t *)(uintptr_t)ours;
+        uint32_t at;
+        for (at = 0; at < 0x200 && !s_frame_rect_end; ++at)
+            if (code[at] == 0xc2 && code[at + 1] == 4 && code[at + 2] == 0) s_frame_rect_end = ours + at + 3;
+        if (!s_frame_rect_end) GIVE_UP();
+    }
+    return (back >= BASE + 0x13910 && back < BASE + 0x1395d) || (back >= ours && back < s_frame_rect_end);
+}
 typedef int32_t (SC *enum_devices_callback)(void *, char *, char *, void *, void *, void *);
 static int com_semantics(uint32_t kind, uint32_t slot, uint32_t *arguments, uint64_t *result)
 {
@@ -387,10 +578,11 @@ static int com_semantics(uint32_t kind, uint32_t slot, uint32_t *arguments, uint
         *result = value % 4 ? 0 : 0x80004005u;
         return 1;
     case COM_SURFACE * 64 + 17:         /* GetDC(out): a DC, and now and then a failure */
-        /* a failed GetDC leaves the out as it was -- but under frame_rect it writes 0: there the
-         * out is a slot retail never sets, holding its caller's ecx (docs/open-differences.md) */
+        /* a failed GetDC leaves the out as it was -- but called from 0x413910 (or ours) it writes
+         * 0: there the out is a slot retail never sets, holding its caller's ecx
+         * (docs/open-differences.md) */
         if (!writable(arguments[1], 4)) return 0;
-        if (value % 5 || !strcmp(CURRENT.name, "frame_rect")) {
+        if (value % 5 || from_frame_rect(arguments[-1])) {
             uint32_t dc = value % 5 ? 0x7000 + value % 16 : 0;
             memcpy((void *)(uintptr_t)arguments[1], &dc, 4);
         }
@@ -463,6 +655,14 @@ static void shape_data(void)
             memcpy(s_fixture.data + vas[at] - BASE - DATA_RVA, &value, 4);
         }
     }
+    for (at = 0; at < 2; ++at)          /* the exit table: an executable's -1, or a table */
+        if (next_random() % 2) memset(s_fixture.data + 0x41c5c4 + at * 4 - BASE - DATA_RVA, 0xff, 4);
+    s_callback0_stub_for_shaping = s_callback0_stub;
+    shape_modules();
+    {   /* the game's frame callback: the harness's, or none */
+        uint32_t code = next_random() % 5 ? (uint32_t)(uintptr_t)s_callback0_stub : 0;
+        memcpy(s_fixture.data + 0x418830 - BASE - DATA_RVA, &code, 4);
+    }
     s_overlay_focus = !strcmp(CURRENT.name, "render_surface") && next_random() % 2;
     if (s_overlay_focus) {
         static const uint32_t present[] = {0x41a4e4, 0x41a4dc, 0x41a4f8};
@@ -478,7 +678,7 @@ static void shape_data(void)
     {   /* the DirectDraw options and states: flags, or 0 and 1 */
         static const struct { uint32_t va, mask; } words[] = {
             {0x41a4c0, 0xffff}, {0x41a470, 1}, {0x418854, 1}, {0x418858, 1}, {0x41a4f4, 1}, {0x41a4ec, 7},
-            {0x41a500, 1}, {0x4183b4, 1}, {0x41a4f0, 1}, {0x418858, 1}};
+            {0x41a500, 1}, {0x4183b4, 1}, {0x41a4f0, 1}, {0x418858, 3}};
         for (at = 0; at < sizeof words / sizeof words[0]; ++at) {
             uint32_t random = next_random(), value = random % 3 == 0 ? 0 : (random >> 2) & words[at].mask;
             if (words[at].va == 0x41a4c0 && random % 16 >= 4) value &= ~1u;    /* DirectDraw off, now and then */
@@ -501,13 +701,65 @@ static void shape_picture(uint8_t *picture, uint8_t *bits)
     memcpy(picture + 4, fields, 12);
     memcpy(picture + 0x18, &pointer, 4);
 }
+/* the modules (shape_data): up to four on the list (entries in block 12, names in 11), their
+ * Linkages (block 15 + 0x80 each: id, init, deinit, level, registrations in block 9) and
+ * ImportTables (block 19 + 0x80 each), the host's own imports (0x418800), and an order (block
+ * 16) of some of the Linkages */
+static void *s_callback0_stub_for_shaping;
+static void shape_modules(void)
+{
+    static const char *const names[] = {"C:\\FS98\\MODULES\\A.DLL", "C:\\FS98\\MODULES\\b.dll", "a.dll", "C:\\FS98\\SIMSUI.DLL"};
+    uint32_t count = next_random() % 5, at, header[7] = {0, 0, 0x20, 0x14, 0, 0, 0}, ordered = 0;
+    uint8_t *data = s_fixture.data;
+    #define DATA_AT(va) (data + (va) - BASE - DATA_RVA)
+    for (at = 0; at < 4; ++at) {        /* the Linkages and ImportTables */
+        uint32_t *linkage = (uint32_t *)(s_fixture.blocks[15] + at * 0x80), *table = (uint32_t *)(s_fixture.blocks[19] + at * 0x80);
+        uint32_t random = next_random(), pairs = random % 4, pair;
+        uint32_t *records = (uint32_t *)(s_fixture.blocks[9] + at * 0x40);
+        memset(linkage, 0, 0x80);
+        linkage[0] = random % 7 ? at + 1 : 2;
+        linkage[1] = random & 0x10 ? (uint32_t)(uintptr_t)s_callback0_stub_for_shaping : 0;
+        linkage[2] = random & 0x20 ? (uint32_t)(uintptr_t)s_callback0_stub_for_shaping : 0;
+        linkage[4] = (random >> 6) % 4;
+        linkage[5] = random & 0x100 ? fixture_address(records) : 0;
+        memset(records, 0, 0x40);
+        for (pair = 0; pair < (random >> 9) % 4; ++pair) { records[pair * 3] = 0x100 + pair; records[pair * 3 + 2] = random >> 12; }
+        memset(table, 0, 0x80);
+        for (pair = 0; pair < pairs; ++pair) table[pair * 2] = 1 + (random >> (12 + pair * 2)) % 5;
+    }
+    header[0] = header[1] = count;
+    header[6] = count ? fixture_address(s_fixture.blocks[12]) : 0;
+    for (at = 0; at < count; ++at) {
+        uint32_t *entry = (uint32_t *)(s_fixture.blocks[12] + at * 0x14), random = next_random();
+        char *name = (char *)s_fixture.blocks[11] + at * 0x40;
+        strcpy(name, names[random % 4]);
+        entry[0] = fixture_address(name);
+        entry[1] = random & 4 ? at + 1 : 1 + (random >> 3) % 4;
+        entry[2] = random & 0x20 ? 0x10000000u + at * 0x10000 : 0;
+        entry[3] = random & 0x40 ? fixture_address(s_fixture.blocks[15] + at * 0x80) : 0;
+        entry[4] = (random >> 7) % 3;
+        if (entry[3] && random % 3 && ordered < 4)    /* in the order */
+            memcpy(s_fixture.blocks[16] + ordered++ * 4, &entry[3], 4);
+    }
+    memset(s_fixture.blocks[16] + ordered * 4, 0, 4);
+    memcpy(DATA_AT(0x417b30), header, 0x1c);
+    {
+        uint32_t order = fixture_address(s_fixture.blocks[16]);
+        memcpy(DATA_AT(0x41bb28), &order, 4);
+        memcpy(DATA_AT(0x41889c), &ordered, 4);
+    }
+    memset(DATA_AT(0x418800), 0, 0x30);  /* the host's own imports: none, or a few ids */
+    for (at = 0; at < next_random() % 4; ++at) { uint32_t id = 1 + next_random() % 5; memcpy(DATA_AT(0x418800) + at * 8, &id, 4); }
+    #undef DATA_AT
+}
 static void shape_fixture(void)
 {
     static const uint8_t windows[2][3] = {{5, 6, 20}, {13, 14, 24}};
     uint32_t at;
     for (at = 0; at < 2; ++at) {
         uint8_t *data = s_fixture.blocks[windows[at][0]], *bitmap = s_fixture.blocks[windows[at][1]];
-        uint32_t random = next_random(), flags = (random % 5 ? 0x80000000u : 0) | (random & 0x200), pointer;
+        uint32_t random = next_random(), flags = (random % 5 ? 0x80000000u : 0) | (random & 0x200) |
+                                           (random % 3 == 0 ? 0x10000000u : 0) | (random % 7 == 1 ? 0x40000000u : 0), pointer;
         int32_t rect[4];
         memcpy(data + 8, &flags, 4);
         if (random % 6) memset(data + 0x7c, 0, 4);
@@ -528,5 +780,11 @@ static void shape_fixture(void)
         memcpy(s_fixture.blocks[10] + 0x3c0, rect, 16);
         rect[0] = (int32_t)((random >> 3) % 60) - 12; rect[1] = (int32_t)((random >> 9) % 60) - 12;
         memcpy(s_fixture.blocks[10] + 0x3e0, rect, 8);
+        if (random & 0x80000000u) {     /* a window the rectangle's size, now and then: moved, not resized */
+            int32_t now[4], size[2];
+            memcpy(now, s_fixture.blocks[10] + 0x3c0, 16);
+            size[0] = now[2] - now[0]; size[1] = now[3] - now[1];
+            memcpy(s_fixture.blocks[(random >> 30) & 1 ? 5 : 13] + 0x60, size, 8);
+        }
     }
 }

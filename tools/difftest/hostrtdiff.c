@@ -95,15 +95,16 @@ uint32_t s_harness_esp, s_operation_stack_top;
 static uint8_t *s_operation_stack;
 #define OPERATION_STACK 0x100000
 static void *s_jump[5];
-static void *s_callback_stub;
+static void *s_callback_stub, *s_callback0_stub;
 static volatile LONG s_watch_ticks;
 static HANDLE s_main_thread;
 
 /* the operations, and how each is called */
 enum { ARG_UNSET, ARG_ANY, ARG_SMALL, ARG_FLAGS, ARG_POINTER, ARG_TEXT, ARG_DRIVER, ARG_MAYBE, ARG_MAYBE_TEXT,
        ARG_OUT, ARG_SELF, ARG_DEVICE_NAME, ARG_MAYBE_DEVICE_NAME, ARG_MAYBE_OUT, ARG_INTS, ARG_SEARCH, ARG_DESC,
-       ARG_CALLBACK, ARG_VISIT, ARG_MESSAGE, ARG_WINDOW, ARG_SURFACE, ARG_OUT2, ARG_COORD, ARG_PITCH, ARG_COUNT, ARG_WINDOW_DATA, ARG_PICTURE, ARG_SOURCE_PICTURE, ARG_RECT, ARG_POINT };
+       ARG_CALLBACK, ARG_VISIT, ARG_MESSAGE, ARG_WINDOW, ARG_SURFACE, ARG_OUT2, ARG_COORD, ARG_PITCH, ARG_COUNT, ARG_WINDOW_DATA, ARG_PICTURE, ARG_SOURCE_PICTURE, ARG_RECT, ARG_POINT, ARG_EXCEPTION, ARG_CALLBACK0, ARG_MODULE_NAME, ARG_LINKAGE, ARG_MODULE, ARG_RECORDS, ARG_ORDER };
 #define CALLBACK_INDEX 0x7ffu        /* a callback the harness gives: (a, b), logged */
+#define CALLBACK0_INDEX 0x7feu       /* one with no arguments (the game's frame callback, 0x418830) */
 struct operation {
     uint32_t rva; void *ours; const char *name;
     uint32_t arguments; uint8_t kinds[16];
@@ -156,6 +157,12 @@ static void describe(uint32_t value)
         if (value >= BASE + TEXT_RVA && value < BASE + TEXT_END) { put(" C%x", value - BASE); return; }
         for (at = 0; at < OP_COUNT; ++at)
             if ((uint32_t)(uintptr_t)s_operations[at].ours == value) { put(" C%x", s_operations[at].rva); return; }
+        if (s_stubs && value >= (uint32_t)(uintptr_t)s_stubs && value < (uint32_t)(uintptr_t)s_stubs + 0x10000) {
+            uint32_t index;     /* a stub, by what it stands for */
+            memcpy(&index, (uint8_t *)(uintptr_t)value + 1, 4);
+            put(" S%x", index);
+            return;
+        }
         put(" C");
     }
     else if (in_image(value)) put(" I%x", value - BASE);
@@ -228,6 +235,12 @@ uint64_t __cdecl hostrt_dispatch(uint32_t index, uint32_t ecx, uint32_t *argumen
         if (com_semantics(kind, slot, arguments, &special)) { put(" =>"); describe((uint32_t)special); put("\n"); return special; }
         result = answer();
         put(" -> %x\n", result);
+        return result;
+    }
+    if (index == CALLBACK0_INDEX) {
+        s_pop_now = 0;
+        result = answer();
+        put("callback0 -> %x\n", result);
         return result;
     }
     if (index == CALLBACK_INDEX) {
@@ -491,6 +504,49 @@ static uint32_t argument(uint32_t kind)
     case ARG_SOURCE_PICTURE: return fixture_address(s_fixture.blocks[random % 2 ? 5 : 13] + 0x80);
     case ARG_RECT: return fixture_address(s_fixture.blocks[10] + 0x3c0);
     case ARG_POINT: return fixture_address(s_fixture.blocks[10] + 0x3e0);
+    case ARG_CALLBACK0: return (uint32_t)(uintptr_t)s_callback0_stub;
+    case ARG_MODULE_NAME: {     /* a listed module's name (block 11), or another */
+        static const char *const others[] = {"C:\\FS98\\MODULES\\A.DLL", "x.dll", ""};
+        if (random % 3) return fixture_address(s_fixture.blocks[11] + (random >> 2) % 4 * 0x40);
+        strcpy((char *)s_fixture.blocks[10], others[(random >> 2) % 3]);
+        return fixture_address(s_fixture.blocks[10]);
+    }
+    case ARG_LINKAGE: return random % 6 ? fixture_address(s_fixture.blocks[15] + (random >> 3) % 4 * 0x80) : mixed(random >> 3);
+    case ARG_MODULE: return random % 9 ? fixture_address(s_fixture.blocks[12] + (random >> 4) % 4 * 0x14) : 0;
+    case ARG_RECORDS: return fixture_address(s_fixture.blocks[9] + (random >> 2) % 4 * 0x40);
+    case ARG_ORDER: return fixture_address(s_fixture.blocks[16]);
+    case ARG_EXCEPTION: {   /* EXCEPTION_POINTERS (block 16) to a record (16 +0x10) and a CONTEXT (17), at an F6/F7 (18) */
+        uint8_t *pointers = s_fixture.blocks[16], *context = s_fixture.blocks[17], *code = s_fixture.blocks[18] + 0x10;
+        static const uint32_t codes[] = {0xc0000094u, 0xc0000095u, 0xc0000005u, 0xc0000094u};
+        static const uint16_t registers[8] = {0xb0, 0xac, 0xa8, 0xa4, 0xc4, 0xb4, 0xa0, 0x9c};
+        uint32_t value, at, mod, rm, length = 0;
+        value = fixture_address(pointers + 0x10); memcpy(pointers, &value, 4);
+        value = fixture_address(context); memcpy(pointers + 4, &value, 4);
+        memcpy(pointers + 0x10, &codes[random % 4], 4);
+        for (at = 0; at < 8; ++at) {        /* each register: into blocks 20..22, small, or anything */
+            uint32_t r = next_random();
+            value = r % 3 == 0 ? fixture_address(s_fixture.blocks[20 + r / 3 % 3]) + (r >> 8) % 0x100
+                  : r % 3 == 1 ? (r >> 4) % 0x40 : mixed(r >> 2);
+            memcpy(context + registers[at], &value, 4);
+        }
+        value = fixture_address(code); memcpy(context + 0xb8, &value, 4);
+        value = next_random();
+        if (value % 4 == 0) code[length++] = 0x66;
+        code[length++] = value % 7 == 0 ? (uint8_t)(value >> 3) : (uint8_t)(0xf6 + (value >> 3) % 2);
+        mod = (value >> 5) % 4; rm = (value >> 7) % 8;
+        code[length++] = (uint8_t)(mod << 6 | ((value >> 10) % 5 == 0 ? (value >> 12) % 8 : 6 + (value >> 12) % 2) << 3 | rm);
+        if (rm == 4 && mod != 3) {          /* SIB: a small index, a pointer base, or base 5 */
+            uint32_t r = next_random();
+            code[length++] = (uint8_t)((r % 4) << 6 | ((r >> 2) % 8) << 3 | (r >> 5) % 8);
+        }
+        {   /* a displacement: small, signed small, or (mod 0) an address in block 23 */
+            uint32_t r = next_random(), d = mod == 1 ? (uint32_t)(r % 3 == 0 ? 0x80 + (r >> 2) % 0x80 : (r >> 2) % 0x40) |
+                                                        (next_random() & 0xffffff00u)     /* the next instruction's bytes */
+                       : mod == 2 ? (r >> 2) % 0x100 : fixture_address(s_fixture.blocks[23]) + (r >> 2) % 0x200;
+            memcpy(code + length, &d, 4);
+        }
+        return fixture_address(pointers);
+    }
     case ARG_OUT2: return fixture_address(s_fixture.blocks[((random >> 4) % (BLOCKS / 4)) * 4] + 0x200);
     case ARG_COORD: return random % 4 == 0 ? (uint32_t)-(int32_t)((random >> 2) % 700) : (random >> 2) % 900;
     case ARG_SURFACE: {         /* the primary, back buffer or overlay (any may be none), or another */
@@ -532,7 +588,8 @@ static __attribute__((noinline)) uint64_t run(void)
     return result;
 }
 static uint32_t s_cover_runs, s_cover_hits;
-/* HOSTRT_COVER=op,text: how many of the op's runs have text in retail's log (or "@changed") */
+/* HOSTRT_COVER=op,text: how many of the op's runs have text in retail's log ("@changed": that changed
+ * memory outside .data; "@data": that changed .data) */
 static void cover(void)
 {
     const char *want = getenv("HOSTRT_COVER"), *comma;
@@ -541,7 +598,8 @@ static void cover(void)
     ++s_cover_runs;
     /* "@changed": retail changed the fixture's memory (outside .data) */
     if (!strcmp(comma + 1, "@changed") ? memcmp(&s_initial, &s_retail_result, offsetof(struct fixture, data)) != 0
-                                       : strstr(s_logs[0], comma + 1) != 0) {
+        : !strcmp(comma + 1, "@data") ? memcmp(s_initial.data, s_retail_result.data, DATA_SIZE) != 0
+        : strstr(s_logs[0], comma + 1) != 0) {
         ++s_cover_hits;
         if (getenv("HOSTRT_SHOW") && s_cover_hits <= 3) fprintf(stderr, "--- %s:\n%s", CURRENT.name, s_logs[0]);
     }
@@ -656,6 +714,7 @@ static void setup(void)
     memcpy(s_loaded_data, (void *)(uintptr_t)(BASE + DATA_RVA), DATA_SIZE);
     com_setup();
     s_callback_stub = make_stub(CALLBACK_INDEX);
+    s_callback0_stub = make_stub(CALLBACK0_INDEX);
     for (at = 0; at < OP_COUNT; ++at) {
         uint32_t function;
         for (function = 0; function < FUNCTION_COUNT; ++function)

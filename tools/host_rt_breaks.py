@@ -11,11 +11,10 @@ Proven equivalent, so expected to be missed:
   open-fallback-depth  the fallback mode's depth is 16 with an IDirect3D2 and 8 without, but a
                        failed QueryInterface has already returned: there is always one.
   initialise-word      0x416180..0x41618c are all zero in the reference executable.
+  gdi-shown            0x418858 is only ever 0, 1 (0x402c94 stores a setne) or 2: never below 0.
 
-Rare, missed at N=2000 and caught at N=20000: open-mode-640 (a second device, full screen, a
-640-wide mode not 480 high), render-memory (an 8-bit display without Direct3D that can do 3D).
 """
-EQUIVALENT = {'open-fallback-depth', 'initialise-word'}
+EQUIVALENT = {'open-fallback-depth', 'initialise-word', 'gdi-shown'}
 from concurrent.futures import ThreadPoolExecutor
 import json
 import os
@@ -135,6 +134,70 @@ BREAKS = [
     ('floating-last', 'cursor', 'window = get_window(get_window(G32(0x41880c), 5), 1);', 'window = get_window(get_window(G32(0x41880c), 5), 0);'),
     ('floating-next', 'cursor', '        window = get_window(window, 3);', '        window = get_window(window, 2);'),
     ('floating-size', 'cursor', 'frame.back.height = GI32(0x4183ac);', 'frame.back.height = GI32(0x4183a8);'),
+    # host_rt_fullscreen.c
+    ('palette-555-green', 'fullscreen', '(colours[1] & 0xf8u)) << 2)', '(colours[1] & 0xfcu)) << 2)'),
+    ('palette-565-shift', 'fullscreen', '(colours[1] & 0xfcu)) << 3)', '(colours[1] & 0xfcu)) << 2)'),
+    ('palette-tables', 'fullscreen', "        make_palette((uint16_t *)VA(0x41a568), (const uint8_t *)VA(0x41b620), 16);",
+     "        make_palette((uint16_t *)VA(0x41a568), (const uint8_t *)VA(0x41adc0), 16);"),
+    ('gdi-shown', 'fullscreen', '        if ((int32_t)SHOWN > 1)\n            SHOWN = 1;', '        SHOWN = 1;'),
+    ('gdi-clears', 'fullscreen', '        CLEARS = 3;\n        return;', '        CLEARS = 2;\n        return;'),
+    ('gdi-count', 'fullscreen', '    ++PALETTE_CHANGES;\n', ''),
+    ('gdi-redraw', 'fullscreen', '(G32(0x41880c), 0, 0, 0x181);', '(G32(0x41880c), 0, 0, 0x81);'),
+    ('begin-generation', 'fullscreen', '        G32(0x41a544) = G32(0x41bb2c);\n        CLEARS = 3;', '        G32(0x41a544) = G32(0x41bb2c);\n        CLEARS = 1;'),
+    ('begin-palette', 'fullscreen', '        G32(0x41a980) = PALETTE_CHANGES;\n', ''),
+    ('begin-clear-count', 'fullscreen', '        --CLEARS;\n', ''),
+    ('begin-cursor', 'fullscreen', '    fs98_host_rt_move_cursor();\n}', '}'),
+    ('end-combine', 'fullscreen', '(SCRATCH_REGION, REDRAW, DRAWN, 2);', '(SCRATCH_REGION, REDRAW, DRAWN, 1);'),
+    ('end-swap', 'fullscreen', '    DRAWN = REDRAW;\n    REDRAW = drawn;', '    REDRAW = drawn;'),
+    ('end-restore', 'fullscreen', '(primary, 0, 1) == (int32_t)0x887601c2) {', '(primary, 0, 1) != 0) {'),
+    ('part-offset', 'fullscreen', 'rect[3] + point[1]);', 'rect[3] + point[0]);'),
+    ('part-cut', 'fullscreen', '    if (bottom >= MODE_HEIGHT)\n        bottom = MODE_HEIGHT;\n    if (right >= MODE_WIDTH)\n        right = MODE_WIDTH;\n    CALL_STD(SetRectRgn, int32_t, (uint32_t, int32_t, int32_t, int32_t, int32_t))(\n        SCRATCH_REGION, left',
+     '    if (bottom >= MODE_HEIGHT)\n        bottom = MODE_HEIGHT;\n    CALL_STD(SetRectRgn, int32_t, (uint32_t, int32_t, int32_t, int32_t, int32_t))(\n        SCRATCH_REGION, left'),
+    ('window-generation', 'fullscreen', '        D32(bitmap, 0) = PALETTE_CHANGES;', '        D32(bitmap, 0) = PALETTE_CHANGES + 1;'),
+    ('window-hidden', 'fullscreen', "if (!(D32(data, 8) & 0x40000000u)) {", "if (!(D32(data, 8) & 0x20000000u)) {"),
+    ('window-parts', 'fullscreen', "if ((D32(data, 8) & 0x10000000u) && parts)", "if (D32(data, 8) & 0x10000000u)"),
+    ('window-clear-parts', 'fullscreen', '        SERVICE(0x304, int32_t, (void *))(AT(bitmap, 0x54));', '        SERVICE(0x304, int32_t, (void *))(AT(bitmap, 0x50));'),
+    ('move-same-size', 'fullscreen', 'I32(data, 0x64) == rect[3] - rect[1])', 'I32(data, 0x64) == rect[3] - rect[0])'),
+    ('move-place', 'fullscreen', '        I32(data, 0x34) = rect[1];', '        I32(data, 0x34) = rect[3];'),
+    ('move-clears', 'fullscreen', '    CLEARS = 1;\n    fs98_host_rt_begin_frame();', '    CLEARS = 0;\n    fs98_host_rt_begin_frame();'),
+    ('move-callback', 'fullscreen', '    ((void (*)(void))G_PTR(0x418830))();\n', ''),
+    ('move-shown', 'fullscreen', '        D32(data, 8) |= 0x80000000u;', '        D32(data, 8) |= 0x40000000u;'),
+    # host_rt_divide.c
+    ('sib-index-4', 'divide', "(index & 0xff) <= 7 && (index & 0xff) != 4)", "(index & 0xff) <= 7)"),
+    ('sib-base-5', 'divide', "!((base & 0xff) == 5 && (mod & 0xff) == 0)", "!((base & 0xff) == 5)"),
+    ('sib-scale', 'divide', 'scaled <<= (scale & 0xff) & 31;', 'scaled <<= (scale & 0xff) & 3;'),
+    ('filter-code', 'divide', 'code_value != 0xc0000095u)', 'code_value != 0xc0000096u)'),
+    ('filter-prefix', 'divide', '        ++code;\n        length = 1;', '        ++code;\n        length = 0;'),
+    ('filter-opcode', 'divide', 'if ((opcode & 0xfe) != 0xf6)', 'if ((opcode & 0xfc) != 0xf4)'),
+    ('filter-sib-length', 'divide', '    if (rm == 4) {\n        ++length;', '    if (rm == 4) {\n        length += 0;'),
+    ('filter-disp-signed', 'divide', '        displacement_8 = code[2];          /* RETAIL BUG', '        displacement_8 = (uint32_t)(int8_t)code[2];          /* RETAIL BUG'),
+    ('filter-byte', 'divide', '    if (!(opcode & 1))\n        operand_8 = 1;', '    if (opcode & 1)\n        operand_8 = 1;'),
+    ('filter-reg-6', 'divide', '    if (reg == 6)\n        is_signed = 0;', '    if (reg == 5)\n        is_signed = 0;'),
+    ('filter-disp32-length', 'divide', '            length += 4;\n        length += 2;', '            length += 2;\n        length += 2;'),
+    ('filter-mod2-length', 'divide', '        length += 6;', '        length += 5;'),
+    ('filter-div16', 'divide', '            D32(context, CONTEXT_EAX) |= 0xffff;\n            D32(context, CONTEXT_EDX) |= 0xffff;', '            D32(context, CONTEXT_EAX) |= 0xffff;'),
+    ('filter-div32', 'divide', "            D32(context, CONTEXT_EDX) = 0xffffffffu;\n        }", "            D32(context, CONTEXT_EDX) = 0;\n        }"),
+    ('filter-sib-mod0', 'divide', '            if (sib_base == 5)\n                address += displacement_32;', ''),
+    ('filter-absolute', 'divide', '            divisor = *(const uint32_t *)(uintptr_t)displacement_32;', '            divisor = *(const uint32_t *)(uintptr_t)(displacement_32 + 4);'),
+    ('filter-mod1-disp', 'divide', '(address + displacement_8);', '(address + displacement_32);'),
+    ('filter-byte-sign', 'divide', '((int8_t)(eax >> 8) < 0);', '((int8_t)eax < 0);'),
+    ('filter-byte-value', 'divide', 'differ ? 0x7f81 : 0x7f7f;', 'differ ? 0x7f80 : 0x7f7f;'),
+    ('filter-16-sign', 'divide', '((int16_t)D32(context, CONTEXT_EDX) < 0);', '((int32_t)D32(context, CONTEXT_EDX) < 0);'),
+    ('filter-32-quotient', 'divide', 'differ ? 0x80000001u : 0x7fffffffu;', 'differ ? 0x80000000u : 0x7fffffffu;'),
+    ('filter-step', 'divide', '    D32(context, CONTEXT_EIP) += length;', '    D32(context, CONTEXT_EIP) += length + 1;'),
+    ('guarded-result', 'divide', '    --s_guarded;\n    return result;', '    --s_guarded;\n    return 0;'),
+    # host_rt_startup.c, the glue
+    ('onexit-test', 'startup', 'if (G32(0x41c5c8) == 0xffffffffu)', 'if (G32(0x41c5c4) == 0xffffffffu)'),
+    ('onexit-order', 'startup', '(fn, VA(0x41c5c8), VA(0x41c5c4));', '(fn, VA(0x41c5c4), VA(0x41c5c8));'),
+    ('atexit-result', 'startup', 'return fs98_host_rt_onexit(fn) != 0 ? 0 : -1;', 'return fs98_host_rt_onexit(fn) != 0 ? 0 : 1;'),
+    ('afx-dll', 'startup', '    D8(state, 0x14) = (uint8_t)dll;', '    D32(state, 0x14) = (uint32_t)dll;'),
+    ('afx-codepage', 'startup', '(_setmbcp, int32_t, (int32_t))(-3);', '(_setmbcp, int32_t, (int32_t))(-2);'),
+    ('afx-version', 'startup', 'fs98_host_rt_afx_initialize(0, 0x421);', 'fs98_host_rt_afx_initialize(0, 0x420);'),
+    ('import-data', 'startup', 'return fs98_host_rt_imports[HOST_RT_IMPORT_MFC_4274];', 'return fs98_host_rt_imports[HOST_RT_IMPORT_MFC_818];'),
+    ('app-vtable', 'startup', '    PTR(application, 0) = VA(0x416020);', '    PTR(application, 0) = VA(0x416000);'),
+    ('app-name', 'startup', '(application, 0);\n    PTR(application', '(application, (const char *)1);\n    PTR(application'),
+    ('delete-flag', 'startup', '    if (flags & 1)\n        CALL_C(operator_delete', '    if (flags & 2)\n        CALL_C(operator_delete'),
+    ('app-dtor-registered', 'startup', 'return fs98_host_rt_atexit((void *)fs98_host_rt_destroy_the_application);', 'return fs98_host_rt_atexit((void *)fs98_host_rt_destroy_418798);'),
 ]
 
 

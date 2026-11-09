@@ -25,7 +25,27 @@ SIM1, the gauges and the crash models were replaced on 2026-11-08; the host's st
 | `Sim/SIM1.sim` | AIR decoder, aircraft setup, tick/frame simulation: 190 routines, 17,836 instructions (most of 78,216 bytes) | `tools/gen_sim1_lift.py` | six services and the state lifecycle (`src/sim1/sim1.c`, `sim1_state.inc`, `sim1_air.inc`); **all of it, done 2026-11-08**: all 186 routines decompiled and verified one by one (`src/sim1/sim1_small.c`, 186 operations, 0 differ, 882 breaks), built as the native SIM1.sim over retail's data (`src/sim1/sim1_native.c`, `make sim1`), 74 scripted flights frame for frame; installed, the lift kept only as an oracle ([sim1.md](modules/sim1.md#the-native-build)) | **1, done 2026-11-08** |
 | `Gauges/*.GAU` (120) | every gauge's code, 1,318 routines, 63,472 bytes | `tools/gen_gauges.py` | **all of it, done 2026-11-08**: every gauge hand-written C (`src/gauges/<name>.c` over the generated data image, `src/gauges/gauge.h`), 120 of 120 against retail at 20,000 vectors on a strengthened harness, 67 breaks, 74 flights frame for frame; installed ([gauges.md](modules/gauges.md#decompilation)) | **2, done 2026-11-08** |
 | Crash MDLs (3) | the three crash models, about 28 KB | `tools/gen_mdl_crash.py` | **all of it, done 2026-11-08**: one hand-written source for the three (`src/mdl/mdl_crash.c`, per-model tables), 12,000 lifecycle scenarios against retail with 0 differences, 82 breaks (78 caught, 4 proven equivalent), the three crash flights frame for frame; installed, the lift kept only as an oracle ([mdl.md](modules/mdl.md#crash-models)) | **3, done 2026-11-08** |
-| `FLTSIM98.EXE` | startup, window procedures, timer, message loop, shutdown: 402 routines, 13,081 instructions | `tools/gen_host_runtime.py` | all 194 services (`src/host/host.c`); **under way since 2026-11-08**: 34 of the 166 runtime routines hand-written in `src/host/runtime/` and verified (`hostrtdiff`, 0 differ; 91 breaks) -- DirectDraw, the cursor, the floating windows ([host.md](modules/host.md#the-runtime-decompiled)) | **4, under way** |
+| `FLTSIM98.EXE` | startup, window procedures, timer, message loop, shutdown: 402 routines, 13,081 instructions | `tools/gen_host_runtime.py` | all 194 services (`src/host/host.c`); **under way since 2026-11-08**: 58 of the 165 runtime routines hand-written in `src/host/runtime/` and verified (`hostrtdiff`, 0 differ; 150 breaks) -- DirectDraw, full screen, the cursor, the floating windows, the divide repair, the startup glue ([host.md](modules/host.md#the-runtime-decompiled)) | **4, under way** |
+
+### Routines written twice, until the runtime is linked with the services
+
+Retail's display-settings service `+0x31c` and its runtime share eight routines. `src/host/host.c`
+has them as the service's helpers (verified by `hostdiff`) and `src/host/runtime/` has them again,
+since the runtime calls them directly and is verified apart (`hostrtdiff`). Both copies are
+verified against retail and agree, but a change to one must be made to the other until they are
+merged: when the runtime and the services are built into one executable, keep one copy (the
+runtime's goes through the import table, `host.c`'s calls Win32 directly) and point both callers at it.
+
+| Retail | `src/host/host.c` | `src/host/runtime/` |
+| --- | --- | --- |
+| `0x4121a0` a device's listed name | `host_dd_label` | `fs98_host_rt_device_name` (`host_rt_ddraw.c`) |
+| `0x412210` whether a device is the display | `host_dd_primary` | `fs98_host_rt_device_is` |
+| `0x412250` DirectDrawEnumerate callback, the device searched for | `host_dd_find_cb` | `fs98_host_rt_device_found` |
+| `0x412340` the 3D suffix of a device name | `host_d3d_suffix` | `fs98_host_rt_device_suffix` |
+| `0x412420` create the named device's IDirectDraw | `host_dd_open` | `fs98_host_rt_device_create` |
+| `0x414400` DirectDrawEnumerate callback, the primary display | `host_dd_first_cb` | `fs98_host_rt_primary_found` (`host_rt_config.c`) |
+| `0x4144c0` an option flag from HARDWARE | `host_cfg_flag_read` | `fs98_host_rt_flag_read` |
+| `0x414510` read the display settings | `host_display_read` | `fs98_host_rt_read_display` |
 
 G3D's mesh compiler (`src/g3d/g3d_mesh.S`, `tools/gen_g3d_mesh.py`) is a transcription too, but a
 deliberate one for x87 rounding, with a portable C version checked against it.

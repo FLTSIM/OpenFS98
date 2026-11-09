@@ -98,6 +98,20 @@ void *SC fs98_host_rt_render_surface(int32_t width, int32_t height);
 
 /* src/host/runtime/host_rt_startup.c */
 void fs98_host_rt_413220(void);
+void *fs98_host_rt_onexit(void *fn);
+int32_t fs98_host_rt_atexit(void *fn);
+int32_t SC fs98_host_rt_afx_initialize(int32_t dll, uint32_t version);
+void *fs98_host_rt_construct_afx(void);
+uint32_t fs98_host_rt_construct_418798(void);
+uint32_t fs98_host_rt_destroy_418798(void);
+int32_t fs98_host_rt_static_418798(void);
+void *fs98_host_rt_401040(void);
+void *fs98_host_rt_application_class(void);
+uint32_t TC fs98_host_rt_destroy_application(void *application);
+void *TC fs98_host_rt_delete_application(void *application, uint32_t flags);
+void *fs98_host_rt_construct_application(void);
+uint32_t fs98_host_rt_destroy_the_application(void);
+int32_t fs98_host_rt_static_application(void);
 
 /* src/host/runtime/host_rt_config.c */
 void SC fs98_host_rt_flag_read(uint8_t *settings, uint32_t mask, const char *key, int32_t fallback);
@@ -116,5 +130,53 @@ struct picture;
 void SC fs98_host_rt_draw_piece(uint8_t *window, struct picture *to, const int32_t *point, struct picture *from,
                                 const int32_t *part);
 void SC fs98_host_rt_draw_floating(uint32_t region);
+
+/* src/host/runtime/host_rt_fullscreen.c */
+void fs98_host_rt_make_palettes(void);
+void SC fs98_host_rt_full_screen_gdi(int32_t back);
+void fs98_host_rt_begin_frame(void);
+void fs98_host_rt_end_frame(void);
+int32_t SC fs98_host_rt_redraw_part(const int32_t *rect, const int32_t *point);
+void SC fs98_host_rt_redraw_window(uint32_t window, int32_t parts);
+void SC fs98_host_rt_move_window(uint32_t window, const int32_t *rect);
+
+/* src/host/runtime/host_rt_divide.c */
+uint32_t SC fs98_host_rt_sib_address(uint32_t mod, uint32_t scale, uint32_t index, uint32_t base, void **pointers);
+int32_t SC fs98_host_rt_divide_filter(void **pointers);
+int32_t SC fs98_host_rt_guarded(int32_t (*fn)(void));
+int32_t SC fs98_host_rt_divide_handler(void **pointers);
+
+/* src/host/runtime/host_rt_modules.c */
+struct module;
+struct module *SC fs98_host_rt_module_named(const char *name);
+struct module *SC fs98_host_rt_module_with_id(uint32_t id);
+struct module *SC fs98_host_rt_module_with_linkage(uint32_t *linkage);
+void SC fs98_host_rt_resolve_imports(struct module *module);
+void SC fs98_host_rt_release_imports(struct module *module);
+uint32_t *SC fs98_host_rt_acquire(struct module *module);
+void SC fs98_host_rt_release(struct module *module);
+uint32_t *SC fs98_host_rt_acquire_named(const char *name);
+uint32_t *SC fs98_host_rt_acquire_id(uint32_t id);
+void SC fs98_host_rt_release_id(uint32_t id);
+void SC fs98_host_rt_release_linkage(uint32_t *linkage);
+void SC fs98_host_rt_register(uint32_t id, uint32_t *records);
+int32_t SC fs98_host_rt_add_module(const char *path, int32_t keep);
+void fs98_host_rt_add_host(void);
+void SC fs98_host_rt_add_directory(const char *directory, const char *pattern, int32_t keep);
+void fs98_host_rt_find_modules(void);
+void fs98_host_rt_auto_init_modules(void);
+int32_t SC fs98_host_rt_order_module(struct module *module, uint32_t **order);
+void fs98_host_rt_order_modules(void);
+void fs98_host_rt_init_ordered(void);
+void fs98_host_rt_deinit_ordered(void);
+int32_t SC fs98_host_rt_link_imports(struct module *module, void *unused);
+int32_t SC fs98_host_rt_init_module(struct module *module, void *unused);
+int32_t SC fs98_host_rt_deinit_unordered(struct module *module, void *unused);
+int32_t SC fs98_host_rt_unload_module(struct module *module, void *unused);
+void fs98_host_rt_408110(void);
+void fs98_host_rt_start_modules(void);
+void fs98_host_rt_stop_modules(void);
+uint32_t fs98_host_rt_407910(void);
+uint32_t fs98_host_rt_409c80(void);
 
 #endif

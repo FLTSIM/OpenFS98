@@ -4778,6 +4778,11 @@ static uint32_t FS98_STDCALL host_120(uint32_t block, uint32_t size, uint32_t fl
 
 /* ---- display settings (+0x31c) -------------------------------------------
  *
+ * 0x4121a0, 0x412210, 0x412250, 0x412340, 0x412420, 0x414400, 0x4144c0 and
+ * 0x414510 below are written twice until the runtime is linked with the
+ * services: src/host/runtime/ has them too (docs/remaining-work.md, "Routines
+ * written twice"). A change to one must go to both.
+ *
  * A settings block (0xe8 bytes): the device, as "<description>" or
  * "<description> (<name>)" for one named "\\.<...>", with an optional
  * " <Direct3D suffix>" (+0x00, 0x80 bytes); that suffix alone (+0x80); the

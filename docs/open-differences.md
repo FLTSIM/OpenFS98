@@ -118,8 +118,14 @@ The `radios` suite's stand-in now logs edi, and catches the old call.
 - **The host runtime's failed GetDC under 0x413910.** When the back buffer's GetDC fails,
   retail frames the rectangle with a DC that is never set, its caller's ecx left on the stack;
   ours passes an uninitialised local. FrameRect fails harmlessly either way. `hostrtdiff`'s
-  GetDC writes 0 on failure under that routine alone (elsewhere a failure leaves the out as it
-  was, which `0x4138b0` depends on).
+  GetDC writes 0 on failure when called from that routine (retail's or ours, told by the return
+  address); elsewhere a failure leaves the out as it was, which `0x4138b0` depends on.
+
+- **The divide repair's frame.** Retail runs the sim inside an SEH frame whose filter
+  (`0x4119a0`) repairs divide faults; the decompiled runtime's `0x412140` instead counts the
+  calls under way and a vectored handler applies the same filter. A vectored handler sees a
+  fault before any `__except` inside the call, so a module that caught its own divide faults
+  would no longer see them first. None is known to; the lifted build does the same.
 
 ## Unsettled questions
 

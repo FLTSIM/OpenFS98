@@ -692,16 +692,24 @@ the x87, or stored to a float). On x86 its arithmetic is the x87's own,
 under the caller's control word. Without an x87 (or with
 `FS98_PORTABLE_FP`) it is a software 80-bit float: add, subtract,
 multiply, divide and square root correctly rounded to nearest at the
-precision control's 24, 53 or 64 bits (`g3d_mesh_precision`, 53 by
-default, as Windows starts a process with `0x27f`), with the extended
+precision control's 24, 53 or 64 bits (`g3d_mesh_precision`, 24 by
+default, the precision the game compiles meshes at), with the extended
 exponent range, as the x87 rounds. `fpatan` ignores the precision control,
 so the arctangent is worked out at 64 bits (three halvings and an odd
 series), within five units of the 64th bit of the hardware's and exact in
 82% of a million trials. The C library's `atan2`, good to 53 bits, was not
 enough: it parted from the x87 in 5 of about 35,000 polygons under 24-bit
-precision, each traced to that one instruction. **Which precision the game
-runs G3D under is not established**; on x86 it does not matter, and a
-native build has to set `g3d_mesh_precision` to match.
+precision, each traced to that one instruction.
+
+**The game compiles meshes at 24 bits.** The compiler runs only with GLOBAL
+`+0x12a4` bit 4, which only HG2D's Direct3D device scene sets, so the
+software renderer never compiles meshes. A probe at the compiler's entry
+(a scratch build, 2026-11-15; all-ours game, Direct3D `640x480x16`, 500
+passes) read control word `0x007f` at every compile on PARIS, HONGKONG,
+NEWYORK, KAUAI and STGEORGE; CVINSON compiled none; all six stayed
+frame-identical to retail. HG2D's batch initialisation also leaves 24 bits
+(`hg2d.md`, slice 46). On x86 the C uses the caller's control word, so the
+default matters only without the x87.
 
 `make g3dmeshdiff-run` runs retail's own mesh compiler (the CD's G3D.DLL
 loaded as `G3D_mesh_retail.dll`, called at `0x206e35b0`, its `+0x64` sibling

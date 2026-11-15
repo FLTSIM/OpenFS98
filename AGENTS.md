@@ -47,7 +47,7 @@ A hybrid decompilation of Microsoft Flight Simulator 98, OpenRCT2-style: the ret
 - A fault that skips a cleanup leaves heap pointers that depend on the other side's leak; compare them as null or not. A break caught only by a harness artifact is not caught.
 - Not every FS98 CD is the reference: a later pressing rebased `FLTSIM98.EXE` and ten modules at `0x10000000`. If a generator stops with `image base moved`, check `orig/` against `docs/building.md` ("Which CD") before touching code.
 - Retail HG2D freezes the 3D view under wine (exceptions in window procedures are swallowed, so the divide repair never runs). Run retail HG2D with `make sehfix-install`, plus `make vd-on` for focus; ours does not need it. See `docs/wine.md`.
-- The x87 precision the game runs G3D under is not established; a native build must set `g3d_mesh_precision` to match.
+- G3D's mesh compiler runs at 24-bit x87 precision in the game (Direct3D only; measured 2026-11-15). `g3d_mesh_precision` defaults to 24 for builds without the x87; x86 uses the caller's control word.
 - Never run `wineserver -k` in the shared prefix while difftests run; use a prefix copy.
 - Never `pkill -f` a pattern that also appears in the same command line: it kills its own shell (`docs/wine.md`).
 - In `tools/drive/`: SIMSUI buttons are owner drawn, so `BM_CLICK` does nothing under wine; click by position, and post clicks (a sent `BN_CLICKED` blocks on the modal dialog it opens). Run a crash with `WINEDLLOVERRIDES=dsound=d`, since a crash waits for its sound.

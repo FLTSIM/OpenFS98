@@ -112,7 +112,7 @@ typedef struct {
     uint64_t hi, lo;
 } u128;
 
-int g3d_mesh_precision = 53;        /* control word 0x27f, Windows' own */
+int g3d_mesh_precision = 24;        /* the game compiles meshes only on Direct3D, at 24 bits (docs/modules/g3d.md) */
 
 static u128 mul64(uint64_t a, uint64_t b)
 {

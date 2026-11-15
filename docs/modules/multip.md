@@ -23,7 +23,7 @@ are known and offset-based names where they are not.
 
 ### Restart here
 
-Read `CLAUDE.md`, `README.md`, `docs/method.md`, `src/multip/AGENTS.md`, then
+Read `CLAUDE.md`, `README.md`, `docs/method.md`, then
 this section and [the receive/lifecycle checkpoint](#receive-dispatch-and-session-lifecycle-checkpoint).
 Check `git status --short` before editing: this checkpoint includes modified
 and untracked files. Preserve the entire working tree; do not stage, commit,

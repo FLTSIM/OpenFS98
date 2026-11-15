@@ -118,4 +118,4 @@ identical counts.
 
 The harnesses' own details are in [method.md](method.md) and the per-module
 documents; `make main-dialogs`, `make flights-play`, `tools/hg2d_frames.sh` and
-the like are listed in [tools.md](tools.md) and in [CLAUDE.md](../CLAUDE.md).
+the like are listed in [tools.md](tools.md), with their baselines.

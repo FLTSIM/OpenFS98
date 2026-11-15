@@ -2,7 +2,7 @@
 
 Every harness and analysis script, moved out of the README. The full list of
 verification commands with their expected results and run times is in
-[CLAUDE.md](../CLAUDE.md#verifying); this is what each one is. Setup is in
+[Baselines](#baselines) below; this is what each one is. Setup is in
 [building.md](building.md).
 
 | | |
@@ -78,3 +78,165 @@ verification commands with their expected results and run times is in
 | `make compare` | section sizes of each built module vs. the retail one |
 | `tools/pesurvey.py FILE...` | sections, linker version, exports, debug dir |
 | `tools/dumplinkage.py FILE [n]` | dump a module's `Linkage` / `ImportTable` |
+
+## Baselines
+
+Every verification command with its expected result and run time. These exact numbers are the
+current baseline: a run reporting fewer comparisons or any mismatch has regressed.
+
+```sh
+make utildiff-run        # UTIL service by service   -> 6452880 comparisons, 0 mismatches
+tools/reg_contracts.sh   # every module alone: what each slot leaves in the registers
+make utildiff-portable   # the same with x87 compiled out (the ARM path)
+make numericdiff-run     # all NUMERIC formats/ranges -> 545778 comparisons, 0 mismatches
+make chaindiff-run       # whole-module CHAIN        -> 20000 scenarios, 0 differ
+make atcdiff-run         # whole-module ATC          -> 20000 scenarios, 0 differ
+make weathermdiff-run    # whole-module WEATHERM     -> 20000 scenarios, 0 differ
+make acontaindiff-run    # whole-module ACONTAIN     -> 20000 scenarios, 0 differ (~25 min)
+make sounddiff-run       # whole-module SOUND        -> 20000 scenarios, 0 differ (~40 min)
+make dynamicdiff-run     # whole-module DYNAMIC      -> 20000 scenarios, 0 differ (~15 min)
+make fegriddiff-run      # FE grid conversions        -> 7742499 comparisons, 0 mismatches
+make fediff-run          # FE engine + C file services -> 20000 scenarios, 0 differ
+make landmediff-run      # whole-module LANDME       -> 20000 scenarios, 0 differ
+make facildiff-run       # whole-module FACIL        -> 0 differences; 20000 query, 10000 dialog scenarios, 0 differ (~27 min)
+make facildiff-fe-run    # OpenFS98 FE+FACIL together -> 2000 query, 2000 dialog scenarios, 0 differ (~5 min)
+make fesldiff-run        # FE +0x78, the Scenery Library -> 20000 scenarios, 0 differ (~6 min)
+make boosterdiff-run     # whole-module BOOSTER, its thread drained -> 20000 scenarios, 0 differ (~75 min)
+make demodiff-run        # whole-module DEMO, videos and instant replay -> 20000 scenarios, 0 differ (~25 min)
+make advdrvdiff-run      # whole-module ADVDRV, adventures and lessons -> 20000 scenarios, 0 differ (~40 min)
+make windowdiff-run      # whole-module WINDOW, windows and the eye -> 20000 scenarios, 0 differ (~2 min)
+make window-breaks       # WINDOW broken on purpose -> 109 breaks, 106 caught, 3 proven equivalent (~25 min)
+make maindiff-run SUITE=records  # MAIN slice 1, situation records -> 20000 scenarios, 0 differ (~15 min)
+make main-breaks SUITE=records   # its breaks -> 40, 38 caught, 2 proven equivalent (~35 min)
+make maindiff-run SUITE=situations  # MAIN slice 2, the reader and writer -> 20000 scenarios, 0 differ (~20 min)
+make main-breaks SUITE=situations   # its breaks -> 69, 63 caught, 6 proven equivalent (~40 min)
+make maindiff-run SUITE=nav          # MAIN slice 3, range and bearing (+0x70) -> 20000 scenarios, 0 differ (~3 min)
+make main-breaks SUITE=nav           # its breaks -> 14, 13 caught, 1 proven equivalent (~6 min)
+make maindiff-run SUITE=navio        # MAIN slice 4, the nav read-outs (+0x78,+0x80) -> 20000 scenarios, 0 differ (~3 min)
+make main-breaks SUITE=navio         # its breaks -> 12, all caught (~5 min)
+make maindiff-run SUITE=navdesc      # MAIN slice 5, the station descriptor (+0x7c) -> 20000 scenarios, 0 differ (~3 min)
+make main-breaks SUITE=navdesc       # its breaks -> 12, all caught (~5 min)
+make maindiff-run SUITE=season       # MAIN slice 6, the season/zone/clock (+0x74) -> 20000 scenarios, 0 differ (~3 min)
+make main-breaks SUITE=season        # its breaks -> 24, 23 caught, 1 proven equivalent (~10 min)
+make maindiff-run SUITE=clock        # MAIN slice 7, the clock as digits (+0xa4) -> 20000 scenarios, 0 differ (~3 min)
+make main-breaks SUITE=clock         # its breaks -> 6, all caught (~3 min)
+make maindiff-run SUITE=view         # MAIN slice 8, the view cycler (+0xc8) -> 20000 scenarios, 0 differ (~3 min)
+make main-breaks SUITE=view          # its breaks -> 10, all caught (~5 min)
+make maindiff-run SUITE=menu         # MAIN slice 9, analysis menu greying/enabling (+0x30,+0x34) -> 20000 scenarios, 0 differ (~3 min)
+make main-breaks SUITE=menu          # its breaks -> 6, all caught (~2 min)
+make maindiff-run SUITE=obj          # MAIN slice 10, an object slot release (+0x8c) -> 20000 scenarios, 0 differ (~3 min)
+make main-breaks SUITE=obj           # its breaks -> 6, all caught (~3 min)
+make maindiff-run SUITE=clamp        # MAIN slice 11, the latitude clamp (+0x1c) -> 20000 scenarios, 0 differ (~3 min)
+make main-breaks SUITE=clamp         # its breaks -> 6, 5 caught, 1 proven equivalent (~3 min)
+make maindiff-run SUITE=sun          # MAIN slice 12, the sun direction (+0xa0) -> 20000 scenarios, 0 differ (~5 min)
+make main-breaks SUITE=sun           # its breaks -> 14, 12 caught, 2 proven equivalent (~6 min)
+make maindiff-run SUITE=objalloc     # MAIN slice 13, allocate an object slot (+0x84) -> 20000 scenarios, 0 differ (~5 min)
+make main-breaks SUITE=objalloc      # its breaks -> 15, 14 caught, 1 proven equivalent (~6 min)
+make maindiff-run SUITE=eye          # MAIN slice 14, the eye's reticle (+0xc0) -> 20000 scenarios, 0 differ (~4 min)
+make main-breaks SUITE=eye           # its breaks -> 13, 12 caught, 1 proven equivalent (~5 min)
+make maindiff-run SUITE=band         # MAIN slice 15, the altitude band (+0x9c) -> 20000 scenarios, 0 differ (~4 min)
+make main-breaks SUITE=band          # its breaks -> 33, all caught (~12 min)
+make maindiff-run SUITE=objstep      # MAIN slice 16, the smoke trails (+0x88) -> 20000 scenarios, 0 differ (~4 min)
+make main-breaks SUITE=objstep       # its breaks -> 34, 32 caught, 2 proven equivalent (~12 min)
+make maindiff-run SUITE=quicksave    # MAIN slice 17, the quick save (+0xb0) -> 20000 scenarios, 0 differ (~20 min)
+make main-breaks SUITE=quicksave     # its breaks -> 7, 6 caught, 1 proven equivalent (~15 min)
+make maindiff-run SUITE=prefs        # MAIN slice 18, the preferences (+0xb4,+0xb8,+0xbc) -> 20000 scenarios, 0 differ (~5 min)
+make main-breaks SUITE=prefs         # its breaks -> 28, 26 caught, 2 proven equivalent (~25 min)
+make maindiff-run SUITE=clouds       # MAIN slice 19, the cloud layers' draw (+0x98) -> 20000 scenarios, 0 differ (~4 min)
+make main-breaks SUITE=clouds        # its breaks -> 53, 51 caught, 2 proven equivalent (~50 min)
+make maindiff-run SUITE=cloudtex     # MAIN slice 20, the cloud layers' textures (+0x94) -> 20000 scenarios, 0 differ (~5 min)
+make main-breaks SUITE=cloudtex      # its breaks -> 34, 33 caught, 1 proven equivalent (~30 min)
+make maindiff-run SUITE=spot         # MAIN slice 21, the spot plane's eye (+0xa8), over retail UTIL -> 20000 scenarios, 0 differ (~4 min)
+make main-breaks SUITE=spot          # its breaks -> 50, 47 caught, 3 proven equivalent (~45 min)
+make maindiff-run SUITE=frame        # MAIN slice 22, init/deinit and the frame callbacks (+0x04,+0x08), over retail UTIL -> 20000 scenarios, 0 differ (~5 min)
+make main-breaks SUITE=frame         # its breaks -> 60, 58 caught, 2 proven equivalent (~90 min)
+make maindiff-run SUITE=tick         # MAIN slice 23, the timer tick (+0x24) -> 20000 scenarios, 0 differ (~1 min)
+make main-breaks SUITE=tick          # its breaks -> 11, all caught (~10 min)
+make maindiff-run SUITE=step         # MAIN slice 24, the frame (+0x18) -> 20000 scenarios, 0 differ (~3 min)
+make main-breaks SUITE=step          # its breaks -> 40, 39 caught, 1 proven equivalent (~40 min)
+make maindiff-run SUITE=commands     # MAIN slice 25, the menu command dispatcher (+0x20) -> 20000 scenarios, 0 differ (~4 min)
+make main-breaks SUITE=commands      # its breaks -> 73, all caught (~50 min)
+make maindiff-run SUITE=dialogs      # MAIN slice 26, the first dialogs, over retail UTIL and NUMERIC -> 20000 scenarios, 0 differ (~3 min)
+make main-breaks SUITE=dialogs       # its breaks -> 40, 38 caught, 2 proven equivalent (~25 min)
+make maindiff-run SUITE=flights      # MAIN slice 27, +0x50, +0xac, +0xc4 and command 0x1106 -> 20000 scenarios, 0 differ (~5 min)
+make main-breaks SUITE=flights       # its breaks -> 99, 97 caught, 2 proven equivalent (~80 min)
+make maindiff-run SUITE=natives      # MAIN slice 28, the routines its G3D programs call -> 20000 scenarios, 0 differ (~4 min)
+make main-breaks SUITE=natives       # its breaks -> 98, 95 caught, 3 proven equivalent (~65 min)
+make maindiff-run SUITE=start        # MAIN slice 29, the menu state and the clock -> 20000 scenarios, 0 differ (~3 min)
+make main-breaks SUITE=start         # its breaks -> 93, all caught (~65 min)
+make maindiff-run SUITE=radios       # MAIN slice 30, CHAIN lists 3 and 5 -> 20000 scenarios, 0 differ (~4 min)
+make main-breaks SUITE=radios        # its breaks -> 120, 115 caught, 5 proven equivalent (~75 min)
+make maindiff-run SUITE=weather      # MAIN slice 31, the weather's layers at start -> 20000 scenarios, 0 differ (~4 min)
+make main-breaks SUITE=weather       # its breaks -> 50, all caught (~30 min)
+make maindiff-run SUITE=kneeboard    # MAIN slice 32, the kneeboard -> 20000 scenarios, 0 differ (~3 min)
+make main-breaks SUITE=kneeboard     # its breaks -> 61, all caught (~45 min)
+make maindiff-run SUITE=session      # MAIN slice 33, +0x28 and +0x2c -> 20000 scenarios, 0 differ (~15 min)
+make main-breaks SUITE=session       # its breaks -> 53, all caught (~65 min)
+make maindiff-run SUITE=aircraft # MAIN slice 34, Select Aircraft and the kneeboard pages -> 20000 scenarios, 0 differ
+make main-breaks SUITE=aircraft # its breaks -> 39, 38 caught, 1 proven equivalent
+make maindiff-run SUITE=clockdlg # MAIN slice 35, Time and Season -> 20000 scenarios, 0 differ
+make main-breaks SUITE=clockdlg # its breaks -> 85, 84 caught, 1 proven equivalent
+make maindiff-run SUITE=engines  # MAIN slice 36, the aircraft's engines -> 20000 scenarios, 0 differ
+make main-breaks SUITE=engines  # its breaks -> 78, 66 caught, 12 proven equivalent
+make maindiff-run SUITE=limits   # MAIN slice 37, the aircraft's limits -> 20000 scenarios, 0 differ
+make main-breaks SUITE=limits   # its breaks -> 63, 55 caught, 8 proven equivalent
+make maindiff-run SUITE=areas    # MAIN slice 38, the weather areas -> 20000 scenarios, 0 differ
+make main-breaks SUITE=areas    # its breaks -> 67, 62 caught, 5 proven equivalent
+make maindiff-run SUITE=prefdlg  # MAIN slice 39, General Preferences -> 20000 scenarios, 0 differ
+make main-breaks SUITE=prefdlg  # its breaks -> 69, 68 caught, 1 proven equivalent
+make maindiff-run SUITE=viewdlg  # MAIN slice 40, View Options -> 20000 scenarios, 0 differ
+make main-breaks SUITE=viewdlg  # its breaks -> 69, 66 caught, 3 proven equivalent
+make maindiff-run SUITE=logbook  # MAIN slice 41, the logbook and +0x90 -> 20000 scenarios, 0 differ
+make main-breaks SUITE=logbook  # its breaks -> 111, 105 caught, 6 proven equivalent
+make maindiff-run SUITE=wxdlg    # MAIN slice 42, the weather dialogs -> 20000 scenarios, 0 differ
+make main-breaks SUITE=wxdlg    # its breaks -> 99, 94 caught, 5 proven equivalent
+make maindiff-run SUITE=radiodlg # MAIN slice 43, the radios dialog -> 20000 scenarios, 0 differ
+make main-breaks SUITE=radiodlg # its breaks -> 118, all caught
+make maindiff-run SUITE=create   # MAIN slice 44, Create a Flight -> 20000 scenarios, 0 differ
+make main-breaks SUITE=create   # its breaks -> 98, 97 caught, 1 proven equivalent
+make main-smoke                      # boots the game on our MAIN.DLL, then restores the previous DLL byte for byte
+make flights-play                    # Flights' dialogs used in the game (loads, settings, default, delete, quit), retail twice and ours twice, saves and files compared -> PASS (~10 min)
+make -f tools/options.mk optionseventsdiff-run   # Options.DLL, all 15 dialogs and 13 tab pages -> 20000 scenarios, 9860000 comparisons, 0 differ (~1 h)
+make -f tools/options.mk options-breaks N=400    # its breaks -> 859, all caught, 17 proven equivalent (~8 h)
+make -f tools/options.mk options                 # the native Options.DLL (bin/options-diff/OPTIONS_ours.dll); main-dialogs compares it in the game
+make -f tools/simsui.mk simsuidiff-run N=2000    # SIMSUI.DLL, every routine -> 444 operations, 0 differ (~10 min)
+make -f tools/simsui.mk simsui-breaks N=400      # its breaks, per class (tools/simsui_breaks.py; run from a frozen copy)
+make -f tools/sim1.mk sim1rdiff-run             # SIM1 decompiled routines against retail over in-flight snapshots -> 186 operations, 372000 comparisons, 0 differ (~10 min)
+make -f tools/sim1.mk sim1r-breaks               # their breaks -> 882, all caught; proven equivalents listed in its docstring (tools/sim1r_breaks.py; run from a frozen copy)
+make -f tools/sim1.mk sim1native-flights        # the native SIM1.sim (make sim1, installed) against retail on the 74 scripted flights -> 74 match (~15 min)
+make -f tools/simsui.mk simsui                   # the native SIMSUI.DLL (bin/simsui-native/SIMSUI_ours.dll), installed beside FLTSIM98.EXE
+make main-dialogs                    # 47 menu commands and dialog steps in the real game (with Options' dialogs and tab pages), retail against ours -> same controls, 41 of 47 pictures identical, PASS (~30 min)
+make hostdiff-run N=20000            # HOST (id 1, FLTSIM98.EXE) slices 1-28, all 194 services, real files in bin/difftest/hostfs -> 0 differ (~11 min)
+make host-breaks                     # HOST broken on purpose -> 505 breaks, 488 caught, 15 proven equivalent, 2 rare display paths missed at N=2000 (caught at N=3000) (~5 h)
+make mpchatdiff-run      # whole-module MPCHAT, the chat window -> 20000 scenarios, 0 differ (~20 s)
+make mpchat-breaks       # MPCHAT broken on purpose -> 117 breaks, 113 caught, 4 proven equivalent (~8 min)
+make winmsgdiff-run      # whole-module WINMSG, the message bar -> 20000 scenarios, 0 differ (~2 min)
+make winmsg-breaks       # WINMSG broken on purpose -> 64 breaks, 60 caught, 4 proven equivalent (~13 min)
+make realitydiff-run     # whole-module REALITY, crashes and the analysis -> 20000 scenarios, 0 differ (~1 min)
+make reality-breaks      # REALITY broken on purpose -> 67 breaks, 61 caught, 6 proven equivalent (~7 min)
+make analysisdiff-run    # whole-module ANALYSIS, landing/manoeuvre/course -> 20000 scenarios, 0 differ (~2 min)
+make analysis-breaks     # ANALYSIS broken on purpose -> 103 breaks, 93 caught, 10 proven equivalent (~20 min)
+make controlsdiff-run    # whole-module CONTROLS: commands, joysticks, key bindings, force feedback, the dialog -> 20000 scenarios, 0 differ (~40 min)
+make controls-breaks     # CONTROLS broken on purpose -> 81 breaks, 78 caught, 3 proven equivalent (~20 min)
+make g3ddiff-run         # whole-module G3D, the 3D pipeline -> 20000 scenarios, 0 differ (~5 min)
+make g3d-breaks N=1000   # G3D broken on purpose -> 317 breaks, 279 caught, 7 proven equivalent, 31 missed (19 at N=4000; ~4 h)
+make mdl-crash-diff-run  # the three decompiled crash MDLs against retail -> 12000 scenarios, 0 differ (~3 min)
+python3 tools/mdl_crash_breaks.py # (from a frozen copy) the crash MDLs broken on purpose -> 82, 78 caught, 4 proven equivalent (~4 min)
+make -f tools/host_rt.mk hostrtdiff-run N=20000 # the decompiled host runtime (src/host/runtime/) -> 161 operations, 3220000 comparisons, 0 differ (~30 min)
+python3 tools/host_rt_breaks.py # (from a frozen copy) its breaks -> 569, 557 caught (2 more at N=20000), 10 proven equivalent
+make mdl-crash-game  # the three crash flights, retail against the decompiled MDLs -> identical frames
+make gauges-check N=20000 # all 120 hand-written gauges against retail, every exposed callback/data/resource/FP result -> 120 checked, 0 differ
+python3 tools/gauge_breaks.py # (from a frozen copy) the hand-written gauges broken on purpose -> 67, all caught
+make gauges-breaks       # tools/gauge_breaks.py again (it rewrites src/gauges/: from a frozen copy)
+make gauges-panels N=1000 # same PANELS, retail/rebuilt gauge collection, strict full-state comparison
+make panelsdiff-run      # whole-module PANELS through the CD's gauges -> 3000 scenarios, 0 differ (~15 min)
+make panelsunit-run      # PANELS's image routines alone -> 20000 cases each, 0 differ (~3 min)
+make panels-breaks       # PANELS broken on purpose -> 200 sampled, 2 do not build, the rest caught (two of them only at N=3000)
+make g3dmeshdiff-run     # the mesh compiler: instructions vs portable C, x87 and soft float -> 100000 polygons, 0 differ
+make difftest-run        # whole-module SLEW         -> 0/2000 vectors differ
+make ofstest-run         # in-process, via the host  -> passed 68, failed 0
+make -f tools/hg2d.mk hg2ddiff-run  # whole-module HG2D, a suite per slice -> 59 suite summaries, 0 differ (N=20000 takes hours; docs/modules/hg2d.md)
+tools/hg2d_frames.sh 'Situatio\PARIS.STN' 900  # the running game, retail HG2D twice then ours -> identical frames, PASS, on a private Xvfb; HG2D_FRAMES_ALL=1 for the whole game (needs make -f tools/hg2d.mk bin/hg2d-diff/FRAMELOCK.DLL)
+make smoke               # ACONTAIN, ADVDRV, ANALYSIS, ATC, BOOSTER, CHAIN, CONTROLS, DEMO, DYNAMIC, FACIL, FE, G3D, GLOBAL, HG2D, LANDME, MPCHAT, NUMERIC, REALITY, SLEW, SOUND, UTIL, WEATHERM, WINDOW, WINMSG installed -> 27/27, 95 gauges, PASS
+make util-trace          # which UTIL services the game calls, counted in-game
+```

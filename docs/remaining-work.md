@@ -130,7 +130,7 @@ to `orig/Aircraft/` (2026-11-06).
 7. **Done 2026-11-14: the lifted code decompiled and deleted** (see above).
 8. **Native builds.** Moving off x86 ends comparison with retail, so the earlier steps come
    first. That is also when the retail bugs we reproduce get fixed: they are listed in
-   [retail-bugs.md](retail-bugs.md), which must first be completed from every module's doc. Register contracts between modules ([open-differences.md](open-differences.md#a-class-of-bug-to-look-for))
+   [retail-bugs.md](retail-bugs.md): collected from every module's doc on 2026-11-14 (about 330 entries); the ids still have to be marked in the code (`RETAIL BUG (kept): <id>`), and each entry checked against it, before porting starts. Register contracts between modules ([open-differences.md](open-differences.md#a-class-of-bug-to-look-for))
    are x86 behaviour that a port has to remove on both sides of each call.
 
 ## Other useful work, in no particular order

@@ -8,69 +8,23 @@ N ?= 20000
 FS98_DIR ?= $(CURDIR)/game
 SIM1_LDFLAGS := -shared -nostdlib -Wl,--entry=_DllMain@12 -Wl,--disable-dynamicbase -Wl,--disable-nxcompat -Wl,--image-base,0x22000000
 SIM1_LIBS := -lmsvcrt -lkernel32 -lgcc
-SIM1_COMPLETE_DEPS := $(SIM1_DEPS) $(SIM1_DIR)/lift/sim1_lift.o $(SIM1_DIR)/lift/sim1_entries.S $(SIM1_DIR)/lift/resource.o src/sim1/sim1_lift_native.S
-
-$(SIM1_DIR)/lift/sim1_lift.c $(SIM1_DIR)/lift/sim1_entries.S $(SIM1_DIR)/lift/sim1.res &: tools/gen_sim1_lift.py tools/gen_mdl_crash.py tools/gen_gauges.py $(SIM1_DIR)/sim1_data.inc
-	python3 -B tools/gen_sim1_lift.py > $(SIM1_DIR)/lift-summary.json
-
-$(SIM1_DIR)/lift/sim1_lift.o: $(SIM1_DIR)/lift/sim1_lift.c src/sim1/sim1_lift.h src/mdl/mdl_crash_lift.h
-	$(SIM1_CC) $(SIM1_CFLAGS) -masm=intel -Wno-unused-function -Wno-unused-label -c $< -o $@
-
-$(SIM1_DIR)/lift/resource.o: $(SIM1_DIR)/lift/sim1.res
-	i686-w64-mingw32-windres -J res -O coff $< $@
-
-$(SIM1_DIR)/SIM1_COMPLETE.DLL: $(SIM1_COMPLETE_DEPS) src/sim1/sim1.def
-	$(SIM1_CC) $(SIM1_CFLAGS) -DSIM1_COMPLETE $(SIM1_LDFLAGS) -o $@ $(SIM1_SOURCES) $(SIM1_DIR)/lift/sim1_lift.o $(SIM1_DIR)/lift/sim1_entries.S src/sim1/sim1_lift_native.S $(SIM1_DIR)/lift/resource.o src/sim1/sim1.def $(SIM1_LIBS)
-
-.PHONY: sim1-complete
-sim1-complete: $(SIM1_DIR)/SIM1_COMPLETE.DLL
-
-$(SIM1_DIR)/SIM1_COMPLETE_TEST.DLL: $(SIM1_COMPLETE_DEPS) tools/sim1_complete_test.def tools/difftest/sim1nativeprobe.c
-	$(SIM1_CC) $(SIM1_CFLAGS) -Wno-unused-function -DSIM1_COMPLETE $(SIM1_LDFLAGS) -o $@ $(SIM1_SOURCES) tools/difftest/sim1nativeprobe.c $(SIM1_DIR)/lift/sim1_lift.o $(SIM1_DIR)/lift/sim1_entries.S src/sim1/sim1_lift_native.S $(SIM1_DIR)/lift/resource.o tools/sim1_complete_test.def $(SIM1_LIBS)
-
-$(SIM1_DIR)/sim1decodediff.exe: tools/difftest/sim1decodediff.c tools/difftest/sim1diff.c tools/difftest/sim1call.S tools/difftest/sim1decode_stubs.S
-	$(SIM1_CC) $(SIM1_CFLAGS) -Wno-unused-function -o $@ tools/difftest/sim1decodediff.c tools/difftest/sim1call.S tools/difftest/sim1decode_stubs.S
-
-.PHONY: sim1decode-run
-sim1decode-run: $(SIM1_DIR)/SIM1_COMPLETE_TEST.DLL $(SIM1_DIR)/sim1decodediff.exe
-	WINEPREFIX="$(CURDIR)/$(SIM1_DIR)/wineprefix" WINEARCH=win32 WINEDEBUG=-all flock $(SIM1_DIR)/wine.lock timeout 180s wine $(SIM1_DIR)/sim1decodediff.exe retail-first
-	WINEPREFIX="$(CURDIR)/$(SIM1_DIR)/wineprefix" WINEARCH=win32 WINEDEBUG=-all flock $(SIM1_DIR)/wine.lock timeout 180s wine $(SIM1_DIR)/sim1decodediff.exe ours-first
-	WINEPREFIX="$(CURDIR)/$(SIM1_DIR)/wineprefix" WINEARCH=win32 WINEDEBUG=-all flock $(SIM1_DIR)/wine.lock timeout 180s wine $(SIM1_DIR)/sim1decodediff.exe relocate
-	@for order in retail-first ours-first relocate; do \
-	 WINEPREFIX="$(CURDIR)/$(SIM1_DIR)/wineprefix" WINEARCH=win32 WINEDEBUG=-all flock $(SIM1_DIR)/wine.lock timeout 180s wine $(SIM1_DIR)/sim1decodediff.exe $$order $(SIM1_DIR)/SIM1_COMPLETE_TEST.DLL setup || exit $$?; \
-	done
-
 .PHONY: sim1-install sim1-revert sim1-regression-run
-sim1-install: sim1-complete
+sim1-install: sim1-native
 	python3 -B tools/stage_sim1.py "$(FS98_DIR)"
 
 sim1-revert: $(SIM1_DIR)/sim1_data.inc
 	python3 -B tools/stage_sim1.py "$(FS98_DIR)" --retail
 
-sim1-regression-run: sim1-complete $(SIM1_DIR)/SIM1_COMPLETE_TEST.DLL $(SIM1_DIR)/sim1diff.exe $(SIM1_DIR)/sim1statediff.exe
+sim1-regression-run: $(SIM1_DIR)/SIM1_PARTIAL.DLL $(SIM1_DIR)/SIM1_STATE_TEST.DLL $(SIM1_DIR)/sim1diff.exe $(SIM1_DIR)/sim1statediff.exe
 	@for order in retail-first ours-first relocate; do \
-	 WINEPREFIX="$(CURDIR)/$(SIM1_DIR)/wineprefix" WINEARCH=win32 WINEDEBUG=-all flock $(SIM1_DIR)/wine.lock timeout 180s wine $(SIM1_DIR)/sim1diff.exe $(N) $$order $(SIM1_DIR)/SIM1_COMPLETE.DLL || exit $$?; \
-	 WINEPREFIX="$(CURDIR)/$(SIM1_DIR)/wineprefix" WINEARCH=win32 WINEDEBUG=-all flock $(SIM1_DIR)/wine.lock timeout 180s wine $(SIM1_DIR)/sim1statediff.exe $(N) $$order $(SIM1_DIR)/SIM1_COMPLETE_TEST.DLL || exit $$?; \
+	 WINEPREFIX="$(CURDIR)/$(SIM1_DIR)/wineprefix" WINEARCH=win32 WINEDEBUG=-all flock $(SIM1_DIR)/wine.lock timeout 180s wine $(SIM1_DIR)/sim1diff.exe $(N) $$order $(SIM1_DIR)/SIM1_PARTIAL.DLL || exit $$?; \
+	 WINEPREFIX="$(CURDIR)/$(SIM1_DIR)/wineprefix" WINEARCH=win32 WINEDEBUG=-all flock $(SIM1_DIR)/wine.lock timeout 180s wine $(SIM1_DIR)/sim1statediff.exe $(N) $$order $(SIM1_DIR)/SIM1_STATE_TEST.DLL || exit $$?; \
 	done
 
-.PHONY: sim1-frame-observer sim1frames-run
+.PHONY: sim1-frame-observer
 sim1-frame-observer:
 	$(MAKE) -f tools/hg2d.mk bin/hg2d-diff/FRAMELOCK.DLL
 	$(MAKE) sehfix
-
-sim1frames-run: sim1-complete sim1-frame-observer
-	FS98_DIR="$(CURDIR)/game" HG2D_FRAMES_SIM1="$(CURDIR)/$(SIM1_DIR)/SIM1_COMPLETE.DLL" HG2D_FRAMES_OURS=orig/Modules/HG2D.DLL HG2D_FRAMES_OUT=$(SIM1_DIR)/frames HG2D_FRAMES_DISPLAY=:67 HG2D_FRAMES_NOSOUND=1 tools/hg2d_frames.sh 'Situatio\STGEORGE.STN' 900
-
-.PHONY: sim1flights-run
-sim1flights-run: sim1-complete sim1-frame-observer
-	python3 -B tools/fly_scripts.py $(SIM1_DIR)/scripts
-	FS98_DIR="$(CURDIR)/game" HG2D_FRAMES_ONLY=SIM1 HG2D_FRAMES_SIM1="$(CURDIR)/$(SIM1_DIR)/SIM1_COMPLETE.DLL" HG2D_FRAMES_NOSOUND=1 FRAMES_MANY_OUT=$(SIM1_DIR)/flights FRAMES_MANY_PASSES=1200 FRAMES_MANY_JOBS=8 tools/frames_many.sh $(SIM1_DIR)/scripts/controls.txt
-	@test "$$(grep -c ': match' $(SIM1_DIR)/flights/summary.txt)" -eq 74
-
-.PHONY: sim1-lift-breaks
-sim1-lift-breaks: sim1-complete sim1-frame-observer $(SIM1_DIR)/SIM1_COMPLETE_TEST.DLL $(SIM1_DIR)/sim1decodediff.exe
-	python3 -B tools/fly_scripts.py $(SIM1_DIR)/scripts
-	python3 -B tools/sim1_lift_breaks.py
 
 $(SIM1_DIR)/sim1_data.inc: tools/gen_sim1_data.py tools/impscan.py cd/fs98/Sim/SIM1.sim
 	python3 -B tools/gen_sim1_data.py
@@ -133,7 +87,8 @@ SIM1R_CFLAGS := -std=c99 -O2 -Wall -Wextra -Werror -fno-strict-aliasing -fno-mat
 SIM1R_N ?= 2000
 SIM1R_SEED ?= 0x51e1
 .PHONY: sim1rdiff sim1rdiff-run sim1-tables sim1r-breaks sim1-snapshots
-sim1-snapshots: sim1-complete sim1-frame-observer
+sim1-snapshots: sim1-native sim1-frame-observer
+	python3 -B tools/fly_scripts.py $(SIM1_DIR)/scripts
 	bash tools/sim1_snapshots.sh
 sim1-tables: src/sim1/sim1_tables.inc
 src/sim1/sim1_tables.inc: tools/gen_sim1_tables.py tools/dialogmap.py orig/Sim/SIM1.sim

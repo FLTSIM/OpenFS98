@@ -5,7 +5,7 @@ HOST_RT_CFLAGS := -std=c99 -O2 -Wall -Wextra -fno-strict-aliasing -Isrc/host/run
 HOST_RT_SOURCES := $(wildcard src/host/runtime/*.c)
 HOST_RT_HEADERS := src/host/runtime/host_rt.h src/host/runtime/host_rt_module.h src/host/runtime/host_rt_tables.inc
 
-src/host/runtime/host_rt_tables.inc: tools/gen_host_rt_tables.py tools/gen_host_runtime.py tools/gen_simsui_tables.py orig/FLTSIM98.EXE
+src/host/runtime/host_rt_tables.inc: tools/gen_host_rt_tables.py tools/host_rt_survey.py tools/gen_simsui_tables.py orig/FLTSIM98.EXE
 	python3 -B tools/gen_host_rt_tables.py
 
 $(HOST_RT_DIR):

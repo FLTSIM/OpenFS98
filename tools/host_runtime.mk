@@ -1,24 +1,10 @@
-# Host executable runtime; standalone to leave the verified service DLL intact.
+# The host executable: its build, install, and game-level checks.
 FS98_DIR ?= $(CURDIR)/game
 HOST_RUNTIME_DIR := bin/host-runtime
 HOST_RUNTIME_CC := i686-w64-mingw32-gcc
-HOST_RUNTIME_CFLAGS := -std=c99 -O1 -Wall -Wextra -fno-strict-aliasing -Iinclude -Isrc/host -masm=intel
-HOST_RUNTIME_LIBS := -lmsvcrt -lgdi32 -luser32 -lwinmm -ladvapi32 -lmsacm32 -lddraw -lkernel32
-
-$(HOST_RUNTIME_DIR)/host_runtime.c $(HOST_RUNTIME_DIR)/host_entries.S $(HOST_RUNTIME_DIR)/host.res &: tools/gen_host_runtime.py tools/gen_host_resources.py tools/gen_sim1_lift.py tools/gen_mdl_crash.py orig/FLTSIM98.EXE | $(HOST_RUNTIME_DIR)
-	python3 -B tools/gen_host_runtime.py > $(HOST_RUNTIME_DIR)/generation.json
-
-$(HOST_RUNTIME_DIR):
-	mkdir -p $@
-
-$(HOST_RUNTIME_DIR)/host_runtime.o: $(HOST_RUNTIME_DIR)/host_runtime.c src/host/host_runtime.h include/fs98/host_runtime.h src/mdl/mdl_crash_lift.h
-	$(HOST_RUNTIME_CC) $(HOST_RUNTIME_CFLAGS) -Wno-unused-function -Wno-unused-label -c $< -o $@
-
-$(HOST_RUNTIME_DIR)/host_resources.o: $(HOST_RUNTIME_DIR)/host.res
-	i686-w64-mingw32-windres -J res -O coff $< $@
 
 # The routines the services share with the runtime (src/host/runtime/host_rt.h, HOST_RT_STANDALONE),
-# for a build of the services without the runtime: HOST.DLL, its breaks, the lifted executable.
+# for a build of the services without the runtime: HOST.DLL (hostdiff) and its breaks.
 HOST_RT_SHARED := $(addprefix src/host/runtime/host_rt_,ddraw.c config.c modules.c display.c common.c)
 HOST_RT_STANDALONE_DIR := bin/host-rt-standalone
 HOST_RT_STANDALONE_OBJECTS := $(patsubst src/host/runtime/%.c,$(HOST_RT_STANDALONE_DIR)/%.o,$(HOST_RT_SHARED))
@@ -26,41 +12,17 @@ $(HOST_RT_STANDALONE_DIR)/%.o: src/host/runtime/%.c src/host/runtime/host_rt.h s
 	@mkdir -p $(@D)
 	$(HOST_RUNTIME_CC) -std=c99 -O2 -Wall -Wextra -fno-strict-aliasing -fno-asynchronous-unwind-tables -DHOST_RT_STANDALONE -c $< -o $@
 
-$(HOST_RUNTIME_DIR)/host_services.o: src/host/host.c src/host/host_data.inc include/fs98/host.h src/host/runtime/host_rt.h src/host/runtime/host_rt_rdata.inc
-	$(HOST_RUNTIME_CC) $(HOST_RUNTIME_CFLAGS) -ffreestanding -fno-builtin -c $< -o $@
-
-# The executable: the decompiled runtime and the services (tools/host_rt.mk, src/host/host_rt_exe.c),
-# no lifted code. The lifted one stays buildable as a second oracle (host-exe-lifted).
+# The executable: the decompiled runtime and the services (tools/host_rt.mk, src/host/host_rt_exe.c).
 HOST_EXE_SOURCES := src/host/host_rt_exe.c $(wildcard src/host/runtime/*.c src/host/runtime/*.h src/host/runtime/*.inc) \
 	src/host/host.c src/host/host_data.inc include/fs98/host.h include/fs98/host_runtime.h tools/difftest/hostrt_operations.inc tools/host_rt.mk
 bin/OPENFS98.EXE: $(HOST_EXE_SOURCES) tools/gen_host_resources.py
 	$(MAKE) -f tools/host_rt.mk bin/host-rt/OPENFS98.EXE
 	cp bin/host-rt/OPENFS98.EXE $@
 
-$(HOST_RUNTIME_DIR)/OPENFS98_LIFTED.EXE: $(HOST_RUNTIME_DIR)/host_runtime.o $(HOST_RUNTIME_DIR)/host_entries.S $(HOST_RUNTIME_DIR)/host_resources.o $(HOST_RUNTIME_DIR)/host_services.o $(HOST_RT_STANDALONE_OBJECTS) src/host/host_main.c src/host/host_runtime_native.S src/host/host_runtime.h tools/host_runtime.mk
-	$(HOST_RUNTIME_CC) $(HOST_RUNTIME_CFLAGS) -mwindows -Wno-unused-function -Wl,--disable-dynamicbase -Wl,--image-base,0x43000000 -o $@ src/host/host_main.c src/host/host_runtime_native.S $(HOST_RUNTIME_DIR)/host_runtime.o $(HOST_RUNTIME_DIR)/host_entries.S $(HOST_RUNTIME_DIR)/host_services.o $(HOST_RT_STANDALONE_OBJECTS) $(HOST_RUNTIME_DIR)/host_resources.o $(HOST_RUNTIME_LIBS)
-
-.PHONY: host-exe host-exe-lifted
+.PHONY: host-exe
 host-exe: bin/OPENFS98.EXE
-host-exe-lifted: $(HOST_RUNTIME_DIR)/OPENFS98_LIFTED.EXE
 
-$(HOST_RUNTIME_DIR)/HOST_ours.dll: $(HOST_RUNTIME_DIR)/host_runtime.o $(HOST_RUNTIME_DIR)/host_entries.S $(HOST_RUNTIME_DIR)/host_services.o $(HOST_RT_STANDALONE_OBJECTS) src/host/host_main.c src/host/host_runtime_native.S tools/host_runtime_test.def
-	$(HOST_RUNTIME_CC) $(HOST_RUNTIME_CFLAGS) -Wno-unused-function -shared -Wl,--disable-dynamicbase -Wl,--image-base,0x43000000 -o $@ src/host/host_main.c src/host/host_runtime_native.S $(HOST_RUNTIME_DIR)/host_runtime.o $(HOST_RUNTIME_DIR)/host_entries.S $(HOST_RUNTIME_DIR)/host_services.o $(HOST_RT_STANDALONE_OBJECTS) tools/host_runtime_test.def $(HOST_RUNTIME_LIBS)
-
-$(HOST_RUNTIME_DIR)/hostruntime.exe: tools/difftest/hostruntime.c tools/difftest/hostdiff.c include/fs98/host_runtime.h | $(HOST_RUNTIME_DIR)
-	$(HOST_RUNTIME_CC) -std=c99 -O1 -Wall -Wextra -Wno-unused-function -Iinclude -Wl,--image-base,0x13000000 -o $@ tools/difftest/hostruntime.c
-
-.PHONY: host-runtime-diff
-host-runtime-diff: $(HOST_RUNTIME_DIR)/HOST_ours.dll $(HOST_RUNTIME_DIR)/hostruntime.exe
-	cp orig/FLTSIM98.EXE $(HOST_RUNTIME_DIR)/FLTSIM98.EXE
-	cp "$(FS98_DIR)/mfc42.dll" $(HOST_RUNTIME_DIR)/mfc42.dll
-	@test -d $(HOST_RUNTIME_DIR)/test-prefix || cp -a --reflink=auto "$${WINEPREFIX:-$$HOME/.wine}" $(HOST_RUNTIME_DIR)/test-prefix
-	cd $(HOST_RUNTIME_DIR) && WINEPREFIX="$(CURDIR)/$(HOST_RUNTIME_DIR)/test-prefix" WINEDEBUG=-all timeout 180 wine hostruntime.exe $(if $(N),$(N),20000)
-
-.PHONY: host-runtime-breaks host-runtime-ui host-runtime-boot
-host-runtime-breaks: host-runtime-diff
-	python3 -B tools/host_runtime_breaks.py
-
+.PHONY: host-runtime-ui host-runtime-boot
 host-runtime-ui: host-exe
 	$(MAKE) bin/fsdialogs.exe sehfix
 	FS98_DIR="$(FS98_DIR)" tools/host_runtime_ui.sh

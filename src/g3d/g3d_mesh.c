@@ -1,11 +1,10 @@
-/* G3D's mesh compiler (0x38), .text+0x28d0..+0x361a, in C: the portable
- * counterpart of g3d_mesh.S, which carries retail's instructions over as
- * they are.  The C was MSVC's; this follows the instructions, expression
+/* G3D's mesh compiler (0x38), .text+0x28d0..+0x361a, in C.  The C was
+ * MSVC's; this follows retail's instructions, expression
  * by expression, keeping each value where retail keeps it -- on the x87
  * (fx, rounded to the precision control) or stored to a float (TOF).
  *
  * On x86 fx is long double and the arithmetic is the x87's own, under the
- * caller's control word, so this must equal g3d_mesh.S bit for bit.
+ * caller's control word, so this must equal retail's bit for bit.
  * Elsewhere, or with FS98_PORTABLE_FP, fx is a software 80-bit float:
  * add, subtract, multiply, divide and square root correctly rounded (to
  * nearest, ties to even) to g3d_mesh_precision bits -- 24, 53 or 64, the
@@ -15,8 +14,8 @@
  * fpatan is): a few units in the 64th bit from the x87's, which a float
  * made from it almost never sees.  (The C library's atan2, good to 53
  * bits, parted from the x87 in one polygon of 10,000 under 24-bit
- * precision.)  tools/difftest/g3dmeshdiff.c checks both against the
- * instructions.
+ * precision.)  tools/difftest/g3dmeshdiff.c checks both against retail's
+ * G3D.DLL.
  *
  * Retail's frames are kept where their layout shows: 0x206e28d0 packs its
  * triangles into a list of 150 dwords that runs on into the triangles

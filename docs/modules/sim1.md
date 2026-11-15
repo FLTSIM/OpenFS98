@@ -1,11 +1,11 @@
 # SIM1.sim — module id 25
 
 
-> **Lifted, not decompiled (2026-11-07).** Everything but the six services and the state lifecycle (the AIR decoder, aircraft setup and the simulation callbacks) is machine-translated from retail's
-> instructions into C that emulates the x86 registers and flags, generated into ignored `bin/` at
-> build time. It matches retail but is not readable source and cannot leave x86. Decompiling it is
-> listed in [remaining-work.md](../remaining-work.md#lifted-not-decompiled), and under way: see
-> [Decompilation](#decompilation-started-2026-11-07) at the end of this document.
+> **Decompiled (2026-11-08).** Every routine is hand-written C (`src/sim1/sim1_small.c`), built as
+> the native SIM1.sim (`src/sim1/sim1_native.c`) and installed: see
+> [Decompilation](#decompilation-started-2026-11-07) at the end of this document. The first
+> complete build was *lifted* (machine-translated C emulating the registers and flags); it was
+> deleted on 2026-11-14 ([remaining-work.md](../remaining-work.md#lifted-code-all-removed-2026-11-14)).
 
 The flight model named by the stock aircraft's `.AIR` files. ACONTAIN reads
 chunk `0x100`, loads `Sim\<name>.SIM` through host `+0x26c`, and publishes its
@@ -412,107 +412,35 @@ all eight installed AIR files have byte-identical CD counterparts despite
 their renamed installed filenames. This inventory supplies the real fixtures
 for the decoder acceptance below.
 
-## Complete simulation
+## The first complete build (lifted, 2026-11-06; deleted 2026-11-14)
 
-`SIM1_COMPLETE` connects the AIR decoder (`0x2200af90`), aircraft setup
-(`0x2200fc40`) and the tick/frame callbacks (`0x22001020/0x22001040`). The
-handwritten services and state lifecycle retain their existing entry shims.
-`tools/gen_sim1_lift.py` follows the remaining control flow and emits explicit
-C operations and branches, following the crash-model transliteration approach.
-There are **190 reachable routines, 17,836 distinct instructions and ten switch
-dispatches**. These are static generated functions; no instruction decoder or
-retail executable payload runs inside the replacement.
+The first complete SIM1 (`SIM1_COMPLETE`) joined `src/sim1/sim1.c`'s six services and state
+lifecycle to the AIR decoder (`0x2200af90`), aircraft setup (`0x2200fc40`) and the tick/frame
+callbacks (`0x22001020/0x22001040`) *lifted* by `tools/gen_sim1_lift.py`: 190 reachable routines,
+17,836 instructions and ten switch dispatches as C that emulated the registers and flags, with an
+assembly bridge carrying them across native imports. It matched retail on all 74 stock flights
+and a decoder suite (`sim1decodediff`: the eight AIR files in 1,012 arrangements, twelve FP modes,
+three load layouts) and was installed until the decompiled one replaced it on 2026-11-08. The
+generator, its bridge, the complete builds and the suites that only tested them were deleted on
+2026-11-14. Two findings from it stand:
 
-The generator verifies the original SHA-256, rejects overlapping instructions
-and switch data, and copies only the proven switch tables, their 52-byte byte
-selector, read-only data and version resource. It does not copy executable
-text. Generated files stay under ignored `bin/sim1-diff/lift/`; the generator
-and ABI support are tracked source. Unreachable instruction bytes and padding
-are omitted. The replacement has exactly `ImportTable` and `Linkage`, and
-preserves the reference 760-byte version resource.
+- Omitting Bell's engine-type record `0x105` reaches an unchecked interpolation table and faults,
+  in retail and in ours, in all twelve FP modes: **SIM1-AIR-UNCHECKED-TABLE**, kept in
+  `src/sim1/sim1_small.c` and recorded in [retail-bugs.md](../retail-bugs.md#sim1sim).
+- UTIL's random service needs a deterministic fixture shared by both sides; sharing retail UTIL's
+  mutable generator gave them different glider pitch choices and a false mismatch.
 
-Integer operations retain register widths and explicit condition flags using
-the existing crash-model arithmetic primitives. x87 operations retain their
-instruction order through inline assembly in a separately compiled Intel-syntax
-translation unit. Calls to `_ftol`, `_CIacos`, `_CIasin` and `_CIpow` use the
-actual MSVCRT functions. The module uses its own DLL entry rather than CRT
-startup, avoiding an extra floating-point reset when aircraft load it.
-
-`src/sim1/sim1_lift_native.S` transfers every GPR and flags across native
-imports. The native callee performs its actual stack cleanup, including
-cdecl and nonstandard register conventions. The modeled stack is probed within
-the real Windows thread stack and placed below suspended C frames, so a native
-callback can reenter SIM1 without overwriting them. TLS saves and restores the
-active context across nested calls. Floating-point values remain on the x87
-across these boundaries.
-
-This remains a **32-bit x86 implementation**. The explicit integer C helps
-future porting, but x87, pointer widths, register contracts and stack bridges
-still need a native-platform implementation. No ARM or non-x86 equivalence is
-claimed.
-
-### Real decoder and ABI verification
+`src/sim1/sim1.c` remains, in isolated test builds (`SIM1_PARTIAL`, `SIM1_STATE_TEST`,
+`SIM1_AIR_TEST`) where the decoder, setup and callbacks are traps:
 
 ```sh
-make -f tools/sim1.mk sim1decode-run
-make -f tools/sim1.mk sim1-regression-run N=20000
-make -f tools/sim1.mk sim1-lift-breaks
+make -f tools/sim1.mk sim1-regression-run N=20000   # six services, fifteen state operations, three load layouts
 ```
-
-`sim1decodediff` calls the untouched retail decoder beside the real rebuilt
-decoder. It covers all eight AIR files, reversed and repeated records, 31
-shuffled arrangements per file, each individual record omitted, and empty
-files: **1,012 arrangements in twelve FP modes**, repeated retail-first,
-rebuilt-first and with the preferred base reserved. There are **36,432 decoder
-comparisons**. Input guards, the full 17,252-byte state body, each side's
-import/Linkage prefix, GLOBAL, returned GPRs/ESP, meaningful x87 state and import
-counts/message digests are compared without pointer-range normalization.
-
-UTIL's random service has a deterministic fixture shared as an input, so each
-side receives the same glider pitch choice. A separate oracle checks both pitch
-signs. Sharing retail UTIL's mutable random generator originally gave the two
-sides different choices and produced a false orientation mismatch; the other
-UTIL services remain real.
-
-Omitting Bell's engine-type record `0x105` reaches an unchecked interpolation
-table and causes an access violation in both implementations, in all twelve
-FP modes. These **36 paired fault cases** compare exception class/access type,
-state written before the fault and imports. Interrupted GPRs and x87 condition
-codes are not function-return results and are excluded on those cases. This
-preserves **SIM1-AIR-UNCHECKED-TABLE**, marked in the generator and recorded in
-[retail-bugs.md](../retail-bugs.md#sim1sim).
-
-The native bridge also has independent machine-code callees with known answers
-for all seven GPRs, arithmetic flags and cleanup sizes `0/4/12/36/256`. Tests
-include cdecl arguments, an actual nested callback, and live x87 inputs/results.
-This closes a coverage gap where corrupting returned EDX was unobservable in
-the decoder alone because the caller overwrote it.
-
-Aircraft setup also runs directly after decoding each complete AIR file, with
-nonzero seeded position/velocity state and both branches of its optional
-control-message dispatch. **288 comparisons** cover eight aircraft, twelve FP
-modes and three load layouts. HOST `+0x40` is modeled as its verified two-argument
-control-message boundary. Removing setup was invisible on the initial scripted
-flight, so its mutation is required to fail this direct comparison instead.
-
-The complete DLL retains the original six-service and fifteen-state-operation
-acceptance: **4,516,608 service comparisons and 10,800,000 state comparisons**
-across the three load arrangements. Their existing mutation suites remain
-separate from the simulation mutations. Logs live in
-`bin/sim1-diff/complete-acceptance.log`, `decode-acceptance.log` and
-`lift-mutations.log`.
-
-The simulation mutation suite checks decoder return/copy behavior, angle
-arithmetic and unsigned inputs, native EAX/EDX/flags, direct aircraft setup,
-and missing tick/frame callbacks. Value comparisons must fail for decoder/ABI/
-setup defects. Callback defects must change state or rendered frames while
-both baseline games and the defective game complete cleanly without faults.
-**All ten rebuilt defects are caught.**
 
 ### Game verification and installation
 
 ```sh
-make -f tools/sim1.mk sim1flights-run
+make -f tools/sim1.mk sim1native-flights
 make sim1-install FS98_DIR=game
 make sim1-revert FS98_DIR=game
 ```
@@ -530,23 +458,13 @@ The disposable flight copies suppress the modal crash-analysis graph while
 preserving crash detection settings. DirectSound is disabled for repeatable
 crash timing. The runner freezes its script, observer DLL and SIM1 candidate
 before starting, so source edits or rebuilds cannot change a test midway.
-Its candidate hash is recorded with the results. Logs and summaries are under
-`bin/sim1-diff/flights/` and `flights-acceptance.log`.
-
-A separate 1,200-pass St George control flight also matches with all rebuilt
-module DLLs installed together (`integration-acceptance.log`).
+Its candidate hash is recorded with the results.
 
 `tools/stage_sim1.py` validates the two exports, module id, import table and
 version resource, then replaces `Sim/SIM1.sim` atomically and verifies the
 installed bytes. Revert uses the hash-verified original. Shared `all`,
 `install` and `revert` include SIM1; the standalone targets support installing
-it alone. Install/check/revert have also been exercised in a disposable tree.
-The rebuilt module is installed in `game/Sim/SIM1.sim`; its code, state,
-read-only data, imports, relocations and resources match the frozen candidate
-used by the 74-flight acceptance. Only build metadata differs after relinking.
-Post-install startup on a private display and Wine prefix passes against the
-actual game tree: **27/27 modules, 95 gauge trace mentions, exact rebuilt SIM1
-loaded**. The log is `bin/sim1-diff/install-smoke/result.log`.
+it alone.
 
 These are short scripted trajectories, not long flights or landing acceptance.
 Direct3D-specific rendering and unmasked FP exceptions are not covered by this
@@ -554,9 +472,9 @@ SIM1 run. The module's renderer-independent state is observed directly.
 
 ## Decompilation (started 2026-11-07)
 
-The lifted simulation is being replaced routine by routine with hand-written C, by the method
-the other modules used. The lifted build stays installed, and serves as a second oracle, until
-the hand-written one has every routine and passes the same game acceptance.
+The lifted simulation was replaced routine by routine with hand-written C, by the method the
+other modules used, finished 2026-11-08; the lifted build served as a second oracle until it was
+deleted on 2026-11-14.
 
 **The routines and their contracts.** `tools/gen_sim1_tables.py` writes
 `src/sim1/sim1_tables.inc` from the CD's SIM1 and the retail modules it calls: 186 routines
@@ -663,7 +581,7 @@ analysis, and each over-approximation there showed up as a register a routine "h
 
 `make sim1` (`make -f tools/sim1.mk sim1-native`) builds `bin/sim1-native/SIM1_ours.sim` from
 `src/sim1/sim1_small.c` and `src/sim1/sim1_native.c`; `make sim1-install` installs it
-(`tools/stage_sim1.py`; `--lifted` installs the lifted build instead, `--retail` the CD's). The
+(`tools/stage_sim1.py`; `--retail` installs the CD's). The
 image is retail's: `sim1_native.c` lays out the ImportTable, the Linkage and retail's `.data`
 bytes as one 0x43f8-byte block, as retail's `.data` is, and points `sim1_base` at a copy of
 retail's `.rdata`, so every `SF64`/`RF64` offset is retail's. `tools/gen_sim1_native.py` takes
@@ -674,7 +592,7 @@ else needs relocating. MSVCRT's `_CIpow`, `_CIacos` and `_CIasin` are found at a
 which C cannot express: +0x18 (eax untouched), +0x28 (only ax set) and +0x38 (eax untouched, the
 result in st0). CHAIN registers the C functions themselves.
 
-Its acceptance is the lifted build's: `make -f tools/sim1.mk sim1native-flights`, the 74
+Its acceptance was the lifted build's: `make -f tools/sim1.mk sim1native-flights`, the 74
 scripted flights of `tools/fly_scripts.py`, retail SIM1 twice against ours, 1,200 passes each,
 compared frame for frame and on SIM1's numeric state every pass: **74 match, 0 differ** (the first
 build, 2026-11-08; STGEORGE alone matched first). With every other module ours too (`frames_many.sh` without
@@ -685,8 +603,7 @@ loaded per aircraft, after FRAMELOCK's first wrap); it reports one leftover, no 
 conversion's high dword in edx; no caller of a Linkage entry reads edx (`sim1_tables.inc`), and
 the games run identical.
 
-**Open.** Nothing is lifted in the installed SIM1 now. The lifted build stays buildable
-(`make -f tools/sim1.mk sim1-complete`) as a second oracle. The remaining portability work is
+**Open.** Nothing of SIM1 is lifted, installed or not. The remaining portability work is
 SIM1's x87 dependence (`sim1_fsin` and the other instruction helpers, the `X87_C*` comparisons,
 precision control) and the 32-bit layout of its image, which every module shares.
 0x2200a7fe is the tail of deinit (0x220010a0, reached by a jmp) and goes with it. 0x2200a40e

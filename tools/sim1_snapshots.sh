@@ -5,8 +5,8 @@
 # a record). Each flight runs through tools/hg2d_frames.sh on its own Xvfb; only the retail-a
 # side's snapshots are kept, and they must equal retail-b's (the run repeats).
 #
-#   tools/sim1_snapshots.sh        (needs bin/sim1-diff/SIM1_COMPLETE.DLL and the
-#                                   bin/sim1-diff/scripts made by make -f tools/sim1.mk sim1flights-run)
+#   tools/sim1_snapshots.sh        (needs bin/sim1-native/SIM1_ours.sim and bin/sim1-diff/scripts:
+#                                   make -f tools/sim1.mk sim1-snapshots makes both and runs this)
 set -uo pipefail
 cd "$(dirname "$0")/.."
 out=bin/sim1-diff/snapshots
@@ -14,7 +14,7 @@ mkdir -p "$out"
 flights=(STGEORGE BELLSFR LEARLON EXTRARIO CESSROME SAIL1 KENNEDY PARIS)
 i=0
 for flight in "${flights[@]}"; do
-    ( HG2D_FRAMES_ONLY=SIM1 HG2D_FRAMES_SIM1="$PWD/bin/sim1-diff/SIM1_COMPLETE.DLL" HG2D_FRAMES_NOSOUND=1 \
+    ( HG2D_FRAMES_ONLY=SIM1 HG2D_FRAMES_SIM1="$PWD/bin/sim1-native/SIM1_ours.sim" HG2D_FRAMES_NOSOUND=1 \
       HG2D_FRAMES_SNAPSHOT=40 HG2D_FRAMES_OUT=$out/$flight HG2D_FRAMES_DISPLAY=:$((91 + i)) FS98_DIR="$PWD/game" \
       tools/hg2d_frames.sh "Situatio\\$flight.STN" 1200 bin/sim1-diff/scripts/controls.txt > "$out/$flight.log" 2>&1 ) &
     i=$((i + 1))

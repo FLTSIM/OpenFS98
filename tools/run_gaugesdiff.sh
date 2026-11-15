@@ -21,9 +21,6 @@ if [[ "${1:-}" == --all-panels ]]; then
     cd bin/gauges-all
     exec timeout 7200s wine allpaneldiff.exe "${2:-1000}" "${3:-0}"
 fi
-if [[ "${1:-}" == --all-mutations ]]; then
-    exec python3 -B tools/mutate_gauges.py
-fi
 if [[ "${1:-}" == --suction ]]; then
     exec timeout 180s wine bin/gauges-diff/suctiondiff.exe "${2:-20000}" "${3:-bin/gauges-diff/CESSNA_182.SUCTION.GAU}"
 fi

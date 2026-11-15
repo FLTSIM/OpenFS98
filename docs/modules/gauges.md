@@ -3,14 +3,10 @@
 
 > **Decompiled (2026-11-08).** All 120 gauges are hand-written C, one file per gauge
 > (`src/gauges/<name>.c` over the generated `image.inc`, sharing `src/gauges/gauge.h`; see
-> [Decompilation](#decompilation)); `tools/build_gauges.py` builds each from its hand file. The
-> lift below is history: `tools/gen_gauges.py` still writes it, as an oracle, but nothing builds
-> from it while every gauge has a hand file.
->
-> **Lifted, not decompiled (2026-11-07).** All gauge code but `warning.c` and `suction.c` is machine-translated from retail's
-> instructions into C that emulates the x86 registers and flags, generated into ignored `bin/` at
-> build time. It matches retail but is not readable source and cannot leave x86. Decompiling it is
-> listed in [remaining-work.md](../remaining-work.md#lifted-not-decompiled).
+> [Decompilation](#decompilation)); `tools/build_gauges.py` builds each from its hand file. They
+> were first *lifted* (machine-translated C emulating the registers and flags, 2026-11-06); the
+> lift, kept as an oracle until then, was deleted on 2026-11-14
+> ([remaining-work.md](../remaining-work.md#lifted-code-all-removed-2026-11-14)).
 
 All **120** reference-CD `.GAU` modules are rebuilt from C. `make` builds them
 and `make install` installs them alongside the other replacements. The outputs
@@ -19,26 +15,16 @@ are `bin/gauges-all/Gauges/`, using the exact installed filenames from
 
 ## Implementation
 
-`tools/gen_gauges.py` translates the reference disassembly into explicit C
-expressions, calls and branches. It emits 1,318 routines, including 1,317
-callbacks referenced by the original data images. The remaining helper is
-called internally. DllMain and the `_ftol` import thunks are handled separately.
-No retail executable code is copied into the replacement, and there is no
-runtime instruction decoder. Unsupported instructions, imports, callback
-signatures and live flag dependencies fail generation.
+`tools/gen_gauges.py` reads each CD gauge and writes, under ignored `bin/gauges-all/<name>/`,
+the gauge's `image.inc` (its `.data` and `.rdata` at their RVAs, `ImportTable` and `Linkage`,
+and a DllMain rebinding every relocated pointer, the code ones to the hand file's routines
+through its `gauge_routine(rva)`), `gauge.def`, `gauge.res` and a manifest for the harness:
+the 1,318 routines' argument bytes and x87 returns, the data words read as floats or integers,
+the print and indirect slots, the pointers. It reads the disassembly for instruction boundaries
+and operands only; it emits no code. Until 2026-11-14 it also emitted the lift.
 
-`src/gauges/gauge_lift.h` supplies register-width arithmetic, flags and x87
-semantics. Each routine has a local frame and direct C control flow. Callback
-wrappers preserve stdcall argument cleanup and the original floating-point
-return boundary. Hardware division preserves the integer fault boundary used
-by PANELS' exception repair. This is the project's current 32-bit Windows
-hybrid ABI; removing its pointer widths and x87 return shim remains part of
-the eventual native-platform work.
-
-The generator extracts the writable data, constants and bitmap resources,
-rebinds relocations to C routines and relocated data, and emits normal DLL
-exports `ImportTable` and `Linkage`. Bitmap payloads are exact. Company version
-resources are omitted, following the other extraction tools. Generated C,
+Bitmap payloads are exact. Company version
+resources are omitted, following the other extraction tools. Generated data,
 resource files and binaries stay under ignored `bin/`; the reference files
 stay under ignored `orig/`. No game assets are committed.
 
@@ -76,9 +62,10 @@ A complete run compares **26,687,688 vectors** across all 120 modules. Both
 preferred-address and forced-relocation runs pass. The separate nontermination
 suite passes all 16 original/replacement compass cases with watchdogs.
 
-The mutation harness requires explicit comparison failures for **348**
-independent service-slot, numeric and bitmap changes across the collection.
-Build errors, faults and timeouts do not count as caught mutations.
+`make gauges-breaks` runs `tools/gauge_breaks.py` (from a frozen copy: it rewrites
+`src/gauges/`), the hand-written gauges' breaks. The lift's own mutation suite (348 service-slot,
+numeric and bitmap changes to the generated C) went with it on 2026-11-14.
+Build errors, faults and timeouts do not count as caught breaks.
 
 The PANELS integration harness runs identical rebuilt PANELS on both sides,
 substituting only the gauges on the second side. It compares the transcript,
@@ -185,8 +172,7 @@ larger value, another slot's, the argument's own, or one of the gauge's finite n
 constants or one next to it); the integers the code reads (`int_slots`, recorded by the
 generator, pointers excluded) take 0..3, a 16-bit word or a word above any user address; a
 quarter of the cases vary the PANELS rectangles' heights; and 16383.0 is an edge value. The
-lift passes all of it but EXGMETER and LRFLAPS, whose generated C reloads a denormal (both are
-hand-written now).
+lift passed all of it but EXGMETER and LRFLAPS, whose generated C reloaded a denormal.
 
 **Result.** All 120 gauges against retail, `bash tools/run_gaugesdiff.sh --all 20000` (`make
 gauges-check N=20000`): 120 checked, 0 differ, on the strengthened harness. Breaks:

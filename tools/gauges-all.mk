@@ -1,10 +1,10 @@
-# All 120 gauges, explicit C generated from the checked reference listing.
+# All 120 gauges: the hand-written C (src/gauges/<name>.c) over each one's generated data image.
 GAUGES_ALL_DIR := bin/gauges-all
 .PHONY: all-gauges all-gauges-check all-gauges-hangs all-gauges-panels all-gauges-breaks
 $(GAUGES_ALL_DIR)/generated.stamp: tools/gen_gauges.py tools/dialogmap.py docs/setup_map.tsv $(wildcard orig/Gauges/*.GAU)
 	python3 -B tools/gen_gauges.py
 	touch $@
-$(GAUGES_ALL_DIR)/built.stamp: $(GAUGES_ALL_DIR)/generated.stamp tools/build_gauges.py src/gauges/gauge_lift.h
+$(GAUGES_ALL_DIR)/built.stamp: $(GAUGES_ALL_DIR)/generated.stamp tools/build_gauges.py src/gauges/gauge.h $(wildcard src/gauges/*.c)
 	python3 -B tools/build_gauges.py
 	touch $@
 all-gauges: $(GAUGES_ALL_DIR)/built.stamp
@@ -14,8 +14,9 @@ all-gauges-check: all-gauges $(GAUGES_ALL_DIR)/allgaugesdiff.exe
 	bash tools/run_gaugesdiff.sh --all-batch --count $(N)
 all-gauges-hangs: all-gauges $(GAUGES_ALL_DIR)/allgaugesdiff.exe
 	bash tools/run_gaugesdiff.sh --all-batch --hangs
+# the hand-written gauges broken on purpose (it rewrites src/gauges/ while it runs: use a frozen copy)
 all-gauges-breaks: all-gauges $(GAUGES_ALL_DIR)/allgaugesdiff.exe
-	bash tools/run_gaugesdiff.sh --all-mutations
+	python3 -B tools/gauge_breaks.py
 $(GAUGES_ALL_DIR)/allpaneldiff.exe: tools/difftest/panelsdiff.c tools/difftest/gauges_panels.inc tools/difftest/hg2d_model.inc tools/difftest/divfix.h $(GAUGES_ALL_DIR)/built.stamp
 	$(CC) -std=gnu99 -O1 -Wall -Wextra -DGAUGES_DIFF -DGAUGES_ALL_DIFF -DGAME_DIR='"..\\..\\game"' -I$(GAUGES_ALL_DIR) -o $@ tools/difftest/panelsdiff.c -lgdi32 -luser32
 all-gauges-panels: all-gauges $(GAUGES_ALL_DIR)/allpaneldiff.exe

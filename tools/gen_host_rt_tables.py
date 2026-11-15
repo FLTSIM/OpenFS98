@@ -11,7 +11,7 @@ pops), as tools/gen_simsui_tables.py does for SIMSUI:
       every import slot, in the import directory's order; a caller-cleaned import's arguments
       are the fewest bytes its callers remove after it;
   HOST_RT_FUNCTION(rva, pop_bytes, thiscall)
-      every routine the runtime reaches (tools/gen_host_runtime.py's discovery: the entry,
+      every routine the runtime reaches (tools/host_rt_survey.py: the entry,
       call targets, code addresses in .data and pushed code addresses), not the services;
       thiscall if it reads ecx before writing it;
   HOST_RT_SERVICE(rva, offset, pop_bytes)
@@ -23,8 +23,8 @@ pops), as tools/gen_simsui_tables.py does for SIMSUI:
       every word of .rdata and .data that holds a code address (the application's vtable, the
       static constructors, the service table, SEH scopes), for the executable to point at ours;
   HOST_RT_DATA_POINTER(site_rva, target_rva)
-      and every one that holds an address in .rdata, .data or .idata, for it to rebase (as the
-      lifted build's loader does: any word in that range is taken for a pointer);
+      and every one that holds an address in .rdata, .data or .idata, for it to rebase (any
+      word in that range is taken for a pointer);
   HOST_RT_DIRECT(ident, "symbol")
       every import but MFC's by the symbol of its slot in an import library's thunk table
       (__imp__name@bytes, or __imp__name for a cdecl one), for a build of the services that
@@ -39,7 +39,7 @@ import sys
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from gen_simsui_tables import mfc_pops, mfc_members, reads_ecx, first_ret, MEMBERS_SEEN  # noqa: E402
 from dialogmap import disassemble  # noqa: E402
-from gen_host_runtime import HostRuntime  # noqa: E402
+from host_rt_survey import HostSurvey  # noqa: E402
 
 OUTPUT = 'src/host/runtime/host_rt_tables.inc'
 RDATA_OUTPUT = 'src/host/runtime/host_rt_rdata.inc'
@@ -79,7 +79,7 @@ def ident(dll, name):
 
 
 def main():
-    runtime = HostRuntime()
+    runtime = HostSurvey()
     base = runtime.pe.uiBase
     instructions = {base + rva: value for rva, value in runtime.instructions.items()}
     addresses = sorted(instructions)

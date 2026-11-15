@@ -32,17 +32,15 @@ state_entry sim1_load_air, sim1_load_air_core, 0
 state_entry sim1_publish, sim1_publish_core, 0
 state_entry sim1_init, sim1_init_core, 0
 
-/* Init/deinit register/remove these identities. Execution of tick/frame
- * callbacks remains unsupported until the simulation routines are recovered.
+/* Init/deinit register/remove these identities. The tick/frame callbacks
+ * are traps in these test builds (sim1_small.c has them).
  */
-#ifndef SIM1_COMPLETE
 .globl _sim1_chain_tick
 _sim1_chain_tick:
     jmp _sim1_unsupported
 .globl _sim1_chain_frame
 _sim1_chain_frame:
     jmp _sim1_unsupported
-#endif
 
 /* cdecl(registers, function, argument_count, arguments). The imports obey
  * stdcall; seed/capture EAX/ECX/EDX instead of inventing callee leftovers.

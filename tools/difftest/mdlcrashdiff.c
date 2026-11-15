@@ -3,13 +3,11 @@
  * register capture and pointer-normalization helpers, not its scenarios.
  *
  *   mdlcrashdiff N retail-first|relocate [model.MDL]   the decompiled models
- *   mdlcrashdiff N lifted-first|lifted-relocate       the lifted oracle
  *
  * Registers are compared as each entry's callers read them (src/mdl/mdl_crash.c):
  * all of them for the bare returns, attach and the CHAIN callback (G3D's eax, ecx and
  * edx, which CHAIN passes on); the callee-saved ones for init and detach; edi, ebp and
  * esp for the update (retail leaves ebx and esi changed, and WINDOW pops them unread).
- * The lifted oracle, which emulates every register, is held to all of them.
  */
 #define MDL_STATE_CAPACITY 0x800
 #define main mdl_normal_reference_main
@@ -19,9 +17,6 @@
 struct crash_spec {
     struct model_spec model;
     uint32_t chain_rva, flags_offset, phase_offset;
-    const uint32_t *functions;
-    uint32_t function_count;
-    const char *lifted;
 };
 #include "crashes.inc"
 
@@ -131,8 +126,6 @@ int main(int argc,char **argv)
 {
     uint32_t count=argc>1?(uint32_t)strtoul(argv[1],NULL,0):2000;
     const char *mode=argc>2?argv[2]:"retail-first";
-    int lifted=!strncmp(mode,"lifted-",7);
-    if(lifted) mode+=7;
     HMODULE util;
     uint8_t *util_link;
     uint32_t k;
@@ -154,7 +147,7 @@ int main(int argc,char **argv)
         const struct crash_spec *crash=crashes+k;
         HMODULE dlls[2];
         uint8_t *pristine[2],*normalized,*retail_data,*global_after;
-        uint32_t code_targets[16],*coverage, i,j,step,steps,operation,state_size,end;
+        uint32_t code_targets[16], i,j,step,steps,operation,state_size,end;
         uint32_t regs[8],expected_regs[8],expected_count;
         uint32_t turn; int turning;
         uint8_t craft[32],craft_saved[32];
@@ -167,7 +160,7 @@ int main(int argc,char **argv)
         dlls[0]=LoadLibraryA(model->retail); {   /* a break's DLL replaces the model of its name */
             const char *override=argc>3?strrchr(argv[3],'/'):NULL, *ours=strrchr(model->ours,'/');
             override=override?override+1:argc>3?argv[3]:NULL;
-            dlls[1]=LoadLibraryA(override&&!_stricmp(override,ours+1)?argv[3]:lifted?crash->lifted:model->ours);
+            dlls[1]=LoadLibraryA(override&&!_stricmp(override,ours+1)?argv[3]:model->ours);
         }
         if(!dlls[0]||!dlls[1]) fail("load crash models",GetLastError());
         if(!strcmp(mode,"relocate")) {
@@ -179,9 +172,6 @@ int main(int argc,char **argv)
         model_call(read32((uint8_t *)GetProcAddress(dlls[1],"Linkage")+0x18),craft,1);
         images[1]=(uint8_t *)(uintptr_t)read32(craft)-model->header_rva;
         if((uintptr_t)images[1]&65535u) fail("crash image must be 64-KiB aligned",0);
-        /* only the lifted oracle counts retail's routines */
-        coverage=(uint32_t *)GetProcAddress(dlls[1],"MdlCoverage");
-        if(!coverage && lifted) fail("coverage export",0);
         resources(dlls[0],dlls[1]);
         for(i=0;i<model->reloc_count;i++) {
             code_targets[i]=read32(images[1]+model->relocs[i].site);
@@ -314,7 +304,6 @@ int main(int argc,char **argv)
                         if(memcmp(expected,state,sizeof state)) fprintf(stderr,"step=%u operation=%u\n",step,operation);
                         compare(expected,state,sizeof state,"crash state");
                         compare(global_after,global_blob,sizeof global_blob,"crash GLOBAL");
-                        if(lifted) live=0xff;
                         for(j=0;j<8;j++) if((live>>j&1) && expected_regs[j]!=regs[j] &&
                             canonical(expected_regs[j],0)!=canonical(regs[j],1)) {
                             fprintf(stderr,"step=%u operation=%u register %u: %08x/%08x images %p/%p\n",
@@ -329,14 +318,7 @@ int main(int argc,char **argv)
                 memcpy(initial,state,sizeof state);memcpy(global_before,global_blob,sizeof global_blob);
             }
         }
-        j=0;
-        for(i=0;coverage && i<crash->function_count;i++) if(!coverage[i]) {printf("unreached function 0x%x\n",crash->functions[i]);++j;}
-        if(coverage)
-            printf("%s: lifted, %u scenarios, 0 differences, %u/%u functions reached (%s)\n",strrchr(model->retail,'/')+1,
-                   count,crash->function_count-j,crash->function_count,mode);
-        else
-            printf("%s: decompiled, %u scenarios, 0 differences (%s)\n",strrchr(model->retail,'/')+1,count,mode);
-        if(count>=6*11*3 && j) fail("unreached crash functions",j);
+        printf("%s: decompiled, %u scenarios, 0 differences (%s)\n",strrchr(model->retail,'/')+1,count,mode);
         free(pristine[0]);free(pristine[1]);free(normalized);free(retail_data);free(global_after);
         FreeLibrary(dlls[0]);FreeLibrary(dlls[1]);if(reservation)VirtualFree(reservation,0,MEM_RELEASE);
     }

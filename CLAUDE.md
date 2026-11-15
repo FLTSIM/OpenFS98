@@ -23,10 +23,10 @@ possibly Android.
   `RETAIL BUG (kept): <id>`; they are fixed at porting time, not before.
 - **Lifting is not decompiling.** Do not generate C that emulates retail's instructions
   (registers and flags in a struct, a `goto` per jump) and call the module done. SIM1, the
-  gauges, the crash models and the host executable's startup were done that way; all four have
-  been redone (2026-11-08, the host's 2026-11-14;
-  [remaining-work.md](docs/remaining-work.md#lifted-not-decompiled)); a lifted build
-  is fine as an extra oracle, not as the result.
+  gauges, the crash models and the host executable's startup were done that way; all four were
+  redone (2026-11-08, the host's 2026-11-14) and every lift, oracles included, deleted on
+  2026-11-14 ([remaining-work.md](docs/remaining-work.md#lifted-code-all-removed-2026-11-14)).
+  The oracle is retail itself, loaded beside ours.
 - Preserve every existing staged, unstaged and untracked change. A dirty
   worktree is another contributor's work, not disposable scratch space.
 
@@ -207,7 +207,7 @@ python3 tools/host_rt_breaks.py # (from a frozen copy) its breaks -> 569, 557 ca
 make mdl-crash-game  # the three crash flights, retail against the decompiled MDLs -> identical frames
 make gauges-check N=20000 # all 120 hand-written gauges against retail, every exposed callback/data/resource/FP result -> 120 checked, 0 differ
 python3 tools/gauge_breaks.py # (from a frozen copy) the hand-written gauges broken on purpose -> 67, all caught
-make gauges-breaks       # the older mutation suite (348, written for the lift)
+make gauges-breaks       # tools/gauge_breaks.py again (it rewrites src/gauges/: from a frozen copy)
 make gauges-panels N=1000 # same PANELS, retail/rebuilt gauge collection, strict full-state comparison
 make panelsdiff-run      # whole-module PANELS through the CD's gauges -> 3000 scenarios, 0 differ (~15 min)
 make panelsunit-run      # PANELS's image routines alone -> 20000 cases each, 0 differ (~3 min)
@@ -391,9 +391,9 @@ callbacks (the scene built from FE's stream, the ground, the frame's draw).
 CHAIN and the host, with retail UTIL and WINDOW. Retail's bugs are
 reproduced; its four crash-only bugs are fixed on purpose and listed in
 [docs/modules/g3d.md](docs/modules/g3d.md). The mesh compiler (`0x38`,
-x87 compiled C whose decisions turn on rounding) runs as retail's own
-instructions (`g3d_mesh.S`) on x86; `g3d_mesh.c` is its portable C over a
-software 80-bit float, checked against them (`make g3dmeshdiff-run`). Which
+x87 compiled C whose decisions turn on rounding) is `g3d_mesh.c`: the x87
+on x86, a software 80-bit float elsewhere, both checked against retail's
+G3D.DLL (`make g3dmeshdiff-run`). Which
 x87 precision the game runs G3D under is not established; a native build
 has to set `g3d_mesh_precision` to match. MULTIP, PANELS
 (docs/modules/panels.md) and **MPCHAT are done**; MPCHAT, the chat window,

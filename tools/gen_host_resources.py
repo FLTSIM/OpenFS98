@@ -4,8 +4,7 @@ version) as a .res file, for the executables built from src/host/.
 
     python3 -B tools/gen_host_resources.py [OUT=bin/host-rt/host.res]
 
-Only the .rsrc tree is read; no code. tools/gen_host_runtime.py (the lifted build) writes its
-copy through the same function.
+Only the .rsrc tree is read; no code.
 """
 import hashlib
 from pathlib import Path

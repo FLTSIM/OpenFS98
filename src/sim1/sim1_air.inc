@@ -1,6 +1,6 @@
 /* Aircraft file ownership and initialization, retail 0x2200ae90,
  * 0x22001060 and 0x22010c40. The large record decoder at 0x2200af90 is a
- * generated boundary in the complete build, and a trap in partial tests.
+ * trap in these test builds (sim1_small.c has it).
  */
 #ifdef SIM1_AIR_TEST
 uintptr_t sim1_air_parser_fixture;
@@ -8,12 +8,6 @@ uintptr_t sim1_air_parser_fixture;
 
 static void sim1_parse_air_boundary(struct sim1_registers *registers, const void *data, uint32_t size)
 {
-#ifdef SIM1_COMPLETE
-    extern void sim1_entry_af90(void);
-    uintptr_t arguments[2] = {(uintptr_t)data, size};
-    sim1_import(registers, (uintptr_t)sim1_entry_af90, 2, arguments);
-    return;
-#endif
 #ifdef SIM1_AIR_TEST
     if (sim1_air_parser_fixture != 0) {
         uintptr_t arguments[2] = {(uintptr_t)data, size};

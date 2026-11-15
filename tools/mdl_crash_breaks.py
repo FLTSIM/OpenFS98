@@ -8,8 +8,6 @@ frozen copy of the tree: it builds into bin/mdl-crash/breaks/.
 
     python3 tools/mdl_crash_breaks.py [N=2000] [NAME...]
 
-The lifted oracle has its own suite, tools/mdl_crash_lift_breaks.py.
-
 Proven equivalent, so expected to be missed:
   decay-strict     both callers decay only while the word is at least 0x12c (0x320), and the
                    amount starts at 0x20 and only halves: the word never equals it.

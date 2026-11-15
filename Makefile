@@ -403,24 +403,18 @@ $(BIN)/WINDOW.DLL: src/window/window.c src/window/window.def src/window/window_d
 	      -o $@ src/window/window.c $(BIN)/window.res src/window/window.def \
 	      -lkernel32 -lgcc
 
-# G3D: the asm transliterated in g3d.c, the mesh compiler (0x38) carried over
-# as instructions in g3d_mesh.S; g3d_mesh.c is its portable C (see
-# docs/modules/g3d.md and g3ddiff-meshc-run).
-$(BIN)/G3D.DLL: src/g3d/g3d.c src/g3d/g3d_mesh.S src/g3d/g3d.def src/g3d/g3d_data.inc \
+# G3D: the asm transliterated in g3d.c, the mesh compiler (0x38) in g3d_mesh.c
+# (see docs/modules/g3d.md, g3dmeshdiff-run and g3ddiff-meshc-run).
+$(BIN)/G3D.DLL: src/g3d/g3d.c src/g3d/g3d_mesh.c src/g3d/g3d.def src/g3d/g3d_data.inc \
                 src/g3d/g3d_pointers.inc $(BIN)/g3d.res
 	@mkdir -p $(BIN)
 	$(CC) $(CFLAGS) -fno-delete-null-pointer-checks -fno-ipa-icf -Isrc/g3d $(LDFLAGS) \
 	      -Wl,--image-base=$(BASE_G3D) \
-	      -o $@ src/g3d/g3d.c src/g3d/g3d_mesh.S $(BIN)/g3d.res src/g3d/g3d.def \
+	      -o $@ src/g3d/g3d.c src/g3d/g3d_mesh.c $(BIN)/g3d.res src/g3d/g3d.def \
 	      -lkernel32 -luser32 -lgcc
 
 src/g3d/g3d_data.inc src/g3d/g3d_pointers.inc: $(ORIG)/Modules/G3D.DLL tools/gen_g3d_data.py
 	@python3 tools/gen_g3d_data.py $< src/g3d/g3d_data.inc src/g3d/g3d_pointers.inc
-
-# The mesh compiler (0x38), x87 compiled C carried over instruction for
-# instruction (tools/gen_g3d_mesh.py says why).
-src/g3d/g3d_mesh.S: $(ORIG)/Modules/G3D.DLL tools/gen_g3d_mesh.py
-	@python3 tools/gen_g3d_mesh.py $< $@
 
 $(BIN)/g3d.res: src/g3d/g3d.rc
 	@mkdir -p $(BIN)
@@ -1083,27 +1077,29 @@ G3D_SRC ?= src/g3d/g3d.c
 g3d-break-build:
 	$(CC) $(CFLAGS) -fno-delete-null-pointer-checks -fno-ipa-icf -Isrc/g3d $(LDFLAGS) \
 	      -Wl,--image-base=$(BASE_G3D) -o $(DIFFDIR)/G3D_ours.dll \
-	      $(G3D_SRC) src/g3d/g3d_mesh.S $(BIN)/g3d.res src/g3d/g3d.def -lkernel32 -luser32 -lgcc
+	      $(G3D_SRC) src/g3d/g3d_mesh.c $(BIN)/g3d.res src/g3d/g3d.def -lkernel32 -luser32 -lgcc
 
 g3d-breaks: g3ddiff
 	@python3 tools/g3d_breaks.py $(if $(N),$(N),2000)
 
-# The mesh compiler (0x38) three ways -- retail's instructions, the C on the
+# The mesh compiler (0x38) three ways -- retail's own G3D.DLL, the C on the
 # x87, the C on its software float -- over generated polygons under each
-# precision control; and the whole module with the portable C one in it,
+# precision control; and the whole module with the software-float C in it,
 # against retail.
-$(DIFFDIR)/g3dmeshdiff.exe: tools/difftest/g3dmeshdiff.c src/g3d/g3d_mesh.c src/g3d/g3d_mesh.S
+$(DIFFDIR)/g3dmeshdiff.exe: tools/difftest/g3dmeshdiff.c src/g3d/g3d_mesh.c
 	@mkdir -p $(DIFFDIR)
 	$(CC) -std=c99 -O1 -Wall -Wextra -c -DG3D_MESH_NAME=g3d_mesh_hw \
 	      -o $(DIFFDIR)/g3d_mesh_hw.o src/g3d/g3d_mesh.c
 	$(CC) -std=c99 -O1 -Wall -Wextra -c -DFS98_PORTABLE_FP -DG3D_MESH_NAME=g3d_mesh_soft \
 	      -o $(DIFFDIR)/g3d_mesh_soft.o src/g3d/g3d_mesh.c
-	$(CC) -std=c99 -O1 -Wall -Wextra -o $@ tools/difftest/g3dmeshdiff.c src/g3d/g3d_mesh.S \
+	$(CC) -std=c99 -O1 -Wall -Wextra -o $@ tools/difftest/g3dmeshdiff.c \
 	      $(DIFFDIR)/g3d_mesh_hw.o $(DIFFDIR)/g3d_mesh_soft.o
 
 g3dmeshdiff: $(DIFFDIR)/g3dmeshdiff.exe
 
 g3dmeshdiff-run: g3dmeshdiff
+	@cp $(ORIG)/Modules/G3D.DLL $(DIFFDIR)/G3D_mesh_retail.dll
+	@cp "$(FS98_DIR)/MSVCRT.DLL" $(DIFFDIR)/MSVCRT_cd.dll
 	@cd $(DIFFDIR) && WINEDEBUG=-all wine g3dmeshdiff.exe $(if $(N),$(N),100000)
 
 # The HG2D model (tools/difftest/hg2d_model.inc) that harnesses of modules
@@ -1119,7 +1115,7 @@ hg2dmodeldiff-run: $(DIFFDIR)/hg2dmodeldiff.exe
 
 g3ddiff-meshc-run: $(DIFFDIR)/g3ddiff.exe $(BIN)/g3d.res
 	$(CC) $(CFLAGS) -DFS98_PORTABLE_FP -c -o $(DIFFDIR)/g3d_mesh_portable.o src/g3d/g3d_mesh.c
-	$(CC) $(CFLAGS) -fno-delete-null-pointer-checks -fno-ipa-icf -Isrc/g3d -DG3D_MESH_C $(LDFLAGS) \
+	$(CC) $(CFLAGS) -fno-delete-null-pointer-checks -fno-ipa-icf -Isrc/g3d $(LDFLAGS) \
 	      -Wl,--image-base=$(BASE_G3D) -o $(DIFFDIR)/G3D_ours.dll \
 	      src/g3d/g3d.c $(DIFFDIR)/g3d_mesh_portable.o $(BIN)/g3d.res src/g3d/g3d.def \
 	      -lkernel32 -luser32 -lgcc

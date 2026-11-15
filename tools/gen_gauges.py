@@ -1,10 +1,12 @@
 #!/usr/bin/env python3
-"""Emit explicit C transliterations and data/resource images for every gauge.
+"""Data/resource images and harness metadata for every gauge.
 
-The disassembler supplies instruction boundaries, not executable payloads.
-Every accepted operation has a checked C lowering below; unknown operations,
-branches, imports, calling conventions or pointers fail generation.
-Generated source and retail data stay in ignored bin/gauges-all/.
+For each CD gauge: image.inc (retail's .data and .rdata at their RVAs, the exports, and a
+DllMain rebinding every relocated pointer, the code ones to the hand-written gauge's routines,
+src/gauges/<name>.c), gauge.def, gauge.res, and a manifest of what the harness needs: each
+routine's arguments and x87 return, the data words read as floats or integers, the print and
+indirect slots, the pointers. The disassembler supplies instruction boundaries and operands
+only; no code is emitted. Everything generated stays in ignored bin/gauges-all/.
 """
 import argparse
 from collections import deque
@@ -19,18 +21,14 @@ from dialogmap import Fs98Pe, SurveyError
 
 OUT = Path('bin/gauges-all')
 REGS = {'eax', 'ebx', 'ecx', 'edx', 'esi', 'edi', 'ebp', 'esp'}
-PARTS = {'ax': ('eax', 0, 16), 'cx': ('ecx', 0, 16), 'dx': ('edx', 0, 16), 'al': ('eax', 0, 8), 'ah': ('eax', 8, 8),
-         'cl': ('ecx', 0, 8), 'bl': ('ebx', 0, 8), 'dl': ('edx', 0, 8)}
-ARITIES = {0x40: 2, 0x44: 1, 0x48: 1, 0x4c: 2, 0x50: 1, 0x58: 1,
-           0x60: 1, 0x64: 2, 0x68: 1, 0x6c: 1, 0x70: 2, 0x74: 1,
-           0x7c: 1, 0x80: 3, 0x84: 2, 0x88: 2, 0x8c: 1, 0x90: 2,
-           0x98: 1, 0xa0: 1}
-CONDITIONS = {'je': '(f->flags & 0x40)', 'jne': '!(f->flags & 0x40)',
-              'ja': '!(f->flags & 0x41)', 'jbe': '(f->flags & 0x41)',
-              'jl': '((!!(f->flags & 0x80)) != (!!(f->flags & 0x800)))',
-              'jge': '((!!(f->flags & 0x80)) == (!!(f->flags & 0x800)))',
-              'jle': '((f->flags & 0x40) || ((!!(f->flags & 0x80)) != (!!(f->flags & 0x800))))',
-              'jg': '(!(f->flags & 0x40) && ((!!(f->flags & 0x80)) == (!!(f->flags & 0x800))))'}
+CONDITIONS = ('je', 'jne', 'ja', 'jbe', 'jl', 'jge', 'jle', 'jg')
+# The operands each mnemonic reads as values: (operand index, read as a float).
+INTEGER_READS = {'mov': (1,), 'movsx': (1,), 'push': (0,), 'add': (0, 1), 'sub': (0, 1), 'cmp': (0, 1),
+                 'dec': (0,), 'neg': (0,), 'test': (0, 1), 'and': (0, 1), 'or': (0, 1), 'xor': (0, 1),
+                 'shl': (0,), 'shr': (0,), 'sar': (0,), 'mul': (0,), 'div': (0,), 'idiv': (0,), 'fild': (0,),
+                 'fidiv': (0,)}
+FLOAT_READS = {'fld': (0,), 'fmul': (0, 1), 'fadd': (0, 1), 'fsub': (0, 1), 'fsubr': (0, 1), 'fdiv': (0, 1),
+               'fidiv': (1,), 'fxch': (0,), 'fcom': (0,), 'fcomp': (0,)}
 
 
 def relocations(pe):
@@ -177,158 +175,30 @@ class Gauge:
         self.signatures[start] = signature
         return signature
 
-    def check_live_flags(self, body):
-        # The lowering omits only flag bits no successor reads. In particular,
-        # the gauges never consume shift/multiply carry or overflow flags.
-        ordered = sorted(body)
-        next_address = dict(zip(ordered, ordered[1:]))
-        queue, visited = deque([(ordered[0], 0)]), set()
-        requirements = {'je': 2, 'jne': 2, 'sete': 2, 'ja': 3, 'jbe': 3,
-                        'jl': 12, 'jge': 12, 'jle': 14, 'jg': 14}
-        while queue:
-            address, flags = queue.popleft()
-            if (address, flags) in visited: continue
-            visited.add((address, flags))
-            op, args = body[address]
-            if op in requirements and requirements[op] & flags != requirements[op]:
-                raise SurveyError(f'{self.path} {address:x}: reads unmodelled flag bits after {op}')
-            if op in ('add', 'sub', 'cmp', 'test', 'and', 'or', 'xor', 'neg'): flags = 15
-            elif op == 'dec': flags = (flags & 1) | 14
-            elif op in ('shl', 'shr', 'sar'): flags = 6
-            elif op in ('mul', 'div', 'idiv', 'call'): flags = 0
-            if op == 'ret': continue
-            if op == 'jmp' or op in CONDITIONS:
-                queue.append((int(args, 0), flags))
-                if op == 'jmp': continue
-            if address in next_address: queue.append((next_address[address], flags))
-
-    def address(self, operand):
-        operand = re.sub(r'^(?:BYTE|WORD|DWORD|QWORD) PTR ', '', operand)
-        if operand.startswith('ds:'):
-            return f'gauge_address(0x{int(operand[3:], 16) - self.pe.uiBase:x})'
-        if not operand.startswith('[') or not operand.endswith(']'):
-            raise SurveyError(f'not a memory operand: {operand}')
-        expression = operand[1:-1]
-        expression = re.sub(r'\b(e[a-z]{2})\b', lambda m: 'f->' + m[1] if m[1] in REGS else m[1], expression)
-        expression = re.sub(r'0x([0-9a-f]+)', r'0x\1u', expression)
-        return '(' + expression + ')'
-
-    def read(self, operand, floating=False):
-        if operand in REGS:
-            return 'f->' + operand
-        if operand in PARTS:
-            register, shift, bits = PARTS[operand]
-            return f'((f->{register} >> {shift}) & 0x{(1 << bits) - 1:x}u)'
-        if operand == 'st' or operand.startswith('st('):
-            index = int(operand[3:-1]) if operand.startswith('st(') else 0
-            return f'f->fp[f->depth - {index + 1}]'
-        if operand.startswith(('ds:', '[', 'BYTE ', 'WORD ', 'DWORD ', 'QWORD ')):
-            address = self.address(operand)
+    def scan(self, op, args):
+        """Note the .data words an instruction reads: as a float (a QWORD), or as an integer."""
+        operands = args.split(',')
+        data = self.sections['.data']
+        if op in ('shl', 'shr', 'sar') and not int(operands[1], 0) & 31:
+            return   # a shift by nothing reads nothing
+        for index, floating in [(index, False) for index in INTEGER_READS.get(op, ())] + \
+                               [(index, True) for index in FLOAT_READS.get(op, ())]:
+            if index >= len(operands):
+                continue
+            operand = operands[index]
             if floating:
-                if operand.startswith('QWORD') and 'ds:' in operand:
-                    rva = int(operand.split(':')[1], 16) - self.pe.uiBase
-                    data = self.sections['.data']
+                match = re.fullmatch(r'QWORD PTR ds:(0x[0-9a-f]+)', operand)
+                if match:
+                    rva = int(match[1], 16) - self.pe.uiBase
                     if data['rva'] <= rva < data['rva'] + data['virtual_size']:
                         self.float_slots.add(rva - data['rva'])
-                return f'((long double)gauge_double({address}))'
+                continue
             width = 8 if operand.startswith('BYTE') else 16 if operand.startswith('WORD') else 64 if operand.startswith('QWORD') else 32
             match = re.fullmatch(r'(?:(?:BYTE|WORD|DWORD) PTR )?ds:(0x[0-9a-f]+)', operand)
             if match and width < 64:   # an integer the code reads from its data (the harness varies it)
                 rva = int(match[1], 16) - self.pe.uiBase
-                data = self.sections['.data']
                 if data['rva'] <= rva < data['rva'] + data['virtual_size']:
                     self.int_slots.add((rva - data['rva'], width))
-            return f'gauge_u{width}({address})'
-        value = int(operand, 0)
-        if self.pe.uiBase <= value < self.pe.uiBase + max(s['rva'] + s['virtual_size'] for s in self.sections.values()):
-            return f'gauge_address(0x{value - self.pe.uiBase:x})'
-        return f'0x{value & 0xffffffff:x}u'
-
-    def write(self, operand, value):
-        if operand in REGS:
-            return f'f->{operand} = (uint32_t)({value});'
-        if operand in PARTS:
-            register, shift, bits = PARTS[operand]
-            mask = ((1 << bits) - 1) << shift
-            return f'f->{register} = (f->{register} & 0x{~mask & 0xffffffff:x}u) | (((uint32_t)({value}) << {shift}) & 0x{mask:x}u);'
-        width = 8 if operand.startswith('BYTE') else 16 if operand.startswith('WORD') else 32
-        return f'gauge_w{width}({self.address(operand)}, (uint{width}_t)({value}));'
-
-    def lower(self, address, op, args):
-        operands = args.split(',')
-        left = operands[0]
-        right = operands[1] if len(operands) > 1 else None
-        width = PARTS[left][2] if left in PARTS else 8 if left.startswith('BYTE') else 16 if left.startswith('WORD') else 32
-        if op == 'nop': return ';'
-        if op == 'mov': return self.write(left, self.read(right))
-        if op == 'movsx': return self.write(left, f'(int32_t)(int8_t)({self.read(right)})')
-        if op == 'lea': return self.write(left, self.address(right))
-        if op == 'push': return f'gauge_push(f, {self.read(left)});'
-        if op == 'pop': return self.write(left, 'gauge_pop(f)')
-        if op in ('add', 'sub', 'cmp'):
-            expression = f'gauge_{"sub" if op == "cmp" else op}(f, {self.read(left)}, {self.read(right)}, {width})'
-            return expression + ';' if op == 'cmp' else self.write(left, expression)
-        if op == 'dec':
-            return '{ uint32_t carry = f->flags & 1; ' + self.write(left, f'gauge_sub(f, {self.read(left)}, 1, {width})') + ' f->flags = (f->flags & ~1u) | carry; }'
-        if op == 'neg': return self.write(left, f'gauge_sub(f, 0, {self.read(left)}, {width})')
-        if op in ('test', 'and', 'or', 'xor'):
-            operator = {'test': '&', 'and': '&', 'or': '|', 'xor': '^'}[op]
-            expression = f'({self.read(left)} {operator} {self.read(right)})'
-            return '{ uint32_t value = ' + expression + f'; f->flags = gauge_flags(value, {width}); ' + (self.write(left, 'value') if op != 'test' else '') + ' }'
-        if op in ('shl', 'shr', 'sar'):
-            count = int(right, 0) & 31
-            if not count: return ';'
-            expression = f'({self.read(left)} << {count})' if op == 'shl' else f'({"(int32_t)" if op == "sar" else ""}{self.read(left)} >> {count})'
-            return self.write(left, expression) + f' f->flags = gauge_flags({self.read(left)}, {width});'
-        if op == 'cdq': return 'f->edx = (int32_t)f->eax < 0 ? UINT32_MAX : 0;'
-        if op == 'mul': return '{ uint64_t product = (uint64_t)f->eax * ' + self.read(left) + '; f->eax = (uint32_t)product; f->edx = (uint32_t)(product >> 32); }'
-        if op in ('div', 'idiv'): return f'gauge_divide(f, {self.read(left)}, {int(op == "idiv")});'
-        if op == 'sete': return self.write(left, '!!(f->flags & 0x40)')
-        if op in CONDITIONS: return f'if ({CONDITIONS[op]}) goto label_{int(left, 0) - self.pe.uiBase:x};'
-        if op == 'jmp': return f'goto label_{int(left, 0) - self.pe.uiBase:x};'
-        if op == 'ret': return f'f->esp += {4 + int(args or "0", 0)}; return;'
-        if op == 'fld': return f'gauge_fp_push(f, {self.read(left, floating=True)});'
-        if op == 'fild': return f'gauge_fp_push(f, (long double)(int{64 if left.startswith("QWORD") else 32}_t){self.read(left)});'
-        if op in ('fst', 'fstp'):
-            value = 'f->fp[f->depth - 1]'
-            store = ';' if left == 'st(0)' else f'gauge_wdouble({self.address(left)}, {value});'
-            return store + (' --f->depth;' if op == 'fstp' else '')
-        if op in ('fmul', 'fadd', 'fsub', 'fsubr', 'fdiv', 'fidiv'):
-            other = self.read(left, floating=op != 'fidiv')
-            if op == 'fidiv': other = f'(long double)(int32_t)({other})'
-            top = 'f->fp[f->depth - 1]'
-            operator = {'fmul': '*', 'fadd': '+', 'fsub': '-', 'fsubr': '-', 'fdiv': '/', 'fidiv': '/'}[op]
-            if right:
-                other = self.read(right, floating=True)
-            expression = f'{other} - {top}' if op == 'fsubr' else f'{top} {operator} {other}'
-            return f'{top} = {expression};'
-        if op in ('faddp', 'fsubp', 'fdivp'):
-            operator = {'faddp': '+', 'fsubp': '-', 'fdivp': '/'}[op]
-            return f'f->fp[f->depth - 2] = f->fp[f->depth - 2] {operator} f->fp[f->depth - 1]; --f->depth;'
-        if op == 'fchs': return 'f->fp[f->depth - 1] = -f->fp[f->depth - 1];'
-        if op == 'fcos': return 'f->fp[f->depth - 1] = gauge_cos(f->fp[f->depth - 1]);'
-        if op == 'fxch':
-            other = self.read(left, floating=True)
-            return '{ long double value = ' + other + '; ' + other + ' = f->fp[f->depth - 1]; f->fp[f->depth - 1] = value; }'
-        if op in ('fcom', 'fcomp'):
-            return f'f->fp_status = gauge_compare(f->fp[f->depth - 1], {self.read(left, floating=True)});' + (' --f->depth;' if op == 'fcomp' else '')
-        if op == 'fnstsw': return self.write(left, 'f->fp_status')
-        if op == 'int3': return 'RaiseException(EXCEPTION_BREAKPOINT, 0, 0, NULL);'
-        if op == 'call':
-            if left.startswith('0x'):
-                target = int(left, 16)
-                if target in self.thunks:
-                    return '{ int64_t value = gauge_ftol(gauge_fp_pop(f)); f->eax = (uint32_t)value; f->edx = (uint32_t)((uint64_t)value >> 32); }'
-                return f'gauge_push(f, 0); execute_{target - self.pe.uiBase:x}(f);'
-            if left.startswith('DWORD PTR ds:'):
-                target = int(left.split(':')[1], 16)
-                name = self.imports[target]
-                if name == 'wsprintfA': return 'gauge_print(f);'
-                if name == 'lstrcpyA': return 'f->eax = (uint32_t)(uintptr_t)lstrcpyA((char *)(uintptr_t)gauge_u32(f->esp), (char *)(uintptr_t)gauge_u32(f->esp + 4)); f->esp += 8;'
-                raise SurveyError(f'unexpected direct import {name}')
-            slot = int(re.fullmatch(r'DWORD PTR \[e[a-z]{2}\+(0x[0-9a-f]+)\]', left)[1], 16)
-            return f'gauge_panel_call(f, {self.read(left)}, {ARITIES[slot]});'
-        raise SurveyError(f'{self.path} {address:x}: unhandled {op} {args}')
 
     def emit(self):
         data = self.sections['.data']
@@ -341,34 +211,14 @@ class Gauge:
         linkage_offset = exports['Linkage'] - data['rva']
         if struct.unpack_from('<IIII', initial, import_offset) != (15, 0, 0, 0):
             raise SurveyError('expected a single PANELS import')
-        bodies, bindings, code = [], [], []
+        bindings = []
         for start, body in self.functions.items():
             if start == self.pe.uiBase + 0x1000:
-                continue  # same C DllMain as the first two verified gauges
+                continue  # DllMain: image.inc's own
             nargs, fp = self.signature(start)
-            self.check_live_flags(body)
             rva = start - self.pe.uiBase
-            statements = [f'static void execute_{rva:x}(struct gauge_frame *f) {{']
-            if self.path.stem in ('SCHCMP', 'SOPCOMP') and rva == 0x1020:
-                statements.append('/* RETAIL BUG (kept): GAUGE-COMPASS-WRAP-HANG -- subtraction does not progress for non-finite/huge headings. */')
-            if self.path.stem in ('BELLTURN', 'CESSTURN', 'EXTURN') and rva == 0x1020:
-                statements.append('/* RETAIL BUG (kept): GAUGE-TURN-EMPTY-RETURN -- selector values other than 0/1 supply no x87 return value. */')
-            for address, (op, args) in body.items():
-                statements.append(f'label_{address - self.pe.uiBase:x}: /* {op} {args} */ ' + self.lower(address, op, args))
-            statements.append('}')
-            bodies += statements
-            parameters = ', '.join(f'uint32_t arg{index}' for index in range(nargs // 4)) or 'void'
-            code += [f'static uint32_t __stdcall code_{rva:x}({parameters}) {{',
-                     'struct gauge_frame frame, *f = &frame;',
-                     'memset(f, 0, sizeof *f); f->esp = (uint32_t)(uintptr_t)(f->stack + 192);']
-            for index in range(nargs // 4):
-                code.append(f'gauge_w32(f->esp + {4 + 4 * index}, arg{index});')
-            code += [f'execute_{rva:x}(f);']
-            if fp:
-                code += ['if (f->depth) {',
-                         '/* Win32 callback ABI: publish ST0 without adding a value on a retail empty-return path. */',
-                         '__asm__ volatile("fldt %0" : : "m"(f->fp[f->depth - 1]) : "st");', '}']
-            code += ['return f->eax;', '}']
+            for op, args in body.values():
+                self.scan(op, args)
             offsets = [address - data['rva'] for address, target in self.relocs
                        if target == rva and data['rva'] <= address < data['rva'] + data['virtual_size']]
             header_rva = self.pe.va_uint32(self.pe.uiBase + exports['Linkage'] + 0x18)
@@ -410,29 +260,10 @@ class Gauge:
             return f'{const}uint8_t {name}[{len(blob)}] = {{\n' + '\n'.join(
                 ','.join(f'0x{value:02x}' for value in blob[offset:offset + 24]) + ','
                 for offset in range(0, len(blob), 24)) + '\n};'
-        source = ['/* Generated by tools/gen_gauges.py; explicit C transliteration, no retail text bytes. */',
-                  '#include "gauge_lift.h"', array('gauge_data', initial), array('gauge_rdata', read_only, 'static const '),
-                  'static uint32_t gauge_address(uint32_t rva);']
-        source += [f'static void execute_{start - self.pe.uiBase:x}(struct gauge_frame *f);'
-                   for start in self.functions if start != self.pe.uiBase + 0x1000]
-        source += bodies + code
-        source += ['static uint32_t gauge_address(uint32_t rva) {',
-                   f'if (rva >= 0x{data["rva"]:x} && rva < 0x{data["rva"] + data["virtual_size"]:x}) return (uint32_t)(uintptr_t)(gauge_data + rva - 0x{data["rva"]:x});',
-                   f'if (rva >= 0x{rdata["rva"]:x} && rva < 0x{rdata["rva"] + rdata["virtual_size"]:x}) return (uint32_t)(uintptr_t)(gauge_rdata + rva - 0x{rdata["rva"]:x});',
-                   'switch (rva) {']
-        source += [f'case 0x{binding["rva"]:x}: return (uint32_t)(uintptr_t)code_{binding["rva"]:x};' for binding in bindings]
-        source += ['default: RaiseException(EXCEPTION_ILLEGAL_INSTRUCTION, 0, 0, NULL); return 0; }}',
-                   f'__asm__(".globl _ImportTable\\n.set _ImportTable, _gauge_data + 0x{import_offset:x}\\n.globl _Linkage\\n.set _Linkage, _gauge_data + 0x{linkage_offset:x}\\n");',
-                   'BOOL WINAPI DllMain(HINSTANCE instance, DWORD reason, LPVOID reserved) { (void)reserved; if (reason == DLL_PROCESS_ATTACH) {']
-        for address, target in self.relocs:
-            if data['rva'] <= address < data['rva'] + data['virtual_size']:
-                source.append(f'gauge_w32((uint32_t)(uintptr_t)(gauge_data + 0x{address - data["rva"]:x}), gauge_address(0x{target:x}));')
-        source += ['DisableThreadLibraryCalls(instance); } return TRUE; }']
         name = self.path.stem
         directory = OUT / name
         directory.mkdir(parents=True, exist_ok=True)
-        (directory / 'gauge.c').write_text('\n'.join(source) + '\n')
-        # The same image without code, for a hand-written gauge (src/gauges/<name>.c): retail's
+        # The image for the hand-written gauge (src/gauges/<name>.c): retail's
         # data and constants at their RVAs, the exports, and DllMain rebinding every relocated
         # pointer, the code ones through the hand file's gauge_routine(rva).
         image = ['/* Generated by tools/gen_gauges.py: retail\'s data for a hand-written gauge; no code. */',
@@ -526,7 +357,7 @@ def main():
             continue
         manifest = Gauge(path).emit()
         manifests.append(manifest)
-        print(f'{path.stem}: {len(manifest["functions"])} C routines, {manifest["data_size"]} data bytes')
+        print(f"{path.stem}: {len(manifest['functions'])} routines, {manifest['data_size']} data bytes")
     if not args.names:
         (OUT / 'manifest.json').write_text(json.dumps(manifests, indent=2))
 

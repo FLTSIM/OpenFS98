@@ -47,7 +47,7 @@ shim; its 95 mentions contain 58 load records for 29 distinct gauge paths.
 | `Gauges/*.GAU` | 19 | 63,472 total | **Decompiled and installed** (2026-11-08) — all 120 hand-written C (`src/gauges/<name>.c` over the generated data image), each against retail on a strengthened harness (120 of 120, 0 differ at 20,000 vectors; 67 deliberate breaks, `tools/gauge_breaks.py`) and in the game (74 flights match frame for frame). The earlier lift (`tools/gen_gauges.py`) remains an oracle — see [modules/gauges.md](modules/gauges.md) |
 | `HG2D` | 13 | 389,734 | **reimplemented, verified, and in `MODULES`** — all 40 public services and 18 GPU dispatch cells; 59 suites pass, 40.64 million large-run operations match retail, and 247 new mutations are caught; in private copies of the game, eight flights match retail frame for frame on the software renderer and six on Direct3D (`tools/hg2d_frames.sh`); not yet flown by hand, non-x86 validation remains — see [modules/hg2d.md](modules/hg2d.md#in-the-game) |
 | `UTIL` | 20 | 11,062 | **reimplemented, verified, and running in-game** — all 47 services; 19 seen called in a hands-on session, the modal alert among them — see [modules/util.md](modules/util.md) |
-| `FLTSIM98.EXE` | 1 (host) | 82,016 | **194 services decompiled; the executable's startup, window procedures, loop and shutdown lifted** — `OPENFS98.EXE` runs the hand-written services with 402 machine-translated routines from `tools/gen_host_runtime.py`; 60,000 runtime comparisons, four caught mutations, 74 matching scripted flights — see [modules/host.md](modules/host.md) |
+| `FLTSIM98.EXE` | 1 (host) | 82,016 | **Decompiled** (2026-11-14) — all 194 services and all 161 runtime routines (startup, window procedures, loop, shutdown) hand-written C, built into `bin/OPENFS98.EXE` (`make host-exe`); `hostrtdiff` 3.22 million comparisons and `hostdiff` 20,000 iterations, 0 differ; 74 of 74 scripted flights frame-identical; not yet installed in place of retail's — see [modules/host.md](modules/host.md) |
 | `MAIN` | 3 | 119,648 | **complete** — slices 1 to 44 verified, booting and every menu command opening in the game; in `MODULES`, not yet flown by hand — see [modules/main.md](modules/main.md) |
 | `G3D` | 14 | 92,518 | **reimplemented, verified, and running in-game** — the whole bytecode machine, its depth queue, services and CHAIN callbacks, 20,000 `g3ddiff` scenarios, 0 differ; a portable C mesh compiler checked against retail's instructions — see [modules/g3d.md](modules/g3d.md) |
 | `MULTIP` | 35 | 43,318 | **done** — whole-module acceptance and startup smoke passed: all eleven public entries, workers, protocols, CHAIN callbacks and dialogs, 43 suites of 20,000 scenarios plus eight dispatch-family reruns, 0 differ, all 456 mutations caught; in `MODULES`, installed as `MULTIPLAYER.DLL` — see [modules/multip.md](modules/multip.md) |
@@ -142,13 +142,13 @@ a model of the window system hooked into its import table, 20,000 scenarios
 with zero differences (see [modules/mpchat.md](modules/mpchat.md)).
 **`G3D` is done, verified and running in-game**: the whole bytecode machine,
 its depth queue, services and CHAIN callbacks, 20,000 `g3ddiff` scenarios
-with zero differences, and a portable C mesh compiler checked against
-retail's instructions (see [modules/g3d.md](modules/g3d.md)).
+with zero differences, and its mesh compiler in C, on the x87 and on a
+software float, checked against retail's G3D.DLL (see [modules/g3d.md](modules/g3d.md)).
 
 **Every binary has a replacement as of 2026-11-07**, and the whole game, all retail against all
-ours, matches frame for frame on all 74 flights. Not all of it is decompiled: the host executable's startup and window code is
-*lifted* (SIM1's simulation, the 120 gauges and the three crash models were too, until their decompilation replaced them on 2026-11-08) (machine-translated instruction by instruction into C that emulates the x86 registers and
-flags, generated at build time from the CD's binaries). They behave as retail but are not readable
-source and cannot be ported off x86; decompiling them is the remaining work
-([remaining-work.md](remaining-work.md)). What is still open is listed in
-[open-differences.md](open-differences.md).
+ours, matches frame for frame on all 74 flights. Since 2026-11-14 all of it is hand-written source:
+the parts once *lifted* (machine-translated instruction by instruction into C that emulated the
+x86 registers and flags: SIM1's simulation, the 120 gauges, the three crash models and the host
+executable's startup and windows) were decompiled, and the lifts deleted
+([remaining-work.md](remaining-work.md#lifted-code-all-removed-2026-11-14)). What is still open is
+listed in [open-differences.md](open-differences.md).

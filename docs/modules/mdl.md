@@ -4,7 +4,7 @@
 > **Decompiled (2026-11-08).** All eleven models are hand-written C: the eight normal ones in
 > `src/mdl/mdl_normal.c`, the three crash ones in `src/mdl/mdl_crash.c` (see
 > [Crash models](#crash-models)). The crash models were first lifted (C generated from retail's
-> instructions, 2026-11-06); that build is kept only as a second oracle.
+> instructions, 2026-11-06); that build, kept as a second oracle, was deleted on 2026-11-14.
 
 All eleven MDLs are built as drop-in DLLs, 2026-11-06; all eleven are decompiled C
 since 2026-11-08.
@@ -90,7 +90,7 @@ update callback at RVA 0x1037 copies GLOBAL +0x560 (0x24 bytes) to state +4,
 GLOBAL +0x5b0 (0x18 bytes) to state +0x28 through HOST +0x21c, then updates
 individual fields from GLOBAL, including control-surface values. It uses
 16-bit arithmetic and a helper at RVA 0x11c1 that returns values in bx/cx.
-Those widths and register results need literal treatment in a transliteration.
+Those widths and register results need literal treatment in the C.
 
 Crash C182: +0x1c at RVA 0x1020 has one-time initialization guarded by a
 module flag at VA 0x22105034. It registers callback 0x2210120c with CHAIN
@@ -294,9 +294,11 @@ stack balance, each entry's live registers (above) and every import call (CHAIN,
 HOST moves, G3D draws with a hash of the state, and UTIL `+0x2c`/`+0x44` with their arguments;
 UTIL is retail's own, behind logging proxies).
 
-`make mdl-crash-lifted-run` runs the lifted oracle (`bin/mdl-crash/lifted/`, all registers,
-`tools/mdl_crash_lift_breaks.py` its own eight breaks) over the same scenarios: 0 differences,
-**32 of 32 retail routines reached**, which is the scenarios' coverage of retail.
+Until 2026-11-14 the lifted oracle ran over the same scenarios too (all registers, with a
+counter per retail routine): 0 differences, **32 of 32 retail routines reached**, which is the
+scenarios' coverage of retail. `tools/gen_mdl_crash.py` now builds only the decompiled models,
+and finds the CHAIN callback the harness needs (the code address pushed before list 15) from the
+disassembly.
 
 `python3 tools/mdl_crash_breaks.py` (`make mdl-crash-breaks`; run from a frozen copy) breaks the
 decompiled C on purpose, 82 single edits (every helper, each animation's thresholds and signs,

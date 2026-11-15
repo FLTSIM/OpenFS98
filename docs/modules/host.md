@@ -804,19 +804,19 @@ their low byte is a digit), `ds-mmx-hal` and `ds-mode-mem` (caught in targeted
 runs at N=3000), and `dd-mode640` (a secondary driver asked for a 640-wide
 mode that is not 480 high).
 
-## The executable (2026-11-06)
+## The executable
 
-
-> **Lifted, not decompiled (2026-11-07).** Everything in the executable but the 194 services is machine-translated from retail's
-> instructions into C that emulates the x86 registers and flags, generated into ignored `bin/` at
-> build time. It matches retail but is not readable source and cannot leave x86. Decompiling it is
-> listed in [remaining-work.md](../remaining-work.md#lifted-not-decompiled).
+The first executable (2026-11-06) ran the services with the rest of retail's executable
+*lifted*: machine-translated instruction by instruction into C that emulated the registers and
+flags (`tools/gen_host_runtime.py`, 402 routine boundaries, 13,081 instructions). It matched
+retail but was not readable source. It was decompiled from 2026-11-08 and deleted on 2026-11-14
+([remaining-work.md](../remaining-work.md#lifted-code-all-removed-2026-11-14)).
 
 ## The runtime, decompiled
 
-Begun 2026-11-08 and finished 2026-11-14: the lifted runtime above is replaced by hand-written
-C in `src/host/runtime/`, one routine at a time, as SIMSUI's was. Of the 165 runtime routines
-`tools/gen_host_rt_tables.py` lists (the lift's 402 boundaries less the services and import
+Begun 2026-11-08 and finished 2026-11-14: hand-written C in `src/host/runtime/`, one routine at
+a time, as SIMSUI's was. Of the 165 runtime routines `tools/gen_host_rt_tables.py` lists (every
+routine `tools/host_rt_survey.py` finds the executable reaching, less the services and import
 thunks), **all 161 that are routines are done and verified** (161 operations). The other four
 are fragments of other routines' SEH frames: `0x412172` and `0x41217c` are `0x412140`'s
 `__except` filter expression and handler (its C replaces the frame, below), and `0x414e42` and
@@ -851,8 +851,8 @@ The C calls every import through `fs98_host_rt_imports` (retail's import order, 
 `host_rt_tables.inc`) and reads retail's data through `fs98_host_rt_image` at retail's
 addresses, and it calls a HOST service through the service table in that image. The files
 marked * hold the 45 routines the services use too: `host.c` calls them rather than keeping its
-own copies. A build of the services without the runtime (`HOST.DLL` for `hostdiff`, its
-breaks, the lifted executable) compiles those five with `HOST_RT_STANDALONE`: there an import
+own copies. A build of the services without the runtime (`HOST.DLL` for `hostdiff` and its
+breaks) compiles those five with `HOST_RT_STANDALONE`: there an import
 is called through that build's own import table (`HOST_RT_DIRECT` in the tables, the
 `__imp__` slot read at the call), `.data` is `host.c`'s `host_image`, `.rdata` the generated
 copy and a service `host.c`'s table, so `hostdiff`'s hooks and comparison are as before
@@ -888,49 +888,25 @@ equivalent (the script's docstring says why). The divide repair's guard is logge
 changed fixture memory; `@data`: `.data`).
 
 **The executable.** `make host-exe` (through `make -f tools/host_rt.mk host-rt-exe`) builds it
-from the decompiled runtime and the services alone (`src/host/host_rt_exe.c`): no lifted code
-and none of retail's. Retail's `.rdata`, `.data` and `.idata` are laid out as retail's in one
+from the decompiled runtime and the services alone (`src/host/host_rt_exe.c`): none of
+retail's code. Retail's `.rdata`, `.data` and `.idata` are laid out as retail's in one
 block (Wine keeps the main thread's stack at 0x400000, so not at retail's address), its
-pointers rebased as the lifted loader does (any word holding one of retail's addresses: data
+pointers rebased (any word holding one of retail's addresses: data
 into the block, code to our routine or to the import its thunk jumps to), shared by the runtime
-and the services (`host.c` built with `HOST_IMAGE_SHARED`). It keeps the lifted build's
-`OpenFS98Host` export for the frame-locked driver. Its resources are retail's, written by
-`tools/gen_host_resources.py` from the `.rsrc` tree alone, so building it runs nothing of the
-lift. All 74 scripted flights match retail frame for frame with it
+and the services (`host.c` built with `HOST_IMAGE_SHARED`). It exports
+`OpenFS98Host` for the frame-locked driver. Its resources are retail's, written by
+`tools/gen_host_resources.py` from the `.rsrc` tree alone. All 74 scripted flights match retail frame for frame with it
 (`HG2D_FRAMES_HOST`), and `tools/host_runtime_ui.sh` with `HOST_UI_EXE` passes (identical
-pictures, normal exit). Since 2026-11-14 it is what `make host-exe` builds as `bin/OPENFS98.EXE`; `make host-exe-lifted` builds the
-lifted one (`bin/host-runtime/OPENFS98_LIFTED.EXE`) as a second oracle.
-
-The lifted executable (`make host-exe-lifted`, formerly `make host-exe`) is a 32-bit Windows GUI
-executable that starts the installed game using the 194 service implementations together with
-the lifted startup, window procedures, timer, message loop and shutdown described below. It retains SIMSUI/MFC and the current Windows
-multimedia dependencies; the native platform port remains separate work.
-
-`tools/gen_host_runtime.py` verifies the reference executable's SHA-256 and
-uses the project's SIM1/model lowering primitives to generate explicit C
-operations and branches. There is no runtime instruction decoder and no
-retail executable payload. The output covers 402 routine boundaries and
-13,081 instruction locations; boundaries corresponding to existing services
-call the verified C bodies. Only identified switch tables, their three byte
-index maps, `.rdata` and the 12 resources are retained as data. The generated
-C, assembly entry boundaries, resources and survey live in `bin/host-runtime/`.
-
-The generated runtime shares `host_image` with the service implementation.
-Initialization replaces the embedded data/code pointers, binds the retained
-import slots and publishes the rebuilt service table in the image. Calls to
-Windows, MFC and modules cross an assembly boundary that transfers the general
-registers and flags, including MFC's `this` in ECX. TLS preserves the active
-context through nested callbacks, using a probed region of the real thread
-stack so Windows SEH can see the host's protected frame. The existing service
-DLL and its differential harness remain available independently.
+pictures, normal exit). Since 2026-11-14 it is what `make host-exe` builds as `bin/OPENFS98.EXE`.
+It retains SIMSUI/MFC and the current Windows multimedia dependencies; the native platform port
+remains separate work.
 
 Host implementation findings, progress and verification remain in this file.
 
 ### Runtime map
 
-The following retail addresses identify the recovered runtime boundaries.
-The generated survey records reachable instructions, callable entries and
-switch tables; coverage evidence below is narrower than the recovered code.
+Some of the runtime's retail addresses and what they do (the full list is
+`HOST_RT_FUNCTION` in `src/host/runtime/host_rt_tables.inc`).
 
 | Retail address | Responsibility |
 | --- | --- |
@@ -957,22 +933,19 @@ with cyclic imports. Shutdown handles the unprioritized callbacks and walks
 the prioritized list in reverse. The new harness compares those sequences
 and the resulting import/init/deinit fields over randomized priorities.
 
-`src/host/host_main.c` supplies the executable shell: VC5-compatible onexit
-sentinels, the three global constructors in their original order, then MFC's
-`AfxWinMain`. MinGW's default `FNINIT` uses 64-bit x87 precision, while the
-retail process starts at 53 bits. This produced small SIM1 state differences
-at pass 48 in ATHENS and other flights even when the pictures looked right.
-Initializing the main thread's control word to `0x027f` restores identical
-numeric trajectories. Per-pass SIM1 state logging was essential to seeing it.
+MinGW's default `FNINIT` uses 64-bit x87 precision, while the retail process
+starts at 53 bits. In the first executable this produced small SIM1 state
+differences at pass 48 in ATHENS and other flights even when the pictures
+looked right; `src/host/host_rt_exe.c` sets the main thread's control word to
+`0x027f`, as retail's starts. Per-pass SIM1 state logging was essential to
+seeing it.
 
 A vectored handler delivers divide faults to the recovered filter only while
 the host's SEH scope is active. This is the rebuilt equivalent of SEHFIX's
 Wine workaround: Wine otherwise swallows window-procedure faults before the
-host filter gets them. The original filter's instruction decoding and context
-repair are generated C, and are compared independently against retail over
-register-divisor fixtures, including byte/word/dword sizes and declined
-non-divide exceptions. Broader memory-addressing forms remain exercised by
-actual game paths rather than an exhaustive decoder fixture sweep.
+host filter gets them. The filter's instruction decoding and context repair
+are `src/host/runtime/host_rt_divide.c`, compared with retail's in
+`hostrtdiff`.
 
 ### Deterministic observation
 
@@ -996,8 +969,6 @@ its actual load; Direct3D runs now retain both renderer and load traces.
 
 ```sh
 make host-exe                          # bin/OPENFS98.EXE; no installation
-make host-runtime-diff N=20000          # isolated timer/lifecycle/divide checks
-make host-runtime-breaks N=20000        # baseline, then four broken variants
 make host-runtime-ui FS98_DIR=game      # dialogs, resize, cancelled/accepted exit
 make host-runtime-flights FS98_DIR=game # all stock flights, scripted controls/state
 make host-runtime-d3d FS98_DIR=game     # full-screen renderer, frames and screenshots
@@ -1011,15 +982,15 @@ The host build is included in `make all`. `host-install` preserves
 executable. The executable must live beside the installed assets because
 retail setup derives paths from its own location.
 
-The standalone targets are in `tools/host_runtime.mk`. Runtime differential
-checks copy MFC from the staged game and use a private copy of the configured
-Wine prefix. The retail image mapper needs the WoW64 configuration used by
-the existing host harness; the older 32-bit test prefix could not protect the
-region at `0x400000`. Game acceptance uses separate private prefixes and
+The standalone targets are in `tools/host_runtime.mk`. Game acceptance uses separate private prefixes and
 Xvfb displays, leaving the staged game untouched. All generated evidence is
 under `bin/host-runtime/`.
 
-### Verification
+### Verification of the first executable (2026-11-06)
+
+What the first, lifted executable passed; its own harness (`host-runtime-diff`) and breaks
+went with it. The decompiled one's results are under
+[The runtime, decompiled](#the-runtime-decompiled).
 
 - Planning baseline at `94cf6b6e520d95740096e3994e49f894e5bf386e`:
   `make hostdiff-run N=1`, zero differences.
@@ -1060,10 +1031,10 @@ under `bin/host-runtime/`.
   on every side**, matching logs and three pixel-identical screenshots across
   the transition. Evidence: `bin/host-runtime/display-transition/`.
 
-This phase remains x86 Windows/Wine work: it does not establish
+This remains x86 Windows/Wine work: it does not establish
 native Linux/macOS/ARM behavior, hardware-specific device behavior, long-flight
-stability, every UI path or audible sound equivalence. The generated runtime
-retains retail behavior and still needs those platform dependencies replaced
+stability, every UI path or audible sound equivalence. The runtime keeps
+retail's behaviour and still needs those platform dependencies replaced
 for the native port.
 
 ## Status

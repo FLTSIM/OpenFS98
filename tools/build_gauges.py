@@ -14,27 +14,23 @@ def build(item):
     index, gauge = item
     directory = ROOT / gauge['name']
     output = ROOT / 'Gauges' / gauge['installed']
-    # a decompiled gauge (src/gauges/<name>.c over the generated image.inc) replaces its lift
-    hand = Path('src/gauges') / (gauge['name'].lower() + '.c')
-    source = hand if hand.exists() else directory / 'gauge.c'
-    dependencies = [source, directory / 'gauge.def', directory / 'gauge.res',
-                    Path('src/gauges/gauge_lift.h'), Path('src/gauges/gauge.h')]
-    if hand.exists():
-        dependencies.append(directory / 'image.inc')
+    # the hand-written gauge, src/gauges/<name>.c, over its generated image.inc
+    source = Path('src/gauges') / (gauge['name'].lower() + '.c')
+    dependencies = [source, directory / 'gauge.def', directory / 'gauge.res', directory / 'image.inc',
+                    Path('src/gauges/gauge.h')]
     if output.exists() and output.stat().st_mtime >= max(path.stat().st_mtime for path in dependencies):
         return gauge['name'] + ' up to date'
     resource = directory / 'resource.o'
     subprocess.run(['i686-w64-mingw32-windres', '-J', 'res', '-O', 'coff',
                     str(directory / 'gauge.res'), str(resource)], check=True, capture_output=True)
-    command = ['i686-w64-mingw32-gcc', '-std=gnu99', '-O2', '-Wall', '-Wextra',
+    # a cast or assignment to double rounds, as retail's stores do
+    command = ['i686-w64-mingw32-gcc', '-fexcess-precision=standard', '-Werror', '-std=gnu99', '-O2', '-Wall', '-Wextra',
                '-Wno-unused-function', '-Wno-unused-label', '-fno-strict-aliasing',
                '-fno-asynchronous-unwind-tables', '-Isrc/gauges', f'-I{directory}', '-shared', '-nostdlib',
                '-Wl,--entry=_DllMain@12', '-Wl,--disable-dynamicbase', '-Wl,--disable-nxcompat',
                f'-Wl,--image-base={0x30000000 + index * 0x200000:#x}', '-o', str(output),
                str(source), str(directory / 'gauge.def'), str(resource),
                '-luser32', '-lkernel32', '-lmsvcrt', '-lgcc']
-    if hand.exists():   # a cast or assignment to double rounds, as retail's stores do
-        command[1:1] = ['-fexcess-precision=standard', '-Werror']
     run = subprocess.run(command, capture_output=True, text=True)
     (directory / 'build.log').write_text(run.stdout + run.stderr)
     if run.returncode:

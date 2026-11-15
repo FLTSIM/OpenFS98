@@ -131,7 +131,7 @@ The `radios` suite's stand-in now logs edi, and catches the old call.
   (`0x4119a0`) repairs divide faults; the decompiled runtime's `0x412140` instead counts the
   calls under way and a vectored handler applies the same filter. A vectored handler sees a
   fault before any `__except` inside the call, so a module that caught its own divide faults
-  would no longer see them first. None is known to; the lifted build does the same.
+  would no longer see them first. None is known to.
 
 ## Unsettled questions
 

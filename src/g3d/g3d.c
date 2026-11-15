@@ -7802,22 +7802,17 @@ done:
 
 
 /* 0x206e2690 -- 0x38: with GLOBAL +0x12a4 bit 4 (meshes), the program
- * after it compiled in place (g3d_mesh.S, 0x206e35b0): the 0x38 becomes a
+ * after it compiled in place (g3d_mesh.c, retail's 0x206e35b0): the 0x38 becomes a
  * 0x02, and the next instruction it can take -- a surface of table points
  * (0x05, 0x0f, 0x10.., 0x08), a facet (0x3e) or face (0x1d), past any
  * 0x1e, 0x7d or 0x81 -- becomes a 0x90 mesh and nops.  The counter stays,
  * on the nop.  Otherwise the polygon flag 0x206fd6c8 set and on past it.
- * Without an x87, or with G3D_MESH_C, the compiler is g3d_mesh.c's C,
- * given the point table (.data+0x12a) and +0x64 as the instructions use
- * them. */
-#if !G3D_FP_X87 || defined(G3D_MESH_C)
+ * The compiler is g3d_mesh.c's C, given the point table (.data+0x12a) and
+ * +0x64 as retail's instructions use them. */
 uint32_t g3d_mesh_compile(uint32_t program, uint32_t points,
                           uint32_t (FS98_STDCALL *next)(uint32_t));
 uint32_t FS98_STDCALL g3d_next_instruction(uint32_t p) __asm__("_next_instruction");
-#  define g3d_compile_mesh(p) g3d_mesh_compile((p), M32(V(0x206f912a)), g3d_next_instruction)
-#else
-uint32_t FS98_STDCALL g3d_compile_mesh(uint32_t program) __asm__("_g3d_compile_mesh@4");
-#endif
+#define g3d_compile_mesh(p) g3d_mesh_compile((p), M32(V(0x206f912a)), g3d_next_instruction)
 
 static void op_compile_mesh(void)
 {

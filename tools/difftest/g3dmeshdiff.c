@@ -1,5 +1,8 @@
 /* G3D's mesh compiler (0x38) three ways over the same polygons: retail's
- * instructions (src/g3d/g3d_mesh.S), the C (src/g3d/g3d_mesh.c) on the
+ * own (G3D_mesh_retail.dll, the CD's G3D.DLL, its own copy so that
+ * g3ddiff's copying cannot rewrite it under a run; called at 0x206e35b0 with its
+ * +0x64 sibling 0x206e2850 sent to the harness's and its _CIacos bound to
+ * the CD's MSVCRT.DLL, copied as MSVCRT_cd.dll), the C (src/g3d/g3d_mesh.c) on the
  * x87, and the C on its software float (FS98_PORTABLE_FP), each under
  * the same precision control.  The whole program buffer is compared
  * after each, and the control word.
@@ -17,14 +20,17 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <windows.h>
 
 #define STDCALL __attribute__((stdcall))
 #define PROGRAM 0x800
 #define NPOINTS 0x400
 
-struct { uint8_t bytes[0x200]; } g3d_image;
+#define G3D_BASE 0x206e0000u
+#define G3D_AT(va) ((uint8_t *)retail + ((va) - G3D_BASE))
 
-uint32_t STDCALL g3d_compile_mesh(uint32_t program) __asm__("_g3d_compile_mesh@4");
+static HMODULE retail;
+static uint32_t (STDCALL *g3d_compile_mesh)(uint32_t program);
 uint32_t g3d_mesh_hw(uint32_t program, uint32_t points, uint32_t (STDCALL *next)(uint32_t));
 uint32_t g3d_mesh_soft(uint32_t program, uint32_t points, uint32_t (STDCALL *next)(uint32_t));
 extern int g3d_mesh_precision;
@@ -199,6 +205,42 @@ static const char *make_program(void)
     return names[kind];
 }
 
+/* Retail's G3D.DLL, wherever it loaded: the 0x38 pass at 0x206e35b0; its
+ * call to the +0x64 sibling (0x206e2850, the instruction lengths) goes to
+ * the harness's, as the C's does; its _CIacos (import slot 0x20712070) is
+ * the CD's. */
+static void retail_load(void)
+{
+    HMODULE crt;
+    DWORD old;
+    uint8_t *sibling;
+    int32_t rel;
+    void *acos;
+
+    retail = LoadLibraryA("G3D_mesh_retail.dll");
+    crt = LoadLibraryA("MSVCRT_cd.dll");
+    if (retail == NULL || crt == NULL) {
+        printf("cannot load G3D_mesh_retail.dll or MSVCRT_cd.dll (%lu)\n", GetLastError());
+        exit(2);
+    }
+    acos = (void *)GetProcAddress(crt, "_CIacos");
+    if (acos == NULL) {
+        printf("MSVCRT_cd.dll: no _CIacos\n");
+        exit(2);
+    }
+    sibling = G3D_AT(0x206e2850);
+    rel = (int32_t)((uintptr_t)next_instruction - ((uintptr_t)sibling + 5));
+    VirtualProtect(sibling, 5, PAGE_EXECUTE_READWRITE, &old);
+    sibling[0] = 0xe9;
+    memcpy(sibling + 1, &rel, 4);
+    VirtualProtect(sibling, 5, old, &old);
+    FlushInstructionCache(GetCurrentProcess(), sibling, 5);
+    VirtualProtect(G3D_AT(0x20712070), 4, PAGE_READWRITE, &old);
+    memcpy(G3D_AT(0x20712070), &acos, 4);
+    VirtualProtect(G3D_AT(0x20712070), 4, old, &old);
+    g3d_compile_mesh = (uint32_t (STDCALL *)(uint32_t))(void *)G3D_AT(0x206e35b0);
+}
+
 int main(int argc, char **argv)
 {
     uint32_t n = argc > 1 ? (uint32_t)strtoul(argv[1], NULL, 0) : 100000;
@@ -209,7 +251,8 @@ int main(int argc, char **argv)
     uint32_t table = (uint32_t)(uintptr_t)points;
     uint16_t saved = control_word();
 
-    memcpy(g3d_image.bytes + 0x12a, &table, 4);
+    retail_load();
+    memcpy(G3D_AT(0x206f9000 + 0x12a), &table, 4);
     for (s = first; s < first + n; s++) {
         const char *kind;
         uint32_t pc;

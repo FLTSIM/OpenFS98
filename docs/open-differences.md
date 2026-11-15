@@ -121,6 +121,12 @@ The `radios` suite's stand-in now logs edi, and catches the old call.
   GetDC writes 0 on failure when called from that routine (retail's or ours, told by the return
   address); elsewhere a failure leaves the out as it was, which `0x4138b0` depends on.
 
+- **A 3D dialog's bitmap before it has data** (`DIALOG-UNSET-BITMAP`, `0x4058a0`). Retail
+  reads an unset local there, whatever its caller left on the stack; ours reads null, so those
+  messages fault where retail's might read garbage. The harness agrees because its fresh stack
+  gives retail zero there too. Whether the game ever sends a dialog focus, a paint or a click
+  before its 0x467 has not been checked.
+
 - **The divide repair's frame.** Retail runs the sim inside an SEH frame whose filter
   (`0x4119a0`) repairs divide faults; the decompiled runtime's `0x412140` instead counts the
   calls under way and a vectored handler applies the same filter. A vectored handler sees a

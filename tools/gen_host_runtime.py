@@ -10,11 +10,11 @@ import hashlib
 import json
 from pathlib import Path
 import re
-import struct
 
 from dialogmap import Fs98Pe
 from gen_mdl_crash import CrashLift, CONDITIONS
 from gen_sim1_lift import SimLift
+from gen_host_resources import resources
 
 
 class HostRuntime(SimLift):
@@ -242,14 +242,7 @@ class HostRuntime(SimLift):
                     'pushfl','pushal','pushl %esp',f'pushl $0x{root:x}',
                     'call _host_runtime_enter','movl %eax,%esp','popal','popfl','ret']
         (directory/'host_entries.S').write_text('\n'.join(asm)+'\n')
-        resources=bytearray(struct.pack('<IIHHHHIHHII',0,32,0xffff,0,0xffff,0,0,0,0,0,0))
-        for resource in self.pe.resources():
-            if not all(isinstance(resource[key],int) for key in ('type','id','language')):
-                raise ValueError('named resource')
-            resources += struct.pack('<IIHHHHIHHII',resource['size'],32,0xffff,resource['type'],0xffff,resource['id'],0,0x1030,resource['language'],0,0)
-            resources += self.pe.read_bytes(self.pe.file_offset(resource['rva'],resource['size']),resource['size'])
-            resources += bytes(-len(resources)%4)
-        (directory/'host.res').write_bytes(resources)
+        (directory/'host.res').write_bytes(resources(self.pe))
 
 
 def main():

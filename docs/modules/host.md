@@ -814,59 +814,96 @@ mode that is not 480 high).
 
 ## The runtime, decompiled
 
-Begun 2026-11-08, to replace the lifted runtime above with hand-written C in
-`src/host/runtime/`, one routine at a time, as SIMSUI's was. Of the 165 runtime routines
+Begun 2026-11-08 and finished 2026-11-14: the lifted runtime above is replaced by hand-written
+C in `src/host/runtime/`, one routine at a time, as SIMSUI's was. Of the 165 runtime routines
 `tools/gen_host_rt_tables.py` lists (the lift's 402 boundaries less the services and import
-thunks), **58 are done and verified**:
+thunks), **all 161 that are routines are done and verified** (161 operations). The other four
+are fragments of other routines' SEH frames: `0x412172` and `0x41217c` are `0x412140`'s
+`__except` filter expression and handler (its C replaces the frame, below), and `0x414e42` and
+`0x414e57` are the C runtime entry's (`0x414ce0`), which the toolchain's own C runtime replaces.
 
 | File | What |
 | --- | --- |
-| `host_rt_ddraw.c` | the DirectDraw device list, opening and releasing DirectDraw, the palette, locking, fills, blits and the overlay flip, the render surface |
-| `host_rt_config.c` | the HARDWARE settings reader the runtime calls |
+| `host_rt_main.c` | startup (the window classes, the paths and configuration, the main window's place, the language DLL), InitInstance, Run's loop, ExitInstance and the end, the application's overrides, the multimedia timer, the logo, a second copy handing over its command line, the processor's speed, the main window's placement |
+| `host_rt_frame.c` | FS98MAIN's procedure and its commands (help, the web pages), the floating windows' clippers and places, the callbacks over the child and floating windows |
+| `host_rt_child.c` | FS98CHILD's procedure: the game's windows (views, gauges), created, destroyed, painted, docked and floated, their menus |
+| `host_rt_floating.c` | FS98FLOAT's procedure (a floating window's frame) and FS98DLG3D's (the game's 3D dialogs) |
+| `host_rt_layout.c` | a window's docked place and units, its alignment, its picture (a DIB section, shared or its own, with a DirectDraw surface beside it), its region, the pieces drawn by GDI |
+| `host_rt_mouse.c` | the mouse in a game window: sizing edges, hot spots, tool tips, the menus, help, auto-repeat |
+| `host_rt_misc.c` | the game's keys, the menu bar, the colour table and dither the 16-bit GDI path draws through, sound's setup, tick and end, the lists let go at the end |
+| `host_rt_ddraw.c` * | the DirectDraw device list, opening and releasing DirectDraw, the screen's format, the palette, locking and fills |
+| `host_rt_surface.c` | whether a 3D device is in use, unlocking, clipped fills, blits and the overlay flip, the render surface |
+| `host_rt_config.c` * | the HARDWARE settings reader |
+| `host_rt_display.c` * | the display mode (set on a thread and waited for), full screen in a window and back, page flipping's part in a pause |
+| `host_rt_common.c` * | the modeless dialogs a message is offered to, the paused look (the grey palette and the dithered cube), sound's start, the frames' stacking, a message to every window, the game's message hook |
 | `host_rt_cursor.c` | the full-screen cursor, the 8-to-16-bit palette copies, the floating windows drawn over the back buffer |
-| `host_rt_fullscreen.c` | the 15/16-bit palettes, a full-screen frame begun and ended (regions, flip), giving the screen to GDI and back, floating windows redrawn and moved |
+| `host_rt_fullscreen.c` | the 15/16-bit palettes, a full-screen frame begun and ended (regions, flip), floating windows redrawn and moved |
 | `host_rt_divide.c` | the integer divide repair filter `0x4119a0`, its SIB decoder and the guarded call `0x412140` |
+| `host_rt_modules.c` * | the module list (`host_rt_module.h`): a module by name, id or Linkage, adding one by its path, acquiring and releasing it with its ImportTable, its registrations |
+| `host_rt_module_load.c` | adding the modules from the modules directory and `AutoInitModules`, init and deinit in the order of their Linkage's level, startup and shutdown of them all |
 | `host_rt_startup.c` | the C runtime's exit list, MFC's module state, the globals' constructors and destructors, the application class's |
-| `host_rt_window.c` | the walk over the game's windows |
+| `host_rt_window.c` | menu descriptions, the floating windows' popup menus |
 
-Names are retail's addresses until what a routine does is known; each has its address in the
-comment above it.
+Names are what a routine does, with retail's address in the comment above it; a few
+routines with nothing to name keep their address as their name.
 
 The C calls every import through `fs98_host_rt_imports` (retail's import order, from
 `host_rt_tables.inc`) and reads retail's data through `fs98_host_rt_image` at retail's
-addresses, and it calls a HOST service through the service table in that image. Eight of
-these routines also exist in `host.c` as part of the display-settings service `+0x31c`;
-[remaining-work.md](../remaining-work.md#routines-written-twice-until-the-runtime-is-linked-with-the-services)
-lists them, and both copies carry a note until they are merged.
+addresses, and it calls a HOST service through the service table in that image. The files
+marked * hold the 45 routines the services use too: `host.c` calls them rather than keeping its
+own copies. A build of the services without the runtime (`HOST.DLL` for `hostdiff`, its
+breaks, the lifted executable) compiles those five with `HOST_RT_STANDALONE`: there an import
+is called through that build's own import table (`HOST_RT_DIRECT` in the tables, the
+`__imp__` slot read at the call), `.data` is `host.c`'s `host_image`, `.rdata` the generated
+copy and a service `host.c`'s table, so `hostdiff`'s hooks and comparison are as before
+([remaining-work.md](../remaining-work.md#routines-the-services-share-with-the-runtime)).
 
 Retail's divide repair is an SEH frame (`__try` around the call, filter `0x4119a0`, a
 handler that can never run because the filter returns only -1 or 0). The decompiled
 `0x412140` counts the calls under way instead, and `fs98_host_rt_divide_handler`, installed as
 a vectored handler, applies the same filter while one is
-([open-differences.md](../open-differences.md)). The filter keeps two retail bugs,
-`DIVIDE-DISP8-UNSIGNED` and `DIVIDE-BYTE-REGISTER` ([retail-bugs.md](../retail-bugs.md)).
-
-Left for later, because each calls the game's own startup, loop step or shutdown under the
-guard: the application's overrides `0x4010f0`, `0x401110` and `0x401120`. The C runtime's
-entry (`0x414ce0`) and its `__except` pieces (`0x414e42`, `0x414e57`) are not decompiled: as in
-the lifted build, the toolchain's own C runtime takes their place and runs the three
-constructors before MFC's `AfxWinMain`.
+([open-differences.md](../open-differences.md)). Four retail bugs are kept
+([retail-bugs.md](../retail-bugs.md)): `DIVIDE-DISP8-UNSIGNED` and `DIVIDE-BYTE-REGISTER` in the
+filter, `MODULE-NO-LINKAGE` in adding a module, and `DIALOG-UNSET-BITMAP` in the 3D dialogs'
+procedure. The host's own import table at `0x418800` is in .bss with room for one pair and
+nothing fills it, so `0x408110` acquires nothing in the game.
 
 **Verifying.** `make -f tools/host_rt.mk hostrtdiff-run N=20000` maps retail FLTSIM98.EXE at
 0x400000 without its imports, points every import slot and every service entry at logging
-stubs, and runs each routine retail then ours from one randomised fixture (memory blocks
-shaped as the routine's structures, fake DirectDraw/Direct3D COM objects, exception records
-and contexts at generated `div`/`idiv` instructions, the EXE's `.data`). The call logs (with
-what rectangles, surface descriptions and strings point to), the results and every fixture
-byte must agree: 20,000 scenarios, 58 operations, 1,160,000 comparisons, 0 differ.
-`python3 tools/host_rt_breaks.py` (from a frozen copy) breaks them on purpose: 150 breaks,
-147 caught at N=2000, 3 proven equivalent. `HOSTRT_COVER=op,text` counts an operation's runs
-whose retail log holds text (`@changed`: that changed fixture memory; `@data`: `.data`).
+stubs, and runs each routine retail then ours from one randomised fixture: memory blocks shaped
+as the routine's structures (the game windows' data and bitmaps, hot spots, regions, the lists,
+the voices), fake DirectDraw, Direct3D, DirectSound and CWnd objects, the game's callbacks as
+logging stubs, exception records and contexts at generated `div`/`idiv` instructions, a module
+list with Linkages and ImportTables, and the EXE's `.data`. The imports and services the
+routines lean on are modelled where it matters (the strings, paths and lists as `host.c` does
+them; messages that end the loops in time; rectangles, memory, the system and the display); the
+processor-speed routine's two `rdtsc` reads, retail's and ours, are breakpoints the harness
+answers from the scenario. The call logs (with what rectangles, structures and strings point
+to), the results and every fixture byte must agree (a routine's address our C stores in `.data`
+read as retail's): 20,000 scenarios, 161 operations, 3,220,000 comparisons, 0 differ.
+`python3 tools/host_rt_breaks.py` (from a frozen copy) breaks them on purpose: 569 breaks, 557 caught at N=2000 and the other 2 at N=20000, 10 proven
+equivalent (the script's docstring says why). The divide repair's guard is logged on every call
+(retail's `0x412140` frames on the SEH chain, our count), so dropping it is caught.
+`HOSTRT_COVER=op,text` counts an operation's runs whose retail log holds text (`@changed`: that
+changed fixture memory; `@data`: `.data`).
 
-`make host-exe` now builds `bin/OPENFS98.EXE`, a 32-bit Windows GUI
-executable. It starts the installed game using the existing 194 service
-implementations together with recovered startup, window procedures, timer,
-message loop and shutdown. It retains SIMSUI/MFC and the current Windows
+**The executable.** `make host-exe` (through `make -f tools/host_rt.mk host-rt-exe`) builds it
+from the decompiled runtime and the services alone (`src/host/host_rt_exe.c`): no lifted code
+and none of retail's. Retail's `.rdata`, `.data` and `.idata` are laid out as retail's in one
+block (Wine keeps the main thread's stack at 0x400000, so not at retail's address), its
+pointers rebased as the lifted loader does (any word holding one of retail's addresses: data
+into the block, code to our routine or to the import its thunk jumps to), shared by the runtime
+and the services (`host.c` built with `HOST_IMAGE_SHARED`). It keeps the lifted build's
+`OpenFS98Host` export for the frame-locked driver. Its resources are retail's, written by
+`tools/gen_host_resources.py` from the `.rsrc` tree alone, so building it runs nothing of the
+lift. All 74 scripted flights match retail frame for frame with it
+(`HG2D_FRAMES_HOST`), and `tools/host_runtime_ui.sh` with `HOST_UI_EXE` passes (identical
+pictures, normal exit). Since 2026-11-14 it is what `make host-exe` builds as `bin/OPENFS98.EXE`; `make host-exe-lifted` builds the
+lifted one (`bin/host-runtime/OPENFS98_LIFTED.EXE`) as a second oracle.
+
+The lifted executable (`make host-exe-lifted`, formerly `make host-exe`) is a 32-bit Windows GUI
+executable that starts the installed game using the 194 service implementations together with
+the lifted startup, window procedures, timer, message loop and shutdown described below. It retains SIMSUI/MFC and the current Windows
 multimedia dependencies; the native platform port remains separate work.
 
 `tools/gen_host_runtime.py` verifies the reference executable's SHA-256 and

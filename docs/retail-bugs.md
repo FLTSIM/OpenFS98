@@ -106,7 +106,9 @@ The three crash models (`CESSNA182RRG_C`, `CESSNA182S_C`, `EXTRA300S_C`), all in
 | Id | Where | What retail does | When | Fix at porting |
 | --- | --- | --- | --- | --- |
 | DIVIDE-DISP8-UNSIGNED | Divide repair filter `0x4119a0`; `src/host/runtime/host_rt_divide.c` | Decoding an `idiv` with an 8-bit displacement (`[reg+d8]`, mod 1), it adds the byte zero-extended, so a negative displacement reads the divisor 256 bytes too far on. Only the divisor's sign is used, to choose the saturated quotient. | An `idiv` by zero or into overflow through a memory operand with a negative 8-bit displacement. | Sign-extend the displacement. |
+| MODULE-NO-LINKAGE | Adding a module `0x407b20`; `src/host/runtime/host_rt_modules.c` | A DLL in the modules directory (or named in `AutoInitModules`) without a `Linkage` export is loaded, its missing Linkage skipped for the id, then read through null for its registrations: the game faults at startup. | Any such DLL in `MODULES\`. | Skip a DLL without a Linkage (and free it). |
 | DIVIDE-BYTE-REGISTER | Divide repair filter `0x4119a0`; `src/host/runtime/host_rt_divide.c` | For a byte `idiv` by a register, registers 4-7 (AH, CH, DH, BH) are read as ESP, EBP, ESI and EDI, whose low byte then decides the quotient's sign. | A byte `idiv` by AH, CH, DH or BH that faults. | Read the high byte of EAX, ECX, EDX or EBX. |
+| DIALOG-UNSET-BITMAP | FS98DLG3D's window procedure `0x4058a0`; `src/host/runtime/host_rt_floating.c` | Before a dialog window has its data (GWL_USERDATA, given with message 0x467), the procedure's bitmap pointer is a local never set, and WM_SETFOCUS, WM_PAINT and the button-down messages read through it. | Any of those messages to a 3D dialog window before its 0x467. | Skip them without data. |
 
 ## Other modules
 

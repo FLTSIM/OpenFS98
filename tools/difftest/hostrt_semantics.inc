@@ -2,10 +2,30 @@
  * routines depend on (the string functions do the real thing), what a call's arguments point
  * to, and the fixture's shapes. Included by hostrt_dispatch's file. */
 
-enum { COM_DDRAW, COM_SURFACE, COM_D3D2, COM_PALETTE, COM_KINDS };
+enum { COM_DDRAW, COM_SURFACE, COM_D3D2, COM_PALETTE, COM_CLIPPER, COM_SOUND, COM_BUFFER, COM_WND, COM_KINDS };
 /* a scenario shaped for one routine's deep path: the 8-bit display with Direct3D and overlays */
 static int s_overlay_focus;
+/* one for a window's picture with a 3D surface on an 8-bit display, Direct3D there or not */
+static int s_picture_focus;
+/* the window data GWL_USERDATA last gave (a client rectangle may match its size) */
+static uint32_t s_last_window_data;
+/* one shaped for opening DirectDraw on a second device in full screen */
+static int s_open_focus;
 static uint32_t com_new(uint32_t kind);
+static int readable(uint32_t address, uint32_t size);
+static void shape_modules(void);
+static int window_semantics(uint32_t index, uint32_t ecx, uint32_t *arguments, uint64_t *result);
+static int window_service_semantics(uint32_t offset, uint32_t *arguments, uint64_t *result);
+static void window_log_contents(uint32_t index, const uint32_t *arguments);
+static void callback_contents(uint32_t index, uint32_t *arguments);
+static void shape_windows(void);
+static void shape_windows_late(void);
+static int window_data_fixed(uint32_t rva);
+static int is_tsc_read(uint32_t address);
+static uint64_t tsc_answer(void);
+static void patch_tsc_reads(void);
+static uint32_t s_tsc_reads;
+static void *s_callback0_stub_for_shaping;
 
 /* an import whose slot holds data rather than code: none in FLTSIM98.EXE so far */
 static void *data_import(uint32_t index) { (void)index; return 0; }
@@ -54,7 +74,7 @@ static void log_contents(uint32_t index, const uint32_t *arguments)
         log_text(arguments[0]); break;
     case HOST_RT_IMPORT_GetProcAddress:
         log_text(arguments[1]); break;
-    default: break;
+    default: window_log_contents(index, arguments); break;
     }
 }
 
@@ -129,8 +149,15 @@ static int semantics(uint32_t index, uint32_t ecx, uint32_t *arguments, uint64_t
         size_t length;
         /* opening DirectDraw: the second device, half the time (its kind 4 takes the 640x480 path) */
         if (!strcmp(CURRENT.name, "open_directdraw") && readable_text(arguments[1]) &&
-            !strcmp((const char *)(uintptr_t)arguments[1], "Device") && (value >> 6) % 2)
+            !strcmp((const char *)(uintptr_t)arguments[1], "Device") && ((value >> 6) % 2 || s_open_focus))
             text = "Voodoo Graphics";
+        if (s_open_focus && readable_text(arguments[1]) && !strcmp((const char *)(uintptr_t)arguments[1], "Mode") &&
+            (value >> 6) % 2)
+            text = "640x400x16";
+        if (readable_text(arguments[1]) && !strcmp((const char *)(uintptr_t)arguments[1], "Location")) {
+            static const char *const places[] = {"0,0,640,480", "10,20,650,500", "5,5,100,100", "1,2,3"};
+            text = places[(value >> 3) % 4];
+        }
         length = strlen(text);
         if (size == 0 || !writable(arguments[3], size)) return 0;
         if (length >= size) length = size - 1;
@@ -152,6 +179,8 @@ static int semantics(uint32_t index, uint32_t ecx, uint32_t *arguments, uint64_t
             *result = value % 8 ? fixture_address(s_fixture.blocks[15] + which * 0x80) : 0;
         else if (!strcmp((char *)(uintptr_t)arguments[1], "ImportTable"))
             *result = value % 3 ? fixture_address(s_fixture.blocks[19] + which * 0x80) : 0;
+        else if (!strcmp((char *)(uintptr_t)arguments[1], "DirectSoundCreate"))
+            *result = value % 6 ? (uint32_t)(uintptr_t)s_sound_create_stub : 0;
         else return 0;
         return 1;
     }
@@ -202,6 +231,9 @@ static int semantics(uint32_t index, uint32_t ecx, uint32_t *arguments, uint64_t
         if (value % 3 == 0) {   /* where it was drawn last */
             point[0] = *(int32_t *)(uintptr_t)(BASE + 0x1a970) + *(int32_t *)(uintptr_t)(BASE + 0x1a52c);
             point[1] = *(int32_t *)(uintptr_t)(BASE + 0x1a974) + *(int32_t *)(uintptr_t)(BASE + 0x1a530);
+        } else if (value % 3 == 1 && value % 2) {   /* the main window's centre, or across from it */
+            point[0] = *(int32_t *)(uintptr_t)(BASE + 0x1c358);
+            point[1] = *(int32_t *)(uintptr_t)(BASE + 0x1c35c) + (value >> 3) % 2 * 3;
         }
         if (!writable(arguments[0], 8)) return 0;
         memcpy((void *)(uintptr_t)arguments[0], point, 8);
@@ -235,10 +267,11 @@ static int semantics(uint32_t index, uint32_t ecx, uint32_t *arguments, uint64_t
         return 1;
     }
     case HOST_RT_IMPORT_GetWindowLongA:         /* (window, index): a floating window's data for GWL_USERDATA */
-        if (arguments[1] != (uint32_t)-21) return 0;
+        if (arguments[1] != (uint32_t)-21) return window_semantics(index, ecx, arguments, result);
         {
             uint32_t value = script();
             *result = value % 5 == 0 ? 0 : fixture_address(s_fixture.blocks[value % 2 ? 5 : 13]);
+            s_last_window_data = (uint32_t)*result;
         }
         return 1;
     case HOST_RT_IMPORT_UnionRect:              /* (out, a, b): the real one */
@@ -288,7 +321,7 @@ static int semantics(uint32_t index, uint32_t ecx, uint32_t *arguments, uint64_t
         return 1;
     }
     default:
-        return 0;
+        return window_semantics(index, ecx, arguments, result);
     }
 }
 
@@ -408,7 +441,7 @@ static int service_semantics(uint32_t offset, uint32_t *arguments, uint64_t *res
         return 1;
     }
     default:
-        return 0;
+        return window_service_semantics(offset, arguments, result);
     }
 }
 
@@ -416,9 +449,10 @@ static int service_semantics(uint32_t offset, uint32_t *arguments, uint64_t *res
  * nor the COM objects (none is none: a random one would run the fixture as code) */
 static int data_may_vary(uint32_t rva)
 {
-    if (rva == 0x18830) return 0;       /* the frame callback: shape_data's */
+    if (window_data_fixed(rva)) return 0;
+    if (rva == 0x18830 || rva == 0x18834) return 0;   /* the frame callback and the hook: shape_data's */
     if ((rva >= 0x17ae8 && rva < 0x17b04) || (rva >= 0x17b30 && rva < 0x17b4c) || (rva >= 0x17ee0 && rva < 0x17f1c) ||
-        (rva >= 0x18380 && rva < 0x1839c) || (rva >= 0x18800 && rva < 0x18830) || rva == 0x1bb28 || rva == 0x1889c)
+        (rva >= 0x18380 && rva < 0x1839c) || (rva >= 0x18800 && rva < 0x1880c) || rva == 0x1bb28 || rva == 0x1889c)
         return 0;                       /* the lists, the host's import table, the order: shape_modules's */
     if (rva >= 0x1a4dc && rva < 0x1a500 && rva != 0x1a4ec && rva != 0x1a4f0 && rva != 0x1a4f4) return 0;
     return rva < 0x17ba0 || rva >= 0x17ba0 + 0x320;
@@ -427,7 +461,8 @@ static int data_may_vary(uint32_t rva)
 /* ---- COM: DirectDraw's and Direct3D's objects --------------------------------------------
  * A fake object is a fixture block of COM_OBJECTS: its vtable one of these, each slot a stub
  * popping what the method pops (this included). Methods past an interface's own pop 4. */
-static const char *const com_names[COM_KINDS] = {"DirectDraw", "Surface", "Direct3D2", "Palette"};
+static const char *const com_names[COM_KINDS] = {"DirectDraw", "Surface", "Direct3D2", "Palette", "Clipper", "DirectSound",
+                                                 "SoundBuffer", "CWnd"};
 static const uint8_t com_pops[COM_KINDS][36] = {
     /* IDirectDraw: QI AddRef Release Compact CreateClipper CreatePalette CreateSurface
      * DuplicateSurface EnumDisplayModes EnumSurfaces FlipToGDISurface GetCaps GetDisplayMode
@@ -447,12 +482,25 @@ static const uint8_t com_pops[COM_KINDS][36] = {
     {12, 4, 4, 12, 12, 12, 12, 12, 16},
     /* IDirectDrawPalette: QI AddRef Release GetCaps GetEntries Initialize SetEntries */
     {12, 4, 4, 8, 20, 16, 20},
+    /* IDirectDrawClipper: QI AddRef Release GetClipList GetHWnd Initialize IsClipListChanged
+     * SetClipList SetHWnd */
+    {12, 4, 4, 16, 8, 12, 8, 12, 12},
+    /* IDirectSound: QI AddRef Release CreateSoundBuffer GetCaps DuplicateSoundBuffer
+     * SetCooperativeLevel Compact GetSpeakerConfig SetSpeakerConfig Initialize */
+    {12, 4, 4, 16, 8, 12, 12, 4, 8, 8, 8},
+    /* IDirectSoundBuffer: QI AddRef Release GetCaps GetCurrentPosition GetFormat GetVolume
+     * GetPan GetFrequency GetStatus Initialize Lock Play SetCurrentPosition SetFormat SetVolume
+     * SetPan SetFrequency Stop Unlock Restore */
+    {12, 4, 4, 8, 12, 16, 8, 8, 8, 8, 12, 32, 16, 8, 8, 8, 8, 8, 4, 20, 4},
+    /* CWnd's virtuals: thiscall, none with stack arguments the runtime calls */
+    {0},
 };
 static void **s_com_vtables[COM_KINDS];
 static uint32_t s_com_first;
 static uint32_t com_pop(uint32_t kind, uint32_t slot)
 {
     uint32_t pop = slot < 36 ? com_pops[kind][slot] : 0;
+    if (kind == COM_WND) return 0;
     return pop ? pop : 4;
 }
 /* a new object of a kind, from the fixture's pool, or 0 when it is used up */
@@ -481,7 +529,7 @@ static void com_pixel_format(uint32_t desc)
 {
     static const uint32_t formats[3][4] = {{0x10, 0x7c00, 0x3e0, 0x1f}, {0x10, 0xf800, 0x7e0, 0x1f}, {8, 0, 0, 0}};
     uint32_t value = script() >> 4;
-    if (s_overlay_focus && value % 4 && writable(desc + 0x54, 16)) { memcpy((void *)(uintptr_t)(desc + 0x54), formats[2], 16); return; }
+    if ((s_overlay_focus || s_picture_focus) && value % 4 && writable(desc + 0x54, 16)) { memcpy((void *)(uintptr_t)(desc + 0x54), formats[2], 16); return; }
     if (value % 2 && writable(desc + 0x54, 16)) memcpy((void *)(uintptr_t)(desc + 0x54), formats[(value >> 1) % 3], 16);
 }
 /* what a COM method's arguments point to: the rectangles, the surface description, the caps */
@@ -505,6 +553,7 @@ static void com_log_contents(uint32_t kind, uint32_t slot, const uint32_t *argum
         break;
     case COM_SURFACE * 64 + 12: com_log_words(arguments[1], 1); break;             /* GetAttachedSurface(caps) */
     case COM_SURFACE * 64 + 33: com_log_words(arguments[1], 4); com_log_words(arguments[3], 4); break;  /* UpdateOverlay */
+    case COM_SOUND * 64 + 3: com_log_words(arguments[1], 5); break;                /* CreateSoundBuffer(desc) */
     default: break;
     }
 }
@@ -526,6 +575,7 @@ typedef int32_t (SC *enum_devices_callback)(void *, char *, char *, void *, void
 static int com_semantics(uint32_t kind, uint32_t slot, uint32_t *arguments, uint64_t *result)
 {
     uint32_t value = script();
+    if (kind == COM_WND) return 0;
     if (slot == 0) {                    /* QueryInterface(iid, out): an IDirect3D2, or none */
         uint32_t object = value % 3 ? com_new(COM_D3D2) : 0;
         if (writable(arguments[2], 4)) memcpy((void *)(uintptr_t)arguments[2], &object, 4);
@@ -533,6 +583,22 @@ static int com_semantics(uint32_t kind, uint32_t slot, uint32_t *arguments, uint
         return 1;
     }
     switch (kind * 64 + slot) {
+    case COM_DDRAW * 64 + 4: {          /* CreateClipper(flags, out, outer) */
+        uint32_t object = value % 4 ? com_new(COM_CLIPPER) : 0;
+        if (writable(arguments[2], 4)) memcpy((void *)(uintptr_t)arguments[2], &object, 4);
+        *result = object ? 0 : 0x887600e1u;
+        return 1;
+    }
+    case COM_SOUND * 64 + 3: {          /* CreateSoundBuffer(desc, out, outer) */
+        uint32_t object = value % 4 ? com_new(COM_BUFFER) : 0;
+        if (writable(arguments[2], 4)) memcpy((void *)(uintptr_t)arguments[2], &object, 4);
+        *result = object ? 0 : 0x88780078u;
+        return 1;
+    }
+    case COM_BUFFER * 64 + 9:           /* GetStatus(out): playing, looping, or stopped */
+        if (writable(arguments[1], 4)) { uint32_t status = (value >> 3) % 8; memcpy((void *)(uintptr_t)arguments[1], &status, 4); }
+        *result = value % 5 ? 0 : 0x88780096u;
+        return 1;
     case COM_DDRAW * 64 + 5:            /* CreatePalette(flags, entries, out, outer) */
     case COM_DDRAW * 64 + 6: {          /* CreateSurface(desc, out, outer) */
         uint32_t out = slot == 5 ? arguments[3] : arguments[2];
@@ -546,10 +612,10 @@ static int com_semantics(uint32_t kind, uint32_t slot, uint32_t *arguments, uint
         static const uint32_t flags[4] = {0x841, 0x41, 0x8000841, 0x2000041};
         if (arguments[1]) com_fill(arguments[1], 0x16c, 4);
         if (arguments[2]) com_fill(arguments[2], 0x16c, 4);
-        if (arguments[1] && (value % 3 || s_overlay_focus) && writable(arguments[1], 0x8c)) {
+        if (arguments[1] && (value % 3 || s_overlay_focus || s_picture_focus) && writable(arguments[1], 0x8c)) {
             uint32_t *caps = (uint32_t *)(uintptr_t)arguments[1];
-            caps[1] = flags[s_overlay_focus && value % 2 ? 0 : (value >> 3) % 4];
-            if (s_overlay_focus) caps[0x10] = 0;
+            caps[1] = flags[(s_overlay_focus || s_picture_focus) && value % 2 ? 0 : (value >> 3) % 4];
+            if (s_overlay_focus || s_picture_focus) caps[0x10] = 0;
             if ((value >> 9) % 4 == 0) caps[0x10] = 0x25800 - ((value >> 11) & 1);      /* the memory bounds, exactly */
             if ((value >> 12) % 4 == 0) caps[0xf] = 0x14b000 - ((value >> 14) & 1);
             if ((value >> 15) % 3 == 0) caps[0x22] = 1000 + ((value >> 17) & 1);
@@ -659,11 +725,29 @@ static void shape_data(void)
         if (next_random() % 2) memset(s_fixture.data + 0x41c5c4 + at * 4 - BASE - DATA_RVA, 0xff, 4);
     s_callback0_stub_for_shaping = s_callback0_stub;
     shape_modules();
-    {   /* the game's frame callback: the harness's, or none */
+    {   /* the game's frame callback and message hook: the harness's, or none */
         uint32_t code = next_random() % 5 ? (uint32_t)(uintptr_t)s_callback0_stub : 0;
         memcpy(s_fixture.data + 0x418830 - BASE - DATA_RVA, &code, 4);
+        code = next_random() % 4 ? (uint32_t)(uintptr_t)s_callback_stub : 0;
+        memcpy(s_fixture.data + 0x418834 - BASE - DATA_RVA, &code, 4);
     }
     s_overlay_focus = !strcmp(CURRENT.name, "render_surface") && next_random() % 2;
+    s_picture_focus = !strcmp(CURRENT.name, "make_picture") && next_random() % 2;
+    if (s_picture_focus) {
+        static const uint32_t present[] = {0x41a4e4, 0x41a4f8};
+        for (at = 0; at < 2; ++at) {
+            uint32_t object;
+            memcpy(&object, s_fixture.data + present[at] - BASE - DATA_RVA, 4);
+            if (!object) object = com_new(at == 0 ? COM_DDRAW : COM_SURFACE);
+            memcpy(s_fixture.data + present[at] - BASE - DATA_RVA, &object, 4);
+        }
+        if (next_random() % 2) memset(s_fixture.data + 0x41a4dc - BASE - DATA_RVA, 0, 4);
+    }
+    s_open_focus = !strcmp(CURRENT.name, "open_directdraw") && next_random() % 2;
+    if (s_open_focus) {     /* no DirectDraw yet */
+        memset(s_fixture.data + 0x41a4e4 - BASE - DATA_RVA, 0, 4);
+        memset(s_fixture.data + 0x41a4f8 - BASE - DATA_RVA, 0, 4);
+    }
     if (s_overlay_focus) {
         static const uint32_t present[] = {0x41a4e4, 0x41a4dc, 0x41a4f8};
         for (at = 0; at < 3; ++at) {
@@ -673,20 +757,25 @@ static void shape_data(void)
             memcpy(s_fixture.data + present[at] - BASE - DATA_RVA, &object, 4);
         }
     }
+    shape_windows();
     s_com_first = s_com_used;
     memcpy(s_fixture.com[COM_OBJECTS - 1], &s_com_vtables[COM_SURFACE], 4);
     {   /* the DirectDraw options and states: flags, or 0 and 1 */
         static const struct { uint32_t va, mask; } words[] = {
             {0x41a4c0, 0xffff}, {0x41a470, 1}, {0x418854, 1}, {0x418858, 1}, {0x41a4f4, 1}, {0x41a4ec, 7},
-            {0x41a500, 1}, {0x4183b4, 1}, {0x41a4f0, 1}, {0x418858, 3}};
+            {0x41a500, 1}, {0x4183b4, 3}, {0x41a4f0, 1}, {0x418858, 3}, {0x418848, 3}};
         for (at = 0; at < sizeof words / sizeof words[0]; ++at) {
             uint32_t random = next_random(), value = random % 3 == 0 ? 0 : (random >> 2) & words[at].mask;
             if (words[at].va == 0x41a4c0 && random % 16 >= 4) value &= ~1u;    /* DirectDraw off, now and then */
             if (words[at].va == 0x41a500 && random % 8) value = 0;              /* the opening under way, rarely */
-            if (words[at].va == 0x41a4c0 && s_overlay_focus) value |= 0x202;
+            if (words[at].va == 0x41a4c0 && (s_overlay_focus || s_picture_focus)) value |= 0x202;
+            if (s_open_focus && words[at].va == 0x41a4c0) value &= ~1u;            /* DirectDraw allowed */
+            if (s_open_focus && (words[at].va == 0x418854 || words[at].va == 0x418858)) value = 1;
+            if (s_open_focus && words[at].va == 0x41a500) value = 0;
             memcpy(s_fixture.data + words[at].va - BASE - DATA_RVA, &value, 4);
         }
     }
+    shape_windows_late();
 }
 
 /* the floating windows' data (blocks 5 and 13): flags, bitmap (6 and 14: its screen
@@ -705,7 +794,6 @@ static void shape_picture(uint8_t *picture, uint8_t *bits)
  * Linkages (block 15 + 0x80 each: id, init, deinit, level, registrations in block 9) and
  * ImportTables (block 19 + 0x80 each), the host's own imports (0x418800), and an order (block
  * 16) of some of the Linkages */
-static void *s_callback0_stub_for_shaping;
 static void shape_modules(void)
 {
     static const char *const names[] = {"C:\\FS98\\MODULES\\A.DLL", "C:\\FS98\\MODULES\\b.dll", "a.dll", "C:\\FS98\\SIMSUI.DLL"};
@@ -725,11 +813,14 @@ static void shape_modules(void)
         memset(records, 0, 0x40);
         for (pair = 0; pair < (random >> 9) % 4; ++pair) { records[pair * 3] = 0x100 + pair; records[pair * 3 + 2] = random >> 12; }
         memset(table, 0, 0x80);
-        for (pair = 0; pair < pairs; ++pair) table[pair * 2] = 1 + (random >> (12 + pair * 2)) % 5;
+        for (pair = 0; pair < pairs; ++pair) {   /* the slots hold something until filled in */
+            table[pair * 2] = 1 + (random >> (12 + pair * 2)) % 5;
+            table[pair * 2 + 1] = 0xa5a50000u + pair;
+        }
     }
     header[0] = header[1] = count;
     header[6] = count ? fixture_address(s_fixture.blocks[12]) : 0;
-    for (at = 0; at < count; ++at) {
+    for (at = 0; at < 4; ++at) {        /* past the count too: an argument may point at any of them */
         uint32_t *entry = (uint32_t *)(s_fixture.blocks[12] + at * 0x14), random = next_random();
         char *name = (char *)s_fixture.blocks[11] + at * 0x40;
         strcpy(name, names[random % 4]);
@@ -738,7 +829,7 @@ static void shape_modules(void)
         entry[2] = random & 0x20 ? 0x10000000u + at * 0x10000 : 0;
         entry[3] = random & 0x40 ? fixture_address(s_fixture.blocks[15] + at * 0x80) : 0;
         entry[4] = (random >> 7) % 3;
-        if (entry[3] && random % 3 && ordered < 4)    /* in the order */
+        if (entry[3] && random % 3 && ordered < 4 && at < count)    /* in the order */
             memcpy(s_fixture.blocks[16] + ordered++ * 4, &entry[3], 4);
     }
     memset(s_fixture.blocks[16] + ordered * 4, 0, 4);
@@ -748,8 +839,10 @@ static void shape_modules(void)
         memcpy(DATA_AT(0x41bb28), &order, 4);
         memcpy(DATA_AT(0x41889c), &ordered, 4);
     }
-    memset(DATA_AT(0x418800), 0, 0x30);  /* the host's own imports: none, or a few ids */
-    for (at = 0; at < next_random() % 4; ++at) { uint32_t id = 1 + next_random() % 5; memcpy(DATA_AT(0x418800) + at * 8, &id, 4); }
+    /* the host's own imports: room for one {id, Linkage} and the terminator (0x41880c is the
+     * main window); in .bss, so empty in the game, given one here now and then */
+    memset(DATA_AT(0x418800), 0, 0xc);
+    if (next_random() % 2) { uint32_t id = 1 + next_random() % 5; memcpy(DATA_AT(0x418800), &id, 4); }
     #undef DATA_AT
 }
 static void shape_fixture(void)
@@ -759,9 +852,12 @@ static void shape_fixture(void)
     for (at = 0; at < 2; ++at) {
         uint8_t *data = s_fixture.blocks[windows[at][0]], *bitmap = s_fixture.blocks[windows[at][1]];
         uint32_t random = next_random(), flags = (random % 5 ? 0x80000000u : 0) | (random & 0x200) |
-                                           (random % 3 == 0 ? 0x10000000u : 0) | (random % 7 == 1 ? 0x40000000u : 0), pointer;
+                                           (random % 3 == 0 ? 0x10000000u : 0) | (random % 7 == 1 ? 0x40000000u : 0) |
+                                           (random % 6 == 2 ? 0x20000u : 0) | (random % 6 == 3 ? 0x10000u : 0), pointer;
+        uint32_t type = 1 + (random >> 3) % 3;     /* the window's type at +4 */
         int32_t rect[4];
         memcpy(data + 8, &flags, 4);
+        memcpy(data + 4, &type, 4);
         if (random % 6) memset(data + 0x7c, 0, 4);
         pointer = random % 7 ? fixture_address(bitmap) : 0;
         memcpy(data + 0xa0, &pointer, 4);

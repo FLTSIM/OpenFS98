@@ -74,7 +74,7 @@ int32_t fs98_host_rt_static_418798(void)
 /* 0x401040: what import #4274 is (its import slot's value, read as data). */
 void *fs98_host_rt_401040(void)
 {
-    return fs98_host_rt_imports[HOST_RT_IMPORT_MFC_4274];
+    return IMPORT(MFC_4274);
 }
 
 /* 0x401050: the application's runtime class (0x416000). */

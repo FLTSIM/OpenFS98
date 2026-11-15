@@ -1250,10 +1250,10 @@ include tools/host_runtime.mk
 src/host/host_data.inc src/host/host_pointers.inc &: $(ORIG)/FLTSIM98.EXE tools/gen_host_data.py
 	python3 tools/gen_host_data.py
 
-$(BIN)/HOST.DLL: src/host/host.c src/host/host.def src/host/host_data.inc
+$(BIN)/HOST.DLL: src/host/host.c src/host/host.def src/host/host_data.inc src/host/runtime/host_rt.h src/host/runtime/host_rt_rdata.inc $(HOST_RT_STANDALONE_OBJECTS)
 	@mkdir -p $(BIN)
 	$(CC) $(CFLAGS) $(LDFLAGS) -Wl,--image-base=$(BASE_HOST) \
-	      -o $@ src/host/host.c src/host/host.def -lmsvcrt -lgdi32 -luser32 -lwinmm -ladvapi32 -lmsacm32 -lddraw -lkernel32
+	      -o $@ src/host/host.c $(HOST_RT_STANDALONE_OBJECTS) src/host/host.def -lmsvcrt -lgdi32 -luser32 -lwinmm -ladvapi32 -lmsacm32 -lddraw -lkernel32
 
 # hostdiff runs the real host beside ours in one process, so it is linked away
 # from 0x400000 where the real host must map.
@@ -1270,9 +1270,9 @@ hostdiff-run: hostdiff
 	@cd $(DIFFDIR) && WINEDEBUG=-all timeout 600 wine hostdiff.exe $(if $(N),$(N),1)
 
 # A deliberately broken copy of host.c as the harness's "ours" (tools/host_breaks.py).
-host-break-build:
+host-break-build: $(HOST_RT_STANDALONE_OBJECTS)
 	$(CC) $(CFLAGS) -Isrc/host $(LDFLAGS) -Wl,--image-base=$(BASE_HOST) \
-	      -o $(DIFFDIR)/HOST_ours.dll $(HOST_BREAK) src/host/host.def -lmsvcrt -lgdi32 -luser32 -lwinmm -ladvapi32 -lmsacm32 -lddraw -lkernel32
+	      -o $(DIFFDIR)/HOST_ours.dll $(HOST_BREAK) $(HOST_RT_STANDALONE_OBJECTS) src/host/host.def -lmsvcrt -lgdi32 -luser32 -lwinmm -ladvapi32 -lmsacm32 -lddraw -lkernel32
 
 host-breaks: hostdiff
 	@python3 tools/host_breaks.py $(if $(N),$(N),2000)

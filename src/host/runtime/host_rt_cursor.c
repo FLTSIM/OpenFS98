@@ -204,7 +204,7 @@ void SC fs98_host_rt_draw_floating(uint32_t region)
     } frame;
     uint32_t window;
     uint32_t (SC *get_window)(uint32_t, uint32_t) =
-        (uint32_t (SC *)(uint32_t, uint32_t))fs98_host_rt_imports[HOST_RT_IMPORT_GetWindow];
+        (uint32_t (SC *)(uint32_t, uint32_t))IMPORT(GetWindow);
     if (!fs98_host_rt_lock(BACK_BUFFER, (void **)&frame.back.bits, &frame.back.pitch))
         return;
     frame.back.width = GI32(0x4183a8);

@@ -23,9 +23,9 @@ possibly Android.
   `RETAIL BUG (kept): <id>`; they are fixed at porting time, not before.
 - **Lifting is not decompiling.** Do not generate C that emulates retail's instructions
   (registers and flags in a struct, a `goto` per jump) and call the module done. SIM1, the
-  gauges, the crash models and the host executable's startup were done that way; SIM1, the
-  gauges and the crash models have been redone (2026-11-08), the host's startup still must be
-  ([remaining-work.md](docs/remaining-work.md#lifted-not-decompiled)); a lifted build
+  gauges, the crash models and the host executable's startup were done that way; all four have
+  been redone (2026-11-08, the host's 2026-11-14;
+  [remaining-work.md](docs/remaining-work.md#lifted-not-decompiled)); a lifted build
   is fine as an extra oracle, not as the result.
 - Preserve every existing staged, unstaged and untracked change. A dirty
   worktree is another contributor's work, not disposable scratch space.
@@ -202,8 +202,8 @@ make g3ddiff-run         # whole-module G3D, the 3D pipeline -> 20000 scenarios,
 make g3d-breaks N=1000   # G3D broken on purpose -> 317 breaks, 279 caught, 7 proven equivalent, 31 missed (19 at N=4000; ~4 h)
 make mdl-crash-diff-run  # the three decompiled crash MDLs against retail -> 12000 scenarios, 0 differ (~3 min)
 python3 tools/mdl_crash_breaks.py # (from a frozen copy) the crash MDLs broken on purpose -> 82, 78 caught, 4 proven equivalent (~4 min)
-make -f tools/host_rt.mk hostrtdiff-run N=20000 # the decompiled host runtime so far (src/host/runtime/) -> 58 operations, 1160000 comparisons, 0 differ (~3 min)
-python3 tools/host_rt_breaks.py # (from a frozen copy) its breaks -> 150, 147 caught, 3 proven equivalent (~4 min)
+make -f tools/host_rt.mk hostrtdiff-run N=20000 # the decompiled host runtime (src/host/runtime/) -> 161 operations, 3220000 comparisons, 0 differ (~30 min)
+python3 tools/host_rt_breaks.py # (from a frozen copy) its breaks -> 569, 557 caught (2 more at N=20000), 10 proven equivalent
 make mdl-crash-game  # the three crash flights, retail against the decompiled MDLs -> identical frames
 make gauges-check N=20000 # all 120 hand-written gauges against retail, every exposed callback/data/resource/FP result -> 120 checked, 0 differ
 python3 tools/gauge_breaks.py # (from a frozen copy) the hand-written gauges broken on purpose -> 67, all caught

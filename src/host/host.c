@@ -23,6 +23,7 @@
 #include <string.h>
 
 #include "fs98/host.h"
+#include "runtime/host_rt.h"     /* the routines shared with the runtime (host_rt_ddraw.c and others) */
 
 #define HOST_DATA_VA    0x417000u
 #define HOST_IMAGE_SIZE 0x55ccu
@@ -39,7 +40,21 @@ struct host_image host_image = {{
 #include "host_data.inc"
 }};
 
+#ifndef HOST_IMAGE_SHARED
+/* .rdata, for the shared routines when built without the runtime (HOST_RT_STANDALONE) */
+const uint8_t fs98_host_rt_rdata[] = {
+#include "runtime/host_rt_rdata.inc"
+};
+#endif
+
+#ifdef HOST_IMAGE_SHARED
+/* the decompiled runtime's executable (src/host/host_rt_exe.c): .data in the image it shares
+ * with the runtime, host_image copied there (and its pointers rebased) before anything runs */
+extern uint8_t *fs98_host_data;
+#define D       ((uint32_t)(uintptr_t)fs98_host_data)
+#else
 #define D       ((uint32_t)(uintptr_t)host_image.bytes)
+#endif
 #define V(a)    (D + ((uint32_t)(a) - HOST_DATA_VA))
 #define M8(a)   (*(host_v8  *)(uintptr_t)(uint32_t)(a))
 #define M16(a)  (*(host_v16 *)(uintptr_t)(uint32_t)(a))
@@ -244,17 +259,6 @@ static uint32_t FS98_STDCALL host_2b8(uint32_t s)
 
 /* ---- the allocator ----------------------------------------------------------- */
 
-/* 0x401a30: the purge hook the host offers before retrying a failed allocation
- * -- the function pointer at 0x418834 (one of the fields +0x18 copies in),
- * called (code, arg) if set. */
-static uint32_t host_purge(uint32_t code, uint32_t arg)
-{
-    uint32_t fn = M32(V(0x418834));
-    if (fn == 0)
-        return 0;
-    return ((uint32_t (FS98_STDCALL *)(uint32_t, uint32_t))(uintptr_t)fn)(code, arg);
-}
-
 /* Out of memory, after the retry: string 9 from the host instance (0x418828)
  * into the buffer at 0x41c480, in an MB_ICONHAND box. */
 static void host_oom_box(void)
@@ -275,7 +279,7 @@ static uint32_t FS98_STDCALL host_20c(uint32_t flags, uint32_t size, uint32_t ou
     if (p == 0) {
         if (flags == 4)
             return (uint32_t)-1;
-        host_purge(0x20012, 0);
+        (uint32_t)fs98_host_rt_hook(0x20012, 0);
         p = malloc(size);
         M32(out) = ADDR(p);
         if (p == 0) {
@@ -313,7 +317,7 @@ static uint32_t FS98_STDCALL host_210(uint32_t flags, uint32_t size, uint32_t pp
             M32(pp) = ADDR(old);
             return (uint32_t)-1;
         }
-        host_purge(0x20012, 0);
+        (uint32_t)fs98_host_rt_hook(0x20012, 0);
         p = realloc(old, size);
         M32(pp) = ADDR(p);
         if (p == 0) {
@@ -2679,7 +2683,7 @@ fail:
  * without one). */
 static uint32_t FS98_STDCALL host_030(void)
 {
-    uint32_t r = host_purge(0x20013, 0);
+    uint32_t r = (uint32_t)fs98_host_rt_hook(0x20013, 0);
     M32(V(0x4187ec)) = 0;
     return r;
 }
@@ -3167,137 +3171,9 @@ static uint32_t FS98_STDCALL host_268(uint32_t id)
  * imports and frees the library. */
 typedef void (*host_mod_fn)(void);
 
-/* 0x407a30 / 0x407a60 / 0x407a80: a record by name, by id, by Linkage. */
-static uint32_t host_mod_by_name(uint32_t name)
-{
-    return host_310(HOST_MODULES, 0, ADDR(&name), host_2b8(name) + 1, 1);
-}
-
-static uint32_t host_mod_by_id(uint32_t id)
-{
-    return host_310(HOST_MODULES, 4, ADDR(&id), 4, 0);
-}
-
-static uint32_t host_mod_by_linkage(uint32_t link)
-{
-    return host_310(HOST_MODULES, 0xc, ADDR(&link), 4, 0);
-}
-
-static uint32_t host_mod_acquire(uint32_t rec);
-
-/* 0x408090: resolve a module's imports, acquiring each. */
-static void host_mod_imports(uint32_t rec)
-{
-    uint32_t t = ADDR(GetProcAddress((HMODULE)(uintptr_t)M32(rec + 8),
-                                     (LPCSTR)(uintptr_t)V(0x417b7c)));
-    if (t == 0)
-        return;
-    for (; M32(t) != 0; t += 8)
-        M32(t + 4) = host_mod_acquire(host_mod_by_id(M32(t)));
-}
 
 /* 0x408050's mirror for the imports (0x4080d0): release each. */
-static void host_mod_release(uint32_t rec);
 
-static void host_mod_unimports(uint32_t rec)
-{
-    uint32_t t = ADDR(GetProcAddress((HMODULE)(uintptr_t)M32(rec + 8),
-                                     (LPCSTR)(uintptr_t)V(0x417b7c)));
-    if (t == 0)
-        return;
-    for (; M32(t) != 0; t += 8)
-        host_mod_release(host_mod_by_id(M32(t)));
-}
-
-/* 0x407fe0: take a reference, loading the module on the first.  Returns its
- * Linkage (0 for a null record). */
-static uint32_t host_mod_acquire(uint32_t rec)
-{
-    uint32_t link;
-    if (rec == 0)
-        return 0;
-    if (M32(rec + 0x10) != 0) {
-        M32(rec + 0x10) = M32(rec + 0x10) + 1;
-        return M32(rec + 0xc);
-    }
-    M32(rec + 0x10) = 1;
-    M32(rec + 8) = ADDR(LoadLibraryA((LPCSTR)(uintptr_t)M32(rec)));
-    M32(rec + 0xc) = ADDR(GetProcAddress((HMODULE)(uintptr_t)M32(rec + 8),
-                                         (LPCSTR)(uintptr_t)V(0x417b60)));
-    host_mod_imports(rec);
-    link = M32(rec + 0xc);
-    if (M32(link + 4) != 0) {
-        ((host_mod_fn)(uintptr_t)M32(link + 4))();
-        M32(M32(rec + 0xc) + 4) = 0;
-    }
-    return M32(rec + 0xc);
-}
-
-/* 0x408050: drop a reference, unloading the module on the last. */
-static void host_mod_release(uint32_t rec)
-{
-    if (rec == 0)
-        return;
-    M32(rec + 0x10) = M32(rec + 0x10) - 1;
-    if (M32(rec + 0x10) != 0)
-        return;
-    if (M32(M32(rec + 0xc) + 8) != 0)
-        ((host_mod_fn)(uintptr_t)M32(M32(rec + 0xc) + 8))();
-    host_mod_unimports(rec);
-    FreeLibrary((HMODULE)(uintptr_t)M32(rec + 8));
-    M32(rec + 8) = 0;
-    M32(rec + 0xc) = 0;
-}
-
-static void host_dialogs_register(uint32_t id, uint32_t table);
-
-/* 0x407b20: make the module `name` known (loading it once to read its
- * Linkage: its id, and its dialog table at +0x14, registered), kept loaded
- * with a reference if `keep`.  1, or 0 if it will not load -- 1 too if it
- * was known already.  A module without a Linkage faults: retail reads +0x14
- * of the null it got. */
-static uint32_t host_mod_register(uint32_t name, uint32_t keep)
-{
-    uint32_t h, rec, link;
-    if (host_mod_by_name(name) != 0)
-        return 1;
-    h = ADDR(LoadLibraryA((LPCSTR)(uintptr_t)name));
-    if (h == 0)
-        return 0;
-    rec = host_2f8(HOST_MODULES);
-    M32(rec) = ADDR(_strdup((const char *)(uintptr_t)name));
-    M32(rec + 8) = 0;
-    M32(rec + 0xc) = 0;
-    link = ADDR(GetProcAddress((HMODULE)(uintptr_t)h, (LPCSTR)(uintptr_t)V(0x417b60)));
-    M32(rec + 0x10) = 0;
-    if (link != 0)
-        M32(rec + 4) = M32(link);
-    if (M32(link + 0x14) != 0)
-        host_dialogs_register(M32(link), M32(link + 0x14));
-    if (keep != 0) {
-        M32(rec + 8) = h;
-        M32(rec + 0xc) = link;
-        M32(rec + 0x10) = M32(rec + 0x10) + 1;
-        return 1;
-    }
-    FreeLibrary((HMODULE)(uintptr_t)h);
-    return 1;
-}
-
-/* 0x409c10: register a module's dialogs -- its table of 12-byte entries
- * { dialog id, create, flags } ending at id 0 -- on the dialog registry
- * (0x417ee0): { dialog id, module id, index in the table, flags }. */
-static void host_dialogs_register(uint32_t id, uint32_t table)
-{
-    uint32_t i = 0, e;
-    for (; M32(table) != 0; table += 0xc, i++) {
-        e = host_2f8(V(0x417ee0));
-        M32(e + 4) = id;
-        M32(e + 8) = i;
-        M32(e) = M32(table);
-        M32(e + 0xc) = M32(table + 8);
-    }
-}
 
 /* +0x26c (0x40da90): load the module path + extension (which must exist),
  * *out its Linkage.  0, or -1. */
@@ -3308,11 +3184,11 @@ static uint32_t FS98_STDCALL host_26c(uint32_t out, uint32_t path, uint32_t ext)
         return (uint32_t)-1;
     if (host_path_ext(ADDR(&file), path, ext) == (uint32_t)-1)
         return (uint32_t)-1;
-    if (host_mod_register(file, 0) == 0) {
+    if (fs98_host_rt_add_module((const char *)(uintptr_t)file, 0) == 0) {
         host_214(ADDR(&file));
         return (uint32_t)-1;
     }
-    M32(out) = host_mod_acquire(host_mod_by_name(file));
+    M32(out) = ADDR(fs98_host_rt_acquire(fs98_host_rt_module_named((const char *)(uintptr_t)file)));
     host_214(ADDR(&file));
     return 0;
 }
@@ -3321,8 +3197,8 @@ static uint32_t FS98_STDCALL host_26c(uint32_t out, uint32_t path, uint32_t ext)
  * *plink.  Returns 0. */
 static uint32_t FS98_STDCALL host_270(uint32_t plink)
 {
-    host_mod_by_linkage(M32(plink));
-    host_mod_release(host_mod_by_linkage(M32(plink)));
+    fs98_host_rt_module_with_linkage((uint32_t *)(uintptr_t)M32(plink));
+    fs98_host_rt_release(fs98_host_rt_module_with_linkage((uint32_t *)(uintptr_t)M32(plink)));
     M32(plink) = 0;
     return 0;
 }
@@ -3913,47 +3789,6 @@ static uint32_t FS98_STDCALL host_2e8(uint32_t v, uint32_t st)
     return 0;
 }
 
-/* 0x40f220: start DirectSound from the module at 0x41a3c4: create it,
- * cooperative level 2 with the main window, the primary buffer (at 0x41a2b8,
- * the dummy voice's) formatted from 0x41a264 and played.  0x418308 is 0, or
- * which step failed (4..7). */
-static void host_snd_init(void)
-{
-    typedef HRESULT (WINAPI *dsc_fn)(void *, void *, void *);
-    dsc_fn create = (dsc_fn)(void *)GetProcAddress((HMODULE)(uintptr_t)M32(V(0x41a3c4)),
-                                                    (LPCSTR)(uintptr_t)V(0x41830c));
-    uint32_t desc[5], ds, pb;
-    if (create == 0) {
-        M32(V(0x418308)) = 4;
-        return;
-    }
-    if (create(0, (void *)(uintptr_t)V(0x41a3c8), 0) != 0) {
-        M32(V(0x418308)) = 5;
-        return;
-    }
-    ds = SND_DS;
-    if (((host_com3)(uintptr_t)COM(ds, 0x18))(ds, M32(V(0x41880c)), 2) != 0) {
-        M32(V(0x418308)) = 6;
-        return;
-    }
-    desc[0] = 0x14;
-    desc[1] = 0x81;
-    desc[2] = 0;
-    desc[3] = 0;
-    desc[4] = 0;
-    if (((host_com4)(uintptr_t)COM(SND_DS, 0xc))(SND_DS, ADDR(desc), V(0x41a2b8), 0) != 0) {
-        M32(V(0x418308)) = 7;
-        return;
-    }
-    pb = M32(V(0x41a2b8));
-    ((host_com2)(uintptr_t)COM(pb, 0x38))(pb, V(0x41a264));
-    pb = M32(V(0x41a2b8));
-    ((host_com4)(uintptr_t)COM(pb, 0x14))(pb, V(0x41a264), 0x12, 0);
-    pb = M32(V(0x41a2b8));
-    ((host_com4)(uintptr_t)COM(pb, 0x30))(pb, 0, 0, 1);
-    M32(V(0x418308)) = 0;
-}
-
 /* +0x2d0 (0x40f120): sound on (DirectSound started if it is not, every voice
  * rebuffered and the looping ones restarted) or off (due callbacks called,
  * buffers released, DirectSound released, 0x418308 -1), under the busy
@@ -3967,7 +3802,7 @@ static uint32_t FS98_STDCALL host_2d0(uint32_t on)
     if (on != 0) {
         if (M32(V(0x418308)) == 0)
             goto done;
-        host_snd_init();
+        fs98_host_rt_start_sound();
         if (M32(V(0x418308)) != 0)
             goto failed;
         for (v = M32(V(0x41a3c0)); v != 0; v = M32(v + 0x168)) {
@@ -4070,26 +3905,6 @@ static int host_view_dd(uint32_t rec)
     return 1;
 }
 
-/* 0x412fb0: lock the surface (restoring it once if the lock fails) for its
- * bits and pitch.  1 if locked, else 0. */
-static uint32_t host_surface_lock(uint32_t surf, uint32_t bits, uint32_t pitch)
-{
-    uint32_t desc[0x1b], hr;
-    desc[0] = 0x6c;
-    hr = ((host_com5)(uintptr_t)COM(surf, 0x64))(surf, 0, ADDR(desc), M32(V(0x41a4d8)), 0);
-    if (hr != 0) {
-        hr = ((host_com1)(uintptr_t)COM(surf, 0x6c))(surf);
-        if (hr != 0)
-            return 0;
-        hr = ((host_com5)(uintptr_t)COM(surf, 0x64))(surf, 0, ADDR(desc), M32(V(0x41a4d8)), 0);
-        if (hr != 0)
-            return 0;
-    }
-    M32(bits) = desc[9];
-    M32(pitch) = desc[4];
-    return 1;
-}
-
 /* +0x06c (0x410740): lock a view window for drawing: its DIB's bits and
  * pitch, or DirectDraw's when it draws through it (the surface noted at
  * +0x9c), the row table refilled if the bits moved.  0 (nothing for a window
@@ -4110,7 +3925,7 @@ static uint32_t FS98_STDCALL host_06c(uint32_t rec)
     if (host_view_dd(rec)) {
         if (M32(rec + 8) & 0x4000)
             M32(rec + 0x9c) = HOST_SURFACE;
-        else if (host_surface_lock(HOST_SURFACE, ADDR(&bits), ADDR(&pitch)))
+        else if (fs98_host_rt_lock((void *)(uintptr_t)HOST_SURFACE, (void **)(uintptr_t)ADDR(&bits), (int32_t *)(uintptr_t)ADDR(&pitch)))
             M32(rec + 0x9c) = HOST_SURFACE;
     }
     M32(rec + 0x98) = bits;
@@ -4195,33 +4010,6 @@ static uint32_t FS98_STDCALL host_078(uint32_t rec)
     return 0;
 }
 
-/* 0x411650: restack the main window's frames, group by group, front node
- * first (BeginDeferWindowPos, each after the previous, flags 0x13); not
- * reentrant (0x41a3e8). */
-static void host_view_restack(void)
-{
-    uint32_t g, n, after = 1;
-    HDWP d;
-    if (M32(V(0x41a3e8)) != 0)
-        return;
-    M32(V(0x41a3e8)) = 1;
-    d = BeginDeferWindowPos(1);
-    for (g = M32(V(0x41a3dc)); g != 0; g = M32(g + 8)) {
-        for (n = M32(g + 4); n != 0; n = M32(n + 4)) {
-            uint32_t r = M32(n);
-            if (!(M32(r + 8) & 0x80000000u))
-                continue;
-            if (ADDR(GetParent((HWND)(uintptr_t)M32(M32(r + 0xa0) + 0x24))) != M32(V(0x41880c)))
-                continue;
-            d = DeferWindowPos(d, (HWND)(uintptr_t)M32(M32(r + 0xa0) + 0x24), (HWND)(uintptr_t)after,
-                               0, 0, 0, 0, 0x13);
-            after = M32(M32(M32(n) + 0xa0) + 0x24);
-        }
-    }
-    EndDeferWindowPos(d);
-    M32(V(0x41a3e8)) = 0;
-}
-
 /* +0x090 (0x411560): bring a record to the front of its group (and restack
  * if it moved).  0, or -1 if it is in no group. */
 static uint32_t FS98_STDCALL host_090(uint32_t rec)
@@ -4239,7 +4027,7 @@ static uint32_t FS98_STDCALL host_090(uint32_t rec)
                 M32(prev + 4) = M32(n + 4);
                 M32(n + 4) = M32(g + 4);
                 M32(g + 4) = n;
-                host_view_restack();
+                fs98_host_rt_restack();
             }
             return 0;
         }
@@ -4477,71 +4265,6 @@ static uint32_t FS98_STDCALL host_08c(uint32_t rec, uint32_t place, uint32_t col
     return 0;
 }
 
-/* 0x412bf0: the screen's width, height and depth -- from the primary surface
- * when DirectDraw is up (a 555 16-bit format says 15), else from the
- * screen's DC. */
-static void host_screen_format(uint32_t w, uint32_t h, uint32_t bpp)
-{
-    if (M32(V(0x41a4e4)) != 0 && M32(V(0x41a4f8)) != 0) {
-        uint32_t d[0x1b];
-        memset(d, 0, sizeof d);
-        d[0] = 0x6c;
-        ((host_com2)(uintptr_t)COM(M32(V(0x41a4f8)), 0x58))(M32(V(0x41a4f8)), ADDR(d));
-        M32(w) = d[0xc / 4];
-        M32(h) = d[8 / 4];
-        M32(bpp) = d[0x54 / 4];
-        if (d[0x54 / 4] == 0x10 && d[0x58 / 4] == 0x7c00 && d[0x5c / 4] == 0x3e0 && d[0x60 / 4] == 0x1f)
-            M32(bpp) = 0xf;
-    } else {
-        HDC dc = GetDC(0);
-        int bits;
-        M32(w) = (uint32_t)GetDeviceCaps(dc, HORZRES);
-        M32(h) = (uint32_t)GetDeviceCaps(dc, VERTRES);
-        bits = GetDeviceCaps(dc, BITSPIXEL);
-        M32(bpp) = (uint32_t)(bits * GetDeviceCaps(dc, PLANES));
-        ReleaseDC(0, dc);
-    }
-}
-
-/* 0x412b50: in a full-screen 8-bit DirectDraw mode (0x41a4ec bit 0, not bit
- * 1), give the primary surface the 256 entries -- the palette made on first
- * use (0x41a4e8), else its entries set. */
-static void host_dd_palette(uint32_t entries)
-{
-    uint32_t w, h, bpp;
-    host_screen_format(ADDR(&w), ADDR(&h), ADDR(&bpp));
-    if (M32(V(0x41a4e4)) == 0 || M32(V(0x41a4f8)) == 0 || M32(V(0x418854)) == 0 || bpp != 8 ||
-        !(M8(V(0x41a4ec)) & 1) || (M8(V(0x41a4ec)) & 2))
-        return;
-    if (M32(V(0x41a4e8)) == 0)
-        ((host_com5)(uintptr_t)COM(M32(V(0x41a4e4)), 0x14))(M32(V(0x41a4e4)), 4, entries, V(0x41a4e8), 0);
-    else
-        ((host_com5)(uintptr_t)COM(M32(V(0x41a4e8)), 0x18))(M32(V(0x41a4e8)), 0, 0, 0x100, entries);
-    ((host_com2)(uintptr_t)COM(M32(V(0x41a4f8)), 0x7c))(M32(V(0x41a4f8)), M32(V(0x41a4e8)));
-}
-
-/* 0x40e540: the BGR table at 0x41b620 from the palette's copy at 0x4175ac:
- * all grey at half brightness (0x41a250), else the animated entries (10..105
- * and 118..245) as a dim red of their luminance, the rest as they are. */
-static void host_palette_tint(void)
-{
-    uint32_t k;
-    for (k = 0; k < 0x400; k += 4) {
-        int32_t r = M8(V(0x4175ac) + k), g = M8(V(0x4175ad) + k), b = M8(V(0x4175ae) + k);
-        if (M32(V(0x41a250)) != 0) {
-            r = g = b = (299 * r + 587 * g + 114 * b) / 1000 / 2;
-        } else if ((k >= 0x28 && k <= 0x1a4) || (k >= 0x1d8 && k < 0x3d8)) {
-            int32_t l = (299 * r + 587 * g + 114 * b) / 1000;
-            r = 210 * l / 255;
-            g = 53 * l / 255;
-            b = 0;
-        }
-        M8(V(0x41b622) + k) = (uint8_t)r;
-        M8(V(0x41b621) + k) = (uint8_t)g;
-        M8(V(0x41b620) + k) = (uint8_t)b;
-    }
-}
-
 /* +0x290 (0x40e290): set the palette.  The ten system colours at each end go
  * from the master palette (0x4171a4) to its copy (0x4175ac) and, as BGR, to
  * 0x41adc0; given RGB triples, entries 10..245 are set from them (pal the
@@ -4577,8 +4300,8 @@ static uint32_t FS98_STDCALL host_290(uint32_t pal, uint32_t copy)
         M8(V(0x41ade9) + i) = M8(pal + k + 1);
         M8(V(0x41ade8) + i) = M8(pal + k + 2);
     }
-    host_palette_tint();
-    host_dd_palette(V(0x4171a4));
+    fs98_host_rt_tint_palette();
+    fs98_host_rt_set_palette((void *)(uintptr_t)V(0x4171a4));
     dc = GetDC(HOST_HWND);
     if (GetDeviceCaps(dc, RASTERCAPS) & RC_PALETTE) {
         AnimatePalette((HPALETTE)(uintptr_t)M32(V(0x41bb60)), 10, 0xec, (const PALETTEENTRY *)(uintptr_t)V(0x4171cc));
@@ -4778,10 +4501,9 @@ static uint32_t FS98_STDCALL host_120(uint32_t block, uint32_t size, uint32_t fl
 
 /* ---- display settings (+0x31c) -------------------------------------------
  *
- * 0x4121a0, 0x412210, 0x412250, 0x412340, 0x412420, 0x414400, 0x4144c0 and
- * 0x414510 below are written twice until the runtime is linked with the
- * services: src/host/runtime/ has them too (docs/remaining-work.md, "Routines
- * written twice"). A change to one must go to both.
+ * The device list, the settings read (0x4121a0..0x412420, 0x414400..0x414510)
+ * and DirectDraw itself are the runtime's (src/host/runtime/host_rt_ddraw.c and
+ * host_rt_config.c), called from here: one copy, shared with the services.
  *
  * A settings block (0xe8 bytes): the device, as "<description>" or
  * "<description> (<name>)" for one named "\\.<...>", with an optional
@@ -4791,114 +4513,6 @@ static uint32_t FS98_STDCALL host_120(uint32_t block, uint32_t size, uint32_t fl
  * Direct3D HAL / MMX device seen); the mode parsed (+0xd4 width, +0xd8
  * height, +0xdc depth, +0xe0 a fourth number -- or, when modes are listed,
  * the video memory); and where the next string of a list goes (+0xe4). */
-
-/* The Direct3D suffixes a device string may end in, longest match first. */
-static const uint32_t host_d3d_suffixes[4] = { 0x4183fc, 0x4183ec, 0x4183dc, 0x4183cc };
-
-/* 0x4121a0: a DirectDraw driver's label into `out`: "<desc> (<name>)" for a
- * name starting "\\.", else the description; then " <extra>" if given. */
-static void host_dd_label(uint32_t out, uint32_t desc, uint32_t name, uint32_t extra)
-{
-    if (M8(name) == '\\' && M8(name + 1) == '\\' && M8(name + 2) == '.')
-        wsprintfA((char *)(uintptr_t)out, (const char *)(uintptr_t)V(0x4183bc), (const char *)(uintptr_t)desc,
-                  (const char *)(uintptr_t)name);
-    else
-        lstrcpyA((char *)(uintptr_t)out, (const char *)(uintptr_t)desc);
-    if (extra != 0 && M8(extra) != 0) {
-        lstrcatA((char *)(uintptr_t)out, (const char *)(uintptr_t)V(0x4183b8));
-        lstrcatA((char *)(uintptr_t)out, (const char *)(uintptr_t)extra);
-    }
-}
-
-/* 0x412210: whether a driver is the primary display: no GUID, the name
- * "display", or a name starting "\\.".  1 or 0. */
-static uint32_t host_dd_primary(uint32_t guid, uint32_t desc, uint32_t name)
-{
-    (void)desc;
-    if (guid == 0 || lstrcmpiA((const char *)(uintptr_t)name, (const char *)(uintptr_t)V(0x4183c4)) == 0)
-        return 1;
-    return M8(name) == '\\' && M8(name + 1) == '\\' && M8(name + 2) == '.';
-}
-
-/* 0x412340: the Direct3D suffix a device string ends in (the empty string at
- * 0x4187f8 if none), copied to `out` if given, and cut off the string (at the
- * space before it) when `cut` is set and there is one. */
-static uint32_t host_d3d_suffix(uint32_t s, uint32_t out, uint32_t cut)
-{
-    uint32_t i, p = 0;
-    int n, m;
-    for (i = 0; i < 4 && p == 0; i++) {
-        n = lstrlenA((const char *)(uintptr_t)s);
-        m = lstrlenA((const char *)(uintptr_t)V(host_d3d_suffixes[i]));
-        p = 0;
-        if (n > m) {
-            p = s + (uint32_t)(n - m);
-            if (lstrcmpA((const char *)(uintptr_t)p, (const char *)(uintptr_t)V(host_d3d_suffixes[i])) != 0)
-                p = 0;
-        }
-    }
-    if (p == 0)
-        p = V(0x4187f8);
-    else if (cut)
-        M8(p - 1) = 0;
-    if (out != 0)
-        lstrcpyA((char *)(uintptr_t)out, (const char *)(uintptr_t)p);
-    return p;
-}
-
-/* 0x412250, a DirectDrawEnumerateA callback: the driver whose name or label
- * is the one sought (ctx +4) is created into *(ctx +0x84) (the result at
- * ctx +0), ctx +0x88 getting 3 for the default driver, 1 for another primary
- * one, 4 for a secondary one.  0 once created. */
-static BOOL WINAPI host_dd_find_cb(GUID *guid, LPSTR desc, LPSTR name, LPVOID ctxp)
-{
-    char label[0x80];
-    uint32_t ctx = ADDR(ctxp);
-    host_dd_label(ADDR(label), ADDR(desc), ADDR(name), 0);
-    if (lstrcmpiA((const char *)(uintptr_t)(ctx + 4), name) != 0 &&
-        lstrcmpiA((const char *)(uintptr_t)(ctx + 4), label) != 0)
-        return TRUE;
-    M32(ctx) = (uint32_t)DirectDrawCreate(guid, (LPDIRECTDRAW *)(uintptr_t)M32(ctx + 0x84), 0);
-    if (M32(ctx) != 0)
-        return TRUE;
-    if (guid == 0)
-        M32(ctx + 0x88) |= 3;
-    else if (host_dd_primary(ADDR(guid), ADDR(desc), ADDR(name)))
-        M32(ctx + 0x88) |= 1;
-    else
-        M32(ctx + 0x88) |= 4;
-    return FALSE;
-}
-
-/* 0x412420: the DirectDraw object for a device string (its Direct3D suffix
- * dropped), into *out: the matching driver's, or the default one's for an
- * empty string.  The kind (3 the default, 1 primary, 4 secondary), or 0. */
-static uint32_t host_dd_open(uint32_t dev, uint32_t out)
-{
-    uint8_t ctx[0x8c];
-    if (out == 0)
-        return 0;
-    M32(out) = 0;
-    if (dev != 0 && M8(dev) != 0) {
-        M32(ADDR(ctx) + 0x84) = out;
-        M32(ADDR(ctx) + 0x88) = 0;
-        M32(ADDR(ctx)) = 0x80004005u;
-        lstrcpyA((char *)ctx + 4, (const char *)(uintptr_t)dev);
-        host_d3d_suffix(ADDR(ctx) + 4, 0, 1);
-        DirectDrawEnumerateA(host_dd_find_cb, ctx);
-        return M32(ADDR(ctx) + 0x88);
-    }
-    return DirectDrawCreate(0, (LPDIRECTDRAW *)(uintptr_t)out, 0) == 0 ? 3 : 0;
-}
-
-/* 0x4144c0: an option flag from the HARDWARE section (its default `def`). */
-static void host_cfg_flag_read(uint32_t cfg, uint32_t mask, uint32_t key, uint32_t def)
-{
-    if (GetPrivateProfileIntA(host_hardware, (LPCSTR)(uintptr_t)key, (INT)def, (LPCSTR)(uintptr_t)V(0x41c120)))
-        M32(cfg + 0xd0) |= mask;
-    else
-        M32(cfg + 0xd0) &= ~mask;
-}
 
 /* 0x414440: an option flag back to the HARDWARE section: its key removed when
  * it has its default, else "1" or "0". */
@@ -4911,81 +4525,6 @@ static void host_cfg_flag_write(uint32_t cfg, uint32_t mask, uint32_t key, uint3
         WritePrivateProfileStringA(host_hardware, (LPCSTR)(uintptr_t)key,
                                    (LPCSTR)(uintptr_t)(v != 0 ? V(0x417064) : V(0x417a20)),
                                    (LPCSTR)(uintptr_t)V(0x41c120));
-}
-
-/* 0x414400, a DirectDrawEnumerateA callback: the default driver's label as
- * the device.  0 (stop) for it, 1 for the others. */
-static BOOL WINAPI host_dd_first_cb(GUID *guid, LPSTR desc, LPSTR name, LPVOID cfg)
-{
-    if (guid != 0)
-        return TRUE;
-    M8(ADDR(cfg) + 0x80) = 0;
-    host_dd_label(ADDR(cfg), ADDR(desc), ADDR(name), ADDR(cfg) + 0x80);
-    return FALSE;
-}
-
-/* The number at p, and p past the next 'x'. */
-static uint32_t host_mode_field(uint32_t *p)
-{
-    uint32_t v = (uint32_t)atoi((const char *)(uintptr_t)*p);
-    while (M8(*p) != 0 && M8(*p) != 'x')
-        (*p)++;
-    if (M8(*p) != 0)
-        (*p)++;
-    return v;
-}
-
-/* 0x414510 (ops 1 and 2): the settings, from the HARDWARE section or (2) the
- * flags' defaults; with no device and DirectDraw not disabled, the default
- * driver's; its suffix split out; the mode parsed, 640x480 at 16 bits with a
- * suffix (8 without) if any of the first three numbers is 0. */
-static uint32_t host_display_read(uint32_t cfg, uint32_t defaults)
-{
-    uint32_t e, p;
-    memset((void *)(uintptr_t)cfg, 0, 0xe8);
-    if (defaults) {
-        M32(cfg + 0xd0) = 0;
-        if (M32(V(0x418458)) != 0)
-            for (e = V(0x418458); ; e += 0xc) {
-                if (M32(e + 8) != 0)
-                    M32(cfg + 0xd0) |= M32(e);
-                if (M32(e + 0xc) == 0)
-                    break;
-            }
-    } else {
-        GetPrivateProfileStringA(host_hardware, (LPCSTR)(uintptr_t)V(0x418594), (LPCSTR)(uintptr_t)V(0x4187f8),
-                                 (LPSTR)(uintptr_t)cfg, 0x80, (LPCSTR)(uintptr_t)V(0x41c120));
-        GetPrivateProfileStringA(host_hardware, (LPCSTR)(uintptr_t)V(0x41858c), (LPCSTR)(uintptr_t)V(0x4187f8),
-                                 (LPSTR)(uintptr_t)(cfg + 0xa8), 0x28, (LPCSTR)(uintptr_t)V(0x41c120));
-        if (M32(V(0x418458)) != 0)
-            for (e = V(0x41845c); ; e += 0xc) {
-                host_cfg_flag_read(cfg, M32(e - 4), M32(e), M32(e + 4));
-                if (M32(e + 8) == 0)
-                    break;
-            }
-    }
-    if (M8(cfg) == 0 && !(M8(cfg + 0xd0) & 1))
-        DirectDrawEnumerateA(host_dd_first_cb, (LPVOID)(uintptr_t)cfg);
-    host_d3d_suffix(cfg, cfg + 0x80, 0);
-    p = cfg + 0xa8;
-    M32(cfg + 0xd4) = host_mode_field(&p);
-    M32(cfg + 0xd8) = host_mode_field(&p);
-    M32(cfg + 0xdc) = host_mode_field(&p);
-    M32(cfg + 0xe0) = (uint32_t)atoi((const char *)(uintptr_t)p);
-    if (M32(cfg + 0xd4) == 0 || M32(cfg + 0xd8) == 0 || M32(cfg + 0xdc) == 0) {
-        M32(cfg + 0xd4) = 0x280;
-        M32(cfg + 0xd8) = 0x1e0;
-        if (M8(cfg + 0x80) != 0) {
-            M32(cfg + 0xdc) = 0x10;
-            M32(cfg + 0xe0) = 0;
-            lstrcpyA((char *)(uintptr_t)(cfg + 0xa8), (const char *)(uintptr_t)V(0x418580));
-        } else {
-            M32(cfg + 0xdc) = 8;
-            M32(cfg + 0xe0) = 0;
-            lstrcpyA((char *)(uintptr_t)(cfg + 0xa8), (const char *)(uintptr_t)V(0x418574));
-        }
-    }
-    return 0;
 }
 
 /* 0x414720 (ops 5 and 6): the settings back to the HARDWARE section, or (6)
@@ -5057,8 +4596,8 @@ static BOOL WINAPI host_dd_driver_cb(GUID *guid, LPSTR desc, LPSTR name, LPVOID 
     uint32_t cfg = ADDR(ctx), d3d = 0, dd = 0;
     if (DirectDrawCreate(guid, (LPDIRECTDRAW *)&dd, 0) != 0)
         return TRUE;
-    host_dd_label(cfg, ADDR(desc), ADDR(name), 0);
-    if (host_dd_primary(ADDR(guid), ADDR(desc), ADDR(name)))
+    fs98_host_rt_device_name((char *)(uintptr_t)cfg, desc, name, 0);
+    if (fs98_host_rt_device_is(guid, desc, name))
         host_display_add(cfg, cfg);
     ((host_com3)(uintptr_t)COM(dd, 0))(dd, ADDR(host_iid_d3d), ADDR(&d3d));
     if (d3d != 0) {
@@ -5143,8 +4682,8 @@ static uint32_t host_display_modes(uint32_t cfg)
         host_050(0);
         return 0;
     }
-    if (host_dd_open(cfg, ADDR(&dd)) != 0) {
-        host_d3d_suffix(cfg, cfg + 0x80, 0);
+    if (fs98_host_rt_device_create((const char *)(uintptr_t)cfg, (void **)(uintptr_t)ADDR(&dd)) != 0) {
+        fs98_host_rt_device_suffix((char *)(uintptr_t)cfg, (char *)(uintptr_t)(cfg + 0x80), 0);
         if (M8(cfg + 0x80) != 0)
             M32(cfg + 0xd0) |= 0x10000000;
         M32(cfg + 0xe0) = host_dd_memory(dd);
@@ -5163,7 +4702,7 @@ static uint32_t FS98_STDCALL host_31c(uint32_t op, uint32_t cfg, uint32_t unused
 {
     (void)unused;
     switch (op) {
-    case 1: case 2: return host_display_read(cfg, op == 2);
+    case 1: case 2: return (uint32_t)fs98_host_rt_read_display((uint8_t *)(uintptr_t)cfg, op == 2);
     case 3: return host_display_devices(cfg);
     case 4: return host_display_modes(cfg);
     case 5: case 6: return host_display_write(cfg, op == 6);
@@ -5180,359 +4719,12 @@ static uint32_t FS98_STDCALL host_31c(uint32_t op, uint32_t cfg, uint32_t unused
  * 0x41a3f0, the mode in use (0x4183a8 width, 0x4183ac height, 0x4183b0
  * depth) and a re-entry count (0x41a500).  0x418854 says full screen. */
 
-/* 0x4078b0, an EnumThreadWindows callback: a "FS98FLOAT" window is given to
- * the broadcast's function with its message.  1. */
-static BOOL WINAPI host_float_cb(HWND hwnd, LPARAM ctx)
-{
-    char cls[0x100];
-    GetClassNameA(hwnd, cls, 0xff);
-    if (_strcmpi(cls, (const char *)(uintptr_t)V(0x417178)) == 0)
-        ((BOOL (WINAPI *)(HWND, LPARAM))(uintptr_t)M32(ADDR(ctx)))(hwnd, (LPARAM)M32(ADDR(ctx) + 4));
-    return TRUE;
-}
-
-/* 0x407850: fn(window, msg) for each child of a live window, then for each
- * of this thread's "FS98FLOAT" windows. */
-static void host_broadcast(uint32_t hwnd, uint32_t fn, uint32_t msg)
-{
-    uint32_t ctx[2];
-    if (hwnd == 0 || !IsWindow((HWND)(uintptr_t)hwnd))
-        return;
-    EnumChildWindows((HWND)(uintptr_t)hwnd, (WNDENUMPROC)(uintptr_t)fn, (LPARAM)msg);
-    ctx[0] = fn;
-    ctx[1] = msg;
-    EnumThreadWindows(GetCurrentThreadId(), host_float_cb, (LPARAM)ADDR(ctx));
-}
-
-/* 0x412a20, the broadcast's function: 0x46d is sent (DirectDraw going), any
- * other message posted, with the DirectDraw object.  1. */
-static BOOL WINAPI host_dd_notify(HWND hwnd, LPARAM msg)
-{
-    if (msg == 0x46d)
-        SendMessageA(hwnd, 0x46d, 0, (LPARAM)M32(V(0x41a4e4)));
-    else
-        PostMessageA(hwnd, (UINT)msg, 0, (LPARAM)M32(V(0x41a4e4)));
-    return TRUE;
-}
-
-/* 0x4140b0: back to the GDI surface, and the page-flip windows' GDI objects
- * (0x41a53c, 0x41a984, 0x41a968) deleted. */
-static void host_flip_off(void)
-{
-    ((host_com1)(uintptr_t)COM(M32(V(0x41a4e4)), 0x28))(M32(V(0x41a4e4)));
-    if (M32(V(0x41a53c)) != 0) {
-        DeleteObject((HGDIOBJ)(uintptr_t)M32(V(0x41a53c)));
-        M32(V(0x41a53c)) = 0;
-        DeleteObject((HGDIOBJ)(uintptr_t)M32(V(0x41a984)));
-        M32(V(0x41a984)) = 0;
-        DeleteObject((HGDIOBJ)(uintptr_t)M32(V(0x41a968)));
-        M32(V(0x41a968)) = 0;
-        M32(V(0x41a540)) = 0;
-    }
-}
-
-/* A COM object at a host global released and the global cleared. */
-static void host_release_at(uint32_t at)
-{
-    if (M32(at) != 0) {
-        ((host_com1)(uintptr_t)COM(M32(at), 8))(M32(at));
-        M32(at) = 0;
-    }
-}
-
-/* 0x412a70: the surfaces gone (the views told 0x46d first; page flipping
- * turned off). */
-static void host_dd_surfaces_off(void)
-{
-    if (M32(V(0x41a4f8)) == 0)
-        return;
-    host_broadcast(M32(V(0x41880c)), ADDR(host_dd_notify), 0x46d);
-    if (M32(V(0x41a4f4)) != 0) {
-        host_flip_off();
-        M32(V(0x41a4f4)) = 0;
-    }
-    M32(V(0x41a4f0)) = 0;
-    host_release_at(V(0x41a4fc));
-    host_release_at(V(0x41a4e0));
-    host_release_at(V(0x41a4f8));
-    host_release_at(V(0x41a4e8));
-}
-
-/* 0x412b10: DirectDraw gone: the surfaces, Direct3D and the object. */
-static void host_dd_off(void)
-{
-    host_dd_surfaces_off();
-    host_release_at(V(0x41a4dc));
-    host_release_at(V(0x41a4e4));
-}
-
-/* 0x412590, a Direct3D EnumDevices callback: the device description kept
- * (0xcc bytes): a hardware one, else a software one that does what 2 says
- * if none was kept.  1. */
-static HRESULT WINAPI host_d3d_best_cb(GUID *guid, LPSTR desc, LPSTR name, void *hal, void *hel, LPVOID best)
-{
-    (void)desc; (void)name;
-    if (guid == 0)
-        return 1;
-    if (hal != 0 && M32(ADDR(hal) + 4) != 0)
-        memcpy(best, hal, 0xcc);
-    if (hel != 0 && M32(ADDR(hel) + 4) != 0 && (M8(ADDR(hel) + 8) & 2) && M32(ADDR(best) + 4) == 0)
-        memcpy(best, hel, 0xcc);
-    return 1;
-}
-
-/* 0x4125f0: whether Direct3D can be used: on (4) with a suffix chosen, a
- * device found with 1 in its +0x84, and no video memory reported or at
- * least 0x14b000 of it. */
-static uint32_t host_d3d_usable(void)
-{
-    uint32_t best[0x33], caps[0x5b], m;
-    if (!(M8(V(0x41a4c0)) & 4) || M8(V(0x41a470)) == 0)
-        return 0;
-    memset(best, 0, sizeof best);
-    ((host_com3)(uintptr_t)COM(M32(V(0x41a4dc)), 0xc))(M32(V(0x41a4dc)), ADDR(host_d3d_best_cb), ADDR(best));
-    if (best[1] != 0 && (best[0x84 / 4] & 1)) {
-        caps[0] = 0x16c;
-        ((host_com3)(uintptr_t)COM(M32(V(0x41a4e4)), 0x2c))(M32(V(0x41a4e4)), ADDR(caps), 0);
-        m = caps[0x3c / 4];
-        if (m == 0 || m >= 0x14b000)
-            return 1;
-    }
-    return 0;
-}
-
-/* 0x413050: a surface (or a rectangle of it) filled with a colour.  1 if
- * the Blt worked. */
-static uint32_t host_surface_fill(uint32_t surf, uint32_t rect, uint32_t colour)
-{
-    uint32_t fx[0x19];
-    fx[0] = 0x64;
-    fx[0x50 / 4] = colour;
-    return ((host_com6)(uintptr_t)COM(surf, 0x14))(surf, rect, 0, 0, 0x1000400, ADDR(fx)) == 0;
-}
-
-/* 0x412690: DirectDraw (re)built for the current mode: restored if the
- * surfaces only need it; else the settings read, the driver opened (in
- * full screen the chosen one, else or failing that the default), the
- * cooperative level and, in full screen, the mode set (640x480 if the
- * settings' fails, at 16 bits with Direct3D, 8 without), Direct3D kept if
- * usable, and the primary surface made (flipping with a back buffer when
- * page flipping is on, cleared).  Then the palette and the views told 0x46c.
- * 1 if it was in use (or already being built), else 0. */
-static uint32_t host_dd_on(void)
-{
-    uint32_t desc[0x1b], ok = 1;
-    if (M32(V(0x41a500)) != 0)
-        return 1;
-    if (M32(V(0x4183b4)) != 0)
-        M32(V(0x4183b4)) = (uint32_t)GetSystemMetrics(0x50);
-    if (M32(V(0x41a4e4)) != 0 && M32(V(0x41a4f8)) != 0) {
-        if (M32(V(0x418858)) == 0)
-            return 0;
-        if (((host_com1)(uintptr_t)COM(M32(V(0x41a4f8)), 0x6c))(M32(V(0x41a4f8))) == 0 &&
-            (M32(V(0x41a4e0)) == 0 || ((host_com1)(uintptr_t)COM(M32(V(0x41a4e0)), 0x6c))(M32(V(0x41a4e0))) == 0))
-            goto done;
-    }
-    host_display_read(V(0x41a3f0), 0);
-    if (M8(V(0x41a4c0)) & 1) {
-        host_dd_off();
-        return 0;
-    }
-    M32(V(0x4183ac)) = M32(V(0x41a4c8));
-    M32(V(0x4183a8)) = M32(V(0x41a4c4));
-    M32(V(0x4183b0)) = M32(V(0x41a4cc));
-    if (M32(V(0x41a4e4)) == 0) {
-        if (M32(V(0x418854)) != 0) {
-            M32(V(0x41a4ec)) = host_dd_open(V(0x41a3f0), V(0x41a4e4));
-            if (M32(V(0x41a4e4)) != 0 && (M8(V(0x41a4ec)) & 4))
-                M32(V(0x41a4c0)) |= 0x40;
-        }
-        if (M32(V(0x41a4e4)) == 0) {
-            M32(V(0x41a4ec)) = host_dd_open(0, V(0x41a4e4));
-            if (M32(V(0x41a4e4)) == 0)
-                return 0;
-        }
-        M32(V(0x41a500))++;
-        if (((host_com3)(uintptr_t)COM(M32(V(0x41a4e4)), 0x50))(M32(V(0x41a4e4)), M32(V(0x41880c)),
-                                                               M32(V(0x418854)) != 0 ? 0x11 : 8) != 0) {
-            M32(V(0x41a500))--;
-            host_dd_off();
-            return 0;
-        }
-        M32(V(0x41a500))--;
-        if (!(M8(V(0x41a4c0)) & 0x40) || M32(V(0x418854)) == 0)
-            SetErrorMode(SetErrorMode(0) & ~2u);
-        ((host_com3)(uintptr_t)COM(M32(V(0x41a4e4)), 0))(M32(V(0x41a4e4)), ADDR(host_iid_d3d), V(0x41a4dc));
-        if (M32(V(0x41a4dc)) == 0) {
-            host_release_at(V(0x41a4e4));
-            return 0;
-        }
-        M32(V(0x41a4d8)) = 0x801;
-        if (M32(V(0x418854)) != 0) {
-            if ((M8(V(0x41a4ec)) & 4) && (M32(V(0x4183a8)) != 0x280 || M32(V(0x4183ac)) != 0x1e0))
-                ((host_com4)(uintptr_t)COM(M32(V(0x41a4e4)), 0x54))(M32(V(0x41a4e4)), 0x280, 0x1e0, M32(V(0x4183b0)));
-            if (((host_com4)(uintptr_t)COM(M32(V(0x41a4e4)), 0x54))(M32(V(0x41a4e4)), M32(V(0x4183a8)),
-                                                                   M32(V(0x4183ac)), M32(V(0x4183b0))) != 0) {
-                M32(V(0x4183a8)) = 0x280;
-                M32(V(0x4183ac)) = 0x1e0;
-                M32(V(0x4183b0)) = M32(V(0x41a4dc)) != 0 ? 0x10 : 8;
-                if (((host_com4)(uintptr_t)COM(M32(V(0x41a4e4)), 0x54))(M32(V(0x41a4e4)), 0x280, 0x1e0,
-                                                                       M32(V(0x4183b0))) != 0) {
-                    host_dd_off();
-                    return 0;
-                }
-            }
-        }
-        if (!host_d3d_usable())
-            host_release_at(V(0x41a4dc));
-    }
-    host_dd_surfaces_off();
-    memset(desc, 0, sizeof desc);
-    desc[0] = 0x6c;
-    desc[1] = 1;
-    desc[0x68 / 4] = 0x200;
-    if (M32(V(0x418854)) != 0 && (M8(V(0x41a4c0)) & 0x40)) {
-        desc[1] = 0x21;
-        desc[0x68 / 4] = 0x6218;
-        desc[0x14 / 4] = 1;
-        M32(V(0x41a4f4)) = 1;
-    } else
-        M32(V(0x41a4f4)) = 0;
-    if (((host_com4)(uintptr_t)COM(M32(V(0x41a4e4)), 0x18))(M32(V(0x41a4e4)), ADDR(desc), V(0x41a4f8), 0) != 0) {
-        host_dd_off();
-        return 0;
-    }
-    if (M32(V(0x418854)) != 0 && M32(V(0x41a4f4)) != 0)
-        host_surface_fill(M32(V(0x41a4f8)), 0, 0);
-done:
-    host_dd_palette(V(0x4171a4));
-    host_broadcast(M32(V(0x41880c)), ADDR(host_dd_notify), 0x46c);
-    return ok;
-}
-
-/* 0x403890, a thread: ChangeDisplaySettingsA(mode, CDS_FULLSCREEN), once more
- * with only the width and height if it wants a restart. */
-static DWORD WINAPI host_mode_thread(LPVOID mode)
-{
-    LONG r = ChangeDisplaySettingsA((DEVMODEA *)mode, 4);
-    if (r == 1 && mode != 0) {
-        M32(ADDR(mode) + 0x28) = 0x180000;
-        ChangeDisplaySettingsA((DEVMODEA *)mode, 4);
-    }
-    return (DWORD)r;
-}
-
-/* 0x4038d0: the display mode changed (or, for null, restored) on a thread of
- * its own, unless a secondary DirectDraw driver is in use -- for the primary
- * one the depth is left alone.  Its result, or -1. */
-static uint32_t host_set_mode(uint32_t mode)
-{
-    DWORD r = (DWORD)-1, id;
-    HANDLE th;
-    if (M32(V(0x41a4e4)) != 0 && !(M8(V(0x41a4ec)) & 4))
-        return r;
-    if (M32(V(0x41a4e4)) != 0 && (M8(V(0x41a4ec)) & 4) && mode != 0)
-        M32(mode + 0x28) &= ~0x40000u;
-    th = CreateThread(0, 0, host_mode_thread, (LPVOID)(uintptr_t)mode, 0, &id);
-    if (th != 0) {
-        WaitForSingleObject(th, INFINITE);
-        GetExitCodeThread(th, &r);
-        CloseHandle(th);
-    }
-    return r;
-}
-
-/* 0x403950: to full screen: the window's zoom, rectangle, styles (0x41bb3c,
- * 0x41bb40, 0x41bb54, 0x41bb5c) kept; a popup style, no menu (unless page
- * flipping is off and 0x417198 clear), the whole screen; DirectDraw rebuilt
- * and the display mode set when it is the primary driver or none; then the
- * whole screen again and 0x30f and WM_SIZE posted. */
-static uint32_t host_full_screen(void)
-{
-    uint8_t mode[0x9c];
-    int cx, cy;
-    if (M32(V(0x418854)) != 0)
-        return 0;
-    M32(V(0x418854)) = 1;
-    M32(V(0x41bb58)) = 1;
-    M32(V(0x41bb3c)) = (uint32_t)IsZoomed(HOST_HWND);
-    if (M32(V(0x41bb3c)) != 0)
-        ShowWindow(HOST_HWND, SW_RESTORE);
-    GetWindowRect(HOST_HWND, (LPRECT)(uintptr_t)V(0x41bb40));
-    M32(V(0x41bb54)) = (uint32_t)GetWindowLongA(HOST_HWND, GWL_EXSTYLE);
-    SetWindowLongA(HOST_HWND, GWL_EXSTYLE, 0);
-    M32(V(0x41bb5c)) = (uint32_t)GetWindowLongA(HOST_HWND, GWL_STYLE);
-    SetWindowLongA(HOST_HWND, GWL_STYLE, (LONG)((M32(V(0x41bb5c)) & 0xff38ffffu) | 0x80080000u));
-    if (M32(V(0x41a4f4)) != 0)
-        M32(V(0x417198)) = 1;
-    SetMenu(HOST_HWND, (HMENU)(uintptr_t)(M32(V(0x417198)) != 0 ? 0 : M32(V(0x418810))));
-    M32(V(0x41886c)) = 0;
-    cy = GetSystemMetrics(SM_CYSCREEN);
-    cx = GetSystemMetrics(SM_CXSCREEN);
-    SetWindowPos(HOST_HWND, 0, 0, 0, cx, cy, 0x34);
-    host_dd_off();
-    host_dd_on();
-    if (M32(V(0x41a4e4)) == 0 || (M8(V(0x41a4ec)) & 4)) {
-        M32(ADDR(mode) + 0x6c) = M32(V(0x4183a8));
-        M32(ADDR(mode) + 0x70) = M32(V(0x4183ac));
-        M32(ADDR(mode) + 0x68) = M32(V(0x4183b0));
-        *(uint16_t *)(mode + 0x24) = 0x9c;
-        M32(ADDR(mode) + 0x28) = 0x1c0000;
-        host_set_mode(ADDR(mode));
-    }
-    cy = GetSystemMetrics(SM_CYSCREEN);
-    cx = GetSystemMetrics(SM_CXSCREEN);
-    SetWindowPos(HOST_HWND, 0, 0, 0, cx, cy, 0x34);
-    M32(V(0x41ba2c))++;
-    M32(V(0x41bb58)) = 0;
-    PostMessageA(HOST_HWND, 0x30f, 0, 0);
-    PostMessageA(HOST_HWND, WM_SIZE, 0, 0);
-    return 0;
-}
-
-/* 0x403b20: back to a window: the display mode restored (as above), the
- * style back with WS_VISIBLE and WS_EX-like 0x8000000 set unless the window
- * is its own last active popup (the extended style is not restored), the
- * menu back unless 0x418824, DirectDraw rebuilt windowed, the old rectangle,
- * not topmost, zoomed again if it was; 0x30f and WM_SIZE posted. */
-static uint32_t host_windowed(void)
-{
-    uint32_t style;
-    if (M32(V(0x418854)) == 0)
-        return 0;
-    M32(V(0x41bb58)) = 1;
-    if (M32(V(0x41a4e4)) == 0 || (M8(V(0x41a4ec)) & 4))
-        host_set_mode(0);
-    if (GetLastActivePopup(HOST_HWND) == HOST_HWND)
-        style = M32(V(0x41bb5c)) & 0xf7ffffffu;
-    else
-        style = M32(V(0x41bb5c)) | 0x8000000u;
-    style |= 0x10000000u;
-    M32(V(0x41bb5c)) = style;
-    SetWindowLongA(HOST_HWND, GWL_STYLE, (LONG)style);
-    SetMenu(HOST_HWND, (HMENU)(uintptr_t)(M32(V(0x418824)) != 0 ? 0 : M32(V(0x418810))));
-    M32(V(0x41886c)) = 0;
-    M32(V(0x418854)) = 0;
-    host_dd_off();
-    host_dd_on();
-    SetWindowPos(HOST_HWND, 0, (int)M32(V(0x41bb40)), (int)M32(V(0x41bb44)),
-                 (int)(M32(V(0x41bb48)) - M32(V(0x41bb40))), (int)(M32(V(0x41bb4c)) - M32(V(0x41bb44))), 0x34);
-    SetWindowPos(HOST_HWND, HWND_NOTOPMOST, 0, 0, 0, 0, 0x13);
-    if (M32(V(0x41bb3c)) != 0)
-        ShowWindow(HOST_HWND, SW_MAXIMIZE);
-    M32(V(0x41ba2c))++;
-    M32(V(0x41bb58)) = 0;
-    PostMessageA(HOST_HWND, 0x30f, 0, 0);
-    PostMessageA(HOST_HWND, WM_SIZE, 0, 0);
-    return 0;
-}
-
 /* +0x048 (0x408680): full screen on or off; nothing if it already is.  0. */
 static uint32_t FS98_STDCALL host_048(uint32_t on)
 {
     if (on == M32(V(0x418854)))
         return 0;
-    return on ? host_full_screen() : host_windowed();
+    return on ? (uint32_t)fs98_host_rt_full_screen_on() : (uint32_t)fs98_host_rt_full_screen_off();
 }
 
 /* ---- dialogs (+0x10c..+0x118) --------------------------------------------
@@ -5543,164 +4735,19 @@ static uint32_t FS98_STDCALL host_048(uint32_t on)
  * on the list at 0x417f00; modal ones { record, window or array } on a stack
  * at 0x41ba60, 0x4188a8 deep. */
 
-/* 0x4160c8 (.rdata): the 8x8 ordered-dither thresholds. */
-static const uint8_t host_dither[64] = {
-    0, 38, 9, 47, 2, 40, 11, 50,
-    25, 12, 35, 22, 27, 15, 37, 24,
-    6, 44, 3, 41, 8, 47, 5, 43,
-    31, 19, 28, 15, 34, 21, 31, 18,
-    1, 39, 11, 49, 0, 39, 10, 48,
-    27, 14, 36, 23, 26, 13, 35, 23,
-    7, 46, 4, 43, 7, 45, 3, 42,
-    33, 20, 30, 17, 32, 19, 29, 16,
-};
-
-/* 0x40e6f0: on, a 216-colour cube DIB header at 0x41b1e0 (stamped with the
- * palette count 0x41ba2c at 0x41b1c0) and, made once, a 16K table at
- * 0x41ba28 dithering each palette entry (the BGR copy at 0x41adc0) onto the
- * cube for each of the 8x8 positions; off, the table, 0x41b608 and the
- * bitmap at 0x41ba20 freed. */
-static void host_cube(uint32_t on)
-{
-    uint32_t r, g, b, x, y, k, at, m, t;
-    if (!on) {
-        if (M32(V(0x41ba28)) != 0) {
-            host_214(V(0x41ba28));
-            M32(V(0x41ba28)) = 0;
-        }
-        if (M32(V(0x41b608)) != 0) {
-            host_214(V(0x41b608));
-            M32(V(0x41b608)) = 0;
-        }
-        if (M32(V(0x41ba20)) != 0) {
-            DeleteObject((HGDIOBJ)(uintptr_t)M32(V(0x41ba20)));
-            M32(V(0x41ba20)) = 0;
-        }
-        return;
-    }
-    M32(V(0x41b1c0)) = M32(V(0x41ba2c));
-    memset((void *)(uintptr_t)V(0x41b1e0), 0, 0x10a * 4);
-    M32(V(0x41b1e0)) = 0x28;
-    *(uint16_t *)(uintptr_t)V(0x41b1ec) = 1;
-    *(uint16_t *)(uintptr_t)V(0x41b1ee) = 8;
-    M32(V(0x41b200)) = 0xd8;
-    at = V(0x41b208);
-    for (r = 0; r < 0x5fa; r += 0xff)
-        for (g = 0; g < 0x5fa; g += 0xff)
-            for (b = 0; b < 0x5fa; b += 0xff, at += 4) {
-                M8(at + 2) = (uint8_t)(b / 5);
-                M8(at + 1) = (uint8_t)(g / 5);
-                M8(at) = (uint8_t)(r / 5);
-            }
-    if (M32(V(0x41ba28)) == 0) {
-        host_20c(4, 0x4000, V(0x41ba28), 0);
-        if (M32(V(0x41ba28)) == 0)
-            return;
-    }
-    for (y = 0, at = 0; y < 8; y++)
-        for (x = 0; x < 8; x++) {
-            m = host_dither[(y & 7) * 8 + (x & 7)];
-            for (k = 0; k < 0x400; k += 4) {
-                uint32_t bb = M8(V(0x41adc0) + k), gg = M8(V(0x41adc1) + k), rr = M8(V(0x41adc2) + k);
-                t = (uint8_t)((uint8_t)((bb % 51 > m) + bb / 51) * 6);
-                t = (uint8_t)((uint8_t)(t + (gg % 51 > m) + gg / 51) * 6);
-                t = (uint8_t)(t + (rr % 51 > m) + rr / 51);
-                M8(M32(V(0x41ba28)) + at++) = (uint8_t)t;
-            }
-        }
-}
-
-/* 0x413e80: page flipping's part in a pause (`resume` 0 pausing): pausing in
- * the 8-bit flipped mode (0x418858 1) goes to 2, back to the GDI surface and
- * redraws; resuming from 2 or more comes back to 1, with three frames to
- * redraw (0x41a520). */
-static void host_flip_pause(uint32_t resume)
-{
-    if (M32(V(0x418854)) == 0 || M32(V(0x41a4f4)) == 0 || M32(V(0x41a4e4)) == 0 || M32(V(0x418858)) == 0)
-        return;
-    if (resume) {
-        if ((int32_t)M32(V(0x418858)) > 1)
-            M32(V(0x418858)) = 1;
-        M32(V(0x41a520)) = 3;
-        return;
-    }
-    if (M32(V(0x418858)) != 1)
-        return;
-    M32(V(0x41ba2c))++;
-    M32(V(0x418858)) = 2;
-    ((host_com1)(uintptr_t)COM(M32(V(0x41a4e4)), 0x28))(M32(V(0x41a4e4)));
-    RedrawWindow(HOST_HWND, 0, 0, 0x181);
-}
-
-/* 0x40e450: the paused look on or off: on a palette display the grey
- * palette (0x41a250) and dither tables, the GDI palette realised again on
- * the way out, the window redrawn; elsewhere just the tables' state; then
- * host event 0x100f8 (on) or 0x100f9 (off). */
-static void host_pause_look(uint32_t grey)
-{
-    HDC dc;
-    int caps;
-    M32(V(0x41ba2c))++;
-    host_flip_pause(grey == 0);
-    dc = GetDC(HOST_HWND);
-    caps = GetDeviceCaps(dc, RASTERCAPS);
-    ReleaseDC(HOST_HWND, dc);
-    if (caps & RC_PALETTE) {
-        M32(V(0x41a250)) = grey;
-        host_cube(grey);
-        host_palette_tint();
-        if (!grey) {
-            dc = GetDC(HOST_HWND);
-            SelectPalette(dc, (HPALETTE)(uintptr_t)M32(V(0x41bb60)), FALSE);
-            RealizePalette(dc);
-            ReleaseDC(HOST_HWND, dc);
-        }
-        RedrawWindow(HOST_HWND, 0, 0, 0x181);
-    } else {
-        M32(V(0x41a250)) = 0;
-        host_cube(0);
-    }
-    host_purge(grey ? 0x100f8 : 0x100f9, 0);
-}
-
-/* 0x409ca0, for each modeless dialog as a message comes: one whose window is
- * gone is released (its module, the pause) and taken off the list; the rest
- * are ticked (0x464, sent) and offered the message.  The dialog that took
- * it, or 0. */
-static uint32_t FS98_STDCALL host_modeless_msg(uint32_t e, uint32_t msg)
-{
-    if (!IsWindow((HWND)(uintptr_t)M32(e + 4))) {
-        host_mod_release(host_mod_by_id(M32(M32(e) + 4)));
-        if (!(M8(M32(e) + 0xc) & 8))
-            host_pause_look(0);
-        host_300(V(0x417f00), e);
-        return 0;
-    }
-    SendMessageA((HWND)(uintptr_t)M32(e + 4), 0x464, 0, 0);
-    if (IsDialogMessageA((HWND)(uintptr_t)M32(e + 4), (LPMSG)(uintptr_t)msg))
-        return e;
-    return 0;
-}
-
 /* 0x409d80, +0x114's: the same without a message. */
 static uint32_t FS98_STDCALL host_modeless_tick(uint32_t e, uint32_t unused)
 {
     (void)unused;
     if (!IsWindow((HWND)(uintptr_t)M32(e + 4))) {
-        host_mod_release(host_mod_by_id(M32(M32(e) + 4)));
+        fs98_host_rt_release(fs98_host_rt_module_with_id(M32(M32(e) + 4)));
         if (!(M8(M32(e) + 0xc) & 8))
-            host_pause_look(0);
+            fs98_host_rt_pause_look(0);
         host_300(V(0x417f00), e);
         return 0;
     }
     SendMessageA((HWND)(uintptr_t)M32(e + 4), 0x464, 0, 0);
     return 0;
-}
-
-/* 0x409c60: whether a modeless dialog took a message. */
-static uint32_t host_modeless_take(uint32_t msg)
-{
-    return host_308(V(0x417f00), msg, ADDR(host_modeless_msg)) != 0;
 }
 
 /* 0x409d10: whether one of an array's windows took a message (its
@@ -5732,9 +4779,9 @@ static uint32_t FS98_STDCALL host_10c(uint32_t id, uint32_t param)
     if (IsWindowEnabled(HOST_HWND)) {
         paused = 1;
         if (!(M8(rec + 0xc) & 8))
-            host_pause_look(1);
+            fs98_host_rt_pause_look(1);
     }
-    link = host_mod_acquire(host_mod_by_id(M32(rec + 4)));
+    link = ADDR(fs98_host_rt_acquire(fs98_host_rt_module_with_id(M32(rec + 4))));
     w = ((uint32_t (FS98_STDCALL *)(uint32_t, uint32_t))(uintptr_t)M32(M32(link + 0x14) + M32(rec + 8) * 12 + 4))(
         M32(V(0x41880c)), param);
     if (M8(rec + 0xc) & 2) {
@@ -5743,7 +4790,7 @@ static uint32_t FS98_STDCALL host_10c(uint32_t id, uint32_t param)
     }
     if (arr == 0 && w == 0) {
         if (paused && !(M8(rec + 0xc) & 8))
-            host_pause_look(0);
+            fs98_host_rt_pause_look(0);
         return (uint32_t)-1;
     }
     ShowWindow((HWND)(uintptr_t)w, SW_SHOW);
@@ -5753,7 +4800,7 @@ static uint32_t FS98_STDCALL host_10c(uint32_t id, uint32_t param)
         M32(e) = rec;
         M32(e + 4) = w;
         while (PeekMessageA(&msg, (HWND)(uintptr_t)w, 0, 0, PM_REMOVE))
-            if (!host_modeless_take(ADDR(&msg))) {
+            if (!fs98_host_rt_modeless_took(&msg)) {
                 TranslateMessage(&msg);
                 DispatchMessageA(&msg);
             }
@@ -5781,7 +4828,7 @@ static uint32_t FS98_STDCALL host_10c(uint32_t id, uint32_t param)
     M32(V(0x4188a8)) = n + 1;
     if (paused && M32(V(0x418848)) == 0) {
         M32(V(0x418848)) = 3;
-        host_purge(0x20004, 0);
+        (uint32_t)fs98_host_rt_hook(0x20004, 0);
     }
     accel = ADDR(LoadAcceleratorsA((HINSTANCE)(uintptr_t)M32(V(0x41882c)), (LPCSTR)0x69));
     /* the pumps, in retail's order of checks: alive, done, a message */
@@ -5796,7 +4843,7 @@ static uint32_t FS98_STDCALL host_10c(uint32_t id, uint32_t param)
     array_pump:
         if (DLG_DONE(M32(arr)) || !PeekMessageA(&msg, 0, 0, 0, PM_REMOVE))
             goto array_idle;
-        if (!host_modeless_take(ADDR(&msg)) && !host_array_take(ADDR(&msg), arr, accel)) {
+        if (!fs98_host_rt_modeless_took(&msg) && !host_array_take(ADDR(&msg), arr, accel)) {
             TranslateMessage(&msg);
             DispatchMessageA(&msg);
         }
@@ -5806,7 +4853,7 @@ static uint32_t FS98_STDCALL host_10c(uint32_t id, uint32_t param)
         if (DLG_ALIVE(M32(arr)) && !DLG_DONE(M32(arr))) {
             for (p = arr; M32(p) != 0; p += 4)
                 SendMessageA((HWND)(uintptr_t)M32(p), 0x464, 0, 0);
-            host_purge(0x20006, 0);
+            (uint32_t)fs98_host_rt_hook(0x20006, 0);
         }
         if (DLG_ALIVE(M32(arr)))
             goto array_outer;
@@ -5826,7 +4873,7 @@ static uint32_t FS98_STDCALL host_10c(uint32_t id, uint32_t param)
         if (DLG_DONE(w) || !PeekMessageA(&msg, 0, 0, 0, PM_REMOVE))
             goto single_idle;
         if (!TranslateAcceleratorA((HWND)(uintptr_t)w, (HACCEL)(uintptr_t)accel, &msg) &&
-            !host_modeless_take(ADDR(&msg)) && !IsDialogMessageA((HWND)(uintptr_t)w, &msg)) {
+            !fs98_host_rt_modeless_took(&msg) && !IsDialogMessageA((HWND)(uintptr_t)w, &msg)) {
             TranslateMessage(&msg);
             DispatchMessageA(&msg);
         }
@@ -5835,7 +4882,7 @@ static uint32_t FS98_STDCALL host_10c(uint32_t id, uint32_t param)
     single_idle:
         if (DLG_ALIVE(w) && !DLG_DONE(w)) {
             SendMessageA((HWND)(uintptr_t)w, 0x464, 0, 0);
-            host_purge(0x20006, 0);
+            (uint32_t)fs98_host_rt_hook(0x20006, 0);
         }
         if (DLG_ALIVE(w))
             goto single_outer;
@@ -5844,15 +4891,15 @@ static uint32_t FS98_STDCALL host_10c(uint32_t id, uint32_t param)
             DestroyWindow((HWND)(uintptr_t)w);
     }
     M32(V(0x4188a8))--;
-    host_mod_release(host_mod_by_id(M32(rec + 4)));
+    fs98_host_rt_release(fs98_host_rt_module_with_id(M32(rec + 4)));
     if (paused) {
         if (M32(V(0x418848)) == 3) {
-            host_purge(0x20005, 0);
+            (uint32_t)fs98_host_rt_hook(0x20005, 0);
             M32(V(0x418848)) = 0;
             M32(V(0x41884c)) = 1;
         }
         if (!(M8(rec + 0xc) & 8))
-            host_pause_look(0);
+            fs98_host_rt_pause_look(0);
     }
     return 0;
 }

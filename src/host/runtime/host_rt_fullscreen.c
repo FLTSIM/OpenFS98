@@ -3,11 +3,9 @@
  * flip), and the floating windows moved or redrawn. */
 #include "host_rt.h"
 
-#define DIRECTDRAW G_PTR(0x41a4e4)
 #define BACK_BUFFER G_PTR(0x41a4e0)
 #define PRIMARY G_PTR(0x41a4f8)
 #define COM(object, slot, result, parameters) ((result (SC *) parameters)PTR(PTR(object, 0), slot))
-#define FULL_SCREEN_WANTED G32(0x418854)
 #define FLIPPING G32(0x41a4f4)          /* a full screen with a back buffer */
 #define SHOWN G32(0x418858)             /* 1 drawn by the game, 2 given back to GDI */
 #define REDRAW G32(0x41a53c)            /* the region to redraw */
@@ -45,28 +43,6 @@ void fs98_host_rt_make_palettes(void)
     }
 }
 
-/* 0x413e80: in a flipping full screen, the game's drawing taken back (back, nonzero: shown
- * again, the whole back buffer cleared for three frames) or given to GDI (the palette marked
- * changed, the GDI surface flipped to, the main window redrawn). */
-void SC fs98_host_rt_full_screen_gdi(int32_t back)
-{
-    void *directdraw;
-    if (FULL_SCREEN_WANTED == 0 || FLIPPING == 0 || (directdraw = DIRECTDRAW) == 0 || SHOWN == 0)
-        return;
-    if (back) {
-        if ((int32_t)SHOWN > 1)
-            SHOWN = 1;
-        CLEARS = 3;
-        return;
-    }
-    if (SHOWN != 1)
-        return;
-    SHOWN = 2;
-    ++PALETTE_CHANGES;
-    COM(directdraw, 0x28, int32_t, (void *))(directdraw);
-    CALL_STD(RedrawWindow, int32_t, (uint32_t, void *, uint32_t, uint32_t))(G32(0x41880c), 0, 0, 0x181);
-}
-
 /* 0x413f10: a full-screen frame begun: the regions made the first time, the whole back
  * buffer cleared (and redrawn) when the screen's generation (0x41bb2c) has changed and for
  * the frames after, the palettes made again after a change, and the cursor moved. */
@@ -76,7 +52,7 @@ void fs98_host_rt_begin_frame(void)
         return;
     if (REDRAW == 0) {
         uint32_t (SC *create)(int32_t, int32_t, int32_t, int32_t) =
-            (uint32_t (SC *)(int32_t, int32_t, int32_t, int32_t))fs98_host_rt_imports[HOST_RT_IMPORT_CreateRectRgn];
+            (uint32_t (SC *)(int32_t, int32_t, int32_t, int32_t))IMPORT(CreateRectRgn);
         REDRAW = create(0, 0, 0, 0);
         DRAWN = create(0, 0, 0, 0);
         SCRATCH_REGION = create(0, 0, 0, 0);
@@ -137,9 +113,14 @@ static void redraw_rect(uint32_t region, int32_t left, int32_t top, int32_t righ
  * rectangle (moved by the point, the window's place) added to the region to redraw. 0. */
 int32_t SC fs98_host_rt_redraw_part(const int32_t *rect, const int32_t *point)
 {
+    /* retail adds them up before looking for the region */
+    int32_t left = ((volatile const int32_t *)rect)[0] + ((volatile const int32_t *)point)[0];
+    int32_t top = ((volatile const int32_t *)rect)[1] + ((volatile const int32_t *)point)[1];
+    int32_t right = ((volatile const int32_t *)rect)[2] + ((volatile const int32_t *)point)[0];
+    int32_t bottom = ((volatile const int32_t *)rect)[3] + ((volatile const int32_t *)point)[1];
     uint32_t region = REDRAW;
     if (region != 0)
-        redraw_rect(region, rect[0] + point[0], rect[1] + point[1], rect[2] + point[0], rect[3] + point[1]);
+        redraw_rect(region, left, top, right, bottom);
     return 0;
 }
 

@@ -2,9 +2,8 @@
  * (the service +0x31c reads and writes them for the options dialogs: src/host/host.c, "display
  * settings", whose block layout this shares).
  *
- * Written twice until the runtime is linked with the services: host.c has 0x414400, 0x4144c0
- * and 0x414510 too (docs/remaining-work.md, "Routines written twice"). A change to one must go
- * to both. */
+ * Shared with the services: src/host/host.c calls these too, and its standalone builds compile
+ * this file with HOST_RT_STANDALONE (host_rt.h), so there is one copy of each. */
 #include "host_rt.h"
 
 #define HARDWARE STR(0x416120)
@@ -66,7 +65,7 @@ int32_t SC fs98_host_rt_read_display(uint8_t *settings, int32_t defaults)
     } else {
         int32_t (SC *get_string)(const char *, const char *, const char *, char *, uint32_t, const char *) =
             (int32_t (SC *)(const char *, const char *, const char *, char *, uint32_t, const char *))
-                fs98_host_rt_imports[HOST_RT_IMPORT_GetPrivateProfileStringA];
+                IMPORT(GetPrivateProfileStringA);
         get_string(HARDWARE, STR(0x418594), STR(0x4187f8), (char *)settings, 0x80, CONFIGURATION);
         get_string(HARDWARE, STR(0x41858c), STR(0x4187f8), (char *)AT(settings, 0xa8), 0x28, CONFIGURATION);
         if (G32(0x418458) != 0) {

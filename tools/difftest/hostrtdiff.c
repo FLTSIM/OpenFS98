@@ -31,14 +31,14 @@
 #define DATA_RVA 0x17000u
 #define DATA_SIZE 0x55ccu
 #define LOG_SIZE 65536
-#define BLOCKS 32
+#define BLOCKS 48
 #define BLOCK_SIZE 0x400
 #define HEAP_SIZE 0x10000
 #define MAX_CALLS 4000
 #define SERVICE_BASE 0x800u          /* a service's stub index: SERVICE_BASE + offset / 4 */
 #define SERVICE_SLOTS 0x100
 #define COM_BASE 0x1000u             /* a COM method's: COM_BASE + kind * 64 + slot */
-#define COM_OBJECTS 24
+#define COM_OBJECTS 40
 #define GIVE_UP() do { fprintf(stderr, "GIVE UP line %d scenario=%u op=%u side=%d\n", __LINE__, s_scenario, s_operation, s_side); exit(2); } while (0)
 
 struct import_info { const char *dll, *name; uint32_t slot, pop, thiscall, arguments; };
@@ -95,16 +95,25 @@ uint32_t s_harness_esp, s_operation_stack_top;
 static uint8_t *s_operation_stack;
 #define OPERATION_STACK 0x100000
 static void *s_jump[5];
-static void *s_callback_stub, *s_callback0_stub;
+static void *s_callback_stub, *s_callback0_stub, *s_callback1_stub, *s_callback3_stub, *s_callback4_stub,
+    *s_sound_create_stub;
 static volatile LONG s_watch_ticks;
 static HANDLE s_main_thread;
 
 /* the operations, and how each is called */
 enum { ARG_UNSET, ARG_ANY, ARG_SMALL, ARG_FLAGS, ARG_POINTER, ARG_TEXT, ARG_DRIVER, ARG_MAYBE, ARG_MAYBE_TEXT,
        ARG_OUT, ARG_SELF, ARG_DEVICE_NAME, ARG_MAYBE_DEVICE_NAME, ARG_MAYBE_OUT, ARG_INTS, ARG_SEARCH, ARG_DESC,
-       ARG_CALLBACK, ARG_VISIT, ARG_MESSAGE, ARG_WINDOW, ARG_SURFACE, ARG_OUT2, ARG_COORD, ARG_PITCH, ARG_COUNT, ARG_WINDOW_DATA, ARG_PICTURE, ARG_SOURCE_PICTURE, ARG_RECT, ARG_POINT, ARG_EXCEPTION, ARG_CALLBACK0, ARG_MODULE_NAME, ARG_LINKAGE, ARG_MODULE, ARG_RECORDS, ARG_ORDER };
+       ARG_CALLBACK, ARG_VISIT, ARG_MESSAGE, ARG_WINDOW, ARG_SURFACE, ARG_OUT2, ARG_COORD, ARG_PITCH, ARG_COUNT, ARG_WINDOW_DATA, ARG_PICTURE, ARG_SOURCE_PICTURE, ARG_RECT, ARG_POINT, ARG_EXCEPTION, ARG_CALLBACK0, ARG_MODULE_NAME, ARG_LINKAGE, ARG_MODULE, ARG_RECORDS, ARG_ORDER, ARG_MENU,
+       ARG_PROC_MESSAGE, ARG_WPARAM, ARG_LPARAM, ARG_COMMAND, ARG_MODE, ARG_COPYDATA, ARG_PIECE, ARG_ENTRY, ARG_SHARED,
+       ARG_SPOT, ARG_CONTEXT, ARG_MOUSE_MESSAGE, ARG_BITMAP, ARG_MODELESS, ARG_KEY_TABLE, ARG_KEY_PRESS, ARG_HELP_INFO,
+       ARG_PIXELS, ARG_COORD_LPARAM, ARG_MAIN_MESSAGE, ARG_CHILD_MESSAGE, ARG_FLOAT_MESSAGE,
+       ARG_DIALOG_MESSAGE };
 #define CALLBACK_INDEX 0x7ffu        /* a callback the harness gives: (a, b), logged */
 #define CALLBACK0_INDEX 0x7feu       /* one with no arguments (the game's frame callback, 0x418830) */
+#define CALLBACK1_INDEX 0x7fdu       /* one, three and four arguments, logged */
+#define CALLBACK3_INDEX 0x7fcu
+#define CALLBACK4_INDEX 0x7fbu
+#define SOUND_CREATE_INDEX 0x7fau    /* DirectSoundCreate, as GetProcAddress gives it */
 struct operation {
     uint32_t rva; void *ours; const char *name;
     uint32_t arguments; uint8_t kinds[16];
@@ -218,18 +227,36 @@ static uint32_t argument(uint32_t kind);
 
 static void *make_stub(uint32_t index);
 #include "hostrt_semantics.inc"
+#include "hostrt_windows.inc"
 
 /* the dispatcher every stub jumps to: index, the caller's ECX, its arguments */
+static void land(void);
+/* whether the divide repair is on: retail's 0x412140 frames (_except_handler3 records whose scope
+ * table is 0x416110, inside their __try) on the SEH chain; ours its count */
+static int32_t s_guard_base;
+static int guard_depth(void)
+{
+    const uint32_t *record;
+    int depth = 0;
+    if (s_side) return fs98_host_rt_guard_depth() - s_guard_base;   /* a run that faulted inside leaves it raised */
+    __asm__ volatile("movl %%fs:0, %0" : "=r"(record));
+    while (record && (uint32_t)(uintptr_t)record != 0xffffffffu && in_stack((uint32_t)(uintptr_t)record) && depth < 64) {
+        if (record[2] == BASE + 0x16110 && record[3] == 0) ++depth;
+        record = (const uint32_t *)(uintptr_t)record[0];
+    }
+    return depth;
+}
 uint64_t __cdecl hostrt_dispatch(uint32_t index, uint32_t ecx, uint32_t *arguments);
 uint64_t __cdecl hostrt_dispatch(uint32_t index, uint32_t ecx, uint32_t *arguments)
 {
     uint32_t count, at, result;
     uint64_t special;
-    if (++s_calls > MAX_CALLS) { put("too many calls\n"); GIVE_UP(); }
+    if (++s_calls > MAX_CALLS) { put("too many calls\n"); s_running = 0; land(); }   /* an outcome to compare */
     if (index >= COM_BASE) {
         uint32_t kind = (index - COM_BASE) / 64, slot = (index - COM_BASE) % 64;
         s_pop_now = com_pop(kind, slot);
         put("com %s.%x", com_names[kind], slot * 4);    /* this is the first argument */
+        if (kind == COM_WND) { put(" this"); describe(ecx); }
         for (at = 0; at < s_pop_now / 4; ++at) describe(arguments[at]);
         com_log_contents(kind, slot, arguments);
         if (com_semantics(kind, slot, arguments, &special)) { put(" =>"); describe((uint32_t)special); put("\n"); return special; }
@@ -243,9 +270,26 @@ uint64_t __cdecl hostrt_dispatch(uint32_t index, uint32_t ecx, uint32_t *argumen
         put("callback0 -> %x\n", result);
         return result;
     }
+    if (index >= SOUND_CREATE_INDEX && index <= CALLBACK1_INDEX) {
+        uint32_t count = index == CALLBACK1_INDEX ? 1 : index == CALLBACK3_INDEX ? 3 : index == CALLBACK4_INDEX ? 4 : 3;
+        s_pop_now = count * 4;
+        put(index == SOUND_CREATE_INDEX ? "DirectSoundCreate" : "callback%u", count);
+        for (at = 0; at < count; ++at) describe(arguments[at]);
+        if (index == SOUND_CREATE_INDEX) {
+            uint32_t value = script(), object = value % 4 ? com_new(COM_SOUND) : 0;
+            if (writable(arguments[1], 4)) memcpy((void *)(uintptr_t)arguments[1], &object, 4);
+            result = object ? 0 : 0x88780078u;
+        } else {
+            callback_contents(index, arguments);
+            result = answer();
+        }
+        put(" -> %x\n", result);
+        return result;
+    }
     if (index == CALLBACK_INDEX) {
         s_pop_now = 8;
         put("callback"); describe(arguments[0]); describe(arguments[1]);
+        callback_contents(CALLBACK_INDEX, arguments);
         result = answer();
         put(" -> %x\n", result);
         return result;
@@ -263,6 +307,7 @@ uint64_t __cdecl hostrt_dispatch(uint32_t index, uint32_t ecx, uint32_t *argumen
     s_pop_now = s_imports[index].pop;
     count = s_imports[index].arguments;
     put("%s", s_imports[index].name);
+    if (guard_depth()) put(" [guarded]");      /* inside the divide repair: retail's frame, our count */
     if (s_imports[index].thiscall) { put(" this"); describe(ecx); }
     for (at = 0; at < count; ++at) describe(arguments[at]);
     log_contents(index, arguments);
@@ -391,6 +436,13 @@ static LONG CALLBACK expected_fault(EXCEPTION_POINTERS *exception)
 {
     EXCEPTION_RECORD *record = exception->ExceptionRecord;
     uint32_t address;
+    if (s_running && record->ExceptionCode == EXCEPTION_BREAKPOINT && is_tsc_read((uint32_t)(uintptr_t)record->ExceptionAddress)) {
+        uint64_t tsc = tsc_answer();         /* a patched rdtsc: the scenario's count */
+        exception->ContextRecord->Eax = (DWORD)tsc;
+        exception->ContextRecord->Edx = (DWORD)(tsc >> 32);
+        exception->ContextRecord->Eip = (DWORD)(uintptr_t)record->ExceptionAddress + 2;
+        return EXCEPTION_CONTINUE_EXECUTION;
+    }
     if (!s_running || (record->ExceptionCode != EXCEPTION_ACCESS_VIOLATION &&
                        record->ExceptionCode != EXCEPTION_ILLEGAL_INSTRUCTION &&
                        record->ExceptionCode != EXCEPTION_PRIV_INSTRUCTION &&
@@ -439,9 +491,11 @@ static DWORD WINAPI watchdog(void *unused)
     return 0;
 }
 
+static uint32_t extra_argument(uint32_t kind, uint32_t random);
 static uint32_t argument(uint32_t kind)
 {
     uint32_t random = next_random();
+    if (kind >= ARG_PROC_MESSAGE) return extra_argument(kind, random);
     switch (kind) {
     case ARG_SMALL: return random % 8;
     case ARG_FLAGS: return random % 4;
@@ -502,7 +556,7 @@ static uint32_t argument(uint32_t kind)
     case ARG_WINDOW_DATA: return fixture_address(s_fixture.blocks[random % 2 ? 5 : 13]);
     case ARG_PICTURE: return fixture_address(s_fixture.blocks[7] + 0x200);
     case ARG_SOURCE_PICTURE: return fixture_address(s_fixture.blocks[random % 2 ? 5 : 13] + 0x80);
-    case ARG_RECT: return fixture_address(s_fixture.blocks[10] + 0x3c0);
+    case ARG_RECT: return random % 8 == 0 ? 0 : fixture_address(s_fixture.blocks[10] + 0x3c0);
     case ARG_POINT: return fixture_address(s_fixture.blocks[10] + 0x3e0);
     case ARG_CALLBACK0: return (uint32_t)(uintptr_t)s_callback0_stub;
     case ARG_MODULE_NAME: {     /* a listed module's name (block 11), or another */
@@ -515,6 +569,19 @@ static uint32_t argument(uint32_t kind)
     case ARG_MODULE: return random % 9 ? fixture_address(s_fixture.blocks[12] + (random >> 4) % 4 * 0x14) : 0;
     case ARG_RECORDS: return fixture_address(s_fixture.blocks[9] + (random >> 2) % 4 * 0x40);
     case ARG_ORDER: return fixture_address(s_fixture.blocks[16]);
+    case ARG_MENU: {            /* a menu description: items (0), submenus (1 ... 3), its end (3) */
+        uint32_t *entries = (uint32_t *)s_fixture.blocks[24], at = 0, depth = 0, length = 4 + random % 12;
+        uint32_t step;
+        memset(entries, 0, 0x400);
+        for (step = 0; step < length && at < 20; ++step) {
+            uint32_t r = next_random(), kind = r % 4 == 0 ? 1 : depth && r % 4 == 1 ? 3 : 0;
+            if (kind == 1) ++depth;
+            if (kind == 3) --depth;
+            entries[at++ * 11] = kind == 0 ? (r >> 2) % 3 == 0 ? 2 : 0 : kind;
+        }
+        while (at < 22) { entries[at++ * 11] = 3; if (!depth) break; --depth; }
+        return fixture_address(entries);
+    }
     case ARG_EXCEPTION: {   /* EXCEPTION_POINTERS (block 16) to a record (16 +0x10) and a CONTEXT (17), at an F6/F7 (18) */
         uint8_t *pointers = s_fixture.blocks[16], *context = s_fixture.blocks[17], *code = s_fixture.blocks[18] + 0x10;
         static const uint32_t codes[] = {0xc0000094u, 0xc0000095u, 0xc0000005u, 0xc0000094u};
@@ -559,6 +626,22 @@ static uint32_t argument(uint32_t kind)
     default: return mixed(random);
     }
 }
+/* a routine's address ours stored in .data (a handler it registers) read as retail's */
+static void normalize_code_pointers(void)
+{
+    uint32_t at, op;
+    for (at = 0; at + 4 <= DATA_SIZE; at += 4) {
+        uint32_t value;
+        memcpy(&value, s_fixture.data + at, 4);
+        if (value < s_our_code || value >= s_our_code_end) continue;
+        for (op = 0; op < OP_COUNT; ++op)
+            if ((uint32_t)(uintptr_t)s_operations[op].ours == value) {
+                value = BASE + s_operations[op].rva;
+                memcpy(s_fixture.data + at, &value, 4);
+                break;
+            }
+    }
+}
 static __attribute__((noinline)) uint64_t run(void)
 {
     void *entry = s_side ? CURRENT.ours : (void *)(uintptr_t)(BASE + CURRENT.rva);
@@ -571,6 +654,8 @@ static __attribute__((noinline)) uint64_t run(void)
     for (at = 0; at < count; ++at) arguments[at] = argument(CURRENT.kinds[at]);
     s_rng = saved_rng;
     s_log_length = s_calls = s_heap_used = 0; s_logs[s_side][0] = 0;
+    s_tsc_reads = 0;
+    s_guard_base = fs98_host_rt_guard_depth();
     s_com_used = s_com_first;
     s_stack_low = (uint32_t)(uintptr_t)s_operation_stack;
     s_stack_high = s_stack_low + OPERATION_STACK;
@@ -584,6 +669,7 @@ static __attribute__((noinline)) uint64_t run(void)
     s_running = 0;
     __asm__ volatile("movl %0, %%fs:0" : : "r"(s_saved_seh) : "memory");
     memcpy(s_fixture.data, (uint8_t *)(uintptr_t)(BASE + DATA_RVA), DATA_SIZE);
+    if (s_side) normalize_code_pointers();
     if (s_calls > s_max_calls) s_max_calls = s_calls;
     return result;
 }
@@ -715,6 +801,11 @@ static void setup(void)
     com_setup();
     s_callback_stub = make_stub(CALLBACK_INDEX);
     s_callback0_stub = make_stub(CALLBACK0_INDEX);
+    s_callback1_stub = make_stub(CALLBACK1_INDEX);
+    s_callback3_stub = make_stub(CALLBACK3_INDEX);
+    s_callback4_stub = make_stub(CALLBACK4_INDEX);
+    s_sound_create_stub = make_stub(SOUND_CREATE_INDEX);
+    patch_tsc_reads();
     for (at = 0; at < OP_COUNT; ++at) {
         uint32_t function;
         for (function = 0; function < FUNCTION_COUNT; ++function)

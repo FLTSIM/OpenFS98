@@ -163,6 +163,12 @@ int32_t SC fs98_host_rt_guarded(int32_t (*fn)(void))
     return result;
 }
 
+/* how many guarded calls are under way (for the harness, which compares it with retail's frames) */
+int32_t fs98_host_rt_guard_depth(void)
+{
+    return s_guarded;
+}
+
 /* The vectored handler that stands for retail's SEH frame (see above): install it once at
  * startup with AddVectoredExceptionHandler. */
 int32_t SC fs98_host_rt_divide_handler(void **pointers)

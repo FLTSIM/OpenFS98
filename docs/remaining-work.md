@@ -18,34 +18,29 @@ repository holds no readable source for this code. It matches retail and passes 
 for it, but it is not a decompilation: nobody can read or change it, and it cannot leave x86. Each
 is to be decompiled by the usual method (hand-written C, a differential harness, deliberate breaks),
 keeping the lifted build as a second oracle until the hand-written one replaces it.
-SIM1, the gauges and the crash models were replaced on 2026-11-08; the host's startup remains.
+SIM1, the gauges and the crash models were replaced on 2026-11-08; the host's startup on 2026-11-14 (`make host-exe` now
+builds the executable without the lift).
 
 | What | Lifted part | Generator | Hand-written already | Order |
 | --- | --- | --- | --- | --- |
 | `Sim/SIM1.sim` | AIR decoder, aircraft setup, tick/frame simulation: 190 routines, 17,836 instructions (most of 78,216 bytes) | `tools/gen_sim1_lift.py` | six services and the state lifecycle (`src/sim1/sim1.c`, `sim1_state.inc`, `sim1_air.inc`); **all of it, done 2026-11-08**: all 186 routines decompiled and verified one by one (`src/sim1/sim1_small.c`, 186 operations, 0 differ, 882 breaks), built as the native SIM1.sim over retail's data (`src/sim1/sim1_native.c`, `make sim1`), 74 scripted flights frame for frame; installed, the lift kept only as an oracle ([sim1.md](modules/sim1.md#the-native-build)) | **1, done 2026-11-08** |
 | `Gauges/*.GAU` (120) | every gauge's code, 1,318 routines, 63,472 bytes | `tools/gen_gauges.py` | **all of it, done 2026-11-08**: every gauge hand-written C (`src/gauges/<name>.c` over the generated data image, `src/gauges/gauge.h`), 120 of 120 against retail at 20,000 vectors on a strengthened harness, 67 breaks, 74 flights frame for frame; installed ([gauges.md](modules/gauges.md#decompilation)) | **2, done 2026-11-08** |
 | Crash MDLs (3) | the three crash models, about 28 KB | `tools/gen_mdl_crash.py` | **all of it, done 2026-11-08**: one hand-written source for the three (`src/mdl/mdl_crash.c`, per-model tables), 12,000 lifecycle scenarios against retail with 0 differences, 82 breaks (78 caught, 4 proven equivalent), the three crash flights frame for frame; installed, the lift kept only as an oracle ([mdl.md](modules/mdl.md#crash-models)) | **3, done 2026-11-08** |
-| `FLTSIM98.EXE` | startup, window procedures, timer, message loop, shutdown: 402 routines, 13,081 instructions | `tools/gen_host_runtime.py` | all 194 services (`src/host/host.c`); **under way since 2026-11-08**: 58 of the 165 runtime routines hand-written in `src/host/runtime/` and verified (`hostrtdiff`, 0 differ; 150 breaks) -- DirectDraw, full screen, the cursor, the floating windows, the divide repair, the startup glue ([host.md](modules/host.md#the-runtime-decompiled)) | **4, under way** |
+| `FLTSIM98.EXE` | startup, window procedures, timer, message loop, shutdown: 402 routines, 13,081 instructions | `tools/gen_host_runtime.py` | all 194 services (`src/host/host.c`); **decompiled 2026-11-08..14**: all 161 runtime routines hand-written in `src/host/runtime/` and verified (`hostrtdiff`, 0 differ; deliberate breaks) and built with the services into `bin/OPENFS98.EXE` (`make host-exe`) with no lifted code: 74 of 74 flights frame-identical to retail, dialog drive PASS; the lifted build remains as `make host-exe-lifted` ([host.md](modules/host.md#the-runtime-decompiled)) | **4, done 2026-11-14** |
 
-### Routines written twice, until the runtime is linked with the services
+### Routines the services share with the runtime
 
-Retail's display-settings service `+0x31c` and its runtime share eight routines. `src/host/host.c`
-has them as the service's helpers (verified by `hostdiff`) and `src/host/runtime/` has them again,
-since the runtime calls them directly and is verified apart (`hostrtdiff`). Both copies are
-verified against retail and agree, but a change to one must be made to the other until they are
-merged: when the runtime and the services are built into one executable, keep one copy (the
-runtime's goes through the import table, `host.c`'s calls Win32 directly) and point both callers at it.
-
-| Retail | `src/host/host.c` | `src/host/runtime/` |
-| --- | --- | --- |
-| `0x4121a0` a device's listed name | `host_dd_label` | `fs98_host_rt_device_name` (`host_rt_ddraw.c`) |
-| `0x412210` whether a device is the display | `host_dd_primary` | `fs98_host_rt_device_is` |
-| `0x412250` DirectDrawEnumerate callback, the device searched for | `host_dd_find_cb` | `fs98_host_rt_device_found` |
-| `0x412340` the 3D suffix of a device name | `host_d3d_suffix` | `fs98_host_rt_device_suffix` |
-| `0x412420` create the named device's IDirectDraw | `host_dd_open` | `fs98_host_rt_device_create` |
-| `0x414400` DirectDrawEnumerate callback, the primary display | `host_dd_first_cb` | `fs98_host_rt_primary_found` (`host_rt_config.c`) |
-| `0x4144c0` an option flag from HARDWARE | `host_cfg_flag_read` | `fs98_host_rt_flag_read` |
-| `0x414510` read the display settings | `host_display_read` | `fs98_host_rt_read_display` |
+Retail's services and its runtime share 45 routines: the display settings' device list and
+reader, DirectDraw opened and released, full screen in a window, the module list, the modeless
+dialogs, the paused look, sound's start, the frames' stacking, a message to every window and the
+game's message hook. Until 2026-11-14 `src/host/host.c` and `src/host/runtime/` each had its own
+copy (28 of them listed here; 17 more had not been noticed). Now there is one: the runtime's, in
+five files (`host_rt_ddraw.c`, `host_rt_config.c`, `host_rt_modules.c`, `host_rt_display.c`,
+`host_rt_common.c`), and `host.c` calls them. A build of the services without the runtime
+(`HOST.DLL` for `hostdiff`, its breaks, the lifted executable) compiles those five with
+`HOST_RT_STANDALONE` (`host_rt.h`), where an import goes through that build's own import table, so
+`hostdiff`'s hooks still see it ([host.md](modules/host.md#the-runtime-decompiled)). Both
+harnesses run the one copy: `hostrtdiff` directly, `hostdiff` through the services.
 
 G3D's mesh compiler (`src/g3d/g3d_mesh.S`, `tools/gen_g3d_mesh.py`) is a transcription too, but a
 deliberate one for x87 rounding, with a portable C version checked against it.
@@ -55,7 +50,7 @@ deliberate one for x87 rounding, with a portable C version checked against it.
 | Binary | `.text` | Status | Where |
 | --- | --- | --- | --- |
 | `English/Options.DLL` | 84,381 | **Done and installed** (2026-11-07): all 15 registrations and 13 tab pages verified (0 differ, 859 breaks caught, `tools/options.mk`); in `ENGLISH_MODULES`; `main-dialogs` opens 23 of its dialogs and pages, identical | [options.md](modules/options.md) |
-| `FLTSIM98.EXE` | 82,016 | **Executable built** (2026-11-06): `OPENFS98.EXE`, all 194 services decompiled; startup/windows/loop/shutdown lifted (see above); 74 matching scripted flights, runtime differential and UI/Direct3D acceptance. Retail remains available; native platform work remains | [host.md](modules/host.md) |
+| `FLTSIM98.EXE` | 82,016 | **Executable built** (2026-11-06; without the lift since 2026-11-14): `OPENFS98.EXE`, all 194 services and all 161 runtime routines decompiled (see above); 74 matching scripted flights, runtime differential and UI/Direct3D acceptance. Retail remains available; native platform work remains | [host.md](modules/host.md) |
 | `SIMSUI.DLL` | 79,850 | **Done and installed** (2026-11-07): every routine transliterated, 444 operations verified (0 differ, `tools/simsui.mk`), deliberate breaks per class; native DLL with all 540 exports at retail's ordinals; in `SHARED_MODULES`, installed beside `FLTSIM98.EXE`; `main-dialogs` with it: same controls, 41 of 47 pictures identical (as before) | [simsui.md](modules/simsui.md) |
 | `Sim/SIM1.sim` | 78,216 | **Decompiled and installed** (2026-11-08): every routine hand-written C (`src/sim1/sim1_small.c`), 186 operations against retail over in-flight snapshots (0 differ, 882 breaks); the native DLL over retail's data matches retail on all 74 scripted flights, numeric state and frames. The lifted build (installed 2026-11-06) stays as a second oracle (`tools/stage_sim1.py --lifted`). x87 and the 32-bit ABI are still assumed, as for every module | [sim1.md](modules/sim1.md) |
 | `Gauges/*.GAU` (120) | 63,472 | **Decompiled and installed** (2026-11-08): every gauge hand-written C, verified against retail (120 of 120, 0 differ at 20,000 vectors each; 67 deliberate breaks) and in the game (74 flights match) | [gauges.md](modules/gauges.md) |
@@ -127,7 +122,7 @@ to `orig/Aircraft/` (2026-11-06).
    models still lifted). Both are included in shared build/install/revert.
 4. **SIMSUI: done and installed 2026-11-07.** All 540 exports; the English dialogs, retail's and ours, run on it in `main-dialogs`.
 5. **Gauges decompiled and installed 2026-11-08** (they were lifted 2026-11-06). All 120 are in the shared build.
-6. **Host executable built 2026-11-06** (startup and windows lifted). Build/run and verification are in [host.md](modules/host.md); native platform replacement remains.
+6. **Host executable built 2026-11-06** (startup and windows lifted; decompiled 2026-11-14, `make host-exe`). Build/run and verification are in [host.md](modules/host.md); native platform replacement remains.
 7. **Decompile the lifted code**, in the order of the table above.
 8. **Native builds.** Moving off x86 ends comparison with retail, so the earlier steps come
    first. That is also when the retail bugs we reproduce get fixed: they are listed in

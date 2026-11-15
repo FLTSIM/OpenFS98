@@ -54,6 +54,7 @@
  *
  * Build: make maindiff     Run: make maindiff-run [SUITE=records] [N=...]
  */
+#include "argcount.h"
 #include <windows.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -8056,7 +8057,7 @@ static LONG WINAPI on_fault(EXCEPTION_POINTERS *e)
 
 int main(int argc, char **argv)
 {
-    uint32_t n = argc > 1 ? (uint32_t)strtoul(argv[1], NULL, 0) : 20000;
+    uint32_t n = argc > 1 ? (uint32_t)arg_count(argv[1]) : 20000;
     const char *which = argc > 2 ? argv[2] : "records";
     uint32_t first = argc > 3 ? (uint32_t)strtoul(argv[3], NULL, 0) : 0;
     uint32_t i, differ = 0;

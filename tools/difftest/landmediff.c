@@ -16,6 +16,7 @@
  * that harness under a renamed main entry point.
  */
 #define main fediff_reference_main
+#include "argcount.h"
 #include "fediff.c"
 #undef main
 
@@ -518,7 +519,7 @@ int main(int argc, char **argv)
     int32_t difference;
 
     SetUnhandledExceptionFilter(landme_unhandled);
-    scenarios = argc > 1 ? (uint32_t)strtoul(argv[1], NULL, 0) : 100;
+    scenarios = argc > 1 ? (uint32_t)arg_count(argv[1]) : 100;
     if (argc < 3) {
         printf("usage: landmediff.exe [scenarios] fixture-root\n");
         return 2;

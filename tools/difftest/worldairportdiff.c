@@ -1,5 +1,6 @@
 /* Independent guarded airport fixtures. Patch only external UI/CRT/HOST
  * services; retail keeps its complete internal call graph and dispatch. */
+#include "argcount.h"
 #include <windows.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -182,7 +183,7 @@ static int compare(uint32_t at)
 }
 int main(int argc,char **argv)
 {
-    uint32_t count=argc>1?strtoul(argv[1],NULL,0):200,index,position,limit;int unwind=argc>2&&!strcmp(argv[2],"unwind");
+    uint32_t count=argc>1?arg_count(argv[1]):200,index,position,limit;int unwind=argc>2&&!strcmp(argv[2],"unwind");
     SetErrorMode(SEM_NOGPFAULTERRORBOX);SetUnhandledExceptionFilter(fatal);if(!count)return 2;
     s_retail=LoadLibraryExA("orig/English/World.DLL",NULL,DONT_RESOLVE_DLL_REFERENCES);if(!s_retail||GetProcAddress(s_retail,"Linkage")!=(FARPROC)((uint8_t *)s_retail+0x24120))return 2;
     for(index=0;index<sizeof(s_bindings)/sizeof(s_bindings[0]);++index)patch(s_bindings[index].slot,s_bindings[index].function);

@@ -17,6 +17,7 @@
  * its options, Flight analysis (0x1405), DEMO's Instant replay (0x1403), and MAIN's Select
  * demo (0x14090002), and Display options (0x14090001), Preferences (0x1409) and Customise
  * controls (0x140a) with their tab pages. */
+#include "argcount.h"
 #include <windows.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -2072,7 +2073,7 @@ static int compare(uint32_t throw_at)
 }
 int main(int argc, char **argv)
 {
-    uint32_t count = argc > 1 ? strtoul(argv[1], 0, 0) : 20000;
+    uint32_t count = argc > 1 ? arg_count(argv[1]) : 20000;
     uint32_t initial_seed = argc > 2 ? strtoul(argv[2], 0, 0) : 0x5f1a6c2d;
     int unwind = argc > 3 && !strcmp(argv[3], "unwind");
     uint32_t throw, limit, slot;

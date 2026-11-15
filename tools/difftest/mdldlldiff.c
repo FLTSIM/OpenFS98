@@ -2,6 +2,7 @@
  * Retail and rebuilt DLLs are independently loaded and initialized. The
  * generated metadata supplies original offsets, not executable payloads.
  */
+#include "argcount.h"
 #include <windows.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -149,7 +150,7 @@ static void normalize(uint8_t *buffer, const uint8_t *retail, const uint8_t *our
 
 int main(int argc, char **argv)
 {
-    uint32_t count = argc > 1 ? (uint32_t)strtoul(argv[1], NULL, 0) : 70000;
+    uint32_t count = argc > 1 ? (uint32_t)arg_count(argv[1]) : 70000;
     const char *mode = argc > 2 ? argv[2] : "retail-first";
     uint32_t k;
     if (!count) return 2;

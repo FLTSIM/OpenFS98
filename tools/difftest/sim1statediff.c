@@ -2,6 +2,7 @@
  * models and private helper exports, independently of the six-service suite.
  */
 #define main sim1_service_reference_main
+#include "argcount.h"
 #include "sim1diff.c"
 #undef main
 
@@ -274,7 +275,7 @@ int sim1_state_main(int argc, char **argv)
     static const uint32_t helper_rvas[] = {0x110a0, 0x11050, 0x10d50, 0x10da0, 0x11290, 0x10df0, 0x2ac0, 0x10cc0};
     static const char *callback_names[] = {"Sim1TickCallback", "Sim1FrameCallback", "Sim1SituationCallback"};
     static const uint32_t callback_rvas[] = {0x1020, 0x1040, 0x10da0};
-    uint32_t count = argc > 1 ? strtoul(argv[1], NULL, 0) : 20000;
+    uint32_t count = argc > 1 ? arg_count(argv[1]) : 20000;
     const char *order = argc > 2 ? argv[2] : "retail-first";
     const char *ours = argc > 3 ? argv[3] : "bin/sim1-diff/SIM1_STATE_TEST.DLL";
     const char *paths[2] = {"orig/Sim/SIM1.sim", ours};

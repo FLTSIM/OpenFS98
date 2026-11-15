@@ -17,7 +17,6 @@
 #define MENU_SET   HOST_(0x254, f2)       /* (id, state): bit 1 greyed, bit 0 checked */
 #define KB_REC   M32(V(0x20807fc4))
 #define KB_PAGE  M32(V(0x20807fc8))
-#define WINDOW_  M32(V(0x208000b4))
 #define MODULE23 M32(V(0x20800014))
 
 /* .text+0xa80 */

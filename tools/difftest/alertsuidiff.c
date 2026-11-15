@@ -1,6 +1,7 @@
 /* Public factory/message smoke comparison with the CD's actual MFC/SIMSUI.
  * The host boundary is small: memory, module stack and string resources.
  * This is deliberately separate from the synthetic high-volume suites. */
+#include "argcount.h"
 #include <windows.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -316,7 +317,7 @@ int main(int argc, char **argv)
     HMODULE ui, modules[2], global;
     char directory[MAX_PATH];
     uint32_t slot, case_index, cycle, comparisons = 0;
-    uint32_t cases = argc > 2 ? (uint32_t)strtoul(argv[2], 0, 0) : 48;
+    uint32_t cases = argc > 2 ? (uint32_t)arg_count(argv[2]) : 48;
     struct fs98_ui_linkage *linkages[2];
     uint32_t answers[2][10];
     uint32_t window_states[2][3];

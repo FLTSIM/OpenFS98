@@ -30,6 +30,7 @@
  *
  * Build: make atcdiff     Run: make atcdiff-run
  */
+#include "argcount.h"
 #include <windows.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -681,7 +682,7 @@ int main(int argc, char **argv)
     static uint8_t rimage[IMAGE_SIZE], rglobal[GLOBAL_SIZE];
     static struct side retail, ours;
     static struct scenario s;
-    unsigned v, n = argc > 1 ? (unsigned)atoi(argv[1]) : 20000, bad = 0, k;
+    unsigned v, n = argc > 1 ? (unsigned)arg_count(argv[1]) : 20000, bad = 0, k;
     struct import *im;
     void (*numeric_init)(void);
 

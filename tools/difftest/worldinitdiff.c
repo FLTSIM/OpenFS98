@@ -1,5 +1,6 @@
 /* Reuse World's guarded event fixture, add the initializer's import boundary. */
 #define main world_event_main
+#include "argcount.h"
 #include "worlddiff.c"
 #undef main
 #include "../../src/world/world_init.h"
@@ -102,7 +103,7 @@ static int world_init_compare(uint32_t throw_at)
 }
 int main(int argc, char **argv)
 {
-    uint32_t count = argc > 1 ? strtoul(argv[1], NULL, 0) : 2000, index, limit;
+    uint32_t count = argc > 1 ? arg_count(argv[1]) : 2000, index, limit;
     int unwind = argc > 2 && !strcmp(argv[2], "unwind");
     s_rng = 0x4a971b63;
     SetErrorMode(SEM_NOGPFAULTERRORBOX); s_retail = LoadLibraryExA("orig/English/World.DLL", NULL, DONT_RESOLVE_DLL_REFERENCES);

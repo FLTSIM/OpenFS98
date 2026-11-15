@@ -1,6 +1,7 @@
 /* Gauge comparison: both real DLLs, all callbacks, complete data and bitmaps.
  * PANELS stubs deliberately change roots, imports, contexts and return values.
  * Integration through real PANELS is a separate target. */
+#include "argcount.h"
 #include <windows.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -241,7 +242,7 @@ static int compare_bitmap(void)
 
 int main(int argc, char **argv)
 {
-    unsigned count = argc > 1 ? (unsigned)strtoul(argv[1], NULL, 0) : 20000;
+    unsigned count = argc > 1 ? (unsigned)arg_count(argv[1]) : 20000;
     unsigned scenario, operation, side, checks = 0;
     const unsigned slots[SERVICE_COUNT] = {0x60, 0x64, 0x68, 0x6c, 0x70, 0x74, 0x7c
 #ifdef SUCTION_DIFF

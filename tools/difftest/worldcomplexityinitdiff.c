@@ -1,6 +1,7 @@
 /* Scenery complexity initialization and auxiliary CNotify scalar deletion.
  * Reuse the independent guarded event fixture, not any retail local code. */
 #define main world_complexity_event_main
+#include "argcount.h"
 #include "worldcomplexitydiff.c"
 #undef main
 static uint32_t s_saved_seh, s_init_operation, s_flags;
@@ -140,7 +141,7 @@ static int world_init_compare(uint32_t throw_at)
 }
 int main(int argc, char **argv)
 {
-    uint32_t count = argc > 1 ? strtoul(argv[1],NULL,0) : 2000, index, limit;
+    uint32_t count = argc > 1 ? arg_count(argv[1]) : 2000, index, limit;
     int unwind = argc > 2 && !strcmp(argv[2],"unwind");
     if (!count || (argc > 2 && strcmp(argv[2],"normal") && !unwind)) return 2;
     s_rng = 0x4a971b63; s_operation = 0;

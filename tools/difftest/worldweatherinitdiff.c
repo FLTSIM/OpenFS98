@@ -1,6 +1,7 @@
 /* Independent guarded initializer fixture. Imported services only are patched;
  * retail keeps its CString unwind metadata and native initializer. */
 #define main world_weather_event_main
+#include "argcount.h"
 #include "worldweatherdiff.c"
 #undef main
 static struct fs98_world_weather_font_state s_font_initial, s_font_reference;
@@ -145,7 +146,7 @@ static int init_compare(uint32_t throw_at)
 }
 int main(int argc,char **argv)
 {
-    uint32_t count=argc>1?strtoul(argv[1],NULL,0):2000,seed=argc>2?strtoul(argv[2],NULL,0):0x4a971b63;
+    uint32_t count=argc>1?arg_count(argv[1]):2000,seed=argc>2?strtoul(argv[2],NULL,0):0x4a971b63;
     uint32_t position,limit,index;int unwind=argc>3&&!strcmp(argv[3],"unwind");
     if(!count||!seed)return 2;
     s_rng=seed;SetErrorMode(SEM_FAILCRITICALERRORS|SEM_NOGPFAULTERRORBOX);AddVectoredExceptionHandler(1,init_fault);

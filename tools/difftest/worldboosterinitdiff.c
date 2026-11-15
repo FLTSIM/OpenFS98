@@ -1,5 +1,6 @@
 /* Booster initialization against retail, including shared static font state. */
 #define main world_booster_event_main
+#include "argcount.h"
 #include "worldboosterdiff.c"
 #undef main
 #include "../../src/world/world_unwind.h"
@@ -150,7 +151,7 @@ static int world_init_compare(uint32_t throw_at)
 }
 int main(int argc, char **argv)
 {
-    uint32_t count=argc>1?strtoul(argv[1],NULL,0):2000,index,limit,byte;
+    uint32_t count=argc>1?arg_count(argv[1]):2000,index,limit,byte;
     int unwind=argc>2&&!strcmp(argv[2],"unwind");
     s_rng=0x4a971b63;SetErrorMode(SEM_NOGPFAULTERRORBOX);SetUnhandledExceptionFilter(world_init_fault);
     s_retail=LoadLibraryExA("orig/English/World.DLL",NULL,DONT_RESOLVE_DLL_REFERENCES);

@@ -3,4 +3,5 @@ orig/
 *.i64
 *.idb
 game/
+__pycache__/
 cd/

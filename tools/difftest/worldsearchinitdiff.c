@@ -1,5 +1,6 @@
 /* Drive-search initialization against mapped retail and guarded UI fixtures. */
 #define main world_search_event_main
+#include "argcount.h"
 #include "worldsearchdiff.c"
 #undef main
 static void *s_check_vtable[60], *s_other_check_vtable[60];
@@ -102,7 +103,7 @@ static int world_search_init_compare(uint32_t throw_at)
 }
 int main(int argc, char **argv)
 {
-    uint32_t count = argc > 1 ? strtoul(argv[1], NULL, 0) : 2000;
+    uint32_t count = argc > 1 ? arg_count(argv[1]) : 2000;
     uint32_t index, limit;
     int interrupt = argc > 2 && !strcmp(argv[2], "interrupt");
     static const uint32_t s_capacities[] = {0, 1, 128, 0xffffffff, 0x80000000};

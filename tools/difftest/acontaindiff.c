@@ -40,6 +40,7 @@
  *
  * Build: make acontaindiff     Run: make acontaindiff-run
  */
+#include "argcount.h"
 #include <windows.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -1383,7 +1384,7 @@ int main(int argc, char **argv)
     static struct side retail, ours;
     static struct scenario s;
     struct aircraft raux;
-    unsigned v, n = argc > 1 ? (unsigned)atoi(argv[1]) : 20000, bad = 0, k;
+    unsigned v, n = argc > 1 ? (unsigned)arg_count(argv[1]) : 20000, bad = 0, k;
     struct import *im;
     uint32_t rused;
     HMODULE ch;

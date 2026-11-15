@@ -11,6 +11,7 @@
  */
 #define MDL_STATE_CAPACITY 0x800
 #define main mdl_normal_reference_main
+#include "argcount.h"
 #include "mdldlldiff.c"
 #undef main
 
@@ -124,7 +125,7 @@ static void call_op(uint32_t fn,uint32_t argc,uint8_t *arg,uint32_t registers[8]
 
 int main(int argc,char **argv)
 {
-    uint32_t count=argc>1?(uint32_t)strtoul(argv[1],NULL,0):2000;
+    uint32_t count=argc>1?(uint32_t)arg_count(argv[1]):2000;
     const char *mode=argc>2?argv[2]:"retail-first";
     HMODULE util;
     uint8_t *util_link;

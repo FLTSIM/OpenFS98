@@ -4,6 +4,7 @@
  * the remaining vectors use full-width random inputs. No graphics stub is
  * needed: these callbacks produce state and mutate G3D program operands.
  */
+#include "argcount.h"
 #include <windows.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -120,7 +121,7 @@ static void compare(const void *a, const void *b, uint32_t size, const char *wha
 
 int main(int argc, char **argv)
 {
-    uint32_t count = argc > 1 ? (uint32_t)strtoul(argv[1], NULL, 0) : 70000;
+    uint32_t count = argc > 1 ? (uint32_t)arg_count(argv[1]) : 70000;
     uint32_t k, i, value, image_size;
     int relocated = argc > 2 && !strcmp(argv[2], "relocate");
     SetUnhandledExceptionFilter(fault);

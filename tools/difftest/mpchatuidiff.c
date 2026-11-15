@@ -1,6 +1,7 @@
 /* MPCHAT against retail with actual USER32/GDI/RichEdit windows. Only the
  * simulator's numeric imports are fixtures; no Windows imports are hooked.
  * The two DLLs own FS98MPCHAT in turn so each live WndProc is verified. */
+#include "argcount.h"
 #include <windows.h>
 #include <richedit.h>
 #include <stdint.h>
@@ -575,7 +576,7 @@ static void run_script(void)
 int main(int argc, char **argv)
 {
     WNDCLASSA info;
-    uint32_t cases = argc > 2 ? strtoul(argv[2], 0, 0) : 24;
+    uint32_t cases = argc > 2 ? arg_count(argv[2]) : 24;
     const char *replacement = argc > 1 ? argv[1] : "bin/mpchat-ui/MPCHAT_ours.dll";
     if (!cases || cases > 1000) return 2;
     setvbuf(stdout, 0, _IONBF, 0); SetUnhandledExceptionFilter(fault);

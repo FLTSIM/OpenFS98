@@ -1,6 +1,7 @@
 /* Views event boundary: original PE32 routines versus C over the same object,
  * descriptor, records, numeric buffers and side-effecting dependency scripts.
  * The native MFC creation/rendering boundary is a separate acceptance task. */
+#include "argcount.h"
 #include <windows.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -843,7 +844,7 @@ static __attribute__((noinline)) int32_t run(void)
 }
 int main(int argc, char **argv)
 {
-    uint32_t count = argc > 1 ? (uint32_t)strtoul(argv[1], 0, 0) : 20000;
+    uint32_t count = argc > 1 ? (uint32_t)arg_count(argv[1]) : 20000;
     uint32_t comparisons = 0, initial_seed, operation_count = sizeof(s_entries) / sizeof(s_entries[0]);
     if (!count) return 2;
     s_rng = argc > 2 ? (uint32_t)strtoul(argv[2], 0, 0) : 0x7e51a23b;

@@ -3,6 +3,7 @@
  * This checks lifecycle, factory ABI and injected dependency unwinding;
  * inherited MFC dispatch has a separate harness. The factory NULL-allocation
  * access violation is compared, including the accessed address. */
+#include "argcount.h"
 #include <windows.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -399,7 +400,7 @@ static FS98_ALERTS_NOINLINE void fs98_run(void)
 
 int main(int argc, char **argv)
 {
-    uint32_t count = argc > 1 ? (uint32_t)strtoul(argv[1], 0, 0) : 20000;
+    uint32_t count = argc > 1 ? (uint32_t)arg_count(argv[1]) : 20000;
     uint32_t index;
     static const uint32_t s_flag_cases[] = {0, 1, 2, 3, 0x100, 0x101, 0x80000000, 0xffffffff};
     if (!count) return 2;

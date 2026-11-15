@@ -1,5 +1,6 @@
 /* World drive-search core comparison. Retail executes its own mapped code;
  * only imported UI/CRT calls and virtual callbacks are replaced by fixtures. */
+#include "argcount.h"
 #include <windows.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -283,7 +284,7 @@ static int world_compare(uint32_t throw_at)
 }
 int main(int argc, char **argv)
 {
-    uint32_t count = argc > 1 ? strtoul(argv[1], NULL, 0) : 2000;
+    uint32_t count = argc > 1 ? arg_count(argv[1]) : 2000;
     uint32_t seed = argc > 2 ? strtoul(argv[2], NULL, 0) : 0x4a971b63;
     uint32_t position, limit;
     int interrupt = argc > 3 && !strcmp(argv[3], "interrupt");

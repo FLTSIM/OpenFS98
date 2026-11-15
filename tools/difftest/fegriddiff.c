@@ -15,6 +15,7 @@
  *
  * Usage: fegriddiff.exe [random-vectors]
  */
+#include "argcount.h"
 #include <windows.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -165,7 +166,7 @@ static LONG CALLBACK on_fault(EXCEPTION_POINTERS *x)
 
 int main(int argc, char **argv)
 {
-    long nrand = argc > 1 ? atol(argv[1]) : 2000000;
+    long nrand = argc > 1 ? arg_count(argv[1]) : 2000000;
     uint32_t level, k, top;
     long n;
 

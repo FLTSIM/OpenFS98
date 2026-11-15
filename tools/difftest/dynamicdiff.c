@@ -88,6 +88,7 @@
  *
  * Build: make dynamicdiff     Run: make dynamicdiff-run
  */
+#include "argcount.h"
 #include <windows.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -1874,7 +1875,7 @@ int main(int argc, char **argv)
         "newyork5", "saltlk5", "seatac5", "sf5", "stlouis5"
     };
     uint8_t *rarena;
-    unsigned v, n = argc > 1 ? (unsigned)atoi(argv[1]) : 20000, bad = 0, k;
+    unsigned v, n = argc > 1 ? (unsigned)arg_count(argv[1]) : 20000, bad = 0, k;
     uint32_t rused;
     long at;
     char path[64];

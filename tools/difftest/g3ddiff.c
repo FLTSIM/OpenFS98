@@ -49,6 +49,7 @@
  *
  * Build: make g3ddiff     Run: make g3ddiff-run
  */
+#include "argcount.h"
 #include <windows.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -4124,7 +4125,7 @@ static void show_difference(void)
 
 int main(int argc, char **argv)
 {
-    uint32_t n = argc > 1 ? (uint32_t)strtoul(argv[1], NULL, 0) : 20000;
+    uint32_t n = argc > 1 ? (uint32_t)arg_count(argv[1]) : 20000;
     uint32_t first = argc > 2 ? (uint32_t)strtoul(argv[2], NULL, 0) : 0;
     uint32_t i, differ = 0, c;
 

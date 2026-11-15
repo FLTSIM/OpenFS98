@@ -1,5 +1,6 @@
 /* Independent MAIN-shaped weather-area owner; native controls and unmasked pixels. */
 #define main world_area_ui_main
+#include "argcount.h"
 #include "worlduidiff.c"
 #undef main
 static uint32_t s_step;
@@ -146,7 +147,7 @@ int main(int argc,char **argv)
 {
     HMODULE ui,global_module,modules[2];struct world_ui_linkage *linkages[2];
     char directory[MAX_PATH];uint32_t index,cycle,comparisons=0;
-    uint32_t cases=argc>2?strtoul(argv[2],NULL,0):12;
+    uint32_t cases=argc>2?arg_count(argv[2]):12;
     struct wareas_result results[2];
     if (!cases || cases > 1000) return 2;
     setvbuf(stdout, NULL, _IONBF, 0); SetErrorMode(SEM_NOGPFAULTERRORBOX); SetUnhandledExceptionFilter(world_fault);

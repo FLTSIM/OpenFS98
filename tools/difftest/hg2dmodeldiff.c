@@ -10,6 +10,7 @@
  * (pixels as a block number), through a transcript per side.
  *
  * Usage: hg2dmodeldiff [N] */
+#include "argcount.h"
 #include <windows.h>
 #include <stdarg.h>
 #include <stdint.h>
@@ -218,7 +219,7 @@ static void run(unsigned scenario)
 int main(int argc, char **argv)
 {
     static uint8_t host[0x400];
-    unsigned n = argc > 1 ? (unsigned)strtoul(argv[1], NULL, 0) : 20000, s, differ = 0;
+    unsigned n = argc > 1 ? (unsigned)arg_count(argv[1]) : 20000, s, differ = 0;
     HMODULE h = LoadLibraryA("HG2D_retail.dll");
     uint32_t *imports;
 

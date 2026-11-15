@@ -4,6 +4,7 @@
  * by those routines are patched to a deterministic MFC/Win32 model. This
  * tests event logic, descriptor mutations, virtual-call order and drawing
  * transcripts; it does not test construction, MFC dispatch or real pixels. */
+#include "argcount.h"
 #include <windows.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -719,7 +720,7 @@ complete:
 
 int main(int argc, char **argv)
 {
-    uint32_t count = argc > 1 ? (uint32_t)strtoul(argv[1], 0, 0) : 20000;
+    uint32_t count = argc > 1 ? (uint32_t)arg_count(argv[1]) : 20000;
     uint32_t initial_seed = argc > 2 ? (uint32_t)strtoul(argv[2], 0, 0) : 0x41e2753b;
     uint32_t mismatch = 0;
     if (count == 0 || initial_seed == 0)

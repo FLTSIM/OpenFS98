@@ -1,6 +1,7 @@
 /* Public factory/message/rendering comparison with the CD's actual MFC/SIMSUI.
  * The host boundary is small: memory, module stack and string resources.
  * This is deliberately separate from the synthetic high-volume suites. */
+#include "argcount.h"
 #include <windows.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -550,7 +551,7 @@ int main(int argc, char **argv)
 {
     HMODULE ui, modules[2], global;
     char directory[MAX_PATH];
-    uint32_t index, cycle, comparisons = 0, cases = argc > 2 ? strtoul(argv[2], 0, 0) : 30;
+    uint32_t index, cycle, comparisons = 0, cases = argc > 2 ? arg_count(argv[2]) : 30;
     struct result { uint8_t descriptor[0x40]; char callbacks[4096]; uint32_t opens, queries, attempts, kills, scroll; } results[2];
     char module_path[MAX_PATH], retail_path[MAX_PATH];
     if (!cases || cases > 1000) return 2;

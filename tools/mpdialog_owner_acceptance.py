@@ -138,6 +138,9 @@ def run_side(audit, side, seed, peer, skip_intro, initial_post_only, installed_o
         subprocess.run(['wineserver', '-w'], env=environment, timeout=20, check=False)
         record['dll_after'] = digest(game / 'English/MP_DIALOG.DLL')
         record['config_after'] = digest(game / 'FLTSIM98.CFG')
+        if not os.environ.get('KEEP'):
+            shutil.rmtree(prefix, ignore_errors=True)
+            shutil.rmtree(game, ignore_errors=True)
     return record
 
 

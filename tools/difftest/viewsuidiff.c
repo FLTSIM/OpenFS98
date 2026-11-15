@@ -1,6 +1,7 @@
 /* Public factory/message smoke comparison with the CD's actual MFC/SIMSUI.
  * The host boundary is small: memory, module stack and string resources.
  * This is deliberately separate from the synthetic high-volume suites. */
+#include "argcount.h"
 #include <windows.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -433,7 +434,7 @@ int main(int argc, char **argv)
     struct fs98_ui_linkage *linkages[2];
     char directory[MAX_PATH];
     uint32_t index, case_index, cycle, comparisons = 0;
-    uint32_t cases = argc > 2 ? (uint32_t)strtoul(argv[2], 0, 0) : 24;
+    uint32_t cases = argc > 2 ? (uint32_t)arg_count(argv[2]) : 24;
     struct result { uint32_t descriptor[10]; uint8_t records[4][0xb4]; char buffers[4][7][64]; uint32_t answer, keyboard, invalid_control; } results[2];
     if (!cases || cases > 1000) return 2;
     setvbuf(stdout, 0, _IONBF, 0);

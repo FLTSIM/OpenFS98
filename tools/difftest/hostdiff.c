@@ -18,6 +18,7 @@
  *
  * Usage: hostdiff [N]        (from bin/difftest, after `make hostdiff`)
  */
+#include "argcount.h"
 #include <windows.h>
 #include <mmreg.h>
 #include <msacm.h>
@@ -4400,7 +4401,7 @@ static int heapchk;
 
 int main(int argc, char **argv)
 {
-    uint32_t n = (argc > 1) ? (uint32_t)strtoul(argv[1], NULL, 0) : 1, k, i;
+    uint32_t n = (argc > 1) ? (uint32_t)arg_count(argv[1]) : 1, k, i;
 
     setvbuf(stdout, 0, _IONBF, 0);     /* so a crash still shows what came before it */
     SetUnhandledExceptionFilter(on_fault);

@@ -53,6 +53,8 @@ command -v Xvfb >/dev/null || { echo "needs Xvfb" >&2; exit 2; }
 
 rm -rf "$out"
 mkdir -p "$out"
+# an interrupted run must not leave the game copies, prefixes or Xvfb servers behind
+trap 'kill $(jobs -p) 2>/dev/null; rm -rf "$out"/game-* "$out"/prefix-*' EXIT
 
 run() {     # tag display
     local tag=$1 display=$2 dir=$out/$1 copy=$out/game-$1 prefix=$out/prefix-$1 m
@@ -68,6 +70,7 @@ run() {     # tag display
     export WINEPREFIX=$prefix WINEDEBUG=-all DISPLAY=$display WINEDLLOVERRIDES=dsound=d
     Xvfb "$display" -screen 0 1024x768x24 -ac -noreset >"$dir/xvfb.log" 2>&1 &
     local xvfb=$!
+    trap 'kill $xvfb 2>/dev/null' EXIT   # this subshell's own server, when the main trap kills it
     for _ in $(seq 20); do xdpyinfo >/dev/null 2>&1 && break; sleep 0.5; done
     ( cd "$copy" && WINEDEBUG=err+all timeout 900 wine FLTSIM98.EXE '/STN:Situatio\STGEORGE.STN' >"$dir/game.log" 2>&1 ) &
     local pid=$!

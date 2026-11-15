@@ -24,6 +24,7 @@
  * Ours is an adapter per operation (sim1r_operations.inc): it takes the entry registers and
  * x87 inputs, calls the routine's C as its callers will, and sets what the C returns into the
  * registers retail leaves it in. */
+#include "argcount.h"
 #include <windows.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -1007,7 +1008,7 @@ static void setup(void)
 }
 int main(int argc, char **argv)
 {
-    uint32_t count = argc > 1 ? strtoul(argv[1], 0, 0) : 2000;
+    uint32_t count = argc > 1 ? arg_count(argv[1]) : 2000;
     uint32_t initial_seed = argc > 2 ? strtoul(argv[2], 0, 0) : 0x51e1u;
     uint32_t first = argc > 3 ? strtoul(argv[3], 0, 0) : 0;
     uint32_t last = argc > 4 ? strtoul(argv[4], 0, 0) : (uint32_t)OP_COUNT - 1;

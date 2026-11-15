@@ -24,6 +24,7 @@
  *
  * Build: make chaindiff     Run: make chaindiff-run
  */
+#include "argcount.h"
 #include <windows.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -409,7 +410,7 @@ int main(int argc, char **argv)
     static char rlog[sizeof tlog];
     struct chain_linkage *r, *o;
     static struct scenario s;
-    unsigned v, n = argc > 1 ? (unsigned)atoi(argv[1]) : 20000, bad = 0;
+    unsigned v, n = argc > 1 ? (unsigned)arg_count(argv[1]) : 20000, bad = 0;
     /* what the scripts reached, counted over retail's transcripts, so a
      * passing run says what it covered */
     static const char *seen_what[] = {

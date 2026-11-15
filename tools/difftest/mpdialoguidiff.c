@@ -1,6 +1,7 @@
 /* Native differential for isolated MP_DIALOG 0x110a, 0x110b and 0x110c slices.
  * Retail and replacement share CD MFC42/SIMSUI and USER32 controls. HOST
  * idle dispatch and MULTIP-owned callbacks/storage are explicit test models. */
+#include "argcount.h"
 #include <windows.h>
 #include <stddef.h>
 #include <stdio.h>
@@ -5186,7 +5187,7 @@ int main(int argc, char **argv)
     HMODULE modules[2], global;
     struct fs98_test_linkage *linkages[2];
     char directory[MAX_PATH], module_path[MAX_PATH], retail_path[MAX_PATH];
-    uint32_t cases = argc > 2 ? strtoul(argv[2], 0, 0) : 12;
+    uint32_t cases = argc > 2 ? arg_count(argv[2]) : 12;
     uint32_t cycle, case_index, side, comparisons = 0, differences = 0;
     uint32_t details_differences = 0, flow_differences = 0, render_differences = 0, help_differences = 0;
     uint32_t visibility_checkpoint_matches = 0;

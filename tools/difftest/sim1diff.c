@@ -2,6 +2,7 @@
  * Each case restores both independent images and compares every byte of their
  * seeded state, output guards, register results and meaningful x87 environment.
  */
+#include "argcount.h"
 #include <windows.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -191,7 +192,7 @@ static void seed_case(void)
 
 int main(int argc, char **argv)
 {
-    uint32_t count = argc > 1 ? (uint32_t)strtoul(argv[1], NULL, 0) : 20000;
+    uint32_t count = argc > 1 ? (uint32_t)arg_count(argv[1]) : 20000;
     const char *order = argc > 2 ? argv[2] : "retail-first";
     const char *ours = argc > 3 ? argv[3] : "bin/sim1-diff/SIM1_PARTIAL.DLL";
     const char *paths[2] = {"orig/Sim/SIM1.sim", ours};

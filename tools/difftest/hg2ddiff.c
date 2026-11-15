@@ -4,6 +4,7 @@
  * In-range unaligned handles are intentionally tested with zero pixels/hw;
  * arbitrary malformed COM pointers and out-of-range accounting indices are
  * outside this suite. Usage: hg2ddiff [scenario_count]. */
+#include "argcount.h"
 #include <windows.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -381,7 +382,7 @@ static LONG WINAPI fault(EXCEPTION_POINTERS *exception)
 
 int main(int argc, char **argv)
 {
-    uint32_t count = argc > 1 ? (uint32_t)strtoul(argv[1], NULL, 0) : 20000;
+    uint32_t count = argc > 1 ? (uint32_t)arg_count(argv[1]) : 20000;
     HMODULE modules[2], util;
     const char *suite = argc > 2 ? argv[2] : "all";
     CHECK(!strcmp(suite, "all") || !strcmp(suite, "textures") || !strcmp(suite, "palette") || !strcmp(suite, "colours") || !strcmp(suite, "drawing") || !strcmp(suite, "polygons") || !strcmp(suite, "fills") || !strcmp(suite, "textured") || !strcmp(suite, "affine") || !strcmp(suite, "gouraud") || !strcmp(suite, "blits") || !strcmp(suite, "lifecycle") || !strcmp(suite, "optimized") || !strcmp(suite, "perspective") || !strcmp(suite, "discs") || !strcmp(suite, "perspective_fill") || !strcmp(suite, "matrix_vertices") || !strcmp(suite, "matrix_fills") || !strcmp(suite, "projective") || !strcmp(suite, "projective_keyed") || !strcmp(suite, "projective_fog") || !strcmp(suite, "projective_key_fog") || !strcmp(suite, "projective_dither") || !strcmp(suite, "projective_dither_fog") || !strcmp(suite, "projective_dither_key") || !strcmp(suite, "projective_dither_key_fog") || !strcmp(suite, "projective_plane") || !strcmp(suite, "projective_mip") || !strcmp(suite, "projective_mip_fog") || !strcmp(suite, "projective_mip_dither") || !strcmp(suite, "projective_mip_dither_fog") || !strcmp(suite, "resources") || !strcmp(suite, "initialization") || !strcmp(suite, "projective_mip_build") || !strcmp(suite, "fans") || !strcmp(suite, "device_palettes") || !strcmp(suite, "device_pixels") || !strcmp(suite, "device_states") || !strcmp(suite, "device_shutdown") || !strcmp(suite, "device_config") || !strcmp(suite, "device_formats") || !strcmp(suite, "device_select_format") || !strcmp(suite, "device_flush") || !strcmp(suite, "device_colour") || !strcmp(suite, "device_create") || !strcmp(suite, "device_surfaces") || !strcmp(suite, "device_reduce") || !strcmp(suite, "device_upload") || !strcmp(suite, "device_prepare") || !strcmp(suite, "device_texture") || !strcmp(suite, "device_batch") || !strcmp(suite, "device_points") || !strcmp(suite, "device_commit") || !strcmp(suite, "device_lines") || !strcmp(suite, "device_vertices") || !strcmp(suite, "device_projected") || !strcmp(suite, "device_text") || !strcmp(suite, "device_disc") || !strcmp(suite, "device_scene") || !strcmp(suite, "device_selection"));

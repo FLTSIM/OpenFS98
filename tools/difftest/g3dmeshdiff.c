@@ -15,6 +15,7 @@
  * 0x38.
  *
  * Usage: g3dmeshdiff [N [first]] */
+#include "argcount.h"
 #include <math.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -243,7 +244,7 @@ static void retail_load(void)
 
 int main(int argc, char **argv)
 {
-    uint32_t n = argc > 1 ? (uint32_t)strtoul(argv[1], NULL, 0) : 100000;
+    uint32_t n = argc > 1 ? (uint32_t)arg_count(argv[1]) : 100000;
     uint32_t first = argc > 2 ? (uint32_t)strtoul(argv[2], NULL, 0) : 0, s, k;
     uint32_t differ[2] = { 0, 0 }, meshes = 0, refused = 0, by_pc[3] = { 0, 0, 0 };
     static const uint16_t words[3] = { 0x007f, 0x027f, 0x037f };

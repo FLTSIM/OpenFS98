@@ -1,6 +1,7 @@
 /* Independent copy class fixture with real x86 exception unwinding.
  * Only imported services are patched: retail retains its class/factory code,
  * DDX/help maps and MSVC EH metadata. No MAIN code runs. */
+#include "argcount.h"
 #include <windows.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -387,7 +388,7 @@ static int world_compare(uint32_t throw_at)
 }
 int main(int argc, char **argv)
 {
-    uint32_t count = argc > 1 ? strtoul(argv[1], NULL, 0) : 2000;
+    uint32_t count = argc > 1 ? arg_count(argv[1]) : 2000;
     uint32_t seed = argc > 2 ? strtoul(argv[2], NULL, 0) : 0x4a971b63;
     uint32_t copy, limit;
     int unwind = argc > 3 && (!strcmp(argv[3], "unwind") || !strcmp(argv[3], "typed"));

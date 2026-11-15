@@ -1,5 +1,6 @@
 /* Guarded initializer, including genuine notification-construction unwinds. */
 #define main world_wareas_core_main
+#include "argcount.h"
 #include "worldwareasdiff.c"
 #undef main
 static uint8_t s_notify[0x29c],s_notify_initial[0x29c],s_notify_reference[0x29c];
@@ -101,7 +102,7 @@ static int init_compare(uint32_t throw_at)
 }
 int main(int argc,char **argv)
 {
-    uint32_t count=argc>1?strtoul(argv[1],NULL,0):2000,seed=argc>2?strtoul(argv[2],NULL,0):0x4a971b63,index,limit;
+    uint32_t count=argc>1?arg_count(argv[1]):2000,seed=argc>2?strtoul(argv[2],NULL,0):0x4a971b63,index,limit;
     int unwind=argc>3&&!strcmp(argv[3],"unwind");
     if(!count||!seed)return 2;
     s_rng=seed;SetErrorMode(SEM_NOGPFAULTERRORBOX);SetUnhandledExceptionFilter(init_fatal);

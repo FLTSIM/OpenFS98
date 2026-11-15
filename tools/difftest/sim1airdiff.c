@@ -5,6 +5,7 @@
  */
 #define SIM1_STATE_REFERENCE_ONLY
 #define SIM1_TRANSCRIPT_CAPACITY 64
+#include "argcount.h"
 #include "sim1statediff.c"
 
 static uint8_t acontain_table[0x40];
@@ -244,7 +245,7 @@ int main(int argc, char **argv)
     static const uint32_t paths[] = {1, 15, 254, 255};
     static const char *callback_names[] = {"Sim1TickCallback", "Sim1FrameCallback", "Sim1SituationCallback"};
     static const uint32_t callback_rvas[] = {0x1020, 0x1040, 0x10da0};
-    uint32_t count = argc > 1 ? strtoul(argv[1], NULL, 0) : 20000;
+    uint32_t count = argc > 1 ? arg_count(argv[1]) : 20000;
     const char *order = argc > 2 ? argv[2] : "retail-first";
     const char *ours = argc > 3 ? argv[3] : "bin/sim1-diff/SIM1_AIR_TEST.DLL";
     const char *filenames[2] = {"orig/Sim/SIM1.sim", ours};

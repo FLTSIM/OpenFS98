@@ -1,5 +1,6 @@
 /* Guarded Advanced Weather events and initialization. Only imported services and
  * independent owner callbacks are patched; no MAIN code executes. */
+#include "argcount.h"
 #include <windows.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -290,7 +291,7 @@ static int time_compare(uint32_t throw_at)
 }
 int main(int argc,char **argv)
 {
-    uint32_t count=argc>1?strtoul(argv[1],NULL,0):2000,seed=argc>2?strtoul(argv[2],NULL,0):0x4a971b63,index,limit,call;
+    uint32_t count=argc>1?arg_count(argv[1]):2000,seed=argc>2?strtoul(argv[2],NULL,0):0x4a971b63,index,limit,call;
     int unwind=argc>3&&(!strcmp(argv[3],"unwind")||!strcmp(argv[3],"interrupt"));if(!count||!seed)return 2;s_rng=seed;
     SetErrorMode(SEM_FAILCRITICALERRORS|SEM_NOGPFAULTERRORBOX);AddVectoredExceptionHandler(1,time_fault);
     s_retail=LoadLibraryExA("orig/English/World.DLL",NULL,DONT_RESOLVE_DLL_REFERENCES);if(!s_retail)return 2;

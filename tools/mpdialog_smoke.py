@@ -21,6 +21,16 @@ def sha256(path):
 
 
 def main():
+    copies = []
+    try:
+        return run(copies)
+    finally:
+        if not os.environ.get('KEEP'):
+            for c in copies:
+                shutil.rmtree(c, ignore_errors=True)
+
+
+def run(copies):
     root = Path.cwd()
     output = root / 'bin/mpdialog-diff'
     prefix = output / 'wineprefix-smoke'
@@ -37,6 +47,7 @@ def main():
     source_hash = sha256(source_dll)
     replacement_hash = sha256(replacement)
     copy = Path(tempfile.mkdtemp(prefix='smoke-game-', dir=output))
+    copies.append(copy)
     shutil.copytree(source, copy, dirs_exist_ok=True, copy_function=shutil.copy2)
     installed = copy / 'English/MP_DIALOG.DLL'
     shutil.copy2(replacement, installed)

@@ -20,6 +20,7 @@
  *
  * Build: make difftest     Run: make difftest-run
  */
+#include "argcount.h"
 #include <windows.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -184,7 +185,7 @@ int main(int argc, char **argv)
     static struct subject a, b;
     static unsigned char before[GLOBAL_SIZE];
     unsigned char host[0x40];
-    unsigned iters = (argc > 1) ? (unsigned)atoi(argv[1]) : 2000;
+    unsigned iters = (argc > 1) ? (unsigned)arg_count(argv[1]) : 2000;
     long show = (argc > 2) ? atol(argv[2]) : -1;
     unsigned iter, diffs = 0;
 

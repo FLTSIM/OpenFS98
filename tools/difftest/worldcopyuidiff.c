@@ -1,5 +1,6 @@
 /* Actual copy-weather controls; independent MAIN-shaped rows, no live apply. */
 #define main world_area_ui_main
+#include "argcount.h"
 #include "worlduidiff.c"
 #undef main
 static uint8_t s_copy_descriptors[2][0x54], s_copy_rows[4][0xc8];
@@ -91,7 +92,7 @@ int main(int argc,char **argv)
 {
     HMODULE ui,global_module,modules[2];struct world_ui_linkage *linkages[2];
     char directory[MAX_PATH];uint32_t index,cycle,comparisons=0;
-    uint32_t cases=argc>2?strtoul(argv[2],NULL,0):16;
+    uint32_t cases=argc>2?arg_count(argv[2]):16;
     struct copy_result results[2];
     if (!cases || cases > 1000) return 2;
     setvbuf(stdout, NULL, _IONBF, 0); SetErrorMode(SEM_NOGPFAULTERRORBOX); SetUnhandledExceptionFilter(world_fault);

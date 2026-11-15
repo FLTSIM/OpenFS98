@@ -1,5 +1,6 @@
 /* Help's event boundary, original PE32 routines versus C. Every operation
  * starts from the same guarded fixture, including side-effecting imports. */
+#include "argcount.h"
 #include <windows.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -786,7 +787,7 @@ static int compare(uint32_t throw_at)
 }
 int main(int argc, char **argv)
 {
-    uint32_t count = argc > 1 ? strtoul(argv[1], 0, 0) : 20000;
+    uint32_t count = argc > 1 ? arg_count(argv[1]) : 20000;
     uint32_t initial_seed = argc > 2 ? strtoul(argv[2], 0, 0) : 0x19a847e3;
     int unwind = argc > 3 && !strcmp(argv[3], "unwind");
     uint32_t throw, limit;

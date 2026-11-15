@@ -152,13 +152,13 @@ src/multip/multip_dispatch_cases.inc: $(ORIG)/Modules/multip.dll tools/gen_multi
 	python3 -B tools/gen_multip_dispatch.py
 
 src/multip/multip_weather_fields.inc: $(ORIG)/Modules/multip.dll tools/gen_multip_weather.py
-	@python3 tools/gen_multip_weather.py
+	@python3 -B tools/gen_multip_weather.py
 
 src/multip/multip_data.inc src/multip/multip_rdata.inc src/multip/multip_pointers.inc src/multip/multip_nametag.inc src/multip/multip_frame_actions.inc &: $(ORIG)/Modules/multip.dll tools/gen_multip_data.py
-	@python3 tools/gen_multip_data.py
+	@python3 -B tools/gen_multip_data.py
 
 src/multip/multip_profile_fields.inc: $(ORIG)/Modules/multip.dll tools/gen_multip_profile.py
-	@python3 tools/gen_multip_profile.py
+	@python3 -B tools/gen_multip_profile.py
 
 $(BIN)/multip.res: src/multip/multip.rc
 	@mkdir -p $(BIN)
@@ -238,7 +238,7 @@ $(BIN)/atc.res: src/atc/atc.rc
 	$(RC) $< -O coff -o $@
 
 src/atc/atc_data.inc: $(ORIG)/Modules/ATC.DLL tools/gen_atc_data.py
-	@python3 tools/gen_atc_data.py $< $@
+	@python3 -B tools/gen_atc_data.py $< $@
 
 # WEATHERM, laid out the same way.  MSVCRT for whatever block copies gcc emits
 # as memcpy, libgcc for the 64-bit divisions.
@@ -254,7 +254,7 @@ $(BIN)/weatherm.res: src/weatherm/weatherm.rc
 	$(RC) $< -O coff -o $@
 
 src/weatherm/weatherm_data.inc: $(ORIG)/Modules/WEATHERM.DLL tools/gen_weatherm_data.py
-	@python3 tools/gen_weatherm_data.py $< $@
+	@python3 -B tools/gen_weatherm_data.py $< $@
 
 # ACONTAIN, laid out the same way.  USER32 for wsprintfA, which retail calls
 # directly; MSVCRT for whatever block copies gcc emits as memcpy.
@@ -271,7 +271,7 @@ $(BIN)/acontain.res: src/acontain/acontain.rc
 	$(RC) $< -O coff -o $@
 
 src/acontain/acontain_data.inc src/acontain/acontain_colours.inc &: $(ORIG)/Modules/ACONTAIN.DLL tools/gen_acontain_data.py
-	@python3 tools/gen_acontain_data.py $< src/acontain
+	@python3 -B tools/gen_acontain_data.py $< src/acontain
 
 # SOUND, laid out the same way.  USER32 for wsprintfA and MSVCRT for strtok,
 # both of which retail imports directly.
@@ -287,7 +287,7 @@ $(BIN)/sound.res: src/sound/sound.rc
 	$(RC) $< -O coff -o $@
 
 src/sound/sound_data.inc src/sound/sound_consts.inc &: $(ORIG)/Modules/SOUND.DLL tools/gen_sound_data.py
-	@python3 tools/gen_sound_data.py $< src/sound
+	@python3 -B tools/gen_sound_data.py $< src/sound
 
 # DYNAMIC, laid out the same way.  An interpreter for programs from scenery
 # files, so null-pointer checks stay in: a bad program has to fault where
@@ -304,7 +304,7 @@ $(BIN)/dynamic.res: src/dynamic/dynamic.rc
 	$(RC) $< -O coff -o $@
 
 src/dynamic/dynamic_data.inc: $(ORIG)/Modules/DYNAMIC.DLL tools/gen_dynamic_data.py
-	@python3 tools/gen_dynamic_data.py $< $@
+	@python3 -B tools/gen_dynamic_data.py $< $@
 
 # FE, the scenery file engine, laid out the same way: the assembly engine and
 # file services (fediff), and the Scenery Library in fe_library.c (fesldiff).
@@ -319,7 +319,7 @@ $(BIN)/fe.res: src/fe/fe.rc
 	$(RC) $< -O coff -o $@
 
 src/fe/fe_data.inc: $(ORIG)/Modules/FE.DLL tools/gen_fe_data.py
-	@python3 tools/gen_fe_data.py $< $@
+	@python3 -B tools/gen_fe_data.py $< $@
 
 # FACIL, the compiled facility index and its three dialogs' callbacks.  Every
 # Linkage slot is verified by facildiff.
@@ -335,7 +335,7 @@ $(BIN)/facil.res: src/facil/facil.rc
 	$(RC) $< -O coff -o $@
 
 src/facil/facil_data.inc: $(ORIG)/Modules/facil.dll tools/gen_facil_data.py
-	@python3 tools/gen_facil_data.py $< $@
+	@python3 -B tools/gen_facil_data.py $< $@
 
 # BOOSTER, the CD scenery cache and its copying thread.  USER32 for the
 # thread's message loop, MessageBoxA and wsprintfA, all of which retail calls
@@ -354,7 +354,7 @@ $(BIN)/booster.res: src/booster/booster.rc
 	$(RC) $< -O coff -o $@
 
 src/booster/booster_data.inc: $(ORIG)/Modules/BOOSTER.DLL tools/gen_booster_data.py
-	@python3 tools/gen_booster_data.py $< $@
+	@python3 -B tools/gen_booster_data.py $< $@
 
 # ADVDRV, the adventure and lesson interpreter: MSVC C with the x87
 # throughout.  libgcc for _ftol's 64-bit conversion.  Its tables hold distinct
@@ -372,7 +372,7 @@ $(BIN)/advdrv.res: src/advdrv/advdrv.rc
 	$(RC) $< -O coff -o $@
 
 src/advdrv/advdrv_data.inc: $(ORIG)/Modules/ADVDRV.DLL tools/gen_advdrv_data.py
-	@python3 tools/gen_advdrv_data.py $< $@
+	@python3 -B tools/gen_advdrv_data.py $< $@
 
 # DEMO, flight videos and instant replay: an assembly recorder and player
 # with a C half of dialog callbacks.  libgcc for the 64-bit divisions.  The
@@ -390,7 +390,7 @@ $(BIN)/demo.res: src/demo/demo.rc
 	$(RC) $< -O coff -o $@
 
 src/demo/demo_data.inc: $(ORIG)/Modules/DEMO.DLL tools/gen_demo_data.py
-	@python3 tools/gen_demo_data.py $< $@
+	@python3 -B tools/gen_demo_data.py $< $@
 
 # WINDOW, the view windows and the eyepoint: MSVC C with an assembly half.
 # libgcc for the 64-bit arithmetic; identical-code folding is off so the
@@ -414,7 +414,7 @@ $(BIN)/G3D.DLL: src/g3d/g3d.c src/g3d/g3d_mesh.c src/g3d/g3d.def src/g3d/g3d_dat
 	      -lkernel32 -luser32 -lgcc
 
 src/g3d/g3d_data.inc src/g3d/g3d_pointers.inc: $(ORIG)/Modules/G3D.DLL tools/gen_g3d_data.py
-	@python3 tools/gen_g3d_data.py $< src/g3d/g3d_data.inc src/g3d/g3d_pointers.inc
+	@python3 -B tools/gen_g3d_data.py $< src/g3d/g3d_data.inc src/g3d/g3d_pointers.inc
 
 $(BIN)/g3d.res: src/g3d/g3d.rc
 	@mkdir -p $(BIN)
@@ -446,7 +446,7 @@ $(BIN)/PANELS.DLL: src/panels/panels.c src/panels/panels.h src/panels/panels.def
 
 src/panels/panels_data.inc src/panels/panels_rdata.inc src/panels/panels_pointers.inc: \
     $(ORIG)/Modules/PANELS.DLL tools/gen_panels_data.py
-	@python3 tools/gen_panels_data.py $< src/panels/panels_data.inc \
+	@python3 -B tools/gen_panels_data.py $< src/panels/panels_data.inc \
 	      src/panels/panels_rdata.inc src/panels/panels_pointers.inc
 
 $(BIN)/panels.res: src/panels/panels.rc
@@ -458,7 +458,7 @@ $(BIN)/window.res: src/window/window.rc
 	$(RC) $< -O coff -o $@
 
 src/window/window_data.inc src/window/window_text.inc: $(ORIG)/Modules/WINDOW.DLL tools/gen_window_data.py
-	@python3 tools/gen_window_data.py $< src/window/window_data.inc src/window/window_text.inc
+	@python3 -B tools/gen_window_data.py $< src/window/window_data.inc src/window/window_text.inc
 
 # REALITY, crashes, damage and the crash analysis: assembly and MSVC C.
 $(BIN)/REALITY.DLL: src/reality/reality.c src/reality/reality.def src/reality/reality_data.inc \
@@ -474,7 +474,7 @@ $(BIN)/reality.res: src/reality/reality.rc
 	$(RC) $< -O coff -o $@
 
 src/reality/reality_data.inc src/reality/reality_rdata.inc: $(ORIG)/Modules/REALITY.DLL tools/gen_reality_data.py
-	@python3 tools/gen_reality_data.py $< src/reality/reality_data.inc src/reality/reality_rdata.inc
+	@python3 -B tools/gen_reality_data.py $< src/reality/reality_data.inc src/reality/reality_rdata.inc
 
 # CONTROLS, the keyboard, joysticks and mouse: a hand-written assembly half
 # (controls.c) and a compiled-C half (controls_input.c), both transliterated
@@ -495,7 +495,7 @@ $(BIN)/controls.res: src/controls/controls.rc
 	$(RC) $< -O coff -o $@
 
 $(CONTROLS_INC): $(ORIG)/Modules/CONTROLS.DLL tools/gen_controls_data.py
-	@python3 tools/gen_controls_data.py $< $(CONTROLS_INC)
+	@python3 -B tools/gen_controls_data.py $< $(CONTROLS_INC)
 
 # ANALYSIS, landing and manoeuvre analysis and course tracking: assembly and
 # MSVC C.
@@ -512,7 +512,7 @@ $(BIN)/analysis.res: src/analysis/analysis.rc
 	$(RC) $< -O coff -o $@
 
 src/analysis/analysis_data.inc src/analysis/analysis_rdata.inc: $(ORIG)/Modules/ANALYSIS.DLL tools/gen_analysis_data.py
-	@python3 tools/gen_analysis_data.py $< src/analysis/analysis_data.inc src/analysis/analysis_rdata.inc
+	@python3 -B tools/gen_analysis_data.py $< src/analysis/analysis_data.inc src/analysis/analysis_rdata.inc
 
 # MAIN, the sim's controller: MSVC C and assembly (docs/modules/main.md).
 MAIN_SOURCES := src/main/main.c src/main/main_records.inc src/main/main_situation.inc src/main/main_nav.inc src/main/main_season.inc src/main/main_sun.inc src/main/main_eye.inc src/main/main_band.inc src/main/main_flights.inc src/main/main_prefs.inc src/main/main_clouds.inc src/main/main_natives.inc src/main/main_spot.inc src/main/main_frame.inc src/main/main_tick.inc src/main/main_step.inc src/main/main_dialogs.inc src/main/main_commands.inc src/main/main_radios.inc src/main/main_weather.inc src/main/main_kneeboard.inc src/main/main_aircraft.inc src/main/main_clockdlg.inc src/main/main_engines.inc src/main/main_limits.inc src/main/main_areas.inc src/main/main_prefdlg.inc src/main/main_viewdlg.inc src/main/main_logbook.inc src/main/main_wxdlg.inc src/main/main_radiodlg.inc src/main/main_create.inc src/main/main_start.inc src/main/main_text_tail.inc
@@ -526,14 +526,14 @@ $(BIN)/MAIN.DLL: $(MAIN_SOURCES) src/main/main.def src/main/main_data.inc \
 
 $(BIN)/main_kneeboard.bmp: $(ORIG)/Modules/MAIN.DLL tools/gen_main_bitmap.py
 	@mkdir -p $(BIN)
-	@python3 tools/gen_main_bitmap.py $< $@
+	@python3 -B tools/gen_main_bitmap.py $< $@
 
 $(BIN)/main.res: src/main/main.rc $(BIN)/main_kneeboard.bmp
 	@mkdir -p $(BIN)
 	$(RC) -I$(BIN) $< -O coff -o $@
 
 src/main/main_data.inc src/main/main_pointers.inc src/main/main_text_tail.inc &: $(ORIG)/Modules/MAIN.DLL tools/gen_main_data.py
-	@python3 tools/gen_main_data.py
+	@python3 -B tools/gen_main_data.py
 
 # MPCHAT, the multiplayer chat window: MSVC C.  The CD names it mpchat.DLL,
 # and setup installs it under that name.
@@ -550,7 +550,7 @@ $(BIN)/mpchat.res: src/mpchat/mpchat.rc
 	$(RC) $< -O coff -o $@
 
 src/mpchat/mpchat_data.inc: $(ORIG)/Modules/mpchat.DLL tools/gen_mpchat_data.py
-	@python3 tools/gen_mpchat_data.py $< $@
+	@python3 -B tools/gen_mpchat_data.py $< $@
 
 # WINMSG, the on-screen message window: MSVC C.
 $(BIN)/WINMSG.DLL: src/winmsg/winmsg.c src/winmsg/winmsg.def src/winmsg/winmsg_data.inc \
@@ -566,7 +566,7 @@ $(BIN)/winmsg.res: src/winmsg/winmsg.rc
 	$(RC) $< -O coff -o $@
 
 src/winmsg/winmsg_data.inc: $(ORIG)/Modules/WINMSG.DLL tools/gen_winmsg_data.py
-	@python3 tools/gen_winmsg_data.py $< $@
+	@python3 -B tools/gen_winmsg_data.py $< $@
 
 # LANDME, the landing-assistance state machine.  It uses retail FE in-game and
 # in its differential harness, so it can be completed independently of FE's
@@ -582,7 +582,7 @@ $(BIN)/landme.res: src/landme/landme.rc
 	$(RC) $< -O coff -o $@
 
 src/landme/landme_data.inc: $(ORIG)/Modules/LANDME.DLL tools/gen_landme_data.py
-	@python3 tools/gen_landme_data.py $< $@
+	@python3 -B tools/gen_landme_data.py $< $@
 
 $(BIN)/SLEW.DLL: src/slew/slew.c src/slew/slew.def $(BIN)/slew.res
 	@mkdir -p $(BIN)
@@ -635,11 +635,10 @@ $(BIN)/UTIL_TRACE.DLL: $(UTIL_SRC) src/util/util.def src/util/util_imports.h \
 	      -o $@ $(UTIL_SRC) $(BIN)/util.res src/util/util.def -lkernel32 -lgcc
 
 util-trace: $(BIN)/UTIL_TRACE.DLL $(BIN)/UTIL.DLL
-	@cp $(BIN)/UTIL_TRACE.DLL "$(FS98_DIR)/Modules/UTIL.DLL"
 	@rm -f "$(UTIL_TRACE_LOG)"
 	@echo "tracing UTIL for up to $(UTIL_TRACE_SECS)s -- use the sim, or just wait"
-	@cd $(FS98_DIR) && WINEDEBUG=-all timeout $(UTIL_TRACE_SECS) wine FLTSIM98.EXE >/dev/null 2>&1 || true
-	@cp $(BIN)/UTIL.DLL "$(FS98_DIR)/Modules/UTIL.DLL"
+	@tools/run_swapped.sh "$(FS98_DIR)/Modules/UTIL.DLL" $(BIN)/UTIL_TRACE.DLL \
+	    sh -c 'cd $(FS98_DIR) && WINEDEBUG=-all timeout $(UTIL_TRACE_SECS) wine FLTSIM98.EXE >/dev/null 2>&1 || true'
 	@echo "--- services called (slot, count, hex) ---"
 	@grep -v ' 00000000' "$(UTIL_TRACE_LOG)" 2>/dev/null || echo "(no log)"
 	@echo "--- never called ---"
@@ -650,10 +649,10 @@ $(BIN)/util.res: src/util/util.rc
 	$(RC) $< -O coff -o $@
 
 src/global/global_state.inc: $(ORIG)/Modules/GLOBAL.DLL tools/gen_global_state.py
-	python3 tools/gen_global_state.py $< $@
+	python3 -B tools/gen_global_state.py $< $@
 
 src/numeric/numeric_data.inc: $(ORIG)/Modules/NUMERIC.DLL tools/gen_numeric_tables.py
-	@python3 tools/gen_numeric_tables.py $< $@
+	@python3 -B tools/gen_numeric_tables.py $< $@
 
 # The in-process test module.  The host cannot be loaded beside an external
 # test program -- no .reloc, so it only works at 0x400000, which is already
@@ -681,11 +680,9 @@ ofstest: $(BIN)/OFSTEST.DLL
 # they would be comparing it with itself -- and whatever was there is put back.
 ofstest-run: ofstest
 	@cp $(BIN)/OFSTEST.DLL "$(FS98_DIR)/Modules/OFSTEST.DLL"
-	@cp "$(FS98_DIR)/Modules/UTIL.DLL" $(BIN)/.util-installed.bak
-	@cp $(ORIG)/Modules/UTIL.DLL "$(FS98_DIR)/Modules/UTIL.DLL"
 	@rm -f "$(OFSTEST_LOG)"
-	@cd $(FS98_DIR) && WINEDEBUG=-all timeout 45 wine FLTSIM98.EXE >/dev/null 2>&1 || true
-	@cp $(BIN)/.util-installed.bak "$(FS98_DIR)/Modules/UTIL.DLL"; rm -f $(BIN)/.util-installed.bak
+	@tools/run_swapped.sh "$(FS98_DIR)/Modules/UTIL.DLL" $(ORIG)/Modules/UTIL.DLL \
+	    sh -c 'cd $(FS98_DIR) && WINEDEBUG=-all timeout 45 wine FLTSIM98.EXE >/dev/null 2>&1 || true'
 	@echo "--- $(OFSTEST_LOG) ---"
 	@cat "$(OFSTEST_LOG)" 2>/dev/null || echo "(no log -- init was not reached)"
 
@@ -746,7 +743,7 @@ $(DIFFDIR)/numericdiff.exe: tools/difftest/numericdiff.c \
 	      tools/difftest/numericdiff.c src/numeric/numeric.c -lm
 
 src/util/cos_table.inc: $(ORIG)/Modules/UTIL.DLL tools/gen_util_tables.py
-	@python3 tools/gen_util_tables.py $< $@
+	@python3 -B tools/gen_util_tables.py $< $@
 
 utildiff: $(DIFFDIR)/utildiff.exe $(BIN)/UTIL.DLL
 	@cp $(ORIG)/Modules/UTIL.DLL $(DIFFDIR)/UTIL_retail.dll
@@ -982,7 +979,7 @@ window-break-build:
 	      $(WINDOW_SRC) $(BIN)/window.res src/window/window.def -lkernel32 -lgcc
 
 window-breaks: windowdiff
-	@python3 tools/window_breaks.py $(if $(N),$(N),2000)
+	@python3 -B tools/window_breaks.py $(if $(N),$(N),2000)
 
 # G3D, in progress: retail and OpenFS98 in turn over the same scripts, every
 # register set before each service call and compared after, the host's divide
@@ -1061,16 +1058,16 @@ multip-breaks: multipdiff
 	@python3 -B tools/multip_breaks.py
 
 multip-directplay-breaks: multipdiff
-	@python3 tools/multip_breaks.py --slice directplay
+	@python3 -B tools/multip_breaks.py --slice directplay
 
 multip-worker-breaks: multipdiff
-	@python3 tools/multip_breaks.py --slice workers
+	@python3 -B tools/multip_breaks.py --slice workers
 
 multip-receive-breaks: multipdiff
-	@python3 tools/multip_breaks.py --slice receive
+	@python3 -B tools/multip_breaks.py --slice receive
 
 multip-send-breaks: multipdiff
-	@python3 tools/multip_breaks.py --slice send
+	@python3 -B tools/multip_breaks.py --slice send
 
 # G3D broken on purpose, a place at a time (tools/g3d_breaks.py).
 G3D_SRC ?= src/g3d/g3d.c
@@ -1080,7 +1077,7 @@ g3d-break-build:
 	      $(G3D_SRC) src/g3d/g3d_mesh.c $(BIN)/g3d.res src/g3d/g3d.def -lkernel32 -luser32 -lgcc
 
 g3d-breaks: g3ddiff
-	@python3 tools/g3d_breaks.py $(if $(N),$(N),2000)
+	@python3 -B tools/g3d_breaks.py $(if $(N),$(N),2000)
 
 # The mesh compiler (0x38) three ways -- retail's own G3D.DLL, the C on the
 # x87, the C on its software float -- over generated polygons under each
@@ -1148,7 +1145,7 @@ reality-break-build:
 	      $(REALITY_SRC) $(BIN)/reality.res src/reality/reality.def -lkernel32 -lgcc
 
 reality-breaks: realitydiff
-	@python3 tools/reality_breaks.py $(if $(N),$(N),2000)
+	@python3 -B tools/reality_breaks.py $(if $(N),$(N),2000)
 
 realitydiff-run: realitydiff
 	@cd $(DIFFDIR) && WINEDEBUG=-all timeout 3600 wine realitydiff.exe $(if $(N),$(N),20000)
@@ -1200,7 +1197,7 @@ controls-break-build:
 	      $(BIN)/controls.res src/controls/controls.def -lkernel32 -luser32 -lgcc
 
 controls-breaks: controlsdiff
-	@python3 tools/controls_breaks.py $(if $(N),$(N),2000)
+	@python3 -B tools/controls_breaks.py $(if $(N),$(N),2000)
 
 # A deliberately broken copy of analysis.c as the harness's "ours" (for
 # tools/analysis_breaks.py, which makes the copies and runs the harness).
@@ -1210,7 +1207,7 @@ analysis-break-build:
 	      $(ANALYSIS_SRC) $(BIN)/analysis.res src/analysis/analysis.def -lkernel32 -lgcc
 
 analysis-breaks: analysisdiff
-	@python3 tools/analysis_breaks.py $(if $(N),$(N),2000)
+	@python3 -B tools/analysis_breaks.py $(if $(N),$(N),2000)
 
 analysisdiff-run: analysisdiff
 	@cd $(DIFFDIR) && WINEDEBUG=-all timeout 3600 wine analysisdiff.exe $(if $(N),$(N),20000)
@@ -1239,12 +1236,12 @@ main-break-build:
 	      $(MAIN_BREAK_DIR)/main.c $(BIN)/main.res src/main/main.def -lmsvcrt -lkernel32 -luser32 -lgdi32 -lgcc
 
 main-breaks: maindiff
-	@python3 tools/main_breaks.py $(if $(N),$(N),2000) $(if $(SUITE),$(SUITE),records)
+	@python3 -B tools/main_breaks.py $(if $(N),$(N),2000) $(if $(SUITE),$(SUITE),records)
 
 # HOST (module id 1, FLTSIM98.EXE), a slice at a time (docs/modules/host.md).
 include tools/host_runtime.mk
 src/host/host_data.inc src/host/host_pointers.inc &: $(ORIG)/FLTSIM98.EXE tools/gen_host_data.py
-	python3 tools/gen_host_data.py
+	python3 -B tools/gen_host_data.py
 
 $(BIN)/HOST.DLL: src/host/host.c src/host/host.def src/host/host_data.inc src/host/runtime/host_rt.h src/host/runtime/host_rt_rdata.inc $(HOST_RT_STANDALONE_OBJECTS)
 	@mkdir -p $(BIN)
@@ -1271,7 +1268,7 @@ host-break-build: $(HOST_RT_STANDALONE_OBJECTS)
 	      -o $(DIFFDIR)/HOST_ours.dll $(HOST_BREAK) $(HOST_RT_STANDALONE_OBJECTS) src/host/host.def -lmsvcrt -lgdi32 -luser32 -lwinmm -ladvapi32 -lmsacm32 -lddraw -lkernel32
 
 host-breaks: hostdiff
-	@python3 tools/host_breaks.py $(if $(N),$(N),2000)
+	@python3 -B tools/host_breaks.py $(if $(N),$(N),2000)
 
 # MPCHAT, whole-module: the chat window, retail and OpenFS98 in turn over the
 # same scripts, against a model of the window system (hooked into both DLLs'
@@ -1294,7 +1291,7 @@ mpchat-break-build:
 	      -lkernel32 -luser32 -lgdi32 -lgcc
 
 mpchat-breaks: mpchatdiff
-	@python3 tools/mpchat_breaks.py $(if $(N),$(N),2000)
+	@python3 -B tools/mpchat_breaks.py $(if $(N),$(N),2000)
 
 mpchatdiff-run: mpchatdiff
 	@cd $(DIFFDIR) && WINEDEBUG=-all timeout 3600 wine mpchatdiff.exe $(if $(N),$(N),20000)
@@ -1319,7 +1316,7 @@ winmsg-break-build:
 	      $(WINMSG_SRC) $(BIN)/winmsg.res src/winmsg/winmsg.def -lkernel32 -luser32 -lgcc
 
 winmsg-breaks: winmsgdiff
-	@python3 tools/winmsg_breaks.py $(if $(N),$(N),2000)
+	@python3 -B tools/winmsg_breaks.py $(if $(N),$(N),2000)
 
 winmsgdiff-run: winmsgdiff
 	@cd $(DIFFDIR) && WINEDEBUG=-all timeout 3600 wine winmsgdiff.exe $(if $(N),$(N),20000)
@@ -1363,7 +1360,7 @@ panels-break-build:
 	      $(PANELS_DEF) -lmsvcrt -lgdi32 -luser32 -lkernel32 -lgcc
 
 panels-breaks: panelsdiff panelsunit
-	@python3 tools/panels_breaks.py $(if $(N),$(N),150) $(if $(COUNT),$(COUNT),200) $(if $(SEED),$(SEED),1)
+	@python3 -B tools/panels_breaks.py $(if $(N),$(N),150) $(if $(COUNT),$(COUNT),200) $(if $(SEED),$(SEED),1)
 
 panelsdiff-run: panelsdiff
 	@cd $(DIFFDIR) && WINEDEBUG=-all timeout 7200 wine panelsdiff.exe $(if $(N),$(N),200) $(START)
@@ -1487,22 +1484,22 @@ difftest-run: difftest
 	@cd $(DIFFDIR) && WINEDEBUG=-all wine slewdiff.exe $(N)
 
 stage:
-	@python3 tools/stage_game.py
+	@python3 -B tools/stage_game.py
 
 stage-scenery:
 	@python3 -B tools/stage_scenery.py
 
 setup-map:
-	@python3 tools/extract_setup_map.py cd/Setup.exe > docs/setup_map.tsv
+	@python3 -B tools/extract_setup_map.py cd/Setup.exe > docs/setup_map.tsv
 	@wc -l < docs/setup_map.tsv | xargs echo "entries:"
 
 # Map the host's service table: where it is, how the services classify by code
 # shape, and which libraries each reaches for.
 hostmap:
-	@python3 tools/hostmap.py $(ORIG)/FLTSIM98.EXE
+	@python3 -B tools/hostmap.py $(ORIG)/FLTSIM98.EXE
 
 graph:
-	@python3 tools/modgraph.py $(ORIG)/Modules
+	@python3 -B tools/modgraph.py $(ORIG)/Modules
 
 # side-by-side disassembly of a module's .text, ours vs retail
 disasm-%: all
@@ -1512,7 +1509,7 @@ disasm-%: all
 compare: all
 	@for m in $(ALL_MODULES); do \
 	  echo "== $$m"; \
-	  python3 tools/pesurvey.py $$(make -s orig-module-of M=$$m) $(BIN)/$$m.DLL 2>/dev/null; \
+	  python3 -B tools/pesurvey.py $$(make -s orig-module-of M=$$m) $(BIN)/$$m.DLL 2>/dev/null; \
 	done
 
 run:
@@ -1634,7 +1631,7 @@ install: all
 	@test -d "$(FS98_DIR)/Modules" || { echo "no $(FS98_DIR)/Modules -- set FS98_DIR"; exit 1; }
 	@for m in $(MODULES); do \
 	  n=$$(make -s installed-name-of M=$$m); \
-	  cp $(BIN)/$$m.DLL "$(FS98_DIR)/Modules/$$n"; echo "installed $$m -> $$n"; \
+	  cp $(BIN)/$$m.DLL "$(FS98_DIR)/Modules/$$n.openfs98" && mv -f "$(FS98_DIR)/Modules/$$n.openfs98" "$(FS98_DIR)/Modules/$$n"; echo "installed $$m -> $$n"; \
 	done
 	$(MAKE) $(foreach m,$(ENGLISH_MODULES) $(SHARED_MODULES),$(call english_target,$(m))-install) FS98_DIR="$(FS98_DIR)"
 	$(MAKE) gauges-install FS98_DIR="$(FS98_DIR)"
@@ -1644,7 +1641,7 @@ install: all
 revert:
 	@for m in $(MODULES); do \
 	  n=$$(make -s installed-name-of M=$$m); \
-	  cp "$$(make -s orig-module-of M=$$m)" "$(FS98_DIR)/Modules/$$n"; echo "reverted $$n"; \
+	  cp "$$(make -s orig-module-of M=$$m)" "$(FS98_DIR)/Modules/$$n.openfs98" && mv -f "$(FS98_DIR)/Modules/$$n.openfs98" "$(FS98_DIR)/Modules/$$n"; echo "reverted $$n"; \
 	done
 	$(MAKE) $(foreach m,$(ENGLISH_MODULES) $(SHARED_MODULES),$(call english_target,$(m))-revert) FS98_DIR="$(FS98_DIR)"
 	$(MAKE) gauges-revert FS98_DIR="$(FS98_DIR)"

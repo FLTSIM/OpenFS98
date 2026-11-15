@@ -20,6 +20,7 @@
  *
  * Build: make fediff     Run: make fediff-run
  */
+#include "argcount.h"
 #include <windows.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -2030,7 +2031,7 @@ int main(int argc, char **argv)
     int32_t image_difference;
 
     SetUnhandledExceptionFilter(fe_unhandled);
-    scenarios = argc > 1 ? (uint32_t)strtoul(argv[1], NULL, 0) : 100;
+    scenarios = argc > 1 ? (uint32_t)arg_count(argv[1]) : 100;
     if (argc < 3) {
         printf("usage: fediff.exe [scenarios] fixture-root\n");
         return 2;

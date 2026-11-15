@@ -30,6 +30,7 @@
  *
  * Build: make weathermdiff     Run: make weathermdiff-run
  */
+#include "argcount.h"
 #include <windows.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -900,7 +901,7 @@ int main(int argc, char **argv)
     static uint8_t rimage[IMAGE_HI], rglobal[GLOBAL_SIZE], rarena[ARENA_SIZE];
     static struct side retail, ours;
     static struct scenario s;
-    unsigned v, n = argc > 1 ? (unsigned)atoi(argv[1]) : 20000, bad = 0, k;
+    unsigned v, n = argc > 1 ? (unsigned)arg_count(argv[1]) : 20000, bad = 0, k;
     struct import *im;
     uint32_t rused;
 

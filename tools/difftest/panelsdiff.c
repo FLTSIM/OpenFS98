@@ -23,6 +23,7 @@
  *
  * Build: make panelsdiff     Run: make panelsdiff-run [N=...]
  */
+#include "argcount.h"
 #include <windows.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -3282,7 +3283,7 @@ int main(int argc, char **argv)
 {
     char *rlog = NULL;
     static struct scenario sc;
-    unsigned n = argc > 1 ? (unsigned)atoi(argv[1]) : 200, start = argc > 2 ? (unsigned)atoi(argv[2]) : 0;
+    unsigned n = argc > 1 ? (unsigned)arg_count(argv[1]) : 200, start = argc > 2 ? (unsigned)atoi(argv[2]) : 0;
     unsigned v, bad = 0, i, failed[64];
 #ifdef GAUGES_DIFF
     unsigned missing_gauges = 0;
@@ -3314,7 +3315,7 @@ int main(int argc, char **argv)
     if (unit_mode) {
         argc--;
         argv++;
-        n = argc > 1 ? (unsigned)atoi(argv[1]) : 200;
+        n = argc > 1 ? (unsigned)arg_count(argv[1]) : 200;
         start = argc > 2 ? (unsigned)atoi(argv[2]) : 0;
     }
     if (!load_side(&sides[0], "PANELS_retail.dll") ||

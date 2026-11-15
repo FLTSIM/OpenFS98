@@ -2,6 +2,7 @@
  * payload and PANELS transcript. Metadata comes from the checked PE survey;
  * the test loads separate retail and rebuilt modules and never executes a
  * retail byte through the replacement. */
+#include "argcount.h"
 #include <windows.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -405,7 +406,7 @@ static int test_module(unsigned count, const char *replacement)
 
 int main(int argc, char **argv)
 {
-    unsigned index, tested = 0, count = argc > 1 ? (unsigned)strtoul(argv[1], NULL, 0) : 100;
+    unsigned index, tested = 0, count = argc > 1 ? (unsigned)arg_count(argv[1]) : 100;
     const char *only = argc > 2 ? argv[2] : NULL;
     const char *replacement = argc > 3 ? argv[3] : NULL;
     SetErrorMode(SEM_NOGPFAULTERRORBOX | SEM_FAILCRITICALERRORS);

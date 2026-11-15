@@ -13,6 +13,7 @@ Usage: tools/window_breaks.py [N] [name...]       (from the repository root,
        after make windowdiff)
 """
 import os
+import re
 import subprocess
 import sys
 
@@ -193,9 +194,13 @@ def main():
         run = subprocess.run(["wine", "windowdiff.exe", str(N), "../../cd"], cwd="bin/difftest",
                              capture_output=True, text=True,
                              env=dict(os.environ, WINEDEBUG="-all"))
-        caught = run.returncode != 0
         last = [l for l in run.stdout.splitlines() if l.startswith("windowdiff:")]
-        verdict = "caught" if caught else "equivalent" if len(entry) > 3 else "MISSED"
+        # only a finished comparison that reports differences is a catch: a crash, a load failure
+        # or a harness guard (exit 2-6) is not, as main_breaks.py learnt from 27 hidden misses
+        caught = (run.returncode == 1 and bool(last) and re.search(r" [1-9][0-9]* differ$", last[-1]) is not None)
+        crashed = not caught and run.returncode != 0
+        verdict = ("caught" if caught else "CRASHED (exit %d)" % run.returncode if crashed
+                   else "equivalent" if len(entry) > 3 else "MISSED")
         print("%-20s %s  %s%s" % (name, verdict, last[0] if last else run.stdout.strip()[-200:],
                                   "  (" + entry[3] + ")" if len(entry) > 3 and not caught else ""))
         results.append((name, verdict.lower()))

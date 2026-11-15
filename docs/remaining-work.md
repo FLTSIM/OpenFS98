@@ -143,3 +143,44 @@ to `orig/Aircraft/` (2026-11-06).
    the rest own 64 of the host's 65 dialogs; the graph does not see them yet.
 3. **The host's 84 services that call no platform API.** Portable logic, and the
    specification a native host has to satisfy ([portability.md](portability.md)).
+
+## Tooling fixes from the 2026-11-14 audit
+
+Done the same day: the break runners for WINDOW, WINMSG, REALITY, ANALYSIS, MPCHAT, HOST
+and G3D counted any non-zero exit as a caught break, so a crash, a `cannot load` (exit 2)
+or one of the harness's own guards (exits 3-6) passed as a catch. They now count a break as
+caught only when the harness exits 1 and its summary reports a non-zero `N differ` (host's
+and G3D's hangs still count, as before); anything else prints `CRASHED (exit N)` and is
+listed as missed. **Re-run those seven suites** before trusting their catch counts in
+CLAUDE.md: some breaks recorded as caught may have been crashes.
+
+Still to do:
+
+1. **Test runs keep every game copy.** `tools/mpdialog_smoke.py` (`smoke-game-*`) and
+   `tools/mpdialog_owner_acceptance.py` (`owner-acceptance-*`) never delete their copies of
+   the game: `bin/mpdialog-diff` had 204 entries, 73 GB, and `bin/` 127 GB. Delete the copy
+   in the existing `finally`, keep the logs and manifest, and keep the copy only on `KEEP=1`.
+2. **`tools/flights_play.sh` leaves ~12 GB and four Xvfb servers behind when interrupted.**
+   Cleanup runs only after a run finishes. Add
+   `trap 'kill $(jobs -p) 2>/dev/null; rm -rf "$out"/game-* "$out"/prefix-*' EXIT`.
+3. **`make util-trace` and `make ofstest-run` do not restore what was installed.** util-trace
+   always puts back `bin/UTIL.DLL` (even if retail UTIL was installed), and neither restores
+   anything on Ctrl-C. Do it the way `tools/main_smoke.sh` does: back up, restore in a trap,
+   check with `cmp`.
+4. **`make install` and `make revert` rewrite Modules DLLs in place** with `cp`
+   (Makefile, the `install` and `revert` loops), while the English and SIMSUI targets copy to
+   a temporary name and `mv` it over. A game running at the time sees its mapped DLLs change.
+   Use the same copy-then-`mv` in both loops.
+5. **`tools/__pycache__/` is tracked**: 17 `.pyc` files, two of them (`gen_host_runtime`,
+   `gen_sim1_lift`) for generators deleted with the lifted code. `git rm -r --cached
+   tools/__pycache__`, add `__pycache__/` to `.gitignore`; the Makefile lines that run
+   `python3` without `-B` are what write them.
+6. **The `tools/world_*_native_breaks.py` runners are near-copies** (about fifteen files,
+   1,149 lines), each with the same hard-coded list of 38 World source units. Adding a unit
+   means editing all of them. One runner with a mutation table per family, and the unit list
+   taken from `src/world/*.c`.
+7. **A zero or mistyped `N` passes.** The harnesses read it with `strtoul`, so `N=2OOOO`
+   runs 0 scenarios and reports 0 differ, exit 0. Exit 2 when `n == 0`.
+8. **`WINDOW_` is defined twice in MAIN** (`src/main/main_kneeboard.inc` and
+   `src/main/main_commands.inc`), to the same address; `main.c`'s only warning. Drop the
+   kneeboard one.

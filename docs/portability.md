@@ -3,6 +3,11 @@
 Moved out of the README. The end state is native builds; this is how far away
 that is and the decisions already made on the way.
 
+The plan for the port itself -- order, correctness tiers, UI, third-party
+add-ons, module contract -- is [native-port/SPEC.md](native-port/SPEC.md),
+with the evidence behind its decisions in
+[native-port/decisions.md](native-port/decisions.md).
+
 The end state is native builds -- modern Windows, Linux, Mac, maybe Android --
 at which point wine stops mattering. Running the retail binary under wine is
 scaffolding for the middle of the project, not the destination. Its one real

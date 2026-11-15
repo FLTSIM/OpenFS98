@@ -797,12 +797,11 @@ classes at 0x417168) must be kept out of the random seeding, or the paths
 behind them are never taken. `HOSTDIFF_HEAPCHK=1` validates the heap after
 every check.
 
-The full `make host-breaks` (610 breaks, about six hours) catches 580, proves
-26 equivalent and misses four, all rare display paths: `ds-field-skip` (a
-39-character mode string read past its end into the flags, visible only when
-their low byte is a digit), `ds-mmx-hal` and `ds-mode-mem` (caught in targeted
-runs at N=3000), and `dd-mode640` (a secondary driver asked for a 640-wide
-mode that is not 480 high).
+The full `make host-breaks` (505 breaks since 2026-11-14, when the 105 in
+`host.c`'s copies of runtime routines went with the copies; those routines'
+breaks are the runtime's, `tools/host_rt_breaks.py`) catches 488, proves 15
+equivalent and misses two rare display paths at N=2000, `ds-mmx-hal` and
+`ds-mode-mem`, both caught in targeted runs at N=3000.
 
 ## The executable
 

@@ -5,6 +5,7 @@ Snapshot all inputs before building: ongoing Sim work cannot change a mutation's
 headers or harness halfway through the run. Each worker has its own source tree
 and process; the tests make no real registry, timer, window or game writes.
 """
+import module_flags
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 import json
@@ -136,8 +137,7 @@ def main():
             (work/key).write_text(value.replace(before,after,1) if key==filename else value)
         executable=work/'test.exe'
         executable.unlink(missing_ok=True)
-        build=subprocess.run(['i686-w64-mingw32-gcc','-std=c99','-O2','-Wall','-Wextra','-Werror',
-            '-fno-strict-aliasing','-o',str(executable),str(work/'simdiff.c'),
+        build=subprocess.run(['i686-w64-mingw32-gcc', *module_flags.FLAGS,'-std=c99', '-Itools/difftest','-O2','-Wall','-Wextra','-Werror','-o',str(executable),str(work/'simdiff.c'),
             *(str(work/f'sim_{unit}.c') for unit in ('events','objects','crash','engines','systems','realism','fuel','settings')),'-lntdll'],text=True,capture_output=True)
         if build.returncode:
             print(f'{name}: BUILD FAILED (not counted)\n{build.stderr}',flush=True);return False

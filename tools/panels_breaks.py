@@ -17,7 +17,7 @@ directory of its own (bin/difftest_brk<k>, beside bin/difftest so that the
 game's path is the same).
 
 Usage: tools/panels_breaks.py [N] [COUNT] [SEED] [name...]   (from the
-       repository root, after make panelsdiff panelsunit)
+       repository root, after tools/ofs panelsdiff panelsunit)
   N      scenarios of the whole-module mode per mutant (default 150)
   COUNT  how many mutants to try (default 200)
   SEED   which sample (default 1)
@@ -123,14 +123,14 @@ def attempt(item, k, source_lines):
     name, ln, new, func = item
     d = "bin/difftest_brk%d" % k
     os.makedirs(d, exist_ok=True)
-    for f in ("panelsdiff.exe", "PANELS_retail.dll"):
-        if not os.path.exists(os.path.join(d, f)):
-            shutil.copy(os.path.join("bin/difftest", f), os.path.join(d, f))
+    for f in ("panelsdiff.exe", "PANELS_retail.dll"):    # every time: a copy kept from an earlier build is stale
+        shutil.copy(os.path.join("bin/difftest", f), os.path.join(d, f))
     tmp = os.path.join(d, "panels_break.c")
     lines = list(source_lines)
     lines[ln] = new
     open(tmp, "w").write("\n".join(lines) + "\n")
     outs = []
+    crashed = ""
     unit_name = UNIT_FOR.get(func, func)
     for flavour, dll, extra, deff in (("unit", "PANELS_unit.dll", "-DPANELS_UNIT", "src/panels/panels_unit.def"),
                                       ("module", "PANELS_ours.dll", "", "src/panels/panels.def")):
@@ -139,7 +139,7 @@ def attempt(item, k, source_lines):
         out = os.path.join(d, dll)
         if os.path.exists(out):
             os.remove(out)
-        build = run(["make", "-s", "panels-break-build", "PANELS_SRC=" + tmp, "PANELS_OUT=" + out,
+        build = run(["tools/ofs", "panels-break-build", "PANELS_SRC=" + tmp, "PANELS_OUT=" + out,
                      "PANELS_DEF=" + deff, "PANELS_BREAK_FLAGS=" + extra])
         if build.returncode != 0:
             return name, "unbuilt", build.stderr[-300:]
@@ -152,7 +152,14 @@ def attempt(item, k, source_lines):
         outs.append((flavour, r.returncode))
         if r.returncode != 0:
             last = [l for l in r.stdout.splitlines() if "differ" in l or "HANG" in l or "fault" in l]
-            return name, "caught", "%s: %s" % (flavour, (last[-1] if last else "exit %d" % r.returncode)[:100])
+            # caught only by a reported difference or a hang (the watchdog's exit 4); a crash, a
+            # `cannot load` or a guard (exit 2) is a miss, as in the other break runners
+            if (r.returncode == 1 and re.search(r"\b[1-9]\d* differ", r.stdout)) or \
+                    (r.returncode == 4 and "HANG" in r.stdout):
+                return name, "caught", "%s: %s" % (flavour, (last[-1] if last else "exit %d" % r.returncode)[:100])
+            crashed = crashed or "%s: exit %d %s" % (flavour, r.returncode, (last[-1] if last else "")[:80])
+    if crashed:     # a crash in the unit mode still leaves the module mode its chance to differ
+        return name, "CRASHED", crashed
     return name, "MISSED", " ".join("%s ok" % f for f, _ in outs)
 
 
@@ -188,12 +195,12 @@ def main():
             print("%-34s %-8s %s" % (name, verdict, note))
             sys.stdout.flush()
             results.append((name, verdict, item))
-    missed = [(n, i) for n, v, i in results if v == "MISSED"]
+    missed = [(n, i) for n, v, i in results if v in ("MISSED", "CRASHED")]
     unbuilt = [n for n, v, i in results if v == "unbuilt"]
     print("%d mutants, %d caught, %d missed, %d did not build" %
           (len(results), sum(v == "caught" for _, v, _ in results), len(missed), len(unbuilt)))
     for n, i in missed:
-        print("  MISSED %-30s %s" % (n, lines[i[1]].strip()[:100]))
+        print("  MISSED %-30s %s" % (n, lines[i[1]].strip()[:100]))  # CRASHED ones included
     return 1 if missed else 0
 
 

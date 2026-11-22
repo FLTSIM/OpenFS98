@@ -27,7 +27,7 @@ commands="1308 1309 1607 1203 1201 1202 1204 1205 1301 1306 1307 1407 1409 1502 
 # drawn), and Display options through the Display page's button, with each of its pages.
 # See tools/drive/fsdialogs.c.
 steps="1607/3805 1407/4443 1407/4439 1409/4467 set:1205/@505,190/@80,174 crash 1102 1109 1109/502 1109/504 1109/502/3257 1109/502/3202 1106 1107 1105 exit 1404 1405 140a 140a/@530,158 140a/@530,197 1409/@500,157 1409/@500,196 1409/@500,235 1409/@500,274 1409/@500,313 1409/@500,235/4417 1409/@500,235/4417/@500,157 1409/@500,235/4417/@500,196 1409/@500,235/4417 1409/@500,235/4417/@500,235 1403"
-english="$(make -s english-modules-of) $(make -s english-candidates-of) $(make -s shared-modules-of) $(make -s shared-candidates-of)"
+english="$(tools/modules.sh english-modules-of) $(tools/modules.sh english-candidates-of) $(tools/modules.sh shared-modules-of) $(tools/modules.sh shared-candidates-of)"
 for m in MAIN $english; do
     [ -f "bin/$m.DLL" ] || { echo "needs bin/$m.DLL" >&2; exit 2; }
 done
@@ -55,8 +55,8 @@ run() {     # tag dll button
     cp "$2" "$copy/Modules/MAIN.DLL"
     local m
     for m in $english; do      # the English DLLs, Flights and SIMSUI: retail's or ours with MAIN
-        if [[ $1 == ours-* ]]; then cp "bin/$m.DLL" "$copy/$(make -s installed-path-of M=$m)"
-        else cp "$(make -s orig-module-of M=$m)" "$copy/$(make -s installed-path-of M=$m)"; fi
+        if [[ $1 == ours-* ]]; then cp "bin/$m.DLL" "$copy/$(tools/modules.sh installed-path-of "$m")"
+        else cp "$(tools/modules.sh orig-module-of "$m")" "$copy/$(tools/modules.sh installed-path-of "$m")"; fi
     done
     ( cd "$copy" && WINEDEBUG=err+all timeout 720 wine FLTSIM98.EXE '/STN:Situatio\STGEORGE.STN' >"$dir/game.log" 2>&1 ) &
     local pid=$!

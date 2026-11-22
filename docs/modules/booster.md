@@ -1,8 +1,8 @@
 # BOOSTER.DLL — the performance boosters
 
 BOOSTER (module id 34) is the CD scenery cache, and it is reimplemented and
-verified. `make boosterdiff-run` drives retail and OpenFS98 through 20,000
-whole-module scenarios, worker thread included: zero differences, after all 25 deliberate breaks were caught. It runs in-game with `make smoke` passing.
+verified. `tools/ofs boosterdiff-run` drives retail and OpenFS98 through 20,000
+whole-module scenarios, worker thread included: zero differences, after all 25 deliberate breaks were caught. It runs in-game with `tools/ofs smoke` passing.
 
 A "performance booster" is a directory on the CD (`Boosters\Antarcti`,
 `Boosters\europe`, ...) with a `bstinfo` file and `scenery\files*`,
@@ -19,8 +19,10 @@ world file gives it.
 one `__CxxFrameHandler` frame) and one 0x904-byte `.data` section, of which
 0x200 bytes are on disk. `ImportTable` is at `+0x0`, `Linkage` at `+0x38`,
 then the strings, the level factors and all of the state.
-`tools/gen_booster_data.py` extracts the image; its only relocations are the
-four Linkage code pointers, which `booster.c` installs.
+The image is a typed struct in `booster.c` at retail's offsets (strings, ten
+hex-float level factors, state); `tools/check_data_image.py` proves it equals
+retail's byte for byte. Its only relocations are the four Linkage code
+pointers, which `booster.c` installs.
 
 Imports: host, GLOBAL, CHAIN, NUMERIC (never called), UTIL and FE.
 Direct Win32 calls: thread, mutex, event and critical section;

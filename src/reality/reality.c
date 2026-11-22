@@ -39,17 +39,89 @@ typedef volatile uint32_t __attribute__((may_alias)) re_v32;
 typedef volatile double   __attribute__((may_alias)) re_vd;
 
 struct reality_image {
-    uint8_t bytes[RE_IMAGE_SIZE];
-};
+    uint32_t jump[8];                           /* +0x00 code pointers, installed */
+    uint8_t  state[0x28];                       /* +0x20 */
+    struct { uint32_t id, link; } import[13];   /* +0x48 */
+    uint32_t linkage[8];                        /* +0xb0 */
+    uint16_t crack[0x4e][2];                    /* +0xd0 */
+    uint32_t rest[(RE_IMAGE_SIZE - 0x208) / 8][2];   /* +0x208: meaning not yet known */
+} __attribute__((packed));
+_Static_assert(sizeof(struct reality_image) == RE_IMAGE_SIZE, "image");
+_Static_assert(__builtin_offsetof(struct reality_image, import) == RE_IMPORTS, "import");
+_Static_assert(__builtin_offsetof(struct reality_image, linkage) == 0xb0, "linkage");
+_Static_assert(__builtin_offsetof(struct reality_image, crack) == 0xd0, "crack");
+_Static_assert(__builtin_offsetof(struct reality_image, rest) == 0x208, "rest");
 
 extern struct reality_image reality_image;
 
-static const uint8_t reality_rdata[0x1000] __attribute__((aligned(8))) = {
-#include "reality_rdata.inc"
+struct reality_rdata {
+    uint32_t feet[12][2];                       /* +0x00 range, step */
+    uint32_t metric[12][2];                     /* +0x60 */
+    double   k[15];                             /* +0xc0 */
+    uint32_t export_dir[25];                    /* +0x138: retail's export directory; the scale search reads on into it */
+    uint8_t  zero[0x1000 - 0x19c];
+} __attribute__((packed));
+_Static_assert(sizeof(struct reality_rdata) == 0x1000, "rdata");
+_Static_assert(__builtin_offsetof(struct reality_rdata, metric) == 0x60, "metric");
+_Static_assert(__builtin_offsetof(struct reality_rdata, k) == 0xc0, "k");
+_Static_assert(__builtin_offsetof(struct reality_rdata, export_dir) == 0x138, "export_dir");
+static const struct reality_rdata reality_rdata __attribute__((aligned(8))) = {
+    .feet = {
+        {0x3, 0x2},
+        {0x7, 0x5},
+        {0xf, 0xa},
+        {0x1e, 0x14},
+        {0x4b, 0x32},
+        {0x96, 0x64},
+        {0x12c, 0xc8},
+        {0x2ee, 0x1f4},
+        {0x5dc, 0x3e8},
+        {0xbb8, 0x7d0},
+        {0x1d4c, 0x1388},
+        {0xffff, 0x2710},
+    },
+    .metric = {
+        {0xa, 0x2},
+        {0x19, 0x5},
+        {0x32, 0xa},
+        {0x64, 0x14},
+        {0xfa, 0x32},
+        {0x1f4, 0x64},
+        {0x3e8, 0xc8},
+        {0x9c4, 0x1f4},
+        {0x1388, 0x3e8},
+        {0x2710, 0x7d0},
+        {0x61a8, 0x1388},
+        {0xff37, 0x2710},
+    },
+    .k = {
+        0x1.381d897c00000p-2,
+        0x1.0000000000000p-16,
+        -0x1.6000000000000p+4,
+        0x1.0000000000000p+1,
+        0x1.4000000000000p+2,
+        0x1.8624ebda79eafp+0,
+        0x0.0p+0,
+        0x1.0000000000000p+0,
+        0x1.5555555555555p-5,
+        0x1.7c20000000000p+12,
+        0x1.7e10000000000p+12,
+        -0x1.fae0000000000p+12,
+        0x1.4800000000000p+5,
+        0x1.0000000000000p-13,
+        0x1.5555555555555p-13,
+    },
+    .export_dir = {
+        0x0, 0x0, 0x0, 0x33e94d61, 0x0,
+        0x317c, 0x1, 0x2, 0x2, 0x3168,
+        0x3170, 0x3178, 0x4048, 0x40b0, 0x3188,
+        0x3194, 0x10000, 0x4c414552, 0x2e595449, 0x4c4c44,
+        0x6f706d49, 0x61547472, 0x656c62, 0x6b6e694c, 0x656761,
+    },
 };
 
-#define D       ((uint32_t)(uintptr_t)reality_image.bytes)
-#define R       ((uint32_t)(uintptr_t)reality_rdata)
+#define D       ((uint32_t)(uintptr_t)reality_image.jump)
+#define R       ((uint32_t)(uintptr_t)reality_rdata.feet)
 #define M8(a)   (*(re_v8  *)(uintptr_t)(uint32_t)(a))
 #define M16(a)  (*(re_v16 *)(uintptr_t)(uint32_t)(a))
 #define M32(a)  (*(re_v32 *)(uintptr_t)(uint32_t)(a))
@@ -804,9 +876,106 @@ static uint32_t FS98_STDCALL control(uint32_t mode, uint32_t b, uint32_t hwnd)
 
 /* ---- the image -------------------------------------------------------------- */
 
-struct reality_image reality_image = {{
-#include "reality_data.inc"
-}};
+struct reality_image reality_image = {
+    .state = { [8] = 0x78, [19] = 0x80 },
+    .import = { {1,0},{2,0},{4,0},{16,0},{7,0},{13,0},{3,0},{17,0},{39,0},{20,0},{10,0},{22,0},{0,0} },
+    .linkage = { 32 },
+    .crack = {
+        {0x8, 0x8002},
+        {0x13, 0x39},
+        {0x9, 0x60},
+        {0x1b, 0x93},
+        {0x14, 0x80e5},
+        {0x10, 0xad},
+        {0x2e, 0x60},
+        {0x28, 0x1c},
+        {0x20, 0x2},
+        {0x30, 0x8002},
+        {0x28, 0x1c},
+        {0x28, 0x8100},
+        {0x31, 0xcd},
+        {0x40, 0x100},
+        {0xee, 0x80a9},
+        {0xf0, 0x100},
+        {0x53, 0x8048},
+        {0x58, 0x78},
+        {0x69, 0x59},
+        {0x6c, 0x1a},
+        {0x81, 0x2},
+        {0x63, 0x80ad},
+        {0x79, 0x78},
+        {0xc, 0x8100},
+        {0x31, 0xa1},
+        {0x69, 0x8059},
+        {0x79, 0x78},
+        {0x90, 0x43},
+        {0xa0, 0x93},
+        {0xbc, 0xa4},
+        {0x99, 0x806a},
+        {0xb6, 0x63},
+        {0xa3, 0x8093},
+        {0x96, 0xbc},
+        {0x9e, 0xcd},
+        {0x9e, 0x100},
+        {0x96, 0x80bc},
+        {0x83, 0xd9},
+        {0x86, 0xfd},
+        {0x79, 0x8078},
+        {0x63, 0xad},
+        {0x6b, 0xd9},
+        {0x68, 0x100},
+        {0x44, 0x8039},
+        {0x53, 0x48},
+        {0x5b, 0x30},
+        {0x63, 0x80ad},
+        {0x54, 0xd9},
+        {0x58, 0x100},
+        {0x63, 0x80ad},
+        {0x50, 0x90},
+        {0xb6, 0x8063},
+        {0xb9, 0x2d},
+        {0xe8, 0x2},
+        {0xb9, 0x802d},
+        {0xb1, 0x2},
+        {0xbb, 0x8090},
+        {0xe3, 0x65},
+        {0xbb, 0x8090},
+        {0xb9, 0xd9},
+        {0xb0, 0x100},
+        {0xb9, 0x80d9},
+        {0xc3, 0x100},
+        {0xf8, 0x8002},
+        {0xe8, 0x35},
+        {0xc8, 0x6c},
+        {0xe8, 0x8035},
+        {0xf8, 0x60},
+        {0xe9, 0x90},
+        {0xee, 0xa9},
+        {0xc8, 0x100},
+        {0x31, 0x80cd},
+        {0x31, 0xa1},
+        {0x49, 0x18},
+        {0x36, 0x1c},
+        {0x38, 0x2},
+        {0xe9, 0x8090},
+        {0x100, 0xa4},
+    },
+    .rest = {   /* meaning not yet known */
+        [0] = {0xffffffff, 0x0},
+        [2] = {0x2d, 0x0},
+        [7] = {0x0, 0xd},
+        [8] = {0x0, 0xb},
+        [15] = {0x1, 0xc},
+        [16] = {0x2006, 0xc18},
+        [17] = {0x1, 0x8},
+        [18] = {0x14, 0x2001},
+        [20] = {0x8, 0x18},
+        [21] = {0x1100f, 0x844},
+        [22] = {0x1, 0x0},
+        [24] = {0x20, 0x18},
+        [28] = {0x20, 0x10},
+    },
+};
 
 __asm__(".globl _ImportTable\n\t.set _ImportTable, _reality_image + 0x48\n\t"
         ".globl _Linkage\n\t.set _Linkage, _reality_image + 0xb0");

@@ -10,10 +10,10 @@ for each declaration whose scenery class is switched on, steps every
 object's program each frame, and hands the objects to G3D to draw.
 
 `src/dynamic/dynamic.c` is the transliteration and the module shell together.
-`make dynamicdiff-run` drives retail and the OpenFS98 build side by side over
+`tools/ofs dynamicdiff-run` drives retail and the OpenFS98 build side by side over
 random scripts against the twelve real blocks on the CD, often mutated --
 **20,000 scenarios, 0 differ** -- comparing DYNAMIC's whole `.data` image, GLOBAL and the
-heap as well as every call it makes. `make smoke` passes with DYNAMIC
+heap as well as every call it makes. `tools/ofs smoke` passes with DYNAMIC
 installed beside ACONTAIN, ATC, CHAIN, GLOBAL, NUMERIC, SLEW, SOUND, UTIL and
 WEATHERM: 27/27 modules, 95 gauges. That shows the sim loads it and reaches
 the panel with it; the smoke test does not check that dynamic scenery was
@@ -242,7 +242,7 @@ as reads rather than writes; they are now one instruction each.
 
 ## The harness
 
-`make dynamicdiff-run` (`tools/difftest/dynamicdiff.c`): both builds in one
+`tools/ofs dynamicdiff-run` (`tools/difftest/dynamicdiff.c`): both builds in one
 process, driven as the sim drives them -- `+0x18` every frame with a
 chosen ecx, `+0x04`/`+0x08`, CHAIN lists 3, 4 and 16 dispatched by retail
 CHAIN. UTIL is retail's behind forwarders that fold every argument and
@@ -308,7 +308,7 @@ UTIL does): retail DYNAMIC counts loops in ecx across UTIL calls.
 
 ## Verification
 
-`make dynamicdiff-run`: **20,000 scenarios, 0 differ** (about 15 minutes;
+`tools/ofs dynamicdiff-run`: **20,000 scenarios, 0 differ** (about 15 minutes;
 `N=2000` for a quick check). The harness is described above and in the
 header of `tools/difftest/dynamicdiff.c`.
 

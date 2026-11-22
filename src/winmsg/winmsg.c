@@ -21,6 +21,7 @@
  * the message layout and the rest of retail's quirks.
  */
 #include <windows.h>
+#include <stddef.h>
 #include <stdint.h>
 
 #include "fs98/linkage.h"
@@ -34,13 +35,22 @@ typedef volatile uint8_t  wm_v8;
 typedef volatile uint16_t __attribute__((may_alias)) wm_v16;
 typedef volatile uint32_t __attribute__((may_alias)) wm_v32;
 
+/* Retail's .data at its offsets; the code pointers retail relocates stay 0. */
 struct winmsg_image {
-    uint8_t bytes[WM_IMAGE_SIZE];
+    struct { uint32_t id, link; } imports[6];       /* +0x00 ImportTable */
+    uint32_t linkage[10];                           /* +0x30 Linkage */
+    uint32_t slot_colour[7];                        /* +0x58 */
+    uint8_t  fill;                                  /* +0x74 */
+    uint8_t  state[WM_IMAGE_SIZE - 0x75];           /* +0x75 */
 };
+_Static_assert(sizeof(struct winmsg_image) == WM_IMAGE_SIZE, "image size");
+_Static_assert(offsetof(struct winmsg_image, linkage) == WM_LINKAGE, "linkage");
+_Static_assert(offsetof(struct winmsg_image, slot_colour) == 0x58, "colours");
+_Static_assert(offsetof(struct winmsg_image, fill) == 0x74, "fill");
 
 extern struct winmsg_image winmsg_image;
 
-#define D       ((uint32_t)(uintptr_t)winmsg_image.bytes)
+#define D       ((uint32_t)(uintptr_t)&winmsg_image)
 #define M8(a)   (*(wm_v8  *)(uintptr_t)(uint32_t)(a))
 #define M16(a)  (*(wm_v16 *)(uintptr_t)(uint32_t)(a))
 #define M32(a)  (*(wm_v32 *)(uintptr_t)(uint32_t)(a))
@@ -708,9 +718,12 @@ static uint32_t FS98_STDCALL slot_queued(uint32_t slot)
 
 /* ---- the image -------------------------------------------------------------- */
 
-struct winmsg_image winmsg_image = {{
-#include "winmsg_data.inc"
-}};
+struct winmsg_image winmsg_image = {
+    .imports = {{1, 0}, {2, 0}, {4, 0}, {10, 0}, {3, 0}, {0, 0}},
+    .linkage = {22},
+    .slot_colour = {0, 0x6a, 0x75, 0x75, 0x75, 0x6a, 0x6a},
+    .fill = 0x0b,
+};
 
 __asm__(".globl _ImportTable\n\t.set _ImportTable, _winmsg_image + 0x0\n\t"
         ".globl _Linkage\n\t.set _Linkage, _winmsg_image + 0x30");

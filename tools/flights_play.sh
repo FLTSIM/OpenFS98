@@ -42,7 +42,7 @@ steps="1104/3272=DriveStart sleep:15
 1102/#3267=DriveRadios/!3346 sleep:30 pause 1104/3272=DriveDefault sleep:15
 1104/3272=DriveDelete sleep:15 1102/#3267=DriveDelete/3221/2004 sleep:5
 quit"
-english="$(make -s english-modules-of) $(make -s shared-modules-of)"
+english="$(tools/modules.sh english-modules-of) $(tools/modules.sh shared-modules-of)"
 for m in MAIN $english; do
     [ -f "bin/$m.DLL" ] || { echo "needs bin/$m.DLL" >&2; exit 2; }
 done
@@ -54,7 +54,7 @@ command -v Xvfb >/dev/null || { echo "needs Xvfb" >&2; exit 2; }
 rm -rf "$out"
 mkdir -p "$out"
 # an interrupted run must not leave the game copies, prefixes or Xvfb servers behind
-trap 'kill $(jobs -p) 2>/dev/null; rm -rf "$out"/game-* "$out"/prefix-*' EXIT
+trap 'kill $(jobs -p) 2>/dev/null || true; rm -rf "$out"/game-* "$out"/prefix-*' EXIT
 
 run() {     # tag display
     local tag=$1 display=$2 dir=$out/$1 copy=$out/game-$1 prefix=$out/prefix-$1 m
@@ -62,15 +62,15 @@ run() {     # tag display
     cp -a "$game" "$copy"
     cp -a "${WINEPREFIX:-$HOME/.wine}" "$prefix"
     for m in MAIN $english; do
-        if [[ $tag == ours-* && $m == FLIGHTS && -n ${FLIGHTS_DLL:-} ]]; then cp "$FLIGHTS_DLL" "$copy/$(make -s installed-path-of M=$m)"
-        elif [[ $tag == ours-* ]]; then cp "bin/$m.DLL" "$copy/$(make -s installed-path-of M=$m)"
-        else cp "$(make -s orig-module-of M=$m)" "$copy/$(make -s installed-path-of M=$m)"; fi
+        if [[ $tag == ours-* && $m == FLIGHTS && -n ${FLIGHTS_DLL:-} ]]; then cp "$FLIGHTS_DLL" "$copy/$(tools/modules.sh installed-path-of "$m")"
+        elif [[ $tag == ours-* ]]; then cp "bin/$m.DLL" "$copy/$(tools/modules.sh installed-path-of "$m")"
+        else cp "$(tools/modules.sh orig-module-of "$m")" "$copy/$(tools/modules.sh installed-path-of "$m")"; fi
     done
     touch "$dir/marker"
     export WINEPREFIX=$prefix WINEDEBUG=-all DISPLAY=$display WINEDLLOVERRIDES=dsound=d
     Xvfb "$display" -screen 0 1024x768x24 -ac -noreset >"$dir/xvfb.log" 2>&1 &
     local xvfb=$!
-    trap 'kill $xvfb 2>/dev/null' EXIT   # this subshell's own server, when the main trap kills it
+    trap 'kill $xvfb 2>/dev/null || true' EXIT   # this subshell's own server, when the main trap kills it
     for _ in $(seq 20); do xdpyinfo >/dev/null 2>&1 && break; sleep 0.5; done
     ( cd "$copy" && WINEDEBUG=err+all timeout 900 wine FLTSIM98.EXE '/STN:Situatio\STGEORGE.STN' >"$dir/game.log" 2>&1 ) &
     local pid=$!

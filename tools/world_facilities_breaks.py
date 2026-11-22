@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Require actual differential failures for facilities core/init mutations."""
+import module_flags
 from pathlib import Path
 import os
 import subprocess
@@ -54,7 +55,7 @@ for name, before, after in mutations:
     path = output / f'{name}.c'
     executable = output / f'{name}.exe'
     path.write_text(source.replace(before, after))
-    subprocess.run(['i686-w64-mingw32-gcc', '-std=c99', '-O2', '-Wall', '-Wextra', '-Werror', '-fno-strict-aliasing', '-Isrc/world', '-o', str(executable), 'tools/difftest/worldfacilitiesdiff.c', str(path), '-lntdll'], cwd=root, check=True)
+    subprocess.run(['i686-w64-mingw32-gcc', *module_flags.FLAGS, '-std=c99', '-O2', '-Wall', '-Wextra', '-Werror', '-Isrc/world', '-o', str(executable), 'tools/difftest/worldfacilitiesdiff.c', str(path), '-lntdll'], cwd=root, check=True)
     result = subprocess.run(['wine', str(executable), '64', 'unwind'], cwd=root, env=os.environ.copy(), capture_output=True, text=True, timeout=180)
     (output / f'{name}.log').write_text(result.stdout + result.stderr)
     if result.returncode != 1 or 'FACILITIES DIFFER scenario=' not in result.stderr:

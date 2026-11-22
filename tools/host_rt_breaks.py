@@ -2,7 +2,7 @@
 """The decompiled host runtime (src/host/runtime/) broken on purpose.
 
 Each break is one edit to a copy of one source file, built into its own hostrtdiff, and must
-make hostrtdiff report a difference (a crash of the harness is not a catch). Run from a frozen
+make hostrtdiff (tools/ofs hostrtdiff) report a difference (a crash of the harness is not a catch). Run from a frozen
 copy of the tree: it builds into bin/host-rt/breaks/.
 
     python3 tools/host_rt_breaks.py [N=2000] [NAME...]
@@ -29,6 +29,7 @@ depends on the fixtures' random stream.
 """
 EQUIVALENT = {'open-fallback-depth', 'initialise-word', 'gdi-shown', 'command-concept', 'dock-below', 'init-period-max',
               'picture-min', 'relaid-adjust', 'setup-channels', 'speed-tsc-bit'}
+import module_flags
 from concurrent.futures import ThreadPoolExecutor
 import json
 import os
@@ -39,7 +40,7 @@ import sys
 
 SOURCE = Path('src/host/runtime')
 OUT = Path('bin/host-rt/breaks')
-CC = ['i686-w64-mingw32-gcc', '-std=c99', '-O2', '-w', '-fno-strict-aliasing',
+CC = ['i686-w64-mingw32-gcc', *module_flags.FLAGS, '-std=c99', '-O2', '-w',
       '-Wl,--image-base=0x13000000', '-Wl,--disable-dynamicbase']
 
 # name, file, before, after (the before text must occur exactly once)

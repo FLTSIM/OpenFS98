@@ -90,7 +90,7 @@ static int32_t STDCALL facil_util_alert_close(void **handle)
 #define FACIL_REL_TEXT(offset, rva)    (uint16_t)(offset),
 #define FACIL_RELOCS
 static const uint16_t facil_relocations[] = {
-#include "../../src/facil/facil_data.inc"
+#include "../../src/facil/facil_relocs.inc"
 };
 #undef FACIL_RELOCS
 #undef FACIL_REL_TEXT

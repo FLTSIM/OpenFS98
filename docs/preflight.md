@@ -46,7 +46,7 @@ instructions after each call site that counts a read of eax before eax is
 written. It is a heuristic. "None" is the reliable direction; check each
 read by hand before building a stub on it.
 
-How these were produced, so they can be rerun: `make graph`,
+How these were produced, so they can be rerun: `tools/ofs graph`,
 `dumplinkage.py` and `impscan.py` on each module, `objdump -p` for the
 Win32 imports, and the service table at host `0x417ba0` for the new host
 services. Each Linkage was read against its raw words, and
@@ -119,13 +119,13 @@ callbacks, init/deinit) and the compiled-C half
 (`src/controls/controls_input.c`: the key bindings, the joystick poll and
 watcher, the joystick configs and their defaults, force feedback over
 DirectInput 5, and the key-assignment dialog `+0x58`) are transliterated.
-`make controlsdiff-run` drives them against retail over 20,000 scenarios, 0
+`tools/ofs controlsdiff-run` drives them against retail over 20,000 scenarios, 0
 differences, over the host's profile services passed through to fixture
 files, models of its accelerator tables and joysticks, a DirectInput
 stand-in, and a stand-in for the dialog: `0x140a` of `English\Options.DLL`,
 an MFC dialog that calls back into CONTROLS through a parameter block, built
-from its listing. `make controls-breaks`: 78 of 81 deliberate breaks caught,
-3 proven equivalent. `make smoke` passes with it installed. See
+from its listing. `tools/ofs controls-breaks`: 78 of 81 deliberate breaks caught,
+3 proven equivalent. `tools/ofs smoke` passes with it installed. See
 [modules/controls.md](modules/controls.md).
 
 ## MULTIP (id 35) and MPCHAT
@@ -187,7 +187,7 @@ the dialog id MPCHAT passes to host `+0x110`. What reads that record is
 not yet known.
 
 **Status: done, verified and running in-game.** The record is the dialog
-table the host's scanner registers. `make mpchatdiff-run`: 20,000
+table the host's scanner registers. `tools/ofs mpchatdiff-run`: 20,000
 scenarios, 0 differences; 113 of 117 deliberate breaks caught, 4 proven
 equivalent. See [modules/mpchat.md](modules/mpchat.md).
 
@@ -449,7 +449,7 @@ faithfully (the z-order, the sizes the host's `WM_SIZE` gives a record, the
 menu items), so the harness tests WINDOW's logic rather than a fake host.
 
 **Outcome:** done and verified -- [modules/window.md](modules/window.md).
-`make windowdiff-run`, 20,000 scenarios, zero differences.
+`tools/ofs windowdiff-run`, 20,000 scenarios, zero differences.
 
 | | WINDOW |
 | --- | --- |
@@ -481,7 +481,7 @@ It is now done: [modules/demo.md](modules/demo.md).
 **Outcome:** ADVDRV is done and verified too --
 [modules/advdrv.md](modules/advdrv.md). It is MSVC C, an x87 expression stack
 machine over 176 GLOBAL-backed system variables driving a bytecode
-interpreter. `make advdrvdiff-run` runs both sides over the CD's forty-four
+interpreter. `tools/ofs advdrvdiff-run` runs both sides over the CD's forty-four
 programs and synthetic ones an assembler in the harness writes, 20,000
 scenarios, zero differences. The one obstacle was `op_error`: it stops the
 program (freeing the code) and returns to the interpreter, which runs on
@@ -532,7 +532,7 @@ operation.
    `+0x7c`..`+0x88` (BGL sections, for FACIL), in the same harness.
    `+0x78`, the Scenery Library and booster dialogs, was planned for
    `ofstest`; like FACIL's dialogs it turned out to be World.DLL callbacks
-   and was verified externally instead (`make fesldiff-run`, 20,000
+   and was verified externally instead (`tools/ofs fesldiff-run`, 20,000
    scenarios, zero differences). FE is installed; see
    [modules/fe.md](modules/fe.md).
 
@@ -696,7 +696,7 @@ do not share FE's mutable search state. MAIN `+0x70` and WINMSG `+0x18` are
 logging stubs, and host `+0x03c` records command `0x100d7`. The 20,000-scenario
 baseline reaches all seven states and eleven nonzero phases, finds 18,881
 runways, takes 1,119 no-runway paths and has zero differences. With LANDME
-installed, `make smoke` reaches the panel with 27/27 modules and 95 gauges. See
+installed, `tools/ofs smoke` reaches the panel with 27/27 modules and 95 gauges. See
 [modules/landme.md](modules/landme.md).
 
 ## FACIL (id 37)
@@ -712,7 +712,7 @@ and the dialogs go to `ofstest`. It is next.
 
 **Outcome so far:** the complete `.data` image, profile init/deinit, cache-id
 validation, hierarchy builder, serializer/replacement path and `+0x20` record
-copy are reimplemented and verified by `make facildiff-run`. The synthetic BGL
+copy are reimplemented and verified by `tools/ofs facildiff-run`. The synthetic BGL
 fixture covers all five hierarchy levels and the absent-airport-name fallback;
 the baseline produces a 0x195-byte cache and a 0xbcd0-byte deterministic arena
 with zero differences. A deliberate wrong synthesized kind was detected at
@@ -853,7 +853,7 @@ use.
 
 **Risk:** the x87. Retail is MSVC with `_ftol`; the rebuild has to keep the
 same operation order and the same spills to 64-bit memory, or volumes and
-frequencies come out one unit apart. UTIL faced the same and `make
+frequencies come out one unit apart. UTIL faced the same and `tools/ofs
 utildiff-run` holds it; follow its pattern.
 
 ## DYNAMIC (id 6)
@@ -1276,7 +1276,7 @@ strdup.
   callee must pop exactly its own arguments. There are `pusha`/`popa` pairs and
   hand-chosen registers throughout. Transliteration will read more like the
   assembly than CHAIN's C did; expect to keep register-level structure.
-- **`make graph`'s `slots` column is an upper bound.** It walks zeros past the
+- **`tools/ofs graph`'s `slots` column is an upper bound.** It walks zeros past the
   end of the Linkage into `.data`, so ATC shows 256 (its cap) and LANDME 113.
   The hand counts are 11 and 7 entries; `fns` (7 and 3) is right.
   `dumplinkage.py` stops at the right place.

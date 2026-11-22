@@ -76,22 +76,18 @@
 #define MAX_OPS      60
 #define MAX_PROGRAMS 6
 
-/* the image's relocated slots, from the generator's list */
+/* the image's relocated slots, from advdrv_relocs.inc */
 static const uint16_t code_slots[] = {
 #define ADVDRV_CODE(offset, retail) offset,
 #define ADVDRV_DATA(offset, target)
-#define ADVDRV_RELOCS
-#include "../../src/advdrv/advdrv_data.inc"
-#undef ADVDRV_RELOCS
+#include "../../src/advdrv/advdrv_relocs.inc"
 #undef ADVDRV_CODE
 #undef ADVDRV_DATA
 };
 static const uint16_t data_slots[] = {
 #define ADVDRV_CODE(offset, retail)
 #define ADVDRV_DATA(offset, target) offset,
-#define ADVDRV_RELOCS
-#include "../../src/advdrv/advdrv_data.inc"
-#undef ADVDRV_RELOCS
+#include "../../src/advdrv/advdrv_relocs.inc"
 #undef ADVDRV_CODE
 #undef ADVDRV_DATA
 };

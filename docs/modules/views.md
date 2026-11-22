@@ -15,16 +15,16 @@ WINDOW, MAIN, G3D or HG2D.
 
 ## Building and verification
 
-All commands run from the repository root, independently of the shared Makefile:
+All commands run from the repository root:
 
 ```sh
-make -f tools/views.mk viewsevents views
+tools/ofs viewsevents views
 bash tools/run_viewsdiff.sh 20000
 bash tools/run_viewsdiff.sh 20000 0x98a1e7d3
 bash tools/run_viewsdiff.sh 2000 0x7e51a23b unwind
-make -f tools/views.mk views-breaks N=2000
-make -f tools/views.mk viewsuidiff-run views-ui-breaks
-make -f tools/views.mk views-smoke
+tools/ofs views-breaks N=2000
+tools/ofs viewsuidiff-run views-ui-breaks
+tools/ofs views-smoke
 ```
 
 Final acceptance:
@@ -55,9 +55,9 @@ identical while changing a pixel (255 versus 0).
 English Views DLL replaced, verifies the installed bytes against the launch
 snapshot, and stops only this prefix. It retains the copy and trace.
 
-**Installed 2026-11-02.** The shared Makefile now builds this DLL into `bin/` and
-`make install` puts it in `English/` (`make views-install` / `views-revert` alone, keeping the
-first retail copy as `.orig`). `make smoke` requires it to match and load; `make
+**Installed 2026-11-02.** The shared build (the Makefile then, CMake since 2026-11-18) builds this DLL into `bin/` and
+`tools/ofs ofs_install` puts it in `English/` (`tools/ofs views-install` / `views-revert` alone, keeping the
+first retail copy as `.orig`). `tools/ofs smoke` requires it to match and load; `tools/ofs
 main-dialogs` compares it in play against retail through command `0x1502`: every control the same, pixels only in the live preview.
 
 `viewseventsdiff` maps the actual original DLL without its loader startup,
@@ -106,9 +106,9 @@ are not established by the Wine comparison or startup smoke.
 `views_events.c` implements the UI behavior, `views_objects.c` the derived
 object and factory, `views_stack.S` the two entry-stack observations, and
 `views_runtime.c` the native library adapter and module lifecycle. The DLL
-exports exactly `Linkage` and `ImportTable`. `gen_views_tables.py` extracts
-control-state recipes, bindings, subobject layout and floating constants.
-`gen_views_runtime.py` extracts all 60 dialog vtable slots, the message map,
+exports exactly `Linkage` and `ImportTable`. The retired `gen_views_tables.py` extracted
+(now committed) control-state recipes, bindings, subobject layout and floating constants.
+`views_runtime_tables.inc` (committed; the retired table half of `gen_views_runtime.py` wrote it) holds all 60 dialog vtable slots, the message map,
 119 shared-library bindings and dialog registry. All 23 non-version resource
 leaves are copied byte-for-byte into ignored build resources. No original
 machine code or resource payload is committed. The transient private spin

@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Require actual retail mismatches for airport core and initialization breaks."""
+import module_flags
 from pathlib import Path
 import os
 import subprocess
@@ -53,8 +54,7 @@ for name, before, after in mutations:
         raise SystemExit(f'{name}: missing anchor')
     path, exe = output_dir / f'{name}.c', output_dir / f'{name}.exe'
     path.write_text(source_text.replace(before, after))
-    subprocess.run(['i686-w64-mingw32-gcc', '-std=c99', '-O2', '-Wall', '-Wextra', '-Werror',
-                    '-fno-strict-aliasing', '-Isrc/world', '-o', str(exe),
+    subprocess.run(['i686-w64-mingw32-gcc', *module_flags.FLAGS, '-std=c99', '-Itools/difftest', '-O2', '-Wall', '-Wextra', '-Werror', '-Isrc/world', '-o', str(exe),
                     'tools/difftest/worldairportdiff.c', str(path), '-lntdll'], cwd=root, check=True)
     result = subprocess.run(['wine', str(exe), '64', 'unwind'], cwd=root, env=os.environ.copy(),
                             capture_output=True, text=True, timeout=120)

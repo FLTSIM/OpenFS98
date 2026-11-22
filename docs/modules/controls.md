@@ -1,6 +1,6 @@
 # CONTROLS.DLL — module id 16
 
-**Done, verified and running in-game.** `make controlsdiff-run` drives
+**Done, verified and running in-game.** `tools/ofs controlsdiff-run` drives
 retail and the OpenFS98 build side by side over 20,000 scenarios -- commands
 through the dispatcher and through CHAIN list 0xb, the axis/engine/event
 entries, the CHAIN frames (lists 1, 2, 3, 6 and 0x14), the joystick poll and
@@ -12,9 +12,9 @@ left them: **0 differences** (24,372 dialogs, 19,342 of them answered OK,
 with 158,089 edits and 44,949 callbacks; 153,296 dispatches, 118,239
 joystick polls, 25,448 key loads, 55,251 force-feedback calls with 269
 crashes, 31 of them reaching their second part; 1,347 faults taken alike by
-both sides; about 40 minutes). `make controls-breaks` breaks the module on
+both sides; about 40 minutes). `tools/ofs controls-breaks` breaks the module on
 purpose: 81 breaks, 78 caught and 3 proven equivalent (`list-first`,
-`current-mask` and `throttle-floor`, below), about 20 minutes. `make smoke`
+`current-mask` and `throttle-floor`, below), about 20 minutes. `tools/ofs smoke`
 boots the game with it installed: 27/27 modules, 95 gauges, PASS.
 
 CONTROLS is the keyboard, the joysticks and the mouse. Every key, button and
@@ -62,12 +62,13 @@ video records.
 
 383 records of 20 bytes at `.text+0x15f9`, its address at `+0x15f1` and count
 `0x17f` at `+0x15f5`: `{ handler, kind-mask, command, display-string id, name }`.
-342 distinct handlers. `tools/gen_controls_data.py` extracts it to
+342 distinct handlers. It is committed C in
 `controls_table.inc`; `controls.c` turns each handler offset into its
 reimplemented function with `#define H(x) h_##x`. The kind mask selects which
 key table a command may be bound in (4 flight, 8 slew, and the joystick
 variants). The hand-written assembly keeps this table among its own code, so
-the generator reads it out of `.text`, not `.data`.
+the table is committed C (`src/controls/controls_table.inc`), taken from
+`.text+0x15f9`, not `.data`.
 
 ## What the reading settled (hand-written half)
 
@@ -304,7 +305,7 @@ artifact gone the break run missed it and `crash-second`, which was caught
 before the dialog op was added but which no scenario of the new mix reached;
 the frames after a crash now reach it.
 
-Three breaks in `make controls-breaks` are proven equivalences:
+Three breaks in `tools/ofs controls-breaks` are proven equivalences:
 - `list-first`: no table gives a command two keys (neither default table
   does, a profile section names each command once, the dialog rebuilds a
   table from one binding per command, and the one id with several names, 0,
@@ -338,5 +339,5 @@ Nothing in the module. What the verification does not reach:
 - **Options.DLL itself.** The dialog's callbacks are verified against a
   stand-in built from its listing, not the real MFC pages, and the dialog
   has not been opened in-game.
-- **Hands-on input.** `make smoke` boots to the panel with CONTROLS
+- **Hands-on input.** `tools/ofs smoke` boots to the panel with CONTROLS
   installed, but no key, stick or force-feedback device was driven in-game.

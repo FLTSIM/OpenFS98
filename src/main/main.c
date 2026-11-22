@@ -256,7 +256,7 @@ static void imul32(uint32_t m)
 /* ---- the image -------------------------------------------------------------- */
 
 struct main_image main_image = {{
-#include "main_data.inc"
+#include "main_image.inc"
 }};
 
 static const struct { uint32_t at, to; } data_pointers[] = {
@@ -279,6 +279,11 @@ static const uint32_t retail_linkage[] = {
 #undef MAIN_CODE_TARGET
 #undef MAIN_LINKAGE_RETAIL
 };
+
+/* the generator's counts: 455 pointers into the image, 51 Linkage words (47 routines), 180 relocated code pointers of which the
+ * 47 Linkage slots are set here and 133 kept raw in main_image.inc (check_data_image.py proves the rest against retail) */
+_Static_assert(sizeof data_pointers / sizeof data_pointers[0] == 455, "MAIN's data pointers");
+_Static_assert(sizeof retail_linkage / sizeof retail_linkage[0] == 51, "MAIN's Linkage");
 
 #include "main_records.inc"
 #include "main_situation.inc"

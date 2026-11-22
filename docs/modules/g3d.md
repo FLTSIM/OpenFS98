@@ -10,12 +10,12 @@ through HG2D.
 **Status: done, verified and running in-game.** Every opcode, every
 Linkage service, init, deinit and the nine CHAIN callbacks are
 transliterated (all 193 code addresses in the image map to a routine), and
-`make g3ddiff-run` compares the whole module with retail: **20,000
+`tools/ofs g3ddiff-run` compares the whole module with retail: **20,000
 scenarios, 0 differences** (about 4.5 minutes). The mesh compiler is
 C (`src/g3d/g3d_mesh.c`), on the x87 on x86 and on a software float
-elsewhere, both checked against retail's G3D.DLL (`make g3dmeshdiff-run`,
+elsewhere, both checked against retail's G3D.DLL (`tools/ofs g3dmeshdiff-run`,
 100,000 polygons, 0 differences). G3D is in
-`MODULES`, and `make smoke` passes with it installed. See *Progress* for
+`MODULES`, and `tools/ofs smoke` passes with it installed. See *Progress* for
 the stages, [../preflight.md](../preflight.md#g3d-id-14) for the survey
 that chose it.
 
@@ -265,7 +265,7 @@ harness models the filter.
 
 ## Plan
 
-1. **The image.** `tools/gen_g3d_data.py`: the whole `.data` image, with
+1. **The image.** `src/g3d/g3d_image.inc` (first `tools/gen_g3d_data.py`, retired in Story 1.4 slice 14): the whole `.data` image, with
    its pointers as tables -- data-to-data as image offsets, installed in a
    loop; code pointers (aligned and unaligned) as retail addresses, which
    `g3d.c` maps to its own routines and checks for completeness at load.
@@ -291,11 +291,12 @@ harness models the filter.
 
 ## Progress
 
-**Stage 1, verified.** `tools/gen_g3d_data.py` writes the image and its
-pointer tables; `src/g3d/g3d.c` has the transform core (`.text+0x20` to
+**Stage 1, verified.** `src/g3d/g3d_image.inc` holds the image and
+`src/g3d/g3d_pointers.inc` its pointer tables (both committed typed source since
+Story 1.4 slice 14, checked against retail by `tools/ofs data-images`); `src/g3d/g3d.c` has the transform core (`.text+0x20` to
 `+0x535`: the stream's points, relative to the eye with the overflow
 recovery, the normaliser, the two rotations, the outcodes) and the services
-`+0x3c`, `+0x40`, `+0x44`, `+0x5c`, `+0x64`. `make g3ddiff-run`: 20,000
+`+0x3c`, `+0x40`, `+0x44`, `+0x5c`, `+0x64`. `tools/ofs g3ddiff-run`: 20,000
 scenarios, 0 differences, every register compared after every call. Every
 normaliser branch is reached (magnitudes of every bit length, zero, the
 clamp below bit 4, the right shifts at 29..31), `+0x44`'s shift count
@@ -325,7 +326,7 @@ callbacks, the depth queue's allocation, the texture table, `+0x54`,
 `+0x58`, `+0x60`, the library list's ageing), and the opcodes that draw
 nothing: end, return, the jumps, calls relative, 32-bit, absolute and
 through a variable, case, the ifs in range and masked, setting and moving
-variables, the context, and the setters of GLOBAL's drawing state. `make
+variables, the context, and the setters of GLOBAL's drawing state. `tools/ofs
 g3ddiff-run`: 20,000 scenarios, 0 differences, over 140,000 generated
 programs with every one of those opcodes emitted over 100,000 times, and
 1.5 million variable values steered onto the bounds and indices they are
@@ -356,7 +357,7 @@ Harness lessons from stage 2:
 directly: surface (`0x05`), start and continue points (`0x06`, `0x07`),
 closure (`0x08`), `0x09`, points into the table (`0x0e`, `0x11` coloured),
 starting and continuing at table points (`0x0f`, `0x10`), points (`0x37`,
-`0x80`) and the bounding-sphere reject (`0x2c`). `make g3ddiff-run`: 20,000
+`0x80`) and the bounding-sphere reject (`0x2c`). `tools/ofs g3ddiff-run`: 20,000
 scenarios, 0 differences, with 271,411 polygons, 118,434 lines, 16,536
 points and 1.77 million clipped vertices compared call by call, and
 661,309 divides repaired.
@@ -711,7 +712,7 @@ frame-identical to retail. HG2D's batch initialisation also leaves 24 bits
 (`hg2d.md`, slice 46). On x86 the C uses the caller's control word, so the
 default matters only without the x87.
 
-`make g3dmeshdiff-run` runs retail's own mesh compiler (the CD's G3D.DLL
+`tools/ofs g3dmeshdiff-run` runs retail's own mesh compiler (the CD's G3D.DLL
 loaded as `G3D_mesh_retail.dll`, called at `0x206e35b0`, its `+0x64` sibling
 `0x206e2850` jumped to the harness's instruction lengths, its `_CIacos`
 import bound to the CD's `MSVCRT.DLL`), the C on the x87 and the C on the
@@ -723,7 +724,7 @@ comparing the whole program buffer and the control word after: **100,000
 polygons, 0 differences on either path**. Deliberate breaks in the C (the
 third's last bit, a float rounding skipped, a product taken from the float
 where retail keeps it on the x87, the adder at 64 bits under any
-precision, the packing bound) are all caught. `make g3ddiff-meshc-run`
+precision, the packing bound) are all caught. `tools/ofs g3ddiff-meshc-run`
 builds the module with the software-float compiler in it and runs `g3ddiff`
 against retail: 3,000 scenarios, 0 differences, and the third's break
 caught there too. With the x87 C in it, the module's own `g3ddiff-run`
@@ -732,7 +733,7 @@ gives 20,000 scenarios, 0 differences (2026-11-14).
 The harness slows the longer one process runs (2,000 polygons take about a
 minute, as they did against the transcription), so long runs go in chunks:
 `g3dmeshdiff.exe N first` starts at scenario `first`. Do not run it while
-`make g3ddiff` copies `G3D_retail.dll` into the same directory: a DLL
+`tools/ofs g3ddiff` copies `G3D_retail.dll` into the same directory: a DLL
 rewritten under a running process gave false differences once, hence its
 own copy.
 
@@ -881,10 +882,12 @@ from themselves) and `0x206e3db5`.
 
 ## The breaks
 
-`make g3d-breaks N=1000` applies the 317 deliberate breaks in
+`tools/ofs g3d-breaks N=1000` applies the 317 deliberate breaks in
 `tools/g3d_breaks.py` one at a time and runs `g3ddiff` on each: **279
 caught, 7 proven equivalent, 31 missed** at 1,000 scenarios (about 4
-hours). Run again at 4,000 scenarios, 12 of the 31 were caught (`bld-inside`,
+hours). Re-run on 2026-11-18, with a crash counted as a miss (since
+0cc637b): 278 caught, 32 missed, `plane-facet-skip` crashing before the
+comparison finishes. Run again at 4,000 scenarios, 12 of the 31 were caught (`bld-inside`,
 `al-bar-one`, `tile-diag`, `tile-lit`, `tile-floor-height`, `tile-uv-offset`,
 `tile-33-kind`, `rw-presence`, `rw-threshold-wide`, `rw-aiming-narrow`,
 `rw-number-narrow`, `sc-take-pad`): those boundaries are reached, rarely.

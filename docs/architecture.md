@@ -94,6 +94,12 @@ realistic:
 2. **Module granularity is the natural unit of work**, and the smallest
    modules are genuinely small (`CHAIN` is 966 bytes of code, `SLEW` is 1270).
 
+### Compile flags
+
+Every unit, harnesses and break builds included, compiles with the same six semantic flags,
+`OFS_MODULE_FLAGS` in `cmake/toolchains/win32-retail.cmake` (signed overflow wraps, no strict aliasing, null
+checks kept, x87 arithmetic with standard excess precision and no contraction). See [building.md](building.md).
+
 ### Worked example: SLEW.DLL
 
 `SLEW.DLL` is 1270 bytes of `.text`, id 9, imports `{1, 2, 20}` =
@@ -121,7 +127,7 @@ Three things to read off that:
 
 ### Module id and dependency map
 
-Reproduce with `make graph`. Id 1 is the host; id 19 is imported by `PANELS`
+Reproduce with `tools/ofs graph`. Id 1 is the host; id 19 is imported by `PANELS`
 but is not a file in `Modules\` — most likely the gauge host, unconfirmed.
 `MPCHAT`'s id really is `0xffffffff`: nothing imports it, the host registers
 its one dialog from Linkage `+0x14`, and MULTIP reaches it on CHAIN list 0x1d
@@ -254,8 +260,8 @@ Three naming rules matter to anyone poking at the data files:
 
 **Two of the sim modules are renamed as well**: `FACIL.DLL` becomes
 `FACILITIES.DLL` and `MULTIP.DLL` becomes `MULTIPLAYER.DLL`. A rebuilt module
-copied in under its CD name would sit there unloaded, so `make install` maps
-through `installed_name` in the Makefile.
+copied in under its CD name would sit there unloaded, so `tools/ofs ofs_install` maps
+through the installed names in `tools/modules.txt`.
 
 Symptoms, if the renames are skipped: the sim starts, then stops at
 "Aircraft initialization failure <title>"; fix the `.AIR` and it gets one step

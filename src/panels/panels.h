@@ -8,9 +8,7 @@
 
 #define PN_DATA_VA    0x1000f000u   /* retail .data */
 #define PN_IMAGE_SIZE 0x16580       /* .data's virtual size */
-#define PN_INIT_SIZE  0x1e00        /* .data's initialised part */
 #define PN_LINKAGE    0x050
-#define PN_RDATA_SIZE 0x1fb
 
 typedef volatile uint8_t  pn_v8;
 typedef volatile uint16_t __attribute__((may_alias)) pn_v16;
@@ -18,14 +16,13 @@ typedef volatile uint32_t __attribute__((may_alias)) pn_v32;
 typedef volatile float    __attribute__((may_alias)) pn_vf;
 typedef volatile double   __attribute__((may_alias)) pn_vd;
 
-struct panels_image {
-    uint8_t bytes[PN_IMAGE_SIZE];
-} __attribute__((aligned(16)));
+struct panels_image;          /* panels.c, with the typed layout */
+struct panels_rdata;
 extern struct panels_image panels_image;
-extern const uint8_t panels_rdata[PN_RDATA_SIZE];
+extern const struct panels_rdata panels_rdata;
 
-#define D       ((uint32_t)(uintptr_t)panels_image.bytes)
-#define RDATA   ((uint32_t)(uintptr_t)panels_rdata)
+#define D       ((uint32_t)(uintptr_t)&panels_image)
+#define RDATA   ((uint32_t)(uintptr_t)&panels_rdata)
 #define M8(a)   (*(pn_v8  *)(uintptr_t)(uint32_t)(a))
 #define M16(a)  (*(pn_v16 *)(uintptr_t)(uint32_t)(a))
 #define M32(a)  (*(pn_v32 *)(uintptr_t)(uint32_t)(a))

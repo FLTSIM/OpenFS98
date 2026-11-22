@@ -15,70 +15,70 @@ and flies in private copies of the game, on the software renderer and on Direct3
 see [In the game](#in-the-game). It has not been flown by hand, and non-x86 floating
 precision/status verification remains separate.
 
-The shared Makefile builds the game's `bin/HG2D.DLL` at retail's base. The
-differential harness stays in `tools/hg2d.mk`; build and verify it from the
+The shared build builds the game's `bin/HG2D.DLL` at retail's base. The
+differential harness has its own targets (`tools/ofs hg2d`, from the old `tools/hg2d.mk`); build and verify it from the
 repository root with:
 
 ```sh
-make -f tools/hg2d.mk hg2ddiff-run N=20000              # all suites
-make -f tools/hg2d.mk hg2ddiff-run N=20000 SUITE=device_palettes
-make -f tools/hg2d.mk hg2ddiff-run N=20000 SUITE=device_pixels
-make -f tools/hg2d.mk hg2ddiff-run N=20000 SUITE=device_states
-make -f tools/hg2d.mk hg2ddiff-run N=20000 SUITE=device_shutdown
-make -f tools/hg2d.mk hg2ddiff-run N=20000 SUITE=device_config
-make -f tools/hg2d.mk hg2ddiff-run N=20000 SUITE=device_formats
-make -f tools/hg2d.mk hg2ddiff-run N=20000 SUITE=device_select_format
-make -f tools/hg2d.mk hg2ddiff-run N=20000 SUITE=device_flush
-make -f tools/hg2d.mk hg2ddiff-run N=20000 SUITE=device_colour
-make -f tools/hg2d.mk hg2ddiff-run N=20000 SUITE=device_texture
-make -f tools/hg2d.mk hg2ddiff-run N=20000 SUITE=device_commit
-make -f tools/hg2d.mk hg2ddiff-run N=20000 SUITE=device_scene
-make -f tools/hg2d.mk hg2ddiff-run N=20000 SUITE=device_selection
-make -f tools/hg2d.mk hg2ddiff-run N=20000 SUITE=device_disc
-make -f tools/hg2d.mk hg2ddiff-run N=20000 SUITE=device_text
-make -f tools/hg2d.mk hg2ddiff-run N=20000 SUITE=device_projected
-make -f tools/hg2d.mk hg2ddiff-run N=20000 SUITE=device_vertices
-make -f tools/hg2d.mk hg2ddiff-run N=20000 SUITE=device_lines
-make -f tools/hg2d.mk hg2ddiff-run N=20000 SUITE=device_points
-make -f tools/hg2d.mk hg2ddiff-run N=20000 SUITE=device_batch
-make -f tools/hg2d.mk hg2ddiff-run N=20000 SUITE=device_prepare
-make -f tools/hg2d.mk hg2ddiff-run N=20000 SUITE=device_upload
-make -f tools/hg2d.mk hg2ddiff-run N=20000 SUITE=device_reduce
-make -f tools/hg2d.mk hg2ddiff-run N=20000 SUITE=device_surfaces
-make -f tools/hg2d.mk hg2ddiff-run N=20000 SUITE=device_create
-make -f tools/hg2d.mk hg2ddiff-run N=20000 SUITE=palette
-make -f tools/hg2d.mk hg2ddiff-run N=20000 SUITE=textures
-make -f tools/hg2d.mk hg2ddiff-run SUITE=colours       # finite sweeps
-make -f tools/hg2d.mk hg2ddiff-run N=20000 SUITE=drawing
-make -f tools/hg2d.mk hg2ddiff-run N=20000 SUITE=polygons
-make -f tools/hg2d.mk hg2ddiff-run N=20000 SUITE=fills
-make -f tools/hg2d.mk hg2ddiff-run N=20000 SUITE=matrix_vertices
-make -f tools/hg2d.mk hg2ddiff-run N=20000 SUITE=matrix_fills
-make -f tools/hg2d.mk hg2ddiff-run N=20000 SUITE=projective
-make -f tools/hg2d.mk hg2ddiff-run N=20000 SUITE=projective_keyed
-make -f tools/hg2d.mk hg2ddiff-run N=20000 SUITE=projective_fog
-make -f tools/hg2d.mk hg2ddiff-run N=20000 SUITE=projective_key_fog
-make -f tools/hg2d.mk hg2ddiff-run N=20000 SUITE=projective_dither
-make -f tools/hg2d.mk hg2ddiff-run N=20000 SUITE=projective_dither_fog
-make -f tools/hg2d.mk hg2ddiff-run N=20000 SUITE=projective_dither_key
-make -f tools/hg2d.mk hg2ddiff-run N=20000 SUITE=projective_dither_key_fog
-make -f tools/hg2d.mk hg2ddiff-run N=20000 SUITE=projective_plane
-make -f tools/hg2d.mk hg2ddiff-run N=20000 SUITE=projective_mip
-make -f tools/hg2d.mk hg2ddiff-run N=20000 SUITE=projective_mip_fog
-make -f tools/hg2d.mk hg2ddiff-run N=20000 SUITE=projective_mip_dither
-make -f tools/hg2d.mk hg2ddiff-run N=20000 SUITE=projective_mip_dither_fog
-make -f tools/hg2d.mk hg2ddiff-run N=20000 SUITE=projective_mip_build
-make -f tools/hg2d.mk hg2ddiff-run N=20000 SUITE=resources
-make -f tools/hg2d.mk hg2ddiff-run N=20000 SUITE=initialization
-make -f tools/hg2d.mk hg2ddiff-run N=20000 SUITE=fans
-make -f tools/hg2d.mk hg2ddiff-run N=20000 SUITE=textured
-make -f tools/hg2d.mk hg2ddiff-run N=20000 SUITE=affine
-make -f tools/hg2d.mk hg2ddiff-run N=20000 SUITE=optimized
-make -f tools/hg2d.mk hg2ddiff-run N=20000 SUITE=gouraud
-make -f tools/hg2d.mk hg2ddiff-run N=20000 SUITE=blits
-make -f tools/hg2d.mk hg2ddiff-run N=20000 SUITE=perspective
-make -f tools/hg2d.mk hg2ddiff-run N=20000 SUITE=perspective_fill
-make -f tools/hg2d.mk hg2ddiff-run N=20000 SUITE=discs
+tools/ofs hg2ddiff-run N=20000              # all suites
+tools/ofs hg2ddiff-run N=20000 SUITE=device_palettes
+tools/ofs hg2ddiff-run N=20000 SUITE=device_pixels
+tools/ofs hg2ddiff-run N=20000 SUITE=device_states
+tools/ofs hg2ddiff-run N=20000 SUITE=device_shutdown
+tools/ofs hg2ddiff-run N=20000 SUITE=device_config
+tools/ofs hg2ddiff-run N=20000 SUITE=device_formats
+tools/ofs hg2ddiff-run N=20000 SUITE=device_select_format
+tools/ofs hg2ddiff-run N=20000 SUITE=device_flush
+tools/ofs hg2ddiff-run N=20000 SUITE=device_colour
+tools/ofs hg2ddiff-run N=20000 SUITE=device_texture
+tools/ofs hg2ddiff-run N=20000 SUITE=device_commit
+tools/ofs hg2ddiff-run N=20000 SUITE=device_scene
+tools/ofs hg2ddiff-run N=20000 SUITE=device_selection
+tools/ofs hg2ddiff-run N=20000 SUITE=device_disc
+tools/ofs hg2ddiff-run N=20000 SUITE=device_text
+tools/ofs hg2ddiff-run N=20000 SUITE=device_projected
+tools/ofs hg2ddiff-run N=20000 SUITE=device_vertices
+tools/ofs hg2ddiff-run N=20000 SUITE=device_lines
+tools/ofs hg2ddiff-run N=20000 SUITE=device_points
+tools/ofs hg2ddiff-run N=20000 SUITE=device_batch
+tools/ofs hg2ddiff-run N=20000 SUITE=device_prepare
+tools/ofs hg2ddiff-run N=20000 SUITE=device_upload
+tools/ofs hg2ddiff-run N=20000 SUITE=device_reduce
+tools/ofs hg2ddiff-run N=20000 SUITE=device_surfaces
+tools/ofs hg2ddiff-run N=20000 SUITE=device_create
+tools/ofs hg2ddiff-run N=20000 SUITE=palette
+tools/ofs hg2ddiff-run N=20000 SUITE=textures
+tools/ofs hg2ddiff-run SUITE=colours       # finite sweeps
+tools/ofs hg2ddiff-run N=20000 SUITE=drawing
+tools/ofs hg2ddiff-run N=20000 SUITE=polygons
+tools/ofs hg2ddiff-run N=20000 SUITE=fills
+tools/ofs hg2ddiff-run N=20000 SUITE=matrix_vertices
+tools/ofs hg2ddiff-run N=20000 SUITE=matrix_fills
+tools/ofs hg2ddiff-run N=20000 SUITE=projective
+tools/ofs hg2ddiff-run N=20000 SUITE=projective_keyed
+tools/ofs hg2ddiff-run N=20000 SUITE=projective_fog
+tools/ofs hg2ddiff-run N=20000 SUITE=projective_key_fog
+tools/ofs hg2ddiff-run N=20000 SUITE=projective_dither
+tools/ofs hg2ddiff-run N=20000 SUITE=projective_dither_fog
+tools/ofs hg2ddiff-run N=20000 SUITE=projective_dither_key
+tools/ofs hg2ddiff-run N=20000 SUITE=projective_dither_key_fog
+tools/ofs hg2ddiff-run N=20000 SUITE=projective_plane
+tools/ofs hg2ddiff-run N=20000 SUITE=projective_mip
+tools/ofs hg2ddiff-run N=20000 SUITE=projective_mip_fog
+tools/ofs hg2ddiff-run N=20000 SUITE=projective_mip_dither
+tools/ofs hg2ddiff-run N=20000 SUITE=projective_mip_dither_fog
+tools/ofs hg2ddiff-run N=20000 SUITE=projective_mip_build
+tools/ofs hg2ddiff-run N=20000 SUITE=resources
+tools/ofs hg2ddiff-run N=20000 SUITE=initialization
+tools/ofs hg2ddiff-run N=20000 SUITE=fans
+tools/ofs hg2ddiff-run N=20000 SUITE=textured
+tools/ofs hg2ddiff-run N=20000 SUITE=affine
+tools/ofs hg2ddiff-run N=20000 SUITE=optimized
+tools/ofs hg2ddiff-run N=20000 SUITE=gouraud
+tools/ofs hg2ddiff-run N=20000 SUITE=blits
+tools/ofs hg2ddiff-run N=20000 SUITE=perspective
+tools/ofs hg2ddiff-run N=20000 SUITE=perspective_fill
+tools/ofs hg2ddiff-run N=20000 SUITE=discs
 python3 tools/hg2d_breaks.py
 ```
 
@@ -111,8 +111,9 @@ function entries and four data pointers:
 This slice checks the last service explicitly instead of trusting that extent.
 The shared mapper has not been changed during concurrent MAIN work.
 
-`tools/gen_hg2d_data.py` extracts the complete data image and its 55 relocated
-pointers into itself. Linkage code pointers become zero; the loader installs
+The complete data image is committed as typed values (`src/hg2d/hg2d_image.inc`, once written by a generator from
+retail) and its 55 relocated pointers as `src/hg2d/hg2d_pointers.inc`; `tools/check_data_image.py` (row HG2D,
+`--mixed`) proves both against retail. Linkage code pointers become zero; the loader installs
 all forty native service addresses. Other retail code addresses remain numeric
 identifiers for the translated dispatch/state comparisons. No executable code
 is copied.
@@ -813,7 +814,8 @@ bytes advance independently using their fractional carries; they do not carry
 between texture-index bytes. Scratch fields, including shifted step words,
 block counters, and the last tail jump address, retain their retail values.
 The four 32-entry tail tables are extracted from data embedded in retail's
-`.text` section by `gen_hg2d_data.py`; no executable bytes are copied.
+`.text` section; they are committed in `src/hg2d/hg2d_projective_tables.inc`, which lists their retail addresses, and
+no executable bytes are copied.
 
 Full blocks align their four-byte stores with a direction-dependent prefix.
 Each pair of samples is read before either doubled pixel is stored. Tails
@@ -1386,7 +1388,7 @@ then composes the verified format, option, render-state and palette helpers.
 The same-surface path only clears textures, even for a null surface equal to
 the cached null pointer. Unknown device labels retain an existing device;
 failed methods run the original teardown. GUIDs are extracted as data by
-`tools/gen_hg2d_data.py`, without copying executable code.
+committed in `src/hg2d/hg2d_device_guids.inc` (from retail's `.rdata`), without copying executable code.
 
 The final baseline passes **20,000 scenarios / 2,900,000 operations**, zero
 differences. It covers each failure stage, failed methods publishing objects,
@@ -1661,12 +1663,12 @@ faults.
 
 ## In the game
 
-`make bin/HG2D.DLL` uses the compiler options `hg2ddiff` verifies (`-O2`, not the
+`bin/HG2D.DLL` (built by `cmake --build`) uses the compiler options `hg2ddiff` verifies (`-O2`, not the
 shared `-Os`), at retail's base `0x20730000`. `tools/smoketest.sh` over a private
 copy of the game with it installed: 27/27 modules, 95 gauges, PASS.
 
 `tools/hg2d_frames.sh` compares the running game frame by frame. FRAMELOCK
-(`tools/drive/framelock.c`, built by `tools/hg2d.mk`) is a test module that takes
+(`tools/drive/framelock.c`, built by `tools/ofs hg2d`) is a test module that takes
 over the host's clock imports from DllMain: every main-loop pass advances a counter
 33 ms and runs one frame, and the 20 ms multimedia timer is called on the main
 thread when due. Nothing else in the game reads a clock: no module imports a time
@@ -1752,7 +1754,7 @@ What still differs with retail and ours mixed, and what is untested, is in
 [open-differences.md](../open-differences.md).
 
 Flying by script is done: see [open-differences.md](../open-differences.md). Left to do for
-HG2D: night and weather set by hand, for coverage, and flying it longer by hand. HG2D was not installed into `game/` by this work: `make install`
+HG2D: night and weather set by hand, for coverage, and flying it longer by hand. HG2D was not installed into `game/` by this work: `tools/ofs ofs_install`
 does that.
 
 **`SEHFIX.DLL` is not needed with ours.** The wine freeze came from divide faults at
@@ -2004,7 +2006,7 @@ needed distinct sampled texels rather than a constant texture. These are
 fixture corrections, not accepted equivalences.
 
 
-`make -f tools/hg2d.mk hg2ddiff-run N=20000 SUITE=textured` passes 20,000
+`tools/ofs hg2ddiff-run N=20000 SUITE=textured` passes 20,000
 scenarios and 1,336,250 operations: zero differences and zero faults, including
 808,843 repaired retail divides. All 35 textured-vertex mutations are caught
 (`python3 tools/hg2d_breaks.py 64 textured`), and all 22 plain-vertex mutations
@@ -2015,7 +2017,7 @@ comparisons. The three plain-vertex mutation anchors affected by the helper
 signature and duplicated edge expressions now target their original code.
 
 
-`make -f tools/hg2d.mk hg2ddiff-run N=20000 SUITE=fills` passes 20,000
+`tools/ofs hg2ddiff-run N=20000 SUITE=fills` passes 20,000
 scenarios and 2,720,000 operations: zero differences and zero faults. All
 43 new fill mutations are caught (`python3 tools/hg2d_breaks.py 64 fills`),
 and all 50 existing drawing mutations pass their recheck after the mapper
@@ -2033,7 +2035,7 @@ signed divide repairs.
 The vertex slice's full mutation run caught all 136 deliberate breaks: the
 original 114 plus 22 for polygon projection and edges, with zero unresolved.
 
-`make -f tools/hg2d.mk hg2ddiff-run N=20000 SUITE=drawing`: 20,000 scenarios,
+`tools/ofs hg2ddiff-run N=20000 SUITE=drawing`: 20,000 scenarios,
 4,200,000 operations, zero differences. This includes 140,000 matching access
 faults (five completed-remap null reads and two guarded zero-count spans per
 scenario), plus 206,670 repaired retail divides that resume and finish drawing.
@@ -2044,11 +2046,11 @@ The texture, palette and colour baselines below still pass with the drawing
 entries installed. Drawing validation is recorded separately so matching
 retail faults are not mistaken for scenarios skipped before drawing.
 
-`make -f tools/hg2d.mk hg2ddiff-run N=20000 SUITE=textures`: 20,000 scenarios,
+`tools/ofs hg2ddiff-run N=20000 SUITE=textures`: 20,000 scenarios,
 1,155,000 operations, zero differences. Per side: 113,970 allocations,
 37,181 allocation failures, 94,046 FE loads, 124,850 COM releases,
 1,250 full pools and 18,750 unaligned-handle cases.
-`make -f tools/hg2d.mk hg2ddiff-run N=20000` also passes 20,000 palette
+`tools/ofs hg2ddiff-run N=20000` also passes 20,000 palette
 scenarios, 1,120,000 operations, 40,000 realizations and 53,297 CHAIN
 notifications per side, with zero differences. The colour and layout sweeps
 pass all 263,680 operations plus the seven directed fixtures.

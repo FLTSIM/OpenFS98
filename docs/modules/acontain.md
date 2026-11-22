@@ -10,10 +10,10 @@ the host, and lists every complete aircraft for the selection dialog. MAIN
 drives it. PANELS, SOUND, WINDOW and CONTROLS ask it for paths.
 
 `src/acontain/acontain.c` is the transliteration and the module shell
-together. `make acontaindiff-run` drives retail and the OpenFS98 build side by
+together. `tools/ofs acontaindiff-run` drives retail and the OpenFS98 build side by
 side over random scripts against generated aircraft trees --
 **20,000 scenarios, 0 differ**. Each run compares ACONTAIN's whole `.data`
-image as well as everything it calls. `make smoke` passes with ACONTAIN
+image as well as everything it calls. `tools/ofs smoke` passes with ACONTAIN
 installed beside ATC, CHAIN, GLOBAL, NUMERIC, SLEW, UTIL and WEATHERM: 27/27
 modules, 95 gauges. That is a real in-game check: the sim loads its aircraft
 through `+0x28` at startup, and the gauges load only once the flight model,
@@ -241,7 +241,7 @@ there:
 
 ## Verification
 
-`make acontaindiff-run` (`tools/difftest/acontaindiff.c`) loads retail
+`tools/ofs acontaindiff-run` (`tools/difftest/acontaindiff.c`) loads retail
 ACONTAIN and the build into one process, with retail CHAIN behind a logging
 wrapper. The stub host:
 

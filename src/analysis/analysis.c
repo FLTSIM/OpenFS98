@@ -53,17 +53,32 @@ typedef volatile uint16_t __attribute__((may_alias)) an_v16;
 typedef volatile uint32_t __attribute__((may_alias)) an_v32;
 typedef volatile double   __attribute__((may_alias)) an_vd;
 
+struct fs98_imp { uint32_t id; uint32_t link; };
 struct analysis_image {
-    uint8_t bytes[AN_IMAGE_SIZE];
-};
+    uint8_t  state[0x70];
+    uint8_t  tables[0x18];                      /* +0x70 */
+    struct fs98_imp import[8];                  /* +0x88 */
+    uint32_t linkage[0x10];                     /* +0xc8 */
+    char     names[4][0x10];                    /* +0x108 */
+    uint8_t  ptrs_148[0x20];                    /* +0x148 */
+    char     sign[8];                           /* +0x168 */
+    uint32_t one_170;                           /* +0x170 */
+    uint32_t zero_174;
+    char     scale[0x68];                       /* +0x178 */
+    uint32_t exchange[15];                      /* +0x1e0 */
+    uint8_t  rest[AN_IMAGE_SIZE - 0x21c];       /* +0x21c */
+} __attribute__((packed));
+_Static_assert(sizeof(struct analysis_image) == AN_IMAGE_SIZE, "image");
+_Static_assert(__builtin_offsetof(struct analysis_image, exchange) == 0x1e0, "x");
 
 extern struct analysis_image analysis_image;
 
-static const uint8_t analysis_rdata[0x48] __attribute__((aligned(8))) = {
-#include "analysis_rdata.inc"
+static const double analysis_rdata[9] __attribute__((aligned(8))) = {
+    0x1p-1, 0x1.999999999999ap-4, 0x1p-3, 0x1p+9, 0x1.713786d9c7c09p-10,
+    0x1p-13, 0x1.5555555555555p-13, -0x1p+12, 0x1.8p+11,
 };
 
-#define D       ((uint32_t)(uintptr_t)analysis_image.bytes)
+#define D       ((uint32_t)(uintptr_t)analysis_image.state)
 #define R       ((uint32_t)(uintptr_t)analysis_rdata)
 #define M8(a)   (*(an_v8  *)(uintptr_t)(uint32_t)(a))
 #define M16(a)  (*(an_v16 *)(uintptr_t)(uint32_t)(a))
@@ -1229,9 +1244,16 @@ static void FS98_STDCALL options_dialog(void)
 
 /* ---- the image -------------------------------------------------------------- */
 
-struct analysis_image analysis_image = {{
-#include "analysis_data.inc"
-}};
+struct analysis_image analysis_image = {
+    .tables = { 0x00, 0x01, 0x00, 0x05, 0x0e, 0x1d, 0x32, 0x00, 0x00, 0x00, 0xfa, 0x00, 0x00, 0x00, 0xf4, 0x01 },
+    .import = { {1,0},{2,0},{4,0},{13,0},{14,0},{17,0},{20,0},{0,0} },
+    .linkage = { 29 },
+    .names = { "V_VELOCITY", "100", "200", "H_SCALE" },
+    .sign = "+0",
+    .one_170 = 1,
+    .scale = "Scale String",
+    .exchange = { 0, 8, 0x2001, 0, 0, 1, 0x30, 0x2005, 0x828, 1, 1, 0x38, 0x2005, 0x824, 1 },
+};
 
 __asm__(".globl _ImportTable\n\t.set _ImportTable, _analysis_image + 0x88\n\t"
         ".globl _Linkage\n\t.set _Linkage, _analysis_image + 0xc8");

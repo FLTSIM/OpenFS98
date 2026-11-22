@@ -29,6 +29,7 @@ page only ever sets it to 0..2; a negative one loops the axes routine through me
 chosen != 0 for > 0 (only 0 or a joystick's number is ever stored), and SB_LEFT going to 0
 rather than the range's minimum (the clamp that follows brings it back).
 """
+import module_flags
 from pathlib import Path
 import subprocess
 import sys
@@ -1099,8 +1100,7 @@ def main():
         executable.unlink(missing_ok=True)
         others = [f'src/options/options_{u}.c' for u in UNITS if u != unit]
         build = subprocess.run([
-            'i686-w64-mingw32-gcc', '-std=c99', '-O2', '-Wall', '-Wextra', '-Wno-unused',
-            '-fno-strict-aliasing', '-fno-delete-null-pointer-checks', '-Isrc/options', '-o', str(executable),
+            'i686-w64-mingw32-gcc', *module_flags.FLAGS, '-std=c99', '-O2', '-Wall', '-Wextra', '-Wno-unused', '-Isrc/options', '-o', str(executable),
             'tools/difftest/optionseventsdiff.c', str(source), *others, '-lntdll'],
             text=True, capture_output=True)
         if build.returncode:

@@ -94,13 +94,15 @@ slot `+0xa8`:
 - `FRACTIONAL_MINUTE_DIGITS` is clamped to 1…4, then used to build its decimal
   scale.
 
-`tools/gen_numeric_tables.py` extracts the initialized retail `.data` image
-and the bit-exact `.rdata` constants into `src/numeric/numeric_data.inc`. This
-keeps all digit, angle and formatting constants traceable to the original DLL.
+The initialized retail `.data` image is `fs98_numeric_data` in `numeric.c`, a byte
+array written through typed byte-emitting macros (`U32`, `U64`, strings) at retail's
+offsets, with retail's own pointers kept as numbers. `tools/check_data_image.py`
+proves it equals retail's `.data` (row NUMERIC, `at=_fs98_numeric_data`). The seven
+`.rdata` doubles are `fs98_numeric_rdata`, as bit patterns with hex-float comments.
 
 ## Verification
 
-`make numericdiff-run` loads retail NUMERIC beside the reimplementation, binds
+`tools/ofs numericdiff-run` loads retail NUMERIC beside the reimplementation, binds
 both to the same fake host, GLOBAL block and UTIL conversion services, and
 compares return values, output strings and output bytes. It covers every
 format id, both zero-trimming states, all three unit modes, both angle display
@@ -119,7 +121,7 @@ formatter result. That build exits non-zero immediately with mismatches, so the
 all-green result is not a comparison path that silently accepts differences.
 
 The rebuilt DLL is installed in the test game alongside the OpenFS98 GLOBAL,
-SLEW and UTIL modules. The full `make smoke` boot reaches the panel with all
+SLEW and UTIL modules. The full `tools/ofs smoke` boot reaches the panel with all
 27 modules and 95 gauges loaded.
 
 ## Registers

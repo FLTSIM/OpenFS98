@@ -10,7 +10,7 @@ build goes back.  A missed break is a gap in the harness or an equivalence;
 either way it is reported, and docs/modules/winmsg.md says which.
 
 Usage: tools/winmsg_breaks.py [N] [name...]       (from the repository root,
-       after make winmsgdiff)
+       after tools/ofs winmsgdiff)
 """
 import os
 import re
@@ -144,7 +144,7 @@ def main():
         open(TMP, "w").write(source.replace(old, new))
         if os.path.exists("bin/difftest/WINMSG_ours.dll"):
             os.remove("bin/difftest/WINMSG_ours.dll")
-        build = subprocess.run(["make", "-s", "winmsg-break-build", "WINMSG_SRC=" + TMP],
+        build = subprocess.run(["tools/ofs", "winmsg-break-build", "WINMSG_SRC=" + TMP],
                                capture_output=True, text=True)
         if build.returncode != 0:
             print("%-20s does not build:\n%s" % (name, build.stderr[-2000:]))
@@ -164,7 +164,7 @@ def main():
                                   "  (" + entry[3] + ")" if len(entry) > 3 and not caught else ""))
         results.append((name, verdict.lower()))
         sys.stdout.flush()
-    subprocess.run(["make", "-s", "winmsgdiff"], check=True)
+    subprocess.run(["tools/ofs", "winmsgdiff"], check=True)
     missed = [n for n, r in results if r not in ("caught", "equivalent")]
     same = [n for n, r in results if r == "equivalent"]
     print("%d breaks, %d caught, %d proven equivalent (%s); missed: %s" %

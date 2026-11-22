@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Prove native Alerts comparisons detect drawing and module-cleanup errors."""
+import module_flags
 from pathlib import Path
 import subprocess
 import sys
@@ -24,8 +25,7 @@ def main():
         sources = [str(source) if other == unit else f'src/alerts/alerts_{other}.c'
                     for other in ('events', 'objects', 'runtime')]
         build = subprocess.run([
-            'i686-w64-mingw32-gcc', '-std=c99', '-O2', '-Wall', '-Wextra', '-Werror',
-            '-fno-strict-aliasing', '-fno-delete-null-pointer-checks', '-Isrc/alerts',
+            'i686-w64-mingw32-gcc', *module_flags.FLAGS, '-std=c99', '-O2', '-Wall', '-Wextra', '-Werror', '-Isrc/alerts',
             '-shared', '-nostdlib', '-Wl,--entry=_DllMain@12', '-Wl,--disable-dynamicbase',
             '-Wl,--image-base=0x22300000', '-o', str(dll), *sources,
             'src/alerts/alerts.def', 'bin/alerts-diff/alerts-res.o',

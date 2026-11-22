@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Require initializer transcript/state differences, including CString cleanup."""
+import module_flags
 from pathlib import Path
 import subprocess
 
@@ -34,8 +35,7 @@ def main():
                 data = data.replace(before.encode(), after.encode(), 1)
             (work / filename).write_bytes(data)
         exe = work / 'worldinitdiff.exe'
-        build = subprocess.run(['i686-w64-mingw32-gcc', '-std=c99', '-O2', '-Wall', '-Wextra', '-Werror',
-            '-fno-strict-aliasing', '-o', str(exe), str(work / 'worldinitdiff.c'),
+        build = subprocess.run(['i686-w64-mingw32-gcc', *module_flags.FLAGS, '-std=c99', '-Itools/difftest', '-O2', '-Wall', '-Wextra', '-Werror', '-o', str(exe), str(work / 'worldinitdiff.c'),
             str(work / 'world_init.c'), str(work / 'world_area.c'), '-lntdll'], capture_output=True, text=True)
         if build.returncode:
             raise RuntimeError(f'{name}: build failed, not counted\n{build.stderr}')

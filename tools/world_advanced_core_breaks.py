@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Deliberate Advanced Weather core/initializer changes; require real differences."""
+import module_flags
 from pathlib import Path
 import hashlib
 import json
@@ -58,8 +59,7 @@ def main():
         path.write_text(source.replace(before, after))
         executable = work / 'mutant.exe'
         executable.unlink(missing_ok=True)
-        build = subprocess.run(['i686-w64-mingw32-gcc', '-std=c99', '-O2', '-Wall', '-Wextra', '-Werror',
-                                '-fno-strict-aliasing', '-fno-delete-null-pointer-checks', '-o', str(executable),
+        build = subprocess.run(['i686-w64-mingw32-gcc', *module_flags.FLAGS, '-std=c99', '-Itools/difftest', '-O2', '-Wall', '-Wextra', '-Werror', '-o', str(executable),
                                 str(work / f'worldadvanced{kind}diff.c'), str(work / 'world_advanced.c'),
                                 str(work / 'world_advanced_temperature.c'), str(work / 'world_advanced_objects.c'), '-lntdll'], capture_output=True)
         (work / 'build.log').write_bytes(build.stdout + build.stderr)

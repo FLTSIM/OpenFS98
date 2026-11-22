@@ -49,7 +49,7 @@ static void make_image(void *picture, uint8_t *strip, int32_t id, void *backgrou
     uint8_t *info;
     int32_t at;
     PTR(picture, 0x40) = pal;
-    fs98_simsui_dib_load(strip, id, instance, pal, 0);
+    fs98_simsui_dib_load(strip, id, instance, pal, 0);    /* RETAIL BUG (kept): SUI-13 */
     I32(picture, 0x44) = I32(strip, 0xc);
     I32(picture, 0x48) = I32(strip, 8);
     if (I32(picture, 0x44) < 0) I32(picture, 0x44) = -I32(picture, 0x44);

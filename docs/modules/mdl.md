@@ -120,8 +120,8 @@ enters the word written to state +0x6e. Treating it as a 16-bit shift changes
 the output. No intent or defect classification is assigned to this behavior.
 
 ```
-make mdl-normal-diff-run             # N=70000 per model by default
-make mdl-normal-breaks
+tools/ofs mdl-normal-diff-run             # N=70000 per model by default
+tools/ofs mdl-normal-breaks
 ```
 
 The standalone harness loads each retail MDL, binds HOST and GLOBAL, and
@@ -154,7 +154,7 @@ below additionally cover independently generated DLLs and their boundaries.
 
 ## Generated normal modules
 
-`make mdl-normal-modules` builds all eight replacements under
+`tools/ofs mdl-normal-modules` builds all eight replacements under
 `bin/mdl-diff/models/`, with the installed basenames. `src/mdl/mdl_module.c`
 provides the shared boundary: bare-return init/deinit/detach, a state-init
 `ret 4`, the attach thunk, and the C update dispatched by model kind. The
@@ -173,8 +173,8 @@ fixups into the CRT tail and unexpected model sets stop generation. The
 original version resource payloads and language ids are preserved.
 
 ```
-make mdl-normal-modules-run          # N=70000 per model in each mode
-make mdl-normal-module-breaks
+tools/ofs mdl-normal-modules-run          # N=70000 per model in each mode
+tools/ofs mdl-normal-module-breaks
 ```
 
 The loaded-module harness runs **1,680,000 lifecycle/update scenarios with
@@ -202,7 +202,7 @@ program relocation, changed program byte, update pointing at state-init,
 state-init writing a byte, detach clobbering ecx, and changed version data.
 Artifacts and logs are under `bin/mdl-diff/module-breaks/`.
 
-`make mdl-normal-game` runs private game copies with otherwise-retail modules,
+`tools/ofs mdl-normal-game` runs private game copies with otherwise-retail modules,
 using `tools/mdl_frames.py` and `HG2D_FRAMES_MDLS=1`. It compares two retail
 runs before comparing rebuilt MDLs, disables sound for deterministic crash
 timing, and requires the intended normal model to load on all three sides.
@@ -218,7 +218,7 @@ flight's intended normal model was confirmed loaded on all three sides.
 `JOBS=1..4` selects concurrent independent games (default four), each with a
 separate prefix and display; `MDL_GAME_DISPLAY=:76` selects the display base.
 
-`make mdl-normal-render-break` rotates C182RG's rendered heading by 90 degrees
+`tools/ofs mdl-normal-render-break` rotates C182RG's rendered heading by 90 degrees
 in an isolated DLL build. It is **caught at pass 40**, exactly when the script
 switches to the exterior view; the two retail runs match, and all three games
 complete 600 passes with clean exits. This is a picture difference, not a
@@ -239,7 +239,7 @@ successful rendering check (`bin/mdl-render-break/invalid-end.result.txt`).
 decompiled, one source built three times (`-DCRASH_MODEL=0/1/2`) by `tools/gen_mdl_crash.py`
 into `bin/mdl-crash/models/`, over each model's generated data image (retail's `.data` at its
 RVAs, the relocated code pointers bound to the C entries; 64-KiB aligned as before).
-`make mdl-crash-modules` builds them.
+`tools/ofs mdl-crash-modules` builds them.
 
 **One program, three tables.** Retail's three are the same hand-written assembly (32 routines,
 3,394 to 3,952 instructions) assembled with different data: the module variables (`0x5034` to
@@ -278,7 +278,7 @@ compares altitudes in halves, unsigned, and drops a carry.
 
 ### Verification
 
-`make mdl-crash-diff-run` (`tools/difftest/mdlcrashdiff.c`): retail and the decompiled DLLs
+`tools/ofs mdl-crash-diff-run` (`tools/difftest/mdlcrashdiff.c`): retail and the decompiled DLLs
 side by side over the same lifecycle scripts, 2,000 scenarios per model, retail first and both
 forced away from their preferred bases: **12,000 scenarios, 0 differences** (2026-11-08).
 Scenarios include initialization, CHAIN registration and dispatch, repeated update/draw, enabled
@@ -300,7 +300,7 @@ scenarios' coverage of retail. `tools/gen_mdl_crash.py` now builds only the deco
 and finds the CHAIN callback the harness needs (the code address pushed before list 15) from the
 disassembly.
 
-`python3 tools/mdl_crash_breaks.py` (`make mdl-crash-breaks`; run from a frozen copy) breaks the
+`python3 tools/mdl_crash_breaks.py` (`tools/ofs mdl-crash-breaks`; run from a frozen copy) breaks the
 decompiled C on purpose, 82 single edits (every helper, each animation's thresholds and signs,
 the debris tables, the retail bugs fixed one at a time, the register outputs in the entry
 stubs), each built for the models it applies to and run over 2,000 relocated scenarios: **78
@@ -308,9 +308,9 @@ caught, 4 proven equivalent** (listed in the script; 2026-11-08). Three of them 
 after the scenarios were widened: the ground had always been 0, the aircraft never turned between
 frames, and init does not reset two words that carry over from crash to crash.
 
-In the game, `make mdl-crash-game` (ANTILLES, PARIS and EXTRARIO, 1,200 passes each, otherwise
+In the game, `tools/ofs mdl-crash-game` (ANTILLES, PARIS and EXTRARIO, 1,200 passes each, otherwise
 retail modules, the intended crash model loaded on all three sides): **identical frames on all
-three with the decompiled models**, 2026-11-08. `make mdl-crash-render-break` turns the
+three with the decompiled models**, 2026-11-08. `tools/ofs mdl-crash-render-break` turns the
 decompiled C182RG's crash pose a quarter turn and requires the frames to differ.
 
 The private flight fixture enables crash detection without the modal analysis
@@ -328,20 +328,20 @@ callers need.
 
 ## Install and restore
 
-`make` builds all eleven MDLs alongside modules and gauges. `make install`
-installs them into `FS98_DIR`, and `make revert` restores all eleven retail
-files from the verified `orig/Aircraft/` references. `make run` launches that
+`cmake --build build/win32-retail` builds all eleven MDLs alongside modules and gauges. `tools/ofs ofs_install`
+installs them into `FS98_DIR`, and `tools/ofs ofs_revert` restores all eleven retail
+files from the verified `orig/Aircraft/` references. `tools/ofs run` launches that
 same game tree, so aircraft selection exercises the installed replacements.
 
 ```sh
-make install
-make run
+tools/ofs ofs_install
+tools/ofs run
 # Restore modules, gauges and aircraft MDLs:
-make revert
+tools/ofs ofs_revert
 ```
 
-`make mdls-install` and `make mdls-revert` operate on just the eleven MDLs;
-`make mdls` builds them without the differential test executables. Set
+`tools/ofs mdls-install` and `tools/ofs mdls-revert` operate on just the eleven MDLs;
+`tools/ofs mdls` builds them without the differential test executables. Set
 `FS98_DIR=/path/to/FS98` consistently for installation, running and restoration
 when using a tree other than the default `~/.wine/drive_c/FS98`.
 

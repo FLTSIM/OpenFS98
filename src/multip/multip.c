@@ -61,16 +61,474 @@
 #define IMPORT_UTIL             0x0044
 
 struct multip_image {
-    uint8_t data[MULTIP_IMAGE_SIZE];
+    struct { uint32_t id, link; } import[11];   /* +0x000 ImportTable */
+    uint32_t f_0058;
+    uint8_t z_005c[0x4c];
+    uint32_t f_00a8;
+    uint32_t f_00ac;
+    uint8_t z_00b0[0x18];
+    uint32_t f_00c8;
+    uint32_t f_00cc;
+    uint8_t z_00d0[0x18];
+    uint32_t f_00e8;
+    uint32_t f_00ec;
+    uint8_t z_00f0[0xc];
+    uint32_t f_00fc;
+    uint8_t z_0100[0x14];
+    uint32_t f_0114;
+    double d_0118;
+    double d_0120;
+    double d_0128;
+    double d_0130;
+    uint32_t f_0138;
+    uint8_t z_013c[0x1c];
+    double d_0158;
+    uint32_t f_0160;
+    uint32_t f_0164;
+    uint32_t f_0168;
+    uint32_t f_016c;
+    uint32_t f_0170;
+    uint32_t f_0174;
+    uint32_t f_0178;
+    uint32_t f_017c;
+    uint32_t f_0180;
+    uint32_t f_0184;
+    uint32_t f_0188;
+    uint32_t f_018c;
+    uint32_t f_0190;
+    char s_0194[3];
+    uint8_t z_0197[0x1];
+    char s_0198[12];
+    uint32_t f_01a4;
+    uint32_t f_01a8;
+    uint8_t z_01ac[0x4];
+    char s_01b0[20];
+    uint8_t z_01c4[0x4];
+    char s_01c8[19];
+    uint8_t z_01db[0x55];
+    uint32_t f_0230;
+    uint8_t z_0234[0x54];
+    uint32_t f_0288;
+    uint32_t f_028c;
+    uint32_t f_0290;
+    uint8_t z_0294[0x8];
+    uint32_t f_029c;
+    uint32_t f_02a0;
+    uint32_t f_02a4;
+    uint8_t z_02a8[0xc];
+    uint32_t f_02b4;
+    uint32_t f_02b8;
+    uint8_t z_02bc[0xc];
+    uint32_t f_02c8;
+    uint32_t f_02cc;
+    uint8_t z_02d0[0xc];
+    uint32_t f_02dc;
+    uint32_t f_02e0;
+    uint8_t z_02e4[0xc];
+    uint32_t f_02f0;
+    uint32_t f_02f4;
+    uint8_t z_02f8[0xc];
+    uint32_t f_0304;
+    uint32_t f_0308;
+    uint8_t z_030c[0xc];
+    uint32_t f_0318;
+    uint32_t f_031c;
+    uint8_t z_0320[0x10];
+    uint32_t f_0330;
+    uint8_t z_0334[0x1c];
+    uint32_t f_0350;
+    uint32_t f_0354;
+    uint8_t z_0358[0x18];
+    uint32_t f_0370;
+    uint32_t f_0374;
+    uint8_t z_0378[0x10];
+    uint32_t f_0388;
+    uint32_t f_038c;
+    uint8_t z_0390[0x4];
+    uint32_t f_0394;
+    uint32_t f_0398;
+    uint8_t z_039c[0x28];
+    uint32_t f_03c4;
+    uint8_t z_03c8[0x10];
+    uint32_t f_03d8;
+    uint8_t z_03dc[0xc];
+    uint32_t f_03e8;
+    uint8_t z_03ec[0xc];
+    uint32_t f_03f8;
+    uint8_t z_03fc[0x10];
+    uint32_t f_040c;
+    uint8_t z_0410[0x10];
+    uint32_t f_0420;
+    uint8_t z_0424[0x14];
+    uint32_t f_0438;
+    uint8_t z_043c[0x14];
+    uint32_t f_0450;
+    uint8_t z_0454[0xc];
+    uint32_t f_0460;
+    uint8_t z_0464[0x8];
+    uint32_t f_046c;
+    uint32_t f_0470;
+    uint8_t z_0474[0x8];
+    uint32_t f_047c;
+    uint32_t f_0480;
+    uint32_t f_0484;
+    uint8_t z_0488[0x8];
+    uint32_t f_0490;
+    uint32_t f_0494;
+    uint32_t f_0498;
+    uint8_t z_049c[0x8];
+    uint32_t f_04a4;
+    uint32_t f_04a8;
+    uint32_t f_04ac;
+    uint8_t z_04b0[0x8];
+    uint32_t f_04b8;
+    uint32_t f_04bc;
+    uint32_t f_04c0;
+    uint8_t z_04c4[0x8];
+    uint32_t f_04cc;
+    uint32_t f_04d0;
+    uint32_t f_04d4;
+    uint8_t z_04d8[0x8];
+    uint32_t f_04e0;
+    uint32_t f_04e4;
+    uint32_t f_04e8;
+    uint8_t z_04ec[0x8];
+    uint32_t f_04f4;
+    uint32_t f_04f8;
+    uint32_t f_04fc;
+    uint8_t z_0500[0x8];
+    uint32_t f_0508;
+    uint32_t f_050c;
+    uint32_t f_0510;
+    uint8_t z_0514[0x24];
+    uint32_t f_0538;
+    uint8_t z_053c[0xc];
+    uint32_t f_0548;
+    uint8_t z_054c[0x14];
+    uint32_t f_0560;
+    uint32_t f_0564;
+    uint8_t z_0568[0x10];
+    uint32_t f_0578;
+    uint32_t f_057c;
+    uint8_t z_0580[0x4];
+    uint32_t f_0584;
+    uint8_t z_0588[0x24];
+    uint32_t f_05ac;
+    uint8_t z_05b0[0x10];
+    uint32_t f_05c0;
+    uint8_t z_05c4[0x24];
+    uint32_t f_05e8;
+    uint32_t f_05ec;
+    uint32_t f_05f0;
+    uint8_t z_05f4[0x8];
+    uint32_t f_05fc;
+    uint32_t f_0600;
+    uint32_t f_0604;
+    uint8_t z_0608[0x8];
+    uint32_t f_0610;
+    uint32_t f_0614;
+    uint32_t f_0618;
+    uint8_t z_061c[0x8];
+    uint32_t f_0624;
+    uint32_t f_0628;
+    uint32_t f_062c;
+    uint8_t z_0630[0x8];
+    uint32_t f_0638;
+    uint32_t f_063c;
+    uint32_t f_0640;
+    uint8_t z_0644[0x8];
+    uint32_t f_064c;
+    uint32_t f_0650;
+    uint32_t f_0654;
+    uint8_t z_0658[0x10];
+    uint32_t f_0668;
+    uint8_t z_066c[0x1];
+    uint8_t f_066d;
+    uint8_t z_066e[0xe];
+    char s_067c[33];
+    uint8_t z_069d[0x3];
+    char s_06a0[33];
+    uint8_t z_06c1[0x3];
+    char s_06c4[16];
+    char s_06d4[23];
+    uint8_t z_06eb[0x1];
+    char s_06ec[10];
+    uint8_t z_06f6[0x2];
+    char s_06f8[17];
+    uint8_t z_0709[0x3];
+    char s_070c[15];
+    uint8_t z_071b[0x1];
+    char s_071c[26];
+    uint8_t z_0736[0x2];
+    char s_0738[23];
+    uint8_t z_074f[0x1];
+    char s_0750[17];
+    uint8_t z_0761[0x3];
+    char s_0764[19];
+    uint8_t z_0777[0x1];
+    char s_0778[16];
+    char s_0788[24];
+    char s_07a0[25];
+    uint8_t z_07b9[0x3];
+    char s_07bc[21];
+    uint8_t z_07d1[0x3];
+    char s_07d4[17];
+    uint8_t z_07e5[0x3];
+    char s_07e8[21];
+    uint8_t z_07fd[0x3];
+    char s_0800[19];
+    uint8_t z_0813[0x1];
+    char s_0814[26];
+    uint8_t z_082e[0x2];
+    char s_0830[23];
+    uint8_t z_0847[0x1];
+    char s_0848[28];
+    char s_0864[21];
+    uint8_t z_0879[0x3];
+    char s_087c[15];
+    uint8_t z_088b[0x1];
+    char s_088c[16];
+    char s_089c[15];
+    uint8_t z_08ab[0x1];
+    char s_08ac[14];
+    uint8_t z_08ba[0x2];
+    char s_08bc[12];
+    char s_08c8[14];
+    uint8_t z_08d6[0x2];
+    char s_08d8[20];
+    char s_08ec[12];
+    char s_08f8[13];
+    uint8_t z_0905[0x3];
+    char s_0908[13];
+    uint8_t z_0915[0x3];
+    char s_0918[27];
+    uint8_t z_0933[0x6cd];
+} __attribute__((packed));
+_Static_assert(sizeof(struct multip_image) == MULTIP_IMAGE_SIZE, "multip_image");
+_Static_assert(__builtin_offsetof(struct multip_image, f_0058) == 0x58, "linkage");
+
+static struct multip_image s_multip_image = {
+    .import = {
+        { 1, 0 },
+        { 2, 0 },
+        { 23, 0 },
+        { 4, 0 },
+        { 13, 0 },
+        { 14, 0 },
+        { 3, 0 },
+        { 17, 0 },
+        { 20, 0 },
+        { 27, 0 },
+        { 0, 0 },
+    },
+    .f_0058 = 0x23,
+    .f_00a8 = 0x20,
+    .f_00ac = 0xf,
+    .f_00c8 = 0x20,
+    .f_00cc = 0xf,
+    .f_00e8 = 0x20,
+    .f_00ec = 0x54,
+    .f_00fc = 0x1,
+    .f_0114 = 0x3,
+    .d_0118 = -0x1.0000000000000p+0,
+    .d_0120 = 0x1.0000000000000p-1,
+    .d_0128 = 0x1.999999999999ap-3,
+    .d_0130 = 0x1.0000000000000p-1,
+    .f_0138 = 0x10,
+    .d_0158 = 0x1.0000000000000p+0,
+    .f_0160 = 0x2,
+    .f_0164 = 0x5a,
+    .f_0168 = 0x5,
+    .f_016c = 0x64,
+    .f_0170 = 0x1,
+    .f_0174 = 0xf,
+    .f_0178 = 0xa,
+    .f_017c = 0x2710,
+    .f_0180 = 0x1,
+    .f_0184 = 0x1,
+    .f_0188 = 0x1,
+    .f_018c = 0x1,
+    .f_0190 = 0x4,
+    .s_0194 = "0u",
+    .s_0198 = "MULTIPLAYER",
+    .f_01a4 = 0x4,
+    .f_01a8 = 0x4,
+    .s_01b0 = "FS61_REQUEST_PARAMS",
+    .s_01c8 = "FS61_REFUSE_PARAMS",
+    .f_0230 = 0x1,
+    .f_0288 = 0x5,
+    .f_028c = 0x1c,
+    .f_0290 = 0x2002,
+    .f_029c = 0x5,
+    .f_02a0 = 0x18,
+    .f_02a4 = 0x2002,
+    .f_02b4 = 0x20,
+    .f_02b8 = 0x2002,
+    .f_02c8 = 0x28,
+    .f_02cc = 0x2002,
+    .f_02dc = 0x34,
+    .f_02e0 = 0x2002,
+    .f_02f0 = 0x3c,
+    .f_02f4 = 0x2002,
+    .f_0304 = 0x44,
+    .f_0308 = 0x2002,
+    .f_0318 = 0x4c,
+    .f_031c = 0x2002,
+    .f_0330 = 0x1,
+    .f_0350 = 0x20,
+    .f_0354 = 0x1c,
+    .f_0370 = 0x20,
+    .f_0374 = 0x54,
+    .f_0388 = 0x2,
+    .f_038c = 0xff,
+    .f_0394 = 0xff,
+    .f_0398 = 0xc,
+    .f_03c4 = 0x1,
+    .f_03d8 = 0x14,
+    .f_03e8 = 0x1,
+    .f_03f8 = 0x1e,
+    .f_040c = 0x4,
+    .f_0420 = 0x4,
+    .f_0438 = 0x1,
+    .f_0450 = 0x1,
+    .f_0460 = 0x1,
+    .f_046c = 0x18,
+    .f_0470 = 0x2002,
+    .f_047c = 0x1,
+    .f_0480 = 0x20,
+    .f_0484 = 0x2005,
+    .f_0490 = 0x4,
+    .f_0494 = 0x28,
+    .f_0498 = 0x200e,
+    .f_04a4 = 0x1,
+    .f_04a8 = 0x3c,
+    .f_04ac = 0x2005,
+    .f_04b8 = 0x4,
+    .f_04bc = 0x48,
+    .f_04c0 = 0x200e,
+    .f_04cc = 0x4,
+    .f_04d0 = 0x5c,
+    .f_04d4 = 0x1101b,
+    .f_04e0 = 0x4,
+    .f_04e4 = 0x70,
+    .f_04e8 = 0x1101b,
+    .f_04f4 = 0x1,
+    .f_04f8 = 0x8c,
+    .f_04fc = 0x2005,
+    .f_0508 = 0x1,
+    .f_050c = 0xb4,
+    .f_0510 = 0x2005,
+    .f_0538 = 0xc,
+    .f_0548 = 0xc,
+    .f_0560 = 0x20,
+    .f_0564 = 0x10,
+    .f_0578 = 0x2,
+    .f_057c = 0xff,
+    .f_0584 = 0xff,
+    .f_05ac = 0x4,
+    .f_05c0 = 0x4,
+    .f_05e8 = 0x8,
+    .f_05ec = 0x44,
+    .f_05f0 = 0x1101b,
+    .f_05fc = 0x8,
+    .f_0600 = 0x48,
+    .f_0604 = 0x1101b,
+    .f_0610 = 0x4,
+    .f_0614 = 0x1c,
+    .f_0618 = 0x1101b,
+    .f_0624 = 0x4,
+    .f_0628 = 0x30,
+    .f_062c = 0x1101b,
+    .f_0638 = 0x4,
+    .f_063c = 0x1c,
+    .f_0640 = 0x1101b,
+    .f_064c = 0x4,
+    .f_0650 = 0x30,
+    .f_0654 = 0x1101b,
+    .f_0668 = 0x20,
+    .f_066d = 0x1,
+    .s_067c = "TIME_BETWEEN_CONNECTION_ATTEMPTS",
+    .s_06a0 = "TIME_BETWEEN_PLAYER_TYPE_QUERIES",
+    .s_06c4 = "ALLOW_KEEPALIVE",
+    .s_06d4 = "ALLOW_NAME_TAG_DISPLAY",
+    .s_06ec = "ADF_TRACK",
+    .s_06f8 = "DISTANCE_DISPLAY",
+    .s_070c = "AUTOPILOT_LOCK",
+    .s_071c = "ALLOW_DESCRIPTIVE_RECEIVE",
+    .s_0738 = "ALLOW_DESCRIPTIVE_SEND",
+    .s_0750 = "INTERNET_ADDRESS",
+    .s_0764 = "PROTOCOL_SELECTION",
+    .s_0778 = "CONNECTION_TYPE",
+    .s_0788 = "PLAYER_LIST_UPDATE_TIME",
+    .s_07a0 = "SESSION_LIST_UPDATE_TIME",
+    .s_07bc = "MAX_SEGMENTS_PER_SEC",
+    .s_07d4 = "MAX_SEGMENT_SIZE",
+    .s_07e8 = "ALLOW_EXTURE_RECEIVE",
+    .s_0800 = "ALLOW_TEXTURE_SEND",
+    .s_0814 = "ALLOW_PLANE_MODEL_RECEIVE",
+    .s_0830 = "ALLOW_PLANE_MODEL_SEND",
+    .s_0848 = "MAX_TRACK_NAME_DISPLAY_TIME",
+    .s_0864 = "FOLLOWING_MULTIPLIER",
+    .s_087c = "COLLISION_SECS",
+    .s_088c = "PACKETS_PER_SEC",
+    .s_089c = "TICKS_PER_SYNC",
+    .s_08ac = "MAX_OBSERVERS",
+    .s_08bc = "MAX_PLAYERS",
+    .s_08c8 = "EXTRAPOLATION",
+    .s_08d8 = "GUARANTEED_MESSAGES",
+    .s_08ec = "PLAYER_NAME",
+    .s_08f8 = "HOST_SESSION",
+    .s_0908 = "SESSION_NAME",
+    .s_0918 = "ALWAYS_SHOW_INITIAL_DIALOG",
 };
 
-static struct multip_image s_multip_image = {{
-#include "multip_data.inc"
-}};
-
-static uint8_t s_multip_rdata[] = {
-#include "multip_rdata.inc"
+/* Retail's .rdata, 0x1f0 bytes at RVA 0xc000, with no relocations: scale constants (doubles read by byte
+ * offset through s_multip_rdata), 19 GUIDs, rate constants, and a 6-dword table the browser indexes (all zero).
+ * It stays a writable object in our .data, at its address before the image, so every address matches retail. */
+struct multip_guid {
+    uint32_t data1;
+    uint16_t data2, data3;
+    uint8_t  data4[8];
 };
+
+struct multip_rdata {
+    double k[8];                        /* +0x000 scale constants */
+    struct multip_guid guid[19];        /* +0x040 */
+    double rate[13];                    /* +0x170 */
+    uint32_t table[6];                  /* +0x1d8 */
+} __attribute__((packed));
+_Static_assert(sizeof(struct multip_rdata) == 0x1f0, "multip_rdata");
+_Static_assert(__builtin_offsetof(struct multip_rdata, guid) == 0x40, "guid");
+_Static_assert(__builtin_offsetof(struct multip_rdata, rate) == 0x170, "rate");
+_Static_assert(__builtin_offsetof(struct multip_rdata, table) == 0x1d8, "table");
+
+/* Code addresses it as bytes: s_multip_rdata + offset, and "_s_multip_rdata+0x18" in asm. */
+static struct multip_rdata s_multip_rdata_object __asm__("_s_multip_rdata") = {
+    .k = { 0x1.0000000000000p-16, 0x1.381d897c00000p-2, 0x1.9000000000000p+6, 0x1.0000000000000p-15, 0x1.6800000000000p-24, 0x1.0000000000000p+0, 0x1.6c16c16c16c17p-6, 0x1.0624dd2f1a9fcp-10 },
+    .guid = {
+        { 0x2b74f7c0, 0x9154, 0x11cf, { 0xa9, 0xcd, 0x00, 0xaa, 0x00, 0x68, 0x86, 0xe3 } },
+        { 0x9d460580, 0xa822, 0x11cf, { 0x96, 0x0c, 0x00, 0x80, 0xc7, 0x53, 0x4e, 0x82 } },
+        { 0x133efe40, 0x32dc, 0x11d0, { 0x9c, 0xfb, 0x00, 0xa0, 0xc9, 0x0a, 0x43, 0xcb } },
+        { 0x133efe41, 0x32dc, 0x11d0, { 0x9c, 0xfb, 0x00, 0xa0, 0xc9, 0x0a, 0x43, 0xcb } },
+        { 0xd1eb6d20, 0x8923, 0x11d0, { 0x9d, 0x97, 0x00, 0xa0, 0xc9, 0x0a, 0x43, 0xcb } },
+        { 0xaf465c71, 0x9588, 0x11cf, { 0xa0, 0x20, 0x00, 0xaa, 0x00, 0x61, 0x57, 0xac } },
+        { 0x26c66a70, 0xb367, 0x11cf, { 0xa0, 0x24, 0x00, 0xaa, 0x00, 0x61, 0x57, 0xac } },
+        { 0x0194c220, 0xa303, 0x11d0, { 0x9c, 0x4f, 0x00, 0xa0, 0xc9, 0x05, 0x42, 0x5e } },
+        { 0x1bb4af80, 0xa303, 0x11d0, { 0x9c, 0x4f, 0x00, 0xa0, 0xc9, 0x05, 0x42, 0x5e } },
+        { 0x1318f560, 0x912c, 0x11d0, { 0x9d, 0xaa, 0x00, 0xa0, 0xc9, 0x0a, 0x43, 0xcb } },
+        { 0x07d916c0, 0xe0af, 0x11cf, { 0x9c, 0x4e, 0x00, 0xa0, 0xc9, 0x05, 0x42, 0x5e } },
+        { 0x59b95640, 0x9667, 0x11d0, { 0xa7, 0x7d, 0x00, 0x00, 0xf8, 0x03, 0xab, 0xfc } },
+        { 0x78ec89a0, 0xe0af, 0x11cf, { 0x9c, 0x4e, 0x00, 0xa0, 0xc9, 0x05, 0x42, 0x5e } },
+        { 0xba5a7a70, 0x9dbf, 0x11d0, { 0x9c, 0xc1, 0x00, 0xa0, 0xc9, 0x05, 0x42, 0x5e } },
+        { 0xf6dcc200, 0xa2fe, 0x11d0, { 0x9c, 0x4f, 0x00, 0xa0, 0xc9, 0x05, 0x42, 0x5e } },
+        { 0x01fd92e0, 0xa2ff, 0x11d0, { 0x9c, 0x4f, 0x00, 0xa0, 0xc9, 0x05, 0x42, 0x5e } },
+        { 0xc4a54da0, 0xe0af, 0x11cf, { 0x9c, 0x4e, 0x00, 0xa0, 0xc9, 0x05, 0x42, 0x5e } },
+        { 0xe63232a0, 0x9dbf, 0x11d0, { 0x9c, 0xc1, 0x00, 0xa0, 0xc9, 0x05, 0x42, 0x5e } },
+        { 0xf2f0ce00, 0xe0af, 0x11cf, { 0x9c, 0x4e, 0x00, 0xa0, 0xc9, 0x05, 0x42, 0x5e } },
+    },
+    .rate = { 0x1.0000000000000p+16, 0x1.c71c71c71c71cp-5, 0.0, 0x1.0000000000000p+0, -0x1.0000000000000p+0, 0x1.c71c71c71c71cp-5, 0.0, 0x1.0000000000000p+0, 0x1.c71c71c71c71cp-5, 0x1.0000000000000p+0, 0.0, 0x1.1ae96e7bf5389p-11, 0x1.4000000000000p+3 },
+};
+#define s_multip_rdata ((uint8_t *)&s_multip_rdata_object)
 
 struct multip_data_pointer {
     uint32_t owner;
@@ -83,7 +541,7 @@ static const struct multip_data_pointer s_multip_data_pointers[] = {
 #include "multip_pointers.inc"
 };
 
-#define D       ((uint32_t)(uintptr_t)s_multip_image.data)
+#define D       ((uint32_t)(uintptr_t)s_multip_image.import)
 #define M32(o)  (*(volatile uint32_t *)(uintptr_t)(D + (o)))
 #define M8(o)   (*(uint8_t *)(uintptr_t)(D + (o)))
 #define M16(o)  (*(uint16_t *)(uintptr_t)(D + (o)))
@@ -1030,12 +1488,12 @@ static void multip_install(void)
         if (pointer->kind == 1) {
             target = multip_dialog_code(pointer->target);
             if (target != 0) {
-                owner = pointer->owner == 0 ? s_multip_image.data : s_multip_rdata;
+                owner = pointer->owner == 0 ? (uint8_t *)s_multip_image.import : s_multip_rdata;
                 *(uint32_t *)(void *)(owner + pointer->offset) = target;
             }
             continue;
         }
-        owner = pointer->owner == 0 ? s_multip_image.data : s_multip_rdata;
+        owner = pointer->owner == 0 ? (uint8_t *)s_multip_image.import : s_multip_rdata;
         target = pointer->kind == 2 ? D + pointer->target :
             ADDR(s_multip_rdata + pointer->target);
         *(uint32_t *)(void *)(owner + pointer->offset) = target;

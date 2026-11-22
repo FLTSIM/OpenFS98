@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Exercise each dynamic initializer boundary and CNotify cleanup mutation."""
+import module_flags
 from pathlib import Path
 import os
 import subprocess
@@ -38,7 +39,7 @@ for name,before,after in mutations:
  if source_text.count(before)!=1:raise SystemExit(f'{name}: anchor count changed')
  source_path=output_dir/f'{name}.c';exe=output_dir/f'{name}.exe'
  source_path.write_text(source_text.replace(before,after))
- subprocess.run(['i686-w64-mingw32-gcc','-std=c99','-O2','-Wall','-Wextra','-Werror','-fno-strict-aliasing','-Isrc/world','-o',str(exe),'tools/difftest/worlddynamicinitdiff.c','src/world/world_dynamic.c',str(source_path),'-lntdll'],cwd=root,check=True)
+ subprocess.run(['i686-w64-mingw32-gcc', *module_flags.FLAGS,'-std=c99','-O2','-Wall','-Wextra','-Werror','-Isrc/world','-o',str(exe),'tools/difftest/worlddynamicinitdiff.c','src/world/world_dynamic.c',str(source_path),'-lntdll'],cwd=root,check=True)
  result=subprocess.run(['wine',str(exe),'64','unwind'],cwd=root,env=os.environ.copy(),capture_output=True,text=True,timeout=120)
  (output_dir/f'{name}.log').write_text(result.stdout+result.stderr)
  if result.returncode!=1 or 'DIFFER scenario=' not in result.stderr:raise SystemExit(f'{name}: no actual difference (exit {result.returncode})\n{result.stderr}')

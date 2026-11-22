@@ -27,7 +27,7 @@ struct fs98_flights_object_services {
     void (*page_destroy)(void *object);
     void *(*string_assign)(void *string, const char *text);                 /* CString::operator= */
 };
-/* Class indices, in s_classes order (tools/gen_flights_tables.py) */
+/* Class indices, in s_classes order (flights_objects_tables.inc) */
 enum { FS98_FLIGHTS_ADVENTURES, FS98_FLIGHTS_CHALLENGES, FS98_FLIGHTS_SAVE, FS98_FLIGHTS_COMMS, FS98_FLIGHTS_CREATE, FS98_FLIGHTS_AIRCRAFT, FS98_FLIGHTS_MODELESS, FS98_FLIGHTS_OPENING, FS98_FLIGHTS_FLIGHT_MENU,
        FS98_FLIGHTS_LEARNING_MENU, FS98_FLIGHTS_SELECT, FS98_FLIGHTS_AUTOPILOT, FS98_FLIGHTS_NAVIGATION,
        FS98_FLIGHTS_NAV_EFIS, FS98_FLIGHTS_NAV_RADIOS, FS98_FLIGHTS_NAV_ADF, FS98_FLIGHTS_CLASS_COUNT };

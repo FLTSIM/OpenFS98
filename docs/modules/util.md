@@ -11,7 +11,7 @@ and `_ftol`.
 SLEW was a whole module in one go — 1,270 bytes, one service. UTIL is not:
 the host binds all 47 slots at load, so a part-finished UTIL cannot be dropped
 into `Modules\` and tested by running the sim. Progress is therefore measured
-a service at a time against retail, with `make utildiff-run`, which loads the
+a service at a time against retail, with `tools/ofs utildiff-run`, which loads the
 retail DLL and calls its slots directly.
 
 When enough of it exists to be worth installing, the remaining slots can be
@@ -68,14 +68,14 @@ address order, so they include any alignment padding.
 | `+0xa8` | `0x3390` | 160 | **open a modeless alert** |
 | `+0xac` | `0x3430` | 1312 | **close a modeless alert** -- 64 bytes, then the text builder |
 
-Reproduce with `make graph` plus the slot dump in `tools/dumplinkage.py`.
+Reproduce with `tools/ofs graph` plus the slot dump in `tools/dumplinkage.py`.
 
 ## The trigonometry table
 
 A quarter-wave cosine at `.data+0xf6`: 129 entries spanning 0 to `0x4000`,
 four-byte stride, unsigned Q16. Entry 0 is `0xffff`, entry 64 is `0xb504`
 (0.7071) and entry 128 is 0 — it matches `cos` to within a unit across the
-quarter. `tools/gen_util_tables.py` extracts it into `src/util/cos_table.inc`.
+quarter. It is the `UTIL_COS_Q32` list in `src/util/util_trig.inc`: the high halves of the Q32 values, which `fs98_util_cos_q16` is built from.
 
 The lookup interpolates linearly: the index is bits 7..14 of the angle and the
 fraction bits 0..6. The table is read with a *sign-extending* load even though
@@ -108,7 +108,7 @@ Three things about it are worth knowing before calling it:
   divisor of about 2^25, and raises #DE if the quotient will not fit in 32
   bits. Retail crashes outright rather than saturating.
 - **It walks off the table** past roughly ±0x4e of latitude index, into
-  whatever sits next in `.data`. `tools/gen_util_tables.py` therefore emits the
+  whatever sits next in `.data`. `fs98_util_data` in `util_math.c` therefore holds the
   whole section, so the same bytes are read rather than guessed at.
 - **Two of its steps are wrong**, and both are reproduced:
 
@@ -249,7 +249,7 @@ wraps a negative into the positive range before converting, so its intermediate
 sits just below 2^32 and only about twenty bits of fraction survive in a 64-bit
 double. It was written here as portable first, and the harness caught it.
 
-Note that `make utildiff-portable` does **not** catch this: it compiles out the
+Note that `tools/ofs utildiff-portable` does **not** catch this: it compiles out the
 x87 assembly but still runs on x86, where `long double` is still 80-bit.
 
 ## Reaching outside the module
@@ -314,7 +314,7 @@ reads them: MAIN's `+0x60` is read only near a nav station.
 
 **All 47 services** reimplemented and verified against retail.
 
-`make utildiff-run` covers 44 of them: **6,452,880 comparisons, zero
+`tools/ofs utildiff-run` covers 44 of them: **6,452,880 comparisons, zero
 mismatches**, including 400,000 random descriptor tables through the exchange
 engine, 100,000 alert sequences, and all 65,536 sincos angles and all 65,536 sqrt16
 inputs exhaustively, 300,000 draws from the generator with both seeds
@@ -324,12 +324,12 @@ zero-input short-circuit in `hypot`. They are also exactly the set SLEW
 depends on, so `slewdiff` runs with **no stubs at all**.
 
 `0x04`, `0x9c` and the three file listings call the host, so they run in-process
-under `make ofstest-run`, against retail's UTIL and through the real host.
+under `tools/ofs ofstest-run`, against retail's UTIL and through the real host.
 
 ### Installed
 
-UTIL is built as a module (`src/util/util.c`, `make`, `make install`) and runs
-in the sim in place of retail's. `make smoke` passes with it -- 27/27 modules,
+UTIL is built as a module (`src/util/util.c`, `cmake --build build/win32-retail`, `tools/ofs ofs_install`) and runs
+in the sim in place of retail's. `tools/ofs smoke` passes with it -- 27/27 modules,
 95 gauges, startup all the way to the panel.
 
 The module is a shell around the four service files: an ImportTable in
@@ -348,7 +348,7 @@ into UTIL other than through the slot table: a scan of every access through
 UTIL's link in all 27 modules found only slot calls (two apparent exceptions
 in LANDME are a register reloaded by a `pop`).
 
-**What the game actually calls.** `make util-trace` builds the module with
+**What the game actually calls.** `tools/ofs util-trace` builds the module with
 each slot replaced by `incl count[i] / jmp *target[i]` -- transparent to any
 calling convention -- and boots the sim. Startup plus 90 seconds of an idle
 flight call 15 of the 47:

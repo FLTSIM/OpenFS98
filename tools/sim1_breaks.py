@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Build isolated source mutations and demand actual SIM1 comparison failures."""
+import module_flags
 import fcntl
 import json
 import os
@@ -66,8 +67,7 @@ def main():
             s_file.write_text(changed if kind == "S" else assembly)
             dll = directory / "SIM1_PARTIAL.DLL"
             dll.unlink(missing_ok=True)
-            built = run(["i686-w64-mingw32-gcc", "-std=c99", "-O2", "-Wall", "-Wextra",
-                         "-fno-strict-aliasing", "-Iinclude", "-Isrc/sim1", "-Ibin/sim1-diff", "-shared",
+            built = run(["i686-w64-mingw32-gcc", *module_flags.FLAGS, "-std=c99", "-Itools/difftest", "-O2", "-Wall", "-Wextra", "-Iinclude", "-Isrc/sim1", "-Ibin/sim1-diff", "-shared",
                          "-Wl,--disable-dynamicbase", "-Wl,--image-base,0x22000000", "-o", str(dll),
                          str(c_file), str(s_file), "src/sim1/sim1_state_stack.S",
                          "src/sim1/sim1_velocity.S", "src/sim1/sim1.def"])

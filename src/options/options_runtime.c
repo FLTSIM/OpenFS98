@@ -1,6 +1,6 @@
 /* Native Options adapter. Dialog behaviour is rebuilt (src/options/); the shared MFC/SIMSUI
  * controls stay the CD's dependencies during the compatibility port, reached through the same
- * imports retail uses (tools/gen_options_runtime.py lists them), as Flights' runtime does. */
+ * imports retail uses (s_import_bindings in options_runtime_tables.inc lists them, read from retail by the retired table half of tools/gen_options_runtime.py), as Flights' runtime does. */
 /* MSVCRT's own sprintf, as retail calls it, not mingw's ANSI replacement */
 #define __USE_MINGW_ANSI_STDIO 0
 #include <windows.h>

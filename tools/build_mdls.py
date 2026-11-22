@@ -5,6 +5,7 @@ Only data, the Sopwith literal, and resources are extracted. Every relocated
 code pointer must name a known C/ABI entry; unknown targets stop generation.
 Generated artifacts and retail payloads remain under ignored bin/mdl-diff/.
 """
+import module_flags
 import argparse
 import json
 from pathlib import Path
@@ -102,7 +103,7 @@ def build(record, directory, module_source='src/mdl/mdl_module.c', update_source
     output.parent.mkdir(parents=True, exist_ok=True)
     subprocess.run(['i686-w64-mingw32-windres', '-J', 'res', '-O', 'coff',
                     str(directory / 'model.res'), str(directory / 'resource.o')], check=True)
-    command = ['i686-w64-mingw32-gcc', '-std=c99', '-Os', '-Wall', '-Wextra',
+    command = ['i686-w64-mingw32-gcc', *module_flags.FLAGS, '-std=c99', '-Itools/difftest', '-Os', '-Wall', '-Wextra',
                '-ffreestanding', '-fno-builtin', '-fno-asynchronous-unwind-tables',
                '-Iinclude', '-Isrc/mdl', '-I' + str(directory), '-shared', '-nostdlib',
                '-Wl,--entry=_DllMain@12', '-Wl,--disable-dynamicbase', '-Wl,--disable-nxcompat',

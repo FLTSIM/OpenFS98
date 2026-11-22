@@ -8,10 +8,8 @@
 
 #include "fs98/host.h"
 
-#define CT_IMAGE_SIZE 0xc020
 #define CT_IMPORTS    0x000
 #define CT_LINKAGE    0x078
-#define CT_RDATA_SIZE 0x2b8
 #define CT_COMMANDS   383
 
 typedef volatile uint8_t  ct_v8;
@@ -19,11 +17,10 @@ typedef volatile uint16_t __attribute__((may_alias)) ct_v16;
 typedef volatile uint32_t __attribute__((may_alias)) ct_v32;
 typedef volatile double   __attribute__((may_alias)) ct_vd;
 
-struct controls_image {
-    uint8_t bytes[CT_IMAGE_SIZE];
-};
+struct controls_image;          /* controls.c, with the typed layout */
+struct controls_rdata;
 extern struct controls_image controls_image;
-extern uint8_t controls_rdata[CT_RDATA_SIZE];
+extern struct controls_rdata controls_rdata;
 
 /* a command: what retail keeps at .text+0x15f9 */
 struct controls_command {
@@ -37,8 +34,8 @@ extern struct controls_command controls_commands[CT_COMMANDS];
 extern struct controls_command *const controls_table;     /* .text+0x15f1 */
 extern const uint32_t controls_count;                      /* .text+0x15f5 */
 
-#define D       ((uint32_t)(uintptr_t)controls_image.bytes)
-#define RDATA   ((uint32_t)(uintptr_t)controls_rdata)
+#define D       ((uint32_t)(uintptr_t)&controls_image)
+#define RDATA   ((uint32_t)(uintptr_t)&controls_rdata)
 #define M8(a)   (*(ct_v8  *)(uintptr_t)(uint32_t)(a))
 #define M16(a)  (*(ct_v16 *)(uintptr_t)(uint32_t)(a))
 #define M32(a)  (*(ct_v32 *)(uintptr_t)(uint32_t)(a))

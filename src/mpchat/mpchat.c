@@ -27,6 +27,7 @@
  * has the layout and what retail does that is worth knowing.
  */
 #include <windows.h>
+#include <stddef.h>
 #include <stdint.h>
 
 #include "fs98/linkage.h"
@@ -40,13 +41,38 @@
 typedef volatile uint8_t  mc_v8;
 typedef volatile uint32_t __attribute__((may_alias)) mc_v32;
 
+/* Retail's .data at its offsets; the code pointers retail relocates stay 0. */
 struct mpchat_image {
-    uint8_t bytes[MC_IMAGE_SIZE];
+    struct { uint32_t id, link; } imports[6];       /* +0x00 ImportTable */
+    uint32_t dialogs[6];                            /* +0x30 */
+    uint32_t linkage[6];                            /* +0x48 */
+    char     window_class[12];                      /* +0x60 */
+    char     riched_dll[16];                        /* +0x6c */
+    uint32_t split[2];                              /* +0x7c, 16.16 */
+    char     space[4], colon[4];                    /* +0x84 */
+    char     button[8], edit[8], listbox[8];        /* +0x8c */
+    char     richedit[12];                          /* +0xa4 */
+    char     newline[4];                            /* +0xb0 */
+    uint8_t  state[MC_IMAGE_SIZE - 0xb4];           /* +0xb4 */
 };
+_Static_assert(sizeof(struct mpchat_image) == MC_IMAGE_SIZE, "image size");
+_Static_assert(offsetof(struct mpchat_image, dialogs) == MC_DIALOGS, "dialogs");
+_Static_assert(offsetof(struct mpchat_image, linkage) == MC_LINKAGE, "linkage");
+_Static_assert(offsetof(struct mpchat_image, window_class) == 0x60, "window class");
+_Static_assert(offsetof(struct mpchat_image, riched_dll) == 0x6c, "names");
+_Static_assert(offsetof(struct mpchat_image, split) == 0x7c, "split");
+_Static_assert(offsetof(struct mpchat_image, space) == 0x84, "space");
+_Static_assert(offsetof(struct mpchat_image, colon) == 0x88, "colon");
+_Static_assert(offsetof(struct mpchat_image, button) == 0x8c, "button");
+_Static_assert(offsetof(struct mpchat_image, edit) == 0x94, "edit");
+_Static_assert(offsetof(struct mpchat_image, listbox) == 0x9c, "listbox");
+_Static_assert(offsetof(struct mpchat_image, richedit) == 0xa4, "classes");
+_Static_assert(offsetof(struct mpchat_image, newline) == 0xb0, "newline");
+_Static_assert(offsetof(struct mpchat_image, state) == 0xb4, "state");
 
 extern struct mpchat_image mpchat_image;
 
-#define D       ((uint32_t)(uintptr_t)mpchat_image.bytes)
+#define D       ((uint32_t)(uintptr_t)&mpchat_image)
 #define M8(a)   (*(mc_v8  *)(uintptr_t)(uint32_t)(a))
 #define M32(a)  (*(mc_v32 *)(uintptr_t)(uint32_t)(a))
 #define ADDR(p) ((uint32_t)(uintptr_t)(p))
@@ -548,9 +574,18 @@ static uint32_t FS98_STDCALL mpchat_deinit(void)
 
 /* ---- the image -------------------------------------------------------------- */
 
-struct mpchat_image mpchat_image = {{
-#include "mpchat_data.inc"
-}};
+struct mpchat_image mpchat_image = {
+    .imports = {{1, 0}, {2, 0}, {4, 0}, {35, 0}, {22, 0}, {0, 0}},
+    .dialogs = {0xff00, 0, 0xc},
+    .linkage = {0xffffffff},
+    .window_class = "FS98MPCHAT",
+    .riched_dll = "RICHED32.DLL",
+    .split = {0xc000, 0xc000},
+    .space = " ", .colon = ":",
+    .button = "Button", .edit = "Edit", .listbox = "ListBox",
+    .richedit = "RichEdit",
+    .newline = "\n",
+};
 
 __asm__(".globl _ImportTable\n\t.set _ImportTable, _mpchat_image + 0x0\n\t"
         ".globl _Linkage\n\t.set _Linkage, _mpchat_image + 0x48");

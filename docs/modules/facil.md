@@ -8,15 +8,15 @@ hierarchy. Setup installs the CD's `FACIL.DLL` as `FACILITIES.DLL`.
 The module is done: every Linkage slot is reimplemented and verified --
 init/deinit, `+0x2c` cache validation and rebuild, `+0x20` record copy, the
 mapped-cache queries `+0x18`/`+0x1c`, and the three dialogs `+0x24`, `+0x28`
-and `+0x30`. FACIL is in `MODULES`; `make smoke` passes with it installed, and
+and `+0x30`. FACIL is in `MODULES`; `tools/ofs smoke` passes with it installed, and
 the sim rebuilt `INDEX_FILE` through it.
 
 ## Shape and linkage
 
 Retail is MSVC C++ with a 23,045-byte `.text` section. Its `.data` section is
 0x2d1c bytes at `0x206b8000`: 0x600 initialized bytes followed by zero-filled
-state. `tools/gen_facil_data.py` checks the imports, Linkage and relocation
-layout and emits the complete image as `src/facil/facil_data.inc`. There are 74
+state. The image is typed C in `facil.c` (Story 1.4), with its relocation list in
+`src/facil/facil_relocs.inc`, shared with `tools/difftest/facildiff.c`. There are 74
 relocations: 49 point back into `.data` and 25 into `.text`.
 
 | Linkage slot | retail entry | status | purpose |
@@ -246,13 +246,13 @@ In the game it is left over from earlier calls -- in this path, from FE
 the return as memmove's status, and the FE reimplementation returned 0
 there, which would have emptied every runway list under an installed
 OpenFS98 FE. FE now reproduces the leftover word exactly; see
-[fe.md](fe.md). `make facildiff-fe-run` runs this harness with OpenFS98's FE
+[fe.md](fe.md). `tools/ofs facildiff-fe-run` runs this harness with OpenFS98's FE
 behind OpenFS98's FACIL against retail behind retail: 2,000 query and 2,000
 dialog scenarios over the real CD index, zero differences.
 
 ## Differential harness
 
-`make facildiff-run` loads retail FACIL and OpenFS98 FACIL side by side. Each
+`tools/ofs facildiff-run` loads retail FACIL and OpenFS98 FACIL side by side. Each
 gets a separate retail FE instance so mutable FE state is not shared. The
 harness creates a synthetic BGL directory with region, country, state, city
 and airport records, plus a minimal type-1 airport header with no `0x10006`

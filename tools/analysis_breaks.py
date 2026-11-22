@@ -11,7 +11,7 @@ in the harness or an equivalence; either way it is reported, and
 docs/modules/analysis.md says which.
 
 Usage: tools/analysis_breaks.py [N] [name...]      (from the repository root,
-       after make analysisdiff)
+       after tools/ofs analysisdiff)
 """
 import os
 import re
@@ -188,7 +188,7 @@ def main():
         open(TMP, "w").write(source.replace(old, new))
         if os.path.exists("bin/difftest/ANALYSIS_ours.dll"):
             os.remove("bin/difftest/ANALYSIS_ours.dll")
-        build = subprocess.run(["make", "-s", "analysis-break-build", "ANALYSIS_SRC=" + TMP],
+        build = subprocess.run(["tools/ofs", "analysis-break-build", "ANALYSIS_SRC=" + TMP],
                                capture_output=True, text=True)
         if build.returncode != 0:
             print("%-20s does not build:\n%s" % (name, build.stderr[-2000:]))
@@ -208,7 +208,7 @@ def main():
                                   "  (" + entry[3] + ")" if len(entry) > 3 and not caught else ""))
         results.append((name, verdict.lower()))
         sys.stdout.flush()
-    subprocess.run(["make", "-s", "analysisdiff"], check=True)
+    subprocess.run(["tools/ofs", "analysisdiff"], check=True)
     missed = [n for n, r in results if r not in ("caught", "equivalent")]
     same = [n for n, r in results if r == "equivalent"]
     print("%d breaks, %d caught, %d proven equivalent (%s); missed: %s" %

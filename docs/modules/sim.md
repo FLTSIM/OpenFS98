@@ -11,14 +11,14 @@ to MAIN, HOST, or the shared Makefile. Native acceptance is recorded below.
 Build and run independently:
 
 ```sh
-make -f tools/sim.mk sim
-make -f tools/sim.mk simuidiff-run
-make -f tools/sim.mk sim-ui-breaks
-make -f tools/sim.mk sim-smoke
-make -f tools/sim.mk simdiff-run
-make -f tools/sim.mk simdiff-run N=2000 SEED=0x9e37b184 MODE=unwind
-make -f tools/sim.mk sim-breaks N=100
-make -f tools/sim.mk sim-runtime-tables
+tools/ofs sim
+tools/ofs simuidiff-run
+tools/ofs sim-ui-breaks
+tools/ofs sim-smoke
+tools/ofs simdiff-run
+tools/ofs simdiff-run N=2000 SEED=0x9e37b184 MODE=unwind
+tools/ofs sim-breaks N=100
+tools/ofs sim-runtime-tables
 ```
 
 The runner uses `bin/sim-diff/wineprefix` and a module-specific lock. It does not
@@ -52,15 +52,15 @@ with initial tabs 0, 2, 3, and 5. Id `0x14050001` creates crash analysis. The
 factories ignore their parent argument, write the descriptor before calling
 Create, ignore Create/Show results, and return the object's stored HWND.
 
-`tools/gen_sim_tables.py` derives ordered control lifetimes, constructor stores,
+`sim_tables.inc` and `sim_hooks.inc` (committed; `tools/gen_sim_tables.py`, retired, derived them) hold ordered control lifetimes, constructor stores,
 vtable reset requirements, constructor/destructor exception cleanup imports,
 DDX bindings, help maps, engine recipes, systems feature groups, and the fuel
 validator's sparse edit IDs. Generated includes contain ABI metadata, not
 retail instructions or resources.
 
-`tools/gen_sim_runtime.py` prepares bindings for all eight class vtables, the
+`sim_runtime_tables.inc` (committed; once written by the table half of `tools/gen_sim_runtime.py`) holds bindings for all eight class vtables, the
 notification and private CWnd vtables, eight message maps, and five factories.
-It extracts resources and an ordinal import anchor only into ignored build
+`gen_sim_runtime.py` now extracts only resources and an ordinal import anchor, into ignored build
 output. The generated wrappers are compiled into the native DLL. `sim_runtime.c`
 resolves named SIMSUI imports and the CD MFC42 ordinals, binds the ten native
 vtable images and eight inherited message maps, and supplies typed adapters
@@ -228,9 +228,9 @@ the settings validator/converters are descriptor fixtures, not MAIN. The
 native suite complements the high-volume core comparisons; it does not claim
 to cover every possible Windows notification or native exception path.
 
-**Installed 2026-11-02.** The shared Makefile now builds this DLL into `bin/` and
-`make install` puts it in `English/` (`make sim-install` / `sim-revert` alone, keeping the
-first retail copy as `.orig`). `make smoke` requires it to match and load; `make
+**Installed 2026-11-02.** The shared build (the Makefile then, CMake since 2026-11-18) builds this DLL into `bin/` and
+`tools/ofs ofs_install` puts it in `English/` (`tools/ofs sim-install` / `sim-revert` alone, keeping the
+first retail copy as `.orig`). `tools/ofs smoke` requires it to match and load; `tools/ofs
 main-dialogs` compares it in play against retail: Aircraft Settings (command `0x1205`), and
 the crash analysis after it selects "Detect crash and show graph" on the Crash / Damage tab
 and dives into the ground. Every control and its text match; the analysis differs only in

@@ -4,11 +4,11 @@ ADVDRV (module id 21) runs FS98's compiled adventures (`.ADV`, in `ADV\`),
 lessons (`.LES`, in `LESSONS\`) and challenges (`.CHL`, in `CHALLENG\`): small
 bytecode programs produced by Microsoft's APL tools that narrate a flight,
 drive the aircraft and weather, wait on the clock or a keypress, show text and
-play sounds. It is reimplemented and verified: `make advdrvdiff-run` drives
+play sounds. It is reimplemented and verified: `tools/ofs advdrvdiff-run` drives
 retail and OpenFS98 through 20,000 whole-module scenarios over the CD's twenty
 adventures and twenty-four lessons plus programs assembled by the harness, with
 zero differences, after all its deliberate breaks were caught (one is a proven
-equivalence). It runs in-game with `make smoke` passing.
+equivalence). It runs in-game with `tools/ofs smoke` passing.
 
 ## Shape and linkage
 
@@ -19,11 +19,11 @@ relocations are code pointers — the Linkage, the 0x2c-entry instruction table
 at `+0xd8`, the operator `(id, handler)` pairs at `+0x198`, the 176 variable
 descriptors at `+0x318`, the seven weather instructions at `+0x10f8` and the
 0x2c-entry skip table at `+0x1230` — and six pointers into `.data`.
-`tools/gen_advdrv_data.py` zeroes them all and lists each with the address it
-held, and `advdrv.c` installs its own, pairing each retail address to the
-reimplementation's routine. The generator also copies the `.rdata` constant
-pool out as bytes, so every floating-point constant is retail's exact value
-rather than a retyped decimal.
+They are zero in the typed image in `advdrv.c`; `advdrv_relocs.inc` lists each
+with the address it held, and `advdrv.c` installs its own, pairing each retail address to the
+reimplementation's routine. The `.rdata` constant pool is 96 hex-float doubles in
+`advdrv.c`, so every floating-point constant is retail's exact value rather
+than a retyped decimal.
 
 The imports are HOST, GLOBAL, CHAIN, DEMO (`+0x28`, to play a lesson's video),
 MAIN, SOUND, UTIL and WINMSG. The debug console is KERNEL32 directly
@@ -195,12 +195,12 @@ whole `.data` image (code pointers through a pairing learnt in order of first
 sight, pointers into the image as offsets), the arena, GLOBAL and UTIL's
 `.data`, and at each scenario's end the sound cache's files.
 
-Result: **20,000 scenarios, 0 differences**. `make advdrv-cover` builds a
+Result: **20,000 scenarios, 0 differences**. `tools/ofs advdrv-cover` builds a
 counting ADVDRV and confirms every instruction, every operator and every
 readable and writable system variable is exercised, with the error paths
 firing.
 
-Deliberate breaks, each built into `ADVDRV_ours.dll` (`make advdrv-break-N`)
+Deliberate breaks, each built into `ADVDRV_ours.dll` (`tools/ofs advdrv-break BREAK=N`, the Makefile's `advdrv-break-N`)
 and run over 200 scenarios: **10 tried, 9 caught, one proven an equivalence.**
 The caught ones were the 256ths sentinel, the `wait` tick scale, the position
 instruction's GLOBAL flag, the COM 25-kHz step, the key-binding encoding, the

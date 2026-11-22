@@ -5,6 +5,7 @@ Run via bash tools/run_alertsdiff.sh --breaks [N] to keep Wine state isolated.
 A compile error, runtime fault or timeout is not accepted as a caught mutation.
 The baseline source and executable are never edited or overwritten.
 """
+import module_flags
 from pathlib import Path
 import subprocess
 import sys
@@ -84,8 +85,7 @@ def main():
         # Always compile the copy directly to its own executable; never depend
         # on make timestamps and never replace the verified baseline output.
         build = subprocess.run([
-            'i686-w64-mingw32-gcc', '-std=c99', '-O2', '-Wall', '-Wextra',
-            '-fno-strict-aliasing', '-Isrc/alerts', '-o', str(executable),
+            'i686-w64-mingw32-gcc', *module_flags.FLAGS, '-std=c99', '-O2', '-Wall', '-Wextra', '-Isrc/alerts', '-o', str(executable),
             'tools/difftest/alertseventsdiff.c', str(source), '-lntdll'],
             text=True, capture_output=True)
         if build.returncode:

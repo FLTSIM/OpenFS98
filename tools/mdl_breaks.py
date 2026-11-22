@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
 """Build fresh, isolated callback mutations and require a behavioral mismatch.
 
-Run after make -f tools/mdl.mk mdl-normal-diff. Uses its private Wine prefix.
+Run after tools/ofs mdl-normal-diff. Uses its private Wine prefix.
 Neither tracked source nor the normal harness executable is changed.
 """
+import module_flags
 import os
 from pathlib import Path
 import subprocess
@@ -32,7 +33,7 @@ def main():
         modified.write_text(source.replace(before, after))
         executable.unlink(missing_ok=True)
         subprocess.run([
-            'i686-w64-mingw32-gcc', '-std=c99', '-O2', '-Wall', '-Wextra',
+            'i686-w64-mingw32-gcc', *module_flags.FLAGS, '-std=c99', '-O2', '-Wall', '-Wextra',
             '-Iinclude', '-Isrc/mdl', '-Ibin/mdl-diff', '-o', str(executable),
             'tools/difftest/mdldiff.c', str(modified)], cwd=root, check=True)
         result = subprocess.run(['wine', str(executable), '65536'], cwd=root,

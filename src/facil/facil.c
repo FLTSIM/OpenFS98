@@ -35,10 +35,202 @@ struct facil_linkage {
     facil_fn slots[FACIL_NSLOTS];
 };
 
+struct facil_data {
+    uint8_t gap_0074[0x4];
+    uint32_t f_0078;
+    uint8_t gap_007c[0x3c];
+    uint32_t f_00b8;
+    uint8_t gap_00bc[0x4];
+    uint32_t f_00c0;
+    uint8_t gap_00c4[0x4];
+    uint32_t f_00c8;
+    uint8_t gap_00cc[0x4];
+    uint32_t f_00d0;
+    uint8_t gap_00d4[0x4];
+    uint32_t f_00d8;
+    uint8_t gap_00dc[0x4];
+    uint32_t f_00e0;
+    uint8_t gap_00e4[0x4];
+    uint32_t f_00e8;
+    uint8_t gap_00ec[0x4];
+    uint32_t f_00f0;
+    uint8_t gap_00f4[0x4];
+    uint32_t f_00f8;
+    uint8_t gap_00fc[0x4];
+    uint32_t f_0100;
+    uint8_t gap_0104[0x4];
+    uint32_t f_0108;
+    uint32_t f_010c;
+    uint32_t f_0110;
+    uint8_t gap_0114[0x8];
+    uint32_t f_011c;
+    uint32_t f_0120;
+    uint32_t f_0124;
+    uint8_t gap_0128[0x4];
+    uint32_t f_012c;
+    uint32_t f_0130;
+    uint8_t gap_0134[0x4];
+    uint32_t f_0138;
+    uint8_t gap_013c[0xc];
+    uint32_t f_0148;
+    uint8_t gap_014c[0x34];
+    uint32_t f_0180;
+    uint8_t gap_0184[0x14];
+    uint32_t f_0198;
+    uint8_t gap_019c[0x14];
+    uint32_t f_01b0;
+    uint8_t gap_01b4[0x10];
+    uint32_t f_01c4;
+    uint8_t gap_01c8[0x14];
+    uint32_t f_01dc;
+    uint8_t gap_01e0[0x14];
+    uint32_t f_01f4;
+    uint8_t gap_01f8[0x14];
+    uint32_t f_020c;
+    uint8_t gap_0210[0x10];
+    uint32_t f_0220;
+    uint8_t gap_0224[0xc];
+    uint32_t f_0230;
+    uint32_t f_0234;
+    uint32_t f_0238;
+    uint8_t gap_023c[0x8];
+    uint32_t f_0244;
+    uint32_t f_0248;
+    uint32_t f_024c;
+    uint8_t gap_0250[0x8];
+    uint32_t f_0258;
+    uint32_t f_025c;
+    uint32_t f_0260;
+    uint8_t gap_0264[0x8];
+    uint32_t f_026c;
+    uint32_t f_0270;
+    uint32_t f_0274;
+    uint8_t gap_0278[0x8];
+    uint32_t f_0280;
+    uint32_t f_0284;
+    uint32_t f_0288;
+    uint8_t gap_028c[0x8];
+    uint32_t f_0294;
+    uint32_t f_0298;
+    uint32_t f_029c;
+    uint8_t gap_02a0[0x8];
+    uint32_t f_02a8;
+    uint32_t f_02ac;
+    uint32_t f_02b0;
+    uint8_t gap_02b4[0x8];
+    uint32_t f_02bc;
+    uint32_t f_02c0;
+    uint32_t f_02c4;
+    uint8_t gap_02c8[0x8];
+    uint32_t f_02d0;
+    uint8_t gap_02d4[0x4];
+    uint32_t f_02d8;
+    uint8_t gap_02dc[0x4];
+    uint32_t f_02e0;
+    uint8_t gap_02e4[0x4];
+    uint32_t f_02e8;
+    uint8_t gap_02ec[0x4];
+    uint32_t f_02f0;
+    uint8_t gap_02f4[0x4];
+    uint32_t f_02f8;
+    uint8_t gap_02fc[0x4];
+    uint32_t f_0300;
+    uint32_t f_0304;
+    uint32_t f_0308;
+    uint8_t gap_030c[0x4];
+    uint32_t f_0310;
+    uint32_t f_0314;
+    uint32_t f_0318;
+    uint8_t gap_031c[0x4];
+    uint32_t f_0320;
+    uint32_t f_0324;
+    uint32_t f_0328;
+    uint8_t gap_032c[0x4];
+    uint32_t f_0330;
+    uint8_t gap_0334[0x4];
+    uint32_t f_0338;
+    uint8_t gap_033c[0x4];
+    uint32_t f_0340;
+    uint32_t f_0344;
+    uint32_t f_0348;
+    uint8_t gap_034c[0x4];
+    uint32_t f_0350;
+    uint32_t f_0354;
+    uint32_t f_0358;
+    uint8_t gap_035c[0x4];
+    uint32_t f_0360;
+    uint32_t f_0364;
+    uint32_t f_0368;
+    uint8_t gap_036c[0x4];
+    uint32_t f_0370;
+    uint32_t f_0374;
+    uint32_t f_0378;
+    uint8_t gap_037c[0x4];
+    uint32_t f_0380;
+    uint32_t f_0384;
+    uint32_t f_0388;
+    uint8_t gap_038c[0x4];
+    uint32_t f_0390;
+    uint32_t f_0394;
+    uint32_t f_0398;
+    uint8_t gap_039c[0x4];
+    uint32_t f_03a0;
+    uint32_t f_03a4;
+    uint32_t f_03a8;
+    uint8_t gap_03ac[0x4];
+    uint32_t f_03b0;
+    uint32_t f_03b4;
+    uint32_t f_03b8;
+    uint8_t gap_03bc[0x4];
+    uint32_t f_03c0;
+    uint32_t f_03c4;
+    uint32_t f_03c8;
+    uint8_t gap_03cc[0x4];
+    uint32_t f_03d0;
+    uint8_t gap_03d4[0x4];
+    uint32_t f_03d8;
+    uint8_t gap_03dc[0x8];
+    uint32_t f_03e4;
+    uint8_t gap_03e8[0x28];
+    uint32_t f_0410;
+    uint8_t gap_0414[0xc];
+    uint32_t f_0420;
+    uint8_t gap_0424[0x4c];
+    uint32_t f_0470;
+    uint8_t gap_0474[0x34];
+    uint32_t f_04a8;
+    uint8_t gap_04ac[0x4];
+    uint32_t f_04b0;
+    uint8_t gap_04b4[0x4];
+    uint32_t f_04b8;
+    uint8_t gap_04bc[0x4];
+    uint32_t f_04c0;
+    uint8_t gap_04c4[0x4];
+    uint32_t f_04c8;
+    uint8_t gap_04cc[0x4];
+    uint32_t f_04d0;
+    uint8_t gap_04d4[0x4];
+    uint32_t f_04d8;
+    uint8_t gap_04dc[0x4];
+    uint32_t f_04e0;
+    uint32_t f_04e4;
+    uint32_t f_04e8;
+    uint32_t f_04ec;
+    char s_04f0[12];
+    char s_04fc[28];
+    char s_0518[12];
+    char s_0524[8];
+    char s_052c[8];
+    char s_0534[8];
+    char s_053c[64];
+    uint8_t gap_057c[0x27a0];
+} __attribute__((packed));
+_Static_assert(sizeof(struct facil_data) == FACIL_IMAGE_SIZE - FACIL_DATA_START, "facil_data");
+
 struct facil_image {
     struct fs98_import import[8];
     struct facil_linkage linkage;
-    uint8_t data[FACIL_IMAGE_SIZE - FACIL_DATA_START];
+    struct facil_data data;
 };
 
 extern struct facil_image facil_image;
@@ -3045,7 +3237,127 @@ struct facil_image facil_image = {
     },
     { FS98_MOD_FACIL, NULL, NULL, 0, 0, NULL, { NULL } },
     {
-#include "facil_data.inc"
+    .f_0078 = 0x2e,
+    .f_00b8 = 0x10001,
+    .f_00c0 = 0x20001,
+    .f_00c8 = 0x30001,
+    .f_00d0 = 0x3,
+    .f_00d8 = 0x50001,
+    .f_00e0 = 0x10001,
+    .f_00e8 = 0x20001,
+    .f_00f0 = 0x30001,
+    .f_00f8 = 0x40001,
+    .f_0100 = 0x4,
+    .f_0108 = 0x50003,
+    .f_010c = 0x50004,
+    .f_0110 = 0x50003,
+    .f_011c = 0xffffffb4,
+    .f_0120 = 0x47b0000,
+    .f_0124 = 0x7710,
+    .f_012c = 0x1f4,
+    .f_0130 = 0x1680001,
+    .f_0138 = 0x303633,
+    .f_0148 = 0x313030,
+    .f_0180 = 0x15,
+    .f_0198 = 0x15,
+    .f_01b0 = 0x8,
+    .f_01c4 = 0x15,
+    .f_01dc = 0x15,
+    .f_01f4 = 0x8,
+    .f_020c = 0xa,
+    .f_0220 = 0x8,
+    .f_0230 = 0x4,
+    .f_0234 = 0x20,
+    .f_0238 = 0x1015,
+    .f_0244 = 0x4,
+    .f_0248 = 0x38,
+    .f_024c = 0x1014,
+    .f_0258 = 0x4,
+    .f_025c = 0x50,
+    .f_0260 = 0x11050,
+    .f_026c = 0x4,
+    .f_0270 = 0xac,
+    .f_0274 = 0x104d,
+    .f_0280 = 0x4,
+    .f_0284 = 0xc0,
+    .f_0288 = 0x1101b,
+    .f_0294 = 0x4,
+    .f_0298 = 0x64,
+    .f_029c = 0x1015,
+    .f_02a8 = 0x4,
+    .f_02ac = 0x7c,
+    .f_02b0 = 0x1014,
+    .f_02bc = 0x4,
+    .f_02c0 = 0x94,
+    .f_02c4 = 0x11050,
+    .f_02d0 = 0x1,
+    .f_02d8 = 0x10001,
+    .f_02e0 = 0x20001,
+    .f_02e8 = 0x30001,
+    .f_02f0 = 0x40001,
+    .f_02f8 = 0x4,
+    .f_0300 = 0x1,
+    .f_0304 = 0x2,
+    .f_0308 = 0x4,
+    .f_0310 = 0x1,
+    .f_0314 = 0x2,
+    .f_0318 = 0x4,
+    .f_0320 = 0x1,
+    .f_0324 = 0x2,
+    .f_0328 = 0x4,
+    .f_0330 = 0x1,
+    .f_0338 = 0x7,
+    .f_0340 = 0x1,
+    .f_0344 = 0x2,
+    .f_0348 = 0x4,
+    .f_0350 = 0x1,
+    .f_0354 = 0x2,
+    .f_0358 = 0x4,
+    .f_0360 = 0x1,
+    .f_0364 = 0x2,
+    .f_0368 = 0x4,
+    .f_0370 = 0x1,
+    .f_0374 = 0x1,
+    .f_0378 = 0x2,
+    .f_0380 = 0x1,
+    .f_0384 = 0x1,
+    .f_0388 = 0x2,
+    .f_0390 = 0x1,
+    .f_0394 = 0x1,
+    .f_0398 = 0x2,
+    .f_03a0 = 0x1,
+    .f_03a4 = 0x1,
+    .f_03a8 = 0x2,
+    .f_03b0 = 0x1,
+    .f_03b4 = 0x1,
+    .f_03b8 = 0x2,
+    .f_03c0 = 0x1,
+    .f_03c4 = 0x1,
+    .f_03c8 = 0x2,
+    .f_03d0 = 0x1,
+    .f_03d8 = 0x7,
+    .f_03e4 = 0x42f00000,
+    .f_0410 = 0x1000,
+    .f_0420 = 0x3e8,
+    .f_0470 = 0x3e8,
+    .f_04a8 = 0x10001,
+    .f_04b0 = 0x20001,
+    .f_04b8 = 0x30001,
+    .f_04c0 = 0x40001,
+    .f_04c8 = 0x50001,
+    .f_04d0 = 0x50002,
+    .f_04d8 = 0x6,
+    .f_04e0 = 0x4c,
+    .f_04e4 = 0x52,
+    .f_04e8 = 0x43,
+    .f_04ec = 0x1000,
+    .s_04f0 = "FACILITIES",
+    .s_04fc = "ALLOW_GRAY_ERROR_DIALOGS",
+    .s_0518 = "GTL_BUTTON",
+    .s_0524 = "CITY",
+    .s_052c = "STATE",
+    .s_0534 = "COUNTRY",
+    .s_053c = "REGION",
     }
 };
 
@@ -3059,7 +3371,7 @@ static void facil_install_pointers(void)
     D32(offset) = (uint32_t)(uintptr_t)(D + (target));
 #define FACIL_REL_TEXT(offset, target) \
     D32(offset) = (uint32_t)(uintptr_t)facil_text_target(target);
-#include "facil_data.inc"
+#include "facil_relocs.inc"
 #undef FACIL_REL_TEXT
 #undef FACIL_REL_DATA
 #undef FACIL_RELOCS

@@ -9,8 +9,8 @@ external behavior it needs is allocation, reallocation, freeing and `memmove`,
 all through host services.
 
 `src/chain/chain.c` is the transliteration and the module shell together.
-`make chaindiff-run` drives retail and the OpenFS98 build side by side over
-20,000 random scripts -- **0 differ** -- and `make smoke` passes with it
+`tools/ofs chaindiff-run` drives retail and the OpenFS98 build side by side over
+20,000 random scripts -- **0 differ** -- and `tools/ofs smoke` passes with it
 installed beside GLOBAL, NUMERIC, SLEW and UTIL: 27/27 modules, 95 gauges.
 
 The preflight below held up. The sections after it record what the

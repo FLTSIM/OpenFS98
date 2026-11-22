@@ -5,3 +5,4 @@ orig/
 game/
 __pycache__/
 cd/
+/build/

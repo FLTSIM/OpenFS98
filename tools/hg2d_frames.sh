@@ -86,7 +86,7 @@ if [ -n "${HG2D_FRAMES_GAUGE:-}${HG2D_FRAMES_GAUGE_RETAIL:-}" ]; then
     gauge_name=$(basename "$HG2D_FRAMES_GAUGE")
 fi
 [ -f "$ours" ] && [ -f "$framelock" ] && [ -f bin/SEHFIX.DLL ] && [ -f "$game/FLTSIM98.EXE" ] || {
-    echo "needs $ours, $framelock, bin/SEHFIX.DLL and the staged game" >&2; exit 2;
+    echo "needs $ours, $framelock, bin/SEHFIX.DLL and the staged game (tools/ofs framelock sehfix)" >&2; exit 2;
 }
 command -v Xvfb >/dev/null || { echo "needs Xvfb" >&2; exit 2; }
 
@@ -103,7 +103,7 @@ cp -a "${WINEPREFIX:-$HOME/.wine}" "$out/prefix"
 export WINEPREFIX=$out/prefix
 Xvfb "$display" -screen 0 "${HG2D_FRAMES_SCREEN:-1024x768}x24" +extension GLX -ac -noreset >"$out/xvfb.log" 2>&1 &
 xvfb=$!
-trap 'wineserver -k 2>/dev/null; kill $xvfb 2>/dev/null || true' EXIT
+trap 'wineserver -k 2>/dev/null || true; kill $xvfb 2>/dev/null || true' EXIT
 export DISPLAY=$display
 for _ in $(seq 20); do xdpyinfo >/dev/null 2>&1 && break; sleep 0.5; done
 xdpyinfo >/dev/null 2>&1 || { echo "Xvfb did not start" >&2; exit 2; }
@@ -124,9 +124,9 @@ run() {     # tag hg2d
     local hg2d=$2
     if [ -n "${HG2D_FRAMES_ALL:-}${HG2D_FRAMES_ONLY:-}${HG2D_FRAMES_MDLS:-}" ]; then
         local m
-        for m in $(make -s modules-of) $(make -s english-modules-of); do
+        for m in $(tools/modules.sh modules-of) $(tools/modules.sh english-modules-of); do
             local to from
-            to=$(make -s installed-path-of M=$m) from=$(make -s orig-module-of M=$m)
+            to=$(tools/modules.sh installed-path-of "$m") from=$(tools/modules.sh orig-module-of "$m")
             if [ "$tag" = ours ]; then
                 if [ -n "${HG2D_FRAMES_ALL:-}${HG2D_FRAMES_ONLY:-}" ] && {
                     [ -z "${HG2D_FRAMES_ONLY:-}" ] || [[ " $HG2D_FRAMES_ONLY " == *" $m "* ]]

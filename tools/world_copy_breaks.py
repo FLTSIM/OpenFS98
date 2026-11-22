@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Require actual differences for copy-weather core and initializer mutations."""
+import module_flags
 from pathlib import Path
 import subprocess
 
@@ -69,8 +70,7 @@ def main():
         sources = [str(path) if filename == original else str(filename) for filename in
                    (Path('src/world/world_copy.c'), Path('src/world/world_copy_init.c'))]
         exe = output / f'{name}.exe'
-        subprocess.run(['i686-w64-mingw32-gcc', '-std=c99', '-O2', '-Wall', '-Wextra', '-Werror',
-                        '-fno-strict-aliasing', '-Isrc/world', '-o', str(exe),
+        subprocess.run(['i686-w64-mingw32-gcc', *module_flags.FLAGS, '-std=c99', '-Itools/difftest', '-O2', '-Wall', '-Wextra', '-Werror', '-Isrc/world', '-o', str(exe),
                         'tools/difftest/worldcopydiff.c', *sources], check=True)
         result = subprocess.run(['wine', str(exe), '256', '0x4a971b63', 'interrupt'],
                                 capture_output=True, text=True, timeout=120)

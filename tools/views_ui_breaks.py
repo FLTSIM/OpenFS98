@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Prove native Views comparisons detect drawing and module-cleanup errors."""
+import module_flags
 from pathlib import Path
 import subprocess
 import sys
@@ -24,8 +25,7 @@ def main():
         sources = [str(source) if other == unit else f'src/views/views_{other}.c'
                     for other in ('events', 'objects', 'runtime')]
         build = subprocess.run([
-            'i686-w64-mingw32-gcc', '-std=c99', '-O2', '-Wall', '-Wextra', '-Werror',
-            '-fno-strict-aliasing', '-fno-delete-null-pointer-checks', '-Isrc/views',
+            'i686-w64-mingw32-gcc', *module_flags.FLAGS, '-std=c99', '-O2', '-Wall', '-Wextra', '-Werror', '-Isrc/views',
             '-shared', '-nostdlib', '-Wl,--entry=_DllMain@12', '-Wl,--disable-dynamicbase',
             '-Wl,--image-base=0x223e0000', '-o', str(dll), *sources, 'src/views/views_stack.S',
             'src/views/views.def', 'bin/views-diff/views-res.o',

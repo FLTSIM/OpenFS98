@@ -87,7 +87,74 @@ struct ac_linkage {
 struct ac_image {
     struct fs98_import import[7];       /* +0x000 ImportTable */
     struct ac_linkage  linkage;         /* +0x038 Linkage */
-    uint8_t            data[AC_IMAGE_SIZE - 0x78]; /* +0x078 on */
+    struct __attribute__((packed)) {
+    struct ac_key { uint32_t id; int32_t type; uint32_t alias; } keys[12]; /* +0x078 */
+    char dot[4];            /* +0x108 */
+    char section_fmt[8];    /* +0x10c */
+    char cfg_section[0x10]; /* +0x114 */
+    char models[8];         /* +0x124 */
+    char normal[8];         /* +0x12c */
+    char crash[8];          /* +0x134 */
+    char c_yellow[8];
+    char c_white[8];
+    char c_water[8];
+    char c_tan[4];
+    char c_red[4];
+    char c_orange[8];
+    char c_olive[8];
+    char c_med_yellow[12];
+    char c_med_tan[8];
+    char c_med_red[8];
+    char c_med_orange[12];
+    char c_med_olive[12];
+    char c_med_green[12];
+    char c_med_brown[12];
+    char c_med_brick[12];
+    char c_med_blue[12];
+    char c_ltgray[8];
+    char c_light_yellow[16];
+    char c_light_tan[12];
+    char c_light_red[12];
+    char c_light_orange[16];
+    char c_light_olive[12];
+    char c_light_green[12];
+    char c_light_brown[12];
+    char c_light_brick[12];
+    char c_light_blue[12];
+    char c_green[8];
+    char c_gray[8];
+    char c_dkgray[8];
+    char c_dark_yellow[12];
+    char c_dark_tan[12];
+    char c_dark_red[12];
+    char c_dark_orange[12];
+    char c_dark_olive[12];
+    char c_dark_green[12];
+    char c_dark_brown[12];
+    char c_dark_brick[12];
+    char c_dark_blue[12];
+    char c_const_white[12];
+    char c_brown[8];
+    char c_bright_yellow[16];
+    char c_bright_white[16];
+    char c_bright_red[12];
+    char c_bright_orange[16];
+    char c_bright_ltgray[16];
+    char c_bright_green[16];
+    char c_bright_gray[12];
+    char c_bright_dkgray[16];
+    char c_bright_blue[12];
+    char c_bright_aqua[12];
+    char c_brick[8];
+    char c_blue[8];
+    char c_black[8];
+    char colors[8];         /* +0x38c */
+    char key_fmt[8];        /* +0x394 */
+    uint32_t pool_textures; /* +0x39c */
+    uint32_t pool_dirs;     /* +0x3a0 */
+    char empty[4];          /* +0x3a4 */
+    uint8_t pad[8];         /* +0x3a8 */
+    } data;
 };
 
 extern struct ac_image ac_image;
@@ -156,6 +223,9 @@ typedef void     (*mdl_detach_fn)(void);                                   /* re
 #define S_SIM_DIR       0x9054      /* "SIM" */
 #define S_AIRCRAFT_DIR  0x9055      /* "AIRCRAFT" */
 
+_Static_assert(offsetof(struct ac_image, data.c_black) == 0x384, "BLACK");
+_Static_assert(offsetof(struct ac_image, data.pool_textures) == 0x39c, "pools");
+_Static_assert(offsetof(struct ac_image, data.empty) == 0x3a4, "empty");
 static const struct { uint16_t name, id; } ac_colour_table[] = {
 #include "acontain_colours.inc"
 };
@@ -854,7 +924,62 @@ struct ac_image ac_image = {
         ac_query, ac_model_load, ac_model_unload, ac_model_kind
     },
     {
-#include "acontain_data.inc"
+        { { 0x2310, 36, 0x0 }, { 0x231e, 0, 0x0 }, { 0x2313, 15, 0x0 }, { 0x2317, -2, 0x231c }, { 0x2317, 36, 0x231c }, { 0x2316, -2, 0x231b }, { 0x2316, 36, 0x231b }, { 0x2315, -2, 0x231a }, { 0x2315, 36, 0x231a }, { 0x2314, -2, 0x2319 }, { 0x2314, 36, 0x2319 }, { 0x2318, 36, 0x0 } },
+        ".", "%s.%d", "AIRtoCONTAINER", "models", "NORMAL", "CRASH",
+        "YELLOW",
+        "WHITE",
+        "WATER",
+        "TAN",
+        "RED",
+        "ORANGE",
+        "OLIVE",
+        "MED_YELLOW",
+        "MED_TAN",
+        "MED_RED",
+        "MED_ORANGE",
+        "MED_OLIVE",
+        "MED_GREEN",
+        "MED_BROWN",
+        "MED_BRICK",
+        "MED_BLUE",
+        "LTGRAY",
+        "LIGHT_YELLOW",
+        "LIGHT_TAN",
+        "LIGHT_RED",
+        "LIGHT_ORANGE",
+        "LIGHT_OLIVE",
+        "LIGHT_GREEN",
+        "LIGHT_BROWN",
+        "LIGHT_BRICK",
+        "LIGHT_BLUE",
+        "GREEN",
+        "GRAY",
+        "DKGRAY",
+        "DARK_YELLOW",
+        "DARK_TAN",
+        "DARK_RED",
+        "DARK_ORANGE",
+        "DARK_OLIVE",
+        "DARK_GREEN",
+        "DARK_BROWN",
+        "DARK_BRICK",
+        "DARK_BLUE",
+        "CONST_WHITE",
+        "BROWN",
+        "BRIGHT_YELLOW",
+        "BRIGHT_WHITE",
+        "BRIGHT_RED",
+        "BRIGHT_ORANGE",
+        "BRIGHT_LTGRAY",
+        "BRIGHT_GREEN",
+        "BRIGHT_GRAY",
+        "BRIGHT_DKGRAY",
+        "BRIGHT_BLUE",
+        "BRIGHT_AQUA",
+        "BRICK",
+        "BLUE",
+        "BLACK",
+        "colors", "%.2d", 0, 0, "", { 0 }
     }
 };
 

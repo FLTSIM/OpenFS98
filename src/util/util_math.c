@@ -19,8 +19,134 @@
 
 #include "util_imports.h"
 
-#include "cos_table.inc"
-#include "util_data.inc"
+/* Byte-emitting initialiser macros: each carries one typed value, little endian. */
+#define U8(x)  (uint8_t)(x)
+#define U16(x) U8(x), U8((x) >> 8)
+#define U32(x) U16(x), U16((x) >> 16)
+/* One entry of a UTIL_* list in util_trig.inc, in the form its table needs */
+#define ENTRY_U16(v) U16(v),
+#define ENTRY_U32(v) U32(v),
+#define ENTRY_I32(v) U32((uint32_t)(int32_t)(v)),
+#define ENTRY_Q16(v) (uint16_t)((v) >> 16),
+
+#include "util_trig.inc"
+
+#define FS98_UTIL_DATA_SIZE 2048
+#define FS98_UTIL_LATTABLE  0x5b4
+
+/* Retail's cosine table as the interpolator reads it: the high halves of UTIL_COS_Q32 (the
+ * stride-4 words at +0xf6 of the image), unsigned Q16 -- entry 0 is 0xffff, which reads as
+ * -1 and means 1.0 -- and a 130th entry, because the interpolator reads index + 1 and at
+ * index 128 that runs on into the arcsine table at +0x2f8; its value, 0x00a3, is that
+ * table's entry 1 (+0x2fa).  Retail reads the same bytes; they never affect the answer,
+ * because the interpolation weight at index 128 is zero. */
+static const uint16_t fs98_util_cos_q16[130] = {
+    UTIL_COS_Q32(ENTRY_Q16)
+    UTIL_ASIN_ENTRY1                /* arcsine entry 1, at +0x2fa */
+};
+
+/* fs98_util_data: UTIL's whole .data as retail lays it out (2048 bytes), read by byte offset.
+ * Slot 0x44 indexes the latitude table with a byte offset derived from the latitude, which can
+ * leave the table proper, so the image is kept entire.  A byte array, not a struct, so that
+ * every `fs98_util_data + off` and the symbol stay as they were.  Retail's own ImportTable and
+ * Linkage are copied here (the module's real ones are other objects); the pointers in them and
+ * in the dispatch matrix are retail's raw values (load address 0x208e0000, .text at +0x1000,
+ * .data at +0x5000), kept as numbers and named by what they point at. */
+static const unsigned char fs98_util_data[FS98_UTIL_DATA_SIZE] = {
+    /* +0x000  ImportTable: (module id wanted, link the host fills in) x 3 */
+    [0x000] = U32(1), U32(0),           /* module 1 (HOST) */
+              U32(2), U32(0),           /* module 2 (GLOBAL) */
+              U32(0x11), U32(0),        /* module 17 (NUMERIC) */
+    /* +0x020  Linkage: our module id, then the service slots (retail code addresses, retail
+     * .text + the offset shown) */
+    [0x020] = U32(0x14),                /* module id 20 */
+    [0x024] = U32(0x208e1020),       /* slot 0x04: retail .text+0x1020 */
+    [0x028] = U32(0x208e104d),       /* slot 0x08: retail .text+0x104d */
+    [0x02c] = U32(0),                  /* slot 0x0c: empty */
+    [0x030] = U32(0),                  /* slot 0x10: empty */
+    [0x034] = U32(0),                  /* slot 0x14: empty */
+    [0x038] = U32(0x208e1216),       /* slot 0x18: retail .text+0x1216 */
+    [0x03c] = U32(0x208e125c),       /* slot 0x1c: retail .text+0x125c */
+    [0x040] = U32(0x208e1289),       /* slot 0x20: retail .text+0x1289 */
+    [0x044] = U32(0x208e104e),       /* slot 0x24: retail .text+0x104e */
+    [0x048] = U32(0x208e10b0),       /* slot 0x28: retail .text+0x10b0 */
+    [0x04c] = U32(0x208e1121),       /* slot 0x2c: retail .text+0x1121 */
+    [0x050] = U32(0x208e11b9),       /* slot 0x30: retail .text+0x11b9 */
+    [0x054] = U32(0x208e12b0),       /* slot 0x34: retail .text+0x12b0 */
+    [0x058] = U32(0x208e1309),       /* slot 0x38: retail .text+0x1309 */
+    [0x05c] = U32(0x208e1428),       /* slot 0x3c: retail .text+0x1428 */
+    [0x060] = U32(0x208e156a),       /* slot 0x40: retail .text+0x156a */
+    [0x064] = U32(0x208e14a4),       /* slot 0x44: retail .text+0x14a4 */
+    [0x068] = U32(0x208e159a),       /* slot 0x48: retail .text+0x159a */
+    [0x06c] = U32(0x208e16a9),       /* slot 0x4c: retail .text+0x16a9 */
+    [0x070] = U32(0x208e17c0),       /* slot 0x50: retail .text+0x17c0 */
+    [0x074] = U32(0x208e17d3),       /* slot 0x54: retail .text+0x17d3 */
+    [0x078] = U32(0x208e17e6),       /* slot 0x58: retail .text+0x17e6 */
+    [0x07c] = U32(0x208e17f9),       /* slot 0x5c: retail .text+0x17f9 */
+    [0x080] = U32(0x208e1800),       /* slot 0x60: retail .text+0x1800 */
+    [0x084] = U32(0x208e183c),       /* slot 0x64: retail .text+0x183c */
+    [0x088] = U32(0x208e19c4),       /* slot 0x68: retail .text+0x19c4 */
+    [0x08c] = U32(0x208e1a90),       /* slot 0x6c: retail .text+0x1a90 */
+    [0x090] = U32(0x208e1ab7),       /* slot 0x70: retail .text+0x1ab7 */
+    [0x094] = U32(0x208e1acf),       /* slot 0x74: retail .text+0x1acf */
+    [0x098] = U32(0x208e1b24),       /* slot 0x78: retail .text+0x1b24 */
+    [0x09c] = U32(0x208e1b79),       /* slot 0x7c: retail .text+0x1b79 */
+    [0x0a0] = U32(0x208e1b93),       /* slot 0x80: retail .text+0x1b93 */
+    [0x0a4] = U32(0x208e1bf0),       /* slot 0x84: retail .text+0x1bf0 */
+    [0x0a8] = U32(0x208e1c60),       /* slot 0x88: retail .text+0x1c60 */
+    [0x0ac] = U32(0x208e1df6),       /* slot 0x8c: retail .text+0x1df6 */
+    [0x0b0] = U32(0x208e2444),       /* slot 0x90: retail .text+0x2444 */
+    [0x0b4] = U32(0x208e2b50),       /* slot 0x94: retail .text+0x2b50 */
+    [0x0b8] = U32(0x208e2ed0),       /* slot 0x98: retail .text+0x2ed0 */
+    [0x0bc] = U32(0x208e3270),       /* slot 0x9c: retail .text+0x3270 */
+    [0x0c0] = U32(0x208e2d40),       /* slot 0xa0: retail .text+0x2d40 */
+    [0x0c4] = U32(0x208e3300),       /* slot 0xa4: retail .text+0x3300 */
+    [0x0c8] = U32(0x208e3390),       /* slot 0xa8: retail .text+0x3390 */
+    [0x0cc] = U32(0x208e3430),       /* slot 0xac: retail .text+0x3430 */
+    [0x0d0] = U32(0x208e1c1f),       /* slot 0xb0: retail .text+0x1c1f */
+    [0x0d4] = U32(0x208e1c38),       /* slot 0xb4: retail .text+0x1c38 */
+    [0x0d8] = U32(0x208e3ae0),       /* slot 0xb8: retail .text+0x3ae0 */
+    [0x0dc] = U32(0x208e3950),       /* slot 0xbc: retail .text+0x3950 */
+    [0x0e0] = U32(0x208e39a0),       /* slot 0xc0: retail .text+0x39a0 */
+    [0x0e4] = U32(0x208e39e0),       /* slot 0xc4: retail .text+0x39e0 */
+    [0x0e8] = U32(0x208e3a40),       /* slot 0xc8: retail .text+0x3a40 */
+    [0x0ec] = U32(0),                   /* one past the last slot: meaning not yet known */
+    [0x0f0] = U32(12345),               /* Lehmer generator seed (ours is fs98_util_rand_state) */
+    [0x0f4] = UTIL_COS_Q32(ENTRY_U32)   /* +0x0f4 Q32 cosine, 129 entries */
+    [0x2f8] = UTIL_ASIN1(ENTRY_U16)     /* +0x2f8 arcsine, first range, 61 entries */
+    [0x372] = UTIL_ASIN2(ENTRY_U16)     /* +0x372 arcsine, steep ranges, 29 entries */
+    [0x3ac] = UTIL_ATAN(ENTRY_U16)      /* +0x3ac arctangent, 257 entries */
+    [0x5ae] = U16(0x2014),              /* meaning not yet known */
+    [0x5b0] = U8(0x80), U8(0x40), U8(0xc0), U8(0x00),   /* atan2 quadrant adjustment, by (x >= 0, y >= 0) */
+    [FS98_UTIL_LATTABLE] = UTIL_LAT_CIRCLE(ENTRY_I32)    /* +0x5b4 latitude circles, 78 entries, to +0x6ec */
+    [0x6ec] = U32(0),                   /* meaning not yet known */
+    /* +0x6f0  marshalling dispatch: four row pointers (data), selected by source type */
+    [0x6f0] = U32(0x208e5700),   /* -> row 0 at data +0x700 */
+              U32(0x208e5720),   /* -> row 1 */
+              U32(0x208e5740),   /* -> row 2 */
+              U32(0x208e5760),   /* -> row 3 */
+    /* +0x700  four rows of eight handlers, indexed by destination type: retail code addresses;
+     * the no-op is .text+0x1ca7 */
+    /* row 0: source byte */
+    [0x700] = U32(0x208e1ca8), U32(0x208e1ca8), U32(0x208e1cb1), U32(0x208e1cbf),
+              U32(0x208e1ccd), U32(0x208e1cdd), U32(0x208e1ca7), U32(0x208e1ced),
+    /* row 1: source word */
+    [0x720] = U32(0x208e1cfa), U32(0x208e1cfa), U32(0x208e1d06), U32(0x208e1d06),
+              U32(0x208e1d15), U32(0x208e1d23), U32(0x208e1ca7), U32(0x208e1ca7),
+    /* row 2: source dword */
+    [0x740] = U32(0x208e1d31), U32(0x208e1d31), U32(0x208e1d3c), U32(0x208e1d3c),
+              U32(0x208e1d4a), U32(0x208e1d4a), U32(0x208e1ca7), U32(0x208e1ca7),
+    /* row 3: source 48-bit fixed */
+    [0x760] = U32(0x208e1ca7), U32(0x208e1ca7), U32(0x208e1ca7), U32(0x208e1ca7),
+              U32(0x208e1ca7), U32(0x208e1ca7), U32(0x208e1d57), U32(0x208e1ca7),
+    /* +0x780..+0x7e8  zero but for these words; meaning not yet known */
+    [0x7a0] = U32(0x2a),
+    [0x7b0] = U32(0x20), U32(0x108),
+    [0x7c4] = U32(0x2a),
+    [0x7d0] = U32(0x20), U32(0xa08),
+    [0x7e4] = U32(0x20), U32(0xa),
+};
+_Static_assert(sizeof fs98_util_data == FS98_UTIL_DATA_SIZE, "fs98_util_data is retail's whole .data");
 
 #ifndef FS98_STDCALL
 #  define FS98_STDCALL __attribute__((stdcall))

@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Require actual retail mismatches for position core/init mutations."""
+import module_flags
 from pathlib import Path
 import os
 import subprocess
@@ -47,8 +48,7 @@ for name, before, after in mutations:
     if name == 'accept-close-vtable': mutated = mutated.replace('void **vtable = PTR(object, 0);', 'void **vtable = PTR(object, 0); (void)vtable;')
     if name == 'init-populate-vtable': mutated = mutated.replace('void **vtable;', 'void **vtable __attribute__((unused));')
     source_path.write_text(mutated)
-    subprocess.run(['i686-w64-mingw32-gcc', '-std=c99', '-O2', '-Wall', '-Wextra', '-Werror',
-                    '-fno-strict-aliasing', '-fno-delete-null-pointer-checks', '-Isrc/world',
+    subprocess.run(['i686-w64-mingw32-gcc', *module_flags.FLAGS, '-std=c99', '-Itools/difftest', '-O2', '-Wall', '-Wextra', '-Werror', '-Isrc/world',
                     '-o', str(executable), 'tools/difftest/worldpositiondiff.c', str(source_path),
                     'src/world/world_init.c', 'src/world/world_area.c',
                     '-lntdll'], cwd=root, check=True)

@@ -13,7 +13,7 @@ stack-alignment macro around every import call, values passed between routines
 in registers, 16-bit arithmetic with carries. After that it is compiled C, a
 list library that nothing in the retail set calls (see *The C half*).
 
-`src/weatherm/weatherm.c` transliterates all of it, and `make weathermdiff-run`
+`src/weatherm/weatherm.c` transliterates all of it, and `tools/ofs weathermdiff-run`
 checks it against retail.
 
 ## Linkage
@@ -145,7 +145,7 @@ its own quirks:
 
 ## Testing
 
-`make weathermdiff-run` (`tools/difftest/weathermdiff.c`) drives retail and
+`tools/ofs weathermdiff-run` (`tools/difftest/weathermdiff.c`) drives retail and
 OpenFS98 through Linkage over random scripts of:
 
 - updates at the aircraft and elsewhere;
@@ -167,7 +167,7 @@ Compared after each scenario:
 
 **20,000 scenarios, 0 differ, in about 3 seconds.**
 
-**In the game**, `make smoke` passes with it installed: 27/27 modules, 95
+**In the game**, `tools/ofs smoke` passes with it installed: 27/27 modules, 95
 gauges. A throwaway build that reported each entry point through
 `OutputDebugStringA` showed init, one frame callback and one `+0x1c` update
 running in the sim under wine. Then the sim stalls on the parked 3D-viewport

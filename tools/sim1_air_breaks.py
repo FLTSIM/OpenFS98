@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Rebuilt caller-boundary defects. These do not test AIR record decoding."""
+import module_flags
 import fcntl
 import json
 import os
@@ -58,8 +59,7 @@ def main():
             (directory / "sim1_air.inc").write_text(air.replace(old, new, 1))
             dll = directory / "SIM1_AIR_TEST.DLL"
             dll.unlink(missing_ok=True)
-            built = run(["i686-w64-mingw32-gcc", "-std=c99", "-O2", "-Wall", "-Wextra",
-                         "-fno-strict-aliasing", "-DSIM1_AIR_TEST", "-Iinclude", "-Isrc/sim1", "-Ibin/sim1-diff",
+            built = run(["i686-w64-mingw32-gcc", *module_flags.FLAGS, "-std=c99", "-Itools/difftest", "-O2", "-Wall", "-Wextra", "-DSIM1_AIR_TEST", "-Iinclude", "-Isrc/sim1", "-Ibin/sim1-diff",
                          "-shared", "-Wl,--disable-dynamicbase", "-Wl,--image-base,0x22000000", "-o", str(dll),
                          str(directory / "sim1.c"), "src/sim1/sim1_stack.S", "src/sim1/sim1_state_stack.S",
                          "src/sim1/sim1_velocity.S", "tools/sim1_air_test.def"])

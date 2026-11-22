@@ -7,7 +7,7 @@ static survey of the reference binaries. Implemented replacements and their
 behavioral acceptance are documented separately below; inventory counts alone
 do not establish implementation or verification.
 
-`tools/dialogmap.py` now covers the part of the module graph that `make graph`
+`tools/dialogmap.py` now covers the part of the module graph that `tools/ofs graph`
 misses. It reads the English DLLs, root `SIMSUI.DLL`, `DIALOG.DLL` and
 `ENGLISH.FLL`, and `Modules/mpchat.DLL`, without loading or changing any DLL.
 Only Python's standard library and, by default, `objdump` are needed. It does
@@ -429,7 +429,7 @@ must be surveyed again.
 object lifetime and exception cleanup, initialization, commands, progress,
 MFC dispatch and module lifetime. [alerts.md](alerts.md) records the synthetic
 and native differential suites, deliberate mutations and isolated startup
-smoke. Build with `make -f tools/alerts.mk alerts`; shared build integration
+smoke. Build with `tools/ofs alerts`; shared build integration
 is separate from MAIN's current work. It still uses the CD's SIMSUI/MFC42.
 
 **Views is implemented** as a standalone replacement, including its preview
@@ -438,24 +438,24 @@ control setup, object lifetimes and module ABI. [views.md](views.md) records
 its synthetic and native differential suites, deliberate errors and isolated
 startup test. It retains the CD's SIMSUI/MFC42, and the native preview renderer
 is a stateful caller fixture; the actual renderer and application of edits
-belong to MAIN/WINDOW. Build with `make -f tools/views.mk views`.
+belong to MAIN/WINDOW. Build with `tools/ofs views`.
 
 **Help is implemented** as a standalone native replacement independently of
 MAIN/HOST, including all five dialogs, Credits' RichEdit/timer lifecycle and
 About's cached-font cleanup. [help.md](help.md) records the callback contracts,
 core and native differential suites, mutation checks and isolated startup.
-Build with `make -f tools/help.mk help`.
+Build with `tools/ofs ofs_help`.
 
 **Sim is implemented** as a standalone native replacement, with all five
 factories, six settings pages, crash analysis, object/exception lifetimes,
 native comparisons and deliberate mutations. [sim.md](sim.md) records acceptance
-and the isolated startup result. Build with `make -f tools/sim.mk sim`.
+and the isolated startup result. Build with `tools/ofs sim`.
 
 **MPCHAT is implemented and in the shared module build.** Its modeled suite
 is supplemented by real USER32/GDI/RichEdit comparisons: 48 paired scripts,
 864 checkpoints, two DLL unload cycles and 12 detected native mutations.
 See [mpchat.md](mpchat.md). The independent GUI runner is
-`make -f tools/mpchat.mk mpchatuidiff-run`.
+`tools/ofs mpchatuidiff-run`.
 
 The four MFC replacements above remain standalone builds using the CD's
 MFC42/SIMSUI; shared build/install wiring and complete host-driven interaction

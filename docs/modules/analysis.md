@@ -11,10 +11,10 @@ dialog: the ground track. Course tracking draws the trail in the 3D world,
 as a display list handed to G3D. The options dialog (`+0x34`, from MAIN's
 menu) sets the mode.
 
-`src/analysis/analysis.c` is the transliteration. `make analysisdiff-run`
+`src/analysis/analysis.c` is the transliteration. `tools/ofs analysisdiff-run`
 drives retail and the OpenFS98 build over 20,000 whole-module scenarios: **0
-differ**. `make analysis-breaks` applies 103 deliberate breaks:
-93 caught, 10 proven equivalent. `make smoke` passes with it installed: 27/27 modules, 95
+differ**. `tools/ofs analysis-breaks` applies 103 deliberate breaks:
+93 caught, 10 proven equivalent. `tools/ofs smoke` passes with it installed: 27/27 modules, 95
 gauges. The analysis only runs in flight, which wine does not reach, so in
 the game that proves init; the harness covers the rest.
 
@@ -34,8 +34,8 @@ output, which is a list in its own heap block and so is logged as its bytes.
   (the Linkage, the three dialog blocks' callbacks, the exchange table's
   callback at `+0x1ec`) and five pointers into the image (the landing block's
   four texts and the manoeuvre block's, which points at `+0x179`: one byte
-  into the text NUMERIC writes at `+0x178`). `tools/gen_analysis_data.py`
-  zeroes them, and `analysis.c` installs its own.
+  into the text NUMERIC writes at `+0x178`). `analysis.c`
+  holds the image as typed initialisers with those slots zero, and installs its own.
 - Imports: host, GLOBAL, CHAIN, HG2D (13), G3D (14), NUMERIC, UTIL. Win32:
   `DisableThreadLibraryCalls`; MSVCRT `_ftol`, done inline.
 
@@ -270,5 +270,5 @@ The other ten are equivalences, each shown:
 
 ## Not yet
 
-- **In-game.** `make smoke` proves only that it loads and the sim starts;
+- **In-game.** `tools/ofs smoke` proves only that it loads and the sim starts;
   the analysis needs flight, which wine does not reach.

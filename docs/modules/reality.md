@@ -12,10 +12,10 @@ The crash analysis is a dialog with the descent rate at impact and a graph of
 the last 22 seconds' height above the ground, read back from DEMO's replay
 ring and drawn into a dialog control with HG2D's lines.
 
-`src/reality/reality.c` is the transliteration. `make realitydiff-run` drives
+`src/reality/reality.c` is the transliteration. `tools/ofs realitydiff-run` drives
 retail and the OpenFS98 build over 20,000 whole-module scenarios: **0
-differ**. `make reality-breaks` applies 67 deliberate breaks: 61 caught, 6
-proven equivalent. `make smoke` passes with it installed: 27/27 modules, 95
+differ**. `tools/ofs reality-breaks` applies 67 deliberate breaks: 61 caught, 6
+proven equivalent. `tools/ofs smoke` passes with it installed: 27/27 modules, 95
 gauges. Crashes only happen in flight, which wine does not reach, so in the
 game that proves init; the harness covers the rest.
 
@@ -35,7 +35,8 @@ of callbacks of the kind DEMO's harness already stands in for.
   with `ImportTable` at `+0x48` and `Linkage` at `+0xb0`. Its 19 relocations
   are 15 code pointers (an eight-entry jump table at `+0x00`, the Linkage, the
   dialog's three callbacks) and four pointers into the image.
-  `tools/gen_reality_data.py` zeroes them, and `reality.c` installs its own.
+  `reality.c` holds the image as typed initialisers with those slots zero, and installs its own;
+  `.rdata` is one typed object, whole.
 - Imports: host, GLOBAL, CHAIN, CONTROLS (16), DEMO (7), HG2D (13), MAIN (3),
   NUMERIC, SOUND (39), UTIL, WINDOW, WINMSG. Win32: `DisableThreadLibraryCalls`;
   MSVCRT `_ftol`, which the reimplementation does inline.

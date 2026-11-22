@@ -102,11 +102,11 @@ invocations; full install/revert dry runs verify the corrected paths.
 
 Shared integration adds `MP_DIALOG` to `ENGLISH_MODULES`, preserves the
 standalone build, maps the installed uppercase filename and the lowercase
-retail input correctly, and provides `make mpdialog`, `mpdialog-install` and
+retail input correctly, and provides `tools/ofs mpdialog`, `mpdialog-install` and
 `mpdialog-revert`. Installation used:
 
 ```sh
-make mpdialog-install FS98_DIR="$PWD/game"
+tools/ofs mpdialog-install FS98_DIR="$PWD/game"
 MPD_SMOKE_SEHFIX=1 bash tools/run_mpdialogdiff.sh --smoke
 ```
 
@@ -130,7 +130,7 @@ missing replacement exception cleanup, which is fixed and verified.
 Reproduction commands:
 
 ```sh
-make -f tools/mpdialog.mk mpdialog bin/mpdialog-diff/mpdialoguidiff.exe
+tools/ofs mpdialog bin/mpdialog-diff/mpdialoguidiff.exe
 bash tools/run_mpdialogdiff.sh --ui-breaks
 bash tools/run_mpdialogdiff.sh --review-breaks
 bash tools/run_mpdialogdiff.sh --construction-breaks
@@ -890,7 +890,7 @@ factory itself has no separate post-modal cleanup path.
 
 ### Native differential and current limit
 
-Build and run the standalone slice with `make -f tools/mpdialog.mk mpdialog`
+Build and run the standalone slice with `tools/ofs mpdialog`
 and `bash tools/run_mpdialogdiff.sh --ui`. The harness loads the retail
 `orig/English/mpdialog.dll` and replacement side by side with retail MFC42,
 SIMSUI and GLOBAL binaries. It models only HOST registration/memory services
@@ -1747,7 +1747,7 @@ failure logs and partial conclusions below remain historical evidence.
 Historical evidence commands and logs (superseded where the later follow-ups
 record newer runs):
 
-- `make -f tools/mpdialog.mk mpdialog`
+- `tools/ofs mpdialog`
 - `bash tools/run_mpdialogdiff.sh --ui` → `/tmp/mpdialog-visual-baseline-after-fixes.log`: 24 `0x110a`, 24 `0x110b` and 20 `0x110c` paired scripts match across two load/unload cycles; control trees match `24/24`, `24/24` and `20/20`; all seven render captures match; same-window redraws match `14/14` with zero unstable pairs.
 - `bash tools/run_mpdialogdiff.sh --ui-breaks` → `/tmp/mpdialog-visual-mutations-after-fixes.log`: the runner first requires all behavior, complete child-tree, render and repeatability gates to pass, then runs `15/15` targeted behavioral mutations and one wrong-font rendering mutation. The lifetime mutant also requires controlled leaked-object cleanup and module unload.
 - `bash tools/run_mpdialogdiff.sh --smoke` → `/tmp/mpdialog-visual-smoke-after-fixes.log`: `27/27` Modules DLLs, 95 gauge trace mentions, replacement loaded, no trace errors, and source/private-copy DLL hashes unchanged. The 95 mentions comprise 58 load records for 29 distinct gauge paths plus 37 unload records. Full trace: `bin/mpdialog-diff/smoke-game-7h8f0e_x/mpdialog-smoke.log`.
@@ -2167,7 +2167,7 @@ an independent Wine sentinel remained alive (`/tmp/mpdialog-followup-isolation.l
 This inventory supersedes the earlier recommendation to audit Host Options,
 which was completed above. It reconciles the three registry factories, all
 seven retail class vtables and all seven message maps against the evidence in
-this handoff and the replacement bindings in `tools/gen_mpdialog_runtime.py`.
+this handoff and the replacement bindings in `mpdialog_runtime_tables.inc` (committed; once written by `tools/gen_mpdialog_runtime.py`).
 Addresses are retail preferred VAs. Imported SIMSUI/MFC thunks are framework
 code, not additional MP_DIALOG-owned function bodies; the Connection provider
 and Details command thunks are included with their ultimate targets. Binding,
@@ -2308,7 +2308,7 @@ genuine MFC partial-Create uncertainty, the unexplained historical timeout,
 the private-prefix boundary and whole-module acceptance limits remain as
 previously documented.
 
-Validation: `make -f tools/mpdialog.mk mpdialog bin/mpdialog-diff/mpdialoguidiff.exe`
+Validation: `tools/ofs mpdialog bin/mpdialog-diff/mpdialoguidiff.exe`
 built the replacement and harness. The private-prefix `--ui-breaks` run passed
 the complete 24/24 flow, 24/24 settings and 20/20 details paired baseline,
 all child-tree and seven rendering gates, and 14/14 stable repeats. It caught
@@ -2366,7 +2366,7 @@ historical timeout remain subject to the existing acceptance limits. The
 replacement, the private prefixes, and the evidence remain isolated; no game
 installation or shared owner-module wiring was changed by this audit.
 
-Validation: `make -f tools/mpdialog.mk mpdialog
+Validation: `tools/ofs mpdialog
 bin/mpdialog-diff/mpdialoguidiff.exe` built both binaries. The final
 `bash tools/run_mpdialogdiff.sh --ui-breaks` run passed the full two-cycle
 24/24 flow, 24/24 settings and 20/20 details baseline, all seven child-tree
@@ -2458,8 +2458,8 @@ isolated or full-suite reruns detect the relevant mutants, but do not explain
 any earlier stall. Whole-module status remains **partial** under the existing
 criteria.
 
-**Refreshed private startup smoke — current DLL.** `make -f
-tools/mpdialog.mk mpdialog bin/mpdialog-diff/mpdialoguidiff.exe` found both
+**Refreshed private startup smoke — current DLL.** `tools/ofs
+mpdialog bin/mpdialog-diff/mpdialoguidiff.exe` found both
 outputs up to date. The standalone replacement SHA-256 is
 `b229c54cf83b6d597ce13cd6ffa532b73b91705fe88c9b58b47cfa7e7aefa5e0`;
 the source game `English/MP_DIALOG.DLL` hash before and after these runs is
@@ -2627,7 +2627,7 @@ The unresolved current-suite gate above now has a completed passing run.
 No implementation or fixture changes were needed in this continuation;
 the DLL remains SHA-256
 `01507dec60328c37067bfd2e2359db75a48936b49a060d1ff51f168cb3ed7d92`.
-`make -f tools/mpdialog.mk mpdialog bin/mpdialog-diff/mpdialoguidiff.exe`
+`tools/ofs mpdialog bin/mpdialog-diff/mpdialoguidiff.exe`
 found both outputs up to date.
 
 - `bash tools/run_mpdialogdiff.sh --ui` passed in
@@ -2836,7 +2836,7 @@ covers all five flow classes. Each detection must report the expected class
 difference and return normally through module deinitialization/unload;
 faults, timeouts and compiler failures do not count as detections.
 
-Validation: `make -f tools/mpdialog.mk mpdialog
+Validation: `tools/ofs mpdialog
 bin/mpdialog-diff/mpdialoguidiff.exe` kept the DLL unchanged and rebuilt the
 harness with `-Wall -Wextra -Werror`. The final
 `bash tools/run_mpdialogdiff.sh --retained-breaks` run passes in
@@ -2945,7 +2945,7 @@ all unquarantined outcomes or explain every heap-layout difference. No
 implementation change that bypasses the retail call sequence is made here.
 
 
-Final validation: `make -f tools/mpdialog.mk mpdialog
+Final validation: `tools/ofs mpdialog
 bin/mpdialog-diff/mpdialoguidiff.exe` keeps the implementation DLL unchanged
 and builds the harness with `-Wall -Wextra -Werror`.
 `bash tools/run_mpdialogdiff.sh --create-failure-breaks` passes in

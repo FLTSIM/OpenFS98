@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""SIM1's decompiled routines broken on purpose: each break must make sim1rdiff differ.
+"""SIM1's decompiled routines broken on purpose: each break must make sim1rdiff (tools/ofs sim1rdiff) differ.
 
     python3 -B tools/sim1r_breaks.py [suite ...]      (N=scenarios, default 400; ONLY=name,name)
 
@@ -1030,7 +1030,7 @@ def main():
                     print(f'{suite} {name}: text not found once')
                     continue
                 path.write_text(original.replace(before, after))
-                build = subprocess.run(['make', '-s', '-f', 'tools/sim1.mk', 'sim1rdiff'], cwd=root,
+                build = subprocess.run(['tools/ofs', 'sim1rdiff'], cwd=root,
                                        capture_output=True, text=True)
                 if build.returncode:
                     print(f'{suite} {name}: does not build')
@@ -1046,7 +1046,7 @@ def main():
                     print(f'{suite} {name}: CRASHED ({run.returncode})')
         finally:
             path.write_text(original)
-    subprocess.run(['make', '-s', '-f', 'tools/sim1.mk', 'sim1rdiff'], cwd=root)
+    subprocess.run(['tools/ofs', 'sim1rdiff'], cwd=root)
     print(f'{caught} of {total} caught')
 
 

@@ -8,8 +8,8 @@
 > lift, kept as an oracle until then, was deleted on 2026-11-14
 > ([remaining-work.md](../remaining-work.md#lifted-code-all-removed-2026-11-14)).
 
-All **120** reference-CD `.GAU` modules are rebuilt from C. `make` builds them
-and `make install` installs them alongside the other replacements. The outputs
+All **120** reference-CD `.GAU` modules are rebuilt from C. `cmake --build build/win32-retail` builds them
+and `tools/ofs ofs_install` installs them alongside the other replacements. The outputs
 are `bin/gauges-all/Gauges/`, using the exact installed filenames from
 `docs/setup_map.tsv`. Options work has separate sources and outputs.
 
@@ -36,17 +36,17 @@ module with its own data and resources.
 
 The initial hand-written warning and suction implementations remain in
 `src/gauges/warning.c` and `suction.c`, with their independent extraction and
-regression targets in `tools/gauges.mk`.
+regression targets (`tools/ofs gauges-check`, `gauges-breaks`, ...).
 
 ## Verification
 
 ```sh
-make gauges
-make gauges-check N=20000
-GAUGES_RELOCATE=1 make gauges-check N=20000
-make -f tools/gauges.mk all-gauges-hangs
-make gauges-breaks
-make gauges-panels N=1000
+tools/ofs gauges
+tools/ofs gauges-check N=20000
+GAUGES_RELOCATE=1 tools/ofs gauges-check N=20000
+tools/ofs all-gauges-hangs
+tools/ofs gauges-breaks
+tools/ofs gauges-panels N=1000
 ```
 
 The standalone harness loads separate retail and rebuilt DLLs, exercises all
@@ -62,7 +62,7 @@ A complete run compares **26,687,688 vectors** across all 120 modules. Both
 preferred-address and forced-relocation runs pass. The separate nontermination
 suite passes all 16 original/replacement compass cases with watchdogs.
 
-`make gauges-breaks` runs `tools/gauge_breaks.py` (from a frozen copy: it rewrites
+`tools/ofs gauges-breaks` runs `tools/gauge_breaks.py` (from a frozen copy: it rewrites
 `src/gauges/`), the hand-written gauges' breaks. The lift's own mutation suite (348 service-slot,
 numeric and bitmap changes to the generated C) went with it on 2026-11-14.
 Build errors, faults and timeouts do not count as caught breaks.
@@ -127,17 +127,17 @@ shims preserve that behavior. These are documented in the retail-bug ledger.
 ## Install and restore
 
 ```sh
-make gauges-install                 # same FS98_DIR as the shared install
-make gauges-revert                  # restore all 120 retail gauge files
+tools/ofs gauges-install                 # same FS98_DIR as the shared install
+tools/ofs gauges-revert                  # restore all 120 retail gauge files
 ```
 
 Both commands use `tools/stage_gauges.py`, which validates the full collection
 and installed filenames before copying. Retail restoration verifies reference
 hashes. Copies use temporary files and replacement, then verify the bytes.
-The same steps are included in the shared `make install` and `make revert`.
-A disposable full-game `make install` / `make revert` roundtrip checks all
+The same steps are included in the shared `tools/ofs ofs_install` and `tools/ofs ofs_revert`.
+A disposable full-game `tools/ofs ofs_install` / `tools/ofs ofs_revert` roundtrip checks all
 120 installed names and file contents alongside the eleven MDLs and modules.
-`make run` launches the same `FS98_DIR`, using those installed gauges.
+`tools/ofs run` launches the same `FS98_DIR`, using those installed gauges.
 
 ## Decompilation
 
@@ -174,13 +174,13 @@ generator, pointers excluded) take 0..3, a 16-bit word or a word above any user 
 quarter of the cases vary the PANELS rectangles' heights; and 16383.0 is an edge value. The
 lift passed all of it but EXGMETER and LRFLAPS, whose generated C reloaded a denormal.
 
-**Result.** All 120 gauges against retail, `bash tools/run_gaugesdiff.sh --all 20000` (`make
+**Result.** All 120 gauges against retail, `bash tools/run_gaugesdiff.sh --all 20000` (`tools/ofs
 gauges-check N=20000`): 120 checked, 0 differ, on the strengthened harness. Breaks:
-`tools/gauge_breaks.py` (run from a frozen copy; it rewrites `src/gauges/`): 67, all caught; one
+`tools/gauge_breaks.py` (run from a frozen copy; it rewrites `src/gauges/`): 67, all caught (re-run 2026-11-19: 66, `chrn-minutes` missed, also at N=20000; it differs only once the elapsed time passes 2^31, the clock behind the start, which the harness no longer reaches; open in remaining-work.md); one
 proven equivalent and one not observable through the PANELS stub are in its docstring. In the
 game, the 74 staged flights, retail gauges twice against the hand-written collection for 900
 passes each (`HG2D_FRAMES_GAUGES=1 ... tools/frames_many.sh -`, as above): **74 match**, no faults. Installed
-2026-11-08 (`make gauges-install`).
+2026-11-08 (`tools/ofs gauges-install`).
 
 More lessons: the shapes of two routines can be identical while their constants differ, so each
 routine's addresses come from its own listing; constants are read through `volatile`

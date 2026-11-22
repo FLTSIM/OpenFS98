@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
 """Build isolated MULTIP mutations and require completed comparisons.
 
-Run after `make multipdiff`. Crashes, timeouts and fixture failures do not
+Run after `tools/ofs multipdiff`. Crashes, timeouts and fixture failures do not
 count as catches. All generated sources and DLLs live in /tmp.
 """
+import module_flags
 import argparse
 from concurrent.futures import ThreadPoolExecutor
 import os
@@ -712,7 +713,7 @@ def build_variant(directory, source):
     source_path = directory / "multip.c"
     source_path.write_text(source)
     command = [
-        "i686-w64-mingw32-gcc", "-std=c99", "-Os", "-Wall", "-Wextra",
+        "i686-w64-mingw32-gcc", *module_flags.FLAGS, "-std=c99", "-Os", "-Wall", "-Wextra",
         "-I" + str(ROOT / "include"), "-I" + str(ROOT / "src/multip"), "-ffreestanding", "-fno-builtin",
         "-fno-asynchronous-unwind-tables", "-fomit-frame-pointer",
         "-DMULTIP_DIFFTEST", "-shared", "-nostdlib",

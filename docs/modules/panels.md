@@ -5,12 +5,12 @@ CD's 120 `.GAU` files are modules of id 19 that import only PANELS. It is
 MSVC C, linked at `0x10000000`, `.text` 50,038 bytes, with 39 functions in a
 Linkage of 43 entries (`+0x04`..`+0x08` init and deinit, `+0x18`..`+0xa8`).
 
-**Status: reimplemented, verified, and running in-game** (`make smoke`: 27/27 modules, 95 gauges, with this PANELS).
-`src/panels/panels.c` carries all 201 functions; `make panelsdiff-run` drives
-it and retail side by side through the CD's own gauges (3,000 scenarios, 0 differ), `make
-panelsunit-run` drives each of its 28 image routines alone (20,000 cases each, 0 differ), and `make
-panels-breaks` breaks it on purpose (198 of the 200 sampled mutants that build are caught; see below). The HG2D model the harness
-needs is checked against retail HG2D (`make hg2dmodeldiff-run`).
+**Status: reimplemented, verified, and running in-game** (`tools/ofs smoke`: 27/27 modules, 95 gauges, with this PANELS).
+`src/panels/panels.c` carries all 201 functions; `tools/ofs panelsdiff-run` drives
+it and retail side by side through the gauges installed in `game/` (3,000 scenarios, 0 differ; OpenFS98's rebuilt gauges since 2026-11-14, the CD's before), `tools/ofs
+panelsunit-run` drives each of its 28 image routines alone (20,000 cases each, 0 differ), and `tools/ofs
+panels-breaks` breaks it on purpose (164 of the 200 sampled mutants caught at N=150, 12 still missed at N=3000 and open; see below). The HG2D model the harness
+needs is checked against retail HG2D (`tools/ofs hg2dmodeldiff-run`).
 
 ## Imports
 
@@ -82,7 +82,7 @@ transliteration: in the game PANELS runs against retail HG2D, and in a
 harness both sides see the same model, so the model needs to be plausible
 where it is not exact.
 
-- **Exact: the texture pool.** `make hg2dmodeldiff-run` loads retail HG2D
+- **Exact: the texture pool.** `tools/ofs hg2dmodeldiff-run` loads retail HG2D
   (its DllMain does nothing, and these slots need only the host's
   allocator) and runs it and the model over the same scripts:
   - descriptors right and wrong, and flags;
@@ -120,8 +120,8 @@ retail address, in retail's order, and everything lives in one `.data`
 image laid out as retail's (`0x16580` bytes from `0x1000f000`: the
 ImportTable at `+0x0`, the Linkage at `+0x50`, the strings, from `+0x610` the
 gauge variables' table, then the buffers) so that the harness can compare the
-whole of it. `tools/gen_panels_data.py` extracts the image and its
-constants; the code pointers in it (83) and the links to GLOBAL (311) are
+whole of it. The image and its
+constants are typed C in `panels.c` (packed structs, with the gauge variables as `{fn, link, offset, size}` records); the code pointers in it (83) and the links to GLOBAL (311) are
 installed at load by `panels_install()`. The floating point is retail's,
 operation for operation, on the x87: `long double` where retail keeps a value
 on the FPU stack, `double` or `float` where it stores one, `pn_ftol` for
@@ -216,7 +216,7 @@ Each is noted in `panels.c` where it happens.
 ## The harness
 
 `tools/difftest/panelsdiff.c` loads retail PANELS.DLL and the build, and
-gives both the same world; `make panelsdiff-run [N=...] [START=...]`.
+gives both the same world; `tools/ofs panelsdiff-run [N=...] [START=...]`.
 
 ### Module mode
 
@@ -225,7 +225,7 @@ lists with their deferred removal, surfaces, windows, profile files, module
 loading), GLOBAL (a blob, typed from the variables' table), CHAIN (the
 callbacks it registers, kept for the harness to dispatch), ACONTAIN (the
 aircraft's panel file), MAIN, SOUND and WINDOW, the HG2D model, and **the
-CD's own gauges**: the host's module loader is a stub that loads the `.GAU`
+installed gauges** (OpenFS98's rebuilt ones since 2026-11-14, kept deliberately; the CD's before): the host's module loader is a stub that loads the `.GAU`
 from the game's tree and links its PANELS import to the side under test, so
 the gauges' code calls PANELS's Linkage as it does in the game and the
 elements are their own data. The panel files and bitmaps are the CD's
@@ -254,7 +254,7 @@ something else.
 
 ### Unit mode
 
-`panelsdiff unit [N [START]]` (`make panelsunit-run`) calls the 28 image
+`panelsdiff unit [N [START]]` (`tools/ofs panelsunit-run`) calls the 28 image
 routines (the scalers, `surface_from_bitmap` over the CD's panel bitmaps and
 the gauges' 538 resources, the conversions, the blits, `clip`,
 `edges_24`, `dib_new`, `surface_over`, `bounds_build`, the bitmap loaders)
@@ -284,10 +284,10 @@ scalers' weights are the coordinates.
 
 ### Results
 
-- `make panelsdiff-run N=3000 START=10000`: 3,000 scenarios, 0 differ (9,451
+- `tools/ofs panelsdiff-run N=3000 START=10000`: 3,000 scenarios, 0 differ (9,451
   aircraft loads, 134,184 gauges loaded, 1.17 million surfaces, 36,314 HG2D
   polygons, 419 scenarios cut short by a retail fault).
-- `make panelsunit-run N=20000`: the 28 routines and the variables' lookup,
+- `tools/ofs panelsunit-run N=20000`: the 28 routines and the variables' lookup,
   0 differ.
 - Earlier long runs showed two scenarios in about 4,000 differing in one
   row of GDI-rendered digits (one glyph's 9 bytes), which pass when run alone:
@@ -295,7 +295,7 @@ scalers' weights are the coordinates.
 
 ### The breaks
 
-`make panels-breaks [N=150 COUNT=200 SEED=1]` applies generated one-place
+`tools/ofs panels-breaks [N=150 COUNT=200 SEED=1]` applies generated one-place
 mutations (an offset four out, a comparison, `&&`/`||`, a sign, a shift, a
 constant) to copies of `panels.c` and runs the unit mode for the routine, then
 the whole-module mode. Of 200 sampled, 164 were caught at N=150 and 2 did not build; the 34 missed,
@@ -307,3 +307,15 @@ unmutated build has 0 differ over the same 3,000. Every mutant that builds (198 
 larger run did not need to catch were equivalent or unreachable before:
 an index clamp `< 0` on a 0, `smooth_8`'s centre case (`i == j == 0x8000`),
 sampling (`e_b630`, 2 scenarios in 400).
+
+Re-run on 2026-11-18 (CMake port), that does not reproduce: the same 200 mutants give 164
+caught, 34 missed and 2 unbuilt at N=150 as before, but the 34 at N=800 leave 30 and those at
+N=3000 leave 12, all finishing with 0 differ (not crashes): `panels_load:1019:const13`,
+`panels_refresh:1306:off419`, `smooth_8:1633:add35`, `smooth_8:1634:add49`,
+`shrink_8_to_8:2024:gt28`, `shrink_8_to_8:2080:gt29`, `e_c720:5446:ge30`, `e_cbf0:5485:off48`,
+`e_cbf0:5486:off48`, `e_ccd0:5519:off461`, `e_ccd0:5525:off44`, `e_cda0:5553:off413`. It is not
+the build system (the frozen Makefile tree misses three of them at N=800 alike), not the gauges
+(`game/Gauges` holds the rebuilt ones since 2026-11-14; with the CD's restored, 31 of the 34 are
+still missed at N=800), and not the harness (changed since only in `GAUGES_DIFF` blocks and its
+count parsing). Some are the known equivalents above (`smooth_8`'s centre case); the rest are not
+yet analysed, so treat PANELS's break coverage as open.

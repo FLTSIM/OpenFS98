@@ -12,17 +12,17 @@ harness with deliberate breaks, then the native DLL, then the game.
 ## Building and verifying
 
 ```sh
-make -f tools/options.mk options-tables optionsevents   # tables from the retail image, then the harness
-make -f tools/options.mk optionseventsdiff-run                     # 20,000 scenarios, seed 0x5f1a6c2d
-make -f tools/options.mk optionseventsdiff-run SEED=0x98a1e7d3
-make -f tools/options.mk optionseventsdiff-run N=2000 SEED=0x7e51a23b MODE=unwind
-make -f tools/options.mk options-breaks N=400
+tools/ofs options-tables optionsevents   # tables from the retail image, then the harness
+tools/ofs optionseventsdiff-run                     # 20,000 scenarios, seed 0x5f1a6c2d
+tools/ofs optionseventsdiff-run SEED=0x98a1e7d3
+tools/ofs optionseventsdiff-run N=2000 SEED=0x7e51a23b MODE=unwind
+tools/ofs options-breaks N=400
 ```
 
 `tools/run_optionsdiff.sh` runs everything in its own prefix, `bin/options-diff/wineprefix`,
 behind a lock. The pieces, each Flights' own adapted:
-- `tools/gen_options_tables.py`: from the retail image, each class's context-help table,
-  DDX bindings and member controls, checked against its constructor and destructor.
+- `options_tables.inc`, `options_objects_tables.inc` (committed; the retired `tools/gen_options_tables.py` read them from the retail image): each class's context-help table,
+  DDX bindings and member controls (the retired script checked them against the constructor and destructor; nothing re-checks them now).
 - `src/options/`: `options_internal.h` (the service table), `options_events.c` (shared
   helpers, help and data exchange), `options_objects.c` (construction, destruction and
   the factories, with cleanup-only SEH frames), and one file per family of dialogs.
@@ -374,7 +374,7 @@ callback pointer; and a test copy must be frozen before anything else in the sam
 
 ## The native DLL
 
-`tools/gen_options_runtime.py` writes `src/options/options_runtime_tables.inc`: the imports,
+`src/options/options_runtime_tables.inc` (committed; the retired table half of `tools/gen_options_runtime.py` wrote it) holds the imports,
 each of the 28 classes' vtables slot by slot (an import or ours), their message maps, the
 registrations, and the vtables of Options' own `CNotify` and the Logbook's rows list.
 Which of our functions a retail routine is comes from the harness's operation table, so a
@@ -382,7 +382,7 @@ routine the harness does not test cannot be bound. `src/options/options_runtime.
 service the import retail calls (or the Win32 or C runtime function directly), builds the
 vtables and message maps at load (page `0x386`'s `WM_ACTIVATE` entry gets
 `CSimsTabPage::OnActivate`, as retail's static initialiser fills it), and does what retail's
-module init, deinit and `DllMain` do, as Flights' runtime does. `make -f tools/options.mk
+module init, deinit and `DllMain` do, as Flights' runtime does. `tools/ofs
 options` builds `bin/options-diff/OPTIONS_ours.dll` at retail's base.
 
 It is in `ENGLISH_MODULES` (installed 2026-11-07). `main-dialogs` opens on it the Logbook with

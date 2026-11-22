@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Build isolated dynamic-core mutants; require actual DIFFER transcripts."""
+import module_flags
 from pathlib import Path
 import os
 import subprocess
@@ -43,8 +44,7 @@ for name, before, after in mutations:
     source_path = output_dir / f'{name}.c'
     executable = output_dir / f'{name}.exe'
     source_path.write_text(mutant)
-    subprocess.run(['i686-w64-mingw32-gcc', '-std=c99', '-O2', '-Wall', '-Wextra', '-Werror',
-                    '-fno-strict-aliasing', '-Isrc/world', '-o', str(executable),
+    subprocess.run(['i686-w64-mingw32-gcc', *module_flags.FLAGS, '-std=c99', '-Itools/difftest', '-O2', '-Wall', '-Wextra', '-Werror', '-Isrc/world', '-o', str(executable),
                     'tools/difftest/worlddynamicdiff.c', str(source_path)], cwd=root, check=True)
     result = subprocess.run(['wine', str(executable), '4096', '0x4a971b63', 'normal'],
                             cwd=root, env=os.environ.copy(), capture_output=True,

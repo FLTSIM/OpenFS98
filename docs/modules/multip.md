@@ -8,7 +8,7 @@ MULTIP has passed x86 whole-module acceptance and startup smoke testing.
 All eleven public entries, worker lifecycles, protocols, dialogs and CHAIN
 callbacks are implemented and compared with retail. The latest evidence is in
 [the acceptance checkpoint](#whole-module-acceptance-checkpoint). It is included
-in `MODULES`; `make install` maps `bin/MULTIP.DLL` to `MULTIPLAYER.DLL`.
+in `MODULES`; `tools/ofs ofs_install` maps `bin/MULTIP.DLL` to `MULTIPLAYER.DLL`.
 The temporary smoke test restores the previous game DLL rather than deploying
 this build permanently.
 
@@ -52,7 +52,7 @@ immediately; a separate checkout also needs the uncommitted changes.
 - **Limits:** scripted x86 comparisons and startup smoke do not validate native
   non-x86 behavior, real network providers or OS thread scheduling races.
 
-Build with `make multipdiff`; run `make multipdiff-run N=20000` for the full
+Build with `tools/ofs multipdiff`; run `tools/ofs multipdiff-run N=20000` for the full
 checkpoint. From `bin/difftest`, run `WINEDEBUG=-all wine multipdiff.exe 1200
 init` or replace `init` with `lifecycle`, `dispatch`, `dialogs` or `lobby`
 for focused comparisons.
@@ -70,8 +70,8 @@ The working files are:
   `multip_workers.inc` and `multip_directplay.inc`: query, transport, controlled
   worker, and loader/interface-lifetime harness;
 - `tools/multip_breaks.py`: isolated mutation checks for recovered owners;
-- the `multipdiff`, `multipdiff-run`, and explicit `bin/MULTIP.DLL` targets in
-  the top-level `Makefile`.
+- the `multipdiff` and `multipdiff-run` targets (`cmake/targets.cmake`) and the
+  `bin/MULTIP.DLL` step (`cmake/steps/all.cmake`).
 
 Do not add MULTIP to `MODULES` or install it into the game until all public
 slots, both worker lifecycles, and the CHAIN callbacks are implemented and a
@@ -89,9 +89,9 @@ Additional implementation lives in `multip_profile.inc`, `multip_session.inc`,
 `multip_model_cache.inc`, `multip_model_receive.inc`, and `multip_title_receive.inc`
 under `src/multip/`.
 The differential fixtures with the same names live under `tools/difftest/` (record enumeration shares the aircraft
-copy fixture). The generated profile field order comes from
-`tools/gen_multip_profile.py`; initialized image data and pointer fixups come
-from `tools/gen_multip_data.py`. Neither generator embeds executable code.
+copy fixture). The profile field order is committed in
+`multip_profile_fields.inc` (the retired `tools/gen_multip_profile.py`); initialized image data and pointer fixups are
+committed C (Story 1.4: the typed image in `multip.c`, `multip_pointers.inc`; the retired `tools/gen_multip_data.py` once wrote them).
 
 The following internal paths are now implemented and compared against retail:
 
@@ -164,7 +164,7 @@ later enumeration resets the embedded list; a stride mutation exposed this
 fixture gap and now fails the comparison.
 
 The current forty-suite differential run passes 20,000 scenarios per suite
-with zero differences. `make multipdiff` builds both production and test DLLs
+with zero differences. `tools/ofs multipdiff` builds both production and test DLLs
 without warnings; the production export table contains only ImportTable and
 Linkage. These remain slice results, not whole-module acceptance. The earlier
 154-mutation sweep passed; the current larger sweep status is recorded below. All five data
@@ -253,8 +253,8 @@ ESP-0x28 and ESP-0x20) via entry shims. Observer conversion preserves capacity
 wrap, counts, name publication, request-pending state and failure ordering.
 
 `multip_weather.inc` adds messages `1013`, `1014`, and `1017` at
-`+0x60d0/+0x6140/+0x67e0`. The 28 weather fields are extracted in call order by
-`tools/gen_multip_weather.py` into `multip_weather_fields.inc`. They initialize
+`+0x60d0/+0x6140/+0x67e0`. The 28 weather fields are extracted in call order (by the retired
+`tools/gen_multip_weather.py`) into the committed `multip_weather_fields.inc`. They initialize
 bytes +8 through +0x257, while retail sends 0x25c bytes: the last four bytes
 are caller stack at entry ESP-0xa8, preserved by a shim. The tick maintenance
 caller contributes another eight bytes, so its shim reads entry ESP-0xb0.
@@ -788,7 +788,7 @@ thread IDs, and callback addresses before comparing results.
 
 ## Verification
 
-`make multipdiff-run` defaults to 20,000 deterministic randomized scenarios.
+`tools/ofs multipdiff-run` defaults to 20,000 deterministic randomized scenarios.
 It loads retail and OpenFS98 together, seeds equivalent local and remote
 records plus fake GLOBAL and UTIL imports, and compares normalized results for
 the recovered `+0x24` through `+0x38` slice: the result block, local and remote
@@ -819,13 +819,13 @@ both queues populated to check ordering independently of normal draining.
 
 Retail's private helpers are called at loaded-image RVAs `0x89d0`, `0x8970`
 and `0x8aa0`; receive-one and dequeue use `0x6820` and `0x6980`.
-`make multipdiff` builds a separate `MULTIP_test.dll` with
+`tools/ofs multipdiff` builds a separate `MULTIP_test.dll` with
 `MULTIP_DIFFTEST`, exposing the `multip_test_entries` address table. The normal
 `bin/MULTIP.DLL` exports only `ImportTable` and `Linkage`; no public slots are
 added to reach internal helpers. Staging copies use temporary files and atomic
 renames so rebuilding a fixture cannot truncate a DLL already mapped by Wine.
 
-`make multip-send-breaks` builds temporary source mutations and DLLs in `/tmp`.
+`tools/ofs multip-send-breaks` builds temporary source mutations and DLLs in `/tmp`.
 The unmodified baseline must pass, then nine mutations must produce completed
 delivery comparisons with differences: busy retry, ignored HRESULT, send
 arguments, payload cleanup, the plain drain loop, the flagged drain limit,
@@ -843,12 +843,12 @@ each receive, dequeue pointers and flags, the complete call transcript, live
 allocations, leaked partial records, and held locks. The fake heap records
 freed storage for comparison but does not reuse it within a scenario.
 
-`make multip-breaks` includes the forty-two transport/worker/DirectPlay mutations
+`tools/ofs multip-breaks` includes the forty-two transport/worker/DirectPlay mutations
 and the additional owner checks described above; the send-only
-alias is `make multip-send-breaks` and the receive-only alias is
-`make multip-receive-breaks`. The six receive mutations cover retry, flags,
+alias is `tools/ofs multip-send-breaks` and the receive-only alias is
+`tools/ofs multip-receive-breaks`. The six receive mutations cover retry, flags,
 timestamp, successful-receive flag, error cleanup, and dequeue flag behavior.
-`make multip-worker-breaks` checks sixteen lifecycle mutations: event order,
+`tools/ofs multip-worker-breaks` checks sixteen lifecycle mutations: event order,
 repeated start, thread creation failure result, security attributes, receive
 handle retention, shutdown wait duration, send handle close, send queue clear,
 ignored send errors, receive-until-empty, running flag after receive failure,
@@ -892,7 +892,7 @@ receive/lifecycle fixture now combines session, player, group and transport
 contracts; the later lobby fixture also exercises creation and connection
 through completion and disconnect. No real DirectPlay DLL or network is used.
 
-`make multip-directplay-breaks` checks eleven mutations: loader export
+`tools/ofs multip-directplay-breaks` checks eleven mutations: loader export
 selection, loaded-flag retention, export descriptor order, unload flag and
 release-state ordering, first-query leak, second-query target and error return,
 temporary release order, factory outer argument, and query-flag reset. As with
@@ -908,9 +908,9 @@ controlled internal calls and the later completion/lobby fixtures.
 Run the current checkpoint with:
 
 ```sh
-make multipdiff-run
-make multipdiff-run N=20000
-make multip-breaks
+tools/ofs multipdiff-run
+tools/ofs multipdiff-run N=20000
+tools/ofs multip-breaks
 ```
 
 The first command already defaults to 20,000; the explicit form is useful in
@@ -947,8 +947,8 @@ sender split (`+0x4890`), DirectPlay system dispatch (`+0x48e0`), application
 dispatch (`+0x4960`), and reverse-order unknown-peer expiry (`+0x89a0`).
 The application switch reaches all 31 handlers in `1000`–`101f`; `100b` and
 unknown tags forward `{sender, packet, size}` to CHAIN `0x1d/5`, ignoring its
-return. `tools/gen_multip_dispatch.py` extracts and checks the retail jump
-table before emitting named C/assembly calls, rather than executable bytes.
+return. The retired `tools/gen_multip_dispatch.py` extracted and checked the retail jump
+table; the committed `multip_dispatch_cases.inc` holds named C/assembly calls, rather than executable bytes.
 There is no added minimum-packet-size check. Only 1017 receives the timestamp.
 The x86 app dispatcher retains its 12-byte frame and handler nesting, including
 1013 weather-reply and 1019 position padding below the entry stack. The top
@@ -1001,7 +1001,7 @@ the count and skips copying when the signed index is at or beyond the new end.
 It does not reject a stale out-of-range record pointer. The player fixture now
 models that behavior; MULTIP's stale-local-pointer behavior is retained.
 
-`make multipdiff-run N=20000` passes all 37 top-level suites with zero
+`tools/ofs multipdiff-run N=20000` passes all 37 top-level suites with zero
 differences; the dispatch suite additionally repeats eight handler families
 through their real switches. `--slice dispatch` catches all four mutations;
 `--slice lifecycle` catches all nineteen, including both completion stack-word
@@ -1098,10 +1098,10 @@ The scenario generator must mix:
 - pointer-normalized public returns, state snapshots, ordered host/CHAIN/COM
   call logs, sent payload bytes, and queued/received payload bytes.
 
-Before installation, also require a clean `make all`, `git diff --check`, the
+Before installation, also require a clean `cmake --build build/win32-retail`, `git diff --check`, the
 whole-module differential run with zero differences, and a game smoke test.
-Only after those pass should MULTIP be added to `MODULES`; its installed name
-must remain `MULTIPLAYER.DLL` through the existing Makefile mapping.
+Only after those pass should MULTIP be installed as a `module` in `tools/modules.txt`; its installed name
+must remain `MULTIPLAYER.DLL` there.
 
 ## Provider catalogue checkpoint
 
@@ -1134,14 +1134,14 @@ failure, version fields and positive-HRESULT normalization. List append is a
 successful fixed-capacity host model; fatal host growth failures and real
 DirectPlay/network behavior are outside this slice.
 
-`make multipdiff-run N=20000` passes all 38 top-level suites with zero
+`tools/ofs multipdiff-run N=20000` passes all 38 top-level suites with zero
 differences, including the retail boundary assertions in the provider fixture.
 All eleven provider mutations are caught at 1,200 scenarios. The production
 DLL builds without warnings and still exports only ImportTable and Linkage;
 `git diff --check` passes. This remains slice coverage, not whole-module
 acceptance. MULTIP has not been installed or added to `MODULES`.
 
-Focused verification: `make multipdiff`, then from `bin/difftest`,
+Focused verification: `tools/ofs multipdiff`, then from `bin/difftest`,
 `WINEDEBUG=-all wine multipdiff.exe 20000 providers`. Mutation checks:
 `python3 -B tools/multip_breaks.py --slice providers`. The earlier 382-target
 full mutation sweep remains unfinished; the provider mutations extend that
@@ -1239,7 +1239,7 @@ modeled without calling the process allocator. Other invalid fixture frees
 remain harness errors. These x86 comparisons do not validate native fallbacks,
 real DirectPlay providers, Windows dialog rendering, or OS thread scheduling.
 
-`make multipdiff-run N=20000` passes all **40 top-level suites**, zero
+`tools/ofs multipdiff-run N=20000` passes all **40 top-level suites**, zero
 differences. The new dialog suite observes 19,219 configuration dialogs,
 56,406 options dialogs, 37,203 player-details dialogs, 18,867 prune calls,
 36,959 player-removal confirmations and 22,484 intercepted shell calls.
@@ -1310,7 +1310,7 @@ Run the focused fixture from `bin/difftest` with `WINEDEBUG=-all wine
 multipdiff.exe 20000 init`; run its mutations from the repository root with
 `python3 -B tools/multip_breaks.py --slice init`. Run Wine serially.
 
-`make multipdiff-run N=20000` passes all **41 top-level suites**, zero
+`tools/ofs multipdiff-run N=20000` passes all **41 top-level suites**, zero
 differences. The init suite observes 6,248 startup registrations, 301,415
 integer-profile writes, 6,877 compound copies, 3,569 checked completion stack
 words and 1,075 queue allocation failures. All 3,755 fault outcomes are
@@ -1365,7 +1365,7 @@ The baseline DLL is built once. Two compiler jobs prepare independent mutant
 DLLs; installation and Wine comparisons remain serial, with the previous
 process finished before the next DLL is copied into the test directory.
 
-`make multip-smoke` builds the module, temporarily swaps it into the staged
+`tools/ofs multip-smoke` builds the module, temporarily swaps it into the staged
 game as `Modules/MULTIPLAYER.DLL`, and uses the existing startup assertions.
 It additionally requires the smoke log to confirm the exact OpenFS98 MULTIP
 build, and restores the previous DLL with a bytewise check on exit. The smoke
@@ -1376,7 +1376,7 @@ timestamps, so differing DLL bytes alone do not establish retail provenance.
 The generic smoke diagnostic now states that the exact build was not tested
 instead of claiming the installed DLL must be retail.
 
-`make -B all` completes without warnings. `make multip-acceptance` reproduces
+`make -B all` completed without warnings (before the CMake port). `tools/ofs multip-acceptance` reproduces
 the full 20,000-case harness, all mutation checks, whitespace checks and the
 temporary game smoke test in sequence. Focused selectors are `whole` and
 `bounds`; their new mutation slices contain four and two checks respectively.
@@ -1395,10 +1395,10 @@ interrupted attempts did not count.
 With the acceptance gates passed, MULTIP is included in `MODULES`. The install
 mapping remains `MULTIP.DLL` to `MULTIPLAYER.DLL`. Startup smoke verifies this
 replacement temporarily and restores the exact previous DLL; normal deployment
-is through `make install`. Non-x86 behavior, OS scheduling races and live
+is through `tools/ofs ofs_install`. Non-x86 behavior, OS scheduling races and live
 provider interoperability remain outside the automated claim.
 
-After promotion, `make all` rebuilds MULTIP without warnings and the install
+After promotion, `cmake --build build/win32-retail` rebuilds MULTIP without warnings and the install
 mapping check returns `MULTIPLAYER.DLL`. The rebuilt production `.text` is
 byte-identical to the accepted implementation; the source edit only updates
 the status comment. Startup smoke was repeated with this final production

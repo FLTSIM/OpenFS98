@@ -1,20 +1,22 @@
 # LANDME.DLL — landing assistance
 
-LANDME (module id 26) is reimplemented, verified and running in-game. `make
+LANDME (module id 26) is reimplemented, verified and running in-game. `tools/ofs
 landmediff-run` drives retail and OpenFS98 through 20,000 whole-module scenarios
 over the real scenery fixture: zero differences. The run reached all seven
 controller states and all eleven nonzero guidance phases, found 18,881 runways,
 exercised the no-runway path 1,119 times, showed 182,185 messages and posted
-command `0x100d7` 3,061 times. With the module installed, `make smoke` reaches
+command `0x100d7` 3,061 times. With the module installed, `tools/ofs smoke` reaches
 the panel with 27/27 modules and 95 gauges.
 
 ## Shape and linkage
 
 Retail has 4,094 bytes of hand-written assembly and one 0x854-byte `.data`
 image. State and constant tables occupy `+0x000`..`+0x7f7`, followed by
-`ImportTable` at `+0x7f8` and `Linkage` at `+0x838`. The generated
-`landme_data.inc` retains the complete image and zeroes only relocated code
-pointers, which `landme.c` installs when the DLL attaches.
+`ImportTable` at `+0x7f8` and `Linkage` at `+0x838`. `landme.c`
+holds the complete image as typed initialisers (script boxes, phase records,
+the unexplained words) with the relocated code pointers left zero; it installs
+them when the DLL attaches. `tools/check_data_image.py` compares the image with
+retail's.
 
 Imports are host, GLOBAL, MAIN, CHAIN, FE, UTIL and WINMSG. Linkage contains
 only three functions:

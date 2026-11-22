@@ -4,6 +4,7 @@
 Every build uses frozen MPCHAT sources and numeric ABI headers. Only a native
 comparison mismatch with exit 1 counts; build failures, faults and timeouts fail.
 """
+import module_flags
 from pathlib import Path
 import hashlib
 import json
@@ -57,15 +58,14 @@ def main():
         dll = work / 'MPCHAT_ours.dll'
         harness = work / 'mpchatuidiff.exe'
         commands = [
-            ['i686-w64-mingw32-gcc', '-std=c99', '-Os', '-Wall', '-Wextra', '-Werror',
+            ['i686-w64-mingw32-gcc', *module_flags.FLAGS, '-std=c99', '-Itools/difftest', '-Os', '-Wall', '-Wextra', '-Werror',
              '-I' + str(work / 'include'), '-ffreestanding', '-fno-builtin',
-             '-fno-asynchronous-unwind-tables', '-fomit-frame-pointer', '-fno-delete-null-pointer-checks',
+             '-fno-asynchronous-unwind-tables', '-fomit-frame-pointer',
              '-shared', '-nostdlib', '-Wl,--enable-stdcall-fixup', '-Wl,--entry=_DllMain@12',
              '-Wl,--disable-dynamicbase', '-Wl,--disable-nxcompat', '-Wl,--image-base=0x20840000',
              '-o', str(dll), str(work / 'src/mpchat/mpchat.c'), str(work / 'mpchat.res'),
              str(work / 'src/mpchat/mpchat.def'), '-lkernel32', '-luser32', '-lgdi32', '-lgcc'],
-            ['i686-w64-mingw32-gcc', '-std=c99', '-O2', '-Wall', '-Wextra', '-Werror',
-             '-fno-strict-aliasing', '-o', str(harness), str(work / 'tools/difftest/mpchatuidiff.c'), '-lgdi32'],
+            ['i686-w64-mingw32-gcc', *module_flags.FLAGS, '-std=c99', '-Itools/difftest', '-O2', '-Wall', '-Wextra', '-Werror', '-o', str(harness), str(work / 'tools/difftest/mpchatuidiff.c'), '-lgdi32'],
         ]
         for command in commands:
             build = subprocess.run(command, text=True, errors='replace', capture_output=True)

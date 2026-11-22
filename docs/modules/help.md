@@ -8,13 +8,13 @@ lifetime. It is installed in the game; see the end of this page's smoke section.
 Build and run independently:
 
 ```sh
-make -f tools/help.mk help
-make -f tools/help.mk helpuidiff-run
-make -f tools/help.mk help-ui-breaks
-make -f tools/help.mk help-smoke
-make -f tools/help.mk helpeventsdiff-run
-make -f tools/help.mk helpeventsdiff-run N=2000 SEED=0x7e51a23b MODE=unwind
-make -f tools/help.mk help-breaks N=100
+tools/ofs ofs_help
+tools/ofs helpuidiff-run
+tools/ofs help-ui-breaks
+tools/ofs help-smoke
+tools/ofs helpeventsdiff-run
+tools/ofs helpeventsdiff-run N=2000 SEED=0x7e51a23b MODE=unwind
+tools/ofs help-breaks N=100
 ```
 
 The runner uses `bin/help-diff/wineprefix` and its own lock. It neither installs
@@ -43,9 +43,9 @@ control exchange, accept/cancel/close paths, lessons list handling and path
 checks, graph callbacks, and credits streaming/timers. `help_objects.c` implements
 all five factories and object lifetimes, the credits placeholder's deleting
 destructor, and class delete. `help_unwind.h` provides cleanup-only PE32 SEH
-scopes. The generated includes contain control/help/lifetime ABI metadata;
-`tools/gen_help_tables.py` extracts the control mappings and lifetime call lists
-from retail and rejects unexpected layouts. No code or resource payload is
+scopes. The committed includes contain control/help/lifetime ABI metadata.
+The control mappings and lifetime call lists were extracted from retail by the
+retired `tools/gen_help_tables.py`; the outputs are committed. No code or resource payload is
 copied into these includes.
 
 Factories ignore their parent argument, allocate the precise class size,
@@ -185,8 +185,8 @@ registry query and changing that dead store alone is unobservable here.
 ## Native integration and acceptance
 
 `help_runtime.c` supplies typed Win32, HOST and MFC/SIMSUI adapters, DLL entry
-points and both ABI exports. `tools/gen_help_runtime.py` validates the reference
-image and generates six vtable bindings, five message maps and all five
+points and both ABI exports. `help_runtime_tables.inc` (committed; the retired table half of
+`tools/gen_help_runtime.py` validated the reference image and wrote it) holds six vtable bindings, five message maps and all five
 registry factories. The sixth vtable belongs to Credits' embedded CWnd
 placeholder; it must keep its own deleting destructor. Resource payloads and
 an ordinal SIMSUI import anchor are generated only into ignored build output.
@@ -267,9 +267,9 @@ does not alter `game/` or shared build/install integration. The native suite
 complements the high-volume core comparisons; it does not claim every possible
 Windows notification or native exception path.
 
-**Installed 2026-11-02.** The shared Makefile now builds this DLL into `bin/` and
-`make install` puts it in `English/` (`make help-install` / `help-revert` alone, keeping the
-first retail copy as `.orig`). `make smoke` requires it to match and load; `make
+**Installed 2026-11-02.** The shared build (the Makefile then, CMake since 2026-11-18) builds this DLL into `bin/` and
+`tools/ofs ofs_install` puts it in `English/` (`tools/ofs help-install` / `help-revert` alone, keeping the
+first retail copy as `.orig`). `tools/ofs smoke` requires it to match and load; `tools/ofs
 main-dialogs` compares it in play against retail: About (`0x1607`), its Credits button, and
 Lessons (command `0x1105`, through ADVDRV's lesson picker; command `0x1106` is Flights'
 Challenges). All three pixel-identical. The lesson graph (`0x14050004`) and lesson

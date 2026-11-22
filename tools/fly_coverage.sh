@@ -18,8 +18,8 @@ game=$(realpath "${FS98_DIR:-$PWD/game}")
 
 base=$out/base; mkdir -p "$base"
 mkdir -p "$base/Modules" "$base/English"
-for m in $(make -s modules-of) $(make -s english-modules-of); do
-    cp "$(make -s orig-module-of M=$m)" "$base/$(make -s installed-path-of M=$m)"
+for m in $(tools/modules.sh modules-of) $(tools/modules.sh english-modules-of); do
+    cp "$(tools/modules.sh orig-module-of "$m")" "$base/$(tools/modules.sh installed-path-of "$m")"
 done
 
 run_one() {     # tag script

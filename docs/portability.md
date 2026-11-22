@@ -12,7 +12,7 @@ The end state is native builds -- modern Windows, Linux, Mac, maybe Android --
 at which point wine stops mattering. Running the retail binary under wine is
 scaffolding for the middle of the project, not the destination. Its one real
 problem, the 3D view freezing, was wine swallowing divide faults the host
-repairs; `make sehfix-install` and `make vd-on` give a flyable sim, and our HG2D
+repairs; `tools/ofs sehfix-install` and `tools/ofs vd-on` give a flyable sim, and our HG2D
 makes the first unnecessary (see [wine.md](wine.md)).
 
 How far away that is, measured by what each retail module actually calls:
@@ -35,7 +35,7 @@ until last, where a native replacement is a renderer rather than a port.
 **Floating point is kept portable deliberately.** Retail rounds on the x87, and
 the reimplementation uses the same instructions on x86 so that "the same" is
 not a matter of opinion. There is no x87 on ARM, so a parallel path goes
-through `sqrt` and `nearbyint` instead -- and `make utildiff-portable` holds it
+through `sqrt` and `nearbyint` instead -- and `tools/ofs utildiff-portable` holds it
 to the same standard, checking it against the retail DLL with the assembly
 compiled out. It currently passes all 6,452,880 comparisons, so an ARM build
 will compute the same numbers as an x86 one.

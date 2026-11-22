@@ -11,7 +11,7 @@ missed break is a gap in the harness or an equivalence; either way it is
 reported, and docs/modules/main.md says which.
 
 Usage: tools/main_breaks.py [N] [suite] [name...]   (from the repository
-       root, after make maindiff).  MAIN_BREAK_DIFFDIR names another
+       root, after tools/ofs maindiff).  MAIN_BREAK_DIFFDIR names another
        directory holding maindiff.exe and the retail DLLs, so that suites
        can be broken side by side.
 """
@@ -916,7 +916,7 @@ BREAKS = {
         ('b-right', 'main_aircraft.inc', 'M8(at - 1)', 'M8(at - 2)'),
         ('b-left', 'main_aircraft.inc', 'M8(x - w + at)', 'M8(x - w + at + 1)'),
         ('b-limit', 'main_aircraft.inc', 'if ((int32_t)y >= (int32_t)h)\n        return 0;', 'if ((int32_t)y > (int32_t)h)\n        return 0;', 'at y == h the loop that follows does not run, and it answers 0 too'),
-        ('open-size', 'main_aircraft.inc', 'H_MEMSET(ACFT_REC, 0, 0xa4);', 'H_MEMSET(ACFT_REC, 0, 0xa0);'),
+        ('open-size', 'main_aircraft.inc', 'H_MEMSET(ACFT_REC, 0, 0xa4);', 'H_MEMSET(ACFT_REC, 0, 0xa0);', 'retail host +0x74 (0x410aa0) stores a new block at record +0xa0 (+0x20c always writes *out) before anything reads it, so the last four bytes are overwritten either way'),
         ('open-alloc', 'main_aircraft.inc', 'H_ALLOC(1, 0xc0, ACFT_EYE, 1);', 'H_ALLOC(1, 0xc4, ACFT_EYE, 1);'),
         ('open-fail', 'main_aircraft.inc', 'return 0xffffffffu;\n        p = M32(ACFT_EYE);', 'return 0;\n        p = M32(ACFT_EYE);'),
         ('open-y', 'main_aircraft.inc', 'M32(p + 8) = 1u - ', 'M32(p + 8) = 0u - '),
@@ -1178,7 +1178,7 @@ BREAKS = {
         ('mk-next', 'main_radios.inc', '        n = 1;\n', ''),
         ('atis-clear', 'main_radios.inc', 'M32(gp + 0x38c) = 0;\n', ''),
         ('com-clear', 'main_radios.inc', 'M8(gp + 0x38a) = 0;\n', ''),
-        ('com-ok', 'main_radios.inc', '!= 0)\n        CALL(MARKERS, 0x20, f1)(out);', '== 0)\n        CALL(MARKERS, 0x20, f1)(out);'),
+        ('com-ok', 'main_radios.inc', '!= 0)\n        main_call_edi1(M32(MARKERS + 0x20), out, gp);', '== 0)\n        main_call_edi1(M32(MARKERS + 0x20), out, gp);'),
         ('box-first', 'main_radios.inc', 'if ((int32_t)(d - M32(rec + 0xc)) < 0) {\n        struct', 'if ((int32_t)(d - M32(rec + 0xc)) <= 0) {\n        struct'),
         ('box-alt', 'main_radios.inc', 'if ((int32_t)(d - M32(rec + 0x10)) < 0)', 'if ((int32_t)(d - M32(rec + 0x10)) <= 0)'),
         ('box-map', 'main_radios.inc', 'case 0x207f9679: radio_tune_markers(); break;', 'case 0x207f9679: radio_tune_adf(); break;'),
@@ -1210,7 +1210,7 @@ BREAKS = {
         ('nav2-text', 'main_radios.inc', '0xc33, 0xc38,', '0xc34, 0xc38,'),
         ('n1-dead', 'main_radios.inc', 'M8(V(0x2080735d)) |= 8;', 'M8(V(0x2080735d)) |= 4;'),
         ('n1-flag', 'main_radios.inc', 'M8(gp + 0xc4a) |= 0x80;', 'M8(gp + 0xc4a) |= 0x40;'),
-        ('n1-cx', 'main_radios.inc', 'main_xcall2(SLOT_OF(UTIL, 0x60), V(0x20807382), gp + 0x858);', 'CALL(UTIL, 0x60, f2)(V(0x20807382), gp + 0x858);'),
+        ('n1-cx', 'main_radios.inc', 'main_xcall2(SLOT_OF(UTIL, 0x60), V(0x20807382), gp + 0x858);', 'CALL(UTIL, 0x60, f2)(V(0x20807382), gp + 0x858);', "retail UTIL +0x60 (.text+0x1800) pushes and pops eax and ecx and never writes edx, so the thunk's ecx/edx come back as they went in"),
         ('n1-84c', 'main_radios.inc', 'if (M32(gp + 0x84c) != 1) {\n                M16(gp + 0x870) = (uint16_t)(ax + 0x8000);', 'if (M32(gp + 0x84c) == 1) {\n                M16(gp + 0x870) = (uint16_t)(ax + 0x8000);'),
         ('n1-40', 'main_radios.inc', 'if (M8(V(0x2080786e)) == 0x40)', 'if (M8(V(0x2080786e)) == 0x41)'),
         ('n1-div', 'main_radios.inc', 'div16(M16(V(0x2080746c)));\n            ax = AX;\n            if', 'div16(M16(V(0x2080746e)));\n            ax = AX;\n            if'),
@@ -1416,7 +1416,7 @@ BREAKS = {
         ("col-mask", "main_natives.inc", "SET_AX(BX & 0x101);", "SET_AX(BX & 0x100);"),
         ("col-colour", "main_natives.inc", "M8(V(0x20803502)) = AL;", "M8(V(0x20803503)) = AL;"),
         ("col-vector", "main_natives.inc", "M32(V(0x20803402) + twice * 2);", "M32(V(0x20803402) + twice);"),
-        ("col-ecx", "main_natives.inc", "esi = CALL(G3D, 0x40, f0)();", "esi = main_xcall0(SLOT_OF(G3D, 0x40));"),
+        ("col-ecx", "main_natives.inc", "esi = CALL(G3D, 0x40, f0)();", "esi = main_xcall0(SLOT_OF(G3D, 0x40));", "retail G3D +0x40 (.text+0x26e7) only loads eax, saving ebx, esi and edi, so ecx and edx are the same through the thunk or not"),
         ("col-flag", "main_natives.inc", "M16(V(0x20803452)) = 1;", "M16(V(0x20803452)) = 0;"),
         ("col-put", "main_natives.inc", "    face_put(0x70);\n", ""),
         ("col-put2", "main_natives.inc", "    face_put(0x6c0);\n", ""),
@@ -2310,7 +2310,7 @@ BREAKS = {
         ('edit-name-copy', 'main_flights.inc', 'H_STRCPY(FLIGHT_REC(M32(block + 0x1c), M32(block + 0x14)), edit);\n', ''),
         ('open-none', 'main_flights.inc', 'if (block[6] == 0) {', 'if (block[6] == 1) {'),
         ('open-none-alert', 'main_flights.inc', 'UTIL_ALERT(8, 4, 0xf463, 0, 0, 0, 0, 0);', 'UTIL_ALERT(8, 1, 0xf463, 0, 0, 0, 0, 0);'),
-        ('open-select', 'main_flights.inc', 'block[5] = i;\n                break;', 'block[5] = 0;\n                break;'),
+        ('open-select', 'main_flights.inc', 'block[5] = i;\n                block[8] = i;\n                break;', 'block[5] = 0;\n                block[8] = i;\n                break;'),
         ('open-select-empty', 'main_flights.inc', 'if (current != 0 && M8(current) != 0) {', 'if (current != 0) {'),
         ('open-id', 'main_flights.inc', 'H_DIALOG(0x1102, ADDR(block));', 'H_DIALOG(0x1103, ADDR(block));'),
         ('open-answer', 'main_flights.inc', 'if (block[0] != 0) {\n        H_STRCPY(path,', 'if (block[0] == 0) {\n        H_STRCPY(path,'),
@@ -2360,7 +2360,7 @@ def main():
         open(os.path.join(COPY, path), "w").write(source.replace(old, new))
         if os.path.exists(DIFF + "/MAIN_ours.dll"):
             os.remove(DIFF + "/MAIN_ours.dll")
-        build = subprocess.run(["make", "-s", "main-break-build", "MAIN_BREAK_DIR=" + COPY, "DIFFDIR=" + DIFF],
+        build = subprocess.run(["tools/ofs", "main-break-build", "MAIN_BREAK_DIR=" + COPY, "DIFFDIR=" + DIFF],
                                capture_output=True, text=True)
         if build.returncode != 0:
             print("%-20s does not build:\n%s" % (name, build.stderr[-2000:]))
@@ -2381,7 +2381,7 @@ def main():
         sys.stdout.flush()
     shutil.rmtree(COPY, ignore_errors=True)
     if DIFF == "bin/difftest":
-        subprocess.run(["make", "-s", "maindiff"], check=True)
+        subprocess.run(["tools/ofs", "maindiff"], check=True)
     missed = [n for n, r in results if r not in ("caught", "equivalent")]
     same = [n for n, r in results if r == "equivalent"]
     print("%s: %d breaks, %d caught, %d proven equivalent (%s); missed: %s" %

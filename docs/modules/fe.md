@@ -3,9 +3,9 @@
 **Status: done and verified.** Parts 1 (grid conversions), 2 (the hand-written
 assembly engine), 3 (the compiled-C file services) and 4 (`+0x78`, the
 Scenery Library) are reimplemented and verified externally. The whole-module
-run covers parts 2 and 3 with 20,000 scenarios and zero differences, `make
+run covers parts 2 and 3 with 20,000 scenarios and zero differences, `tools/ofs
 facildiff-fe-run` checks them behind OpenFS98 FACIL over the real CD index,
-and `make fesldiff-run` drives the Scenery Library through 20,000 scenarios
+and `tools/ofs fesldiff-run` drives the Scenery Library through 20,000 scenarios
 of a stand-in for `English\World.DLL`'s dialogs, again with zero
 differences.
 
@@ -43,7 +43,7 @@ differential oracle/compatibility DLL, expose normal C entry points for a
 native core, replace image pointers with typed state or offset handles, and
 put files, locking and module linkage behind platform services. The deliberate
 ABI bugs belong only in the façade. The divide/x87 islands can then gain
-tested C fallbacks in the same style as `make utildiff-portable`.
+tested C fallbacks in the same style as `tools/ofs utildiff-portable`.
 
 The Linkage, hand-counted (`dumplinkage.py` stops at `+0x10`, which holds
 `0xd0000000`), runs `+0x18`..`+0x88`:
@@ -78,7 +78,7 @@ and a band back to its south or west edge (`+0x64`, `+0x6c`). Tested by vectors
 in `tools/difftest/fegriddiff.c`: retail and ours loaded side by side and
 called directly, over every table edge at every level 0..24 and random values.
 
-`make fegriddiff-run` → **7,742,499 comparisons, 0 mismatches.**
+`tools/ofs fegriddiff-run` → **7,742,499 comparisons, 0 mismatches.**
 
 Only latitudes inside the table and bands whose index lands in it are vectored:
 past those retail's search reads on through `.data` and beyond, where two
@@ -168,8 +168,8 @@ nothing). Said here per the working rule.
 
 ### The `.data` image
 
-`tools/gen_fe_data.py` extracts `.data` from the end of the Linkage (`+0xd4`)
-to `+0x62e0` as bytes, with every relocated dword zeroed and listed: the
+The image from the end of the Linkage (`+0xd4`) to `+0x62e0` is typed C in
+`fe.c` (Story 1.4; the two band tables are in `fe_bands.inc`), with every relocated dword zero and listed in `fe_relocs.inc`: the
 Linkage's own pointers (fe.c supplies them as its functions), a few pointers
 within `.data`, and the C half's dialog/handler tables, which point into
 `.text`. `fe.c`'s `fe_relocate` reapplies the within-`.data` ones at
@@ -197,7 +197,7 @@ stack before the next call.
 
 The engine needs `Scenery\world.vis`, the area and navaid/facility BGLs, the
 per-airport subtrees, and `Texture\`. `tools/extract.sh` now extracts the full
-CD `fs98/Scenery` and `fs98/Texture` trees into `orig/`. `make fediff-run`
+CD `fs98/Scenery` and `fs98/Texture` trees into `orig/`. `tools/ofs fediff-run`
 prefers that reproducible fixture and falls back to an existing staged
 `game/` tree. The dynamic scenario is pinned over Chicago with a 750 km box so
 every run reaches `CHICAGO5.BGL` and its one-byte oversized-block probe. Part
@@ -205,7 +205,7 @@ every run reaches `CHICAGO5.BGL` and its one-byte oversized-block probe. Part
 synthetic BGL with exact, fallback, repeated, absent and legacy section cases.
 The raw, palette and haze paths use the installed `Texture` tree.
 
-`make fediff-run` → **20,000 scenarios, 0 differences**: 1,819 scene and
+`tools/ofs fediff-run` → **20,000 scenarios, 0 differences**: 1,819 scene and
 next-record scenarios, 1,818 of each of the other nine operations, 1,818
 confirmed `+0x40` oversized probes, 7,272 successful texture loads, and 3,636
 successful FACIL section reads. A deliberate wrong register rotation was
@@ -323,7 +323,7 @@ Retail behaviour reproduced, all confirmed by the harness:
   last held; `.text+0xa9f0` always returns -1; the temporary file's joined
   name at `.data+0x3b60` is built and never used.
 
-### The harness, `make fesldiff-run`
+### The harness, `tools/ofs fesldiff-run`
 
 `tools/difftest/fesldiff.c` reuses `facildiff.c`'s host (and through it
 `fediff.c`'s) and binds retail UTIL and NUMERIC. Host `+0x10c` is a stand-in

@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Require observable retail differences for Advanced Weather lifetime mutations."""
+import module_flags
 from pathlib import Path
 import hashlib
 import json
@@ -58,8 +59,7 @@ def main():
         source.write_text(text.replace(before, after))
         executable = work / 'worldadvancedlifediff.exe'
         executable.unlink(missing_ok=True)
-        build = subprocess.run(['i686-w64-mingw32-gcc', '-std=c99', '-O2', '-Wall', '-Wextra', '-Werror',
-                                '-fno-strict-aliasing', '-fno-delete-null-pointer-checks', '-o', str(executable),
+        build = subprocess.run(['i686-w64-mingw32-gcc', *module_flags.FLAGS, '-std=c99', '-Itools/difftest', '-O2', '-Wall', '-Wextra', '-Werror', '-o', str(executable),
                                 str(work / 'worldadvancedlifediff.c'), str(source), '-lntdll'], capture_output=True)
         (work / 'build.log').write_bytes(build.stdout + build.stderr)
         if build.returncode:

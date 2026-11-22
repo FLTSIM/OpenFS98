@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Require reported differences for isolated Alerts lifecycle/cleanup mutations."""
+import module_flags
 from pathlib import Path
 import subprocess
 import sys
@@ -44,8 +45,7 @@ def main():
         executable = directory / f'{name}.exe'
         source.write_text(source_text.replace(before, after, 1))
         build = subprocess.run([
-            'i686-w64-mingw32-gcc', '-std=c99', '-O2', '-Wall', '-Wextra',
-            '-fno-strict-aliasing', '-fno-delete-null-pointer-checks', '-Isrc/alerts',
+            'i686-w64-mingw32-gcc', *module_flags.FLAGS, '-std=c99', '-O2', '-Wall', '-Wextra', '-Isrc/alerts',
             '-o', str(executable), f'tools/difftest/alerts{suite}diff.c',
             str(source), '-lntdll'], text=True, capture_output=True)
         if build.returncode:

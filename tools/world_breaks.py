@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Build independent area-core mutations and require actual retail differences."""
+import module_flags
 from pathlib import Path
 import os
 import subprocess
@@ -37,8 +38,7 @@ for name, before, after in mutations:
     executable = output_dir / f'{name}.exe'
     source_path.write_text(source_text.replace(before, after))
     # Every mutation uses a distinct executable built from the changed source.
-    compile = ['i686-w64-mingw32-gcc', '-std=c99', '-O2', '-Wall', '-Wextra', '-Werror',
-                '-fno-strict-aliasing', '-Isrc/world', '-o', str(executable),
+    compile = ['i686-w64-mingw32-gcc', *module_flags.FLAGS, '-std=c99', '-Itools/difftest', '-O2', '-Wall', '-Wextra', '-Werror', '-Isrc/world', '-o', str(executable),
                 'tools/difftest/worlddiff.c', str(source_path)]
     subprocess.run(compile, cwd=root, check=True)
     run_result = subprocess.run(['wine', str(executable), '512', '0x4a971b63', 'normal'],

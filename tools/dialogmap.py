@@ -27,6 +27,15 @@ class SurveyError(ValueError):
     pass
 
 
+def resource_name(name):
+    """A .res name or ordinal field, as the resource compiler reads it."""
+    if isinstance(name, int):
+        if name > 0xffff:
+            raise SurveyError('resource ordinal exceeds WORD')
+        return struct.pack('<HH', 0xffff, name)
+    return name.encode('utf-16-le') + b'\0\0'
+
+
 class Fs98Pe:
     """Small, bounds-checked PE32 reader; no third-party Python dependencies."""
 

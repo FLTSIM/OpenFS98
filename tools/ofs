@@ -1,0 +1,23 @@
+#!/bin/sh
+# Run CMake targets with make-style parameters: tools/ofs maindiff-run SUITE=nav N=2000 is
+# `SUITE=nav N=2000 cmake --build "$OFS_BUILD" --target maindiff-run`. Several targets run in order, as with make.
+# OFS_BUILD defaults to build/win32-retail under the source root (docs/building.md); configure it once first.
+[ $# -ge 1 ] || { echo "usage: tools/ofs TARGET... [VAR=value ...]" >&2; exit 2; }
+root=$(cd "$(dirname "$0")/.." && pwd)
+build=${OFS_BUILD:-$root/build/win32-retail}
+[ -f "$build/CMakeCache.txt" ] || {
+    echo "no CMake build in $build: cmake -S . -B build/win32-retail -DCMAKE_TOOLCHAIN_FILE=cmake/toolchains/win32-retail.cmake" >&2
+    exit 2
+}
+targets=
+for a in "$@"; do
+    case "$a" in
+        [A-Za-z_]*=*) export "$a" ;;
+        -*) echo "tools/ofs: no options, only TARGET and VAR=value: $a" >&2; exit 2 ;;
+        *) targets="$targets $a" ;;
+    esac
+done
+[ -n "$targets" ] || { echo "usage: tools/ofs TARGET... [VAR=value ...]" >&2; exit 2; }
+for t in $targets; do
+    cmake --build "$build" --target "$t" || exit $?
+done

@@ -9,7 +9,7 @@ At the end the real build goes back.  A missed break is a gap in the harness or
 an equivalence; either way it is reported.
 
 Usage: tools/host_breaks.py [N] [name...]   (from the repository root, after
-       make hostdiff)
+       tools/ofs hostdiff)
 """
 import os
 import re
@@ -616,7 +616,7 @@ def main():
         open(BREAK, "w").write(src.replace(old, new))
         if os.path.exists("bin/difftest/HOST_ours.dll"):
             os.remove("bin/difftest/HOST_ours.dll")
-        build = subprocess.run(["make", "-s", "host-break-build", "HOST_BREAK=" + BREAK],
+        build = subprocess.run(["tools/ofs", "host-break-build", "HOST_BREAK=" + BREAK],
                                capture_output=True, text=True)
         if build.returncode != 0:
             print("%-16s does not build:\n%s" % (name, build.stderr[-1500:]))
@@ -647,7 +647,7 @@ def main():
         sys.stdout.flush()
     if os.path.exists(BREAK):
         os.remove(BREAK)
-    subprocess.run(["make", "-s", "hostdiff"], check=True)
+    subprocess.run(["tools/ofs", "hostdiff"], check=True)
     missed = [n for n, r in results if r not in ("caught", "equivalent")]
     same = [n for n, r in results if r == "equivalent"]
     print("host: %d breaks, %d caught, %d equivalent (%s); missed: %s" %

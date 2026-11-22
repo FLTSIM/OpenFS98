@@ -13,7 +13,7 @@
  * Retail is two programs.  Hand-written assembly runs from .text+0x20 to
  * +0x78c1, with ATC's stack-alignment wrapper around every import call (no
  * observable effect, so not reproduced).  It keeps the command table among
- * its code at .text+0x15f9 (tools/gen_controls_data.py extracts it).  MSVC C
+ * its code at .text+0x15f9 (controls_table.inc).  MSVC C
  * follows from +0x78d0: the key and joystick bindings, read from and written
  * to FLTSIM98.CFG through the host's profile services, the joysticks through
  * the host's winmm services, and force feedback through DirectInput 5,
@@ -4120,12 +4120,540 @@ uint32_t FS98_STDCALL controls_dialog(void);                  /* .text+0x7e40 */
 uint32_t FS98_STDCALL controls_force(uint32_t op, uint32_t p);     /* .text+0xa400 */
 void controls_input_install(void);
 
-struct controls_image controls_image = {{
-#include "controls_data.inc"
-}};
+/* The image at retail's offsets (0xc020 bytes, the first 0xc00 initialised): ImportTable, Linkage, the state of the
+ * hand-written half from +0xe0 (f_XXXX: values whose use is not yet known), the keyboard and joystick section names, the
+ * DirectInput data format's object table at +0x510 and the force-feedback key names.  The Linkage's functions, two pointers
+ * into the image (+0x344, +0x350) and the objects' GUID pointers are zero here and set by controls_install().
+ * controls_rdata is retail's .rdata copied: 37 GUIDs (IID_IDirectInputDevice2A at +0x80, GUID_ConstantForce at +0x190, GUID_Square
+ * at +0x1b0, GUID_Sine at +0x1c0 ...), c_dfDIJoystick at +0x250 and the doubles.  It stays writable, in .data, because
+ * controls_install() writes the format's object-table pointer at +0x264. */
+struct ct_linkage {
+    uint32_t id;  /* +0x0 */
+    void *init;  /* +0x4 */
+    void *deinit;  /* +0x8 */
+    uint32_t reserved_0c;  /* +0xc */
+    uint32_t reserved_10;  /* +0x10 */
+    void *dialogs;  /* +0x14 */
+    void *slots[0x12];  /* +0x18 */
+} __attribute__((packed));
+_Static_assert(sizeof(struct ct_linkage) == 0x60, "ct_linkage");
 
-uint8_t controls_rdata[CT_RDATA_SIZE] __attribute__((aligned(8))) = {
-#include "controls_rdata.inc"
+struct ct_object_format {
+    const void *guid;  /* +0x0 */
+    uint32_t offset;  /* +0x4 */
+    uint32_t type;  /* +0x8 */
+    uint32_t flags;  /* +0xc */
+} __attribute__((packed));
+_Static_assert(sizeof(struct ct_object_format) == 0x10, "ct_object_format");
+
+struct controls_image {
+    struct fs98_import import[15];  /* +0x0 */
+    struct ct_linkage linkage;  /* +0x78 */
+    uint8_t gap_00d8[0x20];  /* +0xd8 */
+    uint32_t f_00f8;  /* +0xf8 */
+    uint32_t f_00fc;  /* +0xfc */
+    uint8_t gap_0100[0x8];  /* +0x100 */
+    uint32_t f_0108;  /* +0x108 */
+    uint32_t f_010c;  /* +0x10c */
+    uint32_t f_0110;  /* +0x110 */
+    uint32_t f_0114;  /* +0x114 */
+    uint8_t gap_0118[0x10];  /* +0x118 */
+    uint32_t f_0128;  /* +0x128 */
+    uint32_t f_012c;  /* +0x12c */
+    uint32_t f_0130;  /* +0x130 */
+    uint32_t f_0134;  /* +0x134 */
+    uint8_t gap_0138[0x4];  /* +0x138 */
+    uint32_t f_013c;  /* +0x13c */
+    uint8_t gap_0140[0x4];  /* +0x140 */
+    uint32_t f_0144;  /* +0x144 */
+    uint32_t f_0148;  /* +0x148 */
+    uint32_t f_014c;  /* +0x14c */
+    uint32_t f_0150;  /* +0x150 */
+    uint32_t f_0154;  /* +0x154 */
+    uint32_t f_0158;  /* +0x158 */
+    uint32_t f_015c;  /* +0x15c */
+    uint32_t f_0160;  /* +0x160 */
+    uint32_t f_0164;  /* +0x164 */
+    uint8_t gap_0168[0x4];  /* +0x168 */
+    uint32_t f_016c;  /* +0x16c */
+    uint8_t gap_0170[0x4];  /* +0x170 */
+    uint32_t f_0174;  /* +0x174 */
+    uint8_t gap_0178[0x4];  /* +0x178 */
+    uint32_t f_017c;  /* +0x17c */
+    uint32_t f_0180;  /* +0x180 */
+    uint8_t gap_0184[0xe];  /* +0x184 */
+    char s_controls[9];  /* +0x192 */
+    char s_pan_rate[12];  /* +0x19b */
+    uint8_t gap_01a7[0x1];  /* +0x1a7 */
+    char s_keyboard_main[16];  /* +0x1a8 */
+    char s_keyboard_slew[16];  /* +0x1b8 */
+    char s_s_08x[8];  /* +0x1c8 */
+    char keyboard_name[56];  /* +0x1d0 */
+    char mouse_name[56];  /* +0x208 */
+    uint8_t gap_0240[0xfc];  /* +0x240 */
+    uint32_t f_033c;  /* +0x33c */
+    uint32_t f_0340;  /* +0x340 */
+    uint8_t gap_0344[0x14];  /* +0x344 */
+    char s_joystick[12];  /* +0x358 */
+    uint8_t gap_0364[0x4];  /* +0x364 */
+    char s_joystick_slew[16];  /* +0x368 */
+    char s_axis_event[12];  /* +0x378 */
+    uint8_t gap_0384[0x4];  /* +0x384 */
+    char s_axis_scale[12];  /* +0x388 */
+    uint8_t gap_0394[0x4];  /* +0x394 */
+    char s_axis_null[12];  /* +0x398 */
+    uint8_t gap_03a4[0x4];  /* +0x3a4 */
+    char s_button_down_event[20];  /* +0x3a8 */
+    uint8_t gap_03bc[0x4];  /* +0x3bc */
+    char s_button_down_repeat[20];  /* +0x3c0 */
+    uint8_t gap_03d4[0x4];  /* +0x3d4 */
+    char s_button_up_event[20];  /* +0x3d8 */
+    uint8_t gap_03ec[0x4];  /* +0x3ec */
+    char s_rudder[8];  /* +0x3f0 */
+    char s_slew[8];  /* +0x3f8 */
+    char s_prefs[8];  /* +0x400 */
+    char s_devices[8];  /* +0x408 */
+    uint8_t gap_0410[0x2c];  /* +0x410 */
+    uint32_t f_043c;  /* +0x43c */
+    char s_devices_440[8];  /* +0x440 */
+    char s_joysticks[12];  /* +0x448 */
+    char s_axis_flags[12];  /* +0x454 */
+    char s_type[8];  /* +0x460 */
+    char s_locked[8];  /* +0x468 */
+    uint32_t f_0470;  /* +0x470 */
+    uint32_t f_0474;  /* +0x474 */
+    uint32_t f_0478;  /* +0x478 */
+    uint32_t f_047c;  /* +0x47c */
+    uint32_t f_0480;  /* +0x480 */
+    uint32_t f_0484;  /* +0x484 */
+    uint32_t f_0488;  /* +0x488 */
+    uint32_t f_048c;  /* +0x48c */
+    uint32_t f_0490;  /* +0x490 */
+    uint32_t f_0494;  /* +0x494 */
+    uint32_t f_0498;  /* +0x498 */
+    uint32_t f_049c;  /* +0x49c */
+    uint32_t f_04a0;  /* +0x4a0 */
+    uint32_t f_04a4;  /* +0x4a4 */
+    uint32_t f_04a8;  /* +0x4a8 */
+    uint32_t f_04ac;  /* +0x4ac */
+    uint32_t f_04b0;  /* +0x4b0 */
+    uint32_t f_04b4;  /* +0x4b4 */
+    uint32_t f_04b8;  /* +0x4b8 */
+    uint32_t f_04bc;  /* +0x4bc */
+    double d_04c0;  /* +0x4c0 */
+    uint32_t f_04c8;  /* +0x4c8 */
+    uint32_t f_04cc;  /* +0x4cc */
+    double d_04d0;  /* +0x4d0 */
+    uint32_t f_04d8;  /* +0x4d8 */
+    uint32_t f_04dc;  /* +0x4dc */
+    uint32_t f_04e0;  /* +0x4e0 */
+    uint32_t f_04e4;  /* +0x4e4 */
+    uint32_t f_04e8;  /* +0x4e8 */
+    uint32_t f_04ec;  /* +0x4ec */
+    uint32_t f_04f0;  /* +0x4f0 */
+    uint8_t gap_04f4[0x4];  /* +0x4f4 */
+    uint32_t f_04f8;  /* +0x4f8 */
+    uint8_t gap_04fc[0xc];  /* +0x4fc */
+    uint32_t f_0508;  /* +0x508 */
+    uint8_t gap_050c[0x4];  /* +0x50c */
+    struct ct_object_format objects[0x2c];  /* +0x510 */
+    char s_force_ground_bumps_enabled[28];  /* +0x7d0 */
+    char s_force_crash_enabled[20];  /* +0x7ec */
+    char s_force_gear_bump_enabled[24];  /* +0x800 */
+    char s_force_stick_shaker_enabled[28];  /* +0x818 */
+    char s_force_stick_force_enabled[28];  /* +0x834 */
+    char s_force_master_enabled[24];  /* +0x850 */
+    char s_force_master_gain[20];  /* +0x868 */
+    char s_crash_duration2[16];  /* +0x87c */
+    char s_crash_period2[16];  /* +0x88c */
+    char s_crash_direction2[20];  /* +0x89c */
+    char s_crash_magnitude2[20];  /* +0x8b0 */
+    char s_crash_direction1[20];  /* +0x8c4 */
+    char s_crash_magnitude1[20];  /* +0x8d8 */
+    char s_ground_bumps_slope2[20];  /* +0x8ec */
+    char s_ground_bumps_intercept2[24];  /* +0x900 */
+    char s_ground_bumps_angle2[20];  /* +0x918 */
+    char s_ground_bumps_magnitude2[24];  /* +0x92c */
+    char s_ground_bumps_slope1[20];  /* +0x944 */
+    char s_ground_bumps_intercept1[24];  /* +0x958 */
+    char s_ground_bumps_angle1[20];  /* +0x970 */
+    char s_ground_bumps_magnitude1[24];  /* +0x984 */
+    char s_gear_bump_right_duration[28];  /* +0x99c */
+    char s_gear_bump_right_direction[28];  /* +0x9b8 */
+    char s_gear_bump_right_magnitude[28];  /* +0x9d4 */
+    char s_gear_bump_left_duration[24];  /* +0x9f0 */
+    char s_gear_bump_left_direction[28];  /* +0xa08 */
+    char s_gear_bump_left_magnitude[28];  /* +0xa24 */
+    char s_gear_bump_nose_duration[24];  /* +0xa40 */
+    char s_gear_bump_nose_direction[28];  /* +0xa58 */
+    char s_gear_bump_nose_magnitude[28];  /* +0xa74 */
+    char s_stick_shaker_period[20];  /* +0xa90 */
+    char s_stick_shaker_direction[24];  /* +0xaa4 */
+    char s_stick_shaker_magnitude[24];  /* +0xabc */
+    char s_forcefeedback[16];  /* +0xad4 */
+    char s_directinputcreatea[20];  /* +0xae4 */
+    char s_dinput[8];  /* +0xaf8 */
+    uint8_t gap_0b00[0xb520];  /* +0xb00 */
+} __attribute__((packed));
+_Static_assert(sizeof(struct controls_image) == 0xc020, "controls_image");
+_Static_assert(__builtin_offsetof(struct controls_image, import) == 0x0, "import");
+_Static_assert(__builtin_offsetof(struct controls_image, linkage) == 0x78, "linkage");
+_Static_assert(__builtin_offsetof(struct controls_image, s_controls) == 0x192, "s_controls");
+_Static_assert(__builtin_offsetof(struct controls_image, s_pan_rate) == 0x19b, "s_pan_rate");
+_Static_assert(__builtin_offsetof(struct controls_image, s_keyboard_main) == 0x1a8, "s_keyboard_main");
+_Static_assert(__builtin_offsetof(struct controls_image, s_keyboard_slew) == 0x1b8, "s_keyboard_slew");
+_Static_assert(__builtin_offsetof(struct controls_image, s_s_08x) == 0x1c8, "s_s_08x");
+_Static_assert(__builtin_offsetof(struct controls_image, keyboard_name) == 0x1d0, "keyboard_name");
+_Static_assert(__builtin_offsetof(struct controls_image, mouse_name) == 0x208, "mouse_name");
+_Static_assert(__builtin_offsetof(struct controls_image, s_joystick) == 0x358, "s_joystick");
+_Static_assert(__builtin_offsetof(struct controls_image, s_joystick_slew) == 0x368, "s_joystick_slew");
+_Static_assert(__builtin_offsetof(struct controls_image, s_axis_event) == 0x378, "s_axis_event");
+_Static_assert(__builtin_offsetof(struct controls_image, s_axis_scale) == 0x388, "s_axis_scale");
+_Static_assert(__builtin_offsetof(struct controls_image, s_axis_null) == 0x398, "s_axis_null");
+_Static_assert(__builtin_offsetof(struct controls_image, s_button_down_event) == 0x3a8, "s_button_down_event");
+_Static_assert(__builtin_offsetof(struct controls_image, s_button_down_repeat) == 0x3c0, "s_button_down_repeat");
+_Static_assert(__builtin_offsetof(struct controls_image, s_button_up_event) == 0x3d8, "s_button_up_event");
+_Static_assert(__builtin_offsetof(struct controls_image, s_rudder) == 0x3f0, "s_rudder");
+_Static_assert(__builtin_offsetof(struct controls_image, s_slew) == 0x3f8, "s_slew");
+_Static_assert(__builtin_offsetof(struct controls_image, s_prefs) == 0x400, "s_prefs");
+_Static_assert(__builtin_offsetof(struct controls_image, s_devices) == 0x408, "s_devices");
+_Static_assert(__builtin_offsetof(struct controls_image, s_devices_440) == 0x440, "s_devices_440");
+_Static_assert(__builtin_offsetof(struct controls_image, s_joysticks) == 0x448, "s_joysticks");
+_Static_assert(__builtin_offsetof(struct controls_image, s_axis_flags) == 0x454, "s_axis_flags");
+_Static_assert(__builtin_offsetof(struct controls_image, s_type) == 0x460, "s_type");
+_Static_assert(__builtin_offsetof(struct controls_image, s_locked) == 0x468, "s_locked");
+_Static_assert(__builtin_offsetof(struct controls_image, d_04c0) == 0x4c0, "d_04c0");
+_Static_assert(__builtin_offsetof(struct controls_image, d_04d0) == 0x4d0, "d_04d0");
+_Static_assert(__builtin_offsetof(struct controls_image, objects) == 0x510, "objects");
+_Static_assert(__builtin_offsetof(struct controls_image, s_force_ground_bumps_enabled) == 0x7d0, "s_force_ground_bumps_enabled");
+_Static_assert(__builtin_offsetof(struct controls_image, s_force_crash_enabled) == 0x7ec, "s_force_crash_enabled");
+_Static_assert(__builtin_offsetof(struct controls_image, s_force_gear_bump_enabled) == 0x800, "s_force_gear_bump_enabled");
+_Static_assert(__builtin_offsetof(struct controls_image, s_force_stick_shaker_enabled) == 0x818, "s_force_stick_shaker_enabled");
+_Static_assert(__builtin_offsetof(struct controls_image, s_force_stick_force_enabled) == 0x834, "s_force_stick_force_enabled");
+_Static_assert(__builtin_offsetof(struct controls_image, s_force_master_enabled) == 0x850, "s_force_master_enabled");
+_Static_assert(__builtin_offsetof(struct controls_image, s_force_master_gain) == 0x868, "s_force_master_gain");
+_Static_assert(__builtin_offsetof(struct controls_image, s_crash_duration2) == 0x87c, "s_crash_duration2");
+_Static_assert(__builtin_offsetof(struct controls_image, s_crash_period2) == 0x88c, "s_crash_period2");
+_Static_assert(__builtin_offsetof(struct controls_image, s_crash_direction2) == 0x89c, "s_crash_direction2");
+_Static_assert(__builtin_offsetof(struct controls_image, s_crash_magnitude2) == 0x8b0, "s_crash_magnitude2");
+_Static_assert(__builtin_offsetof(struct controls_image, s_crash_direction1) == 0x8c4, "s_crash_direction1");
+_Static_assert(__builtin_offsetof(struct controls_image, s_crash_magnitude1) == 0x8d8, "s_crash_magnitude1");
+_Static_assert(__builtin_offsetof(struct controls_image, s_ground_bumps_slope2) == 0x8ec, "s_ground_bumps_slope2");
+_Static_assert(__builtin_offsetof(struct controls_image, s_ground_bumps_intercept2) == 0x900, "s_ground_bumps_intercept2");
+_Static_assert(__builtin_offsetof(struct controls_image, s_ground_bumps_angle2) == 0x918, "s_ground_bumps_angle2");
+_Static_assert(__builtin_offsetof(struct controls_image, s_ground_bumps_magnitude2) == 0x92c, "s_ground_bumps_magnitude2");
+_Static_assert(__builtin_offsetof(struct controls_image, s_ground_bumps_slope1) == 0x944, "s_ground_bumps_slope1");
+_Static_assert(__builtin_offsetof(struct controls_image, s_ground_bumps_intercept1) == 0x958, "s_ground_bumps_intercept1");
+_Static_assert(__builtin_offsetof(struct controls_image, s_ground_bumps_angle1) == 0x970, "s_ground_bumps_angle1");
+_Static_assert(__builtin_offsetof(struct controls_image, s_ground_bumps_magnitude1) == 0x984, "s_ground_bumps_magnitude1");
+_Static_assert(__builtin_offsetof(struct controls_image, s_gear_bump_right_duration) == 0x99c, "s_gear_bump_right_duration");
+_Static_assert(__builtin_offsetof(struct controls_image, s_gear_bump_right_direction) == 0x9b8, "s_gear_bump_right_direction");
+_Static_assert(__builtin_offsetof(struct controls_image, s_gear_bump_right_magnitude) == 0x9d4, "s_gear_bump_right_magnitude");
+_Static_assert(__builtin_offsetof(struct controls_image, s_gear_bump_left_duration) == 0x9f0, "s_gear_bump_left_duration");
+_Static_assert(__builtin_offsetof(struct controls_image, s_gear_bump_left_direction) == 0xa08, "s_gear_bump_left_direction");
+_Static_assert(__builtin_offsetof(struct controls_image, s_gear_bump_left_magnitude) == 0xa24, "s_gear_bump_left_magnitude");
+_Static_assert(__builtin_offsetof(struct controls_image, s_gear_bump_nose_duration) == 0xa40, "s_gear_bump_nose_duration");
+_Static_assert(__builtin_offsetof(struct controls_image, s_gear_bump_nose_direction) == 0xa58, "s_gear_bump_nose_direction");
+_Static_assert(__builtin_offsetof(struct controls_image, s_gear_bump_nose_magnitude) == 0xa74, "s_gear_bump_nose_magnitude");
+_Static_assert(__builtin_offsetof(struct controls_image, s_stick_shaker_period) == 0xa90, "s_stick_shaker_period");
+_Static_assert(__builtin_offsetof(struct controls_image, s_stick_shaker_direction) == 0xaa4, "s_stick_shaker_direction");
+_Static_assert(__builtin_offsetof(struct controls_image, s_stick_shaker_magnitude) == 0xabc, "s_stick_shaker_magnitude");
+_Static_assert(__builtin_offsetof(struct controls_image, s_forcefeedback) == 0xad4, "s_forcefeedback");
+_Static_assert(__builtin_offsetof(struct controls_image, s_directinputcreatea) == 0xae4, "s_directinputcreatea");
+_Static_assert(__builtin_offsetof(struct controls_image, s_dinput) == 0xaf8, "s_dinput");
+
+struct ct_guid {
+    uint32_t data1;
+    uint16_t data2;
+    uint16_t data3;
+    uint8_t data4[8];
+} __attribute__((packed));
+_Static_assert(sizeof(struct ct_guid) == 16, "ct_guid");
+
+struct ct_data_format {
+    uint32_t size;  /* +0x0 */
+    uint32_t object_size;  /* +0x4 */
+    uint32_t flags;  /* +0x8 */
+    uint32_t data_size;  /* +0xc */
+    uint32_t object_count;  /* +0x10 */
+    void *objects;  /* +0x14 */
+} __attribute__((packed));
+_Static_assert(sizeof(struct ct_data_format) == 0x18, "ct_data_format");
+
+struct controls_rdata {
+    struct ct_guid guid[0x25];  /* +0x0 */
+    struct ct_data_format joystick_format;  /* +0x250 */
+    double k_0268;  /* +0x268 */
+    double k_0270;  /* +0x270 */
+    double k_0278;  /* +0x278 */
+    double k_0280;  /* +0x280 */
+    double k_0288;  /* +0x288 */
+    double k_0290;  /* +0x290 */
+    double k_0298;  /* +0x298 */
+    double k_02a0;  /* +0x2a0 */
+    double k_02a8;  /* +0x2a8 */
+    double k_02b0;  /* +0x2b0 */
+} __attribute__((packed));
+_Static_assert(sizeof(struct controls_rdata) == 0x2b8, "controls_rdata");
+_Static_assert(__builtin_offsetof(struct controls_rdata, guid) == 0x0, "guid");
+_Static_assert(__builtin_offsetof(struct controls_rdata, joystick_format) == 0x250, "joystick_format");
+_Static_assert(__builtin_offsetof(struct controls_rdata, k_0268) == 0x268, "k_0268");
+_Static_assert(__builtin_offsetof(struct controls_rdata, k_0270) == 0x270, "k_0270");
+_Static_assert(__builtin_offsetof(struct controls_rdata, k_0278) == 0x278, "k_0278");
+_Static_assert(__builtin_offsetof(struct controls_rdata, k_0280) == 0x280, "k_0280");
+_Static_assert(__builtin_offsetof(struct controls_rdata, k_0288) == 0x288, "k_0288");
+_Static_assert(__builtin_offsetof(struct controls_rdata, k_0290) == 0x290, "k_0290");
+_Static_assert(__builtin_offsetof(struct controls_rdata, k_0298) == 0x298, "k_0298");
+_Static_assert(__builtin_offsetof(struct controls_rdata, k_02a0) == 0x2a0, "k_02a0");
+_Static_assert(__builtin_offsetof(struct controls_rdata, k_02a8) == 0x2a8, "k_02a8");
+_Static_assert(__builtin_offsetof(struct controls_rdata, k_02b0) == 0x2b0, "k_02b0");
+
+struct controls_image controls_image = {
+    .import = {
+        { FS98_MOD_HOST },
+        { FS98_MOD_GLOBAL },
+        { FS98_MOD_ACONTAIN },
+        { FS98_MOD_ADVDRV },
+        { FS98_MOD_ATC },
+        { FS98_MOD_CHAIN },
+        { FS98_MOD_DEMO },
+        { FS98_MOD_HG2D },
+        { FS98_MOD_MAIN },
+        { FS98_MOD_NUMERIC },
+        { FS98_MOD_PANELS },
+        { FS98_MOD_SOUND },
+        { FS98_MOD_UTIL },
+        { FS98_MOD_WINDOW },
+        { 0 },
+    },
+    .linkage = {
+        .id = FS98_MOD_CONTROLS,
+    },
+    .f_00f8 = 0x1000000,
+    .f_00fc = 0x1000000,
+    .f_0108 = 0x64000000,
+    .f_010c = 0x190,
+    .f_0110 = 6,
+    .f_0114 = 0x20,
+    .f_0128 = 0xffffff00,
+    .f_012c = 0x10cff,
+    .f_0130 = 0x37600,
+    .f_0134 = 0x10400,
+    .f_013c = 0x10500,
+    .f_0144 = 0x10600,
+    .f_0148 = 0x37500,
+    .f_014c = 0x10700,
+    .f_0150 = 0x37500,
+    .f_0154 = 0x20600,
+    .f_0158 = 0x37500,
+    .f_015c = 0x20700,
+    .f_0160 = 0x37500,
+    .f_0164 = 0x10f00,
+    .f_016c = 0x11000,
+    .f_0174 = 0x11100,
+    .f_017c = 0x20c00,
+    .f_0180 = 0x37600,
+    .s_controls = "CONTROLS",
+    .s_pan_rate = "PAN_RATE",
+    .s_keyboard_main = "KEYBOARD_MAIN",
+    .s_keyboard_slew = "KEYBOARD_SLEW",
+    .s_s_08x = "%s %08X",
+    .keyboard_name = "KEYBOARD NAME GOES HERE!!",
+    .mouse_name = "MOUSE NAME GOES HERE!!",
+    .f_033c = 0x14,
+    .f_0340 = 0x2002,
+    .s_joystick = "JOYSTICK_",
+    .s_joystick_slew = "JOYSTICK_SLEW_",
+    .s_axis_event = "AXIS_EVENT_",
+    .s_axis_scale = "AXIS_SCALE_",
+    .s_axis_null = "AXIS_NULL_",
+    .s_button_down_event = "BUTTON_DOWN_EVENT_",
+    .s_button_down_repeat = "BUTTON_DOWN_REPEAT_",
+    .s_button_up_event = "BUTTON_UP_EVENT_",
+    .s_rudder = " RUDDER",
+    .s_slew = " SLEW",
+    .s_prefs = "PREFS",
+    .s_devices = "devices",
+    .f_043c = 0x20,
+    .s_devices_440 = "devices",
+    .s_joysticks = "JOYSTICKS",
+    .s_axis_flags = "AXIS_FLAGS",
+    .s_type = "TYPE",
+    .s_locked = "LOCKED",
+    .f_0470 = 1,
+    .f_0474 = 1,
+    .f_0478 = 1,
+    .f_047c = 1,
+    .f_0480 = 1,
+    .f_0484 = 1,
+    .f_0488 = 0x2710,
+    .f_048c = 0x1388,
+    .f_0490 = 0x1b207,
+    .f_0494 = 0x1770,
+    .f_0498 = 0x4650,
+    .f_049c = 0x3d090,
+    .f_04a0 = 0x1770,
+    .f_04a4 = 0x2328,
+    .f_04a8 = 0x3d090,
+    .f_04ac = 0x1770,
+    .f_04b0 = 0x6978,
+    .f_04b4 = 0x3d090,
+    .f_04b8 = 0x1388,
+    .f_04bc = 0x1d4c,
+    .d_04c0 = 0x1.0000000000000p+0,
+    .f_04c8 = 0x1388,
+    .f_04cc = 0x2904,
+    .d_04d0 = 0x1.0000000000000p+0,
+    .f_04d8 = 0x2710,
+    .f_04dc = 0x3e8,
+    .f_04e0 = 0x7a120,
+    .f_04e4 = 0x2710,
+    .f_04e8 = 0x2328,
+    .f_04ec = 0x7a120,
+    .f_04f0 = 0x4c4b40,
+    .f_04f8 = 0x14,
+    .f_0508 = 0x4c4b40,
+    .objects = {
+        [0] = { .type = 0xffff03 },
+        [1] = { .offset = 4, .type = 0xffff03 },
+        [2] = { .offset = 8, .type = 0x80ffff03 },
+        [3] = { .offset = 0xc, .type = 0x80ffff03 },
+        [4] = { .offset = 0x10, .type = 0x80ffff03 },
+        [5] = { .offset = 0x14, .type = 0x80ffff03 },
+        [6] = { .offset = 0x18, .type = 0x80ffff03 },
+        [7] = { .offset = 0x1c, .type = 0x80ffff03 },
+        [8] = { .offset = 0x20, .type = 0x80ffff10 },
+        [9] = { .offset = 0x24, .type = 0x80ffff10 },
+        [10] = { .offset = 0x28, .type = 0x80ffff10 },
+        [11] = { .offset = 0x2c, .type = 0x80ffff10 },
+        [12] = { .offset = 0x30, .type = 0x80ffff0c },
+        [13] = { .offset = 0x31, .type = 0x80ffff0c },
+        [14] = { .offset = 0x32, .type = 0x80ffff0c },
+        [15] = { .offset = 0x33, .type = 0x80ffff0c },
+        [16] = { .offset = 0x34, .type = 0x80ffff0c },
+        [17] = { .offset = 0x35, .type = 0x80ffff0c },
+        [18] = { .offset = 0x36, .type = 0x80ffff0c },
+        [19] = { .offset = 0x37, .type = 0x80ffff0c },
+        [20] = { .offset = 0x38, .type = 0x80ffff0c },
+        [21] = { .offset = 0x39, .type = 0x80ffff0c },
+        [22] = { .offset = 0x3a, .type = 0x80ffff0c },
+        [23] = { .offset = 0x3b, .type = 0x80ffff0c },
+        [24] = { .offset = 0x3c, .type = 0x80ffff0c },
+        [25] = { .offset = 0x3d, .type = 0x80ffff0c },
+        [26] = { .offset = 0x3e, .type = 0x80ffff0c },
+        [27] = { .offset = 0x3f, .type = 0x80ffff0c },
+        [28] = { .offset = 0x40, .type = 0x80ffff0c },
+        [29] = { .offset = 0x41, .type = 0x80ffff0c },
+        [30] = { .offset = 0x42, .type = 0x80ffff0c },
+        [31] = { .offset = 0x43, .type = 0x80ffff0c },
+        [32] = { .offset = 0x44, .type = 0x80ffff0c },
+        [33] = { .offset = 0x45, .type = 0x80ffff0c },
+        [34] = { .offset = 0x46, .type = 0x80ffff0c },
+        [35] = { .offset = 0x47, .type = 0x80ffff0c },
+        [36] = { .offset = 0x48, .type = 0x80ffff0c },
+        [37] = { .offset = 0x49, .type = 0x80ffff0c },
+        [38] = { .offset = 0x4a, .type = 0x80ffff0c },
+        [39] = { .offset = 0x4b, .type = 0x80ffff0c },
+        [40] = { .offset = 0x4c, .type = 0x80ffff0c },
+        [41] = { .offset = 0x4d, .type = 0x80ffff0c },
+        [42] = { .offset = 0x4e, .type = 0x80ffff0c },
+        [43] = { .offset = 0x4f, .type = 0x80ffff0c },
+    },
+    .s_force_ground_bumps_enabled = "force_ground_bumps_enabled",
+    .s_force_crash_enabled = "force_crash_enabled",
+    .s_force_gear_bump_enabled = "force_gear_bump_enabled",
+    .s_force_stick_shaker_enabled = "force_stick_shaker_enabled",
+    .s_force_stick_force_enabled = "force_stick_force_enabled",
+    .s_force_master_enabled = "force_master_enabled",
+    .s_force_master_gain = "force_master_gain",
+    .s_crash_duration2 = "crash_duration2",
+    .s_crash_period2 = "crash_period2",
+    .s_crash_direction2 = "crash_direction2",
+    .s_crash_magnitude2 = "crash_magnitude2",
+    .s_crash_direction1 = "crash_direction1",
+    .s_crash_magnitude1 = "crash_magnitude1",
+    .s_ground_bumps_slope2 = "ground_bumps_slope2",
+    .s_ground_bumps_intercept2 = "ground_bumps_intercept2",
+    .s_ground_bumps_angle2 = "ground_bumps_angle2",
+    .s_ground_bumps_magnitude2 = "ground_bumps_magnitude2",
+    .s_ground_bumps_slope1 = "ground_bumps_slope1",
+    .s_ground_bumps_intercept1 = "ground_bumps_intercept1",
+    .s_ground_bumps_angle1 = "ground_bumps_angle1",
+    .s_ground_bumps_magnitude1 = "ground_bumps_magnitude1",
+    .s_gear_bump_right_duration = "gear_bump_right_duration",
+    .s_gear_bump_right_direction = "gear_bump_right_direction",
+    .s_gear_bump_right_magnitude = "gear_bump_right_magnitude",
+    .s_gear_bump_left_duration = "gear_bump_left_duration",
+    .s_gear_bump_left_direction = "gear_bump_left_direction",
+    .s_gear_bump_left_magnitude = "gear_bump_left_magnitude",
+    .s_gear_bump_nose_duration = "gear_bump_nose_duration",
+    .s_gear_bump_nose_direction = "gear_bump_nose_direction",
+    .s_gear_bump_nose_magnitude = "gear_bump_nose_magnitude",
+    .s_stick_shaker_period = "stick_shaker_period",
+    .s_stick_shaker_direction = "stick_shaker_direction",
+    .s_stick_shaker_magnitude = "stick_shaker_magnitude",
+    .s_forcefeedback = "forcefeedback",
+    .s_directinputcreatea = "DirectInputCreateA",
+    .s_dinput = "dinput",
+};
+
+/* aligned(8) on the object, as before: a bare aggregate this size would be aligned to 32 and move the image */
+struct controls_rdata controls_rdata __attribute__((aligned(8))) = {
+    .guid = {
+        { 0x25e609e0, 0xb259, 0x11cf, { 0xbf, 0xc7, 0x44, 0x45, 0x53, 0x54, 0, 0 } },
+        { 0x25e609e1, 0xb259, 0x11cf, { 0xbf, 0xc7, 0x44, 0x45, 0x53, 0x54, 0, 0 } },
+        { 0x89521360, 0xaa8a, 0x11cf, { 0xbf, 0xc7, 0x44, 0x45, 0x53, 0x54, 0, 0 } },
+        { 0x89521361, 0xaa8a, 0x11cf, { 0xbf, 0xc7, 0x44, 0x45, 0x53, 0x54, 0, 0 } },
+        { 0x5944e662, 0xaa8a, 0x11cf, { 0xbf, 0xc7, 0x44, 0x45, 0x53, 0x54, 0, 0 } },
+        { 0x5944e663, 0xaa8a, 0x11cf, { 0xbf, 0xc7, 0x44, 0x45, 0x53, 0x54, 0, 0 } },
+        { 0x5944e680, 0xc92e, 0x11cf, { 0xbf, 0xc7, 0x44, 0x45, 0x53, 0x54, 0, 0 } },
+        { 0x5944e681, 0xc92e, 0x11cf, { 0xbf, 0xc7, 0x44, 0x45, 0x53, 0x54, 0, 0 } },
+        { 0x5944e682, 0xc92e, 0x11cf, { 0xbf, 0xc7, 0x44, 0x45, 0x53, 0x54, 0, 0 } },
+        { 0x5944e683, 0xc92e, 0x11cf, { 0xbf, 0xc7, 0x44, 0x45, 0x53, 0x54, 0, 0 } },
+        { 0xe7e1f7c0, 0x88d2, 0x11d0, { 0x9a, 0xd0, 0, 0xa0, 0xc9, 0xa0, 0x6e, 0x35 } },
+        { 0xa36d02e0, 0xc9f3, 0x11cf, { 0xbf, 0xc7, 0x44, 0x45, 0x53, 0x54, 0, 0 } },
+        { 0xa36d02e1, 0xc9f3, 0x11cf, { 0xbf, 0xc7, 0x44, 0x45, 0x53, 0x54, 0, 0 } },
+        { 0xa36d02e2, 0xc9f3, 0x11cf, { 0xbf, 0xc7, 0x44, 0x45, 0x53, 0x54, 0, 0 } },
+        { 0xa36d02f4, 0xc9f3, 0x11cf, { 0xbf, 0xc7, 0x44, 0x45, 0x53, 0x54, 0, 0 } },
+        { 0xa36d02f5, 0xc9f3, 0x11cf, { 0xbf, 0xc7, 0x44, 0x45, 0x53, 0x54, 0, 0 } },
+        { 0xa36d02e3, 0xc9f3, 0x11cf, { 0xbf, 0xc7, 0x44, 0x45, 0x53, 0x54, 0, 0 } },
+        { 0xa36d02e4, 0xc9f3, 0x11cf, { 0xbf, 0xc7, 0x44, 0x45, 0x53, 0x54, 0, 0 } },
+        { 0xa36d02f0, 0xc9f3, 0x11cf, { 0xbf, 0xc7, 0x44, 0x45, 0x53, 0x54, 0, 0 } },
+        { 0x55728220, 0xd33c, 0x11cf, { 0xbf, 0xc7, 0x44, 0x45, 0x53, 0x54, 0, 0 } },
+        { 0xa36d02f2, 0xc9f3, 0x11cf, { 0xbf, 0xc7, 0x44, 0x45, 0x53, 0x54, 0, 0 } },
+        { 0xa36d02f3, 0xc9f3, 0x11cf, { 0xbf, 0xc7, 0x44, 0x45, 0x53, 0x54, 0, 0 } },
+        { 0x6f1d2b60, 0xd5a0, 0x11cf, { 0xbf, 0xc7, 0x44, 0x45, 0x53, 0x54, 0, 0 } },
+        { 0x6f1d2b61, 0xd5a0, 0x11cf, { 0xbf, 0xc7, 0x44, 0x45, 0x53, 0x54, 0, 0 } },
+        { 0x6f1d2b70, 0xd5a0, 0x11cf, { 0xbf, 0xc7, 0x44, 0x45, 0x53, 0x54, 0, 0 } },
+        { 0x13541c20, 0x8e33, 0x11d0, { 0x9a, 0xd0, 0, 0xa0, 0xc9, 0xa0, 0x6e, 0x35 } },
+        { 0x13541c21, 0x8e33, 0x11d0, { 0x9a, 0xd0, 0, 0xa0, 0xc9, 0xa0, 0x6e, 0x35 } },
+        { 0x13541c22, 0x8e33, 0x11d0, { 0x9a, 0xd0, 0, 0xa0, 0xc9, 0xa0, 0x6e, 0x35 } },
+        { 0x13541c23, 0x8e33, 0x11d0, { 0x9a, 0xd0, 0, 0xa0, 0xc9, 0xa0, 0x6e, 0x35 } },
+        { 0x13541c24, 0x8e33, 0x11d0, { 0x9a, 0xd0, 0, 0xa0, 0xc9, 0xa0, 0x6e, 0x35 } },
+        { 0x13541c25, 0x8e33, 0x11d0, { 0x9a, 0xd0, 0, 0xa0, 0xc9, 0xa0, 0x6e, 0x35 } },
+        { 0x13541c26, 0x8e33, 0x11d0, { 0x9a, 0xd0, 0, 0xa0, 0xc9, 0xa0, 0x6e, 0x35 } },
+        { 0x13541c27, 0x8e33, 0x11d0, { 0x9a, 0xd0, 0, 0xa0, 0xc9, 0xa0, 0x6e, 0x35 } },
+        { 0x13541c28, 0x8e33, 0x11d0, { 0x9a, 0xd0, 0, 0xa0, 0xc9, 0xa0, 0x6e, 0x35 } },
+        { 0x13541c29, 0x8e33, 0x11d0, { 0x9a, 0xd0, 0, 0xa0, 0xc9, 0xa0, 0x6e, 0x35 } },
+        { 0x13541c2a, 0x8e33, 0x11d0, { 0x9a, 0xd0, 0, 0xa0, 0xc9, 0xa0, 0x6e, 0x35 } },
+        { 0x13541c2b, 0x8e33, 0x11d0, { 0x9a, 0xd0, 0, 0xa0, 0xc9, 0xa0, 0x6e, 0x35 } },
+    },
+    .joystick_format = {
+        .size = 0x18,
+        .object_size = 0x10,
+        .flags = 1,
+        .data_size = 0x50,
+        .object_count = 0x2c,
+    },
+    .k_0268 = -0x1.e848000000000p+19,
+    .k_0270 = 0x1.0000000000000p-1,
+    .k_0280 = 0x1.0000000000000p+0,
+    .k_0288 = 0x1.0624dd2f1a9fcp-10,
+    .k_0290 = -0x1.921f9f01b866ep+0,
+    .k_0298 = 0x1.6619531c8790ep+12,
+    .k_02a0 = 0x1.3880000000000p+13,
+    .k_02a8 = -0x1.3880000000000p+13,
+    .k_02b0 = 0x1.94d7500000000p-193,
 };
 
 static const uint16_t rdata_pointers[][2] = {

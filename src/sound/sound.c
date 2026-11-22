@@ -114,12 +114,292 @@ struct snd_linkage {
     uint32_t (*markers)(void);                                          /* +0x44 */
 };
 
-struct snd_image {
-    struct fs98_import import[6];       /* +0x000 ImportTable */
-    struct snd_linkage linkage;         /* +0x030 Linkage */
-    void *data[(SND_IMAGE_SIZE - 0x78) / 4]; /* +0x078 on */
-};
+/* The image at retail's offsets: ImportTable, Linkage, then the engine sub-sounds, the 29 sound templates (a name, a
+ * loader and a record each), the strings, the dB steps, the Morse table and the state the module keeps.  Pointers are
+ * C addresses, filled statically. */
+struct snd_block {
+    uint32_t size;  /* +0x0 */
+    snd_free_fn free;  /* +0x4 */
+    uint32_t f_08;  /* +0x8 */
+    double param[0x14];  /* +0xc */
+} __attribute__((packed));
+_Static_assert(sizeof(struct snd_block) == 0xac, "snd_block");
 
+struct snd_tmpl {
+    const char *name;  /* +0x0 */
+    snd_tmpl_fn load;  /* +0x4 */
+    struct snd_rec rec;  /* +0x8 */
+} __attribute__((packed));
+_Static_assert(sizeof(struct snd_tmpl) == 0x4c, "snd_tmpl");
+
+struct snd_morse {
+    uint32_t ch;  /* +0x0 */
+    const char *code;  /* +0x4 */
+} __attribute__((packed));
+_Static_assert(sizeof(struct snd_morse) == 0x8, "snd_morse");
+
+struct snd_image {
+    struct fs98_import import[6];  /* +0x0 */
+    struct snd_linkage linkage;  /* +0x30 */
+    struct snd_block block_a;  /* +0x78 */
+    uint8_t gap_0124[0x4];  /* +0x124 */
+    struct snd_block block_b;  /* +0x128 */
+    uint8_t gap_01d4[0x4];  /* +0x1d4 */
+    struct snd_rec sub_a[0x3];  /* +0x1d8 */
+    uint8_t gap_02a4[0x4];  /* +0x2a4 */
+    struct snd_rec sub_b[0x3];  /* +0x2a8 */
+    uint8_t gap_0374[0x4];  /* +0x374 */
+    struct snd_tmpl templates[0x1d];  /* +0x378 */
+    uint32_t wind_armed;  /* +0xc14 */
+    uint32_t default_new;  /* +0xc18 */
+    uint8_t gap_0c1c[0x4];  /* +0xc1c */
+    int32_t db_steps[0x12];  /* +0xc20 */
+    uint32_t last_on;  /* +0xc68 */
+    char s_laglide[8];  /* +0xc6c */
+    char s_glideslope_warning_sound[28];  /* +0xc74 */
+    char s_caapdis[8];  /* +0xc90 */
+    char s_ap_disengage_sound[20];  /* +0xc98 */
+    char s_gearwarn[12];  /* +0xcac */
+    char s_gear_up_warning_sound[24];  /* +0xcb8 */
+    char s_mrssp[8];  /* +0xcd0 */
+    char s_overspeed_warning_sound[24];  /* +0xcd8 */
+    char s_mrssp_cf0[8];  /* +0xcf0 */
+    char s_mrssp_sound[12];  /* +0xcf8 */
+    char s_mrsditl[8];  /* +0xd04 */
+    char s_mrsditl_sound[16];  /* +0xd0c */
+    char s_mrsdith[8];  /* +0xd1c */
+    char s_mrsdith_sound[16];  /* +0xd24 */
+    char s_mrsdahl[8];  /* +0xd34 */
+    char s_mrsdahl_sound[16];  /* +0xd3c */
+    char s_mrsdahh[8];  /* +0xd4c */
+    char s_mrsdahh_sound[16];  /* +0xd54 */
+    char s_high_tone_sound[16];  /* +0xd64 */
+    char s_mid_tone_sound[16];  /* +0xd74 */
+    char s_low_tone_sound[16];  /* +0xd84 */
+    char s_wind3[8];  /* +0xd94 */
+    char s_wind_sound[12];  /* +0xd9c */
+    char s_psplash[8];  /* +0xda8 */
+    char s_splash_sound[16];  /* +0xdb0 */
+    char s_pcrash3[8];  /* +0xdc0 */
+    char s_crash_sound[12];  /* +0xdc8 */
+    char s_right_touchdown[16];  /* +0xdd4 */
+    char s_center_touchdown[20];  /* +0xde4 */
+    char s_screetch[12];  /* +0xdf8 */
+    char s_left_touchdown[16];  /* +0xe04 */
+    char s_stallhrn[12];  /* +0xe14 */
+    char s_stall_warning[16];  /* +0xe20 */
+    char s_innermk[8];  /* +0xe30 */
+    char s_inner_marker[16];  /* +0xe38 */
+    char s_middmk[8];  /* +0xe48 */
+    char s_middle_marker[16];  /* +0xe50 */
+    char s_outermk[8];  /* +0xe60 */
+    char s_outer_marker[16];  /* +0xe68 */
+    char s_flapst[8];  /* +0xe78 */
+    char s_flapsl[8];  /* +0xe80 */
+    char s_flaps[8];  /* +0xe88 */
+    char s_flapsh[8];  /* +0xe90 */
+    char s_geardown[12];  /* +0xe98 */
+    char s_gear_down[12];  /* +0xea4 */
+    char s_gearup[8];  /* +0xeb0 */
+    char s_gear_up[8];  /* +0xeb8 */
+    char s_jet_engine[12];  /* +0xec0 */
+    char s_sound_engine[16];  /* +0xecc */
+    char s_rumblp[8];  /* +0xedc */
+    char s_737lp[8];  /* +0xee4 */
+    char s_cruiselp[12];  /* +0xeec */
+    char s_prop[8];  /* +0xef8 */
+    char s_prefs[8];  /* +0xf00 */
+    char s_sound_fader_d[16];  /* +0xf08 */
+    char s_0f18[4];  /* +0xf18 */
+    char s_viewpoint[12];  /* +0xf1c */
+    char s_panning[8];  /* +0xf28 */
+    char s_minimum_volume[16];  /* +0xf30 */
+    char s_maximum_volume[16];  /* +0xf40 */
+    char s_initial_volume[16];  /* +0xf50 */
+    char s_filename[12];  /* +0xf60 */
+    char s_flags[8];  /* +0xf6c */
+    char s_extra[8];  /* +0xf74 */
+    char s_maximum_speed[16];  /* +0xf7c */
+    char s_minimum_speed[16];  /* +0xf8c */
+    char s_maximum_rate[16];  /* +0xf9c */
+    char s_minimum_rate[16];  /* +0xfac */
+    char s_vparams[8];  /* +0xfbc */
+    char s_rparams[8];  /* +0xfc4 */
+    char s_link[8];  /* +0xfcc */
+    char s_type[8];  /* +0xfd4 */
+    uint8_t gap_0fdc[0x4];  /* +0xfdc */
+    double two_48;  /* +0xfe0 */
+    struct snd_morse morse[0x28];  /* +0xfe8 */
+    uint32_t morse_vol;  /* +0x1128 */
+    char m_newline[8];  /* +0x112c */
+    char m_tab[4];  /* +0x1134 */
+    char m_space[4];  /* +0x1138 */
+    char m_n0[8];  /* +0x113c */
+    char m_n9[8];  /* +0x1144 */
+    char m_n8[8];  /* +0x114c */
+    char m_n7[8];  /* +0x1154 */
+    char m_n6[8];  /* +0x115c */
+    char m_n5[8];  /* +0x1164 */
+    char m_n4[8];  /* +0x116c */
+    char m_n3[8];  /* +0x1174 */
+    char m_n2[8];  /* +0x117c */
+    char m_n1[8];  /* +0x1184 */
+    char m_z[8];  /* +0x118c */
+    char m_y[8];  /* +0x1194 */
+    char m_x[8];  /* +0x119c */
+    char m_w[4];  /* +0x11a4 */
+    char m_v[8];  /* +0x11a8 */
+    char m_u[4];  /* +0x11b0 */
+    char m_t[4];  /* +0x11b4 */
+    char m_s[4];  /* +0x11b8 */
+    char m_r[4];  /* +0x11bc */
+    char m_q[8];  /* +0x11c0 */
+    char m_p[8];  /* +0x11c8 */
+    char m_o[4];  /* +0x11d0 */
+    char m_n[4];  /* +0x11d4 */
+    char m_m[4];  /* +0x11d8 */
+    char m_l[8];  /* +0x11dc */
+    char m_k[4];  /* +0x11e4 */
+    char m_j[8];  /* +0x11e8 */
+    char m_i[4];  /* +0x11f0 */
+    char m_h[8];  /* +0x11f4 */
+    char m_g[4];  /* +0x11fc */
+    char m_f[8];  /* +0x1200 */
+    char m_e[4];  /* +0x1208 */
+    char m_d[4];  /* +0x120c */
+    char m_c[8];  /* +0x1210 */
+    char m_b[8];  /* +0x1218 */
+    char m_a[16];  /* +0x1220 */
+    struct snd_rec default_rec;  /* +0x1230 */
+    uint8_t gap_1274[0x508];  /* +0x1274 */
+} __attribute__((packed));
+_Static_assert(sizeof(struct snd_image) == 0x177c, "snd_image");
+_Static_assert(__builtin_offsetof(struct snd_image, import) == 0x0, "import");
+_Static_assert(__builtin_offsetof(struct snd_image, linkage) == 0x30, "linkage");
+_Static_assert(__builtin_offsetof(struct snd_image, block_a) == 0x78, "block_a");
+_Static_assert(__builtin_offsetof(struct snd_image, block_b) == 0x128, "block_b");
+_Static_assert(__builtin_offsetof(struct snd_image, sub_a) == 0x1d8, "sub_a");
+_Static_assert(__builtin_offsetof(struct snd_image, sub_b) == 0x2a8, "sub_b");
+_Static_assert(__builtin_offsetof(struct snd_image, templates) == 0x378, "templates");
+_Static_assert(__builtin_offsetof(struct snd_image, wind_armed) == 0xc14, "wind_armed");
+_Static_assert(__builtin_offsetof(struct snd_image, default_new) == 0xc18, "default_new");
+_Static_assert(__builtin_offsetof(struct snd_image, db_steps) == 0xc20, "db_steps");
+_Static_assert(__builtin_offsetof(struct snd_image, last_on) == 0xc68, "last_on");
+_Static_assert(__builtin_offsetof(struct snd_image, s_laglide) == 0xc6c, "s_laglide");
+_Static_assert(__builtin_offsetof(struct snd_image, s_glideslope_warning_sound) == 0xc74, "s_glideslope_warning_sound");
+_Static_assert(__builtin_offsetof(struct snd_image, s_caapdis) == 0xc90, "s_caapdis");
+_Static_assert(__builtin_offsetof(struct snd_image, s_ap_disengage_sound) == 0xc98, "s_ap_disengage_sound");
+_Static_assert(__builtin_offsetof(struct snd_image, s_gearwarn) == 0xcac, "s_gearwarn");
+_Static_assert(__builtin_offsetof(struct snd_image, s_gear_up_warning_sound) == 0xcb8, "s_gear_up_warning_sound");
+_Static_assert(__builtin_offsetof(struct snd_image, s_mrssp) == 0xcd0, "s_mrssp");
+_Static_assert(__builtin_offsetof(struct snd_image, s_overspeed_warning_sound) == 0xcd8, "s_overspeed_warning_sound");
+_Static_assert(__builtin_offsetof(struct snd_image, s_mrssp_cf0) == 0xcf0, "s_mrssp_cf0");
+_Static_assert(__builtin_offsetof(struct snd_image, s_mrssp_sound) == 0xcf8, "s_mrssp_sound");
+_Static_assert(__builtin_offsetof(struct snd_image, s_mrsditl) == 0xd04, "s_mrsditl");
+_Static_assert(__builtin_offsetof(struct snd_image, s_mrsditl_sound) == 0xd0c, "s_mrsditl_sound");
+_Static_assert(__builtin_offsetof(struct snd_image, s_mrsdith) == 0xd1c, "s_mrsdith");
+_Static_assert(__builtin_offsetof(struct snd_image, s_mrsdith_sound) == 0xd24, "s_mrsdith_sound");
+_Static_assert(__builtin_offsetof(struct snd_image, s_mrsdahl) == 0xd34, "s_mrsdahl");
+_Static_assert(__builtin_offsetof(struct snd_image, s_mrsdahl_sound) == 0xd3c, "s_mrsdahl_sound");
+_Static_assert(__builtin_offsetof(struct snd_image, s_mrsdahh) == 0xd4c, "s_mrsdahh");
+_Static_assert(__builtin_offsetof(struct snd_image, s_mrsdahh_sound) == 0xd54, "s_mrsdahh_sound");
+_Static_assert(__builtin_offsetof(struct snd_image, s_high_tone_sound) == 0xd64, "s_high_tone_sound");
+_Static_assert(__builtin_offsetof(struct snd_image, s_mid_tone_sound) == 0xd74, "s_mid_tone_sound");
+_Static_assert(__builtin_offsetof(struct snd_image, s_low_tone_sound) == 0xd84, "s_low_tone_sound");
+_Static_assert(__builtin_offsetof(struct snd_image, s_wind3) == 0xd94, "s_wind3");
+_Static_assert(__builtin_offsetof(struct snd_image, s_wind_sound) == 0xd9c, "s_wind_sound");
+_Static_assert(__builtin_offsetof(struct snd_image, s_psplash) == 0xda8, "s_psplash");
+_Static_assert(__builtin_offsetof(struct snd_image, s_splash_sound) == 0xdb0, "s_splash_sound");
+_Static_assert(__builtin_offsetof(struct snd_image, s_pcrash3) == 0xdc0, "s_pcrash3");
+_Static_assert(__builtin_offsetof(struct snd_image, s_crash_sound) == 0xdc8, "s_crash_sound");
+_Static_assert(__builtin_offsetof(struct snd_image, s_right_touchdown) == 0xdd4, "s_right_touchdown");
+_Static_assert(__builtin_offsetof(struct snd_image, s_center_touchdown) == 0xde4, "s_center_touchdown");
+_Static_assert(__builtin_offsetof(struct snd_image, s_screetch) == 0xdf8, "s_screetch");
+_Static_assert(__builtin_offsetof(struct snd_image, s_left_touchdown) == 0xe04, "s_left_touchdown");
+_Static_assert(__builtin_offsetof(struct snd_image, s_stallhrn) == 0xe14, "s_stallhrn");
+_Static_assert(__builtin_offsetof(struct snd_image, s_stall_warning) == 0xe20, "s_stall_warning");
+_Static_assert(__builtin_offsetof(struct snd_image, s_innermk) == 0xe30, "s_innermk");
+_Static_assert(__builtin_offsetof(struct snd_image, s_inner_marker) == 0xe38, "s_inner_marker");
+_Static_assert(__builtin_offsetof(struct snd_image, s_middmk) == 0xe48, "s_middmk");
+_Static_assert(__builtin_offsetof(struct snd_image, s_middle_marker) == 0xe50, "s_middle_marker");
+_Static_assert(__builtin_offsetof(struct snd_image, s_outermk) == 0xe60, "s_outermk");
+_Static_assert(__builtin_offsetof(struct snd_image, s_outer_marker) == 0xe68, "s_outer_marker");
+_Static_assert(__builtin_offsetof(struct snd_image, s_flapst) == 0xe78, "s_flapst");
+_Static_assert(__builtin_offsetof(struct snd_image, s_flapsl) == 0xe80, "s_flapsl");
+_Static_assert(__builtin_offsetof(struct snd_image, s_flaps) == 0xe88, "s_flaps");
+_Static_assert(__builtin_offsetof(struct snd_image, s_flapsh) == 0xe90, "s_flapsh");
+_Static_assert(__builtin_offsetof(struct snd_image, s_geardown) == 0xe98, "s_geardown");
+_Static_assert(__builtin_offsetof(struct snd_image, s_gear_down) == 0xea4, "s_gear_down");
+_Static_assert(__builtin_offsetof(struct snd_image, s_gearup) == 0xeb0, "s_gearup");
+_Static_assert(__builtin_offsetof(struct snd_image, s_gear_up) == 0xeb8, "s_gear_up");
+_Static_assert(__builtin_offsetof(struct snd_image, s_jet_engine) == 0xec0, "s_jet_engine");
+_Static_assert(__builtin_offsetof(struct snd_image, s_sound_engine) == 0xecc, "s_sound_engine");
+_Static_assert(__builtin_offsetof(struct snd_image, s_rumblp) == 0xedc, "s_rumblp");
+_Static_assert(__builtin_offsetof(struct snd_image, s_737lp) == 0xee4, "s_737lp");
+_Static_assert(__builtin_offsetof(struct snd_image, s_cruiselp) == 0xeec, "s_cruiselp");
+_Static_assert(__builtin_offsetof(struct snd_image, s_prop) == 0xef8, "s_prop");
+_Static_assert(__builtin_offsetof(struct snd_image, s_prefs) == 0xf00, "s_prefs");
+_Static_assert(__builtin_offsetof(struct snd_image, s_sound_fader_d) == 0xf08, "s_sound_fader_d");
+_Static_assert(__builtin_offsetof(struct snd_image, s_0f18) == 0xf18, "s_0f18");
+_Static_assert(__builtin_offsetof(struct snd_image, s_viewpoint) == 0xf1c, "s_viewpoint");
+_Static_assert(__builtin_offsetof(struct snd_image, s_panning) == 0xf28, "s_panning");
+_Static_assert(__builtin_offsetof(struct snd_image, s_minimum_volume) == 0xf30, "s_minimum_volume");
+_Static_assert(__builtin_offsetof(struct snd_image, s_maximum_volume) == 0xf40, "s_maximum_volume");
+_Static_assert(__builtin_offsetof(struct snd_image, s_initial_volume) == 0xf50, "s_initial_volume");
+_Static_assert(__builtin_offsetof(struct snd_image, s_filename) == 0xf60, "s_filename");
+_Static_assert(__builtin_offsetof(struct snd_image, s_flags) == 0xf6c, "s_flags");
+_Static_assert(__builtin_offsetof(struct snd_image, s_extra) == 0xf74, "s_extra");
+_Static_assert(__builtin_offsetof(struct snd_image, s_maximum_speed) == 0xf7c, "s_maximum_speed");
+_Static_assert(__builtin_offsetof(struct snd_image, s_minimum_speed) == 0xf8c, "s_minimum_speed");
+_Static_assert(__builtin_offsetof(struct snd_image, s_maximum_rate) == 0xf9c, "s_maximum_rate");
+_Static_assert(__builtin_offsetof(struct snd_image, s_minimum_rate) == 0xfac, "s_minimum_rate");
+_Static_assert(__builtin_offsetof(struct snd_image, s_vparams) == 0xfbc, "s_vparams");
+_Static_assert(__builtin_offsetof(struct snd_image, s_rparams) == 0xfc4, "s_rparams");
+_Static_assert(__builtin_offsetof(struct snd_image, s_link) == 0xfcc, "s_link");
+_Static_assert(__builtin_offsetof(struct snd_image, s_type) == 0xfd4, "s_type");
+_Static_assert(__builtin_offsetof(struct snd_image, two_48) == 0xfe0, "two_48");
+_Static_assert(__builtin_offsetof(struct snd_image, morse) == 0xfe8, "morse");
+_Static_assert(__builtin_offsetof(struct snd_image, morse_vol) == 0x1128, "morse_vol");
+_Static_assert(__builtin_offsetof(struct snd_image, m_newline) == 0x112c, "m_newline");
+_Static_assert(__builtin_offsetof(struct snd_image, m_tab) == 0x1134, "m_tab");
+_Static_assert(__builtin_offsetof(struct snd_image, m_space) == 0x1138, "m_space");
+_Static_assert(__builtin_offsetof(struct snd_image, m_n0) == 0x113c, "m_n0");
+_Static_assert(__builtin_offsetof(struct snd_image, m_n9) == 0x1144, "m_n9");
+_Static_assert(__builtin_offsetof(struct snd_image, m_n8) == 0x114c, "m_n8");
+_Static_assert(__builtin_offsetof(struct snd_image, m_n7) == 0x1154, "m_n7");
+_Static_assert(__builtin_offsetof(struct snd_image, m_n6) == 0x115c, "m_n6");
+_Static_assert(__builtin_offsetof(struct snd_image, m_n5) == 0x1164, "m_n5");
+_Static_assert(__builtin_offsetof(struct snd_image, m_n4) == 0x116c, "m_n4");
+_Static_assert(__builtin_offsetof(struct snd_image, m_n3) == 0x1174, "m_n3");
+_Static_assert(__builtin_offsetof(struct snd_image, m_n2) == 0x117c, "m_n2");
+_Static_assert(__builtin_offsetof(struct snd_image, m_n1) == 0x1184, "m_n1");
+_Static_assert(__builtin_offsetof(struct snd_image, m_z) == 0x118c, "m_z");
+_Static_assert(__builtin_offsetof(struct snd_image, m_y) == 0x1194, "m_y");
+_Static_assert(__builtin_offsetof(struct snd_image, m_x) == 0x119c, "m_x");
+_Static_assert(__builtin_offsetof(struct snd_image, m_w) == 0x11a4, "m_w");
+_Static_assert(__builtin_offsetof(struct snd_image, m_v) == 0x11a8, "m_v");
+_Static_assert(__builtin_offsetof(struct snd_image, m_u) == 0x11b0, "m_u");
+_Static_assert(__builtin_offsetof(struct snd_image, m_t) == 0x11b4, "m_t");
+_Static_assert(__builtin_offsetof(struct snd_image, m_s) == 0x11b8, "m_s");
+_Static_assert(__builtin_offsetof(struct snd_image, m_r) == 0x11bc, "m_r");
+_Static_assert(__builtin_offsetof(struct snd_image, m_q) == 0x11c0, "m_q");
+_Static_assert(__builtin_offsetof(struct snd_image, m_p) == 0x11c8, "m_p");
+_Static_assert(__builtin_offsetof(struct snd_image, m_o) == 0x11d0, "m_o");
+_Static_assert(__builtin_offsetof(struct snd_image, m_n) == 0x11d4, "m_n");
+_Static_assert(__builtin_offsetof(struct snd_image, m_m) == 0x11d8, "m_m");
+_Static_assert(__builtin_offsetof(struct snd_image, m_l) == 0x11dc, "m_l");
+_Static_assert(__builtin_offsetof(struct snd_image, m_k) == 0x11e4, "m_k");
+_Static_assert(__builtin_offsetof(struct snd_image, m_j) == 0x11e8, "m_j");
+_Static_assert(__builtin_offsetof(struct snd_image, m_i) == 0x11f0, "m_i");
+_Static_assert(__builtin_offsetof(struct snd_image, m_h) == 0x11f4, "m_h");
+_Static_assert(__builtin_offsetof(struct snd_image, m_g) == 0x11fc, "m_g");
+_Static_assert(__builtin_offsetof(struct snd_image, m_f) == 0x1200, "m_f");
+_Static_assert(__builtin_offsetof(struct snd_image, m_e) == 0x1208, "m_e");
+_Static_assert(__builtin_offsetof(struct snd_image, m_d) == 0x120c, "m_d");
+_Static_assert(__builtin_offsetof(struct snd_image, m_c) == 0x1210, "m_c");
+_Static_assert(__builtin_offsetof(struct snd_image, m_b) == 0x1218, "m_b");
+_Static_assert(__builtin_offsetof(struct snd_image, m_a) == 0x1220, "m_a");
+_Static_assert(__builtin_offsetof(struct snd_image, default_rec) == 0x1230, "default_rec");
 extern struct snd_image snd_image;
 
 typedef char (*snd_layout_check)[sizeof(struct snd_image) == SND_IMAGE_SIZE &&
@@ -2337,23 +2617,666 @@ static void snd_deinit(void)
 }
 
 struct snd_image snd_image = {
-    {
-        { FS98_MOD_HOST,     0 },
-        { FS98_MOD_GLOBAL,   0 },
-        { FS98_MOD_ACONTAIN, 0 },
-        { FS98_MOD_CHAIN,    0 },
-        { FS98_MOD_UTIL,     0 },
-        { 0, 0 }
+    .import = {
+        { FS98_MOD_HOST },
+        { FS98_MOD_GLOBAL },
+        { FS98_MOD_ACONTAIN },
+        { FS98_MOD_CHAIN },
+        { FS98_MOD_UTIL },
+        { 0 },
     },
-    {
-        FS98_MOD_SOUND, snd_init, snd_deinit, 0, 0, 0,
-        snd_start, snd_stop_all, snd_frame, snd_event, snd_wind,
-        snd_set_fader, snd_get_fader, snd_set_faders, snd_get_faders,
-        snd_save_faders, snd_load_faders, snd_markers
+    .linkage = {
+        .id = FS98_MOD_SOUND, .init = snd_init, .deinit = snd_deinit,
+        .start = snd_start, .stop = snd_stop_all, .frame = snd_frame, .event = snd_event, .wind = snd_wind,
+        .set_fader = snd_set_fader, .get_fader = snd_get_fader, .set_faders = snd_set_faders,
+        .get_faders = snd_get_faders, .save_faders = snd_save_faders, .load_faders = snd_load_faders,
+        .markers = snd_markers,
     },
-    {
-#include "sound_data.inc"
-    }
+    .block_a = {
+        .size = 0xac,
+        .free = (snd_free_fn)snd_free_block,
+        .param = {
+            [0] = 0x1.f400000000000p+7,
+            [1] = 0x1.0000000000000p+0,
+            [2] = 0x1.f400000000000p+11,
+            [3] = 0x1.8000000000000p+1,
+            [4] = 0x1.f400000000000p+7,
+            [6] = 0x1.f400000000000p+7,
+            [7] = 0x1.3880000000000p+13,
+            [8] = 0x1.f400000000000p+7,
+            [9] = 0x1.3880000000000p+13,
+            [10] = 0x1.f400000000000p+11,
+            [11] = 0x1.25c0000000000p+13,
+            [12] = 0x1.f400000000000p+11,
+            [13] = 0x1.25c0000000000p+13,
+            [14] = 0x1.f400000000000p+11,
+            [15] = 0x1.25c0000000000p+13,
+            [16] = 0x1.f400000000000p+11,
+            [17] = 0x1.25c0000000000p+13,
+            [18] = 0x1.f400000000000p+11,
+            [19] = 0x1.25c0000000000p+13,
+        },
+    },
+    .block_b = {
+        .size = 0xac,
+        .free = (snd_free_fn)snd_free_block,
+        .param = {
+            [0] = 0x1.f400000000000p+9,
+            [1] = 0x1.0000000000000p-1,
+            [2] = 0x1.f400000000000p+11,
+            [3] = 0x1.c000000000000p+0,
+            [4] = 0x1.f400000000000p+7,
+            [5] = 0x1.25c0000000000p+13,
+            [6] = 0x1.2c00000000000p+11,
+            [7] = 0x1.3880000000000p+13,
+            [8] = 0x1.f400000000000p+11,
+            [9] = 0x1.3880000000000p+13,
+            [10] = 0x1.f400000000000p+11,
+            [11] = 0x1.3880000000000p+13,
+            [12] = 0x1.f400000000000p+11,
+            [13] = 0x1.3880000000000p+13,
+            [14] = 0x1.f400000000000p+11,
+            [15] = 0x1.3880000000000p+13,
+            [16] = 0x1.f400000000000p+11,
+            [17] = 0x1.3880000000000p+13,
+            [18] = 0x1.f400000000000p+11,
+            [19] = 0x1.3880000000000p+13,
+        },
+    },
+    .sub_a = {
+        [0] = { .id = 1, .chain = 1, .group = 1, .params = (uint8_t *)&snd_image.block_a, .filename = (char *)&snd_image.s_prop, .type = 5, .volume = 0x2710, .maxvol = 0x2710, .fader = 0x2710 },
+        [1] = { .id = 2, .chain = 1, .group = 1, .params = (uint8_t *)&snd_image.block_b, .filename = (char *)&snd_image.s_cruiselp, .type = 5, .volume = 0x2710, .maxvol = 0x2710, .fader = 0x2710 },
+        [2] = { .chain = 1, .filename = (char *)&snd_image.s_cruiselp, .type = 5, .volume = 0x2710, .maxvol = 0x2710, .fader = 0x2710 },
+    },
+    .sub_b = {
+        [0] = { .id = 3, .chain = 1, .group = 1, .filename = (char *)&snd_image.s_737lp, .type = 5, .volume = 0x2710, .maxvol = 0x2710, .fader = 0x2710, .flags = 2 },
+        [1] = { .id = 4, .chain = 1, .group = 1, .filename = (char *)&snd_image.s_rumblp, .type = 5, .volume = 0x2710, .maxvol = 0x2710, .fader = 0x2710, .flags = 4 },
+        [2] = { .chain = 1, .filename = (char *)&snd_image.s_cruiselp, .type = 5, .volume = 0x2710, .maxvol = 0x2710, .fader = 0x2710 },
+    },
+    .templates = {
+        [0] = {
+            .name = (const char *)&snd_image.s_sound_engine,
+            .load = (snd_tmpl_fn)snd_tmpl_engine,
+            .rec = {
+                .id = 1,
+                .chain = 1,
+                .group = 1,
+                .params = (uint8_t *)&snd_image.sub_a[0],
+                .filename = (char *)&snd_image.s_prop,
+                .type = 5,
+                .volume = 0x2710,
+                .maxvol = 0x2710,
+                .fader = 0x2710,
+            },
+        },
+        [1] = {
+            .name = (const char *)&snd_image.s_jet_engine,
+            .load = (snd_tmpl_fn)snd_tmpl_engine,
+            .rec = {
+                .id = 3,
+                .chain = 1,
+                .group = 1,
+                .params = (uint8_t *)&snd_image.sub_b[0],
+                .filename = (char *)&snd_image.s_737lp,
+                .type = 5,
+                .volume = 0x2710,
+                .maxvol = 0x2710,
+                .fader = 0x2710,
+            },
+        },
+        [2] = {
+            .name = (const char *)&snd_image.s_gear_up,
+            .load = (snd_tmpl_fn)snd_tmpl_basic,
+            .rec = {
+                .id = 5,
+                .chain = 0x14,
+                .group = 3,
+                .filename = (char *)&snd_image.s_gearup,
+                .type = 5,
+                .volume = 0x2710,
+                .maxvol = 0x2710,
+                .fader = 0x2710,
+            },
+        },
+        [3] = {
+            .name = (const char *)&snd_image.s_gear_down,
+            .load = (snd_tmpl_fn)snd_tmpl_basic,
+            .rec = {
+                .id = 6,
+                .chain = 0x15,
+                .group = 3,
+                .filename = (char *)&snd_image.s_geardown,
+                .type = 5,
+                .volume = 0x2710,
+                .maxvol = 0x2710,
+                .fader = 0x2710,
+            },
+        },
+        [4] = {
+            .name = (const char *)&snd_image.s_flapsh,
+            .load = (snd_tmpl_fn)snd_tmpl_basic,
+            .rec = {
+                .id = 7,
+                .chain = 0x16,
+                .group = 3,
+                .filename = (char *)&snd_image.s_flaps,
+                .type = 5,
+                .volume = 0x2422,
+                .maxvol = 0x2422,
+                .fader = 0x2710,
+            },
+        },
+        [5] = {
+            .name = (const char *)&snd_image.s_flapsl,
+            .load = (snd_tmpl_fn)snd_tmpl_basic,
+            .rec = {
+                .id = 8,
+                .chain = 0x16,
+                .group = 3,
+                .filename = (char *)&snd_image.s_flaps,
+                .type = 5,
+                .volume = 0x2422,
+                .maxvol = 0x2422,
+                .fader = 0x2710,
+            },
+        },
+        [6] = {
+            .name = (const char *)&snd_image.s_flapst,
+            .load = (snd_tmpl_fn)snd_tmpl_basic,
+            .rec = {
+                .id = 9,
+                .chain = 0x16,
+                .group = 3,
+                .filename = (char *)&snd_image.s_flaps,
+                .type = 5,
+                .volume = 0x2422,
+                .maxvol = 0x2422,
+                .fader = 0x2710,
+            },
+        },
+        [7] = {
+            .name = (const char *)&snd_image.s_outer_marker,
+            .load = (snd_tmpl_fn)snd_tmpl_basic,
+            .rec = {
+                .id = 0xa,
+                .chain = 0xf,
+                .group = 2,
+                .filename = (char *)&snd_image.s_outermk,
+                .type = 5,
+                .volume = 0x2422,
+                .maxvol = 0x2422,
+                .fader = 0x2710,
+            },
+        },
+        [8] = {
+            .name = (const char *)&snd_image.s_middle_marker,
+            .load = (snd_tmpl_fn)snd_tmpl_basic,
+            .rec = {
+                .id = 0xb,
+                .chain = 0x10,
+                .group = 2,
+                .filename = (char *)&snd_image.s_middmk,
+                .type = 5,
+                .volume = 0x2422,
+                .maxvol = 0x2422,
+                .fader = 0x2710,
+            },
+        },
+        [9] = {
+            .name = (const char *)&snd_image.s_inner_marker,
+            .load = (snd_tmpl_fn)snd_tmpl_basic,
+            .rec = {
+                .id = 0xc,
+                .chain = 0x11,
+                .group = 2,
+                .filename = (char *)&snd_image.s_innermk,
+                .type = 5,
+                .volume = 0x2422,
+                .maxvol = 0x2422,
+                .fader = 0x2710,
+            },
+        },
+        [10] = {
+            .name = (const char *)&snd_image.s_stall_warning,
+            .load = (snd_tmpl_fn)snd_tmpl_basic,
+            .rec = {
+                .id = 0xd,
+                .chain = 8,
+                .group = 3,
+                .filename = (char *)&snd_image.s_stallhrn,
+                .type = 5,
+                .volume = 0x2422,
+                .maxvol = 0x2422,
+                .fader = 0x2710,
+            },
+        },
+        [11] = {
+            .name = (const char *)&snd_image.s_left_touchdown,
+            .load = (snd_tmpl_fn)snd_tmpl_basic,
+            .rec = {
+                .id = 0xe,
+                .chain = 0x13,
+                .group = 5,
+                .filename = (char *)&snd_image.s_screetch,
+                .type = 5,
+                .volume = 0x2422,
+                .maxvol = 0x2422,
+                .fader = 0x2710,
+                .pan = -0x2710,
+            },
+        },
+        [12] = {
+            .name = (const char *)&snd_image.s_center_touchdown,
+            .load = (snd_tmpl_fn)snd_tmpl_basic,
+            .rec = {
+                .id = 0xf,
+                .chain = 0x13,
+                .group = 5,
+                .filename = (char *)&snd_image.s_screetch,
+                .type = 5,
+                .volume = 0x2422,
+                .maxvol = 0x2422,
+                .fader = 0x2710,
+            },
+        },
+        [13] = {
+            .name = (const char *)&snd_image.s_right_touchdown,
+            .load = (snd_tmpl_fn)snd_tmpl_basic,
+            .rec = {
+                .id = 0x10,
+                .chain = 0x13,
+                .group = 5,
+                .filename = (char *)&snd_image.s_screetch,
+                .type = 5,
+                .volume = 0x2422,
+                .maxvol = 0x2422,
+                .fader = 0x2710,
+                .pan = 0x2710,
+            },
+        },
+        [14] = {
+            .name = (const char *)&snd_image.s_crash_sound,
+            .load = (snd_tmpl_fn)snd_tmpl_extra,
+            .rec = {
+                .id = 0x11,
+                .chain = 0xe,
+                .group = 5,
+                .filename = (char *)&snd_image.s_pcrash3,
+                .type = 5,
+                .volume = 0x2710,
+                .maxvol = 0x2710,
+                .fader = 0x2710,
+            },
+        },
+        [15] = {
+            .name = (const char *)&snd_image.s_splash_sound,
+            .load = (snd_tmpl_fn)snd_tmpl_extra,
+            .rec = {
+                .id = 0x12,
+                .chain = 0xe,
+                .group = 5,
+                .filename = (char *)&snd_image.s_psplash,
+                .type = 5,
+                .volume = 0x2710,
+                .maxvol = 0x2710,
+                .fader = 0x2710,
+            },
+        },
+        [16] = {
+            .name = (const char *)&snd_image.s_wind_sound,
+            .load = (snd_tmpl_fn)snd_tmpl_rate,
+            .rec = {
+                .id = 0x13,
+                .chain = 2,
+                .group = 5,
+                .filename = (char *)&snd_image.s_wind3,
+                .type = 5,
+                .maxvol = 0x2710,
+                .fader = 0x2710,
+            },
+        },
+        [17] = {
+            .name = (const char *)&snd_image.s_low_tone_sound,
+            .load = (snd_tmpl_fn)snd_tmpl_basic,
+            .rec = {
+                .id = 0x14,
+                .chain = 0x18,
+                .filename = (char *)&snd_image.s_screetch,
+                .type = 5,
+                .volume = 0x2710,
+                .maxvol = 0x2710,
+                .fader = 0x2710,
+            },
+        },
+        [18] = {
+            .name = (const char *)&snd_image.s_mid_tone_sound,
+            .load = (snd_tmpl_fn)snd_tmpl_basic,
+            .rec = {
+                .id = 0x15,
+                .chain = 0x19,
+                .filename = (char *)&snd_image.s_screetch,
+                .type = 5,
+                .volume = 0x2710,
+                .maxvol = 0x2710,
+                .fader = 0x2710,
+            },
+        },
+        [19] = {
+            .name = (const char *)&snd_image.s_high_tone_sound,
+            .load = (snd_tmpl_fn)snd_tmpl_basic,
+            .rec = {
+                .id = 0x16,
+                .chain = 0x1a,
+                .filename = (char *)&snd_image.s_screetch,
+                .type = 5,
+                .volume = 0x2710,
+                .maxvol = 0x2710,
+                .fader = 0x2710,
+            },
+        },
+        [20] = {
+            .name = (const char *)&snd_image.s_mrsdahh_sound,
+            .load = (snd_tmpl_fn)snd_tmpl_basic,
+            .rec = {
+                .id = 0x18,
+                .chain = 0x17,
+                .group = 2,
+                .filename = (char *)&snd_image.s_mrsdahh,
+                .type = 4,
+                .volume = 0x2710,
+                .maxvol = 0x2710,
+                .fader = 0x2710,
+            },
+        },
+        [21] = {
+            .name = (const char *)&snd_image.s_mrsdahl_sound,
+            .load = (snd_tmpl_fn)snd_tmpl_basic,
+            .rec = {
+                .id = 0x19,
+                .chain = 0x17,
+                .group = 2,
+                .filename = (char *)&snd_image.s_mrsdahl,
+                .type = 4,
+                .volume = 0x2710,
+                .maxvol = 0x2710,
+                .fader = 0x2710,
+            },
+        },
+        [22] = {
+            .name = (const char *)&snd_image.s_mrsdith_sound,
+            .load = (snd_tmpl_fn)snd_tmpl_basic,
+            .rec = {
+                .id = 0x1a,
+                .chain = 0x17,
+                .group = 2,
+                .filename = (char *)&snd_image.s_mrsdith,
+                .type = 4,
+                .volume = 0x2710,
+                .maxvol = 0x2710,
+                .fader = 0x2710,
+            },
+        },
+        [23] = {
+            .name = (const char *)&snd_image.s_mrsditl_sound,
+            .load = (snd_tmpl_fn)snd_tmpl_basic,
+            .rec = {
+                .id = 0x1b,
+                .chain = 0x17,
+                .group = 2,
+                .filename = (char *)&snd_image.s_mrsditl,
+                .type = 4,
+                .volume = 0x2710,
+                .maxvol = 0x2710,
+                .fader = 0x2710,
+            },
+        },
+        [24] = {
+            .name = (const char *)&snd_image.s_mrssp_sound,
+            .load = (snd_tmpl_fn)snd_tmpl_basic,
+            .rec = {
+                .id = 0x1c,
+                .chain = 0x17,
+                .group = 2,
+                .filename = (char *)&snd_image.s_mrssp_cf0,
+                .type = 4,
+                .volume = 0x2710,
+                .maxvol = 0x2710,
+                .fader = 0x2710,
+            },
+        },
+        [25] = {
+            .name = (const char *)&snd_image.s_overspeed_warning_sound,
+            .load = (snd_tmpl_fn)snd_tmpl_basic,
+            .rec = {
+                .id = 0x1d,
+                .chain = 3,
+                .group = 3,
+                .filename = (char *)&snd_image.s_mrssp,
+                .type = 5,
+                .volume = 0x2710,
+                .maxvol = 0x2710,
+                .fader = 0x2710,
+            },
+        },
+        [26] = {
+            .name = (const char *)&snd_image.s_gear_up_warning_sound,
+            .load = (snd_tmpl_fn)snd_tmpl_basic,
+            .rec = {
+                .id = 0x1e,
+                .chain = 5,
+                .group = 3,
+                .filename = (char *)&snd_image.s_gearwarn,
+                .type = 5,
+                .volume = 0x2710,
+                .maxvol = 0x2710,
+                .fader = 0x2710,
+            },
+        },
+        [27] = {
+            .name = (const char *)&snd_image.s_ap_disengage_sound,
+            .load = (snd_tmpl_fn)snd_tmpl_basic,
+            .rec = {
+                .id = 0x1f,
+                .chain = 9,
+                .group = 3,
+                .filename = (char *)&snd_image.s_caapdis,
+                .type = 5,
+                .volume = 0x2710,
+                .maxvol = 0x2710,
+                .fader = 0x2710,
+            },
+        },
+        [28] = {
+            .name = (const char *)&snd_image.s_glideslope_warning_sound,
+            .load = (snd_tmpl_fn)snd_tmpl_basic,
+            .rec = {
+                .id = 0x20,
+                .chain = 7,
+                .group = 3,
+                .filename = (char *)&snd_image.s_laglide,
+                .type = 5,
+                .volume = 0x2710,
+                .maxvol = 0x2710,
+                .fader = 0x2710,
+            },
+        },
+    },
+    .wind_armed = 1,
+    .default_new = 1,
+    .db_steps = {
+        [0] = -0x320,
+        [1] = -0x260,
+        [2] = -0x1f0,
+        [3] = -0x1a0,
+        [4] = -0x163,
+        [5] = -0x130,
+        [6] = -0x105,
+        [7] = -0xe0,
+        [8] = -0xc0,
+        [9] = -0xa3,
+        [10] = -0x88,
+        [11] = -0x70,
+        [12] = -0x5a,
+        [13] = -0x46,
+        [14] = -0x32,
+        [15] = -0x21,
+        [16] = -0x10,
+    },
+    .last_on = 1,
+    .s_laglide = "laglide",
+    .s_glideslope_warning_sound = "GLIDESLOPE_WARNING_SOUND",
+    .s_caapdis = "caapdis",
+    .s_ap_disengage_sound = "AP_DISENGAGE_SOUND",
+    .s_gearwarn = "gearwarn",
+    .s_gear_up_warning_sound = "GEAR_UP_WARNING_SOUND",
+    .s_mrssp = "mrssp",
+    .s_overspeed_warning_sound = "OVERSPEED_WARNING_SOUND",
+    .s_mrssp_cf0 = "MRSSP",
+    .s_mrssp_sound = "MRSSP_SOUND",
+    .s_mrsditl = "MRSDITL",
+    .s_mrsditl_sound = "MRSDITL_SOUND",
+    .s_mrsdith = "MRSDITH",
+    .s_mrsdith_sound = "MRSDITH_SOUND",
+    .s_mrsdahl = "MRSDAHL",
+    .s_mrsdahl_sound = "MRSDAHL_SOUND",
+    .s_mrsdahh = "MRSDAHH",
+    .s_mrsdahh_sound = "MRSDAHH_SOUND",
+    .s_high_tone_sound = "HIGH_TONE_SOUND",
+    .s_mid_tone_sound = "MID_TONE_SOUND",
+    .s_low_tone_sound = "LOW_TONE_SOUND",
+    .s_wind3 = "wind3",
+    .s_wind_sound = "WIND_SOUND",
+    .s_psplash = "psplash",
+    .s_splash_sound = "SPLASH_SOUND",
+    .s_pcrash3 = "pcrash3",
+    .s_crash_sound = "CRASH_SOUND",
+    .s_right_touchdown = "RIGHT_TOUCHDOWN",
+    .s_center_touchdown = "CENTER_TOUCHDOWN",
+    .s_screetch = "screetch",
+    .s_left_touchdown = "LEFT_TOUCHDOWN",
+    .s_stallhrn = "stallhrn",
+    .s_stall_warning = "STALL_WARNING",
+    .s_innermk = "innermk",
+    .s_inner_marker = "INNER_MARKER",
+    .s_middmk = "middmk",
+    .s_middle_marker = "MIDDLE_MARKER",
+    .s_outermk = "outermk",
+    .s_outer_marker = "OUTER_MARKER",
+    .s_flapst = "FLAPST",
+    .s_flapsl = "FLAPSL",
+    .s_flaps = "flaps",
+    .s_flapsh = "FLAPSH",
+    .s_geardown = "geardown",
+    .s_gear_down = "GEAR_DOWN",
+    .s_gearup = "gearup",
+    .s_gear_up = "GEAR_UP",
+    .s_jet_engine = "JET_ENGINE",
+    .s_sound_engine = "SOUND_ENGINE",
+    .s_rumblp = "rumblp",
+    .s_737lp = "737lp",
+    .s_cruiselp = "cruiselp",
+    .s_prop = "prop",
+    .s_prefs = "PREFS",
+    .s_sound_fader_d = "SOUND_FADER%d",
+    .s_0f18 = ", ",
+    .s_viewpoint = "viewpoint",
+    .s_panning = "panning",
+    .s_minimum_volume = "minimum_volume",
+    .s_maximum_volume = "maximum_volume",
+    .s_initial_volume = "initial_volume",
+    .s_filename = "filename",
+    .s_flags = "flags",
+    .s_extra = "extra",
+    .s_maximum_speed = "maximum_speed",
+    .s_minimum_speed = "minimum_speed",
+    .s_maximum_rate = "maximum_rate",
+    .s_minimum_rate = "minimum_rate",
+    .s_vparams = "vparams",
+    .s_rparams = "rparams",
+    .s_link = "link",
+    .s_type = "type",
+    .two_48 = 0x1.0000000000000p+48,
+    .morse = {
+        [0] = { .ch = 'A', .code = (const char *)&snd_image.m_a },
+        [1] = { .ch = 'B', .code = (const char *)&snd_image.m_b },
+        [2] = { .ch = 'C', .code = (const char *)&snd_image.m_c },
+        [3] = { .ch = 'D', .code = (const char *)&snd_image.m_d },
+        [4] = { .ch = 'E', .code = (const char *)&snd_image.m_e },
+        [5] = { .ch = 'F', .code = (const char *)&snd_image.m_f },
+        [6] = { .ch = 'G', .code = (const char *)&snd_image.m_g },
+        [7] = { .ch = 'H', .code = (const char *)&snd_image.m_h },
+        [8] = { .ch = 'I', .code = (const char *)&snd_image.m_i },
+        [9] = { .ch = 'J', .code = (const char *)&snd_image.m_j },
+        [10] = { .ch = 'K', .code = (const char *)&snd_image.m_k },
+        [11] = { .ch = 'L', .code = (const char *)&snd_image.m_l },
+        [12] = { .ch = 'M', .code = (const char *)&snd_image.m_m },
+        [13] = { .ch = 'N', .code = (const char *)&snd_image.m_n },
+        [14] = { .ch = 'O', .code = (const char *)&snd_image.m_o },
+        [15] = { .ch = 'P', .code = (const char *)&snd_image.m_p },
+        [16] = { .ch = 'Q', .code = (const char *)&snd_image.m_q },
+        [17] = { .ch = 'R', .code = (const char *)&snd_image.m_r },
+        [18] = { .ch = 'S', .code = (const char *)&snd_image.m_s },
+        [19] = { .ch = 'T', .code = (const char *)&snd_image.m_t },
+        [20] = { .ch = 'U', .code = (const char *)&snd_image.m_u },
+        [21] = { .ch = 'V', .code = (const char *)&snd_image.m_v },
+        [22] = { .ch = 'W', .code = (const char *)&snd_image.m_w },
+        [23] = { .ch = 'X', .code = (const char *)&snd_image.m_x },
+        [24] = { .ch = 'Y', .code = (const char *)&snd_image.m_y },
+        [25] = { .ch = 'Z', .code = (const char *)&snd_image.m_z },
+        [26] = { .ch = '1', .code = (const char *)&snd_image.m_n1 },
+        [27] = { .ch = '2', .code = (const char *)&snd_image.m_n2 },
+        [28] = { .ch = '3', .code = (const char *)&snd_image.m_n3 },
+        [29] = { .ch = '4', .code = (const char *)&snd_image.m_n4 },
+        [30] = { .ch = '5', .code = (const char *)&snd_image.m_n5 },
+        [31] = { .ch = '6', .code = (const char *)&snd_image.m_n6 },
+        [32] = { .ch = '7', .code = (const char *)&snd_image.m_n7 },
+        [33] = { .ch = '8', .code = (const char *)&snd_image.m_n8 },
+        [34] = { .ch = '9', .code = (const char *)&snd_image.m_n9 },
+        [35] = { .ch = '0', .code = (const char *)&snd_image.m_n0 },
+        [36] = { .ch = ' ', .code = (const char *)&snd_image.m_space },
+        [37] = { .ch = '\t', .code = (const char *)&snd_image.m_tab },
+        [38] = { .ch = '\n', .code = (const char *)&snd_image.m_newline },
+    },
+    .morse_vol = 0x2710,
+    .m_newline = "       ",
+    .m_tab = "   ",
+    .m_space = " ",
+    .m_n0 = "-----",
+    .m_n9 = "----.",
+    .m_n8 = "---..",
+    .m_n7 = "--...",
+    .m_n6 = "-....",
+    .m_n5 = ".....",
+    .m_n4 = "....-",
+    .m_n3 = "...--",
+    .m_n2 = "..---",
+    .m_n1 = ".----",
+    .m_z = "--..",
+    .m_y = "-.--",
+    .m_x = "-..-",
+    .m_w = ".--",
+    .m_v = "...-",
+    .m_u = "..-",
+    .m_t = "-",
+    .m_s = "...",
+    .m_r = ".-.",
+    .m_q = "--.-",
+    .m_p = ".--.",
+    .m_o = "---",
+    .m_n = "-.",
+    .m_m = "--",
+    .m_l = ".-..",
+    .m_k = "-.-",
+    .m_j = ".---",
+    .m_i = "..",
+    .m_h = "....",
+    .m_g = "--.",
+    .m_f = "..-.",
+    .m_e = ".",
+    .m_d = "-..",
+    .m_c = "-.-.",
+    .m_b = "-...",
+    .m_a = ".-",
 };
 
 /* The two exports are the image's first 0x30 bytes and the 0x48 at +0x30,

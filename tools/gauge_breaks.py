@@ -177,7 +177,8 @@ def main():
             path.write_text(original)
     subprocess.run(['python3', '-B', 'tools/build_gauges.py'], cwd=root, capture_output=True)
     print(f'{caught} of {total} caught')
+    return 0 if caught == total else 1     # a miss fails the run, as in the other break runners
 
 
 if __name__ == '__main__':
-    main()
+    sys.exit(main())

@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Snapshot deliberate time/season changes; require actual retail differences."""
+import module_flags
 from pathlib import Path
 import hashlib
 import json
@@ -102,7 +103,7 @@ def main():
         harness='worldtimelifediff.c' if unit=='life' else 'worldtimediff.c'
         units=['world_time.c','world_time_objects.c']+([] if unit=='life' else ['world_time_init.c'])
         exe=work/'test.exe'
-        build=subprocess.run(['i686-w64-mingw32-gcc','-std=c99','-O2','-Wall','-Wextra','-Werror','-fno-strict-aliasing','-fno-delete-null-pointer-checks','-Isrc/world','-o',str(exe),str(work/harness),*(str(work/name) for name in units),'-lntdll'],capture_output=True,text=True)
+        build=subprocess.run(['i686-w64-mingw32-gcc', *module_flags.FLAGS,'-std=c99', '-Itools/difftest','-O2','-Wall','-Wextra','-Werror','-Isrc/world','-o',str(exe),str(work/harness),*(str(work/name) for name in units),'-lntdll'],capture_output=True,text=True)
         (work/'build.log').write_text(build.stdout+build.stderr)
         if build.returncode:raise RuntimeError(f'{name}: build failure, not counted\n{build.stderr}')
         args=['32','0x4a971b63','typed'] if unit=='life' else ['128','0x4a971b63','unwind']

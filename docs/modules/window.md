@@ -8,11 +8,11 @@ each 3D view's mode — cockpit, virtual cockpit, tower, track, spot plane,
 the map — with the transitions between them, builds GLOBAL's view matrix,
 and drives MAIN, G3D and HG2D through each window's frame.
 
-It is reimplemented and verified: `make windowdiff-run` drives retail and
+It is reimplemented and verified: `tools/ofs windowdiff-run` drives retail and
 OpenFS98 through 20,000 whole-module scenarios with zero differences, and
-`make window-breaks` (`tools/window_breaks.py`) applies 109 deliberate
+`tools/ofs window-breaks` (`tools/window_breaks.py`) applies 109 deliberate
 breaks, of which 106 are caught and 3 are proven equivalences. It runs in-game
-with `make smoke` passing.
+with `tools/ofs smoke` passing.
 
 ## Shape and linkage
 
@@ -21,9 +21,10 @@ with `make smoke` passing.
 assembly runs from `+0x3504` to the end, with ATC's stack-alignment wrapper
 around every call. There is one 0x8ac-byte `.data` image (0x400 on disk):
 `ImportTable` at `+0`, `Linkage` at `+0x68`, then all of the state. Its only
-relocations are the Linkage's 32 code pointers; `tools/gen_window_data.py`
-zeroes them, and also extracts the `.text` bytes the assembly reads as data
-(below).
+relocations are the Linkage's 32 code pointers, which `window.c` installs; the
+image is a typed struct in `window.c`. `tools/gen_window_data.py` only copies
+the `.text` bytes the assembly reads as data (below) into
+`bin/window/window_text_tail.inc`.
 
 `dumplinkage.py` reported a 3-entry Linkage: it stopped at `+0x10`, which
 holds the word `0xc0000000`. CHAIN (`0xe0000000`) and FE (`0xd0000000`) have
@@ -156,7 +157,7 @@ All reproduced.
 - **The map reads its own code as heights.** With GLOBAL `+0x390` 2 the
   map's zoom (view `+0x26`, copied to GLOBAL `+0x2b2`) indexes the interpolation masks unclamped, up to
   0x803 bytes past them: into the assembly's instructions. The generator
-  carries `.text+0x3490..+0x3c94` so ours reads the same bytes.
+  copies `.text+0x3504..+0x3c94` into `bin/window/` so ours reads the same bytes.
 - **A 3D view's menu id carries the record's top half.** The id is pushed
   from `dx` over the record pointer, so the host's menu gets
   `(rec & 0xffff0000) | number`; a map's carries its counter instead.

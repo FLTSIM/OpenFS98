@@ -1,0 +1,44 @@
+# Raw-dump offenders (tools/check_raw_dumps.py). Dump-file and gen: entries may only be removed (Story 1.4), except a dump file newly detected by a stricter rule, which is listed with the reason on its line; resource: and oracle: entries may stay.
+# Path lines: tracked raw dumps, tagged (a) hex-dump rule or (b) identical to an orig/ file; without orig/ only (b)-tagged stale entries go unreported. Script lines, one per tools/*.py that CMake runs and that reads orig/, as <kind>:<script>  # <reason>:
+#   gen:      feeds module data into a build and is not yet converted (may only be removed)
+#   resource: reads only resources by type and id, or export tables by name, from retail (may stay)
+#   oracle:   reads retail only for test oracles, fixtures, staging or orientation output (may stay)
+gen:gen_window_data.py  # copies WINDOW's .text tail into bin/ for WIN-2
+gen:build_mdls.py  # data or table generator, not yet converted
+resource:gen_alerts_runtime.py  # resources by type and id and the SIMSUI ui_new export by name
+resource:gen_flights_runtime.py  # resources by type and id and the SIMSUI ui_new export by name
+gen:gen_gauges.py  # data or table generator, not yet converted
+resource:gen_help_runtime.py  # resources by type and id and the SIMSUI ui_new export by name
+resource:gen_host_resources.py  # FLTSIM98.EXE resources, by type and id
+resource:gen_main_bitmap.py  # MAIN.DLL bitmap 101, by type and id
+gen:gen_mdl_crash.py  # data or table generator, not yet converted
+oracle:gen_mdl_fixtures.py  # test fixtures from retail MDLs
+resource:gen_mpdialog_runtime.py  # resources by type and id and the SIMSUI ui_new export by name
+resource:gen_options_runtime.py  # resources by type and id and the SIMSUI ui_new export by name
+resource:gen_sim1_native.py  # SIM1.sim resources by type and id; checks its layout and relocations
+resource:gen_sim_runtime.py  # resources by type and id and the SIMSUI ui_new export by name
+gen:gen_simsui_native.py  # data or table generator, not yet converted
+gen:gen_simsui_tables.py  # data or table generator, not yet converted
+gen:gen_suction_data.py  # data or table generator, not yet converted
+resource:gen_views_runtime.py  # resources by type and id and the SIMSUI ui_new export by name
+gen:gen_warning_data.py  # data or table generator, not yet converted
+resource:gen_world_runtime.py  # world.res and simsui-anchor.def: retail resources and a SIMSUI export ordinal
+oracle:gen_host_rt_tables.py  # re-proves host_rt_tables.inc and host_rt_rdata.inc against retail (tools/ofs host-rt-tables-check)
+oracle:hostmap.py  # host slot map printed from retail, orientation output
+oracle:mdl_crash_breaks.py  # break or frame runner, reads retail through imported survey code
+oracle:mdl_crash_frames.py  # break or frame runner, reads retail through imported survey code
+oracle:mdl_crash_render_break.py  # break or frame runner, reads retail through imported survey code
+oracle:mdl_frames.py  # break or frame runner, reads retail through imported survey code
+oracle:mdl_module_breaks.py  # break or frame runner, reads retail through imported survey code
+oracle:mdl_render_break.py  # break or frame runner, reads retail through imported survey code
+oracle:modgraph.py  # module graph printed from retail, orientation output
+oracle:mpdialog_owner_acceptance.py  # acceptance run against retail
+oracle:pesurvey.py  # PE survey of retail, orientation output
+oracle:gen_sim1_data.py  # verifies the CD SIM1 and copies it to orig/, writes survey.json (tools/ofs sim1-reference)
+oracle:sim1r_breaks.py  # break or frame runner, reads retail through imported survey code
+oracle:stage_gauges.py  # stages retail gauges for the game copy
+oracle:stage_mdls.py  # stages retail MDLs for the game copy
+oracle:stage_sim1.py  # stages retail SIM1 for the game copy
+src/main/main_text_tail.inc  # (a) retail's own code and .rdata around the season and daylight tables; MAIN-6/MAIN-18's unbounded season index reads through it; goes when the index is bounded at porting
+oracle:check_data_image.py  # re-proves the converted data images against retail (tools/ofs data-images)
+src/fe/fe_bands.inc  # (a) retail latitude-band and cosine-step tables, typed u32; no exact formula known (newly detected in slice 9)

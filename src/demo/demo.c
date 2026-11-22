@@ -40,13 +40,58 @@ typedef volatile uint8_t  demo_v8;
 typedef volatile uint16_t __attribute__((may_alias)) demo_v16;
 typedef volatile uint32_t __attribute__((may_alias)) demo_v32;
 
-struct demo_image {
-    uint8_t bytes[DEMO_IMAGE_SIZE];
+/* Retail's .data image at its offsets.  Gaps are zero at load, or hold pointers that
+ * demo_install() writes (the Linkage code pointers, the reader and handler tables, the dialog
+ * callbacks and six pointers into this image); meaning not yet known. */
+struct __attribute__((packed, aligned(4))) demo_image {
+    uint32_t imports[20];  /* +0x0, ImportTable: {module id, pointer} x 10, the last a terminator */
+    uint32_t module_id;  /* +0x50, Linkage id */
+    uint8_t  gap_0054[0x25c];  /* +0x54: meaning not yet known */
+    uint32_t flags_2b0[4];  /* +0x2b0 */
+    uint8_t  gap_02c0[0x32c];  /* +0x2c0: meaning not yet known */
+    uint32_t limit_5ec;  /* +0x5ec */
+    uint8_t  gap_05f0[0xb0];  /* +0x5f0: meaning not yet known */
+    uint32_t table_6a0[5];  /* +0x6a0 */
+    uint8_t  gap_06b4[0xac];  /* +0x6b4: meaning not yet known */
+    uint32_t table_760[20];  /* +0x760 */
+    uint32_t table_7b0[4];  /* +0x7b0 */
+    uint8_t rate_tags[5];  /* +0x7c0 */
+    uint32_t values_7c5[4];  /* +0x7c5 */
+    uint32_t value_7d5;  /* +0x7d5 */
+    uint8_t table_7d9[17];  /* +0x7d9 */
+    uint8_t  gap_07ea[0xd];  /* +0x7ea: meaning not yet known */
+    char sound_cue[4];  /* +0x7f7, unterminated */
+    uint8_t value_7fb;  /* +0x7fb */
+    uint8_t  gap_07fc[0x674];  /* +0x7fc: meaning not yet known */
+    uint32_t values_e70[3];  /* +0xe70 */
+    uint8_t  gap_0e7c[0x75];  /* +0xe7c: meaning not yet known */
+    uint8_t flag_ef1;  /* +0xef1 */
+    uint8_t  gap_0ef2[0x13];  /* +0xef2: meaning not yet known */
+    uint8_t flag_f05;  /* +0xf05 */
+    uint8_t  gap_0f06[DEMO_IMAGE_SIZE - 0xf06];  /* +0xf06: meaning not yet known */
 };
+
+_Static_assert(sizeof(struct demo_image) == DEMO_IMAGE_SIZE, "demo_image size");
+_Static_assert(__builtin_offsetof(struct demo_image, imports) == 0x0, "imports");
+_Static_assert(__builtin_offsetof(struct demo_image, module_id) == 0x50, "module_id");
+_Static_assert(__builtin_offsetof(struct demo_image, flags_2b0) == 0x2b0, "flags_2b0");
+_Static_assert(__builtin_offsetof(struct demo_image, limit_5ec) == 0x5ec, "limit_5ec");
+_Static_assert(__builtin_offsetof(struct demo_image, table_6a0) == 0x6a0, "table_6a0");
+_Static_assert(__builtin_offsetof(struct demo_image, table_760) == 0x760, "table_760");
+_Static_assert(__builtin_offsetof(struct demo_image, table_7b0) == 0x7b0, "table_7b0");
+_Static_assert(__builtin_offsetof(struct demo_image, rate_tags) == 0x7c0, "rate_tags");
+_Static_assert(__builtin_offsetof(struct demo_image, values_7c5) == 0x7c5, "values_7c5");
+_Static_assert(__builtin_offsetof(struct demo_image, value_7d5) == 0x7d5, "value_7d5");
+_Static_assert(__builtin_offsetof(struct demo_image, table_7d9) == 0x7d9, "table_7d9");
+_Static_assert(__builtin_offsetof(struct demo_image, sound_cue) == 0x7f7, "sound_cue");
+_Static_assert(__builtin_offsetof(struct demo_image, value_7fb) == 0x7fb, "value_7fb");
+_Static_assert(__builtin_offsetof(struct demo_image, values_e70) == 0xe70, "values_e70");
+_Static_assert(__builtin_offsetof(struct demo_image, flag_ef1) == 0xef1, "flag_ef1");
+_Static_assert(__builtin_offsetof(struct demo_image, flag_f05) == 0xf05, "flag_f05");
 
 extern struct demo_image demo_image;
 
-#define D       ((uint32_t)(uintptr_t)demo_image.bytes)
+#define D       ((uint32_t)(uintptr_t)&demo_image)
 #define M8(a)   (*(demo_v8  *)(uintptr_t)(uint32_t)(a))
 #define M16(a)  (*(demo_v16 *)(uintptr_t)(uint32_t)(a))
 #define M32(a)  (*(demo_v32 *)(uintptr_t)(uint32_t)(a))
@@ -3221,9 +3266,27 @@ static void demo_deinit(void)
 
 /* ---- the image ------------------------------------------------------------------------ */
 
-struct demo_image demo_image = {{
-#include "demo_data.inc"
-}};
+struct demo_image demo_image = {
+    .imports = {1,0, 2,0, 4,0, 0x10,0, 3,0, 0x11,0, 0x27,0, 0x14,0, 0x16,0, 0,0},
+    .module_id = 7,
+    .flags_2b0 = {1, 0, 1, 0},
+    .limit_5ec = 0xff,
+    .table_6a0 = {0, 2, 3, 4, 1},
+    .table_760 = {
+        0x0, 0x1, 0x10093, 0x10094, 0x10095, 0x10096, 0x10097, 0x10098, 0x10099, 0x1009a,
+        0x10044, 0x10042, 0x10040, 0x1003e, 0x1003c, 0x1003b, 0x1003d, 0x1003f, 0x10041, 0x10043,
+    },
+    .table_7b0 = {0, 3, 1, 2},
+    .rate_tags = {0x9b, 0x9a, 0x98, 0x99, 0x99},
+    .values_7c5 = {4, 9, 0x12, 0x5a},
+    .value_7d5 = 0x10e,
+    .table_7d9 = {0x00, 0x01, 0x08, 0x10, 0x18, 0x2c, 0x40, 0x60, 0x7f, 0x81, 0xa0, 0xc0, 0xd4, 0xe8, 0xf0, 0xf8, 0xff},
+    .sound_cue = {'%', '%', 's', ':'},
+    .value_7fb = 0x12,
+    .values_e70 = {1, 0x14, 0xff},
+    .flag_ef1 = 1,
+    .flag_f05 = 1,
+};
 
 __asm__(".globl _ImportTable\n\t.set _ImportTable, _demo_image + 0x0\n\t"
         ".globl _Linkage\n\t.set _Linkage, _demo_image + 0x50");

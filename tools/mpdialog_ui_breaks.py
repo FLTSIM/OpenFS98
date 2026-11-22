@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Build MP_DIALOG mutants and prove the native retail comparison catches them."""
+import module_flags
 from pathlib import Path
 import os
 import contextlib
@@ -17,8 +18,7 @@ WORK = OUT / 'ui-breaks'
 CC = 'i686-w64-mingw32-gcc'
 _private_wine_prefix = None
 FLAGS = [
-    '-std=c99', '-O2', '-Wall', '-Wextra', '-Werror',
-    '-fno-strict-aliasing', '-fno-delete-null-pointer-checks',
+    *module_flags.FLAGS, '-std=c99', '-O2', '-Wall', '-Wextra', '-Werror',
 ]
 
 

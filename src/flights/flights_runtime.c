@@ -1,6 +1,6 @@
 /* Native Flights adapter. Dialog behaviour is rebuilt; the shared MFC/SIMSUI controls stay
  * the CD's dependencies during the compatibility port, reached through the same imports
- * retail uses (tools/gen_flights_runtime.py lists them). */
+ * retail uses (s_import_bindings in flights_runtime_tables.inc lists them, read from retail by the retired table half of tools/gen_flights_runtime.py). */
 /* MSVCRT's own sprintf and atof, as retail calls them, not mingw's ANSI replacements */
 #define __USE_MINGW_ANSI_STDIO 0
 #include <windows.h>

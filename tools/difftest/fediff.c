@@ -15,7 +15,7 @@
  * BGL file and section services.  Compared after every scenario: the import
  * transcript, outputs, GLOBAL, the deterministic arena and FE's .data image.
  * Module-local pointers compare by image offset.  The Scenery Library dialog
- * handler pointers (generated as FE_REL_TEXT entries) and the live
+ * handler pointers (listed as FE_REL_TEXT entries in fe_relocs.inc) and the live
  * CRITICAL_SECTION are outside this verification and are ignored explicitly.
  *
  * Build: make fediff     Run: make fediff-run
@@ -227,7 +227,7 @@ __asm__(
 #define FE_REL_TEXT(offset, rva) (uint16_t)(offset),
 #define FE_RELOCS
 static const uint16_t text_relocs[] = {
-#include "fe_data.inc"
+#include "fe_relocs.inc"
 };
 #undef FE_RELOCS
 #undef FE_REL_TEXT

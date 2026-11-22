@@ -7,12 +7,12 @@ state machine on CHAIN list 3, one step a frame. Every message goes out
 through WINMSG, optionally through a phrase translator driven by `ATIS.XLT`.
 
 `src/atc/atc.c` is the transliteration and the module shell together.
-`make atcdiff-run` drives retail and the OpenFS98 build side by side over
+`tools/ofs atcdiff-run` drives retail and the OpenFS98 build side by side over
 20,000 random scripts -- **0 differ**, comparing ATC's whole `.data` image as
-well as everything it calls -- and `make smoke` passes with it installed beside
+well as everything it calls -- and `tools/ofs smoke` passes with it installed beside
 CHAIN, GLOBAL, NUMERIC, SLEW and UTIL: 27/27 modules, 95 gauges.
 
-What `make smoke` proves is narrower than it sounds: ATC's init (the ATIS.XLT
+What `tools/ofs smoke` proves is narrower than it sounds: ATC's init (the ATIS.XLT
 load) runs at startup, but ATIS and the clearances only run in flight, which
 is not reachable under wine. Those paths are verified by the differential
 harness alone.
@@ -43,7 +43,7 @@ The reasons it was picked over WINMSG and LANDME are in
 | `+0x28` | `0x20641b41` | is slot 2 or slot 1 still up? |
 
 Callers: MAIN uses `+0x18`, `+0x1c` and `+0x20`; CONTROLS uses `+0x24`.
-`make graph` reports 256 slots; the table is 11 entries and the rest is
+`tools/ofs graph` reports 256 slots; the table is 11 entries and the rest is
 `.data` (see the preflight).
 
 ## The data image
@@ -54,8 +54,9 @@ tables, and its state. The reimplementation keeps **one image laid out
 exactly the same way**. `ImportTable` and `Linkage` are exported as aliases
 for the image's `+0x00` and `+0x40`, and the code addresses everything else
 by retail's offsets, so a number in a disassembly listing can be grepped for
-in the C. `tools/gen_atc_data.py` extracts the initialised bytes and checks
-the tables the C relies on.
+in the C. `atc.c` holds the initialised bytes as a typed `struct atc_data` (strings,
+phrase tables, the two handler tables), and `tools/check_data_image.py --kept`
+checks it against retail, including the 55 kept code and data addresses.
 
 Pointers *inside* the image (the macro table, the message tables) stay as
 retail's absolute addresses and are translated on use (`ATC_PTR`). Heap
@@ -191,7 +192,7 @@ its first letter:
 
 ## Verification
 
-`make atcdiff-run` (`tools/difftest/atcdiff.c`) loads retail ATC and the build
+`tools/ofs atcdiff-run` (`tools/difftest/atcdiff.c`) loads retail ATC and the build
 into one process. Retail CHAIN, NUMERIC and UTIL are loaded for real; the
 host, WINMSG and WEATHERM are stubs. The host stub allocates from a fixed
 arena, so heap pointers match between the sides. The WEATHERM stub re-rolls

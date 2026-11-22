@@ -12,9 +12,10 @@ real build goes back at the end.  A missed break is a gap in the harness or
 an equivalence; either way it is reported.
 
 Usage: tools/controls_breaks.py [N] [name...]   (from the repository root,
-       after make controlsdiff)
+       after tools/ofs controlsdiff)
 """
 import os
+import re
 import subprocess
 import sys
 
@@ -180,7 +181,7 @@ INPUT_BREAKS = [
 ]
 
 if not os.path.exists("bin/difftest/controlsdiff.exe"):
-    print("run `make controlsdiff` first"); sys.exit(2)
+    print("run `tools/ofs controlsdiff` first"); sys.exit(2)
 src = open(SRC).read()
 inp = open(INPUT).read()
 caught = missed = 0
@@ -195,21 +196,24 @@ for b in [(SRC,) + t for t in BREAKS] + [(INPUT,) + t for t in INPUT_BREAKS]:
     open(TMP, "w").write(src.replace(old, new, 1) if path == SRC else src)
     open(INPUT_TMP, "w").write(inp.replace(old, new, 1) if path == INPUT else inp)
     os.remove("bin/difftest/CONTROLS_ours.dll") if os.path.exists("bin/difftest/CONTROLS_ours.dll") else None
-    r = subprocess.run(["make", "controls-break-build"], capture_output=True, text=True)
+    r = subprocess.run(["tools/ofs", "controls-break-build"], capture_output=True, text=True)
     if not os.path.exists("bin/difftest/CONTROLS_ours.dll"):
         print("%-18s BUILD FAILED\n%s" % (name, r.stderr[-800:])); continue
     run = subprocess.run(["wine", "controlsdiff.exe", str(N)], cwd="bin/difftest",
                          env=dict(os.environ, WINEDEBUG="-all", CONTROLS_FIRST="1"),
                          capture_output=True, text=True)
-    differ = run.returncode != 0
+    # caught only by a reported difference: a crash, `cannot load` or guard exit is a miss
+    differ = run.returncode == 1 and re.search(r"^controlsdiff: .* [1-9][0-9]* differ", run.stdout, re.M) is not None
     if note:
         print("%-18s %s (%s)" % (name, "caught" if differ else "not shown", note))
     elif differ:
         print("%-18s caught" % name); caught += 1
+    elif run.returncode != 0:
+        print("%-18s CRASHED (exit %d)" % (name, run.returncode)); missed += 1
     else:
         print("%-18s MISSED" % name); missed += 1
 
 # restore the real build
-subprocess.run(["make", "controlsdiff"], capture_output=True)
+subprocess.run(["tools/ofs", "controlsdiff"], capture_output=True)
 print("\n%d caught, %d missed" % (caught, missed))
 sys.exit(1 if missed else 0)

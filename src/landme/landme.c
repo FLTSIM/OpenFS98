@@ -25,13 +25,35 @@
 typedef uint16_t __attribute__((may_alias)) landme_u16;
 typedef uint32_t __attribute__((may_alias)) landme_u32;
 
+/* One script box: a type, six signed bounds, then the phase byte for each of eight headings. */
+struct landme_box { uint32_t type; int32_t bound[6]; uint8_t phase[8]; } __attribute__((packed));
+/* One guidance phase: setup and boundary functions (installed), signed threshold, message id. */
+struct landme_phase { uint32_t setup, boundary; int32_t threshold; uint32_t message; } __attribute__((packed));
+
 struct landme_image {
-    uint8_t bytes[LANDME_IMAGE_SIZE];
-};
+    uint8_t  state[0x8c];                      /* +0x000 */
+    uint32_t callbacks[7];                     /* +0x08c code pointers, installed */
+    uint8_t  state2[0x23];                     /* +0x0a8 */
+    char     suffixes[12];                     /* +0x0cb runway suffixes " LRC" */
+    struct landme_box boxes[40];               /* +0x0d7 the main script */
+    uint8_t  script_end[12];                   /* +0x677 */
+    struct landme_phase phases[12];            /* +0x683 */
+    uint32_t rest[45];                         /* +0x743 */
+    uint8_t  rest_last;                        /* +0x7f7 */
+    struct { uint32_t id, link; } import[8];   /* +0x7f8 */
+    uint32_t linkage[7];                       /* +0x838 */
+} __attribute__((packed));
+_Static_assert(sizeof(struct landme_box) == 0x24, "box");
+_Static_assert(sizeof(struct landme_phase) == 0x10, "phase");
+_Static_assert(sizeof(struct landme_image) == LANDME_IMAGE_SIZE, "image");
+_Static_assert(__builtin_offsetof(struct landme_image, boxes) == 0xd7, "boxes");
+_Static_assert(__builtin_offsetof(struct landme_image, phases) == 0x683, "phases");
+_Static_assert(__builtin_offsetof(struct landme_image, import) == LANDME_IMPORTS, "import");
+_Static_assert(__builtin_offsetof(struct landme_image, linkage) == LANDME_LINKAGE, "linkage");
 
 extern struct landme_image landme_image;
 
-#define D              (landme_image.bytes)
+#define D              ((uint8_t *)(uintptr_t)&landme_image)
 #define D8(offset)     (*(uint8_t *)(D + (offset)))
 #define D16(offset)    (*(landme_u16 *)(D + (offset)))
 #define D32(offset)    (*(landme_u32 *)(D + (offset)))
@@ -781,9 +803,79 @@ static void landme_check_11(void)
         LAND_STATE = 2;
 }
 
-struct landme_image landme_image = {{
-#include "landme_data.inc"
-}};
+struct landme_image landme_image = {
+    .suffixes = " LRC",
+    .boxes = {
+        {3, {-0xaf0, 0x1c2, 0xaf0, 0xaf0, 0x1869f, -0xaf0}, {11, 11, 11, 11, 11, 11, 11, 11}},
+        {3, {-0x578, 0x0, 0x0, -0x12c, 0x3e8, 0x0}, {2, 2, 2, 2, 2, 2, 2, 2}},
+        {2, {-0x578, 0x0, 0x0, -0x12c, 0x3e8, -0x2af8}, {2, 2, 2, 2, 2, 2, 2, 2}},
+        {2, {-0x2328, 0x0, 0x0, -0x578, 0x3e8, -0x2af8}, {2, 2, 2, 2, 2, 2, 2, 2}},
+        {3, {-0x2328, 0x0, 0x0, -0x7d0, 0x3e8, 0x0}, {4, 4, 4, 4, 4, 4, 4, 4}},
+        {1, {-0x2328, 0x0, 0xbb8, -0x7d0, 0x3e8, 0x0}, {4, 4, 4, 4, 4, 4, 4, 4}},
+        {1, {0x7d0, 0x0, 0x1388, 0xfa0, 0x3e8, 0xbb8}, {7, 1, 1, 1, 1, 1, 7, 7}},
+        {1, {0xfa0, 0x0, 0x1b58, 0x1770, 0x3e8, 0xbb8}, {7, 1, 1, 1, 1, 1, 7, 7}},
+        {1, {0x1b58, 0x0, 0x2af8, 0x2328, 0x3e8, 0xbb8}, {7, 1, 1, 1, 1, 1, 7, 7}},
+        {1, {-0xfa0, 0x0, 0x1388, -0x7d0, 0x3e8, 0xbb8}, {4, 4, 4, 4, 1, 1, 1, 1}},
+        {1, {-0x1770, 0x0, 0x1b58, -0xfa0, 0x3e8, 0xbb8}, {4, 4, 4, 4, 1, 1, 1, 1}},
+        {1, {-0x2328, 0x0, 0x2af8, -0x1770, 0x3e8, 0xbb8}, {4, 4, 4, 4, 1, 1, 1, 1}},
+        {1, {-0x2328, 0x0, 0x2af8, 0x2328, 0x3e8, 0xbb8}, {1, 1, 1, 1, 1, 1, 1, 1}},
+        {1, {0xbb8, 0x0, 0xbb8, 0x2328, 0x3e8, 0x0}, {7, 7, 7, 7, 7, 7, 7, 7}},
+        {3, {0xc8, 0x0, 0x0, 0x2328, 0x3e8, 0x0}, {7, 7, 7, 7, 7, 7, 7, 7}},
+        {2, {-0x12c, 0x0, -0x44c, 0xbb8, 0x3e8, -0xbb8}, {9, 9, 9, 9, 9, 9, 9, 9}},
+        {2, {-0x12c, 0x0, -0xbb8, 0xbb8, 0x3e8, -0x2af8}, {2, 2, 2, 2, 7, 7, 7, 7}},
+        {3, {-0x7d0, 0x0, 0x0, -0x578, 0x3e8, 0x0}, {6, 6, 6, 4, 4, 3, 3, 6}},
+        {2, {-0x12c, 0x0, -0x258, 0x4b0, 0x3e8, -0x514}, {9, 9, 9, 9, 9, 7, 7, 7}},
+        {2, {0xc8, 0x0, 0x0, 0x4b0, 0x3e8, -0x258}, {9, 9, 9, 7, 7, 7, 7, 9}},
+        {2, {0x4b0, 0x0, 0x0, 0xbb8, 0x3e8, -0x514}, {9, 9, 9, 9, 7, 7, 7, 7}},
+        {1, {0x4b0, 0x0, 0x578, 0xbb8, 0x3e8, 0x0}, {7, 7, 7, 7, 7, 7, 7, 7}},
+        {1, {0x258, 0x0, 0xbb8, 0xbb8, 0x3e8, 0x578}, {7, 1, 1, 1, 1, 7, 7, 7}},
+        {2, {-0x12c, 0x0, 0xa, -0x64, 0x3e8, -0x258}, {10, 10, 10, 2, 2, 2, 10, 10}},
+        {2, {-0x64, 0x0, 0xa, 0xc8, 0x3e8, -0x258}, {8, 8, 8, 2, 7, 7, 7, 8}},
+        {3, {-0x64, 0x0, 0x0, 0xc8, 0x3e8, 0x0}, {8, 8, 7, 7, 7, 7, 7, 8}},
+        {3, {-0x12c, 0x0, 0x0, -0x64, 0x3e8, 0x0}, {10, 10, 10, 3, 3, 3, 10, 10}},
+        {1, {-0x2bc, 0x0, 0xbb8, 0x258, 0x3e8, 0x578}, {1, 1, 1, 1, 1, 1, 1, 1}},
+        {1, {-0x7d0, 0x0, 0xbb8, -0x2bc, 0x3e8, 0x4b0}, {4, 4, 4, 4, 4, 4, 4, 4}},
+        {1, {-0x7d0, 0x0, 0xbb8, -0x3e8, 0x3e8, 0x4b0}, {4, 4, 4, 4, 4, 4, 4, 4}},
+        {1, {-0x3e8, 0x0, 0x4b0, -0x2bc, 0x3e8, 0x1f4}, {4, 4, 4, 4, 1, 1, 1, 1}},
+        {1, {-0x7d0, 0x0, 0x1f4, -0x578, 0x3e8, 0x0}, {3, 3, 3, 3, 3, 3, 3, 3}},
+        {1, {-0x578, 0x0, 0x1f4, -0x2bc, 0x3e8, 0x0}, {10, 3, 3, 3, 3, 3, 3, 10}},
+        {1, {-0x2bc, 0x0, 0x1f4, -0xc8, 0x3e8, 0x0}, {10, 0, 0, 0, 0, 0, 0, 10}},
+        {1, {-0xc8, 0x0, 0xc8, 0xc8, 0x3e8, 0x0}, {0, 0, 0, 0, 0, 0, 0, 0}},
+        {1, {0xc8, 0x0, 0x1f4, 0x4b0, 0x3e8, 0x0}, {7, 7, 0, 0, 0, 7, 7, 7}},
+        {1, {0x258, 0x0, 0x578, 0x4b0, 0x3e8, 0x1f4}, {7, 7, 1, 1, 1, 1, 7, 7}},
+        {1, {0xc8, 0x0, 0x578, 0x258, 0x3e8, 0x1f4}, {7, 1, 1, 1, 1, 7, 7, 7}},
+        {1, {-0xc8, 0x0, 0x578, 0xc8, 0x3e8, 0xc8}, {1, 1, 1, 0, 0, 0, 1, 1}},
+        {1, {-0x2bc, 0x0, 0x578, -0xc8, 0x3e8, 0x1f4}, {1, 0, 0, 0, 0, 1, 1, 1}},
+    },
+    .phases = {
+        {0, 0, 0x0, 0x1f6},   /* setup, boundary: installed */
+        {0, 0, 0x0, 0x1fc},   /* setup, boundary: installed */
+        {0, 0, 0x0, 0x1f9},   /* setup, boundary: installed */
+        {0, 0, 0x514, 0x1fa},   /* setup, boundary: installed */
+        {0, 0, -0x28a, 0x1fb},   /* setup, boundary: installed */
+        {0, 0, 0x0, 0x205},   /* setup, boundary: installed */
+        {0, 0, -0x6a4, 0x213},   /* setup, boundary: installed */
+        {0, 0, -0x578, 0x1fe},   /* setup, boundary: installed */
+        {0, 0, -0x2bc, 0x202},   /* setup, boundary: installed */
+        {0, 0, -0x578, 0x203},   /* setup, boundary: installed */
+        {0, 0, -0x7d0, 0x202},   /* setup, boundary: installed */
+        {0, 0, 0x1cc, 0x208},   /* setup, boundary: installed */
+    },
+    .rest = {   /* meaning not yet known */
+        0x1, 0x0, 0xffffffc4, 0xfffffc60, 0xfd5f,
+        0x1, 0xfffffa24, 0x131, 0x960, 0x80000000,
+        0x1, 0xfffffa24, 0x0, 0x126c, 0x8000fd5f,
+        0x1, 0x6b4, 0x0, 0x5dc, 0xc000fd5f,
+        0x3, 0xfffffc18, 0x131, 0x0, 0xa0000000,
+        0x3, 0xfffff830, 0x131, 0xfffffed4, 0x40000000,
+        0x1, 0x0, 0x1a4, 0xfffff060, 0x444,
+        0x2, 0xfffff830, 0x1c2, 0xfffffd44, 0x40000444,
+        0x2, 0xffffff38, 0xe8, 0xfffff768, 0x444,
+    },
+    .rest_last = 0x0,
+    .import = { {1,0},{2,0},{3,0},{4,0},{0x12,0},{0x14,0},{0x16,0},{0,0} },
+    .linkage = { 0x1a },
+};
 
 /* Retail exports point into the tail of its .data section. */
 __asm__(".globl _ImportTable\n\t.set _ImportTable, _landme_image + 0x7f8\n\t"

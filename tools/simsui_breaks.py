@@ -29,17 +29,24 @@ Left out as proven equivalent:
   attaches the one handle as both.
 - shadow-hard (flags & 0x30 against & 0x20): it is the else of flags & 0x10, so bit 0x10 is clear
   and the two tests agree.
+- button-init-quarter (/ 4 against >> 2 for the frame's height) and image-abs (the picture's
+  height made positive): both read the section's +0xc, GetObjectA's bmHeight, which is positive
+  for every section (CreateDib makes them top-down, and GDI reports the height unsigned); a failed
+  load returns before the button reads it, and leaves the picture's strip uninitialised
+  (SUI-13), which no two builds share.
+- token-no-out (NextToken writing with no output buffer): not exported, and its three callers
+  all pass a CString's buffer.
 Caught only at more scenarios: 3piece-init-rest (scenario 1016 of 3piece_init alone),
 command-seven-same (N=2000: OnCommand's EN_KILLFOCUS-like case 7 with the focus on the edit
 being validated).
 """
+import module_flags
 from pathlib import Path
 import re
 import subprocess
 import sys
 
-SOURCES = Path('tools/simsui.mk').read_text()
-UNITS = re.search(r'^SIMSUI_SOURCES := (.*)$', SOURCES, re.M)[1].split()
+UNITS = Path('src/simsui/sources.txt').read_text().split()
 
 BREAKS = {
     'small': [
@@ -144,7 +151,6 @@ BREAKS = {
         ('cbutton-delete', 'if (flags & 1) mfc_operator_delete(button);\n    return button;\n}\n/* 0x20473720', 'if (flags & 2) mfc_operator_delete(button);\n    return button;\n}\n/* 0x20473720'),
         ('button-init-hash', "(&text, '#') != -1)\n        fs98_simsui_parse_point(", "(&text, ',') != -1)\n        fs98_simsui_parse_point("),
         ('button-init-name', 'CALL_THIS(MFC_858, void *, (void *, const void *))(&name, &text);\n    }\n    if (!fs98_simsui_dib_load', 'CALL_THIS(MFC_858, void *, (void *, const void *))(&text, &name);\n    }\n    if (!fs98_simsui_dib_load'),
-        ('button-init-quarter', 'I32(button, 0xb4) = I32(button, 0x4c) / 4;', 'I32(button, 0xb4) = I32(button, 0x4c) >> 2;'),
         ('button-init-show', '(button, 5);', '(button, 1);'),
         ('button-init-pal', '    PTR(button, 0xb0) = pal;\n    CALL_THIS(MFC_4299', '    CALL_THIS(MFC_4299'),
         ('button-draw-state', 'if (D32(button, 0xbc) != D32(pal, 0x808)) {', 'if (D32(button, 0xbc) == D32(pal, 0x808)) {'),
@@ -459,7 +465,6 @@ BREAKS = {
     'picture': [
         ('picture-construct', '    D32(picture, 0xbc) = 0;\n    D32(picture, 0xc4) = 0;', '    D32(picture, 0xc4) = 0;'),
         ('picture-delete-size', 'flags, PICTURE_SIZE, fs98_simsui_picture_destroy', 'flags, PICTURE_SIZE - 4, fs98_simsui_picture_destroy'),
-        ('image-abs', '    if (I32(picture, 0x44) < 0) I32(picture, 0x44) = -I32(picture, 0x44);\n', ''),
         ('image-right', 'rect[2] = rect[0] + I32(picture, 0x48);', 'rect[2] = rect[0] + I32(picture, 0x44);'),
         ('image-background', 'I32(picture, 0x48), I32(picture, 0x44), rect[0], rect[1]);', 'I32(picture, 0x48), I32(picture, 0x44), rect[1], rect[0]);'),
         ('image-opaque', '    if (key == OPAQUE_KEY)\n        fs98_simsui_dib_copy(strip', '    if (key == FIRST_PIXEL_KEY)\n        fs98_simsui_dib_copy(strip'),
@@ -748,7 +753,6 @@ BREAKS = {
         ('find-end', 'return *at == wanted_char ? at : 0;', 'return at;'),
         ('token-null', '    if (!text) return 0;\n    found', '    found'),
         ('token-rest', '!= 0) {}\n        return 0;', '!= 0) {}\n        return source;'),
-        ('token-no-out', '    if (out) {\n        from', '    if (1) {\n        from'),
         ('token-prev', 'if (from != text) to = CALL_STD', 'if (from != next) to = CALL_STD'),
         ('token-terminate', '        *to = 0;\n    }\n    return next;', '    }\n    return next;'),
         ('name-separator', "fs98_simsui_next_token((char *)spec, buffer, '#');", "fs98_simsui_next_token((char *)spec, buffer, ',');"),
@@ -831,8 +835,7 @@ def main():
         executable.unlink(missing_ok=True)
         others = [other for other in UNITS if other != path]
         build = subprocess.run([
-            'i686-w64-mingw32-gcc', '-std=c99', '-O2', '-Wall', '-Wextra', '-Wno-unused',
-            '-fno-strict-aliasing', '-fno-delete-null-pointer-checks', '-fno-tree-loop-distribute-patterns',
+            'i686-w64-mingw32-gcc', *module_flags.FLAGS, '-std=c99', '-O2', '-Wall', '-Wextra', '-Wno-unused', '-fno-tree-loop-distribute-patterns',
             '-fno-tree-vectorize', '-Isrc/simsui',
             '-Wl,--image-base=0x400000', '-o', str(executable),
             'tools/difftest/simsuidiff.c', str(source), *others],

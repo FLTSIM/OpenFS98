@@ -7,7 +7,7 @@ place by catching mistakes.
 
 ## The loop
 
-1. **Find the boundaries.** `make graph` for modules, `make hostmap` for the
+1. **Find the boundaries.** `tools/ofs graph` for modules, `tools/ofs hostmap` for the
    host, `python3 tools/dumplinkage.py orig/Modules/<M>.DLL` for one module's
    service table -- it prints every slot, the size of the function behind it,
    and a total, so the sizes in the module documents need no separate script.
@@ -36,8 +36,8 @@ place by catching mistakes.
 5. **Add it to a harness** -- the existing examples cover individual UTIL
    services, whole-module SLEW and imported-service NUMERIC. Use edge cases
    chosen from the code, not at random.
-6. **Run it.** The current targets are `make utildiff-run`,
-   `make numericdiff-run`, `make difftest-run`, and `make utildiff-portable`
+6. **Run it.** The current targets are `tools/ofs utildiff-run`,
+   `tools/ofs numericdiff-run`, `tools/ofs difftest-run`, and `tools/ofs utildiff-portable`
    for UTIL's portable floating-point path.
 7. **Write down what it is** in the module's document, including anything that
    surprised you. The surprises are the valuable part.
@@ -123,7 +123,7 @@ not a list header and took the sim down.
 **Know which build a comparison is against.** In-process tests compare the
 reimplementation with "retail's" module by calling whatever the loader bound.
 Once OpenFS98's UTIL was installed that was the reimplementation itself, and
-every comparison would have passed for nothing. `make ofstest-run` now puts
+every comparison would have passed for nothing. `tools/ofs ofstest-run` now puts
 retail's UTIL in for the run, and a check fails if the UTIL it is talking to
 is not at retail's Linkage address.
 
@@ -247,12 +247,12 @@ after every side, and stops if it changed.
 
 ## Two harnesses, and when to use which
 
-**Outside the process** -- `make utildiff-run`, `make numericdiff-run`,
-`make difftest-run`. Loads the retail binary beside the reimplementation and
+**Outside the process** -- `tools/ofs utildiff-run`, `tools/ofs numericdiff-run`,
+`tools/ofs difftest-run`. Loads the retail binary beside the reimplementation and
 calls both. Fast, scriptable, millions of vectors, and the right tool for
 self-contained code or code whose imports can be stubbed faithfully.
 
-**Inside the sim** -- `make ofstest-run`. Builds `src/test/ofstest.c` as a
+**Inside the sim** -- `tools/ofs ofstest-run`. Builds `src/test/ofstest.c` as a
 module with its own id, drops it into `Modules\`, and lets the real loader bind
 and call it. Slower, needs the sim to start, and reports through a log file --
 but it is the only way to reach anything that calls the host.
@@ -260,7 +260,7 @@ but it is the only way to reach anything that calls the host.
 The split existed because the host could not be *loaded* beside a test program:
 it has no `.reloc`, so it only works at `0x400000`, and that address is already
 committed in any wine process -- `VirtualAlloc` there fails and `VirtualFree`
-there crashes. `make hostdiff-run` gets past this without loading it: it
+there crashes. `tools/ofs hostdiff-run` gets past this without loading it: it
 `VirtualProtect`s the committed `0x400000` region to executable and copies the
 host's sections into place, so the real service table at `0x417ba0` and its
 code run in process beside `HOST_ours.dll` (linked away from `0x400000`). That
@@ -274,7 +274,7 @@ need the live sim's windows, device or MFC state still need the in-process
 
 Anything running in the in-process harness runs during the sim's startup, so a
 fault there stops the sim from starting. Be defensive, and take the module back
-out with `make ofstest-remove` when not using it.
+out with `tools/ofs ofstest-remove` when not using it.
 
 **Compare the module's state, not only its effects, when the layout allows
 it.** ATC keeps ImportTable, Linkage and every byte of state in one `.data`

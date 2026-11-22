@@ -56,12 +56,49 @@ struct atc_linkage {
     uint32_t (*busy)(void);                             /* +0x28 */
 };
 
+/* Everything from +0x70 on: retail's initialised .data, then zeros to the end of its last
+ * page.  Packed, since retail's strings put words at odd offsets. */
+struct atc_data {
+    uint8_t  state_070   [0x421]; /* +0x070: state and buffers, zero */
+    uint8_t  flag_491;                  /* +0x491: meaning not yet known */
+    uint8_t  zero_492    [0x14]; /* +0x492 */
+    uint32_t templates   [21]; /* +0x4a6: message templates, kept as retail addresses */
+    char     words_4fa   [0xef]; /* +0x4fa: message pieces */
+    uint8_t  buffers_5e9 [0x64]; /* +0x5e9: buffers */
+    char     words_64d   [0xe8]; /* +0x64d: more message pieces */
+    char     suffixes[4];               /* +0x735: runway suffixes, no terminator */
+    uint32_t takeoff     [14]; /* +0x739: takeoff handlers, retail code addresses (checked by check_data_image.py --kept) */
+    uint32_t landing     [6]; /* +0x771: landing handlers, retail code addresses */
+    uint32_t phrases     [6]; /* +0x789: phrase pointers */
+    char     words_7a1   [0x23]; /* +0x7a1: phrases */
+    uint32_t say_table   [8]; /* +0x7c4: phrase pointers (atc_say) */
+    char     words_7e4   [0xcf]; /* +0x7e4: phrases */
+    struct { uint16_t value; char label[4]; } vis[20]; /* +0x8b3 */
+    uint32_t mile_92b;                  /* +0x92b: 160934 */
+    uint32_t limit_92f;                 /* +0x92f: 10000 */
+    uint8_t  zero_933    [0x1]; /* +0x933 */
+    char     hex_fmt     [0x4]; /* +0x934 */
+    char     translator  [0xc]; /* +0x938 */
+    char     locale_id   [0xc]; /* +0x944 */
+    char     zeros_text  [0xc]; /* +0x950 */
+    char     xlt_name    [0xc]; /* +0x95c */
+    char     letter_a    [0x8]; /* +0x968 */
+    uint8_t  tail[ATC_DATA_SIZE - 0x970]; /* zero to the end of .data's last page */
+} __attribute__((packed));
+
 struct atc_image {
     struct fs98_import import[8];       /* +0x000 ImportTable */
     struct atc_linkage linkage;         /* +0x040 Linkage */
     uint32_t           zero_6c;
-    uint8_t            data[ATC_DATA_SIZE - 0x70]; /* +0x070 on */
+    struct atc_data    data;            /* +0x070 on */
 };
+_Static_assert(__builtin_offsetof(struct atc_image, data) == 0x70, "data");
+_Static_assert(__builtin_offsetof(struct atc_data, templates) == 0x4a6 - 0x70, "templates");
+_Static_assert(__builtin_offsetof(struct atc_data, takeoff) == 0x739 - 0x70, "takeoff");
+_Static_assert(__builtin_offsetof(struct atc_data, landing) == 0x771 - 0x70, "landing");
+_Static_assert(__builtin_offsetof(struct atc_data, say_table) == 0x7c4 - 0x70, "say_table");
+_Static_assert(__builtin_offsetof(struct atc_data, vis) == 0x8b3 - 0x70, "vis");
+_Static_assert(__builtin_offsetof(struct atc_data, letter_a) == 0x968 - 0x70, "letter_a");
 
 extern struct atc_image atc_image;
 
@@ -784,7 +821,7 @@ static void atc_check_landed(void)
 static void atc_cleared_to_land(void) { atc_post_and_step(3); }
 
 /* .data+0x739 and +0x771, which hold the retail addresses noted; the
- * generator checks them.  Entry 0 is never called. */
+ * tool `check_data_image.py --kept` checks them against retail.  Entry 0 is never called. */
 static void (*const atc_takeoff_steps[14])(void) = {
     atc_finish,             /* 0x2064185b */
     atc_wait_quiet,         /* 0x2064189f */
@@ -887,7 +924,152 @@ struct atc_image atc_image = {
     },
     0,
     {
-#include "atc_data.inc"
+        .flag_491 = 0xff,
+        .templates = {
+            ATC_VA(0x4fa),
+            ATC_VA(0x506),
+            ATC_VA(0x514),
+            ATC_VA(0x521),
+            ATC_VA(0x522),
+            ATC_VA(0x538),
+            ATC_VA(0x546),
+            ATC_VA(0x56b),
+            ATC_VA(0x57f),
+            ATC_VA(0x593),
+            ATC_VA(0x5aa),
+            ATC_VA(0x5e9),
+            ATC_VA(0x64d),
+            ATC_VA(0x662),
+            ATC_VA(0x663),
+            ATC_VA(0x664),
+            ATC_VA(0x67f),
+            ATC_VA(0x68c),
+            ATC_VA(0x697),
+            ATC_VA(0x6aa),
+            ATC_VA(0x6af),
+        },
+        .words_4fa =
+            " weather - \0"
+            " observation \0"
+            " 12:00 zulu \0"
+            "\0"
+            " Temperature 75  f - \0"
+            " Information \0"
+            " Landing and departing runway 31l - \0"
+            " Advise controller \0"
+            " Altimeter       - \0"
+            " Visibility  10 mi  - \0"
+            " Winds 330 at  27 - \0"
+            " Winds calm -\0"
+            " Winds light and variable -",
+        .words_64d =
+            " on initial contact \0"
+            "\0"
+            "\0"
+            "Microsoft Flight Simulator\0"
+            " requesting \0"
+            "clearance \0"
+            ", you are cleared \0"
+            "... \0"
+            "7777 \0"
+            ", Thunderstorms observed in vicinity \0"
+            " Measured ceiling \0"
+            "00600 \0"
+            "broken\0"
+            "overcast\0"
+            "Scattered \0"
+            "Broken \0"
+            "Overcast \0"
+            "Skies clear\0"
+            ", \0"
+            " - ",
+        .suffixes = { ' ', 'L', 'R', 'C' },
+        .takeoff = {
+            0x2064185b,
+            0x2064189f,
+            0x206418b2,
+            0x20641a31,
+            0x20641906,
+            0x2064192d,
+            0x20641970,
+            0x20641991,
+            0x2064189f,
+            0x206418dc,
+            0x206419ec,
+            0x206418b2,
+            0x20641a55,
+            0x2064185b,
+        },
+        .landing = {
+            0x2064185b,
+            0x2064189f,
+            0x206418b2,
+            0x20641a0b,
+            0x20641ad4,
+            0x2064185b,
+        },
+        .phrases = {
+            ATC_VA(0x7a1),
+            ATC_VA(0x7a2),
+            ATC_VA(0x7af),
+            ATC_VA(0x7bc),
+            ATC_VA(0x7bc),
+            ATC_VA(0x7bc),
+        },
+        .words_7a1 =
+            "\0"
+            "\217\220takeoff \221\223\0"
+            "\217\220landing \221\223\0"
+            "unused\223",
+        .say_table = {
+            ATC_VA(0x7e4),
+            ATC_VA(0x7e5),
+            ATC_VA(0x821),
+            ATC_VA(0x838),
+            ATC_VA(0x843),
+            ATC_VA(0x866),
+            ATC_VA(0x882),
+            ATC_VA(0x89c),
+        },
+        .words_7e4 =
+            "\0"
+            "\217, taxi to runway of your choice and hold short.  Squawk \224\223\0"
+            "\217 cleared for takeoff\223\0"
+            "\217\222to land\223\0"
+            "\217 do a right 360 turn for traffic\223\0"
+            "\217 set transponder code to \224\0"
+            "\217 has already taken-off \223\0"
+            "\217 has already landed \223",
+        .vis = {
+            {0x6, {'.', '0', '6', ' '}},
+            {0xd, {'1', '/', '8', ' '}},
+            {0x19, {'1', '/', '4', ' '}},
+            {0x25, {'3', '/', '8', ' '}},
+            {0x32, {'1', '/', '2', ' '}},
+            {0x4b, {'3', '/', '4', ' '}},
+            {0x64, {' ', ' ', '1', ' '}},
+            {0x96, {'1', '.', '5', ' '}},
+            {0xc8, {' ', ' ', '2', ' '}},
+            {0xfa, {'2', '.', '5', ' '}},
+            {0x12c, {' ', ' ', '3', ' '}},
+            {0x190, {' ', ' ', '4', ' '}},
+            {0x1f4, {' ', ' ', '5', ' '}},
+            {0x2bc, {' ', ' ', '7', ' '}},
+            {0x3e8, {' ', '1', '0', ' '}},
+            {0x5dc, {' ', '1', '5', ' '}},
+            {0x7d0, {' ', '2', '0', ' '}},
+            {0xbb8, {' ', '3', '0', ' '}},
+            {0xfa0, {' ', '4', '0', ' '}},
+            {0xffff, {'>', '4', '0', ' '}},
+        },
+        .mile_92b = 160934,
+        .limit_92f = 10000,
+        .hex_fmt = "%x",
+        .translator = "TRANSLATOR",
+        .locale_id = "LocaleID",
+        .zeros_text = "00000000",
+        .xlt_name = "ATIS.XLT",
+        .letter_a = "A",
     }
 };
 

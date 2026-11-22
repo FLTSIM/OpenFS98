@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Snapshot and mutate time native DLLs; require actual differences."""
+import module_flags
 from pathlib import Path
 import hashlib
 import json
@@ -60,9 +61,9 @@ def main():
                     data = data.replace(b'        void *data=PTR(object,0x10dc);vtable=PTR(object,0);', b'        void *data=saved_descriptor;vtable=PTR(object,0);')
             (work / source_name).write_bytes(data)
         dll, exe = work / 'WORLD_area.dll', work / 'worldtimeuidiff.exe'
-        flags = ['i686-w64-mingw32-gcc', '-std=c99', '-O2', '-Wall', '-Wextra', '-Werror', '-fno-strict-aliasing', '-fno-delete-null-pointer-checks']
+        flags = ['i686-w64-mingw32-gcc', *module_flags.FLAGS, '-std=c99', '-Itools/difftest', '-O2', '-Wall', '-Wextra', '-Werror']
         commands = [flags + ['-shared', '-nostdlib', '-Wl,--entry=_DllMain@12', '-Wl,--disable-dynamicbase', '-Wl,--image-base=0x223f0000', '-o', str(dll),
-            *(str(work / Path(unit).name) for unit in Path('tools/world.mk').read_text().split('WORLD_SOURCES := ',1)[1].splitlines()[0].split()),
+            *(str(work / Path(unit).name) for unit in Path('src/world/sources.txt').read_text().split()),
             str(work / 'world.def'), str(work / 'world-res.o'), str(work / 'libworld-simsui.a'), '-lkernel32', '-luser32', '-lmsvcrt', '-lntdll'],
             flags + ['-o', str(exe), str(work / 'worldtimeuidiff.c'), '-lgdi32', '-lntdll']]
         for command in commands:

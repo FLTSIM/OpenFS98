@@ -22,7 +22,7 @@
  * retail's branches make it), and MSVCRT's sprintf, _CIfmod, _CIasin and
  * modf called for real.  The complete 0x32a0-byte .data image is kept at
  * retail's offsets, with its tables of code pointers filled at load from the
- * list tools/gen_advdrv_data.py extracts.  Comments carry retail's .text
+ * list in advdrv_relocs.inc.  Comments carry retail's .text
  * offsets.  docs/modules/advdrv.md describes the format and the variables.
  */
 #include <windows.h>
@@ -43,13 +43,114 @@ typedef int16_t __attribute__((may_alias)) adv_s16;
 typedef int32_t __attribute__((may_alias)) adv_s32;
 typedef double __attribute__((may_alias)) adv_f64;
 
+/* The image at retail's offsets.  The names are where the layout is known (the comments on the A_ macros below
+ * say what each field is for); f_XXXX fields hold a value whose meaning is not yet known. */
+struct adv_linkage {
+    uint32_t id;  /* +0x0 */
+    void * init;  /* +0x4 */
+    void * deinit;  /* +0x8 */
+    uint32_t reserved_0c;  /* +0xc */
+    uint32_t reserved_10;  /* +0x10 */
+    void * dialogs;  /* +0x14 */
+    void * slots[0x7];  /* +0x18 */
+} __attribute__((packed));
+_Static_assert(sizeof(struct adv_linkage) == 0x34, "adv_linkage");
+
+struct adv_operator {
+    uint32_t id;  /* +0x0 */
+    void * handler;  /* +0x4 */
+} __attribute__((packed));
+_Static_assert(sizeof(struct adv_operator) == 0x8, "adv_operator");
+
+struct adv_var {
+    void * get;  /* +0x0 */
+    void * set;  /* +0x4 */
+    uint32_t arg;  /* +0x8 */
+    uint32_t f_0c;  /* +0xc */
+    uint32_t f_10;  /* +0x10 */
+} __attribute__((packed));
+_Static_assert(sizeof(struct adv_var) == 0x14, "adv_var");
+
+struct adv_cloud {
+    uint16_t f_00;  /* +0x0 */
+    uint32_t f_02;  /* +0x2 */
+    uint16_t f_06;  /* +0x6 */
+    uint16_t f_08;  /* +0x8 */
+    uint16_t f_0a;  /* +0xa */
+    uint16_t f_0c;  /* +0xc */
+    uint16_t f_0e;  /* +0xe */
+    uint16_t f_10;  /* +0x10 */
+} __attribute__((packed));
+_Static_assert(sizeof(struct adv_cloud) == 0x12, "adv_cloud");
+
 struct advdrv_image {
-    uint8_t bytes[ADVDRV_IMAGE_SIZE];
-} __attribute__((aligned(16)));
+    struct fs98_import import[9];  /* +0x0 */
+    struct adv_linkage linkage;  /* +0x48 */
+    uint32_t list;  /* +0x7c */
+    char wav_dir[16];  /* +0x80 */
+    char wave[8];  /* +0x90 */
+    char apl[4];  /* +0x98 */
+    char max_events_key[12];  /* +0x9c */
+    char magic_old[16];  /* +0xa8 */
+    char magic[16];  /* +0xb8 */
+    uint32_t steps;  /* +0xc8 */
+    uint32_t msg_time;  /* +0xcc */
+    void * history;  /* +0xd0 */
+    uint8_t gap_00d4[0x4];  /* +0xd4 */
+    void * opcodes[0x2c];  /* +0xd8 */
+    uint32_t newline;  /* +0x188 */
+    uint32_t backslash;  /* +0x18c */
+    char number_format[8];  /* +0x190 */
+    struct adv_operator operators[0x30];  /* +0x198 */
+    struct adv_var vars[0xb0];  /* +0x318 */
+    uint32_t errors[0x8];  /* +0x10d8 */
+    void * weather[0x8];  /* +0x10f8 */
+    struct adv_cloud clouds[0xb];  /* +0x1118 */
+    uint8_t gap_11de[0x2];  /* +0x11de */
+    uint16_t visibility[0x13];  /* +0x11e0 */
+    uint8_t gap_1206[0x2];  /* +0x1206 */
+    uint16_t cover[0x9];  /* +0x1208 */
+    uint8_t gap_121a[0x6];  /* +0x121a */
+    uint16_t cover_10[0x3];  /* +0x1220 */
+    uint8_t gap_1226[0x2];  /* +0x1226 */
+    uint32_t events_max;  /* +0x1228 */
+    uint8_t gap_122c[0x4];  /* +0x122c */
+    void * skip[0x2c];  /* +0x1230 */
+    char cache_key[16];  /* +0x12e0 */
+    uint8_t gap_12f0[0x1fb0];  /* +0x12f0 */
+} __attribute__((packed, aligned(16)));
+_Static_assert(sizeof(struct advdrv_image) == 0x32a0, "advdrv_image");
+_Static_assert(__builtin_offsetof(struct advdrv_image, import) == 0x0, "import");
+_Static_assert(__builtin_offsetof(struct advdrv_image, linkage) == 0x48, "linkage");
+_Static_assert(__builtin_offsetof(struct advdrv_image, list) == 0x7c, "list");
+_Static_assert(__builtin_offsetof(struct advdrv_image, wav_dir) == 0x80, "wav_dir");
+_Static_assert(__builtin_offsetof(struct advdrv_image, wave) == 0x90, "wave");
+_Static_assert(__builtin_offsetof(struct advdrv_image, apl) == 0x98, "apl");
+_Static_assert(__builtin_offsetof(struct advdrv_image, max_events_key) == 0x9c, "max_events_key");
+_Static_assert(__builtin_offsetof(struct advdrv_image, magic_old) == 0xa8, "magic_old");
+_Static_assert(__builtin_offsetof(struct advdrv_image, magic) == 0xb8, "magic");
+_Static_assert(__builtin_offsetof(struct advdrv_image, steps) == 0xc8, "steps");
+_Static_assert(__builtin_offsetof(struct advdrv_image, msg_time) == 0xcc, "msg_time");
+_Static_assert(__builtin_offsetof(struct advdrv_image, history) == 0xd0, "history");
+_Static_assert(__builtin_offsetof(struct advdrv_image, opcodes) == 0xd8, "opcodes");
+_Static_assert(__builtin_offsetof(struct advdrv_image, newline) == 0x188, "newline");
+_Static_assert(__builtin_offsetof(struct advdrv_image, backslash) == 0x18c, "backslash");
+_Static_assert(__builtin_offsetof(struct advdrv_image, number_format) == 0x190, "number_format");
+_Static_assert(__builtin_offsetof(struct advdrv_image, operators) == 0x198, "operators");
+_Static_assert(__builtin_offsetof(struct advdrv_image, vars) == 0x318, "vars");
+_Static_assert(__builtin_offsetof(struct advdrv_image, errors) == 0x10d8, "errors");
+_Static_assert(__builtin_offsetof(struct advdrv_image, weather) == 0x10f8, "weather");
+_Static_assert(__builtin_offsetof(struct advdrv_image, clouds) == 0x1118, "clouds");
+_Static_assert(__builtin_offsetof(struct advdrv_image, visibility) == 0x11e0, "visibility");
+_Static_assert(__builtin_offsetof(struct advdrv_image, cover) == 0x1208, "cover");
+_Static_assert(__builtin_offsetof(struct advdrv_image, cover_10) == 0x1220, "cover_10");
+_Static_assert(__builtin_offsetof(struct advdrv_image, events_max) == 0x1228, "events_max");
+_Static_assert(__builtin_offsetof(struct advdrv_image, skip) == 0x1230, "skip");
+_Static_assert(__builtin_offsetof(struct advdrv_image, cache_key) == 0x12e0, "cache_key");
 
 extern struct advdrv_image advdrv_image;
 
-#define D             (advdrv_image.bytes)
+#define D             ((uint8_t *)&advdrv_image)
 #define D8(o)         (*(uint8_t *)(D + (o)))
 #define D16(o)        (*(adv_u16 *)(D + (o)))
 #define D32(o)        (*(adv_u32 *)(D + (o)))
@@ -279,12 +380,105 @@ static int32_t eval_int(void);
 /* ---- the CRT, and the x87 as retail uses it ----------------------------------------- */
 
 /* .rdata's constant pool, so that every constant is retail's exact value. */
-static const uint8_t advdrv_rdata[] __attribute__((aligned(8))) = {
-#define ADVDRV_RDATA
-#include "advdrv_data.inc"
-#undef ADVDRV_RDATA
+static const double advdrv_rdata[0x60] = {
+    0x0.0p+0,  /* +0x000 0.0 */
+    -0x1.0000000000000p+0,  /* +0x008 -1.0 */
+    0x1.f400000000000p+9,  /* +0x010 1000.0 */
+    0x1.381d7dbf487fdp-2,  /* +0x018 0.3048 */
+    0x1.381d7d17b7b6dp-2,  /* +0x020 0.3047999902464003 */
+    0x1.a3f290abb44e5p+1,  /* +0x028 3.28084 */
+    0x1.0000000000000p+5,  /* +0x030 32.0 */
+    0x1.1c71c71c71c72p-1,  /* +0x038 0.5555555555555556 */
+    0x1.ccccccccccccdp+0,  /* +0x040 1.8 */
+    -0x1.0000000000000p+5,  /* +0x048 -32.0 */
+    0x1.e3d2a4417915cp-6,  /* +0x050 0.02953020134545291 */
+    0x1.0ee8ba2e0eb12p+5,  /* +0x058 33.86363636 */
+    0x1.147537d830a81p-1,  /* +0x060 0.5399568034557235 */
+    0x1.da1cac083126fp+0,  /* +0x068 1.852 */
+    0x1.269979d33136dp+0,  /* +0x070 1.150779356060606 */
+    0x1.bcea768c708bcp-1,  /* +0x078 0.8689763113436793 */
+    0x1.1b17c67f2bae2p-11,  /* +0x080 0.0005399568034557235 */
+    0x1.6800000000000p-8,  /* +0x088 0.0054931640625 */
+    0x1.0000000000000p-8,  /* +0x090 0.00390625 */
+    0x1.ca5dc1a6394b6p+5,  /* +0x098 57.295779513 */
+    0x1.e000000000000p+5,  /* +0x0a0 60.0 */
+    0x1.6800000000000p+8,  /* +0x0a8 360.0 */
+    0x0.0p+0,  /* +0x0b0 0.0 */
+    -0x1.6800000000000p+8,  /* +0x0b8 -360.0 */
+    0x0.0p+0,  /* +0x0c0 0.0 */
+    0x1.0000000000000p-16,  /* +0x0c8 1.52587890625e-05 */
+    0x0.0p+0,  /* +0x0d0 0.0 */
+    0x1.a3f290abb44e5p+1,  /* +0x0d8 3.28084 */
+    0x1.a3f28dfc82721p-7,  /* +0x0e0 0.01281578 */
+    0x1.a3f28fca44edbp-15,  /* +0x0e8 5.0061643906e-05 */
+    0x1.6800000000000p-24,  /* +0x0f0 8.381903171539307e-08 */
+    -0x1.6800000000000p-24,  /* +0x0f8 -8.381903171539307e-08 */
+    0x1.6800000000000p-8,  /* +0x100 0.0054931640625 */
+    0x1.47ae147ae147bp-8,  /* +0x108 0.005 */
+    -0x1.47ae147ae147bp-7,  /* +0x110 -0.01 */
+    -0x1.4000000000000p+3,  /* +0x118 -10.0 */
+    -0x1.999999999999ap-4,  /* +0x120 -0.1 */
+    -0x1.9000000000000p+6,  /* +0x128 -100.0 */
+    0x1.f400000000000p+9,  /* +0x130 1000.0 */
+    0x1.e3d2a44112d88p-10,  /* +0x138 0.001845637584 */
+    0x1.0000000000000p-8,  /* +0x140 0.00390625 */
+    0x1.0000020000040p-23,  /* +0x148 1.1920930376163766e-07 */
+    0x1.0000000000000p-17,  /* +0x150 7.62939453125e-06 */
+    0x1.ca5dc1a6394b6p+5,  /* +0x158 57.295779513 */
+    0x1.999999999999ap-4,  /* +0x160 0.1 */
+    0x1.0624dd2f1a9fcp-10,  /* +0x168 0.001 */
+    0x1.89b367a0f9097p-1,  /* +0x170 0.768946875 */
+    -0x1.f400000000000p+9,  /* +0x178 -1000.0 */
+    -0x1.6800000000000p+8,  /* +0x180 -360.0 */
+    0x1.0004001000400p-14,  /* +0x188 6.103888176768602e-05 */
+    0x1.6800000000000p+8,  /* +0x190 360.0 */
+    0x1.6c16c16c16c17p+7,  /* +0x198 182.04444444444445 */
+    0x1.0000000000000p+0,  /* +0x1a0 1.0 */
+    0x1.fff8000000000p+13,  /* +0x1a8 16383.0 */
+    0x1.d800000000000p+6,  /* +0x1b0 118.0 */
+    0x1.11e667b5f1befp+7,  /* +0x1b8 136.95001 */
+    0x1.4000000000000p+3,  /* +0x1c0 10.0 */
+    0x1.b000000000000p+6,  /* +0x1c8 108.0 */
+    0x1.d7cccf6be37dfp+6,  /* +0x1d0 117.95001 */
+    0x1.9000000000000p+6,  /* +0x1d8 100.0 */
+    0x1.9000000000000p+7,  /* +0x1e0 200.0 */
+    0x1.a8f99b3d07c85p+10,  /* +0x1e8 1699.9001 */
+    0x1.f3800346dc5d6p+9,  /* +0x1f0 999.0001 */
+    0x1.e610000000000p+12,  /* +0x1f8 7777.0 */
+    0x1.86a0000000000p+16,  /* +0x200 100000.0 */
+    0x1.381d7dbf44364p+14,  /* +0x208 19975.372799936114 */
+    -0x1.0000000000000p+0,  /* +0x210 -1.0 */
+    0x1.0000000000000p+14,  /* +0x218 16384.0 */
+    0x1.6800000000000p+7,  /* +0x220 180.0 */
+    0x1.6800000000000p+8,  /* +0x228 360.0 */
+    -0x1.6800000000000p+7,  /* +0x230 -180.0 */
+    -0x1.6800000000000p+8,  /* +0x238 -360.0 */
+    0x1.6800000000000p+6,  /* +0x240 90.0 */
+    -0x1.6800000000000p+6,  /* +0x248 -90.0 */
+    0x1.b21a8e147ae14p+16,  /* +0x250 111130.555 */
+    0x1.2defe28b13324p-17,  /* +0x258 8.998425320561029e-06 */
+    0x1.6800000000000p-24,  /* +0x260 8.381903171539307e-08 */
+    0x0.0p+0,  /* +0x268 0.0 */
+    0x1.6c16c16c16c17p+23,  /* +0x270 11930464.711111112 */
+    -0x1.0000000000000p-17,  /* +0x278 -7.62939453125e-06 */
+    0x1.0000000000000p-17,  /* +0x280 7.62939453125e-06 */
+    0x1.0000000000000p+16,  /* +0x288 65536.0 */
+    0x1.0000000000000p-16,  /* +0x290 1.52587890625e-05 */
+    0x1.f400000000000p+10,  /* +0x298 2000.0 */
+    0x0.0p+0,  /* +0x2a0 0.0 */
+    0x1.925604189374cp+10,  /* +0x2a8 1609.344 */
+    0x1.8c00000000000p+6,  /* +0x2b0 99.0 */
+    0x1.6800000000000p+8,  /* +0x2b8 360.0 */
+    0x1.6c16c16c16c17p+7,  /* +0x2c0 182.04444444444445 */
+    0x1.076541bfda92ap-9,  /* +0x2c8 0.002009548450520833 */
+    0x1.381d7dbf487fdp-2,  /* +0x2d0 0.3048 */
+    0x1.0000000000000p+8,  /* +0x2d8 256.0 */
+    0x1.1800000000000p+5,  /* +0x2e0 35.0 */
+    0x1.9000000000000p+4,  /* +0x2e8 25.0 */
+    0x1.0ee978d4fdf3bp+9,  /* +0x2f0 541.824 */
+    0x0.0p+0,  /* +0x2f8 0.0 */
 };
-#define K(va)  (*(const adv_f64 *)(advdrv_rdata + ((va) - 0x20619000u)))
+#define K(va)  (*(const adv_f64 *)((const uint8_t *)advdrv_rdata + ((va) - 0x20619000u)))
 
 /* Retail calls MSVCRT's sprintf, _CIfmod, _CIasin and modf; so does this, so
  * that formatting and the transcendental functions are the same code. */
@@ -4377,11 +4571,295 @@ static void FS98_STDCALL cache_sounds(uint32_t caching)
 
 /* ---- the image ------------------------------------------------------------------------ */
 
-struct advdrv_image advdrv_image = {{
-#define ADVDRV_IMAGE
-#include "advdrv_data.inc"
-#undef ADVDRV_IMAGE
-}};
+struct advdrv_image advdrv_image = {
+    .import = {
+        { FS98_MOD_HOST },
+        { FS98_MOD_GLOBAL },
+        { FS98_MOD_CHAIN },
+        { FS98_MOD_DEMO },
+        { FS98_MOD_MAIN },
+        { FS98_MOD_SOUND },
+        { FS98_MOD_UTIL },
+        { FS98_MOD_WINMSG },
+        { 0 },
+    },
+    .linkage = {
+        .id = FS98_MOD_ADVDRV,
+    },
+    .list = 5,
+    .wav_dir = "fs98\\adv\\wav",
+    .wave = "WAVE",
+    .apl = "APL",
+    .max_events_key = "MAX_EVENTS",
+    .magic_old = "FS6 Adventure\032",
+    .magic = "FS6X Adventure\032",
+    .steps = 3,
+    .msg_time = 0x5a,
+    .newline = 0xa,
+    .backslash = 0x5c,
+    .number_format = "%0*.*f",
+    .operators = {
+        [0] = { .id = 2 },
+        [1] = { .id = 3 },
+        [2] = { .id = 4 },
+        [3] = { .id = 5 },
+        [4] = { .id = 6 },
+        [5] = { .id = 7 },
+        [6] = { .id = 8 },
+        [7] = { .id = 9 },
+        [8] = { .id = 0xa },
+        [9] = { .id = 0xb },
+        [10] = { .id = 0xc },
+        [11] = { .id = 0xd },
+        [12] = { .id = 0xe },
+        [13] = { .id = 0xf },
+        [14] = { .id = 0x10 },
+        [15] = { .id = 0x11 },
+        [16] = { .id = 0x12 },
+        [17] = { .id = 0x13 },
+        [18] = { .id = 0x14 },
+        [19] = { .id = 0x15 },
+        [20] = { .id = 0x16 },
+        [21] = { .id = 0x17 },
+        [22] = { .id = 0x18 },
+        [23] = { .id = 0x19 },
+        [24] = { .id = 0x1a },
+        [25] = { .id = 0x1b },
+        [26] = { .id = 0x1c },
+        [27] = { .id = 0x1d },
+        [28] = { .id = 0x1e },
+        [29] = { .id = 0x1f },
+        [30] = { .id = 0x20 },
+        [31] = { .id = 0x21 },
+        [32] = { .id = 0x22 },
+        [33] = { .id = 0x23 },
+        [34] = { .id = 0x24 },
+        [35] = { .id = 0x25 },
+        [36] = { .id = 0x26 },
+        [37] = { .id = 0x27 },
+        [38] = { .id = 0x28 },
+        [39] = { .id = 0x29 },
+        [40] = { .id = 0x2a },
+        [41] = { .id = 0x2b },
+        [42] = { .id = 0x2c },
+        [43] = { .id = 0x2d },
+        [44] = { .id = 0x2e },
+        [45] = { .id = 0x2f },
+        [46] = { .id = 0x30 },
+        [47] = { .id = 0x31 },
+    },
+    .vars = {
+        [0] = { .arg = 0x34e },
+        [1] = { .arg = 0x350, .f_0c = 1 },
+        [2] = { .f_0c = 1 },
+        [3] = { .arg = 0xc4e, .f_0c = 1 },
+        [4] = { .arg = 0x352, .f_0c = 2 },
+        [5] = { .arg = 4, .f_0c = 2 },
+        [6] = { .arg = 0xc5e, .f_0c = 2 },
+        [8] = { .arg = 0x354 },
+        [9] = { .arg = 0xbb0, .f_0c = 1 },
+        [10] = { .arg = 0xbae, .f_0c = 1 },
+        [11] = { .arg = 0xbac, .f_0c = 1 },
+        [14] = { .arg = 0x560 },
+        [15] = { .arg = 0x568 },
+        [16] = { .arg = 0x570 },
+        [17] = { .arg = 0x578 },
+        [18] = { .arg = 0x57c },
+        [19] = { .arg = 0x580 },
+        [20] = { .arg = 0x248, .f_10 = 3 },
+        [21] = { .arg = 0x238 },
+        [22] = { .arg = 0x239 },
+        [23] = { .arg = 0x23a },
+        [24] = { .arg = 0xc4a, .f_0c = 0x80 },
+        [25 ... 28] = { .f_0c = 0xc4a },
+        [29] = { .f_0c = 1 },
+        [30] = { .f_0c = 0x80 },
+        [31] = { .f_0c = 0x40 },
+        [34] = { .arg = 0xc5a, .f_0c = 0x80 },
+        [35 ... 38] = { .arg = 4, .f_0c = 0xc5a },
+        [39] = { .arg = 4, .f_0c = 1 },
+        [45] = { .arg = 0xe70 },
+        [46] = { .arg = 0xea4 },
+        [47] = { .arg = 0xea2 },
+        [48] = { .arg = 0xea6 },
+        [49] = { .arg = 0xefe },
+        [50] = { .arg = 0xf02 },
+        [51] = { .arg = 0xe78 },
+        [52] = { .arg = 0xe9c },
+        [53] = { .arg = 0xe9a },
+        [54] = { .arg = 0xe9e },
+        [55] = { .arg = 0xef8 },
+        [56] = { .arg = 0xefc },
+        [57] = { .arg = 0xe7e },
+        [58] = { .arg = 0xeac },
+        [59] = { .arg = 0xeaa },
+        [60] = { .arg = 0xeae },
+        [61] = { .arg = 0xf04 },
+        [62] = { .arg = 0xf08 },
+        [63] = { .arg = 0xeee },
+        [64] = { .arg = 0xef0 },
+        [65] = { .arg = 0xef2 },
+        [66] = { .arg = 0xef4 },
+        [67] = { .arg = 0xef6 },
+        [68] = { .arg = 0xee4 },
+        [69] = { .arg = 0xee2 },
+        [70] = { .arg = 0xee6 },
+        [71] = { .arg = 0xee8 },
+        [72] = { .arg = 0xeea },
+        [73] = { .arg = 0xeec },
+        [74] = { .arg = 0xed8 },
+        [75] = { .arg = 0xed6 },
+        [76] = { .arg = 0xeda },
+        [77] = { .arg = 0xedc },
+        [78] = { .arg = 0xede },
+        [79] = { .arg = 0xee0 },
+        [80] = { .arg = 0xecc },
+        [81] = { .arg = 0xeca },
+        [82] = { .arg = 0xece },
+        [83] = { .arg = 0xed0 },
+        [84] = { .arg = 0xed2 },
+        [85] = { .arg = 0xed4 },
+        [86] = { .arg = 0xebe },
+        [87] = { .arg = 0xec0 },
+        [88] = { .arg = 0xeba },
+        [89] = { .arg = 0xebc },
+        [90] = { .arg = 0xeb6 },
+        [91] = { .arg = 0xeb8 },
+        [92] = { .arg = 0xeb2 },
+        [93] = { .arg = 0xeb4 },
+        [94] = { .arg = 0xec6 },
+        [95] = { .arg = 0xec8, .f_0c = 1 },
+        [96] = { .arg = 0x5dc, .f_0c = 1 },
+        [97] = { .arg = 0x36c, .f_0c = 1 },
+        [98] = { .arg = 0x36d, .f_0c = 1 },
+        [99] = { .arg = 0xbc8, .f_0c = 0x100d8, .f_10 = 0x10034 },
+        [100] = { .arg = 0xbe0, .f_0c = 0x3fff },
+        [101] = { .arg = 0xbe4, .f_0c = 0x3fff },
+        [102] = { .arg = 0xbb6, .f_0c = 0x4000 },
+        [103] = { .arg = 0xbb2, .f_0c = 0xffffc000 },
+        [104] = { .arg = 0xbba, .f_0c = 0x4000 },
+        [105] = { .arg = 0xbc0, .f_0c = 0x4000 },
+        [106] = { .arg = 0xbc4, .f_0c = 0x7fff },
+        [107] = { .arg = 0xbc6, .f_0c = 0x7fff },
+        [108] = { .arg = 0xbec, .f_0c = 0x3fff },
+        [109] = { .arg = 0xbf0, .f_0c = 0x3fff },
+        [110] = { .arg = 0xbf4, .f_0c = 0x3fff },
+        [111] = { .arg = 0xb7c },
+        [112] = { .arg = 0xb94 },
+        [113] = { .arg = 0xb84 },
+        [114] = { .arg = 0xb9c },
+        [115] = { .arg = 0x20 },
+        [116] = { .arg = 0x2c8 },
+        [117] = { .arg = 0x2b8, .f_0c = 0x80 },
+        [118] = { .arg = 0x2bc, .f_0c = 0x80 },
+        [119] = { .arg = 0x2a0 },
+        [121] = { .arg = 0x7bc, .f_0c = 0x10100, .f_10 = 0x100ff },
+        [122] = { .arg = 0x7c8, .f_0c = 0x1010f, .f_10 = 0x10117 },
+        [123] = { .arg = 0x7cc },
+        [124] = { .arg = 0x7d0, .f_0c = 0x10110, .f_10 = 0x10118 },
+        [125] = { .arg = 0x7d4 },
+        [126] = { .arg = 0x7c0, .f_0c = 0x10111, .f_10 = 0x10119 },
+        [127] = { .arg = 0x7d8, .f_0c = 0x1010c, .f_10 = 0x10114 },
+        [128] = { .arg = 0x7fc, .f_0c = 0x1010e, .f_10 = 0x10116 },
+        [129] = { .arg = 0x7c4, .f_0c = 0x10113, .f_10 = 0x1011b },
+        [130] = { .arg = 0x800, .f_0c = 0x1010d, .f_10 = 0x10115 },
+        [131] = { .arg = 0x804, .f_0c = 0x10112, .f_10 = 0x1011a },
+        [132] = { .arg = 0x364, .f_10 = 0xf },
+        [133] = { .arg = 0x610, .f_0c = 1 },
+        [134] = { .arg = 0x609 },
+        [135] = { .arg = 0x5d8, .f_0c = 1 },
+        [136] = { .arg = 0xefa, .f_0c = 1 },
+        [137] = { .arg = 0xf00, .f_0c = 1 },
+        [138] = { .arg = 0xf06, .f_0c = 1 },
+        [139] = { .arg = 0x366, .f_0c = 1 },
+        [140] = { .arg = 0xb65 },
+        [141] = { .arg = 0x612, .f_10 = 1 },
+        [142] = { .arg = 0xb66 },
+        [143] = { .arg = 0x11be },
+        [144] = { .arg = 0xb67 },
+        [145] = { .arg = 0x278, .f_0c = 1 },
+        [146] = { .arg = 0xbdc, .f_0c = 0x3fff },
+        [147] = { .arg = 0x11ba, .f_0c = 0x270 },
+        [148] = { .arg = 0xbfc, .f_0c = 1 },
+        [151] = { .arg = 0xbe8 },
+        [152] = { .arg = 0xb6d },
+        [153] = { .arg = 0x280, .f_0c = 1 },
+        [157] = { .arg = 0xb72 },
+        [158] = { .arg = 0x36e, .f_0c = 0x7f },
+        [159] = { .arg = 0xb6e },
+        [160] = { .arg = 0xc48, .f_0c = 0x7f },
+        [161] = { .arg = 0xc49, .f_0c = 0xffffff81 },
+        [162] = { .arg = 0xc59, .f_0c = 0x7f },
+        [166] = { .arg = 0x88c, .f_0c = 1 },
+        [167] = { .arg = 0x924, .f_0c = 2 },
+        [168] = { .arg = 0x9bc, .f_0c = 3 },
+        [169] = { .arg = 0xa54, .f_0c = 4 },
+        [171] = { .arg = 0xc4b },
+        [172] = { .arg = 0xc5b },
+        [174] = { .arg = 0x888, .f_10 = 0xf },
+    },
+    .errors = {
+        [0] = 0x2331,
+        [1] = 0x2332,
+        [2] = 0x2333,
+        [3] = 0x2334,
+        [4] = 0x2335,
+        [5] = 0x2336,
+        [6] = 0x2337,
+        [7] = 0x2338,
+    },
+    .clouds = {
+        [0] = { .f_00 = 0x64, .f_02 = 0x336b0, .f_06 = 0x2710, .f_0a = 8, .f_0e = 0xff, .f_10 = 0xc8 },
+        [1] = { .f_00 = 0x12c0, .f_02 = 0x336b0, .f_06 = 0x64, .f_0a = 2, .f_0e = 0x12 },
+        [2] = { .f_00 = 0x12c0, .f_02 = 0x336b0, .f_06 = 5, .f_08 = 7, .f_0a = 8, .f_0e = 0x12 },
+        [3] = { .f_00 = 0x12c0, .f_02 = 0x536b0, .f_06 = 0x12c, .f_08 = 2, .f_0a = 6, .f_0c = 0x24, .f_0e = 0x6d },
+        [4] = { .f_00 = 0x708, .f_02 = 0xf1b58, .f_06 = 0x12c, .f_08 = 7, .f_0a = 8, .f_0e = 0x12 },
+        [5] = { .f_00 = 0x708, .f_02 = 0x1e1b58, .f_06 = 0x3e8, .f_08 = 2, .f_0a = 6, .f_0c = 0x24, .f_0e = 0x6d },
+        [6] = { .f_00 = 0x64, .f_02 = 0x6405dc, .f_06 = 0x3e8, .f_08 = 2, .f_0a = 8, .f_0c = 0x24, .f_0e = 0x6d, .f_10 = 0x64 },
+        [7] = { .f_00 = 0x64, .f_02 = 0x12c05dc, .f_06 = 0x4b0, .f_08 = 6, .f_0a = 8, .f_0e = 0x12, .f_10 = 0x14 },
+        [8] = { .f_00 = 0x64, .f_02 = 0x1e05dc, .f_06 = 0x258, .f_08 = 4, .f_0a = 8, .f_0e = 0x12, .f_10 = 0x14 },
+        [9] = { .f_00 = 0x64, .f_02 = 0x6405dc, .f_06 = 0x1388, .f_08 = 2, .f_0a = 8, .f_0c = 0x24, .f_0e = 0x6d, .f_10 = 0xc8 },
+        [10] = { .f_00 = 0x64, .f_02 = 0x5dc1770, .f_06 = 0x2328, .f_0a = 2, .f_0c = 0x92, .f_0e = 0xff, .f_10 = 0xc8 },
+    },
+    .visibility = {
+        [0] = 6,
+        [1] = 0xd,
+        [2] = 0x19,
+        [3] = 0x25,
+        [4] = 0x32,
+        [5] = 0x4b,
+        [6] = 0x64,
+        [7] = 0x96,
+        [8] = 0xc8,
+        [9] = 0x12c,
+        [10] = 0x190,
+        [11] = 0x1f4,
+        [12] = 0x2bc,
+        [13] = 0x3e8,
+        [14] = 0x5dc,
+        [15] = 0x7d0,
+        [16] = 0xbb8,
+        [17] = 0xfa0,
+        [18] = 0x7d00,
+    },
+    .cover = {
+        [1] = 0x2000,
+        [2] = 0x4000,
+        [3] = 0x6000,
+        [4] = 0x8000,
+        [5] = 0xa000,
+        [6] = 0xc000,
+        [7] = 0xe000,
+        [8] = 0xffff,
+    },
+    .cover_10 = {
+        [0] = 0x5555,
+        [1] = 0xaaaa,
+        [2] = 0xffff,
+    },
+    .events_max = 0xc8,
+    .cache_key = "CACHE_WAV_FILES",
+};
 
 __asm__(".globl _ImportTable\n\t.set _ImportTable, _advdrv_image + 0x0\n\t"
         ".globl _Linkage\n\t.set _Linkage, _advdrv_image + 0x48");
@@ -4510,9 +4988,7 @@ static void advdrv_install(void)
 {
 #define ADVDRV_CODE(offset, retail) D32(offset) = code_for(retail);
 #define ADVDRV_DATA(offset, target) D32(offset) = U32(D + (target));
-#define ADVDRV_RELOCS
-#include "advdrv_data.inc"
-#undef ADVDRV_RELOCS
+#include "advdrv_relocs.inc"
 #undef ADVDRV_CODE
 #undef ADVDRV_DATA
     bind_crt();

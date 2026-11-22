@@ -147,7 +147,10 @@ static void shape_object(uint8_t *object)
         for (at = 0x38; at <= 0x44; at += 4) { int32_t value = (int32_t)(next_random() % 24) - 4; memcpy(object + at, &value, 4); }
         return;
     }
-    if (vtable < VTABLE_COUNT && strstr(s_vtables[vtable].name, "Button")) {
+    if (vtable < VTABLE_COUNT && (strstr(s_vtables[vtable].name, "Button") ||
+                                  (strstr(s_vtables[vtable].name, "Slider") && next_random() % 2))) {
+        /* (CSimsSlider is a button too, and its geometry below needs this branch; half are left
+         * random, which reaches a non-zero range minimum and large positions the shape never has) */
         /* a CSimsButton: its palette a block (the palette state +0x808 there or not), a
          * frame's height and width small, its strip a section */
         uint32_t random = next_random(), pal = fixture_address(s_fixture.blocks[random % BLOCKS]);

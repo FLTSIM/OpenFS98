@@ -36,9 +36,13 @@ struct host_image {
     uint8_t bytes[HOST_IMAGE_SIZE];
 };
 
+/* host_image.inc defines AT(off) for its designated initialisers; host_rt.h's AT(object, offset) comes back after it */
+#pragma push_macro("AT")
+#undef AT
 struct host_image host_image = {{
-#include "host_data.inc"
+#include "host_image.inc"
 }};
+#pragma pop_macro("AT")
 
 #ifndef HOST_IMAGE_SHARED
 /* .rdata, for the shared routines when built without the runtime (HOST_RT_STANDALONE) */

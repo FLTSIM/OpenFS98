@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Require actual retail mismatches for cache-list core/init mutations."""
+import module_flags
 from pathlib import Path
 import os
 import subprocess
@@ -48,8 +49,7 @@ for name, before, after in mutations:
     mutated = source_text.replace(before, after)
     if name == 'button-module-cache': mutated = mutated.replace('fs98_world_get_resource_module(), 1, 1, rect)', 'module, 1, 1, rect)')
     source_path.write_text(mutated)
-    subprocess.run(['i686-w64-mingw32-gcc', '-std=c99', '-O2', '-Wall', '-Wextra', '-Werror',
-                    '-fno-strict-aliasing', '-fno-delete-null-pointer-checks', '-Isrc/world',
+    subprocess.run(['i686-w64-mingw32-gcc', *module_flags.FLAGS, '-std=c99', '-Itools/difftest', '-O2', '-Wall', '-Wextra', '-Werror', '-Isrc/world',
                     '-o', str(executable), 'tools/difftest/worldcachediff.c', str(source_path),
                     'src/world/world_init.c', 'src/world/world_area.c',
                     '-lntdll'], cwd=root, check=True)

@@ -10,10 +10,10 @@ DirectSound underneath) does that, and SOUND tells it which sample, how loud,
 how fast and where.
 
 `src/sound/sound.c` is the transliteration and the module shell together.
-`make sounddiff-run` drives retail and the OpenFS98 build side by side over
+`tools/ofs sounddiff-run` drives retail and the OpenFS98 build side by side over
 random scripts -- **20,000 scenarios, 0 differ** -- comparing SOUND's whole `.data` image, the
 heap, GLOBAL and the sim's `FLTSIM98.CFG` as well as every call it makes.
-`make smoke` passes with SOUND installed beside ACONTAIN, ATC, CHAIN, GLOBAL,
+`tools/ofs smoke` passes with SOUND installed beside ACONTAIN, ATC, CHAIN, GLOBAL,
 NUMERIC, SLEW, UTIL and WEATHERM: 27/27 modules, 95 gauges. The sim starts
 SOUND, loads the aircraft's sounds and runs its frames on the way to the
 panel.
@@ -195,7 +195,8 @@ are inline x87 because a C library would not round them the same:
   rounds 1/log2(10) to the precision control first;
 - `fpatan` for the bearing, and `fsqrt`.
 
-The constants are generated from `.rdata` as hex-float literals. `_ftol`
+The constants are committed hex-float literals in `src/sound/sound_consts.inc`,
+taken from `.rdata`. `_ftol`
 truncates to 64 bits and callers keep 32 or 16, as in UTIL. Everything runs
 under whatever precision control the process has, the same for both
 builds; the harness runs each scenario under 24-, 53- or 64-bit precision.
@@ -232,7 +233,7 @@ has no fraction bits left -- and the ident timers start in step.
 
 ## Verification
 
-`make sounddiff-run` (`tools/difftest/sounddiff.c`): both builds loaded into
+`tools/ofs sounddiff-run` (`tools/difftest/sounddiff.c`): both builds loaded into
 one process and driven through Linkage and the three CHAIN lists over
 random scripts -- start, stop, frames, events, wind, the fader services,
 CHAIN messages and marker lights, ident ticks, samples ending -- with
@@ -307,5 +308,5 @@ sub-sounds), the ident reload (many ticks), and the second log10 (the 400 m
 eyepoint under 24-bit precision -- found by working the arithmetic through
 by hand, since at exactly 400 m both ways truncate to the same integer).
 
-`make install` and `make smoke`: PASS, 27/27 modules, 95 gauges, with all nine
+`tools/ofs ofs_install` and `tools/ofs smoke`: PASS, 27/27 modules, 95 gauges, with all nine
 OpenFS98 modules installed.

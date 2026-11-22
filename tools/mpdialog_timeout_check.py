@@ -6,6 +6,7 @@ import subprocess
 import tempfile
 from pathlib import Path
 
+import module_flags
 import mpdialog_ui_breaks as runner
 
 
@@ -18,7 +19,7 @@ def main():
         source.write_text('#include <windows.h>\n#include <stdio.h>\n'
                           'int main(void) { puts("SENTINEL_READY"); fflush(stdout); '
                           'Sleep(60000); return 0; }\n')
-        subprocess.run([runner.CC, '-O2', '-o', str(executable), str(source)], check=True)
+        subprocess.run([runner.CC, *module_flags.FLAGS, '-O2', '-o', str(executable), str(source)], check=True)
         sentinel_env = os.environ.copy()
         sentinel_env['WINEPREFIX'] = str(work / 'sentinel-prefix')
         sentinel = subprocess.Popen(['wine', str(executable)], cwd=runner.ROOT,

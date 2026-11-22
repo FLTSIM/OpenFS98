@@ -14,13 +14,17 @@ Splits three ways, plus a flight model:
 
 ## Backlog
 
-1. GPS output to the LAN for EFBs (ForeFlight, Garmin Pilot).
-2. Airports generated from X-Plane free data (taxiways, signage).
-3. Better terrain heights, batch-downloaded or streamed.
-4. Satellite imagery, downloaded or streamed and converted.
-5. Buildings from Microsoft building footprints.
-6. Trees from coverage data.
-7. Live ADS-B traffic, ~1 minute delayed for smooth interpolation.
-8. Live shipping traffic (maybe).
-9. Live METAR weather, with weather-model improvements if needed.
-10. 3D blocky clouds visible at distance instead of 2D.
+1. Airports generated from X-Plane free data (taxiways, signage).
+2. Better terrain heights, batch-downloaded or streamed.
+3. Satellite imagery, downloaded or streamed and converted.
+4. Buildings from Microsoft building footprints.
+5. Trees from coverage data.
+6. Live ADS-B traffic, ~1 minute delayed for smooth interpolation.
+7. Live shipping traffic (maybe).
+8. Live METAR weather, with weather-model improvements if needed.
+9. 3D blocky clouds visible at distance instead of 2D.
+10. Player toggles to restore individual fixed retail bugs.
+11. Internet multiplayer (NAT traversal, lobbies), and DirectPlay peers on DirectX 5-only runtimes.
+12. A user-run 74-flight check for Mac, if Mac users report real issues.
+
+GPS output to the LAN for EFBs is now in the port, as the CAP-9 add-on.

@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Snapshot weather-area mutations and count only explicit retail differences."""
+import module_flags
 from pathlib import Path
 import argparse
 import hashlib
@@ -93,7 +94,7 @@ def main():
     for name in ('world-res.o','libworld-simsui.a','WORLD_area.dll'):
         sources[name]=(Path('bin/world-diff')/name).read_bytes()
     (output/'inputs.json').write_text(json.dumps({name:hashlib.sha256(data).hexdigest() for name,data in sources.items()},indent=2)+'\n')
-    world_sources=next(line.split(':=',1)[1].split() for line in Path('tools/world.mk').read_text().splitlines() if line.startswith('WORLD_SOURCES :='))
+    world_sources=Path('src/world/sources.txt').read_text().split()
     caught=0
     for name,unit,filename,before,after in selected:
         work=output/name;work.mkdir(exist_ok=True)
@@ -104,7 +105,7 @@ def main():
                 if name=='accept-owner-cache':
                     data=data.replace(b'U32(PTR(object, 0x10f8), 0) = 1;',b'U32(saved_descriptor, 0) = 1;')
             (work/source).write_bytes(data)
-        flags=['i686-w64-mingw32-gcc','-std=c99','-O2','-Wall','-Wextra','-Werror','-fno-strict-aliasing','-fno-delete-null-pointer-checks']
+        flags=['i686-w64-mingw32-gcc', *module_flags.FLAGS,'-std=c99', '-Itools/difftest','-O2','-Wall','-Wextra','-Werror']
         if args.native:
             dll=work/'mutant.dll';exe=work/'worldwareasuidiff.exe'
             commands=[flags+['-shared','-nostdlib','-Wl,--entry=_DllMain@12','-Wl,--disable-dynamicbase','-Wl,--image-base=0x223f0000','-o',str(dll),*[str(work/Path(p).name) for p in world_sources],str(work/'world.def'),str(work/'world-res.o'),str(work/'libworld-simsui.a'),'-lkernel32','-luser32','-lmsvcrt','-lntdll'],flags+['-o',str(exe),str(work/'worldwareasuidiff.c'),'-lgdi32','-lntdll']]

@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Actual owner acceptance in disposable game trees and Wine prefixes."""
+import module_flags
 import argparse
 import fcntl
 import hashlib
@@ -42,7 +43,7 @@ def retail_tree(seed, destination):
 
 
 def build_probes(audit):
-    flags = ['i686-w64-mingw32-gcc', '-std=c99', '-O2', '-Wall', '-Wextra', '-Werror']
+    flags = ['i686-w64-mingw32-gcc', *module_flags.FLAGS, '-std=c99', '-Itools/difftest', '-O2', '-Wall', '-Wextra', '-Werror']
     sources = {}
     for source, target, extra in [
         ('mpdialoghosthook.c', 'mpdialoghosthook.dll', ['-shared', '-Wl,--kill-at', '-luser32']),

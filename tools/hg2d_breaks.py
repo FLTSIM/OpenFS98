@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
 """Build isolated, deliberately wrong HG2D DLLs and require detection.
 
-Run from the repository root after make -f tools/hg2d.mk hg2d.
+Run from the repository root after tools/ofs hg2d.
 Does not edit the source or the baseline DLL. Wine needs normal host access.
 """
+import module_flags
 import os
 from pathlib import Path
 import shutil
@@ -1860,8 +1861,7 @@ for name, old, new, suite in mutations:
     library = build / 'HG2D_ours.dll'
     library.unlink(missing_ok=True)
     subprocess.run([
-        'i686-w64-mingw32-gcc', '-std=c99', '-O2', '-Wall', '-Wextra',
-        '-fno-strict-aliasing', '-shared', '-nostdlib', '-Wl,--entry=_DllMain@12',
+        'i686-w64-mingw32-gcc', *module_flags.FLAGS, '-std=c99', '-O2', '-Wall', '-Wextra', '-shared', '-nostdlib', '-Wl,--entry=_DllMain@12',
         '-Wl,--image-base=0x30000000', '-Wl,--disable-dynamicbase',
         '-I' + str(root / 'src/hg2d'), '-o', str(library), str(variant),
         str(root / 'src/hg2d/hg2d.def'), '-lgcc', '-lkernel32', '-lgdi32'], check=True)

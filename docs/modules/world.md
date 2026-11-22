@@ -1,5 +1,7 @@
 # World.DLL — native scenery, position, facilities, weather and time dialogs
 
+> Story 1.4: the 17 `gen_world_*.py` table generators are retired. Their 36 output files in `src/world/*.inc` (values read from retail World.DLL) are committed C and plain sources. Only `gen_world_runtime.py` remains, building `world.res` and `simsui-anchor.def` at build time. Where the text below says a retired generator extracts something, read it as history.
+
 **Complete native replacement, integrated and exercised in the game.**
 `bin/WORLD.DLL`
 registers the scenery-area list (`0x13080001`), add/edit scenery area
@@ -15,9 +17,9 @@ Their classes, initialization, controls, event/message maps, factories,
 exception lifetimes and module binding are rebuilt in C, using
 retail MFC42/SIMSUI as shared dependencies. All nineteen registrations now
 have native UI acceptance, including the Advanced Weather parent and five pages.
-The shared Makefile builds World, installs it at `English/World.DLL`, restores
-the retail file with `make world-revert`, and includes it in `make install`,
-`make revert`, `make compare`, `make run` and `make smoke` reporting.
+The shared build builds World, installs it at `English/World.DLL`, restores
+the retail file with `tools/ofs world-revert`, and includes it in `tools/ofs ofs_install`,
+`tools/ofs ofs_revert`, `tools/ofs compare`, `tools/ofs run` and `tools/ofs smoke` reporting.
 Real MAIN/FE/FACIL owner flows and both Basic/Advanced Weather modes pass the
 installed-game UI runner. Older family sections retain historical hashes and
 statuses; the latest integrated artifact and test record are below.
@@ -89,9 +91,9 @@ booster behavior is not inferred from scenery-area behavior. That milestone
 left eleven other registrations pending; world-files and exact-position
 acceptance below reduce the remaining boundary to nine.
 
-Keep edits within `src/world/`, World generators/harnesses, `tools/world.mk`,
+Keep edits within `src/world/` (its source list is `src/world/sources.txt`), World generators/harnesses, the `world*` targets,
 `tools/run_worlddiff.sh` and World handoff documentation. Preserve FE/FACIL,
-MAIN/HOST and their harnesses/docs, and the shared Makefile. The World runner
+MAIN/HOST and their harnesses/docs, and the shared build. The World runner
 uses `bin/world-diff/wineprefix` and `bin/world-diff/wine.lock`; keep its output
 and prefix separate from MAIN/HOST runs. Never install the partial DLL into
 the active game. Check the worktree first and preserve any uncommitted slices
@@ -172,9 +174,9 @@ appears in the seven implemented routines. Initialization and inherited behavior
 ### Reproduce the core acceptance
 
 ```sh
-make -f tools/world.mk worlddiff-run N=20000
-make -f tools/world.mk worlddiff-run N=2000 MODE=interrupt
-make -f tools/world.mk world-breaks
+tools/ofs worlddiff-run N=20000
+tools/ofs worlddiff-run N=2000 MODE=interrupt
+tools/ofs world-breaks
 ```
 
 Reference SHA-256:
@@ -226,12 +228,12 @@ These byte-identity results describe the style cleanup before adding Priority.
 
 `src/world/world_objects.c` implements the shared constructor, destructor,
 scalar deleting destructor, DDX, help/context handlers and both factories.
-`tools/gen_world_tables.py` extracts the 15-control lifetime graph, 14 DDX
+The retired `gen_world_tables.py` extracts the 15-control lifetime graph, 14 DDX
 bindings, terminated numeric help map and import-hook metadata directly from
 retail. It validates reverse destruction, the MSVC EH state/action graph,
 vtable/deleting-destructor association, base/module identity and DDX coverage.
-The generated `.inc` files contain ABI metadata, not code or resource payloads;
-regeneration produced identical output.
+The committed `.inc` files contain ABI metadata, not code or resource payloads;
+regeneration (before the generators were retired) produced identical output.
 
 The constructor sets the class vtable and `+0x10e0` only after every embedded
 constructor succeeds. Destruction does **not** reset the class vtable. When a
@@ -265,10 +267,10 @@ The real message-box/abort implementation is not executed by this core suite.
 ### Reproduce the lifetime acceptance
 
 ```sh
-make -f tools/world.mk worldlifediff-run N=20000
-make -f tools/world.mk worldlifediff-run N=2000 MODE=unwind
-make -f tools/world.mk worldlifediff-run N=2000 MODE=typed
-make -f tools/world.mk world-life-breaks
+tools/ofs worldlifediff-run N=20000
+tools/ofs worldlifediff-run N=2000 MODE=unwind
+tools/ofs worldlifediff-run N=2000 MODE=typed
+tools/ofs world-life-breaks
 ```
 
 `tools/difftest/worldlifediff.c` executes nine operations per scenario: the eight
@@ -318,7 +320,8 @@ empty-path CString/resource branch, 15 embedded-control setup, text limits,
 population and final enablement. `world_runtime.c` binds the retail imports,
 rebuilds the 60-slot area vtable and MFC message map, and implements module
 attachment, registration, dynamic-link-library cleanup and resource lifetime.
-`gen_world_runtime.py` extracts bindings and registry records. Build-only
+`gen_world_runtime.py` now only builds the resources, by type and id, with no check of the image. The bindings and registry
+records it once extracted are committed in `src/world/world_runtime_tables.inc`. Build-only
 resource payloads stay in ignored `bin/world-diff/world.res`; no retail machine
 code or resource payload is committed. The DLL exports only Linkage/ImportTable.
 
@@ -338,12 +341,12 @@ Initializer details established against retail:
   buffer acquisition, loading, release or text assignment.
 
 ```sh
-make -f tools/world.mk world
-make -f tools/world.mk worldinitdiff-run N=2000 MODE=unwind
-make -f tools/world.mk world-init-breaks
-make -f tools/world.mk worlduidiff-run
-make -f tools/world.mk world-ui-breaks
-make -f tools/world.mk world-smoke
+tools/ofs world
+tools/ofs worldinitdiff-run N=2000 MODE=unwind
+tools/ofs world-init-breaks
+tools/ofs worlduidiff-run
+tools/ofs world-ui-breaks
+tools/ofs world-smoke
 ```
 
 The initializer's guarded fixture reuses the existing World event boundary,
@@ -422,9 +425,9 @@ with the two-dialog slice, not that the other World menu commands work.
 Registry `0x13080005` uses template `0x6b4`, factory `0x223f1b90`, constructor
 `0x223fc820`, destructor `0x223fc960` and vtable `0x2240fe50`. The object is
 `0x1bb4` bytes with its descriptor at `+0x10dc`. Fourteen embedded controls are
-constructed, destroyed and DDX-bound. `gen_world_priority.py` extracts their
+constructed, destroyed and DDX-bound. The retired `gen_world_priority.py` extracts their
 lifetime/EH graph, DDX/help maps and layer-string recipe; the runtime generator
-now binds both classes and all three registrations. Generated includes contain
+now binds both classes and all three registrations. The committed includes contain
 numeric ABI metadata; build-only retail resources remain ignored.
 
 FE owns this descriptor and the reorder callbacks; see `fe_library.c`'s
@@ -460,12 +463,12 @@ editor, Priority's PostNcDestroy calls the scalar deleting destructor with flag
 object twice.
 
 ```sh
-make -f tools/world.mk world-priority-core N=2000 MODE=unwind
-make -f tools/world.mk world-priority-life N=2000 MODE=typed
-make -f tools/world.mk world-priority-ui
-make -f tools/world.mk world-priority-breaks
-make -f tools/world.mk worlduidiff-run
-make -f tools/world.mk world-smoke
+tools/ofs world-priority-core N=2000 MODE=unwind
+tools/ofs world-priority-life N=2000 MODE=typed
+tools/ofs world-priority-ui
+tools/ofs world-priority-breaks
+tools/ofs worlduidiff-run
+tools/ofs world-smoke
 ```
 
 `worldprioritydiff.c` executes twelve operations against direct retail entry
@@ -518,7 +521,7 @@ The active game was not changed. Acceptance logs are
 `priority-life-breaks-final.log`, `area-ui-regression.log` and
 `priority-smoke-acceptance.log`.
 
-All five World generated includes reproduce byte-for-byte in an isolated
+All five World generated includes were reproduced byte-for-byte in an isolated
 directory. The World sources and fixtures retain snake_case identifiers and
 standard `<stdint.h>` types, without `types.h`.
 
@@ -586,10 +589,10 @@ validation (`0x223f7160`) and virtual error (`0x223f71a0`). Observed behavior:
 
 The class vtable is `0x2240ee68`, constructor `0x223f6280`, destructor
 `0x223f6420`, deleting destructor `0x223f6400` and DDX `0x223f65a0`.
-`gen_world_booster.py` extracts and validates all 21 embedded controls, their
+The retired `gen_world_booster.py` extracts and validates all 21 embedded controls, their
 reverse destruction and MSVC cleanup graph, all 21 DDX bindings, the terminated
 help map and the constructor/deleting-destructor vtable association. Its two
-generated includes reproduce byte-for-byte in an isolated directory; they
+generated includes were reproduced byte-for-byte in an isolated directory; they
 contain ABI metadata, without retail machine code or resource payloads.
 
 `world_booster_objects.c` implements those routines, both factories, help
@@ -611,13 +614,13 @@ pointer adjustments. These rules match the earlier World lifetime boundary.
 ### Reproduce booster core and lifetime acceptance
 
 ```sh
-make -f tools/world.mk world-booster-core N=20000
-make -f tools/world.mk world-booster-core N=2000 MODE=interrupt
-make -f tools/world.mk world-booster-breaks
-make -f tools/world.mk world-booster-life N=20000
-make -f tools/world.mk world-booster-life N=2000 MODE=unwind
-make -f tools/world.mk world-booster-life N=2000 MODE=typed
-make -f tools/world.mk world-booster-life-breaks
+tools/ofs world-booster-core N=20000
+tools/ofs world-booster-core N=2000 MODE=interrupt
+tools/ofs world-booster-breaks
+tools/ofs world-booster-life N=20000
+tools/ofs world-booster-life N=2000 MODE=unwind
+tools/ofs world-booster-life N=2000 MODE=typed
+tools/ofs world-booster-life-breaks
 ```
 
 All runs use seed `0x4a971b63` and the reference hash above. The six-operation
@@ -697,13 +700,13 @@ function pointer in the process-wide CRT exit table. Module deinit leaves the
 font alive until actual DLL unload.
 
 ```sh
-make -f tools/world.mk world-booster-init N=20000
-make -f tools/world.mk world-booster-init N=2000 MODE=unwind
-make -f tools/world.mk world-booster-ui
-make -f tools/world.mk world-booster-native-breaks
-make -f tools/world.mk worlduidiff-run
-make -f tools/world.mk world-priority-ui
-make -f tools/world.mk world-smoke
+tools/ofs world-booster-init N=20000
+tools/ofs world-booster-init N=2000 MODE=unwind
+tools/ofs world-booster-ui
+tools/ofs world-booster-native-breaks
+tools/ofs worlduidiff-run
+tools/ofs world-priority-ui
+tools/ofs world-smoke
 ```
 
 With seed `0x4a971b63`, the initializer made **20,000 normal comparisons** and
@@ -742,7 +745,7 @@ executables and difference logs are in `bin/world-diff/booster-native-breaks/`.
 
 The existing area and priority suites also passed on the five-registration DLL:
 **288** and **210** paired comparisons, respectively, with their full witnesses
-and two unload cycles each. Runtime metadata regenerates identically in an
+and two unload cycles each. Runtime metadata regenerated identically in an
 isolated directory, as do all seven generated World includes. All World code
 retains snake_case and standard `<stdint.h>`
 types, without `types.h`. Acceptance logs in `bin/world-diff/` are
@@ -809,7 +812,7 @@ Recovered behavior:
   answer **zero**, then dispatch virtual close. The latter and validation
   call `0x223f99f0`, a bare `ret`; those no-effect calls are omitted in C.
 
-`gen_world_search.py` extracts the complete class graph for continuation:
+The retired `gen_world_search.py` extracts the complete class graph for continuation:
 18 embedded controls and DDX bindings, reverse destruction and matching MSVC
 cleanup actions, terminated help map, 60-slot vtable and 13 message entries.
 Constructor/destructor/deleting destructor/DDX/initializer are
@@ -817,15 +820,15 @@ Constructor/destructor/deleting destructor/DDX/initializer are
 object size is `0x1e78`, vtable `0x22410320`, map `0x224101c8`, base-map getter
 `0x223f5d40`. Local messages include six buttons `0x1aae..0x1ab3`, drive/layer
 selection and close-up notifications, OK, help and context menu. The metadata
-contains no machine code or resource payloads. Both generated includes reproduce
+contains no machine code or resource payloads. Both committed includes were reproduced
 byte-for-byte in an isolated directory. Extraction alone establishes a graph;
 behavioral lifetime and native-dispatch acceptance follow below.
 
 ```sh
-make -f tools/world.mk world-search-metadata
-make -f tools/world.mk world-search-core N=20000
-make -f tools/world.mk world-search-core N=2000 MODE=interrupt
-make -f tools/world.mk world-search-breaks
+tools/ofs world-search-metadata
+tools/ofs world-search-core N=20000
+tools/ofs world-search-core N=2000 MODE=interrupt
+tools/ofs world-search-breaks
 ```
 
 With seed `0x4a971b63` and the reference hash above, `worldsearchdiff` made
@@ -891,11 +894,11 @@ it does not run SIMSUI's message box or CRT abort. Normal services, Create/Show,
 DDX and WinHelp remain synthetic boundaries.
 
 ```sh
-make -f tools/world.mk world-search-life N=20000
-make -f tools/world.mk world-search-life N=2000 MODE=unwind
-make -f tools/world.mk world-search-life N=2000 MODE=typed
-make -f tools/world.mk world-search-life-breaks
-make -f tools/world.mk world-search-core N=2000
+tools/ofs world-search-life N=20000
+tools/ofs world-search-life N=2000 MODE=unwind
+tools/ofs world-search-life N=2000 MODE=typed
+tools/ofs world-search-life-breaks
+tools/ofs world-search-core N=2000
 ```
 
 With seed `0x4a971b63` and the reference hash above, nine lifetime operations
@@ -961,9 +964,9 @@ local EH cleanup in this initializer. This milestone uses external-boundary
 interruptions, separately from the preceding class/factory real-unwind suite.
 
 ```sh
-make -f tools/world.mk world-search-init N=20000
-make -f tools/world.mk world-search-init N=2000 MODE=interrupt
-make -f tools/world.mk world-search-init-breaks
+tools/ofs world-search-init N=20000
+tools/ofs world-search-init N=2000 MODE=interrupt
+tools/ofs world-search-init-breaks
 ```
 
 With seed `0x4a971b63` and the reference hash above, the normal suite made
@@ -1040,12 +1043,12 @@ message handlers. The inherited import slots are shared MFC/SIMSUI code;
 search's inherited validation/error slots must not be mistaken for local ones.
 
 ```sh
-make -f tools/world.mk world-search-ui
-make -f tools/world.mk world-search-native-breaks
-make -f tools/world.mk worlduidiff-run
-make -f tools/world.mk world-priority-ui
-make -f tools/world.mk world-booster-ui
-make -f tools/world.mk world-smoke
+tools/ofs world-search-ui
+tools/ofs world-search-native-breaks
+tools/ofs worlduidiff-run
+tools/ofs world-priority-ui
+tools/ofs world-booster-ui
+tools/ofs world-smoke
 ```
 
 The search suite passed **680 paired pixel/state/callback comparisons**,
@@ -1080,7 +1083,7 @@ and **292,103 comparisons**, respectively, including their normal fixture
 checks. The initializer includes 65,523 interrupted calls; the typed lifetime
 run includes 246,689 propagated exceptions and 27,414 fatal dispatches.
 
-Runtime/search metadata and build-only resource/anchor files reproduce
+Runtime/search metadata and build-only resource/anchor files were reproduced
 byte-for-byte in an isolated directory. Logs are
 `bin/world-diff/search-ui-acceptance.log`, `search-native-breaks.log`,
 `search-area-regression.log`, `search-priority-regression.log`,
@@ -1182,7 +1185,7 @@ label `+0x16a0` uses `+0x370`; other text uses `+0x220`. Resource modules are
 loaded afresh for each button. It populates and returns one, without extra
 base color-field or close-pointer stores.
 
-`gen_world_list.py` recovers the complete class graph as metadata: 14 embedded
+The retired `gen_world_list.py` recovers the complete class graph as metadata: 14 embedded
 controls and DDX bindings, their reverse destruction and MSVC cleanup actions,
 terminated help map, 60-slot vtable and nine local message entries. Preferred
 VAs are constructor `0x223fa260`, destructor `0x223fa3a0`, scalar deleting
@@ -1192,14 +1195,14 @@ destructor `0x223fa380`, DDX `0x223fa4b0`, help/context `0x223facd0` /
 buttons `0x1aa3..0x1aa7`, list `0x1b16` selection/double-click, help and context
 menu. PostNcDestroy is shared `0x223f3d30`; virtual OK/Cancel are the routines
 above, while validation/error remain inherited imports. Metadata extraction alone establishes the graph; behavioral lifetime and
-native acceptance follow below. Both includes reproduce
+native acceptance follow below. Both includes were reproduced
 byte-for-byte in an isolated directory and contain no code/resource payloads.
 
 ```sh
-make -f tools/world.mk world-list-metadata
-make -f tools/world.mk world-list-core N=20000
-make -f tools/world.mk world-list-core N=2000 MODE=unwind
-make -f tools/world.mk world-list-breaks
+tools/ofs world-list-metadata
+tools/ofs world-list-core N=20000
+tools/ofs world-list-core N=2000 MODE=unwind
+tools/ofs world-list-breaks
 ```
 
 With seed `0x4a971b63` and the reference hash above, the normal run made
@@ -1269,10 +1272,10 @@ message box or CRT abort. Embedded controls, Create/Show, DDX and WinHelp remain
 independent service fixtures in this suite; native control acceptance is below.
 
 ```sh
-make -f tools/world.mk world-list-life N=20000
-make -f tools/world.mk world-list-life N=2000 MODE=unwind
-make -f tools/world.mk world-list-life N=2000 MODE=typed
-make -f tools/world.mk world-list-life-breaks
+tools/ofs world-list-life N=20000
+tools/ofs world-list-life N=2000 MODE=unwind
+tools/ofs world-list-life N=2000 MODE=typed
+tools/ofs world-list-life-breaks
 ```
 
 With seed `0x4a971b63` and the reference hash above, nine operations made
@@ -1338,13 +1341,13 @@ include parent and child windows. Invalid first-layer scratch remains a
 separately painted core fixture; native inputs use defined layer text.
 
 ```sh
-make -f tools/world.mk world-list-ui
-make -f tools/world.mk world-list-native-breaks
-make -f tools/world.mk worlduidiff-run
-make -f tools/world.mk world-priority-ui
-make -f tools/world.mk world-booster-ui
-make -f tools/world.mk world-search-ui
-make -f tools/world.mk world-smoke
+tools/ofs world-list-ui
+tools/ofs world-list-native-breaks
+tools/ofs worlduidiff-run
+tools/ofs world-priority-ui
+tools/ofs world-booster-ui
+tools/ofs world-search-ui
+tools/ofs world-smoke
 ```
 
 The suite passed **504 paired parent/child pixel/state/callback comparisons**,
@@ -1371,7 +1374,7 @@ Booster's shared-font cleanup on unload still passes. Selected existing area,
 priority, booster and search color mutations were detected with the expanded
 native build inputs.
 
-Generated runtime/list metadata and build-only resource/anchor files reproduce
+Generated runtime/list metadata and build-only resource/anchor files were reproduced
 byte-for-byte in an isolated directory. Acceptance logs are
 `bin/world-diff/list-ui-acceptance.log`, `list-native-breaks.log`,
 `list-area-regression.log`, `list-priority-regression.log`,
@@ -1398,7 +1401,7 @@ a partial replacement; continue with a separately bounded remaining family.
 
 `world_cache.c` and `world_cache_objects.c` implement registry `0x13080006`,
 factory `0x223f16b0`, template `0x6ae` and class `CPerformanceBoosters`.
-`gen_world_cache.py` extracts 15 embedded controls and DDX bindings, reverse
+The retired `gen_world_cache.py` extracts 15 embedded controls and DDX bindings, reverse
 destruction, the MSVC cleanup graph, terminated help map, 60-slot vtable and
 seven message entries. The constructor is `0x223f91c0`, destructor
 `0x223f9310`, scalar deleting destructor `0x223f92f0`, DDX `0x223f9430`,
@@ -1470,16 +1473,16 @@ from UI delete. Typed `CException*` catches perform real unwind before fatal
 The fatal fixture records that boundary instead of executing its abort.
 
 ```sh
-make -f tools/world.mk world-cache-metadata
-make -f tools/world.mk world-cache-core N=20000
-make -f tools/world.mk world-cache-core N=2000 MODE=unwind
-make -f tools/world.mk world-cache-breaks
-make -f tools/world.mk world-cache-life N=20000
-make -f tools/world.mk world-cache-life N=2000 MODE=unwind
-make -f tools/world.mk world-cache-life N=2000 MODE=typed
-make -f tools/world.mk world-cache-life-breaks
-make -f tools/world.mk world-cache-ui
-make -f tools/world.mk world-cache-native-breaks
+tools/ofs world-cache-metadata
+tools/ofs world-cache-core N=20000
+tools/ofs world-cache-core N=2000 MODE=unwind
+tools/ofs world-cache-breaks
+tools/ofs world-cache-life N=20000
+tools/ofs world-cache-life N=2000 MODE=unwind
+tools/ofs world-cache-life N=2000 MODE=typed
+tools/ofs world-cache-life-breaks
+tools/ofs world-cache-ui
+tools/ofs world-cache-native-breaks
 ```
 
 Using seed `0x4a971b63` and the reference SHA-256 recorded above, the 12-operation
@@ -1544,7 +1547,7 @@ The eight-registration DLL also passed **288 area**, **210 priority**,
 **320 booster**, **680 drive-search** and **504 scenery-area-list** native
 comparisons, totaling **2,002**, with their witnesses/module-init checks and
 two unload cycles per suite. Generated cache/runtime
-metadata and build-only resource/anchor files reproduce byte-for-byte in an
+metadata and build-only resource/anchor files were reproduced byte-for-byte in an
 isolated directory; the retail dialog registry inventory is unchanged.
 All existing World native mutation build lists include the cache sources.
 Selected existing area, priority, booster and search color mutations and the
@@ -1577,7 +1580,7 @@ Edit Caches, signed count `+0x10`, rows `+0x14` and selection `+0x18`.
 Rows are `0x40` bytes: raw enable flag `+0`, path `+8`, title `+0x1c` and
 second title/description `+0x30`. No real FE file/placement callbacks execute.
 
-`gen_world_files.py` extracts the nine-control constructor/destructor graph,
+The retired `gen_world_files.py` extracts the nine-control constructor/destructor graph,
 MSVC cleanup actions, nine DDX bindings, terminated help map, 60-slot vtable
 and six message entries. Constructor `0x223fd420`, destructor `0x223fd520`,
 scalar deleting destructor `0x223fd500`, DDX `0x223fd600`, initializer
@@ -1637,16 +1640,16 @@ exceptions propagate. The fixture terminates that comparison side at fatal
 dispatch instead of displaying the real SIMSUI error and aborting the process.
 
 ```sh
-make -f tools/world.mk world-files-metadata
-make -f tools/world.mk world-files-core N=20000
-make -f tools/world.mk world-files-core N=2000 MODE=unwind
-make -f tools/world.mk world-files-breaks
-make -f tools/world.mk world-files-life N=20000
-make -f tools/world.mk world-files-life N=2000 MODE=unwind
-make -f tools/world.mk world-files-life N=2000 MODE=typed
-make -f tools/world.mk world-files-life-breaks
-make -f tools/world.mk world-files-ui
-make -f tools/world.mk world-files-native-breaks
+tools/ofs world-files-metadata
+tools/ofs world-files-core N=20000
+tools/ofs world-files-core N=2000 MODE=unwind
+tools/ofs world-files-breaks
+tools/ofs world-files-life N=20000
+tools/ofs world-files-life N=2000 MODE=unwind
+tools/ofs world-files-life N=2000 MODE=typed
+tools/ofs world-files-life-breaks
+tools/ofs world-files-ui
+tools/ofs world-files-native-breaks
 ```
 
 The reference SHA-256 is recorded above; seed is `0x4a971b63`.
@@ -1708,7 +1711,7 @@ Acceptance logs are `bin/world-diff/files-core-normal.log`,
 `files-life-unwind.log`, `files-life-typed.log`, `files-life-breaks.log`,
 `files-ui-acceptance.log` and `files-native-breaks.log`. Generated includes
 contain ABI metadata only. Metadata for the files class and runtime, plus
-build-only resource/anchor outputs, reproduce byte-for-byte in an isolated directory;
+build-only resource/anchor outputs, were reproduced byte-for-byte in an isolated directory;
 the retail registry inventory is unchanged. All existing World native
 mutation build inputs include the new files source units.
 
@@ -1817,7 +1820,7 @@ Skin failure also returns zero. Null/`0xcdcdcdcd` descriptors are checked after
 control setup and cause the recovered bad-descriptor message before returning
 zero; the core fixture exercises both diagnostic branches.
 
-`gen_world_position.py` extracts 29 embedded controls/DDX bindings, terminated
+The retired `gen_world_position.py` extracts 29 embedded controls/DDX bindings, terminated
 help map, ten messages, 62-slot vtable and MSVC cleanup graph. Constructor is
 `0x224037a0`, destructor `0x224039e0`, scalar deleting destructor `0x224039c0`,
 DDX `0x22403be0`, vtable `0x22410f30`, message map `0x22410e20` and base-map
@@ -1846,16 +1849,16 @@ uses dialog delete, distinct from UI delete. **This factory has no typed
 cleanup. It never dispatches the fatal SIMSUI service tested by earlier classes.
 
 ```sh
-make -f tools/world.mk world-position-metadata
-make -f tools/world.mk world-position-core N=20000
-make -f tools/world.mk world-position-core N=2000 MODE=unwind
-make -f tools/world.mk world-position-breaks
-make -f tools/world.mk world-position-life N=20000
-make -f tools/world.mk world-position-life N=2000 MODE=unwind
-make -f tools/world.mk world-position-life N=2000 MODE=typed
-make -f tools/world.mk world-position-life-breaks
-make -f tools/world.mk world-position-ui
-make -f tools/world.mk world-position-native-breaks
+tools/ofs world-position-metadata
+tools/ofs world-position-core N=20000
+tools/ofs world-position-core N=2000 MODE=unwind
+tools/ofs world-position-breaks
+tools/ofs world-position-life N=20000
+tools/ofs world-position-life N=2000 MODE=unwind
+tools/ofs world-position-life N=2000 MODE=typed
+tools/ofs world-position-life-breaks
+tools/ofs world-position-ui
+tools/ofs world-position-native-breaks
 ```
 
 With seed `0x4a971b63` and the reference SHA-256 above, the 16-operation core/
@@ -1922,7 +1925,7 @@ Acceptance logs are `bin/world-diff/position-core-normal.log`,
 `position-native-breaks.log`.
 
 Generated position/runtime metadata and build-only resource/anchor outputs
-reproduce byte-for-byte in an isolated directory. The retail registry inventory
+were reproduced byte-for-byte in an isolated directory. The retail registry inventory
 is unchanged. All existing World native mutation builds include position source.
 Logs/artifacts use `bin/world-diff/position-` and the existing World prefix/lock.
 
@@ -1994,19 +1997,19 @@ Recovered class details:
 - PostNcDestroy calls virtual deleting destruction with flag 1 for nonnull
   objects, and does nothing for null objects.
 
-`gen_world_facilities.py` validates both EH state chains, reverse control
+The retired `gen_world_facilities.py` validates both EH state chains, reverse control
 lifetimes, all DDX bindings, class/deleting-destructor identity, local spin
 vtable and the terminated help/message maps. Its outputs are ABI metadata,
-without retail code or resource payloads. Both generated includes reproduce
-byte-for-byte in an isolated directory. The inventory also regenerates
+without retail code or resource payloads. Both committed includes were reproduced
+byte-for-byte in an isolated directory. The inventory also regenerated
 unchanged; all 12 dialogmap tests pass.
 
 ```sh
-make -f tools/world.mk world-facilities-metadata
-make -f tools/world.mk world-facilities-life N=20000
-make -f tools/world.mk world-facilities-life N=2000 MODE=unwind
-make -f tools/world.mk world-facilities-life N=2000 MODE=typed
-make -f tools/world.mk world-facilities-life-breaks
+tools/ofs world-facilities-metadata
+tools/ofs world-facilities-life N=20000
+tools/ofs world-facilities-life N=2000 MODE=unwind
+tools/ofs world-facilities-life N=2000 MODE=typed
+tools/ofs world-facilities-life-breaks
 ```
 
 Reference SHA-256 is the same `35d67023...3118f5` recorded above. Seed
@@ -2114,16 +2117,16 @@ Observed behavior preserved and tested:
   independently compared with real Windows/MSVC unwinding.
 
 ```sh
-make -f tools/world.mk world-facilities-core N=20000
-make -f tools/world.mk world-facilities-core N=256 MODE=unwind
-make -f tools/world.mk world-facilities-breaks
-make -f tools/world.mk world-facilities-life N=20000
-make -f tools/world.mk world-facilities-life N=2000 MODE=unwind
-make -f tools/world.mk world-facilities-life N=2000 MODE=typed
-make -f tools/world.mk world-facilities-life-breaks
-make -f tools/world.mk world-facilities-ui
-make -f tools/world.mk world-facilities-native-breaks
-make -f tools/world.mk world-smoke
+tools/ofs world-facilities-core N=20000
+tools/ofs world-facilities-core N=256 MODE=unwind
+tools/ofs world-facilities-breaks
+tools/ofs world-facilities-life N=20000
+tools/ofs world-facilities-life N=2000 MODE=unwind
+tools/ofs world-facilities-life N=2000 MODE=typed
+tools/ofs world-facilities-life-breaks
+tools/ofs world-facilities-ui
+tools/ofs world-facilities-native-breaks
+tools/ofs world-smoke
 ```
 
 The core fixture runs eighteen operations per scenario. It compares ordered
@@ -2199,7 +2202,7 @@ are `facilities-<family>-regression.log` and
 `facilities-<family>-mutation-regression.log`, for `area`, `priority`, `booster`,
 `search`, `list`, `cache`, `files` or `position`.
 
-Facilities/runtime metadata and build-only resources/anchor outputs reproduce
+Facilities/runtime metadata and build-only resources/anchor outputs were reproduced
 byte-for-byte in an isolated directory. The retail registry is unchanged and
 all twelve dialogmap tests pass. `git diff --check` passes.
 
@@ -2261,20 +2264,20 @@ Recovered and independently compared behavior:
   Context help uses command 10 and returns 1, ignoring its message coordinates.
   Unlike the facilities directory, it has no artwork geometry suppression.
 
-`tools/gen_world_airport.py` validates the reference image base/module id,
+The retired `gen_world_airport.py` validates the reference image base/module id,
 both 29-state EH cleanup graphs, reverse control lifetimes, complete DDX
 coverage, class/deleting-destructor identity and the terminated help/message
 maps. It extracts a 60-slot vtable and 26 local message entries plus terminator.
-Generated outputs contain ABI metadata, with no copied code or resources;
-both reproduce byte-for-byte in an isolated directory. The registry regenerates
+The committed outputs contain ABI metadata, with no copied code or resources;
+both were reproduced byte-for-byte in an isolated directory. The registry regenerated
 unchanged and all twelve dialogmap tests pass.
 
 ```sh
-make -f tools/world.mk world-airport-metadata
-make -f tools/world.mk world-airport-life N=20000
-make -f tools/world.mk world-airport-life N=2000 MODE=unwind
-make -f tools/world.mk world-airport-life N=2000 MODE=typed
-make -f tools/world.mk world-airport-life-breaks
+tools/ofs world-airport-metadata
+tools/ofs world-airport-life N=20000
+tools/ofs world-airport-life N=2000 MODE=unwind
+tools/ofs world-airport-life N=2000 MODE=typed
+tools/ofs world-airport-life-breaks
 ```
 
 Against reference SHA-256 `35d67023...3118f5`, seed `0x4a971b63`, the normal
@@ -2372,16 +2375,16 @@ Observed behavior preserved and independently compared:
   accept/cancel free all nine strings and the work buffer in ascending order.
 
 ```sh
-make -f tools/world.mk world-airport-core N=20000
-make -f tools/world.mk world-airport-core N=256 MODE=unwind
-make -f tools/world.mk world-airport-breaks
-make -f tools/world.mk world-airport-life N=20000
-make -f tools/world.mk world-airport-life N=2000 MODE=unwind
-make -f tools/world.mk world-airport-life N=2000 MODE=typed
-make -f tools/world.mk world-airport-life-breaks
-make -f tools/world.mk world-airport-ui
-make -f tools/world.mk world-airport-native-breaks
-make -f tools/world.mk world-smoke
+tools/ofs world-airport-core N=20000
+tools/ofs world-airport-core N=256 MODE=unwind
+tools/ofs world-airport-breaks
+tools/ofs world-airport-life N=20000
+tools/ofs world-airport-life N=2000 MODE=unwind
+tools/ofs world-airport-life N=2000 MODE=typed
+tools/ofs world-airport-life-breaks
+tools/ofs world-airport-ui
+tools/ofs world-airport-native-breaks
+tools/ofs world-smoke
 ```
 
 The core fixture exercises 39 operations per scenario. It compares ordered
@@ -2438,7 +2441,7 @@ under `airport-breaks/`, `airport-life-breaks/` and `airport-native-breaks/`.
 Native mutation builds retain input hashes and complete source/DLL/harness
 snapshots. Earlier World mutation builders now include the airport sources.
 
-Airport/runtime metadata and build-only resource/anchor outputs reproduce
+Airport/runtime metadata and build-only resource/anchor outputs were reproduced
 byte-for-byte in an isolated directory. The retail registry is unchanged;
 all twelve dialogmap tests pass. Runs use World's dedicated Wine prefix/lock
 and ignored `bin/world-diff/airport-` artifacts. No FE/FACIL/MAIN/HOST source,
@@ -2508,7 +2511,7 @@ The recovered core behavior, independently exercised against retail, is:
   callback dispatcher (`0x223fb370`) passes one descriptor argument and returns
   the callback result unchanged. The shared error routine is separately compared.
 
-`tools/gen_world_complexity.py` extracts metadata for the next class/lifetime
+The retired `gen_world_complexity.py` extracts metadata for the next class/lifetime
 milestone. It checks the image base/id, constructor `0x223fad50`, destructor
 `0x223fae50`, both eight-state EH cleanup graphs, reverse control destruction,
 all eight DDX bindings (`0x223faf20`), vtable `0x2240f8d8` and its deleting
@@ -2519,14 +2522,14 @@ constructor initializes `+0x10dc` to null. The vtable's Close slot uses shared
 `0x223fb8b0`, which deletes a nonnull `+0x10dc` object before base Close.
 These metadata findings are not lifetime acceptance. Outputs are
 `world_complexity_tables.inc` and `world_complexity_hooks.inc`; they contain ABI
-metadata, no copied code or resources, and reproduce byte-for-byte in an
+metadata, no copied code or resources, and were reproduced byte-for-byte in an
 isolated directory.
 
 ```sh
-make -f tools/world.mk world-complexity-metadata
-make -f tools/world.mk world-complexity-core N=20000
-make -f tools/world.mk world-complexity-core N=2000 MODE=interrupt
-make -f tools/world.mk world-complexity-breaks
+tools/ofs world-complexity-metadata
+tools/ofs world-complexity-core N=20000
+tools/ofs world-complexity-core N=2000 MODE=interrupt
+tools/ofs world-complexity-breaks
 ```
 
 Reference SHA-256 remains `35d67023...3118f5`. With seed `0x4a971b63`, the
@@ -2552,7 +2555,7 @@ callback result and inert error result. Build failures, faults and timeouts do
 not count. Logs are `bin/world-diff/complexity-core-normal.log`,
 `complexity-core-interrupt.log` and `complexity-breaks.log`; separate mutant
 sources/executables/transcripts live in `complexity-breaks/`. Runs retain the
-World Wine prefix and lock. The registry regenerates unchanged, all twelve
+World Wine prefix and lock. The registry regenerated unchanged, all twelve
 dialogmap tests pass and `git diff --check` passes.
 
 At this first milestone constructor/destructor, factory, DDX/help, initializer
@@ -2609,16 +2612,16 @@ Recovered behavior preserved and independently compared:
   and deletes the dialog with flag 1. These are distinct lifetime boundaries.
 
 ```sh
-make -f tools/world.mk world-complexity-life N=20000
-make -f tools/world.mk world-complexity-life N=2000 MODE=unwind
-make -f tools/world.mk world-complexity-life N=2000 MODE=typed
-make -f tools/world.mk world-complexity-life-breaks
-make -f tools/world.mk world-complexity-init N=20000
-make -f tools/world.mk world-complexity-init N=2000 MODE=unwind
-make -f tools/world.mk world-complexity-init-breaks
-make -f tools/world.mk world-complexity-ui
-make -f tools/world.mk world-complexity-native-breaks
-make -f tools/world.mk world-smoke
+tools/ofs world-complexity-life N=20000
+tools/ofs world-complexity-life N=2000 MODE=unwind
+tools/ofs world-complexity-life N=2000 MODE=typed
+tools/ofs world-complexity-life-breaks
+tools/ofs world-complexity-init N=20000
+tools/ofs world-complexity-init N=2000 MODE=unwind
+tools/ofs world-complexity-init-breaks
+tools/ofs world-complexity-ui
+tools/ofs world-complexity-native-breaks
+tools/ofs world-smoke
 ```
 
 Seed `0x4a971b63`: the ten-operation lifetime fixture passed **200,000 normal**
@@ -2697,7 +2700,7 @@ Their logs are `complexity-<family>-mutation-regression.log` for `area`,
 or `airport`; `complexity-regression-mutations.log` records every completed
 stage.
 
-Complexity/runtime metadata and build-only resources/anchor outputs reproduce
+Complexity/runtime metadata and build-only resources/anchor outputs were reproduced
 byte-for-byte in an isolated directory. The retail registry is unchanged;
 all twelve dialogmap tests pass. Existing airport handoff edits remain intact.
 No MAIN/HOST/FE/FACIL code, verified owner harness, shared Makefile or active-game
@@ -2786,17 +2789,17 @@ Recovered differences from scenery complexity are retained:
   distinct from its construction-failure delete.
 
 ```sh
-make -f tools/world.mk world-dynamic-metadata
-make -f tools/world.mk world-dynamic-core N=20000
-make -f tools/world.mk world-dynamic-core N=2000 MODE=interrupt
-make -f tools/world.mk world-dynamic-life N=20000
-make -f tools/world.mk world-dynamic-life N=2000 MODE=unwind
-make -f tools/world.mk world-dynamic-life N=2000 MODE=typed
-make -f tools/world.mk world-dynamic-init N=20000
-make -f tools/world.mk world-dynamic-init N=2000 MODE=unwind
-make -f tools/world.mk world-dynamic-breaks world-dynamic-life-breaks
-make -f tools/world.mk world-dynamic-init-breaks world-dynamic-native-breaks
-make -f tools/world.mk world-dynamic-ui
+tools/ofs world-dynamic-metadata
+tools/ofs world-dynamic-core N=20000
+tools/ofs world-dynamic-core N=2000 MODE=interrupt
+tools/ofs world-dynamic-life N=20000
+tools/ofs world-dynamic-life N=2000 MODE=unwind
+tools/ofs world-dynamic-life N=2000 MODE=typed
+tools/ofs world-dynamic-init N=20000
+tools/ofs world-dynamic-init N=2000 MODE=unwind
+tools/ofs world-dynamic-breaks world-dynamic-life-breaks
+tools/ofs world-dynamic-init-breaks world-dynamic-native-breaks
+tools/ofs world-dynamic-ui
 ```
 
 The fixtures use independent guarded objects and two owner descriptors. They
@@ -2843,7 +2846,7 @@ detected. Logs are `dynamic-mutations.log`, `dynamic-native-breaks.log` and
 Earlier World native mutation builders include the new dynamic sources.
 
 Dynamic class and runtime metadata, build-only resources and the SIMSUI anchor
-reproduce byte-for-byte in an isolated directory. The retail registry remains
+were reproduced byte-for-byte in an isolated directory. The retail registry remains
 unchanged and all twelve dialogmap tests pass. `git diff --check` passes.
 
 All eleven earlier native suites passed against the fourteen-registration
@@ -2941,14 +2944,14 @@ Recovered behavior retained in C:
   module; the reference side executes retail code.
 
 ```sh
-make -f tools/world.mk world-copy-metadata world
-make -f tools/world.mk world-copy-core N=20000
-make -f tools/world.mk world-copy-core N=2000 MODE=interrupt
-make -f tools/world.mk world-copy-life N=20000
-make -f tools/world.mk world-copy-life N=2000 MODE=unwind
-make -f tools/world.mk world-copy-life N=2000 MODE=typed
-make -f tools/world.mk world-copy-breaks world-copy-life-breaks
-make -f tools/world.mk world-copy-ui world-copy-native-breaks
+tools/ofs world-copy-metadata world
+tools/ofs world-copy-core N=20000
+tools/ofs world-copy-core N=2000 MODE=interrupt
+tools/ofs world-copy-life N=20000
+tools/ofs world-copy-life N=2000 MODE=unwind
+tools/ofs world-copy-life N=2000 MODE=typed
+tools/ofs world-copy-breaks world-copy-life-breaks
+tools/ofs world-copy-ui world-copy-native-breaks
 ```
 
 Seed `0x4a971b63`: the independent guarded event/initializer fixture passed
@@ -2985,7 +2988,7 @@ out-of-range positive index. Retail retained its old selection, and the
 rejection witness correctly failed. The corrected scripts explicitly select
 the first/last equal rows or two -1s. This changed only the new fixture.
 
-Copy/runtime metadata and build-only resources/SIMSUI anchor reproduce
+Copy/runtime metadata and build-only resources/SIMSUI anchor were reproduced
 byte-for-byte in an isolated directory. The retail registry is unchanged and
 all twelve dialogmap tests pass.
 
@@ -3122,16 +3125,16 @@ Recovered behavior retained in C:
   the native count/row witness caught this during implementation.
 
 ```sh
-make -f tools/world.mk world-weather-metadata world
-make -f tools/world.mk world-weather-core N=20000
-make -f tools/world.mk world-weather-core N=2000 MODE=interrupt
-make -f tools/world.mk world-weather-init N=20000
-make -f tools/world.mk world-weather-init N=2000 MODE=unwind
-make -f tools/world.mk world-weather-life N=20000
-make -f tools/world.mk world-weather-life N=2000 MODE=unwind
-make -f tools/world.mk world-weather-life N=2000 MODE=typed
-make -f tools/world.mk world-weather-breaks
-make -f tools/world.mk world-weather-ui world-weather-native-breaks
+tools/ofs world-weather-metadata world
+tools/ofs world-weather-core N=20000
+tools/ofs world-weather-core N=2000 MODE=interrupt
+tools/ofs world-weather-init N=20000
+tools/ofs world-weather-init N=2000 MODE=unwind
+tools/ofs world-weather-life N=20000
+tools/ofs world-weather-life N=2000 MODE=unwind
+tools/ofs world-weather-life N=2000 MODE=typed
+tools/ofs world-weather-breaks
+tools/ofs world-weather-ui world-weather-native-breaks
 ```
 
 Seed `0x4a971b63`: the guarded event fixture passed **160,000 normal** and
@@ -3200,7 +3203,7 @@ mode/answer, initialization/font/string cleanup, class/factory ownership, DDX,
 help/context and scalar deletion. Log: `bin/world-diff/weather-breaks-final.log`.
 Build failures, faults and timeouts never count as mutation detections.
 
-Weather/runtime metadata and build-only resources/SIMSUI anchor reproduce
+Weather/runtime metadata and build-only resources/SIMSUI anchor were reproduced
 byte-for-byte in an isolated directory. The final sources reproduce the DLL
 with `SOURCE_DATE_EPOCH=1793148813`. Logs are `weather-final-build.log` and
 `weather-reproduce-final.log`. The retail registry is unchanged and all twelve
@@ -3341,14 +3344,14 @@ Recovered behavior retained in C:
   module. Pages retain the shared imported CSimsTabPage PostNcDestroy.
 
 ```sh
-make -f tools/world.mk world-time-metadata world
-make -f tools/world.mk world-time-core N=20000
-make -f tools/world.mk world-time-core N=2000 MODE=unwind
-make -f tools/world.mk world-time-life N=20000
-make -f tools/world.mk world-time-life N=2000 MODE=unwind
-make -f tools/world.mk world-time-life N=2000 MODE=typed
-make -f tools/world.mk world-time-breaks
-make -f tools/world.mk world-time-ui world-time-native-breaks
+tools/ofs world-time-metadata world
+tools/ofs world-time-core N=20000
+tools/ofs world-time-core N=2000 MODE=unwind
+tools/ofs world-time-life N=20000
+tools/ofs world-time-life N=2000 MODE=unwind
+tools/ofs world-time-life N=2000 MODE=typed
+tools/ofs world-time-breaks
+tools/ofs world-time-ui world-time-native-breaks
 ```
 
 Seed `0x4a971b63`: the independent guarded core/initializer fixture passed
@@ -3506,16 +3509,16 @@ Recovered behavior retained in C:
   of the factory, class, map, entries, handlers and notification deletion.
 
 ```sh
-make -f tools/world.mk world-wareas-metadata world
-make -f tools/world.mk world-wareas-core N=20000
-make -f tools/world.mk world-wareas-core N=2000 MODE=interrupt
-make -f tools/world.mk world-wareas-init N=20000
-make -f tools/world.mk world-wareas-init N=2000 MODE=unwind
-make -f tools/world.mk world-wareas-life N=20000
-make -f tools/world.mk world-wareas-life N=2000 MODE=unwind
-make -f tools/world.mk world-wareas-life N=2000 MODE=typed
-make -f tools/world.mk world-wareas-breaks
-make -f tools/world.mk world-wareas-ui world-wareas-native-breaks
+tools/ofs world-wareas-metadata world
+tools/ofs world-wareas-core N=20000
+tools/ofs world-wareas-core N=2000 MODE=interrupt
+tools/ofs world-wareas-init N=20000
+tools/ofs world-wareas-init N=2000 MODE=unwind
+tools/ofs world-wareas-life N=20000
+tools/ofs world-wareas-life N=2000 MODE=unwind
+tools/ofs world-wareas-life N=2000 MODE=typed
+tools/ofs world-wareas-breaks
+tools/ofs world-wareas-ui world-wareas-native-breaks
 ```
 
 Seed **`0x4a971b63`**: 12 core operations passed **240,000 normal** and
@@ -3624,7 +3627,7 @@ The complete class graph, in parent allocation order:
 | Pressure | `0x223f9c30` | `0x223f9d10` | `0x223f9cf0` | `0x15a4` | `0x6af` | 7 | `0x2240f4e8` |
 
 There are **77 embedded controls**. Parent slots number 60; pages have 61,
-including their control initializer. `gen_world_advanced.py` extracts and
+including their control initializer. The retired `gen_world_advanced.py` extracts and
 cross-checks construction/destruction offsets, imported cleanup slots, MSVC
 unwind metadata, DDX, message/help maps and vtables. It extracts ABI metadata
 only. Normal destruction and unwinding use their respective recovered slots.
@@ -3655,11 +3658,11 @@ Recovered lifetime behavior now compared against retail:
   recovered shared scalar-delete dispatch.
 
 ```sh
-make -f tools/world.mk world-advanced-metadata
-make -f tools/world.mk world-advanced-life N=20000
-make -f tools/world.mk world-advanced-life N=2000 MODE=unwind
-make -f tools/world.mk world-advanced-life N=2000 MODE=typed
-make -f tools/world.mk world-advanced-life-breaks
+tools/ofs world-advanced-metadata
+tools/ofs world-advanced-life N=20000
+tools/ofs world-advanced-life N=2000 MODE=unwind
+tools/ofs world-advanced-life N=2000 MODE=typed
+tools/ofs world-advanced-life-breaks
 ```
 
 Seed **`0x4a971b63`**, six classes and **49 operations**: **980,000 normal
@@ -3694,11 +3697,11 @@ These bindings are checked by guarded fixtures and the complete native page grap
 ### Parent and three-page guarded behavior
 
 ```sh
-make -f tools/world.mk world-advanced-parent N=20000
-make -f tools/world.mk world-advanced-parent N=2000 MODE=unwind
-make -f tools/world.mk world-advanced-temperature N=20000
-make -f tools/world.mk world-advanced-temperature N=2000 MODE=unwind
-make -f tools/world.mk world-advanced-core-breaks
+tools/ofs world-advanced-parent N=20000
+tools/ofs world-advanced-parent N=2000 MODE=unwind
+tools/ofs world-advanced-temperature N=20000
+tools/ofs world-advanced-temperature N=2000 MODE=unwind
+tools/ofs world-advanced-core-breaks
 ```
 
 Seed **`0x4a971b63`**. The parent/Visibility/Pressure fixture has 20 operations:
@@ -3750,10 +3753,10 @@ mutations. These guarded counts are separate from native acceptance below.
 ### Clouds and Wind behavior and owner contract
 
 ```sh
-make -f tools/world.mk world-advanced-cloud N=20000
-make -f tools/world.mk world-advanced-cloud N=2000 MODE=unwind
-make -f tools/world.mk world-advanced-wind N=20000
-make -f tools/world.mk world-advanced-wind N=2000 MODE=unwind
+tools/ofs world-advanced-cloud N=20000
+tools/ofs world-advanced-cloud N=2000 MODE=unwind
+tools/ofs world-advanced-wind N=20000
+tools/ofs world-advanced-wind N=2000 MODE=unwind
 ```
 
 Clouds has twenty guarded operations: **400,000 normal comparisons** and
@@ -3796,7 +3799,7 @@ Temperature retains four `0x2c`-byte rows, dew-point controls and its special
 
 ### Complete native graph and acceptance
 
-`gen_world_runtime.py` binds six additional module-owned vtables, message/help
+The retired runtime table generator bound six additional module-owned vtables, message/help
 maps, DDX handlers, initializers and event/validation handlers. The shared local
 CNotify class serves the parent, Temperature and Wind. The runtime has 27 class
 vtables, registers all nineteen factories, initializes/deinitializes the new
@@ -3804,8 +3807,8 @@ services and keeps every retail shared import at its recovered ABI boundary.
 Resource extraction remains build-only; no retail World class handler is called.
 
 ```sh
-make -f tools/world.mk world-advanced-ui
-make -f tools/world.mk world-advanced-native-breaks
+tools/ofs world-advanced-ui
+tools/ofs world-advanced-native-breaks
 ```
 
 `worldadvanceduidiff.c` uses two independent owners and 35 independent text
@@ -3869,20 +3872,20 @@ Advanced evidence remains in `advanced-acceptance.json` and
 ## Shared build/install and game-owner acceptance
 
 ```sh
-make world
-make world-install FS98_DIR="$PWD/game"
-make world-game-ui FS98_DIR="$PWD/game"
-make smoke FS98_DIR="$PWD/game"
-make world-revert FS98_DIR="$PWD/game"
+tools/ofs world
+tools/ofs world-install FS98_DIR="$PWD/game"
+tools/ofs world-game-ui FS98_DIR="$PWD/game"
+tools/ofs smoke FS98_DIR="$PWD/game"
+tools/ofs world-revert FS98_DIR="$PWD/game"
 ```
 
-`make world` is also part of the default shared `make` build. The installed
+`tools/ofs world` is also part of the default `cmake --build build/win32-retail`. The installed
 replacement is `game/English/World.DLL`, SHA-256
 `9186c742a679470c623a70a22fce91a4402085e42df160ac8db73c468bd89242`.
-`make world-install` retains the first retail copy at
+`tools/ofs world-install` retains the first retail copy at
 `English/World.DLL.orig` (retail SHA-256
 `35d67023ba2ff0113c519f6e2c4ab5f19c842c923401a255e7761eae423118f5`);
-`make world-revert` copies the authoritative `orig/English/World.DLL` back.
+`tools/ofs world-revert` copies the authoritative `orig/English/World.DLL` back.
 
 `tools/world_game.py` starts the retail simulator twice from a disposable copy of
 the installed game and uses normal Win32 window messages. It verifies the

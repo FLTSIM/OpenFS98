@@ -4,6 +4,7 @@
 A compile failure, crash or timeout is a failed check, never a caught break.
 The accepted source, DLL and extracted resources stay untouched.
 """
+import module_flags
 from pathlib import Path
 import subprocess
 import struct
@@ -82,8 +83,7 @@ def main():
             subprocess.run(['i686-w64-mingw32-windres', '-J', 'res', '-O', 'coff',
                             str(res), str(resource)], check=True)
         subprocess.run([
-            'i686-w64-mingw32-gcc', '-std=c99', '-O2', '-Wall', '-Wextra', '-Werror',
-            '-fno-strict-aliasing', '-Ibin/gauges-diff', '-shared', '-nostdlib',
+            'i686-w64-mingw32-gcc', *module_flags.FLAGS, '-std=c99', '-O2', '-Wall', '-Wextra', '-Werror', '-Ibin/gauges-diff', '-shared', '-nostdlib',
             '-Wl,--entry=_DllMain@12', '-Wl,--disable-dynamicbase',
             '-Wl,--disable-nxcompat', '-Wl,--image-base=' + ('0x32010000' if suction else '0x32000000'),
             '-o', str(dll), str(path), f'src/gauges/{gauge}.def', str(resource),

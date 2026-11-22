@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Require actual retail mismatches for world-files core/init mutations."""
+import module_flags
 from pathlib import Path
 import os
 import subprocess
@@ -47,8 +48,7 @@ for name, before, after in mutations:
     if name == 'action-choice': mutated = mutated.replace('    void *descriptor = PTR(object, 0x10dc);\n    ((uint32_t', '    (void)callback_offset; void *descriptor = PTR(object, 0x10dc);\n    ((uint32_t')
     if name == 'cached-count': mutated = mutated.replace('    for (index =', '    (void)count; for (index =', 1)
     source_path.write_text(mutated)
-    subprocess.run(['i686-w64-mingw32-gcc', '-std=c99', '-O2', '-Wall', '-Wextra', '-Werror',
-                    '-fno-strict-aliasing', '-fno-delete-null-pointer-checks', '-Isrc/world',
+    subprocess.run(['i686-w64-mingw32-gcc', *module_flags.FLAGS, '-std=c99', '-Itools/difftest', '-O2', '-Wall', '-Wextra', '-Werror', '-Isrc/world',
                     '-o', str(executable), 'tools/difftest/worldfilesdiff.c', str(source_path),
                     'src/world/world_init.c', 'src/world/world_area.c',
                     '-lntdll'], cwd=root, check=True)

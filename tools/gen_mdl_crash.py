@@ -6,6 +6,7 @@ over each model's generated data image, into bin/mdl-crash/models/, and
 bin/mdl-crash/crashes.inc describes them to tools/difftest/mdlcrashdiff.c.
 Generated model data and DLLs stay in ignored bin/mdl-crash/.
 """
+import module_flags
 import json
 from pathlib import Path
 import re
@@ -46,7 +47,7 @@ def hand_record(path,directory,survey_record):
 def build_hand(record,directory,model,source='src/mdl/mdl_crash.c',optimize='-O2',defines=(),entry='src/mdl/mdl_crash_entry.S'):
     destination=Path(record['rebuilt']); destination.parent.mkdir(parents=True,exist_ok=True)
     subprocess.run(['i686-w64-mingw32-windres','-J','res','-O','coff',str(directory/'model.res'),str(directory/'resource.o')],check=True)
-    result=subprocess.run(['i686-w64-mingw32-gcc','-std=c99',optimize,'-Wall','-Wextra','-fno-strict-aliasing',
+    result=subprocess.run(['i686-w64-mingw32-gcc', *module_flags.FLAGS,'-std=c99', '-Itools/difftest',optimize,'-Wall','-Wextra',
             '-ffreestanding','-fno-builtin','-fno-asynchronous-unwind-tables',f'-DCRASH_MODEL={model}',*defines,
             '-Iinclude','-Isrc/mdl','-shared','-nostdlib','-Wl,--entry=_DllMain@12',
             '-Wl,--disable-dynamicbase','-Wl,--disable-nxcompat','-Wl,--section-alignment=65536','-Wl,--image-base='+record['image_base'],

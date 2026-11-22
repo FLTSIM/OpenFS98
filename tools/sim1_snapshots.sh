@@ -6,7 +6,7 @@
 # side's snapshots are kept, and they must equal retail-b's (the run repeats).
 #
 #   tools/sim1_snapshots.sh        (needs bin/sim1-native/SIM1_ours.sim and bin/sim1-diff/scripts:
-#                                   make -f tools/sim1.mk sim1-snapshots makes both and runs this)
+#                                   tools/ofs sim1-snapshots makes both and runs this)
 set -uo pipefail
 cd "$(dirname "$0")/.."
 out=bin/sim1-diff/snapshots

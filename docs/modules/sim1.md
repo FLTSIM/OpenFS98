@@ -15,13 +15,13 @@ Linkage at GLOBAL `+0x11d4`. This is simulator code outside `Modules\`, not
 **Installed, 2026-11-06:** AIR decoding, aircraft setup and the tick/frame
 callbacks now join the six services and state lifecycle. The production build
 has the two ordinary module exports and the original version resource.
-`make sim1` builds `bin/SIM1.sim`; shared build/install/revert include it.
+`tools/ofs sim1` builds `bin/SIM1.sim`; shared build/install/revert include it.
 The earlier partial harnesses below remain useful isolated tests. Complete
 build verification and installation are described at the end of this document.
 
 ## Reference and shape
 
-`tools/gen_sim1_data.py` checks the extracted CD image before copying it to
+`tools/gen_sim1_data.py` (`tools/ofs sim1-reference`) checks the extracted CD image before copying it to
 ignored `orig/Sim/SIM1.sim`. It refuses to overwrite a different original.
 The CD and installed game copies both have SHA-256
 `66ebc70ff63fd6beb51a146b9fa2d1ce5d92a5cdff99af92960eed9e2ab68c1b`.
@@ -60,9 +60,7 @@ body sizes.
 
 Offsets here are from retail `.data`, `0x22016000`. `src/sim1/sim1.c`
 keeps a matching `0x43f8`-byte image; the two published tables are aliases
-into it. Data after the tables is extracted into ignored build output, not
-copied by hand into tracked source. Pointers in unused extracted state remain
-reference VAs. This is deliberately not a complete relocated SIM1 image;
+into it. Data after the tables is committed typed C: `src/sim1/sim1_data.inc` (included by both `sim1.c` and `sim1_native.c`) and `sim1_rdata.inc` (included only by `sim1_native.c`). The only pointers in `.data` are the Linkage's eleven; the rest is plain data. This is deliberately not a complete relocated SIM1 image;
 unimplemented executable slots raise an exception instead of succeeding.
 
 - **`+0x18`:** forward byte copy from `+0x1730`, length `0x2c`. Source and
@@ -93,9 +91,9 @@ unimplemented executable slots raise an exception instead of succeeding.
 ## Differential verification
 
 ```sh
-make -f tools/sim1.mk sim1-partial
-make -f tools/sim1.mk sim1diff-run N=20000
-make -f tools/sim1.mk sim1-breaks
+tools/ofs sim1-partial
+tools/ofs sim1diff-run N=20000
+tools/ofs sim1-breaks
 ```
 
 `tools/difftest/sim1diff.c` loads independently owned retail and rebuilt
@@ -259,8 +257,8 @@ the init caller comparison described below.
 ### State verification
 
 ```sh
-make -f tools/sim1.mk sim1state-run N=20000
-make -f tools/sim1.mk sim1state-breaks
+tools/ofs sim1state-run N=20000
+tools/ofs sim1state-breaks
 ```
 
 The state test DLL has additional helper exports only in
@@ -366,8 +364,8 @@ that the partial module can simulate a frame.
 ### Caller verification
 
 ```sh
-make -f tools/sim1.mk sim1air-run N=20000
-make -f tools/sim1.mk sim1air-breaks
+tools/ofs sim1air-run N=20000
+tools/ofs sim1air-breaks
 python3 -B tools/sim1_air_survey.py
 ```
 
@@ -434,15 +432,15 @@ generator, its bridge, the complete builds and the suites that only tested them 
 `SIM1_AIR_TEST`) where the decoder, setup and callbacks are traps:
 
 ```sh
-make -f tools/sim1.mk sim1-regression-run N=20000   # six services, fifteen state operations, three load layouts
+tools/ofs sim1-regression-run N=20000   # six services, fifteen state operations, three load layouts
 ```
 
 ### Game verification and installation
 
 ```sh
-make -f tools/sim1.mk sim1native-flights
-make sim1-install FS98_DIR=game
-make sim1-revert FS98_DIR=game
+tools/ofs sim1native-flights
+tools/ofs sim1-install FS98_DIR=game
+tools/ofs sim1-revert FS98_DIR=game
 ```
 
 All **74 stock flights match over 1,200 passes each** with the `controls`
@@ -476,8 +474,7 @@ The lifted simulation was replaced routine by routine with hand-written C, by th
 other modules used, finished 2026-11-08; the lifted build served as a second oracle until it was
 deleted on 2026-11-14.
 
-**The routines and their contracts.** `tools/gen_sim1_tables.py` writes
-`src/sim1/sim1_tables.inc` from the CD's SIM1 and the retail modules it calls: 186 routines
+**The routines and their contracts.** `src/sim1/sim1_tables.inc` is committed (the retired `tools/gen_sim1_tables.py` wrote it) from the CD's SIM1 and the retail modules it calls: 186 routines
 (the Linkage entries, every call target, code addresses held as data) with the bytes each pops,
 and 35 module services with what each pops. Much of SIM1 is old hand-written assembly that
 passes values in registers (edi holding GLOBAL, esi a table, ax a 16-bit position) and leaves
@@ -495,10 +492,10 @@ its contract.
 n passes (`FRAMELOCK_SIM1_SNAPSHOT`, `HG2D_FRAMES_SNAPSHOT=n` in `tools/hg2d_frames.sh`). Eight
 retail flights, one per stock aircraft type (STGEORGE, BELLSFR, LEARLON, EXTRARIO, CESSROME, SAIL1,
 KENNEDY, PARIS), 1,200 passes of the `controls` script, a snapshot every 40: 240 states in
-`bin/sim1-diff/snapshots.bin` (the two retail runs of each flight are identical; `make -f tools/sim1.mk sim1-snapshots` remakes it, `tools/sim1_snapshots.sh`). The floating
+`bin/sim1-diff/snapshots.bin` (the two retail runs of each flight are identical; `tools/ofs sim1-snapshots` remakes it, `tools/sim1_snapshots.sh`). The floating
 point then runs on values the flight model meets, which random doubles would not give.
 
-**The harness**, `tools/difftest/sim1rdiff.c` (`make -f tools/sim1.mk sim1rdiff-run`): retail
+**The harness**, `tools/difftest/sim1rdiff.c` (`tools/ofs sim1rdiff-run`): retail
 SIM1 mapped at its base, its MSVCRT imports real, every module service a logging stub that pops
 what the retail service pops (HOST's memmove modelled). Each scenario takes a snapshot and
 perturbs it (a few doubles nudged, negated, zeroed or scaled, a few bytes changed; one scenario
@@ -543,7 +540,7 @@ roughness, a rate limiter, an angle follower, the integration step, the flaps, s
 landing gear, the air-relative motion, the engines', ground and autopilot passes and the
 autopilot's entry, the helicopter's rotor terms, blades, tail rotor, power and frame, the jet
 and piston engines and the jets' atmosphere, the controls' pass, the attitude's quaternion
-step, the simulation step and the tick's substeps). `make -f tools/sim1.mk sim1rdiff-run`: 186
+step, the simulation step and the tick's substeps). `tools/ofs sim1rdiff-run`: 186
 operations, one per routine (the two CHAIN wrappers 0x22001020 and 0x22001040 run their
 routines' C), 2,000 scenarios each, 372,000 comparisons, 0 differ. Deliberate breaks: `tools/sim1r_breaks.py` (run
 it from a frozen copy; `ONLY=` picks breaks): 882, each caught when added; the ones left out
@@ -554,7 +551,7 @@ special doubles and signed zeros, list terminators, the tick's cuts at 0x420, 0x
 ticks). Retail bugs SIM1-SCALE-DISCARDED, SIM1-GOVERNOR-RPM, SIM1-AUTOTHROTTLE-ENGINES,
 SIM1-GEAR-HORN-ENGINES (the last three suspected) and SIM1-SLEW-HEIGHT-EAX are registered;
 SIM1-AIR-FRAME-OVERRUN is registered as fixed, not kept. The routine table had stopped at
-0x22013340, taking the CRT's start for SIM1's end; `gen_sim1_tables.py`'s `CRT_START` is now
+0x22013340, taking the CRT's start for SIM1's end; the retired `gen_sim1_tables.py`'s `CRT_START` was set to
 0x22014160, which added 0x22013340, 0x220135f0 and 0x22013b30 (the helicopter's frame, power and
 tail rotor).
 
@@ -579,20 +576,20 @@ analysis, and each over-approximation there showed up as a register a routine "h
 
 ### The native build
 
-`make sim1` (`make -f tools/sim1.mk sim1-native`) builds `bin/sim1-native/SIM1_ours.sim` from
-`src/sim1/sim1_small.c` and `src/sim1/sim1_native.c`; `make sim1-install` installs it
+`tools/ofs sim1` (`tools/ofs sim1-native`) builds `bin/sim1-native/SIM1_ours.sim` from
+`src/sim1/sim1_small.c` and `src/sim1/sim1_native.c`; `tools/ofs sim1-install` installs it
 (`tools/stage_sim1.py`; `--retail` installs the CD's). The
 image is retail's: `sim1_native.c` lays out the ImportTable, the Linkage and retail's `.data`
 bytes as one 0x43f8-byte block, as retail's `.data` is, and points `sim1_base` at a copy of
-retail's `.rdata`, so every `SF64`/`RF64` offset is retail's. `tools/gen_sim1_native.py` takes
-those bytes and the resources from the CD's SIM1 into `bin/sim1-native`, and checks retail's
+retail's `.rdata`, so every `SF64`/`RF64` offset is retail's. The bytes are committed C (`src/sim1/sim1_data.inc`, `sim1_rdata.inc`, typed values at retail's offsets, also the harness DLLs' image; row SIM1 in `tools/data_images.txt`); `tools/gen_sim1_native.py` takes
+the resources from the CD's SIM1 into `bin/sim1-native`, and checks retail's
 relocations: the only pointers in `.data` are the Linkage's, and `.rdata` has none, so nothing
 else needs relocating. MSVCRT's `_CIpow`, `_CIacos` and `_CIasin` are found at attach;
 `_ftol` is `sim1_ftol`. Three Linkage entries go through small thunks that keep the caller's eax,
 which C cannot express: +0x18 (eax untouched), +0x28 (only ax set) and +0x38 (eax untouched, the
 result in st0). CHAIN registers the C functions themselves.
 
-Its acceptance was the lifted build's: `make -f tools/sim1.mk sim1native-flights`, the 74
+Its acceptance was the lifted build's: `tools/ofs sim1native-flights`, the 74
 scripted flights of `tools/fly_scripts.py`, retail SIM1 twice against ours, 1,200 passes each,
 compared frame for frame and on SIM1's numeric state every pass: **74 match, 0 differ** (the first
 build, 2026-11-08; STGEORGE alone matched first). With every other module ours too (`frames_many.sh` without

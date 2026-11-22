@@ -1,0 +1,1400 @@
+#!/usr/bin/env python3
+"""Compare a module's .data image with retail's, byte for byte (Story 1.4).
+
+Usage: tools/check_data_image.py [--kept] [--rdata RVA:LEN] <retail.dll> <ours.dll>
+       tools/check_data_image.py --hash <MODULE> <ours.dll> [--manifest FILE]
+       tools/check_data_image.py --orig DIR --manifest FILE [--update] [--self-test]
+Retail's .data (virtual size, zero past the raw data) has each of its own
+relocation targets zeroed (ours installs those pointers at load).  Ours is read
+for the same number of bytes, starting at our ImportTable export minus retail's
+ImportTable offset into its .data (both DLLs must export it, inside .data), with
+our own relocation targets zeroed too (statically initialised code pointers);
+each must also be one of retail's, else exit 1.  Exit 0 if identical.
+--kept (ATC, NUMERIC, UTIL): every retail relocation target that is not one of ours must
+hold retail's raw, unzeroed 4 bytes (a code address kept as a value); a zeroed
+or changed one fails.  The output counts them as "K kept".
+--mixed (manifest flag; HG2D, G3D): each retail relocation target that is not one of ours must be retail's raw value, or zero and
+listed in ptrs= (given the usual value check), or zero and listed in cset=; anything else fails.  Not with --kept.  The output counts
+the raw ones as "K kept" and the cset= ones as "S set in C".
+cset=LIST (manifest field, only with --mixed): the zero slots the module sets in C: comma-separated offsets, and A..B for every 4th
+offset from A to B inclusive.  Each must be a slot retail relocates that is not ours, not in ptrs=, and zero in ours.  --hash hashes the
+parsed list too.
+ptrs= may also hold G3D_DATA_POINTER / MAIN_DATA_POINTER(at, target) (image start + target) and G3D_CODE_TARGET / MAIN_CODE_TARGET(address)
+lines: under --mixed the set of code-target addresses must equal the distinct raw values of the kept slots, and a repeated line is an error.
+MAIN_LINKAGE_RETAIL(at, value) lines (MAIN only) must be exactly 51, at ascending offsets 0xc0..0x188 in steps of 4, with no duplicates,
+and each value must equal retail's raw word at that offset; they are metadata, so they never count as listed or installed slots.
+tail=SYMBOL:VA:LEN[:SHA256] (manifest field, MAIN's text tail): our COFF symbol's LEN bytes must equal retail's mapped image (.text, the zero
+gap and .rdata, as the loader maps them at the preferred base, unrelocated) from VA.  Both windows must lie inside their images (retail's
+between .text and .data, ours inside one of our sections) and none of OUR relocations may overlap ours; retail's own relocations over the
+window are allowed (it is retail's code, kept as raw bytes).  --hash hashes our window.
+--rdata RVA:LEN: retail's .rdata bytes there must appear exactly once in our
+.data and .rdata together (MULTIP keeps its copy in .data), with none of our relocations overlapping the match.
+--hash: no retail.  Checks our image (normalized as above, plus the sorted list
+of our relocation offsets in it) and each .rdata range's window against the
+sha256s in tools/data_images.txt.  With UPDATE=1 in the environment it warns,
+and sets the DLL's mtime to 0 so that the next build reruns the step.
+at=SYMBOL (manifest field): our image starts at that COFF symbol of our DLL (NUMERIC's _fs98_numeric_data,
+UTIL's _fs98_util_data: each a verbatim copy of retail's whole .data, retail's ImportTable and Linkage bytes included; the
+module's live ImportTable and Linkage are separate objects) instead of at our ImportTable export; with at=, the image may lie in .data or .rdata, and off= is 0.
+ptrs=PATH[:SHA256] (manifest field): the pointer list a module installs at attach (FACIL_REL_*, FE_REL_*,
+ADVDRV_CODE/ADVDRV_DATA, PANELS' C/L, or MULTIP's { owner, off, kind, target }).  With orig/, each slot and target must equal retail's relocated
+value, and retail's relocations in the image must all be ours, kept or listed.  --hash needs no orig/: it
+hashes the parsed entries.
+rawptrs=PATH[:SHA256] (manifest field, HOST): an image without relocations (FLTSIM98.EXE keeps retail's absolute addresses raw and
+rebases them at start-up) and a file whose HOST_RT_CODE_POINTER(site, target) and HOST_RT_DATA_POINTER(site, target) rows must equal
+exactly the set retail gives: every aligned word of its .rdata and .data (raw size) whose value lies in .text (a code row) or in
+base+0x16000..base+0x1f000 (a data row), each target being that word minus the image base; a repeated, missing, extra or mistargeted
+row fails.  Neither image may have relocations.  --hash hashes the parsed rows.
+switch=IDX_RVA:LEN:JT_RVA:T=A,...[:SHA256] (manifest field): a table rebuilt from retail's compressed
+switch (byte table, jump table, target T's action A); it must appear once in ours.  --hash hashes the window.
+--manifest with --orig: every row against retail.  UPDATE=1 (or --update)
+rewrites the hashes of the rows that pass.  --self-test: see self_test().
+"""
+import hashlib, os, re, struct, subprocess, sys, tempfile, shutil
+
+def load(path):
+    b = open(path, "rb").read()
+    pe = struct.unpack_from("<I", b, 0x3C)[0]
+    n = struct.unpack_from("<H", b, pe + 6)[0]
+    opt = pe + 24
+    base = struct.unpack_from("<I", b, opt + 28)[0]
+    dirs = opt + 96
+    s = opt + struct.unpack_from("<H", b, pe + 20)[0]
+    secs = {}
+    for i in range(n):
+        o = s + 40 * i
+        name = b[o:o + 8].rstrip(b"\0").decode()
+        secs[name] = struct.unpack_from("<IIII", b, o + 8)  # vsize, rva, rawsize, raw
+    return b, base, dirs, secs
+
+def read_rva(b, secs, rva, size):
+    for vs, va, rs, raw in secs.values():
+        if va <= rva < va + max(vs, rs):
+            off = rva - va
+            data = b[raw + off: raw + min(rs, off + size)] if off < rs else b""
+            return data + bytes(size - len(data))
+    raise SystemExit("rva 0x%x is in no section" % rva)
+
+def targets(b, dirs, secs):
+    """RVAs of every HIGHLOW relocation."""
+    rrva, rsize = struct.unpack_from("<II", b, dirs + 5 * 8)
+    out = []
+    if not rrva:
+        return out
+    reloc = read_rva(b, secs, rrva, rsize)
+    cur = 0
+    while cur + 8 <= len(reloc):
+        page, blk = struct.unpack_from("<II", reloc, cur)
+        if blk == 0:
+            break
+        for e in range(8, blk, 2):
+            ent = struct.unpack_from("<H", reloc, cur + e)[0]
+            if ent >> 12 == 3:
+                out.append(page + (ent & 0xFFF))
+            elif ent >> 12:
+                raise SystemExit("unexpected relocation type")
+        cur += blk
+    return out
+
+def export(ob, odirs, os_):
+    erva = struct.unpack_from("<I", ob, odirs)[0]
+    if not erva:
+        return None
+    ex = read_rva(ob, os_, erva, 40)
+    nnames, faddr, naddr, nord = struct.unpack_from("<IIII", ex, 24)
+    names = read_rva(ob, os_, naddr, 4 * nnames)
+    ords = read_rva(ob, os_, nord, 2 * nnames)
+    funcs = read_rva(ob, os_, faddr, 4 * struct.unpack_from("<I", ex, 20)[0])
+    for i in range(nnames):
+        nrva = struct.unpack_from("<I", names, 4 * i)[0]
+        if read_rva(ob, os_, nrva, 12) == b"ImportTable\0":
+            return struct.unpack_from("<I", funcs, 4 * struct.unpack_from("<H", ords, 2 * i)[0])[0]
+    return None
+
+
+def hexint(x):
+    return int(x, 0)
+
+def coff_symbol(b, secs, name):
+    """(RVA, None) of the COFF symbol `name` in a PE image, or (None, message): no symbol table, no such symbol, more than one, or not in a section.
+    Needs the DLL's COFF symbol table, so a module linked with -s / --strip-all cannot use at=."""
+    pe = struct.unpack_from("<I", b, 0x3C)[0]
+    ptr, n = struct.unpack_from("<II", b, pe + 12)
+    if not ptr:
+        return None, "no COFF symbol table in our DLL (at=; was it stripped?)"
+    strtab = ptr + 18 * n
+    order = list(secs.values())
+    found = []
+    i = 0
+    while i < n:
+        o = ptr + 18 * i
+        raw = b[o:o + 8]
+        if raw[:4] == bytes(4):
+            so = strtab + struct.unpack_from("<I", raw, 4)[0]
+            nm = b[so:b.index(b"\0", so)]
+        else:
+            nm = raw.rstrip(b"\0")
+        value, sec = struct.unpack_from("<Ih", b, o + 8)
+        if nm == name.encode() and 1 <= sec <= len(order):
+            found.append(order[sec - 1][1] + value)
+        i += 1 + b[o + 17]
+    if len(found) != 1:
+        return None, "no symbol %s in our DLL (at=)" % name if not found else "%d symbols named %s in our DLL (at=)" % (len(found), name)
+    return found[0], None
+
+def our_image(ob, odirs, os_, ours, off, vs, at=None):
+    """Ours with our relocation targets zeroed, and the sorted relocation offsets in it."""
+    if at:
+        start, err = coff_symbol(ob, os_, at)  # the DLL must keep its COFF symbol table (no -s / --strip-all)
+        if err:
+            return None, None, "%s: %s" % (ours, err)
+    else:
+        start = export(ob, odirs, os_)
+        if start is None:
+            raise SystemExit("ours has no ImportTable export")
+        start -= off
+    homes = [os_[n] for n in ((".data", ".rdata") if at else (".data",)) if n in os_]
+    if not any(h[1] <= start and start + vs <= h[1] + max(h[0], h[2]) for h in homes):
+        raise SystemExit("%s: our image (0x%x..0x%x) is not inside our %s"
+                         % (ours, start, start + vs, " or ".join("%s (0x%x..0x%x)" % (n, h[1], h[1] + max(h[0], h[2]))
+                                                                for n, h in zip((".data", ".rdata") if at else (".data",), homes))))
+    mine = bytearray(read_rva(ob, os_, start, vs))
+    offs = []
+    for r in targets(ob, odirs, os_):
+        t = r - start
+        if -4 < t < 0 or 0 <= t < vs and t + 4 > vs:
+            return start, None, "%s: our relocation at +0x%x straddles an edge of the image" % (ours, t)
+        if 0 <= t < vs:
+            offs.append(t)
+    return start, mine, offs
+
+RDATA_HOMES = (".data", ".rdata")  # a copy of retail's .rdata may live in our .data (MULTIP's s_multip_rdata)
+
+def home_bytes(ob, os_):
+    """(rva, bytes) of each of our initialised data sections that holds a .rdata range."""
+    out = [(os_[n][1], read_rva(ob, os_, os_[n][1], os_[n][0])) for n in RDATA_HOMES if n in os_]
+    if not out:
+        raise SystemExit("ours has no .data or .rdata")
+    return out
+
+def rdata_matches(ob, os_, pat):
+    """RVAs in our .data and .rdata where pat appears."""
+    out = []
+    for rva, rd in home_bytes(ob, os_):
+        i = rd.find(pat)
+        while i >= 0:
+            out.append(rva + i)
+            i = rd.find(pat, i + 1)
+    return out
+
+def rdata_windows(ob, os_, ln, sha):
+    """RVAs of the length-ln windows in our .data and .rdata whose sha256 is sha."""
+    return [rva + i for rva, rd in home_bytes(ob, os_) for i in range(len(rd) - ln + 1)
+            if hashlib.sha256(rd[i:i + ln]).hexdigest() == sha]
+
+def rdata_overlap(ob, odirs, os_, ours, m, ln):
+    """An error string if one of our relocations overlaps our match at RVA m, else None."""
+    for r in targets(ob, odirs, os_):
+        if r + 4 > m and r < m + ln:
+            return "%s: our relocation at RVA 0x%x overlaps the .rdata match at RVA 0x%x" % (ours, r, m)
+
+def rdata_check(rb, rs, ob, odirs, os_, ours, rva, ln):
+    """Retail's range must be in our .rdata exactly once, with none of our relocations over it."""
+    pat = read_rva(rb, rs, rva, ln)
+    ms = rdata_matches(ob, os_, pat)
+    if len(ms) != 1:
+        return None, "%s: .rdata 0x%x:0x%x found %d times in ours (.data and .rdata), not once" % (ours, rva, ln, len(ms))
+    err = rdata_overlap(ob, odirs, os_, ours, ms[0], ln)
+    if err:
+        return None, err
+    return (ms[0], hashlib.sha256(pat).hexdigest()), None
+
+PTR_RES = [re.compile(r"^\s*(FACIL_REL_DATA|FACIL_REL_TEXT|FE_REL_DATA|FE_REL_TEXT|ADVDRV_CODE|ADVDRV_DATA|HG2D_DATA_POINTER|G3D_DATA_POINTER|MAIN_DATA_POINTER|MAIN_LINKAGE_RETAIL|C)"
+                      r"\((0x[0-9a-fA-F]+),\s*(0x[0-9a-fA-F]+)\)\s*$"),
+           re.compile(r"^\s*\{\s*(\d+),\s*(0x[0-9a-fA-F]+),\s*(\d+),\s*(0x[0-9a-fA-F]+)\s*\},?\s*$"),
+           re.compile(r"^\s*L\((0x[0-9a-fA-F]+)\)\s*$"),
+           re.compile(r"^\s*((?:G3D|MAIN)_CODE_TARGET)\((0x[0-9a-fA-F]+)\)\s*$")]
+GLOBAL_LINK = 0xc  # PANELS' L(at): the slot holds image start + 0xc, the GLOBAL link
+
+def parse_ptrs(path):
+    """(entries, error): (form, off, target) or (owner, off, kind, target) tuples in source order."""
+    try:
+        text = open(path).read()
+    except OSError as e:
+        return None, "%s: %s" % (path, e.strerror)
+    text = re.sub(r"/\*.*?\*/", lambda m: "\n" * m.group(0).count("\n"), text, flags=re.S)
+    out = []
+    targets_seen = set()
+    for n, line in enumerate(text.split("\n"), 1):
+        if not line.strip():
+            continue
+        m = PTR_RES[3].match(line)
+        if m:
+            v = hexint(m.group(2))
+            if v in targets_seen:
+                return None, "%s:%d: duplicate %s 0x%x" % (path, n, m.group(1), v)
+            targets_seen.add(v)
+            out.append((m.group(1), v))
+            continue
+        m = PTR_RES[0].match(line)
+        if m:
+            out.append((m.group(1), hexint(m.group(2)), hexint(m.group(3))))
+            continue
+        m = PTR_RES[2].match(line)
+        if m:
+            out.append(("L", hexint(m.group(1)), GLOBAL_LINK))
+            continue
+        m = PTR_RES[1].match(line)
+        if not m:
+            return None, "%s:%d: not a pointer entry: %s" % (path, n, line.strip())
+        out.append((int(m.group(1)), hexint(m.group(2)), int(m.group(3)), hexint(m.group(4))))
+    return out, None
+
+def ptrs_hash(entries):
+    return hashlib.sha256("\n".join(",".join(str(x) for x in e) for e in entries).encode()).hexdigest()
+
+RAWPTR_RE = re.compile(r"^\s*HOST_RT_(CODE|DATA)_POINTER\((0x[0-9a-fA-F]+),\s*(0x[0-9a-fA-F]+)\)\s*$")
+RAWPTR_DATA = (0x16000, 0x1f000)  # RVAs: .rdata through .idata, the data a raw pointer may name
+
+def parse_rawptrs(path):
+    """(rows, error): ("CODE"|"DATA", site, target) in source order.  Every other line of the file (the other HOST_RT_* tables, #ifdef and
+    comments) belongs to tools/ofs host-rt-tables-check and is skipped."""
+    try:
+        text = open(path).read()
+    except OSError as e:
+        return None, "%s: %s" % (path, e.strerror)
+    text = re.sub(r"/\*.*?\*/", lambda m: "\n" * m.group(0).count("\n"), text, flags=re.S)
+    rows = []
+    for n, line in enumerate(text.split("\n"), 1):
+        m = RAWPTR_RE.match(line)
+        if m:
+            rows.append((m.group(1), hexint(m.group(2)), hexint(m.group(3))))
+        elif re.search(r"HOST_RT_(CODE|DATA)_POINTER", line) and not re.match(r"^\s*#\s*(ifdef|define|undef)\b", line):
+            return None, "%s:%d: not a plain HOST_RT_CODE/DATA_POINTER(0x.., 0x..) row: %s" % (path, n, line.strip())
+    return rows, None
+
+def rawptrs_hash(rows, path):
+    """The parsed pointer rows plus the sha256 of the file's text after its leading header comment, so that an edit to any other row
+    (imports, functions, services, thunks, direct) fails --hash too."""
+    text = open(path).read()
+    body = text[text.index("*/") + 2:] if text.startswith("/*") else text
+    return hashlib.sha256(("\n".join(",".join(str(x) for x in r) for r in rows) + "\n" + hashlib.sha256(body.encode()).hexdigest()).encode()).hexdigest()
+
+def rawptrs_check(path, rb, base, rs):
+    """The rows of path against the set the generator's rule gives on retail; (rows, error)."""
+    rows, err = parse_rawptrs(path)
+    if err:
+        return None, err
+    tv, tva = rs[".text"][:2]
+    want = {}
+    for name in (".rdata", ".data"):
+        vs, rva, rsz, raw = rs[name]
+        for site in range(rva, rva + rsz - 3, 4):
+            v = struct.unpack_from("<I", rb, raw + site - rva)[0]
+            if base + tva <= v < base + tva + tv:
+                want[site] = ("CODE", site, v - base)
+            elif base + RAWPTR_DATA[0] <= v < base + RAWPTR_DATA[1]:
+                want[site] = ("DATA", site, v - base)
+    seen = set()
+    for kind, site, tgt in rows:
+        if site in seen:
+            return None, "%s: HOST_RT_%s_POINTER at 0x%x is repeated" % (path, kind, site)
+        seen.add(site)
+        if site not in want:
+            return None, "%s: HOST_RT_%s_POINTER at 0x%x is not a pointer word of retail's .rdata or .data" % (path, kind, site)
+        if (kind, site, tgt) != want[site]:
+            return None, "%s: HOST_RT_%s_POINTER at 0x%x targets 0x%x, retail's word gives HOST_RT_%s_POINTER 0x%x" % (path, kind, site, tgt, want[site][0], want[site][2])
+    for site in sorted(set(want) - seen):
+        return None, "%s: retail's pointer word at 0x%x (HOST_RT_%s_POINTER) is not listed" % (path, site, want[site][0])
+    return rows, None
+
+def ptrs_check(path, rb, base, rs, va, rset, offs, kept_mode, ours, mixed=False, kept_values=None):
+    """Check a pointer list against retail; returns (entries, error).  kept_mode and mixed both relax completeness to: every other slot is kept or (mixed) zero."""
+    ents, err = parse_ptrs(path)
+    if err:
+        return None, err
+    seen = set()
+    code_targets = set()
+    linkage = []
+    for e in ents:
+        if len(e) == 2:
+            code_targets.add(e[1])
+            continue
+        if e[0] == "MAIN_LINKAGE_RETAIL":
+            linkage.append(e[1:])
+            continue
+        if len(e) == 3:
+            form, off, tgt = e
+            # ADVDRV_CODE holds a VA, so its target base is minus the image base
+            tbase = {"FACIL_REL_DATA": va, "FE_REL_DATA": va, "ADVDRV_DATA": va, "HG2D_DATA_POINTER": va, "G3D_DATA_POINTER": va, "MAIN_DATA_POINTER": va, "L": va, "FACIL_REL_TEXT": 0,
+                     "FE_REL_TEXT": 0, "ADVDRV_CODE": -base, "C": rs[".text"][1]}[form]
+        else:
+            owner, off, kind, tgt = e
+            if owner != 0:
+                return None, "%s: owner %d is unsupported (only owner 0)" % (path, owner)
+            if kind not in (1, 2, 3):
+                return None, "%s: slot +0x%x has unknown kind %d" % (path, off, kind)
+            tbase = {1: rs[".text"][1], 2: va, 3: rs[".rdata"][1]}[kind]
+        if off in seen:
+            return None, "%s: duplicate slot +0x%x" % (path, off)
+        seen.add(off)
+        if off in offs:
+            return None, "%s: listed slot +0x%x is one of our own relocations" % (path, off)
+        if off not in rset:
+            return None, "%s: slot +0x%x is one retail does not relocate" % (path, off)
+        want = struct.unpack("<I", read_rva(rb, rs, va + off, 4))[0]
+        ours_v = base + tbase + tgt
+        if want != ours_v:
+            return None, "%s: slot +0x%x: retail 0x%x, ours 0x%x" % (path, off, want, ours_v)
+    if not (kept_mode or mixed):
+        for t in sorted(rset - offs - seen):
+            return None, "%s: retail relocation at +0x%x is not ours, kept or listed" % (ours, t)
+    kind = next((e[0].split("_")[0] for e in ents if isinstance(e[0], str) and e[0].split("_")[0] in ("G3D", "MAIN") and e[0] != "L"), None)
+    if kind:  # a G3D or MAIN list: an empty target set must fail too
+        if kept_values is None:
+            return None, "%s: %s_CODE_TARGET needs a --mixed row" % (path, kind)
+        for v in sorted(code_targets ^ kept_values):
+            return None, "%s: %s_CODE_TARGET 0x%x %s" % (path, kind, v, "is not a raw value of the image's kept slots" if v in code_targets else "is a raw value of the image's kept slots but not listed")
+    if kind == "MAIN":
+        ats = [a for a, _ in linkage]
+        if ats != list(range(0xc0, 0x18c, 4)):
+            return None, "%s: MAIN_LINKAGE_RETAIL lines must be exactly 51, at ascending offsets 0xc0..0x188 in steps of 4, none repeated (got %d)" % (path, len(ats))
+        for a, v in linkage:
+            want = struct.unpack("<I", read_rva(rb, rs, va + a, 4))[0]
+            if v != want:
+                return None, "%s: MAIN_LINKAGE_RETAIL at +0x%x: retail 0x%x, listed 0x%x" % (path, a, want, v)
+    return ents, None
+
+def parse_cset(text):
+    """Sorted offsets of a cset= value ("0x5c,0x60,0x70..0xbc"); raises ValueError."""
+    out = []
+    for part in text.split(","):
+        a, dots, b = part.partition("..")
+        lo, hi = hexint(a), hexint(b) if dots else hexint(a)
+        if hi < lo or (hi - lo) % 4:
+            raise ValueError
+        out += range(lo, hi + 1, 4)
+    if len(set(out)) != len(out):
+        raise ValueError
+    return sorted(out)
+
+def parse_switch(v):
+    """(idx_rva, len, jt_rva, [(target, action)], sha or None)"""
+    p = v.split(":")
+    if len(p) not in (4, 5):
+        raise ValueError
+    m = [tuple(int(x, 0) for x in kv.split("=")) for kv in p[3].split(",")]
+    if any(len(x) != 2 for x in m):
+        raise ValueError
+    return (hexint(p[0]), hexint(p[1]), hexint(p[2]), m, p[4] if len(p) > 4 else None)
+
+def switch_table(rb, rs, rt, base, sw):
+    """Retail's action table rebuilt from its switch; (bytes, error)."""
+    idx, ln, jt, m, _ = sw
+    mp = dict(m)
+    ib = read_rva(rb, rs, idx, ln)
+    acts = []
+    for i in range(max(ib) + 1):
+        if jt + 4 * i not in rt:
+            return None, "switch 0x%x: jump table dword %d (RVA 0x%x) is not a retail relocation" % (idx, i, jt + 4 * i)
+        t = struct.unpack("<I", read_rva(rb, rs, jt + 4 * i, 4))[0] - base
+        if t not in mp:
+            return None, "switch 0x%x: jump table entry %d targets 0x%x, which is not in the map" % (idx, i, t)
+        acts.append(mp[t])
+    return bytes(acts[b] for b in ib), None
+
+def parse_tail(v):
+    """(symbol, VA, length, sha or None) of a tail= value; raises ValueError."""
+    p = v.split(":")
+    if len(p) not in (3, 4) or not p[0]:
+        raise ValueError
+    return (p[0], hexint(p[1]), hexint(p[2]), p[3] if len(p) > 3 else None)
+
+def our_tail(ob, odirs, os_, ours, sym, ln):
+    """(bytes, None) of our COFF symbol's ln bytes, or (None, error): the window must be positive, inside one of our sections, and clear of our relocations."""
+    if ln <= 0:
+        return None, "%s: tail= length 0x%x is not positive" % (ours, ln)
+    start, err = coff_symbol(ob, os_, sym)
+    if err:
+        return None, "%s: %s" % (ours, err.replace("(at=)", "(tail=)"))
+    if not any(h[1] <= start and start + ln <= h[1] + max(h[0], h[2]) for h in os_.values()):
+        return None, "%s: tail= window 0x%x..0x%x is not inside one of our sections" % (ours, start, start + ln)
+    for r in targets(ob, odirs, os_):
+        if r + 4 > start and r < start + ln:
+            return None, "%s: our relocation at RVA 0x%x overlaps the tail= window at RVA 0x%x" % (ours, r, start)
+    return read_rva(ob, os_, start, ln), None
+
+def retail_tail(rb, base, rs, va, ln):
+    """Retail's mapped image from VA for ln bytes (.text, the zero gap, .rdata; zero up to .data); (bytes, error).  Retail's own relocations
+    over it are allowed: it is retail's code, kept as raw bytes at the preferred base."""
+    lo, hi = rs[".text"][1], rs[".data"][1]
+    if va - base < lo or va - base + ln > hi:
+        return None, "tail= window 0x%x..0x%x is not inside retail's mapped .text..end of .rdata (0x%x..0x%x)" % (va, va + ln, base + lo, base + hi)
+    img = bytearray(hi - lo)
+    for name in (".text", ".rdata"):
+        vs, rva, rsz, raw = rs[name]
+        n = min(rsz, vs)
+        img[rva - lo:rva - lo + n] = rb[raw:raw + n]
+    return bytes(img[va - base - lo:va - base - lo + ln]), None
+
+def image_hash(mine, offs, cset=()):
+    extra = b"cset" + b"".join(struct.pack("<I", t) for t in cset) if cset else b""
+    return hashlib.sha256(bytes(mine) + b"".join(struct.pack("<I", t) for t in sorted(offs)) + extra).hexdigest()
+
+def compare(retail, ours, kept_mode, rdatas=(), ptrs=None, switch=None, at=None, mixed=False, cset=None, tail=None, rawptrs=None):
+    """Returns (rc, info); info is None unless rc == 0.  Prints what it always has."""
+    rb, base, rdirs, rs = load(retail)
+    vs, va, rawsize, raw = rs[".data"]
+    img = bytearray(read_rva(rb, rs, va, vs))
+    rt = targets(rb, rdirs, rs)
+    for r in rt:
+        if va <= r < va + vs:
+            img[r - va:r - va + 4] = bytes(4)
+    ob, _, odirs, os_ = load(ours)
+    if at:
+        off = 0
+    else:
+        rit = export(rb, rdirs, rs)
+        if rit is None or not va <= rit < va + vs:
+            raise SystemExit("retail has no ImportTable export inside .data")
+        off = rit - va
+    start, mine, offs = our_image(ob, odirs, os_, ours, off, vs, at)
+    if mine is None:
+        print(offs)
+        return 1, None
+    rset = {r - va for r in rt if va <= r < va + vs}
+    for t in offs:
+        if t not in rset:
+            print("%s: our relocation at +0x%x is not one of retail's" % (ours, t))
+            return 1, None
+        mine[t:t + 4] = bytes(4)
+    ours_n = len(offs)
+    hashed = bytes(mine)  # kept slots still raw
+    kept = 0
+    kept_values = None
+    if mixed:
+        listed = set()
+        if ptrs and not off:
+            ents, err = parse_ptrs(ptrs)
+            if err:
+                print(err)
+                return 1, None
+            listed = {e[1] for e in ents if len(e) > 2 and e[0] != "MAIN_LINKAGE_RETAIL"}
+        csl = parse_cset(cset) if cset else []
+        for c in csl:
+            why = ("is one retail does not relocate" if c not in rset else "is one of our own relocations" if c in offs
+                   else "is also listed in ptrs=" if c in listed else "is not zero in ours" if c + 4 > vs or any(mine[c:c + 4]) else None)
+            if why:
+                print("%s: cset= slot +0x%x %s" % (ours, c, why))
+                return 1, None
+        kept_values = set()
+        for t in sorted(rset - set(offs)):
+            raw = read_rva(rb, rs, va + t, 4)
+            if t + 4 > vs or not (mine[t:t + 4] == raw or (mine[t:t + 4] == bytes(4) and (t in listed or t in csl))):
+                print("%s: slot at +0x%x is neither retail's raw value nor zero and listed in ptrs= or cset= (--mixed)" % (ours, t))
+                return 1, None
+            if mine[t:t + 4] == raw:
+                kept += 1
+                kept_values.add(struct.unpack("<I", raw)[0])
+                mine[t:t + 4] = bytes(4)
+    elif kept_mode:
+        for t in sorted(rset - set(offs)):
+            raw = read_rva(rb, rs, va + t, 4)
+            if t + 4 > vs or raw == bytes(4) or mine[t:t + 4] != raw:
+                print("%s: kept slot at +0x%x is not retail's raw value" % (ours, t))
+                return 1, None
+            mine[t:t + 4] = bytes(4)
+            kept += 1
+    for i in range(vs):
+        if mine[i] != img[i]:
+            print("%s: first difference at +0x%x: retail 0x%02x, ours 0x%02x"
+                  % (ours, i, img[i], mine[i]))
+            return 1, None
+    name = ours.split("/")[-1].split(".")[0].upper()
+    print("%s: .data image 0x%x bytes identical (%d relocated, %d ours%s)"
+          % (name, vs, len(rset), ours_n, ", %d kept" % kept + (", %d set in C" % len(csl) if cset else "") if kept_mode or mixed else ""))
+    info = dict(name=name, off=off, vs=vs, relocated=len(rset), hash=image_hash(hashed, offs, parse_cset(cset) if cset else ()), rdata=[])
+    for rva, ln in rdatas:
+        res, err = rdata_check(rb, rs, ob, odirs, os_, ours, rva, ln)
+        if err:
+            print(err)
+            return 1, None
+        print("%s: .rdata 0x%x:0x%x bytes identical (at our RVA 0x%x)" % (name, rva, ln, res[0]))
+        info["rdata"].append((rva, ln, res[1]))
+    info["ptrs"] = info["switch"] = info["tail"] = info["rawptrs"] = None
+    if tail:
+        sym, tva, tln, _ = tail
+        want, err = retail_tail(rb, base, rs, tva, tln)
+        got, err2 = (None, None) if err else our_tail(ob, odirs, os_, ours, sym, tln)
+        err = err or err2
+        if not err:
+            for i in range(tln):
+                if want[i] != got[i]:
+                    err = "%s: tail= %s: first difference at +0x%x (VA 0x%x): retail 0x%02x, ours 0x%02x" % (ours, sym, i, tva + i, want[i], got[i])
+                    break
+        if err:
+            print(err)
+            return 1, None
+        print("%s: tail %s 0x%x bytes identical to retail from 0x%x" % (name, sym, tln, tva))
+        info["tail"] = (sym, tva, tln, hashlib.sha256(got).hexdigest())
+    if rawptrs:
+        if rt or offs:
+            print("%s: rawptrs= is for an image without relocations (retail has %d, ours %d in the image)" % (ours, len(rt), len(offs)))
+            return 1, None
+        rows, err = rawptrs_check(rawptrs, rb, base, rs)
+        if err:
+            print(err)
+            return 1, None
+        print("%s: raw pointer rows %s: %d code, %d data match retail" % (name, rawptrs, sum(r[0] == "CODE" for r in rows), sum(r[0] == "DATA" for r in rows)))
+        info["rawptrs"] = (rawptrs, rawptrs_hash(rows, rawptrs), len(rows))
+    if ptrs and off:  # list offsets count from ImportTable, image offsets from .data
+        print("%s: ptrs= needs the image to start at .data (off=0), not +0x%x" % (ours, off))
+        return 1, None
+    if ptrs:
+        ents, err = ptrs_check(ptrs, rb, base, rs, va, rset, set(offs), kept_mode, ours, mixed, kept_values)
+        if err:
+            print(err)
+            return 1, None
+        print("%s: pointer list %s: %d entries match retail%s" % (name, ptrs, len(ents),
+              " (%d data pointers listed)" % sum(1 for e in ents if len(e) == 3 and e[0].endswith("_DATA_POINTER")) if mixed else ""))
+        info["ptrs"] = (ptrs, ptrs_hash(ents), len(ents))
+    if switch:
+        pat, err = switch_table(rb, rs, set(rt), base, switch)
+        ms = [] if err else rdata_matches(ob, os_, pat)
+        if not err and len(ms) != 1:
+            err = "%s: switch 0x%x table found %d times in ours, not once" % (ours, switch[0], len(ms))
+        if not err:
+            err = rdata_overlap(ob, odirs, os_, ours, ms[0], len(pat))
+        if err:
+            print(err)
+            return 1, None
+        print("%s: switch 0x%x rebuilt, %d bytes identical (at our RVA 0x%x)" % (name, switch[0], len(pat), ms[0]))
+        info["switch"] = switch[:4] + (hashlib.sha256(pat).hexdigest(),)
+    return 0, info
+
+# --- the manifest: MODULE retail ours [--kept|--mixed] [at=SYMBOL] [rdata=RVA:LEN[:SHA256] ...] [ptrs=PATH[:SHA256]] [rawptrs=PATH[:SHA256]] [switch=...] [off=0x.. len=0x.. sha256=..]
+
+def read_manifest(path):
+    """Rows as dicts (with their text as read); comment and blank lines as plain strings."""
+    rows = []
+    lines = open(path).read().split("\n")
+    if lines[-1] == "":
+        lines.pop()
+    for n, line in enumerate(lines, 1):
+        f = line.split("#")[0].split()
+        if not f:
+            rows.append(line)
+            continue
+        def bad(why):
+            raise SystemExit("%s:%d: %s" % (path, n, why))
+        if len(f) < 3:
+            bad("a row needs MODULE retail ours")
+        row = dict(module=f[0], retail=f[1], ours=f[2], kept=False, mixed=False, cset=None, tail=None, at=None, rdata=[], ptrs=None, rawptrs=None, switch=None, off=None, len=None, sha=None, text=line)
+        for w in f[3:]:
+            k, _, v = w.partition("=")
+            try:
+                if w == "--kept":
+                    row["kept"] = True
+                elif w == "--mixed":
+                    row["mixed"] = True
+                elif k == "cset" and v:
+                    parse_cset(v)
+                    row["cset"] = v
+                elif k == "tail" and v:
+                    row["tail"] = parse_tail(v)
+                elif k == "at" and v:
+                    row["at"] = v
+                elif k == "rdata":
+                    p = v.split(":")
+                    if len(p) not in (2, 3):
+                        bad("rdata= needs RVA:LEN[:SHA256], got %r" % w)
+                    row["rdata"].append((hexint(p[0]), hexint(p[1]), p[2] if len(p) > 2 else None))
+                elif k == "ptrs":
+                    path, _, sha = v.partition(":")
+                    row["ptrs"] = (path, sha or None)
+                elif k == "rawptrs" and v:
+                    path, _, sha = v.partition(":")
+                    row["rawptrs"] = (path, sha or None)
+                elif k == "switch":
+                    row["switch"] = parse_switch(v)
+                elif k == "off":
+                    row["off"] = hexint(v)
+                elif k == "len":
+                    row["len"] = hexint(v)
+                elif k == "sha256" and v:
+                    row["sha"] = v
+                else:
+                    bad("bad field %r" % w)
+            except ValueError:
+                bad("bad number in %r" % w)
+        if row["kept"] and row["mixed"]:
+            bad("--mixed and --kept are exclusive")
+        if row["cset"] and not row["mixed"]:
+            bad("cset= is only valid with --mixed")
+        if row["at"] and row["off"]:
+            bad("at= images start at the symbol, so off= must be 0")
+        if (row["off"] is None) != (row["len"] is None) or (row["off"] is None) != (row["sha"] is None):
+            bad("off=, len= and sha256= go together; one is missing")
+        rows.append(row)
+    return rows
+
+def format_row(r):
+    f = [r["module"], r["retail"], r["ours"]] + (["--kept"] if r["kept"] else []) + (["--mixed"] if r["mixed"] else []) + (["at=" + r["at"]] if r["at"] else []) + (["cset=" + r["cset"]] if r["cset"] else [])
+    f += ["rdata=0x%x:0x%x%s" % (a, b, ":" + c if c else "") for a, b, c in r["rdata"]]
+    if r["ptrs"]:
+        f.append("ptrs=" + r["ptrs"][0] + (":" + r["ptrs"][1] if r["ptrs"][1] else ""))
+    if r["rawptrs"]:
+        f.append("rawptrs=" + r["rawptrs"][0] + (":" + r["rawptrs"][1] if r["rawptrs"][1] else ""))
+    if r["tail"]:
+        t = r["tail"]
+        f.append("tail=%s:0x%x:0x%x%s" % (t[0], t[1], t[2], ":" + t[3] if t[3] else ""))
+    if r["switch"]:
+        i, n, j, m, c = r["switch"]
+        f.append("switch=0x%x:0x%x:0x%x:%s%s" % (i, n, j, ",".join("0x%x=%d" % x for x in m), ":" + c if c else ""))
+    if r["off"] is not None:
+        f += ["off=0x%x" % r["off"], "len=0x%x" % r["len"], "sha256=%s" % r["sha"]]
+    return " ".join(f)
+
+def hash_check(row, ours):
+    ob, _, odirs, os_ = load(ours)
+    bad = []
+    if row["off"] is None:
+        bad.append("the manifest row has no hashes yet")
+    else:
+        start, mine, offs = our_image(ob, odirs, os_, ours, row["off"], row["len"], row["at"])
+        if mine is None:
+            bad.append(offs)
+        else:
+            for t in offs:
+                mine[t:t + 4] = bytes(4)
+            if image_hash(mine, offs, parse_cset(row["cset"]) if row["cset"] else ()) != row["sha"]:
+                bad.append("%s: our .data image (or its relocations) differs from the manifest" % ours)
+    wins = [("%s: .rdata 0x%x:0x%x" % (ours, a, b), b, c) for a, b, c in row["rdata"]]
+    if row["switch"]:
+        wins.append(("%s: switch 0x%x table" % (ours, row["switch"][0]), row["switch"][1], row["switch"][4]))
+    for what, ln, sha in wins:
+        if sha is None:
+            bad.append("%s: no hash" % what)
+            continue
+        ms = rdata_windows(ob, os_, ln, sha)
+        if len(ms) != 1:
+            bad.append("%s window found %d times, not once" % (what, len(ms)))
+            continue
+        err = rdata_overlap(ob, odirs, os_, ours, ms[0], ln)
+        if err:
+            bad.append(err)
+    if row["tail"]:
+        sym, tva, tln, tsha = row["tail"]
+        got, err = our_tail(ob, odirs, os_, ours, sym, tln)
+        if err:
+            bad.append(err)
+        elif tsha is None:
+            bad.append("%s: no hash for the tail= window" % ours)
+        elif hashlib.sha256(got).hexdigest() != tsha:
+            bad.append("%s: tail= window %s differs from the manifest" % (ours, sym))
+    if row["ptrs"]:
+        ents, err = parse_ptrs(row["ptrs"][0])
+        if err:
+            bad.append(err)
+        elif row["ptrs"][1] is None:
+            bad.append("%s: no hash for pointer list %s" % (ours, row["ptrs"][0]))
+        elif ptrs_hash(ents) != row["ptrs"][1]:
+            bad.append("%s: pointer list %s differs from the manifest" % (ours, row["ptrs"][0]))
+    if row["rawptrs"]:
+        rows, err = parse_rawptrs(row["rawptrs"][0])
+        if err:
+            bad.append(err)
+        elif row["rawptrs"][1] is None:
+            bad.append("%s: no hash for raw pointer rows %s" % (ours, row["rawptrs"][0]))
+        elif rawptrs_hash(rows, row["rawptrs"][0]) != row["rawptrs"][1]:
+            bad.append("%s: raw pointer rows %s differ from the manifest" % (ours, row["rawptrs"][0]))
+    return bad
+
+def run_hash(module, ours, manifest, warn):
+    rows = [r for r in read_manifest(manifest) if isinstance(r, dict) and r["module"] == module]
+    if len(rows) != 1:
+        raise SystemExit("%s: no single row for %s" % (manifest, module))
+    bad = hash_check(rows[0], ours)
+    if not bad:
+        return 0
+    for b in bad:
+        print(b)
+    print("%s: data image changed since tools/data_images.txt; if intended, run tools/ofs data-images UPDATE=1"
+          % module)
+    if warn:
+        os.utime(ours, (0, 0))  # rerun this step next build, against the manifest as it is then
+        print("WARNING only (UPDATE=1)")
+        return 0
+    return 1
+
+def run_manifest(orig, manifest, update):
+    rows = read_manifest(manifest)
+    fails = nd = nbytes = nrel = nr = nrb = nsw = npl = npe = ntl = ntb = nrp = nrr = 0
+    changed = False
+    for r in rows:
+        if not isinstance(r, dict):
+            continue
+        rc, info = compare(os.path.join(orig, r["retail"]), r["ours"], r["kept"],
+                           [(a, b) for a, b, _ in r["rdata"]], r["ptrs"] and r["ptrs"][0], r["switch"], r["at"], r["mixed"], r["cset"], r["tail"], r["rawptrs"] and r["rawptrs"][0])
+        if rc:
+            fails += 1
+            continue
+        nd += 1; nbytes += info["vs"]; nrel += info["relocated"]
+        nr += len(info["rdata"]); nrb += sum(b for _, b, _ in info["rdata"])
+        nsw += bool(info["switch"])
+        if info["tail"]:
+            ntl += 1; ntb += info["tail"][2]
+        if info["ptrs"]:
+            npl += 1; npe += info["ptrs"][2]
+        if info["rawptrs"]:
+            nrp += 1; nrr += info["rawptrs"][2]
+        new = (info["off"], info["vs"], info["hash"], info["rdata"], info["ptrs"] and info["ptrs"][:2], info["switch"], info["tail"], info["rawptrs"] and info["rawptrs"][:2])
+        if update and new != (r["off"], r["len"], r["sha"], r["rdata"], r["ptrs"], r["switch"], r["tail"], r["rawptrs"]):
+            r["off"], r["len"], r["sha"], r["rdata"], r["ptrs"], r["switch"], r["tail"], r["rawptrs"] = new
+            r["text"] = format_row(r)
+            changed = True
+    if changed:
+        tmp = manifest + ".tmp"
+        with open(tmp, "w") as f:
+            f.write("\n".join(r["text"] if isinstance(r, dict) else r for r in rows) + "\n")
+        os.replace(tmp, manifest)
+    return fails, "%d .data images identical (%d bytes, %d relocated), %d .rdata ranges identical (%d bytes), %d switch tables, %d tail windows (%d bytes), %d pointer lists (%d entries), %d raw pointer lists (%d rows)" \
+        % (nd, nbytes, nrel, nr, nrb, nsw, ntl, ntb, npl, npe, nrp, nrr)
+
+# --- G3D's built-in bytecode, re-parsed from src/g3d/g3d_image.inc
+
+G3D_IMAGE_INC = "src/g3d/g3d_image.inc"
+G3D_PROGRAMS = ((0xf840, 0x15c22), (0x16180, 0x16e12), (0x17b1e, 0x18448))
+G3D_OPCODE_TABLE = 0x4220  # 148 {handler, length} pairs; the length rule is service +0x64's (docs/modules/g3d.md)
+INC_SIZES = {"U8": 1, "U16": 2, "OP": 2, "W": 2, "U32": 4}
+
+def inc_lines(text):
+    """(pos, [(macro, value, pos)]) per source line of g3d_image.inc: AT(off) sets the position, each value macro advances it."""
+    text = re.sub(r"/\*.*?\*/", "", text, flags=re.S)
+    out, pos = [], None
+    for line in text.split("\n"):
+        if line.lstrip().startswith("#"):
+            continue
+        toks, start = [], None
+        for name, arg in re.findall(r"(\w+)\(([^()]*)\)", line):
+            if name == "AT":
+                pos = hexint(arg)
+                continue
+            size = INC_SIZES.get(name) or (int(name[3:]) if re.fullmatch(r"STR\d+", name) else None)
+            if size is None or pos is None:
+                raise ValueError("%s(%s): unknown macro or no AT() before it" % (name, arg))
+            if start is None:
+                start = pos
+            toks.append((name, None if name.startswith("STR") else hexint(arg), pos))
+            pos += size
+        if toks:
+            out.append((start, toks, pos))
+    return out
+
+def opcode_length(table, b):
+    """The length service +0x64 gives the instruction whose bytes start b, in 32-bit registers as retail has them; None for an opcode
+    past 0x93, a b too short, or a result that is not positive (next_instruction returns 0 for it)."""
+    s32 = lambda v: (v & 0xFFFFFFFF) - (1 << 32 if v & 0x80000000 else 0)
+    op = struct.unpack_from("<H", b, 0)[0]
+    if op > 0x93:
+        return None
+    base, at, mul = struct.unpack("<hbb", struct.pack("<I", table[op]))
+    n = base
+    try:
+        if mul:
+            n = s32(n + (s32(s32(struct.unpack_from("<H", b, at)[0] * mul) + 1) & ~1))
+        if op == 0x15:
+            n = s32(n + s32(s32((struct.unpack_from("<H", b, 2)[0] + 1) * (struct.unpack_from("<H", b, 4)[0] + 1)) * 4))
+    except struct.error:
+        return None
+    return n if n > 0 else None
+
+def bytecode_problems(rb, base, rs, rt, text):
+    """Problems with the OP() lines of g3d_image.inc's two programs against retail's opcode table and relocations; [] if none."""
+    va, tva = rs[".data"][1], rs[".text"]
+    table = [struct.unpack("<I", read_rva(rb, rs, va + G3D_OPCODE_TABLE + 8 * i + 4, 4))[0] for i in range(148)]
+    code = {r - va for r in rt if va <= r < va + rs[".data"][0]
+            and tva[1] <= struct.unpack("<I", read_rva(rb, rs, r, 4))[0] - base < tva[1] + tva[0]}
+    try:
+        lines = inc_lines(text)
+    except ValueError as e:
+        return [str(e)]
+    probs, seen_code = [], set()
+    for lo, hi in G3D_PROGRAMS:
+        cursor = lo
+        groups = []  # an instruction is its OP() line plus, if it is long, the W() lines that continue it
+        for start, toks, end in lines:
+            if end <= lo or start >= hi:
+                continue
+            if toks[0][0] != "OP" and groups and groups[-1][2] == start and all(t[0] in ("W", "U32", "U8") for t in toks):
+                groups[-1] = (groups[-1][0], groups[-1][1] + toks, end)
+            else:
+                groups.append((start, toks, end))
+        for start, toks, end in groups:
+            if start != cursor:
+                probs.append("program +0x%x..+0x%x: the line at +0x%x does not follow the one before (expected +0x%x)" % (lo, hi, start, cursor))
+            names = [t[0] for t in toks]
+            if names[0] != "OP" or "OP" in names[1:] or any(n not in ("W", "U32", "U8") for n in names[1:]):
+                probs.append("program +0x%x..+0x%x: the line at +0x%x is not one OP() line with W()/U32() operands" % (lo, hi, start))
+            else:
+                b = b"".join(v.to_bytes(INC_SIZES[n], "little") for n, v, _ in toks)
+                if opcode_length(table, b) != len(b):
+                    probs.append("program +0x%x..+0x%x: OP(0x%02x) at +0x%x is %d bytes, the opcode table's rule gives %s"
+                                 % (lo, hi, toks[0][1], start, len(b), opcode_length(table, b)))
+                for n, v, pos in toks:
+                    if n == "U32":
+                        seen_code.add(pos)
+                        if pos not in code:
+                            probs.append("program +0x%x..+0x%x: U32 at +0x%x is not a code address retail relocates" % (lo, hi, pos))
+                        if toks[0][1] != 0x8c or pos != start + 2:
+                            probs.append("embedded code address at +0x%x is not the U32 operand at instruction +2 of an OP(0x8c) line" % pos)
+            cursor = end
+        if cursor != hi:
+            probs.append("program +0x%x..+0x%x: the OP() lines stop at +0x%x" % (lo, hi, cursor))
+    for r in sorted(c for c in code if any(lo <= c < hi for lo, hi in G3D_PROGRAMS) and c not in seen_code):
+        probs.append("embedded code address at +0x%x is not the U32 operand at instruction +2 of an OP(0x8c) line" % r)
+    return probs
+
+# --- self-test
+
+def file_off(b, secs, rva):
+    for vs, va, rs, raw in secs.values():
+        if va <= rva < va + rs:
+            return raw + rva - va
+    raise SystemExit("rva 0x%x not in the file" % rva)
+
+def reloc_blocks(b, dirs, secs):
+    """(file offset of block header, [file offsets of its HIGHLOW entries]) per block."""
+    rrva, rsize = struct.unpack_from("<II", b, dirs + 5 * 8)
+    fo = file_off(b, secs, rrva)
+    out, cur = [], 0
+    while cur + 8 <= rsize:
+        page, blk = struct.unpack_from("<II", b, fo + cur)
+        if blk == 0:
+            break
+        out.append((fo + cur, [fo + cur + e for e in range(8, blk, 2)
+                               if b[fo + cur + e + 1] >> 4 == 3]))
+        cur += blk
+    return out
+
+def add_reloc(b, dirs, secs, rva):
+    """Append one block holding exactly one HIGHLOW entry at rva, in the .reloc section's slack."""
+    rrva, rsize = struct.unpack_from("<II", b, dirs + 5 * 8)
+    fo = file_off(b, secs, rrva) + rsize
+    if fo + 12 > file_off(b, secs, rrva) + secs[".reloc"][2]:
+        raise SystemExit("self-test: no room in .reloc")
+    struct.pack_into("<IIHH", b, fo, rva & ~0xFFF, 12, 0x3000 | (rva & 0xFFF), 0)
+    struct.pack_into("<I", b, dirs + 5 * 8 + 4, rsize + 12)
+
+def self_test(orig, manifest):
+    """Mutated temp copies of built DLLs, each of which must fail; returns (failures, cases)."""
+    rows = {r["module"]: r for r in read_manifest(manifest) if isinstance(r, dict)}
+    tmp = tempfile.mkdtemp(prefix="cdi-selftest-")
+    env = {k: v for k, v in os.environ.items() if k != "UPDATE"}
+    me = os.path.abspath(__file__)
+    with_orig = ["--orig", orig, "--manifest"]
+    fails = []
+    cases = [0]
+
+    def mutated(module, edit):
+        """Temp copy of module's DLL edited by edit(bytearray, dirs, secs, start, row); returns (manifest, row)."""
+        row = dict(rows[module])
+        b = bytearray(open(row["ours"], "rb").read())
+        _, _, dirs, secs = load(row["ours"])
+        if row["at"]:
+            start, err = coff_symbol(bytes(b), secs, row["at"])
+            if err:
+                raise SystemExit("self-test: %s" % err)
+        else:
+            start = export(bytes(b), dirs, secs) - row["off"]
+        edit(b, dirs, secs, start, row)
+        d = tempfile.mkdtemp(dir=tmp)
+        row["ours"] = os.path.join(d, module + ".DLL")
+        open(row["ours"], "wb").write(b)
+        m = os.path.join(d, "m.txt")
+        open(m, "w").write(format_row(row) + "\n")
+        return m, row
+
+    def run(args, extra_env=None):
+        return subprocess.run([sys.executable, "-B", me] + args, capture_output=True, text=True,
+                              env=dict(env, **(extra_env or {})))
+
+    def expect(name, p, needle, rc=1):
+        if p.returncode != rc or needle not in p.stdout + p.stderr:
+            fails.append("%s (exit %d, wanted exit %d and %r in: %s)" % (name, p.returncode, rc, needle, (p.stdout + p.stderr).strip()))
+
+    def case(fn):
+        cases[0] += 1
+        try:
+            fn()
+        except (Exception, SystemExit) as e:
+            fails.append("%s raised %r" % (fn.__name__, e))
+
+    def flip_data(b, dirs, secs, start, row):
+        b[file_off(b, secs, start + 0x100)] ^= 0xFF
+
+    def flip_rdata(b, dirs, secs, start, row):
+        b[file_off(b, secs, secs[".rdata"][1])] ^= 0xFF
+
+    def reloc_at(t):  # t: image offset, may lie outside the image
+        return lambda b, dirs, secs, start, row: add_reloc(b, dirs, secs, start + (t(row) if callable(t) else t))
+
+    def kept_slot(change):
+        def edit(b, dirs, secs, start, row):
+            rb, _, rdirs, rs = load(os.path.join(orig, row["retail"]))
+            va = rs[".data"][1]
+            rset = {r - va for r in targets(rb, rdirs, rs) if va <= r < va + row["len"]}
+            t = sorted(rset - {r - start for r in targets(bytes(b), dirs, secs)})[0]
+            o = file_off(b, secs, start + t)
+            if change:
+                b[o] ^= 0xFF
+            else:
+                b[o:o + 4] = bytes(4)
+        return edit
+
+    def foreign(b, dirs, secs, start, row):  # retarget one existing entry onto a slot retail does not relocate
+        rb, _, rdirs, rs = load(os.path.join(orig, row["retail"]))
+        va = rs[".data"][1]
+        rset = {r - va for r in targets(rb, rdirs, rs)}
+        mine = {r - start for r in targets(bytes(b), dirs, secs)}
+        for hdr, ents in reloc_blocks(b, dirs, secs):
+            page = struct.unpack_from("<I", b, hdr)[0]
+            for e in ents:
+                lo = struct.unpack_from("<H", b, e)[0] & 0xFFF
+                if 0 <= page + lo - start < row["len"]:
+                    for t in range(row["len"] - 3):
+                        if (start + t) >> 12 == page >> 12 and not any(abs(t - x) < 4 for x in rset | mine):
+                            struct.pack_into("<H", b, e, 0x3000 | ((start + t) & 0xFFF))
+                            return
+        raise SystemExit("no relocation to retarget")
+
+    def null_slot(b, dirs, secs, start, row):
+        mine = {r - start for r in targets(bytes(b), dirs, secs)}
+        for t in range(0, row["len"] - 3, 4):
+            if not any(b[file_off(b, secs, start + t):][:4]) and t not in mine:
+                return add_reloc(b, dirs, secs, start + t)
+        raise SystemExit("no NULL slot")
+
+    def copy_rva(b, secs, row):  # where MULTIP's .rdata copy lives in our .data
+        rva, ln, sha = row["rdata"][0]
+        return rdata_windows(bytes(b), secs, ln, sha)[0]
+
+    def flip_copy(b, dirs, secs, start, row):
+        b[file_off(b, secs, copy_rva(b, secs, row))] ^= 0xFF
+
+    def over_copy(b, dirs, secs, start, row):
+        add_reloc(b, dirs, secs, copy_rva(b, secs, row) + 0x10)
+
+    def unmix(b, dirs, secs, start, row):
+        row["mixed"] = False
+        row["cset"] = None
+
+    def unmix_keep_cset(b, dirs, secs, start, row):
+        row["mixed"] = False
+
+    def raw_slot(change):  # a slot whose value in ours is retail's raw one: flip it, or zero it
+        def edit(b, dirs, secs, start, row):
+            rb, _, rdirs, rs = load(os.path.join(orig, row["retail"]))
+            va = rs[".data"][1]
+            for t in sorted(r - va for r in targets(rb, rdirs, rs) if va <= r < va + row["len"]):
+                o = file_off(b, secs, start + t)
+                if b[o:o + 4] == bytes(read_rva(rb, rs, va + t, 4)) != bytes(4):
+                    if change:
+                        b[o] ^= 0xFF
+                    else:
+                        b[o:o + 4] = bytes(4)
+                    return
+            raise SystemExit("no raw slot")
+        return edit
+
+    def with_cset(text):
+        def edit(b, dirs, secs, start, row):
+            row["cset"] = row["cset"] + "," + text
+        return edit
+
+    def no_symbol(b, dirs, secs, start, row):
+        row["at"] = "_fs98_no_such_symbol"
+
+    def tail_start(b, secs, row):
+        return coff_symbol(bytes(b), secs, row["tail"][0])[0]
+
+    def flip_tail(at):  # one byte of our tail= window: at 0 a season word, past it the rest
+        def edit(b, dirs, secs, start, row):
+            b[file_off(b, secs, tail_start(b, secs, row) + at)] ^= 0xFF
+        return edit
+
+    def over_tail(b, dirs, secs, start, row):
+        add_reloc(b, dirs, secs, tail_start(b, secs, row) + 0x10)
+
+    def tail_row(**kw):
+        def edit(b, dirs, secs, start, row):
+            sym, va, ln, sha = row["tail"]
+            row["tail"] = (sym, kw.get("va", va), kw.get("ln", ln), sha)
+        return edit
+
+    def link_edit(fn):  # fn(lines, indexes of the MAIN_LINKAGE_RETAIL lines)
+        def edit(t, o):
+            ls = t.split("\n")
+            fn(ls, [i for i, l in enumerate(ls) if l.startswith("MAIN_LINKAGE_RETAIL")])
+            return "\n".join(ls)
+        return edit
+
+    def del_last_target(t, o):
+        i = t.rindex("MAIN_CODE_TARGET")
+        return t[:i] + t[t.index("\n", i) + 1:]
+
+    over_rdata = lambda b, dirs, secs, start, row: add_reloc(b, dirs, secs, secs[".rdata"][1] + 0x10)
+    end_edge = reloc_at(lambda row: row["len"] - 2)
+    start_edge = reloc_at(-2)
+
+    def retail(module, edit, needle, name):
+        def f():
+            m, _ = mutated(module, edit)
+            expect(name, run(with_orig + [m]), needle)
+        f.__name__ = name
+        return f
+
+    def hashed(module, edit, needle, name, extra_env=None, rc=1):
+        def f():
+            m, row = mutated(module, edit)
+            p = run(["--hash", module, row["ours"], "--manifest", manifest], extra_env)
+            expect(name, p, needle, rc)
+            if extra_env and os.stat(row["ours"]).st_mtime != 0:
+                fails.append(name + ": mtime not reset")
+        f.__name__ = name
+        return f
+
+    def hash_row(module, edit, needle, name):  # --hash against the edited manifest row, not the real one
+        def f():
+            m, row = mutated(module, edit)
+            expect(name, run(["--hash", module, row["ours"], "--manifest", m]), needle)
+        f.__name__ = name
+        return f
+
+    def listcase(module, textedit, name, retail_needle, hash_needle, rc=1, field="ptrs"):
+        """Run both checks on a temp copy of module's pointer list edited by textedit(text, row, offs)."""
+        def f():
+            m, row = mutated(module, lambda *a: None)
+            _, _, odirs, os_ = load(row["ours"])
+            ob = open(row["ours"], "rb").read()
+            offs = our_image(ob, odirs, os_, row["ours"], row["off"], row["len"], row["at"])[2]
+            body = open(row[field][0]).read()
+            head = body.index("*/") + 2
+            new = os.path.join(os.path.dirname(m), "list.inc")
+            open(new, "w").write(body[:head] + textedit(body[head:], offs))
+            row[field] = (new, row[field][1])
+            open(m, "w").write(format_row(row) + "\n")
+            expect(name + " (retail)", run(with_orig + [m]), retail_needle, rc)
+            expect(name + " (hash)", run(["--hash", module, row["ours"], "--manifest", m]), hash_needle, rc)
+        f.__name__ = name
+        return f
+
+    def first_entry(text):  # (start, end) of the first entry line
+        s = text.index("\n") + 1 if text.startswith("\n") else 0
+        return s, text.index("\n", s) + 1
+    def on_first(fn):
+        def edit(text, offs):
+            s, e = first_entry(text)
+            return text[:s] + fn(text[s:e], offs) + text[e:]
+        return edit
+    hexre = re.compile(r"0x[0-9a-f]+")
+    def sub_nth(line, n, val):
+        ms = list(hexre.finditer(line))
+        return line[:ms[n].start()] + val + line[ms[n].end():]
+    def last_hex(line):
+        return len(hexre.findall(line)) - 1
+    def switch_edit(fn):
+        def f(b, dirs, secs, start, row):
+            i, n, j, m, c = row["switch"]
+            row["switch"] = fn(i, n, j, m, c)
+        return f
+    def flip_switch(b, dirs, secs, start, row):
+        b[file_off(b, secs, rdata_windows(bytes(b), secs, row["switch"][1], row["switch"][4])[0])] ^= 0xFF
+    def flip_nametag(b, dirs, secs, start, row):
+        rva, ln, sha = row["rdata"][1]
+        b[file_off(b, secs, rdata_windows(bytes(b), secs, ln, sha)[0])] ^= 0xFF
+
+    def raw_rows(kind):  # edit the first HOST_RT_<kind>_POINTER row of a rawptrs list: fn(line) -> replacement
+        def on(fn):
+            def edit(text, offs):
+                m = re.search(r"^HOST_RT_%s_POINTER\([^\n]*\n" % kind, text, re.M)
+                return text[:m.start()] + fn(m.group(0)) + text[m.end():]
+            return edit
+        return on
+    raw_code, raw_data = raw_rows("CODE"), raw_rows("DATA")
+
+    def bytecode_cases():
+        rb, base, rdirs, rs = load(os.path.join(orig, rows["G3D"]["retail"]))
+        rt = targets(rb, rdirs, rs)
+        text = open(G3D_IMAGE_INC).read()
+        def check(name, edited, needle):
+            probs = bytecode_problems(rb, base, rs, rt, edited)
+            if needle is None and probs or needle and not any(needle in p for p in probs):
+                fails.append("%s: %r not in %s" % (name, needle, probs[:3]))
+        check("67 bytecode: the committed file re-parses", text, None)
+        check("68 bytecode: an OP() line with a wrong operand count",
+              re.sub(r"(OP\(0x0f\)[^\n]*?), W\(0x[0-9a-f]+\),", r"\1,", text, count=1), "opcode table's rule")
+        check("69 bytecode: a line missing from a program",
+              re.sub(r"\n[^\n]*\n(/\* \+0x16e12 )", r"\n\1", text, count=1), "stop at")
+        check("70 bytecode: an embedded address moved off its operand",
+              text.replace("OP(0x8c), U32(0x206f28b7),", "OP(0x8c), W(0x28b7), W(0x206f),", 1), "embedded code address")
+        cases[0] += 4
+
+    def zero_range_twice():  # retail zeros past REALITY's .rdata sit in our zero pad many times
+        row = dict(rows["REALITY"])
+        rva0, ln0, _ = row["rdata"][0]
+        row["rdata"] = [(rva0 + ln0, 0x10, None)]
+        m = os.path.join(tempfile.mkdtemp(dir=tmp), "m.txt")
+        open(m, "w").write(format_row(row) + "\n")
+        expect("7 .rdata found twice", run(with_orig + [m]), "times in ours")
+
+    def update_leaves_failing_row():
+        m, _ = mutated("ANALYSIS", flip_data)
+        before = open(m).read()
+        expect("update on a failing row", run(with_orig + [m, "--update"]), "first difference")
+        if open(m).read() != before:
+            fails.append("--update rewrote a failing row")
+
+    def update_tail_hash():  # a MAIN row with its tail sha256 stale: UPDATE=1 rewrites it, then --hash passes
+        m, row = mutated("MAIN", lambda *x: None)
+        want = row["tail"]
+        row["tail"] = want[:3] + ("0" * 64,)
+        open(m, "w").write(format_row(row) + "\n")
+        p = run(with_orig + [m, "--update"])
+        expect("update the tail hash", p, "data-images:", 0)
+        new = [r for r in read_manifest(m) if isinstance(r, dict)][0]
+        if new["tail"] != want:
+            fails.append("--update left the tail hash %r, wanted %r" % (new["tail"], want))
+        expect("hash after the tail update", run(["--hash", "MAIN", row["ours"], "--manifest", m]), "", 0)
+
+    def update_rawptrs_hash():  # a HOST row with its rawptrs sha256 stale: UPDATE=1 rewrites it, then --hash passes
+        m, row = mutated("HOST", lambda *x: None)
+        want = row["rawptrs"]
+        row["rawptrs"] = (want[0], "0" * 64)
+        open(m, "w").write(format_row(row) + "\n")
+        expect("update the rawptrs hash", run(with_orig + [m, "--update"]), "data-images:", 0)
+        new = [r for r in read_manifest(m) if isinstance(r, dict)][0]
+        if new["rawptrs"] != want:
+            fails.append("--update left the rawptrs hash %r, wanted %r" % (new["rawptrs"], want))
+        expect("hash after the rawptrs update", run(["--hash", "HOST", row["ours"], "--manifest", m]), "", 0)
+
+    def rawptrs_header_edit():  # the header comment is outside the hash: an edit to it passes both checks
+        m, row = mutated("HOST", lambda *x: None)
+        text = open(row["rawptrs"][0]).read()
+        new = os.path.join(os.path.dirname(m), "tables.inc")
+        open(new, "w").write(text.replace("/*", "/* x ", 1))
+        row["rawptrs"] = (new, row["rawptrs"][1])
+        open(m, "w").write(format_row(row) + "\n")
+        expect("95 rawptrs: a header edit (retail)", run(with_orig + [m]), "data-images:", 0)
+        expect("95 rawptrs: a header edit (hash)", run(["--hash", "HOST", row["ours"], "--manifest", m]), "", 0)
+
+    def rawptrs_other_row():  # a changed HOST_RT_FUNCTION row passes the retail check (pointer rows only) but fails --hash
+        m, row = mutated("HOST", lambda *x: None)
+        text = open(row["rawptrs"][0]).read()
+        i = text.index("HOST_RT_FUNCTION(", text.index("#ifdef HOST_RT_FUNCTION"))
+        new = os.path.join(os.path.dirname(m), "tables.inc")
+        open(new, "w").write(text[:i] + "HOST_RT_FUNCTION(0x1, 0, 0)\n" + text[text.index("\n", i) + 1:])
+        row["rawptrs"] = (new, row["rawptrs"][1])
+        open(m, "w").write(format_row(row) + "\n")
+        expect("changed HOST_RT_FUNCTION row (retail)", run(with_orig + [m]), "data-images:", 0)
+        expect("changed HOST_RT_FUNCTION row (hash)", run(["--hash", "HOST", row["ours"], "--manifest", m]), "raw pointer rows")
+
+    try:
+        for fn in (
+                update_tail_hash,
+                update_rawptrs_hash,
+                rawptrs_other_row,
+
+                retail("ANALYSIS", flip_data, "first difference", "1 retail: .data byte"),
+                retail("ACONTAIN", foreign, "not one of retail's", "2 retail: foreign relocation"),
+                retail("ATC", kept_slot(False), "kept slot", "3 retail: kept slot zeroed"),
+                retail("ATC", kept_slot(True), "kept slot", "4 retail: kept slot changed"),
+                retail("ANALYSIS", flip_rdata, ".rdata", "5 retail: .rdata byte"),
+                retail("ANALYSIS", over_rdata, "overlaps", "6 retail: relocation over .rdata"),
+                zero_range_twice,
+                retail("ANALYSIS", end_edge, "straddles an edge", "8 retail: relocation over the image end"),
+                retail("ANALYSIS", start_edge, "straddles an edge", "9 retail: relocation over the image start"),
+                hashed("ANALYSIS", flip_data, "differs from the manifest", "10 hash: .data byte"),
+                hashed("ANALYSIS", null_slot, "differs from the manifest", "11 hash: relocation on a NULL slot"),
+                hashed("ANALYSIS", flip_rdata, "window found 0 times", "12 hash: .rdata byte"),
+                hashed("ANALYSIS", over_rdata, "overlaps", "13 hash: relocation over .rdata"),
+                hashed("ATC", kept_slot(True), "differs from the manifest", "14 hash: kept slot changed"),
+                hashed("LANDME", flip_data, "differs from the manifest", "15 hash: .data byte, row with off != 0"),
+                hashed("ANALYSIS", end_edge, "straddles an edge", "16 hash: relocation over the image end"),
+                hashed("ANALYSIS", start_edge, "straddles an edge", "17 hash: relocation over the image start"),
+                hashed("ANALYSIS", flip_data, "WARNING", "18 hash with UPDATE=1 warns", {"UPDATE": "1"}, 0),
+                retail("MULTIP", flip_copy, "found 0 times", "20 retail: byte of a .rdata range living in .data"),
+                retail("MULTIP", over_copy, "overlaps", "21 retail: relocation over a .rdata range living in .data"),
+                hashed("MULTIP", flip_copy, "window found 0 times", "22 hash: byte of a .rdata range living in .data"),
+                hashed("MULTIP", over_copy, "overlaps", "23 hash: relocation over a .rdata range living in .data"),
+                update_leaves_failing_row,
+                listcase("FE", lambda t, o: "/* x */\n" + t, "24 ptrs: comment edit", "data-images:", "", 0),
+                listcase("FE", on_first(lambda l, o: sub_nth(l, last_hex(l), "0x1d12")), "25 ptrs: mistyped target",
+                         "retail 0x", "pointer list"),
+                listcase("FACIL", on_first(lambda l, o: ""), "26 ptrs: dropped entry",
+                         "is not ours, kept or listed", "pointer list"),
+                listcase("FE", on_first(lambda l, o: sub_nth(l, 0, "0x1d03")), "27 ptrs: foreign slot",
+                         "does not relocate", "pointer list"),
+                listcase("FE", on_first(lambda l, o: l + l), "28 ptrs: duplicate slot", "duplicate slot", "pointer list"),
+                listcase("FE", on_first(lambda l, o: sub_nth(l, 0, "0x%x" % o[0])), "29 ptrs: slot is ours",
+                         "our own relocations", "pointer list"),
+                listcase("MULTIP", on_first(lambda l, o: l.replace("{ 0,", "{ 1,")), "30 ptrs: owner 1",
+                         "owner 1", "pointer list"),
+                listcase("FE", on_first(lambda l, o: "garbage\n" + l), "31 ptrs: unparsable line",
+                         "not a pointer entry", "not a pointer entry"),
+                retail("MULTIP", switch_edit(lambda i, n, j, m, c: (i, n, j, m[1:], c)), "not in the map",
+                       "35 retail: switch map entry dropped"),
+                retail("MULTIP", switch_edit(lambda i, n, j, m, c: (i, n, j + 4, m, c)), "is not a retail relocation",
+                       "36 retail: switch jump table shifted"),
+                listcase("MULTIP", on_first(lambda l, o: re.sub(r"(0x[0-9a-f]+,\s*)\d(,)", r"\g<1>4\2", l)),
+                         "37 ptrs: unknown kind", "unknown kind", "pointer list"),
+                listcase("ADVDRV", on_first(lambda l, o: sub_nth(l, last_hex(l), "0x20611234")),
+                         "38 ptrs: mistyped ADVDRV code target", "retail 0x", "pointer list"),
+                listcase("PANELS", on_first(lambda l, o: sub_nth(l, last_hex(l), "0x0021")),
+                         "39 ptrs: mistyped PANELS target", "retail 0x", "pointer list"),
+                listcase("PANELS", lambda t, o: re.sub(r"(\n\s*L\()(0x[0-9a-f]+)\)", lambda m: "%s0x%04x)" % (m.group(1), int(m.group(2), 16) + 2), t, count=1),
+                         "40 ptrs: PANELS L() slot moved", "does not relocate", "pointer list"),
+                retail("UTIL", kept_slot(True), "kept slot", "41 retail: kept slot of an image in .rdata changed"),
+                hashed("UTIL", kept_slot(True), "differs from the manifest", "42 hash: kept slot of an image in .rdata changed"),
+                retail("UTIL", no_symbol, "no symbol _fs98_no_such_symbol", "43 retail: at= symbol missing"),
+                hash_row("UTIL", no_symbol, "no symbol _fs98_no_such_symbol", "44 hash: at= symbol missing"),
+                retail("NUMERIC", flip_data, "first difference", "45 retail: .data byte of an at= image"),
+                hashed("NUMERIC", flip_data, "differs from the manifest", "46 hash: .data byte of an at= image"),
+                listcase("HG2D", lambda t, o: "/* x */\n" + t, "47 ptrs: --mixed row, raw and unlisted zero slots", "data-images:", "", 0),
+                retail("HG2D", raw_slot(True), "neither retail's raw value", "48 retail: --mixed slot neither zero nor raw"),
+                hashed("HG2D", kept_slot(True), "differs from the manifest", "49 hash: --mixed slot changed"),
+                listcase("HG2D", on_first(lambda l, o: sub_nth(l, last_hex(l), "0x00001")),
+                         "50 ptrs: mistyped HG2D target", "retail 0x", "pointer list"),
+                retail("HG2D", unmix, "first difference", "51 retail: the HG2D row without --mixed"),
+                retail("G3D", raw_slot(False), "neither retail's raw value", "54 retail: a kept slot of a --mixed row zeroed"),
+                retail("G3D", raw_slot(True), "neither retail's raw value", "55 retail: a kept slot of a --mixed row changed"),
+                hashed("G3D", raw_slot(False), "differs from the manifest", "56 hash: a kept slot of a --mixed row zeroed"),
+                listcase("G3D", on_first(lambda l, o: ""), "57 ptrs: a --mixed pointer entry deleted",
+                         "neither retail's raw value", "pointer list"),
+                listcase("HG2D", on_first(lambda l, o: ""), "58 ptrs: an HG2D pointer entry deleted",
+                         "neither retail's raw value", "pointer list"),
+                retail("G3D", with_cset("0x4"), "does not relocate", "59 retail: cset= slot retail does not relocate"),
+                retail("G3D", with_cset("0x12a"), "also listed in ptrs=", "60 retail: cset= slot also in ptrs="),
+                retail("G3D", with_cset("0x4220"), "is not zero in ours", "61 retail: cset= slot that is not zero"),
+                retail("G3D", unmix_keep_cset, "cset= is only valid with --mixed", "62 retail: cset= without --mixed"),
+                hash_row("G3D", lambda b, d, s_, st, row: row.update(cset="0x5c,0x60,0x70..0xb8"), "differs from the manifest",
+                         "63 hash: a cset= slot dropped"),
+                listcase("G3D", lambda t, o: t + "G3D_CODE_TARGET(0x206e1000)\n", "64 ptrs: a G3D_CODE_TARGET added",
+                         "is not a raw value of the image's kept slots", "pointer list"),
+                listcase("G3D", lambda t, o: t[:t.rindex("G3D_CODE_TARGET")], "65 ptrs: a G3D_CODE_TARGET removed",
+                         "is a raw value of the image's kept slots but not listed", "pointer list"),
+                listcase("G3D", lambda t, o: t + t[t.rindex("G3D_CODE_TARGET"):], "66 ptrs: a G3D_CODE_TARGET repeated",
+                         "duplicate G3D_CODE_TARGET", "duplicate G3D_CODE_TARGET"),
+                listcase("G3D", lambda t, o: re.sub(r"G3D_CODE_TARGET\([^\n]*\n", "", t), "71 ptrs: every G3D_CODE_TARGET removed",
+                         "but not listed", "pointer list"),
+                bytecode_cases,
+                rawptrs_header_edit,
+                listcase("HOST", raw_code(lambda l: ""), "96 rawptrs: a HOST_RT_CODE_POINTER row removed",
+                         "is not listed", "raw pointer rows", 1, "rawptrs"),
+                listcase("HOST", raw_data(lambda l: ""), "97 rawptrs: a HOST_RT_DATA_POINTER row removed",
+                         "is not listed", "raw pointer rows", 1, "rawptrs"),
+                listcase("HOST", lambda t, o: t + "HOST_RT_CODE_POINTER(0x17000, 0x1000)\n", "98 rawptrs: a row added at a word retail does not list",
+                         "is not a pointer word", "raw pointer rows", 1, "rawptrs"),
+                listcase("HOST", raw_code(lambda l: l + l), "99 rawptrs: a HOST_RT_CODE_POINTER row repeated",
+                         "is repeated", "raw pointer rows", 1, "rawptrs"),
+                listcase("HOST", raw_data(lambda l: l + l), "100 rawptrs: a HOST_RT_DATA_POINTER row repeated",
+                         "is repeated", "raw pointer rows", 1, "rawptrs"),
+                listcase("HOST", raw_code(lambda l: sub_nth(l, 1, "0x1000")), "101 rawptrs: a HOST_RT_CODE_POINTER row with a wrong target",
+                         "retail's word gives", "raw pointer rows", 1, "rawptrs"),
+                listcase("HOST", raw_data(lambda l: l.replace("DATA", "CODE")), "102 rawptrs: a data row filed as a code row",
+                         "retail's word gives", "raw pointer rows", 1, "rawptrs"),
+                listcase("HOST", lambda t, o: t + "HOST_RT_DATA_POINTER (0x17024, 0x16000)\n", "107 rawptrs: a row the pattern does not match",
+                         "not a plain", "not a plain", 1, "rawptrs"),
+                retail("HOST", flip_data, "first difference", "103 retail: a byte of HOST's .data image"),
+                hashed("HOST", flip_data, "differs from the manifest", "104 hash: a byte of HOST's .data image"),
+                retail("HOST", flip_copy, "found 0 times", "105 retail: a byte of HOST's .rdata"),
+                hashed("HOST", flip_copy, "window found 0 times", "106 hash: a byte of HOST's .rdata"),
+                retail("SIM1", flip_data, "first difference", "108 retail: a byte of SIM1's .data"),
+                hashed("SIM1", flip_data, "differs from the manifest", "109 hash: a byte of SIM1's .data"),
+                retail("SIM1", flip_copy, "found 0 times", "110 retail: a byte of SIM1's .rdata window"),
+                hashed("SIM1", flip_copy, "window found 0 times", "111 hash: a byte of SIM1's .rdata window"),
+                listcase("MAIN", lambda t, o: "/* x */\n" + t, "72 ptrs: the MAIN row passes with its lists", "data-images:", "", 0),
+                listcase("MAIN", link_edit(lambda ls, ix: ls.__setitem__(ix[3], sub_nth(ls[ix[3]], 1, "0x12345678"))),
+                         "73 ptrs: a MAIN_LINKAGE_RETAIL value changed", "MAIN_LINKAGE_RETAIL", "pointer list"),
+                listcase("MAIN", link_edit(lambda ls, ix: ls.pop(ix[5])), "74 ptrs: a MAIN_LINKAGE_RETAIL line removed",
+                         "MAIN_LINKAGE_RETAIL", "pointer list"),
+                listcase("MAIN", link_edit(lambda ls, ix: ls.insert(ix[5], ls[ix[5]])), "75 ptrs: a MAIN_LINKAGE_RETAIL line repeated",
+                         "MAIN_LINKAGE_RETAIL", "pointer list"),
+                listcase("MAIN", link_edit(lambda ls, ix: ls.__setitem__(slice(ix[5], ix[5] + 2), [ls[ix[5] + 1], ls[ix[5]]])),
+                         "76 ptrs: two MAIN_LINKAGE_RETAIL lines out of order", "MAIN_LINKAGE_RETAIL", "pointer list"),
+                listcase("MAIN", link_edit(lambda ls, ix: [ls.pop(i) for i in reversed(ix)]), "77 ptrs: every MAIN_LINKAGE_RETAIL line removed",
+                         "MAIN_LINKAGE_RETAIL", "pointer list"),
+                listcase("MAIN", lambda t, o: t + "MAIN_CODE_TARGET(0x207e1000)\n", "78 ptrs: a MAIN_CODE_TARGET added",
+                         "is not a raw value of the image's kept slots", "pointer list"),
+                listcase("MAIN", del_last_target, "79 ptrs: a MAIN_CODE_TARGET removed",
+                         "is a raw value of the image's kept slots but not listed", "pointer list"),
+                listcase("MAIN", lambda t, o: t + t[t.rindex("MAIN_CODE_TARGET"):t.index("\n", t.rindex("MAIN_CODE_TARGET")) + 1],
+                         "80 ptrs: a MAIN_CODE_TARGET repeated", "duplicate MAIN_CODE_TARGET", "duplicate MAIN_CODE_TARGET"),
+                listcase("MAIN", lambda t, o: re.sub(r"MAIN_CODE_TARGET\([^\n]*\n", "", t), "81 ptrs: every MAIN_CODE_TARGET removed",
+                         "but not listed", "pointer list"),
+                listcase("MAIN", on_first(lambda l, o: ""), "82 ptrs: a MAIN_DATA_POINTER entry deleted",
+                         "neither retail's raw value", "pointer list"),
+                hashed("MAIN", flip_data, "differs from the manifest", "83 hash: one byte of MAIN's image"),
+                retail("MAIN", flip_tail(0), "first difference", "84 retail: a season word of the tail"),
+                retail("MAIN", flip_tail(0x1000), "first difference", "85 retail: a byte of the rest of the tail"),
+                hashed("MAIN", flip_tail(0), "tail= window", "86 hash: a season word of the tail"),
+                hashed("MAIN", flip_tail(0x1000), "tail= window", "87 hash: a byte of the rest of the tail"),
+                retail("MAIN", tail_row(ln=0x1000000), "not inside", "88 retail: a tail= window past retail's image"),
+                retail("MAIN", tail_row(va=0x207e0000), "not inside", "89 retail: a tail= window before retail's .text"),
+                retail("MAIN", tail_row(ln=0), "not positive", "90 retail: an empty tail= window"),
+                hash_row("MAIN", tail_row(ln=0x1000000), "not inside one of our sections", "91 hash: a tail= window outside our sections"),
+                hash_row("MAIN", tail_row(ln=0), "not positive", "92 hash: an empty tail= window"),
+                retail("MAIN", over_tail, "overlaps the tail= window", "93 retail: our relocation over the tail= window"),
+                hashed("MAIN", over_tail, "overlaps the tail= window", "94 hash: our relocation over the tail= window"),
+                retail("GLOBAL", flip_data, "first difference", "52 retail: GLOBAL byte"),
+                hashed("GLOBAL", flip_data, "differs from the manifest", "53 hash: GLOBAL byte"),
+                retail("MULTIP", flip_switch, "found 0 times", "32 retail: switch table byte"),
+                hashed("MULTIP", flip_switch, "table window found 0 times", "33 hash: switch table byte"),
+                hashed("MULTIP", flip_nametag, "window found 0 times", "34 hash: s_nametag byte")):
+            case(fn)
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+    return fails, cases[0]
+
+def cli():
+    a = sys.argv[1:]
+    def opt(name, arg=True):
+        if name not in a:
+            return None
+        i = a.index(name)
+        if arg and i + 1 >= len(a):
+            sys.exit(__doc__)
+        v = a[i + 1] if arg else True
+        del a[i:i + 1 + arg]
+        return v
+    env_update = os.environ.get("UPDATE") == "1"
+    kept, update, st = opt("--kept", False), opt("--update", False), opt("--self-test", False)
+    rdata, orig = opt("--rdata"), opt("--orig")
+    manifest = opt("--manifest") or os.path.join(os.path.dirname(os.path.abspath(__file__)), "data_images.txt")
+    if "--hash" in a:
+        i = a.index("--hash")
+        if len(a) != i + 3:
+            sys.exit(__doc__)
+        return run_hash(a[i + 1], a[i + 2], manifest, env_update)
+    if orig:
+        if a:
+            sys.exit(__doc__)
+        fails, summary = run_manifest(orig, manifest, update or env_update)
+        sf, cases = self_test(orig, manifest) if st and not fails else ([], 0)  # it needs good DLLs
+        for f in sf:
+            print("self-test FAILED: " + f)
+        if fails or sf:
+            print("data-images: FAILED (%d rows, %d self-test cases)%s" % (fails, len(sf),
+                  ", self-test skipped (%d rows failed)" % fails if st and fails else ""))
+            return 1
+        print("data-images: " + summary + (", self-test passed (%d cases)" % cases if st else ""))
+        return 0
+    if len(a) != 2 or any(x.startswith("--") for x in a):
+        sys.exit(__doc__)
+    rd = []
+    if rdata:
+        p = rdata.split(":")
+        rd = [(hexint(p[0]), hexint(p[1]))]
+    return compare(a[0], a[1], bool(kept), rd)[0]
+
+sys.exit(cli())

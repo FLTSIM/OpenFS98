@@ -9,10 +9,10 @@ right. When one is done WINMSG says so on CHAIN list 0x14 (message 0x50, with
 the node `+0x18` returned), which is how ADVDRV knows to go on.
 
 `src/winmsg/winmsg.c` is the transliteration and the module shell together.
-`make winmsgdiff-run` drives retail and the OpenFS98 build over 20,000
+`tools/ofs winmsgdiff-run` drives retail and the OpenFS98 build over 20,000
 whole-module scenarios, comparing everything WINMSG calls and its whole
-`.data` image: **0 differ**. `make winmsg-breaks` applies 64 deliberate
-breaks: 60 caught, 4 proven equivalent. `make smoke` passes with it installed
+`.data` image: **0 differ**. `tools/ofs winmsg-breaks` applies 64 deliberate
+breaks: 58 caught, 4 proven equivalent; `limit-margin` and `word-empty` crash (re-run 2026-11-17; a crash is a miss). `tools/ofs smoke` passes with it installed
 beside the other seventeen: 27/27 modules, 95 gauges. Messages only appear in
 flight, which wine does not reach, so in-game that proves init and the
 window, and the differential harness covers the rest.
@@ -33,7 +33,10 @@ harness compares the calls rather than anything on screen.
   through a scrolling message.
 - One `.data` image: `ImportTable` at `+0`, `Linkage` at `+0x30`, state after.
   Its only relocations are the Linkage's six code pointers
-  (`tools/gen_winmsg_data.py` zeroes them; `winmsg.c` installs its own).
+  (left zero in the C initialiser; `winmsg.c` installs its own). The image is
+  a typed struct in `winmsg.c` (`_Static_assert`ed sizes and offsets);
+  `tools/check_data_image.py` proves it equals retail's `.data` byte for byte
+  and `tools/check_raw_dumps.py` that no dump is in git.
 
 | slot | retail | callers | service |
 | --- | --- | --- | --- |

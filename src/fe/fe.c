@@ -45,10 +45,156 @@ struct fe_linkage {
     fe_fn    slots[FE_NSLOTS];      /* +0x18..+0x88 */
 };
 
+/* The image after the Linkage: retail's .data from +0xd4 to +0x62e0, laid out at retail's offsets (the code
+ * addresses it by those offsets). Names are the offset; "meaning not yet known" unless a comment says otherwise.
+ * Pointer slots (dialog tables, FE_REL_DATA/FE_REL_TEXT in fe_relocs.inc) stay zero here and are installed at attach. */
+struct fe_data {
+    uint8_t z_00d4[0x38];
+    uint32_t f_010c;
+    uint32_t f_0110;
+    uint32_t f_0114;
+    uint32_t f_0118;
+    uint8_t z_011c[0x1a9];
+    uint32_t f_02c5;
+    uint8_t f_02c9;
+    uint8_t z_02ca[0x77d];
+    uint8_t f_0a47;
+    uint8_t z_0a48[0x86];
+    uint16_t w_0ace[550];
+    uint8_t z_0f1a[0x6];
+    uint32_t fe_lat_bands[256];
+    uint32_t fe_cos_steps[257];
+    uint16_t f_1724[6];
+    uint8_t z_1730[0x30];
+    uint32_t f_1760;
+    uint8_t z_1764[0x304];
+    char s_1a68[8];
+    char s_1a70[8];
+    uint8_t z_1a78[0x28e];
+    uint16_t f_1d06;
+    uint8_t z_1d08[0x1108];
+    uint32_t f_2e10;
+    uint32_t f_2e14;
+    uint8_t z_2e18[0x2c];
+    char s_2e44[3];
+    uint8_t z_2e47[0x1];
+    char s_2e48[5];
+    uint8_t z_2e4d[0x3];
+    char s_2e50[5];
+    uint8_t z_2e55[0x3];
+    uint32_t f_2e58;
+    uint8_t z_2e5c[0x4];
+    char s_2e60[7];
+    uint8_t z_2e67[0x1];
+    uint32_t f_2e68;
+    uint8_t z_2e6c[0x4];
+    uint32_t f_2e70;
+    uint8_t z_2e74[0x4c];
+    uint32_t f_2ec0;
+    uint8_t z_2ec4[0x34];
+    uint32_t f_2ef8;
+    uint8_t z_2efc[0x4];
+    uint32_t f_2f00;
+    uint8_t z_2f04[0x8];
+    uint32_t f_2f0c;
+    uint32_t f_2f10;
+    uint32_t f_2f14;
+    uint8_t z_2f18[0x8];
+    uint32_t f_2f20;
+    uint32_t f_2f24;
+    uint32_t f_2f28;
+    uint8_t z_2f2c[0xc];
+    uint32_t f_2f38;
+    uint32_t f_2f3c;
+    uint8_t z_2f40[0xc];
+    uint32_t f_2f4c;
+    uint32_t f_2f50;
+    uint8_t z_2f54[0xc];
+    uint32_t f_2f60;
+    char s_2f64[5];
+    uint8_t z_2f69[0x2f];
+    uint32_t f_2f98;
+    uint8_t z_2f9c[0x11];
+    uint8_t f_2fad;
+    uint8_t z_2fae[0xe];
+    uint32_t f_2fbc;
+    uint8_t z_2fc0[0x14];
+    uint32_t f_2fd4;
+    uint8_t z_2fd8[0x1c];
+    char s_2ff4[4];
+    char s_2ff8[6];
+    uint8_t z_2ffe[0x32];
+    uint32_t f_3030;
+    uint32_t f_3034;
+    uint8_t z_3038[0x10];
+    uint32_t f_3048;
+    uint8_t z_304c[0x4];
+    uint32_t f_3050;
+    uint8_t z_3054[0x8];
+    uint32_t f_305c;
+    uint32_t f_3060;
+    uint32_t f_3064;
+    uint8_t z_3068[0x8];
+    uint32_t f_3070;
+    uint32_t f_3074;
+    uint32_t f_3078;
+    uint8_t z_307c[0x8];
+    uint32_t f_3084;
+    uint32_t f_3088;
+    uint32_t f_308c;
+    uint8_t z_3090[0xc];
+    uint32_t f_309c;
+    uint32_t f_30a0;
+    uint8_t z_30a4[0x8];
+    uint32_t f_30ac;
+    uint32_t f_30b0;
+    uint32_t f_30b4;
+    uint8_t z_30b8[0x8];
+    uint32_t f_30c0;
+    uint32_t f_30c4;
+    uint32_t f_30c8;
+    uint8_t z_30cc[0x8];
+    uint32_t f_30d4;
+    uint32_t f_30d8;
+    uint32_t f_30dc;
+    uint8_t z_30e0[0x28];
+    uint32_t f_3108;
+    uint8_t z_310c[0x24];
+    uint32_t f_3130;
+    uint8_t z_3134[0x18];
+    uint32_t f_314c;
+    uint8_t z_3150[0x18];
+    uint32_t f_3168;
+    uint8_t z_316c[0x18];
+    uint32_t f_3184;
+    uint8_t z_3188[0x18];
+    uint32_t f_31a0;
+    uint8_t z_31a4[0xc];
+    uint32_t f_31b0;
+    uint8_t z_31b4[0x1];
+    uint8_t f_31b5;
+    uint8_t z_31b6[0x1a];
+    uint32_t f_31d0;
+    uint32_t f_31d4;
+    uint8_t z_31d8[0x18];
+    uint32_t f_31f0;
+    uint32_t f_31f4;
+    uint8_t z_31f8[0x18];
+    uint32_t f_3210;
+    char s_3214[4];
+    uint8_t z_3218[0x30c8];
+} __attribute__((packed));
+_Static_assert(sizeof(struct fe_data) == FE_IMAGE_SIZE - FE_DATA_START, "fe_data");
+#define FE_AT(name) (FE_DATA_START + __builtin_offsetof(struct fe_data, name))
+_Static_assert(FE_AT(w_0ace) == 0xace, "w_0ace");
+_Static_assert(FE_AT(fe_lat_bands) == 0xf20, "fe_lat_bands");
+_Static_assert(FE_AT(fe_cos_steps) == 0x1320, "fe_cos_steps");
+_Static_assert(FE_AT(f_1724) == 0x1724, "f_1724");
+
 struct fe_image {
     struct fs98_import import[9];       /* +0x000 ImportTable */
     struct fe_linkage linkage;          /* +0x048 Linkage */
-    uint8_t data[FE_IMAGE_SIZE - FE_DATA_START];
+    struct fe_data data;
 };
 
 extern struct fe_image fe_image;
@@ -4579,7 +4725,88 @@ struct fe_image fe_image = {
         }
     },
     {
-#include "fe_data.inc"
+    .f_010c = 0x3f8fd848,
+    .f_0110 = 0x40c45e05,
+    .f_0114 = 0x9d080005,
+    .f_0118 = 0x98,
+    .f_02c5 = 0xffffffff,
+    .f_02c9 = 0x1,
+    .f_0a47 = 0x8,
+    .w_0ace = { [0 ... 549] = 0xa7 },
+    .f_1724 = { 0x36, 0x54, 0x70, 0x90, 0xa0, 0x7fff },
+    .f_1760 = 0xffffffff,
+    .s_1a68 = "bstinfo",
+    .s_1a70 = "booster",
+    .f_1d06 = 0x8,
+    .f_2e10 = 0xffff00ff,
+    .f_2e14 = 0xffff,
+    .s_2e44 = "F1",
+    .s_2e48 = ".VIS",
+    .s_2e50 = ".SC1",
+    .f_2e58 = 0x5c,
+    .s_2e60 = "     (",
+    .f_2e68 = 0x29,
+    .f_2e70 = 0x1,
+    .f_2ec0 = 0xa0a,
+    .f_2ef8 = 0x4,
+    .f_2f00 = 0x2001,
+    .f_2f0c = 0x4,
+    .f_2f10 = 0x14,
+    .f_2f14 = 0x2001,
+    .f_2f20 = 0x1,
+    .f_2f24 = 0x28,
+    .f_2f28 = 0x2007,
+    .f_2f38 = 0x30,
+    .f_2f3c = 0x41100001,
+    .f_2f4c = 0x38,
+    .f_2f50 = 0x41100002,
+    .f_2f60 = 0x2a,
+    .s_2f64 = ".BGL",
+    .f_2f98 = 0x104,
+    .f_2fad = 0x1,
+    .f_2fbc = 0xa,
+    .f_2fd4 = 0x1,
+    .s_2ff4 = "A:\\",
+    .s_2ff8 = "*.BGL",
+    .f_3030 = 0x20,
+    .f_3034 = 0x80,
+    .f_3048 = 0x4,
+    .f_3050 = 0x2001,
+    .f_305c = 0x4,
+    .f_3060 = 0x14,
+    .f_3064 = 0x2001,
+    .f_3070 = 0x4,
+    .f_3074 = 0x28,
+    .f_3078 = 0x2001,
+    .f_3084 = 0x4,
+    .f_3088 = 0x3c,
+    .f_308c = 0x2001,
+    .f_309c = 0x50,
+    .f_30a0 = 0x2007,
+    .f_30ac = 0x2,
+    .f_30b0 = 0x58,
+    .f_30b4 = 0x2009,
+    .f_30c0 = 0x7,
+    .f_30c4 = 0x74,
+    .f_30c8 = 0x2009,
+    .f_30d4 = 0x1,
+    .f_30d8 = 0x78,
+    .f_30dc = 0x2007,
+    .f_3108 = 0x2002,
+    .f_3130 = 0x1,
+    .f_314c = 0x1,
+    .f_3168 = 0x1,
+    .f_3184 = 0x1,
+    .f_31a0 = 0x1,
+    .f_31b0 = 0x20,
+    .f_31b5 = 0x1,
+    .f_31d0 = 0x20,
+    .f_31d4 = 0x20c,
+    .f_31f0 = 0x20,
+    .f_31f4 = 0x410,
+    .f_3210 = 0x5c,
+    .s_3214 = "FS5",
+#include "fe_bands.inc"
     }
 };
 
@@ -4591,7 +4818,7 @@ static void fe_relocate(void)
 #define FE_REL_DATA(off, target) M32(D + (off)) = D + (target);
 #define FE_REL_TEXT(off, rva)    M32(D + (off)) = fe_lib_text_target(rva);
 #define FE_RELOCS
-#include "fe_data.inc"
+#include "fe_relocs.inc"
 #undef FE_RELOCS
 #undef FE_REL_TEXT
 #undef FE_REL_DATA

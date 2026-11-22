@@ -3,7 +3,7 @@
 
 ## OpenFS98
 
-A hybrid decompilation of Microsoft Flight Simulator 98, OpenRCT2-style: the retail `FLTSIM98.EXE` keeps running and reimplemented modules are swapped in one at a time. The end goal is native builds for Windows, Linux, Mac and possibly Android. C and x86 assembly built with the `Makefile` and `tools/*.mk`, run under wine. Deeper docs are in `docs/`; what is left is in `docs/remaining-work.md`.
+A hybrid decompilation of Microsoft Flight Simulator 98, OpenRCT2-style: the retail `FLTSIM98.EXE` keeps running and reimplemented modules are swapped in one at a time. The end goal is native builds for Windows, Linux, Mac and possibly Android. C and x86 assembly built with CMake (`cmake -S . -B build/win32-retail -DCMAKE_TOOLCHAIN_FILE=cmake/toolchains/win32-retail.cmake`, then `cmake --build build/win32-retail`), run under wine. Every other target runs as `tools/ofs <target> VAR=value` (the retired Makefile's names and parameters); module lists come from `tools/modules.sh`. Deeper docs are in `docs/`; what is left is in `docs/remaining-work.md`.
 
 ## Policy
 
@@ -18,19 +18,19 @@ A hybrid decompilation of Microsoft Flight Simulator 98, OpenRCT2-style: the ret
 
 - Read `docs/method.md` before writing any code: how a service goes from binary to verified reimplementation.
 - Module system and ABI: `docs/architecture.md`. Per-module findings: `docs/modules/<name>.md` (`host.md` and `util.md` are the detailed ones).
-- Every make target and script: `docs/tools.md`. Setup, which CD, layout and testing in the game: `docs/building.md`.
+- Every CMake target and script: `docs/tools.md`. Setup, which CD, layout and testing in the game: `docs/building.md`.
 - Known differences from retail and what is untested: `docs/open-differences.md`. Keep it current when you change a finished module.
 - Confirmed host prototypes: `include/fs98/host.h`.
 - Harness templates in `tools/difftest/`: `acontaindiff.c`, `weathermdiff.c`, `atcdiff.c` for a module with unfinished imports (retail's finished modules loaded for real, logging stubs for the rest, the whole `.data` compared); `acontaindiff.c` for one that touches files; `sounddiff.c` for images holding pointers into the module, faults both sides take, and random x87 precision; `dynamicdiff.c` for a module that runs unchecked data (guard pages, faults and hangs compared as outcomes).
 
 ## Running and verifying
 
-- Orient with `make graph` (module ids, dependencies), `make hostmap` (the host's 194 slots), `python3 tools/dumplinkage.py orig/Modules/<X>.DLL` and `python3 tools/impscan.py orig/Modules/<X>.DLL`. They read the retail binaries live but have under-reported table sizes before; if a module looks surprisingly small, hand-count the table.
+- Orient with `tools/ofs graph` (module ids, dependencies), `tools/ofs hostmap` (the host's 194 slots), `python3 tools/dumplinkage.py orig/Modules/<X>.DLL` and `python3 tools/impscan.py orig/Modules/<X>.DLL`. They read the retail binaries live but have under-reported table sizes before; if a module looks surprisingly small, hand-count the table.
 - Before running or judging a verification target, look up its baseline in `docs/tools.md` (Baselines). Fewer comparisons or any mismatch is a regression: investigate before building on it.
 - Run final numbers at the full N=20000, and rerun the unbroken baseline at full scale after any harness edit. A run once reported 61/61 breaks caught while the baseline itself differed.
 - Run break suites (`*-breaks`, `tools/*_breaks.py`) from a frozen copy of the tree: they copy or rewrite live `src/`, so editing during a run corrupts it.
-- A break counts as caught only when the harness exits 1 with a non-zero `N differ`; a crash or a harness guard is a miss (`CRASHED (exit N)`). Catch counts for seven suites predate that rule (`docs/remaining-work.md`, search `CRASHED`); rerun them before citing.
-- Code that needs the real host process or live game state is tested with `make ofstest-run`; everything else externally, with small faithful stubs for its imports.
+- A break counts as caught only when the harness exits 1 with a non-zero `N differ`; a crash or a harness guard is a miss (`CRASHED (exit N)`). The runners for MAIN, HOST, WINDOW, WINMSG, REALITY, ANALYSIS, MPCHAT, G3D, PANELS, CONTROLS, SIM1R and the gauges apply it, and their counts in `docs/tools.md` were re-run under it on 2026-11-18/19; the other `tools/*_breaks.py` are not yet checked for it (`docs/implementation/deferred-work.md`), so read a runner's verdict test before trusting its count.
+- Code that needs the real host process or live game state is tested with `tools/ofs ofstest-run`; everything else externally, with small faithful stubs for its imports.
 
 ## Conventions that differ from defaults
 
@@ -46,7 +46,7 @@ A hybrid decompilation of Microsoft Flight Simulator 98, OpenRCT2-style: the ret
 - Guard module memory outside the compared image: a retail overrun into its own import table showed up as faults several scenarios later.
 - A fault that skips a cleanup leaves heap pointers that depend on the other side's leak; compare them as null or not. A break caught only by a harness artifact is not caught.
 - Not every FS98 CD is the reference: a later pressing rebased `FLTSIM98.EXE` and ten modules at `0x10000000`. If a generator stops with `image base moved`, check `orig/` against `docs/building.md` ("Which CD") before touching code.
-- Retail HG2D freezes the 3D view under wine (exceptions in window procedures are swallowed, so the divide repair never runs). Run retail HG2D with `make sehfix-install`, plus `make vd-on` for focus; ours does not need it. See `docs/wine.md`.
+- Retail HG2D freezes the 3D view under wine (exceptions in window procedures are swallowed, so the divide repair never runs). Run retail HG2D with `tools/ofs sehfix-install`, plus `tools/ofs vd-on` for focus; ours does not need it. See `docs/wine.md`.
 - G3D's mesh compiler runs at 24-bit x87 precision in the game (Direct3D only; measured 2026-11-15). `g3d_mesh_precision` defaults to 24 for builds without the x87; x86 uses the caller's control word.
 - Never run `wineserver -k` in the shared prefix while difftests run; use a prefix copy.
 - Never `pkill -f` a pattern that also appears in the same command line: it kills its own shell (`docs/wine.md`).

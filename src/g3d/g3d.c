@@ -15422,7 +15422,7 @@ static routine_fn routine(uint32_t a)
 /* ---- the image ---------------------------------------------------------------- */
 
 struct g3d_image g3d_image = {{
-#include "g3d_data.inc"
+#include "g3d_image.inc"
 }};
 
 __asm__(".globl _ImportTable\n\t.set _ImportTable, _g3d_image + 0x0\n\t"
@@ -15468,6 +15468,13 @@ static const uint32_t code_targets[] = {
 #undef G3D_DATA_POINTER
 #undef G3D_CODE_TARGET
 };
+
+/* What holds of retail's G3D.DLL (the retired generator asserted it): image base 0x206e0000, .text at 0x206e1000
+ * (0x16966 bytes), .data at 0x206f9000 (0x18450), module id 14 at the Linkage, 154 pointers into the image and 224
+ * code pointers (22 of them the Linkage's, set below; 202 kept raw, 193 distinct). */
+_Static_assert(G3D_IMAGE_SIZE == 0x18450u && G3D_DATA_VA == 0x206f9000u && G3D_LINKAGE == 0x58u, "image layout");
+_Static_assert(sizeof data_pointers / sizeof data_pointers[0] == 154, "data pointers");
+_Static_assert(sizeof code_targets / sizeof code_targets[0] == 193, "code targets");
 
 /* How many of the image's code addresses routine() does not map yet; the
  * harness reports it.  Zero when the module is complete. */

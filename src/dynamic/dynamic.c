@@ -64,11 +64,16 @@ struct dyn_linkage {
 struct dyn_image {
     struct fs98_import import[8];       /* +0x000 ImportTable */
     struct dyn_linkage linkage;         /* +0x040 Linkage */
-    uint8_t data[DYN_IMAGE_SIZE - 0x170]; /* +0x170 on */
+    struct { uint32_t id; uint32_t d1; uint16_t d2, d3; uint8_t d4[8]; } libs[6]; /* +0x170 */
+    uint8_t  state_1e8[0x40];           /* +0x1e8: meaning not yet known */
+    uint32_t flag_228;                  /* +0x228: 1 */
+    uint8_t  state_22c[0x24];           /* +0x22c: meaning not yet known */
 };
 
 extern struct dyn_image dyn_image;
 
+_Static_assert(offsetof(struct dyn_image, flag_228) == 0x228, "flag");
+_Static_assert(offsetof(struct dyn_image, libs) == 0x170, "libs");
 typedef char (*dyn_layout_check)[sizeof(struct dyn_image) == DYN_IMAGE_SIZE &&
                                  sizeof(struct dyn_linkage) == 0x130 ? 1 : -1];
 
@@ -2616,14 +2621,85 @@ struct dyn_image dyn_image = {
     {
         FS98_MOD_DYNAMIC, dyn_init, dyn_teardown, 0, 0, 0, (void (*)(void))FS98_KEPT(dyn_frame_entry, dyn_frame), 0,
         {
-#define DYN_OPS
-#include "dynamic_data.inc"
-#undef DYN_OPS
+    /* 00 */ op_halt,
+    /* 01 */ op_ease_pitch,
+    /* 02 */ op_ease_bank,
+    /* 03 */ op_ease_heading,
+    /* 04 */ op_flag4,
+    /* 05 */ op_set_pitch,
+    /* 06 */ op_set_bank,
+    /* 07 */ op_set_heading,
+    /* 08 */ op_halt,
+    /* 09 */ op_halt,
+    /* 0a */ op_halt,
+    /* 0b */ op_halt,
+    /* 0c */ op_halt,
+    /* 0d */ op_halt,
+    /* 0e */ op_halt,
+    /* 0f */ op_halt,
+    /* 10 */ op_halt,
+    /* 11 */ op_halt,
+    /* 12 */ op_move_e,
+    /* 13 */ op_move_alt,
+    /* 14 */ op_move_n,
+    /* 15 */ op_move_e_n,
+    /* 16 */ op_move_e_alt,
+    /* 17 */ op_move_alt_n,
+    /* 18 */ op_move_3,
+    /* 19 */ op_ramp_e,
+    /* 1a */ op_ramp_alt,
+    /* 1b */ op_ramp_n,
+    /* 1c */ op_ramp_e_n,
+    /* 1d */ op_ramp_e_alt,
+    /* 1e */ op_ramp_alt_n,
+    /* 1f */ op_ramp_3,
+    /* 20 */ op_turn,
+    /* 21 */ op_halt,
+    /* 22 */ op_halt,
+    /* 23 */ op_halt,
+    /* 24 */ op_jump,
+    /* 25 */ op_call,
+    /* 26 */ op_return,
+    /* 27 */ op_wait,
+    /* 28 */ op_halt,
+    /* 29 */ op_hold,
+    /* 2a */ op_release,
+    /* 2b */ op_jne,
+    /* 2c */ op_je,
+    /* 2d */ op_jge,
+    /* 2e */ op_jle,
+    /* 2f */ op_halt,
+    /* 30 */ op_nop,
+    /* 31 */ op_param,
+    /* 32 */ op_object,
+    /* 33 */ op_place,
+    /* 34 */ op_origin,
+    /* 35 */ op_object,
+    /* 36 */ op_halt,
+    /* 37 */ op_halt,
+    /* 38 */ op_path_mark,
+    /* 39 */ op_path,
+    /* 3a */ op_path_slow,
+    /* 3b */ op_path_n,
+    /* 3c */ op_halt,
+    /* 3d */ op_meet,
+    /* 3e */ op_to_aircraft,
+    /* 3f */ op_refuel,
+    /* 40 */ op_circuit,
+    /* 41 */ op_turn_to,
+    /* 42 */ op_hide,
+    /* 43 */ op_jnear,
         }
     },
     {
-#include "dynamic_data.inc"
-    }
+        { 0xfe0b, 0x00c2cda9, 0x00aa, 0xa9e1, { 0xd0, 0x11, 0x67, 0x59, 0x00, 0x83, 0xa1, 0xb1 } },
+        { 0xfe0c, 0x00c2cda9, 0x00aa, 0xa9e1, { 0xd0, 0x11, 0x67, 0x59, 0x01, 0x83, 0xa1, 0xb1 } },
+        { 0xfe0d, 0x00c2cda9, 0x00aa, 0xa9e1, { 0xd0, 0x11, 0x67, 0x59, 0x02, 0x83, 0xa1, 0xb1 } },
+        { 0xfe0e, 0x00c2cda9, 0x00aa, 0xa9e1, { 0xd0, 0x11, 0x67, 0x59, 0x04, 0x83, 0xa1, 0xb1 } },
+        { 0xfe0f, 0x00c2cda9, 0x00aa, 0xa9e1, { 0xd0, 0x11, 0x67, 0x59, 0x06, 0x83, 0xa1, 0xb1 } },
+        { 0xfe10, 0x00c2cda9, 0x00aa, 0xa9e1, { 0xd0, 0x11, 0x67, 0x59, 0x07, 0x83, 0xa1, 0xb1 } }
+    },
+    { 0 }, 1, { 0 }
 };
 
 /* The two exports are the image's first 0x40 bytes and the 0x130 at +0x40,

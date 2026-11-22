@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Build the complete gauge collection and a metadata-only harness include."""
+import module_flags
 import argparse
 from concurrent.futures import ThreadPoolExecutor
 import json
@@ -17,15 +18,15 @@ def build(item):
     # the hand-written gauge, src/gauges/<name>.c, over its generated image.inc
     source = Path('src/gauges') / (gauge['name'].lower() + '.c')
     dependencies = [source, directory / 'gauge.def', directory / 'gauge.res', directory / 'image.inc',
-                    Path('src/gauges/gauge.h')]
+                    Path('src/gauges/gauge.h'), module_flags.TOOLCHAIN]
     if output.exists() and output.stat().st_mtime >= max(path.stat().st_mtime for path in dependencies):
         return gauge['name'] + ' up to date'
     resource = directory / 'resource.o'
     subprocess.run(['i686-w64-mingw32-windres', '-J', 'res', '-O', 'coff',
                     str(directory / 'gauge.res'), str(resource)], check=True, capture_output=True)
     # a cast or assignment to double rounds, as retail's stores do
-    command = ['i686-w64-mingw32-gcc', '-fexcess-precision=standard', '-Werror', '-std=gnu99', '-O2', '-Wall', '-Wextra',
-               '-Wno-unused-function', '-Wno-unused-label', '-fno-strict-aliasing',
+    command = ['i686-w64-mingw32-gcc', *module_flags.FLAGS, '-Werror', '-std=gnu99', '-O2', '-Wall', '-Wextra',
+               '-Wno-unused-function', '-Wno-unused-label',
                '-fno-asynchronous-unwind-tables', '-Isrc/gauges', f'-I{directory}', '-shared', '-nostdlib',
                '-Wl,--entry=_DllMain@12', '-Wl,--disable-dynamicbase', '-Wl,--disable-nxcompat',
                f'-Wl,--image-base={0x30000000 + index * 0x200000:#x}', '-o', str(output),

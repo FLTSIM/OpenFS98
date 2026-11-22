@@ -18,8 +18,8 @@ out=$(realpath -m "${REG_CONTRACTS_OUT:-bin/reg-contracts}")
 rm -rf "$out"; mkdir -p "$out/scripts"
 python3 -B tools/fly_scripts.py "$out/scripts"
 modules=("$@")
-[ ${#modules[@]} -gt 0 ] || modules=($(make -s modules-of) $(make -s english-modules-of))
-english=" $(make -s english-modules-of) "
+[ ${#modules[@]} -gt 0 ] || modules=($(tools/modules.sh modules-of) $(tools/modules.sh english-modules-of))
+english=" $(tools/modules.sh english-modules-of) "
 
 one() {     # module flight:scenario
     local m=$1 flight=${2%%:*} scenario=${2##*:} dir args verdict
@@ -42,7 +42,7 @@ for m in "${modules[@]}"; do for r in $runs; do echo "$m $r"; done; done |
 
 status=0
 for m in "${modules[@]}"; do
-    if [[ $english == *" $m "* ]]; then name=$m; else name=$(make -s installed-name-of M="$m"); name=${name%.*}; name=${name^^}; fi
+    if [[ $english == *" $m "* ]]; then name=$m; else name=$(tools/modules.sh installed-name-of "$m"); name=${name%.*}; name=${name^^}; fi
     pairs=()
     for r in $runs; do
         flight=${r%%:*}

@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Require actual priority core/lifetime/native differences for deliberate errors."""
+import module_flags
 from pathlib import Path
 import hashlib
 import json
@@ -56,7 +57,7 @@ def main():
                 data = data.replace(before.encode(), after.encode(), 1)
             (work / source_name).write_bytes(data)
         exe = work / f'worldpriority{suite}diff.exe'
-        flags = ['i686-w64-mingw32-gcc', '-std=c99', '-O2', '-Wall', '-Wextra', '-Werror', '-fno-strict-aliasing', '-fno-delete-null-pointer-checks']
+        flags = ['i686-w64-mingw32-gcc', *module_flags.FLAGS, '-std=c99', '-Itools/difftest', '-O2', '-Wall', '-Wextra', '-Werror']
         if suite == 'ui':
             dll = work / 'WORLD_area.dll'
             commands = [flags + ['-shared', '-nostdlib', '-Wl,--entry=_DllMain@12', '-Wl,--disable-dynamicbase', '-Wl,--image-base=0x223f0000', '-o', str(dll),

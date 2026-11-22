@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Snapshot and build native Advanced Weather mutations; faults never count."""
+import module_flags
 from pathlib import Path
 import hashlib
 import json
@@ -43,7 +44,7 @@ def main():
              Path('bin/world-diff/worldadvanceduidiff.exe'), Path('bin/world-diff/world-res.o'), Path('bin/world-diff/libworld-simsui.a')]
     snapshots = {path.name: path.read_bytes() for path in paths if path.is_file()}
     (output / 'inputs.json').write_text(json.dumps({name: hashlib.sha256(data).hexdigest() for name, data in snapshots.items()}, indent=2) + '\n')
-    source_names = next(line.split(':=', 1)[1].split() for line in Path('tools/world.mk').read_text().splitlines() if line.startswith('WORLD_SOURCES :='))
+    source_names = Path('src/world/sources.txt').read_text().split()
     results = []
     for name, filename, before, after, step in chosen:
         work = output / name
@@ -58,8 +59,7 @@ def main():
         path.write_text(source.replace(before, after))
         dll = work / 'mutant.dll'
         dll.unlink(missing_ok=True)
-        command = ['i686-w64-mingw32-gcc', '-std=c99', '-O2', '-Wall', '-Wextra', '-Werror', '-fno-strict-aliasing',
-                   '-fno-delete-null-pointer-checks', '-shared', '-nostdlib', '-Wl,--entry=_DllMain@12', '-Wl,--disable-dynamicbase',
+        command = ['i686-w64-mingw32-gcc', *module_flags.FLAGS, '-std=c99', '-Itools/difftest', '-O2', '-Wall', '-Wextra', '-Werror', '-shared', '-nostdlib', '-Wl,--entry=_DllMain@12', '-Wl,--disable-dynamicbase',
                    '-Wl,--image-base=0x223f0000', '-o', str(dll)]
         command += [str(work / Path(path).name) for path in source_names]
         command += [str(work / 'world.def'), str(work / 'world-res.o'), str(work / 'libworld-simsui.a'), '-lkernel32', '-luser32', '-lmsvcrt', '-lntdll']

@@ -28,7 +28,7 @@ struct fs98_options_object_services {
     void (*string_assign)(void *string, const char *text);                   /* CString::operator= */
     int32_t (*message_box)(const char *text, uint32_t type, uint32_t help);  /* AfxMessageBox */
 };
-/* Class indices, in s_classes order (tools/gen_options_tables.py) */
+/* Class indices, in s_classes order (options_tables.inc and options_objects_tables.inc, once written by the retired tools/gen_options_tables.py) */
 enum { FS98_OPTIONS_VIDEO_FINISHED, FS98_OPTIONS_VIDEO_MESSAGE, FS98_OPTIONS_SAVE_VIDEO,
        FS98_OPTIONS_FLIGHT_VIDEO, FS98_OPTIONS_ADD_LOGBOOK, FS98_OPTIONS_LOGBOOK_ENTRY,
        FS98_OPTIONS_BOOK, FS98_OPTIONS_LANDING, FS98_OPTIONS_MANOEUVRE, FS98_OPTIONS_ANALYSIS,

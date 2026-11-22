@@ -22,7 +22,87 @@ __declspec(dllimport) int __cdecl sprintf(char *output, const char *format, ...)
 #include "fs98/numeric.h"
 #include "numeric_imports.h"
 
-#include "numeric_data.inc"
+/* Byte-emitting initialiser macros: each carries one typed value, little endian.  STRn(s) is
+ * a string padded with NULs to n bytes; the padded literal is indexed because a flat byte
+ * list cannot hold a string literal. */
+#define U8(x)  (uint8_t)(x)
+#define U16(x) U8(x), U8((x) >> 8)
+#define U32(x) U16(x), U16((x) >> 16)
+#define U64(x) U32(x), U32((x) >> 32)
+#define NUL_PAD "\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0"
+#define SB(s, i) U8((s NUL_PAD)[i])
+#define S4(s, o) SB(s, o), SB(s, (o) + 1), SB(s, (o) + 2), SB(s, (o) + 3)
+#define STR8(s)  S4(s, 0), S4(s, 4)
+#define STR12(s) STR8(s), S4(s, 8)
+#define STR28(s) STR12(s), S4(s, 12), S4(s, 16), S4(s, 20), S4(s, 24)
+
+/* fs98_numeric_data: NUMERIC's .data as the loader maps it, laid out as retail's -- retail's file
+ * holds 0x200 initialised bytes (the list below ends at +0x1f0, zero after) and its vsize is
+ * 0x321, the length the manifest guards; zeroes follow to 0x400.  Mutable: init and the
+ * latitude/longitude printers keep their state in it, at the offsets retail uses.  Retail's pointers into the module
+ * (retail's own load address 0x20870000, .text at +0x1000, .data at +0x6000) are kept as numbers
+ * and named by what they point at; the build proves them against retail
+ * (tools/check_data_image.py, row NUMERIC, at=_fs98_numeric_data).
+ *
+ * The buffer is a byte array, not a struct, so that every access `fs98_numeric_data + off`
+ * and the symbol stay as they were.  Retail's own ImportTable and Linkage are copied here
+ * but the module's real ones are other objects. */
+static uint8_t fs98_numeric_data[0x400] = {
+    /* +0x000  ImportTable: (module id wanted, link the host fills in) x 3 */
+    U32(1), U32(0),                 /* module 1 (HOST) */
+    U32(2), U32(0),                 /* module 2 (GLOBAL) */
+    U32(0x14), U32(0),              /* module 20 (UTIL) */
+    U32(0), U32(0),                 /* +0x018, +0x01c: meaning not yet known (zero) */
+    /* +0x020  Linkage: our module id, then the service slots (retail code addresses) */
+    U32(0x11),                      /* module id 17 */
+    U32(0x20874870),                /* +0x024 slot: retail .text+0x3870 (192 bytes) */
+    U32(0x20874930),                /* +0x028 slot: retail .text+0x3930 (208 bytes) */
+    U32(0), U32(0), U32(0),         /* +0x02c..+0x034 slots, empty */
+    U32(0x20873adc),                /* +0x038 slot: retail .text+0x2adc (3476 bytes) */
+    U32(0x208711c4),                /* +0x03c slot: retail .text+0x1c4 (29 bytes) */
+    U32(0x208711e1),                /* +0x040 slot: retail .text+0x1e1 (10491 bytes) */
+    U32(0), U32(0), U32(0),         /* +0x044..+0x04c slots, empty */
+    U32(0x20876094),                /* +0x050 slot: data +0x94, the 0-digit minutes format */
+    U32(0x20876088),                /* +0x054 slot: data +0x88, 1 digit */
+    U32(0x2087607c),                /* +0x058 slot: data +0x7c, 2 digits */
+    U32(0x20876070),                /* +0x05c slot: data +0x70, 3 digits */
+    U32(0x20876064),                /* +0x060 slot: data +0x64, 4 digits */
+    /* +0x064  minutes formats, 12 bytes each, 4 digits first; read at +0x94 - 12 * digits */
+    STR12("%d* %2.4f'"), STR12("%d* %2.3f'"), STR12("%d* %2.2f'"),
+    STR12("%d* %2.1f'"), STR12("%d* %2.0f'"),
+    /* +0x0a0  letter tables for the angle parser: (character, value) pairs, then the pair count and
+     * a pointer back to the first pair.  Values and the first table's meaning not yet known. */
+    U32(0xb9), U32(6), U32('\''), U32(7), U32('"'), U32(8), U32('*'), U32(6),
+    U32(4), U32(0x208760a0),        /* 4 pairs, at data +0xa0 */
+    U32('N'), U32(2), U32('n'), U32(2), U32('S'), U32(3), U32('s'), U32(3),
+    U32(4), U32(0x208760c8),        /* 4 pairs, at data +0xc8: latitude letters */
+    U32('E'), U32(2), U32('e'), U32(2), U32('W'), U32(3), U32('w'), U32(3),
+    U32(4), U32(0x208760f0),        /* 4 pairs, at data +0xf0: longitude letters */
+    U32('+'), U32(0), U32('-'), U32(1),
+    U32(2), U32(0x20876118),        /* 2 pairs, at data +0x118: signs */
+    /* +0x130  powers of ten, 1e8 down to 10: the digit printers' divisors, indexed from
+     * 0x130 + (9 - digits) * 4 */
+    U32(100000000), U32(10000000), U32(1000000), U32(100000),
+    U32(10000), U32(1000), U32(100), U32(10),
+    U32(360),                       /* +0x150 whole circle in degrees (multiplier) */
+    U32(0x400),                     /* +0x154 multiplier for 16-bit angles */
+    /* +0x158  eight 64-bit words; not read by our code, meaning not yet known (the first is
+     * 16/45 as a 0.64 fraction) */
+    U64(0x5b05b05b05b05b05ull), U64(0x611722833944a55bull),
+    U64(0x679024d03d1605b6ull), U64(0x54d6bf8a3b0d88fbull),
+    U64(0x00d90d471c71c71cull), U64(0x00e785a12f684bdaull),
+    U64(0x00f6f4f0329161f9ull), U64(0x00ca4e97b6bcbac1ull),
+    /* +0x198  state and settings */
+    U32('.'),                       /* decimal point character, read as a byte */
+    U32(1),                         /* +0x19c MAIN DISPLAY_FRACTIONAL_MINUTES; default on */
+    U32(2),                         /* +0x1a0 MAIN FRACTIONAL_MINUTE_DIGITS; default 2 */
+    U32(0),                         /* +0x1a4 meaning not yet known */
+    U64(0x4059000000000000ull),     /* +0x1a8 double 100.0 (0x1.9p+6) */
+    STR28("FRACTIONAL_MINUTE_DIGITS"),      /* +0x1b0 CFG key */
+    STR8("MAIN"),                           /* +0x1cc CFG section */
+    STR28("DISPLAY_FRACTIONAL_MINUTES"),    /* +0x1d4 CFG key */
+    /* +0x1f0..+0x400 zero: state at +0x1f4, +0x1f5, +0x1fc, the +0x220 print buffer, +0x320 */
+};
 
 #define FS98_NUMERIC_U8(offset)  (*(uint8_t *)(fs98_numeric_data + (offset)))
 #define FS98_NUMERIC_U16(offset) (*(uint16_t *)(fs98_numeric_data + (offset)))
@@ -60,6 +140,19 @@ static uint32_t fs98_numeric_strlen(const char *text)
         length++;
     return length;
 }
+
+/* fs98_numeric_rdata: retail .rdata+0x10 to +0x48, seven doubles as bit patterns, read through
+ * fs98_numeric_rdata_double().  Only indices 0 and 3 are used; gcc folds those into the code, so
+ * no window of this array exists in the DLL and nothing guards it (deferred-work.md, constant pools). */
+static const uint64_t fs98_numeric_rdata[7] = {
+    0x3ee2defe271c0483ull,   /* .rdata+0x10  0x1.2defe271c0483p-17 (8.998425275576774e-06) */
+    0x404e000000000000ull,   /* .rdata+0x18  0x1.ep+5 (60.0) */
+    0xbfe0000000000000ull,   /* .rdata+0x20  -0x1p-1 (-0.5) */
+    0x3e76800000000000ull,   /* .rdata+0x28  0x1.68p-24 (8.381903171539307e-08) */
+    0x4066800000000000ull,   /* .rdata+0x30  0x1.68p+7 (180.0) */
+    0x4076800000000000ull,   /* .rdata+0x38  0x1.68p+8 (360.0) */
+    0x4024000000000000ull,   /* .rdata+0x40  0x1.4p+3 (10.0) */
+};
 
 static double fs98_numeric_rdata_double(uint32_t index)
 {

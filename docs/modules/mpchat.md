@@ -8,11 +8,11 @@ multiplayer session begins and goes when it ends; the "Views" menu item
 `0x1183` and two keys show and hide it in between.
 
 `src/mpchat/mpchat.c` is the transliteration and the module shell together.
-`make mpchatdiff-run` drives retail and the OpenFS98 build over 20,000
+`tools/ofs mpchatdiff-run` drives retail and the OpenFS98 build over 20,000
 whole-module scenarios against a model of the window system, comparing
 every call MPCHAT makes and its whole `.data` image: **0 differ**.
-`make mpchat-breaks` applies 117 deliberate breaks: 113 caught, 4 proven
-equivalent. `make smoke` passes with it installed: 27/27 modules, 95 gauges.
+`tools/ofs mpchat-breaks` applies 117 deliberate breaks: 107 caught, 4 proven
+equivalent, 6 crash (re-run 2026-11-17; a crash is a miss). `tools/ofs smoke` passes with it installed: 27/27 modules, 95 gauges.
 A session needs a multiplayer connection, which the smoke test does not
 make, so in-game that proves init (RICHED32 loaded, the class registered,
 list 0x1d joined). The core harness covers the wider synthetic boundary;
@@ -28,7 +28,7 @@ calls it makes, so a model of the other side of those calls is enough.
 
 - Retail image base `0x20840000`; `.text` 3,104 bytes (MSVC C, `0x1000` to
   `0x1c12`); `.data` at `0x20843000`, 0x200 bytes on disk, 0x50c mapped.
-  The CD and setup both name it `mpchat.DLL`, in lower case; `make install`
+  The CD and setup both name it `mpchat.DLL`, in lower case; `tools/ofs ofs_install`
   keeps the name.
 - Imports: host, GLOBAL (unused), CHAIN, MULTIP (35), WINMSG (22).
 - Win32: USER32 (16 functions: windows, messages, the class, the scroll
@@ -37,8 +37,11 @@ calls it makes, so a model of the other side of those calls is enough.
 - One `.data` image: `ImportTable` at `+0`, the dialog table at `+0x30`,
   `Linkage` at `+0x48`, strings and state after. Its relocations are the
   dialog table's `create`, the Linkage's two code pointers and Linkage
-  `+0x14`, which points back at the dialog table (`tools/gen_mpchat_data.py`
-  zeroes all four; `mpchat.c` installs its own).
+  `+0x14`, which points back at the dialog table (left zero in the C
+  initialiser; `mpchat.c` installs its own). The image, strings included, is
+  a typed struct in `mpchat.c` (`_Static_assert`ed offsets);
+  `tools/check_data_image.py` proves it equals retail's `.data` byte for byte
+  and `tools/check_raw_dumps.py` that no dump is in git.
 
 | Linkage | retail | |
 | --- | --- | --- |
@@ -208,10 +211,10 @@ The first runs found two transliteration slips, both now fixed: the default
 button sent through `SendMessageA` rather than told to `DefDlgProcA`, and
 the focus after Send given back to the line instead of the main window.
 
-`make mpchatdiff-run`: 20,000 scenarios (about 20 s), 0 differences, with
+`tools/ofs mpchatdiff-run`: 20,000 scenarios (about 20 s), 0 differences, with
 29,711 sessions begun, 38,030 lines sent and 142,838 received, 28,762
 scrolls, and 1,183 faults, all the null-name `strcat` above, alike on both
-sides. `make mpchat-breaks` (1,000 scenarios a break): 113 of 117 caught;
+sides. `tools/ofs mpchat-breaks` (1,000 scenarios a break): 113 of 117 caught;
 the four equivalences are the ListBox fill's count guard (the loop tests the
 same word), the bold flag (both callers pass 0), the split recomputed before
 the ListBox (the same right and the never-written `+0x80`), and create's
@@ -236,12 +239,12 @@ packets and hidden-window notifications are recorded without network traffic.
 The owner is a native window with a real menu and message pump. Its posted
 `0x1183` commands dispatch back through MPCHAT's registered CHAIN callback.
 
-Build and run independently of the shared Makefile:
+Build and run:
 
 ```sh
-make -f tools/mpchat.mk mpchatuidiff-run
-make -f tools/mpchat.mk mpchat-ui-breaks
-make -f tools/mpchat.mk mpchat-modeldiff-run
+tools/ofs mpchatuidiff-run
+tools/ofs mpchat-ui-breaks
+tools/ofs mpchat-modeldiff-run
 ```
 
 `N` selects the native fixture count per DLL load cycle (default 24). All

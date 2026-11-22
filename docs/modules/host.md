@@ -3,7 +3,7 @@
 82,016 bytes of `.text`. Every module imports it, and until the service table
 was found it was the one thing in the dependency graph nothing could see into.
 
-Regenerate everything below with `make hostmap`.
+Regenerate everything below with `tools/ofs hostmap`.
 
 ## It publishes a service table like any other module
 
@@ -156,7 +156,7 @@ results to a file. That is the same drop-in mechanism the project relies on
 everywhere else, pointed at the host.
 
 **That harness now exists**: `src/test/ofstest.c`, built and run by
-`make ofstest-run`. It takes module id 5, which the retail set leaves unused,
+`tools/ofs ofstest-run`. It takes module id 5, which the retail set leaves unused,
 imports the host, GLOBAL and UTIL, and writes its results to
 `C:\openfs98-test.log` because a module has nowhere else to put output.
 
@@ -180,7 +180,7 @@ the genuine host service rather than a stub.
 
 Everything written here runs during the sim's startup, so a fault in it stops
 the sim from starting. The module is defensive about null pointers for that
-reason, and `make ofstest-remove` takes it back out when not in use.
+reason, and `tools/ofs ofstest-remove` takes it back out when not in use.
 
 ## The enumeration cluster
 
@@ -269,7 +269,7 @@ None of them come from `Modules\`. Apart from `mpchat`'s one, they belong to a
 second family of modules in **`English\`** -- `Flights`, `Sim`, `Views`,
 `World`, `Options`, `Help`, `Alerts` and `MP_DIALOG` -- with module ids
 `0x80000002` to `0x8000000a`. `SIMSUI.DLL`, in the root, is `0x80000000`.
-`make graph` does not see them, which is how a static search concluded that
+`tools/ofs graph` does not see them, which is how a static search concluded that
 nothing registers ids 2 and 3; a one-run probe of the live registry found
 them in `Alerts.DLL` (`0x80000009`): 2 modal, 3 modeless, 4 modal.
 
@@ -396,7 +396,7 @@ at 0x13000000 so it does not itself occupy 0x400000; our `HOST.DLL` is a normal
 relocatable DLL exporting its table (`HostTable`) and its `.data` image
 (`host_image`). For each done slot the harness calls both sides and compares
 the result, normalising a pointer into either side's `.data` to an offset.
-`make hostdiff-run`.
+`tools/ofs hostdiff-run`.
 
 | slice | services | status |
 | --- | --- | --- |
@@ -432,7 +432,7 @@ the result, normalising a pointer into either side's `.data` to an offset.
 The harness now seeds `.data` with distinct random values on both sides before
 each iteration (leaving the service table and bounding the string constant at
 0x41bca0), so a service that reads the wrong offset of an otherwise-zero global
-is caught -- `make host-breaks` runs 82 deliberate breaks: 79 caught, 3 proven
+is caught -- `tools/ofs host-breaks` runs 82 deliberate breaks: 79 caught, 3 proven
 equivalent (a hang after two minutes counts as caught). (An
 early run with a plain LCG missed seven, because the generator's low bits had a
 period that aligned with the per-iteration call count and froze the
@@ -797,9 +797,9 @@ classes at 0x417168) must be kept out of the random seeding, or the paths
 behind them are never taken. `HOSTDIFF_HEAPCHK=1` validates the heap after
 every check.
 
-The full `make host-breaks` (505 breaks since 2026-11-14, when the 105 in
+The full `tools/ofs host-breaks` (505 breaks since 2026-11-14, when the 105 in
 `host.c`'s copies of runtime routines went with the copies; those routines'
-breaks are the runtime's, `tools/host_rt_breaks.py`) catches 488, proves 15
+breaks are the runtime's, `tools/host_rt_breaks.py`) catches 467 (re-run 2026-11-17; 21 crash, which count as misses), proves 15
 equivalent and misses two rare display paths at N=2000, `ds-mmx-hal` and
 `ds-mode-mem`, both caught in targeted runs at N=3000.
 
@@ -853,8 +853,8 @@ marked * hold the 45 routines the services use too: `host.c` calls them rather t
 own copies. A build of the services without the runtime (`HOST.DLL` for `hostdiff` and its
 breaks) compiles those five with `HOST_RT_STANDALONE`: there an import
 is called through that build's own import table (`HOST_RT_DIRECT` in the tables, the
-`__imp__` slot read at the call), `.data` is `host.c`'s `host_image`, `.rdata` the generated
-copy and a service `host.c`'s table, so `hostdiff`'s hooks and comparison are as before
+`__imp__` slot read at the call), `.data` is `host.c`'s `host_image` (typed C in `src/host/host_image.inc`, retail's absolute
+addresses raw), `.rdata` the typed copy in `host_rt_rdata.inc` and a service `host.c`'s table, so `hostdiff`'s hooks and comparison are as before
 ([remaining-work.md](../remaining-work.md#routines-the-services-share-with-the-runtime)).
 
 Retail's divide repair is an SEH frame (`__try` around the call, filter `0x4119a0`, a
@@ -867,7 +867,7 @@ filter, `MODULE-NO-LINKAGE` in adding a module, and `DIALOG-UNSET-BITMAP` in the
 procedure. The host's own import table at `0x418800` is in .bss with room for one pair and
 nothing fills it, so `0x408110` acquires nothing in the game.
 
-**Verifying.** `make -f tools/host_rt.mk hostrtdiff-run N=20000` maps retail FLTSIM98.EXE at
+**Verifying.** `tools/ofs hostrtdiff-run N=20000` maps retail FLTSIM98.EXE at
 0x400000 without its imports, points every import slot and every service entry at logging
 stubs, and runs each routine retail then ours from one randomised fixture: memory blocks shaped
 as the routine's structures (the game windows' data and bitmaps, hot spots, regions, the lists,
@@ -886,7 +886,7 @@ equivalent (the script's docstring says why). The divide repair's guard is logge
 `HOSTRT_COVER=op,text` counts an operation's runs whose retail log holds text (`@changed`: that
 changed fixture memory; `@data`: `.data`).
 
-**The executable.** `make host-exe` (through `make -f tools/host_rt.mk host-rt-exe`) builds it
+**The executable.** `tools/ofs host-exe` (through `tools/ofs host-rt-exe`) builds it
 from the decompiled runtime and the services alone (`src/host/host_rt_exe.c`): none of
 retail's code. Retail's `.rdata`, `.data` and `.idata` are laid out as retail's in one
 block (Wine keeps the main thread's stack at 0x400000, so not at retail's address), its
@@ -896,7 +896,7 @@ and the services (`host.c` built with `HOST_IMAGE_SHARED`). It exports
 `OpenFS98Host` for the frame-locked driver. Its resources are retail's, written by
 `tools/gen_host_resources.py` from the `.rsrc` tree alone. All 74 scripted flights match retail frame for frame with it
 (`HG2D_FRAMES_HOST`), and `tools/host_runtime_ui.sh` with `HOST_UI_EXE` passes (identical
-pictures, normal exit). Since 2026-11-14 it is what `make host-exe` builds as `bin/OPENFS98.EXE`.
+pictures, normal exit). Since 2026-11-14 it is what `tools/ofs host-exe` builds as `bin/OPENFS98.EXE`.
 It retains SIMSUI/MFC and the current Windows multimedia dependencies; the native platform port
 remains separate work.
 
@@ -967,21 +967,21 @@ its actual load; Direct3D runs now retain both renderer and load traces.
 ### Commands
 
 ```sh
-make host-exe                          # bin/OPENFS98.EXE; no installation
-make host-runtime-ui FS98_DIR=game      # dialogs, resize, cancelled/accepted exit
-make host-runtime-flights FS98_DIR=game # all stock flights, scripted controls/state
-make host-runtime-d3d FS98_DIR=game     # full-screen renderer, frames and screenshots
-make host-runtime-boot FS98_DIR=game    # bounded diagnostic boot; not acceptance
-make host-install FS98_DIR=game         # adds game/OPENFS98.EXE
-make host-run FS98_DIR=game             # installs that name, then launches it
+tools/ofs host-exe                          # bin/OPENFS98.EXE; no installation
+tools/ofs host-runtime-ui FS98_DIR=game      # dialogs, resize, cancelled/accepted exit
+tools/ofs host-runtime-flights FS98_DIR=game # all stock flights, scripted controls/state
+tools/ofs host-runtime-d3d FS98_DIR=game     # full-screen renderer, frames and screenshots
+tools/ofs host-runtime-boot FS98_DIR=game    # bounded diagnostic boot; not acceptance
+tools/ofs host-install FS98_DIR=game         # adds game/OPENFS98.EXE
+tools/ofs host-run FS98_DIR=game             # installs that name, then launches it
 ```
 
-The host build is included in `make all`. `host-install` preserves
+The host build is included in `cmake --build build/win32-retail`. `host-install` preserves
 `FLTSIM98.EXE`; existing module install/revert targets continue to use retail's
 executable. The executable must live beside the installed assets because
 retail setup derives paths from its own location.
 
-The standalone targets are in `tools/host_runtime.mk`. Game acceptance uses separate private prefixes and
+The standalone targets are the `host-runtime-*` ones in `cmake/targets.cmake` (from the old `tools/host_runtime.mk`). Game acceptance uses separate private prefixes and
 Xvfb displays, leaving the staged game untouched. All generated evidence is
 under `bin/host-runtime/`.
 
@@ -992,7 +992,7 @@ went with it. The decompiled one's results are under
 [The runtime, decompiled](#the-runtime-decompiled).
 
 - Planning baseline at `94cf6b6e520d95740096e3994e49f894e5bf386e`:
-  `make hostdiff-run N=1`, zero differences.
+  `tools/ofs hostdiff-run N=1`, zero differences.
 - Runtime harness: **60,000 comparisons, zero differences**, 20,000 each for
   timer behavior, startup/import/init/deinit ordering and divide repair.
   Evidence: `bin/host-runtime/runtime-diff.log`.

@@ -444,7 +444,7 @@ def main() -> int:
     OUT.mkdir(parents=True, exist_ok=True)
     source_world_dll = GAME_SOURCE / "English/World.DLL"
     if not HELPER.is_file() or not source_world_dll.is_file():
-        raise RuntimeError("build the helper and install World.DLL first (make world-game-ui)")
+        raise RuntimeError("build the helper and install World.DLL first (tools/ofs world-game-ui)")
     accepted_hash = sha256(BASE_DLL)
     installed_hash = sha256(source_world_dll)
     REPORT.update({"installed_game": str(GAME_SOURCE), "accepted_world_sha256": accepted_hash, "installed_world_sha256": installed_hash})

@@ -29,10 +29,10 @@ Tested under wine 9.0 with the retail modules plus OpenFS98's, a flight
 loaded and flown from the keyboard, the 3D view animating throughout:
 
 ```sh
-make sehfix-install   # SEHFIX.DLL into Modules\ -- the fix itself
-make wm-managed       # wine's default; undoes an earlier wm-unmanaged
-make window-reset     # native 640x480 client at the top-left
-make run              # inside a 1024x768 virtual desktop -- for focus, see below
+tools/ofs sehfix-install   # SEHFIX.DLL into Modules\ -- the fix itself
+tools/ofs wm-managed       # wine's default; undoes an earlier wm-unmanaged
+tools/ofs window-reset     # native 640x480 client at the top-left
+tools/ofs run              # inside a 1024x768 virtual desktop -- for focus, see below
 ```
 
 with `[HARDWARE] Device=` (empty) and `Mode=640x480x8`, `FULL_SCREEN=2`, and
@@ -41,14 +41,14 @@ no `renderer` override under `HKCU\Software\Wine\Direct3D`.
 without the virtual desktop, and resizing the window. Each was a suspect
 before the cause was known and may well be fine now; try them one at a time.
 
-`make sehfix-remove` takes the module out; `make sehfix-log` shows its log.
+`tools/ofs sehfix-remove` takes the module out; `tools/ofs sehfix-log` shows its log.
 
-`make run` asks for the virtual desktop on the command line, `wine explorer
-/desktop=FS98,1024x768 FLTSIM98.EXE`, so only the sim gets one (`make run
+`tools/ofs run` asks for the virtual desktop on the command line, `wine explorer
+/desktop=FS98,1024x768 FLTSIM98.EXE`, so only the sim gets one (`tools/ofs run
 VD=` for none, `VD=800x600` for another size). A desktop set in the
 registry (`HKCU\Software\Wine\Explorer`) is opened by every wine program,
 the difference harnesses included; set per program under `AppDefaults` it
-did not take effect here. `make vd-on`/`vd-off` now only clear those
+did not take effect here. `tools/ofs vd-on`/`vd-off` now only clear those
 registry settings.
 
 ### What happens
@@ -121,7 +121,7 @@ see a fault before the host's filter on Windows, and a handler that simply
 called the filter for every divide would have overridden them. The chain walk
 keeps their order.
 
-`C:\openfs98-sehfix.log` (`make sehfix-log`) holds the first 32 faults with
+`C:\openfs98-sehfix.log` (`tools/ofs sehfix-log`) holds the first 32 faults with
 their chains and, at exit, a count per address and verdict. A killed sim
 writes no counts.
 
@@ -238,7 +238,7 @@ session hard enough that nothing was clickable. Do not use it: wine reports
 err:winediag:is_broken_driver Broken NVIDIA RandR detected, falling back to RandR 1.0
 ```
 
-and mode-setting is exactly what exclusive fullscreen needs. `make kill`
+and mode-setting is exactly what exclusive fullscreen needs. `tools/ofs kill`
 recovers from a wedged sim.
 
 ## The window must stay at its native size
@@ -251,14 +251,14 @@ which is what makes it look like a fresh bug rather than the resize.
 
 *Not yet retried with SEHFIX.* A resize is a `WM_SIZE`, the handler whose
 divides wine swallowed (`0x406525`), so this may have been the same bug.
-`make window-reset` still recovers if it is not.
+`tools/ofs window-reset` still recovers if it is not.
 
 ```ini
 Location=635,252,1283,785     ; 648 x 533 -- native: 640x480 client + chrome
 Location=73,75,846,689        ; 773 x 614 -- resized: 3D view black
 ```
 
-`make window-reset` puts it back to `0,0,648,533`: native size, parked at the
+`tools/ofs window-reset` puts it back to `0,0,648,533`: native size, parked at the
 top-left so it fits inside a 1024x768 virtual desktop. The position the game
 saves can leave most of the window off the right edge of that desktop, which is
 exactly what tempts you into resizing it.
@@ -283,22 +283,22 @@ settles it, because the host WM never touches the sim's window.
 
 Confirmed again on 2026-10-19, and the virtual desktop is still needed with
 the fix in. Without it and with the WM managing the window, "Fly Now!"
-would not take a click. With `make wm-unmanaged` (`Managed=N`), the WM never
+would not take a click. With `tools/ofs wm-unmanaged` (`Managed=N`), the WM never
 gives the sim keyboard focus and keys go to whatever window had it before.
 `wm-unmanaged` was a guess at the freeze; leave it off.
 
 **Superseded** -- the list below was the plan before the cause was found.
 None of it turned out to be needed, and `ddraw-gdi` is no longer applied.
 
-1. `make ddraw-gdi` -- switches wine's DirectDraw from its OpenGL path to plain
+1. `tools/ofs ddraw-gdi` -- switches wine's DirectDraw from its OpenGL path to plain
    GDI blitting (`HKCU\Software\Wine\Direct3D` → `renderer=gdi`). This is the
    long-standing fix for mid-90s DirectDraw games whose screen never updates,
-   which is the symptom exactly. `make ddraw-default` reverts it.
+   which is the symptom exactly. `tools/ofs ddraw-default` reverts it.
 2. `Mode=640x480x8`. The software path is at home in 8-bit, and a palettised
    primary surface takes a different route through wine's ddraw.
 3. Toggle `FULL_SCREEN` in `[PREFS]`, currently 2. Exclusive-mode page flipping
    and windowed blitting fail in different ways.
-4. `make trace-render` and read what wine complains about while a flight is
+4. `tools/ofs trace-render` and read what wine complains about while a flight is
    running -- fixme/err only, so the log stays readable.
 
 ## The sim has two top-level windows
@@ -365,6 +365,6 @@ Bracketing the pattern (`'FLT[S]IM98'`) avoids that, but only until some other
 part of the same command, a heredoc for instance, happens to contain the name
 too. Put kills in their own command.
 
-`make kill` used `pkill -f fltsim98`, which is case-sensitive and never
+`tools/ofs kill` used `pkill -f fltsim98`, which is case-sensitive and never
 matched `FLTSIM98.EXE`; it now runs `wineserver -k`, which ends every process
 in the prefix without matching anything.

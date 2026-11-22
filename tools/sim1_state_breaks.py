@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Isolated source mutations for SIM1 records, host ownership and deinit."""
+import module_flags
 import fcntl
 import json
 import os
@@ -95,8 +96,7 @@ def main():
             (directory / "sim1_velocity.S").write_text(velocity.replace(old, new, 1) if kind == "velocity" else velocity)
             dll = directory / "SIM1_STATE_TEST.DLL"
             dll.unlink(missing_ok=True)
-            built = run(["i686-w64-mingw32-gcc", "-std=c99", "-O2", "-Wall", "-Wextra",
-                         "-fno-strict-aliasing", "-Iinclude", "-Isrc/sim1", "-Ibin/sim1-diff", "-shared",
+            built = run(["i686-w64-mingw32-gcc", *module_flags.FLAGS, "-std=c99", "-Itools/difftest", "-O2", "-Wall", "-Wextra", "-Iinclude", "-Isrc/sim1", "-Ibin/sim1-diff", "-shared",
                          "-Wl,--disable-dynamicbase", "-Wl,--image-base,0x22000000", "-o", str(dll),
                          str(directory / "sim1.c"), "src/sim1/sim1_stack.S", "src/sim1/sim1_state_stack.S",
                          str(directory / "sim1_velocity.S"), "tools/sim1_state_test.def"])

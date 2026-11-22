@@ -68,7 +68,7 @@ small accessors and plain controls.
 
 2026-11-07 (day): **every routine is transliterated** (`src/simsui/`, one file per class family),
 including the unexported CDIB class (`simsui_cdib.c`, the MFC samples' DIB, DYNCREATE but used by
-nothing) and the CRT entry. `make -f tools/simsui.mk simsuidiff-run`: 444 operations, every exported
+nothing) and the CRT entry. `tools/ofs simsuidiff-run`: 444 operations, every exported
 routine and every routine a vtable, message map or runtime class reaches, 2000 scenarios, 0 differ.
 Retail bugs SUI-1 to SUI-12 are registered in [retail-bugs.md](../retail-bugs.md). Deliberate
 breaks (`tools/simsui_breaks.py`, one suite per source file; run from a frozen copy): the last
@@ -78,13 +78,24 @@ fixture was widened for the ten first missed (child windows enumerated through t
 ids, the tab strip's frame count, CString lengths, static styles, header sizes, a file read from
 part-way). The proven equivalents are listed in the script's docstring.
 
+Re-run on 2026-11-19 (CMake port), with a crash counted as a miss: 708 breaks, 698 caught at N=400,
+and of the 10 missed all but two caught at N=2000. On the way the fixture was widened again:
+CSimsSlider is shaped as a button half the time (the other half left random, which reaches a
+non-zero range minimum); ClientToScreen leaves a client area at the origin often and now and then
+puts it at exactly 10000; the edit texts OnChar reads mostly hold a '-'; and CBrush's colour is
+logged as it is (`describe()` could take a PALETTEINDEX for an address, which hid `pal-draw-index`).
+`button-init-quarter`, `image-abs` (both read a positive `bmHeight`; SUI-13) and `token-no-out`
+(a path no caller takes) were proven equivalent. Open: `init-far` (a parent at exactly x = 10000)
+and `char-digit-end` (a digit typed into a text holding '-', the selection from 0): probes show
+the harness reaching each routine, too rarely with the break's condition for N=2000 to catch it.
+
 ### The native DLL
 
-`make -f tools/simsui.mk simsui` builds `bin/simsui-native/SIMSUI_ours.dll` (the shared build copies
+`tools/ofs simsui` builds `bin/simsui-native/SIMSUI_ours.dll` (the shared build copies
 it to `bin/SIMSUI.DLL`). Retail's data (vtables, message maps, runtime classes, strings, statics,
 `Linkage` and `ImportTable`) is not rewritten: `tools/gen_simsui_native.py` takes retail's `.rdata`
-and `.data` from RVA 0x15000 as an image (under `bin/`, never tracked) and lists in
-`src/simsui/simsui_native_tables.inc` what each of the 2,129 pointers retail's relocations mark there
+and `.data` from RVA 0x15000 as an image (under `bin/`, never tracked) and the committed
+`src/simsui/simsui_native_tables.inc` (once written by that script) lists what each of the 2,129 pointers retail's relocations mark there
 becomes at load (`src/simsui/simsui_native.c`):
 
 - 130 into the image itself: the same RVA in our copy;
@@ -99,8 +110,8 @@ static import from each library keeps retail's load order. Retail's resources (b
 block) are copied in. The entry transliterates the CRT's (`0x20483490`, `0x204833c0`: MFC's raw
 DllMain, the onexit table, `_initterm` over retail's initialiser table, DllMain).
 
-SIMSUI is a shared module (`SHARED_MODULES` in the Makefile since 2026-11-07, installed as
-`SIMSUI.DLL` beside `FLTSIM98.EXE` by `make install`; alone by `make simsui-install`/`simsui-revert`).
-`make main-dialogs` and `make flights-play` run ours on the "ours" side. With it, `main-dialogs`
+SIMSUI is a shared module (`shared` in `tools/modules.txt`; in the Makefile's `SHARED_MODULES` from 2026-11-07, installed as
+`SIMSUI.DLL` beside `FLTSIM98.EXE` by `tools/ofs ofs_install`; alone by `tools/ofs simsui-install`/`simsui-revert`).
+`tools/ofs main-dialogs` and `tools/ofs flights-play` run ours on the "ours" side. With it, `main-dialogs`
 passes as before: 47 commands, the same controls and text, 41 of 47 pictures identical (the six
 others the clock, live previews and the crash's curve, as without it).

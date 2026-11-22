@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """An actual reported difference is required; faults/timeouts do not count."""
+import module_flags
 from pathlib import Path
 import subprocess
 import sys
@@ -104,8 +105,7 @@ def main():
         source.write_text(original.replace(before, after, 1))
         executable.unlink(missing_ok=True)
         build = subprocess.run([
-            'i686-w64-mingw32-gcc', '-std=c99', '-O2', '-Wall', '-Wextra', '-Werror',
-            '-fno-strict-aliasing', '-Isrc/help', '-o', str(executable),
+            'i686-w64-mingw32-gcc', *module_flags.FLAGS, '-std=c99', '-O2', '-Wall', '-Wextra', '-Werror', '-Isrc/help', '-o', str(executable),
             'tools/difftest/helpeventsdiff.c', str(source),
             f'src/help/help_{"objects" if unit == "events" else "events"}.c', 'src/help/help_stack.S', '-lntdll'], text=True, capture_output=True)
         if build.returncode:

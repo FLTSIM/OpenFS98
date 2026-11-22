@@ -73,30 +73,20 @@ for f in bin/*.DLL; do
     [ -e "$f" ] || continue
     m=$(basename "$f")
     # OFSTEST is a test fixture, not one of the sim's modules: it is installed
-    # only by `make ofstest-run` and removed again afterwards.
+    # only by `tools/ofs ofstest-run` and removed again afterwards.
     [ "$m" = "OFSTEST.DLL" ] && continue
     [ "$m" = "SEHFIX.DLL" ] && continue
     # *_TRACE builds are instrumented variants installed only by their own
-    # targets (make util-trace), never by make install.
+    # targets (tools/ofs util-trace), never by tools/ofs ofs_install.
     case "$m" in *_TRACE.DLL) continue ;; esac
-    case "$m" in
-        FACIL.DLL)  installed=Modules/FACILITIES.DLL ;;
-        MULTIP.DLL) installed=Modules/MULTIPLAYER.DLL ;;
-        MPCHAT.DLL) installed=Modules/mpchat.DLL ;;
-        WORLD.DLL)  installed=English/World.DLL ;;
-        ALERTS.DLL) installed=English/Alerts.DLL ;;
-        HELP.DLL)   installed=English/Help.DLL ;;
-        SIM.DLL)    installed=English/Sim.DLL ;;
-        VIEWS.DLL)  installed=English/Views.DLL ;;
-        FLIGHTS.DLL) installed=English/Flights.DLL ;;
-        *)          installed="Modules/$m" ;;
-    esac
+    # where the game keeps it (tools/modules.txt); a DLL that is not a module, as before, under Modules/
+    installed=$(tools/modules.sh installed-path-of "${m%.DLL}" 2>/dev/null) || installed="Modules/$m"
     english=; case "$installed" in English/*) english=${installed#English/} ;; esac
     if cmp -s "$f" "$GAME/$installed"; then
         echo "  running the OpenFS98 build of $m"
     else
         echo "  NOTE: $m differs from the installed DLL -- this exact build was not tested."
-        echo "        run 'make install' to test what you just built."
+        echo "        run 'tools/ofs ofs_install' to test what you just built."
         [ -z "$english" ] || fail=1
     fi
     if [ -n "$english" ] && ! grep -qiE "english.+${english//./\\.}" "$TRACE"; then

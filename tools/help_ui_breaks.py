@@ -4,6 +4,7 @@
 Snapshots all module sources and the harness before mutation builds. Only exit
 1 with an actual comparison mismatch counts; faults and timeouts fail the run.
 """
+import module_flags
 from pathlib import Path
 import hashlib
 import json
@@ -58,13 +59,11 @@ def main():
         dll = work / 'HELP_ours.dll'
         harness = work / 'helpuidiff.exe'
         commands = [
-            ['i686-w64-mingw32-gcc', '-std=c99', '-O2', '-Wall', '-Wextra', '-Werror',
-             '-fno-strict-aliasing', '-fno-delete-null-pointer-checks', '-shared', '-nostdlib',
+            ['i686-w64-mingw32-gcc', *module_flags.FLAGS, '-std=c99', '-Itools/difftest', '-O2', '-Wall', '-Wextra', '-Werror', '-shared', '-nostdlib',
              '-Wl,--entry=_DllMain@12', '-Wl,--disable-dynamicbase', '-Wl,--image-base=0x22330000',
              '-o', str(dll), *(str(work / f'help_{unit}.c') for unit in UNITS), str(work / 'help_stack.S'), str(work / 'help.def'),
              str(work / 'help-res.o'), str(work / 'libhelp-simsui.a'), '-lkernel32', '-luser32', '-ladvapi32', '-lcomctl32', '-lmsvcrt'],
-            ['i686-w64-mingw32-gcc', '-std=c99', '-O2', '-Wall', '-Wextra', '-Werror',
-             '-fno-strict-aliasing', '-o', str(harness), str(work / 'helpuidiff.c'), '-lgdi32', '-lntdll'],
+            ['i686-w64-mingw32-gcc', *module_flags.FLAGS, '-std=c99', '-Itools/difftest', '-O2', '-Wall', '-Wextra', '-Werror', '-o', str(harness), str(work / 'helpuidiff.c'), '-lgdi32', '-lntdll'],
         ]
         built = True
         for command in commands:

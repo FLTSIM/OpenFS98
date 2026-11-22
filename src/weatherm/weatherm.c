@@ -77,16 +77,36 @@ struct wx_linkage {
                                            uint32_t type);          /* +0x5c */
 };
 
+/* .data from +0x98: the working variables (zero at load), then the tables.  Packed:
+ * the tables sit at odd offsets. */
+struct __attribute__((packed)) wx_data {
+    uint8_t  state[0xf3 - 0x98];        /* +0x098 working variables; meaning not yet known */
+    uint8_t  multipliers[3];            /* +0x0f3 time-of-day multipliers */
+    uint8_t  unknown_f6[0x103 - 0xf6];  /* +0x0f6 meaning not yet known */
+    uint16_t table_103[33];             /* +0x103 */
+    uint16_t head_145;                  /* +0x145 */
+    uint32_t table_147[14];             /* +0x147 */
+    uint16_t tail_17f;                  /* +0x17f */
+    uint16_t table_181[34];             /* +0x181 */
+    uint8_t  spare[WX_IMAGE_SIZE - 0x1c5]; /* +0x1c5 beyond retail's .data */
+};
+
 struct wx_image {
     struct fs98_import import[7];       /* +0x000 ImportTable */
     struct wx_linkage  linkage;         /* +0x038 Linkage */
-    uint8_t            data[WX_IMAGE_SIZE - 0x98]; /* +0x098 on */
+    struct wx_data     data;            /* +0x098 on */
 };
 
 extern struct wx_image wx_image;
 
-typedef char (*wx_layout_check)[sizeof(struct wx_image) == WX_IMAGE_SIZE &&
-                                sizeof(struct wx_linkage) == 0x60 ? 1 : -1];
+_Static_assert(sizeof(struct wx_image) == WX_IMAGE_SIZE, "wx_image size");
+_Static_assert(sizeof(struct wx_linkage) == 0x60, "wx_linkage size");
+_Static_assert(__builtin_offsetof(struct wx_image, data) == 0x98, "data");
+_Static_assert(__builtin_offsetof(struct wx_data, multipliers) == 0xf3 - 0x98, "multipliers");
+_Static_assert(__builtin_offsetof(struct wx_data, table_103) == 0x103 - 0x98, "table_103");
+_Static_assert(__builtin_offsetof(struct wx_data, head_145) == 0x145 - 0x98, "head_145");
+_Static_assert(__builtin_offsetof(struct wx_data, table_181) == 0x181 - 0x98, "table_181");
+_Static_assert(__builtin_offsetof(struct wx_data, spare) == 0x1c5 - 0x98, "spare");
 
 /* ---- the image and its imports ------------------------------------------------ */
 
@@ -1546,7 +1566,27 @@ struct wx_image wx_image = {
         wx_records_copy, wx_record_next, wx_record_append
     },
     {
-#include "weatherm_data.inc"
+        .multipliers = {0x2d, 0xaa, 0x0a},
+        .table_103 = {
+            0x8001, 0xe9d2, 0xef5d, 0xf29c, 0xf4e9, 0xf6b2, 0xf827, 0xf963,
+            0xfa74, 0xfb66, 0xfc3d, 0xfd01, 0xfdb3, 0xfe57, 0xfeef, 0xff7c,
+            0x0000, 0x007c, 0x00f1, 0x0160, 0x01c9, 0x022d, 0x028c, 0x02e7,
+            0x033e, 0x0392, 0x03e2, 0x0430, 0x047a, 0x04c2, 0x0507, 0x054b,
+            0x058c,
+        },
+        .head_145 = 0x14,
+        .table_147 = {
+            0x715e6, 0x26399, 0x1b7e1, 0x0, 0x5e2d, 0x22a5, 0xcbf,
+            0x4b0, 0x1ba, 0xa2, 0x3c, 0x16, 0x8, 0x3,
+        },
+        .tail_17f = 0x1,
+        .table_181 = {
+            0x5e2d, 0x612b, 0x6440, 0x676f, 0x6ab7, 0x6e1b, 0x7199, 0x7535,
+            0x78ed, 0x7cc4, 0x80ba, 0x84d0, 0x8907, 0x8d60, 0x91dd, 0x967f,
+            0x9b46, 0xa033, 0xa549, 0xaa88, 0xaff2, 0xb588, 0xbb4b, 0xc13d,
+            0xc75f, 0xcdb4, 0xd43b, 0xdaf8, 0xe1eb, 0xe917, 0xf07d, 0xf820,
+            0xffff, 0x0000,
+        },
     }
 };
 

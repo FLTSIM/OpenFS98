@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Require actual retail differences for isolated Views logic/cleanup errors."""
+import module_flags
 from pathlib import Path
 import subprocess
 import sys
@@ -70,8 +71,7 @@ def main():
         source.write_text(source_text.replace(before, after, 1))
         sources = [str(source) if other == unit else f'src/views/views_{other}.c' for other in ('events', 'objects')]
         build = subprocess.run([
-            'i686-w64-mingw32-gcc', '-std=c99', '-O2', '-Wall', '-Wextra', '-Werror',
-            '-fno-strict-aliasing', '-fno-delete-null-pointer-checks', '-Isrc/views',
+            'i686-w64-mingw32-gcc', *module_flags.FLAGS, '-std=c99', '-O2', '-Wall', '-Wextra', '-Werror', '-Isrc/views',
             '-o', str(executable), 'tools/difftest/viewseventsdiff.c', *sources, 'src/views/views_stack.S', 'tools/difftest/viewsstack.S', '-lntdll'],
             text=True, capture_output=True)
         if build.returncode:

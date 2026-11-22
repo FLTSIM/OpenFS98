@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Require actual differences for area lifetime, factory and unwind mutations."""
+import module_flags
 from pathlib import Path
 import os
 import subprocess
@@ -59,8 +60,7 @@ def main():
         source_path.write_text(changed_text if filename == 'world_objects.c' else source_text)
         if filename != 'world_objects.c':
             (case_dir / filename).write_text(changed_text)
-        subprocess.run(['i686-w64-mingw32-gcc', '-std=c99', '-O2', '-Wall', '-Wextra', '-Werror',
-                        '-fno-strict-aliasing', '-fno-delete-null-pointer-checks', '-Isrc/world',
+        subprocess.run(['i686-w64-mingw32-gcc', *module_flags.FLAGS, '-std=c99', '-Itools/difftest', '-O2', '-Wall', '-Wextra', '-Werror', '-Isrc/world',
                         '-o', str(executable), 'tools/difftest/worldlifediff.c', str(source_path), '-lntdll'],
                        cwd=root, check=True)
         run_result = subprocess.run(['wine', str(executable), '32', '0x4a971b63', mode],

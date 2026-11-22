@@ -38,13 +38,36 @@
 typedef uint16_t __attribute__((may_alias)) booster_u16;
 typedef uint32_t __attribute__((may_alias)) booster_u32;
 
-struct booster_image {
-    uint8_t bytes[BOOSTER_IMAGE_SIZE];
+/* Retail's .data image at its offsets; the pointer slots are zero here and installed at load. */
+struct __attribute__((packed, aligned(4))) booster_image { /* packed: no tail padding after the odd-sized state */
+    uint32_t imports[14];          /* +0x00: {module id, host pointer} x 7 */
+    uint32_t module_id;            /* +0x38: Linkage id 34 */
+    uint32_t linkage[7];           /* +0x3c: code pointers (+0x3c, +0x40, +0x50, +0x54), installed at load */
+    char     bstinfo[8];           /* +0x58 */
+    double   level_factors[10];    /* +0x60 */
+    uint32_t backslash;            /* +0xb0 */
+    char     fmt_b4[8];            /* +0xb4 */
+    char     fmt_bc[12];           /* +0xbc */
+    char     fmt_c8[12];           /* +0xc8 */
+    char     fmt_d4[28];           /* +0xd4: a path format, 24 characters and its NUL, as retail */
+    char     dir_files[8];         /* +0xf0 */
+    char     dir_grid[8];          /* +0xf8 */
+    char     extensions[4][8];     /* +0x100 */
+    uint8_t  state[BOOSTER_IMAGE_SIZE - 0x120]; /* +0x120: zero at load; meaning not yet known */
 };
+
+_Static_assert(sizeof(struct booster_image) == BOOSTER_IMAGE_SIZE, "booster image size");
+_Static_assert(__builtin_offsetof(struct booster_image, module_id) == BOOSTER_LINKAGE, "linkage");
+_Static_assert(__builtin_offsetof(struct booster_image, bstinfo) == 0x58, "bstinfo");
+_Static_assert(__builtin_offsetof(struct booster_image, level_factors) == 0x60, "level_factors");
+_Static_assert(__builtin_offsetof(struct booster_image, fmt_b4) == 0xb4, "fmt_b4");
+_Static_assert(__builtin_offsetof(struct booster_image, dir_files) == 0xf0, "dir_files");
+_Static_assert(__builtin_offsetof(struct booster_image, extensions) == 0x100, "extensions");
+_Static_assert(__builtin_offsetof(struct booster_image, state) == 0x120, "state");
 
 extern struct booster_image booster_image;
 
-#define D              (booster_image.bytes)
+#define D              ((uint8_t *)&booster_image)
 #define D8(offset)     (*(uint8_t *)(D + (offset)))
 #define D16(offset)    (*(booster_u16 *)(D + (offset)))
 #define D32(offset)    (*(booster_u32 *)(D + (offset)))
@@ -1338,9 +1361,23 @@ static DWORD WINAPI booster_thread(LPVOID unused)
 
 /* ---- the image ----------------------------------------------------------------------- */
 
-struct booster_image booster_image = {{
-#include "booster_data.inc"
-}};
+struct booster_image booster_image = {
+    .imports = {1, 0, 2, 0, 4, 0, 17, 0, 20, 0, 18, 0, 0, 0},
+    .module_id = 34,
+    .bstinfo = "bstinfo",
+    .level_factors = {0x1.0000000000000p-1, 0x1.0000000000000p+0, 0x1.2e147ae147ae1p+0,
+                      0x1.5c28f5c28f5c3p+0, 0x1.8a3d70a3d70a4p+0, 0x1.8000000000000p-1,
+                      0x1.4000000000000p+0, 0x1.6e147ae147ae1p+0, 0x1.9c28f5c28f5c3p+0,
+                      0x1.ca3d70a3d70a4p+0},
+    .backslash = 0x5c,
+    .fmt_b4 = "%s\n%s",
+    .fmt_bc = "%s%s%s%s",
+    .fmt_c8 = "%c%.3u%.3u",
+    .fmt_d4 = "%s%s%s%.3u%\\%c%.3u%.3u%s",
+    .dir_files = "FILES",
+    .dir_grid = "GRID",
+    .extensions = {".TXR", ".BGL", ".PAL", ".HAZ"},
+};
 
 /* Retail's exports point into its .data section. */
 __asm__(".globl _ImportTable\n\t.set _ImportTable, _booster_image + 0x0\n\t"

@@ -148,7 +148,7 @@ static int semantics(uint32_t index, uint32_t ecx, uint32_t *arguments, uint64_t
         *result = ecx;
         return 1;
     case SIMSUI_IMPORT_MFC_3874: {         /* CWnd::GetWindowText(CString &): a spec or plain */
-        static const char *const numbers[8] = {"", "12", "-3", "4.5", "-6.7", "1234567", "0", "-"};
+        static const char *const numbers[8] = {"", "-12", "-3", "4.5", "-6.7", "1234567", "0", "-"};   /* mostly with a '-', which OnChar's digit test reads */
         const char *text = CURRENT.rva == 0x92e0 ? numbers[(value >> 3) % 8] : script_text(value >> 3);   /* an edit's */
         if (writable(arguments[0], 4)) *(uint32_t *)(uintptr_t)arguments[0] = cstring_make(text, (uint32_t)strlen(text));
         *result = 0;
@@ -286,6 +286,7 @@ static int semantics(uint32_t index, uint32_t ecx, uint32_t *arguments, uint64_t
         *result = arguments[0] != 0;
         return 1;
     case SIMSUI_IMPORT_MFC_283:            /* CBrush(COLORREF): a GDI object */
+        put(" colour %x", arguments[0]);    /* as it is: describe() can take a PALETTEINDEX for an address */
         if (writable(ecx, 8)) {
             void **vtable = s_fake_vtables[GENERIC_VTABLE];
             uint32_t handle = (value >> 4) & 0xfff;
@@ -326,7 +327,8 @@ static int semantics(uint32_t index, uint32_t ecx, uint32_t *arguments, uint64_t
     case SIMSUI_IMPORT_ClientToScreen:
         if (writable(arguments[1], 8)) {
             int32_t *point = (int32_t *)(uintptr_t)arguments[1];
-            int32_t shift = (int32_t)(value % 64) - 32;
+            /* often a client area at the origin; now and then one at exactly 10000, the limit CSimsDialog's Init centres within */
+            int32_t shift = value % 4 == 0 ? 0 : value % 32 == 1 ? 10000 : (int32_t)((value >> 2) % 64) - 32;
             point[0] += index == SIMSUI_IMPORT_ScreenToClient ? -shift : shift;
             point[1] += index == SIMSUI_IMPORT_ScreenToClient ? -shift / 2 : shift / 2;
         }

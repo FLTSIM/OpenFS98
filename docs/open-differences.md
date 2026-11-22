@@ -78,7 +78,7 @@ The `radios` suite's stand-in now logs edi, and catches the old call.
 
 ## Not yet tested
 
-- **Gauge replacements.** All 120 are rebuilt and included in `make install`.
+- **Gauge replacements.** All 120 are rebuilt and included in `tools/ofs ofs_install`.
   Standalone comparisons cover all entries. Stock panel files exercise 118;
   `737XFEED` and `CESSVAC` have no stock panel references. See
   [gauges.md](modules/gauges.md) for verification and preserved retail quirks.
@@ -88,19 +88,19 @@ The `radios` suite's stand-in now logs edi, and catches the old call.
 - **The mouse and menus.** No script clicks anything or opens a dialog. Dialogs need a way to
   close them in the script, since a modal one hangs a run until its timeout.
 - **Night, weather and time set by hand.** Only as the flights set them.
-- **Flights in play.** `make flights-play` loads flights through Select Flight and both
+- **Flights in play.** `tools/ofs flights-play` loads flights through Select Flight and both
   pickers, sets the aircraft, radios, autopilot and COM 1, ticks the default flight,
   deletes a flight and quits, comparing every save and file with retail's. Not reached:
   EFIS's lock radios (no VOR or ILS at St George), Select Aircraft's Delete, Create a
   Flight's buttons, Communications' radio messages.
-- **The English dialogs in play.** `make main-dialogs` reaches Help's About, Credits and
+- **The English dialogs in play.** `tools/ofs main-dialogs` reaches Help's About, Credits and
   Lessons, View Options, Sim's Aircraft Settings and crash analysis, and Alerts' modal alert
   (the Exit confirmation), mostly on their first page. Not yet opened in play: Alerts'
   dialogs 3 and 4, Help's lesson graph and lesson completion. Their register contracts are
   not checked in the game: FRAMELOCK wraps Linkage tables, and theirs hold only init and
   deinit, which run outside its window; the rest is entered through the host's dialog
   registry and MFC.
-- **Options in play.** Installed 2026-11-07. `make main-dialogs` opens on it the Logbook with
+- **Options in play.** Installed 2026-11-07. `tools/ofs main-dialogs` opens on it the Logbook with
   Add Logbook and Add Entry, Preferences and each of its six pages, Select demo, Display options
   and each of its four pages, Flight video, Flight analysis, Customise controls and its three
   pages, and Instant replay: same controls and pictures as retail. Not reached: the analysis

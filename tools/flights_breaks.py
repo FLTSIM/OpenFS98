@@ -13,6 +13,7 @@ between them can observe either), and Navigation's Cancel reading its vtable aft
 writes (to +0x2174 and the descriptor, neither of which is the vtable). A removed null check faults on
 both sides rather than differing, which is not counted.
 """
+import module_flags
 from pathlib import Path
 import subprocess
 import sys
@@ -646,8 +647,7 @@ def main():
         executable.unlink(missing_ok=True)
         others = [f'src/flights/flights_{u}.c' for u in UNITS if u != unit]
         build = subprocess.run([
-            'i686-w64-mingw32-gcc', '-std=c99', '-O2', '-Wall', '-Wextra', '-Wno-unused',
-            '-fno-strict-aliasing', '-fno-delete-null-pointer-checks', '-Isrc/flights', '-o', str(executable),
+            'i686-w64-mingw32-gcc', *module_flags.FLAGS, '-std=c99', '-O2', '-Wall', '-Wextra', '-Wno-unused', '-Isrc/flights', '-o', str(executable),
             'tools/difftest/flightseventsdiff.c', str(source), *others, '-lntdll'],
             text=True, capture_output=True)
         if build.returncode:

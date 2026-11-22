@@ -10,7 +10,7 @@
 #define POOL_END 0x8800u
 
 uint8_t hg2d_image[DATA_SIZE] __attribute__((aligned(4))) = {
-#include "hg2d_data.inc"
+#include "hg2d_image.inc"
 };
 #define WORD(offset) (*(uint32_t *)(hg2d_image + (offset)))
 #define ADDRESS(pointer) ((uint32_t)(uintptr_t)(pointer))

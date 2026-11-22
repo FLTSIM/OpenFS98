@@ -8,9 +8,9 @@
  *     (0x16580 bytes from 0x1000f000): ImportTable at +0x0, Linkage at
  *     +0x50, the gauge variables' table at +0x610.  The code addresses it
  *     by retail's addresses through DA()/D32() and friends, so 0x10025020
- *     is the panel windows' list in both.  tools/gen_panels_data.py
- *     extracts the image; its code pointers and its pointers to the GLOBAL
- *     link are installed by panels_install().
+ *     is the panel windows' list in both.  The image is typed C below; its
+ *     code pointers and its pointers to the GLOBAL link are listed in
+ *     panels_pointers.inc and installed by panels_install().
  *   - The floating point is retail's, operation for operation, on the x87:
  *     long double where retail keeps a value on the FPU stack, double or
  *     float where it stores one, and pn_ftol for MSVCRT's _ftol.  fsin and
@@ -5665,12 +5665,713 @@ static void FS98_STDCALL panels_nop(void)
 
 /* ---- the image ---------------------------------------------------------------------- */
 
-struct panels_image panels_image = {{
-#include "panels_data.inc"
-}};
+/* .data at retail's offsets (0x16580 bytes, the first 0x1e00 initialised): ImportTable, Linkage, the .ini key names, a table of
+ * squares, some values whose use is not yet known (f_XXXX), then from +0x614 the gauge variables, 16-byte records
+ * {function, the GLOBAL link, an offset into GLOBAL, a size}.  The functions and links are zero here: panels_install() fills
+ * them (panels_pointers.inc).  .rdata (0x1fb bytes) is the doubles, two floats and a copy of retail's export directory. */
+struct pn_linkage {
+    uint32_t id;  /* +0x0 */
+    void *init;  /* +0x4 */
+    void *deinit;  /* +0x8 */
+    uint32_t reserved_0c;  /* +0xc */
+    uint32_t reserved_10;  /* +0x10 */
+    void *dialogs;  /* +0x14 */
+    void *slots[0x25];  /* +0x18 */
+} __attribute__((packed));
+_Static_assert(sizeof(struct pn_linkage) == 0xac, "pn_linkage");
 
-const uint8_t panels_rdata[PN_RDATA_SIZE] = {
-#include "panels_rdata.inc"
+struct pn_var {
+    void *fn;  /* +0x0 */
+    void *link;  /* +0x4 */
+    uint32_t offset;  /* +0x8 */
+    uint32_t size;  /* +0xc */
+} __attribute__((packed));
+_Static_assert(sizeof(struct pn_var) == 0x10, "pn_var");
+
+struct pn_export {
+    uint32_t characteristics;  /* +0x0 */
+    uint32_t timestamp;  /* +0x4 */
+    uint16_t major;  /* +0x8 */
+    uint16_t minor;  /* +0xa */
+    uint32_t name;  /* +0xc */
+    uint32_t base;  /* +0x10 */
+    uint32_t nfuncs;  /* +0x14 */
+    uint32_t nnames;  /* +0x18 */
+    uint32_t funcs;  /* +0x1c */
+    uint32_t names;  /* +0x20 */
+    uint32_t ordinals;  /* +0x24 */
+} __attribute__((packed));
+_Static_assert(sizeof(struct pn_export) == 0x28, "pn_export");
+
+struct panels_image {
+    struct fs98_import import[10];  /* +0x0 */
+    struct pn_linkage linkage;  /* +0x50 */
+    char s_panels[8];  /* +0xfc */
+    char s_image_quality[16];  /* +0x104 */
+    char s_rb[4];  /* +0x114 */
+    char s_gauge_02d[12];  /* +0x118 */
+    char s_ident[8];  /* +0x124 */
+    char s_visible[8];  /* +0x12c */
+    char s_position[12];  /* +0x134 */
+    char s_windowsize_ratio[20];  /* +0x140 */
+    char s_size_y_mm[12];  /* +0x154 */
+    char s_size_mm[8];  /* +0x160 */
+    char s_file[8];  /* +0x168 */
+    char s_window_titles[16];  /* +0x170 */
+    char s_window_02d[12];  /* +0x180 */
+    char s_8_bit_colors[16];  /* +0x18c */
+    char s_color_02d[12];  /* +0x19c */
+    char s_fs6bounds[12];  /* +0x1a8 */
+    uint8_t gap_01b4[0x2];  /* +0x1b4 */
+    uint16_t squares[512];  /* +0x1b6 */
+    uint8_t gap_05b6[0x2];  /* +0x5b6 */
+    uint32_t f_05b8;  /* +0x5b8 */
+    uint8_t gap_05bc[0x4];  /* +0x5bc */
+    uint32_t f_05c0;  /* +0x5c0 */
+    uint32_t f_05c4;  /* +0x5c4 */
+    uint32_t f_05c8;  /* +0x5c8 */
+    uint32_t f_05cc;  /* +0x5cc */
+    uint32_t f_05d0;  /* +0x5d0 */
+    uint32_t f_05d4;  /* +0x5d4 */
+    uint32_t f_05d8;  /* +0x5d8 */
+    uint32_t f_05dc;  /* +0x5dc */
+    uint32_t f_05e0;  /* +0x5e0 */
+    uint32_t f_05e4;  /* +0x5e4 */
+    uint32_t f_05e8;  /* +0x5e8 */
+    uint32_t f_05ec;  /* +0x5ec */
+    uint32_t f_05f0;  /* +0x5f0 */
+    uint32_t f_05f4;  /* +0x5f4 */
+    uint32_t f_05f8;  /* +0x5f8 */
+    uint32_t f_05fc;  /* +0x5fc */
+    uint32_t f_0600;  /* +0x600 */
+    uint32_t f_0604;  /* +0x604 */
+    uint8_t gap_0608[0xc];  /* +0x608 */
+    struct pn_var vars[0x163];  /* +0x614 */
+    uint8_t gap_1c44[0x1493c];  /* +0x1c44 */
+} __attribute__((packed, aligned(16)));
+_Static_assert(sizeof(struct panels_image) == 0x16580, "panels_image");
+_Static_assert(__builtin_offsetof(struct panels_image, import) == 0x0, "import");
+_Static_assert(__builtin_offsetof(struct panels_image, linkage) == 0x50, "linkage");
+_Static_assert(__builtin_offsetof(struct panels_image, s_panels) == 0xfc, "s_panels");
+_Static_assert(__builtin_offsetof(struct panels_image, s_image_quality) == 0x104, "s_image_quality");
+_Static_assert(__builtin_offsetof(struct panels_image, s_rb) == 0x114, "s_rb");
+_Static_assert(__builtin_offsetof(struct panels_image, s_gauge_02d) == 0x118, "s_gauge_02d");
+_Static_assert(__builtin_offsetof(struct panels_image, s_ident) == 0x124, "s_ident");
+_Static_assert(__builtin_offsetof(struct panels_image, s_visible) == 0x12c, "s_visible");
+_Static_assert(__builtin_offsetof(struct panels_image, s_position) == 0x134, "s_position");
+_Static_assert(__builtin_offsetof(struct panels_image, s_windowsize_ratio) == 0x140, "s_windowsize_ratio");
+_Static_assert(__builtin_offsetof(struct panels_image, s_size_y_mm) == 0x154, "s_size_y_mm");
+_Static_assert(__builtin_offsetof(struct panels_image, s_size_mm) == 0x160, "s_size_mm");
+_Static_assert(__builtin_offsetof(struct panels_image, s_file) == 0x168, "s_file");
+_Static_assert(__builtin_offsetof(struct panels_image, s_window_titles) == 0x170, "s_window_titles");
+_Static_assert(__builtin_offsetof(struct panels_image, s_window_02d) == 0x180, "s_window_02d");
+_Static_assert(__builtin_offsetof(struct panels_image, s_8_bit_colors) == 0x18c, "s_8_bit_colors");
+_Static_assert(__builtin_offsetof(struct panels_image, s_color_02d) == 0x19c, "s_color_02d");
+_Static_assert(__builtin_offsetof(struct panels_image, s_fs6bounds) == 0x1a8, "s_fs6bounds");
+_Static_assert(__builtin_offsetof(struct panels_image, squares) == 0x1b6, "squares");
+_Static_assert(__builtin_offsetof(struct panels_image, vars) == 0x614, "vars");
+
+struct panels_rdata {
+    double k_0000;  /* +0x0 */
+    double k_0008;  /* +0x8 */
+    double k_0010;  /* +0x10 */
+    double k_0018;  /* +0x18 */
+    double k_0020;  /* +0x20 */
+    double k_0028;  /* +0x28 */
+    double k_0030;  /* +0x30 */
+    double k_0038;  /* +0x38 */
+    double k_0040;  /* +0x40 */
+    double k_0048;  /* +0x48 */
+    double k_0050;  /* +0x50 */
+    double k_0058;  /* +0x58 */
+    double k_0060;  /* +0x60 */
+    double k_0068;  /* +0x68 */
+    double k_0070;  /* +0x70 */
+    double k_0078;  /* +0x78 */
+    double k_0080;  /* +0x80 */
+    double k_0088;  /* +0x88 */
+    double k_0090;  /* +0x90 */
+    double k_0098;  /* +0x98 */
+    double k_00a0;  /* +0xa0 */
+    double k_00a8;  /* +0xa8 */
+    double k_00b0;  /* +0xb0 */
+    double k_00b8;  /* +0xb8 */
+    double k_00c0;  /* +0xc0 */
+    double k_00c8;  /* +0xc8 */
+    double k_00d0;  /* +0xd0 */
+    double k_00d8;  /* +0xd8 */
+    double k_00e0;  /* +0xe0 */
+    double k_00e8;  /* +0xe8 */
+    double k_00f0;  /* +0xf0 */
+    double k_00f8;  /* +0xf8 */
+    double k_0100;  /* +0x100 */
+    double k_0108;  /* +0x108 */
+    double k_0110;  /* +0x110 */
+    double k_0118;  /* +0x118 */
+    float f_0120[0x2];  /* +0x120 */
+    double k_0128;  /* +0x128 */
+    double k_0130;  /* +0x130 */
+    double k_0138;  /* +0x138 */
+    double k_0140;  /* +0x140 */
+    double k_0148;  /* +0x148 */
+    double k_0150;  /* +0x150 */
+    double k_0158;  /* +0x158 */
+    double k_0160;  /* +0x160 */
+    double k_0168;  /* +0x168 */
+    double k_0170;  /* +0x170 */
+    double k_0178;  /* +0x178 */
+    double k_0180;  /* +0x180 */
+    double k_0188;  /* +0x188 */
+    double k_0190;  /* +0x190 */
+    double k_0198;  /* +0x198 */
+    struct pn_export export;  /* +0x1a0 */
+    uint32_t funcs[0x2];  /* +0x1c8 */
+    uint32_t names[0x2];  /* +0x1d0 */
+    uint16_t ordinals[0x2];  /* +0x1d8 */
+    char dll_name[11];  /* +0x1dc */
+    char s_import_table[12];  /* +0x1e7 */
+    char s_linkage[8];  /* +0x1f3 */
+} __attribute__((packed));
+_Static_assert(sizeof(struct panels_rdata) == 0x1fb, "panels_rdata");
+_Static_assert(__builtin_offsetof(struct panels_rdata, k_0000) == 0x0, "k_0000");
+_Static_assert(__builtin_offsetof(struct panels_rdata, k_0008) == 0x8, "k_0008");
+_Static_assert(__builtin_offsetof(struct panels_rdata, k_0010) == 0x10, "k_0010");
+_Static_assert(__builtin_offsetof(struct panels_rdata, k_0018) == 0x18, "k_0018");
+_Static_assert(__builtin_offsetof(struct panels_rdata, k_0020) == 0x20, "k_0020");
+_Static_assert(__builtin_offsetof(struct panels_rdata, k_0028) == 0x28, "k_0028");
+_Static_assert(__builtin_offsetof(struct panels_rdata, k_0030) == 0x30, "k_0030");
+_Static_assert(__builtin_offsetof(struct panels_rdata, k_0038) == 0x38, "k_0038");
+_Static_assert(__builtin_offsetof(struct panels_rdata, k_0040) == 0x40, "k_0040");
+_Static_assert(__builtin_offsetof(struct panels_rdata, k_0048) == 0x48, "k_0048");
+_Static_assert(__builtin_offsetof(struct panels_rdata, k_0050) == 0x50, "k_0050");
+_Static_assert(__builtin_offsetof(struct panels_rdata, k_0058) == 0x58, "k_0058");
+_Static_assert(__builtin_offsetof(struct panels_rdata, k_0060) == 0x60, "k_0060");
+_Static_assert(__builtin_offsetof(struct panels_rdata, k_0068) == 0x68, "k_0068");
+_Static_assert(__builtin_offsetof(struct panels_rdata, k_0070) == 0x70, "k_0070");
+_Static_assert(__builtin_offsetof(struct panels_rdata, k_0078) == 0x78, "k_0078");
+_Static_assert(__builtin_offsetof(struct panels_rdata, k_0080) == 0x80, "k_0080");
+_Static_assert(__builtin_offsetof(struct panels_rdata, k_0088) == 0x88, "k_0088");
+_Static_assert(__builtin_offsetof(struct panels_rdata, k_0090) == 0x90, "k_0090");
+_Static_assert(__builtin_offsetof(struct panels_rdata, k_0098) == 0x98, "k_0098");
+_Static_assert(__builtin_offsetof(struct panels_rdata, k_00a0) == 0xa0, "k_00a0");
+_Static_assert(__builtin_offsetof(struct panels_rdata, k_00a8) == 0xa8, "k_00a8");
+_Static_assert(__builtin_offsetof(struct panels_rdata, k_00b0) == 0xb0, "k_00b0");
+_Static_assert(__builtin_offsetof(struct panels_rdata, k_00b8) == 0xb8, "k_00b8");
+_Static_assert(__builtin_offsetof(struct panels_rdata, k_00c0) == 0xc0, "k_00c0");
+_Static_assert(__builtin_offsetof(struct panels_rdata, k_00c8) == 0xc8, "k_00c8");
+_Static_assert(__builtin_offsetof(struct panels_rdata, k_00d0) == 0xd0, "k_00d0");
+_Static_assert(__builtin_offsetof(struct panels_rdata, k_00d8) == 0xd8, "k_00d8");
+_Static_assert(__builtin_offsetof(struct panels_rdata, k_00e0) == 0xe0, "k_00e0");
+_Static_assert(__builtin_offsetof(struct panels_rdata, k_00e8) == 0xe8, "k_00e8");
+_Static_assert(__builtin_offsetof(struct panels_rdata, k_00f0) == 0xf0, "k_00f0");
+_Static_assert(__builtin_offsetof(struct panels_rdata, k_00f8) == 0xf8, "k_00f8");
+_Static_assert(__builtin_offsetof(struct panels_rdata, k_0100) == 0x100, "k_0100");
+_Static_assert(__builtin_offsetof(struct panels_rdata, k_0108) == 0x108, "k_0108");
+_Static_assert(__builtin_offsetof(struct panels_rdata, k_0110) == 0x110, "k_0110");
+_Static_assert(__builtin_offsetof(struct panels_rdata, k_0118) == 0x118, "k_0118");
+_Static_assert(__builtin_offsetof(struct panels_rdata, k_0128) == 0x128, "k_0128");
+_Static_assert(__builtin_offsetof(struct panels_rdata, k_0130) == 0x130, "k_0130");
+_Static_assert(__builtin_offsetof(struct panels_rdata, k_0138) == 0x138, "k_0138");
+_Static_assert(__builtin_offsetof(struct panels_rdata, k_0140) == 0x140, "k_0140");
+_Static_assert(__builtin_offsetof(struct panels_rdata, k_0148) == 0x148, "k_0148");
+_Static_assert(__builtin_offsetof(struct panels_rdata, k_0150) == 0x150, "k_0150");
+_Static_assert(__builtin_offsetof(struct panels_rdata, k_0158) == 0x158, "k_0158");
+_Static_assert(__builtin_offsetof(struct panels_rdata, k_0160) == 0x160, "k_0160");
+_Static_assert(__builtin_offsetof(struct panels_rdata, k_0168) == 0x168, "k_0168");
+_Static_assert(__builtin_offsetof(struct panels_rdata, k_0170) == 0x170, "k_0170");
+_Static_assert(__builtin_offsetof(struct panels_rdata, k_0178) == 0x178, "k_0178");
+_Static_assert(__builtin_offsetof(struct panels_rdata, k_0180) == 0x180, "k_0180");
+_Static_assert(__builtin_offsetof(struct panels_rdata, k_0188) == 0x188, "k_0188");
+_Static_assert(__builtin_offsetof(struct panels_rdata, k_0190) == 0x190, "k_0190");
+_Static_assert(__builtin_offsetof(struct panels_rdata, k_0198) == 0x198, "k_0198");
+_Static_assert(__builtin_offsetof(struct panels_rdata, export) == 0x1a0, "export");
+_Static_assert(__builtin_offsetof(struct panels_rdata, funcs) == 0x1c8, "funcs");
+_Static_assert(__builtin_offsetof(struct panels_rdata, names) == 0x1d0, "names");
+_Static_assert(__builtin_offsetof(struct panels_rdata, ordinals) == 0x1d8, "ordinals");
+_Static_assert(__builtin_offsetof(struct panels_rdata, dll_name) == 0x1dc, "dll_name");
+_Static_assert(__builtin_offsetof(struct panels_rdata, s_import_table) == 0x1e7, "s_import_table");
+_Static_assert(__builtin_offsetof(struct panels_rdata, s_linkage) == 0x1f3, "s_linkage");
+
+/* The squares table at +0x1b6: (n - 256)^2 truncated to 16 bits, for n = 0 .. 511. */
+#define SQ(n)   ((uint16_t)(((n) - 256) * ((n) - 256)))
+#define SQ16(n) SQ(n), SQ((n) + 1), SQ((n) + 2), SQ((n) + 3), SQ((n) + 4), SQ((n) + 5), SQ((n) + 6), SQ((n) + 7), \
+                SQ((n) + 8), SQ((n) + 9), SQ((n) + 10), SQ((n) + 11), SQ((n) + 12), SQ((n) + 13), SQ((n) + 14), SQ((n) + 15)
+
+struct panels_image panels_image = {
+    .import = {
+        { FS98_MOD_HOST },
+        { FS98_MOD_GLOBAL },
+        { FS98_MOD_ACONTAIN },
+        { FS98_MOD_CHAIN },
+        { FS98_MOD_HG2D },
+        { FS98_MOD_GAUGES },
+        { FS98_MOD_MAIN },
+        { FS98_MOD_SOUND },
+        { FS98_MOD_WINDOW },
+        { 0 },
+    },
+    .linkage = {
+        .id = FS98_MOD_PANELS,
+    },
+    .s_panels = "PANELS",
+    .s_image_quality = "IMAGE_QUALITY",
+    .s_rb = "rb",
+    .s_gauge_02d = "Gauge%02d",
+    .s_ident = "ident",
+    .s_visible = "VISIBLE",
+    .s_position = "POSITION",
+    .s_windowsize_ratio = "WINDOWSIZE_RATIO",
+    .s_size_y_mm = "SIZE_Y_MM",
+    .s_size_mm = "SIZE_MM",
+    .s_file = "FILE",
+    .s_window_titles = "Window Titles",
+    .s_window_02d = "Window%02d",
+    .s_8_bit_colors = "8 Bit Colors",
+    .s_color_02d = "Color%02d",
+    .s_fs6bounds = "FS6BOUNDS",
+    .squares = {
+        SQ16(0),
+        SQ16(16),
+        SQ16(32),
+        SQ16(48),
+        SQ16(64),
+        SQ16(80),
+        SQ16(96),
+        SQ16(112),
+        SQ16(128),
+        SQ16(144),
+        SQ16(160),
+        SQ16(176),
+        SQ16(192),
+        SQ16(208),
+        SQ16(224),
+        SQ16(240),
+        SQ16(256),
+        SQ16(272),
+        SQ16(288),
+        SQ16(304),
+        SQ16(320),
+        SQ16(336),
+        SQ16(352),
+        SQ16(368),
+        SQ16(384),
+        SQ16(400),
+        SQ16(416),
+        SQ16(432),
+        SQ16(448),
+        SQ16(464),
+        SQ16(480),
+        SQ16(496),
+    },
+    .f_05b8 = 1,
+    .f_05c0 = 1,
+    .f_05c4 = 1,
+    .f_05c8 = 2,
+    .f_05cc = 2,
+    .f_05d0 = 3,
+    .f_05d4 = 4,
+    .f_05d8 = 2,
+    .f_05dc = 0x73,
+    .f_05e0 = 0x80,
+    .f_05e4 = 0x9f,
+    .f_05e8 = 1,
+    .f_05ec = 7,
+    .f_05f0 = 0xa,
+    .f_05f4 = 0xa,
+    .f_05f8 = 0x6a,
+    .f_05fc = 0x75,
+    .f_0600 = 0xf8,
+    .f_0604 = 0xff,
+    .vars = {
+        [0] = { .offset = 0x2a8, .size = 8 },
+        [1] = { .offset = 0x20, .size = 0x14 },
+        [2] = { .offset = 0x238, .size = 2 },
+        [3] = { .offset = 0x239, .size = 2 },
+        [4] = { .offset = 0x23a, .size = 2 },
+        [5] = { .offset = 0x23b, .size = 2 },
+        [6] = { .offset = 0x23c, .size = 2 },
+        [7] = { .offset = 0x23e, .size = 8 },
+        [8] = { .offset = 0x240, .size = 8 },
+        [9] = { .offset = 0x280, .size = 1 },
+        [10] = { .offset = 0x281, .size = 1 },
+        [11] = { .offset = 0x282, .size = 1 },
+        [12] = { .offset = 0x29c, .size = 0x11 },
+        [13] = { .offset = 0x28c, .size = 0x22 },
+        [14] = { .offset = 0x5d8, .size = 0x22 },
+        [15] = { .offset = 0x34c, .size = 0xe },
+        [16] = { .offset = 0x35c, .size = 0x22 },
+        [17] = { .offset = 0x356, .size = 0xe },
+        [21] = { .offset = 0xc6c, .size = 0x12 },
+        [22] = { .offset = 0x34e, .size = 0xe },
+        [23] = { .offset = 0x350, .size = 0xe },
+        [24] = { .offset = 0xc50, .size = 8 },
+        [26] = { .offset = 0x352, .size = 0xe },
+        [27] = { .offset = 0xc60, .size = 8 },
+        [29] = { .offset = 0xc41, .size = 1 },
+        [33] = { .offset = 0xc42, .size = 1 },
+        [37] = { .offset = 0x354, .size = 0xf },
+        [39] = { .offset = 0xc48, .size = 3 },
+        [40] = { .offset = 0xc49, .size = 3 },
+        [41] = { .offset = 0xc4a, .size = 4 },
+        [42] = { .offset = 0xc4b, .size = 5 },
+        [43] = { .offset = 0xc4c, .size = 1 },
+        [44] = { .offset = 0xc4e, .size = 8 },
+        [49] = { .offset = 0xc59, .size = 3 },
+        [50] = { .offset = 0xc5a, .size = 4 },
+        [51] = { .offset = 0xc5b, .size = 5 },
+        [52] = { .offset = 0xc5c, .size = 1 },
+        [53] = { .offset = 0xc5e, .size = 8 },
+        [59] = { .offset = 0x366, .size = 1 },
+        [62] = { .offset = 0x2c4, .size = 0x19 },
+        [63] = { .offset = 0x11c6, .size = 8 },
+        [64] = { .offset = 0x2c8, .size = 0x14 },
+        [65] = { .offset = 0xb0c, .size = 0x13 },
+        [66] = { .offset = 0x36c, .size = 1 },
+        [67] = { .offset = 0x36d, .size = 1 },
+        [68] = { .offset = 0x36e, .size = 3 },
+        [69] = { .offset = 0x37c, .size = 9 },
+        [70] = { .offset = 0x560, .size = 0x1d },
+        [71] = { .offset = 0x568, .size = 0x1a },
+        [72] = { .offset = 0x570, .size = 0x1d },
+        [81] = { .offset = 0x2a0, .size = 7 },
+        [82] = { .offset = 0x2cc, .size = 0x21 },
+        [84] = { .offset = 0xc3e, .size = 9 },
+        [86] = { .offset = 0x764, .size = 0x22 },
+        [87] = { .offset = 0x778, .size = 0x22 },
+        [88] = { .offset = 0x77c, .size = 0x22 },
+        [89] = { .offset = 0x780, .size = 0x22 },
+        [90] = { .offset = 0x784, .size = 0x22 },
+        [91] = { .offset = 0x78c, .size = 0x22 },
+        [92] = { .offset = 0x790, .size = 0x22 },
+        [93] = { .offset = 0x794, .size = 0x22 },
+        [94] = { .offset = 0x798, .size = 0x24 },
+        [95] = { .offset = 0x79c, .size = 0x22 },
+        [96] = { .offset = 0x7a0, .size = 0x22 },
+        [97] = { .offset = 0x7a4, .size = 0x22 },
+        [98] = { .offset = 0x7ac, .size = 0x22 },
+        [99] = { .offset = 0x7b0, .size = 0x22 },
+        [100] = { .offset = 0x7b4, .size = 0x22 },
+        [101] = { .offset = 0x7b8, .size = 0x22 },
+        [102] = { .offset = 0x7bc, .size = 0x22 },
+        [103] = { .offset = 0x7c0, .size = 0x22 },
+        [104] = { .offset = 0x7c4, .size = 0x22 },
+        [105] = { .offset = 0x7c8, .size = 0x22 },
+        [106] = { .offset = 0x7cc, .size = 7 },
+        [107] = { .offset = 0x7d0, .size = 0x22 },
+        [109] = { .offset = 0x7d8, .size = 0x22 },
+        [110] = { .offset = 0x7fc, .size = 0x22 },
+        [111] = { .offset = 0x800, .size = 0x22 },
+        [112] = { .offset = 0x804, .size = 0x22 },
+        [113] = { .offset = 0x808, .size = 0x22 },
+        [114] = { .offset = 0x7dc, .size = 0x22 },
+        [115] = { .offset = 0x7e0, .size = 0x15 },
+        [116] = { .offset = 0x7e4, .size = 0x22 },
+        [117] = { .offset = 0x7e8, .size = 0x15 },
+        [118] = { .offset = 0x7ec, .size = 0x22 },
+        [120] = { .offset = 0xb10, .size = 0x22 },
+        [121] = { .offset = 0xb14, .size = 0x22 },
+        [122] = { .offset = 0x810, .size = 0x22 },
+        [123] = { .offset = 0x80c, .size = 0x22 },
+        [124] = { .offset = 0x7f8, .size = 0x13 },
+        [125] = { .offset = 0x888, .size = 0x23 },
+        [126] = { .offset = 0x88c, .size = 0x25 },
+        [127] = { .offset = 0x88c, .size = 9 },
+        [128] = { .offset = 0x88e, .size = 8 },
+        [129] = { .offset = 0x890, .size = 8 },
+        [130] = { .offset = 0x894, .size = 6 },
+        [131] = { .offset = 0x892, .size = 0xd },
+        [132] = { .offset = 0x8ae, .size = 6 },
+        [133] = { .offset = 0x8b0, .size = 6 },
+        [134] = { .offset = 0x896, .size = 8 },
+        [135] = { .offset = 0x898, .size = 8 },
+        [137] = { .offset = 0x918, .size = 0x21 },
+        [138] = { .offset = 0x8a0, .size = 8 },
+        [139] = { .offset = 0x8a2, .size = 8 },
+        [140] = { .offset = 0x8b2, .size = 6 },
+        [141] = { .offset = 0x8bc, .size = 8 },
+        [142] = { .offset = 0x8b4, .size = 8 },
+        [143] = { .offset = 0x8be, .size = 8 },
+        [144] = { .offset = 0x8b6, .size = 8 },
+        [145] = { .offset = 0x8e8, .size = 0x21 },
+        [146] = { .offset = 0x8b8, .size = 8 },
+        [147] = { .offset = 0x8ba, .size = 8 },
+        [148] = { .offset = 0x8d0, .size = 0x13 },
+        [149] = { .offset = 0x8d8, .size = 0x13 },
+        [150] = { .offset = 0x8dc, .size = 0x13 },
+        [151] = { .offset = 0x8c0, .size = 8 },
+        [152] = { .offset = 0x8d4, .size = 0x13 },
+        [153] = { .offset = 0x8c8, .size = 8 },
+        [154] = { .offset = 0x8f0, .size = 0x13 },
+        [155] = { .offset = 0x8f4, .size = 0x13 },
+        [156] = { .offset = 0x8f8, .size = 0x13 },
+        [157] = { .offset = 0x8fc, .size = 0x13 },
+        [158] = { .offset = 0x900, .size = 0x13 },
+        [159] = { .offset = 0x904, .size = 0x13 },
+        [160] = { .offset = 0x908, .size = 0x13 },
+        [161] = { .offset = 0x924, .size = 0x25 },
+        [162] = { .offset = 0x924, .size = 9 },
+        [163] = { .offset = 0x926, .size = 8 },
+        [164] = { .offset = 0x928, .size = 8 },
+        [165] = { .offset = 0x92c, .size = 6 },
+        [166] = { .offset = 0x92a, .size = 0xd },
+        [167] = { .offset = 0x946, .size = 6 },
+        [168] = { .offset = 0x948, .size = 6 },
+        [169] = { .offset = 0x92e, .size = 8 },
+        [170] = { .offset = 0x930, .size = 8 },
+        [172] = { .offset = 0x9b0, .size = 0x21 },
+        [173] = { .offset = 0x938, .size = 8 },
+        [174] = { .offset = 0x93a, .size = 8 },
+        [175] = { .offset = 0x94a, .size = 6 },
+        [176] = { .offset = 0x954, .size = 8 },
+        [177] = { .offset = 0x94c, .size = 8 },
+        [178] = { .offset = 0x956, .size = 8 },
+        [179] = { .offset = 0x94e, .size = 8 },
+        [180] = { .offset = 0x980, .size = 0x21 },
+        [181] = { .offset = 0x950, .size = 8 },
+        [182] = { .offset = 0x952, .size = 8 },
+        [183] = { .offset = 0x968, .size = 0x13 },
+        [184] = { .offset = 0x970, .size = 0x13 },
+        [185] = { .offset = 0x974, .size = 0x13 },
+        [186] = { .offset = 0x958, .size = 8 },
+        [187] = { .offset = 0x96c, .size = 0x13 },
+        [188] = { .offset = 0x960, .size = 8 },
+        [189] = { .offset = 0x988, .size = 0x13 },
+        [190] = { .offset = 0x98c, .size = 0x13 },
+        [191] = { .offset = 0x990, .size = 0x13 },
+        [192] = { .offset = 0x994, .size = 0x13 },
+        [193] = { .offset = 0x998, .size = 0x13 },
+        [194] = { .offset = 0x99c, .size = 0x13 },
+        [195] = { .offset = 0x9a0, .size = 0x13 },
+        [196] = { .offset = 0x9bc, .size = 0x25 },
+        [197] = { .offset = 0x9bc, .size = 9 },
+        [198] = { .offset = 0x9be, .size = 8 },
+        [199] = { .offset = 0x9c0, .size = 8 },
+        [200] = { .offset = 0x9c4, .size = 6 },
+        [201] = { .offset = 0x9c2, .size = 0xd },
+        [202] = { .offset = 0x9de, .size = 6 },
+        [203] = { .offset = 0x9e0, .size = 6 },
+        [204] = { .offset = 0x9c6, .size = 8 },
+        [205] = { .offset = 0x9c8, .size = 8 },
+        [207] = { .offset = 0xa48, .size = 0x21 },
+        [208] = { .offset = 0x9d0, .size = 8 },
+        [209] = { .offset = 0x9d2, .size = 8 },
+        [210] = { .offset = 0x9e2, .size = 6 },
+        [211] = { .offset = 0x9ec, .size = 8 },
+        [212] = { .offset = 0x9e4, .size = 8 },
+        [213] = { .offset = 0x9ee, .size = 8 },
+        [214] = { .offset = 0x9e6, .size = 8 },
+        [215] = { .offset = 0xa18, .size = 0x21 },
+        [216] = { .offset = 0x9e8, .size = 8 },
+        [217] = { .offset = 0x9ea, .size = 8 },
+        [218] = { .offset = 0xa00, .size = 0x13 },
+        [219] = { .offset = 0xa08, .size = 0x13 },
+        [220] = { .offset = 0xa0c, .size = 0x13 },
+        [221] = { .offset = 0x9f0, .size = 8 },
+        [222] = { .offset = 0xa04, .size = 0x13 },
+        [223] = { .offset = 0x9f8, .size = 8 },
+        [224] = { .offset = 0xa20, .size = 0x13 },
+        [225] = { .offset = 0xa24, .size = 0x13 },
+        [226] = { .offset = 0xa28, .size = 0x13 },
+        [227] = { .offset = 0xa2c, .size = 0x13 },
+        [228] = { .offset = 0xa30, .size = 0x13 },
+        [229] = { .offset = 0xa34, .size = 0x13 },
+        [230] = { .offset = 0xa38, .size = 0x13 },
+        [231] = { .offset = 0xa54, .size = 0x25 },
+        [232] = { .offset = 0xa54, .size = 9 },
+        [233] = { .offset = 0xa56, .size = 8 },
+        [234] = { .offset = 0xa58, .size = 8 },
+        [235] = { .offset = 0xa5c, .size = 6 },
+        [236] = { .offset = 0xa5a, .size = 0xd },
+        [237] = { .offset = 0xa76, .size = 6 },
+        [238] = { .offset = 0xa78, .size = 6 },
+        [239] = { .offset = 0xa5e, .size = 8 },
+        [240] = { .offset = 0xa60, .size = 8 },
+        [242] = { .offset = 0xae0, .size = 0x21 },
+        [243] = { .offset = 0xa68, .size = 8 },
+        [244] = { .offset = 0xa6a, .size = 8 },
+        [245] = { .offset = 0xa7a, .size = 6 },
+        [246] = { .offset = 0xa84, .size = 8 },
+        [247] = { .offset = 0xa7c, .size = 8 },
+        [248] = { .offset = 0xa86, .size = 8 },
+        [249] = { .offset = 0xa7e, .size = 8 },
+        [250] = { .offset = 0xab0, .size = 0x21 },
+        [251] = { .offset = 0xa80, .size = 8 },
+        [252] = { .offset = 0xa82, .size = 8 },
+        [253] = { .offset = 0xa98, .size = 0x13 },
+        [254] = { .offset = 0xaa0, .size = 0x13 },
+        [255] = { .offset = 0xaa4, .size = 0x13 },
+        [256] = { .offset = 0xa88, .size = 8 },
+        [257] = { .offset = 0xa9c, .size = 0x13 },
+        [258] = { .offset = 0xa90, .size = 8 },
+        [259] = { .offset = 0xab8, .size = 0x13 },
+        [260] = { .offset = 0xabc, .size = 0x13 },
+        [261] = { .offset = 0xac0, .size = 0x13 },
+        [262] = { .offset = 0xac4, .size = 0x13 },
+        [263] = { .offset = 0xac8, .size = 0x13 },
+        [264] = { .offset = 0xacc, .size = 0x13 },
+        [265] = { .offset = 0xad0, .size = 0x13 },
+        [266] = { .offset = 0xaec, .size = 8 },
+        [267] = { .offset = 0xaf0, .size = 0x24 },
+        [268] = { .offset = 0xb00, .size = 9 },
+        [269] = { .offset = 0x886, .size = 0x10 },
+        [270] = { .offset = 0xb02, .size = 8 },
+        [271] = { .offset = 0xb04, .size = 8 },
+        [272] = { .offset = 0xb64, .size = 5 },
+        [273] = { .offset = 0xb65, .size = 5 },
+        [274] = { .offset = 0xb66, .size = 5 },
+        [275] = { .offset = 0xb67, .size = 5 },
+        [276] = { .offset = 0xb68, .size = 5 },
+        [277] = { .offset = 0xb69, .size = 5 },
+        [278] = { .offset = 0xb6a, .size = 5 },
+        [279] = { .offset = 0xb6b, .size = 5 },
+        [280] = { .offset = 0xb6c, .size = 5 },
+        [281] = { .offset = 0xb6d, .size = 5 },
+        [282] = { .offset = 0xb6e, .size = 5 },
+        [283] = { .offset = 0xb6f, .size = 5 },
+        [284] = { .offset = 0xb70, .size = 5 },
+        [285] = { .offset = 0xb71, .size = 5 },
+        [286] = { .offset = 0xb72, .size = 5 },
+        [287] = { .offset = 0xb73, .size = 5 },
+        [288] = { .offset = 0xb74, .size = 0x13 },
+        [289] = { .offset = 0xb78, .size = 0x13 },
+        [290] = { .offset = 0xb7c, .size = 0x13 },
+        [291] = { .offset = 0xb80, .size = 0x13 },
+        [292] = { .offset = 0xb84, .size = 0x13 },
+        [293] = { .offset = 0xb88, .size = 0x13 },
+        [294] = { .offset = 0xb8c, .size = 0x13 },
+        [295] = { .offset = 0xb90, .size = 0x13 },
+        [296] = { .offset = 0xb94, .size = 0x13 },
+        [297] = { .offset = 0xb98, .size = 0x13 },
+        [298] = { .offset = 0xb9c, .size = 0x13 },
+        [299] = { .offset = 0xba0, .size = 0x13 },
+        [300] = { .offset = 0xba4, .size = 0x13 },
+        [301] = { .offset = 0xba8, .size = 0x13 },
+        [305] = { .offset = 0xaf4, .size = 0xb },
+        [306] = { .offset = 0xaf8, .size = 0x24 },
+        [307] = { .offset = 0xafc, .size = 0x24 },
+        [308] = { .offset = 0xbb2, .size = 9 },
+        [309] = { .offset = 0xbb4, .size = 9 },
+        [310] = { .offset = 0xbb6, .size = 9 },
+        [311] = { .offset = 0xbb8, .size = 9 },
+        [312] = { .offset = 0x11c0, .size = 9 },
+        [313] = { .offset = 0xbba, .size = 9 },
+        [314] = { .offset = 0xbbc, .size = 9 },
+        [315] = { .offset = 0x11c4, .size = 9 },
+        [316] = { .offset = 0x11c2, .size = 9 },
+        [317] = { .offset = 0xbc0, .size = 9 },
+        [318] = { .offset = 0xbc2, .size = 9 },
+        [319] = { .offset = 0xbc4, .size = 8 },
+        [320] = { .offset = 0xbc6, .size = 8 },
+        [321] = { .offset = 0xbca, .size = 8 },
+        [322] = { .offset = 0xbc8, .size = 8 },
+        [323] = { .offset = 0xbcc, .size = 0x11 },
+        [324] = { .offset = 0xbd0, .size = 0x13 },
+        [325] = { .offset = 0xbd4, .size = 0x13 },
+        [326] = { .offset = 0xbd8, .size = 0x13 },
+        [327] = { .offset = 0xbdc, .size = 0x13 },
+        [328] = { .offset = 0xbe0, .size = 0x13 },
+        [329] = { .offset = 0xbe4, .size = 0x13 },
+        [330] = { .offset = 0xbe8, .size = 0x13 },
+        [331] = { .offset = 0xbec, .size = 0x13 },
+        [332] = { .offset = 0xbf0, .size = 0x13 },
+        [333] = { .offset = 0xbf4, .size = 0x13 },
+        [334] = { .offset = 0xc18, .size = 8 },
+        [335] = { .offset = 0xc1a, .size = 0xa },
+        [337] = { .offset = 0xc44, .size = 8 },
+        [338] = { .offset = 0xc46, .size = 8 },
+        [339] = { .offset = 0x372, .size = 8 },
+        [340] = { .offset = 0xe8c, .size = 0xb },
+        [341] = { .offset = 0xe8e, .size = 8 },
+        [342] = { .offset = 0xe90, .size = 9 },
+        [343] = { .offset = 0xe92, .size = 7 },
+        [344] = { .offset = 0xe94, .size = 0xb },
+        [345] = { .offset = 0xe96, .size = 0xb },
+        [346] = { .offset = 0xe98, .size = 0xb },
+        [347] = { .offset = 0xec6, .size = 0x10 },
+        [348] = { .offset = 0x11be, .size = 9 },
+        [349] = { .offset = 0x11d0, .size = 0x16 },
+        [350] = { .offset = 0x11ba, .size = 9 },
+        [351] = { .offset = 0x334, .size = 0x14 },
+        [352] = { .offset = 0xb18, .size = 0x21 },
+        [354] = { .offset = 0x378, .size = 0x24 },
+    },
+};
+
+const struct panels_rdata panels_rdata = {
+    .k_0000 = 0x1.9000000000000p+6,
+    .k_0008 = -0x1.0000000000000p+0,
+    .k_0010 = 0x1.0000000000000p+0,
+    .k_0018 = 0x1.0000000000000p+13,
+    .k_0028 = 0x1.0000000000000p+0,
+    .k_0030 = 0x1.ccccccccccccdp-1,
+    .k_0038 = 0x1.999999999999ap-1,
+    .k_0040 = 0x1.3333333333333p-1,
+    .k_0048 = 0x1.0000000000000p-1,
+    .k_0050 = 0x1.999999999999ap-2,
+    .k_0058 = 0x1.3333333333333p-2,
+    .k_0060 = 0x1.999999999999ap-3,
+    .k_0068 = 0x1.999999999999ap-4,
+    .k_0070 = 0x1.0000000000000p-8,
+    .k_0078 = 0x1.09fbe76c8b439p-1,
+    .k_0080 = 0x1.a3d70a3d70a3dp+1,
+    .k_0088 = 0x1.0000000000000p-4,
+    .k_0090 = 0x1.e3d1cc100e6afp-10,
+    .k_0098 = 0x1.6800000000000p-24,
+    .k_00a0 = 0x1.6800000000000p-8,
+    .k_00a8 = 0x1.6800000000000p+8,
+    .k_00b8 = -0x1.6800000000000p+8,
+    .k_00c0 = -0x1.6800000000000p-8,
+    .k_00c8 = -0x1.0000000000000p+15,
+    .k_00d0 = -0x1.0000000000000p+0,
+    .k_00d8 = 0x1.999999999999ap-4,
+    .k_00e0 = 0x1.0000000000000p-7,
+    .k_00e8 = 0x1.0000000000000p-16,
+    .k_00f0 = 0x1.0000000000000p-23,
+    .k_00f8 = 0x1.0000000000000p-6,
+    .k_0100 = 0x1.a3f2800000000p+1,
+    .k_0108 = 0x1.381d7d17b7b6dp-18,
+    .k_0110 = -0x1.0000000000000p+16,
+    .k_0118 = -0x1.0000000000000p-16,
+    .f_0120 = {
+        [1] = 0x1.0000000000000p+0f,
+    },
+    .k_0128 = -0x1.0000000000000p-1,
+    .k_0130 = 0x1.0000000000000p+0,
+    .k_0138 = 0x1.1df46a1fae712p-6,
+    .k_0140 = -0x1.fae147ae147aep-1,
+    .k_0148 = 0x1.fae147ae147aep-1,
+    .k_0150 = -0x1.999999999999ap-5,
+    .k_0158 = 0x1.0000000000000p+0,
+    .k_0160 = 0x1.d208a5a912e31p-14,
+    .k_0168 = 0x1.6c16c16c16c17p-1,
+    .k_0170 = -0x1.0000000000000p-1,
+    .k_0178 = 0x1.ca5ddb05cc3e8p+5,
+    .k_0188 = -0x1.6800000000000p+8,
+    .k_0198 = -0x1.0000000000000p-1,
+    .export = {
+        .timestamp = 0x33ea22c8,
+        .name = 0xe1dc,
+        .base = 1,
+        .nfuncs = 2,
+        .nnames = 2,
+        .funcs = 0xe1c8,
+        .names = 0xe1d0,
+        .ordinals = 0xe1d8,
+    },
+    .funcs = {
+        [0] = 0xf000,
+        [1] = 0xf050,
+    },
+    .names = {
+        [0] = 0xe1e7,
+        [1] = 0xe1f3,
+    },
+    .ordinals = {
+        [1] = 1,
+    },
+    .dll_name = "PANELS.DLL",
+    .s_import_table = "ImportTable",
+    .s_linkage = "Linkage",
 };
 
 __asm__(".globl _ImportTable\n\t.set _ImportTable, _panels_image + 0x0\n\t"

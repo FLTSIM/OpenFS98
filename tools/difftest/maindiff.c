@@ -6264,7 +6264,7 @@ static void report_flights(void)
 
 /* ---- suite: aircraft (command 0x1201, slice 34) ------------------------------------ */
 
-static uint32_t acft_n;
+static uint32_t acft_n, aircraft_pages;
 static unsigned long cover_acft_open, cover_acft_draw, cover_acft_moved, cover_acft_ok;
 
 static uint32_t STDCALL acft_1c(uint32_t *count, uint32_t *list)
@@ -6362,6 +6362,12 @@ static uint32_t STDCALL acft_g18(uint32_t a, uint32_t *e)
     uint32_t i, n = rnd_n(3);
 
     put(" g3d+0x18(%#x) e=%x,%x,%x,%x,%x", a, e[2], e[7], e[8], e[9], e[26]);
+    {                                              /* the preview's eye block, GLOBAL +0x1198: its viewport */
+        uint32_t *eye = (uint32_t *)(uintptr_t)*(uint32_t *)(global + 0x1198);
+
+        if (eye)
+            put(" eye=%x,%x,%x,%x", eye[0], eye[1], eye[2], eye[3]);
+    }
     for (i = 0; i < n; i++)                        /* the model drawn: on the border now and then */
         bits[rnd_n(0x100)] = (uint8_t)rnd();
     if (rnd_n(2)) {                                /* or kept to a pixel off the corner */
@@ -6433,10 +6439,15 @@ static void setup_aircraft(void)
     SET_SLOT(g3d, 0x18, acft_g18);
 }
 
+static void op_kb_page(void);
 static void op_aircraft(void)
 {
     uint32_t i;
 
+    if (aircraft_pages && rnd_n(3) == 0) {         /* slice 34's other half: a kneeboard page from the menu */
+        op_kb_page();
+        return;
+    }
     acft_n = rnd_n(5);
     for (i = 0x5b0; i < 0x5d4; i++)
         global[i] = (uint8_t)rnd();
@@ -7595,6 +7606,40 @@ static void setup_kneeboard(void)
     ((s0)internal(0x207e2320, "main_kb_create@0"))();
 }
 
+/* The aircraft suite: Select Aircraft, and the kneeboard pages of commands 0x300..0x3ff (.text+0x18d0), which
+ * are slice 34's too. The kneeboard's stubs go first; the aircraft's replace the one they share (ACONTAIN +0x30). */
+static void setup_aircraft_suite(void)
+{
+    kneeboard_stubs();
+    setup_aircraft();
+    ((s0)internal(0x207e2320, "main_kb_create@0"))();
+    aircraft_pages = 1;
+}
+
+static void op_kb_page(void)
+{
+    uint32_t page = rnd_n(3);
+    uint8_t *r = kb_rec();
+
+    kb_pages = rnd_n(5);
+    kb_lines = rnd_n(6);
+    *(uint32_t *)(r + 0x10) = 0;
+    *(uint32_t *)(cur->image + 0x11eac + page * 0x2108) = rnd_n(4);
+    put("\n#command(%#x) pages=%u lines=%u", 0x300 + page, kb_pages, kb_lines);
+    ((s2)SVC(0x20))(0x300 + page, rnd());
+    put(" page=%u 129c=%u", IMG32(0x7fc8), *(uint32_t *)(global + 0x129c));
+}
+
+static uint32_t kb_coordinate(uint32_t lo, uint32_t hi)
+{
+    switch (rnd_n(4)) {
+    case 0: return lo - 1 + rnd_n(3);
+    case 1: return hi - 1 + rnd_n(3);
+    case 2: return lo + 1 + rnd_n(hi - lo - 1);
+    default: return rnd_n(0x3000);
+    }
+}
+
 static void op_kneeboard(void)
 {
     uint32_t which = rnd_n(9);
@@ -7614,8 +7659,12 @@ static void op_kneeboard(void)
     case 1: ((s2)internal(0x207e1fc0, "main_kb_listener@8"))(0x60, 0); break;
     case 2: ((s2)internal(0x207e1fc0, "main_kb_listener@8"))(0x70, 0); break;
     case 3: {
-        uint32_t x = rnd_n(2) ? 0x1f9c + rnd_n(3) + (rnd_n(2) ? 0xc8 : 0) - 1 : rnd_n(0x3000);
-        uint32_t y = rnd_n(2) ? 0x179c + rnd_n(3) + (rnd_n(2) ? 0xc8 : 0) - 1 : rnd_n(0x3000);
+        /* the close box's rectangle, x 0x1f9c..0x2064 and y 0x179c..0x1864, both exclusive: each
+         * coordinate at an edge, inside or anywhere, so one edge is met with the other inside */
+        uint32_t x = kb_coordinate(0x1f9c, 0x2064), y = kb_coordinate(0x179c, 0x1864);
+
+        if (rnd_n(2))                              /* the view active, not hidden: the test is reached */
+            *(uint32_t *)(r + 8) = 0x80000000u | (rnd_n(2) ? 0x5000000u : 0);
         *(uint32_t *)(r + 0x20) = x;
         *(uint32_t *)(r + 0x24) = y;
         *(uint32_t *)(r + 0x28) = 0;
@@ -7854,7 +7903,7 @@ static const struct suite suites[] = {
     { "radios", op_radios, report_radios, 12, setup_radios, 0x00 },
     { "weather", op_weather, report_weather, 8, setup_weather, 0x00 },
     { "kneeboard", op_kneeboard, report_kneeboard, 12, setup_kneeboard, 0x00 },
-    { "aircraft", op_aircraft, report_aircraft, 6, setup_aircraft, 0x00 },
+    { "aircraft", op_aircraft, report_aircraft, 6, setup_aircraft_suite, 0x00 },
     { "clockdlg", op_clockdlg, report_clockdlg, 8, setup_dialogs, 0x00 },
     { "engines", op_engines, report_engines, 8, setup_dialogs, 0x00 },
     { "limits", op_limits, report_limits, 8, setup_dialogs, 0x00 },

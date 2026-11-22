@@ -16,7 +16,7 @@ harness, `tools/difftest/maindiff.c`, with a suite per slice.
 | 6, the season, zone and clock | `+0x74` (assembly, `.text+0x18781`..`+0x189c3`) | `season` | verified: 20,000 scenarios, 0 differ; 23 of 24 breaks caught, 1 proven equivalent |
 | 7, the clock as digits | `+0xa4` (assembly, `.text+0x16ddf`..`+0x16e30`) | `clock` | verified: 20,000 scenarios, 0 differ; 6 of 6 breaks caught |
 | 8, the view cycler | `+0xc8` (assembly, `.text+0x18f0`..`+0x193a`) | `view` | verified: 20,000 scenarios, 0 differ; 10 of 10 breaks caught |
-| 9, the analysis menu greying | `+0x30`, `+0x34` (assembly, `.text+0x16920`, `+0x169a0`) | `menu` | verified: 20,000 scenarios, 0 differ; 6 of 6 breaks caught |
+| 9, the analysis menu greying | `+0x30`, `+0x34` (assembly, `.text+0x16920`, `+0x169a0`) | `menu` | verified: 20,000 scenarios, 0 differ; 5 of 6 breaks caught, `slot` crashes (re-run 2026-11-17; crashes count as misses) |
 | 10, an object slot release | `+0x8c` (assembly, `.text+0x16570`..`+0x165a2`) | `obj` | verified: 20,000 scenarios, 0 differ; 6 of 6 breaks caught |
 | 11, the latitude clamp | `+0x1c` (assembly, `.text+0xc520`..`+0xc552`) | `clamp` | verified: 20,000 scenarios, 0 differ; 5 of 6 breaks caught, 1 proven equivalent |
 | 12, the sun direction and intensity | `+0xa0` (assembly, `.text+0x830d`..`+0x95e9`, helper `+0x9097`) | `sun` | verified: 20,000 scenarios, 0 differ; 12 of 14 breaks caught, 2 proven equivalent |
@@ -32,22 +32,22 @@ harness, `tools/difftest/maindiff.c`, with a suite per slice.
 | 22, init, deinit and the frame callbacks | `+0x04`, `+0x08` (MSVC C, `.text+0x20`, `+0x70`), callbacks `.text+0x2e10`, `+0x7095`, `+0x85ea` (assembly) | `frame` | verified: 20,000 scenarios, 0 differ; 58 of 60 breaks caught, 2 proven equivalent |
 | 23, the timer tick | `+0x24` (MSVC C, `.text+0x16a60`) | `tick` | verified: 20,000 scenarios, 0 differ; 11 of 11 breaks caught |
 | 24, the frame | `+0x18` (MSVC C, `.text+0xc000`..`+0xc51d`) | `step` | verified: 20,000 scenarios, 0 differ; 39 of 40 breaks caught, 1 proven equivalent |
-| 25, the menu command dispatcher | `+0x20` (MSVC C, `.text+0xa090`, `+0xae50`) | `commands` | verified: 20,000 scenarios, 0 differ; 73 of 73 breaks caught |
-| 26, the first dialogs | commands `0x1203`, `0x1308`, `0x1309`, `0x1607` (MSVC C, `.text+0x8d0`, `+0x4f50`, `+0x2e30`, `+0xa0`, with their check callbacks) | `dialogs` | verified: 20,000 scenarios, 0 differ; 38 of 40 breaks caught, 2 proven equivalent |
-| 27, rewriting a situation file and the Flights dialogs | `+0x50` (assembly, `.text+0x13105`, `+0x13500`, `+0x13612`, `+0x13710`), `+0xac`, `+0xc4` and command `0x1106` (MSVC C, `.text+0xc560`..`+0xc870`, `+0xd180`..`+0xd790`, `+0xea80`..`+0xeb30`) | `flights` | verified: 20,000 scenarios, 0 differ; 96 of 98 breaks caught, 2 proven equivalent |
-| 28, the routines MAIN's G3D programs call | 15 native routines (assembly, `.text+0x73d7`..`+0xa04a`), 53 pointers in `.data` | `natives` | verified: 20,000 scenarios, 0 differ; 95 of 98 breaks caught, 3 proven equivalent |
+| 25, the menu command dispatcher | `+0x20` (MSVC C, `.text+0xa090`, `+0xae50`) | `commands` | verified: 20,000 scenarios, 0 differ; 64 of 73 breaks caught, 9 crash (re-run 2026-11-17; crashes count as misses) |
+| 26, the first dialogs | commands `0x1203`, `0x1308`, `0x1309`, `0x1607` (MSVC C, `.text+0x8d0`, `+0x4f50`, `+0x2e30`, `+0xa0`, with their check callbacks) | `dialogs` | verified: 20,000 scenarios, 0 differ; 37 of 40 breaks caught, 2 proven equivalent, `1607-child` crashes (re-run 2026-11-17; crashes count as misses) |
+| 27, rewriting a situation file and the Flights dialogs | `+0x50` (assembly, `.text+0x13105`, `+0x13500`, `+0x13612`, `+0x13710`), `+0xac`, `+0xc4` and command `0x1106` (MSVC C, `.text+0xc560`..`+0xc870`, `+0xd180`..`+0xd790`, `+0xea80`..`+0xeb30`) | `flights` | verified: 20,000 scenarios, 0 differ; 95 of 99 breaks caught, 2 proven equivalent; `open-id`, `open-answer` crash (re-run 2026-11-18; crashes count as misses) |
+| 28, the routines MAIN's G3D programs call | 15 native routines (assembly, `.text+0x73d7`..`+0xa04a`), 53 pointers in `.data` | `natives` | verified: 20,000 scenarios, 0 differ; 94 of 98 breaks caught, 4 proven equivalent (re-run 2026-11-18; crashes count as misses) |
 | 29, what `+0x28` sets going | the menu state and listener, the clock (MSVC C and assembly, `.text+0xae40`, `+0xae70`, `+0x11330`) | `start` | verified: 20,000 scenarios, 0 differ; 93 of 93 breaks caught |
-| 30, the radios | CHAIN lists 3 and 5 (assembly, `.text+0x1816e`..`+0x19eb2`) | `radios` | verified: 20,000 scenarios, 0 differ; 115 of 120 breaks caught, 5 proven equivalent |
+| 30, the radios | CHAIN lists 3 and 5 (assembly, `.text+0x1816e`..`+0x19eb2`) | `radios` | verified: 20,000 scenarios, 0 differ; 114 of 120 breaks caught, 6 proven equivalent (re-run 2026-11-18) |
 | 31, the weather's layers | `.text+0x1a5f0`, `+0x1a4b0`, `+0x1b260`, `+0x1cf80` (MSVC C) | `weather` | verified: 20,000 scenarios, 0 differ; 50 of 50 breaks caught |
-| 32, the kneeboard | `.text+0xa80`..`+0x1940` (MSVC C), bitmap 101 | `kneeboard` | verified: 20,000 scenarios, 0 differ; 61 of 61 breaks caught |
+| 32, the kneeboard | `.text+0xa80`..`+0x1940` (MSVC C), bitmap 101 | `kneeboard` | verified: 20,000 scenarios, 0 differ; 61 of 61 breaks caught (re-run 2026-11-18, after the close-box clicks were aimed at its edges; crashes count as misses) |
 | 33, start and shutdown | `+0x28`, `+0x2c` and the welcome dialog (MSVC C, `.text+0x165b0`, `+0x16880`, `+0x14ab0`), command `0x1109` | `session` | verified: 20,000 scenarios, 0 differ; 53 of 53 breaks caught |
-| 34, Select Aircraft and the kneeboard pages | command `0x1201`, `0x300`..`0x3ff` (MSVC C, `.text+0x110`..`+0x690`, `+0x18d0`) | `aircraft` | verified: 20,000 scenarios, 0 differ; 38 of 39 breaks caught, 1 proven equivalent |
+| 34, Select Aircraft and the kneeboard pages | command `0x1201`, `0x300`..`0x3ff` (MSVC C, `.text+0x110`..`+0x690`, `+0x18d0`) | `aircraft` | verified: 20,000 scenarios, 0 differ; 37 of 39 breaks caught, 2 proven equivalent (re-run 2026-11-18, after the harness compared the eye block and drove the kneeboard pages) |
 | 35, Time and Season | command `0x1301` (MSVC C, `.text+0x1b20`..) | `clockdlg` | verified: 20,000 scenarios, 0 differ; 84 of 85 breaks caught, 1 proven equivalent |
 | 36, the aircraft's engines | command `0x1205`, dialog `0x1206` (MSVC C, `.text+0x3bf0`..`+0x4f40`) | `engines` | verified: 20,000 scenarios, 0 differ; 66 of 78 breaks caught, 12 proven equivalent |
 | 37, the aircraft's limits | command `0x1204` (MSVC C, `.text+0x2ee0`..`+0x3b60`) | `limits` | verified: 20,000 scenarios, 0 differ; 55 of 63 breaks caught, 8 proven equivalent |
 | 38, the weather areas | command `0x1307`, dialogs `0x1303`, `0x13050001` (MSVC C, `.text+0x5010`..`+0x6441`) | `areas` | verified: 20,000 scenarios, 0 differ; 62 of 67 breaks caught, 5 proven equivalent |
 | 39, General Preferences | command `0x1409`, dialogs `0x14090001`, `0x14090002` (MSVC C, `.text+0x14ce0`..`+0x15c7f`) | `prefdlg` | verified: 20,000 scenarios, 0 differ; 68 of 69 breaks caught, 1 proven equivalent |
-| 40, View Options | command `0x1502`, dialog `0x1508` (MSVC C, `.text+0x16e40`..`+0x17c97`) | `viewdlg` | verified: 20,000 scenarios, 0 differ; 66 of 69 breaks caught, 3 proven equivalent |
+| 40, View Options | command `0x1502`, dialog `0x1508` (MSVC C, `.text+0x16e40`..`+0x17c97`) | `viewdlg` | verified: 20,000 scenarios, 0 differ; 65 of 69 breaks caught, 3 proven equivalent, `p-fn` crashes (re-run 2026-11-17; crashes count as misses) |
 | 41, the logbook | command `0x1407`, dialogs `0x14070001`, `0x14070002`, and `+0x90` (`.text+0xf2f0`..`+0x11cc9`) | `logbook` | verified: 20,000 scenarios, 0 differ; 105 of 111 breaks caught, 6 proven equivalent |
 | 42, the weather dialogs | command `0x1306`, dialogs `0x1302`, `0x13040001` (MSVC C, `.text+0x19fb0`..) | `wxdlg` | verified: 20,000 scenarios, 0 differ; 94 of 99 breaks caught, 5 proven equivalent |
 | 43, the radios dialog | command `0x1202` (MSVC C, `.text+0x13870`..`+0x14aa8`; `+0x17ca0`; assembly `+0x19dbc`) | `radiodlg` | verified: 20,000 scenarios, 0 differ; 118 of 118 breaks caught |
@@ -59,12 +59,12 @@ or a routine one of MAIN's own tables reaches (the situation reader's six at
 `.data+0x4672`.., the radio list's six at `.data+0x749e`..). MAIN is in `MODULES`, and
 the exports named `main_*` stay for the harness for as long as `maindiff` uses them.
 
-**In the game** (`make main-smoke`, which restores the previous DLL byte for
+**In the game** (`tools/ofs main-smoke`, which restores the previous DLL byte for
 byte): 27/27 modules and 95 gauges, and with a flight on the command line
 (`/STN:Situatio\STGEORGE.STN`) the sky, cloud layers, panel and menu bar draw as
 they do on retail. Without one it stops at the welcome dialog, drawn correctly.
 
-`make main-dialogs` opens all sixteen menu commands in the running game, on retail
+`tools/ofs main-dialogs` opens all sixteen menu commands in the running game, on retail
 and on ours, first pressing Cancel and then OK. Since 2026-11-02 each side also has its own
 English DLLs (retail's or ours: World, Alerts, Help, Sim, Views), and after the sixteen it
 opens About's Credits, sets "Detect crash and show graph", dives into the ground for the
@@ -94,9 +94,13 @@ looked at; nothing has been flown by hand.
   BOOSTER, WINMSG, REALITY and MPCHAT), Linkage at `+0xc0` (51 slots, 47
   routines). 635 relocations land in it: 455 pointers into `.data` itself
   and 180 code pointers (92 distinct targets) outside the Linkage.
-  `tools/gen_main_data.py` writes the image with the self-pointers and the
-  Linkage zeroed, and a table for `main.c` to install the self-pointers;
-  the other code pointers keep retail's values, as G3D's do. Which of those
+  The image is typed C (`src/main/main_image.inc`, Story 1.4 slice 15) with
+  the self-pointers and the Linkage zeroed, and `src/main/main_pointers.inc`
+  lists them for `main.c` to install (and retail's 51 Linkage words); the
+  other code pointers keep retail's values, as G3D's do. Retail's season and
+  daylight tables are typed in `main_situation.inc`; the rest of retail's
+  bytes up to `.data` (MAIN-6/MAIN-18 read through them) stay in
+  `main_text_tail.inc`, guarded by the manifest's `tail=` field. Which of those
   tables only MAIN calls through, and which it hands to the host (menus,
   dialogs, commands), is for the slices that reach them to settle.
 - `.rsrc` 0x3664 bytes: the kneeboard's bitmap 101 (by `LoadImageA`), which
@@ -199,13 +203,13 @@ ended, none) and reading them in chunks; the finder runs over generated
 situation files with both header sizes, the terminator or none, lengths
 below the header's, past the end of the file, and huge.
 
-`make maindiff-run SUITE=records`: 20,000 scenarios (about 15 minutes, most
+`tools/ofs maindiff-run SUITE=records`: 20,000 scenarios (about 15 minutes, most
 of it the hangs' 300 ms), 0 differences, with 88,508 saves writing 177,262
 records, 70,872 records read in 285,113 chunks, and 134,010 finds (56,807
 found). 3,996 scenarios end on an allocation the host would refuse (a huge
 record length) and 1,358 on the spin, alike on both sides.
 
-`make main-breaks SUITE=records`: 40 breaks, 38 caught. The two
+`tools/ofs main-breaks SUITE=records`: 40 breaks, 38 caught. The two
 equivalences: `+0x60`'s file check (what is owed, `+0x9760`, is set non-zero
 only by `+0x5c`, which needs a file, and the save zeroes it before it clears
 the file), and its clamp taken as `<=` (at `n` equal to what is owed both
@@ -295,8 +299,8 @@ bytes, which the slice confirms it reads only the low word of.
 
 ### Verifying the reader and writer
 
-`make maindiff-run SUITE=situations` runs 20,000 scenarios and reports 0
-differences; `make main-breaks SUITE=situations` applies 69 deliberate breaks,
+`tools/ofs maindiff-run SUITE=situations` runs 20,000 scenarios and reports 0
+differences; `tools/ofs main-breaks SUITE=situations` applies 69 deliberate breaks,
 63 caught and 6 proven equivalent (none missed). The equivalences are all
 "retail's table never reaches this": no size code outside `0x80`..`0x83`/`0x20`
 (`field-low`), no tag `1000` (`write-hdr`), no entry of kind 5 (`write-kind5`)
@@ -364,7 +368,7 @@ Retail behaviour worth knowing, reproduced:
 
 ### Verifying the range and bearing
 
-`make maindiff-run SUITE=nav`: 20,000 scenarios, 0 differences, over random
+`tools/ofs maindiff-run SUITE=nav`: 20,000 scenarios, 0 differences, over random
 position pairs (the same point now and then, the adventure sentinel in the
 field now and then) with the three UTIL geometry services as **logging
 models**. UTIL's own geometry is verified in UTIL; the models return a value
@@ -377,7 +381,7 @@ the three) is entered through an assembly trampoline that saves and restores
 `ecx` and `edx`, the harness rule that a stub must leave the registers the
 real callee leaves (`maindiff.c`).
 
-`make main-breaks SUITE=nav`: 14 breaks, 13 caught, 1 proven equivalent
+`tools/ofs main-breaks SUITE=nav`: 14 breaks, 13 caught, 1 proven equivalent
 (`y-neg`, above).
 
 ## Slice 4: the nav read-outs
@@ -394,13 +398,13 @@ table).
 
 ### Verifying the read-outs
 
-`make maindiff-run SUITE=navio`: 20,000 scenarios, 0 differences. Each op seeds
+`tools/ofs maindiff-run SUITE=navio`: 20,000 scenarios, 0 differences. Each op seeds
 the six `.data` words afresh and calls one service with a `which` spanning the
 real cases and the edges on either side, so a wrong offset or case shows at
 once. MULTIP's two accessors are **logging models** (MULTIP is verified
 elsewhere): each fills the word it is handed and returns a status that varies
 with what was there, so both the taken and the failed path of `+0x80` are
-exercised. `make main-breaks SUITE=navio`: 12 breaks, all caught.
+exercised. `tools/ofs main-breaks SUITE=navio`: 12 breaks, all caught.
 
 ## Slice 5: the station descriptor
 
@@ -421,13 +425,13 @@ Two retail details, reproduced:
 
 ### Verifying the station descriptor
 
-`make maindiff-run SUITE=navdesc`: 20,000 scenarios, 0 differences. FE `+0x2c`
+`tools/ofs maindiff-run SUITE=navdesc`: 20,000 scenarios, 0 differences. FE `+0x2c`
 and UTIL `+0x88` are **logging models** (both verified in their own modules):
 FE `+0x2c` fills the buffer deterministically and fails one lookup in five;
 UTIL `+0x88` writes exactly the bytes `+0x7c` copies out and logs a hash of
 them, not the per-side `.data` address it was handed. The output lands in the
 harness's fixture memory so the memmove is over memory both sides share.
-`make main-breaks SUITE=navdesc`: 9 breaks, all caught.
+`tools/ofs main-breaks SUITE=navdesc`: 9 breaks, all caught.
 
 ## Slice 6: the season, the zone and the clock
 
@@ -459,7 +463,7 @@ Retail details, reproduced:
 
 ### Verifying the season, zone and clock
 
-`make maindiff-run SUITE=season`: 20,000 scenarios, 0 differences. The suite
+`tools/ofs maindiff-run SUITE=season`: 20,000 scenarios, 0 differences. The suite
 drives `+0x74` directly through the export `main_season`, past the seam the
 situations suite still uses, over random position, clock and day inputs. FE
 `+0x54` (which sets the enumeration going) and FE `+0x20` (which hands back a
@@ -468,7 +472,7 @@ their records in shared fixture memory so a record pointer is the same on both
 sides. The harness models the **host's integer-divide repair** (`repair_divide`
 in `maindiff.c`): retail's `div` into overflow is caught, saturated to all ones
 and stepped over, exactly as the host's `__try` filter does for the modules it
-calls (docs/modules/host.md, window.md). `make main-breaks SUITE=season`: 24
+calls (docs/modules/host.md, window.md). `tools/ofs main-breaks SUITE=season`: 24
 breaks, 23 caught, 1 proven equivalent (`dst-bound`, above).
 
 ## Slice 7: the clock as digits
@@ -483,9 +487,9 @@ transliteration reproduces with plain `/` and `%`.
 
 ### Verifying the clock
 
-`make maindiff-run SUITE=clock`: 20,000 scenarios, 0 differences, driving
+`tools/ofs maindiff-run SUITE=clock`: 20,000 scenarios, 0 differences, driving
 `+0xa4` directly through the export `main_clock` over clock bytes that are
-usually in range and now and then past it. `make main-breaks SUITE=clock`:
+usually in range and now and then past it. `tools/ofs main-breaks SUITE=clock`:
 6 breaks, all caught.
 
 ## Slice 8: the view cycler
@@ -500,11 +504,11 @@ back to -1. It posts the result to the host: a real index as itself plus
 
 ### Verifying the view cycler
 
-`make maindiff-run SUITE=view`: 20,000 scenarios, 0 differences. Each op points
+`tools/ofs maindiff-run SUITE=view`: 20,000 scenarios, 0 differences. Each op points
 `.data+0x7fc4` at a view record in shared fixture memory (its `+8` field, and
 so the active bit, set at random), seeds the index and a small count so the
 wrap is reached often, and calls `+0xc8` through its Linkage slot; the posted
-command is the host stub's log. `make main-breaks SUITE=view`: 10 breaks, all
+command is the host stub's log. `tools/ofs main-breaks SUITE=view`: 10 breaks, all
 caught.
 
 ## Slice 9: the analysis menu greying
@@ -517,9 +521,10 @@ transliteration loops, the same six calls).
 
 ### Verifying the menu greying
 
-`make maindiff-run SUITE=menu`: 20,000 scenarios, 0 differences -- the six host
+`tools/ofs maindiff-run SUITE=menu`: 20,000 scenarios, 0 differences -- the six host
 calls of whichever of the two is picked, logged by the host stub, match.
-`make main-breaks SUITE=menu`: 6 breaks, all caught.
+`tools/ofs main-breaks SUITE=menu`: 6 breaks, 5 caught; `slot` crashes (ours calls an unstubbed host
++0x258), which counts as a miss.
 
 ## Slice 10: an object slot release
 
@@ -533,9 +538,9 @@ the same table and `+0x88`, slice 16, steps it.)
 
 ### Verifying the object slot release
 
-`make maindiff-run SUITE=obj`: 20,000 scenarios, 0 differences. Each op seeds a
+`tools/ofs maindiff-run SUITE=obj`: 20,000 scenarios, 0 differences. Each op seeds a
 small handle (so the entry stays inside the compared image) and the entry's
-first dword, set or clear, and checks the entry and the handle after. `make
+first dword, set or clear, and checks the entry and the handle after. `tools/ofs
 main-breaks SUITE=obj`: 6 breaks, all caught.
 
 ## Slice 11: the latitude clamp
@@ -546,8 +551,8 @@ it clamps the latitude dword at GLOBAL +0x564 into `[0xff683bb7, 0x97c449]`
 
 ### Verifying the latitude clamp
 
-`make maindiff-run SUITE=clamp`: 20,000 scenarios, 0 differences, over latitudes
-clustered on the two bounds and their neighbours. `make main-breaks SUITE=clamp`:
+`tools/ofs maindiff-run SUITE=clamp`: 20,000 scenarios, 0 differences, over latitudes
+clustered on the two bounds and their neighbours. `tools/ofs main-breaks SUITE=clamp`:
 6 breaks, 5 caught, 1 proven equivalent (`max-op`: `>` versus `>=` at exactly
 the maximum both leave the maximum).
 
@@ -582,9 +587,9 @@ point (`q15`: `imul`, double, keep the high word).
 
 ### Verifying the sun direction
 
-`make maindiff-run SUITE=sun`: 20,000 scenarios, 0 differences, over a random
+`tools/ofs maindiff-run SUITE=sun`: 20,000 scenarios, 0 differences, over a random
 time, day, latitude (now and then large enough that the latitude `idiv`
-overflows) and gate (straddling `0x1000`). `make main-breaks SUITE=sun`: 14
+overflows) and gate (straddling `0x1000`). `tools/ofs main-breaks SUITE=sun`: 14
 breaks, 12 caught, 2 proven equivalent -- `light-zero-op` (`>` versus `>=`
 where the subtraction already left zero) and `idiv-sat` (both `idiv` sites
 discard the quotient's low bits, so the low-order saturation value cannot be
@@ -612,10 +617,10 @@ indistinguishable (the `fast-eq` break).
 
 ### Verifying the allocation
 
-`make maindiff-run SUITE=objalloc`: 20,000 scenarios, 0 differences, over a
+`tools/ofs maindiff-run SUITE=objalloc`: 20,000 scenarios, 0 differences, over a
 random template, kind (including invalid), and handle (fresh, already
 allocated with any nonzero subset of the flag bits over an in-range index, or
-random), with entries now and then pre-marked to move the free slot. `make
+random), with entries now and then pre-marked to move the free slot. `tools/ofs
 main-breaks SUITE=objalloc`: 15 breaks, 14 caught, 1 proven equivalent
 (`fast-eq`).
 
@@ -639,8 +644,8 @@ boxes (the `done-eq` break).
 
 ### Verifying the reticle
 
-`make maindiff-run SUITE=eye`: 20,000 scenarios, 0 differences, over a random
-box and style (now and then done or guarded, so the early return shows). `make
+`tools/ofs maindiff-run SUITE=eye`: 20,000 scenarios, 0 differences, over a random
+box and style (now and then done or guarded, so the early return shows). `tools/ofs
 main-breaks SUITE=eye`: 13 breaks, 12 caught, 1 proven equivalent (`done-eq`).
 
 ## Slice 15: the altitude band and its 3D submission
@@ -673,10 +678,10 @@ three times.
 
 ### Verifying the band
 
-`make maindiff-run SUITE=band`: 20,000 scenarios, 0 differences, over random
+`tools/ofs maindiff-run SUITE=band`: 20,000 scenarios, 0 differences, over random
 centre/width pairs, flags and gate, with the altitude now and then snapped onto
 a computed band edge (and its neighbours) so the comparison boundaries are
-exercised exactly. `make main-breaks SUITE=band`: 33 breaks, 33 caught.
+exercised exactly. `tools/ofs main-breaks SUITE=band`: 33 breaks, 33 caught.
 
 ## Slice 16: the smoke trails
 
@@ -726,7 +731,7 @@ Retail details, reproduced:
 
 ### Verifying the step
 
-`make maindiff-run SUITE=objstep`: 20,000 scenarios, 0 differences (about 4
+`tools/ofs maindiff-run SUITE=objstep`: 20,000 scenarios, 0 differences (about 4
 minutes), with 2,296,860 active entries stepped and 18,540,797 submissions, 574,555
 of them on a wrap edge and 190,796 with a side word wrapped to 0. Each op
 re-seeds the twenty entries now and then (inactive, active with 1 or a
@@ -738,7 +743,7 @@ every step it aims entries' longitude differences onto the four wrap edges
 G3D `+0x38` is a **logging model** that records both pointers, the eight
 words laid out at the buffer's `+0x42` and a digest of the record (G3D is
 verified in its own harness); the image, arena and GLOBAL are compared after
-every op. `make main-breaks SUITE=objstep`: 34 breaks, 32
+every op. `tools/ofs main-breaks SUITE=objstep`: 34 breaks, 32
 caught, 2 proven equivalent: `s-high` (only the running width's low word is
 ever stored, and the low word of a sum depends only on the low words) and
 `width-else` (the branch that sets the width from `+8` also makes the side word
@@ -761,9 +766,9 @@ host's files, its loads and its walk-off guard) in which a third of the ops
 are `+0xb0`, with string `0x2201` absent, `"Temporary Flight"`, short, or
 long enough to fill the buffer (the path join then refuses it). What it saves,
 `FLIGHTS\` and the title as the save copied it to `.data+0x441f`, joins the
-files the loads pick from. `make maindiff-run SUITE=quicksave`: 20,000 scenarios, 0 differences (about 20 minutes, most of it slice 2's hangs), with 80,599 quick
+files the loads pick from. `tools/ofs maindiff-run SUITE=quicksave`: 20,000 scenarios, 0 differences (about 20 minutes, most of it slice 2's hangs), with 80,599 quick
 saves (19,853 with the string absent; 62,659 saved, 51,916 of them found and
-loaded back). `make main-breaks SUITE=quicksave`: 7 breaks, 6 caught, 1 proven
+loaded back). `tools/ofs main-breaks SUITE=quicksave`: 7 breaks, 6 caught, 1 proven
 equivalent (`zero-rest`: the default carries its own terminator and a loaded
 string ends in one, and nothing reads past it).
 
@@ -811,9 +816,9 @@ changing CFG values (huge, negative, empty, digits with a tail, text) or
 GLOBAL fields. Before every load it steers the performance mode onto one whose
 preset block lies in the image and holds no relocated pointer (one would reach
 GLOBAL as each side's own address): mostly 0 to 11, sometimes past the table
-or negative. `make maindiff-run SUITE=prefs`: 20,000 scenarios, 0 differences (about 5 minutes): 99,089 loads, 65,813 saves, 66,118 defaults (33,092 with a mode
+or negative. `tools/ofs maindiff-run SUITE=prefs`: 20,000 scenarios, 0 differences (about 5 minutes): 99,089 loads, 65,813 saves, 66,118 defaults (33,092 with a mode
 above 4), 93,024 presets applied (27,655 past the table, 4,198 negative).
-`make main-breaks SUITE=prefs`: 28 breaks, 26 caught, 2 proven equivalent
+`tools/ofs main-breaks SUITE=prefs`: 28 breaks, 26 caught, 2 proven equivalent
 (`word-mask` and `byte-mask`: every caller passes a field already read at its
 width, so the helpers' masks, which clear a register's stale half in retail,
 have nothing to clear in C).
@@ -874,10 +879,10 @@ now and then on or beside a band edge, or 1500, `0x34` or 6 from one), the band
 edges as slice 15 leaves them or not, the layer records with the aircraft
 usually near their origin (now and then far, so the divides saturate), the
 view kind behind GLOBAL `+0x1198`, and calls `+0x98` with `which` 0 to 5.
-`make maindiff-run SUITE=clouds`: 20,000 scenarios, 0 differences
+`tools/ofs maindiff-run SUITE=clouds`: 20,000 scenarios, 0 differences
 (about 4 minutes): 153,366 calls with `which` 0 (38,572 skipped by
 `+0xdce`), 28,021 inside a layer, 122,332 texels looked up, 17,684 divides
-saturated. `make main-breaks SUITE=clouds`: 53 breaks, 51 caught, 2 proven
+saturated. `tools/ofs main-breaks SUITE=clouds`: 53 breaks, 51 caught, 2 proven
 equivalent: `9d57-sat` (only the quotients' bits 8 to 31 are used, and the two
 saturations agree there) and `9d57-sat-sign` (a 64-bit dividend is negative
 exactly when its high dword is). The breaks found seven gaps, all boundaries,
@@ -931,8 +936,8 @@ The `cloudtex` suite has `TEXTURE\clouds` there (whole, short or empty) or
 not, `cloud1`/`cloud2` there or not and now and then read-only. Each op seeds
 the coverages across the curve's turns, the flags and the last-made ids. The
 texel map is in fixtures, and its digest goes in the transcript after every op.
-`make maindiff-run SUITE=cloudtex`: 20,000 scenarios, 0 differences (about 5 minutes): 149,622 calls over all three curves, 27,486 ops whose write's open was
-refused (edi left on the map). `make main-breaks SUITE=cloudtex`: 34 breaks,
+`tools/ofs maindiff-run SUITE=cloudtex`: 20,000 scenarios, 0 differences (about 5 minutes): 149,622 calls over all three curves, 27,486 ops whose write's open was
+refused (edi left on the map). `tools/ofs main-breaks SUITE=cloudtex`: 34 breaks,
 33 caught, 1 proven equivalent (`edi-early`: the early return needs GLOBAL
 `+0xcb6` clear, read from GLOBAL each call, so every earlier call in the op
 returned early too and the caller's edi is still GLOBAL). The breaks found one
@@ -986,9 +991,9 @@ per-op base (often near the slew's `0x40000`), plus the low bits of the eye's
 position, so where the eye was stepped shows in what comes back. It also logs
 GLOBAL `+0xe88` during the call. The suite keeps the aircraft's latitude
 (GLOBAL `+0x564`) inside slice 11's clamp, as the game does, because UTIL
-`+0x44` indexes its latitude table by it. `make maindiff-run SUITE=spot`:
+`+0x44` indexes its latitude table by it. `tools/ofs maindiff-run SUITE=spot`:
 20,000 scenarios, 0 differences (about 4 minutes), with 3,532,883 G3D measures, 122,615 eyes placed afresh and 41,839
-transitions slewed. `make main-breaks SUITE=spot`: 50 breaks, 47 caught, 3
+transitions slewed. `tools/ofs main-breaks SUITE=spot`: 50 breaks, 47 caught, 3
 proven equivalent: `target-sar` (the count is used only as its low word,
 product bits 8 to 23, and `sar` and `shr` differ only in the top byte),
 `target-1e` (the term is shifted up 16 at once, dropping the bits where sign-
@@ -1054,11 +1059,11 @@ them, and now and then deinit. UTIL's `+0x2c`, `+0x44` and `+0x48` are retail's
 `+0x6c` is the harness's, so each side draws the same numbers. FE's grid
 conversions and HG2D `+0x7c` are models. Real latitudes never give UTIL `+0x48`
 a size of 0, so a wrapper answers 0 now and then to drive the grid's
-memory-operand `idiv` into the repair. `make maindiff-run SUITE=frame`:
+memory-operand `idiv` into the repair. `tools/ofs maindiff-run SUITE=frame`:
 20,000 scenarios, 0 differences (about 4 minutes):
 20,000 inits and 12,320 deinits, 55,156 list-1 dispatches (16,700 scattering the
 puffs), 54,876 list-3 (45,387 re-centring them), 9,096 memory-operand divides
-repaired. `make main-breaks SUITE=frame`: 60 breaks, 58 caught, 2 proven
+repaired. `tools/ofs main-breaks SUITE=frame`: 60 breaks, 58 caught, 2 proven
 equivalent: `wind-none` (with no wind band the speed is 0, so the step is 0
 whatever the angle, and the angle's sine and cosine at `.data+0x201d`/`+0x201f`
 are overwritten by slice 12's sun later in the same callback) and
@@ -1081,9 +1086,9 @@ gains `0xe38` a tick and carries into `+0x260`. Every sixth tick rotates
 (`InterlockedExchange`). The countdowns are `.data+0x6dc0`, `+0x6dc4` and
 `+0x6dc8`; one seeded at 0 wraps and takes 2^32 ticks, as retail's would.
 
-`make maindiff-run SUITE=tick`: 20,000 scenarios, 0 differences (under a minute): 1,035,484 ticks,
+`tools/ofs maindiff-run SUITE=tick`: 20,000 scenarios, 0 differences (under a minute): 1,035,484 ticks,
 137,821 carries, the every-third, -sixth and -eighteenth paths 180,018,
-101,900 and 54,097 times. `make main-breaks SUITE=tick`: 11 breaks, all
+101,900 and 54,097 times. `tools/ofs main-breaks SUITE=tick`: 11 breaks, all
 caught.
 
 ## Slice 24: the frame
@@ -1111,13 +1116,13 @@ caught.
 
 Every module call is a fire-and-forget step. maindiff now gives each module id
 it has no model for a table of its own, so a log can say which module was
-called. `make maindiff-run SUITE=step`: 20,000 scenarios, 0 differences (about 3 minutes): 230,264 frames,
+called. `tools/ofs maindiff-run SUITE=step`: 20,000 scenarios, 0 differences (about 3 minutes): 230,264 frames,
 115,019 with events, the three modes about evenly, 69,609 slew catch-ups due,
 166,411 with ticks to drain, 134,438 with a frame time of a second or more.
 Each module step's stub logs a digest of GLOBAL as the module would find it.
 The breaks found that this was needed: the lamp copied into GLOBAL `+0x282`
 is cleared later in the same frame, so only the steps called in between can
-see it. `make main-breaks SUITE=step`: 40 breaks, 39 caught, 1 proven
+see it. `tools/ofs main-breaks SUITE=step`: 40 breaks, 39 caught, 1 proven
 equivalent (`frame-274`: below a second the fraction is at most `0x7fde`, so
 sign- and zero-extension agree).
 
@@ -1131,10 +1136,11 @@ the host, toggle GLOBAL fields, drive WINDOW and PANELS by command ranges
 through `cmd_pending`, which faults on purpose so that a reached one cannot pass
 for done; the suite steers around them.
 
-`make maindiff-run SUITE=commands`: 20,000 scenarios, 0 differences (about 4
+`tools/ofs maindiff-run SUITE=commands`: 20,000 scenarios, 0 differences (about 4
 minutes): 330,481 commands, 198,576 from the table, 63,905 others and edges,
-33,193 windows, 32,741 panels, 2,066 reloads. `make main-breaks SUITE=commands`:
-73 breaks, all caught.
+33,193 windows, 32,741 panels, 2,066 reloads. `tools/ofs main-breaks SUITE=commands`:
+73 breaks, 64 caught; nine crash on modules the suite does not stub (`case-1105`, `-1181`, `-1303`,
+`-1304`, `-1305`, `-130a`, `-1405`, `-140a`, `-2000d`), which counts as a miss.
 
 ## Slice 26: the first dialogs
 
@@ -1158,9 +1164,9 @@ records, sets the answer first (a real dialog knows which button was pressed
 before it validates), calls the check and logs the statuses. Early versions of
 the stand-in set the answer afterwards, typed text that never parsed as a
 frequency and did not log the statuses. Each of those hid a branch, and the
-breaks found all three. `make maindiff-run SUITE=dialogs`: 20,000 scenarios, 0
+breaks found all three. `tools/ofs maindiff-run SUITE=dialogs`: 20,000 scenarios, 0
 differences (about 3 minutes): 271,777 dialogs opened, 19,514 that would not open,
-113,830 OK, 11,897 refused by a check. `make main-breaks SUITE=dialogs`: 40
+113,830 OK, 11,897 refused by a check. `tools/ofs main-breaks SUITE=dialogs`: 40
 breaks, 38 caught, 2 proven equivalent (`1305-table`, `1304-table`: at mode 1 a plain
 width entry neither stores nor objects, and the entry left out is one).
 
@@ -1203,12 +1209,12 @@ The harness gained the host's split, temporary name, delete, rename, path length
 name check, working directory, free space, `strcmp` and `_strcmpi`, a model of
 UTIL `+0x98` over its files, and stand-ins for dialogs `0x1102`, `0x1107` and
 `0x1104`. UTIL's alert takes a string or a string's id, and the end tag's address
-is not compared because retail's word lies in its `.text`. `make maindiff-run
+is not compared because retail's word lies in its `.text`. `tools/ofs maindiff-run
 SUITE=flights`: 20,000 scenarios, 0 differences (about 5 minutes): 52,482 records
 set, 39,430 Open Flights (6,520 lists empty), 13,153 challenges, 26,426 Save
 Flights; 25,548 deletes and 25,684 edits pressed, 3,430 saves refused by the check.
-`make
-main-breaks SUITE=flights`: 99 breaks, 97 caught, 2 proven equivalent (`hdr-end`:
+`tools/ofs
+main-breaks SUITE=flights`: 99 breaks, 95 caught (`open-id`, `open-answer` crash), 2 proven equivalent (`hdr-end`:
 the loop leaves on the end tag without reading the length; `blank-size`: at size
 == length the loop writes the one terminator the early path does).
 
@@ -1235,7 +1241,7 @@ answers a wild read there with retail's address.
 
 ### Verifying the natives
 
-`make maindiff-run SUITE=natives`. No other suite could see this, because they
+`tools/ofs maindiff-run SUITE=natives`. No other suite could see this, because they
 stub G3D. Each call reads its address out of the image, enters it with random
 registers (`edi` on GLOBAL, as a rule) and compares all seven on the way out, the
 quad buffer G3D `+0x40` hands back (at every `+0x1c`) and the state. Stubs of

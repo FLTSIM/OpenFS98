@@ -2,10 +2,10 @@
 
 DEMO (module id 7) records and plays FS98's flight videos (`.VID`), runs
 instant replay, and supplies the callbacks for the four dialogs around them.
-It is reimplemented and verified: `make demodiff-run` drives retail and
+It is reimplemented and verified: `tools/ofs demodiff-run` drives retail and
 OpenFS98 through 20,000 whole-module scenarios over the CD's six videos and
 synthetic ones with zero differences, after all its deliberate breaks were caught (one is a proven
-equivalence). It runs in-game with `make smoke` passing.
+equivalence). It runs in-game with `tools/ofs smoke` passing.
 
 ## Shape and linkage
 
@@ -15,7 +15,8 @@ call. MSVC C runs from `+0x35e0`: the dialogs' callbacks, the catalogue
 hooks and the sound cue. There is one 0x1165-byte `.data` image (0x1000 on
 disk): `ImportTable` at `+0`, `Linkage` at `+0x50`, then all of the state.
 Its 98 relocations are code pointers and a few pointers into `.data`;
-`tools/gen_demo_data.py` zeroes them and `demo.c` installs its own.
+`demo.c` leaves them zero in its typed `struct demo_image` and installs its own;
+`tools/check_data_image.py` proves the image equals retail's byte for byte.
 
 The assembly passes values in registers and returns status in the carry
 flag. It is transliterated with six register variables and a carry, as FE's

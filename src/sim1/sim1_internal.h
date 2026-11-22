@@ -7,7 +7,7 @@
  *
  * Retail's hand-written assembly passes values in registers and leaves results in them; the C
  * takes them as arguments and returns them. Which registers a retail caller reads after a
- * routine is listed in sim1_tables.inc (tools/gen_sim1_tables.py), and is what the harness
+ * routine is listed in sim1_tables.inc (committed; its generator is retired), and is what the harness
  * compares. */
 #ifndef FS98_SIM1_INTERNAL_H
 #define FS98_SIM1_INTERNAL_H

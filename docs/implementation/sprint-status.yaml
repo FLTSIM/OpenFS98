@@ -1,0 +1,147 @@
+# STATUS DEFINITIONS:
+# ==================
+# Epic Status:
+#   - backlog: Epic not yet started
+#   - in-progress: Epic actively being worked on
+#   - done: All stories in epic completed
+
+# Story Status:
+#   - backlog: Story only exists in epic file
+#   - ready-for-dev: Story file created, ready for development
+#   - in-progress: Developer actively working on implementation
+#   - review: Implementation complete, ready for review
+#   - done: Story completed
+
+# Retrospective Status:
+#   - optional: Can be completed but not required
+#   - done: Retrospective has been completed
+
+# Action Item Status:
+#   - open: Committed during a retrospective, not yet addressed
+#   - in-progress: Actively being worked on
+#   - done: Completed
+
+# WORKFLOW NOTES:
+# ===============
+# - Epic transitions to 'in-progress' automatically when its first story starts (via build's sprint sync)
+# - Stories can be worked in parallel if team capacity allows
+# - Developer typically creates the next story after the previous one is 'done' to incorporate learnings
+# - Dev moves story to 'review', then runs code-review (fresh context, different LLM recommended)
+# - Retrospective appends its action items to action_items; the status view surfaces open ones
+generated: 11-15-2026 19:35
+last_updated: 11-19-2026 18:25
+project: OpenFS98
+project_key: NOKEY
+tracking_system: file-system
+story_location: OpenFS98/docs/implementation
+development_status:
+  epic-1: in-progress
+  1-1-cmake-builds-everything-the-makefile-builds: review
+  1-2-cmake-runs-every-verification-target-and-the-makefile-is-ret: done
+  1-3-one-flag-set-for-every-unit: in-progress
+  1-4-module-data-decompiled-no-raw-dumps-in-git: in-progress
+  1-5-every-kept-retail-bug-is-marked-in-the-code: backlog
+  1-6-retail-reference-logs-recorded: backlog
+  1-7-the-module-abi-headers-are-32-bit: backlog
+  1-8-every-module-uses-the-shared-arena-h: backlog
+  1-9-register-contracts-become-explicit-parameters: backlog
+  1-10-divides-go-through-the-saturating-helpers: backlog
+  epic-1-retrospective: optional
+
+  epic-2: backlog
+  2-1-an-mfc42-dll-that-forwards-to-the-cd-s: backlog
+  2-2-the-mfc-difftest-and-the-retail-layouts-fs98-depends-on: backlog
+  2-3-cstring-memory-and-exceptions: backlog
+  2-4-module-thread-and-app-state: backlog
+  2-5-cwnd-the-handle-maps-and-message-dispatch: backlog
+  2-6-cdialog-ddx-ddv-and-the-control-classes: backlog
+  2-7-cdc-the-gdi-wrappers-and-cfile: backlog
+  2-8-the-rest-and-the-cd-dll-is-no-longer-loaded: backlog
+  epic-2-retrospective: optional
+
+  epic-3: backlog
+  3-1-the-linux-i386-target-and-fs98arena-s-memory: backlog
+  3-2-code-handles-and-the-arena-stack: backlog
+  3-3-modules-build-as-native-shared-libraries-with-an-fs98image: backlog
+  3-4-fs98win32-kernel-and-crt: backlog
+  3-5-one-seh-chain-and-the-fp-control-word: backlog
+  3-6-the-native-host-links-the-modules: backlog
+  3-7-windows-and-messages-through-sdl3: backlog
+  3-8-gdi-drawing: backlog
+  3-9-resources-and-dialogs: backlog
+  3-10-graphics-and-sound: backlog
+  3-11-input-and-the-remaining-system-dlls: backlog
+  3-12-framelock-natively-and-all-74-flights-match: backlog
+  3-13-dialog-drivers-in-process: backlog
+  3-14-devices-on-linux-flown-by-hand: backlog
+  epic-3-retrospective: optional
+
+  epic-4: backlog
+  4-1-triage-the-register: backlog
+  4-2-fix-the-undefined-behaviour-bugs: backlog
+  4-3-fix-the-behaviour-bugs: backlog
+  4-4-the-fixed-i386-build-becomes-the-reference: backlog
+  epic-4-retrospective: optional
+
+  epic-5: backlog
+  5-1-linux-x86_64-builds-with-the-arena-at-a-nonzero-base: backlog
+  5-2-x86-64-matches-the-fixed-i386-build: backlog
+  5-3-windows-x64-builds-and-matches: backlog
+  5-4-devices-on-windows-flown-by-hand: backlog
+  5-5-retire-i386: backlog
+  epic-5-retrospective: optional
+
+  epic-6: backlog
+  6-1-every-fs98-pressing-catalogued: backlog
+  6-2-reading-the-cd-from-any-source: backlog
+  6-3-installing-the-data: backlog
+  6-4-the-dialog-api-natively: backlog
+  6-5-the-setup-dialog: backlog
+  6-6-release-1-archives: backlog
+  epic-6-retrospective: optional
+
+  epic-7: backlog
+  7-1-the-x86-32-interpreter: backlog
+  7-2-the-pe-loader-and-thunks: backlog
+  7-3-the-win32-shim-for-the-corpus: backlog
+  7-4-retail-gauges-in-the-guest-match-the-natives: backlog
+  7-5-third-party-mdls: backlog
+  7-6-every-corpus-gauge-matches-itself-on-a-real-cpu: backlog
+  7-7-the-22-aircraft-fly-the-pinned-dynamic-pass: backlog
+  epic-7-retrospective: optional
+
+  epic-8: backlog
+  8-1-the-add-on-sdk-and-native-modules-in-modules: backlog
+  8-2-the-openfs98-extension-module: backlog
+  8-3-the-efb-settings-dialog-in-both-builds: backlog
+  8-4-udp-sockets-in-fs98win32: backlog
+  8-5-the-efb-data-output-add-on-built-both-ways: backlog
+  epic-8-retrospective: optional
+
+  epic-9: backlog
+  9-1-mac-builds-and-tests-in-github-actions: backlog
+  9-2-per-routine-tolerances: backlog
+  9-3-the-guest-interpreter-on-apple-silicon: backlog
+  9-4-mac-releases: backlog
+  epic-9-retrospective: optional
+
+  epic-10: backlog
+  10-1-map-multip-s-directplay-use-and-the-wire-protocol: backlog
+  10-2-the-directplay-wire-protocol-in-fs98win32: backlog
+  10-3-two-native-builds-share-a-session: backlog
+  10-4-native-and-retail-fs98-share-a-session: backlog
+  epic-10-retrospective: optional
+
+action_items:
+  - epic: 6
+    action: "ISO pressing catalogue script for Story 6.1: records each pressing's game-file and resource checksums in docs/building.md's format and flags differences from the reference; tested here against the reference CD image; Steve runs it at home on his ISOs the week of 2026-11-23. Ready 2026-11-19: tools/pressing_catalogue.py, reference catalogue in bin/pressings/reference.json"
+    owner: "Steve"
+    status: open
+  - epic: 10
+    action: "DirectPlay capture checklist for Story 10.1: DirectPlay legacy component, capture UDP 47624 and TCP/UDP 2300-2400, session script (host, join, chat, fly, leave, then swap hosts), file names; Steve captures it at home on two Windows machines. Ready 2026-11-19: docs/implementation/directplay-capture-checklist.md"
+    owner: "Steve"
+    status: open
+  - epic: 7
+    action: "-m32 instruction-result recorder for Story 7.1: standalone program outside src/, no wine; records integer, flag and x87 results once on a real CPU; deterministic (two runs, same bytes). Done 2026-11-19: tools/guest/x86_record.c, results in bin/guest/x86_results.txt, checked by tools/guest/check_x86_results.py"
+    owner: "dev"
+    status: done

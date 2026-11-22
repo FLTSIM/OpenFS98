@@ -10,7 +10,7 @@ back.  A missed break is a gap in the harness or an equivalence; either way
 it is reported, and docs/modules/window.md says which.
 
 Usage: tools/window_breaks.py [N] [name...]       (from the repository root,
-       after make windowdiff)
+       after tools/ofs windowdiff)
 """
 import os
 import re
@@ -185,7 +185,7 @@ def main():
         open(TMP, "w").write(source.replace(old, new))
         if os.path.exists("bin/difftest/WINDOW_ours.dll"):
             os.remove("bin/difftest/WINDOW_ours.dll")
-        build = subprocess.run(["make", "-s", "window-break-build", "WINDOW_SRC=" + TMP],
+        build = subprocess.run(["tools/ofs", "window-break-build", "WINDOW_SRC=" + TMP],
                                capture_output=True, text=True)
         if build.returncode != 0:
             print("%-20s does not build:\n%s" % (name, build.stderr[-2000:]))
@@ -205,7 +205,7 @@ def main():
                                   "  (" + entry[3] + ")" if len(entry) > 3 and not caught else ""))
         results.append((name, verdict.lower()))
         sys.stdout.flush()
-    subprocess.run(["make", "-s", "windowdiff"], check=True)
+    subprocess.run(["tools/ofs", "windowdiff"], check=True)
     missed = [n for n, r in results if r not in ("caught", "equivalent")]
     same = [n for n, r in results if r == "equivalent"]
     print("%d breaks, %d caught, %d proven equivalent (%s); missed: %s" %

@@ -11,18 +11,18 @@ shared dependencies still need replacement for a native Linux/Mac port.
 
 ## Current acceptance
 
-Run from the repository root, independently of MAIN's shared Makefile:
+Run from the repository root:
 
 ```sh
-make -f tools/alerts.mk alertsevents alertsobjects alerts
+tools/ofs alertsevents alertsobjects alerts
 bash tools/run_alertsdiff.sh 20000
 bash tools/run_alertsdiff.sh 20000 0x98a1e7d3
 bash tools/run_alertsdiff.sh --objects 20000
 bash tools/run_alertsdiff.sh --events-unwind 2000
 bash tools/run_alertsdiff.sh --objects 2000 0x587a41e9 unwind
-make -f tools/alerts.mk alerts-events-breaks alerts-object-breaks N=2000
-make -f tools/alerts.mk alertsuidiff-run alerts-ui-breaks
-make -f tools/alerts.mk alerts-smoke
+tools/ofs alerts-events-breaks alerts-object-breaks N=2000
+tools/ofs alertsuidiff-run alerts-ui-breaks
+tools/ofs alerts-smoke
 ```
 
 The runner serializes Wine jobs in its dedicated prefix,
@@ -89,12 +89,13 @@ every UI interaction.
 
 `alerts_events.c` implements events, `alerts_objects.c` implements lifetime
 and factories, and `alerts_runtime.c` adapts MFC/SIMSUI/Win32. The DLL exports
-only `Linkage` and `ImportTable`. `gen_alerts_runtime.py` extracts 100 import
+only `Linkage` and `ImportTable`. `alerts_runtime_tables.inc` (committed; once written by the table half of
+`gen_alerts_runtime.py`) holds 100 import
 bindings, all 228 vtable slots, three message maps and the dialog registry as
 ABI metadata. Dialogs, strings and bitmaps are extracted into ignored build
 resources; no retail machine code or resource payload is committed. The
-retail version resource is excluded. `gen_alerts_tables.py` extracts the
-button-label jump table separately.
+retail version resource is excluded. The button-label jump table is committed
+in `alerts_tables.inc` (read from retail by the retired `gen_alerts_tables.py`).
 
 The modal init listing contains a dead default-focus branch: its stack local
 starts at -1 and can only change behind a check that it is already not -1.
@@ -129,9 +130,9 @@ callbacks, and double exceptions remain outside these acceptance fixtures.
 The isolated startup smoke establishes loading and initialization, not an
 interactive flight or every alert reachable during one.
 
-**Installed 2026-11-02.** The shared Makefile now builds this DLL into `bin/` and
-`make install` puts it in `English/` (`make alerts-install` / `alerts-revert` alone, keeping the
-first retail copy as `.orig`). `make smoke` requires it to match and load; `make
+**Installed 2026-11-02.** The shared build (the Makefile then, CMake since 2026-11-18) builds this DLL into `bin/` and
+`tools/ofs ofs_install` puts it in `English/` (`tools/ofs alerts-install` / `alerts-revert` alone, keeping the
+first retail copy as `.orig`). `tools/ofs smoke` requires it to match and load; `tools/ofs
 main-dialogs` compares it in play against retail through the Exit confirmation (command
 `0x100c4`), dialog 2, answered No (it ignores `IDCANCEL`): pixel-identical. Dialogs 3
 (modeless) and 4 (advisory with a suppression checkbox) are not reached in play yet.

@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Require actual retail mismatches for world-files class lifetime mutations."""
+import module_flags
 from pathlib import Path
 import os
 import subprocess
@@ -45,8 +46,7 @@ for name, before, after in mutations:
     if name == 'destructor-retry':
         mutated = mutated.replace('control->offset, control->destructor);', 'control->offset, control->destructor); --state->constructed;')
     source_path.write_text(mutated)
-    subprocess.run(['i686-w64-mingw32-gcc', '-std=c99', '-O2', '-Wall', '-Wextra', '-Werror',
-                    '-fno-strict-aliasing', '-fno-delete-null-pointer-checks', '-Isrc/world',
+    subprocess.run(['i686-w64-mingw32-gcc', *module_flags.FLAGS, '-std=c99', '-Itools/difftest', '-O2', '-Wall', '-Wextra', '-Werror', '-Isrc/world',
                     '-o', str(executable), 'tools/difftest/worldfileslifediff.c', str(source_path),
                     '-lntdll'], cwd=root, check=True)
     result = subprocess.run(['wine', str(executable), '32', '0x4a971b63', 'typed'],

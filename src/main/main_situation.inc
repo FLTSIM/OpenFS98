@@ -90,9 +90,22 @@ typedef uint32_t (FS98_STDCALL *f8)(uint32_t, uint32_t, uint32_t, uint32_t, uint
 /* Exported (as main_text_tail) for the harness, which patches retail's
  * call sites into its seams and has to show this copy the same bytes;
  * the export goes when +0x74 and +0xa4 are done. */
+#define AT(off) [(off)] =
+#define U16(x) (uint8_t)(x), (uint8_t)((x) >> 8)
 uint8_t text_tail[0x20800000u - SEASON_TABLE] __asm__("_main_text_tail") = {
+/* +0x0000  the season table: the day of the year each season starts on (355, 81, 172, 264).  MAIN-6, MAIN-18: set_season() indexes
+ * it by GLOBAL +0x248 without a bound and reads on through the bytes of main_text_tail.inc */
+AT(0x0000) U16(0x0163), U16(0x0051), U16(0x00ac), U16(0x0108),
+/* +0x4e1d  the daylight table at DST_TABLE (0x207f8eb0): five { start day, end day, minutes to take off } records */
+AT(0x4e1d) U16(0x005e), U16(0x0130), U16(0x003c),
+           U16(0x005e), U16(0x0130), U16(0x003c),
+           U16(0x0057), U16(0x0129), U16(0x003c),
+           U16(0x0057), U16(0x010d), U16(0x003c),
+           U16(0x0057), U16(0x010d), U16(0x003c),
 #include "main_text_tail.inc"
 };
+#undef AT
+#undef U16
 
 /* ---- the table's routines, .text+0x11cd2..+0x11e3a ------------------------ */
 

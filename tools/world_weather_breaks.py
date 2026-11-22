@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Require retail differences for basic-weather events, initialization and lifetime."""
+import module_flags
 from pathlib import Path
 import hashlib
 import json
@@ -97,8 +98,7 @@ def main():
         if unit.startswith('life'):
             sources.append(str(work / 'world_weather_objects.c'))
         exe = work / 'test.exe'
-        result = subprocess.run(['i686-w64-mingw32-gcc', '-std=c99', '-O2', '-Wall', '-Wextra', '-Werror', '-fno-strict-aliasing',
-                                 '-fno-delete-null-pointer-checks', '-Isrc/world', '-o', str(exe), str(work / harness), *sources, '-lntdll'], capture_output=True, text=True)
+        result = subprocess.run(['i686-w64-mingw32-gcc', *module_flags.FLAGS, '-std=c99', '-Itools/difftest', '-O2', '-Wall', '-Wextra', '-Werror', '-Isrc/world', '-o', str(exe), str(work / harness), *sources, '-lntdll'], capture_output=True, text=True)
         (work / 'build.log').write_text(result.stdout + result.stderr)
         if result.returncode:
             raise RuntimeError(f'{name}: build failure, not counted\n{result.stderr}')

@@ -38,6 +38,9 @@ has exactly those counts (and every 100+ number is found), FAIL otherwise.
 """
 import concurrent.futures, hashlib, json, os, re, shlex, shutil, signal, subprocess, sys, threading, time
 
+import slots    # tools/slots.py: shared with break_pool.py
+from slots import under, owned_procs, cleanup, copy_prefix
+
 root = os.path.realpath(os.getcwd())
 build, results = os.path.abspath(sys.argv[1]), os.path.realpath(sys.argv[2])
 only = sys.argv[sys.argv.index('--only') + 1] if '--only' in sys.argv else None
@@ -226,18 +229,8 @@ def tree_diff(a, b):
     return sorted(k for k in a.keys() | b.keys() if a.get(k) != b.get(k))
 
 
-def under(path, base):
-    return path == base or path.startswith(base.rstrip('/') + '/')
-
-
 def rm_slot_path(path, whole=False):    # the only deletion the run makes: paths under <results>/slots (whole: the root itself)
-    real = os.path.realpath(path) if not os.path.islink(path) else os.path.join(os.path.realpath(os.path.dirname(path)), os.path.basename(path))
-    assert under(real, slots_dir) and (real != slots_dir or whole and path == slots_dir), real
-    if os.path.isdir(real) and not os.path.islink(real):
-        subprocess.run(['chmod', '-R', 'u+rwX', real], check=False)
-        shutil.rmtree(real)
-    elif os.path.lexists(real):
-        os.unlink(real)
+    slots.remove(path, slots_dir, whole)
 
 
 def sh(argv, log, env=None, cwd=None):
@@ -310,40 +303,8 @@ def prepare_slot(k, start_hash, manifest_of):
     if os.path.lexists(os.path.join(root, 'cd')):
         os.symlink(os.path.join(root, 'cd'), os.path.join(slot, 'cd'))    # no Baselines line writes it
     sh(['cp', '-a', os.path.join(root, 'game'), os.path.join(slot, 'game')], log)
-    # the wine prefix, made self-contained
-    wine = os.path.realpath(os.path.expanduser('~/.wine'))
-    pfx = os.path.join(slot, 'wineprefix')
-    sh(['cp', '-a', wine, pfx], log)
-    for dp, dn, fn in os.walk(pfx):
-        for name in dn + fn:
-            q = os.path.join(dp, name)
-            if not os.path.islink(q):
-                continue
-            tgt_ = os.readlink(q)
-            rel = os.path.relpath(q, pfx)
-            if rel == 'dosdevices/c:':
-                new = '../drive_c'
-            elif os.path.isabs(tgt_) and under(tgt_, wine):
-                new = os.path.join(pfx, os.path.relpath(tgt_, wine))
-            else:
-                continue
-            os.unlink(q)
-            os.symlink(new, q)
-    fs98 = os.path.join(pfx, 'drive_c', 'FS98')    # OFSTEST needs C: mapped to the slot's game, whatever it was
-    if os.path.islink(fs98) or os.path.isfile(fs98):
-        os.unlink(fs98)
-    elif os.path.isdir(fs98):
-        rm_slot_path(fs98)
-    os.makedirs(os.path.dirname(fs98), exist_ok=True)
-    os.symlink(os.path.join(slot, 'game'), fs98)
-    assert os.path.realpath(fs98) == os.path.realpath(os.path.join(slot, 'game')), fs98
-    for dp, dn, fn in os.walk(pfx):
-        for name in dn + fn:
-            q = os.path.join(dp, name)
-            if os.path.islink(q):
-                r = os.path.realpath(q)
-                if under(r, wine) or under(r, root):
-                    raise RuntimeError('prefix symlink %s still resolves into %s' % (q, r))
+    # the wine prefix, made self-contained (tools/slots.py)
+    copy_prefix('~/.wine', slot, os.path.join(slot, 'game'), root, log)
     # build from scratch into an empty bin
     b = os.path.join(slot, 'build/win32-retail')
     env = slot_env(slot)
@@ -354,7 +315,7 @@ def prepare_slot(k, start_hash, manifest_of):
     skipped, filt = bin_filters()
     with open(log, 'a') as f:
         f.write('bin directories not copied (over %d MB): %s\n' % (bin_skip_mb, ' '.join(skipped)))
-    sh(['rsync', '-a', '--ignore-existing'] + filt + [os.path.join(root, 'bin') + '/', os.path.join(slot, 'bin') + '/'], log)
+    sh(['rsync', '-a', '--ignore-existing', '--exclude=/break-pool'] + filt + [os.path.join(root, 'bin') + '/', os.path.join(slot, 'bin') + '/'], log)
     names = subprocess.run(['grep', '-rIlF', '--', root, os.path.join(slot, 'bin')], capture_output=True, text=True).stdout
     with open(log, 'a') as f:
         f.write('copied text files naming the start tree (%s), kept:\n%s' % (root, names))
@@ -370,59 +331,6 @@ def prepare_slot(k, start_hash, manifest_of):
     json.dump(man, open(os.path.join(tmpl, '.slot-manifest.json'), 'w'))
     open(os.path.join(tmpl, 'READY'), 'w').close()
     return time.time() - t0
-
-
-def owned_procs(slot):
-    """{pid: WINEPREFIX or None} of every process whose cwd, executable or WINEPREFIX lies under the slot."""
-    out = {}
-    for d in os.listdir('/proc'):
-        if not d.isdigit() or int(d) == os.getpid():
-            continue
-        try:
-            wp = None
-            for kv in open('/proc/%s/environ' % d, 'rb').read().split(b'\0'):
-                if kv.startswith(b'WINEPREFIX='):
-                    wp = kv[11:].decode(errors='replace')
-        except OSError:
-            wp = None
-        try:
-            paths = [os.readlink('/proc/%s/cwd' % d), os.readlink('/proc/%s/exe' % d).replace(' (deleted)', '')]
-        except OSError:
-            paths = []    # gone, a zombie, or not ours
-        if any(under(x, slot) for x in paths) or (wp and under(os.path.realpath(wp), slot)):
-            out[int(d)] = wp
-    return out
-
-
-def cleanup(slot):
-    """Stop every process the slot owns; False if one survives 120 s overall. Never touches ~/.wine or other slots."""
-    end = time.time() + 120
-    slot = os.path.realpath(slot)
-    while owned_procs(slot):
-        if time.time() > end:
-            return False
-        for wp in {w for w in owned_procs(slot).values() if w}:
-            r = os.path.realpath(wp)
-            if not under(r, slot):
-                print('cleanup: not running wineserver -k in %s (%s is not under the slot)' % (wp, r), file=sys.stderr)
-            elif os.path.isdir(r):
-                try:
-                    subprocess.run(['wineserver', '-k'], env=dict(os.environ, WINEPREFIX=r), stdout=subprocess.DEVNULL,
-                                   stderr=subprocess.DEVNULL, timeout=max(1, min(30, end - time.time())))
-                except subprocess.TimeoutExpired:
-                    pass
-        for sig, wait in ((signal.SIGTERM, 30), (signal.SIGKILL, 10)):
-            for pid in owned_procs(slot):
-                try:
-                    os.kill(pid, sig)
-                except OSError:
-                    pass
-            t = min(time.time() + wait, end)
-            while owned_procs(slot) and time.time() < t:
-                time.sleep(0.5)
-            if not owned_procs(slot):
-                break
-    return True
 
 
 def run_line(argv, shell, cwd, env, limit, log):

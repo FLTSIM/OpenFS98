@@ -194,23 +194,29 @@
   summary: A break runner killed by `cmake_verify.py`'s timeout leaves its mutation in the tree. The timeout uses `killpg(…, SIGKILL)`, so no cleanup runs. Story 1.3's p13 kept `sim1r-breaks`' `>=` mutant in `src/sim1/sim1_small.c:843`, and every later SIM1 build in p13 used it (`sim1rdiff-run`, `sim1native-flights` and both smoke runs). Fix it with the parallel-verification work: each break runner mutates its own tree copy, never the tree it was started from. Until then, `cmake_verify.py` should send SIGTERM and wait before SIGKILL, the runners should restore on SIGTERM, and the verifier should check the tree is unchanged after each break step.
   evidence: found 2026-11-21 when re-running p13's `sim1rdiff-run`. It differed in `op_crash_count` (GLOBAL +0xb7c) because of the leftover mutant; the current tree gives 0 differ. Restoring the line in p13 was enough. `main`, `g3d`, `hg2d` and `controls` in p13 were clean.
 - source_spec: none
-  summary: Parallel verification B. Give the break runners (`tools/*_breaks.py`, starting with `host_breaks.py` and `main_breaks.py`) a worker pool, each worker mutating its own tree copy with its own build directory and `WINEPREFIX`, so one long suite runs in parallel. Reuse A's tree-copy helper.
+  summary: DONE 2026-11-22 (`docs/implementation/spec-verify-parallel-b.md`: `tools/break_pool.py`, `BREAK_JOBS` on host, g3d, options and sim1r; `main_breaks.py` stays out by decision). Parallel verification B. Give the break runners (`tools/*_breaks.py`, starting with `host_breaks.py` and `main_breaks.py`) a worker pool, each worker mutating its own tree copy with its own build directory and `WINEPREFIX`, so one long suite runs in parallel. Reuse A's tree-copy helper.
   evidence: split from the parallel-verification request (2026-11-21) on the user's choice. A (`cmake_verify.py -j N` with disposable per-job trees) comes first. `host-breaks` takes 4.2 h and `options-breaks` 2.1 h on their own.
 - source_spec: `docs/implementation/spec-1-4r-simsui-data.md`
   summary: After Story 1.3's Baselines run, run `simsuidiff-run`, `simsui-breaks` (from a frozen copy), `main-dialogs` and `flights-play` (SIMSUI's image is now typed C; slice 17b built it and ran none of them; `bin/SIMSUI.DLL` and `simsuidiff.exe` are identical to their pre-slice builds after `strip` and `peh2.py`).
   evidence: queued by the frozen intent.
 - source_spec: `docs/implementation/spec-1-4r-simsui-data.md`
-  summary: No `--hash` build step depends on `tools/data_images.txt`, so changing a pinned hash does not rerun a module's step (all 28 rows, pre-existing).
+  summary: No `--hash` build step depends on `tools/data_images.txt`, so changing a pinned hash does not rerun a module's step (28 rows, pre-existing; the 120 gauge rows are covered since slice 18b: the gauges step lists `tools/data_images.txt` in `DEPENDS_GLOB`).
   evidence: slice 17b review, Blind Hunter; `UPDATE=1` works around it by zeroing the DLL's mtime.
 - source_spec: `docs/implementation/spec-1-4s-test-gauges-data.md`
   summary: After Story 1.3's Baselines run, run `gaugesdiff-run`, `suctiondiff-run`, `gauges-panels-run`, `gauges-game-run`, `suction-game-run`, `suction-breaks` and `tools/gauges_breaks.py` (warning) (the test gauges' data is now typed C; slice 18a ran none of them, no wine; both `.GAU` files are identical to their pre-slice builds, stripped and unstripped, after `peh2.py`).
   evidence: queued by the frozen intent. `gauges_breaks.py` now passes `-Isrc/gauges` so its break copies find the committed `.inc` files.
+- source_spec: `docs/implementation/spec-1-4t-gauges-data.md`
+  summary: After Story 1.3's Baselines run, run `gauges-check`, `gauges-breaks`, `gauges-panels`, `all-gauges-check`, `all-gauges-breaks`, `all-gauges-panels`, `all-gauges-hangs` and `gauges-game` (the 120 gauges' images are now committed typed C in `src/gauges/images/`; slice 18b ran none of them, no wine; all 120 `.GAU` files are identical to their pre-slice builds, stripped and unstripped, under `peh2.py`, and `allgaugesdiff.exe`, `allpaneldiff.exe`, `all_gauges.inc` and `all_panels.inc` are unchanged).
+  evidence: queued by the frozen intent.
 - source_spec: none
-  summary: Story 1.4 slice 18b: the 120 hand-written gauges' data images (`tools/gen_gauges.py`'s `bin/gauges-all/*/image.inc`, 225 KB of .data/.rdata as hex bytes, with a DllMain rebinding every relocated pointer) as committed typed C, with a manifest check.
-  evidence: split from slice 18 on 2026-11-22 (the user chose 18a, the two test gauges, first); independent of the test gauges and the MDLs.
-- source_spec: none
-  summary: Story 1.4 slice 18c: the 8 normal and 3 crash MDL models' data (`tools/build_mdls.py`, `tools/gen_mdl_crash.py`, about 600 KB, mostly geometry); how to treat the geometry is open (typed C, or content read like resources, which the story's AC does not allow as written).
+  summary: Story 1.4 slice 18c: the 8 normal and 3 crash MDL models' data (`tools/build_mdls.py`, `tools/gen_mdl_crash.py`, about 600 KB, mostly geometry); all of it, geometry included, converted to committed typed C (the user's decision, 2026-11-22: "convert the MDL data to C for now").
   evidence: split from slice 18 on 2026-11-22; the user asked what the content option means before choosing.
 - source_spec: none
   summary: Story 1.4 slice 18d: `tools/gen_window_data.py` (WINDOW's .text tail for WIN-2) stays a `gen:` build step, as the user chose in slice 6, until WIN-2 is fixed at porting.
   evidence: split from slice 18 on 2026-11-22; revisit only with the user.
+- source_spec: `docs/implementation/spec-1-4t-gauges-data.md`
+  summary: The harness steps that compile with `-Ibin/gauges-all` (`allgaugesdiff.exe`, `allpaneldiff.exe`, difftests.cmake:258-268) do not depend on the generated `all_gauges.inc`/`all_panels.inc`, so a manifest change does not rebuild them (pre-existing).
+  evidence: slice 18b spec review (Codex); ofs_step discovers only src/ and tools/ inputs.
+- source_spec: `docs/implementation/spec-1-4u-mdl-data.md`
+  summary: Story 1.4's "only resources from orig/ at build time" rests on self-declared `resource:` lines in `tools/raw_dumps_allowed.txt`; add an automated check that builds the converted modules against a copy of `orig/` with their `.data`/`.rdata` overwritten and asserts identical outputs (done by hand for the MDLs in slice 18c).
+  evidence: 18c code review (Codex verification gap); `check_raw_dumps.py` checks only that a script is listed, not that it is right about what it reads.

@@ -109,6 +109,7 @@ Kept but not caught (a coverage gap, not an equivalence; 2026-11-22):
 - Exception flags are not compared (sim1rdiff.c says why), so a break that only changes
   which x87 exceptions are raised is not one.
 """
+import break_pool
 import os
 from pathlib import Path
 import subprocess
@@ -1014,43 +1015,60 @@ def operation_index(root, rva):
     return rvas.index(rva)
 
 
+# bin/ paths a worker links (BREAK_JOBS): only the read-only snapshots. Nothing else is copied: sim1rdiff depends on
+# `openfs98 difftests`, so prepare() builds those once in the worker, as a cmake_verify slot does.
+POOL_LINK = ['sim1-diff/snapshots.bin']
+PREREQ = ['bin/sim1-diff/sim1rdiff.exe', 'bin/sim1-diff/snapshots.bin', 'tools/difftest/sim1r_operations.inc']
+ORIGINALS = {}    # suite -> its source text, read before any break
+
+
+def prepare(w):
+    w.run(['cmake', '--build', w.env['OFS_BUILD'], '--target', 'openfs98', 'difftests'], env=w.env, cwd=w.root)
+
+
+def one(item, w):
+    """One break rooted at w.root -> (caught, text); the suite's source is restored after it, whatever happens."""
+    suite, entry = item
+    name, before, after = entry[:3]
+    scenarios = os.environ.get('N', '400')
+    root = Path(w.root)
+    path = root / 'src/sim1' / suite
+    original = ORIGINALS[suite]
+    wanted = str(max(int(scenarios), entry[3])) if len(entry) > 3 else scenarios   # a rare edge's own count
+    only_op = [str(operation_index(root, entry[4])), str(operation_index(root, entry[4]))] if len(entry) > 4 else []
+    rec = dict(name=name, unit=suite, build_exit=None, exit=None, summary=None, differ=None)
+    w.rec = rec
+    if original.count(before) != 1:
+        return False, f'{suite} {name}: text not found once\n'
+    try:
+        path.write_text(original.replace(before, after))
+        build = subprocess.run(['tools/ofs', 'sim1rdiff'], cwd=w.root, env=w.env,
+                               capture_output=True, text=True)
+        rec['build_exit'] = build.returncode
+        if build.returncode:
+            return False, f'{suite} {name}: does not build\n'
+        run = subprocess.run(['wine', 'bin/sim1-diff/sim1rdiff.exe', wanted] + (['0x51e1'] + only_op if only_op else []), cwd=w.root,
+                             capture_output=True, text=True, env={**w.env, 'WINEDEBUG': '-all'})
+    finally:
+        path.write_text(original)
+    summary = [l for l in run.stdout.splitlines() if l.startswith('SIM1:')]
+    rec.update(exit=run.returncode, summary=summary[-1] if summary else None, differ=break_pool.first_differ(run.stderr))
+    if 'DIFFER' in run.stderr:
+        return True, f'{suite} {name}: caught\n'
+    if 'SIM1:' in run.stdout:
+        return False, f'{suite} {name}: MISSED\n'
+    return False, f'{suite} {name}: CRASHED ({run.returncode})\n'
+
+
 def main():
     root = Path.cwd()
-    scenarios = os.environ.get('N', '400')
     suites = sys.argv[1:] or list(BREAKS)
     only = set(filter(None, os.environ.get('ONLY', '').split(',')))
-    total = caught = 0
+    entries = [(suite, e) for suite in suites for e in BREAKS[suite] if not only or e[0] in only]
     for suite in suites:
-        path = root / 'src/sim1' / suite
-        original = path.read_text()
-        try:
-            for entry in BREAKS[suite]:
-                name, before, after = entry[:3]
-                wanted = str(max(int(scenarios), entry[3])) if len(entry) > 3 else scenarios   # a rare edge's own count
-                only_op = [str(operation_index(root, entry[4])), str(operation_index(root, entry[4]))] if len(entry) > 4 else []
-                if only and name not in only:
-                    continue
-                total += 1
-                if original.count(before) != 1:
-                    print(f'{suite} {name}: text not found once')
-                    continue
-                path.write_text(original.replace(before, after))
-                build = subprocess.run(['tools/ofs', 'sim1rdiff'], cwd=root,
-                                       capture_output=True, text=True)
-                if build.returncode:
-                    print(f'{suite} {name}: does not build')
-                    continue
-                run = subprocess.run(['wine', 'bin/sim1-diff/sim1rdiff.exe', wanted] + (['0x51e1'] + only_op if only_op else []), cwd=root,
-                                     capture_output=True, text=True, env={**os.environ, 'WINEDEBUG': '-all'})
-                if 'DIFFER' in run.stderr:
-                    caught += 1
-                    print(f'{suite} {name}: caught')
-                elif 'SIM1:' in run.stdout:
-                    print(f'{suite} {name}: MISSED')
-                else:
-                    print(f'{suite} {name}: CRASHED ({run.returncode})')
-        finally:
-            path.write_text(original)
+        ORIGINALS[suite] = (root / 'src/sim1' / suite).read_text()
+    results = break_pool.go('sim1r', entries, one, pool_link=POOL_LINK, prereq=PREREQ, prepare=prepare)
+    caught, total = sum(results), len(results)
     subprocess.run(['tools/ofs', 'sim1rdiff'], cwd=root)
     print(f'{caught} of {total} caught')
 

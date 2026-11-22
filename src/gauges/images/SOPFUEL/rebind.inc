@@ -1,0 +1,23 @@
+/* SOPFUEL.GAU's relocated .data slots, in retail's relocation order.  GAUGE_REBIND(off, rva): the slot at +off
+ * (from the start of .data) holds the image base plus rva, an RVA in .data, .rdata or .text; attach stores the address
+ * of the same place in this image (src/gauges/gauge.h, with the hand-written gauge's routines for the code ones). */
+GAUGE_REBIND(0x14, 0x3000)
+GAUGE_REBIND(0x18, 0x31f0)
+GAUGE_REBIND(0x1c, 0x1170)
+GAUGE_REBIND(0x20, 0x1070)
+GAUGE_REBIND(0x24, 0x10e0)
+GAUGE_REBIND(0x28, 0x10f0)
+GAUGE_REBIND(0x2c, 0x1100)
+GAUGE_REBIND(0x30, 0x1120)
+GAUGE_REBIND(0x34, 0x1130)
+GAUGE_REBIND(0xd8, 0x3010)
+GAUGE_REBIND(0xe4, 0x3060)
+GAUGE_REBIND(0x110, 0x1020)
+GAUGE_REBIND(0x198, 0x30b8)
+GAUGE_REBIND(0x1c0, 0x3010)
+GAUGE_REBIND(0x1c8, 0x3198)
+GAUGE_REBIND(0x1cc, 0x3060)
+GAUGE_REBIND(0x1f0, 0x31a0)
+GAUGE_REBIND(0x294, 0x1160)
+GAUGE_REBIND(0x298, 0x1160)
+GAUGE_REBIND(0x2a8, 0x3010)

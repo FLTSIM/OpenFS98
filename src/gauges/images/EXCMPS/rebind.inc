@@ -1,0 +1,23 @@
+/* EXCMPS.GAU's relocated .data slots, in retail's relocation order.  GAUGE_REBIND(off, rva): the slot at +off
+ * (from the start of .data) holds the image base plus rva, an RVA in .data, .rdata or .text; attach stores the address
+ * of the same place in this image (src/gauges/gauge.h, with the hand-written gauge's routines for the code ones). */
+GAUGE_REBIND(0x24, 0x3000)
+GAUGE_REBIND(0x28, 0x31d8)
+GAUGE_REBIND(0x2c, 0x1150)
+GAUGE_REBIND(0x30, 0x1070)
+GAUGE_REBIND(0x34, 0x10c0)
+GAUGE_REBIND(0x38, 0x10d0)
+GAUGE_REBIND(0x3c, 0x10e0)
+GAUGE_REBIND(0x40, 0x1100)
+GAUGE_REBIND(0x44, 0x1110)
+GAUGE_REBIND(0xa8, 0x3020)
+GAUGE_REBIND(0xb4, 0x3070)
+GAUGE_REBIND(0xe0, 0x1020)
+GAUGE_REBIND(0x114, 0x1060)
+GAUGE_REBIND(0x180, 0x3088)
+GAUGE_REBIND(0x1a8, 0x3020)
+GAUGE_REBIND(0x1b0, 0x3180)
+GAUGE_REBIND(0x1d8, 0x3188)
+GAUGE_REBIND(0x27c, 0x1140)
+GAUGE_REBIND(0x280, 0x1140)
+GAUGE_REBIND(0x290, 0x3020)

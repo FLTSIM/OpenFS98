@@ -4,15 +4,16 @@
 #   resource: reads only resources by type and id, or export tables by name, from retail (may stay)
 #   oracle:   reads retail only for test oracles, fixtures, staging or orientation output (may stay)
 gen:gen_window_data.py  # copies WINDOW's .text tail into bin/ for WIN-2
-gen:build_mdls.py  # data or table generator, not yet converted
 resource:gen_alerts_runtime.py  # resources by type and id and the SIMSUI ui_new export by name
 resource:gen_flights_runtime.py  # resources by type and id and the SIMSUI ui_new export by name
-gen:gen_gauges.py  # data or table generator, not yet converted
+resource:gen_gauges.py  # the gauges' bitmaps by type and id, the layout asserts, and (--check) the committed gauge tables against retail; the images are committed C
 resource:gen_help_runtime.py  # resources by type and id and the SIMSUI ui_new export by name
 resource:gen_host_resources.py  # FLTSIM98.EXE resources, by type and id
 resource:gen_main_bitmap.py  # MAIN.DLL bitmap 101, by type and id
-gen:gen_mdl_crash.py  # data or table generator, not yet converted
+oracle:gen_mdl_images.py  # writes and re-proves the MDL images and manifest against retail (tools/ofs mdl-images-check)
 oracle:gen_mdl_fixtures.py  # test fixtures from retail MDLs
+resource:build_mdls.py  # the normal MDLs' resources by type and id; the images are committed C (src/mdl/images/)
+resource:gen_mdl_crash.py  # the crash MDLs' resources by type and id; the images are committed C
 resource:gen_mpdialog_runtime.py  # resources by type and id and the SIMSUI ui_new export by name
 resource:gen_options_runtime.py  # resources by type and id and the SIMSUI ui_new export by name
 resource:gen_sim1_native.py  # SIM1.sim resources by type and id; checks its layout and relocations

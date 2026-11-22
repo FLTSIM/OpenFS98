@@ -36,7 +36,7 @@ def main():
                 print(f'{case}: {"matched retail hang" if passed else "FAIL"}', flush=True)
                 if not passed: failed.append(case)
         return bool(failed)
-    gauges = json.loads((ROOT / 'manifest.json').read_text())
+    gauges = json.loads(Path('src/gauges/gauges_manifest.json').read_text())
     if args.names:
         gauges = [gauge for gauge in gauges if gauge['name'] in args.names]
     def run(gauge):

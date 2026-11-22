@@ -20,6 +20,9 @@ import shutil
 import subprocess
 import sys
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import break_pool
+
 N = int(sys.argv[1]) if len(sys.argv) > 1 and sys.argv[1].isdigit() else 2000
 ONLY = [a for a in sys.argv[1:] if not a.isdigit()]
 SRC = "src/g3d/g3d.c"
@@ -398,50 +401,67 @@ BREAKS = [
 ]
 
 
+# bin/ paths a worker copies (BREAK_JOBS): the harness and its staged retail DLLs (difftest/, with WINDOW_retail.dll),
+# and what g3d-break-build links: G3D.DLL (its prerequisite) and g3d.res.
+POOL_BIN = ["difftest", "G3D.DLL", "g3d.res"]
+PREREQ = ["bin/difftest/" + f for f in ("g3ddiff.exe", "G3D_retail.dll", "UTIL_retail.dll", "G3D_ours.dll", "WINDOW_retail.dll")] + ["bin/g3d.res", "bin/G3D.DLL"]
+
+
+def prepare(w):
+    # its own copy, so a hang can be killed without touching other runs
+    shutil.copy(os.path.join(w.root, "bin/difftest/g3ddiff.exe"), os.path.join(w.root, "bin/difftest/g3ddiff_break.exe"))
+
+
+def one(entry, w):
+    """One break rooted at w.root -> ((name, result), text)."""
+    name, old, new = entry[:3]
+    rec = dict(name=name, unit="g3d.c", build_exit=None, exit=None, summary=None, differ=None)
+    w.rec = rec
+    if source.count(old) != 1:
+        return (name, "unapplied"), "%-20s cannot apply: %d matches\n" % (name, source.count(old))
+    open(os.path.join(w.root, TMP), "w").write(source.replace(old, new))
+    ours = os.path.join(w.root, "bin/difftest/G3D_ours.dll")
+    if os.path.exists(ours):
+        os.remove(ours)
+    build = subprocess.run(["tools/ofs", "g3d-break-build", "G3D_SRC=" + TMP],
+                           capture_output=True, text=True, cwd=w.root, env=w.env)
+    rec["build_exit"] = build.returncode
+    if build.returncode != 0 or not os.path.exists(ours):
+        return (name, "unbuilt"), "%-20s does not build:\n%s\n" % (name, build.stderr[-2000:])
+    # A break can make ours loop where retail does not (a jump that
+    # lands backwards): that is caught, and the run is cut at the limit.
+    try:
+        run = subprocess.run(["wine", "g3ddiff_break.exe", str(N)], cwd=os.path.join(w.root, "bin/difftest"),
+                             capture_output=True, text=True, errors="replace", timeout=LIMIT,
+                             env=dict(w.env, WINEDEBUG="-all"))
+        last = [l for l in run.stdout.splitlines() if l.startswith("g3ddiff:")]
+        rec.update(exit=run.returncode, summary=last[-1] if last else None, differ=break_pool.first_differ(run.stdout))
+        # only a finished comparison that reports differences is a catch: a crash, a load failure
+        # or a harness guard (exit 2-6) is not, as main_breaks.py learnt from 27 hidden misses
+        caught = (run.returncode == 1 and bool(last) and re.search(r" [1-9][0-9]* differ$", last[-1]) is not None)
+    except subprocess.TimeoutExpired:
+        if w.pooled:
+            w.kill_hang()
+        else:
+            subprocess.run(["pkill", "-f", "g3ddiff_brea[k].exe"])
+        run = subprocess.CompletedProcess([], 1, "hung past %d s" % LIMIT, "")
+        caught = True
+        last = ["hung past %d s" % LIMIT]
+        rec.update(summary=last[0])
+    crashed = not caught and run.returncode != 0
+    verdict = ("caught" if caught else "CRASHED (exit %d)" % run.returncode if crashed
+               else "equivalent" if len(entry) > 3 else "MISSED")
+    return (name, verdict.lower()), "%-20s %s  %s%s\n" % (name, verdict, last[0] if last else run.stdout.strip()[-200:],
+                                                          "  (" + entry[3] + ")" if len(entry) > 3 and not caught else "")
+
+
 def main():
+    global source
     # its own copy, so a hang can be killed without touching other runs
     shutil.copy("bin/difftest/g3ddiff.exe", "bin/difftest/g3ddiff_break.exe")
     source = open(SRC).read()
-    results = []
-    for entry in BREAKS:
-        name, old, new = entry[:3]
-        if ONLY and name not in ONLY:
-            continue
-        if source.count(old) != 1:
-            print("%-20s cannot apply: %d matches" % (name, source.count(old)))
-            results.append((name, "unapplied"))
-            continue
-        open(TMP, "w").write(source.replace(old, new))
-        if os.path.exists("bin/difftest/G3D_ours.dll"):
-            os.remove("bin/difftest/G3D_ours.dll")
-        build = subprocess.run(["tools/ofs", "g3d-break-build", "G3D_SRC=" + TMP],
-                               capture_output=True, text=True)
-        if build.returncode != 0 or not os.path.exists("bin/difftest/G3D_ours.dll"):
-            print("%-20s does not build:\n%s" % (name, build.stderr[-2000:]))
-            results.append((name, "unbuilt"))
-            continue
-        # A break can make ours loop where retail does not (a jump that
-        # lands backwards): that is caught, and the run is cut at the limit.
-        try:
-            run = subprocess.run(["wine", "g3ddiff_break.exe", str(N)], cwd="bin/difftest",
-                                 capture_output=True, text=True, errors="replace", timeout=LIMIT,
-                                 env=dict(os.environ, WINEDEBUG="-all"))
-            last = [l for l in run.stdout.splitlines() if l.startswith("g3ddiff:")]
-            # only a finished comparison that reports differences is a catch: a crash, a load failure
-            # or a harness guard (exit 2-6) is not, as main_breaks.py learnt from 27 hidden misses
-            caught = (run.returncode == 1 and bool(last) and re.search(r" [1-9][0-9]* differ$", last[-1]) is not None)
-        except subprocess.TimeoutExpired:
-            subprocess.run(["pkill", "-f", "g3ddiff_brea[k].exe"])
-            run = subprocess.CompletedProcess([], 1, "hung past %d s" % LIMIT, "")
-            caught = True
-            last = ["hung past %d s" % LIMIT]
-        crashed = not caught and run.returncode != 0
-        verdict = ("caught" if caught else "CRASHED (exit %d)" % run.returncode if crashed
-                   else "equivalent" if len(entry) > 3 else "MISSED")
-        print("%-20s %s  %s%s" % (name, verdict, last[0] if last else run.stdout.strip()[-200:],
-                                  "  (" + entry[3] + ")" if len(entry) > 3 and not caught else ""))
-        results.append((name, verdict.lower()))
-        sys.stdout.flush()
+    entries = [e for e in BREAKS if not ONLY or e[0] in ONLY]
+    results = break_pool.go("g3d", entries, one, pool_bin=POOL_BIN, prereq=PREREQ, prepare=prepare)
     subprocess.run(["tools/ofs", "g3ddiff"], check=True)
     missed = [n for n, r in results if r not in ("caught", "equivalent")]
     same = [n for n, r in results if r == "equivalent"]

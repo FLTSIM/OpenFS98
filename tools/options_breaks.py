@@ -30,6 +30,8 @@ chosen != 0 for > 0 (only 0 or a joystick's number is ever stored), and SB_LEFT 
 rather than the range's minimum (the clamp that follows brings it back).
 """
 import module_flags
+import break_pool
+import os
 from pathlib import Path
 import subprocess
 import sys
@@ -1065,13 +1067,76 @@ UNWIND = [
 ]
 
 
+# bin/ paths a worker copies (BREAK_JOBS): the harness's directory without its prefix (a worker has its own copy of
+# the runner's prefix); the mutants' files are the break's own artifacts.
+POOL_BIN = ['options-diff']
+POOL_SKIP = ['options-diff/wineprefix']
+PREREQ = ['bin/options-diff/optionseventsdiff.exe', 'tools/difftest/optionseventsdiff.c']
+DIRECTORY = Path('bin/options-diff/breaks')
+COUNT = 200
+
+
+def artifacts(entry):
+    return [str(DIRECTORY / f'{entry[0]}.{ext}') for ext in ('c', 'exe', 'log')]
+
+
+def wine_env(w):
+    return {**w.env, **{k: v for k, v in (('WINEARCH', 'win32'), ('WINEDEBUG', '-all')) if k not in w.env}}
+
+
+def start_server(w):
+    """One server across the mutants' builds, in the worker's prefix (run_optionsdiff.sh does it for the serial run)."""
+    if w.pooled:
+        subprocess.run(['wineserver', '-p60'], env=wine_env(w), cwd=w.root, check=True)
+
+
+def one(entry, w):
+    """One break rooted at w.root -> (1 if caught else 0, text)."""
+    name, unit, mode, before, after = entry
+    rec = dict(name=name, unit=unit, build_exit=None, exit=None, summary=None, differ=None)
+    w.rec = rec
+    root = Path(w.root)
+    (root / DIRECTORY).mkdir(parents=True, exist_ok=True)
+    original = (root / f'src/options/options_{unit}.c').read_text()
+    if original.count(before) != 1:
+        raise ValueError(f'{name}: the anchor occurs {original.count(before)} times')
+    source = DIRECTORY / f'{name}.c'
+    executable = DIRECTORY / f'{name}.exe'
+    (root / source).write_text(original.replace(before, after, 1))
+    (root / executable).unlink(missing_ok=True)
+    others = [f'src/options/options_{u}.c' for u in UNITS if u != unit]
+    build = subprocess.run([
+        'i686-w64-mingw32-gcc', *module_flags.FLAGS, '-std=c99', '-O2', '-Wall', '-Wextra', '-Wno-unused', '-Isrc/options', '-o', str(executable),
+        'tools/difftest/optionseventsdiff.c', str(source), *others, '-lntdll'],
+        text=True, capture_output=True, cwd=w.root)
+    rec['build_exit'] = build.returncode
+    if build.returncode:
+        return 0, f'{name}: BUILD FAILED (not counted)\n{build.stderr}\n'
+    scenarios = str(COUNT if mode == 'normal' else max(100, COUNT // 10))
+    try:
+        run = subprocess.run(['wine', str(executable), scenarios, '0x5f1a6c2d', mode],
+                             text=True, errors='replace', capture_output=True, timeout=300, cwd=w.root, env=wine_env(w))
+    except subprocess.TimeoutExpired:
+        if w.pooled:    # the worker's own wine; the serial run leaves it, as before
+            w.kill_hang()
+            start_server(w)
+        return 0, f'{name}: TIMEOUT (not counted)\n'
+    output = run.stdout + run.stderr
+    (root / DIRECTORY / f'{name}.log').write_text(output)
+    rec.update(exit=run.returncode, summary=(output.splitlines() or [None])[-1], differ=break_pool.first_differ(output))
+    if run.returncode == 1 and 'DIFFER scenario=' in output:
+        return 1, f'{name}: caught\n'
+    return 0, f'{name}: NOT CAUGHT (exit {run.returncode})\n{output[-600:]}\n'
+
+
 def main():
     count = int(sys.argv[1]) if len(sys.argv) > 1 else 200
+    global COUNT
+    COUNT = count
     only = set(sys.argv[2:])
     if count < 100:
         raise ValueError('use at least 100 scenarios')
-    directory = Path('bin/options-diff/breaks')
-    directory.mkdir(parents=True, exist_ok=True)
+    DIRECTORY.mkdir(parents=True, exist_ok=True)
     breaks = [(name, 'events', 'normal', before, after) for name, before, after in EVENTS]
     breaks += [(name, 'objects', 'normal', before, after) for name, before, after in OBJECTS]
     breaks += [(name, 'video', 'normal', before, after) for name, before, after in VIDEO]
@@ -1089,37 +1154,9 @@ def main():
     breaks += [(name, unit, 'unwind', before, after) for name, unit, before, after in UNWIND]
     if only:
         breaks = [b for b in breaks if b[0] in only]
-    caught = 0
-    for name, unit, mode, before, after in breaks:
-        original = Path(f'src/options/options_{unit}.c').read_text()
-        if original.count(before) != 1:
-            raise ValueError(f'{name}: the anchor occurs {original.count(before)} times')
-        source = directory / f'{name}.c'
-        executable = directory / f'{name}.exe'
-        source.write_text(original.replace(before, after, 1))
-        executable.unlink(missing_ok=True)
-        others = [f'src/options/options_{u}.c' for u in UNITS if u != unit]
-        build = subprocess.run([
-            'i686-w64-mingw32-gcc', *module_flags.FLAGS, '-std=c99', '-O2', '-Wall', '-Wextra', '-Wno-unused', '-Isrc/options', '-o', str(executable),
-            'tools/difftest/optionseventsdiff.c', str(source), *others, '-lntdll'],
-            text=True, capture_output=True)
-        if build.returncode:
-            print(f'{name}: BUILD FAILED (not counted)\n{build.stderr}', flush=True)
-            continue
-        scenarios = str(count if mode == 'normal' else max(100, count // 10))
-        try:
-            run = subprocess.run(['wine', str(executable), scenarios, '0x5f1a6c2d', mode],
-                                 text=True, errors='replace', capture_output=True, timeout=300)
-        except subprocess.TimeoutExpired:
-            print(f'{name}: TIMEOUT (not counted)', flush=True)
-            continue
-        output = run.stdout + run.stderr
-        (directory / f'{name}.log').write_text(output)
-        if run.returncode == 1 and 'DIFFER scenario=' in output:
-            caught += 1
-            print(f'{name}: caught', flush=True)
-        else:
-            print(f'{name}: NOT CAUGHT (exit {run.returncode})\n{output[-600:]}', flush=True)
+    results = break_pool.go('options', breaks, one, artifacts=artifacts, pool_bin=POOL_BIN, skip=POOL_SKIP,
+                            prereq=PREREQ, prepare=start_server)
+    caught = sum(results)
     print(f'Options breaks: {caught}/{len(breaks)} caught', flush=True)
     return 0 if caught == len(breaks) else 1
 

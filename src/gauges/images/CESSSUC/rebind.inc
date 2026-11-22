@@ -1,0 +1,22 @@
+/* CESSSUC.GAU's relocated .data slots, in retail's relocation order.  GAUGE_REBIND(off, rva): the slot at +off
+ * (from the start of .data) holds the image base plus rva, an RVA in .data, .rdata or .text; attach stores the address
+ * of the same place in this image (src/gauges/gauge.h, with the hand-written gauge's routines for the code ones). */
+GAUGE_REBIND(0x1c, 0x3000)
+GAUGE_REBIND(0x20, 0x31d0)
+GAUGE_REBIND(0x24, 0x1140)
+GAUGE_REBIND(0x28, 0x1060)
+GAUGE_REBIND(0x2c, 0x10b0)
+GAUGE_REBIND(0x30, 0x10c0)
+GAUGE_REBIND(0x34, 0x10d0)
+GAUGE_REBIND(0x38, 0x10f0)
+GAUGE_REBIND(0x3c, 0x1100)
+GAUGE_REBIND(0xb8, 0x3018)
+GAUGE_REBIND(0xf4, 0x1020)
+GAUGE_REBIND(0x108, 0x3068)
+GAUGE_REBIND(0x178, 0x3098)
+GAUGE_REBIND(0x1a0, 0x3018)
+GAUGE_REBIND(0x1a8, 0x3178)
+GAUGE_REBIND(0x1d0, 0x3180)
+GAUGE_REBIND(0x274, 0x1130)
+GAUGE_REBIND(0x278, 0x1130)
+GAUGE_REBIND(0x288, 0x3018)

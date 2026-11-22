@@ -163,10 +163,19 @@ are retained and tested. DllMain retains DisableThreadLibraryCalls; retail
 CRT allocation/environment bookkeeping is omitted because no model service
 uses it. There is no CRT dependency in the rebuilt DLLs.
 
-`tools/build_mdls.py` extracts model data, the Sopwith literal and every
-resource payload. It emits a writable image addressed by retail RVA, with
-the `.data` payload at its original offset and no extracted instructions.
-All seven `.data` HIGHLOW relocations in each normal model are emitted as
+Each model's data image is committed C (since slice 18c): `src/mdl/images/<NAME>/layout.h` (retail's layout
+and the non-pointer words of the header, Linkage, prefix and tail, and Sopwith's literal at `0x1037`) and
+`data.inc` (the body of `.data` from `+0x34` to Linkage as typed `U8`/`U16`/`U32`/`STRn` values, zero runs of 16
+bytes or more omitted), built by the one `src/mdl/mdl_image.c` into a packed struct addressed by retail RVA
+(`_mdl_image`; `_ImportTable`, `_Linkage`, `_mdl_header` and `_mdl_data`, the `.data` start, are `.set` labels). The
+metadata (`modules.json`, `modules.inc`, `crashes.inc` are projected from it) is `src/mdl/mdl_manifest.json`.
+`tools/gen_mdl_images.py` (an oracle: `--write`, `--check` = `tools/ofs mdl-images-check`, `--self-test`)
+writes and re-proves them against retail; `tools/build_mdls.py` reads retail only for the resource payloads
+(`model.res`), so a build with the MDLs' `.data` overwritten gives the same eleven DLLs. The image is
+compiled on its own with `-fno-ident`; the pointers are address constants, so the linker emits retail's
+relocations. `data-images` checks each built MDL (a `--linked at=_mdl_data` row: same relocation offsets, data
+targets the same place relative to the image, code targets in our `.text`; Sopwith's literal is a
+second window). All seven `.data` HIGHLOW relocations in each normal model are emitted as
 linker relocations: one program pointer, one update callback and five Linkage
 function pointers (init and deinit share a target). Unknown targets, pointer
 fixups into the CRT tail and unexpected model sets stop generation. The
@@ -237,8 +246,8 @@ successful rendering check (`bin/mdl-render-break/invalid-end.result.txt`).
 
 `src/mdl/mdl_crash.c` is the three crash models (CESSNA182RRG_C, CESSNA182S_C, EXTRA300S_C)
 decompiled, one source built three times (`-DCRASH_MODEL=0/1/2`) by `tools/gen_mdl_crash.py`
-into `bin/mdl-crash/models/`, over each model's generated data image (retail's `.data` at its
-RVAs, the relocated code pointers bound to the C entries; 64-KiB aligned as before).
+into `bin/mdl-crash/models/`, over each model's committed data image (`src/mdl/images/<NAME>/`, retail's `.data` at its
+RVAs in the `.mdlimg` section, the relocated code pointers bound to the C entries; 64-KiB aligned as before).
 `tools/ofs mdl-crash-modules` builds them.
 
 **One program, three tables.** Retail's three are the same hand-written assembly (32 routines,
@@ -296,9 +305,9 @@ UTIL is retail's own, behind logging proxies).
 
 Until 2026-11-14 the lifted oracle ran over the same scenarios too (all registers, with a
 counter per retail routine): 0 differences, **32 of 32 retail routines reached**, which is the
-scenarios' coverage of retail. `tools/gen_mdl_crash.py` now builds only the decompiled models,
-and finds the CHAIN callback the harness needs (the code address pushed before list 15) from the
-disassembly.
+scenarios' coverage of retail. `tools/gen_mdl_crash.py` now builds only the decompiled models;
+the CHAIN callback the harness needs (the code address pushed before list 15, found from the
+disassembly) is in `src/mdl/mdl_manifest.json`, written by `tools/gen_mdl_images.py`.
 
 `python3 tools/mdl_crash_breaks.py` (`tools/ofs mdl-crash-breaks`; run from a frozen copy) breaks the
 decompiled C on purpose, 82 single edits (every helper, each animation's thresholds and signs,

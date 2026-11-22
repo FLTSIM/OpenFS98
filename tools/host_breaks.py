@@ -17,6 +17,9 @@ import shutil
 import subprocess
 import sys
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import break_pool
+
 args = sys.argv[1:]
 N = int(args.pop(0)) if args and args[0].isdigit() else 2000
 ONLY = args
@@ -602,49 +605,61 @@ BREAKS = [
 ]
 
 
-def main():
-    results = []
-    src = open("src/host/host.c").read()
-    for entry in BREAKS:
-        name, old, new = entry[:3]
-        if ONLY and name not in ONLY:
-            continue
-        if src.count(old) != 1:
-            print("%-16s cannot apply: %d matches" % (name, src.count(old)))
-            results.append((name, "unapplied"))
-            continue
-        open(BREAK, "w").write(src.replace(old, new))
-        if os.path.exists("bin/difftest/HOST_ours.dll"):
-            os.remove("bin/difftest/HOST_ours.dll")
-        build = subprocess.run(["tools/ofs", "host-break-build", "HOST_BREAK=" + BREAK],
-                               capture_output=True, text=True)
-        if build.returncode != 0:
-            print("%-16s does not build:\n%s" % (name, build.stderr[-1500:]))
-            results.append((name, "unbuilt"))
-            continue
-        # A break that corrupts the heap can hang rather than differ; a hang
-        # is a catch.
-        # The profile and file checks use real files and are slow; a break
-        # elsewhere runs without them.
-        env = dict(os.environ, WINEDEBUG="-all")
-        if not name.startswith(("pf-", "fs-", "fd-", "ff-", "ds-", "wn-", "dd-", "bc-")):   # the display check runs with the files
-            env["HOSTDIFF_SKIP_FILES"] = "1"
-        run = subprocess.run(["timeout", "120", "wine", "hostdiff.exe", str(N)], cwd="bin/difftest",
-                             capture_output=True, text=True, errors="replace", env=env)
-        if run.returncode == 124:
+# bin/ paths a worker copies (BREAK_JOBS): the harness and the retail files the target's preamble staged in
+# difftest/, and the runtime objects host-break-build links (it rebuilds them, but this keeps its inputs whole).
+POOL_BIN = ["difftest", "host-rt-standalone"]
+PREREQ = ["bin/difftest/hostdiff.exe"] + ["bin/difftest/" + f for f in ("FLTSIM98.EXE", "ENGLISH.FLL", "SIMSUI.DLL", "DIALOG.DLL")]
+
+
+def one(entry, w):
+    """One break rooted at w.root -> ((name, result), text)."""
+    name, old, new = entry[:3]
+    if src.count(old) != 1:
+        w.rec = dict(name=name, unit="host.c", build_exit=None, exit=None, summary=None, differ=None)
+        return (name, "unapplied"), "%-16s cannot apply: %d matches\n" % (name, src.count(old))
+    open(os.path.join(w.root, BREAK), "w").write(src.replace(old, new))
+    ours = os.path.join(w.root, "bin/difftest/HOST_ours.dll")
+    if os.path.exists(ours):
+        os.remove(ours)
+    build = subprocess.run(["tools/ofs", "host-break-build", "HOST_BREAK=" + BREAK],
+                           capture_output=True, text=True, cwd=w.root, env=w.env)
+    if build.returncode != 0:
+        w.rec = dict(name=name, unit="host.c", build_exit=build.returncode, exit=None, summary=None, differ=None)
+        return (name, "unbuilt"), "%-16s does not build:\n%s\n" % (name, build.stderr[-1500:])
+    # A break that corrupts the heap can hang rather than differ; a hang
+    # is a catch.
+    # The profile and file checks use real files and are slow; a break
+    # elsewhere runs without them.
+    env = dict(w.env, WINEDEBUG="-all")
+    if not name.startswith(("pf-", "fs-", "fd-", "ff-", "ds-", "wn-", "dd-", "bc-")):   # the display check runs with the files
+        env["HOSTDIFF_SKIP_FILES"] = "1"
+    run = subprocess.run(["timeout", "120", "wine", "hostdiff.exe", str(N)], cwd=os.path.join(w.root, "bin/difftest"),
+                         capture_output=True, text=True, errors="replace", env=env)
+    exit_raw = run.returncode
+    first = break_pool.first_differ(run.stdout)
+    if run.returncode == 124:
+        if w.pooled:
+            w.kill_hang()
+        else:
             subprocess.run(["pkill", "-f", "hostdiff.exe"])
-            run.stdout += "\nhostdiff: hung (timeout)"
-        last = [l for l in run.stdout.splitlines() if l.startswith("hostdiff:")]
-        # only a finished comparison that reports differences is a catch: a crash, a load failure
-        # or a harness guard (exit 2-6) is not, as main_breaks.py learnt from 27 hidden misses
-        caught = run.returncode == 124 or (run.returncode == 1 and bool(last) and re.search(r" [1-9][0-9]* differ$", last[-1]) is not None)
-        crashed = not caught and run.returncode != 0
-        verdict = ("caught" if caught else "CRASHED (exit %d)" % run.returncode if crashed
-                   else "equivalent" if len(entry) > 3 else "MISSED")
-        print("%-16s %s  %s%s" % (name, verdict, last[-1] if last else run.stdout.strip()[-120:],
-                                  "  (" + entry[3] + ")" if len(entry) > 3 and not caught else ""))
-        results.append((name, verdict.lower()))
-        sys.stdout.flush()
+        run.stdout += "\nhostdiff: hung (timeout)"
+    last = [l for l in run.stdout.splitlines() if l.startswith("hostdiff:")]
+    # only a finished comparison that reports differences is a catch: a crash, a load failure
+    # or a harness guard (exit 2-6) is not, as main_breaks.py learnt from 27 hidden misses
+    caught = run.returncode == 124 or (run.returncode == 1 and bool(last) and re.search(r" [1-9][0-9]* differ$", last[-1]) is not None)
+    crashed = not caught and run.returncode != 0
+    verdict = ("caught" if caught else "CRASHED (exit %d)" % run.returncode if crashed
+               else "equivalent" if len(entry) > 3 else "MISSED")
+    w.rec = dict(name=name, unit="host.c", build_exit=0, exit=exit_raw, summary=last[-1] if last else None, differ=first)
+    return (name, verdict.lower()), "%-16s %s  %s%s\n" % (name, verdict, last[-1] if last else run.stdout.strip()[-120:],
+                                                          "  (" + entry[3] + ")" if len(entry) > 3 and not caught else "")
+
+
+def main():
+    global src
+    src = open("src/host/host.c").read()
+    entries = [e for e in BREAKS if not ONLY or e[0] in ONLY]
+    results = break_pool.go("host", entries, one, pool_bin=POOL_BIN, prereq=PREREQ)
     if os.path.exists(BREAK):
         os.remove(BREAK)
     subprocess.run(["tools/ofs", "hostdiff"], check=True)

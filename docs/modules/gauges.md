@@ -2,7 +2,7 @@
 
 
 > **Decompiled (2026-11-08).** All 120 gauges are hand-written C, one file per gauge
-> (`src/gauges/<name>.c` over the generated `image.inc`, sharing `src/gauges/gauge.h`; see
+> (`src/gauges/<name>.c` over the committed `src/gauges/images/<NAME>/`, sharing `src/gauges/gauge.h`; see
 > [Decompilation](#decompilation)); `tools/build_gauges.py` builds each from its hand file. They
 > were first *lifted* (machine-translated C emulating the registers and flags, 2026-11-06); the
 > lift, kept as an oracle until then, was deleted on 2026-11-14
@@ -15,16 +15,29 @@ are `bin/gauges-all/Gauges/`, using the exact installed filenames from
 
 ## Implementation
 
-`tools/gen_gauges.py` reads each CD gauge and writes, under ignored `bin/gauges-all/<name>/`,
-the gauge's `image.inc` (its `.data` and `.rdata` at their RVAs, `ImportTable` and `Linkage`,
-and a DllMain rebinding every relocated pointer, the code ones to the hand file's routines
-through its `gauge_routine(rva)`), `gauge.def`, `gauge.res` and a manifest for the harness:
-the 1,318 routines' argument bytes and x87 returns, the data words read as floats or integers,
-the print and indirect slots, the pointers. It reads the disassembly for instruction boundaries
-and operands only; it emits no code. Until 2026-11-14 it also emitted the lift.
+Each gauge's image is committed typed C in `src/gauges/images/<NAME>/`: `layout.h` (retail's section
+RVAs and sizes, the image base, the ImportTable and Linkage offsets), `data.inc` and `rdata.inc` (retail's
+`.data` and `.rdata` as typed values at their offsets: the gauge header, the element tree, ImportTable and
+Linkage named, the doubles the code reads as `F64`, strings as literals, the rest marked "meaning not yet
+known", zero runs of 16 bytes or more left out) and `rebind.inc` (one `GAUGE_REBIND(off, rva)` per relocated
+`.data` slot, in retail's relocation order). `src/gauges/gauge.h` builds the arrays, the `ImportTable` and
+`Linkage` aliases and a DllMain from them, rebinding every relocated pointer, the code ones to the
+hand file's routines through its `gauge_routine(rva)`. The harness metadata (each routine's argument bytes
+and x87 return, the data words read as floats or integers, the print and indirect slots, the pointers, the
+1,318 routines) is `src/gauges/gauges_manifest.json`, one gauge per line.
+
+`tools/gen_gauges.py` (the build step) reads each CD gauge's resources and layout only: it writes
+`bin/gauges-all/<NAME>/gauge.def`, `gauge.res` (the bitmaps) and a `manifest.json` copy of the gauge's line,
+keeping the layout asserts (imports, a single PANELS import, the element tree, type-3 relocations, the
+installed name). `tools/ofs gauges-tables-check` (`--check`) runs the full analysis with `objdump`, writing
+nothing, and exits 1 naming the gauge if a `layout.h`, `rebind.inc`, manifest line or the host-compiled bytes
+of a `data.inc` or `rdata.inc` differ from retail. Manifest rows `<NAME>` of `tools/data_images.txt` pin each
+image (`GAUGE_REBIND`'s targets and order are checked against retail's relocations; the 25 gauges whose `.rdata`
+the compiler drops, such as `737FLAPS` and `SOPMAGS`, have no `rdata=`). It disassembles nothing to emit code.
+Generated resources stay under ignored `bin/gauges-all/`.
 
 Bitmap payloads are exact. Company version
-resources are omitted, following the other extraction tools. Generated data,
+resources are omitted, following the other extraction tools. Generated
 resource files and binaries stay under ignored `bin/`; the reference files
 stay under ignored `orig/`. No game assets are committed.
 
@@ -147,8 +160,8 @@ A disposable full-game `tools/ofs ofs_install` / `tools/ofs ofs_revert` roundtri
 Started 2026-11-08, by the same method as the other modules: hand-written C checked against
 retail by the harness, then deliberately broken.
 
-**The layout.** `tools/gen_gauges.py` also writes each gauge's `image.inc`: retail's `.data` and
-`.rdata` at their RVAs, the `ImportTable`/`Linkage` exports, and a DllMain that rebinds every
+**The layout.** Each gauge's committed image (`src/gauges/images/<NAME>/`, built by `gauge.h`) holds retail's
+`.data` and `.rdata` at their RVAs, the `ImportTable`/`Linkage` exports, and a DllMain that rebinds every
 relocated pointer, the code ones through the gauge's `gauge_routine(rva)`. A gauge's file names
 retail's addresses by RVA (`GD64(0x37a8)`, a constant `GR64(0x2000)`), lists its routines in
 `GAUGE_ROUTINES`, and writes the gauge header's standard callbacks (install, initialise,

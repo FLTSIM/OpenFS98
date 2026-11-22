@@ -1,6 +1,7 @@
-/* Shared by the decompiled gauges (src/gauges/<name>.c), each built over its generated
- * image.inc (tools/gen_gauges.py: retail's .data and .rdata at their RVAs, the exports, and the
- * relocated pointers rebound at attach, the code ones through the gauge's gauge_routine).
+/* Shared by the decompiled gauges (src/gauges/<name>.c), each built over its committed image
+ * (src/gauges/images/<NAME>/, found through -I: layout.h, data.inc and rdata.inc, retail's .data and
+ * .rdata at their RVAs, and rebind.inc, the relocated pointers rebound at attach, the code ones
+ * through the gauge's gauge_routine).  This header defines the arrays, the exports and DllMain.
  *
  * A gauge's code names retail's addresses by RVA: GD64(0x37a8) is the double retail keeps at
  * base + 0x37a8, GR64(0x2000) a constant. Its callbacks are stdcall C with retail's argument
@@ -16,7 +17,29 @@
 #include <stdint.h>
 #include <string.h>
 
-#include "image.inc"
+#include "layout.h"
+
+uint8_t gauge_data[GAUGE_DATA_SIZE] = {
+#include "data.inc"
+};
+static const uint8_t gauge_rdata[GAUGE_RDATA_SIZE] = {
+#include "rdata.inc"
+};
+static void *gauge_routine(uint32_t rva);
+static uint32_t gauge_rebind(uint32_t rva) {
+if (rva >= GAUGE_DATA_RVA && rva < GAUGE_DATA_RVA + GAUGE_DATA_SIZE) return (uint32_t)(uintptr_t)(gauge_data + rva - GAUGE_DATA_RVA);
+if (rva >= GAUGE_RDATA_RVA && rva < GAUGE_RDATA_RVA + GAUGE_RDATA_SIZE) return (uint32_t)(uintptr_t)(gauge_rdata + rva - GAUGE_RDATA_RVA);
+{ void *routine = gauge_routine(rva); if (!routine) RaiseException(EXCEPTION_ILLEGAL_INSTRUCTION, 0, 0, NULL); return (uint32_t)(uintptr_t)routine; }}
+#define GAUGE_STRING_(x) #x
+#define GAUGE_STRING(x) GAUGE_STRING_(x)
+__asm__(".globl _ImportTable\n.set _ImportTable, _gauge_data + " GAUGE_STRING(GAUGE_IMPORT_OFFSET)
+        "\n.globl _Linkage\n.set _Linkage, _gauge_data + " GAUGE_STRING(GAUGE_LINKAGE_OFFSET) "\n");
+/* GAUGE_REBIND(off, rva): the .data slot at +off holds the image base plus rva (rebind.inc); the address of the same place here */
+#define GAUGE_REBIND(off, rva) { uint32_t bound = gauge_rebind(rva); memcpy(gauge_data + (off), &bound, 4); }
+BOOL WINAPI DllMain(HINSTANCE instance, DWORD reason, LPVOID reserved) { (void)reserved; if (reason == DLL_PROCESS_ATTACH) {
+#include "rebind.inc"
+DisableThreadLibraryCalls(instance); } return TRUE; }
+#undef GAUGE_REBIND
 
 #define GAUGE_D(rva) (gauge_data + (rva) - GAUGE_DATA_RVA)
 #define GAUGE_R(rva) (gauge_rdata + (rva) - GAUGE_RDATA_RVA)

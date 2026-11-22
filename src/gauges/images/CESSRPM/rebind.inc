@@ -1,0 +1,22 @@
+/* CESSRPM.GAU's relocated .data slots, in retail's relocation order.  GAUGE_REBIND(off, rva): the slot at +off
+ * (from the start of .data) holds the image base plus rva, an RVA in .data, .rdata or .text; attach stores the address
+ * of the same place in this image (src/gauges/gauge.h, with the hand-written gauge's routines for the code ones). */
+GAUGE_REBIND(0x14, 0x3000)
+GAUGE_REBIND(0x18, 0x3278)
+GAUGE_REBIND(0x1c, 0x1180)
+GAUGE_REBIND(0x20, 0x1060)
+GAUGE_REBIND(0x24, 0x10c0)
+GAUGE_REBIND(0x28, 0x1100)
+GAUGE_REBIND(0x2c, 0x1110)
+GAUGE_REBIND(0x30, 0x1130)
+GAUGE_REBIND(0x34, 0x1140)
+GAUGE_REBIND(0x160, 0x3010)
+GAUGE_REBIND(0x19c, 0x1020)
+GAUGE_REBIND(0x1b0, 0x3060)
+GAUGE_REBIND(0x220, 0x3140)
+GAUGE_REBIND(0x248, 0x3010)
+GAUGE_REBIND(0x250, 0x3220)
+GAUGE_REBIND(0x278, 0x3228)
+GAUGE_REBIND(0x31c, 0x1170)
+GAUGE_REBIND(0x320, 0x1170)
+GAUGE_REBIND(0x330, 0x3010)

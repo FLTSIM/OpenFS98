@@ -538,6 +538,7 @@ ofs_target(g3d-breaks
     [==[cp orig/Modules/G3D.DLL bin/difftest/G3D_retail.dll]==]
     [==[cp orig/Modules/UTIL.DLL bin/difftest/UTIL_retail.dll]==]
     [==[cp bin/G3D.DLL bin/difftest/G3D_ours.dll]==]
+    [==[cp orig/Modules/WINDOW.DLL bin/difftest/WINDOW_retail.dll]==]
     [==[python3 -B tools/g3d_breaks.py ${N:-2000}]==]
   )
 
@@ -1001,6 +1002,18 @@ ofs_target(alertsuidiff-run
   DEPENDS openfs98 difftests
   COMMANDS
     [==[bash tools/run_alertsdiff.sh --ui]==]
+  )
+
+# the committed gauge tables (src/gauges/images/, gauges_manifest.json) against retail's full analysis (needs objdump and cc)
+ofs_target(gauges-tables-check
+  COMMANDS
+    [==[python3 -B tools/gen_gauges.py --check]==]
+  )
+
+# the committed MDL images (src/mdl/images/, mdl_manifest.json) against retail (needs cc)
+ofs_target(mdl-images-check
+  COMMANDS
+    [==[python3 -B tools/gen_mdl_images.py --check]==]
   )
 
 ofs_target(all-gauges

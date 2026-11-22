@@ -25,8 +25,6 @@ def main():
     original = root / 'bin/mdl-diff' / Path(record['path']).stem
     for file in original.iterdir():
         if file.name != 'build.log': shutil.copy2(file, directory / file.name)
-    assembly = (directory / 'model_data.S').read_text().replace(str(original), str(directory))
-    (directory / 'model_data.S').write_text(assembly)
     source = Path('src/mdl/mdl_normal.c').read_text()
     anchor = 'copy(state + 0x28, global + 0x5b0, 0x18);'
     if source.count(anchor) != 1:

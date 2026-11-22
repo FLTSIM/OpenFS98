@@ -399,20 +399,50 @@ ofs_step(all
     [==[python3 -B tools/check_data_image.py --hash SIMSUI bin/SIMSUI.DLL]==]
   )
 
+# the 120 gauges' rows of tools/data_images.txt, as MODULE DLL pairs for one --hash run (the script's own parser; it fails
+# unless the rows are exactly the gauges of src/gauges/gauges_manifest.json)
+set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${CMAKE_SOURCE_DIR}/tools/data_images.txt" "${CMAKE_SOURCE_DIR}/src/gauges/gauges_manifest.json")
+execute_process(COMMAND python3 -B tools/check_data_image.py --gauge-pairs src/gauges/gauges_manifest.json
+  WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}" OUTPUT_VARIABLE OFS_GAUGE_PAIRS ERROR_VARIABLE OFS_GAUGE_ERR RESULT_VARIABLE OFS_GAUGE_RC)
+if(NOT OFS_GAUGE_RC EQUAL 0)
+  message(FATAL_ERROR "tools/data_images.txt gauge rows: ${OFS_GAUGE_ERR}")
+endif()
+string(STRIP "${OFS_GAUGE_PAIRS}" OFS_GAUGE_PAIRS)
+
 ofs_step(all
   OUTPUTS bin/gauges-all/built.stamp
+  DEPENDS_GLOB src/gauges/*.c src/gauges/*.h src/gauges/images/* src/gauges/gauges_manifest.json tools/data_images.txt orig/Gauges/*.GAU docs/setup_map.tsv
   COMMANDS
     [==[python3 -B tools/gen_gauges.py]==]
     [==[touch bin/gauges-all/generated.stamp]==]
     [==[python3 -B tools/build_gauges.py]==]
-    [==[touch bin/gauges-all/built.stamp]==]
+    # exit 3: UPDATE=1 only warned about a mismatch (the DLL's mtime is reset): age the stamp, so the next build reruns the step
+    "python3 -B tools/check_data_image.py --hash ${OFS_GAUGE_PAIRS}@SEMI@ rc=$? @SEMI@ if [ $rc -eq 0 ]@SEMI@ then touch bin/gauges-all/built.stamp@SEMI@ elif [ $rc -eq 3 ]@SEMI@ then touch -d @0 bin/gauges-all/built.stamp@SEMI@ else exit $rc@SEMI@ fi"
   )
 
+# the eleven MDLs' rows of tools/data_images.txt, as MODULE DLL pairs for one --hash run
+set(OFS_MDL_NAMES BOEING737-400_N BELL_206B_JETRANGER_N CESSNA182RRG_N CESSNA182S_N EXTRA300S_N LEAR45_N SCHWEIZER2_32_N SOPWITHCAMEL_N)
+set(OFS_MDL_PAIRS "")
+set(OFS_MDL_DLLS "")
+foreach(n IN LISTS OFS_MDL_NAMES)
+  string(APPEND OFS_MDL_PAIRS "${n} bin/mdl-diff/models/${n}.MDL ")
+  list(APPEND OFS_MDL_DLLS bin/mdl-diff/models/${n}.MDL)
+endforeach()
+foreach(n IN ITEMS CESSNA182RRG_C CESSNA182S_C EXTRA300S_C)
+  string(APPEND OFS_MDL_PAIRS "${n} bin/mdl-crash/models/${n}.MDL ")
+  list(APPEND OFS_MDL_DLLS bin/mdl-crash/models/${n}.MDL)
+endforeach()
+string(STRIP "${OFS_MDL_PAIRS}" OFS_MDL_PAIRS)
+
+# the models' data is committed C (src/mdl/images/<NAME>/ built by src/mdl/mdl_image.c, src/mdl/mdl_manifest.json); retail's resources only come from orig/
 ofs_step(all
-  OUTPUTS bin/mdl-diff/modules.json bin/mdl-crash/modules.json
+  OUTPUTS bin/mdl-diff/modules.json bin/mdl-crash/modules.json bin/mdl-diff/modules.inc bin/mdl-crash/crashes.inc ${OFS_MDL_DLLS}
+  DEPENDS_GLOB src/mdl/* tools/data_images.txt orig/Aircraft/*.MDL
   COMMANDS
     [==[PYTHONDONTWRITEBYTECODE=1 python3 tools/build_mdls.py]==]
     [==[PYTHONDONTWRITEBYTECODE=1 python3 tools/gen_mdl_crash.py]==]
+    # a mismatch (exit 1) or one UPDATE=1 only warned about (exit 3, the DLL's mtime is reset) ages both outputs, so the next build reruns the step
+    "python3 -B tools/check_data_image.py --hash ${OFS_MDL_PAIRS}@SEMI@ rc=$? @SEMI@ if [ $rc -ne 0 ]@SEMI@ then touch -d @0 bin/mdl-diff/modules.json bin/mdl-crash/modules.json bin/mdl-diff/modules.inc bin/mdl-crash/crashes.inc@SEMI@ fi@SEMI@ if [ $rc -ne 0 ] && [ $rc -ne 3 ]@SEMI@ then exit $rc@SEMI@ fi"
   )
 
 ofs_step(all

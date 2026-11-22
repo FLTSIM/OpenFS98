@@ -2,7 +2,8 @@
 """Compare a module's .data image with retail's, byte for byte (Story 1.4).
 
 Usage: tools/check_data_image.py [--kept] [--rdata RVA:LEN] <retail.dll> <ours.dll>
-       tools/check_data_image.py --hash <MODULE> <ours.dll> [--manifest FILE]
+       tools/check_data_image.py --hash <MODULE> <ours.dll> [<MODULE> <ours.dll> ...] [--manifest FILE]
+       tools/check_data_image.py --gauge-pairs GAUGES_MANIFEST.json [--manifest FILE]
        tools/check_data_image.py --orig DIR --manifest FILE [--update] [--self-test]
 Retail's .data (virtual size, zero past the raw data) has each of its own
 relocation targets zeroed (ours installs those pointers at load).  Ours is read
@@ -10,6 +11,9 @@ for the same number of bytes, starting at our ImportTable export minus retail's
 ImportTable offset into its .data (both DLLs must export it, inside .data), with
 our own relocation targets zeroed too (statically initialised code pointers);
 each must also be one of retail's, else exit 1.  Exit 0 if identical.
+--linked (manifest flag, with at=; the MDLs): the image's relocations are retail's exactly, at the same offsets: a data target must be the
+same place relative to the image start (retail's .data, our at= symbol), a code target must lie in retail's .text and in our .text.  --hash
+also hashes the data targets (relative) and which slots are code.  at= may name a symbol in .mdlimg.
 --kept (ATC, NUMERIC, UTIL): every retail relocation target that is not one of ours must
 hold retail's raw, unzeroed 4 bytes (a code address kept as a value); a zeroed
 or changed one fails.  The output counts them as "K kept".
@@ -29,13 +33,16 @@ between .text and .data, ours inside one of our sections) and none of OUR reloca
 window are allowed (it is retail's code, kept as raw bytes).  --hash hashes our window.
 --rdata RVA:LEN: retail's .rdata bytes there must appear exactly once in our
 .data and .rdata together (MULTIP keeps its copy in .data), with none of our relocations overlapping the match.
---hash: no retail.  Checks our image (normalized as above, plus the sorted list
+--hash: no retail; one or more MODULE DLL pairs (an odd count is a usage error; every failing pair is reported, exit 1 if any
+fails).  Checks our image (normalized as above, plus the sorted list
 of our relocation offsets in it) and each .rdata range's window against the
 sha256s in tools/data_images.txt.  With UPDATE=1 in the environment it warns,
 and sets the DLL's mtime to 0 so that the next build reruns the step.
 at=SYMBOL (manifest field): our image starts at that COFF symbol of our DLL (NUMERIC's _fs98_numeric_data,
 UTIL's _fs98_util_data: each a verbatim copy of retail's whole .data, retail's ImportTable and Linkage bytes included; the
 module's live ImportTable and Linkage are separate objects) instead of at our ImportTable export; with at=, the image may lie in .data or .rdata, and off= is 0.
+GAUGE_REBIND(off, rva) lines (a whole gauge's .data, src/gauges/images/<NAME>/rebind.inc): slots count from .data's start, the target is an
+RVA (target base zero) that must lie in retail's .text, .data or .rdata, and the lines must be retail's relocations in retail's order.
 ptrs=PATH[:SHA256] (manifest field): the pointer list a module installs at attach (FACIL_REL_*, FE_REL_*,
 ADVDRV_CODE/ADVDRV_DATA, PANELS' C/L, or MULTIP's { owner, off, kind, target }).  With orig/, each slot and target must equal retail's relocated
 value, and retail's relocations in the image must all be ours, kept or listed.  --hash needs no orig/: it
@@ -162,11 +169,12 @@ def our_image(ob, odirs, os_, ours, off, vs, at=None):
         if start is None:
             raise SystemExit("ours has no ImportTable export")
         start -= off
-    homes = [os_[n] for n in ((".data", ".rdata") if at else (".data",)) if n in os_]
+    names = [n for n in ((".data", ".rdata", ".mdlimg") if at else (".data",)) if n in os_]
+    homes = [os_[n] for n in names]
     if not any(h[1] <= start and start + vs <= h[1] + max(h[0], h[2]) for h in homes):
         raise SystemExit("%s: our image (0x%x..0x%x) is not inside our %s"
                          % (ours, start, start + vs, " or ".join("%s (0x%x..0x%x)" % (n, h[1], h[1] + max(h[0], h[2]))
-                                                                for n, h in zip((".data", ".rdata") if at else (".data",), homes))))
+                                                                for n, h in zip(names, homes))))
     mine = bytearray(read_rva(ob, os_, start, vs))
     offs = []
     for r in targets(ob, odirs, os_):
@@ -224,7 +232,8 @@ PTR_RES = [re.compile(r"^\s*(FACIL_REL_DATA|FACIL_REL_TEXT|FE_REL_DATA|FE_REL_TE
            re.compile(r"^\s*L\((0x[0-9a-fA-F]+)\)\s*$"),
            re.compile(r"^\s*((?:G3D|MAIN)_CODE_TARGET)\((0x[0-9a-fA-F]+)\)\s*$"),
            re.compile(r"^\s*GAUGE_DATA\((0x[0-9a-fA-F]+),\s*(0x[0-9a-fA-F]+)\)\s*$"),
-           re.compile(r"^\s*GAUGE_CODE\((0x[0-9a-fA-F]+),\s*(0x[0-9a-fA-F]+),\s*[A-Za-z_]\w*\)\s*$")]
+           re.compile(r"^\s*GAUGE_CODE\((0x[0-9a-fA-F]+),\s*(0x[0-9a-fA-F]+),\s*[A-Za-z_]\w*\)\s*$"),
+           re.compile(r"^\s*GAUGE_REBIND\((0x[0-9a-fA-F]+),\s*(0x[0-9a-fA-F]+)\)\s*$")]
 GLOBAL_LINK = 0xc  # PANELS' L(at): the slot holds image start + 0xc, the GLOBAL link
 
 def parse_ptrs(path):
@@ -251,7 +260,7 @@ def parse_ptrs(path):
         if m:
             out.append((m.group(1), hexint(m.group(2)), hexint(m.group(3))))
             continue
-        for form, rx in (("GAUGE_DATA", PTR_RES[4]), ("GAUGE_CODE", PTR_RES[5])):  # the routine of a GAUGE_CODE is not checked
+        for form, rx in (("GAUGE_DATA", PTR_RES[4]), ("GAUGE_CODE", PTR_RES[5]), ("GAUGE_REBIND", PTR_RES[6])):  # the routine of a GAUGE_CODE is not checked
             m = rx.match(line)
             if m:
                 out.append((form, hexint(m.group(1)), hexint(m.group(2))))
@@ -451,7 +460,7 @@ def compare_bound(rb, base, rdirs, rs, ours, at, bound):
     return 0, dict(name=name, off=0, vs=len(window), relocated=len(rows), hash=image_hash(mine, []), rdata=[], ptrs=None, switch=None, tail=None,
                    rawptrs=None, bound=(bound, bound_hash((BOUND_START, BOUND_END), rows), len(rows)))
 
-def ptrs_check(path, rb, base, rs, va, rset, offs, kept_mode, ours, mixed=False, kept_values=None):
+def ptrs_check(path, rb, base, rs, va, rset, offs, kept_mode, ours, mixed=False, kept_values=None, rorder=None):
     """Check a pointer list against retail; returns (entries, error).  kept_mode and mixed both relax completeness to: every other slot is kept or (mixed) zero."""
     ents, err = parse_ptrs(path)
     if err:
@@ -470,9 +479,11 @@ def ptrs_check(path, rb, base, rs, va, rset, offs, kept_mode, ours, mixed=False,
             form, off, tgt = e
             # ADVDRV_CODE holds a VA, so its target base is minus the image base
             tbase = {"FACIL_REL_DATA": va, "FE_REL_DATA": va, "ADVDRV_DATA": va, "HG2D_DATA_POINTER": va, "G3D_DATA_POINTER": va, "MAIN_DATA_POINTER": va, "L": va, "FACIL_REL_TEXT": 0,
-                     "FE_REL_TEXT": 0, "GAUGE_DATA": va, "GAUGE_CODE": 0, "ADVDRV_CODE": -base, "C": rs[".text"][1]}[form]
+                     "FE_REL_TEXT": 0, "GAUGE_DATA": va, "GAUGE_CODE": 0, "GAUGE_REBIND": 0, "ADVDRV_CODE": -base, "C": rs[".text"][1]}[form]
             if form == "GAUGE_CODE" and not rs[".text"][1] <= tgt < rs[".text"][1] + rs[".text"][0]:
                 return None, "%s: slot +0x%x: GAUGE_CODE rva 0x%x is not in retail's .text" % (path, off, tgt)
+            if form == "GAUGE_REBIND" and not any(rs[n][1] <= tgt < rs[n][1] + rs[n][0] for n in (".text", ".data", ".rdata")):
+                return None, "%s: slot +0x%x: GAUGE_REBIND rva 0x%x is not in retail's .text, .data or .rdata" % (path, off, tgt)
             if form == "GAUGE_DATA" and not 0 <= tgt < rs[".data"][0]:
                 return None, "%s: slot +0x%x: GAUGE_DATA target 0x%x is not inside the .data image" % (path, off, tgt)
         else:
@@ -496,6 +507,11 @@ def ptrs_check(path, rb, base, rs, va, rset, offs, kept_mode, ours, mixed=False,
     if not (kept_mode or mixed):
         for t in sorted(rset - offs - seen):
             return None, "%s: retail relocation at +0x%x is not ours, kept or listed" % (ours, t)
+    if rorder is not None and any(e[0] == "GAUGE_REBIND" for e in ents):  # GAUGE_REBIND lines are in retail's relocation order
+        want = [o for o in rorder if o in rset]
+        for got, wanted in zip([e[1] for e in ents], want):
+            if got != wanted:
+                return None, "%s: slot +0x%x is out of retail's relocation order (+0x%x comes next)" % (path, got, wanted)
     kind = next((e[0].split("_")[0] for e in ents if isinstance(e[0], str) and e[0].split("_")[0] in ("G3D", "MAIN") and e[0] != "L"), None)
     if kind:  # a G3D or MAIN list: an empty target set must fail too
         if kept_values is None:
@@ -584,11 +600,30 @@ def retail_tail(rb, base, rs, va, ln):
         img[rva - lo:rva - lo + n] = rb[raw:raw + n]
     return bytes(img[va - base - lo:va - base - lo + ln]), None
 
-def image_hash(mine, offs, cset=()):
+def link_targets(ob, obase, os_, start, vs, mine, offs, ours):
+    """(entries, error) for a --linked image: per relocation (in offset order) of ours, (offset, "data", target relative to the
+    image start) or (offset, "code", RVA in our .text); mine is our image before its relocated words are zeroed."""
+    text = os_.get(".text")
+    out = []
+    for t in sorted(offs):
+        if offs.count(t) > 1:
+            return None, "%s: our relocation at +0x%x is listed more than once (--linked)" % (ours, t)
+        rva = struct.unpack_from("<I", mine, t)[0] - obase
+        if start <= rva < start + vs:
+            out.append((t, "data", rva - start))
+        elif text and text[1] <= rva < text[1] + text[0]:
+            out.append((t, "code", rva))
+        else:
+            return None, "%s: our relocation at +0x%x targets RVA 0x%x, in neither the image nor our .text (--linked)" % (ours, t, rva & 0xFFFFFFFF)
+    return out, None
+
+def image_hash(mine, offs, cset=(), link=None):
     extra = b"cset" + b"".join(struct.pack("<I", t) for t in cset) if cset else b""
+    if link is not None:  # the data targets, relative to the image, and which slots are code
+        extra += b"link" + b"".join(struct.pack("<cI", k[:1].encode(), r if k == "data" else 0) for _, k, r in link)
     return hashlib.sha256(bytes(mine) + b"".join(struct.pack("<I", t) for t in sorted(offs)) + extra).hexdigest()
 
-def compare(retail, ours, kept_mode, rdatas=(), ptrs=None, switch=None, at=None, mixed=False, cset=None, tail=None, rawptrs=None, bound=None):
+def compare(retail, ours, kept_mode, rdatas=(), ptrs=None, switch=None, at=None, mixed=False, cset=None, tail=None, rawptrs=None, bound=None, linked=False):
     """Returns (rc, info); info is None unless rc == 0.  Prints what it always has."""
     rb, base, rdirs, rs = load(retail)
     if bound:
@@ -599,7 +634,7 @@ def compare(retail, ours, kept_mode, rdatas=(), ptrs=None, switch=None, at=None,
     for r in rt:
         if va <= r < va + vs:
             img[r - va:r - va + 4] = bytes(4)
-    ob, _, odirs, os_ = load(ours)
+    ob, obase, odirs, os_ = load(ours)
     if at:
         off = 0
     else:
@@ -616,7 +651,28 @@ def compare(retail, ours, kept_mode, rdatas=(), ptrs=None, switch=None, at=None,
         if t not in rset:
             print("%s: our relocation at +0x%x is not one of retail's" % (ours, t))
             return 1, None
+    link = None
+    if linked:
+        link, err = link_targets(ob, obase, os_, start, vs, mine, offs, ours)
+        if err:
+            print(err)
+            return 1, None
+    for t in offs:
         mine[t:t + 4] = bytes(4)
+    if linked:  # every relocation of retail's in the window is ours, at the same offset, bound to the same kind of place
+        for t in sorted(rset - set(offs)):
+            print("%s: retail's relocation at +0x%x is not one of ours (--linked)" % (ours, t))
+            return 1, None
+        for t, kind, target in link:
+            raw = struct.unpack("<I", read_rva(rb, rs, va + t, 4))[0] - base
+            rkind, rtarget = ("data", raw - va) if va <= raw < va + vs else ("code", raw)
+            if rkind == "code" and not (rs[".text"][1] <= raw < rs[".text"][1] + rs[".text"][0]):
+                print("%s: retail's relocation at +0x%x targets RVA 0x%x, not in its .text or .data (--linked)" % (ours, t, raw))
+                return 1, None
+            if (kind, target if kind == "data" else None) != (rkind, rtarget if rkind == "data" else None):
+                print("%s: our relocation at +0x%x is a %s pointer%s, retail's a %s pointer%s (--linked)"
+                      % (ours, t, kind, " to image+0x%x" % target if kind == "data" else "", rkind, " to image+0x%x" % rtarget if rkind == "data" else ""))
+                return 1, None
     ours_n = len(offs)
     hashed = bytes(mine)  # kept slots still raw
     kept = 0
@@ -662,7 +718,7 @@ def compare(retail, ours, kept_mode, rdatas=(), ptrs=None, switch=None, at=None,
     name = ours.split("/")[-1].split(".")[0].upper()
     print("%s: .data image 0x%x bytes identical (%d relocated, %d ours%s)"
           % (name, vs, len(rset), ours_n, ", %d kept" % kept + (", %d set in C" % len(csl) if cset else "") if kept_mode or mixed else ""))
-    info = dict(name=name, off=off, vs=vs, relocated=len(rset), hash=image_hash(hashed, offs, parse_cset(cset) if cset else ()), rdata=[])
+    info = dict(name=name, off=off, vs=vs, relocated=len(rset), hash=image_hash(hashed, offs, parse_cset(cset) if cset else (), link), rdata=[])
     for rva, ln in rdatas:
         res, err = rdata_check(rb, rs, ob, odirs, os_, ours, rva, ln)
         if err:
@@ -707,7 +763,7 @@ def compare(retail, ours, kept_mode, rdatas=(), ptrs=None, switch=None, at=None,
         print("%s: ptrs= needs the image to start at .data (off=0), not +0x%x" % (ours, off))
         return 1, None
     if ptrs:
-        ents, err = ptrs_check(ptrs, rb, base, rs, va, rset, set(offs), kept_mode, ours, mixed, kept_values)
+        ents, err = ptrs_check(ptrs, rb, base, rs, va, rset, set(offs), kept_mode, ours, mixed, kept_values, [r - va for r in rt])
         if err:
             print(err)
             return 1, None
@@ -745,7 +801,7 @@ def read_manifest(path):
             raise SystemExit("%s:%d: %s" % (path, n, why))
         if len(f) < 3:
             bad("a row needs MODULE retail ours")
-        row = dict(module=f[0], retail=f[1], ours=f[2], kept=False, mixed=False, cset=None, tail=None, at=None, rdata=[], ptrs=None, rawptrs=None, bound=None, switch=None, off=None, len=None, sha=None, text=line)
+        row = dict(module=f[0], retail=f[1], ours=f[2], kept=False, mixed=False, linked=False, cset=None, tail=None, at=None, rdata=[], ptrs=None, rawptrs=None, bound=None, switch=None, off=None, len=None, sha=None, text=line)
         for w in f[3:]:
             k, _, v = w.partition("=")
             try:
@@ -753,6 +809,8 @@ def read_manifest(path):
                     row["kept"] = True
                 elif w == "--mixed":
                     row["mixed"] = True
+                elif w == "--linked":
+                    row["linked"] = True
                 elif k == "cset" and v:
                     parse_cset(v)
                     row["cset"] = v
@@ -788,6 +846,8 @@ def read_manifest(path):
                 bad("bad number in %r" % w)
         if row["kept"] and row["mixed"]:
             bad("--mixed and --kept are exclusive")
+        if row["linked"] and (not row["at"] or row["kept"] or row["mixed"] or row["bound"] or row["ptrs"] or row["rawptrs"] or row["switch"] or row["tail"]):
+            bad("--linked needs at= and excludes --kept, --mixed and the pointer-list fields")
         if row["cset"] and not row["mixed"]:
             bad("cset= is only valid with --mixed")
         if row["bound"] and (not row["at"] or row["kept"] or row["mixed"] or row["rdata"] or row["ptrs"] or row["rawptrs"] or row["switch"] or row["tail"]):
@@ -800,7 +860,7 @@ def read_manifest(path):
     return rows
 
 def format_row(r):
-    f = [r["module"], r["retail"], r["ours"]] + (["--kept"] if r["kept"] else []) + (["--mixed"] if r["mixed"] else []) + (["at=" + r["at"]] if r["at"] else []) + (["cset=" + r["cset"]] if r["cset"] else [])
+    f = [r["module"], r["retail"], r["ours"]] + (["--kept"] if r["kept"] else []) + (["--mixed"] if r["mixed"] else []) + (["--linked"] if r["linked"] else []) + (["at=" + r["at"]] if r["at"] else []) + (["cset=" + r["cset"]] if r["cset"] else [])
     f += ["rdata=0x%x:0x%x%s" % (a, b, ":" + c if c else "") for a, b, c in r["rdata"]]
     if r["ptrs"]:
         f.append("ptrs=" + r["ptrs"][0] + (":" + r["ptrs"][1] if r["ptrs"][1] else ""))
@@ -819,19 +879,26 @@ def format_row(r):
     return " ".join(f)
 
 def hash_check(row, ours):
-    ob, _, odirs, os_ = load(ours)
+    ob, obase, odirs, os_ = load(ours)
     bad = []
     offs = []
     if row["off"] is None:
         bad.append("the manifest row has no hashes yet")
     else:
         start, mine, offs = our_image(ob, odirs, os_, ours, row["off"], row["len"], row["at"])
+        link = None
+        if mine is not None and row["linked"]:
+            link, err = link_targets(ob, obase, os_, start, row["len"], mine, offs, ours)
+            if err:
+                bad.append(err)
+                mine = None
         if mine is None:
-            bad.append(offs)
+            if not bad:
+                bad.append(offs)
         else:
             for t in offs:
                 mine[t:t + 4] = bytes(4)
-            if image_hash(mine, offs, parse_cset(row["cset"]) if row["cset"] else ()) != row["sha"]:
+            if image_hash(mine, offs, parse_cset(row["cset"]) if row["cset"] else (), link) != row["sha"]:
                 bad.append("%s: our .data image (or its relocations) differs from the manifest" % ours)
     wins = [("%s: .rdata 0x%x:0x%x" % (ours, a, b), b, c) for a, b, c in row["rdata"]]
     if row["switch"]:
@@ -884,8 +951,8 @@ def hash_check(row, ours):
             bad.append("%s: raw pointer rows %s differ from the manifest" % (ours, row["rawptrs"][0]))
     return bad
 
-def run_hash(module, ours, manifest, warn):
-    rows = [r for r in read_manifest(manifest) if isinstance(r, dict) and r["module"] == module]
+def run_hash(module, ours, manifest, warn, rows=None, warn_code=0):
+    rows = [r for r in (rows if rows is not None else read_manifest(manifest)) if isinstance(r, dict) and r["module"] == module]
     if len(rows) != 1:
         raise SystemExit("%s: no single row for %s" % (manifest, module))
     bad = hash_check(rows[0], ours)
@@ -898,7 +965,7 @@ def run_hash(module, ours, manifest, warn):
     if warn:
         os.utime(ours, (0, 0))  # rerun this step next build, against the manifest as it is then
         print("WARNING only (UPDATE=1)")
-        return 0
+        return warn_code
     return 1
 
 def run_manifest(orig, manifest, update):
@@ -909,7 +976,7 @@ def run_manifest(orig, manifest, update):
         if not isinstance(r, dict):
             continue
         rc, info = compare(os.path.join(orig, r["retail"]), r["ours"], r["kept"],
-                           [(a, b) for a, b, _ in r["rdata"]], r["ptrs"] and r["ptrs"][0], r["switch"], r["at"], r["mixed"], r["cset"], r["tail"], r["rawptrs"] and r["rawptrs"][0], r["bound"] and r["bound"][0])
+                           [(a, b) for a, b, _ in r["rdata"]], r["ptrs"] and r["ptrs"][0], r["switch"], r["at"], r["mixed"], r["cset"], r["tail"], r["rawptrs"] and r["rawptrs"][0], r["bound"] and r["bound"][0], r["linked"])
         if rc:
             fails += 1
             continue
@@ -1422,6 +1489,82 @@ def self_test(orig, manifest):
             return text[:i] + line + new + text[text.index(")", i):]
         return edit
 
+    def rebind_line(n):  # a GAUGE_REBIND line (index n) edited by fn
+        def pick(fn):
+            def edit(text, offs):
+                ls = text.split("\n")
+                at = [i for i, l in enumerate(ls) if l.startswith("GAUGE_REBIND")][n]
+                fn(ls, at)
+                return "\n".join(ls)
+            return edit
+        return pick
+
+    def gauge_rdata(b, dirs, secs, start, row):  # one byte of 737ADI's kept .rdata window
+        rva, ln, sha = row["rdata"][0]
+        b[file_off(b, secs, rdata_windows(bytes(b), secs, ln, sha)[0])] ^= 0xFF
+
+    def swap_next(ls, at):
+        ls[at], ls[at + 1] = ls[at + 1], ls[at]
+
+    def synthetic_rdata_target():  # no real gauge slot points into .rdata: retarget one slot of a copy of retail's file, and its row
+        d = tempfile.mkdtemp(dir=tmp)
+        row = dict(rows["737ADI"])
+        os.makedirs(os.path.join(d, os.path.dirname(row["retail"])))
+        b = bytearray(open(os.path.join(orig, row["retail"]), "rb").read())
+        _, base, rdirs, rs = load(os.path.join(orig, row["retail"]))
+        ents = parse_ptrs(row["ptrs"][0])[0]
+        slot = ents[0][1]
+        struct.pack_into("<I", b, rs[".data"][3] + slot, base + rs[".rdata"][1] + 8)
+        open(os.path.join(d, row["retail"]), "wb").write(b)
+        text = open(row["ptrs"][0]).read()
+        new = os.path.join(d, "rebind.inc")
+        open(new, "w").write(text.replace("GAUGE_REBIND(0x%x, 0x%x)" % ents[0][1:], "GAUGE_REBIND(0x%x, 0x%x)" % (slot, rs[".rdata"][1] + 8), 1))
+        row["ptrs"] = (new, None)
+        m = os.path.join(d, "m.txt")
+        open(m, "w").write(format_row(row) + "\n")
+        expect("139 ptrs: a GAUGE_REBIND target in .rdata (synthetic) passes", run(["--orig", d, "--manifest", m]), "data-images:", 0)
+
+    def batch_hash():  # --hash with several pairs
+        good, other = rows["737ADI"], rows["737ALTIM"]
+        bad1, bad2 = (mutated(x, flip_at(0))[1]["ours"] for x in ("737ADI", "737ALTIM"))
+        expect("145 hash: one pair passes", run(["--hash", "737ADI", good["ours"], "--manifest", manifest]), "", 0)
+        expect("146 hash: two pairs pass", run(["--hash", "737ADI", good["ours"], "737ALTIM", other["ours"], "--manifest", manifest]), "", 0)
+        p = run(["--hash", "737ADI", good["ours"], "737ALTIM", bad2, "--manifest", manifest])
+        expect("147 hash: a later failing pair", p, bad2)
+        if bad2 not in p.stdout or good["ours"] in p.stdout:
+            fails.append("147 hash: the report must name the failing pair only (%s)" % p.stdout.strip())
+        p = run(["--hash", "737ADI", bad1, "737ALTIM", bad2, "--manifest", manifest])
+        expect("148 hash: two failing pairs", p, bad2)
+        if bad1 not in p.stdout:
+            fails.append("148 hash: every failing pair is reported (%s)" % p.stdout.strip())
+        expect("149 hash: an odd count is a usage error", run(["--hash", "737ADI", good["ours"], "737ALTIM", "--manifest", manifest]), "Usage:")
+        cases[0] += 4
+
+    def mdl_slots(b, dirs, secs, start, row):  # our relocated slots of an MDL image, as image offsets
+        return sorted(r - start for r in targets(bytes(b), dirs, secs) if 0 <= r - start < row["len"])
+
+    def mdl_slot(i, change):  # change(b, file offset of slot i, our image base, image start RVA)
+        def edit(b, dirs, secs, start, row):
+            change(b, file_off(b, secs, start + mdl_slots(b, dirs, secs, start, row)[i]), load(row["ours"])[1], start)
+        return edit
+
+    def drop_slot(i):  # slot i of the image is no longer a relocation of ours
+        def edit(b, dirs, secs, start, row):
+            want = start + mdl_slots(b, dirs, secs, start, row)[i]
+            for hdr, ents in reloc_blocks(b, dirs, secs):
+                page = struct.unpack_from("<I", b, hdr)[0]
+                for e in ents:
+                    if page + (struct.unpack_from("<H", b, e)[0] & 0xFFF) == want:
+                        struct.pack_into("<H", b, e, 0)
+                        return
+            raise SystemExit("no relocation to drop")
+        return edit
+
+    dup_slot = lambda b, dirs, secs, start, row: add_reloc(b, dirs, secs, start + mdl_slots(b, dirs, secs, start, row)[0])
+    nudge = mdl_slot(0, lambda b, o, base, start: b.__setitem__(o, (b[o] + 2) & 255))  # the header's data pointer, two bytes on
+    code_out = mdl_slot(2, lambda b, o, base, start: struct.pack_into("<I", b, o, base + 0x1000000))  # a code slot aimed past everything
+    code_in = mdl_slot(2, lambda b, o, base, start: struct.pack_into("<I", b, o, base + start + 0x10))  # a code slot aimed into the image
+
     try:
         for fn in (
                 update_tail_hash,
@@ -1605,7 +1748,41 @@ def self_test(orig, manifest):
                          "not in retail's .text", "pointer list"),
                 listcase("WARNING", on_first(lambda l, o: ""), "136 ptrs: a GAUGE_* line dropped",
                          "is not ours, kept or listed", "pointer list"),
-                listcase("SUCTION", lambda t, o: "/* x */\n" + t, "137 ptrs: a GAUGE_* list with an added comment", "data-images:", "", 0)):
+                listcase("SUCTION", lambda t, o: "/* x */\n" + t, "137 ptrs: a GAUGE_* list with an added comment", "data-images:", "", 0),
+                retail("737ADI", flip_at(0), "first difference", "140 retail: an in-range non-pointer byte of a gauge's image"),
+                hashed("737ADI", flip_at(0), "differs from the manifest", "141 hash: an in-range non-pointer byte of a gauge's image"),
+                retail("737ADI", gauge_rdata, "found 0 times", "142 retail: a byte of a kept .rdata window"),
+                hashed("737ADI", gauge_rdata, "window found 0 times", "143 hash: a byte of a kept .rdata window"),
+                listcase("737ADI", rebind_line(0)(lambda ls, at: ls.__setitem__(at, sub_nth(ls[at], 1, "0x3004"))), "150 rebind: a target changed",
+                         "retail 0x", "pointer list"),
+                listcase("737ADI", rebind_line(0)(lambda ls, at: ls.__setitem__(at, sub_nth(ls[at], 0, "0x19"))), "151 rebind: a slot changed",
+                         "one retail does not relocate", "pointer list"),
+                listcase("737ADI", rebind_line(3)(lambda ls, at: ls.pop(at)), "152 rebind: a line dropped",
+                         "is not ours, kept or listed", "pointer list"),
+                listcase("737ADI", rebind_line(3)(lambda ls, at: ls.insert(at, ls[at])), "153 rebind: a line duplicated",
+                         "duplicate slot", "pointer list"),
+                listcase("737ADI", rebind_line(3)(swap_next), "154 rebind: two lines reordered",
+                         "out of retail's relocation order", "pointer list"),
+                listcase("737ADI", rebind_line(3)(lambda ls, at: ls.__setitem__(at, sub_nth(ls[at], 1, "0x5000"))), "155 rebind: a target outside the three sections",
+                         "not in retail's .text, .data or .rdata", "pointer list"),
+                listcase("737ADI", lambda t, o: "/* x */\n" + t, "156 rebind: a list with an added comment", "data-images:", "", 0),
+                synthetic_rdata_target,
+                batch_hash,
+                retail("BOEING737-400_N", nudge, "image+0x36", "157 linked: a data target moved"),
+                hashed("BOEING737-400_N", nudge, "differs from the manifest", "158 hash: a data target moved"),
+                retail("BOEING737-400_N", code_out, "in neither the image nor our .text", "159 linked: a code target outside our .text"),
+                retail("BOEING737-400_N", code_in, "retail's a code pointer", "160 linked: a code slot aimed into the image"),
+                hashed("BOEING737-400_N", code_in, "differs from the manifest", "161 hash: a code slot aimed into the image"),
+                retail("BOEING737-400_N", drop_slot(3), "is not one of ours (--linked)", "162 linked: one of retail's relocations is not ours"),
+                hashed("BOEING737-400_N", drop_slot(3), "differs from the manifest", "163 hash: one of our relocations dropped"),
+                retail("BOEING737-400_N", foreign, "not one of retail's", "164 linked: a relocation at a slot retail does not relocate"),
+                retail("EXTRA300S_C", flip_at(0x100), "first difference", "165 retail: a byte of a crash model's .mdlimg image"),
+                hashed("EXTRA300S_C", flip_at(0x100), "differs from the manifest", "166 hash: a byte of a crash model's .mdlimg image"),
+                retail("SOPWITHCAMEL_N", flip_copy, "found 0 times", "167 retail: Sopwith's literal"),
+                hashed("SOPWITHCAMEL_N", flip_copy, "window found 0 times", "168 hash: Sopwith's literal"),
+                retail("BOEING737-400_N", dup_slot, "listed more than once", "169 linked: a relocation of ours repeated"),
+                hashed("BOEING737-400_N", dup_slot, "listed more than once", "170 hash: a relocation of ours repeated"),
+                ):
             case(fn)
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
@@ -1626,11 +1803,32 @@ def cli():
     kept, update, st = opt("--kept", False), opt("--update", False), opt("--self-test", False)
     rdata, orig = opt("--rdata"), opt("--orig")
     manifest = opt("--manifest") or os.path.join(os.path.dirname(os.path.abspath(__file__)), "data_images.txt")
+    if "--gauge-pairs" in a:  # MODULE DLL pairs of the manifest's gauge rows; exit 1 unless they are exactly the gauges of the given JSON
+        import json
+        i = a.index("--gauge-pairs")
+        if len(a) != i + 2:
+            sys.exit(__doc__)
+        gauges = json.load(open(a[i + 1]))
+        rows = [r for r in read_manifest(manifest) if isinstance(r, dict) and r["ours"].startswith("bin/gauges-all/Gauges/")]
+        if sorted((r["module"], r["ours"]) for r in rows) != sorted((g["name"], "bin/gauges-all/Gauges/" + g["installed"]) for g in gauges):
+            sys.exit("%s: the gauge rows do not cover exactly the %d gauges of %s" % (manifest, len(gauges), a[i + 1]))
+        print(" ".join("%s %s" % (r["module"], r["ours"]) for r in rows))
+        return 0
     if "--hash" in a:
         i = a.index("--hash")
-        if len(a) != i + 3:
+        pairs = a[i + 1:]
+        if not pairs or len(pairs) % 2:
             sys.exit(__doc__)
-        return run_hash(a[i + 1], a[i + 2], manifest, env_update)
+        rows = read_manifest(manifest)  # one pair behaves as before; several report every failing pair
+        def one(module, ours):
+            try:
+                return run_hash(module, ours, manifest, env_update, rows, 3 if len(pairs) > 2 else 0)
+            except (Exception, SystemExit) as e:
+                print("%s %s: %s" % (module, ours, e))
+                return 1
+        codes = [one(pairs[j], pairs[j + 1]) for j in range(0, len(pairs), 2)]
+        # exit 3 (several pairs, UPDATE=1 only): a mismatch was only warned about, so the caller must not record the step as done
+        return 1 if 1 in codes else 3 if 3 in codes else 0
     if orig:
         if a:
             sys.exit(__doc__)

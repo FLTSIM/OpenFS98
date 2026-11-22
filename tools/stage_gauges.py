@@ -15,7 +15,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('game', type=Path)
     parser.add_argument('--retail', action='store_true')
-    parser.add_argument('--manifest', type=Path, default=Path('bin/gauges-all/manifest.json'))
+    parser.add_argument('--manifest', type=Path, default=Path('src/gauges/gauges_manifest.json'))
     parser.add_argument('--rebuilt', type=Path, default=Path('bin/gauges-all/Gauges'))
     args = parser.parse_args()
     gauges = json.loads(args.manifest.read_text())

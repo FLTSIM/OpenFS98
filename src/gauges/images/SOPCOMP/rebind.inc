@@ -1,0 +1,23 @@
+/* SOPCOMP.GAU's relocated .data slots, in retail's relocation order.  GAUGE_REBIND(off, rva): the slot at +off
+ * (from the start of .data) holds the image base plus rva, an RVA in .data, .rdata or .text; attach stores the address
+ * of the same place in this image (src/gauges/gauge.h, with the hand-written gauge's routines for the code ones). */
+GAUGE_REBIND(0x1c, 0x3000)
+GAUGE_REBIND(0x20, 0x3210)
+GAUGE_REBIND(0x24, 0x1170)
+GAUGE_REBIND(0x28, 0x1090)
+GAUGE_REBIND(0x2c, 0x10e0)
+GAUGE_REBIND(0x30, 0x10f0)
+GAUGE_REBIND(0x34, 0x1100)
+GAUGE_REBIND(0x38, 0x1120)
+GAUGE_REBIND(0x3c, 0x1130)
+GAUGE_REBIND(0xa0, 0x3018)
+GAUGE_REBIND(0xac, 0x3068)
+GAUGE_REBIND(0x134, 0x1020)
+GAUGE_REBIND(0x1b8, 0x3080)
+GAUGE_REBIND(0x1e0, 0x3018)
+GAUGE_REBIND(0x1e8, 0x31b8)
+GAUGE_REBIND(0x1ec, 0x3068)
+GAUGE_REBIND(0x210, 0x31c0)
+GAUGE_REBIND(0x2bc, 0x1160)
+GAUGE_REBIND(0x2c0, 0x1160)
+GAUGE_REBIND(0x2d0, 0x3018)

@@ -2,7 +2,7 @@
  * the CRT's entry (0x20483490) and DLL initialisation (0x204833c0) as retail runs them,
  * around DllMain (simsui_fonts.c).
  *
- * The image (bin/simsui-native/simsui_image.S, from tools/gen_simsui_native.py) is retail's
+ * The image (src/simsui/simsui_image.inc, in simsui_image.c) is retail's
  * .rdata and .data from RVA 0x15000; fs98_simsui_image is placed so that IMAGE(rva) lands in
  * it. Each pointer retail's relocations list there is made ours before anything runs:
  * simsui_native_tables.inc says which. */

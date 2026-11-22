@@ -20,14 +20,15 @@ set(OFS_TOOLCHAIN win32-retail)
 #   sites: ADVDRV, ANALYSIS, CONTROLS, DEMO, G3D, PANELS, REALITY, WINDOW (cmake/steps/all.cmake) and their
 #          difftest builds (*_ours.dll, PANELS_unit.dll in cmake/targets.cmake)
 #   without it: code changes in ADVDRV, CONTROLS, DEMO, G3D; ANALYSIS, PANELS, REALITY, WINDOW unchanged.
-#   baselines without it: demodiff-run 20000 scenarios, 0 differ (so DEMO's baseline does not need it).
-#   see the spec's Implementation Notes for g3ddiff-run, advdrvdiff-run and controlsdiff-run.
+#   baselines without it: demodiff-run, advdrvdiff-run, g3ddiff-run and controlsdiff-run each 20000 scenarios, 0 differ.
+#   So no baseline needs it; it stays because the byte-identity gates compare the DLLs with it.
 # -fno-tree-loop-distribute-patterns, -fno-tree-vectorize
 #   sites: the 25 simsui-native objects, SIM1_ours.sim (all.cmake), sim1rdiff.exe, simsuidiff.exe (difftests.cmake),
 #          the SIMSUI break build (tools/simsui_breaks.py)
 #   without either: code changes in SIM1_ours.sim, sim1rdiff.exe, simsuidiff.exe and in several simsui objects
 #   (loop-distribute: text, textart, cdib; vectorize: dib, dibsection, button, dialog, tabs, slider, textart, cdib,
-#   native). Baselines: see the spec's Implementation Notes (sim1rdiff-run, simsuidiff-run).
+#   native). Baselines without either: sim1rdiff-run 372000 comparisons, 0 differ; simsuidiff-run N=2000, 0 differ.
+#   So no baseline needs them; they stay for the byte-identity gates.
 # -fno-math-errno
 #   sites: SIM1_ours.sim (all.cmake), sim1rdiff.exe (difftests.cmake)
-#   without it: no code change in either site; nothing breaks, so the flag has no effect today.
+#   without it: no code change in either site (sim1rdiff-run 372000 comparisons, 0 differ); the flag has no effect today.

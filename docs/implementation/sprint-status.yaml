@@ -38,7 +38,7 @@ development_status:
   epic-1: in-progress
   1-1-cmake-builds-everything-the-makefile-builds: review
   1-2-cmake-runs-every-verification-target-and-the-makefile-is-ret: done
-  1-3-one-flag-set-for-every-unit: in-progress
+  1-3-one-flag-set-for-every-unit: done
   1-4-module-data-decompiled-no-raw-dumps-in-git: in-progress
   1-5-every-kept-retail-bug-is-marked-in-the-code: backlog
   1-6-retail-reference-logs-recorded: backlog

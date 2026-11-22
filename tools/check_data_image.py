@@ -45,6 +45,15 @@ rebases them at start-up) and a file whose HOST_RT_CODE_POINTER(site, target) an
 exactly the set retail gives: every aligned word of its .rdata and .data (raw size) whose value lies in .text (a code row) or in
 base+0x16000..base+0x1f000 (a data row), each target being that word minus the image base; a repeated, missing, extra or mistargeted
 row fails.  Neither image may have relocations.  --hash hashes the parsed rows.
+bound=PATH[:SHA256] (manifest field, SIMSUI; with at=): a pointer image bound at load (SIMSUI.DLL's .rdata and .data from RVA 0x15000 hold
+retail's raw virtual addresses and bind_image() rewrites each at attach from src/simsui/simsui_native_tables.inc).  Retail's window is
+mapped section by section (.rdata, the gap, .data with zero past its raw data, up to 0x21400), unrelocated and with nothing zeroed; our
+symbol's bytes must equal it, with none of our relocations inside.  PATH is parsed strictly (the two #defines, which must equal
+0x15000 and 0x21400, SIMSUI_RELOC_DATA/CODE/IMPORT/NONE rows, and comments); its sites must be unique, ascending and equal retail's
+relocations in the window, and each row's kind and target must equal what the generator's classifier (tools/gen_simsui_native.py)
+gives for retail's raw word: DATA when it lies in the window plus 0x10; else in .text, an IMPORT when a jmp [slot] thunk of an import
+(simsui_tables.inc), a CODE when the harness's operation table (tools/difftest/simsui_operations.inc) has it, a NONE when it is a
+funclet (0x13560 and up, or one of four).  sha256= hashes the window; the bound= hash covers the bounds and the rows in order.
 switch=IDX_RVA:LEN:JT_RVA:T=A,...[:SHA256] (manifest field): a table rebuilt from retail's compressed
 switch (byte table, jump table, target T's action A); it must appear once in ours.  --hash hashes the window.
 --manifest with --orig: every row against retail.  UPDATE=1 (or --update)
@@ -308,6 +317,131 @@ def rawptrs_check(path, rb, base, rs):
         return None, "%s: retail's pointer word at 0x%x (HOST_RT_%s_POINTER) is not listed" % (path, site, want[site][0])
     return rows, None
 
+BOUND_START, BOUND_END, BOUND_BASE = 0x15000, 0x21400, 0x20470000
+BOUND_FUNCLETS = (0x131f3, 0x13270, 0x1327d, 0x1337f)  # the unwind funclets below 0x13560 (tools/gen_simsui_native.py)
+BOUND_ROW = re.compile(r"^SIMSUI_RELOC_(DATA|CODE|IMPORT|NONE)\((0x[0-9a-f]+)(?:, (0x[0-9a-f]+|\w+))?\)$")
+BOUND_DEFINE = re.compile(r"^#define (SIMSUI_IMAGE_START|SIMSUI_IMAGE_END) (0x[0-9a-f]+)$")
+BOUND_OPS, BOUND_TABLES = "tools/difftest/simsui_operations.inc", "src/simsui/simsui_tables.inc"
+
+def parse_bound(path):
+    """((start, end), rows, error): rows are (kind, site, arg) in source order; arg is a target, a routine name, an import index or None."""
+    try:
+        text = open(path).read()
+    except OSError as e:
+        return None, None, "%s: %s" % (path, e.strerror)
+    text = re.sub(r"/\*.*?\*/", lambda m: "\n" * m.group(0).count("\n"), text, flags=re.S)
+    bounds, rows = {}, []
+    for n, line in enumerate(text.split("\n"), 1):
+        line = line.strip()
+        if not line:
+            continue
+        d, m = BOUND_DEFINE.match(line), BOUND_ROW.match(line)
+        if d and d.group(1) not in bounds:
+            bounds[d.group(1)] = hexint(d.group(2))
+        elif m and (m.group(3) is None) == (m.group(1) == "NONE") and (m.group(1) != "DATA" or m.group(3).startswith("0x")) and (m.group(1) != "IMPORT" or re.fullmatch(r"0|[1-9][0-9]*", m.group(3))):
+            kind, arg = m.group(1), m.group(3)
+            rows.append((kind, hexint(m.group(2)), hexint(arg) if kind == "DATA" else int(arg) if kind == "IMPORT" else arg))
+        else:
+            return None, None, "%s:%d: not a #define of the bounds or a plain SIMSUI_RELOC_ row: %s" % (path, n, line)
+    if bounds != {"SIMSUI_IMAGE_START": BOUND_START, "SIMSUI_IMAGE_END": BOUND_END}:
+        return None, None, "%s: the bounds must be SIMSUI_IMAGE_START 0x%x and SIMSUI_IMAGE_END 0x%x, got %s" % (path, BOUND_START, BOUND_END, {k: hex(v) for k, v in bounds.items()})
+    return (BOUND_START, BOUND_END), rows, None
+
+def bound_hash(bounds, rows):
+    return hashlib.sha256(("0x%x 0x%x\n" % bounds + "\n".join("%s,0x%x,%s" % (k, s, a) for k, s, a in rows)).encode()).hexdigest()
+
+def bound_window(rb, base, rs):
+    """Retail's mapped window, as tools/gen_simsui_native.py maps it: (bytes, error)."""
+    if base != BOUND_BASE:
+        return None, "image base moved (0x%x, not 0x%x)" % (base, BOUND_BASE)
+    vs, rva, _, _ = rs[".data"]
+    if rs[".rdata"][1] != BOUND_START or ((rva + vs + 15) & ~15) != BOUND_END:
+        return None, "retail's .rdata or .data moved: the image is not 0x%x..0x%x" % (BOUND_START, BOUND_END)
+    img = bytearray(BOUND_END - BOUND_START)
+    for name in (".rdata", ".data"):
+        vs, rva, rsz, raw = rs[name]
+        n = min(rsz, vs, BOUND_END - rva)
+        img[rva - BOUND_START:rva - BOUND_START + n] = rb[raw:raw + n]
+    return bytes(img), None
+
+def bound_check(path, rb, base, rs, rdirs, window):
+    """The rows of path against retail's relocations in the window and the generator's classifier; (rows, counts, error)."""
+    bounds, rows, err = parse_bound(path)
+    if err:
+        return None, None, err
+    sites = sorted(r for r in targets(rb, rdirs, rs) if BOUND_START <= r < BOUND_END)
+    if any(r + 4 > BOUND_END for r in sites):
+        return None, None, "retail's relocation at 0x%x straddles the end of the window" % [r for r in sites if r + 4 > BOUND_END][0]
+    seen = set()
+    for kind, site, _ in rows:
+        if site in seen:
+            return None, None, "%s: SIMSUI_RELOC_%s at 0x%x is repeated" % (path, kind, site)
+        seen.add(site)
+    if [r[1] for r in rows] != sorted(seen) or not seen <= set(sites):
+        bad = [r[1] for r in rows if r[1] not in sites]
+        return None, None, ("%s: SIMSUI_RELOC_ row at 0x%x is not one of retail's relocations in the window" % (path, bad[0]) if bad
+                            else "%s: the rows are not in ascending order of site" % path)
+    for site in sites:
+        if site not in seen:
+            return None, None, "%s: retail's relocation at 0x%x is not listed" % (path, site)
+    ops, op_rvas = {}, {}
+    for rva, name in re.findall(r"OPV?\(0x([0-9a-f]+), (\w+)", open(BOUND_OPS).read()):
+        ops.setdefault(int(rva, 16), "fs98_simsui_" + name)
+        op_rvas.setdefault("fs98_simsui_" + name, set()).add(int(rva, 16))
+    imports = {int(slot, 16): int(i) for i, slot in re.findall(r'SIMSUI_IMPORT\((\d+), \w+, "[^"]+", "[^"]+", (0x[0-9a-f]+),', open(BOUND_TABLES).read())}
+    tv, trva = rs[".text"][:2]
+    counts = {"DATA": 0, "CODE": 0, "IMPORT": 0, "NONE": 0}
+    for kind, site, arg in rows:
+        target = struct.unpack_from("<I", window, site - BOUND_START)[0] - base
+        why = "SIMSUI_RELOC_%s at 0x%x (retail's word 0x%x)" % (kind, site, target + base)
+        if BOUND_START <= target < BOUND_END + 0x10:
+            want = "DATA"
+            if (kind, arg) != (want, target):
+                return None, None, "%s: %s: retail's word is a pointer into the image, SIMSUI_RELOC_DATA 0x%x" % (path, why, target)
+        elif trva <= target < trva + tv:
+            thunk = read_rva(rb, rs, target, 6)
+            index = imports.get(struct.unpack_from("<I", thunk, 2)[0] - base) if thunk[:2] == b"\xff\x25" else None
+            if index is not None:
+                if (kind, arg) != ("IMPORT", index):
+                    return None, None, "%s: %s: retail's word is the thunk of import %d, SIMSUI_RELOC_IMPORT(0x%x, %d)" % (path, why, index, site, index)
+            elif target in ops:
+                if kind != "CODE" or target not in op_rvas.get(arg, ()):
+                    return None, None, "%s: %s: retail's word is routine 0x%x, which the harness knows as %s" % (path, why, target, ops[target])
+            elif target >= 0x13560 or target in BOUND_FUNCLETS:
+                if kind != "NONE":
+                    return None, None, "%s: %s: retail's word is a funclet, SIMSUI_RELOC_NONE(0x%x)" % (path, why, site)
+            else:
+                return None, None, "%s: %s: retail's word is routine 0x%x, which the harness does not verify" % (path, why, target)
+        else:
+            return None, None, "%s: %s: retail's word is outside the image and .text" % (path, why)
+        counts[kind] += 1
+    return rows, counts, None
+
+def compare_bound(rb, base, rdirs, rs, ours, at, bound):
+    """compare() for a bound= row: our symbol's window against retail's unrelocated one, then the table; (rc, info)."""
+    window, err = bound_window(rb, base, rs)
+    ob, _, odirs, os_ = load(ours)
+    if not err and not at:
+        err = "%s: bound= needs at=" % ours
+    if not err:
+        start, mine, offs = our_image(ob, odirs, os_, ours, 0, len(window), at)
+        err = offs if mine is None else "%s: our relocation at +0x%x is inside the bound= window" % (ours, offs[0]) if offs else None
+    if not err:
+        diff = next((i for i in range(len(window)) if window[i] != mine[i]), None)
+        if diff is not None:
+            err = "%s: first difference at +0x%x (RVA 0x%x): retail 0x%02x, ours 0x%02x" % (ours, diff, BOUND_START + diff, window[diff], mine[diff])
+    rows = counts = None
+    if not err:
+        rows, counts, err = bound_check(bound, rb, base, rs, rdirs, window)
+    if err:
+        print(err)
+        return 1, None
+    name = ours.split("/")[-1].split(".")[0].upper()
+    print("%s: image 0x%x bytes identical to retail's unrelocated window; bound rows %s: %d DATA, %d CODE, %d IMPORT, %d NONE (%d)"
+          % (name, len(window), bound, counts["DATA"], counts["CODE"], counts["IMPORT"], counts["NONE"], len(rows)))
+    return 0, dict(name=name, off=0, vs=len(window), relocated=len(rows), hash=image_hash(mine, []), rdata=[], ptrs=None, switch=None, tail=None,
+                   rawptrs=None, bound=(bound, bound_hash((BOUND_START, BOUND_END), rows), len(rows)))
+
 def ptrs_check(path, rb, base, rs, va, rset, offs, kept_mode, ours, mixed=False, kept_values=None):
     """Check a pointer list against retail; returns (entries, error).  kept_mode and mixed both relax completeness to: every other slot is kept or (mixed) zero."""
     ents, err = parse_ptrs(path)
@@ -441,9 +575,11 @@ def image_hash(mine, offs, cset=()):
     extra = b"cset" + b"".join(struct.pack("<I", t) for t in cset) if cset else b""
     return hashlib.sha256(bytes(mine) + b"".join(struct.pack("<I", t) for t in sorted(offs)) + extra).hexdigest()
 
-def compare(retail, ours, kept_mode, rdatas=(), ptrs=None, switch=None, at=None, mixed=False, cset=None, tail=None, rawptrs=None):
+def compare(retail, ours, kept_mode, rdatas=(), ptrs=None, switch=None, at=None, mixed=False, cset=None, tail=None, rawptrs=None, bound=None):
     """Returns (rc, info); info is None unless rc == 0.  Prints what it always has."""
     rb, base, rdirs, rs = load(retail)
+    if bound:
+        return compare_bound(rb, base, rdirs, rs, ours, at, bound)
     vs, va, rawsize, raw = rs[".data"]
     img = bytearray(read_rva(rb, rs, va, vs))
     rt = targets(rb, rdirs, rs)
@@ -521,7 +657,7 @@ def compare(retail, ours, kept_mode, rdatas=(), ptrs=None, switch=None, at=None,
             return 1, None
         print("%s: .rdata 0x%x:0x%x bytes identical (at our RVA 0x%x)" % (name, rva, ln, res[0]))
         info["rdata"].append((rva, ln, res[1]))
-    info["ptrs"] = info["switch"] = info["tail"] = info["rawptrs"] = None
+    info["ptrs"] = info["switch"] = info["tail"] = info["rawptrs"] = info["bound"] = None
     if tail:
         sym, tva, tln, _ = tail
         want, err = retail_tail(rb, base, rs, tva, tln)
@@ -572,7 +708,7 @@ def compare(retail, ours, kept_mode, rdatas=(), ptrs=None, switch=None, at=None,
         info["switch"] = switch[:4] + (hashlib.sha256(pat).hexdigest(),)
     return 0, info
 
-# --- the manifest: MODULE retail ours [--kept|--mixed] [at=SYMBOL] [rdata=RVA:LEN[:SHA256] ...] [ptrs=PATH[:SHA256]] [rawptrs=PATH[:SHA256]] [switch=...] [off=0x.. len=0x.. sha256=..]
+# --- the manifest: MODULE retail ours [--kept|--mixed] [at=SYMBOL] [rdata=RVA:LEN[:SHA256] ...] [ptrs=PATH[:SHA256]] [rawptrs=PATH[:SHA256]] [bound=PATH[:SHA256]] [switch=...] [off=0x.. len=0x.. sha256=..]
 
 def read_manifest(path):
     """Rows as dicts (with their text as read); comment and blank lines as plain strings."""
@@ -589,7 +725,7 @@ def read_manifest(path):
             raise SystemExit("%s:%d: %s" % (path, n, why))
         if len(f) < 3:
             bad("a row needs MODULE retail ours")
-        row = dict(module=f[0], retail=f[1], ours=f[2], kept=False, mixed=False, cset=None, tail=None, at=None, rdata=[], ptrs=None, rawptrs=None, switch=None, off=None, len=None, sha=None, text=line)
+        row = dict(module=f[0], retail=f[1], ours=f[2], kept=False, mixed=False, cset=None, tail=None, at=None, rdata=[], ptrs=None, rawptrs=None, bound=None, switch=None, off=None, len=None, sha=None, text=line)
         for w in f[3:]:
             k, _, v = w.partition("=")
             try:
@@ -615,6 +751,9 @@ def read_manifest(path):
                 elif k == "rawptrs" and v:
                     path, _, sha = v.partition(":")
                     row["rawptrs"] = (path, sha or None)
+                elif k == "bound" and v:
+                    path, _, sha = v.partition(":")
+                    row["bound"] = (path, sha or None)
                 elif k == "switch":
                     row["switch"] = parse_switch(v)
                 elif k == "off":
@@ -631,6 +770,8 @@ def read_manifest(path):
             bad("--mixed and --kept are exclusive")
         if row["cset"] and not row["mixed"]:
             bad("cset= is only valid with --mixed")
+        if row["bound"] and (not row["at"] or row["kept"] or row["mixed"] or row["rdata"] or row["ptrs"] or row["rawptrs"] or row["switch"] or row["tail"]):
+            bad("bound= needs at= and excludes the other image fields")
         if row["at"] and row["off"]:
             bad("at= images start at the symbol, so off= must be 0")
         if (row["off"] is None) != (row["len"] is None) or (row["off"] is None) != (row["sha"] is None):
@@ -645,6 +786,8 @@ def format_row(r):
         f.append("ptrs=" + r["ptrs"][0] + (":" + r["ptrs"][1] if r["ptrs"][1] else ""))
     if r["rawptrs"]:
         f.append("rawptrs=" + r["rawptrs"][0] + (":" + r["rawptrs"][1] if r["rawptrs"][1] else ""))
+    if r["bound"]:
+        f.append("bound=" + r["bound"][0] + (":" + r["bound"][1] if r["bound"][1] else ""))
     if r["tail"]:
         t = r["tail"]
         f.append("tail=%s:0x%x:0x%x%s" % (t[0], t[1], t[2], ":" + t[3] if t[3] else ""))
@@ -658,6 +801,7 @@ def format_row(r):
 def hash_check(row, ours):
     ob, _, odirs, os_ = load(ours)
     bad = []
+    offs = []
     if row["off"] is None:
         bad.append("the manifest row has no hashes yet")
     else:
@@ -700,6 +844,16 @@ def hash_check(row, ours):
             bad.append("%s: no hash for pointer list %s" % (ours, row["ptrs"][0]))
         elif ptrs_hash(ents) != row["ptrs"][1]:
             bad.append("%s: pointer list %s differs from the manifest" % (ours, row["ptrs"][0]))
+    if row["bound"]:
+        bounds, rows, err = parse_bound(row["bound"][0])
+        if err:
+            bad.append(err)
+        elif row["bound"][1] is None:
+            bad.append("%s: no hash for bound rows %s" % (ours, row["bound"][0]))
+        elif bound_hash(bounds, rows) != row["bound"][1]:
+            bad.append("%s: bound rows %s differ from the manifest" % (ours, row["bound"][0]))
+        elif offs:
+            bad.append("%s: our relocation inside the bound= window" % ours)
     if row["rawptrs"]:
         rows, err = parse_rawptrs(row["rawptrs"][0])
         if err:
@@ -729,13 +883,13 @@ def run_hash(module, ours, manifest, warn):
 
 def run_manifest(orig, manifest, update):
     rows = read_manifest(manifest)
-    fails = nd = nbytes = nrel = nr = nrb = nsw = npl = npe = ntl = ntb = nrp = nrr = 0
+    fails = nd = nbytes = nrel = nr = nrb = nsw = npl = npe = ntl = ntb = nrp = nrr = nbd = nbr = 0
     changed = False
     for r in rows:
         if not isinstance(r, dict):
             continue
         rc, info = compare(os.path.join(orig, r["retail"]), r["ours"], r["kept"],
-                           [(a, b) for a, b, _ in r["rdata"]], r["ptrs"] and r["ptrs"][0], r["switch"], r["at"], r["mixed"], r["cset"], r["tail"], r["rawptrs"] and r["rawptrs"][0])
+                           [(a, b) for a, b, _ in r["rdata"]], r["ptrs"] and r["ptrs"][0], r["switch"], r["at"], r["mixed"], r["cset"], r["tail"], r["rawptrs"] and r["rawptrs"][0], r["bound"] and r["bound"][0])
         if rc:
             fails += 1
             continue
@@ -748,9 +902,11 @@ def run_manifest(orig, manifest, update):
             npl += 1; npe += info["ptrs"][2]
         if info["rawptrs"]:
             nrp += 1; nrr += info["rawptrs"][2]
-        new = (info["off"], info["vs"], info["hash"], info["rdata"], info["ptrs"] and info["ptrs"][:2], info["switch"], info["tail"], info["rawptrs"] and info["rawptrs"][:2])
-        if update and new != (r["off"], r["len"], r["sha"], r["rdata"], r["ptrs"], r["switch"], r["tail"], r["rawptrs"]):
-            r["off"], r["len"], r["sha"], r["rdata"], r["ptrs"], r["switch"], r["tail"], r["rawptrs"] = new
+        if info["bound"]:
+            nbd += 1; nbr += info["bound"][2]
+        new = (info["off"], info["vs"], info["hash"], info["rdata"], info["ptrs"] and info["ptrs"][:2], info["switch"], info["tail"], info["rawptrs"] and info["rawptrs"][:2], info["bound"] and info["bound"][:2])
+        if update and new != (r["off"], r["len"], r["sha"], r["rdata"], r["ptrs"], r["switch"], r["tail"], r["rawptrs"], r["bound"]):
+            r["off"], r["len"], r["sha"], r["rdata"], r["ptrs"], r["switch"], r["tail"], r["rawptrs"], r["bound"] = new
             r["text"] = format_row(r)
             changed = True
     if changed:
@@ -758,8 +914,8 @@ def run_manifest(orig, manifest, update):
         with open(tmp, "w") as f:
             f.write("\n".join(r["text"] if isinstance(r, dict) else r for r in rows) + "\n")
         os.replace(tmp, manifest)
-    return fails, "%d .data images identical (%d bytes, %d relocated), %d .rdata ranges identical (%d bytes), %d switch tables, %d tail windows (%d bytes), %d pointer lists (%d entries), %d raw pointer lists (%d rows)" \
-        % (nd, nbytes, nrel, nr, nrb, nsw, ntl, ntb, npl, npe, nrp, nrr)
+    return fails, "%d .data images identical (%d bytes, %d relocated), %d .rdata ranges identical (%d bytes), %d switch tables, %d tail windows (%d bytes), %d pointer lists (%d entries), %d raw pointer lists (%d rows), %d bound images (%d rows)" \
+        % (nd, nbytes, nrel, nr, nrb, nsw, ntl, ntb, npl, npe, nrp, nrr, nbd, nbr)
 
 # --- G3D's built-in bytecode, re-parsed from src/g3d/g3d_image.inc
 
@@ -1199,6 +1355,45 @@ def self_test(orig, manifest):
         expect("changed HOST_RT_FUNCTION row (retail)", run(with_orig + [m]), "data-images:", 0)
         expect("changed HOST_RT_FUNCTION row (hash)", run(["--hash", "HOST", row["ours"], "--manifest", m]), "raw pointer rows")
 
+    def bound_rows(kind):  # edit the first SIMSUI_RELOC_<kind> row of a bound= table: fn(line) -> replacement
+        def on(fn):
+            def edit(text, offs):
+                m = re.search(r"^SIMSUI_RELOC_%s\([^\n]*\n" % kind, text, re.M)
+                return text[:m.start()] + fn(m.group(0)) + text[m.end():]
+            return edit
+        return on
+    bd_data, bd_code, bd_import = bound_rows("DATA"), bound_rows("CODE"), bound_rows("IMPORT")
+    as_none = lambda l: "SIMSUI_RELOC_NONE(%s)\n" % l[l.index("(") + 1:l.index(",")]
+
+    def swap_routine(text, offs):  # the first CODE row takes the routine of the first row that names another
+        rows = re.findall(r"^SIMSUI_RELOC_CODE\((0x[0-9a-f]+), (\w+)\)$", text, re.M)
+        other = next(r for r in rows if r[1] != rows[0][1])[1]
+        return text.replace("%s, %s)" % rows[0], "%s, %s)" % (rows[0][0], other), 1)
+
+    def swap_rows(text, offs):  # two neighbouring rows out of ascending order
+        m = re.search(r"^(SIMSUI_RELOC_[^\n]*\n)(SIMSUI_RELOC_[^\n]*\n)", text, re.M)
+        return text[:m.start()] + m.group(2) + m.group(1) + text[m.end():]
+
+    def shared_routine():  # one routine stands for several retail RVAs and the table, read as a whole, still passes (a duplicate-routine CODE row)
+        path = rows["SIMSUI"]["bound"][0]
+        rb, base, rdirs, rs = load(os.path.join(orig, rows["SIMSUI"]["retail"]))
+        window, _ = bound_window(rb, base, rs)
+        targets_of = {}
+        for kind, site, arg in parse_bound(path)[1]:
+            if kind == "CODE":
+                targets_of.setdefault(arg, set()).add(struct.unpack_from("<I", window, site - BOUND_START)[0] - base)
+        if len(targets_of.get("fs98_simsui_nothing", ())) < 2:
+            fails.append("112 bound: fs98_simsui_nothing stands for fewer than two retail RVAs")
+        if bound_check(path, rb, base, rs, rdirs, window)[2]:
+            fails.append("112 bound: the table with a routine standing for several RVAs does not pass")
+
+    def import_row(site, new):  # an IMPORT row at site keeps its kind and takes another index
+        def edit(text, offs):
+            line = "SIMSUI_RELOC_IMPORT(0x%x, " % site
+            i = text.index(line)
+            return text[:i] + line + new + text[text.index(")", i):]
+        return edit
+
     try:
         for fn in (
                 update_tail_hash,
@@ -1346,6 +1541,25 @@ def self_test(orig, manifest):
                 hash_row("MAIN", tail_row(ln=0), "not positive", "92 hash: an empty tail= window"),
                 retail("MAIN", over_tail, "overlaps the tail= window", "93 retail: our relocation over the tail= window"),
                 hashed("MAIN", over_tail, "overlaps the tail= window", "94 hash: our relocation over the tail= window"),
+                shared_routine,
+                listcase("SIMSUI", lambda t, o: "/* x */\n" + t, "113 bound: the SIMSUI row passes with an added comment", "data-images:", "", 0, "bound"),
+                retail("SIMSUI", flip_data, "first difference", "114 retail: a byte of SIMSUI's image"),
+                hashed("SIMSUI", flip_data, "differs from the manifest", "115 hash: a byte of SIMSUI's image"),
+                retail("SIMSUI", reloc_at(0x100), "inside the bound= window", "116 retail: our relocation inside SIMSUI's window"),
+                hashed("SIMSUI", reloc_at(0x100), "differs from the manifest", "117 hash: our relocation inside SIMSUI's window"),
+                listcase("SIMSUI", swap_routine, "118 bound: a CODE row's routine swapped", "the harness knows as", "differ from the manifest", 1, "bound"),
+                listcase("SIMSUI", bd_import(lambda l: ""), "119 bound: a row dropped", "is not listed", "differ from the manifest", 1, "bound"),
+                listcase("SIMSUI", bd_import(lambda l: l + l), "120 bound: a row duplicated", "is repeated", "differ from the manifest", 1, "bound"),
+                listcase("SIMSUI", swap_rows, "121 bound: two rows out of order", "ascending", "differ from the manifest", 1, "bound"),
+                listcase("SIMSUI", bd_data(as_none), "122 bound: a DATA row made NONE", "pointer into the image", "differ from the manifest", 1, "bound"),
+                listcase("SIMSUI", bd_import(as_none), "123 bound: an IMPORT row made NONE", "thunk of import", "differ from the manifest", 1, "bound"),
+                listcase("SIMSUI", bd_code(as_none), "124 bound: a CODE row made NONE", "the harness knows as", "differ from the manifest", 1, "bound"),
+                listcase("SIMSUI", bd_data(lambda l: sub_nth(l, 1, "0x15000")), "125 bound: a DATA row with a wrong target", "pointer into the image", "differ from the manifest", 1, "bound"),
+                listcase("SIMSUI", import_row(0x15000, "123"), "128 bound: an IMPORT row keeps its kind and changes its index", "thunk of import", "differ from the manifest", 1, "bound"),
+                listcase("SIMSUI", import_row(0x15000, "0122"), "129 bound: an IMPORT index written with a leading zero (octal in C)", "not a #define", "not a #define", 1, "bound"),
+                listcase("SIMSUI", lambda t, o: t.replace("SIMSUI_IMAGE_END 0x21400", "SIMSUI_IMAGE_END 0x21410"), "126 bound: a changed bound",
+                         "the bounds must be", "the bounds must be", 1, "bound"),
+                listcase("SIMSUI", lambda t, o: t + "SIMSUI_RELOC_NONE (0x17850)\n", "127 bound: a row the pattern does not match", "not a #define", "not a #define", 1, "bound"),
                 retail("GLOBAL", flip_data, "first difference", "52 retail: GLOBAL byte"),
                 hashed("GLOBAL", flip_data, "differs from the manifest", "53 hash: GLOBAL byte"),
                 retail("MULTIP", flip_switch, "found 0 times", "32 retail: switch table byte"),

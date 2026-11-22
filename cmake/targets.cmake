@@ -186,6 +186,11 @@ ofs_target(host-rt-tables-check
     [==[python3 -B tools/gen_host_rt_tables.py]==]
   )
 
+ofs_target(simsui-tables-check
+  COMMANDS
+    [==[python3 -B tools/gen_simsui_tables.py]==]
+  )
+
 ofs_target(hostrtdiff-run
   DEPENDS openfs98 difftests
   COMMANDS

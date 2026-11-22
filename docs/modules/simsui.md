@@ -93,10 +93,10 @@ the harness reaching each routine, too rarely with the break's condition for N=2
 
 `tools/ofs simsui` builds `bin/simsui-native/SIMSUI_ours.dll` (the shared build copies
 it to `bin/SIMSUI.DLL`). Retail's data (vtables, message maps, runtime classes, strings, statics,
-`Linkage` and `ImportTable`) is not rewritten: `tools/gen_simsui_native.py` takes retail's `.rdata`
-and `.data` from RVA 0x15000 as an image (under `bin/`, never tracked) and the committed
-`src/simsui/simsui_native_tables.inc` (once written by that script) lists what each of the 2,129 pointers retail's relocations mark there
-becomes at load (`src/simsui/simsui_native.c`):
+`Linkage` and `ImportTable`) is not rewritten: `src/simsui/simsui_image.inc` (committed typed C, compiled by `simsui_image.c`) holds retail's `.rdata`
+and `.data` from RVA 0x15000 as an image, every pointer still retail's raw address, and the committed
+`src/simsui/simsui_native_tables.inc` lists what each of the 2,129 pointers retail's relocations mark there
+becomes at load (`tools/ofs data-images`, row SIMSUI with `bound=`, checks the image and that table against retail; `tools/gen_simsui_native.py` writes only `simsui.def`, `simsui_labels.h` and `simsui.res`; `tools/ofs simsui-tables-check` re-proves `simsui_tables.inc`) (`src/simsui/simsui_native.c`):
 
 - 130 into the image itself: the same RVA in our copy;
 - 486 to routines: our transliteration of each, taken from the harness's operation table, so a

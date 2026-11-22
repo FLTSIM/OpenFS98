@@ -253,7 +253,10 @@ def slot_env(slot, extra=None):
     e = dict(os.environ, **{})
     e.update(extra or {})    # the slot's values win over a line's own VAR=value
     e.update(OFS_BUILD=os.path.join(slot, 'build/win32-retail'), PYTHONDONTWRITEBYTECODE='1',
-             WINEPREFIX=os.path.join(slot, 'wineprefix'), FS98_DIR=os.path.join(slot, 'game'))
+             WINEPREFIX=os.path.join(slot, 'wineprefix'), PYTHONUNBUFFERED='1',
+             # the game through the prefix's C:\FS98 link (to <slot>/game), as a serial run's default
+             # $HOME/.wine/drive_c/FS98 is: a game started there sees C:, and OFSTEST checks the drive root
+             FS98_DIR=os.path.join(slot, 'wineprefix', 'drive_c', 'FS98'))
     return e
 
 

@@ -2,7 +2,7 @@
 title: 'One flag set for every unit'
 type: 'refactor'
 created: '2026-11-19'
-status: 'in-review'
+status: 'done'
 route: 'dispatch'
 review_loop_iteration: 0
 baseline_commit: '27371fb6412439f035a43c168790f46c7c4d6d43' # plus uncommitted 1.2 work; diff against the snapshot /tmp/claude-1000/-home-steve-source/b2e3078b-1d77-426e-816f-2de2772a67dc/scratchpad/baseline-1-3 (cmake CMakeLists.txt tools docs include src AGENTS.md)
@@ -48,9 +48,9 @@ context: ['{project-root}/OpenFS98/docs/implementation/epic-1-context.md', '{pro
 - [x] `tools/module_flags.py` -- `FLAGS` parsed from the toolchain file's `set(OFS_MODULE_FLAGS …)`, path from `Path(__file__).resolve().parents[1]`; stop if the line is missing.
 - [x] `cmake/steps/*.cmake`, `cmake/targets.cmake` -- scripted rewrite of every gcc string.
 - [x] every Python site -- `*module_flags.FLAGS` in place of its own semantic flags; `build_gauges.py` adds the toolchain file to its dependencies.
-- [ ] `cmake/toolchains/win32-retail.cmake` -- overrides table: for each override, remove it in a frozen copy, rebuild that target and run its difftest; record the sites and the build error or baseline that moved.
+- [x] `cmake/toolchains/win32-retail.cmake` -- overrides table: for each override, remove it in a frozen copy, rebuild that target and run its difftest; record the sites and the build error or baseline that moved.
 - [x] `docs/tools.md`, `docs/building.md`, `docs/architecture.md` -- the set and where it lives.
-- [ ] verify (decision 2) from a frozen copy with `bin/` removed (`tools/ofs ofs_clean`), then rebuild; then all ours installed in a disposable game copy and flown with `tools/frames_many.sh`. Record moved numbers and causes in Implementation Notes.
+- [x] verify (decision 2) from a frozen copy with `bin/` removed (`tools/ofs ofs_clean`), then rebuild; then all ours installed in a disposable game copy and flown with `tools/frames_many.sh`. Record moved numbers and causes in Implementation Notes.
 
 **Acceptance Criteria:**
 - Given the change, when `grep -rnE -- '-f(no-)?(wrapv|strict-aliasing|delete-null-pointer-checks)|-mfpmath|-ffp-contract|-fexcess-precision' cmake CMakeLists.txt tools/*.py tools/*.sh tools/ofs` runs, then only `cmake/toolchains/win32-retail.cmake` matches.
@@ -65,9 +65,16 @@ Done 2026-11-19: `OFS_MODULE_FLAGS` in the toolchain file, `OpenFS98::module`, `
 
 Override experiments (copies `~/openfs98-verify/x-<name>`, WINEPREFIX `~/.wine-x`, log `~/openfs98-verify/ovr.log`): removing the flag changes code, as the table in the toolchain file lists. Baselines without `-fno-ipa-icf`: demodiff 20000, 0 differ; advdrvdiff 20000, 0 differ. controlsdiff, g3ddiff (its first run failed on a missing `WINDOW_retail.dll`, a setup dependency on an earlier target), the loop-distribute / vectorize / math-errno runs: see `ovr.log` (the table in the toolchain file is to be completed from it).
 
-NOT finished: the full Baselines run (`python3 tools/cmake_verify.py build/win32-retail ../p13-results` from `~/openfs98-verify/p13`, running detached, results in `~/openfs98-verify/p13-results/report.md`; 1-2b's took three days), `tools/frames_many.sh` with all ours installed (74 match) and `sim1native-flights` (74 match).
+Superseded by the 2026-11-22 notes below. Was NOT finished: the full Baselines run (`python3 tools/cmake_verify.py build/win32-retail ../p13-results` from `~/openfs98-verify/p13`, running detached, results in `~/openfs98-verify/p13-results/report.md`; 1-2b's took three days), `tools/frames_many.sh` with all ours installed (74 match) and `sim1native-flights` (74 match).
 
 Review patches (2026-11-19, after `~/openfs98-verify/p13` was frozen): `tools/check_module_flags.sh` (new, a Baselines line), the sentinel compile in `tools/mpdialog_timeout_check.py` takes the set, and `tools/simsui_breaks.py` is added to the overrides table. None changes a unit the running Baselines run builds; the p13 copy's mpdialog timeout sentinel still builds without the set, and it is a probe, not a unit under test. Run `tools/check_module_flags.sh` once in p13 at the end.
+
+Verification finished 2026-11-22 (frozen copy `~/openfs98-verify/p13`, results in `p13-results`, then the reruns `p13-group2`..`p13-group2d` through `cmake_verify.py -j 3`):
+- Baselines: all 161 lines PASS or read by hand and OK. Earlier false results fixed along the way: `panelsunit-run` lacked `bin/difftest/replay.bin` (now a real PASS with the replay case); `reg_contracts` ran before FRAMELOCK and SEHFIX were built; `ofstest-run` started the game from `Z:` in a slot (now 68 passed, 0 failed); a killed `sim1r-breaks` left a mutant in p13 (restored; slots now check the tree after every line).
+- `hg2ddiff-run`: 59 suites, 0 differ (needed `HG2D_TIMEOUT=40000`; 19309 s). `controlsdiff-run`: 20000 scenarios, 0 differ (`CONTROLS_TIMEOUT`).
+- `sim1r-breaks`: 881 of 882 caught. 16 breaks never ran since before 1.2 (their text was not unique; 1-2b's run recorded 0 of 882 because every mutant crashed or was not found): re-anchored in `tools/sim1r_breaks.py`, all caught. `filter-kept` and `jet-flowsat` are rare edges, caught at N=2000 (now their own count). `gpass-steer` is missed at N=2000 with the 1-3 flags and with the pre-1-3 ones alike (tested 2026-11-22): a coverage gap, recorded in the runner's docstring and `docs/tools.md`.
+- `tools/frames_many.sh` from p13 with all ours: 74 match, 0 differ. `sim1native-flights`: 74 of 74.
+- Overrides table complete (every removal run 0 differ). Toolchain-touch rebuild: all 40 steps reran (5 m 36 s), every output identical after normalizing. `tools/check_module_flags.sh` passes.
 
 ## Spec Change Log
 

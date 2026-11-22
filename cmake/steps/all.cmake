@@ -384,19 +384,19 @@ endforeach()
 ofs_step(all
   OUTPUTS bin/SIMSUI.DLL
   COMMANDS
-    [==[python3 -B tools/gen_simsui_tables.py]==]
     [==[python3 -B tools/gen_simsui_native.py]==]
     [==[mkdir -p bin/simsui-native]==]
     ${simsui_units}
     [==[i686-w64-mingw32-gcc @MODULE_FLAGS@ -std=c99 -O2 -Wall -Wextra -Werror -fno-tree-loop-distribute-patterns -fno-tree-vectorize -c -o bin/simsui-native/simsui_native.o src/simsui/simsui_native.c]==]
     [==[python3 -B tools/gen_simsui_native.py @SIMSUI_OBJECTS@ bin/simsui-native/simsui_native.o]==]
-    [==[cd bin/simsui-native && i686-w64-mingw32-gcc @MODULE_FLAGS@ -c -o simsui_image.o simsui_image.S]==]
+    [==[i686-w64-mingw32-gcc @MODULE_FLAGS@ -std=c99 -O2 -Wall -Wextra -Werror -fno-ident -fno-tree-loop-distribute-patterns -fno-tree-vectorize -Ibin/simsui-native -c -o bin/simsui-native/simsui_image.o src/simsui/simsui_image.c]==]
     [==[i686-w64-mingw32-windres -J res -O coff bin/simsui-native/simsui.res bin/simsui-native/simsui-res.o]==]
     [==[printf 'LIBRARY MFC42.DLL\nEXPORTS\n    fs98_simsui_mfc42_anchor@0 @1168 NONAME\n' > bin/simsui-native/mfc42-anchor.def]==]
     [==[i686-w64-mingw32-dlltool -d bin/simsui-native/mfc42-anchor.def -l bin/simsui-native/libsimsui-mfc42.a]==]
     [==[i686-w64-mingw32-gcc @MODULE_FLAGS@ -shared -nostdlib -Wl,--entry=_fs98_simsui_entry@12 -Wl,--disable-dynamicbase -Wl,--image-base=0x20470000 -o bin/simsui-native/SIMSUI_ours.dll @SIMSUI_OBJECTS@ bin/simsui-native/simsui_native.o bin/simsui-native/simsui_image.o bin/simsui-native/simsui-res.o bin/simsui-native/simsui.def bin/simsui-native/libsimsui-mfc42.a -lkernel32 -luser32 -lgdi32 -limm32 -lmsvcrt -lgcc]==]
     [==[mkdir -p bin]==]
     [==[cmp -s bin/simsui-native/SIMSUI_ours.dll bin/SIMSUI.DLL || cp bin/simsui-native/SIMSUI_ours.dll bin/SIMSUI.DLL]==]
+    [==[python3 -B tools/check_data_image.py --hash SIMSUI bin/SIMSUI.DLL]==]
   )
 
 ofs_step(all

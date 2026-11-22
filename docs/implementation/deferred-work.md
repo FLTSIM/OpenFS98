@@ -185,7 +185,7 @@
   summary: Check whether `gen_host_resources.py` (which reads `orig/FLTSIM98.EXE` in the `OPENFS98.EXE` build step) gives the same resources from another pressing. Add a pin or a pressing-independent check if it doesn't.
   evidence: slice 16 code review. `gen_host_data.py` used to stop the build on any EXE but the reference; now only `host-rt-tables-check` and the image headers name the reference sha256.
 - source_spec: none
-  summary: Story 1.4 slice 17b. Turn SIMSUI's native image (`gen_simsui_native.py`'s binary payload of retail's `.rdata` 0xa768 and `.data` 0xc00, with every relocated pointer bound at load) into committed typed C with checked bindings, and make `gen_simsui_tables.py` an oracle check as `gen_host_rt_tables.py` became in slice 16.
+  summary: RESOLVED by slice 17b (spec-1-4r-simsui-data.md, 2026-11-22): SIMSUI's image is typed C (`src/simsui/simsui_image.inc`, `simsui_image.c`), row SIMSUI (`bound=`) is in `tools/data_images.txt`, `gen_simsui_native.py` writes only the `.def`, labels header and resources, and `gen_simsui_tables.py` is the oracle `tools/ofs simsui-tables-check`. Was: turn SIMSUI's native image (`gen_simsui_native.py`'s binary payload of retail's `.rdata` 0xa768 and `.data` 0xc00, with every relocated pointer bound at load) into committed typed C with checked bindings, and make `gen_simsui_tables.py` an oracle check as `gen_host_rt_tables.py` became in slice 16.
   evidence: split from slice 17 (SIM1 and SIMSUI) on 2026-11-21. The two are independent, and SIMSUI needs its own manifest mode for a pointer image bound at load.
 - source_spec: `docs/implementation/spec-1-4q-sim1-data.md`
   summary: Commit the identity gate's normalizer (the scratchpad `peh2.py`: it zeroes the COFF timestamp, the checksum and the export timestamp, and masks `_CSWTCH.N` digits) as a repository tool with a documented command, so another reviewer can reproduce slices 10-17's "normalized-identical" claims.
@@ -196,3 +196,9 @@
 - source_spec: none
   summary: Parallel verification B. Give the break runners (`tools/*_breaks.py`, starting with `host_breaks.py` and `main_breaks.py`) a worker pool, each worker mutating its own tree copy with its own build directory and `WINEPREFIX`, so one long suite runs in parallel. Reuse A's tree-copy helper.
   evidence: split from the parallel-verification request (2026-11-21) on the user's choice. A (`cmake_verify.py -j N` with disposable per-job trees) comes first. `host-breaks` takes 4.2 h and `options-breaks` 2.1 h on their own.
+- source_spec: `docs/implementation/spec-1-4r-simsui-data.md`
+  summary: After Story 1.3's Baselines run, run `simsuidiff-run`, `simsui-breaks` (from a frozen copy), `main-dialogs` and `flights-play` (SIMSUI's image is now typed C; slice 17b built it and ran none of them; `bin/SIMSUI.DLL` and `simsuidiff.exe` are identical to their pre-slice builds after `strip` and `peh2.py`).
+  evidence: queued by the frozen intent.
+- source_spec: `docs/implementation/spec-1-4r-simsui-data.md`
+  summary: No `--hash` build step depends on `tools/data_images.txt`, so changing a pinned hash does not rerun a module's step (all 28 rows, pre-existing).
+  evidence: slice 17b review, Blind Hunter; `UPDATE=1` works around it by zeroing the DLL's mtime.

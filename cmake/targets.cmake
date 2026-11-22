@@ -53,8 +53,21 @@ ofs_target(numericdiff-run
     [==[cd bin/difftest && WINEDEBUG=-all wine numericdiff.exe]==]
   )
 
+# The two hand-written test gauges, built once for every target that runs them (bin/gauges-diff/; the data is committed in src/gauges/).
+ofs_target(test-gauges
+  COMMANDS
+    [==[python3 -B tools/gen_warning_data.py]==]
+    [==[i686-w64-mingw32-windres -J res -O coff bin/gauges-diff/warning.res bin/gauges-diff/warning-res.o]==]
+    [==[i686-w64-mingw32-gcc @MODULE_FLAGS@ -std=c99 -O2 -Wall -Wextra -Werror -Ibin/gauges-diff -shared -nostdlib -Wl,--entry=_DllMain@12 -Wl,--disable-dynamicbase -Wl,--disable-nxcompat -Wl,--image-base=0x32000000 -o bin/gauges-diff/737-400.WARNING_ENUNCIATORS.GAU src/gauges/warning.c src/gauges/warning.def bin/gauges-diff/warning-res.o -lkernel32]==]
+    [==[python3 -B tools/gen_suction_data.py]==]
+    [==[i686-w64-mingw32-windres -J res -O coff bin/gauges-diff/suction.res bin/gauges-diff/suction-res.o]==]
+    [==[i686-w64-mingw32-gcc @MODULE_FLAGS@ -std=c99 -O2 -Wall -Wextra -Werror -Ibin/gauges-diff -shared -nostdlib -Wl,--entry=_DllMain@12 -Wl,--disable-dynamicbase -Wl,--disable-nxcompat -Wl,--image-base=0x32010000 -o bin/gauges-diff/CESSNA_182.SUCTION.GAU src/gauges/suction.c src/gauges/suction.def bin/gauges-diff/suction-res.o -lkernel32]==]
+    [==[python3 -B tools/check_data_image.py --hash WARNING bin/gauges-diff/737-400.WARNING_ENUNCIATORS.GAU]==]
+    [==[python3 -B tools/check_data_image.py --hash SUCTION bin/gauges-diff/CESSNA_182.SUCTION.GAU]==]
+  )
+
 ofs_target(data-images
-  DEPENDS openfs98
+  DEPENDS openfs98 test-gauges
   COMMANDS
     [==[python3 -B tools/check_data_image.py --orig orig --manifest tools/data_images.txt --self-test]==]
 )
@@ -477,66 +490,36 @@ ofs_target(all-gauges-hangs
   )
 
 ofs_target(gaugesdiff-run
-  DEPENDS difftests
+  DEPENDS difftests test-gauges
   COMMANDS
-    [==[python3 -B tools/gen_warning_data.py]==]
-    [==[i686-w64-mingw32-windres -J res -O coff bin/gauges-diff/warning.res bin/gauges-diff/warning-res.o]==]
-    [==[i686-w64-mingw32-gcc @MODULE_FLAGS@ -std=c99 -O2 -Wall -Wextra -Werror -Ibin/gauges-diff -shared -nostdlib -Wl,--entry=_DllMain@12 -Wl,--disable-dynamicbase -Wl,--disable-nxcompat -Wl,--image-base=0x32000000 -o bin/gauges-diff/737-400.WARNING_ENUNCIATORS.GAU src/gauges/warning.c src/gauges/warning.def bin/gauges-diff/warning-res.o -lkernel32]==]
-    [==[python3 -B tools/gen_suction_data.py]==]
-    [==[i686-w64-mingw32-windres -J res -O coff bin/gauges-diff/suction.res bin/gauges-diff/suction-res.o]==]
-    [==[i686-w64-mingw32-gcc @MODULE_FLAGS@ -std=c99 -O2 -Wall -Wextra -Werror -Ibin/gauges-diff -shared -nostdlib -Wl,--entry=_DllMain@12 -Wl,--disable-dynamicbase -Wl,--disable-nxcompat -Wl,--image-base=0x32010000 -o bin/gauges-diff/CESSNA_182.SUCTION.GAU src/gauges/suction.c src/gauges/suction.def bin/gauges-diff/suction-res.o -lkernel32]==]
     [==[bash tools/run_gaugesdiff.sh ${N:-20000}]==]
     [==[GAUGES_RELOCATE=1 bash tools/run_gaugesdiff.sh ${N:-20000}]==]
   )
 
 ofs_target(suctiondiff-run
-  DEPENDS difftests
+  DEPENDS difftests test-gauges
   COMMANDS
-    [==[python3 -B tools/gen_warning_data.py]==]
-    [==[i686-w64-mingw32-windres -J res -O coff bin/gauges-diff/warning.res bin/gauges-diff/warning-res.o]==]
-    [==[i686-w64-mingw32-gcc @MODULE_FLAGS@ -std=c99 -O2 -Wall -Wextra -Werror -Ibin/gauges-diff -shared -nostdlib -Wl,--entry=_DllMain@12 -Wl,--disable-dynamicbase -Wl,--disable-nxcompat -Wl,--image-base=0x32000000 -o bin/gauges-diff/737-400.WARNING_ENUNCIATORS.GAU src/gauges/warning.c src/gauges/warning.def bin/gauges-diff/warning-res.o -lkernel32]==]
-    [==[python3 -B tools/gen_suction_data.py]==]
-    [==[i686-w64-mingw32-windres -J res -O coff bin/gauges-diff/suction.res bin/gauges-diff/suction-res.o]==]
-    [==[i686-w64-mingw32-gcc @MODULE_FLAGS@ -std=c99 -O2 -Wall -Wextra -Werror -Ibin/gauges-diff -shared -nostdlib -Wl,--entry=_DllMain@12 -Wl,--disable-dynamicbase -Wl,--disable-nxcompat -Wl,--image-base=0x32010000 -o bin/gauges-diff/CESSNA_182.SUCTION.GAU src/gauges/suction.c src/gauges/suction.def bin/gauges-diff/suction-res.o -lkernel32]==]
     [==[bash tools/run_gaugesdiff.sh --suction ${N:-20000}]==]
     [==[GAUGES_RELOCATE=1 bash tools/run_gaugesdiff.sh --suction ${N:-20000}]==]
   )
 
 ofs_target(gauges-panels-run
-  DEPENDS openfs98 difftests
+  DEPENDS openfs98 difftests test-gauges
   COMMANDS
-    [==[python3 -B tools/gen_warning_data.py]==]
-    [==[i686-w64-mingw32-windres -J res -O coff bin/gauges-diff/warning.res bin/gauges-diff/warning-res.o]==]
-    [==[i686-w64-mingw32-gcc @MODULE_FLAGS@ -std=c99 -O2 -Wall -Wextra -Werror -Ibin/gauges-diff -shared -nostdlib -Wl,--entry=_DllMain@12 -Wl,--disable-dynamicbase -Wl,--disable-nxcompat -Wl,--image-base=0x32000000 -o bin/gauges-diff/737-400.WARNING_ENUNCIATORS.GAU src/gauges/warning.c src/gauges/warning.def bin/gauges-diff/warning-res.o -lkernel32]==]
-    [==[python3 -B tools/gen_suction_data.py]==]
-    [==[i686-w64-mingw32-windres -J res -O coff bin/gauges-diff/suction.res bin/gauges-diff/suction-res.o]==]
-    [==[i686-w64-mingw32-gcc @MODULE_FLAGS@ -std=c99 -O2 -Wall -Wextra -Werror -Ibin/gauges-diff -shared -nostdlib -Wl,--entry=_DllMain@12 -Wl,--disable-dynamicbase -Wl,--disable-nxcompat -Wl,--image-base=0x32010000 -o bin/gauges-diff/CESSNA_182.SUCTION.GAU src/gauges/suction.c src/gauges/suction.def bin/gauges-diff/suction-res.o -lkernel32]==]
     [==[cp bin/PANELS.DLL bin/gauges-diff/PANELS_retail.dll]==]
     [==[cp bin/PANELS.DLL bin/gauges-diff/PANELS_ours.dll]==]
     [==[bash tools/run_gaugesdiff.sh --panels ${N:-20000} ${START:-}]==]
   )
 
 ofs_target(gauges-game-run
-  DEPENDS difftests
+  DEPENDS difftests test-gauges
   COMMANDS
-    [==[python3 -B tools/gen_warning_data.py]==]
-    [==[i686-w64-mingw32-windres -J res -O coff bin/gauges-diff/warning.res bin/gauges-diff/warning-res.o]==]
-    [==[i686-w64-mingw32-gcc @MODULE_FLAGS@ -std=c99 -O2 -Wall -Wextra -Werror -Ibin/gauges-diff -shared -nostdlib -Wl,--entry=_DllMain@12 -Wl,--disable-dynamicbase -Wl,--disable-nxcompat -Wl,--image-base=0x32000000 -o bin/gauges-diff/737-400.WARNING_ENUNCIATORS.GAU src/gauges/warning.c src/gauges/warning.def bin/gauges-diff/warning-res.o -lkernel32]==]
-    [==[python3 -B tools/gen_suction_data.py]==]
-    [==[i686-w64-mingw32-windres -J res -O coff bin/gauges-diff/suction.res bin/gauges-diff/suction-res.o]==]
-    [==[i686-w64-mingw32-gcc @MODULE_FLAGS@ -std=c99 -O2 -Wall -Wextra -Werror -Ibin/gauges-diff -shared -nostdlib -Wl,--entry=_DllMain@12 -Wl,--disable-dynamicbase -Wl,--disable-nxcompat -Wl,--image-base=0x32010000 -o bin/gauges-diff/CESSNA_182.SUCTION.GAU src/gauges/suction.c src/gauges/suction.def bin/gauges-diff/suction-res.o -lkernel32]==]
     [==[HG2D_FRAMES_OUT="$PWD/bin/gauges-frames" HG2D_FRAMES_DISPLAY=:176 HG2D_FRAMES_OURS=orig/Modules/HG2D.DLL HG2D_FRAMES_GAUGE=bin/gauges-diff/737-400.WARNING_ENUNCIATORS.GAU HG2D_FRAMES_GAUGE_RETAIL=orig/Gauges/737WARNG.GAU bash tools/hg2d_frames.sh 'Situatio\HONGKONG.STN' 900]==]
   )
 
 ofs_target(suction-game-run
-  DEPENDS difftests
+  DEPENDS difftests test-gauges
   COMMANDS
-    [==[python3 -B tools/gen_warning_data.py]==]
-    [==[i686-w64-mingw32-windres -J res -O coff bin/gauges-diff/warning.res bin/gauges-diff/warning-res.o]==]
-    [==[i686-w64-mingw32-gcc @MODULE_FLAGS@ -std=c99 -O2 -Wall -Wextra -Werror -Ibin/gauges-diff -shared -nostdlib -Wl,--entry=_DllMain@12 -Wl,--disable-dynamicbase -Wl,--disable-nxcompat -Wl,--image-base=0x32000000 -o bin/gauges-diff/737-400.WARNING_ENUNCIATORS.GAU src/gauges/warning.c src/gauges/warning.def bin/gauges-diff/warning-res.o -lkernel32]==]
-    [==[python3 -B tools/gen_suction_data.py]==]
-    [==[i686-w64-mingw32-windres -J res -O coff bin/gauges-diff/suction.res bin/gauges-diff/suction-res.o]==]
-    [==[i686-w64-mingw32-gcc @MODULE_FLAGS@ -std=c99 -O2 -Wall -Wextra -Werror -Ibin/gauges-diff -shared -nostdlib -Wl,--entry=_DllMain@12 -Wl,--disable-dynamicbase -Wl,--disable-nxcompat -Wl,--image-base=0x32010000 -o bin/gauges-diff/CESSNA_182.SUCTION.GAU src/gauges/suction.c src/gauges/suction.def bin/gauges-diff/suction-res.o -lkernel32]==]
     [==[HG2D_FRAMES_OUT="$PWD/bin/suction-frames" HG2D_FRAMES_DISPLAY=:177 HG2D_FRAMES_OURS=orig/Modules/HG2D.DLL HG2D_FRAMES_GAUGE=bin/gauges-diff/CESSNA_182.SUCTION.GAU HG2D_FRAMES_GAUGE_RETAIL=orig/Gauges/CESSSUC.GAU bash tools/hg2d_frames.sh 'Situatio\STGEORGE.STN' 900]==]
   )
 
@@ -1994,14 +1977,8 @@ ofs_target(stage-scenery
   )
 
 ofs_target(suction-breaks
-  DEPENDS difftests
+  DEPENDS difftests test-gauges
   COMMANDS
-    [==[python3 -B tools/gen_warning_data.py]==]
-    [==[i686-w64-mingw32-windres -J res -O coff bin/gauges-diff/warning.res bin/gauges-diff/warning-res.o]==]
-    [==[i686-w64-mingw32-gcc @MODULE_FLAGS@ -std=c99 -O2 -Wall -Wextra -Werror -Ibin/gauges-diff -shared -nostdlib -Wl,--entry=_DllMain@12 -Wl,--disable-dynamicbase -Wl,--disable-nxcompat -Wl,--image-base=0x32000000 -o bin/gauges-diff/737-400.WARNING_ENUNCIATORS.GAU src/gauges/warning.c src/gauges/warning.def bin/gauges-diff/warning-res.o -lkernel32]==]
-    [==[python3 -B tools/gen_suction_data.py]==]
-    [==[i686-w64-mingw32-windres -J res -O coff bin/gauges-diff/suction.res bin/gauges-diff/suction-res.o]==]
-    [==[i686-w64-mingw32-gcc @MODULE_FLAGS@ -std=c99 -O2 -Wall -Wextra -Werror -Ibin/gauges-diff -shared -nostdlib -Wl,--entry=_DllMain@12 -Wl,--disable-dynamicbase -Wl,--disable-nxcompat -Wl,--image-base=0x32010000 -o bin/gauges-diff/CESSNA_182.SUCTION.GAU src/gauges/suction.c src/gauges/suction.def bin/gauges-diff/suction-res.o -lkernel32]==]
     [==[bash tools/run_gaugesdiff.sh --suction-breaks]==]
   )
 

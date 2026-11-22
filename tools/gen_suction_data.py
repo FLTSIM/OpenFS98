@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Extract Cessna suction's data and two bitmaps; bind every callback to C."""
+"""Extract Cessna suction's two bitmaps and re-assert its layout; the image is committed C (src/gauges/suction_*.inc)."""
 import struct
 from dialogmap import Fs98Pe, SurveyError
 from gen_warning_data import extract

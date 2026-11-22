@@ -19,9 +19,9 @@ resource:gen_sim1_native.py  # SIM1.sim resources by type and id; checks its lay
 resource:gen_sim_runtime.py  # resources by type and id and the SIMSUI ui_new export by name
 resource:gen_simsui_native.py  # SIMSUI's exports (simsui.def, simsui_labels.h), resources and relocation asserts; the image is committed C
 oracle:gen_simsui_tables.py  # re-proves simsui_tables.inc against retail (tools/ofs simsui-tables-check)
-gen:gen_suction_data.py  # data or table generator, not yet converted
+resource:gen_suction_data.py  # Cessna suction's bitmaps by type and id; checks its layout, relocations and clamp bounds; the image is committed C
 resource:gen_views_runtime.py  # resources by type and id and the SIMSUI ui_new export by name
-gen:gen_warning_data.py  # data or table generator, not yet converted
+resource:gen_warning_data.py  # the warning gauge's bitmaps by type and id, and the layout asserts both test gauges share; the image is committed C
 resource:gen_world_runtime.py  # world.res and simsui-anchor.def: retail resources and a SIMSUI export ordinal
 oracle:gen_host_rt_tables.py  # re-proves host_rt_tables.inc and host_rt_rdata.inc against retail (tools/ofs host-rt-tables-check)
 oracle:hostmap.py  # host slot map printed from retail, orientation output

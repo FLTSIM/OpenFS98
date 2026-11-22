@@ -70,6 +70,12 @@ static uint32_t __stdcall warning_failures(void)
     return ((panel_one)(uintptr_t)panel_service(0x60))(*root);
 }
 
+/* The relocated slots of warning_pointers.inc: each is installed at attach with the address the retail slot holds. */
+#define GAUGE_DATA(off, target) \
+    warning_image.words[(off) / 4] = (uint32_t)(uintptr_t)(warning_image.bytes + (target));
+#define GAUGE_CODE(off, rva, routine) \
+    warning_image.words[(off) / 4] = (uint32_t)(uintptr_t)routine;
+
 BOOL WINAPI DllMain(HINSTANCE instance, DWORD reason, LPVOID reserved)
 {
     (void)reserved;

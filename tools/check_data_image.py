@@ -222,7 +222,9 @@ PTR_RES = [re.compile(r"^\s*(FACIL_REL_DATA|FACIL_REL_TEXT|FE_REL_DATA|FE_REL_TE
                       r"\((0x[0-9a-fA-F]+),\s*(0x[0-9a-fA-F]+)\)\s*$"),
            re.compile(r"^\s*\{\s*(\d+),\s*(0x[0-9a-fA-F]+),\s*(\d+),\s*(0x[0-9a-fA-F]+)\s*\},?\s*$"),
            re.compile(r"^\s*L\((0x[0-9a-fA-F]+)\)\s*$"),
-           re.compile(r"^\s*((?:G3D|MAIN)_CODE_TARGET)\((0x[0-9a-fA-F]+)\)\s*$")]
+           re.compile(r"^\s*((?:G3D|MAIN)_CODE_TARGET)\((0x[0-9a-fA-F]+)\)\s*$"),
+           re.compile(r"^\s*GAUGE_DATA\((0x[0-9a-fA-F]+),\s*(0x[0-9a-fA-F]+)\)\s*$"),
+           re.compile(r"^\s*GAUGE_CODE\((0x[0-9a-fA-F]+),\s*(0x[0-9a-fA-F]+),\s*[A-Za-z_]\w*\)\s*$")]
 GLOBAL_LINK = 0xc  # PANELS' L(at): the slot holds image start + 0xc, the GLOBAL link
 
 def parse_ptrs(path):
@@ -248,6 +250,13 @@ def parse_ptrs(path):
         m = PTR_RES[0].match(line)
         if m:
             out.append((m.group(1), hexint(m.group(2)), hexint(m.group(3))))
+            continue
+        for form, rx in (("GAUGE_DATA", PTR_RES[4]), ("GAUGE_CODE", PTR_RES[5])):  # the routine of a GAUGE_CODE is not checked
+            m = rx.match(line)
+            if m:
+                out.append((form, hexint(m.group(1)), hexint(m.group(2))))
+                break
+        if m:
             continue
         m = PTR_RES[2].match(line)
         if m:
@@ -461,7 +470,11 @@ def ptrs_check(path, rb, base, rs, va, rset, offs, kept_mode, ours, mixed=False,
             form, off, tgt = e
             # ADVDRV_CODE holds a VA, so its target base is minus the image base
             tbase = {"FACIL_REL_DATA": va, "FE_REL_DATA": va, "ADVDRV_DATA": va, "HG2D_DATA_POINTER": va, "G3D_DATA_POINTER": va, "MAIN_DATA_POINTER": va, "L": va, "FACIL_REL_TEXT": 0,
-                     "FE_REL_TEXT": 0, "ADVDRV_CODE": -base, "C": rs[".text"][1]}[form]
+                     "FE_REL_TEXT": 0, "GAUGE_DATA": va, "GAUGE_CODE": 0, "ADVDRV_CODE": -base, "C": rs[".text"][1]}[form]
+            if form == "GAUGE_CODE" and not rs[".text"][1] <= tgt < rs[".text"][1] + rs[".text"][0]:
+                return None, "%s: slot +0x%x: GAUGE_CODE rva 0x%x is not in retail's .text" % (path, off, tgt)
+            if form == "GAUGE_DATA" and not 0 <= tgt < rs[".data"][0]:
+                return None, "%s: slot +0x%x: GAUGE_DATA target 0x%x is not inside the .data image" % (path, off, tgt)
         else:
             owner, off, kind, tgt = e
             if owner != 0:
@@ -683,7 +696,14 @@ def compare(retail, ours, kept_mode, rdatas=(), ptrs=None, switch=None, at=None,
             return 1, None
         print("%s: raw pointer rows %s: %d code, %d data match retail" % (name, rawptrs, sum(r[0] == "CODE" for r in rows), sum(r[0] == "DATA" for r in rows)))
         info["rawptrs"] = (rawptrs, rawptrs_hash(rows, rawptrs), len(rows))
-    if ptrs and off:  # list offsets count from ImportTable, image offsets from .data
+    gauge_list = False
+    if ptrs and off:  # a GAUGE_* list counts from .data's start, as the image does; the others from the ImportTable
+        ents, err = parse_ptrs(ptrs)
+        if err:
+            print(err)
+            return 1, None
+        gauge_list = bool(ents) and all(isinstance(e[0], str) and e[0].startswith("GAUGE_") for e in ents)
+    if ptrs and off and not gauge_list:
         print("%s: ptrs= needs the image to start at .data (off=0), not +0x%x" % (ours, off))
         return 1, None
     if ptrs:
@@ -1089,6 +1109,9 @@ def self_test(orig, manifest):
     def flip_data(b, dirs, secs, start, row):
         b[file_off(b, secs, start + 0x100)] ^= 0xFF
 
+    def flip_at(off):  # one byte of the image at +off
+        return lambda b, dirs, secs, start, row: b.__setitem__(file_off(b, secs, start + off), b[file_off(b, secs, start + off)] ^ 0xFF)
+
     def flip_rdata(b, dirs, secs, start, row):
         b[file_off(b, secs, secs[".rdata"][1])] ^= 0xFF
 
@@ -1252,6 +1275,11 @@ def self_test(orig, manifest):
         def edit(text, offs):
             s, e = first_entry(text)
             return text[:s] + fn(text[s:e], offs) + text[e:]
+        return edit
+    def on_gauge_code(fn):  # the first GAUGE_CODE line
+        def edit(text, offs):
+            m = re.search(r"^GAUGE_CODE\([^\n]*\n", text, re.M)
+            return text[:m.start()] + fn(m.group(0), offs) + text[m.end():]
         return edit
     hexre = re.compile(r"0x[0-9a-f]+")
     def sub_nth(line, n, val):
@@ -1564,7 +1592,20 @@ def self_test(orig, manifest):
                 hashed("GLOBAL", flip_data, "differs from the manifest", "53 hash: GLOBAL byte"),
                 retail("MULTIP", flip_switch, "found 0 times", "32 retail: switch table byte"),
                 hashed("MULTIP", flip_switch, "table window found 0 times", "33 hash: switch table byte"),
-                hashed("MULTIP", flip_nametag, "window found 0 times", "34 hash: s_nametag byte")):
+                hashed("MULTIP", flip_nametag, "window found 0 times", "34 hash: s_nametag byte"),
+                retail("WARNING", flip_at(0x4c), "first difference", "130 retail: an in-range non-pointer byte of WARNING's image"),
+                hashed("WARNING", flip_at(0x4c), "differs from the manifest", "131 hash: an in-range non-pointer byte of WARNING's image"),
+                retail("SUCTION", flip_at(0x68), "first difference", "132 retail: an in-range non-pointer byte of SUCTION's image"),
+                hashed("SUCTION", flip_at(0x68), "differs from the manifest", "133 hash: an in-range non-pointer byte of SUCTION's image"),
+                listcase("WARNING", on_first(lambda l, o: sub_nth(l, 1, "0x4")), "134 ptrs: a GAUGE_DATA target changed",
+                         "retail 0x", "pointer list"),
+                listcase("SUCTION", on_gauge_code(lambda l, o: sub_nth(l, 1, "0x1020")), "135 ptrs: a GAUGE_CODE rva changed",
+                         "retail 0x", "pointer list"),
+                listcase("WARNING", on_first(lambda l, o: "GAUGE_CODE(0x24, 0x3000, warning_noop)\n"), "138 ptrs: a GAUGE_CODE row standing in a data slot",
+                         "not in retail's .text", "pointer list"),
+                listcase("WARNING", on_first(lambda l, o: ""), "136 ptrs: a GAUGE_* line dropped",
+                         "is not ours, kept or listed", "pointer list"),
+                listcase("SUCTION", lambda t, o: "/* x */\n" + t, "137 ptrs: a GAUGE_* list with an added comment", "data-images:", "", 0)):
             case(fn)
     finally:
         shutil.rmtree(tmp, ignore_errors=True)

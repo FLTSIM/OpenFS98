@@ -202,3 +202,15 @@
 - source_spec: `docs/implementation/spec-1-4r-simsui-data.md`
   summary: No `--hash` build step depends on `tools/data_images.txt`, so changing a pinned hash does not rerun a module's step (all 28 rows, pre-existing).
   evidence: slice 17b review, Blind Hunter; `UPDATE=1` works around it by zeroing the DLL's mtime.
+- source_spec: `docs/implementation/spec-1-4s-test-gauges-data.md`
+  summary: After Story 1.3's Baselines run, run `gaugesdiff-run`, `suctiondiff-run`, `gauges-panels-run`, `gauges-game-run`, `suction-game-run`, `suction-breaks` and `tools/gauges_breaks.py` (warning) (the test gauges' data is now typed C; slice 18a ran none of them, no wine; both `.GAU` files are identical to their pre-slice builds, stripped and unstripped, after `peh2.py`).
+  evidence: queued by the frozen intent. `gauges_breaks.py` now passes `-Isrc/gauges` so its break copies find the committed `.inc` files.
+- source_spec: none
+  summary: Story 1.4 slice 18b: the 120 hand-written gauges' data images (`tools/gen_gauges.py`'s `bin/gauges-all/*/image.inc`, 225 KB of .data/.rdata as hex bytes, with a DllMain rebinding every relocated pointer) as committed typed C, with a manifest check.
+  evidence: split from slice 18 on 2026-11-22 (the user chose 18a, the two test gauges, first); independent of the test gauges and the MDLs.
+- source_spec: none
+  summary: Story 1.4 slice 18c: the 8 normal and 3 crash MDL models' data (`tools/build_mdls.py`, `tools/gen_mdl_crash.py`, about 600 KB, mostly geometry); how to treat the geometry is open (typed C, or content read like resources, which the story's AC does not allow as written).
+  evidence: split from slice 18 on 2026-11-22; the user asked what the content option means before choosing.
+- source_spec: none
+  summary: Story 1.4 slice 18d: `tools/gen_window_data.py` (WINDOW's .text tail for WIN-2) stays a `gen:` build step, as the user chose in slice 6, until WIN-2 is fixed at porting.
+  evidence: split from slice 18 on 2026-11-22; revisit only with the user.

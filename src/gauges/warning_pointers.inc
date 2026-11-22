@@ -1,0 +1,16 @@
+/* 737WARNG.GAU's relocated slots, in the order the attach installs them.  GAUGE_DATA(off, target): slot +off holds this image's start plus
+ * target (an offset in .data).  GAUGE_CODE(off, rva, routine): slot +off holds retail's code RVA rva, which routine implements. */
+GAUGE_DATA(0x24, 0x0)
+GAUGE_DATA(0x28, 0xc0)
+GAUGE_CODE(0x2c, 0x10b0, warning_failures)
+GAUGE_CODE(0x30, 0x1020, warning_install)
+GAUGE_CODE(0x34, 0x1040, warning_unmark)
+GAUGE_CODE(0x38, 0x1050, warning_prepare)
+GAUGE_CODE(0x3c, 0x1060, warning_update)
+GAUGE_CODE(0x40, 0x1080, warning_draw)
+GAUGE_CODE(0x44, 0x1090, warning_release)
+GAUGE_DATA(0x90, 0x20)
+GAUGE_DATA(0xc0, 0x70)
+GAUGE_CODE(0xdc, 0x10a0, warning_noop)
+GAUGE_CODE(0xe0, 0x10a0, warning_noop)
+GAUGE_DATA(0xf0, 0x20)

@@ -35,8 +35,11 @@ complete code after image-base normalization; each still builds as its own
 module with its own data and resources.
 
 The initial hand-written warning and suction implementations remain in
-`src/gauges/warning.c` and `suction.c`, with their independent extraction and
-regression targets (`tools/ofs gauges-check`, `gauges-breaks`, ...).
+`src/gauges/warning.c` and `suction.c`. Their data images and pointer lists are
+committed typed C (`warning_data.inc`, `warning_pointers.inc`, `suction_data.inc`,
+`suction_pointers.inc`, checked by manifest rows WARNING and SUCTION); only the
+bitmaps still come from `orig/` (`tools/gen_warning_data.py`, `gen_suction_data.py`,
+run by `tools/ofs test-gauges`). Their independent regression targets (`gaugesdiff-run`, `suctiondiff-run`, `gauges-panels-run`, `suction-breaks`, `tools/gauges_breaks.py`) (`tools/ofs gauges-check`, `gauges-breaks`, ...).
 
 ## Verification
 

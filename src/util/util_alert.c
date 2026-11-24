@@ -44,7 +44,10 @@ static int32_t FS98_STDCALL fs98_util_alert_no_handler(void *alert)
  *
  * The first piece is not optional.  If it is zero, retail never initialises
  * its block pointer and the next append writes through stack garbage; here the
- * pointer starts null, which faults as surely.  No caller passes zero.
+ * pointer starts null, which faults as surely (Not reproduced: UTIL-15's
+ * garbage pointer).  Both services (`+0xa4`,
+ * fs98_util_alert_modal; `+0xa8`, fs98_util_alert_open) forward their caller's p1 unchanged, zero included: all
+ * pieces zero returns null; a zero p1 with a later piece reaches STRCAT with a null destination.
  */
 static const char *fs98_util_alert_piece(uint32_t piece, char *buf)
 {
@@ -59,6 +62,9 @@ static char *fs98_util_alert_text(uint32_t p1, uint32_t p2, uint32_t p3,
                                   uint32_t p4, uint32_t p5, int32_t lines)
 {
     char buf[0x100];
+    /* Not reproduced (UTIL-15): retail leaves its block pointer uninitialised when the first piece is zero, so the
+     * next append writes through stack garbage; ours starts it at null.  Both services (`+0xa4` and `+0xa8`)
+     * forward p1 unchanged: all zero returns null; zero p1 with a later piece reaches STRCAT with a null block. */
     char *block = 0;
     const uint32_t more[4] = { p2, p3, p4, p5 };
     const char *s;
@@ -72,6 +78,8 @@ static char *fs98_util_alert_text(uint32_t p1, uint32_t p2, uint32_t p3,
     for (i = 0; i < 4; i++) {
         if (more[i] == 0)
             continue;
+        /* RETAIL BUG (kept): UTIL-15 -- the separator is appended before the realloc below, into the four bytes
+         * of slack the last allocation left. */
         FS98_HOST_STRCAT(H)(block, lines ? "\n" : " ");
         s = fs98_util_alert_piece(more[i], buf);
         FS98_HOST_REALLOC(H)(1, FS98_HOST_STRLEN(H)(s) + FS98_HOST_STRLEN(H)(block) + 4,
@@ -114,7 +122,9 @@ int32_t FS98_STDCALL fs98_util_alert_modal(uint32_t flags, uint32_t tag,
     d.handler = fs98_util_alert_no_handler;
     d.flags   = flags;
     d.tag     = tag;
-    d.answer  = 0;              /* retail leaves this as whatever was there */
+    /* RETAIL BUG (fixed, not kept): UTIL-16 -- retail never initialises the answer, so an alert that closes
+     * without answering returns whatever was on the stack; ours zeroes it. */
+    d.answer  = 0;
 
     FS98_HOST_DIALOG(H)(2, &d);
     FS98_HOST_FREE(H)((void **)&d.text);
@@ -134,7 +144,8 @@ int32_t FS98_STDCALL fs98_util_alert_modal(uint32_t flags, uint32_t tag,
  *   +0x08  tag
  *   +0x0c  1 -- alive; +0xac clears it to make the alert close itself
  *   +0x10  0
- *   +0x14  uninitialised, sixteen bytes of whatever malloc returned
+ *   +0x14  sixteen bytes left as the allocation made them (zero: the host's
+ *          allocator is asked to zero, in retail and here)
  *   +0x24  the text block
  *
  * The descriptor layout is not the modal one: the tag moves from +0x10 to +0x08
@@ -148,6 +159,8 @@ void FS98_STDCALL fs98_util_alert_open(void **out, uint32_t tag,
     unsigned char *o;
 
     FS98_HOST_ALLOC(H)(1, 0x28, (void **)&o, 1);
+    /* RETAIL BUG (kept): UTIL-17 -- the object is stored through `out` before it is filled in, and its layout is
+     * not the modal one (tag at +0x08, text at +0x24). */
     *out = o;
     *(uint32_t *)(o + 0x00) = 0;
     *(uint32_t *)(o + 0x0c) = 1;

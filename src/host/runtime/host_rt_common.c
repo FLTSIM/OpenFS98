@@ -170,6 +170,7 @@ void fs98_host_rt_start_sound(void)
     desc[4] = 0;
     sound = G_PTR(0x41a3c8);
     if (((int32_t (SC *)(void *, void *, void *, void *))PTR(PTR(sound, 0), 0xc))(sound, desc, VA(0x41a2b8), 0) != 0) {
+        /* RETAIL BUG (kept): HOST-18 -- DirectSound (0x41a3c8) stays set with no primary buffer */
         G32(0x418308) = 7;
         return;
     }
@@ -200,6 +201,7 @@ void fs98_host_rt_restack(void)
             uint8_t *data = (uint8_t *)PTR(node, 0);
             if (!(D32(data, 8) & 0x80000000))
                 continue;
+            /* RETAIL BUG (kept): HOST-19 -- the record's host block is read unchecked */
             if (WIN(GetParent, uint32_t, (uint32_t))(D32(PTR(data, 0xa0), 0x24)) != MAIN_WINDOW)
                 continue;
             defer = place(defer, D32(PTR(PTR(node, 0), 0xa0), 0x24), after, 0, 0, 0, 0, 0x13);

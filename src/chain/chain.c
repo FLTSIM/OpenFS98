@@ -140,6 +140,7 @@ static int32_t chain_add_to(struct chain_list **pp, chain_cb cb)
 
 static int32_t FS98_STDCALL chain_add(uint32_t index, chain_cb cb)
 {
+    /* Not reproduced (CHAIN-1): the registers retail's add service leaves behind; ours leaves what the compiler does. */
     return chain_add_to(&chain.list[index], cb);
 }
 
@@ -150,6 +151,8 @@ static int32_t chain_remove_from(struct chain_list **pp, chain_cb cb)
     struct chain_list *l = *pp;
     uint32_t i, n;
 
+    /* RETAIL BUG (fixed, not kept): CHAIN-2 -- retail reads a null list here and faults (a remove before any add);
+     * ours returns -1. */
     if (!l)
         return -1;                          /* retail faults here */
     n = l->count;
@@ -175,6 +178,7 @@ static int32_t chain_remove_from(struct chain_list **pp, chain_cb cb)
 
 static int32_t FS98_STDCALL chain_remove(uint32_t index, chain_cb cb)
 {
+    /* Not reproduced (CHAIN-1): the registers retail's remove service leaves behind, likewise. */
     return chain_remove_from(&chain.list[index], cb);
 }
 
@@ -197,6 +201,8 @@ static int32_t chain_compact(void)
 
         if (!l)
             continue;
+        /* RETAIL BUG (kept): CHAIN-1 -- the dispatch returns edx as the compaction leaves it: every allocated
+         * list's count, then (below) the walk's pointer and count. */
         chain_edx = l->count;               /* every allocated list's count */
         if (l->count == 0 || l->pending == 0)
             continue;
@@ -241,6 +247,9 @@ static int32_t chain_compact(void)
 
 /* The callback with retail's registers (r: eax, edx, ebx, esi, edi), ecx a
  * and ebp b; its edx back. */
+/* RETAIL BUG (kept): CHAIN-1 -- the callback thunk: callbacks are entered with eax = the list's block, edx = the
+ * depth or the previous callback's edx, ebx = the list's slot, esi = 0x10 + 8 * i, edi = i, ecx = the first
+ * argument and ebp = the second; other modules (ANALYSIS's change test, WINMSG's callbacks) rely on them. */
 uint32_t chain_call(chain_cb cb, uint32_t a, uint32_t b, const uint32_t *r) __asm__("_chain_call");
 __asm__(".text\n\t.p2align 4\n"
         "_chain_call:\n\t"
@@ -260,6 +269,8 @@ uint32_t chain_dispatch_body(uint32_t index, uint32_t a, uint32_t b)
     struct chain_list **pp = &chain.list[index];
     uint32_t i, r, edx;
 
+    /* RETAIL BUG (kept): CHAIN-1 -- the return paths leave ecx and edx as retail does: b and a with no list, 0 and
+     * a for an empty one (the list pointer in eax). */
     if (!*pp) {
         chain_ecx = b;
         chain_edx = a;
@@ -271,6 +282,8 @@ uint32_t chain_dispatch_body(uint32_t index, uint32_t a, uint32_t b)
         return (uint32_t)(uintptr_t)*pp;
     }
 
+    /* RETAIL BUG (kept): CHAIN-1 -- edx starts as the depth after the increment, then is whatever the callback
+     * before left in it (not reloaded), below. */
     edx = ++(*pp)->depth;
     for (i = 0; i < (*pp)->count; i++)     /* count and block reread each step */
         if (!(*pp)->entry[i].removed) {
@@ -283,6 +296,7 @@ uint32_t chain_dispatch_body(uint32_t index, uint32_t a, uint32_t b)
             regs[4] = i;
             edx = chain_call((*pp)->entry[i].callback, a, b, regs);
         }
+    /* RETAIL BUG (kept): CHAIN-1 -- returns ecx = the depth after the decrement and edx = the last callback's. */
     chain_ecx = --(*pp)->depth;
     chain_edx = edx;
 
@@ -294,7 +308,8 @@ uint32_t chain_dispatch_body(uint32_t index, uint32_t a, uint32_t b)
     return r;
 }
 
-/* +0x20 (index, a, b), stdcall: the body, then ecx and edx as retail's. */
+/* +0x20 (index, a, b), stdcall: the body, then ecx and edx as retail's.
+ * RETAIL BUG (kept): CHAIN-1 -- the final register reload below. */
 __asm__(".text\n\t.p2align 4\n"
         "_chain_dispatch:\n\t"
         "pushl 12(%esp)\n\tpushl 12(%esp)\n\tpushl 12(%esp)\n\t"

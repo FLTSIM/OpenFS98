@@ -921,7 +921,8 @@ static int32_t fs98_numeric_validate(const char *text,
                 return 4;
             has_digit = 1;
         } else if (byte == '-') {
-            /* QUIRK: retail never sets the flag it checks for a repeated
+            /* RETAIL BUG (kept): NUM-1 -- the repeated-minus flag is never set, so "--5" passes the validator.
+             * QUIRK: retail never sets the flag it checks for a repeated
              * minus, so "--1" is accepted here (and rejected later only by
              * unsigned wrappers). */
             if (has_digit)
@@ -1117,6 +1118,8 @@ static int32_t fs98_numeric_store_s48(int64_t value, void *output,
         if (high < minimum_high ||
             (high == minimum_high && low < minimum_low))
             return 5;
+        /* RETAIL BUG (kept): NUM-3 -- the upper endpoint of a signed 48-bit range is exclusive here (`>=`), unlike
+         * the inclusive integer and fixed-point ranges and the longitude and latitude parsers. */
         /* Retail treats the upper fixed-point endpoint as exclusive. */
         if (high > maximum_high ||
             (high == maximum_high && low >= maximum_low))
@@ -1633,6 +1636,8 @@ parse_s48_fixed:
 store_s48:
         return fs98_numeric_store_s48(converted_value, output, range, result);
     case 0x19:
+        /* RETAIL BUG (kept): NUM-2 -- only octal characters pass, but the digit string is read as decimal and
+         * converted to packed BCD (below). */
         {
             const char *octal = text;
 

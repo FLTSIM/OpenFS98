@@ -312,10 +312,14 @@ static uint32_t fs98_util_lat_scale(const void *pos48)
     off  = (uint32_t)(((uint32_t)lat_hi & ~1u) * 2u);
     frac = ((uint32_t)(lat_hi & 1) << 31) | (lat_lo >> 1);
 
+    /* Not reproduced (UTIL-2): past the end of the copied .data, retail's two reads would fall on whatever
+     * follows its .data in memory; ours reads offset 0 instead. */
     if (off + FS98_UTIL_LATTABLE + 8 > FS98_UTIL_DATA_SIZE)
         off = 0;                            /* see the note on range, below */
 
     {
+        /* RETAIL BUG (kept): UTIL-2 -- the index is not clamped, so a latitude near a pole reads past the table
+         * into the neighbouring .data (inside the copied image, the same bytes retail reads). */
         const unsigned char *t = fs98_util_data + FS98_UTIL_LATTABLE + off;
         uint32_t cur   = *(const uint32_t *)t;
         uint32_t next  = *(const uint32_t *)(t + 4);
@@ -326,6 +330,7 @@ static uint32_t fs98_util_lat_scale(const void *pos48)
          * So the high half is not doubled, and the scale comes out
          * fractionally different from the interpolation the code reads as if
          * it were doing.  Reproduced -- it moves results by a unit or two. */
+        /* RETAIL BUG (kept): UTIL-3 -- only the low half is doubled; the carry goes to the high half unchanged. */
         {
             uint32_t p_lo  = (uint32_t)prod;
             uint32_t p_hi2 = (uint32_t)(prod >> 32);
@@ -355,6 +360,9 @@ void FS98_STDCALL fs98_util_metres_to_longitude(const void *in48,
         negate = 1;
     }
 
+    /* RETAIL BUG (fixed, not kept): UTIL-1 -- retail's first `div` raises #DE when the quotient does not fit in 32
+     * bits (a step reaching the latitude circle's circumference) and on a zero divisor; ours guards zero and
+     * divides in 64 bits, so it neither faults nor saturates. */
     if (divisor == 0)                       /* retail would fault; do not */
         divisor = 1;
 
@@ -363,6 +371,7 @@ void FS98_STDCALL fs98_util_metres_to_longitude(const void *in48,
     q_lo = (uint32_t)(((num % divisor) << 32) / divisor);
 
     if (negate) {
+        /* RETAIL BUG (kept): UTIL-4 -- the borrow of the 64-bit negate lands on edx, so the high half lacks its +1. */
         /* QUIRK.  The low 16 bits of the fractional half are cleared, and then
          * the 64-bit negate is written as `not ecx / neg eax / sbb edx,-1` --
          * the borrow correction lands on EDX, the leftover remainder, instead
@@ -612,6 +621,7 @@ int32_t FS98_STDCALL fs98_util_v48_equal(const void *a, const void *b)
  */
 void FS98_STDCALL fs98_util_shr48(void *dst, const void *src, uint32_t count)
 {
+    /* RETAIL BUG (kept): UTIL-6 -- the count is masked to five bits below, as CL is. */
     uint16_t lo = *(const uint16_t *)((const unsigned char *)src + 2);
     int32_t  hi = *(const int32_t  *)((const unsigned char *)src + 4);
     uint32_t c  = count & 31;
@@ -1040,6 +1050,8 @@ void FS98_STDCALL fs98_util_fixed48_to_double(double *out, const void *in48)
     uint32_t hi = *(const uint32_t *)(s + 4);
     uint16_t lo = *(const uint16_t *)(s + 2);
 
+    /* RETAIL BUG (kept): UTIL-7 -- the integer half is converted as unsigned, so a negative position comes
+     * out near 2^32 higher. */
     *out = (double)hi - (double)lo * (-1.0 / 65536.0);
 }
 
@@ -1053,6 +1065,7 @@ int64_t FS98_STDCALL fs98_util_double_to_fixed48(const double *in, void *out48)
      * precision, and with that deliberate 2^32 offset in play the precision
      * is load-bearing: computed in 64-bit double the fraction comes out one
      * or two units different.  `long double` is 80-bit on x86. */
+    /* RETAIL BUG (kept): UTIL-7 -- `(uint32_t)hi`: unsigned here too; the 2^48 error cannot reach the stored 16 bits. */
     long double frac = (long double)v - (long double)(uint32_t)hi;
     int64_t lo = fs98_util_ftol(frac * 65536.0L);
 

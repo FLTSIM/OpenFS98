@@ -48,6 +48,11 @@ static void FS98_STDCALL fs98_util_walk(const char *dir, const char *pattern,
     struct fs98_host_find *h;
     struct fs98_host_find_entry e;
 
+    /* RETAIL BUG (kept): UTIL-9 -- one entry (and its `type`, set by HOST +0x160 and left untouched for an
+     * unregistered extension) serves both loops, so a file inherits the previous entry's type (this decides only the second loop's recursion).  Separately,
+     * the first loop makes one record per match from e.name, so with ext -1 "a.BGL" and "a.TXT" give two records
+     * with the same path.  Not reproduced (UTIL-9): retail's first iteration reads stack
+     * garbage for `type`; ours seeds 0. */
     e.type = 0;
     FS98_HOST_ALLOC(H)(1, 0x105, (void **)&sub, 1);
 
@@ -116,7 +121,12 @@ int32_t FS98_STDCALL fs98_util_is_dir(const char *path)
     struct fs98_host_find_entry e;
     int32_t found = 0;
 
+    /* RETAIL BUG (kept): UTIL-9 -- `+0xa0` shares the stale `type` of `+0x94` (a file with an unregistered extension
+     * directly after a directory of the same name counts).  Not reproduced (UTIL-9): the first entry's type is
+     * stack garbage in retail; ours seeds 0. */
     e.type = 0;
+    /* RETAIL BUG (kept): UTIL-10 -- the host's split peels ".BGL" off "dir.BGL", so a directory with a dot in its
+     * name is compared as "dir" and never found; a bare name rejoins to "" and is looked for in the drive root (except HOST-1's case: a top byte of 0x5c leaves the search relative). */
     if (FS98_HOST_PATH_SPLIT(H)(path, drive, dir, name, 0) != 0)
         return 0;
     if (FS98_HOST_PATH_JOIN(H)(joined, drive, dir, 0) != 0)
@@ -242,6 +252,8 @@ int32_t FS98_STDCALL fs98_util_catalogue(uint32_t stock_id, uint32_t user_id,
         }
     }
 
+    /* RETAIL BUG (kept): UTIL-11 -- an empty result returns without resetting the static list, whose buffer
+     * carries into the next call. */
     if (fs98_util_list98.count == 0)
         return 0;
 

@@ -310,7 +310,8 @@ static void host_quit(void)
 /* +0x210 (0x40ce60): *pp = realloc(*pp, size).  Failure with flags 4 puts the
  * old pointer back and returns -1; otherwise the purge hook and one retry, and
  * a second failure shows the out-of-memory box and asks the main window to
- * close -- but, unlike +0x20c, returns 0 with *pp null rather than exiting. */
+ * close -- but, unlike +0x20c, returns 0 with *pp null rather than exiting.
+ * RETAIL BUG (kept): HOST-7 (the non-fatal second failure, below). */
 static uint32_t FS98_STDCALL host_210(uint32_t flags, uint32_t size, uint32_t pp)
 {
     void *old = (void *)(uintptr_t)M32(pp);
@@ -413,7 +414,7 @@ static uint32_t host_list_remove_at(uint32_t l, int32_t i)
         return e;
     }
     count = (int32_t)L_COUNT(l) - 1;
-    L_COUNT(l) = (uint32_t)count;
+    L_COUNT(l) = (uint32_t)count;   /* RETAIL BUG (kept): HOST-4 -- dropped even for an index at or past the end, and when a queued removal is applied */
     if (i < count) {
         uint32_t size = L_SIZE(l), n = (uint32_t)(count - i) * size, k;
         uint8_t *d = (uint8_t *)(uintptr_t)((uint32_t)i * size + L_DATA(l));
@@ -422,6 +423,7 @@ static uint32_t host_list_remove_at(uint32_t l, int32_t i)
             d[k] = s[k];
         return size;                /* eax: what the move left there */
     }
+    /* RETAIL BUG (kept): HOST-6 -- +0x300 returns what eax held (the size after a move, else the depth tested; during a walk the new queue entry's address) */
     return 0;                       /* eax: the depth it tested */
 }
 
@@ -438,6 +440,7 @@ static uint32_t FS98_STDCALL host_300(uint32_t l, uint32_t elem)
 static void host_list_flush(uint32_t l)
 {
     uint32_t n, q;
+    /* RETAIL BUG (kept): HOST-5 -- the depth L_ITER is not consulted here */
     if (L_PEND(l) == 0)
         return;
     n = L_COUNT(HOST_QUEUE);
@@ -488,7 +491,8 @@ static uint32_t FS98_STDCALL host_30c(uint32_t l, uint32_t ctx, uint32_t fn)
 
 /* 0x4104e0: the index of the first element whose `len` bytes at `off` match
  * `key` -- or, with `indirect`, whose pointer at `off` points at bytes
- * matching those `key` points at -- or -1.  A zero `len` matches at once. */
+ * matching those `key` points at -- or -1.  A zero `len` matches at once
+ * (RETAIL BUG (kept): HOST-6, +0x310 with a zero length: the first element). */
 static int32_t host_list_index(uint32_t l, uint32_t off, uint32_t key, uint32_t len,
                                uint32_t indirect)
 {
@@ -522,6 +526,8 @@ static uint32_t FS98_STDCALL host_310(uint32_t l, uint32_t off, uint32_t key, ui
  * when there was nothing to free, the address of the data field. */
 static uint32_t FS98_STDCALL host_2fc(uint32_t l)
 {
+    /* RETAIL BUG (kept): HOST-6 -- the capacity is left, so a freed list not re-initialised
+     * writes through null on its next append; the return is what eax held */
     if (L_DATA(l) == 0)
         return l + 0x18;
     return host_214(l + 0x18);
@@ -531,7 +537,9 @@ static uint32_t FS98_STDCALL host_2fc(uint32_t l)
 
 /* qsort and bsearch take a cdecl comparator; the host's callers pass stdcall
  * ones, so the host parks the comparator at 0x41a24c and hands MSVCRT this
- * trampoline (0x40cfe0) instead.  Not reentrant, as retail is not. */
+ * trampoline (0x40cfe0) instead.  Not reentrant, as retail is not.
+ * RETAIL BUG (kept): HOST-3 -- the parked comparator is global (+0x22c and +0x234 both),
+ * and the trampoline does not clean up after a stdcall comparator, which must be one. */
 static int __cdecl host_cmp_tramp(const void *a, const void *b)
 {
     return (int)((uint32_t (FS98_STDCALL *)(uint32_t, uint32_t))(uintptr_t)M32(V(0x41a24c)))(
@@ -624,6 +632,8 @@ static uint32_t host_opt_find(uint32_t p, uint32_t name)
         return 0;
     do {
         uint8_t c = M8(p);
+        /* RETAIL BUG (kept): HOST-8 -- M8(p - 1) for a first character of '/' or '-' is the byte
+         * before the command line's buffer; serves +0x98 (so +0x9c, +0xa0) and +0xa4 */
         if ((c == '/' || c == '-') && M8(p - 1) == ' ' &&
             host_228(p + 1, name, host_2b8(name)) == 0 &&
             (M8(host_2b8(name) + p + 1) == ':' || M8(host_2b8(name) + p + 1) == ' '))
@@ -928,6 +938,7 @@ static uint32_t FS98_STDCALL host_1d0(uint32_t code, uint32_t buf, uint32_t unus
     uint32_t eax = host_input_names();
     (void)unused;
     M8(buf) = 0;
+    /* RETAIL BUG (kept): HOST-9 -- the return is whatever eax holds (wsprintfA's count, or the loading's) */
     if (c >= 0x11 && c <= 0x50)
         eax = (uint32_t)wsprintfA((char *)(uintptr_t)buf, (const char *)(uintptr_t)V(0x41826c),
                                   (const char *)(uintptr_t)V(0x418108), c - 0x10);
@@ -946,6 +957,8 @@ static uint32_t FS98_STDCALL host_1d4(uint32_t s, uint32_t out)
     uint32_t eax;
     host_input_names();
     M32(out) = 0;
+    /* RETAIL BUG (kept): HOST-9 -- the return is the last compare or the code made; a button past 64
+     * or an axis past 16 stores 0 in *out (the return is the code made, not 0); the axis prefix is compared from just past a matched button prefix */
     eax = host_228(s, V(0x418108), M32(V(0x41a244)));
     if (eax == 0) {
         M32(out) = 0x11;
@@ -1027,7 +1040,7 @@ static void host_cut_sep(uint32_t buf, uint32_t seplen)
  * for a null `out`; else 0.  The work buffer is 0x208 bytes, unchecked. */
 static uint32_t FS98_STDCALL host_184(uint32_t out, uint32_t drive, uint32_t dir, uint32_t name)
 {
-    uint8_t buf[0x208];
+    uint8_t buf[0x208];     /* RETAIL BUG (kept): HOST-2 -- only the result is checked against 0x104, not the parts */
     uint32_t seplen = host_2b8(V(0x4180c4)), i, b = ADDR(buf);
     buf[0] = M8(V(0x4187f8));
     for (i = 1; i < sizeof buf; i++)
@@ -1432,9 +1445,9 @@ static uint32_t FS98_STDCALL host_200(uint32_t key, uint32_t buf, uint32_t len)
     case 0x87: w = KN_NUMENTER; break;
     case 0x90: w = KN_NUMLOCK; break;
     default:
-        return host_key_text(vk, buf + n, len - n - 1);
+        return host_key_text(vk, buf + n, len - n - 1);     /* RETAIL BUG (kept): HOST-10 -- len - n - 1 unchecked */
     }
-    return host_2ac(buf + n, w, len - n - 1);
+    return host_2ac(buf + n, w, len - n - 1);               /* RETAIL BUG (kept): HOST-10 -- as above; strncpy's zero fill then runs on */
 }
 
 /* Does `s` begin with word `w`?  (host +0x228 over the word's length.) */
@@ -1574,7 +1587,7 @@ static void host_prof_put_double(uint32_t sec, uint32_t key, double v, uint32_t 
 static uint32_t host_prof_get_list(uint32_t sec, uint32_t key, uint32_t out, uint32_t n,
                                    uint32_t file, int dbl)
 {
-    uint32_t size = n * (dbl ? 30 : 15), buf;
+    uint32_t size = n * (dbl ? 30 : 15), buf;   /* RETAIL BUG (kept): HOST-11 -- 15 bytes an int, 30 a double */
     char *p;
     if (host_20c(1, size, ADDR(&buf), 0) != 0)
         return (uint32_t)-1;
@@ -1605,6 +1618,7 @@ static uint32_t host_prof_put_list(uint32_t sec, uint32_t key, uint32_t vals, ui
 {
     char t[0x24];
     uint32_t buf, i;
+    /* RETAIL BUG (kept): HOST-11 -- the same block size, written into unchecked; and a double's "%f" overruns t[0x24] (one value suffices: 318 bytes at most) */
     if (host_20c(1, n * (dbl ? 30 : 15), ADDR(&buf), 0) != 0)
         return (uint32_t)-1;
     M8(buf) = 0;
@@ -2107,7 +2121,7 @@ static uint32_t FS98_STDCALL host_11c(uint32_t path)
     if (host_path_ext(ADDR(&file), path, 0) != 0)
         return (uint32_t)-1;
     if (!CreateDirectoryA((LPCSTR)(uintptr_t)file, 0))
-        return (uint32_t)-1;
+        return (uint32_t)-1;    /* RETAIL BUG (kept): HOST-12 -- the copy is not freed */
     return host_214(ADDR(&file)) != 0 ? (uint32_t)-1 : 0;
 }
 
@@ -2176,6 +2190,7 @@ static uint32_t FS98_STDCALL host_164(uint32_t out, uint32_t dir, uint32_t patte
     if (dir != 0) {
         host_2b0(ADDR(buf), dir);
         n = host_2b8(ADDR(buf));
+        /* RETAIL BUG (kept): HOST-1 -- an empty dir reads the byte before buf (the heap pointer's top byte; 0x5c appends nothing) */
         if ((n != 0 ? (uint8_t)buf[n - 1] : (uint8_t)(f >> 24)) != '\\')
             host_2b0(ADDR(buf), V(0x4180c4));
     }
@@ -2447,6 +2462,7 @@ static uint32_t FS98_STDCALL host_1c4(uint32_t idx, uint32_t st)
         return (uint32_t)-1;
     caps = M32(e + 0x64);
     axes = M16(e + 0x6c);
+    /* RETAIL BUG (kept): HOST-23 -- the axis count is 16 bits and wraps when the caps claim fewer axes than flags */
     if (caps & 0x8) { mask = 8; axes--; }
     if (caps & 0x4) { mask |= 4; axes--; }
     if (caps & 0x2) { mask |= 2; axes--; }
@@ -2634,7 +2650,7 @@ static uint32_t FS98_STDCALL host_208(uint32_t key, uint32_t unused, uint32_t fl
         M32(key) = 0x2e;
     } else {
         if (vk == 0x0d && M32(extended) != 0)
-            M32(key) = 0x87;
+            M32(key) = 0x87;    /* RETAIL BUG (kept): HOST-16 -- *flags is not set */
         return key;
     }
     M32(flags) |= 1;
@@ -2779,6 +2795,7 @@ static uint32_t FS98_STDCALL host_150(uint32_t path, uint32_t out)
     M32(out) = 0;
     if (!GetDiskFreeSpaceA(drive, &spc, &bps, &free_, &total))
         return (uint32_t)-1;
+    /* RETAIL BUG (kept): HOST-15 -- bps * spc in 32 bits before widening */
     *(uint64_t *)(uintptr_t)out = (uint64_t)(uint32_t)(bps * spc) * free_;
     return 0;
 }
@@ -2997,6 +3014,7 @@ static uint32_t FS98_STDCALL host_244(uint32_t parent, uint32_t id, uint32_t tex
     item[4] = 0;
     if (p == 0)
         return (uint32_t)-1;
+    /* RETAIL BUG (kept): HOST-17 -- an item with no submenu (MI_SUB 0): host_menu_count reads through null here */
     r = host_menu_insert(MI_SUB(p), 1, ADDR(item), 0xffff);
     MI_SUB(p) = r;
     if (r == 0)
@@ -3011,6 +3029,7 @@ static uint32_t FS98_STDCALL host_248(uint32_t id, uint32_t items)
     uint32_t p = host_menu_find(MENU_ROOT, id), r;
     if (p == 0)
         return (uint32_t)-1;
+    /* RETAIL BUG (kept): HOST-17 -- an item with no submenu: counted through null here (+0x244's case) */
     r = host_menu_insert(MI_SUB(p), host_menu_count(items) - 1, items, 0xffff);
     MI_SUB(p) = r;
     if (r == 0)
@@ -3026,7 +3045,7 @@ static uint32_t FS98_STDCALL host_24c(uint32_t id, uint32_t new_id, uint32_t tex
     uint32_t item[5], n = host_menu_find(MENU_ROOT, id), p, r;
     if (n == 0)
         return (uint32_t)-1;
-    p = host_menu_find(MENU_ROOT, MI_PARENT(n));
+    p = host_menu_find(MENU_ROOT, MI_PARENT(n));   /* RETAIL BUG (kept): HOST-17 -- the array is found through the item's own parent id */
     if (p == 0)
         return (uint32_t)-1;
     item[0] = MI_ID(p) | (new_id << 16);
@@ -3048,7 +3067,7 @@ static uint32_t FS98_STDCALL host_250(uint32_t id, uint32_t items)
     uint32_t n = host_menu_find(MENU_ROOT, id), p, r;
     if (n == 0)
         return (uint32_t)-1;
-    p = host_menu_find(MENU_ROOT, MI_PARENT(n));
+    p = host_menu_find(MENU_ROOT, MI_PARENT(n));   /* RETAIL BUG (kept): HOST-17 -- as +0x24c */
     if (p == 0)
         return (uint32_t)-1;
     r = host_menu_insert(MI_SUB(p), host_menu_count(items) - 1, items, id & 0xffff);
@@ -3072,6 +3091,7 @@ static uint32_t FS98_STDCALL host_254(uint32_t id, uint32_t flags)
     p = host_menu_find(MENU_ROOT, MI_PARENT(n));
     if (p == 0)
         return (uint32_t)-1;
+    /* RETAIL BUG (kept): HOST-17 -- found through the item's own parent id; a wrong but resolvable one leaves idx -1, used unchecked */
     idx = host_menu_index(MI_SUB(p), id);
     e = MI_SUB(p) + (uint32_t)idx * 0x14;
     if (flags & 2) {
@@ -3092,7 +3112,7 @@ static uint32_t FS98_STDCALL host_254(uint32_t id, uint32_t flags)
     }
     CheckMenuItem((HMENU)(uintptr_t)MI_HMENU(p), (UINT)idx, how);
     if (M32(V(0x4182c0)) != 0) {
-        if (MI_PARENT(p) == 0)
+        if (MI_PARENT(p) == 0)      /* RETAIL BUG (kept): HOST-17 -- rebuilds the bar before redrawing */
             host_menu_rebuild();
         DrawMenuBar(HOST_HWND);
     }
@@ -3123,6 +3143,8 @@ static uint32_t FS98_STDCALL host_25c(uint32_t id)
     if (p == 0)
         return (uint32_t)-1;
     sub = p + 0xc;
+    /* RETAIL BUG (kept): HOST-17 -- found through the item's own parent id, idx unchecked; and
+     * the removed item's own submenu is never freed */
     idx = host_menu_index(M32(sub), id);
     host_20c(1, host_menu_count(M32(sub)) * 0x14 - 0x14, ADDR(&fresh), 0);
     if (fresh == 0)
@@ -3435,6 +3457,7 @@ static uint32_t host_voice_buffer(uint32_t v)
             if (host_wav_load(v + 0x64, ADDR(&scratch), v + 4, v + 8, v + 0xc) == 0)
                 goto cleanup;
         }
+        /* RETAIL BUG (kept): HOST-18 -- copies from the voice's sound, null for a type 7 duplicate of a buffered type 5 voice */
         host_21c(p1, M32(v + 4), M32(v + 8));
         if (M32(v + 0x24) == 5)
             host_214(v + 4);
@@ -3538,6 +3561,7 @@ static uint32_t FS98_STDCALL host_2d4(uint32_t src, uint32_t type, uint32_t out)
         M32(v + 8) = M32(M32(src) + 8);
         host_21c(v + 0xc, M32(src + 4), 0x12);
     } else if (type == 6 || type == 7) {
+        /* RETAIL BUG (kept): HOST-18 -- copies the source's (possibly null) sound pointer: a type 7 duplicate of a type 5 voice, whose sound was freed once buffered */
         M32(v + 8) = M32(src + 8);
         host_21c(v + 0xc, src + 0xc, 0x12);
         M32(v + 4) = M32(src + 4);
@@ -3554,6 +3578,7 @@ static uint32_t FS98_STDCALL host_2d4(uint32_t src, uint32_t type, uint32_t out)
     return err;
 fail:
     if (v != 0) {
+        /* RETAIL BUG (kept): HOST-18 -- a duplicate that fails to get a buffer frees the sound it shares with its source */
         if (M32(v + 4) != 0)
             host_214(v + 4);
         host_214(ADDR(&v));
@@ -3621,9 +3646,11 @@ static uint32_t FS98_STDCALL host_2d8(uint32_t src, uint32_t kind, uint32_t v, u
         return 0;
     }
     host_20c(1, M32(v + 8) + M32(add + 8), ADDR(&block), 0);
+    /* RETAIL BUG (kept): HOST-18 -- either sound may be null (a type 5 voice's, once buffered), copied from regardless */
     host_21c(block, M32(v + 4), M32(v + 8));
     host_21c(block + M32(v + 8), M32(add + 4), M32(add + 8));
     M32(v + 8) = M32(v + 8) + M32(add + 8);
+    /* RETAIL BUG (kept): HOST-18 -- for a duplicate v this frees the sound it shares with its source */
     host_214(v + 4);
     M32(v + 4) = block;
     if (kind == 2)
@@ -3687,6 +3714,7 @@ static uint32_t FS98_STDCALL host_2e4(uint32_t v, uint32_t m_lo, uint32_t m_hi)
     if (SND_DS == 0)
         return 0;
     M32(v + 0x2c) = host_voice_freq(v);
+    /* RETAIL BUG (kept): HOST-18 -- the buffer is used unchecked */
     return ((host_com2)(uintptr_t)COM(M32(v + 0x60), 0x44))(M32(v + 0x60), M32(v + 0x2c)) != 0 ? 0x9002c : 0;
 }
 
@@ -3725,6 +3753,7 @@ static uint32_t FS98_STDCALL host_2f0(uint32_t v, uint32_t pan)
     if (SND_DS == 0)
         return 0;
     M32(v + 0x30) = pan;
+    /* RETAIL BUG (kept): HOST-18 -- the buffer is used unchecked */
     hr = ((host_com2)(uintptr_t)COM(M32(v + 0x60), 0x40))(M32(v + 0x60), pan);
     if (hr == 0)
         return 0;
@@ -3746,6 +3775,7 @@ static uint32_t FS98_STDCALL host_2f4(uint32_t v)
     M32(v + 0x38) = 0;
     if (SND_DS == 0)
         return 0;
+    /* RETAIL BUG (kept): HOST-18 -- the buffer is used unchecked */
     return ((host_com1)(uintptr_t)COM(M32(v + 0x60), 0x48))(M32(v + 0x60)) != 0 ? 0x9003d : 0;
 }
 
@@ -3765,6 +3795,7 @@ static uint32_t FS98_STDCALL host_2e8(uint32_t v, uint32_t st)
     }
     if (v == 0)
         v = SND_HEAD;
+    /* RETAIL BUG (kept): HOST-18 -- the voice (the list's head if null) and its buffer are used unchecked */
     if (((host_com2)(uintptr_t)COM(M32(v + 0x60), 0x24))(M32(v + 0x60), ADDR(&status)) != 0) {
         M32(st + 4) |= 0x80;
     } else {
@@ -3878,7 +3909,7 @@ static uint32_t FS98_STDCALL host_2c4(uint32_t dst, uint32_t src, uint32_t len)
         return (uint32_t)-1;
     /* Retail tests strcpy's result the wrong way round: the copy is never
      * null, so this always returns -1 -- and never frees its working copy. */
-    if (host_2a8(dst, tmp) != 0)
+    if (host_2a8(dst, tmp) != 0)    /* RETAIL BUG (kept): HOST-14 */
         return (uint32_t)-1;
     return host_214(ADDR(&tmp)) != 0 ? (uint32_t)-1 : 0;
 }
@@ -3922,7 +3953,7 @@ static uint32_t FS98_STDCALL host_06c(uint32_t rec)
     block = M32(rec + 0xa0);
     if (M32(rec + 0x7c) == 0)
         return 0;
-    bits = M32(block + 0x1c);
+    bits = M32(block + 0x1c);   /* RETAIL BUG (kept): HOST-19 -- the host block is read unchecked (as +0x068's and the restack's) */
     pitch = M32(block + 0x20);
     if (M32(rec + 8) & 0x2000)
         return (uint32_t)-1;
@@ -3935,7 +3966,7 @@ static uint32_t FS98_STDCALL host_06c(uint32_t rec)
     M32(rec + 0x98) = bits;
     M32(rec + 8) |= 0x2000;
     M32(rec + 0x8c) = pitch;
-    if (M32(M32(rec + 0x90)) == bits)
+    if (M32(M32(rec + 0x90)) == bits)   /* RETAIL BUG (kept): HOST-19 -- the row table is refilled only when its first row moved */
         return 0;
     GetObjectA((HGDIOBJ)(uintptr_t)M32(block + 0x30), 0x18, bm);
     for (i = 0; i < (int32_t)bm[2]; i++) {
@@ -3970,7 +4001,7 @@ static uint32_t FS98_STDCALL host_074(uint32_t hwnd, uint32_t rec)
     if (rec == 0)
         return (uint32_t)-1;
     host_20c(1, 0x90, ADDR(&b), 1);
-    M32(rec + 0xa0) = b;
+    M32(rec + 0xa0) = b;    /* RETAIL BUG (kept): HOST-19 -- the old block is not freed */
     M32(b + 0x54) = 0;
     M32(b + 0x58) = 0;
     M32(b + 0x5c) = 0x20;
@@ -4159,7 +4190,7 @@ static uint32_t FS98_STDCALL host_318(uint32_t rec, uint32_t rect, uint32_t fg, 
     uint32_t dc, font, old;
     (void)unused;
     host_view_getdc(rec, ADDR(&dc));
-    if (kind == 0)
+    if (kind == 0)      /* RETAIL BUG (kept): HOST-21 -- a new font every call, never deleted */
         font = ADDR(CreateFontA(-7, 0, 0, 0, 0, 0, 0, 0, 1, 6, 0, 0, 0, (LPCSTR)(uintptr_t)V(0x41839c)));
     else if (kind == 1)
         font = ADDR(GetStockObject(SYSTEM_FIXED_FONT));
@@ -4792,7 +4823,7 @@ static uint32_t FS98_STDCALL host_10c(uint32_t id, uint32_t param)
         arr = w;
         w = M32(w);
     }
-    if (arr == 0 && w == 0) {
+    if (arr == 0 && w == 0) {   /* RETAIL BUG (kept): HOST-22 -- single-window factory only (an array factory faults at w = M32(w)): the module acquired above is not released */
         if (paused && !(M8(rec + 0xc) & 8))
             fs98_host_rt_pause_look(0);
         return (uint32_t)-1;
@@ -4818,7 +4849,8 @@ static uint32_t FS98_STDCALL host_10c(uint32_t id, uint32_t param)
     if ((int32_t)n > 0) {
         prev = M32(V(0x41ba58) + n * 8);
         if (M8(prev + 0xc) & 2) {
-            arr = M32(V(0x41ba5c) + n * 8);         /* retail reuses its register: the loop below sees this array */
+            /* RETAIL BUG (kept): HOST-22 -- retail reuses its register: when the current record and the previous one are both arrays, the pump below runs on the one below */
+            arr = M32(V(0x41ba5c) + n * 8);
             for (p = arr; M32(p) != 0; p += 4)
                 if (IsWindowVisible((HWND)(uintptr_t)M32(p))) {
                     SendMessageA((HWND)(uintptr_t)w, 0x469, 0, (LPARAM)M32(p));
@@ -5045,6 +5077,7 @@ static uint32_t FS98_STDCALL host_068(uint32_t rec)
         return 0;
     block = M32(rec + 0xa0);
     host_view_unlink(rec);
+    /* RETAIL BUG (kept): HOST-19 -- the host block is read unchecked */
     DestroyWindow((HWND)(uintptr_t)M32(block + 0x24));
     DestroyWindow((HWND)(uintptr_t)M32(block + 0x28));
     if (M32(rec + 0xa0) != 0) {
@@ -5103,6 +5136,7 @@ static uint32_t host_tip_add(uint32_t rec, uint32_t nodes, int32_t dx, int32_t d
         M32(n + 0x28) = r;
         M32(r) = M32(n + 4) + (uint32_t)dx;
         M32(r + 8) = M32(n + 0xc) + M32(r) + 1;
+        /* RETAIL BUG (kept): HOST-20 -- nested nodes grow the outermost bounds, not their group's */
         if ((int32_t)M32(bounds) > (int32_t)M32(r))
             M32(bounds) = M32(r);
         if ((int32_t)M32(bounds + 8) < (int32_t)M32(r + 8))
@@ -5212,6 +5246,7 @@ static uint32_t host_tip_check(uint32_t tree)
     if (M32(tree) == 0)
         return 0;
     do {
+        /* RETAIL BUG (kept): HOST-20 -- every top-level node is read as a group: one that is not scans past the end for a closing 3 */
         r = host_tip_fits(TN(tree, i));
         if (r == 0)
             return (uint32_t)-1;
@@ -5233,6 +5268,7 @@ static uint32_t FS98_STDCALL host_27c(uint32_t rec, uint32_t tree, uint32_t x, u
                                                  (HINSTANCE)(uintptr_t)M32(V(0x418828)), 0));
     if (host_310(block + 0x70, 0x10, ADDR(&tree), 4, 0) != 0)
         return (uint32_t)-1;
+    /* RETAIL BUG (kept): HOST-20 -- the tools are registered (host_tip_add) before host_tip_check */
     e = host_2f8(block + 0x70);
     M32(e) = M32(rec + 0x38);
     M32(e + 4) = M32(rec + 0x3c);

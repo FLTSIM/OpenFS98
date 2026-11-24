@@ -161,6 +161,10 @@ static const fs98_util_put_fn fs98_util_put[X_TABLE];
 static int32_t fs98_util_put_sub(struct fs98_util_xdesc *d, void *base, int32_t mode)
 {
     uint32_t i = fs98_util_xindex(d->subtype);
+    /* RETAIL BUG (kept): UTIL-12 -- the subtype indexes the one flat table unbounded; 0x1ffd..0x2000 (i 4..7)
+     * land on a kind handler, reproduced by the table below.  Not reproduced (UTIL-12): a subtype 0x1ff9..0x1ffc
+     * (i < 4) re-enters retail's own kind handler until the stack runs out, and one off either end of the table
+     * jumps into code; ours returns 0 for both. */
     if (i < 4 || i >= X_TABLE)
         return 0;                               /* retail crashes */
     return fs98_util_put[i](d, base, mode);
@@ -169,6 +173,7 @@ static int32_t fs98_util_put_sub(struct fs98_util_xdesc *d, void *base, int32_t 
 /* the callback convention: commit is 1, validate is 2 */
 static int32_t fs98_util_put_cb(struct fs98_util_xdesc *d, void *base, int32_t mode)
 {
+    /* RETAIL BUG (kept): UTIL-13 -- the callback is told 2 to validate and 1 to commit, the opposite of `mode`. */
     return CB(d)(d->kind, base, mode == 1 ? 2 : 1);
 }
 
@@ -178,6 +183,7 @@ static int32_t fs98_util_put_bits(struct fs98_util_xdesc *d, void *base, int32_t
     struct fs98_util_xrec *r = REC(d, base);
     uint32_t m;
     unsigned w = fs98_util_bits(d->subtype, &m);
+    /* RETAIL BUG (kept): UTIL-13 -- a valid flag width writes whatever the mode; a width of zero only clears status. */
     (void)mode;
 
     if (w == 1) {
@@ -219,6 +225,7 @@ static int32_t fs98_util_put_k4(struct fs98_util_xdesc *d, void *base, int32_t m
     int32_t e;
 
     if (d->subtype == X_STRING) {
+        /* RETAIL BUG (kept): UTIL-13 -- the string copy writes even in validation mode. */
         FS98_HOST_STRCPY(FS98_UTIL_HOST)((char *)VAR(d),
                                          (const char *)(uintptr_t)r->value);
         r->status = 0;
@@ -226,6 +233,7 @@ static int32_t fs98_util_put_k4(struct fs98_util_xdesc *d, void *base, int32_t m
     }
     if (d->subtype == X_CALLBACK)
         return fs98_util_put_cb(d, base, mode);
+    /* RETAIL BUG (kept): UTIL-13 -- any non-zero mode (validate is 1, but 2 as well) parses into the scratch buffer. */
     e = NUMERIC_PARSE(FS98_UTIL_NUMERIC)((const char *)(uintptr_t)r->value,
                                          d->subtype - 0x1000,
                                          mode != 0 ? (void *)scratch : (void *)VAR(d));
@@ -245,6 +253,7 @@ static int32_t fs98_util_put_width(struct fs98_util_xdesc *d, void *base, int32_
                                    unsigned w)
 {
     struct fs98_util_xrec *r = REC(d, base);
+    /* RETAIL BUG (kept): UTIL-13 -- only a mode of exactly 1 skips the store. */
     if (mode != 1) {
         if (w == 4)      *(uint32_t *)VAR(d) = r->value;
         else if (w == 2) *(uint16_t *)VAR(d) = (uint16_t)r->value;
@@ -278,6 +287,9 @@ int32_t FS98_STDCALL fs98_util_exchange_put(void *descs, uint32_t n, void *base,
 
     fs98_util_relocate(d, n);
     for (; n != 0; n--, d++)
+        /* RETAIL BUG (kept): UTIL-12 -- the kind indexes the same table unbounded (kinds 9..20 are the width handlers
+         * called directly, reproduced).  Not reproduced (UTIL-12): a kind past 20 jumps into code in retail;
+         * ours skips the descriptor. */
         if (d->kind < X_TABLE)                  /* else retail crashes */
             any |= (uint32_t)fs98_util_put[d->kind](d, base, mode);
     return any != 0;
@@ -291,8 +303,10 @@ static const fs98_util_get_fn fs98_util_get[X_TABLE];
 static void fs98_util_get_sub(struct fs98_util_xdesc *d, void *base)
 {
     uint32_t i = fs98_util_xindex(d->subtype);
+    /* RETAIL BUG (kept): UTIL-12 -- see fs98_util_put_sub.  Not reproduced (UTIL-12): the re-entry and the off-table
+     * jump; ours returns without doing anything. */
     if (i < 4 || i >= X_TABLE)
-        return;                                 /* retail crashes */
+        return;                                 /* retail crashes; the caller still clears the record's status */
     fs98_util_get[i](d, base);
 }
 
@@ -392,15 +406,17 @@ static const fs98_util_get_fn fs98_util_get[X_TABLE] = {
     fs98_util_get_w4, fs98_util_get_w2, fs98_util_get_w1,
 };
 
-/* Retail returns whatever the last handler left in EAX, which on some paths is
- * a bit index or the kind number.  Every caller in the retail modules ignores
- * it, so this returns nothing. */
+/* RETAIL BUG (fixed, not kept): UTIL-14 -- retail returns whatever the last handler left in EAX, which on some
+ * paths is a bit index or the kind number.  Every caller in the retail modules ignores it, so this returns
+ * nothing. */
 void FS98_STDCALL fs98_util_exchange_get(void *descs, uint32_t n, void *base)
 {
     struct fs98_util_xdesc *d = descs;
 
     fs98_util_relocate(d, n);
     for (; n != 0; n--, d++)
+        /* RETAIL BUG (kept): UTIL-12 -- unbounded kind, as in fs98_util_exchange_put; ours skips a kind past 20 where
+         * retail jumps into code (Not reproduced (UTIL-12)). */
         if (d->kind < X_TABLE)                  /* else retail crashes */
             fs98_util_get[d->kind](d, base);
 }

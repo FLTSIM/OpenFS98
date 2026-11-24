@@ -4861,8 +4861,8 @@ static void sim1_contact_ratio(uint32_t point, long double stiffness, int both, 
  * (0x2200ada0), the starters are capped by the engine type, empty lists cleared, GLOBAL +0x368
  * set, the stall angle and the pass's setup made (0x2200d750, 0x2200a7b0). Returns 1.
  * Retail's frame buffers: an id 0x302 record longer than its 0x1c bytes overruns retail's
- * stack; the C copies at most 0x1c (SIM1-AIR-FRAME-OVERRUN, fixed, docs/retail-bugs.md), and a
- * shorter one leaves stale frame bytes in retail where the C has zeros. */
+ * stack; the C copies at most 0x1c (marked at the copy below, SIM1-AIR-FRAME-OVERRUN, fixed,
+ * docs/retail-bugs.md), and a shorter one leaves stale frame bytes in retail where the C has zeros. */
 uint32_t __stdcall sim1_air_decode(const uint8_t *data, int32_t size)
 {
     uint8_t *global = SIM1_GLOBAL;
@@ -4915,6 +4915,7 @@ uint32_t __stdcall sim1_air_decode(const uint8_t *data, int32_t size)
         case 0x302: {
             uint32_t pairs[7] = {0};
             static const uint16_t into[7] = {0xb78, 0xb80, 0xb98, 0xb88, 0xba0, 0xb90, 0xba8};
+            /* RETAIL BUG (fixed, not kept): SIM1-AIR-FRAME-OVERRUN -- retail copies `length` bytes */
             SIM1_MEMMOVE(pairs, record, length < sizeof pairs ? length : sizeof pairs);
             for (at = 0; at < 7; ++at) P32(SIM1_GLOBAL, into[at]) = pairs[at];
             break;

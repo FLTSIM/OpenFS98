@@ -116,6 +116,13 @@ The `radios` suite's stand-in now logs edi, and catches the old call.
   run on a real display without `SEHFIX.DLL`; see [wine.md](wine.md).
 - **Non-x86.** HG2D's floating precision and status; see
   [modules/hg2d.md](modules/hg2d.md).
+- **DEMO's divide faults and the host's repair** (DEMO-10). Ours faults through an unsigned `divl`
+  where retail uses `idivl` for the vertical-speed and pitch-rate divides (the airspeed divide at
+  `0x206935d0` is unsigned in retail too), so the host's repair saturates unsigned for ours and signed
+  for retail there. Separately, retail resumes at the instruction consuming the repaired
+  quotient; ours resumes inside the void `fault_div`, discarding it (a zero interval goes on to another
+  divide by zero, an overflow stores the truncated quotient). `demodiff` stops at the fault, so the
+  repair is never compared.
 
 - **The host runtime's failed GetDC under 0x413910.** When the back buffer's GetDC fails,
   retail frames the rectangle with a DC that is never set, its caller's ecx left on the stack;

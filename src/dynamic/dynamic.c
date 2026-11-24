@@ -177,6 +177,8 @@ static uint32_t edi;                /* the object */
  * divisor or a quotient past 32 bits faults as retail's does. */
 static uint32_t udiv(uint32_t hi, uint32_t lo, uint32_t d, uint32_t *rem)
 {
+    /* RETAIL BUG (kept): DYN-2 -- (the divides) nothing tests the divisor or the quotient's range, so a zero
+     * divisor or an overflowing quotient takes a #DE (the host's repair then saturates it). */
     uint32_t q, r;
     __asm__ volatile("divl %4" : "=a"(q), "=d"(r) : "a"(lo), "d"(hi), "rm"(d) : "cc");
     if (rem) *rem = r;
@@ -186,6 +188,7 @@ static uint32_t udiv(uint32_t hi, uint32_t lo, uint32_t d, uint32_t *rem)
 /* idiv: edx:eax / d, signed */
 static uint32_t sdiv(uint32_t hi, uint32_t lo, uint32_t d)
 {
+    /* RETAIL BUG (kept): DYN-2 -- (the divides) as udiv: the ramped move divides by a program word (S_LEFT) unchecked. */
     uint32_t q, r;
     __asm__ volatile("idivl %4" : "=a"(q), "=d"(r) : "a"(lo), "d"(hi), "rm"(d) : "cc");
     return q;
@@ -194,6 +197,7 @@ static uint32_t sdiv(uint32_t hi, uint32_t lo, uint32_t d)
 /* idiv r/m16: dx:ax / d, signed, quotient in ax */
 static uint16_t sdiv16(uint16_t hi, uint16_t lo, uint16_t d)
 {
+    /* RETAIL BUG (kept): DYN-2 -- (the divides) as udiv: the divisor is a program word, and the 16-bit quotient can overflow. */
     uint16_t q, r;
     __asm__ volatile("idivw %4" : "=a"(q), "=d"(r) : "a"(lo), "d"(hi), "rm"(d) : "cc");
     return q;
@@ -378,6 +382,8 @@ static void __attribute__((used)) dyn_frame_ecx(uint32_t ecx)
         S_DT = eax;
         S_CLOCK = S_CLOCK + S_DT;
         ecx = step_all(ecx);
+        /* RETAIL BUG (kept): DYN-5 -- with no object array step_all returns ecx untouched, so the slices
+         * are counted down from the caller's ecx (or CHAIN's), not by time alone. */
         if (--ecx == 0)
             break;
     }
@@ -433,6 +439,8 @@ static void FS98_STDCALL dyn_players(uint32_t a, uint32_t b)
         s = M32(eax + 4);
         do {
             if (M32(s + 0x8) == 1 && M32(s + 0xc) == 0) {
+                /* RETAIL BUG (kept): DYN-7 -- a player with id 0 matches record 0, the user's, whose id is 0,
+                 * and overwrites it. */
                 eax = M32(s + 0x4);
                 ebx = S_PLAYERS;
                 edx = M32(ebx);
@@ -548,6 +556,8 @@ static void load_block(void)
  * the table.  Whatever handler they name runs, on whatever edi is. */
 static void run_declarations(void)
 {
+    /* RETAIL BUG (kept): DYN-2 -- (the declaration's edi) the handlers run on whatever edi is: dyn_load's GLOBAL,
+     * or, after a declaration that leaves it moved, the next object, and a program's writes land there. */
     esi = S_BLOCK;
     if (esi == 0)
         return;
@@ -640,6 +650,9 @@ static void step_object(void)
             M32(edi + 0x68) = esi;
             continue;
         }
+        /* RETAIL BUG (kept): DYN-1 -- an opcode below 0xa that sets carry (0, 8, 9 are op_halt) or a strayed
+         * counter on a zero byte does not move esi, so this loop runs it again for ever (the 0x1..0x7
+         * easing moves do advance esi). */
         S_RUN = 0;
         if (ebx >= 0xa)
             return;
@@ -845,6 +858,9 @@ static int op_origin(void)
  * checked.  Returns the carry of `add esi,4`. */
 static int op_param(void)
 {
+    /* RETAIL BUG (kept): DYN-2 -- (0x31's byte index) the index is a byte unchecked: it writes
+     * edi + 0x30 + 2 * index, up to 0x1fe past +0x30, and with the 0x120-byte object stride index 0x78 is the
+     * next object's +0, and 0x8a its +0x24 (the flags). */
     uint32_t ebx = M8(esi + 1);
     M16(edi + 0x30 + ebx * 2) = M16(esi + 2);
     esi += 4;
@@ -991,6 +1007,7 @@ static int timed(uint16_t ax, uint32_t ebx)
  * offset.  Retail's; kept. */
 static int ramped(uint16_t ax, uint32_t ebx)
 {
+    /* RETAIL BUG (kept): DYN-4 -- ecx carries the offset across timer(), whose path_end may overwrite it. */
     uint32_t ecx = ax, eax;
     uint32_t prod;
     uint16_t dx, lo;
@@ -1175,6 +1192,7 @@ static int op_turn(void)
         turn_apply();
         cf = 0;
     }
+    /* RETAIL BUG (kept): DYN-3 -- add si,7: only the low 16 bits of the counter step. */
     esi = (esi & 0xffff0000u) | (uint16_t)(esi + 7);
     return cf;
 }
@@ -1184,6 +1202,7 @@ static int op_turn(void)
 /* .text+0x18f2 */
 static int op_jump(void)
 {
+    /* RETAIL BUG (kept): DYN-2 -- (jumps) the target is not checked to lie in the program. */
     esi += SX16(M16(esi + 1));
     return 0;
 }
@@ -1191,6 +1210,7 @@ static int op_jump(void)
 /* .text+0x18fa -- one level: the return address goes to edi+0x6c */
 static int op_call(void)
 {
+    /* RETAIL BUG (kept): DYN-2 -- (calls) the target is not checked; one level only, a nested call overwrites the return. */
     uint32_t eax = SX16(M16(esi + 1)) + esi;
     esi += 3;
     M32(edi + 0x6c) = esi;
@@ -1202,6 +1222,8 @@ static int op_call(void)
  * otherwise to edi+0x6c */
 static int op_return(void)
 {
+    /* RETAIL BUG (kept): DYN-2 -- (the return paths) both go to a stored address nothing has checked
+     * (edi+0x74 for generated code, else edi+0x6c). */
     if (M32(edi + 0x70) != 0) {
         FREE(edi + 0x70);
         M32(edi + 0x70) = 0;
@@ -1253,6 +1275,7 @@ static uint32_t condition(uint16_t *pdx, uint16_t *pax)
 {
     uint32_t ecx, ebx, edx, g;
 
+    /* RETAIL BUG (kept): DYN-2 -- (conditional branches) ecx, the target, is unchecked like op_jump's. */
     ecx = SX16(M16(esi + 1)) + esi;
     ebx = M16(esi + 3);
     g = G;
@@ -2024,8 +2047,8 @@ have_target:
  * Carry set while it goes on.  Each tank's share is its room halved over
  * the total, as a 32.32 fraction whose low bit is lost (see the rcr).  The
  * proportional total leaves out the first tank -- its room is stored and then overwritten by the second's -- so a
- * first tank with more room than twice the rest overflows the divide, as
- * in retail. */
+ * first tank whose room halved reaches the total (room[0] >> 1 >= total) overflows
+ * the divide, as in retail. */
 static int op_refuel(void)
 {
     static const uint16_t tank[5][2] = {    /* capacity, level */
@@ -2082,6 +2105,8 @@ static int op_refuel(void)
         eax = (LO(p) >> 7) | (HI(p) << 25);
         room[k] = (ecx << 16) - eax;
     }
+    /* RETAIL BUG (kept): DYN-6 -- the total leaves out room[0], the first tank's, which retail stores and then
+     * overwrites with the second's; only the proportional branch (GLOBAL +0xc44 set) gets here. */
     total = room[1] + room[2] + room[3] + room[4];
     if (M32(rec + 0x34) == 0) {
         p = umul(0x3c, total);
@@ -2244,7 +2269,7 @@ static int op_jnear(void)
                s, c))
         eax = 0x19;
     else
-        eax = SX16(M16(esi + 1));
+        eax = SX16(M16(esi + 1));   /* RETAIL BUG (kept): DYN-2 -- (jumps) unchecked, like op_jump */
     esi += eax;
     return 0;
 }

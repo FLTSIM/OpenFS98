@@ -406,6 +406,8 @@ static void record_flush(void)
 {
     uint32_t wrote, keep_eax = eax, keep_ecx = ecx;
 
+    /* RETAIL BUG (kept): DEMO-1 -- only eax and ecx are kept, so edx stays as the host's write (or the alert)
+     * left it, and a word event that fills the buffer with its tag writes that as its value. */
     if (M32(S_REC_FILE) != 0 && M32(S_BUF_FILL) != 0) {
         disk_check();
         demo_call4_edx(M32(HOST + 0x1b0), M32(S_REC_FILE), S_BUF, M32(S_BUF_FILL),
@@ -736,7 +738,9 @@ static uint32_t FS98_STDCALL demo_message(uint32_t text)
     eax = 2;
     goto out;
 found:
-    if (ecx == 0x38) {      /* never: the scan always counts one */
+    /* RETAIL BUG (kept): DEMO-11 -- the test never passes: the repnz scasb scans 1 to 0x38 bytes, so any scan
+     * that reaches here has already taken ecx below 0x38. */
+    if (ecx == 0x38) {      /* never: see above */
         eax = 1;
         goto out;
     }
@@ -1230,6 +1234,10 @@ static void FS98_STDCALL demo_play_frame(void)
             play_end(M32(edi + 0x750));
             if (M32(edi + 0x750) == 0)
                 goto out;
+            /* RETAIL BUG (kept): DEMO-5 -- with the memory readers switched in and the loop flag
+             * +0x750 still set from an earlier video, this rewinds the memory reader to nothing and loops
+             * for ever.  RETAIL BUG (kept): DEMO-6 -- the same hang, reached by an instant replay started
+             * during a review (replay_prepare). */
             VIA(S_READ_REWIND);
             M32(edi + 0x758) = 1;
             M32(edi + 0x74c) = 1;
@@ -1278,6 +1286,8 @@ static void play_finish(void)
  * where it ends, and stop. */
 static void play_review_end(void)
 {
+    /* RETAIL BUG (kept): DEMO-8 -- this loop's parse_frame can stop playback on an unknown tag, which
+     * stops the review, which runs this again (see stop_playing). */
     do {
         edi = G;
         esi = M32(edi + 0x754);
@@ -1345,6 +1355,7 @@ static void f_refill(void)
 {
     uint32_t got, keep = eax;
 
+    /* RETAIL BUG (kept): DEMO-7 -- only eax is kept: ecx comes back as the host's read left it. */
     demo_call4_edx(M32(HOST + 0x19c), M32(S_PLAY_FILE), S_BUF, 0x200,
                    (uint32_t)(uintptr_t)&got);
     ecx = demo_callee_ecx4;
@@ -1364,6 +1375,8 @@ static void f_peek(void)
 {
     uint32_t keep;
 
+    /* RETAIL BUG (kept): DEMO-10 -- a misparsed dword length skips gigabytes, and this refills 0x200 bytes at
+     * a time to get there (slow, not wrong). */
     while (M32(S_BUF_POS) >= 0x200) {
         f_refill();
         if (M32(S_BUF_POS) == 0xffffffffu)
@@ -1501,6 +1514,9 @@ static void stop_playing(void)
     M32(edi + 0x750) = 0;
     H_POST(0x100ce, 0);
     if (M32(edi + 0x758) == 2) {
+        /* RETAIL BUG (kept): DEMO-8 -- stopping a review runs it to its end (play_review_end, which parses
+         * frames until the end), and a frame tag parse_frame stops on calls back here: the recursion
+         * runs until the stack does. */
         play_review_end();
     } else {
         M32(edi + 0x74c) = 0;
@@ -1629,6 +1645,9 @@ static void FS98_STDCALL parse_memory(uint32_t cursor, uint32_t end,
 {
     SAVE_REGS;
 
+    /* RETAIL BUG (kept): DEMO-5 -- the reader table is shared: this (and instant replay) switches it to
+     * memory and nothing switches it back until the next +0x28, so a video playing meanwhile reads memory
+     * (a looping one rewinds to nothing and spins for ever).  The harness keeps the three apart. */
     readers_memory();
     M32(S_RESYNC) = resync;
     esi = M32(cursor);
@@ -1704,6 +1723,8 @@ static void parse_frame(void)
         VIA(S_READ_SKIP1);
         goto step;
     default:
+        /* RETAIL BUG (kept): DEMO-8 -- an unknown frame tag (0x92, say) stops playback, and during a review
+         * that recurses (see stop_playing). */
         M32(S_DIALOG) = 0;
         stop_playing();
         alert(1, 0xf416);
@@ -1744,6 +1765,7 @@ end:
     }
     return;
 skip:
+    /* RETAIL BUG (kept): DEMO-10 -- a record that will not parse skips a second instead (slow, not wrong). */
     cf = M32(S_KEY) + 1000u < M32(S_KEY);
     M32(S_KEY) += 1000;
 }
@@ -1790,6 +1812,7 @@ static void parse_records(void)
         case 0x82: key_short(); continue;
         case 0x83: key_delta(); continue;
         case 0x86: key_long(); continue;
+        /* RETAIL BUG (kept): DEMO-8 -- the view event's tag 0x80 + 4 is taken here as a message. */
         case 0x84: record_message(); continue;
         case 0x89: cf = 1; return;
         case 0x8a:
@@ -1902,6 +1925,8 @@ static void record_tag(void)
         VIA(S_READ_PEEK);
         eax = length;
     }
+    /* RETAIL BUG (kept): DEMO-10 -- the dword length is taken as read: 4 is subtracted unchecked (a length
+     * under 4 wraps) and the reader skips that, gigabytes at 0x200 bytes a time (see f_peek). */
     eax -= 4;
     VIA(S_READ_SKIP);
 }
@@ -1915,6 +1940,9 @@ static void record_message(void)
     ebx = 0;
     ecx = 0x37;
     do {
+        /* RETAIL BUG (kept): DEMO-7 -- the count lives in ecx across the reader, and a refill in the middle
+         * of the message hands it the ecx the host's read left (f_refill): a large one writes past the
+         * 0x38-byte buffer into .data+0x530. */
         VIA(S_READ_BYTE);
         if (ecx != 0) {
             M8(ebx + S_MSG) = AL;
@@ -2174,6 +2202,8 @@ void derive_speeds(void)
             }
         }
         eax = ebx;
+        /* RETAIL BUG (kept): DEMO-10 -- a zero frame interval divides by zero (see fault_div; retail goes on
+         * with the repaired quotient, ours with the next divide, which is by zero too). */
         if (dt == 0) fault_div();
         {
             uint64_t n = (uint64_t)eax << 15, q;
@@ -2203,6 +2233,8 @@ void derive_speeds(void)
     if (M32(S_VS_SET) == 0) {
         int64_t n = (int64_t)(int32_t)dz << 16, q;
 
+        /* RETAIL BUG (kept): DEMO-10 -- a zero interval, or a vertical speed that overflows, divides by
+         * zero (see fault_div). */
         if (dt == 0) fault_div();
         q = n / (int32_t)dt;
         if (q != (int32_t)q) fault_div();
@@ -2221,6 +2253,12 @@ void derive_speeds(void)
  * it may a C division by zero. */
 static void fault_div(void)
 {
+    /* RETAIL BUG (kept): DEMO-10 -- the same #DE retail takes.  Not reproduced (DEMO-10): (1) ours divides
+     * through an unsigned divl, so the host's repair saturates unsigned where retail's idivl saturates signed;
+     * (2) retail resumes at the instruction that consumes the repaired quotient, but ours resumes here, inside
+     * a void helper, and the quotient is discarded: after a zero interval ours goes on to the next divide,
+     * also by zero, and after an overflow it stores the truncated quotient.  demodiff stops at the fault, so
+     * the repair is never compared (docs/open-differences.md). */
     __asm__ volatile("xorl %%ecx, %%ecx\n\tdivl %%ecx" : : : "eax", "ecx", "edx");
 }
 
@@ -2262,6 +2300,9 @@ TABLE_CMD(h_770, 0x770)
 TABLE_CMD(h_77c, 0x77c)
 static void h_770_77c(void)
 {
+    /* RETAIL BUG (kept): DEMO-3 -- the 0x40 handler saves eax round the first command, not ecx, so the
+     * second is sent with the ecx CONTROLS' +0x44 left (src/controls/controls.c:344); ours takes it back
+     * through demo_call2. */
     uint32_t keep = eax;
     h_770();
     eax = keep;
@@ -2270,6 +2311,9 @@ static void h_770_77c(void)
 TABLE_CMD(h_788, 0x788)
 static void h_6a0(void)
 {
+    /* RETAIL BUG (kept): DEMO-2 -- the record's nibble indexes the five values at .data+0x6a0 unchecked:
+     * nibbles 5..15 read the next table (+0x6b4, code pointers), so retail sends command 0x1009b with one
+     * of its own addresses as the value (ours sends one of its own, so it cannot be byte-identical). */
     ecx = M32(ecx * 4 + D + 0x6a0);
     eax = 0x1009b;
     controls();
@@ -2397,6 +2441,11 @@ EV_WORD(e_2011, 0x2011)
  * sets: see demo_event_entry. */
 static void e_view(void)
 {
+    /* RETAIL BUG (kept): DEMO-4 -- the test reads +0x11a0 of the caller's edi (see demo_event_entry).
+     * RETAIL BUG (kept): DEMO-8 -- the tag is 0x80 + the view value, unbounded, and put_tag writes it high
+     * byte first: values up to 0x7f00 write 00 xx, one command; a tag with high byte 0x84 (value 0x8400,
+     * bytes 84 80) is taken as a message and one with 0x92 (value 0x9200, bytes 92 80) is what parse_frame
+     * stops on. */
     ecx = M32(edi + 0x11a0);
     if (ecx != 0) {
         SET_AX(0x80 + DX);
@@ -2406,6 +2455,7 @@ static void e_view(void)
 EV_WORD(e_200f, 0x200f)
 static void e_2007(void)
 {
+    /* RETAIL BUG (kept): DEMO-4 -- reads +0x11a0 of the caller's edi (see demo_event_entry). */
     ecx = M32(edi + 0x11a0);
     if (ecx != 0) {
         SET_AX(0x2007); put_tag();
@@ -2417,6 +2467,7 @@ EV_BIT(e_160, 0x160)
 EV_BIT(e_170, 0x170)
 static void e_mode(void)
 {
+    /* RETAIL BUG (kept): DEMO-4 -- reads +0x11a0 of the caller's edi (see demo_event_entry). */
     ecx = M32(edi + 0x11a0);
     if (ecx == 0)
         return;
@@ -2463,6 +2514,8 @@ uint32_t demo_caller_edi;
 void FS98_STDCALL demo_event_body(uint32_t which, uint32_t value);
 void FS98_STDCALL demo_event_body(uint32_t which, uint32_t value)
 {
+    /* RETAIL BUG (kept): DEMO-4 -- edi is the caller's (CONTROLS' pilot_event, src/controls/controls.c:3702),
+     * which events 10, 12 and 17 read +0x11a0 of; retail's +0x24 never sets it. */
     edi = demo_caller_edi;
     demo_event(which, value);
 }
@@ -2828,6 +2881,9 @@ static uint32_t replay_prepare(void)
 {
     uint32_t g = G;
 
+    /* RETAIL BUG (kept): DEMO-6 -- the dialog refuses while +0x758 is 1 (playing), not 2 (reviewing a
+     * recording just made); a replay started then, with the loop flag +0x750 still set, hangs the sim
+     * (see demo_play_frame).  The harness keeps the replay dialog to when nothing plays. */
     if (M32(g + 0x758) == 1 || M32(g + 0x760) == 1 ||
         M16(g + 0x18) == 2 || M16(g + 0x18) == 7) {
         M32(D + 0xe88) = 1;
@@ -2866,6 +2922,8 @@ static uint32_t replay_begin(void)
     M32(g + 0x634) = M32(D + 0xeb0);
     M32(g + 0x614) = M32(D + 0xecc);
     M32(g + 0x628) = 1;
+    /* RETAIL BUG (kept): DEMO-9 -- the length is checked only by the dialog (replay_check refuses over +0x630);
+     * a replay started past the ring parses its 0xffff fill and spins, alerting, for ever. */
     M32(g + 0x62c) = M32(D + 0xe94);
     M32(g + 0x264) = 0;
     return 0;
@@ -3254,6 +3312,8 @@ static void demo_deinit(void)
 
     record_discard();
     M32(S_DIALOG) = 0;
+    /* RETAIL BUG (kept): DEMO-5 -- with the readers still switched to memory (see parse_memory) the close
+     * this runs is the memory one, so a video file still open is left open. */
     stop_playing();
     CHAIN_REMOVE(1, (uint32_t)(uintptr_t)demo_tick);
     CHAIN_REMOVE(0xd, (uint32_t)(uintptr_t)demo_paused);

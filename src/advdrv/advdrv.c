@@ -561,7 +561,9 @@ static int fcom(ld a, ld b)
     return 0x45;
 }
 
-/* idiv, so that a zero divisor or INT_MIN / -1 faults as retail's does. */
+/* idiv, so that a zero divisor or INT_MIN / -1 faults as retail's does.
+ * RETAIL BUG (kept): ADV-7 -- neither x_idiv nor x_mod tests the divisor or INT_MIN / -1, so a program that
+ * divides by zero (or INT_MIN by -1) takes a #DE; the host's divide repair then saturates the result. */
 static int32_t idiv(int32_t a, int32_t b, int32_t *remainder)
 {
     int32_t q, r;
@@ -1058,6 +1060,8 @@ static void op_stop(void)
 static void op_error(void)
 {
     COVER(0x309);
+    /* RETAIL BUG (kept): ADV-1 -- op_stop frees the code buffer, and op_error then returns to its caller, which
+     * keeps running on the freed cursor (the continuation sites are marked below). */
     op_stop();
     UTIL_ALERT(1, 4, 0xf439, 0, 0, 0, 0, 0);
 }
@@ -1686,7 +1690,7 @@ static char *text(void)
             c = PC8();
             A_PC++;
             if (c != 0x32)
-                op_error();
+                op_error();   /* RETAIL BUG (kept): ADV-1 -- continues: reads the string index from the freed code */
             index = PC32();
             A_PC += 4;
             s = (char *)PTR(P32(PTR(A_STRINGS), 4 * index));
@@ -1711,7 +1715,7 @@ static void step(void)
 
     A_PC++;
     if (op > 0x2b) {
-        op_error();
+        op_error();   /* the step loops check A_RUNNING (cleared by op_stop) before the next fetch, so nothing reads on */
         return;
     }
     COVER(op);
@@ -1754,7 +1758,7 @@ static void FS98_STDCALL parse_ref(struct adv_ref *ref)
         A_PC += 2;
         ref->read_only = var_read_only(ref->where);
     } else {
-        op_error();
+        op_error();   /* RETAIL BUG (kept): ADV-1 -- continues: the reference is left half-built and the caller goes on */
     }
 }
 
@@ -1794,7 +1798,7 @@ static double eval(void)
     }
     v = pop();
     if (!stack_empty())
-        op_error();
+        op_error();   /* RETAIL BUG (kept): ADV-1 -- continues: the value is returned to the caller on the freed code */
     return v;
 }
 
@@ -1812,7 +1816,7 @@ static void FS98_STDCALL push(double v)
     uint32_t sp;
 
     if (A_SP + 1 == 100)
-        op_error();
+        op_error();   /* RETAIL BUG (kept): ADV-1 -- continues: the push is stored anyway */
     sp = A_SP;
     OPERAND(sp) = v;
     A_SP = sp + 1;
@@ -1822,7 +1826,7 @@ static void FS98_STDCALL push(double v)
 static double pop(void)
 {
     if (A_SP == 0)
-        op_error();
+        op_error();   /* RETAIL BUG (kept): ADV-1 -- continues: the pop goes on to read OPERAND(-1) */
     A_SP = A_SP - 1;
     return OPERAND(A_SP);
 }
@@ -1836,7 +1840,7 @@ static int stack_empty(void)
 /* .text+0x1df0: an operator with no handler */
 static void op_bad_operator(void)
 {
-    op_error();
+    op_error();   /* RETAIL BUG (kept): ADV-1 -- continues: the operator handler returns into the expression loop */
 }
 
 /* .text+0x1e00 .. +0x1f20: constants and variables */
@@ -2154,7 +2158,7 @@ static ld FS98_STDCALL var_get(uint32_t index)
             return fn(VAR(index));
         }
     }
-    op_error();
+    op_error();   /* RETAIL BUG (kept): ADV-1 -- continues: a bad variable read returns a constant to its caller */
     return K(0x206190c0);
 }
 
@@ -2170,7 +2174,7 @@ static uint32_t FS98_STDCALL var_set(uint32_t index, double v)
             return fn(VAR(index), v);
         }
     }
-    op_error();
+    op_error();   /* RETAIL BUG (kept): ADV-1 -- continues: a bad variable write returns 0 to its caller */
     return 0;
 }
 
@@ -2179,7 +2183,7 @@ static uint32_t FS98_STDCALL var_read_only(uint32_t index)
 {
     if ((int32_t)index >= 0 && (int32_t)index <= 0xaf)
         return P32(VAR(index), 4) == 0;
-    op_error();
+    op_error();   /* RETAIL BUG (kept): ADV-1 -- continues: a bad variable's read-only test returns 1 to its caller */
     return 1;
 }
 
@@ -2256,6 +2260,8 @@ static ld FS98_STDCALL g_feet16(uint8_t *e)
 {
     uint32_t v = GV(e, uint16_t);
 
+    /* RETAIL BUG (kept): ADV-2 -- v is a zero-extended 16-bit value, so the test below (0xffffd8f1) is unreachable
+     * and -9999 ("none") is not turned into 0 (g_256ths compares 16 bits and does). */
 #if BREAK==1
     return (ld)(int32_t)v * K(0x206190d8);
 #else
@@ -3160,6 +3166,9 @@ static void FS98_STDCALL to_48(double v, uint8_t *out)
         v = (double)((ld)v - K(0x20619278));
     fraction = advdrv_modf(v, &whole);
     high = (int32_t)ftol(whole);
+    /* RETAIL BUG (kept): ADV-3 -- the high dword is the signed whole part but the low word is the fraction's
+     * magnitude (fabs), so a negative position is sign and magnitude; the sign lives in the whole part
+     * only, so a negative value with a zero whole part (-0.5) stores as +0.5 (see metres). */
 #if BREAK==9
     fraction = fraction * K(0x20619288);
 #else
@@ -3174,6 +3183,8 @@ static ld FS98_STDCALL metres(uint32_t low, int32_t high)
 {
     ld fraction = (ld)(int32_t)(low >> 16) * K(0x20619290);
 
+    /* RETAIL BUG (kept): ADV-3 -- (the read back) a whole part of 0 subtracts the fraction, so a positive
+     * sub-unit value (0.5) comes back negative: the round trip fails. */
     if (high > 0)
         return (ld)high + fraction;
     return (ld)high - fraction;
@@ -3298,7 +3309,7 @@ static void op_weather(void)
     uint8_t which = (uint8_t)(*(PTR(A_PC) - 1) - 0x1a);
 
     if (which >= 7) {
-        op_error();
+        op_error();   /* RETAIL BUG (kept): ADV-1 -- continues: op_weather returns to the step loop on the freed cursor */
         return;
     }
     ((void (*)(void))(uintptr_t)D32(A_WEATHER + 4 * which))();
@@ -3506,6 +3517,9 @@ static void w_cloud(void)
             return;
     }
     cloud_remove(id & 0xffff);
+    /* ADV-4's cloud part is not a bug here: the displaced lower layer reloads id, top, base, cover, icing,
+     * turbulence, type and flag (below), so it keeps its own top; only the wind and temperature layers below
+     * carry stale fields. */
     if (type == 10) {
         A_LAYER(0x192c) = (uint16_t)id;
         G16(0x1014) = t;
@@ -3707,7 +3721,9 @@ static void w_wind(void)
     if (cx == 0)
         return;
     /* the old first layer moves up -- keeping the new layer's top, which
-     * retail never reloads */
+     * retail never reloads.  RETAIL BUG (kept): ADV-4 -- (wind, first promotion) top16, the incoming layer's
+     * top, is not reloaded with the displaced layer's (cx / G16(0x104e)), so the second-slot store below
+     * (G16(0x1042) = top16) and the comparison at `second` use the incoming top. */
     t18 = s28;
     t1c = s24;
     t14 = s2c;
@@ -3731,7 +3747,7 @@ second:
     }
     A_LAYER(0x1948) = si;
     G16(0x1040) = di;
-    G16(0x1042) = top16;
+    G16(0x1042) = top16;   /* RETAIL BUG (kept): ADV-4 -- (wind, first promotion) the displaced first layer is stored with the incoming top */
     G16(0x1044) = t18;
     G16(0x1046) = t1c;
     G16(0x1048) = t14;
@@ -3919,6 +3935,9 @@ third:
     si = ax;
     bx = dx;
 fourth:
+    /* RETAIL BUG (kept): ADV-4 -- (temperature) the displaced layer moves down by altitude (si) and
+     * temperature (bx) only: its id (edi) is not carried, and this fourth slot's id, A_LAYER(0x1934), is never
+     * stored, so it keeps whatever was there (0 after temperature_remove). */
     G16(0x101c) = si;
     G16(0x101e) = bx;
 done:
@@ -4326,6 +4345,8 @@ static void FS98_STDCALL events_drop(uint32_t target)
             if (node == 0)
                 return;
         }
+        /* RETAIL BUG (kept): ADV-5 -- after an unlink, node is already the successor; advancing from it here
+         * steps past that successor unexamined (a run of two matching events loses only the first). */
         before = node;
         node = P32(PTR(node), 0xc);
     }
@@ -4530,6 +4551,10 @@ static uint8_t *FS98_STDCALL skip_sound(uint8_t *name)
         if (copy[0] == 0) {
             H_JOIN(U32(copy), 0, U32(A_SOUND_DIR3), U32(name));
             H_JOIN(U32(source), 0, U32(A_CACHE_DIR), U32(name));
+            /* RETAIL BUG (kept): ADV-6 -- (the copy) the copy goes to string 0x900e's directory.  The attribute
+             * change below uses it too, but HOST maps H_SET_ATTR(1, ..) to FILE_ATTRIBUTE_NORMAL, so nothing
+             * is marked read-only.  A sound find_sound already finds skips this copy, yet the delete in the
+             * other arm still tries that pre-existing file. */
             H_COPY(U32(copy), 0x13, U32(source), 0x13);
 #if BREAK!=10
             H_SET_ATTR(1, U32(copy), 0x13);
@@ -4539,7 +4564,7 @@ static uint8_t *FS98_STDCALL skip_sound(uint8_t *name)
     }
     H_JOIN(U32(source), 0, U32(A_SOUND_DIR3), U32(name));
     if (H_EXISTS(U32(source), 0x13) == 0)
-        H_DELETE(U32(source), 0x13);
+        H_DELETE(U32(source), 0x13);   /* RETAIL BUG (kept): ADV-6 -- (the delete) from 0x900e's directory, whether or not this program copied the file, and the result is ignored */
     return skip_str(name);
 }
 

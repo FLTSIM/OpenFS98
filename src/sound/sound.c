@@ -635,6 +635,8 @@ static void FS98_STDCALL snd_stop(struct snd_rec *rec)
     /* +0x24 code 0x1b hands this a voice handle instead of a record (see
      * snd_horn), so the read goes through a volatile to stay a read. */
     volatile struct snd_rec *r = rec;
+    /* RETAIL BUG (kept): SND-1 -- (the read) snd_horn passes a voice handle here as if it were a record, so
+     * this reads the handle's +0x1c; with no voice loaded that is address 0x1c, which faults. */
     uint32_t v = r->voice;
     if (v != 0) {
         H_VOICE_STOP(v);
@@ -757,6 +759,7 @@ static int32_t FS98_STDCALL snd_set_faders(int32_t *f)
         if (f[k] != 0) {
             S_FADER_ON(k) = 1;
             v = (uint32_t)f[6 + k];
+            /* RETAIL BUG (kept): SND-5 -- the clamp is unsigned, so a negative fader becomes 10000. */
             if (v > 10000)
                 v = 10000;
             S_FADER(k) = (int32_t)v;
@@ -1120,23 +1123,25 @@ static void FS98_STDCALL snd_cb_messages(uint32_t msg, uint32_t b)
 /* .text+0xc30 -- CHAIN list 0x12: a marker light off, on or toggled.
  * `idx` is checked only against 5, signed, so 5 and anything negative
  * reach past the five slots -- into the fader table above them, or below
- * them -- and the shift takes its count mod 32.  Retail's, kept. */
+ * them -- and the shift takes its count mod 32.  Retail's, kept.
+ * The slot written is .data+0x1680 + 0x1c * idx (M_ON): idx 5 is .data+0x170c, before the fader table
+ * (+0x1720); idx -1 is +0x1664, inside S_POS; other negatives reach other addresses below it. */
 static void FS98_STDCALL snd_cb_marker_light(uint32_t op, int32_t idx)
 {
     if (idx > 5)
         return;
     switch (op) {
     case 0:
-        S_MARKER_BITS &= ~(1u << (idx & 31));
-        M_ON(idx) = 0;
+        S_MARKER_BITS &= ~(1u << (idx & 31));   /* RETAIL BUG (kept): SND-2 -- (off) the masked shift */
+        M_ON(idx) = 0;                          /* RETAIL BUG (kept): SND-2 -- (off) the unchecked slot write */
         break;
     case 1:
-        M_ON(idx) = 1;
-        S_MARKER_BITS |= 1u << (idx & 31);
+        M_ON(idx) = 1;                          /* RETAIL BUG (kept): SND-2 -- (on) the unchecked slot write */
+        S_MARKER_BITS |= 1u << (idx & 31);      /* RETAIL BUG (kept): SND-2 -- (on) the masked shift */
         break;
     case 2:
-        M_ON(idx) = M_ON(idx) == 0;
-        S_MARKER_BITS ^= 1u << (idx & 31);
+        M_ON(idx) = M_ON(idx) == 0;             /* RETAIL BUG (kept): SND-2 -- (toggle) the unchecked slot read and write */
+        S_MARKER_BITS ^= 1u << (idx & 31);      /* RETAIL BUG (kept): SND-2 -- (toggle) the masked shift */
         break;
     }
 }
@@ -1290,6 +1295,8 @@ static void FS98_STDCALL snd_flaps(int32_t kind, int32_t force)
         } else {
             snd_volume(r, 0);
         }
+        /* RETAIL BUG (kept): SND-3 -- && where state 0 uses ||: the flap sound stops when either word is
+         * unchanged, not when both are. */
         if (S_FLAPS_A != G32(0xbe0) && S_FLAPS_B != G32(0xbe4))
             goto keep;
         snd_stop(snd_find(7));
@@ -1533,6 +1540,9 @@ static void FS98_STDCALL snd_prop_params(struct snd_rec *rec, const char *sectio
                    FS98_HOST_EXT_CFG);
     x = PF64(p, 0x2c);
     y = PF64(p, 0x34);
+    /* RETAIL BUG (fixed, not kept): SND-6 -- retail's final comparison reads the point at p+0xac, one past the
+     * 0xac-byte block (which can fault if the address is unmapped, and the fcomp can change the x87
+     * exception status); the stored curve is unaffected, so ours stops at i < 8 and never reads it. */
     for (i = 1; i < 8; i++) {
         if (!FC0((long double)x, PF64(p, 0x2c + 0x10 * i)))
             break;
@@ -1869,6 +1879,7 @@ static int32_t FS98_STDCALL snd_touchdown(int32_t kind, int32_t side)
 /* .text+0x23e0 -- id 0x22, which no template has: the default record */
 static int32_t FS98_STDCALL snd_range_sound(uint32_t dist)
 {
+    /* RETAIL BUG (kept): SND-4 -- no template has id 0x22, so this is the shared default record (as id 0x21's). */
     struct snd_rec *r = snd_find(0x22);
     snd_volume(r, dist > 0x13880000u ? 0 : 10000 - (int32_t)(dist >> 15));
     snd_play(r, 0);
@@ -1881,12 +1892,14 @@ static int32_t FS98_STDCALL snd_range_sound(uint32_t dist)
  * 0x1c.  Kept. */
 static int32_t FS98_STDCALL snd_horn(int32_t on)
 {
+    /* RETAIL BUG (kept): SND-4 -- no template has id 0x21, so this is the shared default record. */
     struct snd_rec *r = snd_find(0x21);
     if (on == 1 && G32(0xb24) != 0) {
         snd_volume(r, r->maxvol);
         snd_play(r, 1);
         return 0;
     }
+    /* RETAIL BUG (kept): SND-1 -- (the call) the voice handle goes to snd_stop as a record. */
     snd_stop((struct snd_rec *)(uintptr_t)r->voice);
     return 0;
 }

@@ -3708,6 +3708,8 @@ static void pilot_event(uint32_t which, uint32_t value)
     SAVE_REGS;
 
     edi = G;
+    /* Not reproduced (CTL-9): retail's words carry stack garbage in their top halves; DEMO reads only the
+     * low halves (demo.c's demo_event), so these are zero-extended and the harness compares the words. */
     if (GD(0x760) != 0)
         XCALL(SVC(DEMO, 0x24), (uint16_t)which, (uint16_t)value);
     RESTORE_REGS;

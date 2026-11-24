@@ -224,3 +224,7 @@
 - source_spec: `docs/implementation/spec-1-5d-facil-fe-retail-bugs-marked.md`
   summary: The FE build step does not depend on `src/fe/fe_library.c`, which `fe.c` includes (`fe.c:4814`), so editing only the Scenery Library leaves `bin/FE.DLL` (and `FE_sl_ours.dll`) stale.
   evidence: `cmake/OpenFS98.cmake:46`/`:54` glob only `*.h` and `*.inc` siblings as dependencies; `cmake/steps/all.cmake:110` names only `src/fe/fe.c`. Fix by adding `fe_library.c` to the step's DEPENDS (or globbing included `.c`).
+
+- source_spec: `docs/implementation/spec-1-5f-reality-analysis-demo-retail-bugs-marked.md`
+  summary: DEMO's `disk_check` (`src/demo/demo.c:427`) documents a retail bug with no register id: when the free-space call fails, retail uses its uninitialised outputs, while ours zeroes them and still ignores the return.
+  evidence: Found by slice 6's spec review; it needs a DEMO-12 entry in `docs/retail-bugs.md` (probably `(fixed, not kept)`), which is outside slice 6's fixed 29-id scope.

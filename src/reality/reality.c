@@ -391,6 +391,8 @@ steady:
     if (GLB8(0x838) != 0)
         return;
     v = (int32_t)GLB32(0x2c8);
+    /* RETAIL BUG (kept): REAL-7 -- the upper clamp replaces only ax (mov ax), so a rate over 0xa674 keeps its
+     * high word. */
     if (v > 0xa674)
         v = (int32_t)(((uint32_t)v & 0xffff0000u) | 0xa674);   /* mov ax */
     if (v < -0xa674)
@@ -455,7 +457,7 @@ static void countdown(void)
         return;
     }
     if (ah == 2 && M16(S_CODE) == 2)
-        ah = (uint8_t)(analysis() >> 8);
+        ah = (uint8_t)(analysis() >> 8);   /* RETAIL BUG (kept): REAL-1 -- the test for 1 below reads the dialog's result's second byte */
     if (ah != 1)
         return;
     GLB16(0x832) = 0;
@@ -605,6 +607,8 @@ static void collect(void)
             M16(S_LOWEST + 2) = M16(e + 0x12);
         }
         pt = H_LIST_ADD(S_POINTS);
+        /* RETAIL BUG (kept): REAL-5 -- x is the index read as 64 bits with a zero top half (-22 is
+         * 4,294,967,274); nothing reads it but the host's array. */
         MD(pt) = (double)(long double)(uint64_t)index;
         MD(pt + 8) = (double)((long double)(int32_t)M32(e + 0x14) +
                               (long double)(int32_t)M16(e + 0x12) * (long double)RD(0xc8));
@@ -725,6 +729,8 @@ static void labels(void)
         M32(M32(D + 0x248) + i) = p;
         v.lo += 2;
     }
+    /* RETAIL BUG (kept): REAL-6 -- the heights' labels start at 0 from the high dword of the 8-byte local whose
+     * low dword the seconds' labels just used, and go up by the scale's step. */
     for (i = 0, p = S_YLABELS; p < S_YLABELS + 11 * 8; p += 8, i++) {
         if ((i & 1) == 1) {
             H_STRCPY(p, S_EMPTY);
@@ -747,13 +753,27 @@ static void scale(void)
     long double range = (long double)MD(S_MAX) - (long double)MD(S_MIN);
     uint32_t units = GLB16(0xc18), i = 0;
 
+    /* RETAIL BUG (kept): REAL-4 -- a unit past 2 takes neither branch, so neither S_STEP nor S_SCALE is
+     * written and both stay as they were (0 the first time).  A zero range forces S_SCALE to 1 below, for
+     * the curve only: labels() still uses the stale S_STEP. */
     if ((int32_t)units >= 0) {
         if ((int32_t)units <= 1) {
+            /* RETAIL BUG (kept): REAL-3 -- no bound: past the table's last limit the search reads on through
+             * .rdata (the metric table, the doubles, retail's export directory) while the range passes each
+             * dword.  The feet search stops at .rdata+0xe8 up to 3,181,878,959; only the metric search (step
+             * 0x30, below) skips that limit.  Not reproduced (REAL-3): past 2,545,942,528 the metric search
+             * runs through .rdata's zero slack into .data and the code pointers there, which a rebuild cannot
+             * match (the harness keeps heights within 10^9 of each other). */
             while (range > (long double)(uint64_t)M32(R + 8 * i))
                 i++;
             M32(S_STEP) = M32(R + 4 + 8 * i);
             MD(S_SCALE) = (double)((long double)(uint64_t)M32(S_STEP) * (long double)RD(0xe8));
         } else if (units == 2) {
+            /* RETAIL BUG (kept): REAL-2 -- steps 0x30 bytes through the metric table (same 8-byte layout as the
+             * feet one), seeing only 10, 1000 and .rdata+0xc0's low word as limits: a range over 1,000 m (and up
+             * to that word, 2,545,942,528) takes its step from that double's high word, an oversized scale that
+             * compresses the curve (a big span still shows a slope).  RETAIL BUG (kept): REAL-3 -- and this
+             * search has no bound either (the reads past 2,545,942,528 are not reproduced, as above). */
             while (range > (long double)(uint64_t)M32(R + 0x60 + 0x30 * i))
                 i++;
             M32(S_STEP) = M32(R + 0x64 + 0x30 * i);

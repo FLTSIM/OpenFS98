@@ -230,7 +230,9 @@ static void axis_reset(void)
         for (i = 0; i < 0x10; i++)
             M32(p + i * 4) = 0xffff8000u;
     }
-    ecx = 0;    /* the rep stosd leaves ecx 0; +0x44's caller (DEMO) reads it */
+    /* RETAIL BUG (kept): CTL-9 -- the rep stosd leaves ecx 0, which JOYSTICK_CALIBRATE's +0x44 (h_4b16) leaves
+     * for DEMO to read; passed in no register by design. */
+    ecx = 0;
 }
 
 /* .text+0x9270 -- JOYSTICK_CALIBRATE's enable/report: with `set`, store `on`
@@ -308,7 +310,7 @@ static uint32_t FS98_STDCALL axis_curve(uint32_t joy, uint32_t axis)
         v = 0;
     r = v ? (((int32_t)M32(cfg + 0x4c) * v) >> 7) : 0;
     if (r < -0x3fff)
-        return 0x4000;
+        return 0x4000;   /* RETAIL BUG (kept): CTL-7 -- the very-negative case skips the final negate */
     if (r > 0x3fff)
         r = 0x3fff;
     return (uint32_t)(-r);
@@ -559,6 +561,8 @@ static void parse_int(uint32_t *pp, uint32_t out, uint32_t negative)
                 v = v * 10 + (M8(*pp) & 0xf);
             else
                 bad = 1;
+            /* RETAIL BUG (kept): CTL-1 -- blanks, or a terminal minus sign, that run to the terminator get here
+             * with the cursor on it: it steps past it, and the zeroed buffer makes what follows read as empty. */
             (*pp)++;
             if (M8(*pp) == 0)
                 break;
@@ -692,6 +696,8 @@ static void joy_defaults(uint32_t joy)
     uint8_t blk[0x3cc];
     uint32_t present, s;
 
+    /* RETAIL BUG (kept): CTL-4 -- (the lock) tests the *current* table's LOCKED (flight or slew, whichever
+     * D+0x350 is), not the table each default fills. */
     if (M32(V32(0x350) + joy * 0x3cc) != 0)
         return;
     s = section_name(D + 0x358, joy);
@@ -699,6 +705,7 @@ static void joy_defaults(uint32_t joy)
     HC(0x214, f1)(P(&s));
     if (present != 0)
         return;
+    /* RETAIL BUG (kept): CTL-4 -- (the stack) blk is uninitialised and joy_default may leave it so, as in retail. */
     if (joy_default(0, joy, P(blk)) == 0)
         joy_install(0, joy, P(blk));
     if (joy_default(1, joy, P(blk)) == 0)
@@ -759,6 +766,7 @@ static uint32_t write_cmd(uint32_t section, uint32_t key, uint32_t value)
 
     for (i = 0; i < NCMD; i++)
         if (CMD(i).command == value)
+            /* RETAIL BUG (kept): CTL-2 -- a nameless command's name is null, and writing a null value deletes the key */
             return HC(0xcc, f3)(section, key, P(CMD(i).name));
     return HC(0xac, f3)(section, key, value);
 }
@@ -1028,6 +1036,8 @@ static uint32_t di_create(uint32_t wnd, uint32_t inst, uint32_t pdi, uint32_t pd
     r = COM(M32(pdi), 0x10, f5)(M32(pdi), 4, P(di_enum), P(ddi), 0x101);    /* EnumDevices */
     if ((int32_t)r < 0)
         return r;
+    /* RETAIL BUG (kept): CTL-5 -- with no force-feedback joystick enumerated, ddi is uninitialised stack and
+     * CreateDevice takes its GUID from it. */
     dev1 = 0;
     r = COM(M32(pdi), 0xc, f4)(M32(pdi), P(ddi + 4), P(&dev1), 0);          /* CreateDevice */
     if ((int32_t)r < 0) {
@@ -1204,6 +1214,7 @@ static uint32_t eff_periodic(uint32_t dev, uint32_t pp, int32_t kind, uint32_t m
     eff[10] = env;
     eff[11] = 0x10;
     eff[12] = P(per);
+    /* RETAIL BUG (kept): CTL-6 -- a kind outside 0..2 makes no effect: e stays dev, so the device is "started" as one. */
     e = dev;
     if (kind == 0)
         r = COM(dev, 0x48, f5)(dev, RDATA + 0x1b0, P(eff), P(&e), 0);   /* GUID_Square */
@@ -1801,6 +1812,8 @@ static void apply_joys(uint32_t list, uint32_t kind)
         uint32_t e = M32(list + 0xc) + (j + 1) * 0x14;
         uint32_t ext = M32(e + 0x10), bind = M32(e + 0xc), k;
         HC(0x1c8, f2)(j, P(desc));
+        /* RETAIL BUG (kept): CTL-3 -- the config is rebuilt from the dialog's bindings alone, so the joystick's
+         * up events, LOCKED and TYPE are zeroed. */
         HC(0x218, f3)(P(cfg), 0, 0x3cc);
         for (k = 0; k < n; k++) {
             uint32_t v = M32(bind + k * 8);

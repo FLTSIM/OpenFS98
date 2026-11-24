@@ -356,6 +356,10 @@ static void compact(void)
 {
     uint32_t ebx;
 
+    /* RETAIL BUG (kept): ANA-1 -- the slot is ecx, which host +0x21c's memmove leaves (7 with the CD's
+     * MSVCRT.DLL, 0 with wine's builtin; reproduced as 7 everywhere): every kept sample lands in one slot and
+     * the count ends one past it, so the trail collapses rather than halving.
+     * RETAIL BUG (kept): ANA-2 -- the interval doubles with a rol, so after 0x80 it is 1 again. */
     for (ebx = 2; ebx < 1000; ebx += 2) {
         sample_out(ebx, S_SCRATCH, 0, 0x1c);
         sample_in(AN_MEMMOVE_ECX, S_SCRATCH);
@@ -370,6 +374,8 @@ static void compact(void)
  * is not 0. */
 static void sample(uint32_t ecx)
 {
+    /* RETAIL BUG (kept): ANA-3 -- the count is (ecx's top half : 0xc) words, so with a top half an unchanged
+     * position compares on into GLOBAL and takes the sample anyway.  Latent: in the game the top half is 0. */
     uint32_t n = (ecx & 0xffff0000u) | 0xc, s = G + 0x560, d = S_LAST;
     uint8_t flag;
 
@@ -428,6 +434,8 @@ static void __attribute__((used)) an_frame_ecx(uint32_t ecx, uint32_t a, uint32_
         /* the height above the ground: GLOBAL +0x574:+0x572 less +0x20 (24.8),
          * with `sub ah,bl` / `sar ebx,8` / `sbb`: the borrow sbb takes is the
          * sar's carry, bit 7 of the ground's low byte */
+        /* RETAIL BUG (kept): ANA-4 -- the borrow comes from bit 7 of the ground's low byte (the sar's carry
+         * replaces the subtraction's) and the fraction's low byte is never subtracted. */
         edx = GLB32(0x574);
         ax = GLB16(0x572);
         ebx = GLB32(0x20);
@@ -469,6 +477,8 @@ take:
     if (mode < 2)
         al = 2;
     else if (mode == 2)
+        /* RETAIL BUG (kept): ANA-9 -- (an_frame_ecx) the frame-delay table is indexed by GLOBAL +0x824 with
+         * no bound; the harness keeps the index inside the image. */
         al = M8(S_FRAMES + GLB32(0x824));
     else
         al = M8(S_INTERVAL);
@@ -528,6 +538,8 @@ static uint32_t segment(uint32_t toggle, uint32_t index, uint32_t p)
     uint32_t q = ADDR(pos);
 
     get_position(index, q);
+    /* RETAIL BUG (kept): ANA-9 -- (build_list's writes) nothing bounds p: with the segment count 0 (below),
+     * past 500 samples the list runs past its 0x59e4-byte block. */
     M16(p) = 0x2f;
     M16(p + 2) = 0x2e;
     M16(p + 4) = 0;
@@ -569,6 +581,8 @@ static void build_list(void)
     if (n >= 2) {
         n--;
         t = 0;
+        /* RETAIL BUG (kept): ANA-9 -- (build_list) the segment counts are indexed by GLOBAL +0x828 with no
+         * bound, and .data+0x76[3] reads 0; the loop below then takes the wrapped count as no limit. */
         len = M32(S_SEGMENTS + 4 * GLB32(0x828));
         M16(p) = 0x51;
         M16(p + 2) = 0xf00f;
@@ -582,7 +596,7 @@ static void build_list(void)
             if ((int32_t)n < 0)
                 break;
             len--;
-            if (len == 0)
+            if (len == 0)   /* RETAIL BUG (kept): ANA-9 -- a count of 0 wraps past this test: no limit */
                 break;
             t ^= 1;
             p = segment(t, n, p);
@@ -681,6 +695,8 @@ static void l_point(uint32_t s, uint32_t ref, uint32_t out)
     if (ecx > esi)
         ecx = esi;
     eax = ecx * 7692;
+    /* RETAIL BUG (kept): ANA-5 -- a zero range divides by zero and the host's filter yields all ones;
+     * computed here without trapping. */
     eax = esi != 0 ? eax / esi : 0xffffffffu;
     M32(out) = ((eax + 0xfa) * W) >> 13;
     v = (int32_t)edi / 256;
@@ -722,6 +738,11 @@ static uint32_t l_curve(void)
         put_record(1, b + 0x38);
         set_count(2);
     }
+    /* RETAIL BUG (kept): ANA-6 -- a run of none asks for index -1, which get_position refuses, so the frame
+     * local at b + 0x20 is used uninitialised (ours is uninitialised stack too).  A further input: the
+     * get_position(0, b + 0x54) below checks capacity, not the count, so an empty graph also copies slot 0,
+     * and UTIL_RANGE48 and l_point use both.  The harness ends a scenario that reaches a graph with no
+     * samples, before comparing either (tools/difftest/analysisdiff.c:566). */
     get_position(ebx - 1, b + 0x20);
     M32(S_BASE) = ((M32(b + 0x34) & 0xff) << 16) + (M32(b + 0x32) & 0xffff);
     get_position(0, b + 0x54);
@@ -860,6 +881,8 @@ static void extents(uint32_t p)
         M16(S_LATMIN + 2) = M16(p + 2);
     }
     ecx = M32(p + 4);
+    /* RETAIL BUG (kept): ANA-7 -- with equal whole parts the tie-break compares the whole part with the stored
+     * fraction word instead of the fraction with it. */
     if ((int32_t)ecx > (int32_t)M32(S_LATMAX + 4) ||
         (ecx == M32(S_LATMAX + 4) && (int32_t)ecx > (int32_t)(uint32_t)M16(S_LATMAX + 2))) {
         M32(S_LATMAX + 4) = ecx;
@@ -932,6 +955,8 @@ static void m_compute(void)
  * once; here that frame is zeros (docs/modules/analysis.md). */
 static void m_extents(void)
 {
+    /* Not reproduced (ANA-6): with no samples at all retail reads its uninitialised frame once; ours
+     * explicitly zeroes it (docs/modules/analysis.md). */
     uint8_t pos[0x18] __attribute__((aligned(4))) = { 0 };
     uint32_t q = ADDR(pos), esi = 0;
 
@@ -948,6 +973,8 @@ static void m_extents(void)
         M16(S_LONA + 2) = M16(q + 0xa);
     }
     do {
+        /* RETAIL BUG (kept): ANA-6 -- the loop starts at index -1, which get_position refuses, so the first
+         * sample is taken twice. */
         get_position(esi - 1, q);
         extents(q);
         esi++;
@@ -1013,6 +1040,9 @@ static void m_scale(void)
     long double a, b, m;
     int64_t e;
 
+    /* RETAIL BUG (kept): ANA-10 -- the value is a mixed 8-byte local: the eighth of the latitude span as a
+     * double, then _ftol's result over its low dword; NUMERIC's format 0x3a reads only that low dword, so
+     * the integer result is what is formatted and the double's bytes never are. */
     a = (long double)MD(S_LONM) * (long double)RD(0x08);
     b = (long double)MD(S_LATSPAN) * (long double)RD(0x10);
     MD(ADDR(q)) = (double)b;
@@ -1172,6 +1202,8 @@ static uint32_t o_commit(uint32_t p)
 {
     uint32_t r = 0;
 
+    /* RETAIL BUG (kept): ANA-8 -- "off" does not stay off: this clears the mode and the selection below sets
+     * it again. */
     if (M32(p + 0xc) == 0) {
         GLB32(0x814) = 0;
         GLB16(0x1a) &= 0xfdff;

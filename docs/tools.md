@@ -154,7 +154,7 @@ others are only slow, and their line timeout comes from the documented time, so 
 | `main-breaks SUITE=situations` | 2 h line limit (documented ~40 min) | PASS, 9973 s; its documented time needs ~2.8 h |
 | `controlsdiff-run` | 2 h line limit at 19,000 of 20,000 | PASS alone, 5869 s (~98 min; give it 2.5 h) |
 | `controls-breaks` | 1 h line limit | PASS alone, 2874 s (~48 min, just under 1 h: give it 1.5 h) |
-| `hg2ddiff-run` | 2 h line limit at 38 of 59 suites (also in 1.3's run) | rerun pending |
+| `hg2ddiff-run` | 2 h line limit at 38 of 59 suites (also in 1.3's run) | all 59 suites, 0 differ, 19854 s alone (~5.5 h): its limit needs `HG2D_TIMEOUT` over 20000 and a line timeout of 8 h |
 
 ```sh
 tools/ofs utildiff-run        # UTIL service by service   -> 6452880 comparisons, 0 mismatches
@@ -281,7 +281,7 @@ tools/ofs main-dialogs                    # 47 menu commands and dialog steps in
 tools/ofs hostdiff-run N=20000            # HOST (id 1, FLTSIM98.EXE) slices 1-28, all 194 services, real files in bin/difftest/hostfs -> 0 differ (~11 min)
 tools/ofs host-breaks                     # HOST broken on purpose -> 505 breaks, 467 caught, 15 proven equivalent, 21 crash, 2 rare display paths missed at N=2000 (caught at N=3000) (~5 h)
 python3 tools/check_raw_dumps.py  # no raw retail dump in git beyond tools/raw_dumps_allowed.txt (may only shrink, bar an entry newly detected by a stricter rule, with its reason on its line; Story 1.4) -> raw dumps: 2 allowed dump files, 38 scripts reading orig/ (1 gen, 17 resource, 20 oracle), none new, exit 0
-python3 -B tools/check_retail_bugs.py  # docs/retail-bugs.md against the RETAIL BUG markers in src/, both ways; the ids still unmarked are in tools/retail_bugs_unmarked.txt (may only shrink; Story 1.5 slices 1-5 marked MAIN, Flights, Options, Gauges, SIM1, the runtime, HOST, UTIL, CHAIN, NUMERIC, FACIL, FE, WINDOW, WINMSG and MPCHAT); `--self-test` covers its failure cases -> retail bugs: 331 entries, 161 marked, 167 allowlisted, 3 no longer apply
+python3 -B tools/check_retail_bugs.py  # docs/retail-bugs.md against the RETAIL BUG markers in src/, both ways; the ids still unmarked are in tools/retail_bugs_unmarked.txt (may only shrink; Story 1.5 slices 1-7 marked MAIN, Flights, Options, Gauges, SIM1, the runtime, HOST, UTIL, CHAIN, NUMERIC, FACIL, FE, WINDOW, WINMSG, MPCHAT, REALITY, ANALYSIS, DEMO, ADVDRV, DYNAMIC, CONTROLS and SOUND); `--self-test` covers its failure cases -> retail bugs: 331 entries, 217 marked, 109 allowlisted, 5 no longer apply
 tools/ofs data-images  # every converted data image against retail, and the .rdata ranges, then the self-test of its own failure paths (needs orig/; UPDATE=1 rewrites tools/data_images.txt) -> data-images: 161 .data images identical (1587303 bytes, 9105 relocated), 106 .rdata ranges identical (18159 bytes), 1 switch tables, 1 tail windows (49005 bytes), 130 pointer lists (5931 entries), 1 raw pointer lists (295 rows), 1 bound images (2129 rows: 130 DATA, 486 CODE, 1234 IMPORT, 279 NONE), self-test passed (173 cases)
 tools/ofs gauges-tables-check  # tools/gen_gauges.py --check: the committed gauge tables (layout.h, rebind.inc, gauges_manifest.json, host-compiled data.inc and rdata.inc) against retail's full analysis, writes nothing (needs orig/, objdump, cc) -> gauges-tables-check: 120 gauges: layout.h, rebind.inc, manifest line and the host-compiled data.inc and rdata.inc match retail, exit 0
 tools/ofs mdl-images-check  # tools/gen_mdl_images.py --check: the committed MDL images (layout.h, host-compiled data.inc, mdl_manifest.json) against retail, writes nothing (needs orig/, objdump, cc) -> mdl-images-check: 11 models: layout.h, data.inc (host-compiled) and src/mdl/mdl_manifest.json match retail, exit 0
@@ -319,7 +319,7 @@ tools/ofs panels-breaks       # PANELS broken on purpose -> 200 sampled, 164 cau
 tools/ofs g3dmeshdiff-run     # the mesh compiler: instructions vs portable C, x87 and soft float -> 100000 polygons, 0 differ
 tools/ofs difftest-run        # whole-module SLEW         -> 0/2000 vectors differ
 tools/ofs ofstest-run         # in-process, via the host  -> passed 68, failed 0
-tools/ofs hg2ddiff-run  # whole-module HG2D, a suite per slice -> 59 suite summaries, 0 differ (N=20000 takes hours; docs/modules/hg2d.md)
+tools/ofs hg2ddiff-run  # whole-module HG2D, a suite per slice -> 59 suite summaries, 0 differ (N=20000 takes ~5.5 h alone, 19854 s on 2026-11-24; docs/modules/hg2d.md)
 tools/hg2d_frames.sh 'Situatio\PARIS.STN' 900  # the running game, retail HG2D twice then ours -> identical frames, PASS, on a private Xvfb; HG2D_FRAMES_ALL=1 for the whole game (needs tools/ofs framelock sehfix)
 tools/ofs smoke               # every module of tools/modules.txt installed (tools/ofs ofs_install) -> 27/27 modules (the 27 of Modules\; a leftover OFSTEST.DLL makes it 28/28), 95 gauges, PASS
 tools/ofs util-trace          # which UTIL services the game calls, counted in-game

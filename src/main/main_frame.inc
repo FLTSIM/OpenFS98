@@ -58,6 +58,7 @@ __asm__(".text\n\t.p2align 4\n\t.globl _main_record_listener@8\n_main_record_lis
 /* ---- the wind ------------------------------------------------------------- */
 
 /* .text+0x8da5: the wind step at altitude `alt`: *x (ebx) and *z (eax). */
+/* RETAIL BUG (kept): MAIN-15 (docs/retail-bugs.md). The wind's speed keeps bits 8 to 23 of its product and each component bits 15 to 30. */
 static void wind_step(uint16_t alt, uint32_t *x, uint32_t *z)
 {
     uint32_t gp = G, p;
@@ -288,6 +289,7 @@ static uint32_t FS98_STDCALL frame_clouds(uint32_t a, uint32_t b)
 
 /* .text+0x8887: |v - target| against the last (.data+0x1ac4), by a signed
  * compare; answers whether it fell, and keeps it. */
+/* RETAIL BUG (kept): MAIN-15 (docs/retail-bugs.md). The grid step's distance test is signed: a distance of 0x80000000 counts as falling. */
 static int grid_closer(uint32_t v, uint32_t target)
 {
     uint32_t d = v - target;
@@ -339,6 +341,7 @@ static void grid_follow(void)
     M32(V(0x2080203d)) = 0x1000000;
     CALL(UTIL, 0x48, f3)(V(0x20802039), G + 0xb38, V(0x20802041));
     d = M32(V(0x20802045));
+    /* RETAIL BUG (kept): MAIN-10 (docs/retail-bugs.md). The grid's idiv of 0x1000000 by UTIL +0x48's answer relies on the host's divide repair. */
     q = idiv32(0x1000000, (int32_t)d);             /* by zero, the repair's largest */
     gp = G;
     M32(gp + 0xb50) = q;
@@ -387,18 +390,21 @@ static void puffs_recentre(void)
         if (M16(V(0x20802080)) == 0) {
             M16(V(0x20802080)) = 1;
             e = M32(V(0x20801e6e)) >> 2;
+            /* RETAIL BUG (kept): MAIN-10 (docs/retail-bugs.md). The puff re-centring's idiv by a cell size relies on the host's divide repair. */
             q = idiv32((int64_t)(int32_t)(M32(G + 0x564) - M32(V(0x20801b00))), (int32_t)e);
             if ((uint16_t)q != M16(V(0x20802082))) {
                 M16(V(0x20802082)) = (uint16_t)q;
                 if (M16(V(0x20801e46)) == 0)
                     M32(V(0x20801b18)) = q * e + M32(V(0x20801b00));
             }
+            /* RETAIL BUG (kept): MAIN-15 (docs/retail-bugs.md). The puff re-centring's 48-bit value has its high word twice (shld/shr). */
             /* retail's shld/shr leave e's high word in both upper words */
             M16(V(0x20802043)) = 0;
             M16(V(0x20802045)) = (uint16_t)(e >> 16);
             M16(V(0x20802047)) = (uint16_t)(e >> 16);
             CALL(UTIL, 0x44, f3)(V(0x20802041), G + 0x560, V(0x20802039));
             x = (uint32_t)M16(V(0x2080203f)) << 16 | M16(V(0x2080203d));
+            /* RETAIL BUG (kept): MAIN-10 (docs/retail-bugs.md). The puff re-centring's idiv by UTIL +0x44's answer relies on the host's divide repair. */
             q = idiv32((int64_t)(int32_t)(M32(G + 0x56c) - M32(V(0x20801b08))), (int32_t)x);
             if ((uint16_t)q != M16(V(0x20802084))) {
                 M16(V(0x20802084)) = (uint16_t)q;

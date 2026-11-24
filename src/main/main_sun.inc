@@ -109,6 +109,7 @@ static void sun_light(uint32_t gp)
         if (dx <= 0) { M16(gp + 0x12a0) = 0; return; }
         bx = 0x1770;
     }
+    /* RETAIL BUG (kept): MAIN-10 (docs/retail-bugs.md). The sun's idiv bx overflows for a mid-range sun and relies on the host's divide repair. */
     ax = (uint16_t)idiv16((int32_t)((uint32_t)(uint16_t)dx << 16), (int16_t)bx);
     M16(gp + 0x12a0) = (uint16_t)(ax >> 5);
 }
@@ -142,6 +143,7 @@ static uint32_t FS98_STDCALL nav_sun(void)
     SUN_2C(bx, SUN_T23, SUN_T21);
 
     /* the latitude, as the fourth angle */
+    /* RETAIL BUG (kept): MAIN-10 (docs/retail-bugs.md). The sun's idiv bx overflows for a mid-range sun and relies on the host's divide repair. */
     ax = (uint16_t)idiv16((int32_t)(((uint32_t)M16(gp + 0x566) << 16) | M16(gp + 0x564)), 0x131);
     ax = (uint16_t)((int16_t)ax >> 1);
     bx = (uint16_t)(ax + 0xc000);

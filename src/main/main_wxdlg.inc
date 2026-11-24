@@ -6,6 +6,7 @@
  * The check reads a value it may not have: a text NUMERIC refuses with anything but
  * status 0xb leaves the word as the last call left it. */
 
+/* RETAIL BUG (kept): MAIN-23 (docs/retail-bugs.md). A field NUMERIC turned down keeps whatever the slot held (retail's stack contents). The check reads a word NUMERIC refused as the last call left it. */
 #define WX_W(i)    (V(0x20807878) + (i) * 22)   /* a wind type's limits */
 #define WX_R       V(0x20807f54)
 #define WX_C       V(0x20807f58)
@@ -161,6 +162,7 @@ static uint32_t wx_load(void)
      * up by one layer as its index jumps to the one it compared with */
     {
         uint32_t ebp = V(0x20807e64), esi;
+        /* RETAIL BUG (kept): MAIN-21 (docs/retail-bugs.md). 0x1306's cloud sort keeps its locals across passes and compares stale rows. */
         uint32_t l1c = 0, l18 = 0;                 /* held from pass to pass: a text NUMERIC refuses leaves them */
         uint16_t ax = 0, di = 0;
 

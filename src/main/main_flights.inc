@@ -151,6 +151,7 @@ static uint32_t FS98_STDCALL flight_set_record(uint32_t path, uint32_t tag, uint
     r = H_JOIN(ADDR(temp), ADDR(drive), ADDR(dir), 0);
     if (r != 0)
         goto closing;
+    /* RETAIL BUG (kept): MAIN-16 (docs/retail-bugs.md). Host +0x174 is handed the directory without the drive: for a file on another drive the temporary file goes on the current drive. */
     r = H_TEMPNAME(ADDR(name), ADDR(dir));
     if (r != 0)
         goto closing;
@@ -375,6 +376,7 @@ static uint32_t FS98_STDCALL flight_dialog(uint32_t path, uint32_t current)
     UTIL_LIST(0x9004, 0x9002, 2, ADDR(&block[6]), ADDR(&block[7]), ADDR(flight_list_title),
                          ADDR(flight_list_description), 0, 1);
     if (block[6] == 0) {
+        /* Not reproduced (MAIN-17): with no flights it alerts and returns its block's first word, uninitialised stack in retail (ours 0). */
         UTIL_ALERT(8, 4, 0xf463, 0, 0, 0, 0, 0);
         return 0;
     }
@@ -387,6 +389,7 @@ static uint32_t FS98_STDCALL flight_dialog(uint32_t path, uint32_t current)
                 break;
             }
     }
+    /* RETAIL BUG (kept): FLT-6 (docs/retail-bugs.md). MAIN stores a callback in the descriptor's +4; neither dialog reads it. */
     block[1] = ADDR(main_nothing);
     block[2] = ADDR(flight_dialog_delete);
     block[3] = ADDR(flight_dialog_edit);
@@ -430,6 +433,7 @@ static uint32_t command_1106(void)
     UTIL_LIST(0x900a, 0, 2, ADDR(&block[2]), ADDR(&block[4]), ADDR(flight_list_title),
                          ADDR(flight_list_description), 0, 1);
     block[0] = 0;
+    /* RETAIL BUG (kept): FLT-6 (docs/retail-bugs.md). MAIN stores a callback in the descriptor's +4; neither dialog reads it. */
     block[1] = ADDR(main_nothing);
     block[3] = 0;
     H_DIALOG(0x1107, ADDR(block));
@@ -471,8 +475,10 @@ static uint32_t FS98_STDCALL save_dialog_check(uint32_t records)
         M32(records + 8) = 0x100d;
         result = 0x100d;
     }
+    /* RETAIL BUG (kept): MAIN-17 (docs/retail-bugs.md). The Save check goes on testing the path length after host +0x170 has failed, reading an uninitialised local. */
     if (length >= 0x104) {
         M32(records + 8) = 0x100d;
+        /* RETAIL BUG (kept): MAIN-17 (docs/retail-bugs.md). A too-long name gets status 0x100d but answer 0x1001. */
         result = 0x1001;
     }
     if (H_EXISTS(ADDR(path), 2) == 0) {

@@ -84,6 +84,7 @@ typedef uint32_t (FS98_STDCALL *f8)(uint32_t, uint32_t, uint32_t, uint32_t, uint
  * they are done (the harness sets those slots).  +0xa4 is called with no
  * arguments; +0x74 with (1, the day of the year), the day pushed as a word
  * over two stale bytes, which it reads as a word. */
+/* RETAIL BUG (kept): MAIN-9 (docs/retail-bugs.md). +0x74's day is pushed as a word over two stale bytes. */
 #define MAIN_74       CALL(D + MAIN_LINKAGE, 0x74, f2)
 #define MAIN_A4       CALL(D + MAIN_LINKAGE, 0xa4, f0)
 
@@ -331,6 +332,7 @@ static uint32_t FS98_STDCALL save_flight(uint32_t title, uint32_t description)
     H_STRNCPY(S_TITLE, title, 0x1e);
     H_STRNCPY(ADDR(text), description, 0x100);
     M16(S_TAG2_SIZE) = 0x100;
+    /* RETAIL BUG (kept): MAIN-7 (docs/retail-bugs.md). Record 2 is written from a buffer on this routine's stack, whose address stays in the table entry at .data+0x4480. */
     M32(S_TAG2_AT) = ADDR(text);
     CALL(ACONTAIN, 0x30, f4)(G + 0x11e0, 1, S_AIRCRAFT, 0x104);
     M16(S_TAG61_SIZE) = (uint16_t)(H_STRLEN(S_AIRCRAFT) + 1);
@@ -437,6 +439,7 @@ static void parse_records(void)
             M32(S_CURSOR) = M32(S_CURSOR) + body;
             continue;
         }
+        /* RETAIL BUG (kept): MAIN-4 (docs/retail-bugs.md). Copies the table entry's length, not the record's: a record of another length leaves the walk out of step with the file. */
         n = E_SIZE(e);
         dst = E_AT(e);
         switch (E_KIND(e)) {
@@ -613,6 +616,7 @@ static const struct { uint32_t at, to; } retail_written[] = {
 /* A byte as retail's process holds it at `a`: its own code, gap and .rdata
  * below .data, MAIN's image above, with its self-pointers and its Linkage
  * as retail's. */
+/* RETAIL BUG (kept): MAIN-18 (docs/retail-bugs.md). A wild season index can read through .data+0x35ec (the module handle and the close button at .data+0x7fc0, +0xdc24), which is why these are retail's values. */
 static uint8_t retail_byte_at(uint32_t a)
 {
     uint32_t off, i, v;
@@ -649,6 +653,7 @@ static void set_season(void)
     uint32_t a;
 
     if (M16(G + 0x23e) == 0) {
+        /* RETAIL BUG (kept): MAIN-6 (docs/retail-bugs.md). The season is not bounded: past 3 this reads on through MAIN's code and .rdata. MAIN-18 is marked at retail_byte_at. */
         a = SEASON_TABLE + 2 * (uint32_t)M16(G + 0x248);
         M16(G + 0x23e) = (uint16_t)(retail_byte_at(a) | retail_byte_at(a + 1) << 8);
         H_LOCAL_TIME(ADDR(now));
@@ -704,6 +709,7 @@ static uint32_t after_load(void)
     if (M16(G + 0xc44) > 100)
         M16(G + 0xc44) = 100;
     CALL(CONTROLS, 0x48, f0)();
+    /* RETAIL BUG (kept): MAIN-4 (docs/retail-bugs.md). ACONTAIN +0x30 is asked only when GLOBAL +0x1244 is clear, while the aircraft at .data+0x4217 is loaded whenever it is not empty. */
     if (M32(G + 0x1244) == 0)
         CALL(ACONTAIN, 0x30, f4)(G + 0x11e0, 1, S_AIRCRAFT, 0x104);
     if (H_STRLEN(S_AIRCRAFT) != 0)
@@ -782,6 +788,7 @@ static uint32_t load_current(void)
     H_FILE_SIZE(M32(S_LOAD_FILE), ADDR(&size));
     H_ALLOC(1, size, ADDR(&buf), 1);
     H_FILE_READ(M32(S_LOAD_FILE), buf, size, ADDR(&got));
+    /* RETAIL BUG (kept): MAIN-4 (docs/retail-bugs.md). .data+0x41e1 is left naming the file it has just closed. */
     H_FILE_CLOSE(M32(S_LOAD_FILE));
     M32(S_CURSOR) = buf;
     load_records();
@@ -823,6 +830,7 @@ static uint32_t FS98_STDCALL load_default(void)
     if (H_EXISTS(ADDR(f.path), 2) != 0) {
         H_LOADSTRING(0xf461, ADDR(text), 0x100);
         UTIL_ALERT(8, 1, ADDR(text), 0, 0, 0, 0, 0);
+        /* RETAIL BUG (kept): MAIN-5 (docs/retail-bugs.md). With neither default flight file present: the alert, then a spin at .text+0x1207c that never ends. */
         for (;;)
             __asm__ volatile("");
     }

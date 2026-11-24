@@ -135,6 +135,7 @@ static void fs98_flights_picker_accept(void *object)
 {
     D32(object, 0x15e0) = 1;
     fs98_flights_picker_sync(object);
+    /* RETAIL BUG (kept): FLT-4 (docs/retail-bugs.md). The error check 0x5580 always returns zero, so the OnOK's second call to it is unreachable. */
     if (fs98_flights_picker_no_error(object) && fs98_flights_picker_no_error(object)) return;
     {
         uint32_t *descriptor = PTR(object, 0x10dc);

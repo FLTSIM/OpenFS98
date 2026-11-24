@@ -31,6 +31,7 @@
 int32_t TC fs98_flights_navigation_validate(void *object, uint32_t control)
 {
     (void)object; (void)control;
+    /* RETAIL BUG (kept): FLT-5 (docs/retail-bugs.md). A leftover AfxMessageBox that passes on every OK. */
     SERVICES->message_box("CNavigation::ValidateData()", 0, 0);
     return 0;
 }

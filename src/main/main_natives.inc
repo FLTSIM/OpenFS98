@@ -144,6 +144,7 @@ static void face_column(void)
     M16(V(0x20803450)) = 1;
     M16(V(0x20803452)) = 1;
     M16(V(0x20803454)) = 1;
+    /* RETAIL BUG (kept): MAIN-19 (docs/retail-bugs.md). +0x9230 goes on using ecx and edx across G3D +0x40. */
     esi = CALL(G3D, 0x40, f0)();                   /* ecx and edx as they were */
     eax = s_eax;
 
@@ -651,6 +652,7 @@ NATIVE(native_889c)
 }
 
 /* .text+0x88e2 */
+/* RETAIL BUG (kept): MAIN-19 (docs/retail-bugs.md). +0x88e2 loads di before reading GLOBAL +0xe76 through edi, so the read lands at G's upper half, that di, plus 0xe76. */
 NATIVE(native_88e2)
 {
     uint32_t c;
@@ -672,6 +674,7 @@ NATIVE(native_88e2)
 }
 
 /* .text+0x8d47: through the caller's edi. */
+/* RETAIL BUG (kept): MAIN-19 (docs/retail-bugs.md). +0x8d47 writes through the edi it was called with. */
 NATIVE(native_8d47)
 {
     eax = M32(V(0x20801ebe));

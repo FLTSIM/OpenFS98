@@ -142,7 +142,7 @@ uint32_t TC fs98_options_prefs_general_error(void *page)
     }
     return 0;
 }
-/* 0x22395c00, vtable +0xf0. RETAIL BUG (kept): OPT-10 (docs/retail-bugs.md): the third
+/* 0x22395c00, vtable +0xf0. RETAIL BUG (kept, suspected): OPT-10 (docs/retail-bugs.md): the third
  * combo is given the first combo's label. */
 void TC fs98_options_prefs_general_init(void *page)
 {

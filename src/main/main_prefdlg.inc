@@ -269,6 +269,7 @@ static uint32_t pf_load(void)
 
     H_MEMMOVE(PF_DLG, V(0x20805cc0), 0x148);
     for (i = 0; i < 12; i++)              /* the last overwrites the head of the descriptor it was copied from */
+        /* RETAIL BUG (kept): MAIN-21 (docs/retail-bugs.md). A twelfth preset's string overwrites the descriptor beside the table. */
         H_LOADSTRING(0x2300 + i, V(0x20805740) + i * 0x80, 0x40);
     UTIL_GET(V(0x20805ee8), 0x19, PF_DLG);
     gp = G;
@@ -280,6 +281,7 @@ static uint32_t pf_load(void)
      * only if GLOBAL +0x11b2 differs from it and all the others agree */
     if (M32(gp + 0x123c) != 0) {
         at = M32(PF_PRESET) << 7;
+        /* RETAIL BUG (kept): MAIN-21 (docs/retail-bugs.md). 0x1409's preset comparison inverts the first word. */
         if (M32(V(0x20805784) + at) != M16(gp + 0x11b2)) {
             for (i = 0; i < sizeof same / sizeof same[0]; i++)
                 if (M32(D + same[i].at + at) != (same[i].wide ? M32(gp + same[i].g) : M16(gp + same[i].g)))

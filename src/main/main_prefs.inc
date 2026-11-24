@@ -60,6 +60,7 @@ static void prefs_preset(uint32_t mode)
 
     if (mode == 0)
         return;
+    /* RETAIL BUG (kept): MAIN-11 (docs/retail-bugs.md). PERFORMANCE_MODE is not bounded: past the twelve entries (or negative) the preset reads on through .data. */
     p = V(0x20805780) + (mode << 7);
     M16(G + 0xcb4) = M16(p + 0x00);
     M16(G + 0x11b2) = M16(p + 0x04);

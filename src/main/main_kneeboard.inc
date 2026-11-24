@@ -191,6 +191,7 @@ static uint32_t FS98_STDCALL kb_shape(uint32_t bm)
             clear = M8(M32(HG2D + 0x90));
             if (M8(row) == clear) {
                 while (left != 0) {
+                    /* RETAIL BUG (kept): MAIN-24 (docs/retail-bugs.md). +0x11b0 reads a byte past a row ending in transparent pixels. */
                     uint8_t c = M8(row + 1);
 
                     left--;
@@ -271,6 +272,7 @@ static uint32_t FS98_STDCALL kb_draw(uint32_t page)
     rc[0] = 0x14;
     rc[1] = 0x28;
     rc[2] = (int32_t)M32(rec + 0x38) - 0xa;
+    /* Not reproduced (MAIN-24): +0x1620 hands the host's +0x318 a RECT whose bottom it never set the first time (ours sets it). */
     rc[3] = 0;
     H_DRAW_TEXT(rec, ADDR(rc), 0xffffffffu, 0xffffffffu, text, 3, 0);
     rec = KB_REC;
@@ -404,6 +406,7 @@ static uint32_t kb_create(void)
     r = HOST_(0x64, f1)(rec);
     if (r != 0)
         return r;
+    /* RETAIL BUG (kept): MAIN-25 (docs/retail-bugs.md). Retail imports no DeleteObject: every call leaves its DIB section behind (the process runs out of address space after about 30,000); ours keeps the leak. */
     bm = ADDR(LoadImageA((HINSTANCE)(uintptr_t)M32(V(0x20807fc0)), MAKEINTRESOURCEA(0x65), 0, 0, 0, 0x2040));
     M32(V(0x2080dc84)) = bm;
     if (bm != 0) {

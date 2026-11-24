@@ -1077,7 +1077,8 @@ COUNT = 200
 
 
 def artifacts(entry):
-    return [str(DIRECTORY / f'{entry[0]}.{ext}') for ext in ('c', 'exe', 'log')]
+    # the exe is unlinked before every build: a deletion whenever it is absent afterwards, as in the serial run
+    return [str(DIRECTORY / f'{entry[0]}.c'), (str(DIRECTORY / f'{entry[0]}.exe'), True), str(DIRECTORY / f'{entry[0]}.log')]
 
 
 def wine_env(w):

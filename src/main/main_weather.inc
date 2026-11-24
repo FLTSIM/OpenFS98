@@ -26,6 +26,7 @@ static uint32_t weather_compare_values(uint32_t x, uint32_t y)
     if (x == 0 || y == 0)
         return 0;
     /* a text NUMERIC refuses leaves the other's address here, as retail's process holds it */
+    /* RETAIL BUG (kept): MAIN-23 (docs/retail-bugs.md). A field NUMERIC turned down keeps whatever the slot held (retail's stack contents). */
     a = y - D < MAIN_IMAGE_SIZE ? y - D + MAIN_DATA_VA : y;
     N_GET(x, 0, ADDR(&a));
     b = x - D < MAIN_IMAGE_SIZE ? x - D + MAIN_DATA_VA : x;
@@ -59,6 +60,7 @@ static uint32_t FS98_STDCALL weather_compare_temps(uint32_t a, uint32_t b)
 static void weather_sort_clouds(uint32_t p)
 {
     uint32_t edi = p + 8, esi, ebp = 0, n = 1, again = 0;
+    /* RETAIL BUG (kept): MAIN-23 (docs/retail-bugs.md). A field NUMERIC turned down keeps whatever the slot held (retail's stack contents). */
     uint32_t a12 = 0, a14 = 0, a16 = 0, a18 = 0, a1c = 0, i;    /* held from pass to pass, as a text NUMERIC refuses leaves them */
 
     HOST_(0x22c, f4)(edi, 3, 0x64, ADDR(weather_compare_clouds));

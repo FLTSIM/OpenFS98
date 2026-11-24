@@ -19,7 +19,7 @@ prepared once (sources, game, a copy of ~/.wine made self-contained, a fresh bui
 fixtures no build makes), copied aside as K.template, and rsync-reset from the template after every line, so no
 mutant source, rebuilt module, installed module or game write reaches a later line. Lines of one CONFLICT group
 (break runners that pkill their harness machine-wide) never overlap; SOLO lines (X display, game directory writes,
-FLTSIM98.EXE) run with no other line running. main-smoke, smoke, ofstest-run and util-trace are preceded by
+FLTSIM98.EXE, and the load-sensitive lines of docs/tools.md's "Load limits") run with no other line running. main-smoke, smoke, ofstest-run and util-trace are preceded by
 ofs_install into the slot's game. After each line the processes the slot owns are stopped, and a change in the
 slot's cmake, docs, include, src or tools directories (against the template) fails the line (`tree_changed`).
 --in-place keeps the old behaviour: the start tree, serial, no slots. --clean-slots deletes <results-dir>/slots at
@@ -163,6 +163,8 @@ SOLO = [
     tgt('mdl-crash-game', 'gauges-panels'),            # private game flights, display :176/:177
     r'mdl_crash_frames', r'mdl_frames',                # displays :80+, :86+
     tgt('ofstest-run', 'util-trace'),                  # install OFSTEST/UTIL_TRACE into game/, run FLTSIM98.EXE
+    # Load-sensitive: a fixed inner timeout or a hang verdict that load alone trips (docs/tools.md, "Load limits").
+    tgt('acontaindiff-run', 'hostdiff-run', 'host-breaks', 'panels-breaks'),
 ]
 # CONFLICT groups: lines of one group never run at once, in any slot. One group per harness a break runner kills
 # machine-wide with pkill -f (tools/host_breaks.py:635 "hostdiff.exe"; tools/g3d_breaks.py:434 "g3ddiff_brea[k].exe").
@@ -191,7 +193,8 @@ def needs_install(cmd):
 
 
 for c in ('tools/reg_contracts.sh', 'tools/ofs smoke', 'tools/ofs main-smoke', 'tools/ofs gauges-panels N=1000',
-          'python3 tools/mdl_crash_frames.py', 'tools/ofs ofstest-run', 'tools/hg2d_frames.sh x 900'):
+          'python3 tools/mdl_crash_frames.py', 'tools/ofs ofstest-run', 'tools/hg2d_frames.sh x 900',
+          'tools/ofs host-breaks', 'tools/ofs panels-breaks', 'tools/ofs acontaindiff-run'):
     assert is_solo(c), c
 for c in ('tools/smoketest.sh', 'tools/ofs gauges-panels-run N=1000', 'tools/ofs main-breaks SUITE=menu', 'tools/ofs hostrtdiff-run'):
     assert not is_solo(c), c

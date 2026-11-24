@@ -186,7 +186,7 @@ void TC fs98_options_logbook_entry_fill(void *object)
  * remarks changed, so the other four edits are disabled and the remarks take the focus. */
 int32_t TC fs98_options_logbook_entry_init(void *object)
 {
-    char title[0x28];     /* RETAIL BUG (kept): OPT-4, retail's slot is 0x18 bytes for room 0x27 */
+    char title[0x28];     /* RETAIL BUG (fixed, not kept): OPT-4, retail's slot is 0x18 bytes for room 0x27; ours has the room */
     SERVICES->base_init(object);
     if (!skin(object, 0xf)) return 0;
     D32(object, 0x84) = 0xb;

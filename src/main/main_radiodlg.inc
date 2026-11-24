@@ -53,6 +53,7 @@ static void rd_station(uint32_t which, uint32_t name, uint32_t ident, uint32_t l
  * stack held it; the suite gives it what parses. */
 static uint32_t rd_nav_fields(uint32_t b)
 {
+    /* RETAIL BUG (kept): MAIN-23 (docs/retail-bugs.md). A field NUMERIC turned down keeps whatever the slot held (retail's stack contents). */
     uint32_t freq = 0, slot = b - D + MAIN_DATA_VA;
 
     N_GET(M32(b + 0x2c), 0x32, ADDR(&freq));

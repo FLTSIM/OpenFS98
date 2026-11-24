@@ -46,6 +46,7 @@ static uint32_t FS98_STDCALL record_current(uint32_t out)
  * nothing is left or nothing is asked for. */
 static uint32_t FS98_STDCALL record_read(uint32_t dst, uint32_t n, uint32_t got)
 {
+    /* RETAIL BUG (kept): MAIN-3 (docs/retail-bugs.md). The reader keeps its leftovers: with no record (+0x54 says -1) +0x58 still reads from where the last body got to. */
     uint32_t take = M32(S_READ_LEFT);
 
     if (take == 0 || n == 0) {
@@ -103,6 +104,7 @@ static uint32_t FS98_STDCALL record_begin(uint32_t tag, uint32_t size)
     word = tag;
     H_FILE_WRITE(M32(S_FILE), ADDR(&word), 2, ADDR(&size));
     if ((int32_t)tag < 1000) {
+        /* RETAIL BUG (kept): MAIN-2 (docs/retail-bugs.md). The 16-bit length wraps for a tag below 1000 and a body of 0xfffc bytes or more; both header writes report into size's own slot. */
         word = want + 4;
         H_FILE_WRITE(M32(S_FILE), ADDR(&word), 2, ADDR(&size));
     } else {
@@ -166,6 +168,7 @@ static uint32_t FS98_STDCALL record_find(uint32_t path, uint32_t tag, uint32_t o
     at = 0;
     if (length != 0) {
         do {
+            /* RETAIL BUG (kept): MAIN-3 (docs/retail-bugs.md). Each record's length is trusted: 0 never moves on, one below the header steps back, a huge one wraps the index, a file cut inside a header is read past the block. */
             id = ((uint32_t)M8(buf + at + 1) << 8) + M8(buf + at);
             at += 2;
             if ((int32_t)id < 1000) {

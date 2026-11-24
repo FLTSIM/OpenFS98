@@ -43,6 +43,7 @@ static void season_snapshot(uint32_t buf)
  * al the hours and ah the minutes, under the host's divide repair (a count
  * that still will not fit after one wrap divides into all ones).  The divisor
  * is 0x3c, which the one caller leaves in bl. */
+/* RETAIL BUG (kept): MAIN-10 (docs/retail-bugs.md). The minutes-to-hours divide (div bl) relies on the host's divide repair when the count will not fit. */
 static uint16_t season_hm(int16_t minutes)
 {
     uint16_t ax = (uint16_t)minutes;
@@ -85,6 +86,7 @@ static uint32_t FS98_STDCALL nav_season(uint32_t a, uint32_t b)
     for (;;) {
         uint32_t rec;
 
+        /* RETAIL BUG (kept): MAIN-9 (docs/retail-bugs.md). FE +0x20's state argument is pushed as a word over two stale bytes: only the low word counts. */
         if (CALL(FE, 0x20, f3)(ax, S_FE_REC, S_FE_STATE) == 0)
             break;
         rec = M32(S_FE_REC);

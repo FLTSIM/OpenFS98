@@ -240,6 +240,7 @@ static uint32_t FS98_STDCALL en_power4(uint32_t a, uint32_t b, uint32_t c) { (vo
 
 /* .text+0x4a80: its argument's stack slot is the scratch word, and NUMERIC writes only
  * the low half: the rest of the block's address goes along to the text. */
+/* RETAIL BUG (kept): MAIN-21 (docs/retail-bugs.md). 0x1205's argument slot serves as scratch: a value NUMERIC does not write leaves retail's block address in it. */
 static uint32_t FS98_STDCALL en_units_up(uint32_t block)
 {
     uint32_t slot = block - D + MAIN_DATA_VA;

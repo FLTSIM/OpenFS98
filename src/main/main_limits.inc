@@ -90,6 +90,7 @@ static uint32_t lm_round_speed(uint32_t block)
         x = (long double)lm_round(x * lm_01) * lm_c;
     slot = main_ftol(x);
     /* metres only when +0xc18 is 2, but the clamp takes any non-zero for them */
+    /* RETAIL BUG (kept): MAIN-21 (docs/retail-bugs.md). 0x1204 tests GLOBAL +0xc18 differently for the clamp (!= 0) and the units shown (== 2): at 1 a field is checked against feet and clamped to metres. */
     clamp = M16(G + 0xc18) != 0 ? V(0x20800754) : V(0x20800750);
     if ((int16_t)slot > (int16_t)M16(clamp + 2))
         slot = (slot & 0xffff0000u) | M16(clamp + 2);

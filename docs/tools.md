@@ -141,6 +141,20 @@ Self-tests: `python3 tools/slots.py --self-test`, `python3 tools/break_pool.py -
 `--factor` scales only the verifier's own limit; two harnesses also stop themselves, and in parallel slots they run slower,
 so raise their limits for a `-j` run: `CONTROLS_TIMEOUT=SECONDS` (`controlsdiff-run`, default 3600) and `HG2D_TIMEOUT=SECONDS`
 (`hg2ddiff-run`, default 7200) in the environment.
+**Load limits** (12-core host). The 1.4 run (`-j 3`, `BREAK_JOBS=2`, load average about 11) failed these lines by load alone:
+nothing differed before the limit. The first four are SOLO in `cmake_verify.py`, since their verdict depends on timing; the
+others are only slow, and their line timeout comes from the documented time, so keep that time measured alone.
+
+| Line | Under load ~11 | Alone (load ~1) |
+|---|---|---|
+| `acontaindiff-run` | its own `timeout 1800` | PASS, 1587 s |
+| `hostdiff-run N=20000` | its own `timeout 600` at 606 s | 0 differ, 602 s with niced builds beside it (549 s in 1.3's run): close to its own 600 s limit, keep the machine quiet |
+| `host-breaks` | `fs-same`, proven equivalent, "caught" by a 120 s hang | rerun pending |
+| `panels-breaks` | `e_be10:5111:lt29`, a known miss, "caught" by a hang | not yet rerun |
+| `main-breaks SUITE=situations` | 2 h line limit (documented ~40 min) | PASS, 9973 s; its documented time needs ~2.8 h |
+| `controlsdiff-run` | 2 h line limit at 19,000 of 20,000 | rerun pending |
+| `controls-breaks` | 1 h line limit | rerun pending |
+| `hg2ddiff-run` | 2 h line limit at 38 of 59 suites (also in 1.3's run) | rerun pending |
 
 ```sh
 tools/ofs utildiff-run        # UTIL service by service   -> 6452880 comparisons, 0 mismatches
@@ -267,6 +281,7 @@ tools/ofs main-dialogs                    # 47 menu commands and dialog steps in
 tools/ofs hostdiff-run N=20000            # HOST (id 1, FLTSIM98.EXE) slices 1-28, all 194 services, real files in bin/difftest/hostfs -> 0 differ (~11 min)
 tools/ofs host-breaks                     # HOST broken on purpose -> 505 breaks, 467 caught, 15 proven equivalent, 21 crash, 2 rare display paths missed at N=2000 (caught at N=3000) (~5 h)
 python3 tools/check_raw_dumps.py  # no raw retail dump in git beyond tools/raw_dumps_allowed.txt (may only shrink, bar an entry newly detected by a stricter rule, with its reason on its line; Story 1.4) -> raw dumps: 2 allowed dump files, 38 scripts reading orig/ (1 gen, 17 resource, 20 oracle), none new, exit 0
+python3 -B tools/check_retail_bugs.py  # docs/retail-bugs.md against the RETAIL BUG markers in src/, both ways; the ids still unmarked are in tools/retail_bugs_unmarked.txt (may only shrink; Story 1.5 slice 1 marked MAIN, Flights, Options, Gauges); `--self-test` covers its failure cases -> retail bugs: 331 entries, 77 marked, 254 allowlisted, 0 no longer apply
 tools/ofs data-images  # every converted data image against retail, and the .rdata ranges, then the self-test of its own failure paths (needs orig/; UPDATE=1 rewrites tools/data_images.txt) -> data-images: 161 .data images identical (1587303 bytes, 9105 relocated), 106 .rdata ranges identical (18159 bytes), 1 switch tables, 1 tail windows (49005 bytes), 130 pointer lists (5931 entries), 1 raw pointer lists (295 rows), 1 bound images (2129 rows: 130 DATA, 486 CODE, 1234 IMPORT, 279 NONE), self-test passed (173 cases)
 tools/ofs gauges-tables-check  # tools/gen_gauges.py --check: the committed gauge tables (layout.h, rebind.inc, gauges_manifest.json, host-compiled data.inc and rdata.inc) against retail's full analysis, writes nothing (needs orig/, objdump, cc) -> gauges-tables-check: 120 gauges: layout.h, rebind.inc, manifest line and the host-compiled data.inc and rdata.inc match retail, exit 0
 tools/ofs mdl-images-check  # tools/gen_mdl_images.py --check: the committed MDL images (layout.h, host-compiled data.inc, mdl_manifest.json) against retail, writes nothing (needs orig/, objdump, cc) -> mdl-images-check: 11 models: layout.h, data.inc (host-compiled) and src/mdl/mdl_manifest.json match retail, exit 0

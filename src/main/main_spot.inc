@@ -110,6 +110,7 @@ static int spot_follow(void)
 
     if (spot_target(&eax, &ecx, &ebx))
         return 1;
+    /* RETAIL BUG (kept): MAIN-15 (docs/retail-bugs.md). The height term in mode 2 is an unsigned 32x32 product whose high dword becomes the count kept in .data+0x1924. */
     M16(V(0x20801924)) = (uint16_t)ecx;
     M32(V(0x20801888)) = eax;
     COPY24(V(0x208018a4), ebx);
@@ -131,6 +132,7 @@ static void spot_offset(void)
         cl = 2;
     if (M16(gp + 0xe5e) == 2)
         cl = 1;
+    /* RETAIL BUG (kept): MAIN-9 (docs/retail-bugs.md). The angle is pushed as a word over two stale bytes: only the low word counts. */
     SPOT_UTIL(0x2c, f3)((uint16_t)((int32_t)M32(V(0x20801888)) >> 16), V(0x20801928), V(0x2080192a));
     eax = (uint32_t)(int32_t)(int16_t)M16(V(0x2080192a)) << cl << 8;
     M16(V(0x208018d6)) = (uint16_t)eax;
@@ -169,6 +171,7 @@ static void spot_slew(void)
         M32(V(0x2080191c)) = 0;
         return;
     }
+    /* RETAIL BUG (kept): MAIN-15 (docs/retail-bugs.md). The slewed transition raises .data+0x1888 by a quarter turn across its walk and puts it back. */
     saved = M32(V(0x20801888));
     M32(V(0x20801888)) = saved + 0x40000000u;
     for (n = 15; n != 0; n--) {
@@ -272,6 +275,7 @@ static uint32_t FS98_STDCALL spot_view(void)
     spot_eye();
     if (saved >= M32(gp + 0xd4c))
         M32(V(0x20801920)) = 1;
+    /* Not reproduced (MAIN-15): the step count for GLOBAL +0xe60 past 2 is G3D's leftover ecx in retail; this takes no steps there (not reproduced). */
     n = M16(gp + 0xe60) == 0 ? 3 : M16(gp + 0xe60) == 1 ? 7 : M16(gp + 0xe60) == 2 ? 15 : 0;
     for (i = n; i != 0; i--) {
         V48_ADD(V(0x20801868), V(0x20801868), V(0x208018d4));

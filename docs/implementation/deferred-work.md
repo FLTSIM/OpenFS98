@@ -1,5 +1,5 @@
 - source_spec: none
-  summary: Story 1.2 piece 2: re-verify every difftest, break suite, smoke, frames and dialog target through CMake against its baseline in docs/tools.md.
+  summary: Story 1.2 piece 2: re-verify every difftest, break suite, smoke, frames and dialog target through CMake against its baseline in docs/tools.md. (Done 2026-11-19 as spec-1-2b-verify-baselines-through-cmake.md.)
   evidence: Split from Story 1.2 on 2026-11-16: about 340 targets, some run 25-40 minutes under wine; hours of wall time and separable by module family.
 - source_spec: none
   summary: Story 1.2 piece 3: update docs/tools.md, docs/building.md and AGENTS.md for CMake, then delete the Makefile and tools/*.mk. (Taken up 2026-11-18 as spec-1-2c-retire-the-makefile.md.)

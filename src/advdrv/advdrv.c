@@ -3208,6 +3208,7 @@ static uint32_t FS98_STDCALL description_of(const char *path, char *out);
 /* The catalogue's block, for the host's dialog. */
 struct adv_picker {
     uint32_t ok;            /* +0x00 */
+    /* RETAIL BUG (kept): FLT-6 (docs/retail-bugs.md). ADVDRV leaves the descriptor's +4 uninitialised (MAIN stores a callback there); neither dialog reads it. */
     uint32_t unused;        /* +0x04 */
     uint32_t count;         /* +0x08 */
     int32_t chosen;         /* +0x0c */

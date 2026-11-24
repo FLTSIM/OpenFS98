@@ -32,6 +32,7 @@ static void menu_kneeboard(void)
 }
 
 /* .text+0xae70 */
+/* RETAIL BUG (kept): MAIN-9 (docs/retail-bugs.md). The item ids pushed to host +0x254 are pushed over stale upper halves; only the low 16 bits are looked up. */
 void menu_state(void);
 void menu_state(void)
 {

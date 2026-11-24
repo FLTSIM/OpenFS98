@@ -73,6 +73,7 @@ static void clouds_918b(void)
                 goto store;
             }
         }
+        /* RETAIL BUG (kept): MAIN-13 (docs/retail-bugs.md). The second-layer test reads the first layer's +0xe6e, not +0xe76, and compares the position the first test stored. */
         if (M16(gp + 0xe78) != 0 && M16(gp + 0xe6e) >= 0xc000) {
             bx = M16(V(0x20801aac));
             if ((int16_t)M16(V(0x2080208c)) >= (int16_t)bx) {
@@ -170,6 +171,7 @@ static uint32_t clouds_9d57(uint16_t which)
 
     M32(V(0x20803498)) = 0x1000000u / M32(V(0x20803498));
     rec = M32(V(0x20803470));
+    /* RETAIL BUG (kept): MAIN-10 (docs/retail-bugs.md). +0x9d57's first idiv runs into overflow for an aircraft far from the layer's origin and relies on the host's divide repair. */
     q1 = idiv32((int64_t)(int32_t)(M32(gp + 0x5b4) - M32(rec + 4)) * 0x10000,
                 (int32_t)M32(V(0x20803498)));
     M16(V(0x20803438)) = (uint16_t)((int32_t)q1 >> 16);
@@ -186,11 +188,13 @@ static uint32_t clouds_9d57(uint16_t which)
     M16(V(0x2080203f)) = w2;
     main_xcall3(SLOT_OF(UTIL, 0x48), V(0x20802039), gp + 0x5b0, V(0x20802041));
 
+    /* RETAIL BUG (kept): MAIN-10 (docs/retail-bugs.md). +0x9d57's second idiv relies on the host's divide repair too. */
     q2 = idiv32((int64_t)(((uint64_t)(uint32_t)(int32_t)(int16_t)M16(V(0x20802047)) << 32) |
                           M32(V(0x20802043))),
                 (int32_t)M32(V(0x20803498)));
     M16(V(0x2080343a)) = (uint16_t)((int32_t)q2 >> 16);
 
+    /* RETAIL BUG (kept): MAIN-13 (docs/retail-bugs.md). The texel index is two quotient bytes less the layer's origin bytes, each wrapping on its own. */
     bl = (uint8_t)(q2 >> 8);
     bh = (uint8_t)(q1 >> 8);
     SET_CL(bl);
@@ -246,6 +250,7 @@ static uint16_t clouds_9f39(uint16_t which, uint16_t *dist)
     w = (uint16_t)(ax - M16(V(0x208035d0)));
     p = (uint32_t)((int32_t)(int16_t)w * (int16_t)M16(V(0x2080346e)));
     dx = (uint16_t)(p >> 16);
+    /* RETAIL BUG (kept): MAIN-13 (docs/retail-bugs.md). +0x9f39 takes shl ax,1 / rol dx,1 after an imul: dx's top bit comes round. */
     dx = (uint16_t)(dx << 1 | dx >> 15);
     ax = (uint16_t)(w - dx);
     M16(V(0x208035d2)) = (uint16_t)(M16(V(0x208035d2)) + dx);
@@ -483,6 +488,7 @@ static uint32_t clouds_texture(uint16_t layer, uint16_t id, uint32_t *edi)
 
     H_LOADSTRING(0x9006, V(0x20801ee2), 0x100);
     H_JOIN(V(0x20801ee2), 0, V(0x20801ee2), V(0x20801fe2));
+    /* RETAIL BUG (kept): MAIN-14 (docs/retail-bugs.md). The read's open is never checked: with no clouds file the host's read and close of a null file fail quietly. */
     H_FILE_OPEN(V(0x20801ede), V(0x20801ee2), 4, 0);
     map = CALL(HG2D, 0xb4, f1)(M32(G + 0xc8c));
     *edi = map;
@@ -506,6 +512,7 @@ static uint32_t clouds_texture(uint16_t layer, uint16_t id, uint32_t *edi)
                 if (ah >= bh) {
                     uint32_t q;
                     ah = (uint8_t)(ah - bh);
+                    /* RETAIL BUG (kept): MAIN-10 (docs/retail-bugs.md). The shoulder's div bl overflows just inside the curve, or divides by 0 at the lowest coverages, and relies on the host's divide repair (0xff). */
                     q = bl != 0 ? ((uint32_t)ah << 8) / bl : 0x100;
                     al = q > 0xff ? 0xff : (uint8_t)q;     /* the host's divide repair */
                 }
@@ -533,6 +540,7 @@ written:
     H_ATTR_GET(V(0x2080204d), V(0x20801ee2), 4);
     M32(V(0x2080204d)) = M32(V(0x2080204d)) & 0xfffffffdu;
     H_ATTR_SET(M32(V(0x2080204d)), V(0x20801ee2), 4);
+    /* RETAIL BUG (kept): MAIN-14 (docs/retail-bugs.md). A failed write (open or write) returns with edi still on the texel map, and a failed write leaves the file open. */
     if (H_FILE_OPEN(V(0x20801ede), V(0x20801ee2), 4, 1) != 0)
         return 1;
     if (H_FILE_WRITE(M32(V(0x20801ede)), map, 0x10000, V(0x20802049)) != 0)

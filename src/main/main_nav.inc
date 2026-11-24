@@ -62,6 +62,7 @@ static uint32_t nav_delta(uint32_t from, uint32_t to, uint32_t out)
 
     /* the magnitude: UTIL +0x18 of x^2 + y^2 + z^2 (signed 64-bit). */
     sum  = (int64_t)x * x;
+    /* RETAIL BUG (kept): MAIN-8 (docs/retail-bugs.md). The delta's y-term is only ever squared. */
     sum += (int64_t)y * y;
     sum += (int64_t)z * z;
     return CALL(UTIL, 0x18, f1)(ADDR(&sum));
@@ -102,6 +103,7 @@ static uint32_t FS98_STDCALL nav_range_bearing(uint32_t from, uint32_t to,
     M32(V(0x208072e0)) = range;
     bearing = nav_bearing((int32_t)out[0], (int32_t)out[2]);
     M16(bearing_out) = (uint16_t)bearing;
+    /* Not reproduced (MAIN-8): retail restores every register, eax included, so its result is the caller's own eax; ours returns the bearing. */
     return bearing;
 }
 
@@ -306,6 +308,7 @@ static uint32_t FS98_STDCALL lat_clamp(void)
  * output and answers -1.  The descriptor's fourth word is a relocation into
  * .data, so ours builds the descriptor with its own .data address rather than
  * reading retail's unrelocated pointer out of .text. */
+/* RETAIL BUG (kept): MAIN-9 (docs/retail-bugs.md). FE +0x2c's first argument is pushed as a word over two stale bytes: only the low word counts. */
 static uint32_t FS98_STDCALL nav_describe(uint32_t which, uint32_t arg2, uint32_t out)
 {
     static const uint32_t table[10][4] = {
@@ -365,6 +368,7 @@ static uint32_t FS98_STDCALL obj_step(void)
         if (left == 0)
             continue;
         n = M32(e + 0xc);
+        /* RETAIL BUG (kept): MAIN-12 (docs/retail-bugs.md). The step trusts n: at 0 the record shift is 4 GB, past 15 it runs into the buffer pointers (+0x84 only makes 15). */
         last = M32(V(0x208099fc) + (n + idx * 181u) * 4u);
         memmove((void *)(uintptr_t)(e + 0x3c), (void *)(uintptr_t)(e + 0x14), n * 40u - 40u);
         n = M32(e + 0xc);
@@ -380,6 +384,7 @@ static uint32_t FS98_STDCALL obj_step(void)
         s = M32(e + 0x38);
         width = M16(e + 0xa);
         d = M32(gp + 0x5d0) - s;
+        /* RETAIL BUG (kept): MAIN-12 (docs/retail-bugs.md). A side word that wraps to exactly 0 counts as no wrap; one local is written as a word on two paths and a dword on the third; eax at exit is what the last entry left. */
         if (d > 0x15540000u && d < 0x6aa40000u) {
             side = M32(e + 0x30) + 0x3ffc0000u;
         } else if (d > 0x954c0000u && d < 0xea9c0000u) {

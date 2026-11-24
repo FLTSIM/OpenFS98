@@ -32,6 +32,17 @@ class SetupFailed(Exception):
     pass
 
 
+# one flag set for the whole pooled part of go(): a signal stops setup (raising out of it) and the queue
+_STOP = {'stop': False, 'sig': None, 'raise': False, 'err': None}
+
+
+def _on_signal(sig, frame):
+    _STOP['sig'] = sig
+    _STOP['stop'] = True
+    if _STOP['raise']:    # during setup: unwind to go()'s teardown
+        raise SystemExit(128 + sig)
+
+
 class Worker:
     pooled = True
 
@@ -44,6 +55,8 @@ class Worker:
         self.rec = None
 
     def run(self, argv, **kw):    # a setup command, its output in the worker log
+        if _STOP['stop']:
+            raise SetupFailed('interrupted')
         with open(self.log, 'a') as f:
             f.write('$ %s\n' % ' '.join(map(str, argv)))
             f.flush()
@@ -57,7 +70,8 @@ class Worker:
             subprocess.run(['wineserver', '-k'], env=self.env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=30)
         except subprocess.TimeoutExpired:
             pass
-        cleanup(self.root)
+        if not cleanup(self.root):
+            raise RuntimeError('processes of worker %d survived a hang kill: %s' % (self.k, ' '.join(map(str, owned_procs(os.path.realpath(self.root))))))
 
 
 class Serial:    # the runner's own tree, as before
@@ -92,8 +106,11 @@ def _reap_stale(pool_dir):
             pid = int(open(os.path.join(p, 'owner')).read().strip())
         except (OSError, ValueError):
             continue
+        if os.path.exists(os.path.join(p, 'keep')):    # BREAK_POOL_KEEP: kept on purpose
+            continue
         if not _alive(pid):
-            cleanup(os.path.realpath(p))
+            if not cleanup(os.path.realpath(p)):
+                raise SetupFailed('stale pool %s still has processes: %s' % (p, ' '.join(map(str, owned_procs(os.path.realpath(p))))))
             remove(p, os.path.realpath(pool_dir))
 
 
@@ -151,10 +168,17 @@ def workers(runner, n, tree, pool_bin=(), pool_link=(), skip=(), prereq=(), prep
             errors.append(SetupFailed('worker %d setup failed: %s (see %s)' % (w.k, e, w.log)))
 
     ts = [threading.Thread(target=setup, args=(w,)) for w in ws]
-    for t in ts:
-        t.start()
-    for t in ts:
-        t.join()
+    try:
+        for t in ts:
+            t.start()
+        for t in ts:
+            t.join()
+    except BaseException:    # a signal: let the setup threads stop (Worker.run checks _STOP), then unwind
+        _STOP['stop'] = True
+        for t in ts:
+            if t.is_alive():
+                t.join(60)
+        raise
     if errors:
         raise errors[0]
     return ws
@@ -187,7 +211,9 @@ def teardown(ws, failed=False):
     if survivors or not ws:
         return survivors
     base = ws[0].base
-    if os.environ.get('BREAK_POOL_KEEP') != '1':
+    if os.environ.get('BREAK_POOL_KEEP') == '1':
+        open(os.path.join(base, 'keep'), 'w').close()    # so the next run does not reap it as stale
+    else:
         for w in ws:
             if os.path.lexists(w.root):
                 remove(w.root, os.path.realpath(base))
@@ -208,11 +234,14 @@ def _stamp(path):
 
 def run(entries, one, ws, tree, artifacts=None):
     """-> [result of one(entry, worker)] in entry order, printing each text as soon as everything before it is
-    printed. A signal or an exception stops the queue; the workers' processes are SIGKILLed and it re-raises."""
+    printed. A signal or an exception stops the queue; the workers' processes are SIGKILLed and it re-raises.
+    artifacts(entry) lists paths relative to the tree; a path given as (path, True) is one the break always removes
+    first, so it is published as a deletion whenever it is absent afterwards. Signals: go() installs _on_signal."""
     n = len(entries)
     cond = threading.Condition()
     todo, done = deque(range(n)), {}
-    state = {'stop': False, 'sig': None, 'err': None}
+    state = _STOP
+    state['err'] = None
     snap_dir = os.path.join(ws[0].base, 'snap')
     os.makedirs(snap_dir, exist_ok=True)
 
@@ -223,18 +252,17 @@ def run(entries, one, ws, tree, artifacts=None):
                     return
                 i = todo.popleft()
             try:
-                files = artifacts(entries[i]) if artifacts else []
-                before = {p: _stamp(os.path.join(w.root, p)) for p in files}
+                files = [(f, False) if isinstance(f, str) else f for f in (artifacts(entries[i]) if artifacts else [])]
+                before = {p: _stamp(os.path.join(w.root, p)) for p, _ in files}
                 w.rec = None
                 result, text = one(entries[i], w)
                 changes = []
-                for p in files:
+                for p, removed in files:
                     after = _stamp(os.path.join(w.root, p))
-                    if after == before[p]:
-                        continue
                     if after is None:
-                        changes.append((p, None))
-                    else:
+                        if before[p] is not None or removed:
+                            changes.append((p, None))
+                    elif after != before[p]:
                         keep = os.path.join(snap_dir, '%d-%d' % (i, len(changes)))
                         shutil.copy2(os.path.join(w.root, p), keep)
                         changes.append((p, keep))
@@ -249,13 +277,9 @@ def run(entries, one, ws, tree, artifacts=None):
                     cond.notify_all()
                 return
 
-    def on_signal(sig, frame):
-        state['sig'] = sig
-        state['stop'] = True
-
-    old = {s: signal.signal(s, on_signal) for s in (signal.SIGINT, signal.SIGTERM)}
     ts = [threading.Thread(target=work, args=(w,), daemon=True) for w in ws]
     results, recs, nxt = [], [], 0
+    ok = False
     try:
         for t in ts:
             t.start()
@@ -278,14 +302,13 @@ def run(entries, one, ws, tree, artifacts=None):
                     nxt += 1
                 if nxt < n:
                     cond.wait(0.5)
-        if state['stop']:
+        ok = nxt == n and not state['stop']
+    finally:    # whatever happened above, the workers stop before anything deletes their directories
+        state['stop'] = True
+        if not ok:
             kill(ws, 25)
         for t in ts:
             t.join(30)
-    finally:
-        for s, h in old.items():
-            signal.signal(s, h)
-        state['stop'] = True
         run.recs = recs
     if state['sig']:
         raise SystemExit(128 + state['sig'])
@@ -311,18 +334,30 @@ def go(runner, entries, one, artifacts=None, tree=None, pool_bin=(), pool_link=(
                 results.append(result)
                 recs.append(dict(w.rec or {}, index=i))
             return results
-        ws = []
+        ws, failed = [], False
+        run.recs = []
+        _STOP.update(stop=False, sig=None, err=None)
+        _STOP['raise'] = True
+        old = {sg: signal.signal(sg, _on_signal) for sg in (signal.SIGINT, signal.SIGTERM)}
         try:
-            ws = workers(runner, jobs, tree, pool_bin, pool_link, skip, prereq, prepare, prefix, configure)
-            results = run(entries, one, ws, tree, artifacts)
-            recs = run.recs
-        except SetupFailed as e:
-            print('break_pool: %s' % e, file=sys.stderr)
-            teardown(getattr(workers, 'made', []), failed=True)
-            sys.exit(2)
+            try:
+                ws = workers(runner, jobs, tree, pool_bin, pool_link, skip, prereq, prepare, prefix, configure)
+                _STOP['raise'] = False
+                try:
+                    results = run(entries, one, ws, tree, artifacts)
+                finally:
+                    recs = run.recs
+            except SetupFailed as e:
+                print('break_pool: %s' % e, file=sys.stderr)
+                failed = True
+                sys.exit(2)
         finally:
+            _STOP['raise'] = False
+            made = ws or getattr(workers, 'made', [])
             workers.made = []
-            survivors = teardown(ws) if ws else []
+            survivors = teardown(made, failed=failed) if made else []
+            for sg, h in old.items():
+                signal.signal(sg, h)
             if survivors:
                 print('break_pool: processes survived the teardown: %s' % ' '.join(map(str, survivors)), file=sys.stderr)
                 os._exit(2)
@@ -403,8 +438,9 @@ def self_test():
         open(os.path.join(tree, 'src', 'gone.c'), 'w').write('g')
         open(os.path.join(tree, 'src', 'keep.c'), 'w').write('k')
 
+
         def art(entry):
-            return ['src/f.c', 'src/gone.c', 'src/keep.c']
+            return ['src/f.c', 'src/gone.c', 'src/keep.c', ('src/marked.c', True)]
 
         def one2(entry, w):
             if entry == 0:
@@ -413,6 +449,8 @@ def self_test():
             elif entry == 1:
                 open(os.path.join(w.root, 'src', 'f.c'), 'w').write('second')
                 os.unlink(os.path.join(w.root, 'src', 'gone.c'))
+            elif entry == 2:    # absent in the worker before and after, present in the runner's tree, marked: a deletion
+                open(os.path.join(tree, 'src', 'marked.c'), 'w').write('m')
             return entry, 'e%d\n' % entry
         open(os.path.join(tree, 'src', 'keep.c'), 'w').write('runner')    # the runner's current file, not the worker's copy
         os.environ['BREAK_JOBS'] = '2'
@@ -421,6 +459,29 @@ def self_test():
         assert open(os.path.join(tree, 'src', 'f.c')).read() == 'second'
         assert not os.path.exists(os.path.join(tree, 'src', 'gone.c'))
         assert open(os.path.join(tree, 'src', 'keep.c')).read() == 'runner'
+        assert not os.path.exists(os.path.join(tree, 'src', 'marked.c'))
+        # reaping: a directory whose owner is alive is untouched, a dead owner's is removed, a kept one is skipped
+        pdir = os.path.join(tree, 'bin', 'break-pool')
+        live = subprocess.Popen(['sleep', '60'])
+        dead = subprocess.Popen(['true'])
+        dead.wait()
+        for name, pid in (('other-live', live.pid), ('other-dead', dead.pid), ('other-kept', dead.pid)):
+            os.makedirs(os.path.join(pdir, name, '0'))
+            open(os.path.join(pdir, name, 'owner'), 'w').write('%d\n' % pid)
+        open(os.path.join(pdir, 'other-kept', 'keep'), 'w').close()
+        os.environ['BREAK_JOBS'] = '2'
+        capture(lambda: go('fake', [1, 2], lambda e, w: (e, ''), **kw))
+        live.kill()
+        live.wait()
+        assert os.path.isdir(os.path.join(pdir, 'other-live', '0')) and os.path.isdir(os.path.join(pdir, 'other-kept', '0'))
+        assert not os.path.exists(os.path.join(pdir, 'other-dead'))
+        # BREAK_POOL_KEEP leaves a keep marker, so the next run does not reap the directory
+        os.environ['BREAK_POOL_KEEP'] = '1'
+        capture(lambda: go('fake', [1, 2], lambda e, w: (e, ''), **kw))
+        del os.environ['BREAK_POOL_KEEP']
+        kept = os.path.join(pdir, 'fake-%d' % os.getpid())
+        assert os.path.exists(os.path.join(kept, 'keep')) and os.path.exists(os.path.join(kept, '0'))
+        shutil.rmtree(kept)
         # a missing prerequisite and an unwritable bin/break-pool: exit 2, no break run
         ran = []
         for bad in ('prereq', 'perm'):

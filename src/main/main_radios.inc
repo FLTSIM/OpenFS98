@@ -227,6 +227,7 @@ static void radio_mask(uint32_t dist, uint32_t rec, uint32_t alt)
             return;
         if (cls <= 0x19) {
             if ((int32_t)alt <= 0x7be) {
+                /* RETAIL BUG (kept): MAIN-20 (docs/retail-bugs.md). Compares a record's address with 0xb4dc where it meant a distance: an address always passes. */
                 if ((int32_t)rec <= 0xb4dc)
                     return;
                 radio_mask_step(0xf4, 0x55476, 0xb4dc, 0x98, 0xf30b7, 0xb4dc, dist, alt, &flag);
@@ -235,6 +236,7 @@ static void radio_mask(uint32_t dist, uint32_t rec, uint32_t alt)
             }
         } else if (cls < 0x32) {
             if ((int32_t)alt <= 0xb50) {
+                /* RETAIL BUG (kept): MAIN-20 (docs/retail-bugs.md). Compares a record's address with 0x12160 where it meant a distance: an address always passes. */
                 if ((int32_t)rec <= 0x12160)
                     return;
                 radio_mask_step(0xf4, 0x6fbea, 0x12160, 0x98, 0xd80a2, 0x12160, dist, alt, &flag);
@@ -297,6 +299,7 @@ static void radio_tune_nav(void)
     M16(V(0x20807359)) = 0;
     M8(V(0x208073b5)) = 0;
     M16(V(0x208073b1)) = 0;
+    /* RETAIL BUG (kept): MAIN-9 (docs/retail-bugs.md). FE's first arguments are words pushed over stale bytes (and FE +0x28's second a byte over a stale register): only the low word counts. */
     if (CALL(FE_, 0x2c, f3)(M16(gp + 0x350), G + 0x560, V(0x208070b8)) != 0)
         radio_marshal(V(0x208070b8), radio_nav1, 12);
     keep = M16(G + 0x37e);
@@ -345,6 +348,7 @@ static void radio_tune_markers(void)
     CALL(FE_, 0x54, f3)(gp + 0x560, 0x1d4c, gp + 0x3e4);
     M8(V(0x20807522)) = 0;
     M32(V(0x20807862)) = V(0x20807522);
+    /* RETAIL BUG (kept): MAIN-9 (docs/retail-bugs.md). FE +0x20's state argument is pushed as a word over two stale bytes: only the low word counts. */
     while ((uint16_t)CALL(FE_, 0x20, f3)(n, V(0x20807866), V(0x2080786a)) != 0) {
         p = M32(V(0x20807866));
         kind = M8(p);
@@ -516,6 +520,7 @@ static void radio_dme(const struct radio_dme *r)
 
     if (M8(gp + 0xb70) != 0 || M16(r->freq) == 0 || !(M8(r->flags) & 1)) {
         if (M16(r->mode) != 1) {
+            /* RETAIL BUG (kept): MAIN-20 (docs/retail-bugs.md). NAV2's retune word steps with inc where NAV1's is set to 1. */
             if (r->inc)
                 M16(r->mode) = (uint16_t)(M16(r->mode) + 1);
             else
@@ -536,9 +541,11 @@ static void radio_dme(const struct radio_dme *r)
     M32(r->whole) = q;
     SET_AX(q);
     SET_DX(q >> 16);
+    /* RETAIL BUG (kept): MAIN-10 (docs/retail-bugs.md). The word divide relies on the host's divide repair when it overflows. */
     div16(0x73c);
     q1 = AX;
     SET_AX(0);
+    /* RETAIL BUG (kept): MAIN-10 (docs/retail-bugs.md). The second word divide relies on the host's divide repair when it overflows. */
     div16(0x73c);
     q2 = AX;
     M32(r->whole) = (uint16_t)(q1 * M16(V(0x20807474)));
@@ -570,6 +577,7 @@ static void radio_dme(const struct radio_dme *r)
             q = 0u - q;
         eax = q;
         mul32(0x100);
+        /* RETAIL BUG (kept): MAIN-10 (docs/retail-bugs.md). The dword divide relies on the host's divide repair when it overflows. */
         div32(M16(gp + 0xc1a));
         q = eax;
         q = (uint32_t)(((uint64_t)q * 0x1f1a0u)) >> 0x13;
@@ -618,6 +626,7 @@ static void radio_nav1_needle(void)
             SET_CX(CX + M16(V(0x2080735b)));
             SET_DX(M16(gp + 0xc4e));
             SET_AX(0);
+            /* RETAIL BUG (kept): MAIN-10 (docs/retail-bugs.md). The word divide relies on the host's divide repair when it overflows. */
             div16(M16(V(0x2080746c)));
             ax = AX;
             if (M32(gp + 0x84c) != 1) {
@@ -705,6 +714,7 @@ static void radio_nav2_needle(void)
             SET_CX(CX + M16(V(0x208073b3)));
             SET_DX(M16(gp + 0xc5e));
             SET_AX(0);
+            /* RETAIL BUG (kept): MAIN-10 (docs/retail-bugs.md). The word divide relies on the host's divide repair when it overflows. */
             div16(M16(V(0x2080746c)));
             ax = AX;
         }

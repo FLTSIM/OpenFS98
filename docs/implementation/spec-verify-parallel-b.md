@@ -2,7 +2,7 @@
 title: 'Parallel verification B: a worker pool inside the long break runners'
 type: 'feature'
 created: '2026-11-22'
-status: 'in-progress'
+status: 'done'
 baseline_commit: 'c1f577c4048f2492cbb9ab099284072aedc8c835' # plus uncommitted Stories 1.3-1.4; file snapshot at ~/openfs98-verify/baseline-verify-parallel-b
 route: 'dispatch'
 review_loop_iteration: 0
@@ -127,23 +127,23 @@ Decision: `main_breaks.py` stays out. Its 34 suites are separate Baselines lines
 ## Tasks & Acceptance
 
 **Execution:**
-- [ ] `tools/slots.py`, `tools/cmake_verify.py`: extract the code and import it. Add a self-test (`--self-test`) covering:
+- [x] `tools/slots.py`, `tools/cmake_verify.py`: extract the code and import it. Add a self-test (`--self-test`) covering:
   - `under`;
   - `remove` refusing paths outside its base;
   - `copy_prefix` on a tiny fake prefix (a `dosdevices/c:` link and an absolute link into the source get rewritten, and nothing resolves outside).
-- [ ] `tools/break_pool.py`: `workers`, `run`, `kill` and `teardown`. Add a self-test with a fake `one` and no wine:
+- [x] `tools/break_pool.py`: `workers`, `run`, `kill` and `teardown`. Add a self-test with a fake `one` and no wine:
   - 9 entries on 3 workers give results in order;
   - an exception in `one` tears down and is reported;
   - jobs greater than entries works;
   - an unwritable `bin/break-pool` gives exit 2;
   - a published deletion and an untouched file behave as in serial order.
-- [ ] The four runners:
+- [x] The four runners:
   - `POOL_BIN`/`POOL_LINK`;
   - prerequisite asserts;
   - `prepare` hooks;
   - `one`;
   - `break_pool.run`.
-- [ ] `docs/tools.md`:
+- [x] `docs/tools.md`:
   - `BREAK_JOBS`, `BREAK_POOL_KEEP` and `BREAK_POOL_RECORD` on the four targets (there is no pool-directory setting);
   - the budget: about 3–4 GB of disk per worker (prefix, copied `bin`), and wine processes ≈ `-j` slots × `BREAK_JOBS`, at most 6 on this 12-core host;
   - the fixed-name transcripts that are not copied back.
@@ -166,6 +166,22 @@ Decision: `main_breaks.py` stays out. Its 34 suites are separate Baselines lines
 - Given part A, when `cmake_verify.py -j 1 --lines <one cheap line>` runs, then it gives the same verdict as before the extraction.
 
 ## Implementation Notes
+
+Verified 2026-11-22 from a frozen copy, `~/openfs98-verify/pb/tree` (the live tree without `bin`, `build`, `game`; a fresh `openfs98 difftests` build; its own prefix copy). Oracle = the baseline snapshot's runner, copied as `tools/o_*_breaks.py`. Each runner: oracle, new serial, new `BREAK_JOBS=3`, run one after the other; outputs and `BREAK_POOL_RECORD` files are in `~/openfs98-verify/pb/results/`. In every case the oracle's verdict lines equal the new serial run's, and the `BREAK_JOBS=3` run's, except the one noted below.
+
+| Runner | Command (from the tree) | Breaks | Wall (oracle / serial / jobs 3) |
+|---|---|---|---|
+| host | `host_breaks.py 100 const-one global-20 past-table set-2c fs-attr-ro fd-ro ds-op fs-same dl-nopause tt-bounds strcpy-nul mt-remove` (after `tools/ofs hostdiff` and the staging copies of the `host-breaks` preamble) | 12: 4 hangs counted as caught (120 s), `HOSTDIFF_SKIP_FILES` both ways (`fs-`, `fd-`, `ds-` run with files), `fs-same` proven equivalent, `strcpy-nul` CRASHED (exit 5) | 9.0 / 9.0 / 4.4 min |
+| g3d | `g3d_breaks.py 200 norm-clamp norm-zero sat-sign scale-shift tick-reload stop-cleared top-opcode jump-from case-bound unmapped-hook set-byte mirror` | 12: `jump-from` and `case-bound` hang (900 s, caught) | 32 / 32 / 15.6 min |
+| options | `run_optionsdiff.sh --breaks 100 disable-window enable-window accept-state keys-text-unwind controls-caption-unwind scroll-unwind-destructor prefs-page-unwind display-page-unwind select-live-late` | 12 entries: 6 `unwind`, `accept-state` in four units | 2.8 / 2.8 / 1.8 min |
+| sim1r | `N=100 ONLY=ftol-order,bits,clear,pairs,step-shift,step-dx,t32-mask,t32-entry,t16-entry,isqrt-signed,square-14,square-high python3 -B tools/sim1r_breaks.py` | 12 over `sim1_internal.h` and `sim1_small.c`, all caught | 2.6 / 2.6 / 5.7 min (jobs 3 includes three fresh `openfs98 difftests` builds) |
+
+- Record files (serial vs jobs 3) are byte equal for g3d, options and sim1r. For host they differ in one line: `strcpy-nul`'s crash message names a fault address (`fault 0xc0000005 at 7bd35da0 (reading 0x885e0008)` serial and oracle; `at 7bd344d4 (reading 0x502e2e32)` in a worker). The address read is the ASCII of the tree path, so it follows the worker's path; the verdict (CRASHED, exit 5) is the same. The host verdicts of `const-one`, `global-20`, `past-table` and `set-2c` are decided by the 120 s timeout (hostdiff reports and then does not exit), in the oracle as well.
+- After a jobs-3 run: `~/.wine` and the runner's prefix listing hashes are unchanged (host run). In the Options run the runner's own `bin/options-diff/wineprefix` listing changed: its `run_optionsdiff.sh` wrapper's `wineserver -p60` saves the registry when it exits, after the previous run too; it is stable afterwards. Nothing under `bin/break-pool` survived any run (`owned_procs` empty), and `bin/break-pool` was empty afterwards.
+- SIGTERM to the runner's process group during a jobs-3 host run (wine `hostdiff.exe` running in the workers): the runner was gone in 4 s, no process under the pool survived, the workers were deleted. Setup failure (`bin/break-pool` read-only): exit 2 with `cannot create .../bin/break-pool/host-<pid>`, no break run.
+- Part A: `cmake_verify.py -j 1 --lines 165` (`tools/check_module_flags.sh`) gives UNCHECKED, exit 0, `tree_changed` empty, before (baseline `cmake_verify.py`) and after the extraction. A tree that already has a top-level `wineprefix` is refused by `copy_prefix` (the destination must not exist); the old code copied the prefix into it.
+- The Options and sim1r tests ran the runners' own preamble steps by hand where the `*-breaks` targets run the whole suite (`ofs` targets take no names). The `g3d-breaks` preamble now stages `WINDOW_retail.dll` (`cmake/targets.cmake`).
+- Not run: the full suites; interleaved Part A `-j` runs with `BREAK_JOBS` (the budget in `docs/tools.md` is arithmetic, not measured).
 
 ## Spec Change Log
 
@@ -194,8 +210,32 @@ Decision: `main_breaks.py` stays out. Its 34 suites are separate Baselines lines
 | 3.3 | Options' deletions and untouched files | medium | per-break changes (written, deleted, untouched) published in order |
 | 3.4 | `BREAK_POOL_DIR` escapes containment | medium | removed; row 1 marked superseded |
 
+Code review (Codex: Blind Hunter, Edge Case Hunter, Verification Gap), 2026-11-22:
+
+| # | Finding | Verdict | Evidence | Route |
+|---|---|---|---|---|
+| C1 (B1, E1, G2) | a signal during setup bypasses teardown; KeyboardInterrupt loses `workers.made` | medium | handlers are installed in `run()` (`break_pool.py:256`), after `workers()` (`:316`) | patch |
+| C2 (B3, E6, G1-other) | Options' exe, already absent in a fresh worker, is not published as deleted | medium | `_stamp` is equal (`None == None`) at `:233`; serial unlinks before each build (`options_breaks.py:1106`) | patch |
+| C3 (B4) | an exception while publishing skips the kill and join | low | the publish loop at `:266` runs outside a `finally` | patch |
+| C4 (B5, E4) | `BREAK_POOL_KEEP` directories are reaped as stale by the next run | low | `owner` remains; `_reap_stale` sees a dead PID | patch |
+| C5 (B6, E3, G3) | stale cleanup deletes despite survivors | low | `cleanup()`'s False is ignored at `:96` | patch |
+| C6 (B7, E2) | `kill_hang` reuses a worker with survivors | low | `cleanup()`'s result is ignored at `:60` | patch |
+| C7 (B8, E7) | records are lost when `run()` raises | low | `recs = run.recs` is skipped (`:318`) | patch |
+| C8 (G1) | no test that a live pool survives another run's reaping | low | the self-test never seeds a live owner | patch |
+| C9 (B2) | `BREAK_JOBS>1` with one break runs serially in the tree | low | that is today's serial behaviour, as the spec allows for `jobs=min(N, breaks)`; frozen copies only | reject |
+| C10 (B9) | host's synthetic hung line replaces the summary in the record | false | a killed harness prints no summary of its own; both paths record the same synthetic line | reject |
+| C11 (E5) | absolute symlinks in copied sources | false | `find` outside bin/build/game/cd finds no symlinks | reject |
+| C12 (E8) | serial `go(tree=...)` ignores `tree` | false | no runner passes `tree` (`host_breaks.py:662`, `g3d_breaks.py:464`, `options_breaks.py:1157`, `sim1r_breaks.py:1070`) | reject |
+| C13 (E9, E10) | `strcpy-nul`'s fault address differs between serial and parallel | low | the verdict (CRASHED, exit 5) is equal; the address of a wild read depends on the worker's paths and heap layout. Recorded, not fixable without changing host's line | reject (noted) |
+| C14 (E11) | Options' own prefix listing changes after a run | false for this change | the wrapper's `wineserver -p60` (`run_optionsdiff.sh:12`, pre-existing) saves the registry on exit; the workers copy it read-only | reject (noted) |
+
 ## Verification
 
 **Commands:**
 - `python3 tools/slots.py --self-test && python3 tools/break_pool.py --self-test`: expected pass.
 - The four subset trios (oracle, serial and `BREAK_JOBS=3`) from a frozen copy under `~/openfs98-verify/`: expected identical lines.
+
+Re-verified after the code-review patches (2026-11-22):
+- `slots.py --self-test` and `break_pool.py --self-test` pass. The latter now also covers live, dead and kept owners, and marked deletions.
+- The Options subset with `BREAK_JOBS=3` gives a `BREAK_POOL_RECORD` byte-equal to the serial one, the same output apart from wall time, and an empty `bin/break-pool` afterwards.
+- The host, g3d and sim1r subsets were not re-run after these patches, which touch only failure paths and artifact publishing.

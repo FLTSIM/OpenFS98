@@ -8,6 +8,7 @@
  * the rows. A file that opens but cannot be read leaves the counts below on the stack
  * uninitialised in retail (.text+0xfd70); ours has them 0. */
 
+/* Not reproduced: a file that opens but cannot be read leaves the counts on the stack uninitialised in retail (.text+0xfd70); ours has them 0. */
 #define LB_DLG    V(0x20803b08)
 #define LB_BOOKS  V(0x20803ac8)
 #define LB_ROWS   V(0x20803ae8)
@@ -158,6 +159,7 @@ static void lb_file_read(uint32_t name, uint32_t lines, uint32_t count)
     if (H_ALLOC(1, M32(V(0x20803c8b)), V(0x20803c93), 0) != 0)
         return;
     M8(V(0x20803c86)) = 1;
+    /* RETAIL BUG (kept): MAIN-22 (docs/retail-bugs.md). A failed read returns with the file still open. */
     if (H_FILE_READ(M32(V(0x20803c8f)), M32(V(0x20803c93)), M32(V(0x20803c8b)), V(0x20803fa3)) != 0)
         return;
     H_FILE_CLOSE(M32(V(0x20803c8f)));
@@ -473,6 +475,7 @@ static uint32_t lb_load(void)
     n = 0xfffffffcu - H_STRLEN(ADDR(cwd));
     n -= H_STRLEN(ADDR(dir));
     n -= H_STRLEN(V(0x2080361c));
+    /* RETAIL BUG (kept): MAIN-22 (docs/retail-bugs.md). +0x3b40 shrinks by the path's length each time the dialog loads. */
     M32(V(0x20803b40)) += n;
     H_LOADSTRING(0xf4b0, LB_DEFAULT, 0x100);
     if (H_JOIN(ADDR(path), 0, ADDR(dir), LB_DEFAULT) == 0 && H_EXISTS(ADDR(path), 0x1c) == 0) {
@@ -1077,6 +1080,7 @@ static uint32_t FS98_STDCALL main_log_flight(void)
     lb_button(4, book, LB_DLG);
     /* the directory alone, not the logbook's path (+0x10a13) */
     if (H_STRICMP(G + 0x12c, LB_DEFAULT) == 0)
+        /* RETAIL BUG (kept): MAIN-22 (docs/retail-bugs.md). +0x90 sets the attribute on the directory rather than the path. */
         H_ATTR_SET(2, ADDR(dir), 0x1c);
     H_FREE(V(0x20803bf4));
     return 0;

@@ -272,6 +272,7 @@ static void ar_load_area(uint32_t at, uint32_t present, uint32_t text)
         M16(at + 0x32) = 0xd8f1;
         M16(at + 0x36) = 0xd8f1;
     } else {
+        /* RETAIL BUG (kept): MAIN-21 (docs/retail-bugs.md). 0x1307 loads the second area from the same GLOBAL fields as the first (+0x1004), and only the first two ever go back by name. */
         H_MEMMOVE(at, G + 0x1004, 0x18);
         H_MEMMOVE(at + 0x18, G + 0x1062, 0x12);
         H_MEMMOVE(at + 0x2a, G + 0x101c, 0x18);

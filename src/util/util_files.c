@@ -84,7 +84,7 @@ int32_t FS98_STDCALL fs98_util_list_tree(void **data, int32_t *count,
 {
     fs98_util_walk(dir, pattern, ext);
 
-    *data  = fs98_util_list94.data;
+    *data  = (void *)(uintptr_t)fs98_util_list94.data;
     *count = fs98_util_list94.count;
 
     fs98_util_list94.count     = 0;
@@ -258,7 +258,7 @@ int32_t FS98_STDCALL fs98_util_catalogue(uint32_t stock_id, uint32_t user_id,
         return 0;
 
     *count = fs98_util_list98.count;
-    *data  = fs98_util_list98.data;
+    *data  = (void *)(uintptr_t)fs98_util_list98.data;
 
     fs98_util_list98.count     = 0;
     fs98_util_list98.capacity  = 0;

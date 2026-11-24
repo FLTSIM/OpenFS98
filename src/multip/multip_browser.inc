@@ -44,7 +44,10 @@ static int32_t FS98_STDCALL multip_browser_prune(void *record, void *context)
     return 0;
 }
 /* .text+0x4430 -- TIMEOUT stops enumeration without inspecting the descriptor.
- * Existing records are initialized again, leaking their previous names/lists. */
+ * Existing records are initialized again, leaking their previous names/lists.
+ * RETAIL BUG (kept): MULTI-12 -- the re-initialisation without freeing the previous name/list; the failed
+ * record setup returns -1, which DirectPlay reads as true; TIMEOUT (`flags & 1`) returns false without
+ * looking at the descriptor. */
 static int32_t FS98_STDCALL multip_browser_session_callback(const void *description,
     uint32_t *timeout, uint32_t flags, void *context)
 {
@@ -62,7 +65,8 @@ static int32_t FS98_STDCALL multip_browser_session_callback(const void *descript
     return 1;
 }
 /* .text+0x42f0 -- publish only after successful EnumSessions. Stale-record
- * visitor failures are ignored by the caller, as are marker-walk errors. */
+ * visitor failures are ignored by the caller, as are marker-walk errors.
+ * RETAIL BUG (kept): MULTI-12 -- the marker walk's and the prune walk's errors are consumed. */
 int32_t FS98_STDCALL multip_browser_refresh(void *dialog)
 {
     uint32_t description[20];

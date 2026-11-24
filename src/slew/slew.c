@@ -63,10 +63,10 @@ struct slew_private {
 static struct slew_private priv = { 0, 30480, 0, 0, 0, 0, 0, 0u, 0u, 0, 0 };
 
 struct fs98_import ImportTable[] = {
-    { FS98_MOD_HOST,   0 },
-    { FS98_MOD_GLOBAL, 0 },
-    { FS98_MOD_UTIL,   0 },
-    { 0, 0 }
+    { FS98_MOD_HOST,   { 0 } },
+    { FS98_MOD_GLOBAL, { 0 } },
+    { FS98_MOD_UTIL,   { 0 } },
+    { 0, { 0 } }
 };
 
 static void slew_noop(void) { }
@@ -80,8 +80,8 @@ struct {
     void (*update)(void);    /* slot 0x18 */
 } Linkage = { FS98_MOD_SLEW, slew_noop, slew_noop, { 0, 0, 0 }, slew_update };
 
-#define GLOBAL_LINK (ImportTable[1].link)
-#define UTIL_LINK   (ImportTable[2].link)
+#define GLOBAL_LINK ((void *)FS98_LINK(ImportTable[1]))
+#define UTIL_LINK   ((void *)FS98_LINK(ImportTable[2]))
 
 /* ---- 48 bit position arithmetic -------------------------------------------
  *
@@ -196,7 +196,7 @@ static void slew_update(void)
     /* fast slew, gated on the current aircraft */
     priv.fast = 0;
     if (FS98_G_S32(g, FS98_G_MODE) >= 2) {
-        unsigned char *ac = (unsigned char *)FS98_G_PTR(g, FS98_G_AIRCRAFT);
+        unsigned char *ac = (unsigned char *)(uintptr_t)FS98_G_PTR(g, FS98_G_AIRCRAFT);
         if (ac && *(int32_t *)(ac + 0x10) == 1 && *(uint16_t *)(ac + 0x26) >= 0x700)
             priv.fast = 1;
     }
@@ -310,6 +310,9 @@ static void slew_update(void)
      * the negation never runs.  Harmless either way -- the values are squared
      * immediately, which discards the sign regardless.  Omitted as dead. */
 
+    /* RETAIL BUG (kept): SLEW-3 -- the high halves are added first and the carry goes into the low half
+     * (add [hi] / adc [lo]), the wrong way round: the low half's own overflow is lost (each square adds at
+     * most 0x40000000 to the high half, so three cannot overflow it). */
     {
         const int32_t v[3] = { priv.vel_x, priv.vel_y, priv.vel_z };
         uint64_t p = (uint64_t)((int64_t)v[0] * v[0]);
@@ -334,7 +337,7 @@ static void slew_update(void)
         FS98_G_S32(g, FS98_G_SPEED_OUT) = s;
     }
 
-    /* QUIRK 3.  The clamp tests against 0x3fffff but assigns 0x3ffff, a factor
+    /* RETAIL BUG (kept): SLEW-2 -- QUIRK 3.  The clamp tests against 0x3fffff but assigns 0x3ffff, a factor
      * of sixteen apart, so a fast-slew speed above the threshold is replaced by
      * a value sixteen times smaller instead of being limited to it.  Reproduced
      * as written. */

@@ -14,6 +14,7 @@ static int32_t __attribute__((used, noinline)) multip_message_1014_impl(uint32_t
     const struct multip_weather_field *field;
 
     A32(packet, 0) = 0x1014;
+    /* RETAIL BUG (kept): MULTI-15 -- the last four bytes of message 1014 are caller-stack bytes in retail. */
     A32(packet, 0x258) = padding;
     for (index = 0; index < sizeof(s_weather_fields) / sizeof(s_weather_fields[0]); index++) {
         field = &s_weather_fields[index];
@@ -26,13 +27,15 @@ static int32_t __attribute__((used, noinline)) multip_message_1014_impl(uint32_t
 }
 
 #if defined(__i386__)
-/* Four trailing bytes are not initialized in retail's 0x300-byte frame. */
+/* Four trailing bytes are not initialized in retail's 0x300-byte frame.
+ * RETAIL BUG (kept): MULTI-15 -- the weather-button entry's capture of that word (-0xa8). */
 __attribute__((naked)) int32_t FS98_STDCALL multip_message_1014(uint32_t id __attribute__((unused)))
 {
     __asm__ volatile("movl -0xa8(%esp), %eax\n\tpushl %eax\n\tpushl 8(%esp)\n\t"
         "call _multip_message_1014_impl\n\taddl $8, %esp\n\tret $4");
 }
 #else
+/* Not reproduced (MULTI-15): native targets send zero for those four bytes. */
 int32_t FS98_STDCALL multip_message_1014(uint32_t id) { return multip_message_1014_impl(id, 0); }
 #endif
 
@@ -85,10 +88,12 @@ static int32_t __attribute__((used, noinline)) multip_handle_1013_impl(uint32_t 
 __attribute__((naked)) int32_t FS98_STDCALL multip_handle_1013(
     uint32_t id __attribute__((unused)), const void *packet __attribute__((unused)), uint32_t size __attribute__((unused)))
 {
+    /* RETAIL BUG (kept): MULTI-15 -- the host's reply to a weather request sends the same word from -0xb0. */
     __asm__ volatile("movl -0xb0(%esp), %eax\n\tpushl %eax\n\tpushl 8(%esp)\n\t"
         "call _multip_handle_1013_impl\n\taddl $8, %esp\n\tret $12");
 }
 #else
+/* Not reproduced (MULTI-15): zero on native targets. */
 int32_t FS98_STDCALL multip_handle_1013(uint32_t id, const void *packet, uint32_t size)
 { (void)packet; (void)size; return multip_handle_1013_impl(id, 0); }
 #endif

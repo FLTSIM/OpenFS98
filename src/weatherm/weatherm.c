@@ -115,8 +115,8 @@ _Static_assert(__builtin_offsetof(struct wx_data, spare) == 0x1c5 - 0x98, "spare
 #define D16(o)      (*(wx_u16 *)(D + (o)))
 #define D32(o)      (*(wx_u32 *)(D + (o)))
 
-#define HOST        ((void *)wx_image.import[0].link)
-#define G           ((uint8_t *)wx_image.import[1].link)
+#define HOST        ((void *)FS98_LINK(wx_image.import[0]))
+#define G           ((uint8_t *)FS98_LINK(wx_image.import[1]))
 #define G8(o)       (*(uint8_t *)(G + (o)))
 #define G16(o)      (*(wx_u16 *)(G + (o)))
 #define G32(o)      (*(wx_u32 *)(G + (o)))
@@ -127,7 +127,7 @@ _Static_assert(__builtin_offsetof(struct wx_data, spare) == 0x1c5 - 0x98, "spare
 #define P32(p, o)   (*(wx_u32 *)((uint8_t *)(p) + (o)))
 #define PPTR(p, o)  (*(void **)((uint8_t *)(p) + (o)))
 
-#define SLOT(i, off, type) (*(type *)((uint8_t *)wx_image.import[i].link + (off)))
+#define SLOT(i, off, type) (*(type *)((uint8_t *)FS98_LINK(wx_image.import[i]) + (off)))
 
 /* Every prototype read from the callee's `ret N`. */
 typedef int32_t  (FS98_STDCALL *chain_add_fn)(uint32_t list, wx_tick_fn cb);      /* ret 8 */
@@ -333,6 +333,9 @@ static uint16_t wx_interpolate(uint16_t ax, uint16_t bx, uint16_t cx, uint16_t d
 
     WX_BAND = (uint16_t)depth;
     up = ((int32_t)(int16_t)WX_ALT - d) >> 1;
+    /* RETAIL BUG (kept): WXM-1 -- at altitude == top of an even band the quotient is exactly 2^31 and overflows,
+     * and a band of zero divides by zero; both faults are reproduced.  Not reproduced (WXM-1): the host's divide
+     * repair, which resumes only a faulting div/idiv; wx_fault raises a non-continuable exception. */
     if (depth == 0)
         wx_fault(EXCEPTION_INT_DIVIDE_BY_ZERO);
     q = (int64_t)((uint64_t)(uint32_t)up << 32) / depth;
@@ -610,6 +613,8 @@ static void wx_blend_wind(struct wx_cursor *k, uint32_t first, uint16_t w)
  * not offset -- so every call writes the same word. */
 static void wx_blend_at(const struct wx_cursor *k, uint32_t offset, uint16_t w)
 {
+    /* RETAIL BUG (kept): WXM-3 -- the destination is not offset, so all three surface wind blends land on
+     * GLOBAL+0xef8 and +0xefc, +0xf02 and +0xf08 keep what they held. */
     struct wx_cursor c = { k->a + offset, k->b + offset, k->d };
     wx_blend(&c, 1, 1, w);
 }
@@ -753,6 +758,10 @@ static uint16_t wx_edge(uint32_t eax, uint8_t *area, uint32_t off)
         return 0x4000;
     eax = (eax << 14) >> 1;
     ebx >>= 1;
+    /* RETAIL BUG (kept): WXM-2 -- retail's unsigned `div` (0x208f1633) is reached only for an adjusted edge
+     * distance >= 0 and < the width; with a width of 1 only a distance of 0 does, and the halved width 0 divides
+     * by zero.  The fault is reproduced.  Not reproduced (WXM-2): the host's divide repair, which resumes a
+     * faulting div; wx_fault raises a non-continuable exception. */
     if (ebx == 0)
         wx_fault(EXCEPTION_INT_DIVIDE_BY_ZERO);
     return (uint16_t)(eax / ebx);
@@ -765,6 +774,10 @@ static void wx_weigh(uint8_t *area)
     uint32_t x, y;
     uint16_t a, b;
 
+    /* RETAIL BUG (kept): WXM-6 -- the position is converted against the area's centre before the area's
+     * enabled check below, so an area that is off is converted too.
+     * Not reproduced (WXM-6): UTIL keeps reads past the latitude table within the copied .data and falls back
+     * to offset 0 beyond it (UTIL-2, util_math.c:315). */
     wx_offset(P32(WX_POSITION, 0x04), P32(WX_POSITION, 0x0c), area);
     wx_rotate(P16(area, 0x48));
     x = WX_X;
@@ -819,6 +832,8 @@ static void wx_clouds(void)
     G16(0xe76) = P16(L, 4);
 
     ax = (uint16_t)(((uint32_t)P16(L, 8) + P16(L, 0xa)) >> 1);
+    /* RETAIL BUG (kept): WXM-5 -- when this layer's middle is above ground + 200 the raised line stays for the
+     * comparisons after it. */
     ground += 0xc8;
     if (!((int16_t)(uint16_t)ground < (int16_t)ax)) {
         ax = (uint16_t)ground;
@@ -907,6 +922,7 @@ static void wx_update(void)
             G16(0x115c) = 0x7fff;
         wx_shape(G + 0xf90);
         wx_shape(G + 0x1078);
+        /* RETAIL BUG (kept): WXM-6 -- both areas are weighed, so converted, whether or not each is on. */
         wx_weigh(G + 0xf90);
         wx_weigh(G + 0x1078);
         area = G + 0xf90;
@@ -972,6 +988,8 @@ static void FS98_STDCALL wx_wander(uint32_t i)
 
     if (i >= 3)
         return;
+    /* RETAIL BUG (kept): WXM-4 -- every WX_P_*(i) below indexes a three-word array by the block number
+     * unscaled, so blocks 1 and 2 read and write their neighbours' bytes. */
     block = WX_P_BLOCK(i);
     if (P16(block, 0x16) == 0)
         return;
@@ -1132,6 +1150,8 @@ static uint16_t wx_effect_strength(uint8_t type, uint16_t cx, uint16_t dx)
     uint32_t p;
     int16_t s, c;
 
+    /* RETAIL BUG (kept): WXM-7 -- `type` is overwritten by the strength's low byte after a sincos, so the
+     * second retry below tests that byte, not the wind type. */
     if ((int16_t)bx > 0x3fff || (int16_t)bx < (int16_t)0xc001)
         goto opposed;
     for (;;) {
@@ -1195,6 +1215,7 @@ static void FS98_STDCALL wx_effect(const uint8_t *record)
 
 static int32_t wx_alloc(uint32_t size, void **out)
 {
+    /* RETAIL BUG (kept, suspected): WXM-8 -- allocates with the zero-fill flag 0 (suspected, not used). */
     return FS98_HOST_ALLOC(HOST)(1, size, out, 0);
 }
 
@@ -1206,6 +1227,7 @@ static int32_t wx_free(void **pp)
 /* .text+0x31d0 -- the list a record type lives in. */
 static void **wx_records(void *area, uint32_t type)
 {
+    /* (WXM-8: only the head's address is computed here; the readers are marked.) */
     switch (type) {
     case 1: return (void **)((uint8_t *)area + 0xb0);
     case 2: return (void **)((uint8_t *)area + 0xb4);
@@ -1265,6 +1287,8 @@ static void *FS98_STDCALL wx_record_next(void *area, void *record, uint32_t type
 {
     void **head, *e;
 
+    /* RETAIL BUG (kept, suspected): WXM-8 -- walks `next` links nothing has set, from heads that a fresh
+     * (unzeroed) area never set (suspected, not used). */
     if (area == NULL)
         return NULL;
     if (record != NULL) {
@@ -1295,6 +1319,8 @@ static uint32_t FS98_STDCALL wx_record_append(void *area, void *record, uint32_t
     head = wx_records(area, type);
     if (head == NULL)
         return 0;
+    /* RETAIL BUG (kept, suspected): WXM-8 -- dereferences the head and walks the links, reached from
+     * wx_area_new on a fresh area whose heads were never set (wx_area_copy clears them; suspected, not used). */
     last = *head;
     if (last == NULL) {
         *head = record;
@@ -1550,13 +1576,13 @@ static uint32_t FS98_STDCALL wx_area_copy(void *src, void *dst)
 
 struct wx_image wx_image = {
     {
-        { FS98_MOD_HOST,   0 },
-        { FS98_MOD_GLOBAL, 0 },
-        { FS98_MOD_CHAIN,  0 },
-        { FS98_MOD_G3D,    0 },
-        { FS98_MOD_MAIN,   0 },
-        { FS98_MOD_UTIL,   0 },
-        { 0, 0 }
+        { FS98_MOD_HOST,   { 0 } },
+        { FS98_MOD_GLOBAL, { 0 } },
+        { FS98_MOD_CHAIN,  { 0 } },
+        { FS98_MOD_G3D,    { 0 } },
+        { FS98_MOD_MAIN,   { 0 } },
+        { FS98_MOD_UTIL,   { 0 } },
+        { 0, { 0 } }
     },
     {
         FS98_MOD_WEATHERM, wx_init, wx_deinit, 0, 0, 0,

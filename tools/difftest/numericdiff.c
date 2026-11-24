@@ -273,9 +273,9 @@ int main(void)
     TEST_SLOT(host_blob, 0x2b8, stub_strlen);
     TEST_SLOT(util_blob, 0xc0, stub_fixed48_to_double);
     TEST_SLOT(util_blob, 0xc8, stub_fixed48_to_double_signed);
-    imports[0].link = (struct fs98_linkage *)host_blob;
-    imports[1].link = (struct fs98_linkage *)global_blob;
-    imports[2].link = (struct fs98_linkage *)util_blob;
+    imports[0].link = (fs98_addr)(uintptr_t)host_blob;
+    imports[1].link = (fs98_addr)(uintptr_t)global_blob;
+    imports[2].link = (fs98_addr)(uintptr_t)util_blob;
     fs98_numeric_set_host(host_blob);
     fs98_numeric_set_global(global_blob);
     fs98_numeric_set_util(util_blob);

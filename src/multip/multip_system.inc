@@ -23,7 +23,8 @@ int32_t FS98_STDCALL multip_system_created(const void *message, uint32_t size)
     return 0;
 }
 
-/* .text+0x8110 -- retail returns failure even after successful removal. */
+/* .text+0x8110 -- retail returns failure even after successful removal.
+ * RETAIL BUG (kept): MULTI-3 -- the -1 below, returned for every destruction. */
 int32_t FS98_STDCALL multip_system_destroyed(const void *message, uint32_t size)
 {
     (void)size;
@@ -44,7 +45,9 @@ int32_t FS98_STDCALL multip_system_player_data(const void *message, uint32_t siz
     return 0;
 }
 
-/* .text+0x8140 -- migration sets host state before its first query. */
+/* .text+0x8140 -- migration sets host state before its first query.
+ * RETAIL BUG (kept): MULTI-3 -- 0xaa8 is set before multip_session_get_description, and a later
+ * failure keeps that and the partial changes and leaks `description`. */
 int32_t FS98_STDCALL multip_system_host(const void *message, uint32_t size)
 {
     void *description;

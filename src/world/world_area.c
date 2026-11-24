@@ -97,7 +97,10 @@ int fs98_world_area_validate(void *object, uint32_t unused)
     return WORLD_U32(descriptor, 0x10) ? 0x1aef : 0;
 }
 /* 0x223fc660: unused is ignored even when zero. The pointer at +0x1c
- * deliberately outlives this stack buffer in retail; only consumed in Error. */
+ * deliberately outlives this stack buffer in retail; only consumed in Error.
+ * RETAIL BUG (kept): WLD-2 -- the supplied argument is ignored; the three-word record at descriptor +0x18
+ * leaves +0x1c pointing at the dead stack buffer `position`; the result of the virtual at +0xe0 is returned,
+ * with control 0 when there is no error. */
 int fs98_world_area_error(void *object, uint32_t unused)
 {
     char position[0x40];

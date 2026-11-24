@@ -6,7 +6,9 @@ typedef int32_t (FS98_STDCALL *multip_lobby_get_fn)(void **, uint32_t *, uint32_
 #define LOBBY_FN(object, offset, type) (*(type *)(void *)(*(uint8_t **)(object) + (offset)))
 
 /* .text+0x9bd0 -- the second QueryInterface HRESULT is consumed. Unlike
- * normal creation, this owner does not first clear the queried flag. */
+ * normal creation, this owner does not first clear the queried flag.
+ * RETAIL BUG (kept): MULTI-13 -- the second QueryInterface failure is consumed (the `== 0` test sets only a
+ * flag), and a later failure of the caller leaks the lobby interface. */
 static int32_t FS98_STDCALL __attribute__((used)) multip_lobby_connect(void *lobby)
 {
     void *connected;
@@ -16,6 +18,7 @@ static int32_t FS98_STDCALL __attribute__((used)) multip_lobby_connect(void *lob
     LOBBY_FN(connected, 8, multip_dp_release_fn)(connected);
     return 0;
 }
+/* RETAIL BUG (kept): MULTI-13 -- a failed copy into the connection block returns -1 and leaks the block. */
 static int32_t FS98_STDCALL __attribute__((used, noinline)) multip_lobby_host_prepare(void *lobby, void *connection)
 {
     const uint32_t *application = (const uint32_t *)(uintptr_t)M32(0xa38);
@@ -37,6 +40,9 @@ static void FS98_STDCALL __attribute__((used, noinline)) multip_lobby_apply_prep
     A32(description, 4) |= M32(0x190);
 }
 #if defined(__i386__)
+/* RETAIL BUG (kept): MULTI-13 -- below, the lobby creation result and the SetConnectionSettings result
+ * (vtable +0x30) are ignored, and a failed apply returns before releasing the lobby (multip_lobby_start and
+ * multip_lobby_start_connection, here and in the C twins). */
 /* Keep lobby/completion nesting: local player startup consumes a deep caller
  * stack word. C preparation helpers do not reach that stack slot. */
 __attribute__((naked, used)) static int32_t FS98_STDCALL multip_lobby_host(
@@ -80,7 +86,8 @@ __attribute__((naked)) int32_t multip_lobby_start(void)
         "testl %eax, %eax\n\tjnz 1f\n\tmovl 4(%esp), %eax\n\tpushl %eax\n\tmovl (%eax), %ecx\n\tcall *8(%ecx)\n\t"
         "2: xorl %eax, %eax\n\taddl $12, %esp\n\tret\n\t1: orl $-1, %eax\n\taddl $12, %esp\n\tret");
 }
-/* .text+0x9a20 -- even complete success returns -1. */
+/* .text+0x9a20 -- even complete success returns -1.
+ * RETAIL BUG (kept): MULTI-13 -- explicit-connection startup returns -1 even after success. */
 __attribute__((naked)) int32_t FS98_STDCALL multip_lobby_start_connection(void *connection __attribute__((unused)))
 {
     __asm__ volatile("pushl %esi\n\tmovl 8(%esp), %esi\n\ttestl %esi, %esi\n\tjz 1f\n\t"

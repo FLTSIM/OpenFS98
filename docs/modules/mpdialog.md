@@ -1264,8 +1264,9 @@ confirmation. If the answer has bit `0x40`, it sends MULTIP message `1016`
 with the selected row's player ID at `+0`. It then frees the formatted
 messages and stores `ticks()+2000` in its refresh marker. Static code shows
 that the next refresh test subtracts this marker as an unsigned value before
-comparing it to the interval; near wraparound this subtraction can make the
-refresh immediately due. This is a reproduced arithmetic consequence, not an
+comparing it to the interval; the marker lies in the future, so the subtraction
+wraps and the first refresh after a removal is immediately due (it then rewrites
+the marker with the current tick). This is a reproduced arithmetic consequence, not an
 inference that the delay was intended to work that way. The remove callback's
 callee ends in `ret 4`; on the send-failure early return, the already-created
 confirmation strings are not freed.

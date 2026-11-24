@@ -94,7 +94,8 @@ void TC fs98_help_credits_close(void *object)
 }
 
 /* 0x22331fe0: a failed ReadFile clears the byte count but STILL returns zero,
- * so RichEdit sees EOF rather than an EDITSTREAM callback error. */
+ * so RichEdit sees EOF rather than an EDITSTREAM callback error.
+ * RETAIL BUG (kept): HELP-4 -- the callback returns zero after a ReadFile failure (EOF, not an error). */
 uint32_t FS98_HELP_STDCALL fs98_help_credits_read(uint32_t cookie, void *buffer,
                                                int32_t count, uint32_t *read)
 {
@@ -140,6 +141,7 @@ int32_t TC fs98_help_credits_start_timer(void *object)
     if (!D32(object, 0x10e8)) s_services->message_box("SetTimer failed", 0, 0);
     return (int32_t)D32(object, 0x10e8);
 }
+/* RETAIL BUG (kept): HELP-5 -- the first visible line is compared with +0x10f0 as a signed value. */
 void TC fs98_help_credits_timer(void *object, uint32_t timer)
 {
     int32_t line;
@@ -152,6 +154,7 @@ void TC fs98_help_credits_timer(void *object, uint32_t timer)
         D32(object, 0x10f4) = 0;
     }
 }
+/* RETAIL BUG (kept): HELP-5 -- Pause toggles only bit 0 with XOR (`^= 1` below), for any flag value. */
 void TC fs98_help_credits_toggle(void *object)
 {
     if (D32(object, 0x1108)) {
@@ -341,7 +344,9 @@ int32_t TC fs98_help_lessons_init(void *object)
 }
 
 /* 0x22331d50: replace the template placeholder with a native RichEdit window.
- * LoadLibrary/CreateWindow failures are not checked before the stream load. */
+ * LoadLibrary/CreateWindow failures are not checked before the stream load.
+ * RETAIL BUG (kept): HELP-4 -- the LoadLibrary and CreateWindow results below are used unchecked, and a
+ * missing fltcred.rtf is reported only by fs98_help_credits_load's message box. */
 int32_t TC fs98_help_credits_init(void *object)
 {
     struct fs98_help_rect rect;
@@ -384,7 +389,10 @@ static void fs98_help_about_cleanup(struct fs98_help_unwind *frame)
     }
 }
 /* 0x22331950: one unused CString still has observable construction/cleanup.
- * The successful RegOpen handle is never closed in retail. The first value
+ * RETAIL BUG (kept): HELP-1 -- the successful RegOpen handle (`*key_out`) is never closed in retail.
+ * RETAIL BUG (kept): HELP-2 -- `PTR(PTR(object, 0x10dc), 8) = name` below publishes a stack buffer through
+ * descriptor +8 (kept at entry ESP-0x270 by fs98_help_about_populate in help_stack.S).
+ * The first value
  * is Name (99 bytes), the second ProductID (49 bytes), despite the screen's
  * field order. The published descriptor pointer expires on return. */
 FS98_HELP_NOINLINE void fs98_help_about_populate_body(void *object, uint8_t *scratch)
@@ -430,7 +438,8 @@ static struct fs98_help_about_state *s_about_state = &s_default_about_state;
 void fs98_help_set_about_state(struct fs98_help_about_state *state) { s_about_state = state; }
 void fs98_help_about_font_destroy(void) { s_services->font_destroy(s_about_state->font); }
 /* 0x22331710: the initialized bit is committed before the base-font and
- * font-constructor calls. A throw does not clear it or schedule a destructor. */
+ * font-constructor calls. A throw does not clear it or schedule a destructor.
+ * RETAIL BUG (kept): HELP-3 -- `initialized |= 1` below precedes the base-font and construct calls. */
 int32_t fs98_help_about_init_body(void *object, uint8_t *scratch)
 {
     s_services->base_init(object);

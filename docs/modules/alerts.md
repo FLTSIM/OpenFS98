@@ -226,8 +226,9 @@ releases the module and UTIL frees the descriptor's text.
 
 ## Modeless alert and progress, id 3
 
-UTIL allocates a `0x28`-byte descriptor and initializes the live flag, but
-deliberately leaves the progress fields uninitialized:
+UTIL allocates a `0x28`-byte descriptor, zero-filled (the host allocator is asked to zero,
+in retail and in ours), and writes the live flag and 0 to `+0x10`; the progress fields are
+therefore zero, not uninitialized (UTIL-17, `src/util/util_alert.c:155`):
 
 | Offset | Observed use |
 | --- | --- |

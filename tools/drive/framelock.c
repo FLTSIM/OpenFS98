@@ -61,8 +61,8 @@
 #define GLOBAL_SIZE         0x12a8u
 
 struct fs98_import ImportTable[] = {
-    { FS98_MOD_GLOBAL, 0 },
-    { 0, 0 }
+    { FS98_MOD_GLOBAL, { 0 } },
+    { 0, { 0 } }
 };
 
 static struct fs98_host_runtime *runtime;

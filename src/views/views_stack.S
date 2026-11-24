@@ -7,6 +7,7 @@
 .globl _fs98_views_map
 .def _fs98_views_map; .scl 2; .type 32; .endef
 _fs98_views_map:
+    /* RETAIL BUG (kept): VIEW-1 -- the metric flag is the uninitialised word at entry ESP-16. */
     movl -16(%esp), %eax
     pushl %eax
     pushl %ecx
@@ -18,6 +19,7 @@ _fs98_views_map:
 .globl _fs98_views_zoom
 .def _fs98_views_zoom; .scl 2; .type 32; .endef
 _fs98_views_zoom:
+    /* RETAIL BUG (kept): VIEW-1 -- the zoom float is the uninitialised word at entry ESP-16. */
     movl -16(%esp), %eax
     pushl %eax
     pushl %ecx

@@ -125,8 +125,8 @@ ofs_step(difftests
   OUTPUTS bin/difftest/g3dmeshdiff.exe
   COMMANDS
     [==[mkdir -p bin/difftest]==]
-    [==[i686-w64-mingw32-gcc @MODULE_FLAGS@ -std=c99 -O1 -Wall -Wextra -c -DG3D_MESH_NAME=g3d_mesh_hw -o bin/difftest/g3d_mesh_hw.o src/g3d/g3d_mesh.c]==]
-    [==[i686-w64-mingw32-gcc @MODULE_FLAGS@ -std=c99 -O1 -Wall -Wextra -c -DFS98_PORTABLE_FP -DG3D_MESH_NAME=g3d_mesh_soft -o bin/difftest/g3d_mesh_soft.o src/g3d/g3d_mesh.c]==]
+    [==[i686-w64-mingw32-gcc @MODULE_FLAGS@ -std=c99 -O1 -Wall -Wextra -Iinclude -c -DG3D_MESH_NAME=g3d_mesh_hw -o bin/difftest/g3d_mesh_hw.o src/g3d/g3d_mesh.c]==]
+    [==[i686-w64-mingw32-gcc @MODULE_FLAGS@ -std=c99 -O1 -Wall -Wextra -Iinclude -c -DFS98_PORTABLE_FP -DG3D_MESH_NAME=g3d_mesh_soft -o bin/difftest/g3d_mesh_soft.o src/g3d/g3d_mesh.c]==]
     [==[i686-w64-mingw32-gcc @MODULE_FLAGS@ -std=c99 -O1 -Wall -Wextra -o bin/difftest/g3dmeshdiff.exe tools/difftest/g3dmeshdiff.c bin/difftest/g3d_mesh_hw.o bin/difftest/g3d_mesh_soft.o]==]
   )
 

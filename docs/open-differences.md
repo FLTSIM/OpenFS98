@@ -123,6 +123,11 @@ The `radios` suite's stand-in now logs edi, and catches the old call.
   quotient; ours resumes inside the void `fault_div`, discarding it (a zero interval goes on to another
   divide by zero, an overflow stores the truncated quotient). `demodiff` stops at the fault, so the
   repair is never compared.
+- **WEATHERM's divide faults and the host's repair** (WXM-1, WXM-2). Ours raises the same faults as
+  retail's `idiv` (an even band at its top, a zero band) and unsigned `div` (a fade width of 1 at an edge distance of 0), but through `wx_fault`, a
+  non-continuable software exception, while the host's filter resumes only a faulting `div`/`idiv`
+  (`host_rt_divide.c`), so retail's repaired result is not reproduced. `weathermdiff` avoids these
+  inputs (`tools/difftest/weathermdiff.c`), so the repair is never compared.
 
 - **The host runtime's failed GetDC under 0x413910.** When the back buffer's GetDC fails,
   retail frames the rectangle with a DC that is never set, its caller's ecx left on the stack;

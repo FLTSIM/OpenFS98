@@ -15,6 +15,9 @@ static void perspective_sample(uint32_t first, uint32_t second, uint32_t bias,
         *one += WORD(0x4dc4);
         phase = *one;
     }
+    /* RETAIL BUG (kept): HG2D-5 -- the five-bit phase is unchecked: it can select any of thirty-two rows of
+     * the remap table at +0x4e00 though initialisation remaps sixteen; BYTE(0x100) then selects the +0xd70
+     * distance row, the first lookup supplying its column. */
     index = ((phase >> 19) & 0xff00) | value;
     value = BYTE(0x4e00 + index);
     value = BYTE(0xd70 + (BYTE(0x100) << 8) + value);

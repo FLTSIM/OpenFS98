@@ -17,7 +17,7 @@
 #include <string.h>
 #include <stdarg.h>
 
-#define FS98_STDCALL __attribute__((stdcall))
+#include "fs98/abi.h"
 int32_t FS98_STDCALL fs98_util_sqrt32(uint32_t v);
 int32_t FS98_STDCALL fs98_util_sqrt64(const void *p);
 int32_t FS98_STDCALL fs98_util_hypot(int16_t a, int16_t b);

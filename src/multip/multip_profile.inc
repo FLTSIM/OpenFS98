@@ -54,7 +54,8 @@ static void multip_profile_validate(const struct multip_profile_field *field)
         if (value < 5 || value > 45) value = 15;
         break;
     case 10:
-        /* Retail reads this key into +0x174, but validates +0x178. */
+        /* Retail reads this key into +0x174, but validates +0x178.
+         * RETAIL BUG (kept, suspected): MULTI-7 -- the validated field is not the one read. */
         if (M32(0x178) < 5 || M32(0x178) > 45) M32(0x178) = 15;
         break;
     case 11:

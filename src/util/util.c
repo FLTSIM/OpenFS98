@@ -22,10 +22,10 @@
 
 /* The order is retail's: host, GLOBAL, NUMERIC.  util_imports.h indexes it. */
 struct fs98_import ImportTable[] = {
-    { FS98_MOD_HOST,    0 },
-    { FS98_MOD_GLOBAL,  0 },
-    { FS98_MOD_NUMERIC, 0 },
-    { 0, 0 }
+    { FS98_MOD_HOST,    { 0 } },
+    { FS98_MOD_GLOBAL,  { 0 } },
+    { FS98_MOD_NUMERIC, { 0 } },
+    { 0, { 0 } }
 };
 
 typedef int32_t (FS98_STDCALL *fs98_util_entry_cb)(const char *, char *);

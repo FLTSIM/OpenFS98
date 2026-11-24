@@ -114,13 +114,13 @@ typedef char (*atc_layout_check)[sizeof(struct atc_image) == ATC_DATA_SIZE &&
 #define ATC_VA(o)   (ATC_DATA_VA + (uint32_t)(o))           /* offset -> retail address */
 #define ATC_PTR(va) (D + ((uint32_t)(va) - ATC_DATA_VA))    /* retail address -> here */
 
-#define HOST        ((void *)atc_image.import[0].link)
-#define G           ((uint8_t *)atc_image.import[1].link)
+#define HOST        ((void *)FS98_LINK(atc_image.import[0]))
+#define G           ((uint8_t *)FS98_LINK(atc_image.import[1]))
 #define G8(o)       (*(uint8_t *)(G + (o)))
 #define G16(o)      (*(atc_u16 *)(G + (o)))
 #define G32(o)      (*(atc_u32 *)(G + (o)))
 
-#define SLOT(i, off, type) (*(type *)((uint8_t *)atc_image.import[i].link + (off)))
+#define SLOT(i, off, type) (*(type *)((uint8_t *)FS98_LINK(atc_image.import[i]) + (off)))
 
 /* Every prototype read from the callee's `ret N`. */
 typedef int32_t  (FS98_STDCALL *chain_add_fn)(uint32_t list, atc_tick_fn cb);         /* ret 8 */
@@ -149,7 +149,7 @@ typedef uint32_t (FS98_STDCALL *winmsg_slot_fn)(uint32_t slot);                 
 #define ATC_MODE        D32(0x496)   /* 1 takeoff, 2 landing */
 #define ATC_RETRIES     D32(0x49a)
 #define ATC_WAITED      D32(0x49e)
-#define ATC_REGISTERED  D32(0x4a2)   /* set on the first start, never cleared */
+#define ATC_REGISTERED  D32(0x4a2)   /* set on the first start, never cleared (ATC-3) */
 #define ATC_KEY_LENGTH  D32(0x96c)   /* translator: length of the key just matched */
 #define ATC_LOADED      D32(0x970)   /* translator: sections read */
 #define ATC_SECTION(i)  (*(char **)(D + 0x980 + (i) * 4))   /* 'A'..'Z', heap */
@@ -201,6 +201,7 @@ static void atc_digits(const void *value, uint32_t id, uint8_t *dst, uint32_t bl
         dst[i] = c;
         i++;
     } while (i <= 5);
+    /* RETAIL BUG (kept): ATC-6 -- an empty field with `blank` writes its '0' at dst[-1], the byte before the field. */
     if (blank != 0)
         dst[i - 1] = '0';
 }
@@ -218,7 +219,9 @@ static void atc_load_translations(void)
     char section[2];
     char path[0x104];
     char locale[0xc];
-    uint32_t lcid = 0;              /* retail: uninitialised if sscanf fails */
+    /* RETAIL BUG (fixed, not kept): ATC-9 -- retail leaves the locale uninitialised on its stack when the
+     * sscanf cannot parse LocaleID; ours starts it at 0, so an unparsable locale is simply not installed. */
+    uint32_t lcid = 0;
     uint32_t letter;
 
     *(atc_u16 *)section = D16(0x968);       /* "A" */
@@ -233,6 +236,8 @@ static void atc_load_translations(void)
         G32(0x1290) = 0;
 
     if (G32(0x128c) == 0) {
+        /* RETAIL BUG (kept): ATC-7 -- a re-init with GLOBAL+0x128c clear zeroes the section table but leaves
+         * ATC_LOADED set, so the next translated message reads a null section. */
         for (letter = 0; letter < 26; letter++)     /* rep stosd; ATC_LOADED stays */
             ATC_SECTION(letter) = 0;
         return;
@@ -273,6 +278,8 @@ static void atc_unload_translations(void)
 
     if (G32(0x128c) == 0)
         return;
+    /* RETAIL BUG (kept): ATC-7 -- deinit frees the sections without clearing ATC_LOADED, so a translation after
+     * it reads a null section. */
     for (letter = 0; letter < 26; letter++)
         if (ATC_SECTION(letter) != 0)
             FS98_HOST_FREE(HOST)((void **)&ATC_SECTION(letter));
@@ -289,6 +296,8 @@ static uint32_t atc_match(const uint8_t *s)
     uint32_t pos = 0, run, best;
     uint8_t c = s[0], k;
 
+    /* RETAIL BUG (kept): ATC-11 -- the message is upper-cased here and below, the keys are not (a key with a
+     * lower-case letter never matches), a key matches as a prefix, and the first match in file order wins. */
     if (c >= 'a' && c <= 'z')
         c -= 0x20;
     if (c < 'A' || c > 'Z')
@@ -367,8 +376,8 @@ static char *atc_translate(const char *text)
             }
             s += ATC_KEY_LENGTH;
         } else {
-            /* a word and the space after it -- to the next space, even past
-             * the terminator */
+            /* RETAIL BUG (kept): ATC-1 -- a word and the space after it, to the next space even past the
+             * terminator: a message not ending in a space drags the buffer bytes after it into the output. */
             c = *s;
             if (c != ' ') {
                 do {
@@ -450,6 +459,7 @@ static void atc_cloud_layer(uint16_t *base, uint16_t *cover)
 {
     uint16_t cx = (uint16_t)D32(0x48d);
 
+    /* RETAIL BUG (kept): ATC-4 -- the first layer matches only below its top (`<`), the second also at it (`<=`). */
     if (cx < G16(0xea2) && *base <= G16(0xea4) && *cover <= G16(0xea6)) {
         *base = G16(0xea4);
         *cover = G16(0xea6);
@@ -541,6 +551,9 @@ static void atc_compose_atis(void)
     ceiling_said = 0;
     layers = 0;
     for (;;) {
+        /* RETAIL BUG (kept): ATC-8 -- after a layer at base 0xffff that is not overcast this wraps to 0 and the
+         * search starts again from the bottom: it re-selects the same layer and loops for ever, unless an earlier
+         * layer qualifies at base 0 (then the base == 0 check below exits). */
         base = (uint16_t)(layer_base + 1);
         cover = 0x100;
         atc_cloud_layer(&base, &cover);
@@ -648,11 +661,14 @@ static void atc_say(const uint8_t *template, uint32_t slot)
  * position, +0x0c four runway bytes, +0x10 the broadcast template.
  *
  * Retail reads +0xb04 and +0xb68 through the caller's EDI, never loaded here;
- * MAIN, the only caller, has GLOBAL in it. */
+ * MAIN, the only caller, has GLOBAL in it (ATC-12, marked at the two reads). */
 static __attribute__((used)) void FS98_STDCALL atc_atis(const uint8_t *record)
 {
     uint32_t ground;
 
+    /* RETAIL BUG (fixed, not kept): ATC-12 -- retail reads +0xb04 and +0xb68 through EDI, which it never loads;
+     * MAIN's only call site has GLOBAL there (main_radios.inc:386, thunk main.c:173).  Ours reads both through
+     * the imported GLOBAL, here and on the next test. */
     if ((G16(0xb04) & 8) == 0)
         return;
     if (G8(0xb68) != 0)
@@ -694,6 +710,8 @@ static void atc_post_and_step(uint32_t n)
 static void atc_finish(void)
 {
     ATC_STEP = 0;
+    /* RETAIL BUG (kept): ATC-3 -- .data+0x4a2 is never cleared, so every finish after the first start
+     * unregisters, whether or not the callback is still registered.  Test site; set site in atc_start. */
     if (ATC_REGISTERED != 0)
         CHAIN_REMOVE(3, atc_tick);
 }
@@ -737,6 +755,7 @@ static void atc_pick_squawk(void)
 static void atc_taxi(void)
 {
     atc_pick_squawk();
+    /* RETAIL BUG (kept): ATC-5 -- the taxi instructions are posted without waiting for them to go out. */
     atc_post(1);
     ATC_STEP++;
     ATC_WAITED = 0;
@@ -780,6 +799,7 @@ static void atc_check_squawk(void)
         ATC_STEP += 4;
         return;
     }
+    /* RETAIL BUG (kept): ATC-5 -- the squawk reminder is posted without waiting for it to go out. */
     atc_post(5);
     ATC_STEP++;
 }
@@ -880,8 +900,10 @@ static void atc_start(void)
         return;
     request = D32(0x789 + ATC_MODE * 4);
     ATC_STEP = 1;
-    ATC_REGISTERED = 1;
+    ATC_REGISTERED = 1;         /* ATC-3's set site; see atc_finish */
     atc_say(ATC_PTR(request), 1);
+    /* RETAIL BUG (kept): ATC-2 -- registers the step callback on every call, so two starts before a finish step
+     * the exchange twice a frame. */
     CHAIN_ADD(3, atc_tick);
 }
 
@@ -907,14 +929,14 @@ static void atc_landing(void)
 
 struct atc_image atc_image = {
     {
-        { FS98_MOD_HOST,     0 },
-        { FS98_MOD_GLOBAL,   0 },
-        { FS98_MOD_CHAIN,    0 },
-        { FS98_MOD_NUMERIC,  0 },
-        { FS98_MOD_UTIL,     0 },
-        { FS98_MOD_WEATHERM, 0 },
-        { FS98_MOD_WINMSG,   0 },
-        { 0, 0 }
+        { FS98_MOD_HOST,     { 0 } },
+        { FS98_MOD_GLOBAL,   { 0 } },
+        { FS98_MOD_CHAIN,    { 0 } },
+        { FS98_MOD_NUMERIC,  { 0 } },
+        { FS98_MOD_UTIL,     { 0 } },
+        { FS98_MOD_WEATHERM, { 0 } },
+        { FS98_MOD_WINMSG,   { 0 } },
+        { 0, { 0 } }
     },
     {
         FS98_MOD_ATC, atc_load_translations, atc_unload_translations, 0, 0, 0,

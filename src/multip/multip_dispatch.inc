@@ -115,7 +115,9 @@ int32_t multip_receive_expire(void)
 }
 
 /* .text+0x47f0 -- failures are returned raw and leave the dequeued record
- * owned by nobody. A NULL payload also leaves its record unfreed. */
+ * owned by nobody. A NULL payload also leaves its record unfreed.
+ * RETAIL BUG (kept): MULTI-8 -- the NULL-payload record leak and the partial state after a failed
+ * dispatch, payload free or record free, in both the x86 routine below and its C twin. */
 #if defined(__i386__)
 __attribute__((naked)) static uint32_t FS98_STDCALL multip_receive_callback(
     uint32_t code __attribute__((unused)), uint32_t argument __attribute__((unused)))

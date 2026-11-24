@@ -800,7 +800,8 @@ static uint32_t FS98_STDCALL post_command(uint32_t a, uint32_t b)
 
 /* 0x10001d40 -- a panel window's ident, or -1 if it is not in the table.
  * Retail reads each entry's window through the entry without checking it:
- * a window past the loaded ones faults on a null entry, as here. */
+ * a window past the loaded ones faults on a null entry, as here.
+ * RETAIL BUG (kept): PANEL-WINDOW-IDENT -- each entry's window is read through the entry unchecked. */
 static uint32_t FS98_STDCALL window_ident(uint32_t w)
 {
     uint32_t a, i = 0;
@@ -869,6 +870,7 @@ static uint32_t bitmap_load(const char *path)
     fclose(f);
     return blk;
 fail:
+    /* RETAIL BUG (kept): PANEL-FCLOSE -- f is NULL when the file did not open, and is passed to fclose. */
     fclose(f);
     h_free(&blk);
     return 0;
@@ -1012,7 +1014,8 @@ static uint32_t FS98_STDCALL panel_paint(uint32_t mode, uint32_t w, uint32_t arg
  * relative to the first window's SIZE_MM; a window the table does not
  * name looks for gauges in the section named by its title and, should it
  * find any, loads them into the last panel window seen (`e`, which retail
- * leaves in ebp; before any it is whatever ebp held, here 0). */
+ * leaves in ebp; before any it is whatever ebp held, here 0).
+ * Not reproduced (PANEL-LOAD-WINDOW): that stale ebp before a panel record is seen -- ours uses 0. */
 static void panels_load(uint32_t a)
 {
     char cfg[0x104], prof[0x100], val[0x100], title[0x100], file[0x100], path[0x104];
@@ -1150,6 +1153,8 @@ static void panels_load(uint32_t a)
                     }
                 }
                 R32(w, 0x28) = 0x2000;
+                /* RETAIL BUG (kept): PANEL-LOAD-WINDOW -- a window with no layout of its own is sized from the
+                 * first window's SIZE_MM (size0). */
                 x = FTOL((long double)size / size0 * RD(0x1000e018));
                 R32(w, 0x28) = x;
                 if ((long double)ratio > RD(0x1000e020))
@@ -1251,6 +1256,8 @@ static void panels_load(uint32_t a)
         sprintf(key, S_GAUGE_FMT, g);
         sect = R32(w, 0);
         val[0] = 0;
+        /* RETAIL BUG (kept): PANEL-LOAD-WINDOW -- a window the table does not name keeps `e`, the last panel
+         * record seen, and its gauges load into that panel. */
         for (n = 0; n < D32(0x10010e6c); n++)
             if (R32(D32(WT_ENTRY(n)), 4) == w) {
                 e = D32(WT_ENTRY(n));
@@ -1469,6 +1476,7 @@ static uint32_t FS98_STDCALL panel_free(uint32_t e, uint32_t c)
     if (w != 0) {
         h_window_destroy(w);
         h_free(e + 0x4c);
+        /* RETAIL BUG (kept): PANEL-FREE-USE -- the record's +0x10 is read after h_window_destroy freed it. */
         h_free(w + 0x10);
         WN(0x7c, f1)(P(&w));
     }
@@ -1598,7 +1606,8 @@ static void scale_8(uint32_t info, uint32_t bits, uint32_t dst)
  * itself not at all for green and blue; and the rows are stored one late
  * -- the first two go to the last row and row 0 is never written.  Black
  * and (1,1,1) pixels, the first row and the first column are copied as
- * they are, and a result of black or (1,1,1) becomes (0x10,0x10,0x10). */
+ * they are, and a result of black or (1,1,1) becomes (0x10,0x10,0x10).
+ * RETAIL BUG (kept): PANEL-SMOOTH -- weights by the loop counters and rows stored one late (row 0 never). */
 static void smooth_8(uint32_t info, uint32_t bits, uint32_t dst)
 {
     uint32_t pal = info + R32(info, 0), rows = R32(dst, 0x10);
@@ -1670,7 +1679,8 @@ static void smooth_8(uint32_t info, uint32_t bits, uint32_t dst)
  * at a time; any channel at 1 is copied as it is, as is the last source
  * row; the average at (0x8000, 0x8000) is of all four; a black or
  * (1,1,1) result becomes (8,8,8).  The same counters for weights and the
- * same late rows as smooth_8. */
+ * same late rows as smooth_8.
+ * RETAIL BUG (kept): PANEL-SMOOTH -- the same counters as weights and the same late rows. */
 static void smooth_24(uint32_t info, uint32_t bits, uint32_t dst)
 {
     uint32_t rows = R32(dst, 0x10);
@@ -1958,7 +1968,8 @@ static uint8_t colour_8(uint8_t R, uint8_t G, uint8_t B, uint32_t cache, uint32_
  * 0x10018ee0).  A box mostly black (0xff in `black`) is 0, mostly (1,1,1)
  * is 1; where a box is part black and `back` is given, the background's
  * pixel at `at` shows through in proportion.  Kept from retail: a box with
- * whole pixels in its middle counts its first pixel's (1,1,1) weight twice. */
+ * whole pixels in its middle counts its first pixel's (1,1,1) weight twice.
+ * RETAIL BUG (kept): PANEL-SHRINK-GREY -- the first pixel's grey weight is counted twice. */
 static void shrink_8_to_8(uint32_t info, uint32_t bits, uint32_t dst, uint32_t back,
                           uint32_t at, uint32_t flags)
 {
@@ -2113,7 +2124,8 @@ static void shrink_8_to_8(uint32_t info, uint32_t bits, uint32_t dst, uint32_t b
 /* 0x10004f50 -- the same without a background, mostly meaning more than
  * half (0x80): whole pixels in a box's middle are its width's whole part,
  * the last its fraction.  The first pixel's (1,1,1) count is doubled as in
- * shrink_8_to_8. */
+ * shrink_8_to_8.
+ * RETAIL BUG (kept): PANEL-SHRINK-GREY -- the first pixel's grey weight is counted twice, as above. */
 static void shrink_8_to_8_plain(uint32_t info, uint32_t bits, uint32_t dst, uint32_t flags)
 {
     uint8_t hostpal[0x300], black[0x100], grey[0x100];
@@ -2334,7 +2346,8 @@ static void FS98_STDCALL to_8_host(uint32_t src, uint32_t dst)
  * the 8-bit `light` surface's at `at` (255 full).  Black keeps only the top
  * bit; (1,1,1) is 0x421 over the old top bits.  Kept from retail: the
  * test meant for a result of 0 or 0x421 looks at bit 15 alone, so every
- * result without it becomes at least 0x842 in its low bits. */
+ * result without it becomes at least 0x842 in its low bits.
+ * RETAIL BUG (kept): PANEL-555-TEST -- bit 15 is tested where the colour is meant. */
 static void FS98_STDCALL to_555(uint32_t src, uint32_t dst, uint32_t light, uint32_t at)
 {
     uint32_t r, k;
@@ -2579,7 +2592,8 @@ static uint32_t FS98_STDCALL clip(uint32_t psx, uint32_t psy, uint32_t pdx, uint
  * share a bit (i & j), not when both are nonzero; the background is read
  * round the pixel one left of and one row before the gauge's, the row
  * index going to -1 for the first; and a pixel with no background inside
- * the surface's memory divides by zero, into the host's repair. */
+ * the surface's memory divides by zero, into the host's repair.
+ * RETAIL BUG (kept): PANEL-EDGES-AND -- the up-left test `(i & j) != 0` where both nonzero is meant. */
 static void FS98_STDCALL edges_24(uint32_t s, uint32_t back, uint32_t at)
 {
     static const double factor[9] = { 1.0, 0.9, 0.8, 0.6, 0.5, 0.4, 0.3, 0.2, 0.1 };
@@ -2784,7 +2798,8 @@ static void FS98_STDCALL compose(uint32_t dst, uint32_t over, uint32_t base, uin
  * panel colours' palette: HG2D's through its remap, or with flags bit 2 the
  * host's; 2/3 16; 4 24; 5 32), `w` by `h` top down, its bits to *bits.
  * Retail has no header for a type past 5 and writes through an
- * uninitialised pointer; here a null one. */
+ * uninitialised pointer; here a null one.
+ * Not reproduced (PANEL-DIB-NEW): the indeterminate address -- ours writes through a null pointer. */
 static uint32_t FS98_STDCALL dib_new(uint32_t type, int32_t w, int32_t h, uint32_t bits,
                                      uint32_t flags)
 {
@@ -2836,6 +2851,8 @@ static uint32_t FS98_STDCALL dib_new(uint32_t type, int32_t w, int32_t h, uint32
         R16(info, 0xe) = 0x20;
         break;
     }
+    /* RETAIL BUG (kept): PANEL-DIB-NEW -- past type 5 no header was allocated and the write goes through
+     * a pointer that was never set (ours: null, so the write is still invalid). */
     R32(info, 0) = 0x28;
     R32(info, 4) = w;
     R32(info, 8) = -h;
@@ -3132,7 +3149,9 @@ static uint32_t FS98_STDCALL v_7c70(uint32_t v, uint32_t op) { var_main_whole(v,
 static uint32_t FS98_STDCALL v_7cd0(uint32_t v, uint32_t op) { var_main_whole(v, op, 4); return 0; }
 
 /* 0x10007d30 -- by GLOBAL +0x612: +0x2b8 or +0x2bc in 1/128ths; for any
- * other retail scales what is left in the op's slot, 1 */
+ * other retail scales what is left in the op's slot, 1
+ * RETAIL BUG (kept): PANEL-ZOOM-ADDRESS-2 -- only op 1 reaches the scaling; with GLOBAL +0x612 selecting
+ * neither case the value stays at 1 and that is scaled. */
 static uint32_t FS98_STDCALL v_7d30(uint32_t v, uint32_t op)
 {
     int32_t t = op;
@@ -3505,6 +3524,7 @@ static uint32_t FS98_STDCALL named_remove(uint32_t name)
 {
     uint32_t prev, cur;
 
+    /* RETAIL BUG (kept): PANEL-NAMED-CLEAR -- an empty list faults here, reading the head's name. */
     if (h_strcmp(R32(D32(0x10010e88), 0), name) == 0) {
         cur = D32(0x10010e88);
         D32(0x10010e88) = R32(cur, 0xc);
@@ -3523,7 +3543,8 @@ static uint32_t FS98_STDCALL named_remove(uint32_t name)
 
 /* 0x10008d70 -- Linkage +0xa8: empty the list.  Kept from retail: each
  * record is unlinked and MSVCRT's free is handed the address of the local
- * that holds it, not the record, so nothing is freed. */
+ * that holds it, not the record, so nothing is freed.
+ * RETAIL BUG (kept): PANEL-NAMED-CLEAR -- free gets the address of the local `p`. */
 static void FS98_STDCALL named_clear(void)
 {
     uint32_t p = D32(0x10010e88);
@@ -4434,6 +4455,7 @@ static uint32_t FS98_STDCALL e_a790(uint32_t e)
     win = R32(R32(e, 0x20), 0x3c);
     for (k = 0; k < 4; k++) {
         lim = (int32_t)R32(win, 0x84);
+        /* RETAIL BUG (kept): PANEL-QUAD-CLAMP -- the needle's second corner's x has no lower bound. */
         if (k != 1 && p[k][0] < 0)
             p[k][0] = 0;
         if (p[k][0] >= lim)
@@ -4574,6 +4596,8 @@ static uint32_t FS98_STDCALL e_ae40(uint32_t e, uint32_t hmod)
         /* shrink the font until the digits fit */
         i = (uint32_t)-h;
         rc.left = rc.top = 0;
+        /* Not reproduced (PANEL-DIGITS): retail's first DrawText measurement sees RECT.right and .bottom
+         * as the stack left them; ours zeroes them (no reason stated). */
         rc.right = rc.bottom = 0;
         do {
             rc.left = rc.top = 0;
@@ -5086,6 +5110,7 @@ static uint32_t FS98_STDCALL e_be10(uint32_t e)
         latch = 1;
         break;
     default:                     /* 2 and past 4: retail leaves its argument in both */
+        /* RETAIL BUG (kept): PANEL-DIGITS -- the icon pointer itself is the target and the latch. */
         want = latch = e;
         break;
     }
@@ -5439,6 +5464,8 @@ static uint32_t FS98_STDCALL e_c720(uint32_t e, uint32_t hmod)
     hh = (int32_t)R32(win, 0x88);
     if ((int32_t)R32(e, 0xec) < 0) R32(e, 0xec) = 0;
     if ((int32_t)R32(e, 0xec) >= ww) R32(e, 0xec) = ww - 1;
+    /* RETAIL BUG (kept): PANEL-QUAD-CLAMP -- the shape's second corner's x (+0xf4) has no lower clamp
+     * (the first, +0xec, is clamped on both sides). */
     if (x0 >= ww) R32(e, 0xf4) = ww - 1;
     if (x0 < 0) R32(e, 0xfc) = 0;
     if ((int32_t)R32(e, 0xfc) >= ww) R32(e, 0xfc) = ww - 1;

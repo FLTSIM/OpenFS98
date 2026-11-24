@@ -16,6 +16,7 @@ void STDCALL __attribute__((used)) device_point_body(uint32_t surface, uint32_t 
             if ((int16_t)GLOBAL_HALF(0x30c) > (int16_t)GLOBAL_HALF(0xcd4))
                 value = draw_divide_word((uint32_t)value * GLOBAL_HALF(0xcd4), GLOBAL_HALF(0x30c));
             if (value >= 15) value = 15;
+            /* RETAIL BUG (kept): HG2D-9 -- the depth helper leaves its lookup index in EBX (depth_active). */
             lookup = ((uint32_t)value << 8) | BYTE(0x90c); depth_active = 1;
         }
         BYTE(0x90c) = draw_depth(BYTE(0x90c), (uint16_t)depth);
@@ -38,6 +39,8 @@ void STDCALL __attribute__((used)) device_point_body(uint32_t surface, uint32_t 
     hg2d_device_point_active = 1;
     hg2d_device_point_ebx_active = depth_active; hg2d_device_point_ebx = lookup;
 }
+/* RETAIL BUG (kept): HG2D-9 -- the compiled device point does not save EBX, so the shim loads it with the
+ * helper's lookup index (hg2d_device_point_ebx) whenever depth shading took the lookup path. */
 #define DEVICE_POINT_RESULT \
     "popl %edx\n\tpopl %ecx\n\tcmpl $0,_hg2d_device_point_active\n\tje 1f\n\t" \
     "movl _hg2d_image+0x5ee4,%eax\n\tmovl %eax,(%esp)\n\t" \

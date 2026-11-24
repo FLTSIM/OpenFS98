@@ -13,6 +13,7 @@
 #define FS98_GLOBAL_H
 
 #include <stdint.h>
+#include "fs98/abi.h"
 
 /* Accessors.  Offsets stay as raw numbers on purpose: an offset seen in a
  * disassembly listing should be greppable against this header verbatim. */
@@ -20,7 +21,7 @@
 #define FS98_G_S16(g, off)  (*(int16_t  *)((unsigned char *)(g) + (off)))
 #define FS98_G_U16(g, off)  (*(uint16_t *)((unsigned char *)(g) + (off)))
 #define FS98_G_S32(g, off)  (*(int32_t  *)((unsigned char *)(g) + (off)))
-#define FS98_G_PTR(g, off)  (*(void *   *)((unsigned char *)(g) + (off)))
+#define FS98_G_PTR(g, off)  (*(fs98_addr *)((unsigned char *)(g) + (off)))
 
 /* Aircraft position is a 48 bit fixed-point quantity stored as a 16 bit low
  * half followed by a 32 bit high half, and updated with add/adc pairs.  The
@@ -59,8 +60,30 @@ enum {
     FS98_G_RATE_PITCH     = 0x05ee,  /* s16, centred on 0x4000                */
     FS98_G_SPEED_OUT      = 0x05f8,  /* s32, speed magnitude SLEW publishes   */
 
-    FS98_G_AIRCRAFT       = 0x11a0,  /* pointer; +0x10 and +0x26 gate fast slew */
-    FS98_G_ALT_OFFSET     = 0x120c   /* s32, added to ground alt for the floor */
+    FS98_G_AIRCRAFT       = 0x11a0,  /* fs98_addr; +0x10 and +0x26 gate fast slew */
+    FS98_G_ALT_OFFSET     = 0x120c,  /* s32, added to ground alt for the floor */
+
+    FS98_GLOBAL_SIZE      = 4776     /* 0x12a8, the whole block */
 };
+
+/* Every named offset plus the width it is accessed at lies inside the block.
+ * FS98_G_POS_BASE is passed by address and UTIL reads through +7 (8 bytes). */
+#define FS98_G_FITS_(name, width) \
+    _Static_assert((name) + (width) <= FS98_GLOBAL_SIZE, #name " outside GLOBAL")
+FS98_G_FITS_(FS98_G_GROUND_ALT, 4);    FS98_G_FITS_(FS98_G_TIME_SCALE, 2);
+FS98_G_FITS_(FS98_G_GROUNDSPEED_A, 4); FS98_G_FITS_(FS98_G_GROUNDSPEED_B, 4);
+FS98_G_FITS_(FS98_G_VERT_SPEED, 4);    FS98_G_FITS_(FS98_G_SLEW_INACTIVE, 1);
+FS98_G_FITS_(FS98_G_MODE, 4);          FS98_G_FITS_(FS98_G_POS_BASE, 8);
+FS98_G_FITS_(FS98_G_LAT_LO, 2);        FS98_G_FITS_(FS98_G_LAT_HI, 4);
+FS98_G_FITS_(FS98_G_LON_LO, 2);        FS98_G_FITS_(FS98_G_LON_HI, 4);
+FS98_G_FITS_(FS98_G_ALT_LO, 2);        FS98_G_FITS_(FS98_G_ALT_HI, 4);
+FS98_G_FITS_(FS98_G_PITCH, 4);         FS98_G_FITS_(FS98_G_BANK, 4);
+FS98_G_FITS_(FS98_G_HEADING, 4);       FS98_G_FITS_(FS98_G_HEADING_HI, 2);
+FS98_G_FITS_(FS98_G_ATT_RESET, 2);     FS98_G_FITS_(FS98_G_RATE_BANK, 2);
+FS98_G_FITS_(FS98_G_RATE_HEADING, 2);  FS98_G_FITS_(FS98_G_RATE_VERT, 2);
+FS98_G_FITS_(FS98_G_ATT_ZERO, 4);      FS98_G_FITS_(FS98_G_RATE_FWD, 2);
+FS98_G_FITS_(FS98_G_RATE_SIDE, 2);     FS98_G_FITS_(FS98_G_RATE_PITCH, 2);
+FS98_G_FITS_(FS98_G_SPEED_OUT, 4);     FS98_G_FITS_(FS98_G_AIRCRAFT, 4);
+FS98_G_FITS_(FS98_G_ALT_OFFSET, 4);
 
 #endif /* FS98_GLOBAL_H */

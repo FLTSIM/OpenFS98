@@ -25,9 +25,7 @@
 #ifndef G3D_MESH_NAME
 #  define G3D_MESH_NAME g3d_mesh_compile
 #endif
-#ifndef FS98_STDCALL
-#  define FS98_STDCALL __attribute__((stdcall))
-#endif
+#include "fs98/abi.h"
 
 #if (defined(__i386__) || defined(__x86_64__)) && !defined(FS98_PORTABLE_FP)
 #  define MESH_X87 1

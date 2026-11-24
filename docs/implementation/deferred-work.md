@@ -9,7 +9,7 @@
   evidence: docs/remaining-work.md "Open from the CMake re-verification"; logs in ~/openfs98-verify/p3-results (panels-breaks-3000.log, simsui-3-2000.log, simsui-probe2.log).
 
 - source_spec: `docs/implementation/spec-1-4e-booster-weatherm-demo-data.md`
-  summary: Run `tools/ofs boosterdiff-run` (~75 min), `tools/ofs weathermdiff-run` and `tools/ofs demodiff-run` (~25 min) after Story 1.3's Baselines run has finished.
+  summary: RESOLVED by the held-back Story 1.4 run (2026-11-23/24: ~/openfs98-verify/p14-results, reruns p14-rerun, p14-rerun2; docs/tools.md "Load limits"): Run `tools/ofs boosterdiff-run` (~75 min), `tools/ofs weathermdiff-run` and `tools/ofs demodiff-run` (~25 min) after Story 1.3's Baselines run has finished.
   evidence: expected 20000 scenarios, 0 differ each. Slice 5 proved only the .data images byte for byte; a wrong function pointer in a correct slot is seen only by the difftests.
 
 ## Deferred from: code review of spec-1-2-cmake-targets-for-every-tools-md-target.md (2026-11-19)
@@ -21,7 +21,7 @@
   summary: No regression test for tools/modules.sh output or tools/ofs argument handling.
   evidence: modules.sh matched `make -s` for every query before the Makefile was deleted; a table test would guard later edits.
 - source_spec: spec-1-2-cmake-targets-for-every-tools-md-target.md
-  summary: Generated src/**/*.inc files are not CMake step inputs (shortcut in cmake/OpenFS98.cmake); World's and the slice-3 table files (MULTIP, ALERTS, HELP, VIEWS, FLIGHTS, SIM1) are plain sources now. Story 1.4.
+  summary: RESOLVED by Story 1.4 (2026-11-24): no generated file is left in `src/` (`git ls-files -o src` is empty); the generators read committed sources and write only into `bin/`, and every committed `.inc`/`.h` beside a named source is a step input (`cmake/OpenFS98.cmake`). One gap remains, deferred from spec-1-5d: `fe.c` includes `fe_library.c`, which is not globbed. Generated src/**/*.inc files are not CMake step inputs (shortcut in cmake/OpenFS98.cmake); World's and the slice-3 table files (MULTIP, ALERTS, HELP, VIEWS, FLIGHTS, SIM1) are plain sources now. Story 1.4.
   evidence: cmake/OpenFS98.cmake header comment.
 
 ## Deferred from: code review of spec-1-3-one-flag-set-for-every-unit.md (2026-11-19)
@@ -63,7 +63,7 @@
   summary: RESOLVED by slice 8 (spec-1-4h-data-images-guard.md, 2026-11-20): Add `tools/ofs data-images`, run after `all`, that runs every `check_data_image.py` line and fails on any difference. With the generators' value asserts gone, it is the only guard on the typed initialisers outside the Baselines run. List it as `oracle:` in the allowlist.
   evidence: today the five checks are Baselines lines only (`cmake_verify.py`), and nothing runs them on an ordinary build.
 - source_spec: `docs/implementation/spec-1-4f-window-acontain-dynamic-data.md`
-  summary: Run `tools/ofs windowdiff-run`, `tools/ofs window-breaks` (from a frozen copy of the tree), `tools/ofs acontaindiff-run` and `tools/ofs dynamicdiff-run` after Story 1.3's Baselines run has finished.
+  summary: RESOLVED by the held-back Story 1.4 run (2026-11-23/24: ~/openfs98-verify/p14-results, reruns p14-rerun, p14-rerun2; docs/tools.md "Load limits"): Run `tools/ofs windowdiff-run`, `tools/ofs window-breaks` (from a frozen copy of the tree), `tools/ofs acontaindiff-run` and `tools/ofs dynamicdiff-run` after Story 1.3's Baselines run has finished.
   evidence: not run in slice 6. WINDOW.DLL, ACONTAIN.DLL and DYNAMIC.DLL are normalized-identical to the pre-slice build (`~/openfs98-verify/s14/bin`) and `check_data_image.py` prints identical, so these are confirming runs.
 - source_spec: `docs/implementation/spec-1-4f-window-acontain-dynamic-data.md`
   summary: WINDOW's masks and code tail (retail keeps them in `.text`; ours is a `.rdata` copy) have no retail oracle other than s14 identity and `windowdiff`. `gen_window_data.py` checks retail against its own literals, not against the typed C in `window.c`.
@@ -75,7 +75,7 @@
 ## Deferred from: Story 1.4, slice 7 (ANALYSIS, REALITY, LANDME and ATC data decompiled, 2026-11-20)
 
 - source_spec: `docs/implementation/spec-1-4g-analysis-reality-landme-atc-data.md`
-  summary: Run `tools/ofs atcdiff-run`, `landmediff-run`, `realitydiff-run`, `reality-breaks`, `analysisdiff-run` and `analysis-breaks` (breaks from a frozen copy of the tree) after Story 1.3's Baselines run has finished.
+  summary: RESOLVED by the held-back Story 1.4 run (2026-11-23/24: ~/openfs98-verify/p14-results, reruns p14-rerun, p14-rerun2; docs/tools.md "Load limits"): Run `tools/ofs atcdiff-run`, `landmediff-run`, `realitydiff-run`, `reality-breaks`, `analysisdiff-run` and `analysis-breaks` (breaks from a frozen copy of the tree) after Story 1.3's Baselines run has finished.
   evidence: not run in slice 7. The four DLLs are normalized-identical to the pre-slice build (`~/openfs98-verify/s14/bin`) and `check_data_image.py` prints identical for all twelve converted modules, so these are confirming runs.
 - source_spec: `docs/implementation/spec-1-4g-analysis-reality-landme-atc-data.md`
   summary: RESOLVED by slice 8 (spec-1-4h-data-images-guard.md, 2026-11-20): The `.rdata` objects (ANALYSIS's nine doubles, REALITY's whole `.rdata`) have no retail oracle other than s14 identity and the difftests, because `check_data_image.py` compares `.data` only.
@@ -87,7 +87,7 @@
   summary: Make `tools/data_images.txt` an input of the module steps (now fifteen), so a hand edit of the manifest alone reruns their `--hash` checks.
   evidence: `ofs_step` scans `python3` lines only for `tools/*.py` and `orig/…` tokens; until then `tools/ofs data-images` is the check after a manifest edit.
 - source_spec: `docs/implementation/spec-1-4i-facil-multip-fe-data.md`
-  summary: After Story 1.3's Baselines run, run `facildiff-run`, `facildiff-fe-run`, `fediff-run`, `fegriddiff-run`, `fesldiff-run`, `multipdiff-run` and `multip-breaks` (break suites from a frozen copy). Record `multipdiff-run`'s output as MULTIP's first Baselines line, since none exists yet.
+  summary: PARTLY RESOLVED by the held-back Story 1.4 run (2026-11-23/24; p14-results): the Baselines lines among these passed; still to run, since the Baselines list does not hold them: `multipdiff-run`, `multip-breaks`. After Story 1.3's Baselines run, run `facildiff-run`, `facildiff-fe-run`, `fediff-run`, `fegriddiff-run`, `fesldiff-run`, `multipdiff-run` and `multip-breaks` (break suites from a frozen copy). Record `multipdiff-run`'s output as MULTIP's first Baselines line, since none exists yet.
   evidence: slice 9 was proved by normalized identity of FACIL/FE/MULTIP.DLL, facildiff.exe, fediff.exe, MULTIP_test.dll and FE_sl_ours.dll with the pre-slice build, and by `tools/ofs data-images`; the difftests were not run.
 - source_spec: `docs/implementation/spec-1-4i-facil-multip-fe-data.md`
   summary: `src/fe/fe_bands.inc` (256 latitude-band edges and 257 cosine-like steps, typed u32) is allowlisted as data because no exact formula is known. Either derive a formula that reproduces both tables bit for bit, or confirm they stay data, then settle the allowlist entry.
@@ -99,7 +99,7 @@
 ## Deferred from: Story 1.4, slice 11 (ADVDRV, SOUND, PANELS and CONTROLS data decompiled, 2026-11-20)
 
 - source_spec: `docs/implementation/spec-1-4k-advdrv-sound-panels-controls-data.md`
-  summary: After Story 1.3's Baselines run, run `advdrvdiff-run`, `sounddiff-run`, `controlsdiff-run`, `panelsdiff-run N=3000`, `panelsunit-run`, `controls-breaks` and `panels-breaks` (break suites from a frozen copy).
+  summary: RESOLVED by the held-back Story 1.4 run (2026-11-23/24: ~/openfs98-verify/p14-results, reruns p14-rerun, p14-rerun2; docs/tools.md "Load limits"): After Story 1.3's Baselines run, run `advdrvdiff-run`, `sounddiff-run`, `controlsdiff-run`, `panelsdiff-run N=3000`, `panelsunit-run`, `controls-breaks` and `panels-breaks` (break suites from a frozen copy).
   evidence: slice 11 was proved by normalized identity of ADVDRV/SOUND/PANELS/CONTROLS.DLL, advdrvdiff.exe, the ADVDRV coverage build, an `-DBREAK=2` ADVDRV build and PANELS_unit.dll with the pre-slice build, and by `tools/ofs data-images`; none of the difftests was run.
 - source_spec: `docs/implementation/spec-1-4k-advdrv-sound-panels-controls-data.md`
   summary: The difftests step depends only on `tools/difftest/*.inc` and `*.h` (`cmake/OpenFS98.cmake:43-47`), so a later edit to `src/advdrv/advdrv_relocs.inc` will not rebuild `bin/difftest/advdrvdiff.exe`, which compiles it. Add the file as a dependency of that step, or rebuild by hand.
@@ -111,7 +111,7 @@
 ## Deferred from: Story 1.4, slice 12 (NUMERIC and UTIL data decompiled, 2026-11-20)
 
 - source_spec: `docs/implementation/spec-1-4l-numeric-util-data.md`
-  summary: After Story 1.3's Baselines run, run `utildiff-run`, `utildiff-portable`, `numericdiff-run` and `ofstest-run`.
+  summary: RESOLVED by the held-back Story 1.4 run (2026-11-23/24: ~/openfs98-verify/p14-results, reruns p14-rerun, p14-rerun2; docs/tools.md "Load limits"): After Story 1.3's Baselines run, run `utildiff-run`, `utildiff-portable`, `numericdiff-run` and `ofstest-run`.
   evidence: slice 12 was proved by normalized identity of NUMERIC.DLL, UTIL.DLL, numericdiff.exe, utildiff.exe, utildiff_portable.exe, slewdiff.exe, OFSTEST.DLL and UTIL_TRACE.DLL with the pre-slice build, and by `tools/ofs data-images`; none of the difftests was run.
 - source_spec: `docs/implementation/spec-1-4l-numeric-util-data.md`
   summary: RESOLVED by slice 12, without changing module code paths (the data initialisers did change): NUMERIC and UTIL were thought to need code changes before their data could be checked, because their `.data` copies are not found through the `ImportTable` export. The `at=SYMBOL` manifest field finds each image by its COFF symbol instead, and both DLLs are normalized-identical to the pre-slice build.
@@ -129,16 +129,16 @@
   summary: RESOLVED by slice 16 (spec-1-4p-host-data.md, 2026-11-21): HOST's `.data` is typed C (`src/host/host_image.inc`), `.rdata` typed C (`host_rt_rdata.inc`), `host_rt_tables.inc` committed source; `gen_host_data.py`, `host_data.inc` and `host_pointers.inc` are gone, `gen_host_rt_tables.py` is the oracle behind `tools/ofs host-rt-tables-check`, and row HOST in `tools/data_images.txt` uses the new `rawptrs=` field.
   evidence: split from "remaining generators" (2026-11-21).
 - source_spec: `docs/implementation/spec-1-4p-host-data.md`
-  summary: After Story 1.3's Baselines run, run `hostdiff-run`, `host-breaks` (from a frozen copy), `hostrtdiff-run` and `host_rt_breaks.py` (from a frozen copy) (HOST's data is now typed C; slice 16 built it and ran none of them; `HOST.DLL` is identical to a build of the baseline tree, `bin/OPENFS98.EXE`, `hostrtdiff.exe` and `hostdiff.exe` to their pre-slice builds).
+  summary: RESOLVED by the held-back Story 1.4 run (2026-11-23/24: ~/openfs98-verify/p14-results, reruns p14-rerun, p14-rerun2; docs/tools.md "Load limits"): After Story 1.3's Baselines run, run `hostdiff-run`, `host-breaks` (from a frozen copy), `hostrtdiff-run` and `host_rt_breaks.py` (from a frozen copy) (HOST's data is now typed C; slice 16 built it and ran none of them; `HOST.DLL` is identical to a build of the baseline tree, `bin/OPENFS98.EXE`, `hostrtdiff.exe` and `hostdiff.exe` to their pre-slice builds).
   evidence: queued by the frozen intent.
 - source_spec: `docs/implementation/spec-1-4m-global-hg2d-data.md`
-  summary: After Story 1.3's Baselines run, run `hg2ddiff-run`, `hg2dmodeldiff-run` and `hg2d-breaks` (HG2D's data is now typed C; slice 13 built it but ran none of them).
+  summary: PARTLY RESOLVED by the held-back Story 1.4 run (2026-11-23/24; p14-results): the Baselines lines among these passed; still to run, since the Baselines list does not hold them: `hg2dmodeldiff-run` and `tools/hg2d_breaks.py` (there is no `hg2d-breaks` target). After Story 1.3's Baselines run, run `hg2ddiff-run`, `hg2dmodeldiff-run` and `hg2d-breaks` (HG2D's data is now typed C; slice 13 built it but ran none of them).
   evidence: queued by the frozen intent.
 - source_spec: none
   summary: RESOLVED for SIM1 by slice 17 (spec-1-4q-sim1-data.md, 2026-11-21): SIM1's `.data` and `.rdata` are typed C (`src/sim1/sim1_data.inc`, `sim1_rdata.inc`, shared by the harness DLLs and the native build), `gen_sim1_native.py` only extracts the resources, `gen_sim1_data.py` is the setup check `tools/ofs sim1-reference`, and row SIM1 is in `tools/data_images.txt`. SIMSUI (`gen_simsui_native.py`, `gen_simsui_tables.py`) is slice 17b below.
   evidence: split from "remaining generators" (2026-11-21).
 - source_spec: `docs/implementation/spec-1-4q-sim1-data.md`
-  summary: After Story 1.3's Baselines run, run `sim1diff-run`, `sim1rdiff-run`, `sim1-breaks`, `sim1r-breaks`, `sim1air-run`, `sim1air-breaks`, `sim1state-run`, `sim1state-breaks` and `sim1native-flights` (SIM1's data is now typed C; slice 17 built it and ran none of them; `bin/SIM1.sim` and `sim1rdiff.exe` are identical to their pre-slice builds, the three test DLLs to a build of the baseline tree).
+  summary: PARTLY RESOLVED by the held-back Story 1.4 run (2026-11-23/24; p14-results): the Baselines lines among these passed; still to run, since the Baselines list does not hold them: `sim1diff-run`, `sim1-breaks`, `sim1air-run`, `sim1air-breaks`, `sim1state-run`, `sim1state-breaks`. After Story 1.3's Baselines run, run `sim1diff-run`, `sim1rdiff-run`, `sim1-breaks`, `sim1r-breaks`, `sim1air-run`, `sim1air-breaks`, `sim1state-run`, `sim1state-breaks` and `sim1native-flights` (SIM1's data is now typed C; slice 17 built it and ran none of them; `bin/SIM1.sim` and `sim1rdiff.exe` are identical to their pre-slice builds, the three test DLLs to a build of the baseline tree).
   evidence: queued by the frozen intent.
 - source_spec: none
   summary: Story 1.4 slice 18: the gauges, MDLs and test gauges (`gen_gauges.py`, `build_mdls.py`, `gen_mdl_crash.py`, `gen_warning_data.py`, `gen_suction_data.py`); then revisit `gen_window_data.py`, which the user chose to keep as a build step in slice 6.
@@ -150,7 +150,7 @@
   summary: Guard `src/hg2d/hg2d_projective_tables.inc`, the tail tables from retail's `.text` whose words are retail code addresses, with a check against retail's `.text` at the addresses its header lists, and a per-build hash.
   evidence: slice 13 Codex review; once `gen_hg2d_data.py` is gone, only DLL identity proves them.
 - source_spec: `docs/implementation/spec-1-4n-g3d-data-strict-mixed.md`
-  summary: After Story 1.3's Baselines run, run `g3ddiff-run`, `g3ddiff-meshc-run`, `g3dmeshdiff-run` and `g3d-breaks` (G3D's data is now typed C; slice 14 built it, matched `G3D.DLL` and `HG2D.DLL` normalized, and ran none of them).
+  summary: PARTLY RESOLVED by the held-back Story 1.4 run (2026-11-23/24; p14-results): the Baselines lines among these passed; still to run, since the Baselines list does not hold them: `g3ddiff-meshc-run`. After Story 1.3's Baselines run, run `g3ddiff-run`, `g3ddiff-meshc-run`, `g3dmeshdiff-run` and `g3d-breaks` (G3D's data is now typed C; slice 14 built it, matched `G3D.DLL` and `HG2D.DLL` normalized, and ran none of them).
   evidence: queued by the frozen intent.
 - source_spec: `docs/implementation/spec-1-4n-g3d-data-strict-mixed.md`
   summary: Revisit HG2D's `U8` regions (`src/hg2d/hg2d_image.inc`: glyph bitmaps, byte ramps, tables marked "meaning not yet known") the way G3D's image was typed in slice 14: by structure (names, counts, dwords, words, instruction lines) rather than by width alone. G3D's remaining untyped regions (the scenery models +0x4f22..+0x64d2 and the tails after the two programs, written as words) wait for their meaning.
@@ -165,7 +165,7 @@
   summary: Parallel verification, after slice 15. First, give the break runners a worker pool, each worker with its own frozen tree copy, build directory and `WINEPREFIX` (starting with `host-breaks` and `main-breaks`). Then add `cmake_verify.py -j N`, running independent Baselines lines at once, each in its own tree, prefix and Xvfb display. Move the remaining wine steps off the shared `~/.wine`.
   evidence: Story 1.3's Baselines run (p13) took about 44 h serially on a 12-core, 78 GB machine with load around 1.8. Its longest steps are `host-breaks` (4.2 h), `options-breaks` (2.1 h), and three that hit the 2 h timeout (`main-breaks SUITE=situations`, `sim1r-breaks`, `g3d-breaks N=1000`). Docker is not needed: separate prefixes give the same isolation. Requested by the user on 2026-11-21.
 - source_spec: `docs/implementation/spec-1-4o-main-data.md`
-  summary: After Story 1.3's Baselines run, run `maindiff-run`, `main-breaks` (from a frozen copy), `main-smoke` and `main-dialogs` (MAIN's data is now typed C; slice 15 built it and matched `MAIN.DLL` and `maindiff.exe` normalized, and ran none of them).
+  summary: RESOLVED by the held-back Story 1.4 run (2026-11-23/24: ~/openfs98-verify/p14-results, reruns p14-rerun, p14-rerun2; docs/tools.md "Load limits"): After Story 1.3's Baselines run, run `maindiff-run`, `main-breaks` (from a frozen copy), `main-smoke` and `main-dialogs` (MAIN's data is now typed C; slice 15 built it and matched `MAIN.DLL` and `maindiff.exe` normalized, and ran none of them).
   evidence: queued by the frozen intent.
 - source_spec: `docs/implementation/spec-1-4o-main-data.md`
   summary: MAIN's `main_image.inc` types only the ImportTable, Linkage, month and season tables and the situation records by structure; the rest (menus, dialogs, strings and state, about 30 kB) is typed words marked "meaning not yet known". Describe them as the slices that read them settle their layout. The `tail=` window's retail-relocation allowance (the spec asked for none overlapping; retail's code there has 2,309) can tighten once the tail goes.
@@ -197,16 +197,16 @@
   summary: DONE 2026-11-22 (`docs/implementation/spec-verify-parallel-b.md`: `tools/break_pool.py`, `BREAK_JOBS` on host, g3d, options and sim1r; `main_breaks.py` stays out by decision). Parallel verification B. Give the break runners (`tools/*_breaks.py`, starting with `host_breaks.py` and `main_breaks.py`) a worker pool, each worker mutating its own tree copy with its own build directory and `WINEPREFIX`, so one long suite runs in parallel. Reuse A's tree-copy helper.
   evidence: split from the parallel-verification request (2026-11-21) on the user's choice. A (`cmake_verify.py -j N` with disposable per-job trees) comes first. `host-breaks` takes 4.2 h and `options-breaks` 2.1 h on their own.
 - source_spec: `docs/implementation/spec-1-4r-simsui-data.md`
-  summary: After Story 1.3's Baselines run, run `simsuidiff-run`, `simsui-breaks` (from a frozen copy), `main-dialogs` and `flights-play` (SIMSUI's image is now typed C; slice 17b built it and ran none of them; `bin/SIMSUI.DLL` and `simsuidiff.exe` are identical to their pre-slice builds after `strip` and `peh2.py`).
+  summary: RESOLVED by the held-back Story 1.4 run (2026-11-23/24: ~/openfs98-verify/p14-results, reruns p14-rerun, p14-rerun2; docs/tools.md "Load limits"): After Story 1.3's Baselines run, run `simsuidiff-run`, `simsui-breaks` (from a frozen copy), `main-dialogs` and `flights-play` (SIMSUI's image is now typed C; slice 17b built it and ran none of them; `bin/SIMSUI.DLL` and `simsuidiff.exe` are identical to their pre-slice builds after `strip` and `peh2.py`).
   evidence: queued by the frozen intent.
 - source_spec: `docs/implementation/spec-1-4r-simsui-data.md`
   summary: No `--hash` build step depends on `tools/data_images.txt`, so changing a pinned hash does not rerun a module's step (28 rows, pre-existing; the 120 gauge rows are covered since slice 18b: the gauges step lists `tools/data_images.txt` in `DEPENDS_GLOB`).
   evidence: slice 17b review, Blind Hunter; `UPDATE=1` works around it by zeroing the DLL's mtime.
 - source_spec: `docs/implementation/spec-1-4s-test-gauges-data.md`
-  summary: After Story 1.3's Baselines run, run `gaugesdiff-run`, `suctiondiff-run`, `gauges-panels-run`, `gauges-game-run`, `suction-game-run`, `suction-breaks` and `tools/gauges_breaks.py` (warning) (the test gauges' data is now typed C; slice 18a ran none of them, no wine; both `.GAU` files are identical to their pre-slice builds, stripped and unstripped, after `peh2.py`).
+  summary: PARTLY RESOLVED by the held-back Story 1.4 run (2026-11-23/24; p14-results): the Baselines lines among these passed; still to run, since the Baselines list does not hold them: `gauges-panels-run`, `gauges-game-run`, `suction-game-run`, `suction-breaks`. After Story 1.3's Baselines run, run `gaugesdiff-run`, `suctiondiff-run`, `gauges-panels-run`, `gauges-game-run`, `suction-game-run`, `suction-breaks` and `tools/gauges_breaks.py` (warning) (the test gauges' data is now typed C; slice 18a ran none of them, no wine; both `.GAU` files are identical to their pre-slice builds, stripped and unstripped, after `peh2.py`).
   evidence: queued by the frozen intent. `gauges_breaks.py` now passes `-Isrc/gauges` so its break copies find the committed `.inc` files.
 - source_spec: `docs/implementation/spec-1-4t-gauges-data.md`
-  summary: After Story 1.3's Baselines run, run `gauges-check`, `gauges-breaks`, `gauges-panels`, `all-gauges-check`, `all-gauges-breaks`, `all-gauges-panels`, `all-gauges-hangs` and `gauges-game` (the 120 gauges' images are now committed typed C in `src/gauges/images/`; slice 18b ran none of them, no wine; all 120 `.GAU` files are identical to their pre-slice builds, stripped and unstripped, under `peh2.py`, and `allgaugesdiff.exe`, `allpaneldiff.exe`, `all_gauges.inc` and `all_panels.inc` are unchanged).
+  summary: PARTLY RESOLVED by the held-back Story 1.4 run (2026-11-23/24; p14-results): the Baselines lines among these passed; still to run, since the Baselines list does not hold them: `all-gauges-check`, `all-gauges-breaks`, `all-gauges-panels`, `all-gauges-hangs`, `gauges-game`. After Story 1.3's Baselines run, run `gauges-check`, `gauges-breaks`, `gauges-panels`, `all-gauges-check`, `all-gauges-breaks`, `all-gauges-panels`, `all-gauges-hangs` and `gauges-game` (the 120 gauges' images are now committed typed C in `src/gauges/images/`; slice 18b ran none of them, no wine; all 120 `.GAU` files are identical to their pre-slice builds, stripped and unstripped, under `peh2.py`, and `allgaugesdiff.exe`, `allpaneldiff.exe`, `all_gauges.inc` and `all_panels.inc` are unchanged).
   evidence: queued by the frozen intent.
 - source_spec: none
   summary: Story 1.4 slice 18c: the 8 normal and 3 crash MDL models' data (`tools/build_mdls.py`, `tools/gen_mdl_crash.py`, about 600 KB, mostly geometry); all of it, geometry included, converted to committed typed C (the user's decision, 2026-11-22: "convert the MDL data to C for now").
@@ -228,3 +228,30 @@
 - source_spec: `docs/implementation/spec-1-5f-reality-analysis-demo-retail-bugs-marked.md`
   summary: DEMO's `disk_check` (`src/demo/demo.c:427`) documents a retail bug with no register id: when the free-space call fails, retail uses its uninitialised outputs, while ours zeroes them and still ignores the return.
   evidence: Found by slice 6's spec review; it needs a DEMO-12 entry in `docs/retail-bugs.md` (probably `(fixed, not kept)`), which is outside slice 6's fixed 29-id scope.
+
+- source_spec: `docs/implementation/spec-1-4-module-data-decompiled-no-raw-dumps-in-git.md`
+  summary: `tools/ofs main-dialogs` is flaky: its control dump lists a dialog's child pages in z-order, so Display options' (0x1409) pages can come out in another order, and the Time of day combo (0x1301) differs when retail and ours start on either side of sunrise.
+  evidence: 4 runs of the unchanged 1.4 tree on 2026-11-23/24 (~/openfs98-verify/p14-results, p14, md-bisect/): two failed on the page order in the cancel pass (same controls and text, one page block moved), one on Time of day (retail 06:25 Night, ours 06:35 Day), one passed. A swapped-in 1.3 SIMSUI.DLL differed only in its export timestamp. `tools/drive/fsdialogs.c:588` lists children with EnumChildWindows (z-order). Fix: list a dialog's top-level child pages in a fixed order (e.g. by their first control's id), and mask the Time of day combo as the hour and minute edits are masked (`tools/main_dialogs.sh`).
+
+- source_spec: `docs/implementation/spec-1-5h-atc-acontain-booster-weatherm-slew-retail-bugs-marked.md`
+  summary: `docs/modules/weatherm.md:133` describes three WEATHERM effect-list quirks with no register id (a type-width mismatch, freeing non-members, and losing the predecessor during free-by-type); each needs a WXM entry in `docs/retail-bugs.md` and a marker.
+  evidence: Found by slice 8's spec review; adding ids would change the slice's fixed 37-id scope.
+
+- source_spec: `docs/implementation/spec-1-5j-multip-english-dialogs-retail-bugs-marked-allowlist-gone.md`
+  summary: `tools/check_retail_bugs.py` comment parsing and file listing have gaps that predate slice 10: if `git ls-files` fails for any reason (e.g. a corrupt index) the checker silently falls back to a filesystem walk, which also counts git-ignored files; in `.S` files a spaced directive (`# define X "RETAIL BUG (kept): ID"`) is taken as a comment; `;` after an instruction is accepted as a marker comment (the self-test relies on it); a backslash-newline inside `*/` is not followed; an empty register with no markers passes with `0 entries`; a malformed duplicate marker passes when a valid one exists elsewhere.
+  evidence: Slice 10 code review (Codex gpt-6.2-sol, blind and edge-case layers, 2026-11-24). None affects the current tree: the check passes on 331 entries.
+
+## Deferred from: Story 1.7 (the module ABI headers are 32-bit, 2026-11-24)
+
+- source_spec: `docs/implementation/spec-1-7-the-module-abi-headers-are-32-bit.md`
+  summary: `FS98_W` (the wide-literal macro) is not in `abi.h`: `u""` literals need C11 and the project builds `-std=c99`. Only `FS98_WCHAR` is added; the literal API belongs to the Win32 headers' story.
+  evidence: spec Boundaries, `abi.h`.
+
+- source_spec: `docs/implementation/spec-1-7-the-module-abi-headers-are-32-bit.md`
+  summary: Not converted, and listed here for the stories that migrate them: `host_runtime.h`, `keep.h`, the rest of `numeric.h`, and modules' private struct copies (FE's harness `struct fs98_import` in `tools/difftest/fediff.c`, SLEW's private UTIL typedefs and export layouts, GLOBAL's private export layout, SIM1's `uintptr_t linkage[15]`). SIM1's embedded `fs98_import` array does change through the header. MinGW i686 accepts `(fs98_code)(uintptr_t)func` in a static initialiser and x86-64 GCC rejects it, so those tables need another form at migration.
+  evidence: spec Boundaries, "The other users" and "Never".
+
+- source_spec: `docs/implementation/spec-1-7-the-module-abi-headers-are-32-bit.md`
+  summary: The retail-only bridge (`fs98_host_<name>_call`, `FS98_HOST_SLOT`) and the direct `(uint8_t *)(uintptr_t)x.link` / `(fs98_addr)(uintptr_t)p` casts at converted fields hold only for retail address words; native handle registration (AD-17) and `fs98_call` are Story 1.8's, and the bridge is removed module by module there.
+  evidence: spec Boundaries, "The retail bridge".
+

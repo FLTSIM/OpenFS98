@@ -406,7 +406,10 @@ static void outcode_b(void) { outcode(V(0x206f90cc), V(0x206f911e)); }
 /* 0x206e121e -- the point of the instruction at ebx: three words from +1
  * (bit 0 of 0x206f9156 clear), or x and z from +1 and +3 with y the word at
  * 0x206f9157 (bit set; the byte is shifted down either way).  The program
- * counter goes past it.  Then relative to the eye, rotated, into edi. */
+ * counter goes past it.  Then relative to the eye, rotated, into edi.
+ * RETAIL BUG (kept): G3D-7 -- the decoder writes 0x206f9156 back shifted right on every call; it starts at 0
+ * and a shift cannot set a bit, so the two-word form (x and z from the instruction, y from 0x206f9157) is
+ * never enabled; ours keeps the branch. */
 static void point_relative_into(uint32_t out);
 
 static void point_from_stream(void)
@@ -959,7 +962,8 @@ static void g3d_deinit_body(const uint32_t *arg)
 
 /* 0x206e3727, 0x206f1b5f, 0x206f4813 -- 0x01, 0x59, 0x4b: a bare ret.  The
  * counter does not move, so the interpreter runs the same opcode again,
- * forever: retail hangs on any of the three. */
+ * forever: retail hangs on any of the three.
+ * RETAIL BUG (kept): G3D-1 -- a bare ret that does not advance the counter. */
 static void bare_ret(void)
 {
 }
@@ -1016,7 +1020,10 @@ static void op_54(void)
 
 /* 0x206e3797 -- 0x8c: call the code at the operand's absolute address,
  * the counter kept around it.  Retail's built-in programs carry its own
- * addresses here; routine() finds the one they name. */
+ * addresses here; routine() finds the one they name.
+ * RETAIL BUG (kept): G3D-3 -- the program holds an absolute code address; ours maps it through routine()
+ * and native_thunk.  Other sites: g3d_image.inc's raw operands (cited, not marked: MAIN's in
+ * main_image.inc, main_natives.inc). */
 static void op_native(void)
 {
     uint32_t keep = M32(V(0x206f9126));
@@ -1243,6 +1250,8 @@ static void op_47(void)
     M32(V(0x206f9126)) += 4;
     SET_CX(BX);
     operand = CX;
+    /* RETAIL BUG (kept): G3D-5 -- the operand is compared as an int16_t: 0x8000..0xffff take the shift branch,
+     * and 32 (and above) stores the eye unshifted (the jump back into the store). */
     ebp = M32(edi + 0x300);
     esi = M32(edi + 0x318);
     edi = M32(edi + 0x30c);
@@ -1538,7 +1547,8 @@ static void op_39(void)
  * table of signed offsets after the count.  A value at or past the count
  * was meant to take the default before the table (bx 0xffff, index -1 in
  * 16-bit code), but bx is doubled in ebx, zero-extended, so retail reads
- * its offset 0x20006 bytes on from the instruction instead.  Reproduced. */
+ * its offset 0x20006 bytes on from the instruction instead.  Reproduced.
+ * RETAIL BUG (kept): G3D-2 -- bx 0xffff doubled in a zero-extended ebx, the default read 128 KB on. */
 static void op_03(void)
 {
     SET_CX(M16(esi + 2));
@@ -1589,6 +1599,7 @@ static void line_project(void);
  * 0x206f90f6 2 it is drawn unclipped. */
 static void line(void)
 {
+    /* RETAIL BUG (kept): G3D-9 -- the unclipped path, taken only with 0x206f90f6 at 2, which G3D never writes. */
     if (M16(V(0x206f90f6)) == 2)
         goto draw;
     SET_CL(M8(V(0x206f911c)));
@@ -1852,6 +1863,7 @@ static void polygon_first(void)
     M8(V(0x206f9238)) = AL;
     M8(V(0x206f9239)) = AL;
     LOAD_VERTEX(0x206f90c0);
+    /* RETAIL BUG (kept): G3D-9 -- the unclipped path, taken only with 0x206f90f6 at 2, which G3D never writes. */
     if (M16(V(0x206f90f6)) == 2) {
         emit_raw();
         return;
@@ -1935,6 +1947,7 @@ static void polygon_next(void)
 {
     TRACE(0x206e1b30);
     LOAD_VERTEX(0x206f90c0);
+    /* RETAIL BUG (kept): G3D-9 -- the unclipped path, taken only with 0x206f90f6 at 2, which G3D never writes. */
     if (M16(V(0x206f90f6)) == 2) {
         emit_raw();
         return;
@@ -2032,6 +2045,7 @@ CLOSE(close3, 0x206f92e2, 0x206f9252, (int32_t)ecx < (int32_t)esi, onto_y_low, e
  * the test is computed into eax and lost to the import's own eax. */
 static void polygon_close(void)
 {
+    /* RETAIL BUG (kept): G3D-9 -- the unclipped path, taken only with 0x206f90f6 at 2, which G3D never writes. */
     if (M16(V(0x206f90f6)) != 2) {
         LOAD_VERTEX(0x206f90e4);
         M8(V(0x206f9125)) = 0;
@@ -2336,6 +2350,8 @@ static void op_continue(void)
         return;
     }
     edi = G;
+    /* RETAIL BUG (kept): G3D-6 -- in the map with another line colour this returns having moved the counter
+     * past the opcode's first byte only (set above), so the program goes on from inside the instruction. */
     if (M32(edi + 0x2ec) != 0x6900 && M16(edi + 0xdca) != 0)
         return;
     if (M8(V(0x206f9120)) == 0) {
@@ -3740,6 +3756,7 @@ static void textured_first(void)
     LOAD_VERTEX(0x206f90c0);
     ebx = M32(V(0x206f921f));
     ebp = M32(V(0x206f9223));
+    /* RETAIL BUG (kept): G3D-9 -- the unclipped path, taken only with 0x206f90f6 at 2, which G3D never writes. */
     if (M16(V(0x206f90f6)) == 2) {
         emit_raw_t();
         return;
@@ -3818,6 +3835,7 @@ static void textured_next(void)
     LOAD_VERTEX(0x206f90c0);
     ebx = M32(V(0x206f921f));
     ebp = M32(V(0x206f9223));
+    /* RETAIL BUG (kept): G3D-9 -- the unclipped path, taken only with 0x206f90f6 at 2, which G3D never writes. */
     if (M16(V(0x206f90f6)) == 2) {
         emit_raw_t();
         return;
@@ -3904,6 +3922,7 @@ CLOSE_T(close3_t, 0x206f92e2, 0x206f9252, (int32_t)ecx < (int32_t)esi, onto_y_lo
  * zero. */
 static void textured_close(void)
 {
+    /* RETAIL BUG (kept): G3D-9 -- the unclipped path, taken only with 0x206f90f6 at 2, which G3D never writes. */
     if (M16(V(0x206f90f6)) != 2) {
         LOAD_VERTEX(0x206f90e4);
         ebx = M32(V(0x206f922f));
@@ -4230,7 +4249,9 @@ static void fast_quad(uint16_t depth, const struct fast_vertex *v)
  * code address: retail crashes there, every time.  Here that path does
  * what the other three do (0x206f0970, 0x206f091a, 0x206f0c96), a
  * deliberate fix of a crash; docs/modules/g3d.md has the details, and the
- * harness keeps clear of it. */
+ * harness keeps clear of it.
+ * RETAIL BUG (fixed, not kept): G3D-11 -- retail's 0x60 triangle pushes edi once a vertex and never pops it;
+ * here the triangle is pushed and popped as the other three are. */
 static void textured_fast_shape(uint32_t n)
 {
     struct fast_vertex v[4];
@@ -4536,6 +4557,7 @@ static void st_first(void)
     ebx = M32(V(0x206f921f));
     ebp = M32(V(0x206f9223));
     edi = M32(V(0x206f9213));
+    /* RETAIL BUG (kept): G3D-9 -- the unclipped path, taken only with 0x206f90f6 at 2, which G3D never writes. */
     if (M16(V(0x206f90f6)) == 2) {
         emit_raw_st();
         return;
@@ -4617,6 +4639,7 @@ static void st_next(void)
     ebx = M32(V(0x206f921f));
     ebp = M32(V(0x206f9223));
     edi = M32(V(0x206f9213));
+    /* RETAIL BUG (kept): G3D-9 -- the unclipped path, taken only with 0x206f90f6 at 2, which G3D never writes. */
     if (M16(V(0x206f90f6)) == 2) {
         emit_raw_st();
         return;
@@ -4703,6 +4726,7 @@ CLOSE_ST(close3_st, 0x206f92e2, 0x206f9252, (int32_t)ecx < (int32_t)esi, onto_y_
  * counts past zero. */
 static void st_close(void)
 {
+    /* RETAIL BUG (kept): G3D-9 -- the unclipped path, taken only with 0x206f90f6 at 2, which G3D never writes. */
     if (M16(V(0x206f90f6)) != 2) {
         LOAD_VERTEX(0x206f90e4);
         ebx = M32(V(0x206f922f));
@@ -4983,7 +5007,8 @@ static void st_fast_quad(uint16_t depth, const struct st_vertex *v)
  * make its handler pop the count from the wrong place and return into the
  * middle of an address: retail crashes there, every time.  Here it pushes
  * a word as the rest do, a deliberate fix of a crash; docs/modules/g3d.md
- * has the details, and the harness keeps clear of it. */
+ * has the details, and the harness keeps clear of it.
+ * RETAIL BUG (fixed, not kept): G3D-12 -- retail's 0x7b quad pushes its depth as a dword; here a word. */
 static void st_fast_shape(uint32_t n)
 {
     struct st_vertex v[4];
@@ -5671,7 +5696,8 @@ static void op_row_1286(void)
  * each eight.  The counter goes to (ebx + 15) >> 4 past +0x1e, ebx as the
  * last point left it: its screen x when drawn, its eye-space x when out of
  * view, the step's y when its bit is clear (the first end's address with
- * one point). */
+ * one point).
+ * RETAIL BUG (kept): G3D-8 -- the mask walk's adc esi,1 and the counter from ebx as the last point left it. */
 static void op_row_mask(void)
 {
     uint32_t keep_esi;
@@ -6823,6 +6849,7 @@ static void object_check(int packed)
     uint32_t len = packed ? 0x1c : 0xc;
 
     SET_AX(M16(esi + 8));                       /* xchg [esi+8],ax / cwde */
+    /* RETAIL BUG (kept): G3D-4 -- the one-shot word is exchanged in the program being run. */
     M16(esi + 8) = 0;
     eax = (uint32_t)(int32_t)(int16_t)AX;
     if (eax != 0) {
@@ -6945,6 +6972,8 @@ static int queue_prepare(void)
     if (BX == 0x2f)
         goto packed;
     if (BX != 0x77) {
+        /* RETAIL BUG (fixed, not kept): G3D-13 -- retail pops the instruction's address into 0x206f91b7 and
+         * returns to the old context as a code address; ours restores the context and refuses the model. */
         M32(V(0x206f91b7)) = keep_ctx;
         return 1;
     }
@@ -8882,6 +8911,8 @@ static void op_texture(void)
     uint32_t name0, name1;
     int equal;
 
+    /* RETAIL BUG (kept): G3D-4 -- the texture name is lower-cased, and "red "/"side" rewritten below, in the
+     * program being run. */
     CharLowerA_ptr(esi + 0xa);
     name0 = M32(esi + 0xa);
     name1 = M32(esi + 0xe);
@@ -9925,6 +9956,8 @@ static void building_head(uint32_t t, uint32_t base)
         (int16_t)M16(V(0x206f9184)) <= (int16_t)(uint16_t)(AX + SI) &&
         (int16_t)M16(V(0x206f9190)) >= (int16_t)(uint16_t)(CX - DI) &&
         (int16_t)M16(V(0x206f9190)) <= (int16_t)(uint16_t)(CX + DI))
+        /* RETAIL BUG (fixed, not kept): G3D-14 -- retail's kind 1 marks +0x832 after a push edi that is never
+         * popped, then returns to edi's value; ours marks it and goes on (see building_box). */
         M16(G + 0x832) = 0xe;
     {
         uint16_t height = DX;
@@ -10637,6 +10670,8 @@ static void op_plane_facet(void)
     }
     SET_CX(CX - 1);
     ecx = CX;
+    /* RETAIL BUG (kept): G3D-10 -- only cx is saved and restored around each call; the high half of ecx is
+     * what the polygon clipper left. */
     do {
         lods16();
         eax = (uint32_t)(int32_t)(int16_t)AX;
@@ -15199,6 +15234,7 @@ static void unmapped(void)
  * transliteration holds, and what it leaves in them kept. */
 uint32_t g3d_native_target;
 void native_thunk(void);
+/* RETAIL BUG (kept): G3D-3 -- the thunk's indirect call of the absolute address the program names. */
 __asm__(".text\n\t.p2align 4\n_native_thunk:\n\t"
         "pushl %ebp\n\tpushl %ebx\n\tpushl %esi\n\tpushl %edi\n\t"
         "movl _g3d_ebx, %ebx\n\tmovl _g3d_esi, %esi\n\tmovl _g3d_edi, %edi\n\t"
@@ -15411,6 +15447,7 @@ static routine_fn routine(uint32_t a)
     case 0x206ec545: return op_st_face;
     default:
         if (a - 0x206e0000u >= 0x38000u) {
+            /* RETAIL BUG (kept): G3D-3 -- an address outside the image (MAIN's) is called as itself. */
             g3d_native_target = a;
             return native_thunk;
         }

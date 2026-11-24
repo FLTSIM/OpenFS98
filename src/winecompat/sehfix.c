@@ -61,7 +61,7 @@ typedef LONG (WINAPI *host_filter_fn)(EXCEPTION_POINTERS *);
 typedef PVOID (WINAPI *add_veh_fn)(ULONG, PVECTORED_EXCEPTION_HANDLER);
 
 struct fs98_import ImportTable[] = {
-    { 0, 0 }
+    { 0, { 0 } }
 };
 
 static char     game_dir[MAX_PATH];

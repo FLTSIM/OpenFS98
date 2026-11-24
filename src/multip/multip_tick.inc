@@ -119,6 +119,7 @@ MULTIP_TICK_SHIM(multip_interval_callback,
     "pushl %eax\n\tcall _multip_interval_callback_impl\n\taddl $4, %esp\n\tret $8")
 MULTIP_TICK_SHIM(multip_sync_callback,
     "pushl %eax\n\tcall _multip_sync_callback_impl\n\taddl $4, %esp\n\tret $8")
+/* RETAIL BUG (kept): MULTI-15 -- the maintenance tick's weather send reads the same stack word (-0xb0). */
 MULTIP_TICK_SHIM(multip_maintenance_callback,
     "movl -0xb0(%esp), %eax\n\tpushl %eax\n\tcall _multip_maintenance_callback_impl\n\taddl $4, %esp\n\tret $8")
 #undef MULTIP_TICK_SHIM
@@ -127,6 +128,7 @@ uint32_t FS98_STDCALL multip_interval_callback(uint32_t code, uint32_t argument)
 { (void)code; (void)argument; return multip_interval_callback_impl(0); }
 uint32_t FS98_STDCALL multip_sync_callback(uint32_t code, uint32_t argument)
 { (void)code; (void)argument; return multip_sync_callback_impl(0); }
+/* Not reproduced (MULTI-15): zero on native targets. */
 uint32_t FS98_STDCALL multip_maintenance_callback(uint32_t code, uint32_t argument)
 { (void)code; (void)argument; return multip_maintenance_callback_impl(0); }
 #endif

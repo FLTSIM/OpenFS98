@@ -26,11 +26,16 @@ static int32_t __attribute__((used, noinline)) multip_message_1000_impl(uint32_t
     void *aircraft = (void *)(uintptr_t)A32(global, 0x11e0);
     uint32_t size = A32(aircraft, 0x18), index;
     /* The retail copy omits 0x6c bytes without reducing the sent length.
-     * Preserve all uninitialized tail bytes from the original caller stack. */
+     * Preserve all uninitialized tail bytes from the original caller stack.
+     * RETAIL BUG (kept): MULTI-6 -- the snapshot of the caller's stack below is overwritten by the header
+     * and the copy; the last 0x6c bytes of the sent length stay uninitialised stack (the x86 capture is the
+     * naked multip_message_1000 below). */
     for (index = 0; index < sizeof(packet); index++) packet[index] = stack[index];
     A32(packet, 0) = 0x1000; A32(packet, 4) = size + 12;
     A32(packet, 8) = M32(0xad8);
     A32(packet, 0x10) = A32((void *)(uintptr_t)A32(global, 0x11e0), 0x18);
+    /* RETAIL BUG (kept): MULTI-9 -- construction: the copy length is the aircraft size minus 0x6c, unchecked;
+     * a size under 0x6c wraps, and a size past the 1000-byte frame overruns it. */
     if (HOST_FN(0x21c, multip_copy_fn)(packet + 0x14,
         (const uint8_t *)(uintptr_t)A32(global, 0x11e4) + 0x6c,
         A32((void *)(uintptr_t)A32(global, 0x11e0), 0x18) - 0x6c) != 0) return -1;
@@ -44,6 +49,8 @@ static int32_t __attribute__((used, noinline)) multip_message_1018_impl(uint32_t
     A32(packet, 0) = 0x1018; A32(packet, 4) = 32; A32(packet, 8) = M32(0xad8);
     A32(packet, 0x10) = multip_state_angles(global);
     multip_state_coordinates(packet + 0x14, global);
+    /* RETAIL BUG (kept): MULTI-6 -- the 16-bit padding word at +0x26 is uninitialised stack in retail; the
+     * fields above cover every other byte of the 40. */
     *(uint16_t *)(void *)(packet + 0x26) = (uint16_t)padding;
     A32(packet, 0xc) = M32(0xe08); M32(0xe08)++;
     return multip_send(id, packet, sizeof(packet), 0) != 0 ? -1 : 0;
@@ -76,10 +83,13 @@ static int32_t __attribute__((used, noinline)) multip_message_1019_impl(uint32_t
     A32(packet, 0xc) = M32(0xad8); A32(packet, 0x1c) = A32(global, 0x2b4);
     A32(packet, 0x20) = multip_state_angles(global);
     multip_state_coordinates(packet + 0x24, global);
+    /* RETAIL BUG (kept): MULTI-6 -- the padding word at +0x36, as for 1018. */
     *(uint16_t *)(void *)(packet + 0x36) = (uint16_t)padding;
     return multip_send(id, packet, sizeof(packet), 0) != 0 ? -1 : 0;
 }
 #if defined(__i386__)
+/* RETAIL BUG (kept): MULTI-6 -- the x86 capture of the caller's stack for 1000 (the 1000-byte snapshot whose
+ * last 0x6c sent bytes survive), 1018 (the word at -0x3c2) and 1019 (the word at -2). */
 __attribute__((naked)) int32_t FS98_STDCALL multip_message_1000(uint32_t id __attribute__((unused)))
 {
     __asm__ volatile("movl %esp, %eax\n\tsubl $0x100c, %esp\n\tmovl %ebx, (%esp)\n\t"
@@ -94,6 +104,7 @@ __attribute__((naked)) int32_t FS98_STDCALL multip_message_1018(uint32_t id __at
 __attribute__((naked)) int32_t FS98_STDCALL multip_message_1019(uint32_t id __attribute__((unused)))
 { __asm__ volatile("movzwl -2(%esp), %eax\n\tpushl %eax\n\tpushl 8(%esp)\n\tcall _multip_message_1019_impl\n\taddl $8, %esp\n\tret $4"); }
 #else
+/* Not reproduced (MULTI-6): native targets have no caller stack, so the tail and the padding words are zero. */
 int32_t FS98_STDCALL multip_message_1000(uint32_t id)
 { uint8_t stack[1000] = {0}; return multip_message_1000_impl(id, stack); }
 int32_t FS98_STDCALL multip_message_1018(uint32_t id) { return multip_message_1018_impl(id, 0); }

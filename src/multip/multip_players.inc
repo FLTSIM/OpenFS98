@@ -5,7 +5,9 @@ typedef uint32_t (FS98_STDCALL *multip_chain_dispatch_fn)(uint32_t, uint32_t, vo
 typedef void (FS98_STDCALL *multip_list_remove_fn)(void *, void *);
 
 /* .text+0x8930 -- find checks the old local pointer before the moved array.
- * Preserve that stale-pointer behavior if the allocator moved the storage. */
+ * Preserve that stale-pointer behavior if the allocator moved the storage.
+ * RETAIL BUG (kept): MULTI-10 -- the stale local-player pointer: the find below runs against the
+ * possibly moved array, and the pointer is then kept (also in multip_player_remove). */
 void *multip_player_append(void)
 {
     uint32_t local_id = 0;
@@ -76,7 +78,8 @@ int32_t FS98_STDCALL multip_player_add_remote(const void *name, uint32_t id)
     return 0;
 }
 
-/* .text+0xa8a0 -- removing the local list entry leaves its pointer intact. */
+/* .text+0xa8a0 -- removing the local list entry leaves its pointer intact.
+ * RETAIL BUG (kept): MULTI-10 -- M_LOCAL_PLAYER is not updated after the host's +0x300 removal. */
 int32_t multip_player_remove_local(void)
 {
     uint32_t id = A32((void *)(uintptr_t)M32(M_LOCAL_PLAYER), 4);
@@ -87,7 +90,9 @@ int32_t multip_player_remove_local(void)
     return 0;
 }
 
-/* .text+0x84b0 */
+/* .text+0x84b0
+ * RETAIL BUG (kept): MULTI-10 -- after the host's +0x300 removal the local pointer is recomputed by a find
+ * that checks the old pointer first, so it can stay stale when the array moved. */
 int32_t FS98_STDCALL multip_player_remove(uint32_t id)
 {
     uint8_t *player = multip_find_player(id);
@@ -155,6 +160,8 @@ static int32_t __attribute__((used, noinline)) multip_player_create_local_impl(u
     local = (uint8_t *)(uintptr_t)M32(M_LOCAL_PLAYER);
     A32(local, 0) = D + 0x9a8;
     name_fields[0] = 16;
+    /* RETAIL BUG (kept): MULTI-6 -- the DPNAME reserved word is the uninitialised stack word the entry shim
+     * captured (multip_player_create_local, and multip_player_start through multip_player_start_impl). */
     name_fields[1] = reserved;
     name_fields[2] = ADDR(short_name);
     name_fields[3] = ADDR(long_name);
@@ -213,7 +220,9 @@ static int32_t __attribute__((used, noinline)) multip_player_start_impl(uint32_t
 #if defined(__i386__)
 /* Retail allocates 0x404 bytes and leaves DPNAME+4 unwritten. Its caller
  * at +0x8700 contributes one more return address. Read those slots before
- * compiler frames or nested calls can overwrite them. */
+ * compiler frames or nested calls can overwrite them.
+ * RETAIL BUG (kept): MULTI-6 -- the DPNAME reserved word read from entry ESP-0x400 (+0x8820,
+ * multip_player_create_local) and ESP-0x404 (through +0x8700, multip_player_start). */
 __attribute__((naked)) int32_t multip_player_create_local(void)
 {
     __asm__ volatile("movl -0x400(%esp), %eax\n\tpushl %eax\n\t"
@@ -225,7 +234,8 @@ __attribute__((naked)) int32_t multip_player_start(void)
                      "call _multip_player_start_impl\n\taddl $4, %esp\n\tret");
 }
 #else
-/* There is no original x86 caller stack on native targets. */
+/* There is no original x86 caller stack on native targets.
+ * Not reproduced (MULTI-6): the DPNAME reserved word is zero here. */
 int32_t multip_player_create_local(void) { return multip_player_create_local_impl(0); }
 int32_t multip_player_start(void) { return multip_player_start_impl(0); }
 #endif

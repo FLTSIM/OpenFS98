@@ -435,6 +435,8 @@ MPD_NOINLINE uint32_t FS98_MPDIALOG_STDCALL fs98_mpdialog_create(uint32_t parent
     PTR(object, 0x211c) = descriptor;
     D32(object, 0x80) = fs98_mpdialog_instance();
     state.live = 0;
+    /* RETAIL BUG (kept): MPD-2 -- the Settings dialog's ShowWindow is not guarded by the Create result, and
+     * `D32(object, 0x20)` is read below even when Create failed and the object is gone. */
     fs98_mpdialog_create_window(object, 0x6a, 0);
     fs98_mpdialog_show_window(object, 1);
     fs98_mpdialog_unwind_leave(&state.frame);

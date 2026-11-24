@@ -43,6 +43,14 @@
 # HG2D_FRAMES_CRASH_ALTITUDE optionally sets that private fixture's altitude in metres.
 # HG2D_FRAMES_CRASH_COCKPIT_ONLY removes saved non-cockpit views from that fixture.
 #
+# HG2D_FRAMES_RETAIL_ONLY=1 is for tools/record_references.sh: retail-a and retail-b only, from
+# FS98_DIR as it is (no module copied over it, SEHFIX on both), every other HG2D_FRAMES_* option
+# and every FRAMELOCK_* variable ignored, always without sound (WINEDLLOVERRIDES=dsound=d), +loaddll,
+# the prefix copy without its drive_c/FS98 link.  It does not judge: each run writes <tag>/status
+# ("exit <code> end <1 if the log ends with exactly end <passes>, else 0>") and the script exits 0
+# once both have finished.  HG2D_FRAMES_GLOBAL=1 also writes <tag>/global.bin (FRAMELOCK_GLOBAL);
+# HG2D_FRAMES_KEEP=1 keeps the game copies (the recorder takes the scenery index a first run builds).
+#
 # HG2D_FRAMES_ALL=1 compares the whole game instead: every module and the English DLLs
 # retail against every one ours, and the verdict is on all of them.
 # HG2D_FRAMES_ONLY="UTIL MAIN" compares those modules alone: ours has them in an otherwise
@@ -65,6 +73,16 @@ if [ -z "${BASH_EXECUTION_STRING:-}" ]; then
 fi
 cd "$(dirname "$0")/.."
 root=$PWD
+retail_only=${HG2D_FRAMES_RETAIL_ONLY:-}
+if [ -n "$retail_only" ]; then
+    # nothing inherited may change the run, or copy a file into it
+    for v in $(compgen -v | grep -E '^(HG2D_FRAMES_|FRAMELOCK_)'); do
+        case $v in
+            HG2D_FRAMES_RETAIL_ONLY|HG2D_FRAMES_OUT|HG2D_FRAMES_DISPLAY|HG2D_FRAMES_TIMEOUT|HG2D_FRAMES_GLOBAL|HG2D_FRAMES_KEEP) ;;
+            *) unset "$v" ;;
+        esac
+    done
+fi
 flight=${1:-'Situatio\STGEORGE.STN'}
 passes=${2:-900}
 script=${3:-}
@@ -85,7 +103,7 @@ if [ -n "${HG2D_FRAMES_GAUGE:-}${HG2D_FRAMES_GAUGE_RETAIL:-}" ]; then
     }
     gauge_name=$(basename "$HG2D_FRAMES_GAUGE")
 fi
-[ -f "$ours" ] && [ -f "$framelock" ] && [ -f bin/SEHFIX.DLL ] && [ -f "$game/FLTSIM98.EXE" ] || {
+{ [ -n "$retail_only" ] || [ -f "$ours" ]; } && [ -f "$framelock" ] && [ -f bin/SEHFIX.DLL ] && [ -f "$game/FLTSIM98.EXE" ] || {
     echo "needs $ours, $framelock, bin/SEHFIX.DLL and the staged game (tools/ofs framelock sehfix)" >&2; exit 2;
 }
 command -v Xvfb >/dev/null || { echo "needs Xvfb" >&2; exit 2; }
@@ -99,14 +117,19 @@ if [ -n "${HG2D_FRAMES_SIM1:-}" ]; then
     export HG2D_FRAMES_SIM1=$out/SIM1_candidate.sim
     sha256sum "$HG2D_FRAMES_SIM1" > "$out/sim1-build.sha256"
 fi
-cp -a "${WINEPREFIX:-$HOME/.wine}" "$out/prefix"
+cp -a "${WINEPREFIX:-$HOME/.wine}" "$out/prefix" || { echo "wine prefix copy failed" >&2; exit 2; }
+if [ -n "$retail_only" ]; then
+    rm -f "$out/prefix/drive_c/FS98"    # a link to the live game/
+    [ ! -e "$out/prefix/drive_c/FS98" ] && [ ! -L "$out/prefix/drive_c/FS98" ] || { echo "prefix copy still has drive_c/FS98" >&2; exit 2; }
+    ! xdpyinfo -display "$display" >/dev/null 2>&1 || { echo "display $display is in use" >&2; exit 2; }
+fi
 export WINEPREFIX=$out/prefix
 Xvfb "$display" -screen 0 "${HG2D_FRAMES_SCREEN:-1024x768}x24" +extension GLX -ac -noreset >"$out/xvfb.log" 2>&1 &
 xvfb=$!
 trap 'wineserver -k 2>/dev/null || true; kill $xvfb 2>/dev/null || true' EXIT
 export DISPLAY=$display
 for _ in $(seq 20); do xdpyinfo >/dev/null 2>&1 && break; sleep 0.5; done
-xdpyinfo >/dev/null 2>&1 || { echo "Xvfb did not start" >&2; exit 2; }
+xdpyinfo >/dev/null 2>&1 && kill -0 $xvfb 2>/dev/null || { echo "Xvfb did not start" >&2; exit 2; }
 
 debug=-all
 [ -z "$gauge_name" ] || debug=+loaddll
@@ -115,8 +138,10 @@ debug=-all
 [ -z "${HG2D_FRAMES_SIM1:-}" ] || debug=+loaddll
 [ -z "${HG2D_FRAMES_DEVICE:-}" ] || debug=+ddraw
 [ -z "${gauge_name}${HG2D_FRAMES_GAUGES:-}${HG2D_FRAMES_MDLS:-}${HG2D_FRAMES_SIM1:-}" ] || [ -z "${HG2D_FRAMES_DEVICE:-}" ] || debug=+loaddll,+ddraw
+[ -z "$retail_only" ] || debug=+loaddll
 export WINEDEBUG=-all
 [ -z "${HG2D_FRAMES_NOSOUND:-}" ] || export WINEDLLOVERRIDES="dsound=d"
+[ -z "$retail_only" ] || export WINEDLLOVERRIDES="dsound=d"    # no sound, wine's builtin msvcrt
 
 run() {     # tag hg2d
     local tag=$1 copy=$out/game-$1
@@ -136,7 +161,7 @@ run() {     # tag hg2d
             [ "$m" = HG2D ] && hg2d=$from
         done
     fi
-    cp "$hg2d" "$copy/Modules/HG2D.DLL"
+    [ -n "$retail_only" ] || cp "$hg2d" "$copy/Modules/HG2D.DLL"
     if [ -n "${HG2D_FRAMES_SIM1:-}" ]; then
         local sim1=orig/Sim/SIM1.sim
         [ "$tag" != ours ] || sim1=$HG2D_FRAMES_SIM1
@@ -197,6 +222,7 @@ run() {     # tag hg2d
       FRAMELOCK_LOG="$(winepath -w "$out/$tag/frames.log")" FRAMELOCK_PASSES=$passes \
       FRAMELOCK_DUMP=${HG2D_FRAMES_DUMP:-0} FRAMELOCK_DUMP_AT=${HG2D_FRAMES_DUMP_AT:-0} \
       FRAMELOCK_HOLD=${HG2D_FRAMES_HOLD:-0} \
+      FRAMELOCK_GLOBAL=${HG2D_FRAMES_GLOBAL:+$(winepath -w "$out/$tag/global.bin")} \
       FRAMELOCK_SIM1=${HG2D_FRAMES_SIM1:+1} \
       FRAMELOCK_SIM1_SNAPSHOT=${HG2D_FRAMES_SNAPSHOT:+$(winepath -w "$out/$tag/sim1.snap")} \
       FRAMELOCK_SIM1_EVERY=${HG2D_FRAMES_SNAPSHOT:-50} \
@@ -205,6 +231,15 @@ run() {     # tag hg2d
       timeout "${HG2D_FRAMES_TIMEOUT:-600}" wine FLTSIM98.EXE "/STN:$flight" >"$out/$tag/game.log" 2>&1 )
     local status=$?
     kill $watcher 2>/dev/null
+    if [ -n "$retail_only" ]; then
+        local end_ok=0
+        [ "$(tail -n 1 "$out/$tag/frames.log" 2>/dev/null)" = "$(printf 'end %08x' "$passes")" ] && end_ok=1
+        echo "exit $status end $end_ok" >"$out/$tag/status"
+        echo "$tag: exit $status end $end_ok"
+        wineserver -k 2>/dev/null
+        [ -n "${HG2D_FRAMES_KEEP:-}" ] || rm -rf "$copy"
+        return 0
+    fi
     [ -s "$out/$tag/frames.log" ] || { echo "$tag: exit $status and no frames logged" >&2; exit 2; }
     echo "$tag: exit $status, $(grep -c . "$out/$tag/frames.log") lines, $(tail -1 "$out/$tag/frames.log")"
     local expected_end
@@ -266,6 +301,10 @@ first_difference() {    # a b
 
 run retail-a orig/Modules/HG2D.DLL
 run retail-b orig/Modules/HG2D.DLL
+if [ -n "$retail_only" ]; then
+    rm -rf "$out/prefix"
+    exit 0
+fi
 run ours "$ours"
 rm -rf "$out/prefix"
 

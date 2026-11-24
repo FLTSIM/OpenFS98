@@ -21,7 +21,7 @@ static void sim1_write32(void *pointer, uint32_t value)
 
 static uint8_t *sim1_dependency(uint32_t index)
 {
-    return (uint8_t *)sim1_image.imports[index].link;
+    return (uint8_t *)FS98_LINK(sim1_image.imports[index]);
 }
 
 static void sim1_import_call(struct sim1_registers *registers, uint32_t index,

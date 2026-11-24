@@ -5,7 +5,8 @@ A marker is `RETAIL BUG (<kind>): <ID>` inside a comment of a file under src/ th
 would track.  Each register entry's Id-cell annotation sets the marker it requires:
   ID -> (kept); ID (suspected[, not used]) -> (kept, suspected); ID (fixed, not kept) -> (fixed, not kept);
   ID (no longer applies) -> no marker, not allowlisted.
-tools/retail_bugs_unmarked.txt lists the ids still unmarked (one per line, # comments); it may only shrink.
+Every entry that still applies must be marked.  The allowlist tools/retail_bugs_unmarked.txt is gone (end of
+Story 1.5) and its return is an error.
 Usage: tools/check_retail_bugs.py [--self-test]
 """
 import os, re, subprocess, sys
@@ -85,8 +86,8 @@ def comments(path, text):
     return out, bad
 
 
-def check(reg_text, files, allow):
-    """files {path: text}, allow [id] -> (errors, warnings, summary)"""
+def check(reg_text, files):
+    """files {path: text} -> (errors, warnings, summary)"""
     ents, errs = register(reg_text)
     warns, marked = [], {}
     for path, text in sorted(files.items()):
@@ -111,30 +112,36 @@ def check(reg_text, files, allow):
                 errs.append("%s:%d: %s no longer applies but still has a marker" % (path, ln, i))
             elif ents[i] != kind:
                 errs.append("%s:%d: %s is a %s marker, the entry is %s" % (path, ln, i, kind, ents[i]))
-    seen = set()
-    for i in allow:
-        if i in seen:
-            errs.append("allowlist: %s twice" % i)
-        seen.add(i)
-        if i not in ents:
-            errs.append("allowlist: %s is not in the register" % i)
-        elif ents[i] == "obsolete":
-            errs.append("allowlist: %s no longer applies" % i)
-        elif i in marked:
-            errs.append("allowlist: %s is marked now, remove it" % i)
-    for i, s in sorted(ents.items()):
-        if s != "obsolete" and i not in marked and i not in seen:
+    for i, s_ in sorted(ents.items()):
+        if s_ != "obsolete" and i not in marked:
             errs.append("unmarked: %s" % i)
     nobs = sum(s == "obsolete" for s in ents.values())
-    return errs, warns, "retail bugs: %d entries, %d marked, %d allowlisted, %d no longer apply" % (
-        len(ents), len(marked), len(seen), nobs)
+    return errs, warns, "retail bugs: %d entries, %d marked, %d no longer apply" % (len(ents), len(marked), nobs)
+
+
+def run_root(root):
+    """The CLI's work on a source root -> (errors, warnings, summary)"""
+    errs = []
+    if os.path.lexists(os.path.join(root, "tools/retail_bugs_unmarked.txt")):
+        errs.append("tools/retail_bugs_unmarked.txt exists: the allowlist is gone, mark the entry instead")
+    reg_text = open(os.path.join(root, "docs/retail-bugs.md"), encoding="utf-8").read()
+    try:
+        names = subprocess.check_output(["git", "ls-files", "-z", "-co", "--exclude-standard", "src"], text=True,
+                                        cwd=root, stderr=subprocess.DEVNULL).split("\0")
+    except (subprocess.CalledProcessError, OSError):   # not a git tree (the self-test's temporary root)
+        names = [os.path.join(d, f) for d, _, fs in os.walk(os.path.join(root, "src")) for f in fs]
+        names = [os.path.relpath(n, root) for n in names]
+    files = {f: open(os.path.join(root, f), encoding="latin-1").read() for f in names
+             if f and os.path.isfile(os.path.join(root, f))}
+    e, warns, summary = check(reg_text, files)
+    return errs + e, warns, summary
 
 
 def self_test():
     def reg(*rows):
         return "| Id | Where |\n| --- | --- |\n" + "".join("| %s | x |\n" % r for r in rows)
-    def run(rows, files, allow=()):
-        return check(reg(*rows), {"a.c": files} if isinstance(files, str) else files, list(allow))
+    def run(rows, files):
+        return check(reg(*rows), {"a.c": files} if isinstance(files, str) else files)
     def fails(res, *words):
         assert res[0] and all(any(w in e for e in res[0]) for w in words), (res, words)
     def clean(res):
@@ -142,47 +149,58 @@ def self_test():
     clean(run(["SS-1"], "/* RETAIL BUG (kept): SS-1 */"))                                   # consistent
     fails(run(["OPT-1"], "/* RETAIL BUG (kept): OPT-99 */"), "a.c:1", "OPT-99")             # unknown
     fails(run(["SS-1"], ""), "unmarked: SS-1")                                              # unmarked
-    fails(run(["SS-1"], "/* RETAIL BUG (kept): SS-1 */", ["SS-1"]), "SS-1")                 # stale allowlist
-    fails(run(["SS-1"], "", ["SS-1", "ZZ-9"]), "ZZ-9")                                      # not in register
     fails(run(["SS-1 (suspected)"], "/* RETAIL BUG (kept): SS-1 */"), "a.c:1", "kept", "suspected")
     fails(run(["SS-1 (fixed, not kept)"], "/* RETAIL BUG (kept): SS-1 */"), "fixed")
     clean(run(["SS-1 (suspected, not used)"], "// RETAIL BUG (kept, suspected): SS-1"))
     fails(run(["SS-1 (no longer applies)"], "/* RETAIL BUG (kept): SS-1 */"), "no longer applies")
-    fails(run(["SS-1 (no longer applies)"], "", ["SS-1"]), "SS-1")                         # obsolete allowlisted
     clean(run(["SS-1 (no longer applies)"], ""))
     clean(run(["FLT-3"], "/* RETAIL BUG (kept):\n * FLT-3. */"))                            # wrapped, trailing dot
     clean(run(["FLT-3"], "// RETAIL BUG (kept):\n// FLT-3,"))
     fails(run(["MAIN-1", "MAIN-10"], "/* RETAIL BUG (kept): MAIN-10 */"), "unmarked: MAIN-1")
-    clean(run(["MAIN-6", "MAIN-18"], "/* see MAIN-6, MAIN-18 */", ["MAIN-6", "MAIN-18"]))   # prose
-    r = run(["SS-1"], 'char *s = "RETAIL BUG (kept): SS-1";', ["SS-1"])                     # string
-    clean(r); assert r[1] and "a.c:1" in r[1][0], r
-    fails(run(["SS-1"], "/* RETAIL BUG (kept): */", ["SS-1"]), "a.c:1", "malformed")
+    r = run(["MAIN-6", "MAIN-18"], "/* see MAIN-6, MAIN-18 */\n/* RETAIL BUG (kept): MAIN-6 */")
+    fails(r, "unmarked: MAIN-18"); assert len(r[0]) == 1, r                                # prose is not a marker
+    r = run(["SS-1", "SS-2"], 'char *s = "RETAIL BUG (kept): SS-1";\n/* RETAIL BUG (kept): SS-2 */')   # string
+    fails(r, "unmarked: SS-1"); assert len(r[0]) == 1, r
+    assert r[1] and "a.c:1" in r[1][0], r
+    fails(run(["SS-1"], "/* RETAIL BUG (kept): */"), "a.c:1", "malformed")
     fails(run(["MAIN-6", "MAIN-18"], "/* RETAIL BUG (kept): MAIN-6, MAIN-18 */"), "a.c:1", "malformed")
     clean(run(["SS-1", "SS-2"], "/* RETAIL BUG (kept): SS-1, and RETAIL BUG (kept): SS-2 */"))   # two in one
     clean(run(["SS-1", "SS-2"], {"b.S": "# RETAIL BUG (kept): SS-1\n  nop ; RETAIL BUG (kept): SS-2\n"}))
     fails(run(["SS-1", "SS-1"], "/* RETAIL BUG (kept): SS-1 */"), "duplicate id SS-1")
     fails(run(["SS-1 (odd)"], "/* RETAIL BUG (kept): SS-1 */"), "annotation")
-    res = run(["SS-1", "SS-2", "SS-3 (no longer applies)"], "/* RETAIL BUG (kept): SS-1 */", ["SS-2"])
-    assert res[2] == "retail bugs: 3 entries, 1 marked, 1 allowlisted, 1 no longer apply", res
+    clean(run(["SS-1"], "/* RETAIL BUG (kept): SS-1 */\n/* RETAIL BUG (kept): SS-1 */"))   # one id, two sites
+    res = run(["SS-1", "SS-2 (no longer applies)"], "/* RETAIL BUG (kept): SS-1 */")
+    assert res[2] == "retail bugs: 2 entries, 1 marked, 1 no longer apply", res
     fails(run(["SS-1 (suspected)"], "", ["SS-1"]) if False else
-          check(reg("SS-1  (suspected)"), {"a.c": ""}, []), "unparseable")             # bad Id cell
-    fails(check(reg("SS-1 (suspected"), {"a.c": ""}, []), "unparseable")
-    r = run(["SS-1"], {"b.S": '#define TEXT "RETAIL BUG (kept): SS-1"\n'}, ["SS-1"])      # directive is code
-    clean(r); assert r[1], r
-    r = run(["SS-1"], "int RETAIL BUG (kept): SS-1;", ["SS-1"])                             # bare code
-    clean(r); assert r[1] and "a.c:1" in r[1][0], r
+          check(reg("SS-1  (suspected)"), {"a.c": ""}), "unparseable")             # bad Id cell
+    fails(check(reg("SS-1 (suspected"), {"a.c": ""}), "unparseable")
+    r = run(["SS-1", "SS-2"], {"b.S": '#define TEXT "RETAIL BUG (kept): SS-1"\n/* RETAIL BUG (kept): SS-2 */\n'})
+    fails(r, "unmarked: SS-1"); assert len(r[0]) == 1 and r[1], r                           # directive is code
+    r = run(["SS-1", "SS-2"], "int RETAIL BUG (kept): SS-1;\n/* RETAIL BUG (kept): SS-2 */")  # bare code
+    fails(r, "unmarked: SS-1"); assert len(r[0]) == 1 and r[1] and "a.c:1" in r[1][0], r
+    import tempfile                                    # the allowlist file is refused, through the CLI's own path
+    with tempfile.TemporaryDirectory() as root:
+        for path, text in (("docs/retail-bugs.md", reg("SS-1")), ("src/a.c", "/* RETAIL BUG (kept): SS-1 */"),
+                           ("tools/retail_bugs_unmarked.txt", "")):
+            os.makedirs(os.path.dirname(os.path.join(root, path)), exist_ok=True)
+            open(os.path.join(root, path), "w").write(text)
+        fails(run_root(root), "retail_bugs_unmarked.txt")
+        os.remove(os.path.join(root, "tools/retail_bugs_unmarked.txt"))
+        clean(run_root(root))
+        link = os.path.join(root, "tools/retail_bugs_unmarked.txt")
+        try:
+            os.symlink(os.path.join(root, "missing-target"), link)   # a dangling link is refused too
+        except OSError:
+            link = None
+        if link:
+            fails(run_root(root), "retail_bugs_unmarked.txt")
     print("check_retail_bugs: self-test passed")
 
 
 def main():
     if "--self-test" in sys.argv:
         return self_test()
-    os.chdir(ROOT)
-    reg_text = open("docs/retail-bugs.md", encoding="utf-8").read()
-    names = subprocess.check_output(["git", "ls-files", "-z", "-co", "--exclude-standard", "src"], text=True).split("\0")
-    files = {f: open(f, encoding="latin-1").read() for f in names if f and os.path.isfile(f)}
-    allow = [l.split("#")[0].strip() for l in open("tools/retail_bugs_unmarked.txt")]
-    errs, warns, summary = check(reg_text, files, [a for a in allow if a])
+    errs, warns, summary = run_root(ROOT)
     for w in warns:
         print("warning:", w)
     for e in errs:

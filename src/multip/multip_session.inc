@@ -87,7 +87,8 @@ int32_t multip_session_host(void)
     for (index = 0; index < 4; index++)
         M32(0x9d8 + index * 4) = application[index];
     /* Retail reads the interface vtable before publishing these final two
-     * fields. A NULL interface faults with capacity/name still untouched. */
+     * fields. A NULL interface faults with capacity/name still untouched.
+     * RETAIL BUG (kept): MULTI-13 -- the vtable read through a possibly null interface. */
     directplay = (void *)(uintptr_t)M32(M_DIRECTPLAY);
     vtable = *(uint8_t *volatile *)directplay;
     M32(0x9e8) = M32(0x998) + M32(0x99c);
@@ -237,7 +238,8 @@ typedef int32_t (FS98_STDCALL *multip_dp_get_player_name_fn)(void *, uint32_t, v
 typedef int32_t (FS98_STDCALL *multip_dp_set_player_name_fn)(void *, uint32_t, void *, uint32_t);
 
 /* .text+0xa1a0 -- the size-query error is ignored, and the allocated name
- * is never freed, including on successful publication. */
+ * is never freed, including on successful publication.
+ * RETAIL BUG (kept): MULTI-1 -- the leak of `name` on every return, success included. */
 int32_t multip_player_publish_name(void)
 {
     char name_text[10];

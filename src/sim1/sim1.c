@@ -31,8 +31,8 @@ struct sim1_state {
 };
 
 struct sim1_state sim1_image = {
-    {{1, 0}, {2, 0}, {23, 0}, {4, 0}, {16, 0}, {3, 0},
-     {32, 0}, {39, 0}, {20, 0}, {10, 0}, {0, 0}},
+    {{1, {0}}, {2, {0}}, {23, {0}}, {4, {0}}, {16, {0}}, {3, {0}},
+     {32, {0}}, {39, {0}}, {20, {0}}, {10, {0}}, {0, {0}}},
     {25, (uintptr_t)sim1_init, (uintptr_t)sim1_deinit, 0, 0, 0,
      (uintptr_t)sim1_descriptor, (uintptr_t)SIM1_SETUP,
      (uintptr_t)((uint8_t *)&sim1_image + 0x1150),

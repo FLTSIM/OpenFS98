@@ -86,6 +86,7 @@ in Python. A new harness or break build adds it and does not spell those flags.
 | `tools/ofs sehfix-install` | put `SEHFIX.DLL` in `Modules\`, which hands the divide faults wine swallows back to the host's repair, so the 3D view does not freeze; `sehfix-remove` takes it out, `sehfix-log` shows what it repaired (see [wine.md](wine.md)) |
 | `tools/ofs util-trace` | boot the sim with a UTIL that counts every service call, and list what ran; `UTIL_TRACE_SECS=` for a longer session to play in |
 | `tools/hg2d_frames.sh` | the running game on a virtual clock, every frame checksummed: retail HG2D twice, then ours, in private copies, compared frame for frame, on a private Xvfb; `HG2D_FRAMES_ALL=1` compares the whole game, all retail against all ours; on Direct3D by screenshots (see the script) |
+| `tools/ofs references` (`tools/record_references.sh`) | record retail's reference logs once: 131 cases (74 flights, 56 scripted, 1 GLOBAL dump), each flown twice on a game staged fresh from the CD, no sound, software renderer, 900 passes, into `bin/references/` with a committed manifest `tools/references.txt`; `CASES="flight/PARIS ..."` and `REFERENCES_OUT=` for a subset; see [Retail reference logs](#retail-reference-logs) |
 | `tools/ofs graph` | module id and dependency table, read live from `orig/` |
 | `tools/impscan.py FILE` | which imported services a module calls, by import and slot |
 | `tools/ofs hostmap` | the host's service table: location, classification, and which libraries each service calls |
@@ -108,7 +109,7 @@ the older, higher counts were crashes counted as catches. "Missed" means the har
 what it compares.
 
 `python3 -B tools/cmake_verify.py build/win32-retail RESULTS [-j N] [--in-place] [--baselines FILE] [--clean-slots] [--only S] [--lines N,N] [--factor F] [--list]`
-runs this block (164 lines) and records each as `RESULTS/NNN.json`/`.log`, with `report.md`. By default every line runs in a
+runs this block (168 lines) and records each as `RESULTS/NNN.json`/`.log`, with `report.md`. By default every line runs in a
 **slot**: a disposable copy of the tree it was started in (`RESULTS/slots/K`, outside the start tree), with its own `bin`,
 a copy of `game`, a self-contained copy of `~/.wine` (`WINEPREFIX`, `FS98_DIR` and `OFS_BUILD` point into it) and a
 template (`K.template`) it is rsync-reset from after every line, so a break runner's mutant source, a rebuilt module, an
@@ -277,11 +278,11 @@ tools/ofs sim1rdiff-run             # SIM1 decompiled routines against retail ov
 tools/ofs sim1r-breaks               # their breaks -> 881 of 882 caught (gpass-steer missed: a coverage gap, see its docstring); proven equivalents listed in its docstring (tools/sim1r_breaks.py; run from a frozen copy)
 tools/ofs sim1native-flights        # the native SIM1.sim (tools/ofs sim1, installed) against retail on the 74 scripted flights -> 74 match (~15 min)
 tools/ofs simsui                   # the native SIMSUI.DLL (bin/simsui-native/SIMSUI_ours.dll), installed beside FLTSIM98.EXE
-tools/ofs main-dialogs                    # 47 menu commands and dialog steps in the real game (with Options' dialogs and tab pages), retail against ours -> same controls, 41 of 47 pictures identical, PASS (~30 min)
+tools/ofs main-dialogs                    # 47 menu commands and dialog steps in the real game (with Options' dialogs and tab pages), retail against ours -> same controls, 41 of 47 pictures identical, PASS (~30 min); flaky: in 4 runs on 2026-11-23/24 two cancel passes listed Display options' (0x1409) pages in another z-order, and a run crossing sunrise differs on Time of day's combo (deferred-work.md), so rerun a FAIL before investigating
 tools/ofs hostdiff-run N=20000            # HOST (id 1, FLTSIM98.EXE) slices 1-28, all 194 services, real files in bin/difftest/hostfs -> 0 differ (~11 min)
 tools/ofs host-breaks                     # HOST broken on purpose -> 505 breaks, 467 caught, 15 proven equivalent, 21 crash, 2 rare display paths missed at N=2000 (caught at N=3000) (~5 h)
 python3 tools/check_raw_dumps.py  # no raw retail dump in git beyond tools/raw_dumps_allowed.txt (may only shrink, bar an entry newly detected by a stricter rule, with its reason on its line; Story 1.4) -> raw dumps: 2 allowed dump files, 38 scripts reading orig/ (1 gen, 17 resource, 20 oracle), none new, exit 0
-python3 -B tools/check_retail_bugs.py  # docs/retail-bugs.md against the RETAIL BUG markers in src/, both ways; the ids still unmarked are in tools/retail_bugs_unmarked.txt (may only shrink; Story 1.5 slices 1-7 marked MAIN, Flights, Options, Gauges, SIM1, the runtime, HOST, UTIL, CHAIN, NUMERIC, FACIL, FE, WINDOW, WINMSG, MPCHAT, REALITY, ANALYSIS, DEMO, ADVDRV, DYNAMIC, CONTROLS and SOUND); `--self-test` covers its failure cases -> retail bugs: 331 entries, 217 marked, 109 allowlisted, 5 no longer apply
+python3 -B tools/check_retail_bugs.py  # docs/retail-bugs.md against the RETAIL BUG markers in src/, both ways; every entry that still applies is marked and the allowlist file is an error (Story 1.5 slices 1-10 marked MAIN, Flights, Options, Gauges, SIM1, the runtime, HOST, UTIL, CHAIN, NUMERIC, FACIL, FE, WINDOW, WINMSG, MPCHAT, REALITY, ANALYSIS, DEMO, ADVDRV, DYNAMIC, CONTROLS, SOUND, ATC, ACONTAIN, BOOSTER, WEATHERM, SLEW, PANELS, G3D, HG2D, MULTIP, Views, Help, Alerts, World and MP_DIALOG); `--self-test` covers its failure cases -> retail bugs: 331 entries, 323 marked, 8 no longer apply
 tools/ofs data-images  # every converted data image against retail, and the .rdata ranges, then the self-test of its own failure paths (needs orig/; UPDATE=1 rewrites tools/data_images.txt) -> data-images: 161 .data images identical (1587303 bytes, 9105 relocated), 106 .rdata ranges identical (18159 bytes), 1 switch tables, 1 tail windows (49005 bytes), 130 pointer lists (5931 entries), 1 raw pointer lists (295 rows), 1 bound images (2129 rows: 130 DATA, 486 CODE, 1234 IMPORT, 279 NONE), self-test passed (173 cases)
 tools/ofs gauges-tables-check  # tools/gen_gauges.py --check: the committed gauge tables (layout.h, rebind.inc, gauges_manifest.json, host-compiled data.inc and rdata.inc) against retail's full analysis, writes nothing (needs orig/, objdump, cc) -> gauges-tables-check: 120 gauges: layout.h, rebind.inc, manifest line and the host-compiled data.inc and rdata.inc match retail, exit 0
 tools/ofs mdl-images-check  # tools/gen_mdl_images.py --check: the committed MDL images (layout.h, host-compiled data.inc, mdl_manifest.json) against retail, writes nothing (needs orig/, objdump, cc) -> mdl-images-check: 11 models: layout.h, data.inc (host-compiled) and src/mdl/mdl_manifest.json match retail, exit 0
@@ -321,7 +322,72 @@ tools/ofs difftest-run        # whole-module SLEW         -> 0/2000 vectors diff
 tools/ofs ofstest-run         # in-process, via the host  -> passed 68, failed 0
 tools/ofs hg2ddiff-run  # whole-module HG2D, a suite per slice -> 59 suite summaries, 0 differ (N=20000 takes ~5.5 h alone, 19854 s on 2026-11-24; docs/modules/hg2d.md)
 tools/hg2d_frames.sh 'Situatio\PARIS.STN' 900  # the running game, retail HG2D twice then ours -> identical frames, PASS, on a private Xvfb; HG2D_FRAMES_ALL=1 for the whole game (needs tools/ofs framelock sehfix)
+o=$(mktemp -d -u) && REFERENCES_OUT=$o tools/ofs references CASES="global/STGEORGE flight/PARIS script/controls/PARIS" && test "$(grep -cP '^case\t(global/STGEORGE|flight/PARIS|script/controls/PARIS)\tmatch\t' "$o/manifest.txt")" = 3  # the reference recorder on a subset, into a fresh directory -> three cases of 900 passes, all match (checked here from the manifest), tools/references.txt untouched (~2 min)
 tools/ofs smoke               # every module of tools/modules.txt installed (tools/ofs ofs_install) -> 27/27 modules (the 27 of Modules\; a leftover OFSTEST.DLL makes it 28/28), 95 gauges, PASS
 tools/ofs util-trace          # which UTIL services the game calls, counted in-game
 tools/check_module_flags.sh   # every gcc invocation takes OFS_MODULE_FLAGS (Story 1.3) -> PASS, prints "every site takes OFS_MODULE_FLAGS"
+python3 -B tools/check_abi_headers.py   # Story 1.7: one FS98_STDCALL (abi.h), no pointer/long/size_t/wchar_t/bitfield/long double in the four ABI headers, and the headers with their _Static_asserts compile on mingw i686, gcc -m32 and gcc; `--self-test` runs failing fixtures for each -> both PASS
 ```
+
+Manual, not a Baselines line (it takes hours, and `tools/cmake_verify.py` would run it): the full recording, `tools/ofs references`,
+is run from a frozen `cp -a` copy of the committed tree (with `cd/`, `game/`, `orig/` and `bin/`), so the manifest has no
+`+dirty`. Configure a fresh build directory in the copy, point `OFS_BUILD` at it, and check that its `CMakeCache.txt` names the copy as
+`CMAKE_HOME_DIRECTORY`. Then copy `bin/references/` and `tools/references.txt` back with the same marker-and-rename sequence under the live
+tree's `bin/references.lock`, run `tools/record_references.sh --verify bin/references` (it reads only that set's `manifest.txt`) and
+`cmp bin/references/manifest.txt tools/references.txt`. Story 1.6 closes when that verified mirror is committed.
+
+## Retail reference logs
+
+`tools/record_references.sh` (Story 1.6, AD-8) flies each case twice through `tools/hg2d_frames.sh` with `HG2D_FRAMES_RETAIL_ONLY=1`:
+retail only, from a game staged by `tools/stage_game.py` into a fresh work directory under `bin/references-work/`, with SEHFIX and
+FRAMELOCK added, `[HARDWARE] Device=` empty (the software renderer), no sound, 900 passes. Every `MZ` file of the stage must be
+byte-identical to a file under `cd/`, and `FLTSIM98.EXE` must be the pressing of `REFERENCE_SHA256`, or the recorder stops before wine starts.
+
+- **Cases** (131): `flight/<NAME>` for each of the 74 `.STN` in `Situatio/`, nobody flying; `script/<scenario>/<NAME>` for `controls`,
+  `systems`, `views`, `avionics`, `slew`, `toggles` and `keys` (`tools/fly_scripts.py`) on `PARIS`, `STGEORGE`, `KAUAI`, `NEWYORK`, `LEARLON`,
+  `HONGKONG`, `BELLWTC` and `CVINSON`; `global/STGEORGE`, nobody flying, with GLOBAL dumped each pass.
+- **Outcomes:** `match` (both runs complete and identical), `NONDETERMINISTIC` (both complete, different: both runs' files kept under `a/` and `b/`),
+  `FAILED` (a run did not end with `end 00000384`, had under 20 distinct frames, loaded no builtin `msvcrt.dll`, FRAMELOCK or SEHFIX, or a GLOBAL dump
+  is not 4,298,400 bytes; or a script is missing, has an event outside passes 1 to 899, or changed nothing against the unscripted flight). Any `FAILED`
+  case, or a `global/STGEORGE` that is not a `match`, fails the recording and nothing is published. `delivery unchecked` marks a script case whose
+  script check could not be made because one of its two pairs is NONDETERMINISTIC.
+- **Published set:** `bin/references/` holds `<case>/frames.log` (and `global.bin`), `config/FLTSIM98.CFG`, `config/devices.cfg` and `manifest.txt`,
+  which is authoritative; `tools/references.txt` mirrors it and is the only committed part. The manifest starts with `references v1`, then the
+  commit (`+dirty` if a tracked file differs), the pressing (EXE, PE and data digests), the config (wine version, `WINEDLLOVERRIDES`, hashes of the
+  CFGs, FRAMELOCK, SEHFIX and the scripts), then one tab-separated line per case: `case`, name, outcome, flight, script sha256 or `-`, passes, delivery,
+  and `path=sha256` for each kept file. `tools/record_references.sh --verify DIR` checks a set against its manifest.
+- **Config consequence (ANA-1):** retail runs on wine's builtin `msvcrt`, as every comparison does, not the CD's 1997 `MSVCRT.DLL` (under it wine's own
+  `advapi32`, `user32` and `gdi32` fail to load). Host `+0x21c`'s `memmove` therefore leaves 0 in ecx, not 7: ANALYSIS's trail compaction
+  (`docs/retail-bugs.md`, ANA-1) behaves as with the builtin, and Epic 3 must allow for that when it compares.
+- **Publishing:** under `flock bin/references.lock`, the candidate is built and verified in `bin/references.new/`, then `bin/references.publishing` is
+  written, `bin/references` becomes `.old`, `.new` becomes `bin/references`, the mirror is written through a temporary file and checked equal, and
+  only then are `.old` and the marker removed. If the marker, `.old` or `.new` exists at the start, the recorder refuses and names them. A non-empty
+  `bin/references/` needs `REFERENCES_FORCE=1`. A subset publishes to `REFERENCES_OUT` (which must not exist, and lie outside `bin/references*`,
+  `game/`, `cd/`, `orig/`, `src/`) and never touches `tools/references.txt`.
+
+### `frames.log` grammar (v1)
+
+One text file, one line per event, `\n` terminated, every number 8 lowercase hex digits (zero padded). A run that reaches its pass limit ends with
+`end`. Version 1 compares **all of `frames.log`, byte for byte** (as `hg2d_frames.sh` does), and the GLOBAL dump; `regs.txt` is not compared.
+
+| Line | Fields | Meaning |
+|------|--------|---------|
+| blit | `pass blit kind x y w h size hash palette` | A `BitBlt`, `StretchBlt` or `StretchDIBits` call, logged before the call is forwarded; the destination window is not checked or named. `pass`: passes counted so far. `blit`: blit counter, from 0, in call order. `kind`: `bitblt`, `stretchblt` or `stretchdibits`. `x y w h`: the call's destination rectangle arguments (signed dwords). `size`: the source DIB's byte count, `(width*bitcount+31)/32*4*abs(height)`, and 0 when there is no DIB or no bits. `hash`: FNV-1a (32 bit, basis `811c9dc5`) over those bytes; `palette`: the same over the colour table. With no DIB bits both stay `811c9dc5`. A recording counts distinct frames from the `hash` of lines with a nonzero `size`. |
+| `end` | `end passes` | Written once, last, as the process exits at the pass limit: `end 00000384` for 900 passes. |
+| `fault` | `fault pass <pass> eip <eip> stack <dword>...` | An access violation, logged before wine may swallow it: the pass, the faulting address and up to 40 stack dwords. The addresses are retail-specific (retail's image, wine's stack). |
+| `sim1` | `sim1 pass <dword pairs>... ` | Only with `FRAMELOCK_SIM1`, which the recorder never sets: not part of v1 recordings. |
+
+`global.bin` (`global/` case only) is 900 records of `0x12a8` bytes, 4,298,400 bytes, the raw bytes of GLOBAL's data, unmasked (masking relocated dwords and
+handles is Story 3.6's). `regs.txt` (`FRAMELOCK_REGS`, one line per module slot: name, offset, calls, input hash, then output and kept hashes per register) is a separate
+file that the recorder does not produce and v1 does not compare.
+
+Limits of v1, kept as FRAMELOCK writes them today (`framelock.c` is unchanged):
+
+- there is no window identity: a blit line does not say which window it drew to;
+- blits are logged in call order, as they are made, not as the last frame presented each pass;
+- `fault` lines hold retail-specific addresses;
+- GLOBAL record `n` is the state before pass `n` runs, so a native run's state after pass `n` lines up with record `n+1`, through pass 898; the last hook
+  writes record 899 and exits without running pass 899's loop;
+- script events are dispatched after the pass is counted: an event at pass `p` runs as pass `p` begins, `p >= 1` (an event at 0 first runs at pass 1).
+
+Epic 3's FRAMELOCK in `fs98win32` defines how it maps onto v1 (AD-8).

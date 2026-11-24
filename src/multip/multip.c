@@ -16,9 +16,7 @@
 
 #include "fs98/linkage.h"
 
-#ifndef FS98_STDCALL
-#define FS98_STDCALL __attribute__((stdcall))
-#endif
+#include "fs98/abi.h"
 
 #define MULTIP_IMAGE_SIZE       0x1000
 #define MULTIP_LINKAGE          0x0058
@@ -586,7 +584,8 @@ typedef int32_t (FS98_STDCALL *multip_copy_fn)(void *, const void *, uint32_t);
 #define HOST_FN(offset, type) (*(type *)(uintptr_t)(M32(IMPORT_HOST) + (offset)))
 
 /* .text+0x4da0 -- append under the queue's critical section. Retail leaves
- * the lock held if the node allocation fails; keep that failure ordering. */
+ * the lock held if the node allocation fails; keep that failure ordering.
+ * RETAIL BUG (kept): MULTI-8 -- the node-allocation failure returns -1 with the queue lock still held. */
 static int32_t multip_queue_append(struct multip_queue *queue, void *record)
 {
     struct multip_queue_node *node;
@@ -609,7 +608,9 @@ static int32_t multip_queue_append(struct multip_queue *queue, void *record)
     return 0;
 }
 
-/* .text+0x4e30 -- remove first, then free its node under the lock. */
+/* .text+0x4e30 -- remove first, then free its node under the lock.
+ * RETAIL BUG (kept): MULTI-8 -- the record is unlinked and counted down before the node free, so a
+ * failed free returns -1 with the record already out of the queue. */
 static int32_t multip_queue_take(struct multip_queue *queue, void **record)
 {
     struct multip_queue_node *node;
@@ -712,7 +713,9 @@ struct multip_receive_record {
 };
 
 /* .text+0x5820 -- receive one message, growing its buffer until it fits.
- * Receive HRESULTs are not propagated; only host/queue failures return -1. */
+ * Receive HRESULTs are not propagated; only host/queue failures return -1.
+ * RETAIL BUG (kept): MULTI-8 -- `*received = 1` is set before the queue append, so an append failure
+ * leaves received=1 with the record in nobody's hands; the failed payload/record frees leave partial state. */
 int32_t FS98_STDCALL multip_receive(uint32_t *received)
 {
     struct multip_receive_record *record;
@@ -1028,7 +1031,8 @@ int32_t multip_directplay_unload(void)
 
 /* .text+0x9d50 -- query both IIDs on the factory object, not on the first
  * queried interface. A failed first query leaks the factory reference. The
- * second query result affects only the flag; temporary releases still run. */
+ * second query result affects only the flag; temporary releases still run.
+ * RETAIL BUG (kept): MULTI-13 -- the first query's failure return leaks the `created` reference. */
 int32_t FS98_STDCALL multip_directplay_create(const GUID *provider)
 {
     void *created;

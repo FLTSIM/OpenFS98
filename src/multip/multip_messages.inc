@@ -6,6 +6,8 @@ static int32_t multip_message_request(uint32_t tag)
 
     if (multip_send(0, packet, sizeof(packet), 1) != 0)
         return -1;
+    /* RETAIL BUG (kept): MULTI-2 -- request-pending (0x984) and the time (0xadc) are set only after a
+     * successful enqueue; the four request constructors (1001, 1008, 1002, 1009) share this. */
     M32(0x984) = 1;
     M32(0xadc) = HOST_FN(0x38, multip_ticks_fn)();
     return 0;
@@ -46,7 +48,8 @@ int32_t FS98_STDCALL multip_message_1010(uint32_t id)
 { return multip_message_empty(id, 0x1010); }
 
 /* Unlike the stack variants, .text+0x5e50/+0x5ec0/+0x5f30 allocate a packet
- * before enqueueing its copy. An enqueue failure leaks that first packet. */
+ * before enqueueing its copy. An enqueue failure leaks that first packet.
+ * RETAIL BUG (kept): MULTI-2 -- the leak of `packet` on an enqueue failure (1011, 100a, 100c, 1012). */
 static int32_t multip_message_allocated(uint32_t id, uint32_t tag)
 {
     uint32_t *packet;

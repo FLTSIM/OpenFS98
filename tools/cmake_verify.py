@@ -158,7 +158,7 @@ def tgt(*names):    # a make/CMake target name as a word: "smoke" is not "main-s
 # directory, or runs FLTSIM98.EXE (smoketest.sh:30 refuses to start while any exists).
 SOLO = [
     r'reg_contracts\.sh',                              # runs the game, display :62
-    tgt('main-smoke', 'smoke', 'flights-play', 'main-dialogs', 'sim1native-flights'),   # FLTSIM98.EXE, swap modules in game/
+    tgt('main-smoke', 'smoke', 'flights-play', 'main-dialogs', 'sim1native-flights', 'references'),   # FLTSIM98.EXE, swap modules in game/
     r'hg2d_frames\.sh',                                # display :150+
     tgt('mdl-crash-game', 'gauges-panels'),            # private game flights, display :176/:177
     r'mdl_crash_frames', r'mdl_frames',                # displays :80+, :86+
@@ -194,7 +194,8 @@ def needs_install(cmd):
 
 for c in ('tools/reg_contracts.sh', 'tools/ofs smoke', 'tools/ofs main-smoke', 'tools/ofs gauges-panels N=1000',
           'python3 tools/mdl_crash_frames.py', 'tools/ofs ofstest-run', 'tools/hg2d_frames.sh x 900',
-          'tools/ofs host-breaks', 'tools/ofs panels-breaks', 'tools/ofs acontaindiff-run'):
+          'tools/ofs host-breaks', 'tools/ofs panels-breaks', 'tools/ofs acontaindiff-run',
+          'o=$(mktemp -d -u) && REFERENCES_OUT=$o tools/ofs references CASES="global/STGEORGE flight/PARIS script/controls/PARIS" && test "$(grep -cP \'^case\\t(global/STGEORGE|flight/PARIS|script/controls/PARIS)\\tmatch\\t\' "$o/manifest.txt")" = 3'):
     assert is_solo(c), c
 for c in ('tools/smoketest.sh', 'tools/ofs gauges-panels-run N=1000', 'tools/ofs main-breaks SUITE=menu', 'tools/ofs hostrtdiff-run'):
     assert not is_solo(c), c

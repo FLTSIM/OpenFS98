@@ -67,6 +67,7 @@ static uint8_t draw_distance(uint8_t colour)
 
 void STDCALL __attribute__((used)) draw_point_body(void *surface, uint32_t x, uint32_t y)
 {
+    /* RETAIL BUG (kept): HG2D-6 -- a point is not checked against the surface's bounds. */
     uint8_t *pixel = draw_address(surface, x, y);
     *pixel = draw_colour();
 }
@@ -76,6 +77,7 @@ static __attribute__((used)) uint32_t STDCALL draw_depth_point(void *surface, ui
 {
     uint8_t *pixel, colour;
     HALF(0x29ae) = (uint16_t)depth;
+    /* RETAIL BUG (kept): HG2D-6 -- the depth point has no bounds check on the surface either. */
     pixel = draw_address(surface, x, y);
     colour = draw_depth(draw_colour(), (uint16_t)depth);
     *pixel = colour;
@@ -142,6 +144,9 @@ static void draw_map_pixels(uint8_t *pixel, uint32_t count, const uint8_t *map)
 static void draw_map_span(uint8_t *pixel, uint32_t count)
 {
     uint8_t *map = POINTER(WORD(0x1d88));
+    /* RETAIL BUG (kept): HG2D-6 -- with GLOBAL+0x1298 set even a valid positive span is remapped and then
+     * faults, because retail's helper clobbers EBP (hg2d.md, slice 3; fault-time register context is not
+     * reproduced). */
     draw_map_pixels(pixel, count, map);
     /* Retail's mapper overwrites EBP with its count, ends with EBP zero,
      * then its caller's leave reads address zero. Preserve the fault after
@@ -163,6 +168,9 @@ static void draw_horizontal_pixels(void *surface, uint32_t first, uint32_t last,
             last = (last & 0xffff0000u) | temporary;
         }
     }
+    /* RETAIL BUG (kept): HG2D-6 -- only negative low words of x are clamped (and only that path swaps them): no
+     * right-edge clipping, and reversed non-negative endpoints give a zero or wrapped count, which with the
+     * loop running once before it decrements writes past the row. */
     count = last - first + 1;
     pixel = draw_address(surface, first, y);
     if (GLOBAL_WORD(0x1298)) {
@@ -186,6 +194,7 @@ static void draw_vertical_pixels(void *surface, uint32_t x, uint32_t first, uint
         delta = 0u - delta;
         start = last;
     }
+    /* RETAIL BUG (kept): HG2D-6 -- a vertical span is not clipped to the surface. */
     pixel = draw_address(surface, x, start);
     count = delta + 1;
     while (count--) {
@@ -218,6 +227,7 @@ void STDCALL __attribute__((used)) draw_line_body(void *surface, uint32_t x, uin
         draw_point_body(surface, x, y);
         return;
     }
+    /* RETAIL BUG (kept): HG2D-6 -- the line is not clipped to the surface. */
     row_step = (int32_t)SURFACE_WORD(surface, 0xc);
     if ((int32_t)height > 0)
         row_step = -row_step;
@@ -241,6 +251,7 @@ void STDCALL __attribute__((used)) draw_line_body(void *surface, uint32_t x, uin
 /* +0x3c, 0x2073106e: the four inclusive edges, zero dimensions do nothing. */
 void STDCALL __attribute__((used)) draw_frame_body(void *surface, uint32_t x, uint32_t y, uint32_t width, uint32_t height)
 {
+    /* RETAIL BUG (kept): HG2D-6 -- a zero frame dimension skips drawing and the colour selection entirely. */
     if (!width || !height) return;
     draw_horizontal_body(surface, x, x + width - 1, y);
     draw_horizontal_body(surface, x, x + width - 1, y + height - 1);
@@ -276,6 +287,7 @@ void STDCALL __attribute__((used)) draw_fixed_line_body(void *surface, uint32_t 
         temporary = x; x = end_x; end_x = temporary;
         temporary = y; y = end_y; end_y = temporary;
     }
+    /* RETAIL BUG (kept): HG2D-6 -- the 16.16 line is not clipped to the surface. */
     WORD(0x8e8) = x;
     WORD(0x8ec) = y;
     slope = draw_slope(vertical ? end_x - x : end_y - y, vertical ? height : width);

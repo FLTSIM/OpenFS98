@@ -55,7 +55,9 @@ static void image(void *object, uint32_t id)
 { API(0x25858, void (TC *)(void *, uint32_t, void *, void *, uint32_t, uint16_t))(AT(object, 0x1b44), id, AT(object, 0xff4), AT(object, 0x7e8), U32(object, 0x80), 0xf100); }
 static uint32_t *row(void *object, uint32_t list, uint32_t offset) { return (void *)AT(PTR(PTR(object, 0x10dc), list), offset); }
 /* 0x22407210: counts are retained per list; descriptor and row bases reload
- * before every pointer-to-pointer release. Counts become zero only at the end. */
+ * before every pointer-to-pointer release. Counts become zero only at the end.
+ * RETAIL BUG (kept): WLD-7 -- the signed counts are trusted: a negative count skips the row-field frees but
+ * still frees the arrays, and a large positive count walks past the rows freeing wild pointers. */
 void fs98_world_facilities_release(void *object)
 {
     static const uint8_t s_airport_fields[] = {0, 4, 8, 12, 16, 0x60};
@@ -196,6 +198,8 @@ void fs98_world_facilities_output(void *object, uint32_t resource, uint32_t mode
                             suffix = U32(end, 4);
                             if (suffix <= 4) {
                                 if (suffix == 4) string_assign(&line, "H");
+                                /* RETAIL BUG (kept): WLD-6 -- _itoa writes through the new CString's data pointer, not a buffer
+                                 * (numeric runway branch with a suffix of 0..4). */
                                 API(0x25698, char *(*)(int, char *, int))((int)number, (char *)runway_text, 10);
                                 if (suffix == 4) string_append(&line, (char *)runway_text);
                                 else { string_assign(&line, (char *)runway_text); if (suffix) string_append(&line, suffix == 1 ? "L" : suffix == 2 ? "R" : "C"); }
@@ -232,6 +236,7 @@ void fs98_world_facilities_output(void *object, uint32_t resource, uint32_t mode
                 string_load(&temporary, 0xf97a); index = U32(row(object, 0x30, offset), 0x5c);
                 if (index & 1) string_load(&temporary, 0xf982);
                 else if (index & 4) string_load(&temporary, 0xf985);
+                /* RETAIL BUG (kept): WLD-6 -- the navaid priority test is (flags & 8) && (flags & 0xf982). */
                 else if ((index & 8) && (index & 0xf982)) string_load(&temporary, 0xf984);
                 else if (index & 2) string_load(&temporary, 0xf986);
                 string_copy(&line, &temporary); string_append(&line, "\t"); string_load(&temporary, 0xf97a);
@@ -251,7 +256,9 @@ void fs98_world_facilities_output(void *object, uint32_t resource, uint32_t mode
     cursor(0, 0x7f00); life_end(&life);
 }
 /* 0x224086e0: index 100 aliases +0x1420, the history index itself.
- * Retain its reload after storing the mode through that aliased entry. */
+ * Retain its reload after storing the mode through that aliased entry.
+ * RETAIL BUG (kept): WLD-4 -- the history store below: entry 100 aliases +0x1420, and the resource store
+ * reloads the changed index. */
 void fs98_world_facilities_transition(void *object, uint32_t mode, uint32_t resource, uint32_t back)
 {
     struct facilities_life life;
@@ -269,6 +276,8 @@ void fs98_world_facilities_transition(void *object, uint32_t mode, uint32_t reso
         U32(object,0x10f4) = mode; U32(object,0x10f8) = mode == 10 ? 9 : 50;
         PTR(object,0x10fc) = (void *)(mode == 10 ? s_facilities_regions : s_facilities_countries);
         enable(AT(object,0x1b44),1); image(object,mode == 10 ? 0x6a4 : 0x6c1); invalidate(object); show(AT(object,0x1b44),5);
+        /* RETAIL BUG (kept): WLD-5 -- the new mask bitmap replaces the handle in +0x10e0 without deleting
+         * the earlier one (fs98_world_facilities_close deletes only the current one). */
         U32(object,0x10e0) = API(0x25880,uint32_t (SC *)(uint32_t,uint32_t,uint32_t,int,int,uint32_t))(s_services->module(),mode == 10 ? 0x6c3 : 0x6d6,0,0,0,0x2040);
         show(AT(object,0x1cfc),0); show(AT(object,0x195c),0); show(AT(object,0x1a50),0); show(PTR(object,0x1428),0);
         enable(AT(object,0x1860),mode == 20); call0(0x25590,AT(object,0x1628));
@@ -389,6 +398,7 @@ void fs98_world_facilities_accept(void *object)
         cursor(0,0x7f00);
     }
 }
+/* RETAIL BUG (kept): WLD-5 -- Close deletes only the current mask (+0x10e0); the earlier handles leak. */
 void fs98_world_facilities_close(void *object)
 {
     U32(object,0x1db4)=2;U32(PTR(object,0x10dc),0)=0;

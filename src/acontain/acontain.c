@@ -25,6 +25,9 @@
  *     host's path join writes up to 0x104.  Retail overruns a 0x100 buffer on
  *     a long enough path, into whatever the compiler put next; this does too,
  *     but the neighbour may differ.
+ *     RETAIL BUG (kept): ACN-9 -- the undersized path destinations; marked
+ *     here and at the joins into 0x100 buffers in ac_resolve, ac_enumerate,
+ *     ac_find_title and ac_model_load.
  */
 #include <windows.h>
 #include <stdint.h>
@@ -169,8 +172,8 @@ typedef char (*ac_layout_check)[sizeof(struct ac_image) == AC_IMAGE_SIZE &&
 #define D32(o)      (*(ac_u32 *)(D + (o)))
 #define DSTR(o)     ((const char *)(D + (o)))
 
-#define HOST        ((void *)ac_image.import[0].link)
-#define G           ((uint8_t *)ac_image.import[1].link)
+#define HOST        ((void *)FS98_LINK(ac_image.import[0]))
+#define G           ((uint8_t *)FS98_LINK(ac_image.import[1]))
 #define G16(o)      (*(ac_u16 *)(G + (o)))
 #define G32(o)      (*(ac_u32 *)(G + (o)))
 
@@ -178,7 +181,7 @@ typedef char (*ac_layout_check)[sizeof(struct ac_image) == AC_IMAGE_SIZE &&
 #define P32(p, o)   (*(ac_u32 *)((uint8_t *)(p) + (o)))
 #define PPTR(p, o)  (*(void **)((uint8_t *)(p) + (o)))
 
-#define SLOT(i, off, type) (*(type *)((uint8_t *)ac_image.import[i].link + (off)))
+#define SLOT(i, off, type) (*(type *)((uint8_t *)FS98_LINK(ac_image.import[i]) + (off)))
 
 /* Every prototype read from the callee's `ret N`. */
 typedef uint32_t (FS98_STDCALL *chain_dispatch_fn)(uint32_t list, uint32_t a,
@@ -332,6 +335,7 @@ static void FS98_STDCALL ac_resolve(const char *dir, int32_t variant, int32_t ke
     if (key >= 12)
         return;
     FS98_HOST_LOADSTRING(HOST)(S_AIRCRAFT_CFG, path, 0x100);
+    /* RETAIL BUG (kept): ACN-9 -- the join writes up to 0x104 bytes into this 0x100-byte buffer. */
     FS98_HOST_PATH_JOIN(HOST)(path, NULL, dir, path);
     if (key == 0) {
         if (FS98_HOST_EXISTS(HOST)(path, FS98_HOST_EXT_CFG) != 0)
@@ -357,24 +361,26 @@ static void FS98_STDCALL ac_resolve(const char *dir, int32_t variant, int32_t ke
 
     FS98_HOST_LOADSTRING(HOST)(S_ALIAS, name, 0x10);
     FS98_HOST_LOADSTRING(HOST)(AC_KEY_ALIAS(key), path, 0x100);
+    /* RETAIL BUG (kept): ACN-9 -- the joins below into the 0x100-byte `folder` and `path` write the same way. */
     FS98_HOST_PATH_JOIN(HOST)(folder, NULL, dir, path);
     if (value[0] != 0) {
         FS98_HOST_STRCAT(HOST)(folder, DSTR(0x108));
         FS98_HOST_STRCAT(HOST)(folder, value);
     }
-    FS98_HOST_PATH_JOIN(HOST)(path, NULL, folder, path);
+    FS98_HOST_PATH_JOIN(HOST)(path, NULL, folder, path);     /* ACN-9 */
     FS98_HOST_LOADSTRING(HOST)(S_FLTSIM, section, 0x10);
     value[0] = 0;
     FS98_HOST_PROFILE_STRING(HOST)(section, name, value, 0x100, path, FS98_HOST_EXT_CFG);
     if (value[0] != 0) {
         FS98_HOST_LOADSTRING(HOST)(S_AIRCRAFT_DIR, folder, 0x100);
         FS98_HOST_LOADSTRING(HOST)(AC_KEY_ALIAS(key), path, 0x100);
+        /* RETAIL BUG (kept): ACN-9 -- the alias branch's joins into `folder` and `path` write the same way. */
         FS98_HOST_PATH_JOIN(HOST)(folder, NULL, folder, value);
         FS98_HOST_PATH_JOIN(HOST)(path, NULL, folder, path);
         if (FS98_HOST_EXISTS(HOST)(path, FS98_HOST_EXT_CFG) != 0) {
             FS98_HOST_LOADSTRING(HOST)(AC_KEY_ALIAS(key), path, 0x100);
-            FS98_HOST_PATH_JOIN(HOST)(folder, NULL, value, NULL);
-            FS98_HOST_PATH_JOIN(HOST)(path, NULL, folder, path);
+            FS98_HOST_PATH_JOIN(HOST)(folder, NULL, value, NULL);    /* ACN-9 */
+            FS98_HOST_PATH_JOIN(HOST)(path, NULL, folder, path);     /* ACN-9 */
             if (FS98_HOST_EXISTS(HOST)(path, FS98_HOST_EXT_CFG) != 0)
                 return;
         }
@@ -408,10 +414,11 @@ static int32_t FS98_STDCALL ac_complete(const char *dir, int32_t variant)
  * AIRCRAFT, or with `complete`, each whose variant 0 is complete, until it
  * returns 0.  Returns find-first's -1 or find-close's 0.
  *
- * Retail never sets the entry's type before the first find-next, and the host
- * leaves it alone for a file with an extension it does not know -- so a first
- * entry like that is taken for a folder if the stack happened to hold -2.  It
- * starts at 0 here, which is what retail sees when the stack is clean. */
+ * RETAIL BUG (fixed, not kept): ACN-8 -- retail never sets the entry's type
+ * before the first find-next, and the host leaves it alone for a file with an
+ * extension it does not know -- so a first entry like that is taken for a
+ * folder if the stack happened to hold -2.  It starts at 0 here, which is what
+ * retail sees when the stack is clean. */
 static int32_t FS98_STDCALL ac_enumerate(ac_visit_fn visit, void *ctx, int32_t complete)
 {
     struct fs98_host_find *h;
@@ -428,8 +435,11 @@ static int32_t FS98_STDCALL ac_enumerate(ac_visit_fn visit, void *ctx, int32_t c
         return r;
     if (FS98_HOST_FIND_NEXT(HOST)(h, &e) == 0) {
         do {
+            /* RETAIL BUG (kept): ACN-7 -- the entry is never reset, so a file with an extension the host does
+             * not know keeps the previous entry's type (after a folder it is taken for a folder too). */
             if (e.type != FS98_HOST_TYPE_DIR)
                 continue;
+            /* RETAIL BUG (kept): ACN-9 -- the join writes up to 0x104 bytes into the 0x100-byte `path`. */
             FS98_HOST_PATH_JOIN(HOST)(path, NULL, root, e.name);
             if (complete != 0 && ac_complete(path, 0) == 0)
                 continue;
@@ -467,6 +477,7 @@ static int32_t FS98_STDCALL ac_find_title(const char *dir, void *ctx)
     int32_t variant;
 
     FS98_HOST_LOADSTRING(HOST)(S_AIRCRAFT_CFG, path, 0x100);
+    /* RETAIL BUG (kept): ACN-9 -- the join writes up to 0x104 bytes into this 0x100-byte buffer. */
     FS98_HOST_PATH_JOIN(HOST)(path, NULL, dir, path);
     if (FS98_HOST_EXISTS(HOST)(path, FS98_HOST_EXT_CFG) != 0)
         return 1;
@@ -484,6 +495,8 @@ static int32_t FS98_STDCALL ac_find_title(const char *dir, void *ctx)
             variant++;
             value[0] = 0;
             wsprintfA(section, DSTR(0x10c), fltsim, variant);
+            /* RETAIL BUG (kept): ACN-6 -- the search stops at the first [fltsim.N] with no title, even if later
+             * sections exist. */
             if (FS98_HOST_PROFILE_STRING(HOST)(section, name, value, 0x100, path,
                                                FS98_HOST_EXT_CFG) == 0)
                 return 1;
@@ -530,6 +543,7 @@ static int32_t FS98_STDCALL ac_model_unload(struct ac_aircraft *a);
  * `a` without checking it, so a null one faults.  Always 1. */
 static int32_t FS98_STDCALL ac_release(struct ac_aircraft *a)
 {
+    /* RETAIL BUG (kept): ACN-2 -- `a` is read without a check, so a null record faults. */
     struct ac_record *r = a->rec;
 
     if (r != NULL) {
@@ -581,6 +595,8 @@ static int32_t FS98_STDCALL ac_read_chunk(const char *path, int32_t id, void *ou
             if (got != 4)
                 break;
             if (tag == id) {
+                /* RETAIL BUG (kept): ACN-9 -- `size` is not bounded against `out` (0x104 or 0x400 bytes), on the
+                 * read and on the short-read zeroing below. */
                 FS98_HOST_FILE_READ(HOST)(f, out, size, &got);
                 if (got == size)
                     found = 1;
@@ -613,6 +629,8 @@ static uint16_t FS98_STDCALL ac_colour(const char *name)
         return 0;
     for (i = 0; i < sizeof ac_colour_table / sizeof *ac_colour_table; i++) {
         r = FS98_HOST_STRICMP(HOST)(name, DSTR(ac_colour_table[i].name));
+        /* RETAIL BUG (kept): ACN-1 -- stops only on exactly -1, so a name sorting before an entry by more keeps
+         * searching. */
         if (r == -1)
             return 0;
         if (r == 0)
@@ -675,9 +693,11 @@ static int32_t FS98_STDCALL ac_model_load(struct ac_aircraft *a, int32_t kind)
         return 0;
     name[0] = 0;
     FS98_HOST_PROFILE_STRING(HOST)(DSTR(0x124), key, name, 0x100, cfg, FS98_HOST_EXT_CFG);
+    /* RETAIL BUG (kept): ACN-9 -- the join writes up to 0x104 bytes into the 0x100-byte `dir`. */
     FS98_HOST_PATH_JOIN(HOST)(dir, NULL, dir, name);
     mdl = &r->mdl;
     FS98_HOST_MODULE_LOAD(HOST)(mdl, dir, FS98_HOST_EXT_MDL);
+    /* RETAIL BUG (kept): ACN-4 -- tests the module pointer, not the load's return value. */
     if (*mdl == NULL)
         return 0;
     MDL_ATTACH(*mdl)(a);
@@ -695,6 +715,9 @@ static int32_t FS98_STDCALL ac_model_load(struct ac_aircraft *a, int32_t kind)
         FS98_HOST_ALLOC(HOST)(1, P32(hdr, 0x18), (void **)&a->state, 1);
         P32(a->state, 0) = P32(a->header, 0x18);
         ac_colours(a);
+        /* RETAIL BUG (kept): ACN-9 -- the state is header +0x18 bytes, but +0x64 (written only after a successful
+         * texture query) and +0x60 (a word; it overruns only for a non-zero size below 0x62) are written
+         * regardless. */
         if (ac_query(a, 9, dir, 0x100) != 0)
             PPTR(a->state, 0x64) = ac_intern(AC_POOL_TEXTURES, dir);
         P16(a->state, 0x60) = G16(0x11b6);
@@ -716,6 +739,9 @@ static int32_t FS98_STDCALL ac_model_unload(struct ac_aircraft *a)
     MDL_DETACH(r->mdl)();
     FS98_HOST_MODULE_FREE(HOST)(&r->mdl);
     if (a->state != NULL) {
+        /* RETAIL BUG (kept): ACN-9 -- reads +0x64 whatever the state's size: out of bounds when the allocation
+         * is smaller than 0x68 bytes (a fresh state of at least 0x68 is zeroed, so its pointer is null if the
+         * texture query failed). */
         ac_release_string(AC_POOL_TEXTURES, PPTR(a->state, 0x64));
         FS98_HOST_FREE(HOST)((void **)&a->state);
     }
@@ -755,9 +781,10 @@ static int32_t ac_unload(void);
  * normal visual model, and the panel, and tells CHAIN list 20.  1 if all of
  * that worked.
  *
- * Retail leaves `previous` unset when there was no aircraft, and `sim` unset
- * when the .AIR has no chunk 0x100 or will not open, and goes on to use both
- * as strings.  They start empty here: retail's behaviour on a clean stack. */
+ * RETAIL BUG (fixed, not kept): ACN-8 -- retail leaves `previous` unset when
+ * there was no aircraft, and `sim` unset when the .AIR has no chunk 0x100 or
+ * will not open, and goes on to use both as strings.  They start empty here
+ * (below): retail's behaviour on a clean stack. */
 static int32_t FS98_STDCALL ac_load(const char *title)
 {
     struct ac_aircraft *a = (struct ac_aircraft *)(G + 0x11e0);
@@ -767,7 +794,7 @@ static int32_t FS98_STDCALL ac_load(const char *title)
     char previous[0x104];       /* esp+0x30c */
     char simdir[0x104];         /* esp+0x410 */
 
-    previous[0] = 0;
+    previous[0] = 0;            /* ACN-8's seeds */
     sim[0] = 0;
     if (a != NULL && a->rec != NULL) {
         ac_query(a, 1, previous, 0x104);
@@ -790,9 +817,14 @@ static int32_t FS98_STDCALL ac_load(const char *title)
             FS98_HOST_STRCPY(HOST)(wanted, previous);
         }
     }
+    /* RETAIL BUG (kept): ACN-3 -- neither the query nor the chunk read is checked: a missing .AIR chunk 0x100
+     * leaves `sim` empty (on a clean stack), and the module loaded is SIM\.SIM, which fails as a missing flight
+     * model. */
     ac_query(a, 2, name, 0x100);
     ac_read_chunk(name, 0x100, sim);
     FS98_HOST_LOADSTRING(HOST)(S_SIM_DIR, simdir, 0x104);
+    /* RETAIL BUG (kept): ACN-9 -- a flight-model name filling `sim` has no terminator, so this join reads past
+     * it. */
     FS98_HOST_PATH_JOIN(HOST)(sim, NULL, simdir, sim);
     if (FS98_HOST_MODULE_LOAD(HOST)((void **)(G + 0x11d4), sim, FS98_HOST_EXT_SIM) != 0) {
         UTIL_ALERT(1, 4, 0xf541, wanted, 0, 0, 0, 1);
@@ -813,6 +845,8 @@ static int32_t FS98_STDCALL ac_load(const char *title)
 static int32_t ac_unload(void)
 {
     PANELS_DETACH();
+    /* RETAIL BUG (kept): ACN-5 -- the visual model is unloaded only if a flight model is loaded; without one,
+     * ac_release (+0x24) unloads it, because the record still says it is loaded. */
     if (G32(0x11d4) != 0) {
         ac_model_unload((struct ac_aircraft *)(G + 0x11e0));
         FS98_HOST_MODULE_FREE(HOST)((void **)(G + 0x11d4));
@@ -910,13 +944,13 @@ static void ac_deinit(void)
 
 struct ac_image ac_image = {
     {
-        { FS98_MOD_HOST,   0 },
-        { FS98_MOD_GLOBAL, 0 },
-        { FS98_MOD_CHAIN,  0 },
-        { FS98_MOD_G3D,    0 },
-        { FS98_MOD_PANELS, 0 },
-        { FS98_MOD_UTIL,   0 },
-        { 0, 0 }
+        { FS98_MOD_HOST,   { 0 } },
+        { FS98_MOD_GLOBAL, { 0 } },
+        { FS98_MOD_CHAIN,  { 0 } },
+        { FS98_MOD_G3D,    { 0 } },
+        { FS98_MOD_PANELS, { 0 } },
+        { FS98_MOD_UTIL,   { 0 } },
+        { 0, { 0 } }
     },
     {
         FS98_MOD_ACONTAIN, ac_init, ac_deinit, 0, 0, 0,

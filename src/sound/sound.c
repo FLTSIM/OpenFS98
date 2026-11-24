@@ -419,8 +419,8 @@ typedef char (*snd_layout_check)[sizeof(struct snd_image) == SND_IMAGE_SIZE &&
 #define DF64(o)     (*(snd_f64 *)(D + (o)))
 #define DSTR(o)     ((const char *)(D + (o)))
 
-#define HOST        ((void *)snd_image.import[0].link)
-#define G           ((uint8_t *)snd_image.import[1].link)
+#define HOST        ((void *)FS98_LINK(snd_image.import[0]))
+#define G           ((uint8_t *)FS98_LINK(snd_image.import[1]))
 #define G8(o)       (*(snd_u8  *)(G + (o)))
 #define G16(o)      (*(snd_u16 *)(G + (o)))
 #define GS16(o)     (*(snd_s16 *)(G + (o)))
@@ -430,7 +430,7 @@ typedef char (*snd_layout_check)[sizeof(struct snd_image) == SND_IMAGE_SIZE &&
 #define P32(p, o)   (*(snd_s32 *)((uint8_t *)(p) + (o)))
 #define PF64(p, o)  (*(snd_f64 *)((uint8_t *)(p) + (o)))
 
-#define SLOT(i, off, type) (*(type *)((uint8_t *)snd_image.import[i].link + (off)))
+#define SLOT(i, off, type) (*(type *)((uint8_t *)FS98_LINK(snd_image.import[i]) + (off)))
 
 /* The state this file names.  Retail addresses, so a listing greps straight
  * to them. */
@@ -812,7 +812,7 @@ static void FS98_STDCALL snd_wind(uint32_t a, uint32_t b, uint32_t c)
     int32_t vol;
     (void)a; (void)b; (void)c;
 
-    if (S_SOUNDS->data == NULL)
+    if (FS98_RETAIL_PTR(void *, S_SOUNDS->data) == NULL)
         return;
     rec = snd_find(0x13);
     cur = SIM_VALUE();
@@ -980,7 +980,7 @@ static void snd_list_init(snd_list *l)
     l->elem_size = 0x44;
     l->iterating = 0;
     l->pending = 0;
-    l->data = NULL;
+    l->data = 0;
 }
 
 /* .text+0x980 -- an engine's sub-sounds, from a static list in .data, for
@@ -1021,7 +1021,7 @@ static int32_t snd_build(void)
     S_SOUNDS->elem_size = 0x44;
     S_SOUNDS->iterating = 0;
     S_SOUNDS->pending = 0;
-    S_SOUNDS->data = NULL;
+    S_SOUNDS->data = 0;
     for (t = D + A(0x208d637c); t < D + A(0x208d6c18); t += 0x4c) {
         const char *name = *(const char **)(t - 4);
         snd_tmpl_fn fn = *(snd_tmpl_fn *)t;
@@ -1174,7 +1174,7 @@ static int32_t FS98_STDCALL snd_rec_free(struct snd_rec *rec)
 static int32_t FS98_STDCALL snd_free_cb(void *elem, void *ctx)
 {
     struct snd_rec *rec = elem;
-    if (S_SOUNDS->data == NULL)
+    if (FS98_RETAIL_PTR(void *, S_SOUNDS->data) == NULL)
         return (int32_t)(uintptr_t)elem;
     if (rec->links != NULL) {
         H_LIST_WALK(rec->links, rec->links, snd_free_cb);
@@ -1194,7 +1194,7 @@ static void snd_shutdown(void)
 {
     int32_t k;
     S_CRASHING = 0;
-    if (S_SOUNDS->data != NULL) {
+    if (FS98_RETAIL_PTR(void *, S_SOUNDS->data) != NULL) {
         for (k = 0; k < 5; k++) {
             M_ON(k) = 0;
             if (M_VOICE(k) != 0)
@@ -1210,7 +1210,7 @@ static void snd_shutdown(void)
     S_SOUNDS->capacity = 0;
     S_SOUNDS->iterating = 0;
     S_SOUNDS->pending = 0;
-    S_SOUNDS->data = NULL;
+    S_SOUNDS->data = 0;
     S_SOUNDS->grow = 0x20;
     S_SOUNDS->elem_size = 0x44;
 }

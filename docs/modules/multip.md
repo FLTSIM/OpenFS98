@@ -1183,9 +1183,12 @@ Preserved behavior includes:
   invalid fields retain their individual control error codes. The weather-button
   entry retains the four caller-stack bytes transmitted at the end of message 1014.
 - Player-details refresh uses unsigned elapsed time and a strict greater-than
-  comparison to `period * 1000`, including wrap. Removing a player sends only
+  comparison to `period * 1000`. Removing a player sends only
   after confirmation; early send/free errors leak the allocated strings.
-  Success moves the next refresh time forward by 2000 ms. Capacity edits preserve
+  Success stores `ticks() + 2000` as the refresh marker, a time in the future, so
+  the unsigned elapsed time of the next refresh wraps to a huge value and that
+  refresh is due at once (it then rewrites the marker with the current tick).
+  Capacity edits preserve
   the minimum-two clamp and per-control parse results.
 - Lobby creation and SetConnectionSettings HRESULTs are ignored. Host takes
   priority when both connection bits are set. Connect's second QueryInterface

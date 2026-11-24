@@ -55,6 +55,9 @@ static int32_t FS98_STDCALL multip_details_accept(void *dialog)
     }
     return result;
 }
+/* RETAIL BUG (kept): MULTI-14 -- an early send or free error returns -1 and leaks the allocated strings.
+ * RETAIL BUG (kept): MPD-4 -- the same early return is the remove callback's; MP_DIALOG reaches it through
+ * the block's +0x0c entry (fs98_mpdialog_details_on_remove, src/mpdialog/mpdialog_details.c). */
 static int32_t FS98_STDCALL multip_details_kick(void *dialog)
 {
     char *format, *message;
@@ -74,6 +77,12 @@ static int32_t FS98_STDCALL multip_details_kick(void *dialog)
     M32(0xe8c) = HOST_FN(0x38, multip_ticks_fn)() + 2000;
     return 0;
 }
+/* RETAIL BUG (kept): MULTI-14 -- the elapsed time is unsigned and the test is a strict greater-than
+ * against period * 1000; with the future marker set by multip_details_kick, the subtraction wraps and the refresh is due at once.
+ * RETAIL BUG (kept): MPD-4 -- the marker `ticks() + 2000` set by multip_details_kick lies in the future,
+ * so the unsigned subtraction wraps and the first refresh after a removal is due at once on an ordinary
+ * tick (it then overwrites the marker with the current tick), not only near the
+ * wrap; MP_DIALOG reaches the refresh through the block's +0x10 entry (fs98_mpdialog_details_on_refresh). */
 static int32_t FS98_STDCALL multip_details_refresh(void *dialog)
 {
     void *description = (void *)(uintptr_t)M32(0xe88);

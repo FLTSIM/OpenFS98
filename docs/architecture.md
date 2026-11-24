@@ -66,18 +66,28 @@ ImportTable  the modules it needs, by numeric id
 ### ABI
 
 ```c
-struct fs98_import {           /* array, terminated by an all-zero entry */
-    uint32_t             id;   /* module id wanted */
-    struct fs98_linkage *link; /* zero on disc; written by the host at init */
+struct fs98_import {           /* array, terminated by an all-zero entry; 4-packed */
+    uint32_t  id;              /* module id wanted */
+    fs98_addr link;            /* zero on disc; written by the host at init: a struct fs98_linkage * */
 };
 
 struct fs98_linkage {
-    uint32_t id;               /* this module's id */
-    void   (*init)(void);      /* slot 0 — inferred from position */
-    void   (*deinit)(void);    /* slot 1 — inferred from position */
-    void    *service[];        /* slot 2.. — module specific, called by index */
+    uint32_t  id;              /* this module's id */
+    fs98_code init;            /* slot 0 — inferred from position; void (*)(void) */
+    fs98_code deinit;          /* slot 1 — inferred from position */
+    fs98_code service[];       /* slot 2.. — module specific, called by index */
 };
 ```
+
+The shared headers describe FS98 memory with 32-bit contract types (AD-14), so one layout holds on every build.
+`include/fs98/abi.h` defines `fs98_addr` (a data address, an arena offset), `fs98_code` (a code handle),
+`FS98_WCHAR` and the only `FS98_STDCALL` (stdcall on `win32-retail`, the platform default elsewhere). `linkage.h`,
+`host.h` and `global.h` use no C pointer, `long`, `size_t`, `wchar_t`, bitfield or `long double`; every host service is
+a function type (`fs98_host_<name>_fn`) over `fs98_addr` and `fs98_code`, and each shared struct is 4-packed with
+`_Static_assert`s on its size, alignment and offsets. `tools/check_abi_headers.py` checks the types and compiles the
+headers with mingw i686, `gcc -m32` and `gcc`. On `win32-retail` only, `host.h` also keeps a transitional bridge: a
+`fs98_host_<name>_call` type with the native pointer signature for each service, which the `FS98_HOST_*` macros use so
+existing callers compile unchanged, plus a pointer view of `fs98_import.link` (`FS98_LINK`, an anonymous union member) and `FS98_RETAIL_PTR` for list `data` fields, which keep the code gcc generates for those fields byte-identical. Story 1.8's `fs98_call` removes it module by module.
 
 The host reads each module's id out of `Linkage`, then walks every
 `ImportTable` and patches in a pointer to the corresponding module's

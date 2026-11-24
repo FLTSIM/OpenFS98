@@ -82,7 +82,7 @@ struct chain_data {
 };
 
 struct chain_data chain = {
-    { { FS98_MOD_HOST, 0 }, { FS98_MOD_GLOBAL, 0 } /* imported; never read */, { 0, 0 } },
+    { { FS98_MOD_HOST, { 0 } }, { FS98_MOD_GLOBAL, { 0 } } /* imported; never read */, { 0, { 0 } } },
     { FS98_MOD_CHAIN, chain_init, chain_deinit, 0, 0xe0000000u, 0,
       chain_add, chain_remove, (void *)chain_dispatch },
     0, { 0 }, 0

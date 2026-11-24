@@ -89,7 +89,9 @@ static void priority_string_cleanup(struct fs98_world_unwind *frame)
 /* 0x223fd030: the scratch buffer intentionally survives iterations. Invalid
  * later layers reuse the previous formatted position; an invalid first layer
  * reads uninitialized stack text. Keep CString followed by that text so the
- * guarded fixture can paint this indeterminate local at the constructor call. */
+ * guarded fixture can paint this indeterminate local at the constructor call.
+ * RETAIL BUG (kept): WLD-1 -- the Priority list's twin of the scenery list's populate: `data.text` is loaded
+ * only for layers 10..50 in tens, so an invalid layer reuses the previous position or reads uninitialised text. */
 WORLD_NOINLINE void fs98_world_priority_populate(void *object)
 {
     const struct fs98_world_init_services *init = fs98_world_get_init_services();

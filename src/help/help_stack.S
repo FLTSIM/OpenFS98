@@ -1,4 +1,6 @@
-/* About publishes a local Name buffer through descriptor+8. Retain its
+/* RETAIL BUG (kept): HELP-2 -- the Name buffer is a local of retail's populate frame (the dangling
+ * descriptor+8 pointer): the frame reserved below keeps its address.
+ * About publishes a local Name buffer through descriptor+8. Retain its
  * retail address, entry ESP-0x270, rather than changing the dangling pointer
  * into persistent storage. The C body lives below this reserved local area. */
 .text

@@ -13,5 +13,5 @@ enum fs98_mdl_kind {
  * module wrapper and generated data supply the relocated header/Linkage. */
 void fs98_mdl_normal_update(enum fs98_mdl_kind kind, uint8_t *state,
                            const uint8_t *global, uint8_t *image,
-                           fs98_host_memmove_fn copy);
+                           fs98_host_memmove_call copy);
 #endif

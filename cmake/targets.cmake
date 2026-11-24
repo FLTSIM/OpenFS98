@@ -124,6 +124,13 @@ ofs_target(sim1native-flights
     [==[test "$(grep -c ': match' bin/sim1-native/flights/summary.txt)" -eq 74]==]
   )
 
+# Story 1.6: retail's reference logs (tools/record_references.sh); CASES="flight/PARIS ..." and REFERENCES_OUT for a subset
+ofs_target(references
+  DEPENDS framelock sehfix
+  COMMANDS
+    [==[tools/record_references.sh ${CASES:-}]==]
+  )
+
 ofs_target(sim1-install
   DEPENDS openfs98
   COMMANDS

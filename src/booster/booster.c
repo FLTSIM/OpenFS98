@@ -319,6 +319,8 @@ static void booster_init(void)
     InitializeCriticalSection(B_CS);
     B_MUTEX = CreateMutexA(NULL, FALSE, NULL);
     B_EVENT = CreateEventA(NULL, FALSE, FALSE, NULL);
+    /* RETAIL BUG (kept): BST-1 -- init does not wait for the thread, which has no message queue until its first
+     * GetMessageA: a 0x401 posted before then is lost (see the wait in +0x18). */
     B_THREAD = CreateThread(NULL, 0, booster_thread, NULL, 0,
                             (DWORD *)(D + 0x35c));
     H_LOADSTRING(0xf429, B_ERROR, 0x100);
@@ -388,12 +390,16 @@ static void FS98_STDCALL booster_each_file(const char *dir, int32_t ext,
     if (H_FIND_FIRST(&B_FIND, dir, NULL, ext) == 0 &&
         H_FIND_NEXT(B_FIND, B_ENTRY) == 0) {
         do {
+            /* RETAIL BUG (kept): BST-3 -- the entry's type is the last file's when the host does not know this
+             * file's extension (NOEXT after G001.HAZ is used as NOEXT.HAZ, measured and deleted). */
             if (B_ENTRY->type != -2) {
                 H_JOIN(path, NULL, dir, B_ENTRY->name);
                 each(path, B_ENTRY->type);
             }
         } while (H_FIND_NEXT(B_FIND, B_ENTRY) == 0);
     }
+    /* RETAIL BUG (kept): BST-2 -- closes the handle even when the find failed (a cache without SCENERY\ or
+     * TEXTURE\), and the host's find-close dereferences it unconditionally. */
     H_FIND_CLOSE(&B_FIND);
 }
 
@@ -527,6 +533,8 @@ static void FS98_STDCALL booster_add(uint8_t *rec, uint32_t area)
         ((uint32_t)P16(cur->rec, 0x21c) << 10) > cur->free_lo)
         UTIL_ALERT(2, 0, 0xf421, 0, 0, 0, 0, 1);
     ResetEvent(B_EVENT);
+    /* RETAIL BUG (kept): BST-1 -- if the thread has no queue yet this post is lost, and the wait below is for an
+     * event nobody will set. */
     PostThreadMessageA(B_THREAD_ID, WM_BOOSTER, 0, 0);
     ReleaseMutex(B_MUTEX);
     WaitForSingleObject(B_EVENT, INFINITE);
@@ -707,6 +715,7 @@ static void booster_point(void)
     B_RADIUS += step;
     if (booster_in_range())
         return;
+    /* RETAIL BUG (kept): BST-4 -- a record length under 0x13 wraps this count to 0x7ffffff6..0x7fffffff (out-of-bounds reads). */
     n = ((uint32_t)P16(B_REC, 1) - 0x13) >> 1;
     for (i = n; i-- != 0;) {
         uint16_t word = P16(B_REC, 0x13 + 2 * i);
@@ -775,6 +784,7 @@ static void booster_grid(void)
     south = (((uint32_t)(int32_t)(int8_t)r[8] << 16) | P16(r, 6)) << 1;
     columns = P16(r, 0x13);
     rows_signed = (int16_t)P16(r, 0x15);
+    /* RETAIL BUG (kept): BST-4 -- rows of 0 divide by zero (signed here); columns of 0 below (unsigned). */
     __asm__ ("cltd\n\tidivl %2"
              : "=a" (lat_step)
              : "0" (north - south), "rm" (rows_signed)
@@ -783,6 +793,7 @@ static void booster_grid(void)
     west = (((uint32_t)r[0xe] << 16) | P16(r, 0xc)) << 8;
     east = (((uint32_t)r[0xb] << 16) | P16(r, 9)) << 8;
     B_INDEX = 0;
+    /* RETAIL BUG (kept): BST-4 -- columns of 0 divide by zero (unsigned). */
     __asm__ ("xorl %%edx,%%edx\n\tdivl %2"
              : "=a" (lon_step)
              : "0" (east - west), "rm" ((uint32_t)columns)
@@ -1238,6 +1249,8 @@ static void FS98_STDCALL booster_run_job(struct booster_job *job)
     B_KIND = P16(r, 0x11);
     switch (r[0]) {
     case 1:             /* a list, one file each */
+        /* RETAIL BUG (kept): BST-4 -- a record length under 0x13 wraps this count to 0x7ffffff6..0x7fffffff
+         * and the loop reads far out of bounds (unless cancellation stops the worker first). */
         n = ((uint32_t)P16(r, 1) - 0x13) >> 1;
         B_GRIDDED = 0;
         for (i = n; i-- != 0;) {
@@ -1256,6 +1269,7 @@ static void FS98_STDCALL booster_run_job(struct booster_job *job)
         }
         return;
     case 5:             /* a list, a BGL and its TXR each */
+        /* RETAIL BUG (kept): BST-4 -- a record length under 0x13 wraps this count to 0x7ffffff6..0x7fffffff (out-of-bounds reads). */
         n = ((uint32_t)P16(r, 1) - 0x13) >> 1;
         B_GRIDDED = 0;
         for (i = n; i-- != 0;) {

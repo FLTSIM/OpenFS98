@@ -148,9 +148,7 @@ static const unsigned char fs98_util_data[FS98_UTIL_DATA_SIZE] = {
 };
 _Static_assert(sizeof fs98_util_data == FS98_UTIL_DATA_SIZE, "fs98_util_data is retail's whole .data");
 
-#ifndef FS98_STDCALL
-#  define FS98_STDCALL __attribute__((stdcall))
-#endif
+#include "fs98/abi.h"
 
 /* Retail rounds on the x87, nearest with ties to even.  On x86 the same
  * instructions are used, which settles the question of what "the same" means.
@@ -363,6 +361,8 @@ void FS98_STDCALL fs98_util_metres_to_longitude(const void *in48,
     /* RETAIL BUG (fixed, not kept): UTIL-1 -- retail's first `div` raises #DE when the quotient does not fit in 32
      * bits (a step reaching the latitude circle's circumference) and on a zero divisor; ours guards zero and
      * divides in 64 bits, so it neither faults nor saturates. */
+    /* RETAIL BUG (fixed, not kept): BST-5 -- the same divide seen from BOOSTER, whose reach can be a whole latitude
+     * circle within about a kilometre of the poles: retail's #DE is not reproduced (the duplicate of UTIL-1). */
     if (divisor == 0)                       /* retail would fault; do not */
         divisor = 1;
 

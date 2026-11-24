@@ -81,13 +81,18 @@ static uint32_t STDCALL texture_load(const uint32_t *name, uint32_t selector, ui
 
 static int texture_inside(uint32_t handle)
 {
-    /* Retail checks the range only, including misaligned handles. */
+    /* Retail checks the range only, including misaligned handles.
+     * RETAIL BUG (kept): HG2D-1 -- no record-alignment test; every caller (free, pixels, update, mip build)
+     * accepts an in-range unaligned handle. */
     return handle >= ADDRESS(hg2d_image + POOL) && handle < ADDRESS(hg2d_image + POOL_END);
 }
 
 /* .text+0x5d6e0: hardware texture release, also updates shared accounting. */
 static uint32_t texture_release(uint32_t *texture)
 {
+    /* RETAIL BUG (kept): HG2D-2 -- the release clears record +0x1c, zeroes eight scratch dwords at 0x2079a820,
+     * decrements the per-level count in the table at 0x2079a800, subtracts from 0x207ba9ec, and discards the
+     * COM Release result. */
     uint32_t result = texture[3], index;
     if (result) {
         uint32_t *object = POINTER(result);
@@ -107,6 +112,7 @@ static uint32_t texture_release(uint32_t *texture)
 uint32_t STDCALL __attribute__((used)) texture_destroy_body(uint32_t handle, uint32_t flags, uint32_t entry_eax)
 {
     uint32_t *texture = POINTER(handle), result = entry_eax;
+    /* RETAIL BUG (kept): HG2D-2 -- an out-of-range handle returns the incoming eax, not a status. */
     if (!texture_inside(handle))
         return result;
     result = texture[3];
@@ -114,6 +120,7 @@ uint32_t STDCALL __attribute__((used)) texture_destroy_body(uint32_t handle, uin
         result = texture_release(texture);
     if (texture[0] && !(flags & 1))
         result = HOST_FREE(ADDRESS(texture));
+    /* RETAIL BUG (kept): HG2D-2 -- free clears only the first four dwords of the record. */
     texture[0] = texture[1] = texture[2] = texture[3] = 0;
     return result;
 }
@@ -124,6 +131,7 @@ static __attribute__((used)) uint32_t STDCALL texture_pixels(uint32_t handle)
     uint32_t *texture = POINTER(handle);
     if (!texture_inside(handle))
         return 0;
+    /* RETAIL BUG (kept): HG2D-2 -- the accessed bit is set even for an empty record (texture[0] is 0). */
     texture[1] |= 0x10000;
     return texture[0];
 }
@@ -131,6 +139,7 @@ static __attribute__((used)) uint32_t STDCALL texture_pixels(uint32_t handle)
 uint32_t STDCALL __attribute__((used)) texture_update_body(uint32_t handle, uint32_t flags, uint32_t entry_eax)
 {
     uint32_t *texture = POINTER(handle), result = entry_eax;
+    /* RETAIL BUG (kept): HG2D-2 -- an out-of-range handle returns the incoming eax, not a status. */
     if (!texture_inside(handle))
         return result;
     texture[1] &= ~0x10000u;
@@ -143,7 +152,8 @@ uint32_t STDCALL __attribute__((used)) texture_update_body(uint32_t handle, uint
     return result;
 }
 
-/* The two services preserve incoming eax on their range-check early exit. */
+/* The two services preserve incoming eax on their range-check early exit.
+ * RETAIL BUG (kept): HG2D-2 -- this entry shim is how the incoming eax reaches the early exit. */
 #define EAX_ENTRY(name, body) \
     void name(void); \
     __asm__(".text\n_" #name ":\n\tpushl %eax\n\t" \

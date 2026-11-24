@@ -1,8 +1,8 @@
 # ofs_step(<group> OUTPUTS <files...> COMMANDS <shell lines...>)
 # One build step: its commands run in order, from the source root, under sh. Steps run in the Makefile's order. Re-run when a named input or a header in a named source directory
-# is newer, or a .inc/.h beside a named tools/ source. The World, MULTIP, ALERTS, HELP, VIEWS, FLIGHTS, SIM1, ADVDRV, SOUND, PANELS and CONTROLS table .inc files are plain
-# sources now (committed C, no generator); the other modules' generated .inc files are not tracked as inputs (the generators
-# rewrite them inside the step), only the scripts, sources and headers are; upgrade as Story 1.4 converts each module.
+# is newer, or a .inc/.h beside a named tools/ source. Since Story 1.4 every module's .inc files are committed C beside its
+# sources, so they are inputs too; the generators left read them or orig/ and write only into bin/. A .c that a named
+# source #includes is not globbed (src/fe/fe_library.c; docs/implementation/deferred-work.md).
 string(REPLACE ";" " " OFS_MODULE_FLAGS_TEXT "${OFS_MODULE_FLAGS}")
 
 # The World and SIMSUI unit lists live once, in src/<module>/sources.txt, which the break runners read too

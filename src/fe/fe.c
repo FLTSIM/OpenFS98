@@ -388,7 +388,7 @@ static void FS98_STDCALL fe_band_lon(uint16_t band, uint16_t level, uint32_t out
 
 /* ---- imports ---------------------------------------------------------------------- */
 
-#define G ADDR(fe_image.import[1].link)
+#define G ADDR(FS98_LINK(fe_image.import[1]))
 
 /* Every service is called with 32-bit arguments, pointers among them, so one
  * shape per arity serves; the prototype each was read from is beside its use. */
@@ -401,7 +401,7 @@ typedef uint32_t (FS98_STDCALL *fe_f5)(uint32_t, uint32_t, uint32_t, uint32_t, u
 typedef uint32_t (FS98_STDCALL *fe_f8)(uint32_t, uint32_t, uint32_t, uint32_t,
                                        uint32_t, uint32_t, uint32_t, uint32_t);
 
-#define CALL(i, off, fn) (*(fn *)((uint8_t *)fe_image.import[i].link + (off)))
+#define CALL(i, off, fn) (*(fn *)((uint8_t *)FS98_LINK(fe_image.import[i]) + (off)))
 #define HOST(off, fn)    CALL(0, off, fn)
 
 /* The host.  The "fatal" four show a message box and exit the process when the
@@ -4726,15 +4726,15 @@ static uint32_t FS98_STDCALL fe_library(void);
 
 struct fe_image fe_image = {
     {
-        { FS98_MOD_HOST,    0 },
-        { FS98_MOD_GLOBAL,  0 },
-        { FS98_MOD_BOOSTER, 0 },
-        { FS98_MOD_CHAIN,   0 },
-        { FS98_MOD_FACIL,   0 },
-        { FS98_MOD_G3D,     0 },
-        { FS98_MOD_NUMERIC, 0 },
-        { FS98_MOD_UTIL,    0 },
-        { 0, 0 }
+        { FS98_MOD_HOST,    { 0 } },
+        { FS98_MOD_GLOBAL,  { 0 } },
+        { FS98_MOD_BOOSTER, { 0 } },
+        { FS98_MOD_CHAIN,   { 0 } },
+        { FS98_MOD_FACIL,   { 0 } },
+        { FS98_MOD_G3D,     { 0 } },
+        { FS98_MOD_NUMERIC, { 0 } },
+        { FS98_MOD_UTIL,    { 0 } },
+        { 0, { 0 } }
     },
     {
         FS98_MOD_FE, fe_init, fe_deinit, 0, 0xd0000000u, 0,

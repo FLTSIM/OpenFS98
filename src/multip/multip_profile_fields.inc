@@ -20,6 +20,8 @@ static const struct multip_profile_field s_profile_load_fields[] = {
     { 0x7d4, 0x16c, 0, 7 }, /* MAX_SEGMENT_SIZE */
     { 0x7bc, 0x170, 0, 8 }, /* MAX_SEGMENTS_PER_SEC */
     { 0x7a0, 0x174, 0, 9 }, /* SESSION_LIST_UPDATE_TIME */
+    /* RETAIL BUG (kept, suspected): MULTI-7 -- the reader's destination is +0x174 (SESSION_LIST_UPDATE_TIME's
+     * too) while validation 10 checks +0x178; see multip_profile_validate. */
     { 0x788, 0x174, 0, 10 }, /* PLAYER_LIST_UPDATE_TIME */
     { 0x778, 0xa6c, 0, 0 }, /* CONNECTION_TYPE */
     { 0x764, 0xa70, 0, 0 }, /* PROTOCOL_SELECTION */

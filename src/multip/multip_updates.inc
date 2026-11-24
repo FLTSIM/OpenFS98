@@ -5,6 +5,9 @@ int32_t FS98_STDCALL multip_handle_1000(uint32_t id, const void *packet, uint32_
     (void)size;
     if (player == NULL || A32(player, 0x28) == 0) return -1;
     if (A32(packet, 0xc) > A32(player, 0x50)) {
+        /* RETAIL BUG (kept): MULTI-9 -- receipt: the copy length is the packet's own field minus 0x6c, unchecked
+         * (a field under 0x6c wraps to a huge count; 0xffffffff and 0x80000000 are oversized counts, not
+         * wraps); the only guard is that the field equals the stored size. */
         if (A32(player, 0x2c) == A32(packet, 0x10)) {
             if (HOST_FN(0x21c, multip_copy_fn)((void *)(uintptr_t)(A32(player, 0x28) + 0x6c),
                 (const uint8_t *)packet + 0x14, A32(packet, 0x10) - 0x6c) != 0)

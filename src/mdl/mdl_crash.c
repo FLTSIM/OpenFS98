@@ -54,11 +54,11 @@ static uint32_t rd32(const uint8_t *p) { return rd16(p) | (uint32_t)rd16(p + 2) 
 static void wr16(uint8_t *p, uint32_t v) { p[0] = (uint8_t)v; p[1] = (uint8_t)(v >> 8); }
 static void wr32(uint8_t *p, uint32_t v) { wr16(p, v); wr16(p + 2, v >> 16); }
 
-#define GLOBAL ((uint8_t *)ImportTable[1].link)
-#define HOST   ((uint8_t *)ImportTable[0].link)
-#define CHAIN  ((uint8_t *)ImportTable[2].link)
-#define G3D    ((uint8_t *)ImportTable[3].link)
-#define UTIL   ((uint8_t *)ImportTable[4].link)
+#define GLOBAL ((uint8_t *)FS98_LINK(ImportTable[1]))
+#define HOST   ((uint8_t *)FS98_LINK(ImportTable[0]))
+#define CHAIN  ((uint8_t *)FS98_LINK(ImportTable[2]))
+#define G3D    ((uint8_t *)FS98_LINK(ImportTable[3]))
+#define UTIL   ((uint8_t *)FS98_LINK(ImportTable[4]))
 #define SERVICE(link, off) ((void *)(uintptr_t)rd32((link) + (off)))
 
 #define V(rva) (mdl_image + (rva))

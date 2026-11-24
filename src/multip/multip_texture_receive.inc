@@ -48,7 +48,8 @@ int32_t FS98_STDCALL multip_texture_receive_clear(void *owner)
 }
 
 /* .text+0x55e0 -- even for a non-head match, retail replaces the head with
- * that match's next pointer. Preceding owners are detached without freeing. */
+ * that match's next pointer. Preceding owners are detached without freeing.
+ * RETAIL BUG (kept): MULTI-4 -- the `M32(0xdec) = A32(owner, 8)` below. */
 int32_t FS98_STDCALL multip_texture_receive_remove_owner(uint32_t id)
 {
     void *owner = multip_texture_receive_owner(id);

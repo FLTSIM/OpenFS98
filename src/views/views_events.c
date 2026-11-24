@@ -114,7 +114,9 @@ void FS98_VIEWS_THISCALL fs98_views_sync(void *object)
     }
 }
 
-/* 0x223e3600: synchronization, caller validation, fresh record, error id. */
+/* 0x223e3600: synchronization, caller validation, fresh record, error id.
+ * RETAIL BUG (kept): VIEW-3 -- validation skips every numeric check for any nonzero map flag, while the
+ * Map radio below (fs98_views_select) takes only an exact 1. */
 int32_t FS98_VIEWS_THISCALL fs98_views_validate(void *object, uint32_t unused)
 {
     void *descriptor, *record;
@@ -144,7 +146,9 @@ int32_t FS98_VIEWS_THISCALL fs98_views_validate(void *object, uint32_t unused)
 }
 
 /* 0x223e36f0: report selected error, then dispatch the inherited virtual
- * at +0xe0. A rejected error dialog still receives that virtual call with 0. */
+ * at +0xe0. A rejected error dialog still receives that virtual call with 0.
+ * RETAIL BUG (kept): VIEW-2 -- the result of the virtual at +0xe0 is returned, not the id passed to it.
+ * RETAIL BUG (kept): VIEW-3 -- any nonzero map flag (`D32(record, 4)`) skips the numeric error checks here. */
 int32_t FS98_VIEWS_THISCALL fs98_views_report_error(void *object, int32_t display)
 {
     typedef int32_t (FS98_VIEWS_THISCALL *error_fn)(void *self, uint32_t control);
@@ -303,7 +307,9 @@ static void fs98_views_assign_temporary(struct fs98_views_strings *state, uint32
 
 /* 0x223e2f30: map altitude choices combine two resource lists and a suffix.
  * Invalid unit selectors leave retail's local metric flag uninitialized;
- * the legitimate caller supplies 0, 1 or 2. */
+ * the legitimate caller supplies 0, 1 or 2.
+ * RETAIL BUG (kept): VIEW-1 -- the metric flag for a selector outside 0..2 is the uninitialised word at
+ * entry ESP-16, passed in as `legacy_bits` (captured by fs98_views_map in views_stack.S). */
 FS98_VIEWS_NOINLINE void fs98_views_map_body(void *object, uint32_t legacy_bits)
 {
     struct fs98_views_strings state;
@@ -368,7 +374,9 @@ FS98_VIEWS_NOINLINE void fs98_views_map_body(void *object, uint32_t legacy_bits)
     fs98_views_strings_end(&state);
 }
 
-/* 0x223e22b0: map keeps the 3D mode word, and sets a separate record flag. */
+/* 0x223e22b0: map keeps the 3D mode word, and sets a separate record flag.
+ * RETAIL BUG (kept): VIEW-3 -- only an exact map flag of 1 chooses the Map radio, and the track and spot
+ * modes (3 and 4) get the radio positions 4 and 3 (`radio` below). */
 void FS98_VIEWS_THISCALL fs98_views_select(void *object)
 {
     uint32_t selected, index, mode, radio;
@@ -395,7 +403,9 @@ void FS98_VIEWS_THISCALL fs98_views_select(void *object)
 }
 
 /* 0x223e3830: sscanf's result is deliberately ignored as retail does.
- * Malformed text therefore leaves an uninitialized single-precision value. */
+ * Malformed text therefore leaves an uninitialized single-precision value.
+ * RETAIL BUG (kept): VIEW-1 -- after a failed sscanf the zoom float is the uninitialised word at entry
+ * ESP-16, passed in as `legacy_bits` (captured by fs98_views_zoom in views_stack.S). */
 FS98_VIEWS_NOINLINE void fs98_views_zoom_body(void *object, uint32_t legacy_bits)
 {
     struct fs98_views_strings state;

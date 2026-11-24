@@ -92,7 +92,9 @@ knowing:
   division (`+0x2803`/`+0x2845`) with its step counter in `.data+0xf2`. It is
   transliterated bit by bit.
 
-## Retail bugs, reproduced
+## Retail bugs, mostly reproduced
+
+The two divide faults below are raised by ours, but retail's host repair (the `__try` filter at `0x4119a0`) resumes a faulting `div`/`idiv` with a saturated result, which ours' non-continuable software exception (`wx_fault`) prevents; `weathermdiff` excludes those inputs (WXM-1, WXM-2).
 
 - **An even band faults.** `+0x2567` divides
   `((altitude − base) >> 1) << 32` by `(top − base)` with `idiv`. At
@@ -100,10 +102,10 @@ knowing:
   overflows. On the way up through the layers it is called with
   `altitude == top` every time, so a position above any layer whose band is
   even faults. `+0x24`'s own defaults (layers at 180 m and 500 m) are 320 m
-  apart, so after a reset, anywhere above 500 m crashes retail. A band of zero
+  apart, so after a reset, anywhere above 500 m faults at the `idiv`; in the game the host's repair resumes it with a saturated result. A band of zero
   (two layers at one altitude) is a divide by zero. `weatherm.c` raises the
   same exceptions (`wx_fault`).
-- **A fade width of 1 divides by zero** (`+0x160b` halves it first).
+- **A fade width of 1 divides by zero** (`+0x160b` halves it first, then divides with an unsigned `div`, reached only for an adjusted edge distance of 0 at that width).
 - **The surface wind's blend writes the wrong word.** `+0x1329` offsets both
   sources but not the destination, so its three blends all land on
   `GLOBAL+0xef8`, and the copy after them overwrites that word. The words they
@@ -132,7 +134,7 @@ acquire passes the caller's own Linkage.
 
 It almost certainly is not used. It allocates through host `+0x20c` without
 the zero-fill flag (the fourth argument: host `+0x20c` zeroes the block when it
-is non-zero), and then walks `next` pointers and list heads it never set. It
+is non-zero), and then walks `next` pointers and list heads a fresh area never set (`wx_area_copy` does clear them). It
 only works if `malloc` happens to hand back zeroes. Transliterated anyway, with
 its own quirks:
 

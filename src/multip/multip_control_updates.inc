@@ -92,12 +92,14 @@ static int32_t __attribute__((used, noinline)) multip_state_publish_impl(const u
     global = (uint8_t *)(uintptr_t)M32(IMPORT_GLOBAL);
     if (global[0x838] != 0 || multip_motion_is_blocked()) {
         MD(0xa50) -= *(double *)(void *)(s_multip_rdata + 0x1b8);
+        /* RETAIL BUG (kept): MULTI-6 -- the 1018 padding word comes from the caller's stack. */
         return multip_message_1018_impl(0, *(const uint16_t *)(const void *)(stack + 0x26)) != 0 ? -1 : 0;
     }
     __asm__ volatile("fldl %1\n\tfcompl %2\n\tfnstsw %0" : "=a"(status)
         : "m"(MD(0xa78)), "m"(*(double *)(void *)(s_multip_rdata + 0x1c0)) : "st");
     if (status & 0x4000) return 0;
     MD(0xa50) -= *(double *)(void *)(s_multip_rdata + 0x1b8);
+    /* RETAIL BUG (kept): MULTI-6 -- the 1019 padding word comes from the caller's stack. */
     result = multip_message_1019_impl(0, *(const uint16_t *)(const void *)(stack + 0x3e6));
     if (result != 0) return -1;
     if (M32(0xabc) != 0) {
@@ -110,12 +112,15 @@ static int32_t __attribute__((used, noinline)) multip_state_publish_impl(const u
         while (count != 0) { sum += *model++; count--; }
         if (sum != M8(0xf28)) {
             M8(0xf28) = sum;
+            /* RETAIL BUG (kept): MULTI-6 -- the 1000 tail is the caller's stack. */
             if (multip_message_1000_impl(M32(0xaa0), stack) != 0) return -1;
         }
     }
     return 0;
 }
 #if defined(__i386__)
+/* RETAIL BUG (kept): MULTI-6 -- the x86 capture of the stack the publication's three packets read (the
+ * 1000-byte copy from -0x3f4). */
 __attribute__((naked)) int32_t multip_state_publish(void)
 {
     __asm__ volatile("movl %esp, %eax\n\tsubl $0x100c, %esp\n\tmovl %ebx, (%esp)\n\t"
@@ -161,6 +166,7 @@ __attribute__((naked)) uint32_t FS98_STDCALL multip_control_callback(
         "2: call _multip_message_1008\n\t8: popl %ecx\n\tret $8");
 }
 #else
+/* Not reproduced (MULTI-6): the native publication passes zeroed stack. */
 int32_t multip_control_publish(void) { return multip_state_publish() != 0 ? -1 : 0; }
 uint32_t FS98_STDCALL multip_control_callback(uint32_t code, uint32_t argument)
 {

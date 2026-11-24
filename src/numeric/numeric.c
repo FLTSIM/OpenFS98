@@ -1852,10 +1852,10 @@ int32_t FS98_STDCALL fs98_numeric_parse(const char *text, uint32_t format,
 
 /* The order is retail's: host, GLOBAL, UTIL.  numeric_imports.h indexes it. */
 struct fs98_import ImportTable[] = {
-    { FS98_MOD_HOST,   0 },
-    { FS98_MOD_GLOBAL, 0 },
-    { FS98_MOD_UTIL,   0 },
-    { 0, 0 }
+    { FS98_MOD_HOST,   { 0 } },
+    { FS98_MOD_GLOBAL, { 0 } },
+    { FS98_MOD_UTIL,   { 0 } },
+    { 0, { 0 } }
 };
 
 static const char fs98_numeric_degrees_0[] = "%d* %2.0f'";

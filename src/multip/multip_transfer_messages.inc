@@ -1,7 +1,11 @@
 /* Multipart model/texture packet builders. Retail frees the initial packet
- * only after enqueue succeeds; all earlier failures retain its allocation. */
+ * only after enqueue succeeds; all earlier failures retain its allocation.
+ * RETAIL BUG (kept): MULTI-2 -- that leak, at every `return -1` after the allocation in 101a, 101b,
+ * 101e and 101d (101c is the shared multip_message_allocated). */
 /* .text+0x6e70 -- the second argument is unused. The total comes from the
- * current GLOBAL aircraft, read after the title callback and allocation. */
+ * current GLOBAL aircraft, read after the title callback and allocation.
+ * RETAIL BUG (kept): MULTI-5 -- the unused `total`, the GLOBAL total read after the callbacks
+ * (`A32(packet, 8)` below), and the ignored title and strcpy results. */
 int32_t FS98_STDCALL multip_message_101a(uint32_t id, uint32_t total, uint32_t segments)
 {
     char title[260];
@@ -55,7 +59,8 @@ int32_t FS98_STDCALL multip_message_101e(uint32_t id, uint32_t texture,
     if (multip_send(id, packet, bytes, 1) != 0) return -1;
     return HOST_FN(0x214, multip_free_fn)((void **)&packet) != 0 ? -1 : 0;
 }
-/* .text+0x7530 -- all fifteen name bytes are copied, including past NUL. */
+/* .text+0x7530 -- all fifteen name bytes are copied, including past NUL.
+ * RETAIL BUG (kept): MULTI-5 -- the raw fifteen-byte name copy. */
 int32_t FS98_STDCALL multip_message_101d(uint32_t id, uint32_t texture,
     const void *name, uint32_t size, uint32_t segments)
 {

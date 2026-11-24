@@ -121,9 +121,9 @@ typedef volatile uint32_t __attribute__((may_alias)) dyn_v32;
 #define S_LIB       (D + 0x170)     /* six library ids, 0x14 each */
 #define S_LIB_END   (D + 0x1e8)
 
-#define G           ADDR(dyn_image.import[1].link)
+#define G           ADDR(FS98_LINK(dyn_image.import[1]))
 
-#define SLOT(i, off, type) (*(type *)((uint8_t *)dyn_image.import[i].link + (off)))
+#define SLOT(i, off, type) (*(type *)((uint8_t *)FS98_LINK(dyn_image.import[i]) + (off)))
 
 /* Every prototype read from the callee's `ret N`. */
 typedef int32_t  (FS98_STDCALL *chain_add_fn)(uint32_t list, dyn_cb_fn cb);  /* ret 8 */
@@ -145,9 +145,9 @@ typedef uint32_t (FS98_STDCALL *util_atan2_fn)(int32_t x, int32_t y);     /* ret
 typedef void     (FS98_STDCALL *util_convert_fn)(uint32_t in48, uint32_t pos48,
                                                  uint32_t out48);         /* ret 0xc */
 
-#define HOST_ALLOC      SLOT(0, FS98_HOST_S_ALLOC, fs98_host_alloc_fn)
-#define HOST_REALLOC    SLOT(0, FS98_HOST_S_REALLOC, fs98_host_realloc_fn)
-#define HOST_FREE       SLOT(0, FS98_HOST_S_FREE, fs98_host_free_fn)
+#define HOST_ALLOC      SLOT(0, FS98_HOST_S_ALLOC, fs98_host_alloc_call)
+#define HOST_REALLOC    SLOT(0, FS98_HOST_S_REALLOC, fs98_host_realloc_call)
+#define HOST_FREE       SLOT(0, FS98_HOST_S_FREE, fs98_host_free_call)
 #define CHAIN_ADD       SLOT(2, 0x18, chain_add_fn)
 #define CHAIN_REMOVE    SLOT(2, 0x1c, chain_add_fn)
 #define FE_SEARCH       SLOT(3, 0x54, fe_search_fn)
@@ -2634,14 +2634,14 @@ void dyn_frame_entry(void);
 
 struct dyn_image dyn_image = {
     {
-        { FS98_MOD_HOST,   0 },
-        { FS98_MOD_GLOBAL, 0 },
-        { FS98_MOD_CHAIN,  0 },
-        { FS98_MOD_FE,     0 },
-        { FS98_MOD_G3D,    0 },
-        { FS98_MOD_UTIL,   0 },
-        { FS98_MOD_MULTIP, 0 },
-        { 0, 0 }
+        { FS98_MOD_HOST,   { 0 } },
+        { FS98_MOD_GLOBAL, { 0 } },
+        { FS98_MOD_CHAIN,  { 0 } },
+        { FS98_MOD_FE,     { 0 } },
+        { FS98_MOD_G3D,    { 0 } },
+        { FS98_MOD_UTIL,   { 0 } },
+        { FS98_MOD_MULTIP, { 0 } },
+        { 0, { 0 } }
     },
     {
         FS98_MOD_DYNAMIC, dyn_init, dyn_teardown, 0, 0, 0, (void (*)(void))FS98_KEPT(dyn_frame_entry, dyn_frame), 0,

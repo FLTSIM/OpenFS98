@@ -17,9 +17,9 @@
 
 #include <windows.h>
 
+#include "fs98/global.h"
 #include "fs98/linkage.h"
 
-#define FS98_GLOBAL_SIZE 0x12a8
 #define FS98_GLOBAL_HEAD 0xc            /* the Linkage header: id, init, deinit */
 
 /* Byte-emitting initialiser macros, one typed value each, little endian (slice 12's style).  AT(off) is the

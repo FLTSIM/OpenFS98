@@ -26,19 +26,27 @@ void STDCALL __attribute__((used)) hg2d_device_prepare(uint32_t *texture, uint32
     if (description[26] & 0x4000) {
         result = hg2d_device_surface(256, 256, level, 0x800, &stage);
         WORD(0x5f3c) = result;
+        /* RETAIL BUG (kept): HG2D-8 -- a failed staging allocation leaks the already queried texture_interface. */
         if (result) return;
+        /* RETAIL BUG (kept): HG2D-8 -- the upload's result is not checked: a failed upload still goes on to the
+         * handle lookup below. */
         hg2d_device_upload(stage, texture, level);
         ((call_three)device_method(stage, 0))(stage, ADDRESS(device_guids[5]), ADDRESS(&stage_interface));
         WORD(0x5f3c) = ((call_two)device_method(texture_interface, 5))(texture_interface, stage_interface);
         ((call_one)device_method(stage_interface, 2))(stage_interface);
         ((call_one)device_method(stage, 2))(stage);
-    } else hg2d_device_upload(surface, texture, level);
+    } else
+        /* RETAIL BUG (kept): HG2D-8 -- the direct upload's result is not checked either; a failure still reaches
+         * the handle lookup. */
+        hg2d_device_upload(surface, texture, level);
     if (description[21] == 8 && WORD(0x289f4)) {
         if (texture[6]) {
             key[0] = key[1] = texture[6] == 0x98 ? 0x96 : texture[6] - 1;
             ((call_three)device_method(surface, 29))(surface, 8, ADDRESS(key));
         } else ((call_three)device_method(surface, 29))(surface, 8, 0);
     }
+    /* RETAIL BUG (kept): HG2D-8 -- when execution reaches here the stored HRESULT is this lookup's, whatever
+     * failed before (a failed staging allocation returned early with its own). */
     WORD(0x5f3c) = ((call_three)device_method(texture_interface, 3))(texture_interface, WORD(0x289d0), ADDRESS(texture + 2));
     ((call_one)device_method(texture_interface, 2))(texture_interface);
 }

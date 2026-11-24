@@ -160,7 +160,11 @@ static MPD_NOINLINE uint32_t flow_create_page(uint32_t page, uint32_t parent, vo
     PTR(object, s_flow_descriptor_offsets[page]) = descriptor;
     D32(object, 0x80) = fs98_mpdialog_instance();
     state.live = 0;
+    /* RETAIL BUG (kept): MPD-1 -- the Create result is not checked and nothing is cleaned up: the object stays
+     * in s_flow_objects[page] with a null HWND, and the factory goes on to the other templates. */
     (void)fs98_mpdialog_create_window(object, s_flow_templates[page], 0);
+    /* RETAIL BUG (kept): MPD-2 -- ShowWindow runs unchecked and `D32(object, 0x20)` is read below; after a
+     * failed Create (the Intro first child) the object has been freed and MFC reads +0x3c of freed memory. */
     (void)fs98_mpdialog_show_window(object, SW_HIDE);
     s_flow_objects[page] = object;
     fs98_mpdialog_unwind_leave(&state.frame);
@@ -172,6 +176,8 @@ uint32_t SC fs98_mpdialog_flow_create(uint32_t parent, void *descriptor)
     memset(s_flow_hwnds, 0, sizeof(s_flow_hwnds));
     memset(s_flow_objects, 0, sizeof(s_flow_objects));
     s_flow_current = s_flow_previous = 0;
+    /* RETAIL BUG (kept): MPD-1 -- the result is [intro, choice, host, NULL, browser, NULL] when the connection
+     * page's Create fails: no page is cleaned up and the factory does not fail. */
     s_flow_hwnds[3] = flow_create_page(3, parent, descriptor);
     s_flow_hwnds[2] = flow_create_page(2, parent, descriptor);
     s_flow_hwnds[4] = flow_create_page(4, parent, descriptor);
@@ -521,6 +527,12 @@ int32_t TC fs98_mpdialog_flow_validate_choice(void *object, uint32_t control_id)
     return result && D32(block, 0x28) ? 0x41a : 0;
 }
 
+/* 0x22345a40 (Choice). Branches: a zero field returns 0 without calling the helper or +0xe0; a nonzero field
+ * with descriptor +0x28 clear calls +0xe0(0); with it set the helper's result is saved at +0x8c and the
+ * original field, or 0x419 on a nonzero helper result, goes to +0xe0.
+ * RETAIL BUG (kept): MPD-3 -- the handler returns the result of +0xe0 as it comes back, undefined for the
+ * caller. Existing divergence, intent not established: the `block &&` guard below is not a claim of retail
+ * behaviour for an invalid descriptor (docs/modules/mpdialog.md, "Choice error handling follow-up"). */
 int32_t TC fs98_mpdialog_flow_error_choice(void *object, int32_t field)
 {
     void *block = flow_block(object, 1);
@@ -636,6 +648,10 @@ int32_t TC fs98_mpdialog_flow_validate_host(void *object, uint32_t control_id)
     return 0;
 }
 
+/* 0x22342b60 (Host Options; not Choice). The +0xe0 return is left in EAX at its two exits, 0x22342bad and
+ * 0x22342c2f.
+ * RETAIL BUG (kept): MPD-3 -- the handler returns the result of +0xe0 as it comes back, undefined for the
+ * caller (the final `return` below, reached with and without a status set). */
 int32_t TC fs98_mpdialog_flow_error_host(void *object, int32_t field)
 {
     void *block = flow_block(object, 2);

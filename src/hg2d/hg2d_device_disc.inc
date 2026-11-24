@@ -49,6 +49,8 @@ static void device_disc_position(uint32_t *destination, const uint32_t *source, 
 
 uint32_t STDCALL __attribute__((used)) hg2d_device_disc(uint32_t surface, uint32_t radius, uint32_t x, uint32_t y)
 {
+    /* RETAIL BUG (kept): HG2D-10 -- the fan's specular and UV words (vertices[][5..7]) are never written: stack
+     * bytes go to the device (the harness does not compare them). */
     uint32_t base[4][8], vertices[26][8], phase, octant, index, count = 1, *view;
     float radius_float, centre_x, centre_y;
     radius &= 0xffff; x &= 0xffff; y &= 0xffff;

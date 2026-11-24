@@ -45,10 +45,10 @@ int32_t FS98_STDCALL fs98_util_catalogue(uint32_t, uint32_t, int32_t, int32_t *,
 /* ---- the host services this module reaches for ---------------------------- */
 
 struct fs98_import ImportTable[] = {
-    { FS98_MOD_HOST,   0 },
-    { FS98_MOD_GLOBAL, 0 },
-    { FS98_MOD_UTIL,   0 },
-    { 0, 0 }
+    { FS98_MOD_HOST,   { 0 } },
+    { FS98_MOD_GLOBAL, { 0 } },
+    { FS98_MOD_UTIL,   { 0 } },
+    { 0, { 0 } }
 };
 
 /* ---- a log, written without any C runtime --------------------------------- */
@@ -265,7 +265,7 @@ static void test_host_files(void *host)
 
     /* +0x2c0 _strcmpi */
     {
-        fs98_host_stricmp_fn f = FS98_HOST_STRICMP(host);
+        fs98_host_stricmp_call f = FS98_HOST_STRICMP(host);
         check(f("Flights", "FLIGHTS") == 0, "host stricmp ignores case");
         check(f("abc", "abd") < 0 && f("abd", "abc") > 0, "host stricmp orders");
     }
@@ -289,19 +289,19 @@ static void test_host_files(void *host)
         }
         check(l.count == 6 && l.capacity == 8, "host list grows by its step: 6 in 8");
         check(zeroed, "host list hands out zeroed elements");
-        e = l.data;
+        e = (uint32_t *)(uintptr_t)l.data;
         FS98_HOST_LIST_REMOVE(host)(&l, &e[2 * 2]);
         check(l.count == 5 && e[4] == 3 && e[5] == ~3u && e[8] == 5,
               "host list remove closes the gap");
         FS98_HOST_LIST_REMOVE(host)(&l, &e[4 * 2]);
         check(l.count == 4 && e[6] == 4, "host list remove of the last just shrinks");
-        FS98_HOST_FREE(host)(&l.data);
+        FS98_HOST_FREE(host)((void **)&l.data);
         check(l.data == 0, "host free nulls the list's buffer");
     }
 
     /* +0x184 path join */
     {
-        fs98_host_path_join_fn j = FS98_HOST_PATH_JOIN(host);
+        fs98_host_path_join_call j = FS98_HOST_PATH_JOIN(host);
         r = j(buf, "C", "\\x", "y");
         check(r == 0 && str_eq(buf, "C:\\x\\y"), "host join: a one-letter drive gets a colon");
         r = j(buf, "C:\\", "x\\", "y");
@@ -324,7 +324,7 @@ static void test_host_files(void *host)
 
     /* +0x188 path split */
     {
-        fs98_host_path_split_fn sp = FS98_HOST_PATH_SPLIT(host);
+        fs98_host_path_split_call sp = FS98_HOST_PATH_SPLIT(host);
         id = 12345;
         r = sp("C:\\a\\b.BGL", drive, dir, name, &id);
         check(r == 0 && str_eq(drive, "C:") && str_eq(dir, "\\a\\") && str_eq(name, "b")
@@ -534,9 +534,9 @@ static void test_util_files(void *host, void *util)
 
 static void run_tests(void)
 {
-    void *host   = ImportTable[0].link;
-    void *global = ImportTable[1].link;
-    void *util   = ImportTable[2].link;
+    void *host   = (void *)(uintptr_t)ImportTable[0].link;
+    void *global = (void *)(uintptr_t)ImportTable[1].link;
+    void *util   = (void *)(uintptr_t)ImportTable[2].link;
 
     emit("OpenFS98 in-process test module\r\n");
 
@@ -559,7 +559,7 @@ static void run_tests(void)
 
     /* host +0x2b8: the null-safe strlen UTIL measures strings through */
     {
-        fs98_host_strlen_fn hstrlen = FS98_HOST_STRLEN(host);
+        fs98_host_strlen_call hstrlen = FS98_HOST_STRLEN(host);
         check(hstrlen("") == 0,        "host strlen of an empty string is 0");
         check(hstrlen("abcd") == 4,    "host strlen of \"abcd\" is 4");
         check(hstrlen(0) == 0,         "host strlen tolerates a null pointer");
@@ -567,7 +567,7 @@ static void run_tests(void)
 
     /* host +0x38: the millisecond clock */
     {
-        fs98_host_ticks_fn ticks = FS98_HOST_TICKS(host);
+        fs98_host_ticks_call ticks = FS98_HOST_TICKS(host);
         uint32_t a = ticks(), bq = ticks();
         emit("  ticks "); emit_u(a); emit(" then "); emit_u(bq); emit("\r\n");
         check(bq >= a, "host clock does not run backwards");

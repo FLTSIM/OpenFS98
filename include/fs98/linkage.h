@@ -17,7 +17,9 @@
 #ifndef FS98_LINKAGE_H
 #define FS98_LINKAGE_H
 
+#include <stddef.h>
 #include <stdint.h>
+#include "fs98/abi.h"
 
 /* Module ids, from the Linkage structs of the retail modules.
  * Id 1 is the host (FLTSIM98.EXE) itself; id 19 is imported by PANELS and is
@@ -54,13 +56,21 @@ enum fs98_module_id {
     FS98_MOD_SOUND     = 39
 };
 
-struct fs98_linkage;
-
 /* One ImportTable entry.  `link` is zero on disk and is written by the host
  * during module init.  The array is terminated by an all-zero entry. */
+#pragma pack(push, 4)
 struct fs98_import {
-    uint32_t             id;
-    struct fs98_linkage *link;
+    uint32_t  id;
+#if defined(_WIN32) && defined(__i386__)
+    /* Retail-only, transitional (the Story 1.7 bridge, see abi.h): the same word as a native pointer, so the
+     * code gcc generates for it stays byte-identical to the pointer field this replaced. */
+    union {
+        fs98_addr link;         /* struct fs98_linkage * */
+        struct fs98_linkage *link_ptr;
+    };
+#else
+    fs98_addr link;             /* struct fs98_linkage * */
+#endif
 };
 
 /* The service table a module publishes.
@@ -76,10 +86,25 @@ struct fs98_import {
  * byte .data block and other modules address shared state as byte offsets from
  * the Linkage pointer rather than calling through it. */
 struct fs98_linkage {
-    uint32_t id;
-    void   (*init)(void);      /* slot 0 -- inferred */
-    void   (*deinit)(void);    /* slot 1 -- inferred */
-    void    *service[];        /* slot 2.. -- module specific */
+    uint32_t  id;
+    fs98_code init;            /* slot 0 -- inferred; void (*)(void) */
+    fs98_code deinit;          /* slot 1 -- inferred; void (*)(void) */
+    fs98_code service[];       /* slot 2.. -- module specific, each a code handle */
 };
+#pragma pack(pop)
+
+#if defined(_WIN32) && defined(__i386__)
+/* Retail-only, transitional (see abi.h): an import's `link` as the Linkage pointer it holds. */
+#  define FS98_LINK(import) ((import).link_ptr)
+#endif
+
+/* Measured on win32-retail before the conversion (Story 1.7). */
+_Static_assert(sizeof(struct fs98_import) == 8 && _Alignof(struct fs98_import) == 4, "fs98_import");
+_Static_assert(offsetof(struct fs98_import, id) == 0 && offsetof(struct fs98_import, link) == 4, "fs98_import");
+_Static_assert(sizeof(struct fs98_linkage) == 12 && _Alignof(struct fs98_linkage) == 4, "fs98_linkage header");
+_Static_assert(offsetof(struct fs98_linkage, id) == 0 && offsetof(struct fs98_linkage, init) == 4 &&
+               offsetof(struct fs98_linkage, deinit) == 8, "fs98_linkage");
+_Static_assert(offsetof(struct fs98_linkage, service) == 12, "fs98_linkage service tail");
+_Static_assert(sizeof(((struct fs98_linkage *)0)->service[0]) == 4, "fs98_linkage service stride");
 
 #endif /* FS98_LINKAGE_H */

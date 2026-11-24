@@ -2389,7 +2389,8 @@ AT(0x160e8) U16(0x0048), U16(0x0000), U16(0x0026), U16(0x1ec8), U16(0x0000), U16
            U32(0x00000000), U16(0x004e), U16(0x0038), U16(0x0386), U16(0x0030), U16(0x7fff), U16(0x0039), U16(0x003a), U16(0x000e), U16(0x0001), U16(0x001a), U16(0x00cd), U16(0x0004), U16(0xffe0), U16(0x0000),  /* -> +0x15bb0, installed from g3d_pointers.inc */
            U16(0xfd06), U16(0x0020), U16(0x0000), U16(0xfd06), U16(0xffe0), U16(0x0000), U16(0xfe06), U16(0x0020), U16(0x0000), U16(0xfe06), U16(0x0051), U16(0xf003), U16(0x000f), U16(0x00cd), U16(0x0010), U16(0x00d0),
            U16(0x000f), U16(0x00ce), U16(0x0010), U16(0x00cf), U16(0x0052), U16(0xf009), U16(0x0051), U16(0xf009), U16(0x0039), U16(0x0012),
-/* +0x16180..+0x16e12  the second built-in program, the sky and stars, one instruction a line (a long one goes on over W() lines): OP(opcode), then W(word) per operand word, or U32 for an embedded code address (opcode 0x8c's operand, which stays a raw address).  Lengths follow the opcode table's rule; operand meanings are not yet known */
+/* RETAIL BUG (kept): G3D-3 -- opcode 0x8c's operands below (and the sky's U32(0x207e9d47) in MAIN's code) are raw absolute code addresses, as in retail; the image stores 0x207e9d47 but main_install() rebinds MAIN's operand cells to native functions.
+   +0x16180..+0x16e12  the second built-in program, the sky and stars, one instruction a line (a long one goes on over W() lines): OP(opcode), then W(word) per operand word, or U32 for an embedded code address (opcode 0x8c's operand, which stays a raw address).  Lengths follow the opcode table's rule; operand meanings are not yet known */
            OP(0x0f), W(0x0002),
            OP(0x8c), U32(0x206f28b7),
            OP(0x23), W(0x00c4),

@@ -5,7 +5,9 @@ typedef int32_t (FS98_STDCALL *multip_provider_enumerate_fn)(
     multip_provider_callback_fn, void *);
 
 /* .text+0x42a0 -- retail never advances the record pointer. Only the first
- * name is freed; the remaining names leak when the list count is cleared. */
+ * name is freed; the remaining names leak when the list count is cleared.
+ * RETAIL BUG (kept): MULTI-11 -- the record pointer is never advanced, and a failed free returns -1 before
+ * the list count is cleared. */
 int32_t multip_provider_clear(void)
 {
     uint32_t count = M32(0x348);
@@ -41,7 +43,9 @@ static int32_t FS98_STDCALL multip_provider_callback(const GUID *provider,
 }
 
 /* .text+0x41f0 -- a cleanup failure is consumed as success, while any
- * nonzero DirectPlayEnumerateA result becomes -1. */
+ * nonzero DirectPlayEnumerateA result becomes -1.
+ * RETAIL BUG (kept): MULTI-11 -- the cleanup failure is consumed as success without calling
+ * DirectPlayEnumerateA. */
 int32_t multip_provider_enumerate(void)
 {
     if (multip_provider_clear() != 0)

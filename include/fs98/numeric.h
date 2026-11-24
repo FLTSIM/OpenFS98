@@ -3,10 +3,7 @@
 
 #include <stdint.h>
 #include <fs98/linkage.h>
-
-#ifndef FS98_STDCALL
-#  define FS98_STDCALL __attribute__((stdcall))
-#endif
+#include "fs98/abi.h"
 
 char *FS98_STDCALL fs98_numeric_format(const void *value, uint32_t format,
                                        char *output);

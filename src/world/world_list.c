@@ -23,7 +23,9 @@ void fs98_world_list_collect(void *object)
     int selection = s_services->events->send(U32(object, 0x1778), 0x188, 0, 0);
     U32(PTR(object, 0x10dc), 0x28) = (uint32_t)selection;
 }
-/* 0x223fac70. Compute protection once, retaining it across both enables. */
+/* 0x223fac70. Compute protection once, retaining it across both enables.
+ * RETAIL BUG (kept): WLD-3 -- when removing the last selected item leaves LB_GETCURSEL at -1, the selection
+ * stored by fs98_world_list_collect is used unchecked: `<< 6` indexes the row table with -1/out of range. */
 void fs98_world_list_selection(void *object)
 {
     void *descriptor;
@@ -44,7 +46,10 @@ static void list_string_cleanup(struct fs98_world_unwind *frame)
 }
 /* 0x223fa8a0. CString +0, saved selection +4, scratch +8 match retail's
  * adjacent locals. Invalid layers retain scratch, including an indeterminate
- * first row. Fixtures paint that owned local through the CString constructor. */
+ * first row. Fixtures paint that owned local through the CString constructor.
+ * RETAIL BUG (kept): WLD-1 -- the type text `data.text` is loaded only for layers 10..50 in tens; an invalid
+ * later layer reuses the previous row's formatted position, an invalid first layer reads uninitialised
+ * scratch (the layer test below). */
 WORLD_NOINLINE void fs98_world_list_populate(void *object)
 {
     const struct fs98_world_services *ui = s_services->events;
@@ -125,7 +130,9 @@ void fs98_world_list_delete(void *object)
     list_callback(object, 0x10);
     fs98_world_list_populate(object);
 }
-/* 0x223fad10 discards LB_GETCURSEL and tests the descriptor's old selection. */
+/* 0x223fad10 discards LB_GETCURSEL and tests the descriptor's old selection.
+ * RETAIL BUG (kept): WLD-3 -- the fresh selection is discarded and the protection is read from the row at
+ * the stale descriptor index (+0x28), which a change since the last collect can leave out of range. */
 void fs98_world_list_double_click(void *object)
 {
     void *descriptor;

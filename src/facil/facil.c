@@ -242,7 +242,7 @@ typedef char (*facil_layout_check)[
 #define D                    ((uint8_t *)&facil_image)
 #define D32(offset)          (*(facil_u32 *)(D + (offset)))
 #define DPTR(offset, type)   (*(type **)(D + (offset)))
-#define IMPORT(index)        (facil_image.import[(index)].link)
+#define IMPORT(index)        (FS98_LINK(facil_image.import[(index)]))
 #define HOST                 IMPORT(0)
 #define FE                   IMPORT(3)
 #define UTIL                 IMPORT(6)
@@ -369,14 +369,14 @@ static void facil_tree_init(struct facil_tree *tree, uint32_t node_size)
     tree->order.elem_size = 4;
     tree->order.iterating = 0;
     tree->order.pending = 0;
-    tree->order.data = NULL;
+    tree->order.data = 0;
     tree->nodes.count = 0;
     tree->nodes.capacity = 0;
     tree->nodes.grow = 0x20;
     tree->nodes.elem_size = (int32_t)node_size;
     tree->nodes.iterating = 0;
     tree->nodes.pending = 0;
-    tree->nodes.data = NULL;
+    tree->nodes.data = 0;
 }
 
 static void facil_clear_active(void)
@@ -393,28 +393,28 @@ static int32_t facil_tree_free(struct facil_tree *tree, uint32_t depth)
     uint32_t index;
 
     for (index = (uint32_t)tree->order.count; index != 0; index--) {
-        uint32_t offset = ((uint32_t *)tree->order.data)[index - 1];
+        uint32_t offset = ((uint32_t *)FS98_RETAIL_PTR(void *, tree->order.data))[index - 1];
         struct facil_node *node =
-            (struct facil_node *)((uint8_t *)tree->nodes.data + offset);
+            (struct facil_node *)((uint8_t *)FS98_RETAIL_PTR(void *, tree->nodes.data) + offset);
         void *source_data;
 
         if (depth != 0 &&
             facil_tree_free(&node->children, depth - 1) != 0)
             return -1;
-        source_data = node->sources.data;
+        source_data = FS98_RETAIL_PTR(void *, node->sources.data);
         node->sources.count = 0;
         node->sources.capacity = 0;
         node->sources.grow = 0x20;
         node->sources.elem_size = 0x14;
         node->sources.iterating = 0;
         node->sources.pending = 0;
-        node->sources.data = NULL;
+        node->sources.data = 0;
         if (FS98_HOST_FREE(HOST)(&source_data) != 0)
             return -1;
     }
     {
-        void *nodes = tree->nodes.data;
-        void *order = tree->order.data;
+        void *nodes = FS98_RETAIL_PTR(void *, tree->nodes.data);
+        void *order = FS98_RETAIL_PTR(void *, tree->order.data);
 
         facil_tree_init(tree, depth == 0 ? 0x24 : 0x60);
         if (FS98_HOST_FREE(HOST)(&nodes) != 0)
@@ -450,7 +450,7 @@ static int facil_source_exists(struct fs98_host_list *sources,
 
     for (index = (uint32_t)sources->count; index != 0; index--) {
         struct facil_source *source =
-            (struct facil_source *)sources->data + index - 1;
+            (struct facil_source *)FS98_RETAIL_PTR(void *, sources->data) + index - 1;
         if (source->value == value &&
             FS98_HOST_MEMCMP(HOST)(id, source->id, 16) == 0)
             return 1;
@@ -469,9 +469,9 @@ static void *facil_tree_add(struct facil_tree *tree, uint32_t node_size,
 
     while (low <= high) {
         int32_t middle = (low + high) / 2;
-        uint32_t offset = ((uint32_t *)tree->order.data)[middle];
+        uint32_t offset = ((uint32_t *)FS98_RETAIL_PTR(void *, tree->order.data))[middle];
         struct facil_leaf *candidate =
-            (struct facil_leaf *)((uint8_t *)tree->nodes.data + offset);
+            (struct facil_leaf *)((uint8_t *)FS98_RETAIL_PTR(void *, tree->nodes.data) + offset);
         int32_t comparison = FS98_HOST_STRCMP(HOST)(name, candidate->name);
 
         if (comparison == 0) {
@@ -504,7 +504,7 @@ static void *facil_tree_add(struct facil_tree *tree, uint32_t node_size,
     node->sources.elem_size = 0x14;
     node->sources.iterating = 0;
     node->sources.pending = 0;
-    node->sources.data = NULL;
+    node->sources.data = 0;
     {
         struct facil_source *source =
             (struct facil_source *)FS98_HOST_LIST_ADD(HOST)(&node->sources);
@@ -514,7 +514,7 @@ static void *facil_tree_add(struct facil_tree *tree, uint32_t node_size,
         facil_source_copy(source, id, value);
         order = (uint32_t *)FS98_HOST_LIST_ADD(HOST)(&tree->order);
         (void)order;
-        order = (uint32_t *)tree->order.data;
+        order = (uint32_t *)FS98_RETAIL_PTR(void *, tree->order.data);
         for (index = tree->order.count - 1; index > insertion; index--)
             order[index] = order[index - 1];
         order[insertion] =
@@ -750,9 +750,9 @@ static int32_t facil_write_tree(struct fs98_host_file *file,
     uint32_t index;
 
     for (index = 0; index < (uint32_t)tree->order.count; index++) {
-        uint32_t offset = ((uint32_t *)tree->order.data)[index];
+        uint32_t offset = ((uint32_t *)FS98_RETAIL_PTR(void *, tree->order.data))[index];
         struct facil_node *node =
-            (struct facil_node *)((uint8_t *)tree->nodes.data + offset);
+            (struct facil_node *)((uint8_t *)FS98_RETAIL_PTR(void *, tree->nodes.data) + offset);
         uint32_t name_size;
         uint32_t source_size;
         uint32_t total_size;
@@ -769,7 +769,7 @@ static int32_t facil_write_tree(struct fs98_host_file *file,
         source_size = (uint32_t)node->sources.count * 0x14;
         FS98_HOST_MEMMOVE(HOST)(
             (uint8_t *)RECORD_BUFFER->name_and_sources + name_size,
-            node->sources.data, source_size);
+            FS98_RETAIL_PTR(void *, node->sources.data), source_size);
         RECORD_BUFFER->payload_size = name_size + source_size + 0x0c;
         total_size = name_size + source_size + 0x20;
         if (facil_write_node(file, RECORD_BUFFER, total_size, level, node) != 0)
@@ -780,7 +780,7 @@ static int32_t facil_write_tree(struct fs98_host_file *file,
             uint32_t section_size = 0;
             struct facil_disk_node fallback;
             struct facil_source *source =
-                (struct facil_source *)node->sources.data;
+                (struct facil_source *)FS98_RETAIL_PTR(void *, node->sources.data);
             const char *fallback_name = EMPTY_NAME;
 
             if (facil_or_field(file, node_offset + 0x14, 2) != 0)
@@ -800,7 +800,7 @@ static int32_t facil_write_tree(struct fs98_host_file *file,
             FS98_HOST_STRCPY(HOST)(fallback.name_and_sources, fallback_name);
             FS98_HOST_MEMMOVE(HOST)(
                 (uint8_t *)fallback.name_and_sources + fallback.name_size,
-                node->sources.data, source_size);
+                FS98_RETAIL_PTR(void *, node->sources.data), source_size);
             fallback.payload_size = fallback.name_size + source_size + 0x0c;
             total_size = fallback.name_size + source_size + 0x20;
             if (facil_write_node(file, &fallback, total_size, level, NULL) != 0)
@@ -913,7 +913,7 @@ static int32_t facil_build_index(void)
     blocks.elem_size = 4;
     blocks.iterating = 0;
     blocks.pending = 0;
-    blocks.data = NULL;
+    blocks.data = 0;
     if (facil_reset_tree() != 0 || !FE_LIST(&ids, &count))
         result = -1;
     if (result == 0) {
@@ -938,9 +938,9 @@ static int32_t facil_build_index(void)
         result = -1;
     for (index = (uint32_t)blocks.count; index != 0; index--)
         if (FS98_HOST_FREE(HOST)(
-                (void **)((uint8_t *)blocks.data + (index - 1) * 4)) != 0)
+                (void **)((uint8_t *)FS98_RETAIL_PTR(void *, blocks.data) + (index - 1) * 4)) != 0)
             result = -1;
-    if (blocks.data != NULL && FS98_HOST_FREE(HOST)(&blocks.data) != 0)
+    if (blocks.data != 0 && FS98_HOST_FREE(HOST)((void **)&blocks.data) != 0)
         result = -1;
     if (facil_reset_tree() != 0)
         result = -1;
@@ -1528,7 +1528,7 @@ static int32_t facil_named_filters(const struct facil_filter_list *source,
                                    const struct facil_filter *unused,
                                    struct facil_filter_list *list)
 {
-    struct fs98_host_list named = { 0, 0, 0x20, 8, 0, 0, NULL };
+    struct fs98_host_list named = { 0, 0, 0x20, 8, 0, 0, 0 };
     uint32_t index;
     void *slot;
 
@@ -1546,7 +1546,7 @@ static int32_t facil_named_filters(const struct facil_filter_list *source,
     }
     if (list->entries != NULL)
         FS98_HOST_FREE(HOST)((void **)&list->entries);
-    list->entries = (struct facil_filter *)named.data;
+    list->entries = (struct facil_filter *)FS98_RETAIL_PTR(void *, named.data);
     list->count = (uint32_t)named.count;
     return 0;
 }
@@ -1634,7 +1634,7 @@ static int32_t facil_collect(uint32_t start,
                              const struct facil_filter_list *filters,
                              struct facil_results *out)
 {
-    struct fs98_host_list results = { 0, 0, 0x20, 0xc, 0, 0, NULL };
+    struct fs98_host_list results = { 0, 0, 0x20, 0xc, 0, 0, 0 };
     struct facil_result record;
     uint32_t written = 0;
     uint32_t index;
@@ -1653,7 +1653,7 @@ static int32_t facil_collect(uint32_t start,
         written++;
     }
     out->count = written;
-    out->records = (struct facil_result *)results.data;
+    out->records = (struct facil_result *)FS98_RETAIL_PTR(void *, results.data);
     return 0;
 }
 
@@ -2136,7 +2136,7 @@ static int32_t facil_runway_end(uint8_t *end_row, uint8_t *end, uint8_t *runway)
  * 1 and 2 swapped, and the number less 18, wrapped into 1..36. */
 static int32_t facil_row_runways(uint8_t *row, const struct facil_source *source)
 {
-    struct fs98_host_list ends = { 0, 0, 0x20, 0x2c, 0, 0, NULL };
+    struct fs98_host_list ends = { 0, 0, 0x20, 0x2c, 0, 0, 0 };
     uint8_t *block;
     uint32_t size;
     uint32_t offset = 0x10;
@@ -2317,7 +2317,7 @@ static int32_t FS98_STDCALL facil_navaid_compare(const void *left,
 /* .text+0x10e0 -- block bit 0: airports in each selected place. */
 static int32_t facil_list_airports(uint8_t *block)
 {
-    struct fs98_host_list rows = { 0, 0, 0x20, 0x64, 0, 0, NULL };
+    struct fs98_host_list rows = { 0, 0, 0x20, 0x64, 0, 0, 0 };
     struct facil_results found;
     uint32_t index;
     uint32_t record;
@@ -2341,7 +2341,7 @@ static int32_t facil_list_airports(uint8_t *block)
     P32(block, 0x28) = U32(rows.data);
     if (rows.count == 0)
         return HOST_FREE(block + 0x28) != 0 ? -1 : 0;
-    FS98_HOST_QSORT(HOST)(rows.data, (uint32_t)rows.count, 0x64,
+    FS98_HOST_QSORT(HOST)(FS98_RETAIL_PTR(void *, rows.data), (uint32_t)rows.count, 0x64,
                           facil_airport_compare);
     return 0;
 }
@@ -2350,7 +2350,7 @@ static int32_t facil_list_airports(uint8_t *block)
  * NDB) in each selected place. */
 static int32_t facil_list_navaids(uint8_t *block)
 {
-    struct fs98_host_list rows = { 0, 0, 0x20, 0x60, 0, 0, NULL };
+    struct fs98_host_list rows = { 0, 0, 0x20, 0x60, 0, 0, 0 };
     struct facil_results found;
     uint32_t index;
     uint32_t kind;
@@ -2379,7 +2379,7 @@ static int32_t facil_list_navaids(uint8_t *block)
     P32(block, 0x30) = U32(rows.data);
     if (rows.count == 0)
         return HOST_FREE(block + 0x30) != 0 ? -1 : 0;
-    FS98_HOST_QSORT(HOST)(rows.data, (uint32_t)rows.count, 0x60,
+    FS98_HOST_QSORT(HOST)(FS98_RETAIL_PTR(void *, rows.data), (uint32_t)rows.count, 0x60,
                           facil_navaid_compare);
     return 0;
 }
@@ -2763,7 +2763,7 @@ static int32_t facil_unpack_navaid(uint8_t *navaid, const void *item)
 /* .text+0x3480 -- FE's area listing into +0xac. */
 static int32_t facil_list_areas(uint8_t *block)
 {
-    struct fs98_host_list list = { 0, 0, 0x20, 0xc, 0, 0, NULL };
+    struct fs98_host_list list = { 0, 0, 0x20, 0xc, 0, 0, 0 };
     void *item = NULL;
     void *state = NULL;
     struct facil_result *record;
@@ -2790,7 +2790,7 @@ static int32_t facil_list_areas(uint8_t *block)
 /* .text+0x35e0 -- mode 0x1002: FE's navaids around the selected area. */
 static int32_t facil_list_navaids_at(uint8_t *block)
 {
-    struct fs98_host_list list = { 0, 0, 0x20, 0xc, 0, 0, NULL };
+    struct fs98_host_list list = { 0, 0, 0x20, 0xc, 0, 0, 0 };
     void *item = NULL;
     void *state = NULL;
     struct facil_result *record;
@@ -2823,7 +2823,7 @@ static int32_t facil_list_navaids_at(uint8_t *block)
  * each source's 0x10005 section, named by number and L/R/C. */
 static int32_t facil_list_runways(uint8_t *block)
 {
-    struct fs98_host_list list = { 0, 0, 0x20, 0xc, 0, 0, NULL };
+    struct fs98_host_list list = { 0, 0, 0x20, 0xc, 0, 0, 0 };
     uint8_t *record;
     uint32_t record_size;
     uint8_t *section;
@@ -3251,14 +3251,14 @@ static facil_fn facil_text_target(uint32_t rva)
 
 struct facil_image facil_image = {
     {
-        { FS98_MOD_HOST,    NULL },
-        { FS98_MOD_GLOBAL,  NULL },
-        { FS98_MOD_CHAIN,   NULL },
-        { FS98_MOD_FE,      NULL },
-        { FS98_MOD_MAIN,    NULL },
-        { FS98_MOD_NUMERIC, NULL },
-        { FS98_MOD_UTIL,    NULL },
-        { 0,                NULL }
+        { FS98_MOD_HOST,    { 0 } },
+        { FS98_MOD_GLOBAL,  { 0 } },
+        { FS98_MOD_CHAIN,   { 0 } },
+        { FS98_MOD_FE,      { 0 } },
+        { FS98_MOD_MAIN,    { 0 } },
+        { FS98_MOD_NUMERIC, { 0 } },
+        { FS98_MOD_UTIL,    { 0 } },
+        { 0,                { 0 } }
     },
     { FS98_MOD_FACIL, NULL, NULL, 0, 0, NULL, { NULL } },
     {

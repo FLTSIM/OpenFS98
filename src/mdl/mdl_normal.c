@@ -53,7 +53,7 @@ static uint16_t quarter(uint16_t value)
 
 void fs98_mdl_normal_update(enum fs98_mdl_kind kind, uint8_t *state,
                            const uint8_t *global, uint8_t *image,
-                           fs98_host_memmove_fn copy)
+                           fs98_host_memmove_call copy)
 {
     uint16_t ax, bx, cx, dx, lights, altitude;
     uint32_t eax, index;

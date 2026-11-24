@@ -84,10 +84,13 @@ static void affine_optimized(uint32_t *left, uint32_t *right, uint32_t y,
     if (left[2] > right[2]) { uint32_t *swap = left; left = right; right = swap; }
     count = (right[2] >> 16) - (left[2] >> 16) + 1;
     pixel = draw_address(POINTER(WORD(0x8c4)), left[2] >> 16, y);
+    /* RETAIL BUG (kept): HG2D-4 -- true signed deltas are divided by the inclusive pixel count, and there is
+     * no software width cap. */
     step_second = (uint32_t)((int64_t)(int32_t)(right[5] - left[5]) / count);
     step_first = (uint32_t)((int64_t)(int32_t)(right[4] - left[4]) / count);
     remainder = (uint32_t)((int64_t)(int32_t)(right[4] - left[4]) % count);
     step_first <<= 8;
+    /* RETAIL BUG (kept): HG2D-4 -- the first coordinate is shifted up by 8 and the second is kept unshifted. */
     first = left[4] << 8; second = left[5];
     registers[2] = step_first;
     if (keyed) {
@@ -99,6 +102,8 @@ static void affine_optimized(uint32_t *left, uint32_t *right, uint32_t y,
             if (value >= BYTE(0x946)) {
                 if (selector & 1) {
                     value = BYTE(0xd70 + WORD(0x100) * 256 + value);
+                    /* RETAIL BUG (kept): HG2D-3 -- the destination is incremented before the write, so the
+                     * pixel lands one to the right (preserved on purpose). */
                     pixel[1] = value; /* Retail's shaded-key path writes after INC EDI. */
                 } else {
                     pixel[0] = value;
@@ -118,6 +123,8 @@ static void affine_optimized(uint32_t *left, uint32_t *right, uint32_t y,
         if (count >= 4) {
             do {
                 uint8_t values[4];
+                /* RETAIL BUG (kept): HG2D-4 -- four samples are read before their four destination bytes are
+                 * written, also when the texture storage aliases the canvas. */
                 for (index = 0; index < 4; index++) {
                     uint32_t at = affine_optimized_index(first, second, selector, y, ADDRESS(pixel) + index);
                     values[index] = *(uint8_t *)POINTER(WORD(0x948) + at);

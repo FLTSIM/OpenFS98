@@ -19,6 +19,8 @@ static uint32_t colour_translate(uint16_t colour, uint16_t pair, uint16_t *mappe
             index = 0;
         product = (uint8_t)(BYTE(0x3401 + index) - BYTE(0x3400 + index)) * (pair >> 8);
         /* add al,al / adc ah,0: partial doubling, not product << 1. */
+        /* RETAIL BUG (kept): HG2D-7 -- gradient mode 0xf0 doubles only the product's low byte (add al,al) and
+         * adds just its carry to the high byte. */
         value = (uint8_t)(BYTE(0x3400 + index) + (product >> 8) + ((product >> 7) & 1));
         pair = HALF(0x3400 + index);
     } else if (mode != 0x69 && mode != 0xe0) {
@@ -184,6 +186,7 @@ static void palette_remap(void)
         /* Retail only writes the inverse map in brightness mode. Full word
          * indexing is intentional: palette words need not be byte-sized. */
         if (BYTE(0x4009))
+            /* RETAIL BUG (kept): HG2D-7 -- the inverse shade table is indexed by the full palette word. */
             BYTE(0xa4e + colour) = value;
     }
     if (BYTE(0x4009) != BYTE(0x400c)) {
@@ -196,9 +199,12 @@ static void palette_remap(void)
 static uint32_t palette_shades(void)
 {
     uint32_t index, colour, result = 0;
+    /* RETAIL BUG (kept): HG2D-7 -- the generation byte is toggled with 0xa5. */
     BYTE(0x4034) ^= 0xa5;
     for (index = 0; index < 256; index++) {
         colour = HALF(0x34c0 + index * 2);
+        /* RETAIL BUG (kept): HG2D-7 -- shades are rebuilt with a divisor of 16 (the remap uses 14), and
+         * the inverse shade table below is indexed by the full palette word. */
         result = index >= 0x74 && index < 0x80 ? (uint8_t)colour : palette_brightness(index, 16);
         BYTE(0xb4e + colour) = (uint8_t)result;
     }
@@ -234,7 +240,8 @@ static uint32_t palette_refresh(void)
             BYTE(0x4004) = 0;
         BYTE(0x4009) = ramp;
         palette_remap();
-        /* Remap leaves EBX at zero, or the final palette byte offset (765). */
+        /* RETAIL BUG (kept): HG2D-7 -- refresh's saved EBX includes the bits the remap loop left in it
+         * (0x200 in brightness mode). Remap leaves EBX at zero, or the final palette byte offset (765). */
         WORD(0x4011) = (ramp ? 0x200 : 0) | GLOBAL[0xb6a];
     }
     if (brightness == BYTE(0x4004)) {
@@ -275,6 +282,7 @@ static uint32_t palette_refresh(void)
     if (BYTE(0x4009)) {
         uint8_t value = 0;
         for (index = 0; index < 32; index++) {
+            /* RETAIL BUG (kept): HG2D-7 -- the sky ramp's final byte wraps to 0 and then becomes 255. */
             value = (uint8_t)(value + 8);
             if (!value) value--;
             BYTE(0x3842 + index * 3) = value;

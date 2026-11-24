@@ -2,7 +2,7 @@
 title: 'Story 1.7: The module ABI headers are 32-bit'
 type: 'refactor'
 created: '2026-11-24'
-status: 'in-progress'
+status: 'done'
 route: 'dispatch'
 baseline_commit: '7c354a84c061559cd1341bcf19f2d8d74fbbc558' # worktree also holds uncommitted Story 1.5 slices 8-10, the 1.4 close-out and Story 1.6
 review_loop_iteration: 0
@@ -130,23 +130,23 @@ context: ['{project-root}/OpenFS98/AGENTS.md', '{project-root}/OpenFS98/docs/nat
 ## Tasks & Acceptance
 
 **Execution:**
-- [ ] Before any edit:
+- [x] Before any edit:
   - the layout probe;
   - the frozen before snapshot, built in full with its relinks;
   - the unit manifest from its expanded recipes and `-MD` output;
   - hashes and objects into `pre17/`.
-- [ ] `include/fs98/abi.h` (new). Then `linkage.h`, `host.h`, `global.h` and `numeric.h`: the contract types, the bridge and the asserts.
-- [ ] The four other `FS98_STDCALL` sites, the G3D mesh `-Iinclude`, and every user the compiler reports.
-- [ ] `tools/check_abi_headers.py` (new):
+- [x] `include/fs98/abi.h` (new). Then `linkage.h`, `host.h`, `global.h` and `numeric.h`: the contract types, the bridge and the asserts.
+- [x] The four other `FS98_STDCALL` sites, the G3D mesh `-Iinclude`, and every user the compiler reports.
+- [x] `tools/check_abi_headers.py` (new):
   - the directive check: exactly one `FS98_STDCALL` definition, in `abi.h`, and none elsewhere in `src`, `tools` or `include`, any spacing;
   - the type check: it preprocesses `abi.h`, `linkage.h`, `host.h` and `global.h` and inspects their contract declarations, typedefs resolved. It excludes the accessor macros and the guarded bridge block by name;
   - the probe compiles;
   - and `--self-test` with failing fixtures for each.
 
   Add it to `docs/tools.md` Baselines.
-- [ ] `docs/architecture.md`: a paragraph on `abi.h`, the contract types and the bridge. `docs/implementation/deferred-work.md`: the deferred items named above.
-- [ ] The after snapshot, built in full; the gate.
-- [ ] This spec: `## Implementation Notes` with the layouts, the manifest counts, the exclusions and the gate result.
+- [x] `docs/architecture.md`: a paragraph on `abi.h`, the contract types and the bridge. `docs/implementation/deferred-work.md`: the deferred items named above.
+- [x] The after snapshot, built in full; the gate.
+- [x] This spec: `## Implementation Notes` with the layouts, the manifest counts, the exclusions and the gate result.
 
 **Acceptance Criteria:**
 - Given the converted headers, when both snapshots build, then they succeed with no new warnings, and every assert passes on all three probe compilers.
@@ -185,3 +185,45 @@ Spec review 2 (Codex gpt-6.2-sol), 10 findings, all applied:
 8. medium: voice play's callback is `fs98_code`, and `mdl_normal.h`/`.c` move to the call type.
 9. medium: the matrix states what the asserts detect, `POS_BASE` spans 8 bytes, and `global.c`'s local constant is replaced.
 10. low: the inventory labels are corrected, and the FESL, FACIL and LANDME link writers are added.
+
+## Implementation Notes
+
+**Layouts** (probe compile on `win32-retail` before any edit, values unchanged by the conversion; all 4-aligned, `#pragma pack(push, 4)`):
+- `fs98_host_list` 28: count 0, capacity 4, grow 8, elem_size 12, iterating 16, pending 20, data 24.
+- `fs98_host_find_entry` 272: name 0, type 260, size 264, writable 268.
+- `fs98_host_image` 28: format 0, width 4, height 8, stride 12, rows 16, size 20, pixels 24.
+- `fs98_host_accel` 12: command 0, flags 4, key 8.
+- `fs98_host_file` 16: handle 0, path 4, mode 8, ext 12.
+- `fs98_import` 8: id 0, link 4. `fs98_linkage` 12 fixed (id 0, init 4, deinit 8), `service[]` at 12, stride 4.
+- `FS98_GLOBAL_SIZE` 4776; `FS98_G_POS_BASE` asserted over 8 bytes. `global.c`'s local constant is replaced by the header's.
+
+**Bridge and identity formulations.** Plain casts at the converted fields changed gcc's code (register and stack-slot choices) in 9 modules, so identity needed pointer-typed access:
+- `fs98_import` gets, on `_WIN32 && __i386__` only, an anonymous union `{ fs98_addr link; struct fs98_linkage *link_ptr; }`; `FS98_LINK(import)` reads `link_ptr`. A punned `*(T *)&x.link` did not restore FE or mdl_crash; the union (a component reference) did.
+- The union makes `{ id, 0 }` initialisers warn (`-Wmissing-braces`), so the initialisers in acontain, atc, chain, dynamic, facil, fe, numeric, slew, util, weatherm, sim1, ofstest, sehfix and `tools/drive/framelock.c` became `{ id, { 0 } }`.
+- List `data` reads in FACIL and SOUND use `FS98_RETAIL_PTR(void *, x.data)` (abi.h, retail only, same transitional status). `FS98_RETAIL_PTR` and `FS98_LINK` are additions beyond the spec's abi.h list.
+- Direct typedef users (`dynamic.c`, `ofstest.c`, `mdl_normal.c/.h`) moved to `fs98_host_<name>_call`; leaving `_fn` there would have silently called the slot's address instead of the pointer stored in it.
+- Other fixes: NULL to 0 on converted fields, `(void **)&list.data` for host free, `(fs98_addr)(uintptr_t)blob` in `numericdiff.c`, `(void *)(uintptr_t)` in `util_files.c`, the four `FS98_STDCALL` sites, `-Iinclude` on both G3D mesh recipes.
+
+**Manifest.** 522 translation units from 489 logged gcc invocations (423 from `all` and `difftests`, 62 from the on-demand gcc/windres lines of `cmake/targets.cmake`, 66 lines run); 15 are `.S`. 80 reach the headers before, 86 after (abi.h). Excluded and named: the mutation and break builds (`advdrv-break`, `analysis-break-build`, `controls-break-build`, `g3d-break-build`, `host-break(s)`, `main-break-build`, `mpchat-break-build`, `mpchat-ui-breaks`, `multip-*-breaks`, `panels-break(s)`, `reality-break-build`, `sim1-breaks`, `window-break-build`, `winmsg-break-build`), and every run/install line. On-demand lines that Python scripts launch (MDL builders) are in the gcc log through the PATH wrapper.
+
+**Gate result** (both sides built fresh at `~/openfs98-verify/p17`, one after the other; the before tree is kept at `p17-before-built`, its sources at `p17-before-src`):
+- Artifact sets: 1129 files, same paths; 0 `ERR`.
+- 320 PEs: all identical after normalising the COFF timestamp, checksum, export timestamp and `CSWTCH.<n>` in the symbol string table. 206 `.o`/`.a` identical by hash.
+- All 522 replayed unit objects identical by `cmp`, bar the two `g3d_mesh.c` units whose recipes gained `-Iinclude` (their `bin/difftest/g3d_mesh_*.o` outputs are identical).
+- Warnings in the `all` and `difftests` logs: the same set as before; no errors.
+- So no difftest or flight fallback run was needed; none was run.
+
+**Checks.** `python3 -B tools/check_abi_headers.py` and `--self-test` pass (three probe compilers, directive, type and layout fixtures). `tools/check_module_flags.sh` passes. The pre-existing `maindiff.c` sign-compare warnings (2) are in both builds.
+
+**Not done.** SIM1's `uintptr_t linkage[15]`, FE's harness `fs98_import`, SLEW's and GLOBAL's private layouts and the other deferred headers are untouched, as the spec says. `(fs98_code)(uintptr_t)func` static initialisers: MinGW i686 accepts them, x86-64 GCC rejects them.
+
+Code review 1 (Codex gpt-6.2-sol: blind, edge-case and verification-gap layers; deduplicated). No finding touched the headers' or the users' code; all concern `tools/check_abi_headers.py`.
+- medium, patch: no calling-convention check, so stdcall on native `linux-i386` would pass (blind, gap).
+- medium, patch: the type check reads only host-gcc output and misses Win32/i386-only branches (blind, edge, gap).
+- low, patch: the native bridge macros (`FS98_RETAIL_PTR`, `FS98_LINK`) are not checked absent with `-dM` (blind, edge).
+- low, patch: array and function parameters, which C adjusts to pointers, pass (blind, edge, gap).
+- low, patch: the directive scan misses `#define/**/` and line splices and counts commented-out definitions (blind, edge, gap).
+- low, patch: the headers are probed only together, not each alone (edge).
+- low, patch: layout fixtures don't require the static-assertion message (edge).
+- low, rejected: typedef multi-declarator and embedded-aggregate resolution, `extern` skips, braces in assert strings, trailing inline definitions, array-bound arithmetic, a missing-compiler exception, and fixture tidiness (blind, edge). These are full-C-parser cases with no current occurrence in the four headers, and the fixes need a real parser.
+- After the patches: `tools/check_abi_headers.py` and `--self-test` pass. Only the checker changed, so the identity gate's result stands.

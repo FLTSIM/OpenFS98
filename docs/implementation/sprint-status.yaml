@@ -29,7 +29,7 @@
 # - Dev moves story to 'review', then runs code-review (fresh context, different LLM recommended)
 # - Retrospective appends its action items to action_items; the status view surfaces open ones
 generated: 11-15-2026 19:35
-last_updated: 11-24-2026 11:19
+last_updated: 11-24-2026 15:10
 project: OpenFS98
 project_key: NOKEY
 tracking_system: file-system
@@ -42,7 +42,7 @@ development_status:
   1-4-module-data-decompiled-no-raw-dumps-in-git: in-progress
   1-5-every-kept-retail-bug-is-marked-in-the-code: done
   1-6-retail-reference-logs-recorded: review
-  1-7-the-module-abi-headers-are-32-bit: in-progress
+  1-7-the-module-abi-headers-are-32-bit: done
   1-8-every-module-uses-the-shared-arena-h: backlog
   1-9-register-contracts-become-explicit-parameters: backlog
   1-10-divides-go-through-the-saturating-helpers: backlog

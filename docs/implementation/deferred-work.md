@@ -255,3 +255,11 @@
   summary: The retail-only bridge (`fs98_host_<name>_call`, `FS98_HOST_SLOT`) and the direct `(uint8_t *)(uintptr_t)x.link` / `(fs98_addr)(uintptr_t)p` casts at converted fields hold only for retail address words; native handle registration (AD-17) and `fs98_call` are Story 1.8's, and the bridge is removed module by module there.
   evidence: spec Boundaries, "The retail bridge".
 
+
+- source_spec: `docs/implementation/spec-1-8-every-module-uses-the-shared-arena-h.md`
+  summary: Remove Story 1.7's retail-only bridge in a story of its own, not in Story 1.8 (user's decision, 2026-11-24; this supersedes the 1.7 entry above that says 1.8 removes it). That means the `fs98_host_<name>_call` types, `FS98_HOST_SLOT`, the `fs98_import` union's pointer view with `FS98_LINK()`, `FS98_RETAIL_PTR`, and the modules' local `CALL` slot loads. The 365 `FS98_HOST_*` call lines in 14 files must pass `fs98_handle()` addresses and call through `fs98_call`, or through a native dispatch once AD-17's handles exist. It is needed before Epic 3's native i386 build.
+  evidence: Story 1.8 spec review; the user chose to defer it because the rewrite is story-sized and would make more 1.8 slices change bytes.
+
+- source_spec: `docs/implementation/spec-1-8-every-module-uses-the-shared-arena-h.md`
+  summary: The arena lint (`tools/check_arena.py`) covers `src/` only, by the user's decision. The difftest harnesses in `tools/` keep their 1,293 `(uint32_t)(uintptr_t)` casts, since they run under wine on real host pointers. If Epic 3 runs harnesses natively against the arena, they need their own conversion.
+  evidence: Story 1.8 scope question, 2026-11-24.

@@ -40,6 +40,10 @@
 #include "fs98/linkage.h"
 #include "fs98/host.h"
 
+#define FS98_DATA_IMAGE  analysis_image
+#define FS98_RDATA_IMAGE analysis_rdata
+#include "fs98/arena.h"
+
 #define AN_IMAGE_SIZE 0x32c
 #define AN_IMPORTS    0x088
 #define AN_LINKAGE    0x0c8
@@ -47,11 +51,6 @@
 /* ecx after host +0x21c's memmove of a 0x1c-byte record: the dword count
  * the CD's MSVCRT.DLL (22 Jan 1997) leaves (docs/preflight.md, round 8) */
 #define AN_MEMMOVE_ECX 7u
-
-typedef volatile uint8_t  an_v8;
-typedef volatile uint16_t __attribute__((may_alias)) an_v16;
-typedef volatile uint32_t __attribute__((may_alias)) an_v32;
-typedef volatile double   __attribute__((may_alias)) an_vd;
 
 struct fs98_imp { uint32_t id; uint32_t link; };
 struct analysis_image {
@@ -77,14 +76,6 @@ static const double analysis_rdata[9] __attribute__((aligned(8))) = {
     0x1p-1, 0x1.999999999999ap-4, 0x1p-3, 0x1p+9, 0x1.713786d9c7c09p-10,
     0x1p-13, 0x1.5555555555555p-13, -0x1p+12, 0x1.8p+11,
 };
-
-#define D       ((uint32_t)(uintptr_t)analysis_image.state)
-#define R       ((uint32_t)(uintptr_t)analysis_rdata)
-#define M8(a)   (*(an_v8  *)(uintptr_t)(uint32_t)(a))
-#define M16(a)  (*(an_v16 *)(uintptr_t)(uint32_t)(a))
-#define M32(a)  (*(an_v32 *)(uintptr_t)(uint32_t)(a))
-#define MD(a)   (*(an_vd  *)(uintptr_t)(uint32_t)(a))
-#define ADDR(p) ((uint32_t)(uintptr_t)(p))
 
 #define IMPORT(i)  M32(D + AN_IMPORTS + 8 * (i) + 4)
 #define HOST       IMPORT(0)
@@ -186,7 +177,7 @@ typedef uint32_t (FS98_STDCALL *f6)(uint32_t, uint32_t, uint32_t, uint32_t,
 #define S_BASE      (D + 0x324)    /* the last sample's height, 8.16 */
 #define S_RANGE     (D + 0x328)    /* first to last sample */
 
-#define RD(o)   MD(R + (o))        /* an .rdata double */
+#define AN_RD(o)   MD(RDATA + (o))     /* an .rdata double */
 
 #define W  M32(S_WIDTH)
 #define H  M32(S_HEIGHT)
@@ -214,7 +205,7 @@ static uint32_t call3_ecx(uint32_t fn, uint32_t a, uint32_t b, uint32_t c)
     return ecx;
 }
 
-#define CHAIN_ADD_ECX(list, cb) call2_ecx(M32(CHAIN + 0x18), (list), ADDR(cb))
+#define CHAIN_ADD_ECX(list, cb) call2_ecx(M32(CHAIN + 0x18), (list), fs98_handle(cb))
 #define H_MEMSET_ECX(d, b, n)   call3_ecx(M32(HOST + 0x218), (d), (b), (n))
 
 /* ---- x87 ------------------------------------------------------------------- */
@@ -276,13 +267,13 @@ static uint32_t FS98_STDCALL analysis_init(void)
 /* .text+0x08e -- +0x08 */
 static void FS98_STDCALL analysis_deinit(void)
 {
-    CHAIN_REMOVE(5, ADDR(an_frame));
+    CHAIN_REMOVE(5, fs98_handle(an_frame));
     if (M32(S_CMD_ON) != 0) {
-        CHAIN_REMOVE(0xc, ADDR(on_command));
+        CHAIN_REMOVE(0xc, fs98_handle(on_command));
         M32(S_CMD_ON) = 0;
     }
     if (M32(S_TRAIL_ON) != 0) {
-        CHAIN_REMOVE(0xe, ADDR(on_trail));
+        CHAIN_REMOVE(0xe, fs98_handle(on_trail));
         M32(S_TRAIL_ON) = 0;
     }
     if (M32(S_LIST) != 0)
@@ -502,7 +493,7 @@ take:
 manoeuvre_end:
     M32(S_ENDED) = 0;
     if (M32(S_CMD_ON) != 0) {
-        CHAIN_REMOVE(0xc, ADDR(on_command));
+        CHAIN_REMOVE(0xc, fs98_handle(on_command));
         M32(S_CMD_ON) = 0;
     }
     manoeuvre_dialog();
@@ -535,7 +526,7 @@ __asm__(".text\n"
 static uint32_t segment(uint32_t toggle, uint32_t index, uint32_t p)
 {
     uint8_t pos[0x18] __attribute__((aligned(4)));
-    uint32_t q = ADDR(pos);
+    uint32_t q = fs98_handle(pos);
 
     get_position(index, q);
     /* RETAIL BUG (kept): ANA-9 -- (build_list's writes) nothing bounds p: with the segment count 0 (below),
@@ -676,7 +667,7 @@ static void l_point(uint32_t s, uint32_t ref, uint32_t out)
     uint32_t dist, bearing, scale, ecx, eax, edi, esi;
     int32_t v;
 
-    UTIL_RANGE48(s, ref, 9, ADDR(&dist), ADDR(&bearing), ADDR(&scale));
+    UTIL_RANGE48(s, ref, 9, fs98_handle(&dist), fs98_handle(&bearing), fs98_handle(&scale));
     ecx = M32(s + 0x14);
     if (ecx & 0x80000000u)
         v = 0;
@@ -718,7 +709,7 @@ static void l_point(uint32_t s, uint32_t ref, uint32_t out)
 static uint32_t l_curve(void)
 {
     uint8_t frame[0x9c] __attribute__((aligned(4)));
-    uint32_t b = ADDR(frame), edi = 0, ebx, esi;
+    uint32_t b = fs98_handle(frame), edi = 0, ebx, esi;
     uint32_t v;
     uint8_t al;
 
@@ -924,7 +915,7 @@ static void extents(uint32_t p)
 static void m_compute(void)
 {
     uint8_t frame[0x28] __attribute__((aligned(8)));
-    uint32_t b = ADDR(frame);
+    uint32_t b = fs98_handle(frame);
     long double t;
 
     M32(S_DRAWN) = 1;
@@ -932,7 +923,7 @@ static void m_compute(void)
     UTIL_C8(b + 8, S_LATMIN);
     t = (long double)MD(S_LATSPAN) - (long double)MD(b + 8);
     MD(S_LATSPAN) = (double)t;
-    MD(S_MIDLAT) = (double)(t * (long double)RD(0x00) + (long double)MD(b + 8));
+    MD(S_MIDLAT) = (double)(t * (long double)AN_RD(0x00) + (long double)MD(b + 8));
     if (M32(S_UNSIGNED) == 1) {
         UTIL_C0(S_LONSPAN, S_LONA);
         UTIL_C0(b, S_LONB);
@@ -942,7 +933,7 @@ static void m_compute(void)
     }
     t = (long double)MD(S_LONSPAN) - (long double)MD(b);
     MD(S_LONSPAN) = (double)t;
-    MD(S_MIDLON) = (double)(t * (long double)RD(0x00) + (long double)MD(b));
+    MD(S_MIDLON) = (double)(t * (long double)AN_RD(0x00) + (long double)MD(b));
     UTIL_BC(S_LONSPAN, b + 0x18);
     UTIL_C4(S_MIDLAT, b + 0x10);
     UTIL_LONM(b + 0x18, b + 0x10, b + 0x20);
@@ -958,7 +949,7 @@ static void m_extents(void)
     /* Not reproduced (ANA-6): with no samples at all retail reads its uninitialised frame once; ours
      * explicitly zeroes it (docs/modules/analysis.md). */
     uint8_t pos[0x18] __attribute__((aligned(4))) = { 0 };
-    uint32_t q = ADDR(pos), esi = 0;
+    uint32_t q = fs98_handle(pos), esi = 0;
 
     M32(S_MCOUNT) = get_count();
     if (M32(S_MCOUNT) != 0) {
@@ -987,11 +978,11 @@ static void m_extents(void)
 static void m_point(uint32_t index, uint32_t out)
 {
     uint8_t frame[0x48] __attribute__((aligned(8)));
-    uint32_t b = ADDR(frame);
+    uint32_t b = fs98_handle(frame);
     long double y, x;
 
-    MD(b + 0x20) = (double)((long double)(int32_t)W * (long double)RD(0x28));
-    MD(b + 0x28) = (double)((long double)(int32_t)H * (long double)RD(0x30));
+    MD(b + 0x20) = (double)((long double)(int32_t)W * (long double)AN_RD(0x28));
+    MD(b + 0x28) = (double)((long double)(int32_t)H * (long double)AN_RD(0x30));
     get_position(index, b + 0x30);
     UTIL_C8(b + 0x18, b + 0x30);
     MD(b + 0x18) = (double)((long double)MD(b + 0x18) - (long double)MD(S_MIDLAT));
@@ -1005,8 +996,8 @@ static void m_point(uint32_t index, uint32_t out)
     UTIL_C8(b, b + 0x10);
     y = (long double)MD(b) / (long double)MD(S_MSCALE);
     x = (long double)MD(b + 0x18) / (long double)MD(S_MSCALE);
-    y = y - (long double)RD(0x38);
-    x = (long double)RD(0x40) - x;
+    y = y - (long double)AN_RD(0x38);
+    x = (long double)AN_RD(0x40) - x;
     M32(out) = (uint32_t)ftol((long double)MD(b + 0x20) * y);
     M32(out + 4) = (uint32_t)ftol((long double)MD(b + 0x28) * x);
 }
@@ -1019,9 +1010,9 @@ static uint32_t m_curve(void)
     if (M32(S_DRAWN) != 1 || M32(S_MCOUNT) == 0)
         return 0;
     GLB32(0x2ec) = 0xf00f;
-    m_point(0, ADDR(from));
+    m_point(0, fs98_handle(from));
     while (i < M32(S_MCOUNT)) {
-        m_point(i, ADDR(to));
+        m_point(i, fs98_handle(to));
         HG2D_LINE(S_SURFACE, from[0], from[1], to[0], to[1]);
         i++;
         from[1] = to[1];
@@ -1043,19 +1034,19 @@ static void m_scale(void)
     /* RETAIL BUG (kept): ANA-10 -- the value is a mixed 8-byte local: the eighth of the latitude span as a
      * double, then _ftol's result over its low dword; NUMERIC's format 0x3a reads only that low dword, so
      * the integer result is what is formatted and the double's bytes never are. */
-    a = (long double)MD(S_LONM) * (long double)RD(0x08);
-    b = (long double)MD(S_LATSPAN) * (long double)RD(0x10);
-    MD(ADDR(q)) = (double)b;
-    if (a > (long double)MD(ADDR(q))) {
-        e = ftol(a * (long double)RD(0x18));
+    a = (long double)MD(S_LONM) * (long double)AN_RD(0x08);
+    b = (long double)MD(S_LATSPAN) * (long double)AN_RD(0x10);
+    MD(fs98_handle(q)) = (double)b;
+    if (a > (long double)MD(fs98_handle(q))) {
+        e = ftol(a * (long double)AN_RD(0x18));
         m = a;
     } else {
-        e = ftol((long double)MD(ADDR(q)) * (long double)RD(0x18));
-        m = (long double)MD(ADDR(q));
+        e = ftol((long double)MD(fs98_handle(q)) * (long double)AN_RD(0x18));
+        m = (long double)MD(fs98_handle(q));
     }
-    M32(ADDR(q)) = (uint32_t)e;
-    MD(S_MSCALE) = (double)(m * (long double)RD(0x20));
-    NUM_FORMAT(ADDR(q), 0x1003a, S_MSCALE_TEXT);
+    M32(fs98_handle(q)) = (uint32_t)e;
+    MD(S_MSCALE) = (double)(m * (long double)AN_RD(0x20));
+    NUM_FORMAT(fs98_handle(q), 0x1003a, S_MSCALE_TEXT);
     M32(S_MBLOCK + 0x10) = 1;
 }
 
@@ -1292,29 +1283,29 @@ __asm__(".globl _ImportTable\n\t.set _ImportTable, _analysis_image + 0x88\n\t"
 
 static void analysis_install(void)
 {
-    M32(D + AN_LINKAGE + 0x04) = ADDR(analysis_init);
-    M32(D + AN_LINKAGE + 0x08) = ADDR(analysis_deinit);
-    M32(D + AN_LINKAGE + 0x18) = ADDR(nothing_18);
-    M32(D + AN_LINKAGE + 0x1c) = ADDR(get_record);
-    M32(D + AN_LINKAGE + 0x20) = ADDR(get_position);
-    M32(D + AN_LINKAGE + 0x24) = ADDR(get_flag);
-    M32(D + AN_LINKAGE + 0x28) = ADDR(put_record);
-    M32(D + AN_LINKAGE + 0x2c) = ADDR(get_count);
-    M32(D + AN_LINKAGE + 0x30) = ADDR(set_count);
-    M32(D + AN_LINKAGE + 0x34) = ADDR(options_dialog);
-    M32(D + AN_LINKAGE + 0x38) = ADDR(landing_entry);
-    M32(D + AN_LINKAGE + 0x3c) = ADDR(manoeuvre_entry);
-    M32(S_LBLOCK + 0x04) = ADDR(block_check);
-    M32(S_LBLOCK + 0x08) = ADDR(l_control);
+    M32(D + AN_LINKAGE + 0x04) = fs98_handle(analysis_init);
+    M32(D + AN_LINKAGE + 0x08) = fs98_handle(analysis_deinit);
+    M32(D + AN_LINKAGE + 0x18) = fs98_handle(nothing_18);
+    M32(D + AN_LINKAGE + 0x1c) = fs98_handle(get_record);
+    M32(D + AN_LINKAGE + 0x20) = fs98_handle(get_position);
+    M32(D + AN_LINKAGE + 0x24) = fs98_handle(get_flag);
+    M32(D + AN_LINKAGE + 0x28) = fs98_handle(put_record);
+    M32(D + AN_LINKAGE + 0x2c) = fs98_handle(get_count);
+    M32(D + AN_LINKAGE + 0x30) = fs98_handle(set_count);
+    M32(D + AN_LINKAGE + 0x34) = fs98_handle(options_dialog);
+    M32(D + AN_LINKAGE + 0x38) = fs98_handle(landing_entry);
+    M32(D + AN_LINKAGE + 0x3c) = fs98_handle(manoeuvre_entry);
+    M32(S_LBLOCK + 0x04) = fs98_handle(block_check);
+    M32(S_LBLOCK + 0x08) = fs98_handle(l_control);
     M32(S_LBLOCK + 0x10) = D + 0x108;
     M32(S_LBLOCK + 0x14) = D + 0x118;
     M32(S_LBLOCK + 0x18) = D + 0x128;
     M32(S_LBLOCK + 0x1c) = D + 0x138;
-    M32(S_MBLOCK + 0x04) = ADDR(block_check);
-    M32(S_MBLOCK + 0x08) = ADDR(m_control);
+    M32(S_MBLOCK + 0x04) = fs98_handle(block_check);
+    M32(S_MBLOCK + 0x08) = fs98_handle(m_control);
     M32(S_MBLOCK + 0x14) = S_MSCALE_TEXT + 1;
-    M32(S_OBLOCK + 0x04) = ADDR(o_check);
-    M32(S_OTABLE + 0x0c) = ADDR(o_exchange);
+    M32(S_OBLOCK + 0x04) = fs98_handle(o_check);
+    M32(S_OTABLE + 0x0c) = fs98_handle(o_exchange);
 }
 
 /* .text+0x000 */

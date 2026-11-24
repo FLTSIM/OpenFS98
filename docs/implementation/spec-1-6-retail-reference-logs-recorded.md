@@ -149,7 +149,7 @@ context: ['{project-root}/OpenFS98/AGENTS.md', '{project-root}/OpenFS98/docs/nat
   - `tools/cmake_verify.py`: add `references` to the solo targets (`:157`), so its wine runs never overlap other game tests.
 - [x] Verify (see Verification).
 - [x] This spec: an `## Implementation Notes` section.
-- [ ] After the user's commit, not by the implementer: the full recording from a frozen copy, then the copy-back and the hash check.
+- [x] After the user's commit, not by the implementer: the full recording from a frozen copy, then the copy-back and the hash check.
 
 **Acceptance Criteria:**
 - Given the full recording, then `bin/references/` holds 131 cases (74 + 56 + 1), and `tools/references.txt` lists each one with its outcome and hashes, with no `+dirty`.
@@ -233,3 +233,5 @@ Code review 1 (Codex gpt-6.2-sol: blind, edge-case and verification-gap layers; 
 - false: a malformed status or log being accepted. Completion is checked from the log's last line, and a malformed blit field raises, so the run exits non-zero and nothing is published (edge).
 - low, rejected: `hg2d_frames.sh:225` now clears an inherited `FRAMELOCK_GLOBAL` in normal mode. No caller sets it, and an inherited value would make both runs append to one file (edge).
 - false: two subset recordings giving different hashes for the same case. The two subset recordings' case lines and hashes were identical (edge).
+
+Full recording (2026-11-24, from the frozen copy `~/openfs98-verify/p16` of commit `1932b40`, clean, fresh build directory; `bin/` not copied, since the fresh build made FRAMELOCK and SEHFIX): 131 cases, all `match`, with 56 scripted cases' delivery `checked`. The manifest has no `+dirty`. Copied back with the marker-and-rename sequence under the live lock: `--verify` passed 134 files, and `cmp` of the mirror against the manifest is equal. The set is 43 MB. Story 1.6 closes when the user commits `tools/references.txt`.

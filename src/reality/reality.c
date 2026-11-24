@@ -29,14 +29,13 @@
 #include "fs98/linkage.h"
 #include "fs98/host.h"
 
+#define FS98_DATA_IMAGE  reality_image
+#define FS98_RDATA_IMAGE reality_rdata
+#include "fs98/arena.h"
+
 #define RE_IMAGE_SIZE 0x510
 #define RE_IMPORTS    0x048
 #define RE_LINKAGE    0x0b0
-
-typedef volatile uint8_t  re_v8;
-typedef volatile uint16_t __attribute__((may_alias)) re_v16;
-typedef volatile uint32_t __attribute__((may_alias)) re_v32;
-typedef volatile double   __attribute__((may_alias)) re_vd;
 
 struct reality_image {
     uint32_t jump[8];                           /* +0x00 code pointers, installed */
@@ -119,14 +118,6 @@ static const struct reality_rdata reality_rdata __attribute__((aligned(8))) = {
         0x6f706d49, 0x61547472, 0x656c62, 0x6b6e694c, 0x656761,
     },
 };
-
-#define D       ((uint32_t)(uintptr_t)reality_image.jump)
-#define R       ((uint32_t)(uintptr_t)reality_rdata.feet)
-#define M8(a)   (*(re_v8  *)(uintptr_t)(uint32_t)(a))
-#define M16(a)  (*(re_v16 *)(uintptr_t)(uint32_t)(a))
-#define M32(a)  (*(re_v32 *)(uintptr_t)(uint32_t)(a))
-#define MD(a)   (*(re_vd  *)(uintptr_t)(uint32_t)(a))
-#define ADDR(p) ((uint32_t)(uintptr_t)(p))
 
 #define IMPORT(i)  M32(D + RE_IMPORTS + 8 * (i) + 4)
 #define HOST       IMPORT(0)
@@ -226,7 +217,7 @@ typedef uint32_t (FS98_STDCALL *f5)(uint32_t, uint32_t, uint32_t, uint32_t,
 #define S_STEP      (D + 0x500)
 #define S_LOWEST    (D + 0x508)    /* 48-bit at +2 */
 
-#define RD(o)   MD(R + (o))        /* an .rdata double */
+#define RE_RD(o)   MD(RDATA + (o))     /* an .rdata double */
 
 /* ---- x87 ------------------------------------------------------------------- */
 
@@ -251,15 +242,15 @@ static uint32_t FS98_STDCALL on_list3(uint32_t a, uint32_t b);
 /* .text+0x020 -- +0x04 */
 static uint32_t FS98_STDCALL reality_init(void)
 {
-    CHAIN_ADD(1, ADDR(on_list1));
-    return CHAIN_ADD(3, ADDR(on_list3));
+    CHAIN_ADD(1, fs98_handle(on_list1));
+    return CHAIN_ADD(3, fs98_handle(on_list3));
 }
 
 /* .text+0x079 -- +0x08 */
 static uint32_t FS98_STDCALL reality_deinit(void)
 {
-    CHAIN_REMOVE(1, ADDR(on_list1));
-    return CHAIN_REMOVE(3, ADDR(on_list3));
+    CHAIN_REMOVE(1, fs98_handle(on_list1));
+    return CHAIN_REMOVE(3, fs98_handle(on_list3));
 }
 
 /* .text+0x2bd -- a damage flag set, unless it already says something */
@@ -286,8 +277,8 @@ static void stress_damage(void)
 {
     char text[0x40];
 
-    H_LOADSTRING(0x276, ADDR(text), 0x40);
-    WINMSG_SHOW(ADDR(text), 5, 0x6c, 0);
+    H_LOADSTRING(0x276, fs98_handle(text), 0x40);
+    WINMSG_SHOW(fs98_handle(text), 5, 0x6c, 0);
     ((void (*)(void))(uintptr_t)M32(S_DAMAGE + (GLB32(0x258) & 0xe) * 2))();
 }
 
@@ -360,13 +351,13 @@ static void crash_check(void)
     GLB32(0x834) = code;
     M32(S_SOUND + 4) = code;
     M32(S_SOUND) = 1;
-    H_LOADSTRING(code + 0x258, ADDR(text), 0x40);
-    WINMSG_SHOW(ADDR(text), 5, 0x3c, 0);
+    H_LOADSTRING(code + 0x258, fs98_handle(text), 0x40);
+    WINMSG_SHOW(fs98_handle(text), 5, 0x3c, 0);
     CONTROLS_PAUSE(8, 1);
     if (GLB32(0xb24) != 0) {
         M32(S_PLAYING) = 1;
         M32(S_SOUND) |= 0x10;
-        M32(S_SOUND + 0xc) = ADDR(sound_done);
+        M32(S_SOUND + 0xc) = fs98_handle(sound_done);
         M32(S_SOUND) |= 4;
     }
     M32(S_SOUND + 0x10) = 1;
@@ -611,7 +602,7 @@ static void collect(void)
          * 4,294,967,274); nothing reads it but the host's array. */
         MD(pt) = (double)(long double)(uint64_t)index;
         MD(pt + 8) = (double)((long double)(int32_t)M32(e + 0x14) +
-                              (long double)(int32_t)M16(e + 0x12) * (long double)RD(0xc8));
+                              (long double)(int32_t)M16(e + 0x12) * (long double)RE_RD(0xc8));
     }
 }
 
@@ -636,7 +627,7 @@ static void bounds(void)
 static uint32_t prepare(void)
 {
     M32(S_LABELLED) = 0;
-    M16(S_DESCENT) = (uint16_t)ftol((long double)(int16_t)GLB16(0x842) * (long double)RD(0xc0));
+    M16(S_DESCENT) = (uint16_t)ftol((long double)(int16_t)GLB16(0x842) * (long double)RE_RD(0xc0));
     collect();
     UTIL_EXCHANGE(S_EXCHANGE, 3, S_BLOCK);
     bounds();
@@ -698,21 +689,21 @@ static void plot(uint32_t index, int32_t x, uint32_t out)
     double h;
     long double a, xx, t, u;
 
-    UTIL_FIXED48(ADDR(&h), M32(S_SAMPLES + 0x18) + index * 0x18 + 0x10);
+    UTIL_FIXED48(fs98_handle(&h), M32(S_SAMPLES + 0x18) + index * 0x18 + 0x10);
     a = (long double)h - (long double)MD(S_MIN);
     xx = (long double)x;
     a = a / (long double)MD(S_SCALE);
-    xx = xx - (long double)RD(0xd0);
-    a = a * (long double)RD(0x108);
-    xx = xx * (long double)RD(0x100);
-    a = (long double)RD(0x110) - a;
-    xx = xx * (long double)RD(0x118);
-    xx = (long double)RD(0x120) - xx;
+    xx = xx - (long double)RE_RD(0xd0);
+    a = a * (long double)RE_RD(0x108);
+    xx = xx * (long double)RE_RD(0x100);
+    a = (long double)RE_RD(0x110) - a;
+    xx = xx * (long double)RE_RD(0x118);
+    xx = (long double)RE_RD(0x120) - xx;
     t = xx * (long double)(int32_t)M32(S_WIDTH);
-    t = t * (long double)RD(0x128);
+    t = t * (long double)RE_RD(0x128);
     M32(out) = (uint32_t)ftol(t);
     u = (long double)(int32_t)M32(S_HEIGHT) * a;
-    u = u * (long double)RD(0x130);
+    u = u * (long double)RE_RD(0x130);
     M32(out + 4) = (uint32_t)ftol(u);
 }
 
@@ -725,7 +716,7 @@ static void labels(void)
     uint32_t i, p;
 
     for (i = 0, p = S_XLABELS; p < S_XLABELS + 13 * 8; p += 8, i += 4) {
-        NUM_FORMAT(ADDR(&v), 0x1000f, p);
+        NUM_FORMAT(fs98_handle(&v), 0x1000f, p);
         M32(M32(D + 0x248) + i) = p;
         v.lo += 2;
     }
@@ -735,7 +726,7 @@ static void labels(void)
         if ((i & 1) == 1) {
             H_STRCPY(p, S_EMPTY);
         } else {
-            NUM_FORMAT(ADDR(&v.hi), 0x1001b, p);
+            NUM_FORMAT(fs98_handle(&v.hi), 0x1001b, p);
             v.hi += (int32_t)M32(S_STEP);
         }
         M32(M32(D + 0x250) + 4 * i) = p;
@@ -764,23 +755,23 @@ static void scale(void)
              * 0x30, below) skips that limit.  Not reproduced (REAL-3): past 2,545,942,528 the metric search
              * runs through .rdata's zero slack into .data and the code pointers there, which a rebuild cannot
              * match (the harness keeps heights within 10^9 of each other). */
-            while (range > (long double)(uint64_t)M32(R + 8 * i))
+            while (range > (long double)(uint64_t)M32(RDATA + 8 * i))
                 i++;
-            M32(S_STEP) = M32(R + 4 + 8 * i);
-            MD(S_SCALE) = (double)((long double)(uint64_t)M32(S_STEP) * (long double)RD(0xe8));
+            M32(S_STEP) = M32(RDATA + 4 + 8 * i);
+            MD(S_SCALE) = (double)((long double)(uint64_t)M32(S_STEP) * (long double)RE_RD(0xe8));
         } else if (units == 2) {
             /* RETAIL BUG (kept): REAL-2 -- steps 0x30 bytes through the metric table (same 8-byte layout as the
              * feet one), seeing only 10, 1000 and .rdata+0xc0's low word as limits: a range over 1,000 m (and up
              * to that word, 2,545,942,528) takes its step from that double's high word, an oversized scale that
              * compresses the curve (a big span still shows a slope).  RETAIL BUG (kept): REAL-3 -- and this
              * search has no bound either (the reads past 2,545,942,528 are not reproduced, as above). */
-            while (range > (long double)(uint64_t)M32(R + 0x60 + 0x30 * i))
+            while (range > (long double)(uint64_t)M32(RDATA + 0x60 + 0x30 * i))
                 i++;
-            M32(S_STEP) = M32(R + 0x64 + 0x30 * i);
-            MD(S_SCALE) = (double)((long double)(uint64_t)M32(S_STEP) * (long double)RD(0xe0));
+            M32(S_STEP) = M32(RDATA + 0x64 + 0x30 * i);
+            MD(S_SCALE) = (double)((long double)(uint64_t)M32(S_STEP) * (long double)RE_RD(0xe0));
         }
     }
-    if (range == (long double)RD(0xf0)) {
+    if (range == (long double)RE_RD(0xf0)) {
         M32(S_SCALE) = 0;
         M32(S_SCALE + 4) = 0x3ff00000;
     }
@@ -820,9 +811,9 @@ static uint32_t curve(void)
     if (n == 0)
         return 0;
     GLB32(0x2ec) = 0xf00f;
-    plot(0, -0x16, ADDR(from));
+    plot(0, -0x16, fs98_handle(from));
     while (i < n) {
-        plot(i, (int32_t)i - 0x16, ADDR(to));
+        plot(i, (int32_t)i - 0x16, fs98_handle(to));
         GLB32(0x2ec) = 0xf00f;
         HG2D_LINE(S_SURFACE, from[0], from[1], to[0], to[1]);
         i++;
@@ -1008,14 +999,14 @@ static void reality_install(void)
     uint32_t i;
 
     for (i = 0; i < 8; i++)
-        M32(S_DAMAGE + 4 * i) = ADDR(table[i]);
-    M32(D + RE_LINKAGE + 0x04) = ADDR(reality_init);
-    M32(D + RE_LINKAGE + 0x08) = ADDR(reality_deinit);
-    M32(D + RE_LINKAGE + 0x18) = ADDR(clear_damage);
-    M32(D + RE_LINKAGE + 0x1c) = ADDR(crack);
-    M32(S_BLOCK + 0x04) = ADDR(block_check);
-    M32(S_BLOCK + 0x08) = ADDR(control);
-    M32(S_EXCHANGE + 0x20) = ADDR(rate_text);
+        M32(S_DAMAGE + 4 * i) = fs98_handle(table[i]);
+    M32(D + RE_LINKAGE + 0x04) = fs98_handle(reality_init);
+    M32(D + RE_LINKAGE + 0x08) = fs98_handle(reality_deinit);
+    M32(D + RE_LINKAGE + 0x18) = fs98_handle(clear_damage);
+    M32(D + RE_LINKAGE + 0x1c) = fs98_handle(crack);
+    M32(S_BLOCK + 0x04) = fs98_handle(block_check);
+    M32(S_BLOCK + 0x08) = fs98_handle(control);
+    M32(S_EXCHANGE + 0x20) = fs98_handle(rate_text);
     M32(D + 0x23c) = S_RATE_TEXT;
     M32(D + 0x240) = D + 0x428;
     M32(D + 0x248) = D + 0x300;

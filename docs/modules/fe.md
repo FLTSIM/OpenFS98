@@ -305,14 +305,16 @@ vocabulary). Booster paths are checked through their `BSTINFO` file
 (string `0x9013`): its title and description offsets at `0x10`/`0x12`, its
 layer at `0x16`.
 
-Retail behaviour reproduced, all confirmed by the harness:
+Retail behaviour reproduced, confirmed by the harness except where noted:
 
 - An area path with an empty directory makes `.text+0xb2f0` (and the writer's
   `.text+0xb170`) compare from the byte below its directory buffer: the top
   byte of the esi it saved, which in the area checks is the block's address
   and in the writer the world file's handle. The suffix is `\`, so it would
-  match -- and the zero be stored into that saved register -- only for a
-  module at `0x5c000000`. Reproduced by passing the caller's esi down.
+  match -- and the zero be stored into that saved register -- whenever its
+  top byte is `0x5c` (any block address starting `0x5c`). Ours passes the
+  caller's esi down for the byte compared, but zeroes only a local padding
+  buffer, not the saved register; the harness exercises the comparison only.
 - The priority dialog's move does not check the selection: from one past the
   list it swaps a row in from beyond the working copy and writes over the
   heap after it.

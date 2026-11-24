@@ -300,6 +300,8 @@ static uint32_t FS98_STDCALL fe_lat_band(uint32_t p, uint16_t level)
     ecx <<= 7;
     ebx = 0;
     esi = T_BANDS;
+    /* RETAIL BUG (kept): FE-GRID-TABLE -- the search has no bound: a latitude past the table's last edge
+     * reads on through .data and beyond.  The difftest vectors exclude out-of-table latitudes. */
     while ((int32_t)(M32(esi) - ecx) < 0) {         /* sub eax,ecx / jns */
         ebx++;
         esi += 4;
@@ -346,6 +348,8 @@ static void FS98_STDCALL fe_band_lat(uint16_t band, uint16_t level, uint32_t out
     cl = (uint8_t)(0x17 - level);
     ax = shl16(ax, cl);
     ecx = ax;
+    /* RETAIL BUG (kept): FE-GRID-TABLE -- the index (the signed band's magnitude, shifted right by level - 8) is not checked against the table,
+     * so a band that lands outside it reads on through .data.  The difftest vectors exclude those bands. */
     eax = M32(T_BANDS + ebx) - M32(T_BANDS + ebx - 4);
     m = (uint64_t)eax * ecx;
     m <<= 1;                                        /* add eax,eax / adc edx,edx */
@@ -477,7 +481,7 @@ typedef uint32_t (FS98_STDCALL *fe_f8)(uint32_t, uint32_t, uint32_t, uint32_t,
  * for its caller, or reads one its caller set, does it through these. */
 static uint32_t eax, ebx, ecx, edx, esi, edi;
 
-/* Retail leaves a saved-register push on the stack when +0x18 passes through
+/* RETAIL BUG (kept): FE-18-PUSH -- retail leaves a saved-register push on the stack when +0x18 passes through
  * state 4.  The public entry shim uses these to reproduce the resulting
  * EBX/ESI/EDI rotation without corrupting the C implementation's frame. */
 uint32_t fe_scene_in_ebx;
@@ -847,9 +851,11 @@ static void open_file(void)
  * 1000..1999 unless +0xf1a is set.  The record is the name, the header from
  * +2 (0x74 bytes), 0x28 more when the header carries 0x87654321, and what the
  * file's extra sections at header +0x72 hold: a type-3 one is copied to
- * +0x19c, and type-4 ones are listed at +0x9fb -- or would be: the list is
- * only allocated while its pointer is negative, and each entry is written at
- * 13 * count with the list's base never added, so a type-4 section faults.
+ * +0x19c, and type-4 ones are listed at +0x9fb -- or would be: RETAIL BUG
+ * (kept): FE-TYPE4 -- the list is only allocated while its pointer is
+ * negative (both the signed test and the write below), and each entry is
+ * written at 13 * count with the list's base never added, so a type-4 section
+ * faults.
  * BOOSTER calls this from its thread; the file it had open is put back. */
 static uint32_t FS98_STDCALL fe_register(uint32_t area, uint32_t name)
 {
@@ -917,11 +923,13 @@ static uint32_t FS98_STDCALL fe_register(uint32_t area, uint32_t name)
         }
         while (M8(S_BUF) == 4) {
             READ_FILE(S_BUF, 0xc);
+            /* RETAIL BUG (kept): FE-TYPE4 -- the signed test: allocated only while the pointer is negative. */
             if ((int32_t)M32(D + 0x9fb) < 0) {
                 ALLOC(0xd0, D + 0x9fb, 0);
                 M16(D + 0x9ff) = 0;
                 M32(D + 0xa01) = 0xd0;
             }
+            /* RETAIL BUG (kept): FE-TYPE4 -- 13 * count, without the list base added. */
             esi = (uint16_t)(0xd * M16(D + 0x9ff));
             if ((int32_t)esi >= (int32_t)M32(D + 0xa01)) {
                 eax = 0xd0 + M32(D + 0xa01);
@@ -1785,6 +1793,10 @@ uint32_t FS98_STDCALL fe_facil_read(uint32_t id, uint32_t offset,
             FREE(out);
         M32(out_size) = total;
     } else {
+        /* RETAIL BUG (kept): FE-84-LEFTOVER -- a non-type-1 container leaves the data null, exposes the internal
+         * file-record pointer through the size output, and returns the never-written local (the incoming
+         * stack word, taken by the entry shim below).  The seeded difftest shows both sides return the
+         * same leftover for a supplied word; the natural carry-over from earlier calls in the game is unverified. */
         M32(out_size) = record;
         H_CLOSE_F(file);
         return fe_facil_read_word;
@@ -1808,6 +1820,11 @@ uint32_t FS98_STDCALL fe_facil_close(uint32_t id, uint32_t offset,
     uint32_t header[4];
     uint32_t got;
     uint32_t size;
+    /* RETAIL BUG (kept): FE-88-LEFTOVER -- the returned local is never written (zeroed only if the memmove
+     * fails): it is the incoming stack word, nonzero in the game, which FACIL's runway code takes as
+     * success (FACIL-8).  The seeded difftest shows both sides return the same
+     * leftover for a supplied word; the natural carry-over from +0x84's lookup in the game is unverified.
+     * Only a found record returns it. */
     uint32_t result = fe_facil_close_word;
 
     M32(out) = 0;
@@ -1826,6 +1843,7 @@ uint32_t FS98_STDCALL fe_facil_close(uint32_t id, uint32_t offset,
             result = 0;
         H_READ_F(file, M32(out) + 0x10, header[1], ADDR(&got));
     } else {
+        /* RETAIL BUG (kept): FE-88-LEFTOVER -- a header that does not match stores the same word as the size. */
         size = result;
     }
     H_CLOSE_F(file);
@@ -1836,6 +1854,7 @@ uint32_t FS98_STDCALL fe_facil_close(uint32_t id, uint32_t offset,
 /* +0x84's and +0x88's public entries: keep the leftover word, then run the
  * body with the caller's five arguments. */
 __asm__(".text\n"
+        /* RETAIL BUG (kept): FE-84-LEFTOVER -- takes the word at [esp - 0x120] as the leftover local. */
         "_fe_facil_read_entry:\n\t"
         "movl -0x120(%esp), %eax\n\t"
         "movl %eax, _fe_facil_read_word\n\t"
@@ -1846,6 +1865,7 @@ __asm__(".text\n"
         "pushl 20(%esp)\n\t"
         "call _fe_facil_read@20\n\t"
         "ret $20\n"
+        /* RETAIL BUG (kept): FE-88-LEFTOVER -- takes the word at [esp - 0x11c] as the leftover local. */
         "_fe_facil_close_entry:\n\t"
         "movl -0x11c(%esp), %eax\n\t"
         "movl %eax, _fe_facil_close_word\n\t"
@@ -3116,6 +3136,7 @@ uint32_t FS98_STDCALL fe_scene(uint32_t buf, int32_t room, uint32_t len, uint32_
             edi = M32(S_COLS) >> 1;
             cell();
             M32(G + 0x418) = M32(ebx);
+            /* RETAIL BUG (kept): FE-18-PUSH -- the edi pushed after the south edge read is never popped. */
             fe_scene_out_edi = edi;
             fe_scene_shifted = 1;
             esi = M32(S_ROWS) - 1;
@@ -3348,7 +3369,7 @@ done:
     return eax;
 }
 
-/* +0x18's public entry.  In state 4 retail fails to pop its second saved EDI,
+/* +0x18's public entry.  RETAIL BUG (kept): FE-18-PUSH -- in state 4 retail fails to pop its second saved EDI,
  * so its epilogue returns EBX=old ESI, ESI=old EDI and EDI=columns/2. */
 __asm__(".text\n"
         "_fe_scene_entry:\n\t"
@@ -4514,7 +4535,7 @@ static void read_block(uint32_t buf)
 }
 
 /* The caller's registers at +0x40's entry, kept by fe_dynamic_entry (below):
- * the block-too-big path needs them. */
+ * the block-too-big path needs them.  RETAIL BUG (kept): FE-40-CONVENTION -- see fe_dynamic. */
 uint32_t fe_in_ebx, fe_in_esi, fe_in_edi, fe_in_ebp, fe_shifted;
 
 /* .text+0x4b24 -- +0x40: the next dynamic-scenery block in the box from each
@@ -4522,7 +4543,7 @@ uint32_t fe_in_ebx, fe_in_esi, fe_in_edi, fe_in_ebp, fe_shifted;
  * over): up to size bytes into buf.  One that fits returns 1 and leaves *out
  * alone.  One bigger than size returns -1 with *out its size -- and breaks
  * the calling convention: retail calls .text+0x4a81 there without pushing
- * the buffer, so the read goes to the address in the caller's edi, and the
+ * the buffer (RETAIL BUG (kept): FE-40-CONVENTION), so the read goes to the address in the caller's edi, and the
  * `ret 4` that pops the missing argument leaves the slot's epilogue a dword
  * off -- it returns with the caller's esi in edi, ebx in esi and ebp in ebx.
  * DYNAMIC probes with a 1-byte buffer first, so it meets this on every load.
@@ -4581,6 +4602,9 @@ uint32_t FS98_STDCALL fe_dynamic(uint16_t kind, uint32_t buf, uint32_t size, uin
                 eax = size;
                 ecx = eax;
                 if (eax < ebx) {
+                    /* RETAIL BUG (kept): FE-40-CONVENTION -- the read helper gets no buffer: it writes through the
+                     * caller's edi, and its length is the caller's byte count (ecx = size), not the block's, so
+                     * DYNAMIC's probe reads one byte; the block's full length goes out through *out. */
                     read_block(fe_in_edi);
                     fe_shifted = 1;
                     edi = G;
@@ -4615,7 +4639,8 @@ done:
 
 /* +0x40's entry: keeps the caller's ebx, esi, edi and ebp for fe_dynamic,
  * and when fe_dynamic took the too-big path, returns with them shifted as
- * retail's misaligned epilogue leaves them. */
+ * retail's misaligned epilogue leaves them (RETAIL BUG (kept): FE-40-CONVENTION: edi = old esi,
+ * esi = old ebx, ebx = old ebp). */
 __asm__(".text\n"
         "_fe_dynamic_entry:\n\t"
         "movl %ebx, _fe_in_ebx\n\t"

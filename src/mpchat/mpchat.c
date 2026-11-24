@@ -230,10 +230,14 @@ static void append(uint32_t hwnd, uint32_t text, uint32_t colour, uint32_t newli
 {
     struct mc_charrange sel, end;
     SCROLLINFO before, after;
+    /* RETAIL BUG (fixed, not kept): MPC-7 -- retail leaves PARAFORMAT2 past the indent and CHARFORMATA past
+     * the colour as the stack had them; ours zeroes both structures. */
     struct mc_paraformat pf = { 0 };
     struct mc_charformat cf = { 0 };
     uint32_t len, got;
 
+    /* RETAIL BUG (kept): MPC-5 -- `sel` is uninitialised: with the RichEdit destroyed (S_CHAT still names
+     * it) EM_EXGETSEL writes nothing, and the selection tested and put back below is stack garbage. */
     SendMessageA(WND(hwnd), 0x434, 0, (LPARAM)&sel);              /* EM_EXGETSEL */
     len = (uint32_t)SendMessageA(WND(hwnd), WM_GETTEXTLENGTH, 0, 0);
     before.cbSize = 0x1c;
@@ -268,6 +272,8 @@ static void append(uint32_t hwnd, uint32_t text, uint32_t colour, uint32_t newli
         return;
     if (got != 0 && before.nPos <= (int32_t)((uint32_t)before.nMax - before.nPage))
         return;
+    /* RETAIL BUG (kept): MPC-2 -- the position packed as ((nPage << 16) - nPage + nMax) << 16: the first
+     * shift is lost to the second, so the position is (nMax - nPage) & 0xffff. */
     SendMessageA(WND(hwnd), WM_VSCROLL,
                  ((((uint32_t)after.nPage << 16) - after.nPage + (uint32_t)after.nMax) << 16) |
                      SB_THUMBPOSITION, 0);
@@ -281,6 +287,10 @@ static void say(uint32_t name, uint32_t text, uint32_t local)
     char line[0x400];
 
     line[0] = 0;
+    /* RETAIL BUG (kept): MPC-3 -- the name and ':' are strcat'ed unbounded into 0x400 bytes: a name of 0x3fe
+     * characters plus ':' and the NUL just fits, 0x3ff or more overruns the stack.  The harness keeps names
+     * under 0x300.  RETAIL BUG (kept): MPC-4 -- a null `name` (string 0x9402 missing, for a sender MULTIP
+     * does not know) is strcat'ed inside the host and faults. */
     H_STRCAT(ADDR(line), name);
     H_STRCAT(ADDR(line), S_COLON);
     append(M32(S_CHAT), ADDR(line), 0xff0000, 2, 0, 0);
@@ -344,6 +354,7 @@ static LRESULT CALLBACK chat_proc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lpa
             } else if ((wparam & 0xffff) == 0x103 && (uint32_t)wparam >> 16 == 0) {
                 /* sent, and the keyboard handed back to the sim */
                 on_send();
+                /* RETAIL BUG (kept): MPC-1 -- the focus goes to the main window, not back to the line. */
                 SetFocus(WND(M32(S_MAIN_WND)));
             }
         }
@@ -424,7 +435,8 @@ static uint32_t FS98_STDCALL create(uint32_t parent, uint32_t param)
  *
  * CHAIN discards what a callback returns.  Retail's leave whatever eax
  * happened to hold -- the entry's eax, for a message they ignore -- and that
- * is not reproduced.
+ * is not reproduced (MPC-8, no longer applies: the ignored return is omitted, with no observable
+ * effect).
  */
 
 /* .text+0x1200 -- list 0xc: 0x10170 toggles the window, 0x10171 shows it
@@ -524,6 +536,9 @@ static void FS98_STDCALL on_session(uint32_t message, uint32_t arg)
         fill_list();
         break;
     case 4:                     /* .text+0x1350 */
+        /* RETAIL BUG (kept): MPC-6 -- message 4's list is received and shown (fill_list), but MULTIP never
+         * sends it: it dispatches 1, 2, 3 and 5 on list 0x1d (src/multip/multip_lifecycle.inc:59,:102,
+         * multip_players.inc:75, multip_dispatch.inc:93), so S_OTHERS stays null. */
         M32(S_OTHERS) = arg;
         fill_list();
         break;

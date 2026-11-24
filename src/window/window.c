@@ -213,6 +213,8 @@ static const struct __attribute__((packed)) {
     uint32_t masks[22];
     uint8_t snap_zeros[0x18];
     uint16_t pitch_limit, zoom_limit;
+    /* RETAIL BUG (kept): WIN-2 -- retail's instructions after the constants, which the map's unclamped zoom
+     * reads as heights; copied from retail by tools/gen_window_data.py (delete it with the fix). */
     uint8_t code_tail[0x790];
 } text_constants = {
     { 0xF, 0x3F, 0x7F, 0xFF, 0x1FF, 0x3FF, 0x7FF, 0xFFF, 0x1FFF, 0x3FFF, 0x7FFF,
@@ -281,7 +283,9 @@ static uint32_t FS98_STDCALL create_record(uint32_t out, uint32_t title,
                 M32(S_NEXT_3D) = 1;
             rec = M32(slot);
             M32(rec + R_ID) = M32(S_NEXT_3D) + 0x100;
-            /* The id goes in dx, over the record pointer's top half. */
+            /* The id goes in dx, over the record pointer's top half.
+             * RETAIL BUG (kept): WIN-3 -- creation: the menu id is (rec & 0xffff0000) | number, the high
+             * word coming from the new record's own pointer `rec`. */
             H_MENU_ADD(0x1005, (rec & 0xffff0000u) | M16(rec + R_ID),
                        M32(rec + R_TITLE), 0);
             M32(S_NEXT_3D)++;
@@ -328,9 +332,12 @@ static uint32_t FS98_STDCALL destroy_record(uint32_t prec)
     }
     rec = M32(prec);
     if (M32(rec + R_TYPE) == 3 || M32(rec + R_TYPE) == 2) {
+        /* RETAIL BUG (kept): WIN-3 -- removal: the same id, its high word the record pointer's (`rec`). */
         H_MENU_REMOVE((rec & 0xffff0000u) | M16(rec + R_ID));
         H_FREE(M32(prec) + R_VIEW);
     }
+    /* RETAIL BUG (kept): WMS-8 -- the second free of the title: on message 0x37 WINMSG's close_window has
+     * already freed it through the record (free(*rec)), so this one sees a null pointer. */
     H_FREE(M32(prec) + R_TITLE);
     H_FREE(prec);
     return 0;
@@ -710,6 +717,8 @@ static void FS98_STDCALL update_title(uint32_t rec)
     char buf[0x104];
     uint32_t view, number, kind = 0;
 
+    /* RETAIL BUG (fixed, not kept): WIN-4 -- retail builds the title on an uninitialised stack buffer; ours
+     * starts it empty. */
     buf[0] = 0;
     if (M32(rec + R_TITLE) == 0)
         return;
@@ -738,6 +747,9 @@ static void FS98_STDCALL update_title(uint32_t rec)
         H_FREE(rec + R_TITLE);
         title = H_STRDUP((uint32_t)(uintptr_t)buf);
         M32(rec + R_TITLE) = title;
+        /* RETAIL BUG (kept): WIN-3 -- title update: the id's high word is the new title pointer's
+         * (`title`), not the record's: a different id from the one created whenever
+         * (title ^ rec) & 0xffff0000 is not zero. */
         H_MENU_TEXT((title & 0xffff0000u) | M16(rec + R_ID), title);
         H_WIN_TITLE(rec);
     }
@@ -1288,6 +1300,9 @@ static void FS98_STDCALL load_record(uint32_t record)
 {
     uint32_t src = M32(record + 0xc), e0, e1, e2, e, i;
 
+    /* RETAIL BUG (kept): WIN-7 -- the three old-format entries are kept by pointer into the host list at
+     * S_LAYOUT; the list moves when it grows past 32 entries (the 0x3de records add to it), leaving these
+     * pointers, and e0..e2 below, stale. */
     if (M32(S_OLD_LAYOUT + 0) == 0) {
         M32(S_OLD_LAYOUT + 0) = new_entry(0);
     }
@@ -1297,6 +1312,7 @@ static void FS98_STDCALL load_record(uint32_t record)
     if (M32(S_OLD_LAYOUT + 8) == 0) {
         M32(S_OLD_LAYOUT + 8) = new_entry(1);
     }
+    /* RETAIL BUG (kept): WIN-7 -- the stale pointers are read back here, and again in cases 11 and 0x1e. */
     e0 = M32(S_OLD_LAYOUT + 0);
     e1 = M32(S_OLD_LAYOUT + 4);
     e2 = M32(S_OLD_LAYOUT + 8);
@@ -1372,6 +1388,7 @@ static void FS98_STDCALL restore_layout(void)
     uint32_t data = M32(S_LAYOUT + 0x18), count, e, rec, old, i, n;
     uint32_t nv, ov;
 
+    /* RETAIL BUG (kept): WIN-5 -- with no layout `data` is null: the first entry's view is read through it. */
     M32(M32(data + L_VIEW) + 0xbc) = GLB16(0x550);
     count = M32(S_LAYOUT);
     if (GLB32(0x1250) != 0) {
@@ -1596,6 +1613,9 @@ static void sar_dxax(void)
  * done without the fault. */
 static void div16(uint16_t d)
 {
+    /* RETAIL BUG (kept): WIN-1 -- the overflow (or divide by zero) is saturated here in C, as the host's
+     * filter repairs retail's fault (DIVIDE-DISP8-UNSIGNED).  The bug's callers are the aspect's two divides
+     * (marked in aspect); zoom_factor's divide is guarded by DX < BP and cannot overflow. */
     uint32_t n = ((uint32_t)DX << 16) | AX;
 
     if (d == 0 || n / d > 0xffff) {
@@ -1609,6 +1629,8 @@ static void div16(uint16_t d)
 
 static void idiv16(uint16_t d)
 {
+    /* RETAIL BUG (kept): WIN-1 -- as div16, signed: saturated to 0x7fff / 0x8001 in C.  Its callers are
+     * look_vector (.text+0x50fa) and matrix_angles' divides. */
     int64_t n = (int32_t)(((uint32_t)DX << 16) | AX), q;
 
     if (d != 0) {
@@ -1675,7 +1697,11 @@ static void offset48(void)
  * retail leaves as the stack had them; UTIL reads only the words.  Retail
  * calls through eax = UTIL's Linkage, and +0x2c, +0x40..+0x4c and +0x5c (a
  * bare ret) keep every register, so eax comes back the Linkage.  +0x28
- * leaves edx 0, the top of a square of a word. */
+ * leaves edx 0, the top of a square of a word.
+ * RETAIL BUG (kept): WIN-8 -- WINDOW's code relies on what UTIL's slots leave in eax (the Linkage, from
+ * its own `mov eax, UTIL` before each call): +0x2c sincos, +0x40/+0x44/+0x48/+0x4c rotation and
+ * longitude, and +0x5c, a bare ret.  The `eax = UTIL;` lines below model it; UTIL's side is
+ * src/util/util_math.c (the KEEP_ALL wrappers and the +0x5c stub). */
 #define U_SQRT    CALL(UTIL, 0x1c, f1)
 #define U_HYPOT   CALL(UTIL, 0x28, f2)
 #define U_SINCOS  CALL(UTIL, 0x2c, f3)
@@ -1780,7 +1806,7 @@ static void angles_matrix(void)
     ecx = keep;
     U_SINCOS(CX, D + 0x2d6, D + 0x2dc);
     U_SINCOS(DX, D + 0x2d4, D + 0x2da);
-    eax = UTIL;
+    eax = UTIL;    /* RETAIL BUG (kept): WIN-8 -- eax is the Linkage after the call */
     matrix_build();
 }
 
@@ -1832,6 +1858,10 @@ static void FS98_STDCALL aspect(void)
     esi = M32(edi + 0x1194);
     eax = M32(esi + R_WIDTH);
     ebx = M32(esi + R_HEIGHT);
+    /* RETAIL BUG (kept): WIN-1 -- both arms divide the shorter side shifted up 15 by the longer, which fits
+     * (800x600 gives (600 << 15) / 800).  What overflows is the 16-bit truncation of the scaled width
+     * (eax, shifted down 13) into cx/dx: an exceptional dimension, or a factor that wraps, leaves a 16-bit
+     * divisor too small for the dividend (or zero); saturated by div16. */
     p = (uint64_t)eax * M32(edi + 0xdb8);
     eax = (uint32_t)p;
     edx = (uint32_t)(p >> 32);
@@ -1952,7 +1982,7 @@ static void eye_offset(void)
     eax = M32(edi + 0x580) >> 0x10;
     M16(D + 0x2e6) = AX;
     U_4C(D + 0x2e2, edi + 0xdb0, D + 0x2e8);
-    eax = UTIL;
+    eax = UTIL;    /* RETAIL BUG (kept): WIN-8 -- eax is the Linkage after the call */
     edi = G;
     eax = M32(D + 0x2ec);
     ecx = (uint32_t)((int32_t)eax >> 0x10);
@@ -1975,7 +2005,7 @@ static void eye_offset(void)
     M16(D + 0x2f6) = AX;
     M32(D + 0x2f8) = edx;
     U_44(D + 0x2f4, edi + 0x560, D + 0x2f4);
-    eax = UTIL;
+    eax = UTIL;    /* RETAIL BUG (kept): WIN-8 -- eax is the Linkage after the call */
     edi = G;
     SET_AX(M16(D + 0x2f6));
     edx = M32(D + 0x2f8);
@@ -2080,7 +2110,7 @@ static void eye_follow(void)
     edi = G;
     eax = H_MEMMOVE(edi + 0x5b0, D + 0x30e, 0x18);
     U_5C();
-    eax = UTIL;
+    eax = UTIL;    /* RETAIL BUG (kept): WIN-8 -- eax is the Linkage after +0x5c */
     edi = G;
     edi += 0x560;
     eye_look();
@@ -2116,7 +2146,7 @@ static void eye_track(void)
         edi = G;
         eax = H_MEMMOVE(edi + 0x5b0, D + 0x30e, 0x18);
         U_5C();
-    eax = UTIL;
+    eax = UTIL;    /* RETAIL BUG (kept): WIN-8 -- eax is the Linkage after +0x5c */
         edi = G;
         edi += 0x588;
         eye_look();
@@ -2152,6 +2182,10 @@ static void zoom_height(void)
     uint64_t p;
     int32_t f;
 
+    /* RETAIL BUG (kept): WIN-2 -- bx is not clamped on the GLOBAL +0x390 2 path (eye_map), and the other
+     * path's signed clamp misses a zoom with bit 15 set, so this index runs up to 0x7fc: the highest byte
+     * read is at offset 0x803 from the start of the masks; the 22 masks end at 0x58, so the reads reach
+     * 0x7ac bytes (plus the read width) past the array, into the code tail. */
     ebx &= 0xff80;
     ebx >>= 5;
     SET_AX(M16(CONST_AT(T_MASKS) + ebx));
@@ -2217,6 +2251,8 @@ static void eye_map(void)
     if (M32(edi + 0x390) != 2) {
         SET_BX(M16(edi + 0x2b2));
         SET_BX(BX & 0xff80);
+        /* RETAIL BUG (kept): WIN-2 -- the signed compare lets a zoom with bit 15 set (0x8000..0xffff) past
+         * the clamp, to the same overread. */
         if ((int16_t)BX > 0x780)
             SET_BX(0x780);
         M16(edi + 0x2b2) = BX;
@@ -2225,6 +2261,7 @@ static void eye_map(void)
     } else {
         SET_BX(M16(edi + 0x2b2));
         M16(edi + 0xd44) = 1;
+        /* RETAIL BUG (kept): WIN-2 -- the zoom goes in unclamped (the other path clamps to 0x780, signed). */
         zoom_height();
         edi = G;
         {
@@ -2321,7 +2358,7 @@ static void spot_target(void)
     d_lo = AX;
     M16(D + 0x35c) = BX;
     U_SINCOS(M16(D + 0x35c), D + 0x2d2, D + 0x2d8);
-    eax = UTIL;
+    eax = UTIL;    /* RETAIL BUG (kept): WIN-8 -- eax is the Linkage after the call */
     SET_CX(M16(D + 0x2d8));
     SET_AX(d_lo);
     SET_DX(d_hi);
@@ -2363,7 +2400,7 @@ static void spot_target(void)
     eax = (eax >> 8) | (edx << 24);
     M32(D + 0x362) = eax;
     U_40(D + 0x362, edi + 0x560, D + 0x340);
-    eax = UTIL;
+    eax = UTIL;    /* RETAIL BUG (kept): WIN-8 -- eax is the Linkage after the call */
     edi = G;
     SET_AX(M16(D + 0x342));
     edx = M32(D + 0x344);
@@ -2754,7 +2791,7 @@ static void tail_inside(void)       /* .text+0x4763, +0x4961 */
     edi = G;
     eax = H_MEMMOVE(edi + 0x5b0, D + 0x30e, 0x18);
     U_5C();
-    eax = UTIL;
+    eax = UTIL;    /* RETAIL BUG (kept): WIN-8 -- eax is the Linkage after +0x5c */
     eye_matrix();
     eye_zoom();
     aspect();
@@ -2899,7 +2936,9 @@ static void eye_transition(void)
             edi = edi + 0x560;
             aim();
             /* The aim from the aircraft is replaced at once by the aim
-             * from the tower, and both ends of the turn are that. */
+             * from the tower, and both ends of the turn are that.
+             * RETAIL BUG (kept): WIN-6 -- the second aim() overwrites the first, so the turn starts and
+             * ends at the same angles. */
             {
                 uint32_t keep = D + 0x2fc;
 
@@ -3169,6 +3208,7 @@ static void eye_zoom(void)
  * down leaves pitch and heading at 0. */
 static void look_vector(void)
 {
+    /* RETAIL BUG (kept): WIN-1 -- the horizontal components over the horizontal length, by idiv16 below. */
     uint32_t keep_ebx = ebx, keep_esi, keep_edi;
     uint16_t first;
 
@@ -3187,7 +3227,7 @@ static void look_vector(void)
     M32(D + 0x344) = edx;
     M32(D + 0x35e) = ebx;
     U_48(D + 0x340, M32(D + 0x35e), D + 0x348);
-    eax = UTIL;
+    eax = UTIL;    /* RETAIL BUG (kept): WIN-8 -- eax is the Linkage after the call */
     SET_AX(M16(D + 0x34a));
     edx = M32(D + 0x34c);
     to_24_8();
@@ -3403,6 +3443,7 @@ static void FS98_STDCALL set_active_mode(uint32_t mode)
  * while it is within 0x5a82 (45 degrees), else from the cosine. */
 static void FS98_STDCALL matrix_angles(uint32_t m, uint32_t out)
 {
+    /* RETAIL BUG (kept): WIN-1 -- the matrix-to-angles divides, by idiv16 below. */
     uint32_t keep_esi, keep_ebp = ebp;
     SAVE_REGS;
 

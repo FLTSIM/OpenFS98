@@ -401,6 +401,9 @@ void FS98_STDCALL fs98_util_metres_to_longitude(const void *in48,
  * saves EBX, ESI and EDI, restores them, and returns, leaving EAX at whatever
  * the caller happened to have in it.
  *
+ * RETAIL BUG (kept): WIN-8 -- +0x5c is a bare ret, so WINDOW's calls through it get back the eax they
+ * entered with, UTIL's Linkage (WINDOW models that after each call).
+ *
  * There is nothing to recover here: no name, no callers inside UTIL, and no
  * behaviour beyond the above.  They are reimplemented as what they are rather
  * than guessed at, and the fourth returns void because its result is not a
@@ -1633,6 +1636,10 @@ void FS98_STDCALL fs98_util_marshal(const void *source, const void *descriptors,
  *
  * Most save everything but their result.  A few leave values of their own, reproduced
  * below though nothing is known to read them.
+ *
+ * RETAIL BUG (kept): WIN-8 -- the wrappers that keep every register (KEEP_ALL below: the sincos, rotation
+ * and longitude services, +0x2c and +0x40..+0x4c) leave eax as WINDOW entered, UTIL's Linkage, which
+ * WINDOW's code reads back; callers reach +0x5c through the stub above.
  */
 #if defined(__i386__)
 #define ENTRY_NAME(name) ".text\n.globl _" #name "_entry\n_" #name "_entry:\n\t"

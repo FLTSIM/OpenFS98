@@ -278,6 +278,9 @@ static uint32_t next_word(uint32_t text, uint32_t pi)
 
     if (c == 0)
         return 0;
+    /* RETAIL BUG (kept): WMS-3 -- a word ending at the end of the text leaves *pi on the terminator, which
+     * the caller steps past (pos + 1) before the next call: the next word is scanned from whatever the heap
+     * holds after the terminator. */
     while (c != ' ') {
         c = M8(text + i + 1);
         i++;
@@ -312,6 +315,10 @@ static uint32_t make_msg(uint32_t text, uint32_t slot, uint32_t time)
     }
     M32(msg + W_SCROLL) = 0;
     w = limit();
+    /* RETAIL BUG (kept): WMS-1 -- the start is the limit; a window under 30 pixels makes it negative from the
+     * first frame, and the countdown (show_scrolling) ends at 1 - speed at the lowest, when it crosses zero (an
+     * exact multiple stops at 0): the line then starts before S_LINE (start / 8 truncates, so -7..-1 still
+     * give at == 0). */
     M32(msg + W_START) = (uint32_t)w;
     if (GLB32(0x1254) == 1) {
         M32(msg + W_TIME) = 0;
@@ -338,11 +345,16 @@ static uint32_t split(uint32_t text, uint32_t slot, uint32_t time)
     len = H_STRLEN(text);
     copy = H_STRDUP(text);
     p = copy;
+    /* RETAIL BUG (kept): WMS-6 -- the queue header (8 bytes) and the two sentinels q_init allocates are never
+     * freed: queue_after splices the nodes out and leaves them. */
     H_ALLOC(1, 8, ADDR(&list), 0);
     q_init(list);
     while (next_word(p, ADDR(&pos))) {
         measure(p, pos, ADDR(ext));
         if ((int32_t)ext[0] > limit()) {
+            /* RETAIL BUG (kept): WMS-4 -- `cut` is not reset per line: a first word wider than the limit is
+             * cut where the previous line was (at 0, an empty message, the word's first character lost
+             * under the terminator).  RETAIL BUG (kept): WMS-5 -- cut * time / len in 32 bits wraps. */
             part = cut * time / len;
             M8(p + cut) = 0;
             node = make_msg(p, slot, part);
@@ -355,6 +367,7 @@ static uint32_t split(uint32_t text, uint32_t slot, uint32_t time)
         }
     }
     if (M8(p) != 0) {
+        /* RETAIL BUG (kept): WMS-5 -- the last line's time, the same 32-bit product. */
         part = pos * time / len;
         node = make_msg(p, slot, part);
         q_insert(list, PREV(TAIL(list)), node);
@@ -380,6 +393,8 @@ static uint32_t slot_text(uint32_t prev, uint32_t text, uint32_t slot)
         H_STRCAT(M32(pp), text);
         return M32(pp);
     }
+    /* RETAIL BUG (kept): WMS-1 -- frees the slot's text pointer (and slot_text's H_REALLOC above reallocates
+     * it), overwritten or not. */
     if (M32(pp) != 0)
         H_FREE(pp);
     a = H_STRLEN(prev);
@@ -407,6 +422,7 @@ static void queue_after(uint32_t pos, uint32_t text, uint32_t slot, uint32_t tim
     measure(text, H_STRLEN(text), ADDR(ext));
     if ((int32_t)ext[0] > limit()) {
         sub = split(text, slot, time);
+        /* RETAIL BUG (kept): WMS-6 -- `sub`, its header and sentinels, are not freed after the splice. */
         q_splice(M32(S_QUEUE), pos, sub);
     } else {
         node = make_msg(text, slot, time);
@@ -495,9 +511,22 @@ static void show_scrolling(void)
     }
     off = p - M32(msg + W_TEXT);
     left = M32(msg + W_LEN) - off;
+    /* RETAIL BUG (kept): WMS-2 -- the room is unsigned: with at = 0x400 (a window 0x201e wide or more, whose
+     * limit is 0x2000) it is -1, so `n` is all of `left`, copied (below) past S_LINE's 0x400 bytes over the
+     * queue and on beyond .data, and the NUL after it is written there too.  The write starts at S_REC
+     * (+0x498): a one-byte message touches only that pointer, and the NUL reaches S_QUEUE (+0x4a4) only with
+     * 12 or more bytes.  Not reproduced: the PE layout
+     * (retail's import table lies where the copy ends; ours is not a bounds check) -- the harness keeps
+     * widths below 0x201e. */
     room = 0x3ff - (uint32_t)at;
     n = left < room ? left : room;
+    /* RETAIL BUG (kept): WMS-1 -- the copy's destination: with `at` negative the line starts before S_LINE
+     * (+0x98).  One to four bytes early stay in +0x94..+0x97; at == -5 (start <= -40, speed 41 or more, i.e.
+     * 78 frames a second) the first character overwrites the top byte of slot 6's text pointer
+     * (+0x90..+0x93); at == -6 the character is at +0x92 and the next one, or the NUL, at +0x93; further
+     * back the other slots', the colours, the Linkage and the ImportTable. */
     H_MEMMOVE(S_LINE + (uint32_t)at, p, n);
+    /* RETAIL BUG (kept): WMS-2 -- the trailing NUL, written at S_LINE + at + n whatever that is. */
     M8(S_LINE + n + (uint32_t)at) = 0;
     if ((int32_t)M32(msg + W_START) > 0)
         M32(msg + W_START) = M32(msg + W_START) - M32(msg + W_SPEED);
@@ -560,6 +589,9 @@ static uint32_t FS98_STDCALL frame(uint32_t a, uint32_t b)
 static uint32_t close_window(void)
 {
     H_WIN_DESTROY(M32(S_REC));
+    /* RETAIL BUG (kept): WMS-8 -- the first free: through the record (`free(*rec)`).  The second is WINDOW's
+     * destroy_record (window.c), through the record's title, which is by then null; afterwards S_REC is
+     * null and any frame or show faults. */
     H_FREE(M32(S_REC));
     return WINDOW_FREE(S_REC);
 }
@@ -571,6 +603,8 @@ static uint32_t FS98_STDCALL situation(uint32_t message, uint32_t data)
     uint32_t src;
 
     if (message == 0x22) {
+        /* RETAIL BUG (kept): WMS-9 -- the list 0x14 callback returns `data` for a record other than 0x3df
+         * (CHAIN discards it). */
         if (M32(data) != 0x3df)
             return data;
         src = M32(data + 0xc);
@@ -590,6 +624,7 @@ static uint32_t FS98_STDCALL situation(uint32_t message, uint32_t data)
     }
     if (message == 0x37)
         return close_window();
+    /* RETAIL BUG (kept): WMS-9 -- `message - 0x37` for a message it ignores (CHAIN discards it). */
     return message - 0x37;
 }
 
@@ -637,6 +672,7 @@ static uint32_t FS98_STDCALL winmsg_deinit(void)
     q_clear(M32(S_QUEUE));
     q_free(M32(S_QUEUE));
     r = H_FREE(S_QUEUE);
+    /* RETAIL BUG (kept): WMS-1 -- deinit frees every slot's pointer, overwritten ones included. */
     for (p = S_TEXTS; p < S_TEXTS + 0x1c; p += 4)
         if (M32(p) != 0)
             r = H_FREE(p);
@@ -647,6 +683,7 @@ static uint32_t FS98_STDCALL winmsg_deinit(void)
  * Returns the head sentinel. */
 static uint32_t FS98_STDCALL clear_all(void)
 {
+    /* RETAIL BUG (kept): WMS-9 -- +0x20 returns the head sentinel, what was last in eax. */
     return q_clear(M32(S_QUEUE));
 }
 
@@ -660,6 +697,8 @@ static uint32_t FS98_STDCALL show(uint32_t text, uint32_t slot, uint32_t time,
     uint32_t rec, flags;
 
     if (append == 0) {
+        /* RETAIL BUG (kept): WMS-1 -- frees the slot's text pointer, which a scroller's first character may
+         * have overwritten (the top byte of slot 6's). */
         if (M32(S_TEXTS + 4 * slot) != 0)
             H_FREE(S_TEXTS + 4 * slot);
         clear_all();
@@ -684,6 +723,7 @@ static uint32_t FS98_STDCALL clear_slot(uint32_t slot)
     uint32_t q = M32(S_QUEUE), node, next;
 
     node = NEXT(HEAD(q));
+    /* RETAIL BUG (kept): WMS-1 -- as in show: the free of a text pointer a scroller may have overwritten. */
     if (M32(S_TEXTS + 4 * slot) != 0) {
         H_FREE(S_TEXTS + 4 * slot);
         q = M32(S_QUEUE);
@@ -698,6 +738,7 @@ static uint32_t FS98_STDCALL clear_slot(uint32_t slot)
             node = NEXT(node);
         }
     }
+    /* RETAIL BUG (kept): WMS-9 -- +0x1c returns the queue, what was last in eax. */
     return q;
 }
 

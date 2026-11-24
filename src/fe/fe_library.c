@@ -196,13 +196,15 @@ static uint32_t fe_lib_resolve(uint32_t out, uint32_t path)
 }
 
 /* .text+0xb2f0 -- the path's last directory is SCENERY (after dropping a
- * trailing .data+0x3210 suffix, "\").  An empty directory makes retail
+ * trailing .data+0x3210 suffix, "\").  RETAIL BUG (kept): FE-LIB-EMPTY-DIR -- an empty directory makes retail
  * compare from the byte below its buffer: the top byte of the esi it saved,
  * which is the caller's -- `leftover` here.  In the area checks that is the
  * block's address, so the byte is the module's own top address byte, and the
- * suffix would match (and the zero be stored there) only for a module loaded
- * at 0x5c000000.  The browser's callers never get here with an empty
- * directory, since UTIL's listing joins every entry to its root. */
+ * suffix (0x5c) would match, and the zero be stored there, whenever the
+ * leftover's top byte is 0x5c: any block address starting 0x5c.  The browser's callers never get here with an empty
+ * directory, since UTIL's listing joins every entry to its root.
+ * Not reproduced (FE-LIB-EMPTY-DIR): ours compares a padded local buffer, so a match would zero the
+ * padding, not retail's saved esi. */
 static uint32_t fe_lib_is_scenery_dir(uint32_t path, uint32_t leftover)
 {
     uint8_t padded[0x10 + 0x108];
@@ -246,8 +248,11 @@ static uint32_t fe_lib_expand(uint32_t out, uint32_t path)
 
 /* .text+0xb170 -- the reverse, for writing: drop a trailing .data+0x3210
  * from the directory, then directory's parent, name and the 0x9015 string.
- * An empty directory reads below the buffer as fe_lib_is_scenery_dir's does;
- * the caller's esi is the world file's handle. */
+ * RETAIL BUG (kept): FE-LIB-EMPTY-DIR -- an empty directory reads below the buffer as
+ * fe_lib_is_scenery_dir's does; the caller's esi is the world file's handle (its writer,
+ * fe_lib_write_area, has its own match condition: the handle's top byte would have to be the suffix
+ * byte 0x5c, and the zero would go into the handle).  Not reproduced (FE-LIB-EMPTY-DIR): as above, ours
+ * zeroes only the padded local buffer. */
 static uint32_t fe_lib_contract(uint32_t out, uint32_t path, uint32_t leftover)
 {
     uint8_t padded[0x10 + 0x108];
@@ -783,7 +788,8 @@ static uint32_t fe_lib_write_area(uint32_t file, uint32_t record)
         H_WRITE(file, record + 4, 1, ADDR(&wrote)) != 0 ||
         H_WRITE(file, record + 5, 1, ADDR(&wrote)) != 0)
         return 0xffffffffu;
-    /* The list's own copy of the path is rewritten in place. */
+    /* The list's own copy of the path is rewritten in place.  RETAIL BUG (kept): FE-LIB-EMPTY-DIR -- the
+     * writer's call into the empty-directory read, with the file handle as the leftover (see above). */
     if (fe_lib_contract(record + 6, record + 6, file) != 0)
         return 0xffffffffu;
     if (H_WRITE(file, record + 6, H_STRLEN(record + 6) + 1, ADDR(&wrote)) != 0)
@@ -882,7 +888,7 @@ static uint32_t fe_lib_write_world(uint32_t file)
     return H_TRUNCATE(file, size) != 0 ? 0xffffffffu : 0;
 }
 
-/* .text+0xa9f0 -- free both kept blocks; always -1. */
+/* .text+0xa9f0 -- free both kept blocks; RETAIL BUG (kept): FE-LIB-LEAKS -- always -1. */
 static uint32_t fe_lib_free_blocks(void)
 {
     if (L32(0x206d3c80) != 0 && FREE(VA(0x206d3c80)) != 0)
@@ -912,7 +918,7 @@ static uint32_t fe_lib_open_world(uint32_t path, uint32_t out)
 }
 
 /* .text+0x5f70 -- a temporary file in the world file's directory.  The
- * joined name at .data+0x3b60 is built and not used. */
+ * joined name at .data+0x3b60 is built and not used (RETAIL BUG (kept): FE-LIB-LEAKS). */
 static uint32_t fe_lib_create_temp(uint32_t path, uint32_t temp,
                                    uint32_t scratch, uint32_t out)
 {
@@ -1259,7 +1265,9 @@ static uint32_t FS98_STDCALL fe_lib_priority_sort(uint32_t block)
     return 0;
 }
 
-/* .text+0x63c0 -- move the selection to the typed position. */
+/* .text+0x63c0 -- move the selection to the typed position.  RETAIL BUG (kept): FE-LIB-PRIORITY -- the
+ * selection (+0x20) is not checked against the count: from one past the list it swaps a row in from beyond
+ * the working copy and writes over the heap after it (priority_up and priority_down do check it). */
 static uint32_t FS98_STDCALL fe_lib_priority_move(uint32_t block)
 {
     uint32_t to = M32(block + 0x2c);
@@ -1299,7 +1307,7 @@ static uint32_t fe_lib_area_rows(void)
 }
 
 /* .text+0x6640 -- and back.  Fields the table does not cover come from
- * whatever .data+0x4080 last held. */
+ * whatever .data+0x4080 last held (RETAIL BUG (kept): FE-LIB-LEAKS). */
 static uint32_t fe_lib_store_areas(void)
 {
     uint32_t count = L32(0x206d0ee8);
@@ -1954,6 +1962,9 @@ static uint32_t FS98_STDCALL fe_lib_browse_drive(uint32_t block)
 
     if ((int32_t)M32(block + 0x6c) >= (int32_t)M32(block + 0x68))
         return 0xffffffffu;
+    /* RETAIL BUG (kept): FE-LIB-NEXT -- the old listing is freed before the confirmation, and a cancel
+     * returns with its count and cursor left, so Next walks the freed listing (host +0x188 is handed a
+     * path at 0x108). */
     if (L32(0x206d2800) != 0 && FREE(VA(0x206d2800)) != 0)
         return 0xffffffffu;
     if (!(UTIL_ALERT(6, 1, 0xf444, 0xf445, 0, 0, 0, 0) & 2))
@@ -1980,7 +1991,9 @@ static uint32_t FS98_STDCALL fe_lib_browse_drive(uint32_t block)
     return 0;
 }
 
-/* .text+0x7390 -- Next. */
+/* .text+0x7390 -- Next.  RETAIL BUG (kept): FE-LIB-NEXT -- after a cancelled drive search the walk below
+ * reads entries of the freed listing (BROWSE_ENTRY with a null base), only when cursor + 1 < count, at
+ * (cursor + 1) * 0x108; 0x108 is the case from cursor 0. */
 static uint32_t FS98_STDCALL fe_lib_browse_next(uint32_t block)
 {
     if (L32(0x206d2808) < L32(0x206d2804)) {
@@ -2521,7 +2534,7 @@ static uint32_t FS98_STDCALL fe_lib_cache_edit(uint32_t block)
            0xffffffffu : 0;
 }
 
-/* .text+0x7e30 -- Delete it, after a confirmation; its strings leak. */
+/* .text+0x7e30 -- Delete it, after a confirmation; RETAIL BUG (kept): FE-LIB-LEAKS -- its four strings leak. */
 static uint32_t FS98_STDCALL fe_lib_cache_delete(uint32_t block)
 {
     if ((int32_t)M32(block + 0x20) >= (int32_t)M32(block + 0x1c))

@@ -478,7 +478,7 @@ static void FS98_STDCALL dyn_players(uint32_t a, uint32_t b)
     } while (--edx != 0);
 }
 
-/* The 1-byte probe of FE +0x40.  A block too big for the buffer takes FE's
+/* The 1-byte probe of FE +0x40.  RETAIL BUG (kept): FE-40-CONVENTION -- this depends on it: a block too big for the buffer takes FE's
  * broken path (fe.c, fe_dynamic): its first byte is read to the address in the
  * caller's edi, whatever the buffer argument says, and the call returns with
  * esi in edi and ebx in esi.  So the real registers go in and come back, and

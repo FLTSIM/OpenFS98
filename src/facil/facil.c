@@ -954,7 +954,8 @@ static int32_t facil_build_index(void)
 /* ---- the mapped cache: .text+0x5680 and +0x57e0 -------------------------
  *
  * +0x18 maps INDEX_FILE on first use and leaves it mapped on success; +0x1c
- * and +0x20 read through that mapping without mapping it themselves.  Retail
+ * and +0x20 read through that mapping without mapping it themselves
+ * (RETAIL BUG (kept): FACIL-2 -- both the leaving it mapped and the unmapped reads).  Retail
  * keeps three copies of the view base.  Node offsets are file offsets, and a
  * zero offset reads the header, exactly as in retail. */
 
@@ -1072,7 +1073,7 @@ static int32_t facil_map(void)
         }
         MAP_VIEW = (uint32_t)(uintptr_t)MapViewOfFile(mapping, FILE_MAP_READ,
                                                       0, 0, 0);
-        /* Retail closes both handles on a failed view but still marks the
+        /* RETAIL BUG (kept): FACIL-2 -- retail closes both handles on a failed view but still marks the
          * cache mapped and reads its header through the null view. */
         if (MAP_VIEW == 0) {
             CloseHandle((HANDLE)(uintptr_t)MAP_MAPPING);
@@ -1087,7 +1088,10 @@ static int32_t facil_map(void)
     return 0;
 }
 
-/* .text+0x57e0.  The three view copies are left stale. */
+/* .text+0x57e0.  RETAIL BUG (kept): FACIL-2 -- the three view copies (MAP_FIRST, MAP_HEADER, MAP_VIEW)
+ * are left stale after the unmap, here and so for +0x2c, deinit and every +0x18 failure.  The cache is also
+ * left mapped on a successful +0x18, and +0x1c/+0x20 read it without mapping it (the comment at the cache
+ * view's definition above). */
 static int32_t facil_unmap(void)
 {
     if (MAPPED != 0) {
@@ -1606,6 +1610,9 @@ static int32_t facil_resolve(uint32_t start, const struct facil_filter *entry,
     for (;;) {
         if (!(VIEW[node + NODE_FLAGS] & 1) &&
             facil_entry_matches(entry, node)) {
+            /* RETAIL BUG (kept): FACIL-4 -- a second match in the run overwrites record->name, record->node
+             * and record->kind, and the displaced FIRST name leaks; the second name stays reachable and goes
+             * to the caller.  RETAIL BUG (kept): FACIL-7 -- that displaced first name is one of the leaks. */
             if (FS98_HOST_ALLOC(HOST)(
                     1, FS98_HOST_STRLEN(HOST)(NODE_NAME(node)) + 1,
                     (void **)&record->name, 0) != 0)
@@ -1653,9 +1660,10 @@ static int32_t facil_collect(uint32_t start,
 /* .text+0x5420 -- Linkage +0x18: every node at `filter`'s level whose name
  * starts with filter's name and which fits the named entries of `filters`,
  * in name order.  Every failure after the zeroing unmaps the cache and, if
- * that succeeds, returns 0 -- retail's error result is the unmap's.  Success
- * leaves the cache mapped for +0x1c and +0x20; failure also leaks the queue
- * and the filter copy. */
+ * that succeeds, returns 0 -- retail's error result is the unmap's (a queue
+ * creation failure returns -1 without unmapping).  Success leaves the cache
+ * mapped for +0x1c and +0x20; a failure after the queue and filter copy exist
+ * leaks them. */
 static uint32_t FS98_STDCALL facil_search(
     const struct facil_filter_list *filters, const struct facil_filter *filter,
     struct facil_results *out, uint32_t dedupe)
@@ -1685,6 +1693,10 @@ static uint32_t FS98_STDCALL facil_search(
         goto fail;
     return 0;
 fail:
+    /* RETAIL BUG (kept): FACIL-3 -- a failure reaching `fail` returns the unmap's result, so 0 (not -1)
+     * when the unmap succeeds.  A map error or an empty cache reaches it before the queue or the filter
+     * copy exist; a later failure leaks them.  (A facil_queue_create failure returns -1 directly and
+     * leaves the mapping live.) */
     return facil_unmap() != 0 ? 0xffffffffu : 0;
 }
 
@@ -1699,6 +1711,10 @@ static uint32_t FS98_STDCALL facil_describe(
 
     out->count = 0;
     out->records = NULL;
+    /* RETAIL BUG (kept): FACIL-4 -- the filter list is copied and sorted, and the copy is never used
+     * (facil_collect reads `filters`); and RETAIL BUG (kept): FACIL-7 -- the copy is heap-allocated by
+     * facil_list_copy: on success a wasted copy and sort, freed below; a failure after the allocation
+     * leaks it. */
     if (facil_list_copy(&sorted, filters) != 0 ||
         facil_list_sort(&sorted) != 0)
         return 0xffffffffu;
@@ -1790,6 +1806,8 @@ static uint32_t FS98_STDCALL facil_deinit(void)
                         (const char *)D + 0x2c98);
     HOST_CFG_PUT_INT((const char *)D + 0x4f0, (const char *)D + 0x518,
                      (int32_t)D32(0x4ec));
+    /* RETAIL BUG (kept): FACIL-1 -- GTL_BUTTON and the four strings are written back, but not the
+     * ALLOW_GRAY_ERROR_DIALOGS flag (.data+0x2d00) that facil_init read. */
     return 0;
 }
 
@@ -1957,8 +1975,8 @@ static int32_t facil_search_at(uint32_t region, uint32_t country,
     return facil_search(LIST_D0, filter, out, 0) != 0 ? -1 : 0;
 }
 
-/* .text+0x12e0 -- a row's four place names and its own name.  +0x1c's
- * results at .data+0x550 are never freed. */
+/* .text+0x12e0 -- a row's four place names and its own name.  RETAIL BUG (kept): FACIL-7 -- +0x1c's
+ * results at .data+0x550 (their names and the array) are never freed, for every row of both row kinds. */
 static int32_t facil_row_names(uint8_t *row, const struct facil_result *record)
 {
     uint32_t index;
@@ -2017,7 +2035,7 @@ static int32_t facil_row_title(uint8_t *row, const struct facil_source *source)
     return HOST_FREE(&section) != 0 ? -1 : 0;
 }
 
-/* .text+0x1570 -- the first type-1 frequency of section 0x20001.  Finding
+/* .text+0x1570 -- the first type-1 frequency of section 0x20001.  RETAIL BUG (kept): FACIL-7 -- finding
  * one returns at once and leaks the section. */
 static int32_t facil_row_frequency(uint8_t *row,
                                    const struct facil_source *source)
@@ -2125,6 +2143,9 @@ static int32_t facil_row_runways(uint8_t *row, const struct facil_source *source
     uint8_t *runway;
     uint8_t *end_row;
 
+    /* RETAIL BUG (kept): FACIL-8 -- FE +0x88 returns a local it never writes (FE-88-LEFTOVER), in practice
+     * nonzero, and this code treats that as success.  Ours returns the same leftover for the same incoming
+     * word. */
     if (!FE_EXTRACT((const struct facil_source *)source, source->value, 1,
                     &block, &size))
         return -1;
@@ -2165,7 +2186,8 @@ done:
     return HOST_FREE(&block) != 0 ? -1 : 0;
 }
 
-/* .text+0x1240 -- one 0x64-byte airport row.  The record copy leaks. */
+/* .text+0x1240 -- one 0x64-byte airport row.  RETAIL BUG (kept): FACIL-7 -- the record copy leaks (the
+ * navaid row's copy is freed). */
 static int32_t facil_airport_row(uint8_t *row, const struct facil_result *found)
 {
     uint8_t *record;
@@ -2607,7 +2629,7 @@ static int32_t facil_free_runway_list(uint8_t *list)
 }
 
 /* .text+0x2b50 -- refill a list from +0x18, dropping a leading empty name
- * (whose string leaks). */
+ * (RETAIL BUG (kept): FACIL-7 -- whose string leaks). */
 static int32_t facil_requery(uint8_t *list, struct facil_filter_list *filters,
                              struct facil_filter *filter, uint32_t dedupe)
 {
@@ -2860,7 +2882,8 @@ static int32_t facil_list_runways(uint8_t *block)
 }
 
 /* .text+0x3860 -- the chosen place names into the caller's output.  The
- * names are +0x1c's, handed over; the array at .data+0x7e8 leaks. */
+ * names are +0x1c's, handed over; RETAIL BUG (kept): FACIL-7 -- the array at .data+0x7e8 (0x1309's
+ * output) leaks. */
 static int32_t facil_fill_output(uint32_t node)
 {
     uint32_t index;
@@ -2960,6 +2983,8 @@ static int32_t facil_airport_tower(uint8_t *block)
     uint8_t *record;
     uint32_t record_size;
     uint32_t size;
+    /* RETAIL BUG (kept): FACIL-6 -- the section starts out as the block itself, so an airport with no
+     * sources copies block words into GLOBAL +0xd50.. and frees the block. */
     uint8_t *section = block;
     const struct facil_source *source;
     uint32_t index;
@@ -3045,7 +3070,7 @@ static int32_t facil_airport_clear(uint8_t *block)
     return 0;
 }
 
-/* .text+0x26a0 -- OK: remember the mode and move to the selection.  The
+/* .text+0x26a0 -- OK: remember the mode and move to the selection.  RETAIL BUG (kept): FACIL-5 -- the
  * position is an uninitialised stack buffer, as in retail: a navaid fills
  * only part of it, any other mode with a nonempty list none of it, and the
  * rest reaches GLOBAL +0x560. */
@@ -3109,8 +3134,8 @@ static uint32_t FS98_STDCALL facil_airport_names(uint8_t *block)
     return 0;
 }
 
-/* .text+0x2920 -- the airport list for the mode.  Mode 0x1002 frees it a
- * second time, harmlessly. */
+/* .text+0x2920 -- the airport list for the mode.  RETAIL BUG (kept): FACIL-7 -- mode 0x1002 frees it a
+ * second time, harmlessly (a discarded extra call). */
 static uint32_t FS98_STDCALL facil_airport_airports(uint8_t *block)
 {
     struct facil_filter filter;

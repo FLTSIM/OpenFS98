@@ -76,6 +76,8 @@ The `radios` suite's stand-in now logs edi, and catches the old call.
   stack-alignment wrapper whose `add` clobbers it, so it is probably never read across modules.
 - **DYNAMIC from `+0x20` on** is its interpreter's dispatch table, not services, and is left out.
 
+- **FE Scenery Library, empty area directory** (FE-LIB-EMPTY-DIR): a match of the suffix against the byte below the buffer zeroes only a local padding buffer in ours, where retail writes the saved esi.
+
 ## Not yet tested
 
 - **Gauge replacements.** All 120 are rebuilt and included in `tools/ofs ofs_install`.

@@ -220,3 +220,7 @@
 - source_spec: `docs/implementation/spec-1-4u-mdl-data.md`
   summary: Story 1.4's "only resources from orig/ at build time" rests on self-declared `resource:` lines in `tools/raw_dumps_allowed.txt`; add an automated check that builds the converted modules against a copy of `orig/` with their `.data`/`.rdata` overwritten and asserts identical outputs (done by hand for the MDLs in slice 18c).
   evidence: 18c code review (Codex verification gap); `check_raw_dumps.py` checks only that a script is listed, not that it is right about what it reads.
+
+- source_spec: `docs/implementation/spec-1-5d-facil-fe-retail-bugs-marked.md`
+  summary: The FE build step does not depend on `src/fe/fe_library.c`, which `fe.c` includes (`fe.c:4814`), so editing only the Scenery Library leaves `bin/FE.DLL` (and `FE_sl_ours.dll`) stale.
+  evidence: `cmake/OpenFS98.cmake:46`/`:54` glob only `*.h` and `*.inc` siblings as dependencies; `cmake/steps/all.cmake:110` names only `src/fe/fe.c`. Fix by adding `fe_library.c` to the step's DEPENDS (or globbing included `.c`).

@@ -10,7 +10,7 @@ exits non-zero when any differ).  At the end the real build goes back.  A
 missed break is a gap in the harness or an equivalence; either way it is
 reported, and docs/modules/main.md says which.
 
-Usage: tools/main_breaks.py --build-only DIR [SUITE...]  builds every mutant DLL into DIR, running nothing (Story 1.8 slice 6a).
+Usage: tools/main_breaks.py --build-only DIR [SUITE...]  (needs bin/main.res; DIR outside the repository) builds every mutant DLL into DIR, running nothing (Story 1.8 slice 6a).
        tools/main_breaks.py [N] [suite] [name...]   (from the repository
        root, after tools/ofs maindiff).  MAIN_BREAK_DIFFDIR names another
        directory holding maindiff.exe and the retail DLLs, so that suites
@@ -2345,14 +2345,33 @@ BREAKS = {
 }
 
 
+def cc_argv(flags, copy, out):
+    """the main-break-build recipe's compiler call, for MAIN's sources in `copy`"""
+    return (["i686-w64-mingw32-gcc"] + flags + ["-std=c99", "-Os", "-Wall", "-Wextra", "-Iinclude", "-ffreestanding", "-fno-builtin",
+            "-fno-asynchronous-unwind-tables", "-fomit-frame-pointer", "-I" + copy, "-shared", "-nostdlib", "-Wl,--enable-stdcall-fixup",
+            "-Wl,--entry=_DllMain@12", "-Wl,--disable-dynamicbase", "-Wl,--disable-nxcompat", "-Wl,--image-base=0x207e0000",
+            "-o", out, os.path.join(copy, "main.c"), "bin/main.res", "src/main/main.def", "-lmsvcrt", "-lkernel32", "-luser32", "-lgdi32", "-lgcc"])
+
+
 def build_only(argv):
     """--build-only DIR [SUITE...]: every case's mutant MAIN_ours.dll, built from a mutated copy of src/main in a temporary
     directory outside the tree, into DIR/<suite>.<name>/mutant.dll with meta.json; no wine, nothing written under the tree."""
     import json, signal, tempfile
-    if not argv or not argv[0] or (os.path.exists(argv[0]) and (not os.path.isdir(argv[0]) or os.listdir(argv[0]))):
-        print("--build-only needs DIR: a missing or empty directory")
+    if not argv or not argv[0]:
+        print("--build-only needs DIR: a missing or empty directory outside the repository")
         return 2
-    dest, suites = argv[0], argv[1:] or list(BREAKS)
+    dest, suites = os.path.realpath(argv[0]), argv[1:] or list(BREAKS)
+    root = os.path.realpath(".")
+    inside = lambda q: os.path.commonpath([root, q]) == root
+    if inside(dest) or inside(os.path.realpath(tempfile.gettempdir())) or (os.path.exists(dest) and (not os.path.isdir(dest) or os.listdir(dest))):
+        print("--build-only needs DIR: a missing or empty directory outside the repository (and a temp directory outside it)")
+        return 2
+    if len(set(suites)) != len(suites):
+        print("a suite is named twice")
+        return 1
+    if not os.path.isfile("bin/main.res"):
+        print("bin/main.res is missing (build MAIN first: it is the link's resource object)")
+        return 1
     unknown = [x for x in suites if x not in BREAKS]
     if unknown:
         print("no suite %s" % " ".join(unknown))
@@ -2378,16 +2397,12 @@ def build_only(argv):
             copy = os.path.join(tmp, "main")
             shutil.copytree("src/main", copy)
             open(os.path.join(copy, path), "w").write(src[path].replace(old, new, 1))
-            argv_cc = (["i686-w64-mingw32-gcc"] + flags + ["-std=c99", "-Os", "-Wall", "-Wextra", "-Iinclude", "-ffreestanding", "-fno-builtin",
-                       "-fno-asynchronous-unwind-tables", "-fomit-frame-pointer", "-I" + copy, "-shared", "-nostdlib", "-Wl,--enable-stdcall-fixup",
-                       "-Wl,--entry=_DllMain@12", "-Wl,--disable-dynamicbase", "-Wl,--disable-nxcompat", "-Wl,--image-base=0x207e0000",
-                       "-o", os.path.join(d, "mutant.dll"), os.path.join(copy, "main.c"), "bin/main.res", "src/main/main.def",
-                       "-lmsvcrt", "-lkernel32", "-luser32", "-lgdi32", "-lgcc"])
-            p = subprocess.Popen(argv_cc, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+            p = subprocess.Popen(cc_argv(flags, copy, os.path.join(d, "mutant.dll")), stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                                 text=True, errors="replace", start_new_session=True)
             try:
                 _, err = p.communicate()
             except BaseException:
-                p.kill()
+                os.killpg(p.pid, signal.SIGKILL)       # the driver's cc1, as and ld too
                 p.wait()
                 raise
         if p.returncode != 0 or not os.path.isfile(os.path.join(d, "mutant.dll")):

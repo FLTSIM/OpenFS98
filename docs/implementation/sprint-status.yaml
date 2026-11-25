@@ -45,7 +45,7 @@ development_status:
   1-7-the-module-abi-headers-are-32-bit: done
   1-8-every-module-uses-the-shared-arena-h: in-progress
   1-9-register-contracts-become-explicit-parameters: backlog
-  1-10-divides-go-through-the-saturating-helpers: backlog
+  1-10-divides-go-through-the-saturating-helpers: in-progress
   epic-1-retrospective: optional
 
   epic-2: backlog

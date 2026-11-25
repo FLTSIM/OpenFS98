@@ -307,3 +307,19 @@
 - source_spec: `docs/implementation/spec-1-8f-main-uses-arena-h.md`
   summary: Pre-existing defect, repaired in slice 6a: MAIN break anchors `session/create-fail` (`main_kneeboard.inc`) and `spot/main-cmp1` (`main_spot.inc`) matched nothing at HEAD, because Story 1.5 put a RETAIL BUG and a `Not reproduced` comment inside them; their `main_breaks.py` counts since then never ran them. The anchors now take in the comment; the mutations are unchanged.
   evidence: `--build-only` on the HEAD tree without the repair reports both as not unique; slice 4 repaired its anchors the same way.
+
+- source_spec: `docs/implementation/spec-1-10a-divide-helpers-match-the-host-filter.md`
+  summary: Story 1.10b: the six modules whose inline `div`/`idiv` asm relies on the trap move onto `include/fs98/divide.h`: FE (`fe.c:254,262,277`), DYNAMIC (`dynamic.c:183,193,202`), PANELS (`panels.c:75,87,96,105`), BOOSTER (`booster.c:788,797`), ADVDRV (`advdrv.c:571`), plus DEMO's deliberate fault (`demo.c:2256` `fault_div`, DEMO-10, a design decision). The proof is their difftests under wine, after checking each harness's repair model against the filter.
+  evidence: Story 1.10 split at its Checkpoint 1 (2026-11-25) into a foundation and two waves; asm becoming C changes code by construction, so these need behavioural proof.
+
+- source_spec: `docs/implementation/spec-1-10a-divide-helpers-match-the-host-filter.md`
+  summary: Story 1.10c: the six modules with private C saturating divides move onto `include/fs98/divide.h`: SIM1 (`sim1_internal.h:53-100`, about 25 uses), HG2D (7 `.inc` sites, keep `hg2d_affine`'s `*2`), G3D, WINDOW (WIN-1), CONTROLS and MAIN (MAIN-10 sites). The proof is byte identity where the code is unchanged and difftests elsewhere; break anchors inside replaced helpers are repaired.
+  evidence: as above, split on 2026-11-25.
+
+- source_spec: `docs/implementation/spec-1-10a-divide-helpers-match-the-host-filter.md`
+  summary: The divide filter (`0x4119a0`, ours in `src/host/runtime/host_rt_divide.c`) reads a narrow (byte or word) memory divisor as a whole dword, so a divisor at the end of a readable page makes the filter itself fault; this is not in `docs/retail-bugs.md` and dividediff pads it away.
+  evidence: Codex review of 1.10a (blind layer); the filter's read at about `host_rt_divide.c:111`; settle by a guard-page case against retail's filter, then log it as a retail bug if both fault.
+
+- source_spec: `docs/implementation/spec-1-4z-two-harness-differences-fixed.md`
+  summary: Fix the two pre-existing 1.4 harness differences, both probably harness artifacts. `g3ddiff-meshc-run` (43/20000): `g3ddiff.c` never matches `g3d_mesh_precision` (24 since `48756cd`) to retail's 53-bit default. `gauges-panels-run` (143/1000): `gauge_pointer()` does not normalise pointers into a rebuilt gauge's image outside `.data` (different `.rsrc` RVA and image base). The draft spec is ready for Checkpoint 1.
+  evidence: read-only analysis 2026-11-25; `48756cd` is an ancestor of `27371fb` (same scenario lists); `all-gauges-panels` (which normalises those words) gave 0 differ in ~/openfs98-verify/p14-final. Each needs one confirming wine run (in the spec) when the wine lock is free.

@@ -2,7 +2,7 @@
 title: 'Story 1.8, slice 6a: MAIN uses arena.h'
 type: 'refactor'
 created: '2026-11-25'
-status: 'in-progress'
+status: 'done'
 route: 'dispatch'
 baseline_commit: '1d710e40dbdbe70071f16bd276257e795b8b1e8b'
 review_loop_iteration: 0
@@ -83,16 +83,16 @@ context: ['{project-root}/OpenFS98/AGENTS.md', '{project-root}/OpenFS98/docs/imp
 ## Tasks & Acceptance
 
 **Execution:**
-- [ ] `tools/main_breaks.py` -- add `--build-only` and repair the two anchors -- the mutant set.
-- [ ] Gate: `--require-set p18f` and `p18f/gate.sh`. Build the before snapshot and its mutant set from HEAD.
-- [ ] `src/main/main.c`, `main_frame.inc`, `main_engines.inc` -- convert.
-- [ ] `tools/arena_lint_allowed.txt` -- delete the two rows.
-- [ ] Docs:
+- [x] `tools/main_breaks.py` -- add `--build-only` and repair the two anchors -- the mutant set.
+- [x] Gate: `--require-set p18f` and `p18f/gate.sh`. Build the before snapshot and its mutant set from HEAD.
+- [x] `src/main/main.c`, `main_frame.inc`, `main_engines.inc` -- convert.
+- [x] `tools/arena_lint_allowed.txt` -- delete the two rows.
+- [x] Docs:
   - `docs/tools.md`: a `# Story 1.8 slice 6a` note for `--build-only`;
   - `docs/modules/main.md`, where it names removed macros;
   - `deferred-work.md`: the anchor defect.
-- [ ] Build the after snapshot and its mutant set; run the gate and the four negative checks; rerun p18b to p18e.
-- [ ] This spec: `## Implementation Notes` covering the counts, the gate result, the negative checks and the earlier gates.
+- [x] Build the after snapshot and its mutant set; run the gate and the four negative checks; rerun p18b to p18e.
+- [x] This spec: `## Implementation Notes` covering the counts, the gate result, the negative checks and the earlier gates.
 
 **Acceptance Criteria:**
 - Given the slice, when `check_arena.py --self-test`, the lint, and the lint with `--prior` on slice 5's list run, then all pass with 41 files, 100 casts, 27 definitions, no MAIN row, and reverse casts at exactly 23.
@@ -120,3 +120,33 @@ Spec review (Codex gpt-6.2-sol, 2026-11-25), before approval:
 - `python3 -B tools/check_arena.py` and `python3 -B tools/check_arena.py --prior ~/openfs98-verify/p18f/prior.txt` -- expected: both pass, 41 files, 100 casts, 27 defines, reverse 23.
 - `python3 -B tools/check_abi_headers.py` -- expected: pass.
 - `bash ~/openfs98-verify/p18f/gate.sh` -- expected: `GATE PASS`; p18b to p18e -- expected: `GATE PASS`.
+
+## Implementation Notes
+
+**Counts.** `check_arena.py --self-test` (37 cases), the plain run, and `--prior` on slice 5's list (`~/openfs98-verify/p18f/prior.txt`) report 41 files, 100 casts, 27 definitions, reverse casts 23 (27 before); both MAIN rows are gone. `check_abi_headers.py` passes.
+
+**Conversion.** `main.c` defines `FS98_DATA_IMAGE main_image.bytes` right after the `extern` and includes `fs98/arena.h` there; `main_v8/16/32`, `D` and `M8`...`M32` are gone; `ADDR(p)` is `fs98_handle(p)`; `V`, `HOST`/`G`/`CHAIN`/`G3D` and `CALL` are unchanged. `RECORD_LISTENER` is `fs98_handle(main_record_listener)`; `M64F(a)` is `MD(a)`. `docs/modules/main.md` names none of the removed macros, so it is unchanged.
+
+**`--build-only`.** Local code in `tools/main_breaks.py` (not `break_build_only.py`): a temporary copy of `src/main` per case, the `main-break-build` arguments called directly. Exit codes checked on the p18f root: empty argument 2, non-empty DIR 2, unknown suite 1 (nothing made), SIGTERM 143 with no compiler left, and a full-tree sha256 inventory identical before and after all of them plus a 98-case `create` run. Both anchors (`session/create-fail`, `spot/main-cmp1`) were repaired and now build on both sides; logged in `deferred-work.md`. `tools/ofs` and wine were never used.
+
+**Gate** (`compare.py --require-set p18f`, backup `compare.py.bak-pre-p18f`; `~/openfs98-verify/p18f/gate-result.txt`): GATE PASS. 1129 artifacts per side, 320 PEs and 206 objects identical (MAIN.DLL and maindiff.exe present), 522 replayed units cmp-identical with equal flags, `src/main/main.c` replayed once per side, all 2180 mutants identical with meta names equal to their directories. Before is HEAD plus the overlaid `tools/main_breaks.py` (the only tools overlay); both sides were built serially at one root under `nice -n 19`. No fallback was needed.
+
+**Negative checks** (`p18f/negative.sh`, output in `negative-checks.txt`; scratch copies, files replaced never written through): MAIN.DLL missing on both sides, the main.c replay entry removed on both sides, one mutant case removed on both sides, and a stray second `--mut` each give GATE FAIL. p18b, p18c, p18d and p18e still print GATE PASS.
+
+Code review (three Codex gpt-6.2-sol layers, 2026-11-25; B blind, E edge-case, V verification-gap):
+
+| # | Finding | Verdict | Evidence / action |
+|---|---|---|---|
+| B1/E8/V3 | SIGTERM kills only the gcc driver; `cc1` survives | medium | Reproduced by review; breaks "SIGTERM kills the compiler". Patch: process group. |
+| B2/E1 | A repeated suite dies with FileExistsError | low | Real. Patch: rejected with exit 1. |
+| B3/E2/E3/E7 | DIR (or TMPDIR) inside the tree is accepted | medium | Breaks "nothing written under the tree". Patch: realpath check, exit 2. |
+| B4 | `bin/main.res` prerequisite unchecked and undocumented | low | Patch: checked and documented. |
+| E4 | Partial case directories remain after a failure | low | Rejected: the exit is non-zero, and DIR must be fresh for a rerun. |
+| E5 | Strict decoding of compiler output | low | Patch: `errors="replace"`. |
+| E6 | No compile timeout | low | Rejected: unlikely, and it would fail loudly by hanging. |
+| V1 | Both sides use the same new runner, so a runner that skipped mutations would pass | medium | Real (the review substituted unmutated DLLs and got GATE PASS); spec triage #3 rejected a broader form. Patch (evidence only): every non-equivalent mutant must differ from the unmutated build, and three cases are cross-built through the legacy path. |
+| V2 | Negative check n4 fails for an unrelated reason | medium | Real (the guard disabled in memory still failed). Patch: a valid pair passed twice, the p18f diagnostic required. |
+
+**Review fixes.** `--build-only` now: starts each compiler in its own session and kills its whole process group on SIGTERM/SIGHUP (re-tested mid-build: exit 143, `ps` shows no gcc/cc1/ld of the run); resolves DIR with realpath and exits 2 if it, or the temp directory, is inside the repository; exits 1 on a repeated suite and, before creating DIR, when `bin/main.res` is missing (named in the usage line and the `docs/tools.md` note); decodes compiler output with `errors="replace"`. The compiler argv moved verbatim into `cc_argv()`. These edits touch only argument checks and signal handling, not the mutation text or the compiler argv, so the existing mutant sets stand; `gate.sh` was re-run at the end: GATE PASS. Negative check n4 now passes the valid `mut-main` pair twice and fails with `--require-set p18f needs exactly one pair of mut-main at 2180` (`negative-checks.txt` updated).
+
+**Mutation evidence** (scratch, `p18f/evidence1.py`, `evidence2.py`): (1) an unmutated DLL built with `cc_argv` from the after root differs, after normalisation, from every one of the 2092 after-side `mutant.dll` whose meta has `equivalent: false` (none identical; the other 88 are the runner's own equivalent-marked cases). (2) `session.create-fail`, `spot.main-cmp1` and `radiodlg.st-none` built through the legacy path (copytree, replace, `tools/ofs main-break-build`, no wine) are normalised-identical to the `--build-only` output.

@@ -217,6 +217,12 @@ ofs_target(hostrtdiff-run
     [==[WINEDEBUG=-all timeout 1800 wine bin/host-rt/hostrtdiff.exe ${N:-2000}]==]
   )
 
+ofs_target(dividediff-run
+  DEPENDS openfs98 difftests
+  COMMANDS
+    [==[WINEDEBUG=-all timeout 1800 wine bin/difftest/dividediff.exe ${N:-2000}]==]
+  )
+
 ofs_target(host-exe
   DEPENDS openfs98
   COMMANDS
@@ -1419,6 +1425,11 @@ ofs_target(hostdiff
   )
 
 ofs_target(hostrtdiff
+  DEPENDS openfs98 difftests
+  COMMANDS
+  )
+
+ofs_target(dividediff
   DEPENDS openfs98 difftests
   COMMANDS
   )

@@ -310,6 +310,13 @@ ofs_step(difftests
   )
 
 ofs_step(difftests
+  OUTPUTS bin/difftest/dividediff.exe
+  COMMANDS
+    [==[mkdir -p bin/difftest]==]
+    [==[i686-w64-mingw32-gcc @MODULE_FLAGS@ -std=c99 -O2 -Wall -Wextra -Werror -Iinclude -Isrc/host/runtime -Wl,--image-base=0x13000000 -Wl,--disable-dynamicbase -o bin/difftest/dividediff.exe tools/difftest/dividediff.c src/host/runtime/host_rt_divide.c]==]
+  )
+
+ofs_step(difftests
   OUTPUTS bin/mdl-crash/mdlcrashdiff.exe
   COMMANDS
     [==[i686-w64-mingw32-gcc @MODULE_FLAGS@ -std=c99 -O2 -Wall -Wextra -Ibin/mdl-crash -Ibin/mdl-diff -o bin/mdl-crash/mdlcrashdiff.exe tools/difftest/mdlcrashdiff.c]==]

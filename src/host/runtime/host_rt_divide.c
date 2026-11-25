@@ -58,7 +58,7 @@ int32_t SC fs98_host_rt_divide_filter(void **pointers)
     mod = modrm >> 6;
     if ((opcode & 0xfe) != 0xf6)
         return 0;
-    if (rm == 4) {
+    if (rm == 4) {                         /* RETAIL BUG (kept): DIVIDE-SIB-REGISTER-STEP */
         ++length;
         sib_scale = code[2] >> 6;
         sib_index = (code[2] >> 3) & 7;

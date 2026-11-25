@@ -39,6 +39,7 @@ in Python. A new harness or break build adds it and does not spell those flags.
 | `tools/ofs mdl-crash-modules` / `mdl-crash-diff-run` | build the three crash MDLs from the decompiled `src/mdl/mdl_crash.c`; compare lifecycle, CHAIN callbacks, state, data, live registers and import events against retail (2,000 scenarios per model in two address modes) |
 | `tools/ofs mdl-crash-breaks` | the decompiled crash models broken on purpose (`tools/mdl_crash_breaks.py`, run from a frozen copy) |
 | `tools/ofs hostrtdiff-run N=...` | the decompiled host runtime (`src/host/runtime/`) routine by routine against retail FLTSIM98.EXE (`tools/difftest/hostrtdiff.c`, its models in `hostrt_semantics.inc` and `hostrt_windows.inc`; `HOSTRT_COVER=op,text` counts coverage); tables, `.rdata` and the image's pointers from `src/host/runtime/host_rt_tables.inc` (committed; `tools/ofs host-rt-tables-check` re-derives it with `tools/gen_host_rt_tables.py` over `tools/host_rt_survey.py`'s routine list) |
+| `tools/ofs dividediff-run N=...` | `include/fs98/divide.h`'s six helpers against retail's divide filter `0x4119a0` and ours (`tools/difftest/dividediff.c`): real `div`/`idiv` executed, each filter repairing the fault from a vectored handler, registers, EIP step, flags and hit count compared three ways; N random vectors per helper plus fixed ones |
 | `tools/ofs host-exe` (`tools/ofs host-rt-exe`) | `bin/OPENFS98.EXE`, the executable from the decompiled runtime and the services (`src/host/host_rt_exe.c`); fly it with `tools/frames_many.sh` and `HG2D_FRAMES_HOST`, drive its dialogs with `tools/host_runtime_ui.sh` and `HOST_UI_EXE`; its resources from `tools/gen_host_resources.py` (the `.rsrc` tree only) |
 | `python3 tools/host_rt_breaks.py [N]` | the decompiled host runtime broken on purpose (run from a frozen copy) |
 | `tools/ofs mdl-crash-game` / `mdl-crash-render-break` | three private 1,200-pass crash flights (`JOBS=1..3`) requiring the intended crash MDL, or a valid pose mutation required to change rendered frames; source flights and primary game untouched |
@@ -306,6 +307,7 @@ tools/ofs g3d-breaks N=1000   # G3D broken on purpose -> 317 breaks, 278 caught,
 tools/ofs mdl-crash-diff-run  # the three decompiled crash MDLs against retail -> 2000 scenarios per MDL and mode, three MDLs in two modes, 0 differences (~3 min)
 python3 tools/mdl_crash_breaks.py # (from a frozen copy) the crash MDLs broken on purpose -> 82, 78 caught, 4 proven equivalent (~4 min)
 tools/ofs hostrtdiff-run N=20000 # the decompiled host runtime (src/host/runtime/) -> 161 operations, 3220000 comparisons, 0 differ (~30 min)
+tools/ofs dividediff-run N=20000 # divide.h helpers vs retail's filter vs ours -> 6 helpers, 168374 comparisons, 0 differ (~2 s)
 python3 tools/host_rt_breaks.py # (from a frozen copy) its breaks -> 569, 557 caught (2 more at N=20000), 10 proven equivalent
 tools/ofs mdl-crash-game  # the three crash flights, retail against the decompiled MDLs -> identical frames
 tools/ofs gauges-check N=20000 # all 120 hand-written gauges against retail, every exposed callback/data/resource/FP result -> 120 checked, 0 differ

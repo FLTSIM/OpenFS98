@@ -281,6 +281,10 @@ further to "Visual model could not be displayed"; and so on through panels and
 gauges. All of them are *modal dialogs*, which is why a smoke test cannot treat
 "process still alive" as success — see `tools/smoketest.sh`.
 
+## Integer divides
+
+Retail relies on the host's divide filter (`0x4119a0`) to saturate a faulting `div` or `idiv`. Every retail divide that can fault is to call a helper from `include/fs98/divide.h` (`fs98_div32`, `fs98_idiv32`, `fs98_div16`, `fs98_idiv16`, `fs98_div8`, `fs98_idiv8`; ARCHITECTURE-SPINE AD-18), which returns what the filter writes. The helpers exist; the modules still use their own divides and move onto them in Stories 1.10b and 1.10c. `tools/ofs dividediff-run` checks them against retail's filter and ours on real faulting instructions. The filter's decode-time quirks (DIVIDE-BYTE-REGISTER, DIVIDE-DISP8-UNSIGNED, DIVIDE-SIB-REGISTER-STEP) are not modelled by the helpers.
+
 ## A wine quirk that is not ours
 
 FS98's opening menu flickers under wine: the "Fly Now!" default button redraws

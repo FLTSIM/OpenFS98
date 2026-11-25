@@ -120,7 +120,7 @@ Spec review (Codex gpt-6.2-sol, 2026-11-25), before approval:
 - [x] `include/fs98/divide.h` -- the six helpers -- the shared rule.
 - [x] `tools/difftest/dividediff.c` -- the three-way test -- proof against retail and ours.
 - [x] `cmake/steps/difftests.cmake`, `cmake/targets.cmake` -- `dividediff` and `dividediff-run`.
-- [ ] Run `tools/ofs dividediff-run N=20000` under the wine lock. Also run `tools/ofs hostrtdiff-run N=20000` (expected unchanged: 161 operations, 3,220,000 comparisons, 0 differ), and `python3 -B tools/cmake_verify.py` for the new line.
+- [ ] Run `tools/ofs dividediff-run N=20000` under the wine lock. Also run `tools/ofs hostrtdiff-run N=20000` (expected unchanged: 161 operations, 3,220,000 comparisons, 0 differ), and `python3 -B tools/cmake_verify.py` for the new line. (Queued 2026-11-25 in the main tree after integration; log ~/openfs98-verify/p110a/main-tree-run.log.)
 - [x] Docs: `docs/tools.md` (target rows and the baseline), the architecture or method note, and `docs/remaining-work.md` if it lists Story 1.10.
 - [x] This spec: `## Implementation Notes` with the counts and run times.
 

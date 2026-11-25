@@ -31,14 +31,12 @@
 
 #include "fs98/linkage.h"
 #include "fs98/host.h"
+#define FS98_DATA_IMAGE window_image.import
+#include "fs98/arena.h"
 
 #define WIN_IMAGE_SIZE 0x8ac
 #define WIN_IMPORTS    0x000
 #define WIN_LINKAGE    0x068
-
-typedef volatile uint8_t  win_v8;
-typedef volatile uint16_t __attribute__((may_alias)) win_v16;
-typedef volatile uint32_t __attribute__((may_alias)) win_v32;
 
 struct window_image {
     struct { uint32_t id, link; } import[13];   /* +0x000 */
@@ -55,11 +53,6 @@ struct window_image {
 extern struct window_image window_image;
 _Static_assert(sizeof(struct window_image) == WIN_IMAGE_SIZE, "image");
 _Static_assert(offsetof(struct window_image, rest) == 0x2b0 && offsetof(struct window_image, bss) == 0x400, "layout");
-
-#define D       ((uint32_t)(uintptr_t)window_image.import)
-#define M8(a)   (*(win_v8  *)(uintptr_t)(uint32_t)(a))
-#define M16(a)  (*(win_v16 *)(uintptr_t)(uint32_t)(a))
-#define M32(a)  (*(win_v32 *)(uintptr_t)(uint32_t)(a))
 
 #define IMPORT(i)  M32(D + WIN_IMPORTS + 8 * (i) + 4)
 #define HOST       IMPORT(0)
@@ -230,7 +223,7 @@ _Static_assert(__builtin_offsetof(__typeof__(text_constants), snap_zeros) == 0x5
 _Static_assert(__builtin_offsetof(__typeof__(text_constants), pitch_limit) == 0x70, "pitch_limit");
 _Static_assert(__builtin_offsetof(__typeof__(text_constants), code_tail) == 0x74, "code_tail");
 #define T_MASKS (0x20904490u)       /* retail's addresses for these */
-#define CONST_AT(a)  ((uint32_t)(uintptr_t)&text_constants + ((a) - T_MASKS))
+#define CONST_AT(a)  (fs98_handle(&text_constants) + ((a) - T_MASKS))
 
 static uint32_t FS98_STDCALL list_windows(uint32_t out, uint32_t count,
                                           uint32_t type);
@@ -278,7 +271,7 @@ static uint32_t FS98_STDCALL create_record(uint32_t out, uint32_t title,
         if (M32(M32(slot) + R_VIEW) == 0)
             goto fail;
         if (type == 3) {
-            list_windows(0, (uint32_t)(uintptr_t)&count, type);
+            list_windows(0, fs98_handle(&count), type);
             if (count == 1)
                 M32(S_NEXT_3D) = 1;
             rec = M32(slot);
@@ -291,7 +284,7 @@ static uint32_t FS98_STDCALL create_record(uint32_t out, uint32_t title,
             M32(S_NEXT_3D)++;
         }
         if (type == 2) {
-            list_windows(0, (uint32_t)(uintptr_t)&count, type);
+            list_windows(0, fs98_handle(&count), type);
             if (count == 1)
                 M32(S_NEXT_MAP) = 1;
             rec = M32(slot);
@@ -383,17 +376,17 @@ static uint32_t FS98_STDCALL list_windows(uint32_t out, uint32_t count,
     if (out != 0)
         M32(out) = 0;
     M32(count) = 0;
-    H_ALLOC(1, M32(S_WINDOWS) * 4, (uint32_t)(uintptr_t)&g.list, 1);
+    H_ALLOC(1, M32(S_WINDOWS) * 4, fs98_handle(&g.list), 1);
     if (g.list == 0)
         return 0xffffffff;
-    H_LIST_WALK(S_WINDOWS, (uint32_t)(uintptr_t)&g,
-                (uint32_t)(uintptr_t)gather_one);
+    H_LIST_WALK(S_WINDOWS, fs98_handle(&g),
+                fs98_handle(gather_one));
     if (out != 0) {
         M32(out) = g.list;
         M32(count) = g.count;
         return 0;
     }
-    H_FREE((uint32_t)(uintptr_t)&g.list);
+    H_FREE(fs98_handle(&g.list));
     M32(count) = g.count;
     return 0;
 }
@@ -405,7 +398,7 @@ static uint32_t FS98_STDCALL next_window(uint32_t out, uint32_t rec,
 {
     uint32_t count, i, list;
 
-    list_windows((uint32_t)(uintptr_t)&type, (uint32_t)(uintptr_t)&count,
+    list_windows(fs98_handle(&type), fs98_handle(&count),
                  type);
     list = type;
     for (i = 0; i < count; i++)
@@ -413,14 +406,14 @@ static uint32_t FS98_STDCALL next_window(uint32_t out, uint32_t rec,
             break;
     if (i >= count) {
         M32(out) = 0;
-        H_FREE((uint32_t)(uintptr_t)&type);
+        H_FREE(fs98_handle(&type));
         return 0xffffffff;
     }
     i++;
     if (i >= count)
         i = 0;
     M32(out) = M32(list + 4 * i);
-    H_FREE((uint32_t)(uintptr_t)&type);
+    H_FREE(fs98_handle(&type));
     return 0;
 }
 
@@ -430,7 +423,7 @@ static uint32_t FS98_STDCALL previous_window(uint32_t out, uint32_t rec,
 {
     uint32_t count, i, list;
 
-    list_windows((uint32_t)(uintptr_t)&type, (uint32_t)(uintptr_t)&count,
+    list_windows(fs98_handle(&type), fs98_handle(&count),
                  type);
     list = type;
     for (i = 0; i < count; i++)
@@ -438,13 +431,13 @@ static uint32_t FS98_STDCALL previous_window(uint32_t out, uint32_t rec,
             break;
     if (i >= count) {
         M32(out) = 0;
-        H_FREE((uint32_t)(uintptr_t)&type);
+        H_FREE(fs98_handle(&type));
         return 0xffffffff;
     }
     if (i == 0)
         i = count;
     M32(out) = M32(list + 4 * (i - 1));
-    H_FREE((uint32_t)(uintptr_t)&type);
+    H_FREE(fs98_handle(&type));
     return 0;
 }
 
@@ -455,7 +448,7 @@ static uint32_t FS98_STDCALL find_window(uint32_t id, uint32_t type)
     uint32_t count, found = 0, list;
     int32_t i;
 
-    list_windows((uint32_t)(uintptr_t)&type, (uint32_t)(uintptr_t)&count,
+    list_windows(fs98_handle(&type), fs98_handle(&count),
                  type);
     list = type;
     for (i = 0; i < (int32_t)count; i++)
@@ -463,7 +456,7 @@ static uint32_t FS98_STDCALL find_window(uint32_t id, uint32_t type)
             found = M32(list + 4 * i);
             break;
         }
-    H_FREE((uint32_t)(uintptr_t)&type);
+    H_FREE(fs98_handle(&type));
     return found;
 }
 
@@ -557,7 +550,7 @@ static void position_text(void)
             value = GLB32(0x2b8) >> 7;
         else
             value = GLB32(0x2bc) >> 7;
-        NUM_FORMAT((uint32_t)(uintptr_t)&value, 0x22,
+        NUM_FORMAT(fs98_handle(&value), 0x22,
                    S_TEXT + H_STRLEN(S_TEXT));
     }
     H_STRCAT(S_TEXT, STR(0x898));
@@ -603,7 +596,7 @@ static void rate_text(void)
     if ((long double)(int32_t)local[1] < -158.4L)
         local[0] = 0xffffff62u;
     H_STRCAT(S_TEXT, STR(0x440));
-    NUM_FORMAT((uint32_t)(uintptr_t)&local[0], 0x41,
+    NUM_FORMAT(fs98_handle(&local[0]), 0x41,
                S_TEXT + H_STRLEN(S_TEXT));
     H_STRCAT(S_TEXT, STR(0x86c));
 }
@@ -732,20 +725,20 @@ static void FS98_STDCALL update_title(uint32_t rec)
         case 4: kind = STR(0x868); break;
         }
         if (kind != 0)
-            H_STRCPY((uint32_t)(uintptr_t)buf, kind);
+            H_STRCPY(fs98_handle(buf), kind);
     } else if (M32(view + 0x10) == 1) {
-        H_STRCPY((uint32_t)(uintptr_t)buf, STR(0x888));
+        H_STRCPY(fs98_handle(buf), STR(0x888));
     }
     number = M32(rec + R_ID) - 0x100;
-    H_STRCAT((uint32_t)(uintptr_t)buf, STR(0x434));
-    H_STRCAT((uint32_t)(uintptr_t)buf, STR(0x860));
-    NUM_FORMAT((uint32_t)(uintptr_t)&number, 0x20,
-               (uint32_t)(uintptr_t)buf + H_STRLEN((uint32_t)(uintptr_t)buf));
-    if (H_STRCMP(M32(rec + R_TITLE), (uint32_t)(uintptr_t)buf) != 0) {
+    H_STRCAT(fs98_handle(buf), STR(0x434));
+    H_STRCAT(fs98_handle(buf), STR(0x860));
+    NUM_FORMAT(fs98_handle(&number), 0x20,
+               fs98_handle(buf) + H_STRLEN(fs98_handle(buf)));
+    if (H_STRCMP(M32(rec + R_TITLE), fs98_handle(buf)) != 0) {
         uint32_t title;
 
         H_FREE(rec + R_TITLE);
-        title = H_STRDUP((uint32_t)(uintptr_t)buf);
+        title = H_STRDUP(fs98_handle(buf));
         M32(rec + R_TITLE) = title;
         /* RETAIL BUG (kept): WIN-3 -- title update: the id's high word is the new title pointer's
          * (`title`), not the record's: a different id from the one created whenever
@@ -890,12 +883,12 @@ static uint32_t FS98_STDCALL create_3d(uint32_t kind, uint32_t mode)
 {
     uint32_t rec, count;
 
-    list_windows(0, (uint32_t)(uintptr_t)&count, 3);
+    list_windows(0, fs98_handle(&count), 3);
     if (count >= 0x20) {
         UTIL_ALERT(1, 2, 0xf580, 0, 0, 0, 0, 0);
         return 0;
     }
-    create_record((uint32_t)(uintptr_t)&rec, S_EMPTY, 3);
+    create_record(fs98_handle(&rec), S_EMPTY, 3);
     if (count == 0 && M32(S_GEOMETRY + 8) != 0 && M32(S_GEOMETRY + 12) != 0) {
         M32(rec + 0x20) = M32(S_GEOMETRY + 0);
         M32(rec + 0x24) = M32(S_GEOMETRY + 4);
@@ -909,7 +902,7 @@ static uint32_t FS98_STDCALL create_3d(uint32_t kind, uint32_t mode)
     }
     M32(rec + 0x68) = 0x32;
     M32(rec + 0x6c) = 0x1e;
-    M32(rec + R_PAINT) = (uint32_t)(uintptr_t)paint_3d;
+    M32(rec + R_PAINT) = fs98_handle(paint_3d);
     M32(rec + R_GROUP) = 0x2000;
     M32(rec + 0x7c) = 1;
     view_defaults(rec, kind, mode);
@@ -933,7 +926,7 @@ static void FS98_STDCALL destroy_window(uint32_t rec)
     hide(rec);
     unmaximise(rec);
     H_WIN_DESTROY(rec);
-    destroy_record((uint32_t)(uintptr_t)&rec);
+    destroy_record(fs98_handle(&rec));
     H_NTH(G + 0x119c, 0x2000, 0);
     g = G;
     if (M32(g + 0x119c) != 0) {
@@ -949,10 +942,10 @@ static void FS98_STDCALL destroy_3d_all(void)
 {
     uint32_t list, count, i;
 
-    list_windows((uint32_t)(uintptr_t)&list, (uint32_t)(uintptr_t)&count, 3);
+    list_windows(fs98_handle(&list), fs98_handle(&count), 3);
     for (i = 0; i < count; i++)
         destroy_window(M32(list + 4 * i));
-    H_FREE((uint32_t)(uintptr_t)&list);
+    H_FREE(fs98_handle(&list));
 }
 
 /* .text+0x110 -- +0x18: a jump to +0x44. */
@@ -1068,7 +1061,7 @@ static void FS98_STDCALL paint_all(void)
     if (H_ACTIVE() == 0)
         return;
     CHAIN_SEND(0x1b, 0, 0);
-    list_windows((uint32_t)(uintptr_t)&list, (uint32_t)(uintptr_t)&count, 0);
+    list_windows(fs98_handle(&list), fs98_handle(&count), 0);
     for (i = 0; i < count; i++) {
         rec = M32(list + 4 * i);
         if (!(M32(rec + R_FLAGS) & F_SHOWN))
@@ -1085,7 +1078,7 @@ static void FS98_STDCALL paint_all(void)
         H_WIN_FLUSH(M32(list + 4 * i));
         CHAIN_SEND(0x1a, 0, M32(list + 4 * i));
     }
-    H_FREE((uint32_t)(uintptr_t)&list);
+    H_FREE(fs98_handle(&list));
     CHAIN_SEND(0x1c, 0, 0);
 }
 
@@ -1168,7 +1161,7 @@ static uint32_t FS98_STDCALL z_index(uint32_t rec)
     uint32_t want = rec, i = 0;
 
     for (;;) {
-        H_NTH((uint32_t)(uintptr_t)&rec, 0x2000, i);
+        H_NTH(fs98_handle(&rec), 0x2000, i);
         if (rec == 0)
             i = 0xff;
         if (rec == want)
@@ -1209,15 +1202,15 @@ static void FS98_STDCALL save_layout(void)
 {
     uint32_t list, count, i, entry[6];
 
-    list_windows((uint32_t)(uintptr_t)&list, (uint32_t)(uintptr_t)&count, 3);
+    list_windows(fs98_handle(&list), fs98_handle(&count), 3);
     for (i = 0; i < count; i++) {
         entry[2] = M32(list + 4 * i);
         entry[3] = M32(entry[2] + R_VIEW);
         entry[0] = z_index(entry[2]);
         entry[1] = entry[2] == GLB32(0x119c);
-        save_fields(0x3de, S_LAYOUT_FIELDS, (uint32_t)(uintptr_t)entry);
+        save_fields(0x3de, S_LAYOUT_FIELDS, fs98_handle(entry));
     }
-    H_FREE((uint32_t)(uintptr_t)&list);
+    H_FREE(fs98_handle(&list));
 }
 
 /* A new layout entry with a blank record and view block. */
@@ -1333,7 +1326,7 @@ static void FS98_STDCALL load_record(uint32_t record)
     case 10: old_rect(M32(e2 + L_REC), src); break;
     case 11:
         /* The byte goes over the bottom of the argument's own slot. */
-        H_MEMMOVE((uint32_t)(uintptr_t)&record, src, 1);
+        H_MEMMOVE(fs98_handle(&record), src, 1);
         switch (record & 0xff) {
         case 0: M32(M32(S_OLD_LAYOUT + 0) + L_ACTIVE) = 1; break;
         case 1: M32(M32(S_OLD_LAYOUT + 4) + L_ACTIVE) = 1; break;
@@ -1443,7 +1436,7 @@ static void FS98_STDCALL restore_layout(void)
         H_FREE(data + 0x18 * i + L_REC);
         H_FREE(data + 0x18 * i + L_VIEW);
     }
-    H_FREE((uint32_t)(uintptr_t)&data);
+    H_FREE(fs98_handle(&data));
     M32(S_LAYOUT + 0x00) = 0;
     M32(S_LAYOUT + 0x04) = 0;
     M32(S_LAYOUT + 0x10) = 0;
@@ -1467,19 +1460,19 @@ static void FS98_STDCALL aircraft_geometry(void)
     uint32_t list, count, i, rec, x = 0, y = 0, w = 0, h = 0;
     int32_t gx, gy, gw, gh;
 
-    ACONTAIN_PATH(G + 0x11e0, 6, (uint32_t)(uintptr_t)path, 0x104);
-    H_PROFILE_INT(S_SECTION, S_KEY_X, (uint32_t)(uintptr_t)&x,
-                  (uint32_t)(uintptr_t)path, 0x24);
-    H_PROFILE_INT(S_SECTION, S_KEY_Y, (uint32_t)(uintptr_t)&y,
-                  (uint32_t)(uintptr_t)path, 0x24);
-    H_PROFILE_INT(S_SECTION, S_KEY_SIZE_X, (uint32_t)(uintptr_t)&w,
-                  (uint32_t)(uintptr_t)path, 0x24);
-    H_PROFILE_INT(S_SECTION, S_KEY_SIZE_Y, (uint32_t)(uintptr_t)&h,
-                  (uint32_t)(uintptr_t)path, 0x24);
+    ACONTAIN_PATH(G + 0x11e0, 6, fs98_handle(path), 0x104);
+    H_PROFILE_INT(S_SECTION, S_KEY_X, fs98_handle(&x),
+                  fs98_handle(path), 0x24);
+    H_PROFILE_INT(S_SECTION, S_KEY_Y, fs98_handle(&y),
+                  fs98_handle(path), 0x24);
+    H_PROFILE_INT(S_SECTION, S_KEY_SIZE_X, fs98_handle(&w),
+                  fs98_handle(path), 0x24);
+    H_PROFILE_INT(S_SECTION, S_KEY_SIZE_Y, fs98_handle(&h),
+                  fs98_handle(path), 0x24);
     if (M32(S_MAXIMISED) != 0) {
         PANELS_HIDE();
     } else if (w != 0 && h != 0) {
-        list_windows((uint32_t)(uintptr_t)&list, (uint32_t)(uintptr_t)&count,
+        list_windows(fs98_handle(&list), fs98_handle(&count),
                      3);
         gx = (int32_t)M32(S_GEOMETRY + 0);
         gy = (int32_t)M32(S_GEOMETRY + 4);
@@ -1503,7 +1496,7 @@ static void FS98_STDCALL aircraft_geometry(void)
             H_WIN_UPDATE(rec);
             break;
         }
-        H_FREE((uint32_t)(uintptr_t)&list);
+        H_FREE(fs98_handle(&list));
     }
     M32(S_GEOMETRY + 0) = x;
     M32(S_GEOMETRY + 4) = y;
@@ -1529,21 +1522,21 @@ static void window_init(void)
 {
     uint32_t length = 0, file = 0, got = 0;
 
-    if (H_OPEN((uint32_t)(uintptr_t)&file, S_STARS_NAME, 0, 0) == 0) {
-        H_READ(file, (uint32_t)(uintptr_t)&length, 2, (uint32_t)(uintptr_t)&got);
+    if (H_OPEN(fs98_handle(&file), S_STARS_NAME, 0, 0) == 0) {
+        H_READ(file, fs98_handle(&length), 2, fs98_handle(&got));
         length -= 2;
         if (H_ALLOC(2, length, S_STARS, 1) == 0)
-            H_READ(file, M32(S_STARS), length, (uint32_t)(uintptr_t)&got);
+            H_READ(file, M32(S_STARS), length, fs98_handle(&got));
         H_CLOSE(file);
     }
     load_strings();
-    CHAIN_ADD(0x14, (uint32_t)(uintptr_t)situation_message);
+    CHAIN_ADD(0x14, fs98_handle(situation_message));
 }
 
 /* .text+0xe0 */
 static void window_deinit(void)
 {
-    CHAIN_REMOVE(0x14, (uint32_t)(uintptr_t)situation_message);
+    CHAIN_REMOVE(0x14, fs98_handle(situation_message));
     free_strings();
     if (M32(S_STARS) != 0)
         H_FREE(S_STARS);
@@ -3939,10 +3932,10 @@ static void window_install(void)
     };
     uint32_t i;
 
-    M32(D + WIN_LINKAGE + 0x04) = (uint32_t)(uintptr_t)window_init;
-    M32(D + WIN_LINKAGE + 0x08) = (uint32_t)(uintptr_t)window_deinit;
+    M32(D + WIN_LINKAGE + 0x04) = fs98_handle(window_init);
+    M32(D + WIN_LINKAGE + 0x08) = fs98_handle(window_deinit);
     for (i = 0; i < 30; i++)
-        M32(D + WIN_LINKAGE + 0x18 + 4 * i) = (uint32_t)(uintptr_t)services[i];
+        M32(D + WIN_LINKAGE + 0x18 + 4 * i) = fs98_handle(services[i]);
 }
 
 BOOL WINAPI DllMain(HINSTANCE instance, DWORD reason, LPVOID reserved)

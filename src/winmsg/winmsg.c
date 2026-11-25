@@ -26,14 +26,12 @@
 
 #include "fs98/linkage.h"
 #include "fs98/host.h"
+#define FS98_DATA_IMAGE winmsg_image
+#include "fs98/arena.h"
 
 #define WM_IMAGE_SIZE 0x4a8
 #define WM_IMPORTS    0x000
 #define WM_LINKAGE    0x030
-
-typedef volatile uint8_t  wm_v8;
-typedef volatile uint16_t __attribute__((may_alias)) wm_v16;
-typedef volatile uint32_t __attribute__((may_alias)) wm_v32;
 
 /* Retail's .data at its offsets; the code pointers retail relocates stay 0. */
 struct winmsg_image {
@@ -49,12 +47,6 @@ _Static_assert(offsetof(struct winmsg_image, slot_colour) == 0x58, "colours");
 _Static_assert(offsetof(struct winmsg_image, fill) == 0x74, "fill");
 
 extern struct winmsg_image winmsg_image;
-
-#define D       ((uint32_t)(uintptr_t)&winmsg_image)
-#define M8(a)   (*(wm_v8  *)(uintptr_t)(uint32_t)(a))
-#define M16(a)  (*(wm_v16 *)(uintptr_t)(uint32_t)(a))
-#define M32(a)  (*(wm_v32 *)(uintptr_t)(uint32_t)(a))
-#define ADDR(p) ((uint32_t)(uintptr_t)(p))
 
 #define IMPORT(i)  M32(D + WM_IMPORTS + 8 * (i) + 4)
 #define HOST       IMPORT(0)
@@ -229,7 +221,7 @@ static void q_erase(uint32_t q, uint32_t node)
     NEXT(PREV(node)) = NEXT(node);
     PREV(NEXT(node)) = PREV(node);
     msg_free(node);
-    H_FREE(ADDR(&node));
+    H_FREE(fs98_handle(&node));
 }
 
 /* .text+0x11f0 -- every node freed; the head sentinel back */
@@ -242,7 +234,7 @@ static uint32_t q_clear(uint32_t q)
             at = node;
             node = NEXT(node);
             msg_free(at);
-            H_FREE(ADDR(&at));
+            H_FREE(fs98_handle(&at));
         } while (node != TAIL(q));
     }
     NEXT(HEAD(q)) = TAIL(q);
@@ -297,11 +289,11 @@ static uint32_t make_msg(uint32_t text, uint32_t slot, uint32_t time)
     uint32_t msg, node, copy;
     int32_t w;
 
-    H_ALLOC(1, 0xc, ADDR(&node), 1);
-    H_ALLOC(1, 0x2c, ADDR(&msg), 1);
+    H_ALLOC(1, 0xc, fs98_handle(&node), 1);
+    H_ALLOC(1, 0x2c, fs98_handle(&msg), 1);
     M32(node + N_DATA) = msg;
     M32(msg + W_LEN) = H_STRLEN(text);
-    H_ALLOC(1, M32(msg + W_LEN) + 1, ADDR(&copy), 1);
+    H_ALLOC(1, M32(msg + W_LEN) + 1, fs98_handle(&copy), 1);
     M32(msg + W_TEXT) = copy;
     M32(msg + W_SLOT) = slot;
     H_STRCPY(M32(msg + W_TEXT), text);
@@ -347,10 +339,10 @@ static uint32_t split(uint32_t text, uint32_t slot, uint32_t time)
     p = copy;
     /* RETAIL BUG (kept): WMS-6 -- the queue header (8 bytes) and the two sentinels q_init allocates are never
      * freed: queue_after splices the nodes out and leaves them. */
-    H_ALLOC(1, 8, ADDR(&list), 0);
+    H_ALLOC(1, 8, fs98_handle(&list), 0);
     q_init(list);
-    while (next_word(p, ADDR(&pos))) {
-        measure(p, pos, ADDR(ext));
+    while (next_word(p, fs98_handle(&pos))) {
+        measure(p, pos, fs98_handle(ext));
         if ((int32_t)ext[0] > limit()) {
             /* RETAIL BUG (kept): WMS-4 -- `cut` is not reset per line: a first word wider than the limit is
              * cut where the previous line was (at 0, an empty message, the word's first character lost
@@ -372,7 +364,7 @@ static uint32_t split(uint32_t text, uint32_t slot, uint32_t time)
         node = make_msg(p, slot, part);
         q_insert(list, PREV(TAIL(list)), node);
     }
-    H_FREE(ADDR(&copy));
+    H_FREE(fs98_handle(&copy));
     return list;
 }
 
@@ -419,7 +411,7 @@ static void queue_after(uint32_t pos, uint32_t text, uint32_t slot, uint32_t tim
     }
     if (time == 0)
         return;
-    measure(text, H_STRLEN(text), ADDR(ext));
+    measure(text, H_STRLEN(text), fs98_handle(ext));
     if ((int32_t)ext[0] > limit()) {
         sub = split(text, slot, time);
         /* RETAIL BUG (kept): WMS-6 -- `sub`, its header and sentinels, are not freed after the splice. */
@@ -505,7 +497,7 @@ static void show_scrolling(void)
         do {
             if (M8(p) == 0)
                 break;
-            p = ADDR(CharNextA((LPCSTR)(uintptr_t)p));
+            p = fs98_handle(CharNextA((LPCSTR)(uintptr_t)p));
             i++;
         } while ((int32_t)i < (int32_t)(M32(msg + W_SCROLL) >> 3));
     }
@@ -658,8 +650,8 @@ static uint32_t FS98_STDCALL winmsg_init(void)
     M32(M32(S_REC) + 0x6c) = 0x16;
     M32(M32(S_REC) + 0x74) = 0x16;
     H_WIN_UPDATE(M32(S_REC));
-    CHAIN_ADD(2, ADDR(frame));
-    return CHAIN_ADD(0x14, ADDR(situation));
+    CHAIN_ADD(2, fs98_handle(frame));
+    return CHAIN_ADD(0x14, fs98_handle(situation));
 }
 
 /* .text+0x1380 -- +0x08.  The window stays; message 0x37 closes it. */
@@ -667,8 +659,8 @@ static uint32_t FS98_STDCALL winmsg_deinit(void)
 {
     uint32_t p, r;
 
-    CHAIN_REMOVE(0x14, ADDR(situation));
-    CHAIN_REMOVE(2, ADDR(frame));
+    CHAIN_REMOVE(0x14, fs98_handle(situation));
+    CHAIN_REMOVE(2, fs98_handle(frame));
     q_clear(M32(S_QUEUE));
     q_free(M32(S_QUEUE));
     r = H_FREE(S_QUEUE);
@@ -771,12 +763,12 @@ __asm__(".globl _ImportTable\n\t.set _ImportTable, _winmsg_image + 0x0\n\t"
 
 static void winmsg_install(void)
 {
-    M32(D + WM_LINKAGE + 0x04) = ADDR(winmsg_init);
-    M32(D + WM_LINKAGE + 0x08) = ADDR(winmsg_deinit);
-    M32(D + WM_LINKAGE + 0x18) = ADDR(show);
-    M32(D + WM_LINKAGE + 0x1c) = ADDR(clear_slot);
-    M32(D + WM_LINKAGE + 0x20) = ADDR(clear_all);
-    M32(D + WM_LINKAGE + 0x24) = ADDR(slot_queued);
+    M32(D + WM_LINKAGE + 0x04) = fs98_handle(winmsg_init);
+    M32(D + WM_LINKAGE + 0x08) = fs98_handle(winmsg_deinit);
+    M32(D + WM_LINKAGE + 0x18) = fs98_handle(show);
+    M32(D + WM_LINKAGE + 0x1c) = fs98_handle(clear_slot);
+    M32(D + WM_LINKAGE + 0x20) = fs98_handle(clear_all);
+    M32(D + WM_LINKAGE + 0x24) = fs98_handle(slot_queued);
 }
 
 /* .text+0x1000 */

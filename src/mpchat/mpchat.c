@@ -32,14 +32,13 @@
 
 #include "fs98/linkage.h"
 #include "fs98/host.h"
+#define FS98_DATA_IMAGE mpchat_image
+#include "fs98/arena.h"
 
 #define MC_IMAGE_SIZE 0x50c
 #define MC_IMPORTS    0x000
 #define MC_DIALOGS    0x030
 #define MC_LINKAGE    0x048
-
-typedef volatile uint8_t  mc_v8;
-typedef volatile uint32_t __attribute__((may_alias)) mc_v32;
 
 /* Retail's .data at its offsets; the code pointers retail relocates stay 0. */
 struct mpchat_image {
@@ -72,12 +71,8 @@ _Static_assert(offsetof(struct mpchat_image, state) == 0xb4, "state");
 
 extern struct mpchat_image mpchat_image;
 
-#define D       ((uint32_t)(uintptr_t)&mpchat_image)
-#define M8(a)   (*(mc_v8  *)(uintptr_t)(uint32_t)(a))
-#define M32(a)  (*(mc_v32 *)(uintptr_t)(uint32_t)(a))
-#define ADDR(p) ((uint32_t)(uintptr_t)(p))
-#define PTR(a)  ((void *)(uintptr_t)(uint32_t)(a))
-#define STR(a)  ((const char *)(uintptr_t)(uint32_t)(a))
+#define PTR(a)  fs98_ptr(a)
+#define STR(a)  ((const char *)fs98_ptr(a))
 #define WND(a)  ((HWND)(uintptr_t)(uint32_t)(a))
 
 #define IMPORT(i)  M32(D + MC_IMPORTS + 8 * (i) + 4)
@@ -291,13 +286,13 @@ static void say(uint32_t name, uint32_t text, uint32_t local)
      * characters plus ':' and the NUL just fits, 0x3ff or more overruns the stack.  The harness keeps names
      * under 0x300.  RETAIL BUG (kept): MPC-4 -- a null `name` (string 0x9402 missing, for a sender MULTIP
      * does not know) is strcat'ed inside the host and faults. */
-    H_STRCAT(ADDR(line), name);
-    H_STRCAT(ADDR(line), S_COLON);
-    append(M32(S_CHAT), ADDR(line), 0xff0000, 2, 0, 0);
+    H_STRCAT(fs98_handle(line), name);
+    H_STRCAT(fs98_handle(line), S_COLON);
+    append(M32(S_CHAT), fs98_handle(line), 0xff0000, 2, 0, 0);
     append(M32(S_CHAT), text, 0, 1, 1, 0);
     if (is_visible() || local != 0)
         return;
-    WINMSG_SHOW(ADDR(line), 6, 0x5a, 0);
+    WINMSG_SHOW(fs98_handle(line), 6, 0x5a, 0);
     WINMSG_SHOW(S_SPACE, 6, 0x5a, 1);
     WINMSG_SHOW(text, 6, 0x5a, 1);
 }
@@ -325,9 +320,9 @@ static void on_send(void)
     char buf[0x400];
 
     GetWindowTextA(WND(M32(S_ENTRY)), buf, 0x3ff);
-    if (H_STRLEN(ADDR(buf)) == 0)
+    if (H_STRLEN(fs98_handle(buf)) == 0)
         return;
-    send_line(ADDR(buf));
+    send_line(fs98_handle(buf));
     SetWindowTextA(WND(M32(S_ENTRY)), STR(S_EMPTY));
 }
 
@@ -375,32 +370,32 @@ static LRESULT CALLBACK chat_proc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lpa
         right = (uint32_t)rc.right;
         bottom = (uint32_t)rc.bottom;
         split = SPLIT(right);
-        h = (uint32_t)(uintptr_t)CreateWindowExA(
+        h = fs98_handle(CreateWindowExA(
             WS_EX_CLIENTEDGE, STR(S_RICHEDIT), STR(S_EMPTY), 0x50a30904, 2, 2,
             (int)(split - 3), (int)(bottom - 0x23), hwnd, (HMENU)0x100,
-            (HINSTANCE)(uintptr_t)M32(S_MAIN_INST), 0);
+            (HINSTANCE)(uintptr_t)M32(S_MAIN_INST), 0));
         M32(S_CHAT) = h;
         ShowWindow(WND(h), SW_SHOWNOACTIVATE);
         UpdateWindow(WND(M32(S_CHAT)));
         split = SPLIT(right);
-        h = (uint32_t)(uintptr_t)CreateWindowExA(
+        h = fs98_handle(CreateWindowExA(
             WS_EX_CLIENTEDGE, STR(S_LISTBOX), STR(S_EMPTY), 0x50b30908, (int)(split + 1), 2,
             (int)(right - split - 1), (int)(bottom - 0x23), hwnd, (HMENU)0x102,
-            (HINSTANCE)(uintptr_t)M32(S_MAIN_INST), 0);
+            (HINSTANCE)(uintptr_t)M32(S_MAIN_INST), 0));
         M32(S_LIST) = h;
         ShowWindow(WND(h), SW_SHOWNOACTIVATE);
         UpdateWindow(WND(M32(S_LIST)));
-        h = (uint32_t)(uintptr_t)CreateWindowExA(
+        h = fs98_handle(CreateWindowExA(
             WS_EX_CLIENTEDGE, STR(S_EDIT), STR(S_EMPTY), 0x50830080, 2, (int)(bottom - 0x1e),
             (int)(right - 0x50), 0x19, hwnd, (HMENU)0x101,
-            (HINSTANCE)(uintptr_t)M32(S_MAIN_INST), 0);
+            (HINSTANCE)(uintptr_t)M32(S_MAIN_INST), 0));
         M32(S_ENTRY) = h;
         ShowWindow(WND(h), SW_SHOWNOACTIVATE);
         UpdateWindow(WND(M32(S_ENTRY)));
-        h = (uint32_t)(uintptr_t)CreateWindowExA(
+        h = fs98_handle(CreateWindowExA(
             0, STR(S_BUTTON), STR(M32(S_SEND_TEXT)), 0x50030000, (int)(right - 0x4b),
             (int)(bottom - 0x1e), 0x46, 0x19, hwnd, (HMENU)0x103,
-            (HINSTANCE)(uintptr_t)M32(S_MAIN_INST), 0);
+            (HINSTANCE)(uintptr_t)M32(S_MAIN_INST), 0));
         M32(S_SEND) = h;
         ShowWindow(WND(h), SW_SHOWNOACTIVATE);
         UpdateWindow(WND(M32(S_SEND)));
@@ -420,9 +415,9 @@ static uint32_t FS98_STDCALL create(uint32_t parent, uint32_t param)
 
     (void)parent;
     (void)param;
-    h = (uint32_t)(uintptr_t)CreateWindowExA(
+    h = fs98_handle(CreateWindowExA(
         WS_EX_TOOLWINDOW, STR(S_CLASS), STR(M32(S_TITLE)), 0x84cc0000, 0, 0, 0x190, 0xc8,
-        WND(M32(S_MAIN_WND)), 0, (HINSTANCE)(uintptr_t)M32(S_MAIN_INST), 0);
+        WND(M32(S_MAIN_WND)), 0, (HINSTANCE)(uintptr_t)M32(S_MAIN_INST), 0));
     M32(S_WND) = h;
     ShowWindow(WND(h), SW_SHOWNOACTIVATE);
     M32(S_PLAYERS) = MULTIP_LIST();
@@ -488,17 +483,17 @@ static void session_begin(void)
     H_DIALOG(0xff00, 0);
     fill_list();
     H_MENU_ADD(0x1108, CMD_CHAT, CMD_CHAT, 0);
-    CHAIN_ADD(0x14, ADDR(on_situation));
-    CHAIN_ADD(0xb, ADDR(on_menu));
-    CHAIN_ADD(0xc, ADDR(on_command));
+    CHAIN_ADD(0x14, fs98_handle(on_situation));
+    CHAIN_ADD(0xb, fs98_handle(on_menu));
+    CHAIN_ADD(0xc, fs98_handle(on_command));
 }
 
 /* .text+0x12d0 -- message 2: it ended. */
 static void session_end(void)
 {
-    CHAIN_REMOVE(0xc, ADDR(on_command));
-    CHAIN_REMOVE(0xb, ADDR(on_menu));
-    CHAIN_REMOVE(0x14, ADDR(on_situation));
+    CHAIN_REMOVE(0xc, fs98_handle(on_command));
+    CHAIN_REMOVE(0xb, fs98_handle(on_menu));
+    CHAIN_REMOVE(0x14, fs98_handle(on_situation));
     H_MENU_REMOVE(CMD_CHAT);
     destroy();
     M32(S_PLAYERS) = 0;
@@ -555,7 +550,7 @@ static uint32_t FS98_STDCALL mpchat_init(void)
 {
     WNDCLASSA wc;
 
-    M32(S_RICHED_MOD) = (uint32_t)(uintptr_t)LoadLibraryA(STR(S_RICHED));
+    M32(S_RICHED_MOD) = fs98_handle(LoadLibraryA(STR(S_RICHED)));
     H_MODULE_IN(D + MC_LINKAGE, S_INSTANCE);
     H_STRING(0x9400, S_TITLE);
     H_STRING(0x9401, S_SEND_TEXT);
@@ -572,13 +567,13 @@ static uint32_t FS98_STDCALL mpchat_init(void)
     wc.lpszMenuName = 0;
     wc.lpszClassName = STR(S_CLASS);
     RegisterClassA(&wc);
-    return CHAIN_ADD(0x1d, ADDR(on_session));
+    return CHAIN_ADD(0x1d, fs98_handle(on_session));
 }
 
 /* .text+0x1120 -- +0x08 */
 static uint32_t FS98_STDCALL mpchat_deinit(void)
 {
-    CHAIN_REMOVE(0x1d, ADDR(on_session));
+    CHAIN_REMOVE(0x1d, fs98_handle(on_session));
     UnregisterClassA(STR(S_CLASS), (HINSTANCE)(uintptr_t)M32(S_INSTANCE));
     H_MODULE_OUT(M32(S_INSTANCE));
     FreeLibrary((HMODULE)(uintptr_t)M32(S_RICHED_MOD));
@@ -607,9 +602,9 @@ __asm__(".globl _ImportTable\n\t.set _ImportTable, _mpchat_image + 0x0\n\t"
 
 static void mpchat_install(void)
 {
-    M32(D + MC_DIALOGS + 0x04) = ADDR(create);
-    M32(D + MC_LINKAGE + 0x04) = ADDR(mpchat_init);
-    M32(D + MC_LINKAGE + 0x08) = ADDR(mpchat_deinit);
+    M32(D + MC_DIALOGS + 0x04) = fs98_handle(create);
+    M32(D + MC_LINKAGE + 0x04) = fs98_handle(mpchat_init);
+    M32(D + MC_LINKAGE + 0x08) = fs98_handle(mpchat_deinit);
     M32(D + MC_LINKAGE + 0x14) = D + MC_DIALOGS;
 }
 

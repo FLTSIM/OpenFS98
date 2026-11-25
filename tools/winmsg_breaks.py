@@ -9,14 +9,26 @@ scenarios (winmsgdiff exits non-zero when any differ).  At the end the real
 build goes back.  A missed break is a gap in the harness or an equivalence;
 either way it is reported, and docs/modules/winmsg.md says which.
 
-Usage: tools/winmsg_breaks.py [N] [name...]       (from the repository root,
-       after tools/ofs winmsgdiff)
+Usage: tools/winmsg_breaks.py [N] [name...] [--build-only DIR]   (from the repository root,
+       after tools/ofs winmsgdiff).  --build-only builds every case's mutant DLL, one at a time, keeps
+       it as DIR/<case>/mutant.dll with meta.json, and runs nothing; it needs the main build's
+       bin/winmsg.res.
 """
 import os
 import re
 import subprocess
 import sys
 
+import break_build_only
+
+BUILD_ONLY = None                     # --build-only DIR: build every case's mutant DLL into DIR/<case>, run nothing
+if "--build-only" in sys.argv:
+    i = sys.argv.index("--build-only")
+    BUILD_ONLY = sys.argv[i + 1] if i + 1 < len(sys.argv) else ""
+    if not BUILD_ONLY or BUILD_ONLY.startswith("--"):
+        sys.stderr.write("--build-only needs a directory\n")
+        sys.exit(2)
+    del sys.argv[i:i + 2]
 N = int(sys.argv[1]) if len(sys.argv) > 1 and sys.argv[1].isdigit() else 2000
 ONLY = [a for a in sys.argv[1:] if not a.isdigit()]
 SRC = "src/winmsg/winmsg.c"
@@ -35,10 +47,10 @@ BREAKS = [
      "    NEXT(PREV(TAIL(sub))) = NEXT(pos);\n    PREV(NEXT(pos)) = PREV(TAIL(sub));",
      "the two writes are different fields of different nodes"),
     ("splice-reset", "    NEXT(HEAD(sub)) = TAIL(sub);\n    PREV(TAIL(sub)) = HEAD(sub);\n}", "}"),
-    ("pop-free", "    H_FREE(HEAD(q) + N_NEXT);", "    H_FREE(ADDR(&first));"),
+    ("pop-free", "    H_FREE(HEAD(q) + N_NEXT);", "    H_FREE(fs98_handle(&first));"),
     ("pop-relink", "    NEXT(HEAD(q)) = second;\n    PREV(second) = HEAD(q);",
      "    NEXT(HEAD(q)) = second;"),
-    ("erase-free", "    msg_free(node);\n    H_FREE(ADDR(&node));", "    msg_free(node);"),
+    ("erase-free", "    msg_free(node);\n    H_FREE(fs98_handle(&node));", "    msg_free(node);"),
     ("clear-relink", "    NEXT(HEAD(q)) = TAIL(q);\n    PREV(TAIL(q)) = HEAD(q);\n    return HEAD(q);",
      "    NEXT(HEAD(q)) = TAIL(q);\n    return HEAD(q);"),
     ("clear-return", "    PREV(TAIL(q)) = HEAD(q);\n    return HEAD(q);",
@@ -52,7 +64,7 @@ BREAKS = [
     ("limit-cap", "    return w < 0x2000 ? w : 0x2000;", "    return w < 0x1ff8 ? w : 0x1ff8;"),
     ("word-end", "        c = M8(text + i + 1);\n        i++;\n        if (c == 0)\n            break;",
      "        c = M8(text + i + 1);\n        if (c == 0)\n            break;\n        i++;"),
-    ("word-empty", "    if (c == 0)\n        return 0;\n    while", "    if (c == 0)\n        return 1;\n    while"),
+    ("word-empty", "    if (c == 0)\n        return 0;\n    /* RETAIL BUG (kept): WMS-3", "    if (c == 0)\n        return 1;\n    /* RETAIL BUG (kept): WMS-3"),
     ("make-keep", "    if (GLB32(0x1254) == 1) {", "    if (GLB32(0x1254) != 0) {"),
     ("make-speed", "    M32(msg + W_SPEED) = ((uint32_t)GLB16(0x362) >> 1) + 2;\n    return node;",
      "    M32(msg + W_SPEED) = ((uint32_t)GLB16(0x362) >> 1) + 1;\n    return node;"),
@@ -65,15 +77,15 @@ BREAKS = [
      "            part = (uint32_t)((uint64_t)cut * time / len);"),
     ("split-tail-share", "        part = pos * time / len;", "        part = cut * time / len;"),
     ("split-past-cut", "            p = p + cut + 1;", "            p = p + cut;"),
-    ("split-fits", "        if ((int32_t)ext[0] > limit()) {\n            part",
-     "        if ((int32_t)ext[0] >= limit()) {\n            part"),
+    ("split-fits", "        if ((int32_t)ext[0] > limit()) {\n            /* RETAIL BUG (kept): WMS-4",
+     "        if ((int32_t)ext[0] >= limit()) {\n            /* RETAIL BUG (kept): WMS-4"),
     ("slot-realloc", "        H_REALLOC(1, a + b + 1, pp);", "        H_REALLOC(1, a + b + 2, pp);"),
     ("slot-prev-free", "    if (M32(pp) != 0)\n        H_FREE(pp);\n    a = H_STRLEN(prev);",
      "    a = H_STRLEN(prev);"),
     ("queue-fits", "    if ((int32_t)ext[0] > limit()) {\n        sub",
      "    if ((int32_t)ext[0] >= limit()) {\n        sub"),
-    ("queue-no-time", "    if (time == 0)\n        return;\n    measure(text, H_STRLEN(text), ADDR(ext));",
-     "    measure(text, H_STRLEN(text), ADDR(ext));"),
+    ("queue-no-time", "    if (time == 0)\n        return;\n    measure(text, H_STRLEN(text), fs98_handle(ext));",
+     "    measure(text, H_STRLEN(text), fs98_handle(ext));"),
     # the append
     ("append-search", "        node = PREV(node);\n    prev", "        node = NEXT(node);\n    prev"),
     ("append-first", "        if (node == NEXT(HEAD(M32(S_QUEUE)))) {", "        if (1) {"),
@@ -95,7 +107,7 @@ BREAKS = [
      "    start"),
     ("scroll-colour", "    H_TEXT(M32(S_REC), 3, M32(S_COLOUR + 4 * M32(msg + W_SLOT)), S_LINE, 0);",
      "    H_TEXT(M32(S_REC), 3, M32(S_COLOUR + 4), S_LINE, 0);"),
-    ("charnext", "            p = ADDR(CharNextA((LPCSTR)(uintptr_t)p));", "            p = p + 1;",
+    ("charnext", "            p = fs98_handle(CharNextA((LPCSTR)(uintptr_t)p));", "            p = p + 1;",
      "CharNextA steps one byte in a single-byte code page, the harness's"),
     ("plain-done", "    if (M32(msg + W_TIME) == 0) {\n        CHAIN_SEND(0x14, 0x50, node);",
      "    if (M32(msg + W_TIME) == 0) {"),
@@ -122,7 +134,7 @@ BREAKS = [
     ("situation-flags", "        H_MEMMOVE(M32(S_REC) + 0x08, src, 4);", "        H_MEMMOVE(M32(S_REC) + 0x08, src, 2);"),
     ("situation-size", "        MAIN_SAVE_OPEN(0x3df, 0x24);", "        MAIN_SAVE_OPEN(0x3df, 0x28);"),
     ("situation-other", "    return message - 0x37;", "    return 0;"),
-    ("close-title", "    H_WIN_DESTROY(M32(S_REC));\n    H_FREE(M32(S_REC));", "    H_WIN_DESTROY(M32(S_REC));"),
+    ("close-title", "    H_FREE(M32(S_REC));\n    return WINDOW_FREE(S_REC);", "    return WINDOW_FREE(S_REC);"),
     ("init-min", "    M32(rec + 0x68) = 0x16;", "    M32(rec + 0x68) = 0x15;"),
     ("init-group", "    M32(M32(S_REC) + 0x78) = 0x5000;", "    M32(M32(S_REC) + 0x78) = 0x4000;"),
     ("deinit-texts", "    for (p = S_TEXTS; p < S_TEXTS + 0x1c; p += 4)",
@@ -132,6 +144,8 @@ BREAKS = [
 
 def main():
     source = open(SRC).read()
+    if BUILD_ONLY:
+        return break_build_only.run(source, BREAKS, ONLY, TMP, "bin/difftest/WINMSG_ours.dll", ["tools/ofs", "winmsg-break-build", "WINMSG_SRC=" + TMP], BUILD_ONLY)
     results = []
     for entry in BREAKS:
         name, old, new = entry[:3]

@@ -271,3 +271,11 @@
 - source_spec: `docs/implementation/spec-1-8b-controls-panels-gauges-use-arena-h.md`
   summary: The panels and gauges break runners' verdicts cannot supply the spec's acceptance fallback ("caught means the harness's mismatch exit with N differ non-zero, never a crash, timeout or guard exit") as written. `panels_breaks.py` counts a watchdog hang (exit 4) and a timeout as caught, and its unit mode runs 400 vectors whatever N is; `gauges_breaks.py` (warning and suction) runs a fixed 100. A later slice that needs a mutant's verdict compared at N=20000 must first give these runners the strict test and an N that reaches the harness. Slice 2 did not need the fallback: every output and mutant was byte-identical.
   evidence: Story 1.8 slice 2 review.
+
+- source_spec: `docs/implementation/spec-1-8c-window-winmsg-mpchat-use-arena-h.md`
+  summary: WINDOW, WINMSG and MPCHAT keep the same kind of retained reverse conversions as slice 2's entry: address-to-pointer and callback conversions (WINDOW's `(fn *)(uintptr_t)` slot loads in `CALL`, the `paint_fn` call and the call through `eax` in the eye code; MPCHAT's `WND(a)` Win32 handle conversion and its `HINSTANCE` casts; WINMSG's `CALL` and `CharNextA` operands), plus the `CALL` slot loads. Only the private access macros (8) and MPCHAT's `PTR`/`STR` bodies (2, now `fs98_ptr`) left the inventory: 43 to 33.
+  evidence: Story 1.8 slice 3 spec, "Reverse conversions".
+
+- source_spec: `docs/implementation/spec-1-8c-window-winmsg-mpchat-use-arena-h.md`
+  summary: Pre-existing runner defects found and fixed in this slice: `winmsg_breaks.py` never ran `word-empty`, `split-fits` and `close-title` (their anchors sat across retail-bug comments, 61 of 64 ran), and `mpchat_ui_breaks.py` did not build since Story 1.7 (it copied `linkage.h` and `host.h` but not the `abi.h` they include). The WINMSG and MPCHAT UI break counts in `docs/tools.md` and the module docs predate this and were not re-run.
+  evidence: Story 1.8 slice 3, runner `--build-only` work.

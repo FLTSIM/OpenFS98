@@ -33,7 +33,6 @@ src/main/main.c 2 4
 src/main/main_frame.inc 1 0
 src/mdl/mdl_crash.c 1 0
 src/mdl/mdl_image.c 2 0
-src/mpchat/mpchat.c 8 3
 src/mpdialog/mpdialog_details.c 1 0
 src/mpdialog/mpdialog_flow.c 3 0
 src/multip/multip.c 2 5
@@ -56,6 +55,4 @@ src/sound/sound.c 1 1
 src/test/ofstest.c 3 0
 src/util/util_exchange.c 1 0
 src/weatherm/weatherm.c 4 1
-src/window/window.c 68 4
-src/winmsg/winmsg.c 2 4
 src/world/world_search.c 1 0

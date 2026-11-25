@@ -9,14 +9,26 @@ run for N scenarios (mpchatdiff exits non-zero when any differ).  At the end
 the real build goes back.  A missed break is a gap in the harness or an
 equivalence; either way it is reported, and docs/modules/mpchat.md says which.
 
-Usage: tools/mpchat_breaks.py [N] [name...]       (from the repository root,
-       after tools/ofs mpchatdiff)
+Usage: tools/mpchat_breaks.py [N] [name...] [--build-only DIR]   (from the repository root,
+       after tools/ofs mpchatdiff).  --build-only builds every case's mutant DLL, one at a time, keeps
+       it as DIR/<case>/mutant.dll with meta.json, and runs nothing; it needs the main build's
+       bin/mpchat.res.
 """
 import os
 import re
 import subprocess
 import sys
 
+import break_build_only
+
+BUILD_ONLY = None                     # --build-only DIR: build every case's mutant DLL into DIR/<case>, run nothing
+if "--build-only" in sys.argv:
+    i = sys.argv.index("--build-only")
+    BUILD_ONLY = sys.argv[i + 1] if i + 1 < len(sys.argv) else ""
+    if not BUILD_ONLY or BUILD_ONLY.startswith("--"):
+        sys.stderr.write("--build-only needs a directory\n")
+        sys.exit(2)
+    del sys.argv[i:i + 2]
 N = int(sys.argv[1]) if len(sys.argv) > 1 and sys.argv[1].isdigit() else 2000
 ONLY = [a for a in sys.argv[1:] if not a.isdigit()]
 SRC = "src/mpchat/mpchat.c"
@@ -64,13 +76,13 @@ BREAKS = [
     ("scroll-code", "                     SB_THUMBPOSITION, 0);", "                     SB_THUMBTRACK, 0);"),
     ("scroll-pos", "<< 16) - after.nPage + (uint32_t)after.nMax) << 16)", "<< 16) + (uint32_t)after.nMax) << 16)"),
     # a line of chat
-    ("say-colon", "    H_STRCAT(ADDR(line), S_COLON);", "    H_STRCAT(ADDR(line), S_SPACE);"),
-    ("say-colour", "ADDR(line), 0xff0000, 2, 0, 0);", "ADDR(line), 0x0000ff, 2, 0, 0);"),
-    ("say-newlines", "ADDR(line), 0xff0000, 2, 0, 0);", "ADDR(line), 0xff0000, 1, 0, 0);"),
+    ("say-colon", "    H_STRCAT(fs98_handle(line), S_COLON);", "    H_STRCAT(fs98_handle(line), S_SPACE);"),
+    ("say-colour", "fs98_handle(line), 0xff0000, 2, 0, 0);", "fs98_handle(line), 0x0000ff, 2, 0, 0);"),
+    ("say-newlines", "fs98_handle(line), 0xff0000, 2, 0, 0);", "fs98_handle(line), 0xff0000, 1, 0, 0);"),
     ("say-indent", "    append(M32(S_CHAT), text, 0, 1, 1, 0);", "    append(M32(S_CHAT), text, 0, 1, 0, 0);"),
     ("say-local", "    if (is_visible() || local != 0)", "    if (is_visible())"),
     ("say-visible", "    if (is_visible() || local != 0)", "    if (local != 0)"),
-    ("say-slot", "    WINMSG_SHOW(ADDR(line), 6, 0x5a, 0);", "    WINMSG_SHOW(ADDR(line), 5, 0x5a, 0);"),
+    ("say-slot", "    WINMSG_SHOW(fs98_handle(line), 6, 0x5a, 0);", "    WINMSG_SHOW(fs98_handle(line), 5, 0x5a, 0);"),
     ("say-time", "    WINMSG_SHOW(S_SPACE, 6, 0x5a, 1);", "    WINMSG_SHOW(S_SPACE, 6, 0x5b, 1);"),
     ("say-append", "    WINMSG_SHOW(text, 6, 0x5a, 1);", "    WINMSG_SHOW(text, 6, 0x5a, 0);"),
     ("send-type", "    M32(S_MSG) = MSG_CHAT;", "    M32(S_MSG) = MSG_CHAT + 1;"),
@@ -82,7 +94,7 @@ BREAKS = [
     ("send-flag", "S_EMPTY, text, 1);", "S_EMPTY, text, 0);"),
     ("entry-limit", "buf, 0x3ff);", "buf, 0x400);"),
     ("entry-clear", "    SetWindowTextA(WND(M32(S_ENTRY)), STR(S_EMPTY));\n", ""),
-    ("entry-empty", "    if (H_STRLEN(ADDR(buf)) == 0)\n        return;\n", ""),
+    ("entry-empty", "    if (H_STRLEN(fs98_handle(buf)) == 0)\n        return;\n", ""),
     # layout
     ("split", "#define SPLIT(right) (((uint32_t)(right) * M32(S_SPLIT)) >> 16)", "#define SPLIT(right) (((uint32_t)(right) * M32(S_SPLIT)) >> 15)"),
     ("split-signed", "#define SPLIT(right) (((uint32_t)(right) * M32(S_SPLIT)) >> 16)", "#define SPLIT(right) ((uint32_t)((int32_t)(right) * (int32_t)M32(S_SPLIT) >> 16))"),
@@ -94,13 +106,13 @@ BREAKS = [
     ("create-chat-style", "0x50a30904", "0x50a30900"),
     ("create-chat-h", "(int)(split - 3), (int)(bottom - 0x23), hwnd, (HMENU)0x100", "(int)(split - 3), (int)(bottom - 0x22), hwnd, (HMENU)0x100"),
     ("create-list-id", "(HMENU)0x102", "(HMENU)0x104"),
-    ("create-list-split", "        split = SPLIT(right);\n        h = (uint32_t)(uintptr_t)CreateWindowExA(\n            WS_EX_CLIENTEDGE, STR(S_LISTBOX)",
-     "        h = (uint32_t)(uintptr_t)CreateWindowExA(\n            WS_EX_CLIENTEDGE, STR(S_LISTBOX)",
+    ("create-list-split", "        split = SPLIT(right);\n        h = fs98_handle(CreateWindowExA(\n            WS_EX_CLIENTEDGE, STR(S_LISTBOX)",
+     "        h = fs98_handle(CreateWindowExA(\n            WS_EX_CLIENTEDGE, STR(S_LISTBOX)",
      "split is recomputed from the same right and the same unwritten +0x80"),
     ("create-entry-y", "0x50830080, 2, (int)(bottom - 0x1e),", "0x50830080, 2, (int)(bottom - 0x1f),"),
     ("create-button-text", "STR(M32(S_SEND_TEXT)), 0x50030000", "STR(S_EMPTY), 0x50030000"),
     ("create-button-ex", "            0, STR(S_BUTTON)", "            WS_EX_CLIENTEDGE, STR(S_BUTTON)"),
-    ("create-instance", "(HMENU)0x101,\n            (HINSTANCE)(uintptr_t)M32(S_MAIN_INST), 0);", "(HMENU)0x101,\n            (HINSTANCE)(uintptr_t)M32(S_INSTANCE), 0);"),
+    ("create-instance", "(HMENU)0x101,\n            (HINSTANCE)(uintptr_t)M32(S_MAIN_INST), 0));", "(HMENU)0x101,\n            (HINSTANCE)(uintptr_t)M32(S_INSTANCE), 0));"),
     ("create-show", "        ShowWindow(WND(h), SW_SHOWNOACTIVATE);\n        UpdateWindow(WND(M32(S_LIST)));", "        UpdateWindow(WND(M32(S_LIST)));"),
     ("defid", "DefDlgProcA(hwnd, DM_SETDEFID, 0x103, 0);", "SendMessageA(hwnd, DM_SETDEFID, 0x103, 0);"),
     # the procedure
@@ -134,8 +146,8 @@ BREAKS = [
     ("begin-id", "    H_DIALOG(0xff00, 0);", "    H_DIALOG(0xff01, 0);"),
     ("begin-fill", "    H_DIALOG(0xff00, 0);\n    fill_list();", "    H_DIALOG(0xff00, 0);"),
     ("begin-menu", "    H_MENU_ADD(0x1108, CMD_CHAT, CMD_CHAT, 0);", "    H_MENU_ADD(0x1109, CMD_CHAT, CMD_CHAT, 0);"),
-    ("begin-order", "    CHAIN_ADD(0xb, ADDR(on_menu));\n    CHAIN_ADD(0xc, ADDR(on_command));", "    CHAIN_ADD(0xc, ADDR(on_command));\n    CHAIN_ADD(0xb, ADDR(on_menu));"),
-    ("end-order", "    CHAIN_REMOVE(0xc, ADDR(on_command));\n    CHAIN_REMOVE(0xb, ADDR(on_menu));", "    CHAIN_REMOVE(0xb, ADDR(on_menu));\n    CHAIN_REMOVE(0xc, ADDR(on_command));"),
+    ("begin-order", "    CHAIN_ADD(0xb, fs98_handle(on_menu));\n    CHAIN_ADD(0xc, fs98_handle(on_command));", "    CHAIN_ADD(0xc, fs98_handle(on_command));\n    CHAIN_ADD(0xb, fs98_handle(on_menu));"),
+    ("end-order", "    CHAIN_REMOVE(0xc, fs98_handle(on_command));\n    CHAIN_REMOVE(0xb, fs98_handle(on_menu));", "    CHAIN_REMOVE(0xb, fs98_handle(on_menu));\n    CHAIN_REMOVE(0xc, fs98_handle(on_command));"),
     ("end-menu", "    H_MENU_REMOVE(CMD_CHAT);\n", ""),
     ("end-destroy", "    H_MENU_REMOVE(CMD_CHAT);\n    destroy();", "    H_MENU_REMOVE(CMD_CHAT);"),
     ("end-local", "    M32(S_OTHERS) = 0;\n    M32(S_LOCAL) = 0;", "    M32(S_OTHERS) = 0;"),
@@ -148,13 +160,13 @@ BREAKS = [
     ("session-4", "        M32(S_OTHERS) = arg;\n", "        M32(S_PLAYERS) = arg;\n"),
     ("session-4-fill", "        M32(S_OTHERS) = arg;\n        fill_list();", "        M32(S_OTHERS) = arg;"),
     # the Linkage
-    ("init-riched", "    M32(S_RICHED_MOD) = (uint32_t)(uintptr_t)LoadLibraryA(STR(S_RICHED));\n", ""),
+    ("init-riched", "    M32(S_RICHED_MOD) = fs98_handle(LoadLibraryA(STR(S_RICHED)));\n", ""),
     ("init-strings", "    H_STRING(0x9401, S_SEND_TEXT);\n    H_STRING(0x9402, S_UNKNOWN);", "    H_STRING(0x9401, S_UNKNOWN);\n    H_STRING(0x9402, S_SEND_TEXT);"),
     ("init-style", "CS_GLOBALCLASS | CS_HREDRAW | CS_VREDRAW;", "CS_HREDRAW | CS_VREDRAW;"),
     ("init-extra", "    wc.cbWndExtra = DLGWINDOWEXTRA;", "    wc.cbWndExtra = 0;"),
     ("init-brush", "GetStockObject(LTGRAY_BRUSH)", "GetStockObject(WHITE_BRUSH)"),
     ("init-instance", "    wc.hInstance = (HINSTANCE)(uintptr_t)M32(S_INSTANCE);", "    wc.hInstance = (HINSTANCE)(uintptr_t)M32(S_MAIN_INST);"),
-    ("init-return", "    return CHAIN_ADD(0x1d, ADDR(on_session));", "    CHAIN_ADD(0x1d, ADDR(on_session));\n    return 0;"),
+    ("init-return", "    return CHAIN_ADD(0x1d, fs98_handle(on_session));", "    CHAIN_ADD(0x1d, fs98_handle(on_session));\n    return 0;"),
     ("deinit-unregister", "    UnregisterClassA(STR(S_CLASS), (HINSTANCE)(uintptr_t)M32(S_INSTANCE));\n", ""),
     ("deinit-leave", "    H_MODULE_OUT(M32(S_INSTANCE));", "    H_MODULE_OUT(0);"),
     ("deinit-free", "    H_FREE(S_TITLE);\n    H_FREE(S_SEND_TEXT);", "    H_FREE(S_SEND_TEXT);\n    H_FREE(S_TITLE);"),
@@ -164,6 +176,8 @@ BREAKS = [
 
 def main():
     source = open(SRC).read()
+    if BUILD_ONLY:
+        return break_build_only.run(source, BREAKS, ONLY, TMP, "bin/difftest/MPCHAT_ours.dll", ["tools/ofs", "mpchat-break-build", "MPCHAT_SRC=" + TMP], BUILD_ONLY)
     results = []
     for entry in BREAKS:
         name, old, new = entry[:3]

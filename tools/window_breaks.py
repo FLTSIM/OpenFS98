@@ -9,14 +9,26 @@ The copy is built as the harness's WINDOW_ours.dll and run for N scenarios
 back.  A missed break is a gap in the harness or an equivalence; either way
 it is reported, and docs/modules/window.md says which.
 
-Usage: tools/window_breaks.py [N] [name...]       (from the repository root,
-       after tools/ofs windowdiff)
+Usage: tools/window_breaks.py [N] [name...] [--build-only DIR]   (from the repository root,
+       after tools/ofs windowdiff).  --build-only builds every case's mutant DLL, one at a time, keeps
+       it as DIR/<case>/mutant.dll with meta.json, and runs nothing; it needs the main build's
+       bin/window.res and bin/window/window_text_tail.inc.
 """
 import os
 import re
 import subprocess
 import sys
 
+import break_build_only
+
+BUILD_ONLY = None                     # --build-only DIR: build every case's mutant DLL into DIR/<case>, run nothing
+if "--build-only" in sys.argv:
+    i = sys.argv.index("--build-only")
+    BUILD_ONLY = sys.argv[i + 1] if i + 1 < len(sys.argv) else ""
+    if not BUILD_ONLY or BUILD_ONLY.startswith("--"):
+        sys.stderr.write("--build-only needs a directory\n")
+        sys.exit(2)
+    del sys.argv[i:i + 2]
 N = int(sys.argv[1]) if len(sys.argv) > 1 and sys.argv[1].isdigit() else 2000
 ONLY = [a for a in sys.argv[1:] if not a.isdigit()]
 SRC = "src/window/window.c"
@@ -173,6 +185,8 @@ BREAKS = [
 
 def main():
     source = open(SRC).read()
+    if BUILD_ONLY:
+        return break_build_only.run(source, BREAKS, ONLY, TMP, "bin/difftest/WINDOW_ours.dll", ["tools/ofs", "window-break-build", "WINDOW_SRC=" + TMP], BUILD_ONLY)
     results = []
     for entry in BREAKS:
         name, old, new = entry[:3]

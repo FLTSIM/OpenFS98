@@ -9,14 +9,17 @@ Every entry that still applies must be marked.  The allowlist tools/retail_bugs_
 Story 1.5) and its return is an error.
 Usage: tools/check_retail_bugs.py [--self-test]
 """
-import os, re, subprocess, sys
+import bisect, os, re, subprocess, sys
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 ID = r"[A-Z][A-Z0-9]*(?:-[A-Z0-9]+)+"
 KINDS = {"kept": "kept", "kept, suspected": "suspected", "fixed, not kept": "fixed"}
 STATUS = {"": "kept", "suspected": "suspected", "suspected, not used": "suspected",
           "fixed, not kept": "fixed", "no longer applies": "obsolete"}
-HEAD = re.compile(r"RETAIL BUG\s*\(")
+# An attempted marker is "retail bug" (any case) followed by what a marker has next: "(", ":", a kind word or an id.
+# Prose such as "a RETAIL BUG in X" is not one. Every attempt must then match MARK exactly, or it is malformed.
+HEAD = re.compile(r"retail\s+bug\b(?:\s*[(:]|\s+(?:kept|suspected|fixed)\b|\s+(?-i:%s))" % ID, re.I)
+DIRECTIVE = re.compile(r"(?:[ \t]|/\*.*?\*/)*(?:define|undef|include|ifdef|ifndef|if|elif|else|endif|pragma|error|warning|line)\b", re.S)
 MARK = re.compile(r"RETAIL BUG \(([a-z, ]+)\):\s*(%s)(?!\w|-)(?!\s*,\s*%s)" % (ID, ID))
 
 
@@ -49,19 +52,32 @@ def register(text):
 
 
 def comments(path, text):
-    """-> ([(line, comment text)], [line of marker text outside a comment])"""
-    asm = path.endswith((".S", ".def"))
-    out, bad, i, n, line = [], [], 0, len(text), 1
+    """-> ([(line, comment text)], [line of marker text outside a comment])
+    Line splices are removed first, as cpp does (a `*\\` newline `/` closes a comment); lines stay physical."""
+    # `#` comments in .S and .def; `;` only in .def (in GAS x86 it separates statements)
+    hash_c, semi_c = path.endswith((".S", ".def")), path.endswith(".def")
+    parts, splices, pos, total = [], [], 0, 0
+    for m in re.finditer(r"\\[ \t]*\r?\n", text):
+        parts.append(text[pos:m.start()]); total += m.start() - pos
+        splices.append(total); pos = m.end()
+    parts.append(text[pos:])
+    text = "".join(parts)
+    nls = [m.start() for m in re.finditer("\n", text)]
+    def at(i):   # physical line of offset i in the spliced text
+        return 1 + bisect.bisect_left(nls, i) + bisect.bisect_right(splices, i)
+    out, bad, i, n = [], [], 0, len(text)
     last = None   # consecutive line comments are one comment
+    bol = True    # only blanks and block comments since the line start: `#` here begins a directive
     while i < n:
         c, two = text[i], text[i:i + 2]
+        line = at(i)
         if two == "/*":
             j = text.find("*/", i + 2); j = n if j < 0 else j
             out.append((line, text[i + 2:j])); last = None
-            line += text.count("\n", i, j); i = j + 2
-        elif asm and c == "#" and re.match(r"[ \t]*$", text[text.rfind("\n", 0, i) + 1:i]) and text[i + 1:i + 2].isalpha():
-            i += 1; last = None   # a preprocessor directive is code
-        elif two == "//" or (asm and c in "#;"):
+            i = j + 2
+        elif hash_c and c == "#" and bol and DIRECTIVE.match(text, i + 1):
+            i += 1; last = None; bol = False   # a preprocessor directive is code, `# define` included
+        elif two == "//" or (c == "#" and hash_c) or (c == ";" and semi_c):
             j = text.find("\n", i); j = n if j < 0 else j
             if last is not None and last[0] == line - 1:
                 out[-1] = (out[-1][0], out[-1][1] + "\n" + text[i + (2 if two == "//" else 1):j])
@@ -74,15 +90,15 @@ def comments(path, text):
                 j += 2 if text[j] == "\\" else 1
             if HEAD.search(text[i:j]):
                 bad.append(line)
-            i = j + 1; last = None
+            i = j + 1; last = None; bol = False
         elif c == "R" and HEAD.match(text, i):
-            bad.append(line); i += 10; last = None   # bare marker text in code
+            bad.append(line); i += 10; last = None; bol = False   # bare marker text in code
         else:
-            if c == "\n":
-                line += 1
             i += 1
-            if not c.isspace():
-                last = None
+            if c == "\n":
+                bol = True
+            elif not c.isspace():
+                last = None; bol = False
     return out, bad
 
 
@@ -115,6 +131,8 @@ def check(reg_text, files):
     for i, s_ in sorted(ents.items()):
         if s_ != "obsolete" and i not in marked:
             errs.append("unmarked: %s" % i)
+    if not ents and not marked:
+        errs.append("register: no entries and no markers (an empty or unparsed register)")
     nobs = sum(s == "obsolete" for s in ents.values())
     return errs, warns, "retail bugs: %d entries, %d marked, %d no longer apply" % (len(ents), len(marked), nobs)
 
@@ -125,12 +143,12 @@ def run_root(root):
     if os.path.lexists(os.path.join(root, "tools/retail_bugs_unmarked.txt")):
         errs.append("tools/retail_bugs_unmarked.txt exists: the allowlist is gone, mark the entry instead")
     reg_text = open(os.path.join(root, "docs/retail-bugs.md"), encoding="utf-8").read()
-    try:
+    try:   # no fallback: a failed listing would check nothing
         names = subprocess.check_output(["git", "ls-files", "-z", "-co", "--exclude-standard", "src"], text=True,
-                                        cwd=root, stderr=subprocess.DEVNULL).split("\0")
-    except (subprocess.CalledProcessError, OSError):   # not a git tree (the self-test's temporary root)
-        names = [os.path.join(d, f) for d, _, fs in os.walk(os.path.join(root, "src")) for f in fs]
-        names = [os.path.relpath(n, root) for n in names]
+                                        cwd=root, stderr=subprocess.PIPE).split("\0")
+    except (subprocess.CalledProcessError, OSError) as e:
+        print("check_retail_bugs: git ls-files failed in %s: %s" % (root, (getattr(e, "stderr", None) or str(e)).strip()), file=sys.stderr)
+        sys.exit(2)
     files = {f: open(os.path.join(root, f), encoding="latin-1").read() for f in names
              if f and os.path.isfile(os.path.join(root, f))}
     e, warns, summary = check(reg_text, files)
@@ -165,7 +183,29 @@ def self_test():
     fails(run(["SS-1"], "/* RETAIL BUG (kept): */"), "a.c:1", "malformed")
     fails(run(["MAIN-6", "MAIN-18"], "/* RETAIL BUG (kept): MAIN-6, MAIN-18 */"), "a.c:1", "malformed")
     clean(run(["SS-1", "SS-2"], "/* RETAIL BUG (kept): SS-1, and RETAIL BUG (kept): SS-2 */"))   # two in one
-    clean(run(["SS-1", "SS-2"], {"b.S": "# RETAIL BUG (kept): SS-1\n  nop ; RETAIL BUG (kept): SS-2\n"}))
+    clean(run(["SS-1", "SS-2"], {"b.S": "# RETAIL BUG (kept): SS-1\n  nop # RETAIL BUG (kept): SS-2\n"}))
+    clean(run(["SS-1"], {"b.def": "; RETAIL BUG (kept): SS-1\n"}))                          # .def keeps `;`
+    r = run(["SS-1", "SS-2"], {"b.S": "  nop ; RETAIL BUG (kept): SS-1\n/* RETAIL BUG (kept): SS-2 */\n"})
+    fails(r, "unmarked: SS-1"); assert len(r[0]) == 1 and r[1] and "b.S:1" in r[1][0], r    # `;` is a statement break in .S
+    r = run(["SS-1", "SS-2"], {"b.S": '#define TEXT "x"\n# define T2 "RETAIL BUG (kept): SS-1"\n# RETAIL BUG (kept): SS-2\n'})
+    fails(r, "unmarked: SS-1"); assert len(r[0]) == 1 and r[1] and "b.S:2" in r[1][0], r    # spaced `# define` is code
+    for src in ('/* n */ # define X "RETAIL BUG (kept): SS-1"\n', '# /* n */ define X "RETAIL BUG (kept): SS-1"\n',
+                '/* a\n b */ # define X "RETAIL BUG (kept): SS-1"\n'):                       # block comments are whitespace
+        r = run(["SS-1", "SS-2"], {"b.S": src + "/* RETAIL BUG (kept): SS-2 */\n"})
+        fails(r, "unmarked: SS-1"); assert len(r[0]) == 1 and r[1], (src, r)
+    clean(run(["SS-1"], {"b.S": "# define the thing\n# RETAIL BUG (kept): SS-1\n"}))        # no `# define` here: prose
+    r = run(["SS-1"], "/* x *\\\n/\nint RETAIL BUG (kept): SS-1;\n")
+    assert len(r[1]) == 1 and "a.c:3" in r[1][0], r                                                    # splice: physical line 3
+    clean(run(["SS-1"], "/* RETAIL BUG (kept): SS-1 *\\\n/\n"))                             # `*\` newline `/` closes
+    r = run(["SS-1"], "/* a *\\\n/ int x;\n/* RETAIL BUG kept: SS-1 */\n")
+    fails(r, "a.c:3", "malformed")
+    fails(run(["SS-1"], "/* RETAIL BUG (kept): SS-1 */\n/* RETAIL BUG kept: SS-1 */"), "a.c:2", "malformed")   # valid elsewhere
+    fails(run(["SS-1"], "/* RETAIL BUG (kept) SS-1 */\n/* RETAIL BUG (kept): SS-1 */"), "a.c:1", "malformed")
+    clean(run(["SS-1"], "/* a retail bugfix-123 and a retail bug in-flight */\n/* RETAIL BUG (kept): SS-1 */"))   # boundaries
+    fails(run(["SS-1"], "/* RETAIL BUG kept: SS-1 */"), "malformed")
+    fails(run(["SS-1"], "/* RETAIL BUG\tSS-1 */"), "malformed")
+    clean(run(["SS-1"], "/* a RETAIL BUG in prose */\n/* RETAIL BUG (kept): SS-1 */"))      # prose is no attempt
+    fails(check(reg(), {"a.c": ""}), "no entries")                                            # empty register
     fails(run(["SS-1", "SS-1"], "/* RETAIL BUG (kept): SS-1 */"), "duplicate id SS-1")
     fails(run(["SS-1 (odd)"], "/* RETAIL BUG (kept): SS-1 */"), "annotation")
     clean(run(["SS-1"], "/* RETAIL BUG (kept): SS-1 */\n/* RETAIL BUG (kept): SS-1 */"))   # one id, two sites
@@ -178,13 +218,14 @@ def self_test():
     fails(r, "unmarked: SS-1"); assert len(r[0]) == 1 and r[1], r                           # directive is code
     r = run(["SS-1", "SS-2"], "int RETAIL BUG (kept): SS-1;\n/* RETAIL BUG (kept): SS-2 */")  # bare code
     fails(r, "unmarked: SS-1"); assert len(r[0]) == 1 and r[1] and "a.c:1" in r[1][0], r
-    import tempfile                                    # the allowlist file is refused, through the CLI's own path
+    import tempfile                                    # the CLI's own path, in a temporary Git repo
     with tempfile.TemporaryDirectory() as root:
+        subprocess.check_call(["git", "init", "-q", root])
         for path, text in (("docs/retail-bugs.md", reg("SS-1")), ("src/a.c", "/* RETAIL BUG (kept): SS-1 */"),
                            ("tools/retail_bugs_unmarked.txt", "")):
             os.makedirs(os.path.dirname(os.path.join(root, path)), exist_ok=True)
             open(os.path.join(root, path), "w").write(text)
-        fails(run_root(root), "retail_bugs_unmarked.txt")
+        fails(run_root(root), "retail_bugs_unmarked.txt")        # the allowlist file is refused
         os.remove(os.path.join(root, "tools/retail_bugs_unmarked.txt"))
         clean(run_root(root))
         link = os.path.join(root, "tools/retail_bugs_unmarked.txt")
@@ -194,6 +235,21 @@ def self_test():
             link = None
         if link:
             fails(run_root(root), "retail_bugs_unmarked.txt")
+    with tempfile.TemporaryDirectory() as root:                      # not a Git repo: exit 2 with a message
+        os.makedirs(os.path.join(root, "docs")); open(os.path.join(root, "docs/retail-bugs.md"), "w").write(reg("SS-1"))
+        env = dict(os.environ, GIT_CEILING_DIRECTORIES=os.path.dirname(root))
+        old = os.environ.copy(); os.environ.update(env)
+        import contextlib, io
+        err = io.StringIO()
+        try:
+            with contextlib.redirect_stderr(err):
+                run_root(root)
+            raise AssertionError("no exit")
+        except SystemExit as e:
+            assert e.code == 2, e.code
+            assert "git ls-files failed" in err.getvalue(), err.getvalue()
+        finally:
+            os.environ.clear(); os.environ.update(old)
     print("check_retail_bugs: self-test passed")
 
 

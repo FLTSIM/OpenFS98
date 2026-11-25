@@ -23,7 +23,9 @@ endforeach()
 
 # The AD-15 lint (Story 1.8): a target with no output, so it runs on every build, even an up-to-date tree. Every
 # output-producing custom command below names it in DEPENDS, so no module recipe starts before it passes.
+# The codegen-override check (Cleanup 2) rides on the same target, so it runs on the same paths. ofs_revert bypasses both.
 add_custom_target(ofs_arena_lint COMMAND python3 -B tools/check_arena.py
+  COMMAND python3 -B tools/check_codegen_overrides.py
   WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}" USES_TERMINAL VERBATIM)
 
 function(ofs_step group)

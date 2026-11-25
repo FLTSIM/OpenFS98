@@ -7,15 +7,6 @@
 - source_spec: spec-1-2-cmake-targets-for-every-tools-md-target.md
   summary: Break runners other than the nine already fixed (WINDOW, WINMSG, REALITY, ANALYSIS, MPCHAT, HOST, G3D, PANELS, CONTROLS) may still count a harness crash as a caught break.
   evidence: Unverified; read each remaining tools/*_breaks.py verdict test.
-- source_spec: spec-1-2-cmake-targets-for-every-tools-md-target.md
-  summary: No regression test for tools/modules.sh output or tools/ofs argument handling.
-  evidence: modules.sh matched `make -s` for every query before the Makefile was deleted; a table test would guard later edits.
-
-## Deferred from: code review of spec-1-3-one-flag-set-for-every-unit.md (2026-11-19)
-
-- source_spec: `docs/implementation/spec-1-3-one-flag-set-for-every-unit.md`
-  summary: Nothing fails if a codegen override (-fno-ipa-icf, -fno-tree-loop-distribute-patterns, -fno-tree-vectorize, -fno-math-errno) is later dropped from one of its sites; the toolchain table is documentation only.
-  evidence: medium, unverified as a harm. Without -fno-ipa-icf, DEMO's code changes but demodiff still gives 0 differ, so a dropped override may go unnoticed. A section comparison against a reference build per site would settle it (Story 1.4's image checks are the natural home).
 
 ## Deferred from: Story 1.4, slice 1 (WINMSG and MPCHAT data decompiled, 2026-11-19)
 
@@ -96,6 +87,7 @@
 - source_spec: none
   summary: A break runner killed by `cmake_verify.py`'s timeout leaves its mutation in the tree. The timeout uses `killpg(…, SIGKILL)`, so no cleanup runs. Story 1.3's p13 kept `sim1r-breaks`' `>=` mutant in `src/sim1/sim1_small.c:843`, and every later SIM1 build in p13 used it (`sim1rdiff-run`, `sim1native-flights` and both smoke runs). Fix it with the parallel-verification work: each break runner mutates its own tree copy, never the tree it was started from. Until then, `cmake_verify.py` should send SIGTERM and wait before SIGKILL, the runners should restore on SIGTERM, and the verifier should check the tree is unchanged after each break step.
   evidence: found 2026-11-21 when re-running p13's `sim1rdiff-run`. It differed in `op_crash_count` (GLOBAL +0xb7c) because of the leftover mutant; the current tree gives 0 differ. Restoring the line in p13 was enough. `main`, `g3d`, `hg2d` and `controls` in p13 were clean.
+  review (cleanup 2 spec review, Codex gpt-6.2-sol, 2026-11-25): a leak must stop the run and block resuming; protected paths must be told apart from the expected `bin/` outputs; the break-line classification needs fixing; and `cmake_verify.py --self-test` currently raises `IndexError`.
 - source_spec: none
   summary: Story 1.4 slice 18d: `tools/gen_window_data.py` (WINDOW's .text tail for WIN-2) stays a `gen:` build step, as the user chose in slice 6, until WIN-2 is fixed at porting.
   evidence: split from slice 18 on 2026-11-22; revisit only with the user.
@@ -106,10 +98,6 @@
 - source_spec: `docs/implementation/spec-1-4-module-data-decompiled-no-raw-dumps-in-git.md`
   summary: `tools/ofs main-dialogs` is flaky: its control dump lists a dialog's child pages in z-order, so Display options' (0x1409) pages can come out in another order, and the Time of day combo (0x1301) differs when retail and ours start on either side of sunrise.
   evidence: 4 runs of the unchanged 1.4 tree on 2026-11-23/24 (~/openfs98-verify/p14-results, p14, md-bisect/): two failed on the page order in the cancel pass (same controls and text, one page block moved), one on Time of day (retail 06:25 Night, ours 06:35 Day), one passed. A swapped-in 1.3 SIMSUI.DLL differed only in its export timestamp. `tools/drive/fsdialogs.c:588` lists children with EnumChildWindows (z-order). Fix: list a dialog's top-level child pages in a fixed order (e.g. by their first control's id), and mask the Time of day combo as the hour and minute edits are masked (`tools/main_dialogs.sh`).
-
-- source_spec: `docs/implementation/spec-1-5j-multip-english-dialogs-retail-bugs-marked-allowlist-gone.md`
-  summary: `tools/check_retail_bugs.py` comment parsing and file listing have gaps that predate slice 10: if `git ls-files` fails for any reason (e.g. a corrupt index) the checker silently falls back to a filesystem walk, which also counts git-ignored files; in `.S` files a spaced directive (`# define X "RETAIL BUG (kept): ID"`) is taken as a comment; `;` after an instruction is accepted as a marker comment (the self-test relies on it); a backslash-newline inside `*/` is not followed; an empty register with no markers passes with `0 entries`; a malformed duplicate marker passes when a valid one exists elsewhere.
-  evidence: Slice 10 code review (Codex gpt-6.2-sol, blind and edge-case layers, 2026-11-24). None affects the current tree: the check passes on 331 entries.
 
 ## Deferred from: Story 1.7 (the module ABI headers are 32-bit, 2026-11-24)
 
@@ -178,10 +166,6 @@
   evidence: `--build-only` on the HEAD tree without the repair reports both as not unique; slice 4 repaired its anchors the same way.
 
 - source_spec: `docs/implementation/spec-1-10a-divide-helpers-match-the-host-filter.md`
-  summary: Story 1.10b: the six modules whose inline `div`/`idiv` asm relies on the trap move onto `include/fs98/divide.h`: FE (`fe.c:254,262,277`), DYNAMIC (`dynamic.c:183,193,202`), PANELS (`panels.c:75,87,96,105`), BOOSTER (`booster.c:788,797`), ADVDRV (`advdrv.c:571`), plus DEMO's deliberate fault (`demo.c:2256` `fault_div`, DEMO-10, a design decision). The proof is their difftests under wine, after checking each harness's repair model against the filter.
-  evidence: Story 1.10 split at its Checkpoint 1 (2026-11-25) into a foundation and two waves; asm becoming C changes code by construction, so these need behavioural proof.
-
-- source_spec: `docs/implementation/spec-1-10a-divide-helpers-match-the-host-filter.md`
   summary: Story 1.10c: the six modules with private C saturating divides move onto `include/fs98/divide.h`: SIM1 (`sim1_internal.h:53-100`, about 25 uses), HG2D (7 `.inc` sites, keep `hg2d_affine`'s `*2`), G3D, WINDOW (WIN-1), CONTROLS and MAIN (MAIN-10 sites). The proof is byte identity where the code is unchanged and difftests elsewhere; break anchors inside replaced helpers are repaired.
   evidence: as above, split on 2026-11-25.
 
@@ -196,3 +180,22 @@
 - source_spec: `docs/implementation/spec-cleanup-1-deps-retail-ids-norm-pe.md`
   summary: Nothing re-checks the new rebuild edges automatically: a recurring incremental-build check is wanted (touch `tools/data_images.txt`, `advdrv_relocs.inc`, `fe_library.c`, a gauges input; delete a generated header; a wrong pinned hash; assert the exact recipe sets and a lint-only second build).
   evidence: the touch, delete and bad-hash proofs were one-off runs (the spec's Implementation Notes); removing the `data_images.txt` edge from `ofs_step` would pass every recurring check.
+  review (cleanup 2 spec review, Codex gpt-6.2-sol, 2026-11-25): it needs a scratch configure and build (a copied build is tied to its source path), stable recipe identifiers, the absent-`bin/gauges-all` case, and the bad-hash restore.
+
+- source_spec: `docs/implementation/spec-1-10b1-fe-dynamic-advdrv-booster-divides.md`
+  summary: Story 1.10b2: PANELS' divides onto `divide.h`. That covers its asm wrappers `pn_idiv64`/`pn_div`/`pn_idiv`/`pn_imod` (`src/panels/panels.c:72-107`, `pn_imod` returns a signed remainder via a temporary), its faulting C divides (at least `edges_24`'s six, `panels.c:2591,2632,2683`, retail signed divides `0x10006c1e`-`0x10006c90`; audit the rest), and three DIVIDE-DISP8-UNSIGNED sites, retail `idiv [ebp-0x3c/-0x14/-0x6c]` at `0x1000419d`, `0x100044bc` and `0x100048cd` (the reciprocal `1:0 / d`, d from `MUL16(xs, ys)`). User's decision (2026-11-25): those three are fixed, not kept, with ours using the true divisor's sign and one new register id. The harness repair is our filter, with an independent fixed-rule override keyed by RVA and opcode bytes at those VAs (guarded raw read; an observed raw-vs-fixed delta required at each). Also: the `allpaneldiff.exe`/`gaugespanelsdiff.exe` modes load rebuilt PANELS under both names and need their own fault policy, rerun against their baselines (gauges-panels-run's known 143/1000); and `panels-breaks` `--cases` keys on line numbers, so remap and freeze cases under the strict verdict before converting. Then shrink `tools/div_asm_allowed.txt`.
+  evidence: 1.10b split by module on 2026-11-25 after two Codex spec rounds (blockers each time); the full draft's findings are in this entry and the next.
+
+- source_spec: `docs/implementation/spec-1-10b1-fe-dynamic-advdrv-booster-divides.md`
+  summary: Story 1.10b3: DEMO's divides onto `divide.h`, matching retail (user's decision, 2026-11-25). The six `fault_div` call sites map to five retail instructions, all checked against the disassembly by Codex:
+    - `demo.c:2192`, three `div ebx` at `0x206935ab/b5/bf`: `fs98_div32(sum_hi, sum_lo, estimate, NULL)`, the repair feeding add/rcr;
+    - `2201`/`2205`, `div` at `0x206935d0`: `fs98_div32(estimate>>17, estimate<<15, dt, NULL)`, where `0xffffffff` is rejected at the `0x5dc00` cutoff;
+    - `2232`/`2234`, `idiv [ebp-4]` at `0x20693637`: `fs98_idiv32((uint32_t)((int32_t)dz>>16), (uint32_t)dz<<16, dt, NULL)`, stored to GLOBAL `+0x2c8`;
+    - `2240`, `idiv [ebp-4]` at `0x20693651`: `lo` is the wrapped 16-bit pitch delta `<<16`, `fs98_idiv32(sx(lo), lo, dt, NULL)`, AX stored to `+0x37c`; pitch overflows only at `INT_MIN/-1`, so test both signs with vertical speed;
+    - `demo.c:~1736` (retail `div dword [edi+0x634]` at `0x20692f2f`, EDX 0): `fs98_div32(0, 0x640000, speed, 0)`, unconditionally.
+    - The two `[ebp-4]` sites are DIVIDE-DISP8-UNSIGNED, fixed, not kept (user's decision), and get one new register id. `fault_div` goes; DEMO-10 becomes reproduced apart from them, and `docs/open-differences.md:119-125` goes. `demodiff`'s repair becomes our filter plus the override. Then empty `tools/div_asm_allowed.txt`, completing Story 1.10's AC with 1.10c.
+  evidence: as above.
+
+- source_spec: `docs/implementation/spec-cleanup-2-tooling-guards.md`
+  summary: Nothing recurring asserts that the codegen check stays wired into `ofs_arena_lint`: removing its `COMMAND` in `cmake/OpenFS98.cmake` passes every recurring check. Wanted: a scratch-CMake test that drops a flag and requires a command-only target such as `graph` to fail first.
+  evidence: cleanup 2 review; the wiring proof was a one-off run (the spec's Implementation Notes).

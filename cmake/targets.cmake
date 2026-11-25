@@ -58,10 +58,10 @@ ofs_target(test-gauges
   COMMANDS
     [==[python3 -B tools/gen_warning_data.py]==]
     [==[i686-w64-mingw32-windres -J res -O coff bin/gauges-diff/warning.res bin/gauges-diff/warning-res.o]==]
-    [==[i686-w64-mingw32-gcc @MODULE_FLAGS@ -std=c99 -O2 -Wall -Wextra -Werror -Ibin/gauges-diff -shared -nostdlib -Wl,--entry=_DllMain@12 -Wl,--disable-dynamicbase -Wl,--disable-nxcompat -Wl,--image-base=0x32000000 -o bin/gauges-diff/737-400.WARNING_ENUNCIATORS.GAU src/gauges/warning.c src/gauges/warning.def bin/gauges-diff/warning-res.o -lkernel32]==]
+    [==[i686-w64-mingw32-gcc @MODULE_FLAGS@ -std=c99 -O2 -Wall -Wextra -Werror -Iinclude -Ibin/gauges-diff -shared -nostdlib -Wl,--entry=_DllMain@12 -Wl,--disable-dynamicbase -Wl,--disable-nxcompat -Wl,--image-base=0x32000000 -o bin/gauges-diff/737-400.WARNING_ENUNCIATORS.GAU src/gauges/warning.c src/gauges/warning.def bin/gauges-diff/warning-res.o -lkernel32]==]
     [==[python3 -B tools/gen_suction_data.py]==]
     [==[i686-w64-mingw32-windres -J res -O coff bin/gauges-diff/suction.res bin/gauges-diff/suction-res.o]==]
-    [==[i686-w64-mingw32-gcc @MODULE_FLAGS@ -std=c99 -O2 -Wall -Wextra -Werror -Ibin/gauges-diff -shared -nostdlib -Wl,--entry=_DllMain@12 -Wl,--disable-dynamicbase -Wl,--disable-nxcompat -Wl,--image-base=0x32010000 -o bin/gauges-diff/CESSNA_182.SUCTION.GAU src/gauges/suction.c src/gauges/suction.def bin/gauges-diff/suction-res.o -lkernel32]==]
+    [==[i686-w64-mingw32-gcc @MODULE_FLAGS@ -std=c99 -O2 -Wall -Wextra -Werror -Iinclude -Ibin/gauges-diff -shared -nostdlib -Wl,--entry=_DllMain@12 -Wl,--disable-dynamicbase -Wl,--disable-nxcompat -Wl,--image-base=0x32010000 -o bin/gauges-diff/CESSNA_182.SUCTION.GAU src/gauges/suction.c src/gauges/suction.def bin/gauges-diff/suction-res.o -lkernel32]==]
     [==[python3 -B tools/check_data_image.py --hash WARNING bin/gauges-diff/737-400.WARNING_ENUNCIATORS.GAU]==]
     [==[python3 -B tools/check_data_image.py --hash SUCTION bin/gauges-diff/CESSNA_182.SUCTION.GAU]==]
   )

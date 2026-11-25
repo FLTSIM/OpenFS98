@@ -3,7 +3,11 @@
 tools/difftest/allgaugesdiff.c catches each: rebuild the collection, run that gauge alone
 against retail.
 
-    python3 tools/gauge_breaks.py [gauge...]     N=vectors (default 4000), ONLY=name,name
+    python3 tools/gauge_breaks.py [gauge...] [--build-only DIR]     N=vectors (default 4000), ONLY=name,name
+
+--build-only builds each case in turn, keeps the gauge's installed .GAU as DIR/<gauge>-<case>/mutant.dll with
+meta.json, and runs nothing; the baseline source and the installed .GAU (bin/gauges-all/Gauges/) are restored
+afterwards, and it exits non-zero when no case matches.
 
 Each entry is (name, before, after[, vectors]): before must occur once in the gauge's file; a
 fourth field raises the vector count for a rare edge. A break that
@@ -18,8 +22,10 @@ Not observable here: 737START reads the switch's state again after its three eve
 harness's PANELS stub never changes the state in between, so dropping the second read is not
 seen (in the game it is kept as retail has it).
 """
+import json
 import os
 from pathlib import Path
+import shutil
 import subprocess
 import sys
 
@@ -144,11 +150,27 @@ def main():
     root = Path.cwd()
     scenarios = os.environ.get('N', '4000')
     only = set(filter(None, os.environ.get('ONLY', '').split(',')))
-    gauges = sys.argv[1:] or list(BREAKS)
+    argv = sys.argv[1:]
+    build_only = None
+    if '--build-only' in argv:
+        i = argv.index('--build-only')
+        build_only = Path(argv[i + 1])
+        del argv[i:i + 2]
+    gauges = argv or list(BREAKS)
     total = caught = 0
+    unknown = [g for g in gauges if g not in BREAKS]
+    wanted_cases = {g: [e for e in BREAKS[g] if not only or e[0] in only] for g in gauges if g in BREAKS}
+    if unknown or not any(wanted_cases.values()):     # nothing is written, restored or rebuilt on no match
+        print('no case matches %s' % ' '.join(unknown or sorted(only) or gauges))
+        return 1
+    gauges = [g for g in gauges if wanted_cases[g]]
+    manifest = {g['name'].lower(): g['installed'] for g in json.loads((root / 'src/gauges/gauges_manifest.json').read_text())}
     for gauge in gauges:
         path = root / 'src/gauges' / f'{gauge}.c'
         original = path.read_text()
+        installed = root / 'bin/gauges-all/Gauges' / manifest[gauge]
+        saved = installed.read_bytes() if build_only else None
+        saved_stat = installed.stat() if build_only else None
         try:
             for entry in BREAKS[gauge]:
                 name, before, after = entry[:3]
@@ -160,9 +182,16 @@ def main():
                     print(f'{gauge} {name}: text not found once')
                     continue
                 path.write_text(original.replace(before, after))
-                build = subprocess.run(['python3', '-B', 'tools/build_gauges.py'], cwd=root, capture_output=True, text=True)
+                build = subprocess.run(['python3', '-B', 'tools/build_gauges.py', '--jobs', '2'], cwd=root, capture_output=True, text=True)
                 if build.returncode:
                     print(f'{gauge} {name}: does not build')
+                    continue
+                if build_only:
+                    kept = build_only / f'{gauge}-{name}'
+                    kept.mkdir(parents=True, exist_ok=True)
+                    shutil.copy(installed, kept / 'mutant.dll')
+                    (kept / 'meta.json').write_text(json.dumps({'name': name, 'gauge': gauge}, sort_keys=True))
+                    caught += 1
                     continue
                 run = subprocess.run(['bash', 'tools/run_gaugesdiff.sh', '--all', wanted, gauge.upper()], cwd=root,
                                      capture_output=True, text=True)
@@ -175,7 +204,13 @@ def main():
                     print(f'{gauge} {name}: CRASHED ({run.returncode}) {run.stderr[-200:]}')
         finally:
             path.write_text(original)
-    subprocess.run(['python3', '-B', 'tools/build_gauges.py'], cwd=root, capture_output=True)
+            if build_only:      # the source first, so the restored .GAU stays the newer
+                installed.write_bytes(saved)
+                os.utime(installed, ns=(saved_stat.st_atime_ns, saved_stat.st_mtime_ns))     # never make a stale binary look fresh
+    if build_only:
+        print(f'{caught} of {total} mutants built into {build_only}')
+        return 0 if total and caught == total else 1
+    subprocess.run(['python3', '-B', 'tools/build_gauges.py', '--jobs', '2'], cwd=root, capture_output=True)
     print(f'{caught} of {total} caught')
     return 0 if caught == total else 1     # a miss fails the run, as in the other break runners
 

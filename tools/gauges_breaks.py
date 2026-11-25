@@ -3,8 +3,15 @@
 
 A compile failure, crash or timeout is a failed check, never a caught break.
 The accepted source, DLL and extracted resources stay untouched.
+
+    gauges_breaks.py [--suction] [--build-only DIR] [case...]
+
+--build-only builds each case's mutant DLL, keeps it as DIR/<case>/mutant.dll with meta.json, and runs
+nothing; a case name matching nothing exits non-zero.
 """
+import json
 import module_flags
+import shutil
 from pathlib import Path
 import subprocess
 import struct
@@ -12,7 +19,14 @@ import sys
 
 
 def main():
-    suction = len(sys.argv) > 1 and sys.argv[1] == '--suction'
+    argv = sys.argv[1:]
+    build_only = None
+    if '--build-only' in argv:
+        i = argv.index('--build-only')
+        build_only = Path(argv[i + 1])
+        del argv[i:i + 2]
+    suction = '--suction' in argv
+    only = [a for a in argv if not a.startswith('--')]
     gauge = 'suction' if suction else 'warning'
     directory = Path('bin/gauges-diff/suction-breaks' if suction else 'bin/gauges-diff/breaks')
     directory.mkdir(parents=True, exist_ok=True)
@@ -28,7 +42,7 @@ def main():
         ('failure-indirection', 'panel_service(0x60))(*root)',
          'panel_service(0x60))(*root ^ 1)'),
         ('failure-root-address', 'warning_image.words[0x28 / 4]',
-         '(uint32_t)(uintptr_t)(warning_image.bytes + 0xc0)'),
+         'fs98_handle(warning_image.bytes + 0xc0)'),
         ('install-context', 'warning_image.words[0xc0 / 4], context);',
          'warning_image.words[0xc0 / 4], context ^ 1);'),
         ('root-value', 'warning_image.words[0xc0 / 4]);',
@@ -59,7 +73,12 @@ def main():
              '(void)context;'),
         ]
     passed = 0
-    for name, before, after in breaks + [('bitmap', '', '')] + ([('bitmap-second', '', '')] if suction else []):
+    cases = breaks + [('bitmap', '', '')] + ([('bitmap-second', '', '')] if suction else [])
+    if only:
+        cases = [c for c in cases if c[0] in only]
+    if not cases:
+        raise SystemExit('no case matches ' + ' '.join(only))
+    for name, before, after in cases:
         text = source
         if before:
             if before not in source:
@@ -83,11 +102,18 @@ def main():
             subprocess.run(['i686-w64-mingw32-windres', '-J', 'res', '-O', 'coff',
                             str(res), str(resource)], check=True)
         subprocess.run([
-            'i686-w64-mingw32-gcc', *module_flags.FLAGS, '-std=c99', '-O2', '-Wall', '-Wextra', '-Werror', '-Isrc/gauges', '-Ibin/gauges-diff', '-shared', '-nostdlib',
+            'i686-w64-mingw32-gcc', *module_flags.FLAGS, '-std=c99', '-O2', '-Wall', '-Wextra', '-Werror', '-Iinclude', '-Isrc/gauges', '-Ibin/gauges-diff', '-shared', '-nostdlib',
             '-Wl,--entry=_DllMain@12', '-Wl,--disable-dynamicbase',
             '-Wl,--disable-nxcompat', '-Wl,--image-base=' + ('0x32010000' if suction else '0x32000000'),
             '-o', str(dll), str(path), f'src/gauges/{gauge}.def', str(resource),
             '-lkernel32'], check=True, capture_output=True, text=True)
+        if build_only:
+            kept = build_only / name
+            kept.mkdir(parents=True, exist_ok=True)
+            shutil.copy(dll, kept / 'mutant.dll')
+            (kept / 'meta.json').write_text(json.dumps({'name': name, 'gauge': gauge}, sort_keys=True))
+            passed += 1
+            continue
         run = subprocess.run(['wine', 'bin/gauges-diff/' + ('suctiondiff.exe' if suction else 'gaugesdiff.exe'), '100', str(dll)],
                              capture_output=True, text=True, timeout=30)
         output = run.stdout + run.stderr
@@ -98,6 +124,9 @@ def main():
         if not caught:
             raise RuntimeError(f'{name}: exit {run.returncode}\n{output}')
         passed += 1
+    if build_only:
+        print(f'{passed} mutants built into {build_only}')
+        return
     print(f'{passed} deliberate gauge breaks, all caught')
 
 

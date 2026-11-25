@@ -21,7 +21,7 @@ def build(item):
     source = Path('src/gauges') / (gauge['name'].lower() + '.c')
     image = Path('src/gauges/images') / gauge['name']
     dependencies = [source, directory / 'gauge.def', directory / 'gauge.res', *(image / file for file in IMAGE_FILES),
-                    Path('src/gauges/gauge.h'), module_flags.TOOLCHAIN]
+                    Path('src/gauges/gauge.h'), Path('include/fs98/arena.h'), Path('include/fs98/abi.h'), module_flags.TOOLCHAIN]
     if output.exists() and output.stat().st_mtime >= max(path.stat().st_mtime for path in dependencies):
         return gauge['name'] + ' up to date'
     resource = directory / 'resource.o'
@@ -30,7 +30,7 @@ def build(item):
     # a cast or assignment to double rounds, as retail's stores do
     command = ['i686-w64-mingw32-gcc', *module_flags.FLAGS, '-Werror', '-std=gnu99', '-O2', '-Wall', '-Wextra',
                '-Wno-unused-function', '-Wno-unused-label',
-               '-fno-asynchronous-unwind-tables', '-Isrc/gauges', f'-I{image}', '-shared', '-nostdlib',
+               '-fno-asynchronous-unwind-tables', '-Iinclude', '-Isrc/gauges', f'-I{image}', '-shared', '-nostdlib',
                '-Wl,--entry=_DllMain@12', '-Wl,--disable-dynamicbase', '-Wl,--disable-nxcompat',
                f'-Wl,--image-base={0x30000000 + index * 0x200000:#x}', '-o', str(output),
                str(source), str(directory / 'gauge.def'), str(resource),

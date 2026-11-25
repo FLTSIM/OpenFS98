@@ -10,41 +10,21 @@
 #define PN_IMAGE_SIZE 0x16580       /* .data's virtual size */
 #define PN_LINKAGE    0x050
 
-typedef volatile uint8_t  pn_v8;
-typedef volatile uint16_t __attribute__((may_alias)) pn_v16;
-typedef volatile uint32_t __attribute__((may_alias)) pn_v32;
-typedef volatile float    __attribute__((may_alias)) pn_vf;
-typedef volatile double   __attribute__((may_alias)) pn_vd;
-
 struct panels_image;          /* panels.c, with the typed layout */
 struct panels_rdata;
 extern struct panels_image panels_image;
 extern const struct panels_rdata panels_rdata;
-
-#define D       ((uint32_t)(uintptr_t)&panels_image)
-#define RDATA   ((uint32_t)(uintptr_t)&panels_rdata)
-#define M8(a)   (*(pn_v8  *)(uintptr_t)(uint32_t)(a))
-#define M16(a)  (*(pn_v16 *)(uintptr_t)(uint32_t)(a))
-#define M32(a)  (*(pn_v32 *)(uintptr_t)(uint32_t)(a))
-#define MF(a)   (*(pn_vf  *)(uintptr_t)(uint32_t)(a))
-#define MD(a)   (*(pn_vd  *)(uintptr_t)(uint32_t)(a))
-#define ADDR(p) ((uint32_t)(uintptr_t)(p))
-#define P(x)    ((uint32_t)(uintptr_t)(x))
+#define FS98_DATA_IMAGE panels_image
+#define FS98_RDATA_IMAGE panels_rdata
+#define FS98_DATA_VA PN_DATA_VA
+#include "fs98/arena.h"
 
 /* retail's .data and .rdata addresses, as ours */
-#define DA(va)  (D + ((uint32_t)(va) - PN_DATA_VA))
 #define D8(va)  M8(DA(va))
 #define D16(va) M16(DA(va))
 #define D32(va) M32(DA(va))
-#define RD(va)  MD(RDATA + ((uint32_t)(va) - 0x1000e000u))     /* an .rdata double */
-#define RF(va)  MF(RDATA + ((uint32_t)(va) - 0x1000e000u))     /* an .rdata float */
-
-/* a record's fields */
-#define R8(p, o)  M8((uint32_t)(p) + (o))
-#define R16(p, o) M16((uint32_t)(p) + (o))
-#define R32(p, o) M32((uint32_t)(p) + (o))
-#define RFL(p, o) MF((uint32_t)(p) + (o))
-#define RDB(p, o) MD((uint32_t)(p) + (o))
+#define PN_RD(va)  MD(RDATA + ((uint32_t)(va) - 0x1000e000u))     /* an .rdata double */
+#define PN_RF(va)  MF(RDATA + ((uint32_t)(va) - 0x1000e000u))     /* an .rdata float */
 
 #define IMPORT(i)  M32(D + 8 * (i) + 4)
 #define HOST       IMPORT(0)

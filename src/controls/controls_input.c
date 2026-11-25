@@ -42,11 +42,10 @@
 #define CMD(i) controls_commands[i]
 
 /* string helpers through the host (so the layout and behaviour match retail) */
-#define h_strcpy(d, s) HC(0x2a8, f2)((uint32_t)(uintptr_t)(d), (uint32_t)(uintptr_t)(s))
-#define h_strcat(d, s) HC(0x2b0, f2)((uint32_t)(uintptr_t)(d), (uint32_t)(uintptr_t)(s))
-#define h_strlen(s)    HC(0x2b8, f1)((uint32_t)(uintptr_t)(s))
-#define h_stricmp(a, b) HC(0x2c0, f2)((uint32_t)(uintptr_t)(a), (uint32_t)(uintptr_t)(b))
-#define P(x) ((uint32_t)(uintptr_t)(x))
+#define h_strcpy(d, s) HC(0x2a8, f2)(fs98_handle(d), fs98_handle(s))
+#define h_strcat(d, s) HC(0x2b0, f2)(fs98_handle(d), fs98_handle(s))
+#define h_strlen(s)    HC(0x2b8, f1)(fs98_handle(s))
+#define h_stricmp(a, b) HC(0x2c0, f2)(fs98_handle(a), fs98_handle(b))
 
 static uint32_t ff_begin(void);          /* .text+0xa8d0 */
 static uint32_t ff_end(void);            /* .text+0xa9b0 */
@@ -62,10 +61,10 @@ static uint32_t section_read(const char *section, uint32_t kind, uint32_t *pAcce
 {
     uint32_t got, i;
 
-    HC(0x100, f2)(P(section), P(&got));     /* get the [section] text */
+    HC(0x100, f2)(fs98_handle(section), fs98_handle(&got));     /* get the [section] text */
     if (got == 0)
         return got;
-    if (HC(0x1d8, f1)(P(pAccel)) != 0)      /* begin a new table */
+    if (HC(0x1d8, f1)(fs98_handle(pAccel)) != 0)      /* begin a new table */
         return got;
     for (i = 0; i < NCMD; i++) {
         uint32_t parsed[2], ent[3];         /* parsed = key, flags; ent = key, flags, cmd */
@@ -75,13 +74,13 @@ static uint32_t section_read(const char *section, uint32_t kind, uint32_t *pAcce
             continue;
         parsed[0] = 0;
         parsed[1] = 0;
-        HC(0xb0, f4)(P(section), P(CMD(i).name), P(parsed), 2);
+        HC(0xb0, f4)(fs98_handle(section), fs98_handle(CMD(i).name), fs98_handle(parsed), 2);
         ent[0] = parsed[0];
         ent[1] = parsed[1];
         ent[2] = CMD(i).command;
         if (ent[0] == 0)
             continue;
-        HC(0x1f4, f3)(*pAccel, P(ent), 1);
+        HC(0x1f4, f3)(*pAccel, fs98_handle(ent), 1);
     }
     return got;
 }
@@ -98,14 +97,14 @@ static uint32_t section_read_layout(uint32_t path, const char *section, uint32_t
     char dir[0x104], layout[0x104];
     uint32_t got, i, hkl;
 
-    hkl = (uint32_t)(uintptr_t)GetKeyboardLayout(0);
+    hkl = fs98_handle(GetKeyboardLayout(0));
     wsprintfA(layout, (LPCSTR)(uintptr_t)(D + 0x1c8), section, hkl);  /* "%s %08X" */
-    HC(0x130, f1)(P(dir));
-    HC(0x184, f4)(P(dir), 0, P(dir), path);
-    HC(0x104, f4)(P(layout), P(dir), 0x24, P(&got));
+    HC(0x130, f1)(fs98_handle(dir));
+    HC(0x184, f4)(fs98_handle(dir), 0, fs98_handle(dir), path);
+    HC(0x104, f4)(fs98_handle(layout), fs98_handle(dir), 0x24, fs98_handle(&got));
     if (got == 0)
         return got;
-    if (HC(0x1d8, f1)(P(pAccel)) != 0)
+    if (HC(0x1d8, f1)(fs98_handle(pAccel)) != 0)
         return got;
     for (i = 0; i < NCMD; i++) {
         uint32_t parsed[2], ent[3];
@@ -115,13 +114,13 @@ static uint32_t section_read_layout(uint32_t path, const char *section, uint32_t
             continue;
         parsed[0] = 0;
         parsed[1] = 0;
-        HC(0xd8, f6)(P(layout), P(CMD(i).name), P(parsed), 2, P(dir), 0x24);
+        HC(0xd8, f6)(fs98_handle(layout), fs98_handle(CMD(i).name), fs98_handle(parsed), 2, fs98_handle(dir), 0x24);
         ent[0] = parsed[0];
         ent[1] = parsed[1];
         ent[2] = CMD(i).command;
         if (ent[0] == 0)
             continue;
-        HC(0x1f4, f3)(*pAccel, P(ent), 1);
+        HC(0x1f4, f3)(*pAccel, fs98_handle(ent), 1);
     }
     return got;
 }
@@ -153,11 +152,11 @@ static void section_write(const char *section, uint32_t kind, uint32_t *pAccel)
 {
     uint32_t count, *buf, i;
 
-    HC(0xf8, f1)(P(section));                        /* clear the section */
-    if (HC(0x1fc, f6)(*pAccel, 0, 0, 2, 0, P(&count)) != 0)
+    HC(0xf8, f1)(fs98_handle(section));                        /* clear the section */
+    if (HC(0x1fc, f6)(*pAccel, 0, 0, 2, 0, fs98_handle(&count)) != 0)
         return;
-    HC(0x20c, f4)(1, count * 0xc, P(&buf), 1);       /* count {key,flags,cmd} */
-    HC(0x1fc, f6)(*pAccel, 0, 0, 2, P(buf), P(&count));
+    HC(0x20c, f4)(1, count * 0xc, fs98_handle(&buf), 1);       /* count {key,flags,cmd} */
+    HC(0x1fc, f6)(*pAccel, 0, 0, 2, fs98_handle(buf), fs98_handle(&count));
     for (i = 0; i < NCMD; i++) {
         uint32_t k;
         if (CMD(i).name == 0)
@@ -171,11 +170,11 @@ static void section_write(const char *section, uint32_t kind, uint32_t *pAccel)
                 uint32_t ent2[2];
                 ent2[0] = buf[k * 3 + 0];
                 ent2[1] = buf[k * 3 + 1];
-                HC(0xb4, f4)(P(section), P(CMD(i).name), P(ent2), 2);
+                HC(0xb4, f4)(fs98_handle(section), fs98_handle(CMD(i).name), fs98_handle(ent2), 2);
             }
         }
     }
-    HC(0x214, f1)(P(&buf));
+    HC(0x214, f1)(fs98_handle(&buf));
 }
 
 /* .text+0x7bd0 -- Linkage +0x50 */
@@ -197,11 +196,11 @@ uint32_t FS98_STDCALL controls_keys_list(uint32_t count, uint32_t pairs)
 {
     uint32_t n, *buf, i, r;
 
-    r = HC(0x1fc, f6)(V32(0x186), 0, 0, 2, 0, P(&n));
+    r = HC(0x1fc, f6)(V32(0x186), 0, 0, 2, 0, fs98_handle(&n));
     if (r != 0)
         return r;
-    HC(0x20c, f4)(1, n * 0xc, P(&buf), 1);
-    HC(0x1fc, f6)(V32(0x186), 0, 0, 2, P(buf), P(&n));
+    HC(0x20c, f4)(1, n * 0xc, fs98_handle(&buf), 1);
+    HC(0x1fc, f6)(V32(0x186), 0, 0, 2, fs98_handle(buf), fs98_handle(&n));
     for (i = 0; i < count; i++) {
         uint32_t *pair = (uint32_t *)(uintptr_t)(pairs + i * 8);
         uint32_t k;
@@ -209,7 +208,7 @@ uint32_t FS98_STDCALL controls_keys_list(uint32_t count, uint32_t pairs)
             if (buf[k * 3 + 2] == pair[0])
                 pair[1] = buf[k * 3 + 0] + (buf[k * 3 + 1] << 8);
     }
-    return HC(0x214, f1)(P(&buf));
+    return HC(0x214, f1)(fs98_handle(&buf));
 }
 
 /* ======== the joysticks and the frame poll: .text+0x8e60.. ======================= */
@@ -270,8 +269,8 @@ uint32_t controls_input_init(void)
     V32(0xbf90) = 1;
     HC(0x218, f3)(D + 0x4a08, 0, 0x38c0);
     HC(0xc8, f4)(D + 0x192, D + 0x440, D + 0x408, 0x32);
-    CALL(CHAIN, 0x18, f2)(1, P(joy_poll));
-    CALL(CHAIN, 0x18, f2)(1, P(joy_watch));
+    CALL(CHAIN, 0x18, f2)(1, fs98_handle(joy_poll));
+    CALL(CHAIN, 0x18, f2)(1, fs98_handle(joy_watch));
     controls_joystick(1, 0);
     return V32(0xbf88);
 }
@@ -286,9 +285,9 @@ uint32_t controls_input_deinit(void)
     V32(0xbf90) = 0;
     HC(0xac, f3)(D + 0x400, D + 0x448, controls_joystick(0, 0));
     joy_config_save();
-    CALL(CHAIN, 0x1c, f2)(1, P(joy_poll));
-    CALL(CHAIN, 0x1c, f2)(1, P(joy_watch));
-    return CALL(CHAIN, 0x1c, f2)(6, P(joy_watch));
+    CALL(CHAIN, 0x1c, f2)(1, fs98_handle(joy_poll));
+    CALL(CHAIN, 0x1c, f2)(1, fs98_handle(joy_watch));
+    return CALL(CHAIN, 0x1c, f2)(6, fs98_handle(joy_watch));
 }
 
 /* .text+0x8e90 -- the axis response curve for joystick `joy` axis `axis`:
@@ -425,9 +424,9 @@ static uint32_t section_name(uint32_t prefix, uint32_t joy)
 {
     uint32_t s = 0;
 
-    if ((int32_t)HC(0x20c, f4)(1, h_strlen(prefix) + 3, P(&s), 1) != -1) {
+    if ((int32_t)HC(0x20c, f4)(1, h_strlen(prefix) + 3, fs98_handle(&s), 1) != -1) {
         h_strcpy(s, prefix);
-        NUMF(0x18, f3)(P(&joy), 0xb, s + h_strlen(s));
+        NUMF(0x18, f3)(fs98_handle(&joy), 0xb, s + h_strlen(s));
     }
     return s;
 }
@@ -442,9 +441,9 @@ static uint32_t read_cmd(uint32_t file, uint32_t section, uint32_t key, uint32_t
 
     buf[0] = 0;
     if (file == 0)
-        HC(0xc8, f4)(section, key, P(buf), 0x32);
+        HC(0xc8, f4)(section, key, fs98_handle(buf), 0x32);
     else
-        HC(0xf0, f6)(section, key, P(buf), 0x32, file, 0x24);
+        HC(0xf0, f6)(section, key, fs98_handle(buf), 0x32, file, 0x24);
     for (i = 0; i < NCMD; i++) {
         if (CMD(i).name == 0)
             continue;
@@ -475,48 +474,48 @@ static uint32_t joy_read(uint32_t path, uint32_t section, uint32_t table)
         HC(0xa8, f3)(section, D + 0x460, table + 4);        /* TYPE */
         HC(0xa8, f3)(section, D + 0x454, table + 8);        /* AXIS_FLAGS */
     } else {
-        HC(0x130, f1)(P(file));
-        HC(0x184, f4)(P(file), 0, P(file), path);
-        if (HC(0x158, f2)(P(file), 0x24) == 0)
-            HC(0x104, f4)(section, P(file), 0x24, P(&got));
+        HC(0x130, f1)(fs98_handle(file));
+        HC(0x184, f4)(fs98_handle(file), 0, fs98_handle(file), path);
+        if (HC(0x158, f2)(fs98_handle(file), 0x24) == 0)
+            HC(0x104, f4)(section, fs98_handle(file), 0x24, fs98_handle(&got));
         if (got == 0)
             return 0;
-        HC(0xd0, f5)(section, D + 0x468, table + 0, P(file), 0x24);
-        HC(0xd0, f5)(section, D + 0x460, table + 4, P(file), 0x24);
-        HC(0xd0, f5)(section, D + 0x454, table + 8, P(file), 0x24);
+        HC(0xd0, f5)(section, D + 0x468, table + 0, fs98_handle(file), 0x24);
+        HC(0xd0, f5)(section, D + 0x460, table + 4, fs98_handle(file), 0x24);
+        HC(0xd0, f5)(section, D + 0x454, table + 8, fs98_handle(file), 0x24);
     }
     for (k = 0; k < 0x10; k++) {
         h_strcpy(k28, D + 0x378);                           /* AXIS_EVENT_ */
-        NUMF(0x18, f3)(P(&k), 0xb, P(k28) + h_strlen(k28));
+        NUMF(0x18, f3)(fs98_handle(&k), 0xb, fs98_handle(k28) + h_strlen(k28));
         h_strcpy(k14, D + 0x388);                           /* AXIS_SCALE_ */
-        NUMF(0x18, f3)(P(&k), 0xb, P(k14) + h_strlen(k14));
+        NUMF(0x18, f3)(fs98_handle(&k), 0xb, fs98_handle(k14) + h_strlen(k14));
         h_strcpy(k40, D + 0x398);                           /* AXIS_NULL_ */
-        NUMF(0x18, f3)(P(&k), 0xb, P(k40) + h_strlen(k40));
+        NUMF(0x18, f3)(fs98_handle(&k), 0xb, fs98_handle(k40) + h_strlen(k40));
         if (path == 0) {
-            read_cmd(0, section, P(k28), table + 0xc + k * 4);
-            HC(0xa8, f3)(section, P(k14), table + 0x4c + k * 4);
-            HC(0xa8, f3)(section, P(k40), table + 0x8c + k * 4);
+            read_cmd(0, section, fs98_handle(k28), table + 0xc + k * 4);
+            HC(0xa8, f3)(section, fs98_handle(k14), table + 0x4c + k * 4);
+            HC(0xa8, f3)(section, fs98_handle(k40), table + 0x8c + k * 4);
         } else {
-            read_cmd(P(file), section, P(k28), table + 0xc + k * 4);
-            HC(0xd0, f5)(section, P(k14), table + 0x4c + k * 4, P(file), 0x24);
-            HC(0xd0, f5)(section, P(k40), table + 0x8c + k * 4, P(file), 0x24);
+            read_cmd(fs98_handle(file), section, fs98_handle(k28), table + 0xc + k * 4);
+            HC(0xd0, f5)(section, fs98_handle(k14), table + 0x4c + k * 4, fs98_handle(file), 0x24);
+            HC(0xd0, f5)(section, fs98_handle(k40), table + 0x8c + k * 4, fs98_handle(file), 0x24);
         }
     }
     for (k = 0; k < 0x40; k++) {
         h_strcpy(k28, D + 0x3a8);                           /* BUTTON_DOWN_EVENT_ */
-        NUMF(0x18, f3)(P(&k), 0xb, P(k28) + h_strlen(k28));
+        NUMF(0x18, f3)(fs98_handle(&k), 0xb, fs98_handle(k28) + h_strlen(k28));
         h_strcpy(k40, D + 0x3c0);                           /* BUTTON_DOWN_REPEAT_ */
-        NUMF(0x18, f3)(P(&k), 0xb, P(k40) + h_strlen(k40));
+        NUMF(0x18, f3)(fs98_handle(&k), 0xb, fs98_handle(k40) + h_strlen(k40));
         h_strcpy(k14, D + 0x3d8);                           /* BUTTON_UP_EVENT_ */
-        NUMF(0x18, f3)(P(&k), 0xb, P(k14) + h_strlen(k14));
+        NUMF(0x18, f3)(fs98_handle(&k), 0xb, fs98_handle(k14) + h_strlen(k14));
         if (path == 0) {
-            read_cmd(0, section, P(k28), table + 0xcc + k * 4);
-            HC(0xa8, f3)(section, P(k40), table + 0x1cc + k * 4);
-            read_cmd(0, section, P(k14), table + 0x2cc + k * 4);
+            read_cmd(0, section, fs98_handle(k28), table + 0xcc + k * 4);
+            HC(0xa8, f3)(section, fs98_handle(k40), table + 0x1cc + k * 4);
+            read_cmd(0, section, fs98_handle(k14), table + 0x2cc + k * 4);
         } else {
-            read_cmd(P(file), section, P(k28), table + 0xcc + k * 4);
-            HC(0xd0, f5)(section, P(k40), table + 0x1cc + k * 4, P(file), 0x24);
-            read_cmd(P(file), section, P(k14), table + 0x2cc + k * 4);
+            read_cmd(fs98_handle(file), section, fs98_handle(k28), table + 0xcc + k * 4);
+            HC(0xd0, f5)(section, fs98_handle(k40), table + 0x1cc + k * 4, fs98_handle(file), 0x24);
+            read_cmd(fs98_handle(file), section, fs98_handle(k14), table + 0x2cc + k * 4);
         }
     }
     return 1;
@@ -530,10 +529,10 @@ static void joy_load(uint32_t joy)
 
     s = section_name(D + 0x358, joy);                       /* JOYSTICK_ */
     joy_read(0, s, D + 0xd48 + joy * 0x3cc);
-    HC(0x214, f1)(P(&s));
+    HC(0x214, f1)(fs98_handle(&s));
     s = section_name(D + 0x368, joy);                       /* JOYSTICK_SLEW_ */
     joy_read(0, s, D + 0x82c8 + joy * 0x3cc);
-    HC(0x214, f1)(P(&s));
+    HC(0x214, f1)(fs98_handle(&s));
 }
 
 /* .text+0xa200 -- one comma-separated integer at *pp into `out`, *pp left
@@ -586,7 +585,7 @@ static uint32_t joy_parse(uint32_t id, uint32_t blk)
 {
     uint32_t buf, p, r, i;
 
-    r = HC(0x20c, f4)(1, 0x800, P(&buf), 1);
+    r = HC(0x20c, f4)(1, 0x800, fs98_handle(&buf), 1);
     if (r != 0)
         return r;
     if (HC(0x2a0, f3)(id, buf, 0x800) != 0) {
@@ -606,7 +605,7 @@ static uint32_t joy_parse(uint32_t id, uint32_t blk)
         for (i = 0; i < 0x40; i++)
             parse_int(&p, blk + 0x2cc + i * 4, 0);
     }
-    HC(0x214, f1)(P(&buf));
+    HC(0x214, f1)(fs98_handle(&buf));
     return 0;
 }
 
@@ -629,18 +628,18 @@ static uint32_t joy_default(uint32_t kind, uint32_t joy, uint32_t blk)
     char buf[0x100];
     uint32_t r;
 
-    r = HC(0x1c8, f2)(joy, P(&desc));
+    r = HC(0x1c8, f2)(joy, fs98_handle(&desc));
     if (r != 0)
         return r;
     if (kind == 0) {
         h_strcpy(buf, desc.name);
         if (desc.rudder != 0)
             h_strcat(buf, D + 0x3f0);                       /* " RUDDER" */
-        if (joy_read(D + 0x408, P(buf), blk) != 0)
+        if (joy_read(D + 0x408, fs98_handle(buf), blk) != 0)
             return 0;
         if (desc.rudder != 0) {
             h_strcpy(buf, desc.name);
-            if (joy_read(D + 0x408, P(buf), blk) != 0)
+            if (joy_read(D + 0x408, fs98_handle(buf), blk) != 0)
                 return 0;
         }
         r = joy_parse(desc.id + 1, blk);
@@ -649,12 +648,12 @@ static uint32_t joy_default(uint32_t kind, uint32_t joy, uint32_t blk)
         if (desc.rudder != 0)
             h_strcat(buf, D + 0x3f0);
         h_strcat(buf, D + 0x3f8);                           /* " SLEW" */
-        if (joy_read(D + 0x408, P(buf), blk) != 0)
+        if (joy_read(D + 0x408, fs98_handle(buf), blk) != 0)
             return 0;
         if (desc.rudder != 0) {
             h_strcpy(buf, desc.name);
             h_strcat(buf, D + 0x3f8);
-            if (joy_read(D + 0x408, P(buf), blk) != 0)
+            if (joy_read(D + 0x408, fs98_handle(buf), blk) != 0)
                 return 0;
         }
         r = joy_parse(desc.id + 2, blk);
@@ -701,15 +700,15 @@ static void joy_defaults(uint32_t joy)
     if (M32(V32(0x350) + joy * 0x3cc) != 0)
         return;
     s = section_name(D + 0x358, joy);
-    HC(0x100, f2)(s, P(&present));
-    HC(0x214, f1)(P(&s));
+    HC(0x100, f2)(s, fs98_handle(&present));
+    HC(0x214, f1)(fs98_handle(&s));
     if (present != 0)
         return;
     /* RETAIL BUG (kept): CTL-4 -- (the stack) blk is uninitialised and joy_default may leave it so, as in retail. */
-    if (joy_default(0, joy, P(blk)) == 0)
-        joy_install(0, joy, P(blk));
-    if (joy_default(1, joy, P(blk)) == 0)
-        joy_install(1, joy, P(blk));
+    if (joy_default(0, joy, fs98_handle(blk)) == 0)
+        joy_install(0, joy, fs98_handle(blk));
+    if (joy_default(1, joy, fs98_handle(blk)) == 0)
+        joy_install(1, joy, fs98_handle(blk));
 }
 
 /* .text+0x93b0 -- CHAIN list 1, then list 6: watch for joysticks.  Each new
@@ -732,7 +731,7 @@ static uint32_t FS98_STDCALL joy_watch(uint32_t a, uint32_t b)
         }
         if (V32(0xbf88) == 0) {
             on = 0xffffffff;
-            HC(0xa8, f3)(D + 0x400, D + 0x448, P(&on));     /* [PREFS] JOYSTICKS */
+            HC(0xa8, f3)(D + 0x400, D + 0x448, fs98_handle(&on));     /* [PREFS] JOYSTICKS */
             controls_joystick(1, on == 0xffffffff ? 1 : on);
         }
         axis_reset();
@@ -745,8 +744,8 @@ static uint32_t FS98_STDCALL joy_watch(uint32_t a, uint32_t b)
             return V32(0x43c);
         }
         if (V32(0xbf94) == 0) {
-            CALL(CHAIN, 0x1c, f2)(1, P(joy_watch));
-            CALL(CHAIN, 0x18, f2)(6, P(joy_watch));
+            CALL(CHAIN, 0x1c, f2)(1, fs98_handle(joy_watch));
+            CALL(CHAIN, 0x18, f2)(6, fs98_handle(joy_watch));
             V32(0xbf94) = 1;
         }
         return V32(0xbf94);
@@ -767,7 +766,7 @@ static uint32_t write_cmd(uint32_t section, uint32_t key, uint32_t value)
     for (i = 0; i < NCMD; i++)
         if (CMD(i).command == value)
             /* RETAIL BUG (kept): CTL-2 -- a nameless command's name is null, and writing a null value deletes the key */
-            return HC(0xcc, f3)(section, key, P(CMD(i).name));
+            return HC(0xcc, f3)(section, key, fs98_handle(CMD(i).name));
     return HC(0xac, f3)(section, key, value);
 }
 
@@ -794,35 +793,35 @@ static void joy_save(uint32_t prefix, uint32_t table)
             if (M32(e + 0xc + k * 4) == 0)
                 continue;
             h_strcpy(k2c, D + 0x378);
-            NUMF(0x18, f3)(P(&k), 0xb, P(k2c) + h_strlen(k2c));
+            NUMF(0x18, f3)(fs98_handle(&k), 0xb, fs98_handle(k2c) + h_strlen(k2c));
             h_strcpy(k3c, D + 0x388);
-            NUMF(0x18, f3)(P(&k), 0xb, P(k3c) + h_strlen(k3c));
+            NUMF(0x18, f3)(fs98_handle(&k), 0xb, fs98_handle(k3c) + h_strlen(k3c));
             h_strcpy(k1c, D + 0x398);
-            NUMF(0x18, f3)(P(&k), 0xb, P(k1c) + h_strlen(k1c));
-            write_cmd(s, P(k2c), M32(e + 0xc + k * 4));
-            HC(0xac, f3)(s, P(k3c), M32(e + 0x4c + k * 4));
-            HC(0xac, f3)(s, P(k1c), M32(e + 0x8c + k * 4));
+            NUMF(0x18, f3)(fs98_handle(&k), 0xb, fs98_handle(k1c) + h_strlen(k1c));
+            write_cmd(s, fs98_handle(k2c), M32(e + 0xc + k * 4));
+            HC(0xac, f3)(s, fs98_handle(k3c), M32(e + 0x4c + k * 4));
+            HC(0xac, f3)(s, fs98_handle(k1c), M32(e + 0x8c + k * 4));
         }
         for (k = 0; k < 0x40; k++) {
             if (M32(e + 0xcc + k * 4) != 0) {
                 h_strcpy(k60, D + 0x3a8);
-                NUMF(0x18, f3)(P(&k), 0xb, P(k60) + h_strlen(k60));
-                write_cmd(s, P(k60), M32(e + 0xcc + k * 4));
+                NUMF(0x18, f3)(fs98_handle(&k), 0xb, fs98_handle(k60) + h_strlen(k60));
+                write_cmd(s, fs98_handle(k60), M32(e + 0xcc + k * 4));
             }
             if (M32(e + 0x1cc + k * 4) != 0) {
                 h_strcpy(k78, D + 0x3c0);
-                NUMF(0x18, f3)(P(&k), 0xb, P(k78) + h_strlen(k78));
-                HC(0xac, f3)(s, P(k78), M32(e + 0x1cc + k * 4));
+                NUMF(0x18, f3)(fs98_handle(&k), 0xb, fs98_handle(k78) + h_strlen(k78));
+                HC(0xac, f3)(s, fs98_handle(k78), M32(e + 0x1cc + k * 4));
             }
         }
         for (k = 0; k < 0x40; k++) {
             if (M32(e + 0x2cc + k * 4) == 0)
                 continue;
             h_strcpy(k4c, D + 0x3d8);
-            NUMF(0x18, f3)(P(&k), 0xb, P(k4c) + h_strlen(k4c));
-            write_cmd(s, P(k4c), M32(e + 0x2cc + k * 4));
+            NUMF(0x18, f3)(fs98_handle(&k), 0xb, fs98_handle(k4c) + h_strlen(k4c));
+            write_cmd(s, fs98_handle(k4c), M32(e + 0x2cc + k * 4));
         }
-        HC(0x214, f1)(P(&s));
+        HC(0x214, f1)(fs98_handle(&s));
         j++;
         t = j;
     } while (t < V32(0xbf88));
@@ -888,13 +887,13 @@ static uint32_t di_load(void)
 
     if (V32(0xbfb8) != 0)
         return 0;
-    h = (uint32_t)(uintptr_t)LoadLibraryA((LPCSTR)(uintptr_t)(D + 0xaf8));     /* "dinput" */
+    h = fs98_handle(LoadLibraryA((LPCSTR)(uintptr_t)(D + 0xaf8)));     /* "dinput" */
     V32(0xc014) = h;
     if (h == 0)
         return (uint32_t)-1;
     V32(0xbfb8) = 1;
-    V32(0xc010) = (uint32_t)(uintptr_t)GetProcAddress((HMODULE)(uintptr_t)h,
-                                                      (LPCSTR)(uintptr_t)(D + 0xae4));
+    V32(0xc010) = fs98_handle(GetProcAddress((HMODULE)(uintptr_t)h,
+                                                      (LPCSTR)(uintptr_t)(D + 0xae4)));
     return 0;
 }
 
@@ -916,7 +915,7 @@ static uint32_t ff_begin(void)
     ff_settings_load();
     r = di_load();
     if (r == 0 && (r = V32(0xbfb8)) != 0) {
-        HC(0x54, f2)(P(&wnd), P(&inst));                    /* the main window, the instance */
+        HC(0x54, f2)(fs98_handle(&wnd), fs98_handle(&inst));                    /* the main window, the instance */
         r = V32(0x470);
         if (r != 0) {
             r = V32(0xbfbc);
@@ -926,8 +925,8 @@ static uint32_t ff_begin(void)
                 if ((int32_t)r >= 0) {
                     V32(0xbfbc) = 1;
                     V32(0xbfec) = 1;
-                    CALL(CHAIN, 0x18, f2)(1, P(ff_frame));
-                    r = CALL(CHAIN, 0x18, f2)(0x14, P(ff_message));
+                    CALL(CHAIN, 0x18, f2)(1, fs98_handle(ff_frame));
+                    r = CALL(CHAIN, 0x18, f2)(0x14, fs98_handle(ff_message));
                 }
             }
         } else {
@@ -946,8 +945,8 @@ static uint32_t ff_begin(void)
 static uint32_t ff_end(void)
 {
     if (V32(0xbfbc) == 1) {
-        CALL(CHAIN, 0x1c, f2)(1, P(ff_frame));
-        CALL(CHAIN, 0x1c, f2)(0x14, P(ff_message));
+        CALL(CHAIN, 0x1c, f2)(1, fs98_handle(ff_frame));
+        CALL(CHAIN, 0x1c, f2)(0x14, fs98_handle(ff_message));
         ff_effects_free();
         di_release(D + 0xbfc0, D + 0xbfc4);
         di_none();
@@ -1033,13 +1032,13 @@ static uint32_t di_create(uint32_t wnd, uint32_t inst, uint32_t pdi, uint32_t pd
     r = ((f4)(uintptr_t)V32(0xc010))(inst, 0x500, pdi, 0);
     if ((int32_t)r < 0)
         return r;
-    r = COM(M32(pdi), 0x10, f5)(M32(pdi), 4, P(di_enum), P(ddi), 0x101);    /* EnumDevices */
+    r = COM(M32(pdi), 0x10, f5)(M32(pdi), 4, fs98_handle(di_enum), fs98_handle(ddi), 0x101);    /* EnumDevices */
     if ((int32_t)r < 0)
         return r;
     /* RETAIL BUG (kept): CTL-5 -- with no force-feedback joystick enumerated, ddi is uninitialised stack and
      * CreateDevice takes its GUID from it. */
     dev1 = 0;
-    r = COM(M32(pdi), 0xc, f4)(M32(pdi), P(ddi + 4), P(&dev1), 0);          /* CreateDevice */
+    r = COM(M32(pdi), 0xc, f4)(M32(pdi), fs98_handle(ddi + 4), fs98_handle(&dev1), 0);          /* CreateDevice */
     if ((int32_t)r < 0) {
         COM(M32(pdi), 0x8, f1)(M32(pdi));
         return r;
@@ -1060,7 +1059,7 @@ static uint32_t di_create(uint32_t wnd, uint32_t inst, uint32_t pdi, uint32_t pd
             prop[2] = 0;
             prop[3] = 0;                                /* DIPH_DEVICE */
             prop[4] = 0;                                /* DIPROPAUTOCENTER_OFF */
-            r = COM(M32(pdev), 0x18, f3)(M32(pdev), 9, P(prop));            /* DIPROP_AUTOCENTER */
+            r = COM(M32(pdev), 0x18, f3)(M32(pdev), 9, fs98_handle(prop));            /* DIPROP_AUTOCENTER */
             if ((int32_t)r >= 0)
                 return 0;
         }
@@ -1076,10 +1075,10 @@ static uint32_t di_probe(uint32_t inst)
     uint8_t ddi[0x244];
     uint32_t di, r;
 
-    r = ((f4)(uintptr_t)V32(0xc010))(inst, 0x500, P(&di), 0);
+    r = ((f4)(uintptr_t)V32(0xc010))(inst, 0x500, fs98_handle(&di), 0);
     if ((int32_t)r < 0)
         return r;
-    r = COM(di, 0x10, f5)(di, 4, P(di_enum), P(ddi), 0x101);
+    r = COM(di, 0x10, f5)(di, 4, fs98_handle(di_enum), fs98_handle(ddi), 0x101);
     COM(di, 0x8, f1)(di);
     return r;
 }
@@ -1132,12 +1131,12 @@ static uint32_t eff_constant(uint32_t dev, uint32_t pp, uint32_t mag, uint32_t d
     eff[5] = 0xffffffff;                                /* DIEB_NOTRIGGER */
     eff[6] = 0;
     eff[7] = 2;
-    eff[8] = P(axes);
-    eff[9] = P(dirs);
+    eff[8] = fs98_handle(axes);
+    eff[9] = fs98_handle(dirs);
     eff[10] = 0;
     eff[11] = 4;
-    eff[12] = P(&force);
-    r = COM(dev, 0x48, f5)(dev, RDATA + 0x190, P(eff), P(&e), 0);       /* GUID_ConstantForce */
+    eff[12] = fs98_handle(&force);
+    r = COM(dev, 0x48, f5)(dev, RDATA + 0x190, fs98_handle(eff), fs98_handle(&e), 0);       /* GUID_ConstantForce */
     if ((int32_t)r < 0)
         return r;
     M32(pp) = e;
@@ -1168,13 +1167,13 @@ static uint32_t eff_constant_set(uint32_t dev, uint32_t pp, uint32_t mag, uint32
         eff[i] = 0;
     eff[0] = 0x34;
     axes[1] = 4;
-    eff[8] = P(axes);
-    eff[9] = P(dirs);
+    eff[8] = fs98_handle(axes);
+    eff[9] = fs98_handle(dirs);
     eff[11] = 4;
     eff[1] = 0x22;
     eff[7] = 2;
-    eff[12] = P(&force);
-    return COM(M32(pp), 0x18, f3)(M32(pp), P(eff), 0x140);   /* DIEP_DIRECTION | DIEP_TYPESPECIFICPARAMS */
+    eff[12] = fs98_handle(&force);
+    return COM(M32(pp), 0x18, f3)(M32(pp), fs98_handle(eff), 0x140);   /* DIEP_DIRECTION | DIEP_TYPESPECIFICPARAMS */
 }
 
 /* .text+0xb910 -- a periodic effect, kind 0 square, 1 or 2 sine (2 a
@@ -1209,17 +1208,17 @@ static uint32_t eff_periodic(uint32_t dev, uint32_t pp, int32_t kind, uint32_t m
     eff[5] = 0xffffffff;
     eff[6] = 0;
     eff[7] = 2;
-    eff[8] = P(axes);
-    eff[9] = P(dirs);
+    eff[8] = fs98_handle(axes);
+    eff[9] = fs98_handle(dirs);
     eff[10] = env;
     eff[11] = 0x10;
-    eff[12] = P(per);
+    eff[12] = fs98_handle(per);
     /* RETAIL BUG (kept): CTL-6 -- a kind outside 0..2 makes no effect: e stays dev, so the device is "started" as one. */
     e = dev;
     if (kind == 0)
-        r = COM(dev, 0x48, f5)(dev, RDATA + 0x1b0, P(eff), P(&e), 0);   /* GUID_Square */
+        r = COM(dev, 0x48, f5)(dev, RDATA + 0x1b0, fs98_handle(eff), fs98_handle(&e), 0);   /* GUID_Square */
     else if (kind > 0 && kind <= 2)
-        r = COM(dev, 0x48, f5)(dev, RDATA + 0x1c0, P(eff), P(&e), 0);   /* GUID_Sine */
+        r = COM(dev, 0x48, f5)(dev, RDATA + 0x1c0, fs98_handle(eff), fs98_handle(&e), 0);   /* GUID_Sine */
     if ((int32_t)r < 0)
         return r;
     M32(pp) = e;
@@ -1251,14 +1250,14 @@ static uint32_t eff_periodic_set(uint32_t dev, uint32_t pp, uint32_t mag, uint32
         eff[i] = 0;
     eff[0] = 0x34;
     V32(0xbfac) = period;
-    eff[8] = P(axes);
+    eff[8] = fs98_handle(axes);
     axes[1] = 4;
     eff[1] = 0x22;
     eff[7] = 2;
-    eff[9] = P(dirs);
+    eff[9] = fs98_handle(dirs);
     eff[11] = 0x10;
     eff[12] = D + 0xbfa0;
-    return COM(M32(pp), 0x18, f3)(M32(pp), P(eff), 0x140);
+    return COM(M32(pp), 0x18, f3)(M32(pp), fs98_handle(eff), 0x140);
 }
 
 /* .text+0xbb50 -- stop and release the effect at *pp: S_FALSE (1) if there
@@ -1286,7 +1285,7 @@ static uint32_t eff_reap(uint32_t dev, uint32_t pp)
 
     if (dev == 0 || pp == 0 || M32(pp) == 0)
         return DI_BADARG;
-    r = COM(M32(pp), 0x24, f2)(M32(pp), P(&status));    /* GetEffectStatus */
+    r = COM(M32(pp), 0x24, f2)(M32(pp), fs98_handle(&status));    /* GetEffectStatus */
     if (r != 0)
         return r;
     if ((uint8_t)status & 1)                            /* DIEGES_PLAYING */
@@ -1322,12 +1321,12 @@ static uint32_t eff_bump(uint32_t dev, uint32_t pp, uint32_t mag, uint32_t dir, 
     eff[5] = 0xffffffff;
     eff[6] = 0;
     eff[7] = 2;
-    eff[8] = P(axes);
-    eff[9] = P(dirs);
+    eff[8] = fs98_handle(axes);
+    eff[9] = fs98_handle(dirs);
     eff[10] = 0;
     eff[11] = 0x10;
-    eff[12] = P(per);
-    r = COM(dev, 0x48, f5)(dev, RDATA + 0x1c0, P(eff), P(&e), 0);       /* GUID_Sine */
+    eff[12] = fs98_handle(per);
+    r = COM(dev, 0x48, f5)(dev, RDATA + 0x1c0, fs98_handle(eff), fs98_handle(&e), 0);       /* GUID_Sine */
     if ((int32_t)r < 0)
         return r;
     M32(pp) = e;
@@ -1417,10 +1416,10 @@ static void ff_effects_init(void)
     char sect[0x10], path[0x104];
     uint32_t i;
 
-    M32(P(sect) + 0) = V32(0xad4);                      /* "forcefeedback" */
-    M32(P(sect) + 4) = V32(0xad8);
-    M32(P(sect) + 8) = V32(0xadc);
-    M16(P(sect) + 0xc) = V16(0xae0);
+    M32(fs98_handle(sect) + 0) = V32(0xad4);                      /* "forcefeedback" */
+    M32(fs98_handle(sect) + 4) = V32(0xad8);
+    M32(fs98_handle(sect) + 8) = V32(0xadc);
+    M16(fs98_handle(sect) + 0xc) = V16(0xae0);
     V32(0x494) = 0x1770;
     V32(0x4a0) = 0x1770;
     V32(0x4ac) = 0x1770;
@@ -1452,18 +1451,18 @@ static void ff_effects_init(void)
     V32(0x4d4) = 0x3ff00000;
     V32(0x4dc) = 0x3e8;
     V32(0x4e8) = 0x2328;
-    if (CALL(ACONTAIN, 0x30, f4)(G + 0x11e0, 0, P(path), 0x104) == 0)
+    if (CALL(ACONTAIN, 0x30, f4)(G + 0x11e0, 0, fs98_handle(path), 0x104) == 0)
         return;
     for (i = 0; i < sizeof ints / sizeof ints[0]; i++)
-        HC(0xd0, f5)(P(sect), D + ints[i][0], D + ints[i][1], P(path), 0x24);
-    HC(0xe0, f5)(P(sect), D + 0x958, D + 0xc000, P(path), 0x24);   /* ground_bumps_intercept1 */
-    HC(0xe0, f5)(P(sect), D + 0x944, D + 0x4c0, P(path), 0x24);    /* ground_bumps_slope1 */
+        HC(0xd0, f5)(fs98_handle(sect), D + ints[i][0], D + ints[i][1], fs98_handle(path), 0x24);
+    HC(0xe0, f5)(fs98_handle(sect), D + 0x958, D + 0xc000, fs98_handle(path), 0x24);   /* ground_bumps_intercept1 */
+    HC(0xe0, f5)(fs98_handle(sect), D + 0x944, D + 0x4c0, fs98_handle(path), 0x24);    /* ground_bumps_slope1 */
     for (i = 0; i < sizeof more / sizeof more[0]; i++)
-        HC(0xd0, f5)(P(sect), D + more[i][0], D + more[i][1], P(path), 0x24);
-    HC(0xe0, f5)(P(sect), D + 0x900, D + 0xc008, P(path), 0x24);   /* ground_bumps_intercept2 */
-    HC(0xe0, f5)(P(sect), D + 0x8ec, D + 0x4d0, P(path), 0x24);    /* ground_bumps_slope2 */
+        HC(0xd0, f5)(fs98_handle(sect), D + more[i][0], D + more[i][1], fs98_handle(path), 0x24);
+    HC(0xe0, f5)(fs98_handle(sect), D + 0x900, D + 0xc008, fs98_handle(path), 0x24);   /* ground_bumps_intercept2 */
+    HC(0xe0, f5)(fs98_handle(sect), D + 0x8ec, D + 0x4d0, fs98_handle(path), 0x24);    /* ground_bumps_slope2 */
     for (i = 0; i < sizeof crash / sizeof crash[0]; i++)
-        HC(0xd0, f5)(P(sect), D + crash[i][0], D + crash[i][1], P(path), 0x24);
+        HC(0xd0, f5)(fs98_handle(sect), D + crash[i][0], D + crash[i][1], fs98_handle(path), 0x24);
     V32(0x508) = V32(0x4f0);
 }
 
@@ -1595,13 +1594,13 @@ static uint32_t fill_keys(uint32_t bind, uint32_t accel, uint32_t mode)
 {
     uint32_t n, buf, prev, idx, r;
 
-    r = HC(0x1fc, f6)(accel, 0, 0, 2, 0, P(&n));
+    r = HC(0x1fc, f6)(accel, 0, 0, 2, 0, fs98_handle(&n));
     if (r != 0)
         return r;
-    HC(0x20c, f4)(1, n * 0xc, P(&buf), 1);
-    HC(0x1fc, f6)(accel, 0, 0, 2, buf, P(&n));
+    HC(0x20c, f4)(1, n * 0xc, fs98_handle(&buf), 1);
+    HC(0x1fc, f6)(accel, 0, 0, 2, buf, fs98_handle(&n));
     prev = 0;
-    if (next_cmd(P(&idx), P(&prev), mode) == 0) {
+    if (next_cmd(fs98_handle(&idx), fs98_handle(&prev), mode) == 0) {
         do {
             uint32_t e;
             M32(bind) = 0;
@@ -1612,9 +1611,9 @@ static uint32_t fill_keys(uint32_t bind, uint32_t accel, uint32_t mode)
                 }
             M32(bind + 4) = (CMD(idx).kind & 3) != 0;
             bind += 8;
-        } while (next_cmd(P(&idx), P(&prev), mode) == 0);
+        } while (next_cmd(fs98_handle(&idx), fs98_handle(&prev), mode) == 0);
     }
-    return HC(0x214, f1)(P(&buf));
+    return HC(0x214, f1)(fs98_handle(&buf));
 }
 
 /* .text+0x84d0 -- a joystick's bindings and extras from its config `cfg`:
@@ -1634,7 +1633,7 @@ static uint32_t fill_joy(uint32_t list, uint32_t bind, uint32_t ext, uint32_t cf
     for (a = 0; a < 0x10; a++) {
         if (M32(cfg + 0xc + a * 4) == 0)
             continue;
-        if (find_pair(list, M32(cfg + 0xc + a * 4), P(&at)) == 0)
+        if (find_pair(list, M32(cfg + 0xc + a * 4), fs98_handle(&at)) == 0)
             continue;
         M32(bind + at * 8) = a + 1;
         M32(ext + at * 0xc) = M32(cfg + 0x4c + a * 4);
@@ -1643,16 +1642,16 @@ static uint32_t fill_joy(uint32_t list, uint32_t bind, uint32_t ext, uint32_t cf
     for (a = 0; a < 0x40; a++) {
         if (M32(cfg + 0xcc + a * 4) == 0)
             continue;
-        if (find_pair(list, M32(cfg + 0xcc + a * 4), P(&at)) == 0)
+        if (find_pair(list, M32(cfg + 0xcc + a * 4), fs98_handle(&at)) == 0)
             continue;
         M32(bind + at * 8) = a + 0x11;
         M32(ext + at * 0xc + 8) = M32(cfg + 0x1cc + a * 4);
     }
     prev = 0;
-    r = next_cmd(P(&idx), P(&prev), mode);
+    r = next_cmd(fs98_handle(&idx), fs98_handle(&prev), mode);
     for (k = 0; r == 0; k++) {
         M32(bind + k * 8 + 4) = (CMD(idx).kind & 3) != 0 ? 2 : 3;
-        r = next_cmd(P(&idx), P(&prev), mode);
+        r = next_cmd(fs98_handle(&idx), fs98_handle(&prev), mode);
     }
     return r;
 }
@@ -1664,14 +1663,14 @@ static void joy_current(uint32_t kind, uint32_t joy, uint32_t out)
     uint8_t state[0x14c];
     uint32_t r;
 
-    M32(P(state) + 8) = 0xff;
-    r = HC(0x1c4, f2)(joy, P(state));
+    M32(fs98_handle(state) + 8) = 0xff;
+    r = HC(0x1c4, f2)(joy, fs98_handle(state));
     if (kind == 0)
         HC(0x21c, f3)(out, D + 0xd48 + joy * 0x3cc, 0x3cc);
     else if (kind == 1)
         HC(0x21c, f3)(out, D + 0x82c8 + joy * 0x3cc, 0x3cc);
     if (r == 0)
-        M32(out + 8) = M32(P(state) + 8);
+        M32(out + 8) = M32(fs98_handle(state) + 8);
 }
 
 /* .text+0x80a0 -- build a list: the commands of `mode` (4 flight or 8 slew
@@ -1684,25 +1683,25 @@ static void build_list(uint32_t list, uint32_t accel, uint32_t mode)
 
     prev = 0;
     n = 0;
-    if (next_cmd(P(&idx), P(&prev), mode) == 0)
+    if (next_cmd(fs98_handle(&idx), fs98_handle(&prev), mode) == 0)
         do
             n++;
-        while (next_cmd(P(&idx), P(&prev), mode) == 0);
-    HC(0x20c, f4)(1, n * 8, P(&pairs), 1);
+        while (next_cmd(fs98_handle(&idx), fs98_handle(&prev), mode) == 0);
+    HC(0x20c, f4)(1, n * 8, fs98_handle(&pairs), 1);
     M32(list) = n;
     M32(list + 4) = pairs;
     prev = 0;
     off = 0;
-    if (next_cmd(P(&idx), P(&prev), mode) == 0)
+    if (next_cmd(fs98_handle(&idx), fs98_handle(&prev), mode) == 0)
         do {
             HC(0x2a4, f2)(CMD(idx).sid, pairs + off);
             off += 8;
             M32(pairs + off - 4) = CMD(idx).command;
-        } while (next_cmd(P(&idx), P(&prev), mode) == 0);
+        } while (next_cmd(fs98_handle(&idx), fs98_handle(&prev), mode) == 0);
     ndev = 1;
     if (mode & 3)
         ndev = HC(0x1c0, f0)() + 1;
-    HC(0x20c, f4)(1, ndev * 0x14, P(&devs), 1);
+    HC(0x20c, f4)(1, ndev * 0x14, fs98_handle(&devs), 1);
     M32(list + 8) = ndev;
     M32(list + 0xc) = devs;
     HC(0x20c, f4)(1, n * 8, devs + 0xc, 1);
@@ -1720,15 +1719,15 @@ static void build_list(uint32_t list, uint32_t accel, uint32_t mode)
         HC(0x20c, f4)(1, n * 0xc, M32(list + 0xc) + (j + 1) * 0x14 + 0x10, 1);
         M32(M32(list + 0xc) + (j + 1) * 0x14) = 1;
         M32(M32(list + 0xc) + (j + 1) * 0x14 + 4) = j;
-        HC(0x1c8, f2)(j, P(desc));
-        HC(0x20c, f4)(1, h_strlen(P(desc) + 0x10) + 1, M32(list + 0xc) + (j + 1) * 0x14 + 8, 0);
-        h_strcpy(M32(M32(list + 0xc) + (j + 1) * 0x14 + 8), P(desc) + 0x10);
+        HC(0x1c8, f2)(j, fs98_handle(desc));
+        HC(0x20c, f4)(1, h_strlen(fs98_handle(desc) + 0x10) + 1, M32(list + 0xc) + (j + 1) * 0x14 + 8, 0);
+        h_strcpy(M32(M32(list + 0xc) + (j + 1) * 0x14 + 8), fs98_handle(desc) + 0x10);
         if (mode & 1)
-            joy_current(0, j, P(cfg));
+            joy_current(0, j, fs98_handle(cfg));
         else if (mode & 2)
-            joy_current(1, j, P(cfg));
+            joy_current(1, j, fs98_handle(cfg));
         e = M32(list + 0xc) + (j + 1) * 0x14;
-        fill_joy(list, M32(e + 0xc), M32(e + 0x10), P(cfg), mode);
+        fill_joy(list, M32(e + 0xc), M32(e + 0x10), fs98_handle(cfg), mode);
     }
 }
 
@@ -1793,7 +1792,7 @@ static uint32_t apply_keys(uint32_t list, uint32_t accel)
         ent[0] = spec & 0xff;
         ent[1] = spec >> 8;
         if (ent[0] != 0)
-            r = HC(0x1f4, f3)(accel, P(ent), 1);
+            r = HC(0x1f4, f3)(accel, fs98_handle(ent), 1);
     }
     return r;
 }
@@ -1811,26 +1810,26 @@ static void apply_joys(uint32_t list, uint32_t kind)
     for (j = 0; j + 1 < M32(list + 8); j++) {
         uint32_t e = M32(list + 0xc) + (j + 1) * 0x14;
         uint32_t ext = M32(e + 0x10), bind = M32(e + 0xc), k;
-        HC(0x1c8, f2)(j, P(desc));
+        HC(0x1c8, f2)(j, fs98_handle(desc));
         /* RETAIL BUG (kept): CTL-3 -- the config is rebuilt from the dialog's bindings alone, so the joystick's
          * up events, LOCKED and TYPE are zeroed. */
-        HC(0x218, f3)(P(cfg), 0, 0x3cc);
+        HC(0x218, f3)(fs98_handle(cfg), 0, 0x3cc);
         for (k = 0; k < n; k++) {
             uint32_t v = M32(bind + k * 8);
             if (v == 0)
                 continue;
             if (v >= 0x11 && v <= 0x50) {
-                M32(P(cfg) + 0x88 + v * 4) = M32(pairs + k * 8 + 4);
-                M32(P(cfg) + 0x188 + v * 4) = M32(ext + k * 0xc + 8);
+                M32(fs98_handle(cfg) + 0x88 + v * 4) = M32(pairs + k * 8 + 4);
+                M32(fs98_handle(cfg) + 0x188 + v * 4) = M32(ext + k * 0xc + 8);
             }
             if (v >= 1 && v <= 0x10) {
-                M32(P(cfg) + 8) |= 1u << (v - 1);
-                M32(P(cfg) + 8 + v * 4) = M32(pairs + k * 8 + 4);
-                M32(P(cfg) + 0x48 + v * 4) = M32(ext + k * 0xc);
-                M32(P(cfg) + 0x88 + v * 4) = M32(ext + k * 0xc + 4);
+                M32(fs98_handle(cfg) + 8) |= 1u << (v - 1);
+                M32(fs98_handle(cfg) + 8 + v * 4) = M32(pairs + k * 8 + 4);
+                M32(fs98_handle(cfg) + 0x48 + v * 4) = M32(ext + k * 0xc);
+                M32(fs98_handle(cfg) + 0x88 + v * 4) = M32(ext + k * 0xc + 4);
             }
         }
-        joy_install(kind, j, P(cfg));
+        joy_install(kind, j, fs98_handle(cfg));
     }
 }
 
@@ -1879,22 +1878,22 @@ static uint32_t FS98_STDCALL dlg_reset(uint32_t block, uint32_t list, uint32_t d
     if (M32(e) == 0) {
         if (M32(block + 0x28) == 0) {
             if (section_read_layout(D + 0x408, (const char *)(uintptr_t)(D + 0x1a8), 4, &accel) == 0)
-                HC(0x1e4, f2)(P(&accel), 0x67);
+                HC(0x1e4, f2)(fs98_handle(&accel), 0x67);
             fill_keys(M32(M32(list + 0xc) + dev * 0x14 + 0xc), accel, 5);
         } else {
             if (section_read_layout(D + 0x408, (const char *)(uintptr_t)(D + 0x1b8), 8, &accel) == 0)
-                HC(0x1e4, f2)(P(&accel), 0x68);
+                HC(0x1e4, f2)(fs98_handle(&accel), 0x68);
             fill_keys(M32(M32(list + 0xc) + dev * 0x14 + 0xc), accel, 0xa);
         }
-        return HC(0x1dc, f1)(P(&accel));
+        return HC(0x1dc, f1)(fs98_handle(&accel));
     }
     if (M32(e) == 1) {
         uint32_t kind = M32(block + 0x28) == 0 ? 0 : 1, r;
-        r = joy_default(kind, M32(e + 4), P(cfg));
+        r = joy_default(kind, M32(e + 4), fs98_handle(cfg));
         if (r != 0)
             return r;
         e = M32(list + 0xc) + dev * 0x14;
-        return fill_joy(list, M32(e + 0xc), M32(e + 0x10), P(cfg), kind == 0 ? 5 : 0xa);
+        return fill_joy(list, M32(e + 0xc), M32(e + 0x10), fs98_handle(cfg), kind == 0 ? 5 : 0xa);
     }
     return e;
 }
@@ -1943,7 +1942,7 @@ static uint32_t dlg_setup(void)
         V32(0x250) = 1;
         V32(0xb00) = 0;
     }
-    controls_force(1, P(ff));
+    controls_force(1, fs98_handle(ff));
     V32(0x310) = ff[2];
     V32(0x308) = ff[1];
     V32(0x328) = ff[5];
@@ -1980,7 +1979,7 @@ static uint32_t dlg_apply(void)
     ff[4] = V32(0x320);
     ff[5] = V32(0x328);
     ff[6] = V32(0x330);
-    controls_force(2, P(ff));
+    controls_force(2, fs98_handle(ff));
     records_apply(D + 0x264);
     apply_keys(D + 0x270, V32(0x186));
     apply_keys(D + 0x280, V32(0x18a));
@@ -2137,8 +2136,8 @@ uint32_t FS98_STDCALL controls_force(uint32_t op, uint32_t blk)
  * in the dialog's block */
 void controls_input_install(void)
 {
-    V32(0x244) = P(dlg_none);                               /* the dialog's callbacks */
-    V32(0x25c) = P(dlg_adjust);
-    V32(0x260) = P(dlg_refresh);
-    V32(0x26c) = P(dlg_reset);
+    V32(0x244) = fs98_handle(dlg_none);                               /* the dialog's callbacks */
+    V32(0x25c) = fs98_handle(dlg_adjust);
+    V32(0x260) = fs98_handle(dlg_refresh);
+    V32(0x26c) = fs98_handle(dlg_reset);
 }

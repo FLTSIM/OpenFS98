@@ -17,6 +17,7 @@
 #include <stdint.h>
 #include <string.h>
 
+#include "fs98/arena.h"
 #include "layout.h"
 
 uint8_t gauge_data[GAUGE_DATA_SIZE] = {
@@ -27,9 +28,9 @@ static const uint8_t gauge_rdata[GAUGE_RDATA_SIZE] = {
 };
 static void *gauge_routine(uint32_t rva);
 static uint32_t gauge_rebind(uint32_t rva) {
-if (rva >= GAUGE_DATA_RVA && rva < GAUGE_DATA_RVA + GAUGE_DATA_SIZE) return (uint32_t)(uintptr_t)(gauge_data + rva - GAUGE_DATA_RVA);
-if (rva >= GAUGE_RDATA_RVA && rva < GAUGE_RDATA_RVA + GAUGE_RDATA_SIZE) return (uint32_t)(uintptr_t)(gauge_rdata + rva - GAUGE_RDATA_RVA);
-{ void *routine = gauge_routine(rva); if (!routine) RaiseException(EXCEPTION_ILLEGAL_INSTRUCTION, 0, 0, NULL); return (uint32_t)(uintptr_t)routine; }}
+if (rva >= GAUGE_DATA_RVA && rva < GAUGE_DATA_RVA + GAUGE_DATA_SIZE) return fs98_handle(gauge_data + rva - GAUGE_DATA_RVA);
+if (rva >= GAUGE_RDATA_RVA && rva < GAUGE_RDATA_RVA + GAUGE_RDATA_SIZE) return fs98_handle(gauge_rdata + rva - GAUGE_RDATA_RVA);
+{ void *routine = gauge_routine(rva); if (!routine) RaiseException(EXCEPTION_ILLEGAL_INSTRUCTION, 0, 0, NULL); return fs98_handle(routine); }}
 #define GAUGE_STRING_(x) #x
 #define GAUGE_STRING(x) GAUGE_STRING_(x)
 __asm__(".globl _ImportTable\n.set _ImportTable, _gauge_data + " GAUGE_STRING(GAUGE_IMPORT_OFFSET)
@@ -153,7 +154,7 @@ typedef uint32_t (__stdcall *gauge_service1)(uint32_t);
 typedef uint32_t (__stdcall *gauge_service2)(uint32_t, uint32_t);
 typedef uint32_t (__stdcall *gauge_service3)(uint32_t, uint32_t, uint32_t);
 #define GAUGE_PANELS_CALL(offset, arity) GAUGE_SERVICE(GAUGE_IMPORTS, offset, gauge_service##arity)
-#define GAUGE_ADDRESS(rva) ((uint32_t)(uintptr_t)GAUGE_D(rva))
+#define GAUGE_ADDRESS(rva) (fs98_handle(GAUGE_D(rva)))
 #define GAUGE_INSTALL(name) \
     static void __stdcall name(uint32_t context) \
     { \

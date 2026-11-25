@@ -411,11 +411,11 @@ string(STRIP "${OFS_GAUGE_PAIRS}" OFS_GAUGE_PAIRS)
 
 ofs_step(all
   OUTPUTS bin/gauges-all/built.stamp
-  DEPENDS_GLOB src/gauges/*.c src/gauges/*.h src/gauges/images/* src/gauges/gauges_manifest.json tools/data_images.txt orig/Gauges/*.GAU docs/setup_map.tsv
+  DEPENDS_GLOB src/gauges/*.c src/gauges/*.h include/fs98/arena.h include/fs98/abi.h src/gauges/images/* src/gauges/gauges_manifest.json tools/data_images.txt orig/Gauges/*.GAU docs/setup_map.tsv
   COMMANDS
     [==[python3 -B tools/gen_gauges.py]==]
     [==[touch bin/gauges-all/generated.stamp]==]
-    [==[python3 -B tools/build_gauges.py]==]
+    [==[python3 -B tools/build_gauges.py --jobs 2]==]
     # exit 3: UPDATE=1 only warned about a mismatch (the DLL's mtime is reset): age the stamp, so the next build reruns the step
     "python3 -B tools/check_data_image.py --hash ${OFS_GAUGE_PAIRS}@SEMI@ rc=$? @SEMI@ if [ $rc -eq 0 ]@SEMI@ then touch bin/gauges-all/built.stamp@SEMI@ elif [ $rc -eq 3 ]@SEMI@ then touch -d @0 bin/gauges-all/built.stamp@SEMI@ else exit $rc@SEMI@ fi"
   )

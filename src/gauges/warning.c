@@ -3,6 +3,7 @@
  * PANELS implements all drawing. See docs/modules/gauges.md. */
 #include <windows.h>
 #include <stdint.h>
+#include "fs98/arena.h"
 
 union warning_data {
     uint8_t bytes[0xfc];
@@ -72,9 +73,9 @@ static uint32_t __stdcall warning_failures(void)
 
 /* The relocated slots of warning_pointers.inc: each is installed at attach with the address the retail slot holds. */
 #define GAUGE_DATA(off, target) \
-    warning_image.words[(off) / 4] = (uint32_t)(uintptr_t)(warning_image.bytes + (target));
+    warning_image.words[(off) / 4] = fs98_handle(warning_image.bytes + (target));
 #define GAUGE_CODE(off, rva, routine) \
-    warning_image.words[(off) / 4] = (uint32_t)(uintptr_t)routine;
+    warning_image.words[(off) / 4] = fs98_handle(routine);
 
 BOOL WINAPI DllMain(HINSTANCE instance, DWORD reason, LPVOID reserved)
 {

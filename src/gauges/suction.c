@@ -3,6 +3,7 @@
  * PANELS draws the element tree and installs its mouse rectangles. */
 #include <windows.h>
 #include <stdint.h>
+#include "fs98/arena.h"
 
 union suction_data {
     uint8_t bytes[0x298];
@@ -40,12 +41,12 @@ static uint32_t __stdcall suction_install(uint32_t context)
 {
     ((panel_two)(uintptr_t)panel_service(0x64))(suction_image.words[0x1d0 / 4], context);
     ((panel_three)(uintptr_t)panel_service(0x80))(
-        (uint32_t)(uintptr_t)(suction_image.bytes + 0x1d8),
-        (uint32_t)(uintptr_t)(suction_image.bytes + 0x18),
+        fs98_handle(suction_image.bytes + 0x1d8),
+        fs98_handle(suction_image.bytes + 0x18),
         suction_image.words[0x1bc / 4] + 4);
     return ((panel_two)(uintptr_t)panel_service(0x84))(
-        (uint32_t)(uintptr_t)(suction_image.bytes + 0x1d8),
-        (uint32_t)(uintptr_t)(suction_image.bytes + 0x18));
+        fs98_handle(suction_image.bytes + 0x1d8),
+        fs98_handle(suction_image.bytes + 0x18));
 }
 
 static uint32_t __stdcall suction_unmark(void)
@@ -72,8 +73,8 @@ static uint32_t __stdcall suction_draw(void)
 static uint32_t __stdcall suction_release(void)
 {
     ((panel_two)(uintptr_t)panel_service(0x88))(
-        (uint32_t)(uintptr_t)(suction_image.bytes + 0x1d8),
-        (uint32_t)(uintptr_t)(suction_image.bytes + 0x18));
+        fs98_handle(suction_image.bytes + 0x1d8),
+        fs98_handle(suction_image.bytes + 0x18));
     return ((panel_one)(uintptr_t)panel_service(0x7c))(suction_image.words[0x1d0 / 4]);
 }
 
@@ -87,9 +88,9 @@ static uint32_t __stdcall suction_failures(void)
 
 /* The relocated slots of suction_pointers.inc: each is installed at attach with the address the retail slot holds. */
 #define GAUGE_DATA(off, target) \
-    suction_image.words[(off) / 4] = (uint32_t)(uintptr_t)(suction_image.bytes + (target));
+    suction_image.words[(off) / 4] = fs98_handle(suction_image.bytes + (target));
 #define GAUGE_CODE(off, rva, routine) \
-    suction_image.words[(off) / 4] = (uint32_t)(uintptr_t)routine;
+    suction_image.words[(off) / 4] = fs98_handle(routine);
 
 BOOL WINAPI DllMain(HINSTANCE instance, DWORD reason, LPVOID reserved)
 {

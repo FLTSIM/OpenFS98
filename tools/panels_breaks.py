@@ -16,14 +16,22 @@ The mutants of a run are independent, so they run in parallel, each in a
 directory of its own (bin/difftest_brk<k>, beside bin/difftest so that the
 game's path is the same).
 
-Usage: tools/panels_breaks.py [N] [COUNT] [SEED] [name...]   (from the
-       repository root, after tools/ofs panelsdiff panelsunit)
+Usage: tools/panels_breaks.py [N] [COUNT] [SEED] [name...] [--freeze FILE | --cases FILE]
+       [--build-only DIR]   (from the repository root, after tools/ofs panelsdiff panelsunit)
   N      scenarios of the whole-module mode per mutant (default 150)
   COUNT  how many mutants to try (default 200)
   SEED   which sample (default 1)
   name   try only these (names are printed)
+  --freeze FILE      write the sampled cases (function, line, operation and which match on the line)
+  --cases FILE       use a frozen sample: each case is the same operation at the same site of this
+                     source, under the frozen name; the frozen line's text must match (as converted)
+  --build-only DIR   build every case's mutant DLLs, one at a time, as DIR/<case>-module and
+                     DIR/<case>-unit (mutant.dll and meta.json), and run nothing.  A case that does
+                     not build keeps only its meta.json ("unbuilt": true); a name matching nothing
+                     exits non-zero
 """
 import concurrent.futures
+import json
 import os
 import random
 import re
@@ -31,6 +39,17 @@ import shutil
 import subprocess
 import sys
 
+def _flag(name):
+    if name in sys.argv:
+        i = sys.argv.index(name)
+        v = sys.argv[i + 1]
+        del sys.argv[i:i + 2]
+        return v
+
+
+BUILD_ONLY = _flag("--build-only")
+FREEZE = _flag("--freeze")
+CASES = _flag("--cases")
 args = [a for a in sys.argv[1:]]
 nums = [int(a) for a in args if a.isdigit()]
 N = nums[0] if len(nums) > 0 else 150
@@ -47,6 +66,19 @@ UNIT_FUNCS = {
     "bounds_build", "colour_8",
 }
 # helpers the unit routines call, tried under the routine that matters most
+# the only cases whose build may fail: the duplicate `case` values these two edits make in var_lookup
+EXPECTED_UNBUILT = {"var_lookup:3508:const9", "var_lookup:3508:const31"}
+# how the slice-2 conversion rewrote a source line, so a frozen line can be matched against the converted source
+RENAMES = [(r"\bRF\(", "PN_RF("), (r"\bRD\(", "PN_RD("), (r"\bRFL\(", "RF("), (r"\bADDR\(", "fs98_handle("),
+           (r"\bP\(", "fs98_handle("), (r"\(uint32_t\)\(uintptr_t\)([A-Za-z_0-9]+);", r"fs98_handle(\1);")]
+
+
+def converted(line):
+    for pat, rep_ in RENAMES:
+        line = re.sub(pat, rep_, line)
+    return line
+
+
 UNIT_FOR = {"colour_8": "shrink_8_to_8", "var_lookup": "var_lookup", "var_init": "var_lookup"}
 
 
@@ -72,7 +104,7 @@ def functions(lines):
 
 # (what, pattern, replacement function)
 OPS = [
-    ("off4", re.compile(r"\b(R32|RFL)\((\w+(?:\s*\+\s*\w+)?), 0x([0-9a-f]+)\)"),
+    ("off4", re.compile(r"\b(R32|RFL|RF)\((\w+(?:\s*\+\s*\w+)?), 0x([0-9a-f]+)\)"),
      lambda m: "%s(%s, 0x%x)" % (m.group(1), m.group(2), int(m.group(3), 16) + 4)),
     ("off2", re.compile(r"\b(R16)\((\w+), 0x([0-9a-f]+)\)"),
      lambda m: "R16(%s, 0x%x)" % (m.group(2), int(m.group(3), 16) + 2)),
@@ -108,10 +140,10 @@ def candidates(lines):
                 continue
             code = text
             for what, pat, rep in OPS:
-                for m in pat.finditer(code):
+                for nth, m in enumerate(pat.finditer(code)):
                     new = code[:m.start()] + rep(m) + code[m.end():]
                     if new != code:
-                        out.append(("%s:%d:%s%d" % (name, ln + 1, what, m.start()), ln, new, name))
+                        out.append(("%s:%d:%s%d" % (name, ln + 1, what, m.start()), ln, new, name, (name, ln, what, nth)))
     return out
 
 
@@ -120,7 +152,7 @@ def run(cmd, **kw):
 
 
 def attempt(item, k, source_lines):
-    name, ln, new, func = item
+    name, ln, new, func = item[:4]
     d = "bin/difftest_brk%d" % k
     os.makedirs(d, exist_ok=True)
     for f in ("panelsdiff.exe", "PANELS_retail.dll"):    # every time: a copy kept from an earlier build is stale
@@ -141,6 +173,19 @@ def attempt(item, k, source_lines):
             os.remove(out)
         build = run(["tools/ofs", "panels-break-build", "PANELS_SRC=" + tmp, "PANELS_OUT=" + out,
                      "PANELS_DEF=" + deff, "PANELS_BREAK_FLAGS=" + extra])
+        if BUILD_ONLY:
+            d2 = os.path.join(BUILD_ONLY, "%s-%s" % (re.sub(r"[^\w.-]", "_", name), flavour))
+            os.makedirs(d2, exist_ok=True)
+            if build.returncode != 0 and name not in EXPECTED_UNBUILT:
+                return name, "unbuilt", build.stderr[-300:]
+            meta = {"name": name, "flavour": flavour, "unbuilt": build.returncode != 0}
+            if build.returncode != 0:
+                meta["stderr"] = build.stderr
+            json.dump(meta, open(os.path.join(d2, "meta.json"), "w"), sort_keys=True)
+            if build.returncode == 0:
+                shutil.copy(out, os.path.join(d2, "mutant.dll"))
+            outs.append((flavour, 0))
+            continue
         if build.returncode != 0:
             return name, "unbuilt", build.stderr[-300:]
         env = dict(os.environ, WINEDEBUG="-all")
@@ -158,6 +203,8 @@ def attempt(item, k, source_lines):
                     (r.returncode == 4 and "HANG" in r.stdout):
                 return name, "caught", "%s: %s" % (flavour, (last[-1] if last else "exit %d" % r.returncode)[:100])
             crashed = crashed or "%s: exit %d %s" % (flavour, r.returncode, (last[-1] if last else "")[:80])
+    if BUILD_ONLY:
+        return name, "built", " ".join(f for f, _ in outs)
     if crashed:     # a crash in the unit mode still leaves the module mode its chance to differ
         return name, "CRASHED", crashed
     return name, "MISSED", " ".join("%s ok" % f for f, _ in outs)
@@ -167,16 +214,35 @@ def main():
     import queue
     lines = open(SRC).read().split("\n")
     cands = candidates(lines)
-    if ONLY:
+    if CASES:
+        by_key = {c[4]: c for c in cands}
+        picked = []
+        for f in json.load(open(CASES)):
+            c = by_key.get((f["func"], f["ln"], f["what"], f["nth"]))
+            if c is None:
+                print("frozen case %s has no site in this source" % f["name"]); return 1
+            if lines[c[1]].strip() not in (f["text"].strip(), converted(f["text"]).strip()):
+                print("frozen case %s: the site's text differs\n  frozen: %s\n  now:    %s" % (f["name"], f["text"].strip(), lines[c[1]].strip()))
+                return 1
+            picked.append((f["name"],) + c[1:])
+    elif ONLY:
         picked = [c for c in cands if c[0] in ONLY]
     else:
         rnd = random.Random(SEED)
         rnd.shuffle(cands)
         picked = cands[:COUNT]
+    if ONLY and CASES:
+        picked = [c for c in picked if c[0] in ONLY]
+    if not picked:
+        print("no case matches"); return 1
+    if FREEZE:
+        json.dump([{"name": c[0], "func": c[4][0], "ln": c[4][1], "what": c[4][2], "nth": c[4][3], "text": lines[c[1]]} for c in picked],
+                  open(FREEZE, "w"), indent=0)
     print("%d candidate mutants, %d tried" % (len(cands), len(picked)))
     sys.stdout.flush()
+    workers = 1 if BUILD_ONLY else WORKERS      # builds only, one case at a time
     slots = queue.Queue()
-    for k in range(WORKERS):
+    for k in range(workers):
         slots.put(k)
 
     def task(item):
@@ -190,11 +256,15 @@ def main():
             slots.put(k)
 
     results = []
-    with concurrent.futures.ThreadPoolExecutor(max_workers=WORKERS) as ex:
+    with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as ex:
         for name, verdict, note, item in ex.map(task, picked):
             print("%-34s %-8s %s" % (name, verdict, note))
             sys.stdout.flush()
             results.append((name, verdict, item))
+    if BUILD_ONLY:
+        bad = [n for n, v, i in results if v != "built"]
+        print("%d cases built into %s; failed: %s" % (len(results), BUILD_ONLY, " ".join(bad) or "none"))
+        return 1 if bad else 0
     missed = [(n, i) for n, v, i in results if v in ("MISSED", "CRASHED")]
     unbuilt = [n for n, v, i in results if v == "unbuilt"]
     print("%d mutants, %d caught, %d missed, %d did not build" %

@@ -118,42 +118,42 @@ static int32_t pn_imod(int32_t a, int32_t b)
 
 #define h_post(a, b)            HC(0x03c, f2)((a), (b))
 #define h_busy(on)              HC(0x050, f1)(on)
-#define h_window_create(w)      HC(0x064, f1)(P(w))
-#define h_window_destroy(w)     HC(0x068, f1)(P(w))
-#define h_window_update(w)      HC(0x07c, f1)(P(w))
-#define h_window_invalidate(w, r) HC(0x088, f2)(P(w), P(r))
-#define h_cfg_int_get(s, k, p)  HC(0x0a8, f3)(P(s), P(k), P(p))
-#define h_cfg_int_put(s, k, v)  HC(0x0ac, f3)(P(s), P(k), (v))
-#define h_profile_int(s, k, p, path, e) HC(0x0d0, f5)(P(s), P(k), P(p), P(path), (e))
-#define h_profile_num(s, k, p, path, e) HC(0x0e0, f5)(P(s), P(k), P(p), P(path), (e))
+#define h_window_create(w)      HC(0x064, f1)(fs98_handle(w))
+#define h_window_destroy(w)     HC(0x068, f1)(fs98_handle(w))
+#define h_window_update(w)      HC(0x07c, f1)(fs98_handle(w))
+#define h_window_invalidate(w, r) HC(0x088, f2)(fs98_handle(w), fs98_handle(r))
+#define h_cfg_int_get(s, k, p)  HC(0x0a8, f3)(fs98_handle(s), fs98_handle(k), fs98_handle(p))
+#define h_cfg_int_put(s, k, v)  HC(0x0ac, f3)(fs98_handle(s), fs98_handle(k), (v))
+#define h_profile_int(s, k, p, path, e) HC(0x0d0, f5)(fs98_handle(s), fs98_handle(k), fs98_handle(p), fs98_handle(path), (e))
+#define h_profile_num(s, k, p, path, e) HC(0x0e0, f5)(fs98_handle(s), fs98_handle(k), fs98_handle(p), fs98_handle(path), (e))
 #define h_profile_string(s, k, b, n, path, e) \
-    HC(0x0f0, f6)(P(s), P(k), P(b), (n), P(path), (e))
-#define h_exists(path, e)       HC(0x158, f2)(P(path), (e))
-#define h_path_join(o, d, dir, n) HC(0x184, f4)(P(o), P(d), P(dir), P(n))
-#define h_surface_new(o, w, h, t) HC(0x1b4, f4)(P(o), (w), (h), (t))
+    HC(0x0f0, f6)(fs98_handle(s), fs98_handle(k), fs98_handle(b), (n), fs98_handle(path), (e))
+#define h_exists(path, e)       HC(0x158, f2)(fs98_handle(path), (e))
+#define h_path_join(o, d, dir, n) HC(0x184, f4)(fs98_handle(o), fs98_handle(d), fs98_handle(dir), fs98_handle(n))
+#define h_surface_new(o, w, h, t) HC(0x1b4, f4)(fs98_handle(o), (w), (h), (t))
 #define h_surface_free(s)       HC(0x1b8, f1)(s)
-#define h_alloc(f, n, o, z)     HC(0x20c, f4)((f), (n), P(o), (z))
-#define h_free(pp)              HC(0x214, f1)(P(pp))
-#define h_memset(d, b, n)       HC(0x218, f3)(P(d), (b), (n))
-#define h_memmove(d, s, n)      HC(0x21c, f3)(P(d), P(s), (n))
-#define h_module_load(o, path, e) HC(0x26c, f3)(P(o), P(path), (e))
-#define h_module_release(o)     HC(0x270, f1)(P(o))
-#define h_child_add(a, b, x, y) HC(0x27c, f4)((a), P(b), (x), (y))
-#define h_child_remove(a, b)    HC(0x284, f2)((a), P(b))
-#define h_module_enter(l, o)    HC(0x298, f2)((l), P(o))
+#define h_alloc(f, n, o, z)     HC(0x20c, f4)((f), (n), fs98_handle(o), (z))
+#define h_free(pp)              HC(0x214, f1)(fs98_handle(pp))
+#define h_memset(d, b, n)       HC(0x218, f3)(fs98_handle(d), (b), (n))
+#define h_memmove(d, s, n)      HC(0x21c, f3)(fs98_handle(d), fs98_handle(s), (n))
+#define h_module_load(o, path, e) HC(0x26c, f3)(fs98_handle(o), fs98_handle(path), (e))
+#define h_module_release(o)     HC(0x270, f1)(fs98_handle(o))
+#define h_child_add(a, b, x, y) HC(0x27c, f4)((a), fs98_handle(b), (x), (y))
+#define h_child_remove(a, b)    HC(0x284, f2)((a), fs98_handle(b))
+#define h_module_enter(l, o)    HC(0x298, f2)((l), fs98_handle(o))
 #define h_module_leave(t)       HC(0x29c, f1)(t)
-#define h_palette_copy(b)       HC(0x28c, f1)(P(b))
-#define h_load_string(id, b, n) HC(0x2a0, f3)((id), P(b), (n))
-#define h_strcpy(d, s)          HC(0x2a8, f2)(P(d), P(s))
-#define h_strdup(s)             HC(0x2b4, f1)(P(s))
-#define h_strlen(s)             HC(0x2b8, f1)(P(s))
-#define h_strcmp(a, b)          HC(0x2bc, f2)(P(a), P(b))
-#define h_list_add(l)           HC(0x2f8, f1)(P(l))
-#define h_list_free(l)          HC(0x2fc, f1)(P(l))
-#define h_list_remove(l, e)     HC(0x300, f2)(P(l), P(e))
-#define h_list_reset(l)         HC(0x304, f1)(P(l))
-#define h_list_walk(l, c, fn)   HC(0x308, f3)(P(l), (c), P(fn))
-#define h_list_find(l, o, k, n, x) HC(0x310, f5)(P(l), (o), P(k), (n), (x))
+#define h_palette_copy(b)       HC(0x28c, f1)(fs98_handle(b))
+#define h_load_string(id, b, n) HC(0x2a0, f3)((id), fs98_handle(b), (n))
+#define h_strcpy(d, s)          HC(0x2a8, f2)(fs98_handle(d), fs98_handle(s))
+#define h_strdup(s)             HC(0x2b4, f1)(fs98_handle(s))
+#define h_strlen(s)             HC(0x2b8, f1)(fs98_handle(s))
+#define h_strcmp(a, b)          HC(0x2bc, f2)(fs98_handle(a), fs98_handle(b))
+#define h_list_add(l)           HC(0x2f8, f1)(fs98_handle(l))
+#define h_list_free(l)          HC(0x2fc, f1)(fs98_handle(l))
+#define h_list_remove(l, e)     HC(0x300, f2)(fs98_handle(l), fs98_handle(e))
+#define h_list_reset(l)         HC(0x304, f1)(fs98_handle(l))
+#define h_list_walk(l, c, fn)   HC(0x308, f3)(fs98_handle(l), (c), fs98_handle(fn))
+#define h_list_find(l, o, k, n, x) HC(0x310, f5)(fs98_handle(l), (o), fs98_handle(k), (n), (x))
 
 /* PANELS's own lists and tables */
 #define GAUGE_LIST   DA(0x10025000)     /* a gauge module's Linkage pointer each */
@@ -263,9 +263,9 @@ static void FS98_STDCALL panels_init(void)
     D32(0x10010ed8) = 0;
     D32(0x10010e60) = 0;
     D32(0x10010e64) = 0;
-    CH(0x18, f2)(3, ADDR(cb_engines));
-    CH(0x18, f2)(0x14, ADDR(cb_situation));
-    CH(0x18, f2)(0xc, ADDR(cb_command));
+    CH(0x18, f2)(3, fs98_handle(cb_engines));
+    CH(0x18, f2)(0x14, fs98_handle(cb_situation));
+    CH(0x18, f2)(0xc, fs98_handle(cb_command));
     D32(0x10025568) = 1;
     h_cfg_int_get(S_PANELS, S_IMAGE_QUALITY, DA(0x10025568));
     h_cfg_int_put(S_PANELS, S_IMAGE_QUALITY, D32(0x10025568));
@@ -302,9 +302,9 @@ ELEMENT_FN0(c100) ELEMENT_FN0(c6f0) ELEMENT_FN0(d300) ELEMENT_FN0(d340)
 /* 0x10001140 -- Linkage +0x08 */
 static void FS98_STDCALL panels_deinit(void)
 {
-    CH(0x1c, f2)(3, ADDR(cb_engines));
-    CH(0x1c, f2)(0x14, ADDR(cb_situation));
-    CH(0x1c, f2)(0xc, ADDR(cb_command));
+    CH(0x1c, f2)(3, fs98_handle(cb_engines));
+    CH(0x1c, f2)(0x14, fs98_handle(cb_situation));
+    CH(0x1c, f2)(0xc, fs98_handle(cb_command));
     h_list_free(GAUGE_LIST);
     h_list_free(PANEL_LIST);
     h_list_free(LAYOUT_LIST);
@@ -366,7 +366,7 @@ static void FS98_STDCALL windows_show_all(void)
 {
     uint32_t list, n, i, f;
 
-    WN(0x80, f3)(P(&list), P(&n), 2);
+    WN(0x80, f3)(fs98_handle(&list), fs98_handle(&n), 2);
     for (i = 0; i < n; i++) {
         f = R32(R32(list, 4 * i), 8);
         if ((f & 0x40000000) == 0 && (f & 1) != 0) {
@@ -382,7 +382,7 @@ static void FS98_STDCALL windows_hide_all(void)
 {
     uint32_t list, n, i, f;
 
-    WN(0x80, f3)(P(&list), P(&n), 2);
+    WN(0x80, f3)(fs98_handle(&list), fs98_handle(&n), 2);
     for (i = 0; i < n; i++) {
         f = R32(R32(list, 4 * i), 8);
         if ((f & 0x40000000) == 0 && (f & 0x80000000) != 0) {
@@ -408,7 +408,7 @@ static void FS98_STDCALL windows_options(void)
 {
     uint32_t list, n, i, w;
 
-    WN(0x80, f3)(P(&list), P(&n), 2);
+    WN(0x80, f3)(fs98_handle(&list), fs98_handle(&n), 2);
     for (i = 0; i < n; i++) {
         w = R32(list, 4 * i);
         if (G32(0x1224) != 0)
@@ -430,7 +430,7 @@ static uint32_t FS98_STDCALL windows_any_shown(void)
 {
     uint32_t list, n, i, any = 0, f;
 
-    WN(0x80, f3)(P(&list), P(&n), 2);
+    WN(0x80, f3)(fs98_handle(&list), fs98_handle(&n), 2);
     for (i = 0; i < n; i++) {
         f = R32(R32(list, 4 * i), 8);
         if ((f & 0x40000000) == 0 && (f & 0x80000000) != 0)
@@ -740,7 +740,7 @@ static uint32_t FS98_STDCALL tree_op58(uint32_t e)
  * header's +0x34/+0x38 and placed at `pt` */
 static uint32_t FS98_STDCALL mouse_place(uint32_t m, uint32_t hdr, uint32_t pt)
 {
-    float sx = RFL(hdr, 0x34), sy = RFL(hdr, 0x38);
+    float sx = RF(hdr, 0x34), sy = RF(hdr, 0x38);
     uint32_t r;
 
     R32(m, 4) = FTOL(FI(R32(m, 4)) * sx);
@@ -776,7 +776,7 @@ static uint32_t FS98_STDCALL window_toggle(uint32_t id)
 {
     uint32_t list, n, i, k, any = 0, w;
 
-    WN(0x80, f3)(P(&list), P(&n), 2);
+    WN(0x80, f3)(fs98_handle(&list), fs98_handle(&n), 2);
     for (i = 0; i < n; i++) {
         k = window_ident(R32(list, 4 * i));
         if (k != 0xffffffff && id == k) {
@@ -904,10 +904,10 @@ static uint32_t FS98_STDCALL panel_rebuild(uint32_t e, uint32_t ctx)
     R32(e, 8) = s;
     width = R32(e, 0x18);
     R32(e, 0x1c) = pn_div((uint32_t)width * R32(bmp, 8), R32(bmp, 4));
-    RFL(e, 0x20) = FI(R32(w, 0x84)) / FI(R32(bmp, 4));
-    RFL(e, 0x24) = FI(R32(w, 0x88)) / FI(R32(bmp, 8));
-    RFL(e, 0x28) = FI(R32(w, 0x84)) / FI(width);
-    RFL(e, 0x2c) = FI(R32(w, 0x88)) / FI(R32(e, 0x1c));
+    RF(e, 0x20) = FI(R32(w, 0x84)) / FI(R32(bmp, 4));
+    RF(e, 0x24) = FI(R32(w, 0x88)) / FI(R32(bmp, 8));
+    RF(e, 0x28) = FI(R32(w, 0x84)) / FI(width);
+    RF(e, 0x2c) = FI(R32(w, 0x88)) / FI(R32(e, 0x1c));
     R32(w, 0x10) = bounds_build(s);
     h_window_update(w);
     h_free(&bmp);
@@ -925,7 +925,7 @@ static uint32_t FS98_STDCALL panel_reload_gauges(uint32_t e, uint32_t ctx)
 
     if (ctx != w)
         return 0;
-    if (AC(0x30, f4)(D32(0x10020ee0), 6, P(cfg), 0x104) == 0)
+    if (AC(0x30, f4)(D32(0x10020ee0), 6, fs98_handle(cfg), 0x104) == 0)
         return 0;
     n = D32(0x10010e6c);
     sect = R32(w, 0);
@@ -940,13 +940,13 @@ static uint32_t FS98_STDCALL panel_reload_gauges(uint32_t e, uint32_t ctx)
     if (h_profile_string(sect, key, val, 0x100, cfg, 0x24) == 0)
         return 0;
     do {
-        p = token(P(val), P(name), 0x2c);
-        p = token(p, P(tok), 0x2c);
+        p = token(fs98_handle(val), fs98_handle(name), 0x2c);
+        p = token(p, fs98_handle(tok), 0x2c);
         x = atoi(tok);
-        p = token(p, P(tok), 0x2c);
+        p = token(p, fs98_handle(tok), 0x2c);
         y = atoi(tok);
         if (p != 0) {
-            token(p, P(tok), 0x2c);
+            token(p, fs98_handle(tok), 0x2c);
             wd = atoi(tok);
         } else {
             wd = 0;
@@ -1024,9 +1024,9 @@ static void panels_load(uint32_t a)
     int32_t width, height, pos, visible, ident, x, y, wd;
     double size, size0 = 0, size_y, ratio;
 
-    if (AC(0x30, f4)(a, 5, P(prof), 0x100) == 0)
+    if (AC(0x30, f4)(a, 5, fs98_handle(prof), 0x100) == 0)
         return;
-    if (AC(0x30, f4)(a, 6, P(cfg), 0x104) == 0)
+    if (AC(0x30, f4)(a, 6, fs98_handle(cfg), 0x104) == 0)
         return;
     D32(0x10020ee0) = a;
 
@@ -1036,11 +1036,11 @@ static void panels_load(uint32_t a)
         val[0] = 0;
         if (h_profile_string(S_COLOURS, key, val, 0x100, cfg, 0x24) == 0)
             break;
-        p = token(P(val), P(tok), 0x2c);
+        p = token(fs98_handle(val), fs98_handle(tok), 0x2c);
         D8(0x10025040 + 3 * i) = (uint8_t)atoi(tok);
-        p = token(p, P(tok), 0x2c);
+        p = token(p, fs98_handle(tok), 0x2c);
         D8(0x10025041 + 3 * i) = (uint8_t)atoi(tok);
-        token(p, P(tok), 0x2c);
+        token(p, fs98_handle(tok), 0x2c);
         D8(0x10025042 + 3 * i) = (uint8_t)atoi(tok);
     }
     n = i;
@@ -1080,7 +1080,7 @@ static void panels_load(uint32_t a)
             h_profile_int(key, S_VISIBLE, &visible, cfg, 0x24);
             ident = -1;
             h_profile_int(key, S_IDENT, &ident, cfg, 0x24);
-            w = panel_window_new(P(title));
+            w = panel_window_new(fs98_handle(title));
             if (w == 0)
                 return;
             e = h_list_add(PANEL_LIST);
@@ -1155,11 +1155,11 @@ static void panels_load(uint32_t a)
                 R32(w, 0x28) = 0x2000;
                 /* RETAIL BUG (kept): PANEL-LOAD-WINDOW -- a window with no layout of its own is sized from the
                  * first window's SIZE_MM (size0). */
-                x = FTOL((long double)size / size0 * RD(0x1000e018));
+                x = FTOL((long double)size / size0 * PN_RD(0x1000e018));
                 R32(w, 0x28) = x;
-                if ((long double)ratio > RD(0x1000e020))
+                if ((long double)ratio > PN_RD(0x1000e020))
                     R32(w, 0x28) = FTOL(FI(x) * ratio);
-                if ((long double)size_y == RD(0x1000e008))
+                if ((long double)size_y == PN_RD(0x1000e008))
                     v = FIU(height) / FIU(width) * FI(R32(w, 0x28));
                 else
                     v = (long double)size_y / size * FI(R32(w, 0x28));
@@ -1208,7 +1208,7 @@ static void panels_load(uint32_t a)
                 else
                     window_hide(w);
             }
-            R32(w, 0x18) = ADDR(panel_paint);
+            R32(w, 0x18) = fs98_handle(panel_paint);
             R32(w, 0x68) = R32(w, 0x60);
             R32(w, 0x70) = R32(w, 0x60);
             R32(w, 0x38) = R32(w, 0x60);
@@ -1227,10 +1227,10 @@ static void panels_load(uint32_t a)
             R32(e, 8) = s;
             R32(e, 0x18) = FTOL(size);
             R32(e, 0x1c) = FTOL(FIU(height) * size / FIU(width));
-            RFL(e, 0x20) = FI(R32(w, 0x84)) / FI(width);
-            RFL(e, 0x24) = FI(R32(w, 0x88)) / FI(height);
-            RFL(e, 0x28) = FI(R32(w, 0x84)) / FI(R32(e, 0x18));
-            RFL(e, 0x2c) = FI(R32(w, 0x88)) / FI(R32(e, 0x1c));
+            RF(e, 0x20) = FI(R32(w, 0x84)) / FI(width);
+            RF(e, 0x24) = FI(R32(w, 0x88)) / FI(height);
+            RF(e, 0x28) = FI(R32(w, 0x84)) / FI(R32(e, 0x18));
+            RF(e, 0x2c) = FI(R32(w, 0x88)) / FI(R32(e, 0x1c));
             if (visible != 0)
                 R32(w, 0x10) = bounds_build(s);
             if (G32(0x1228) != 0)
@@ -1248,7 +1248,7 @@ static void panels_load(uint32_t a)
     D32(0x10010e6c) = i;
 
     /* every window's gauges */
-    WN(0x80, f3)(P(&list), P(&nlist), 0);
+    WN(0x80, f3)(fs98_handle(&list), fs98_handle(&nlist), 0);
     for (k = 0; k < nlist; k++) {
         uint32_t g = 0;
 
@@ -1267,13 +1267,13 @@ static void panels_load(uint32_t a)
         if (h_profile_string(sect, key, val, 0x100, cfg, 0x24) == 0)
             continue;
         do {
-            p = token(P(val), P(name), 0x2c);
-            p = token(p, P(tok), 0x2c);
+            p = token(fs98_handle(val), fs98_handle(name), 0x2c);
+            p = token(p, fs98_handle(tok), 0x2c);
             x = atoi(tok);
-            p = token(p, P(tok), 0x2c);
+            p = token(p, fs98_handle(tok), 0x2c);
             y = atoi(tok);
             if (p != 0) {
-                token(p, P(tok), 0x2c);
+                token(p, fs98_handle(tok), 0x2c);
                 wd = atoi(tok);
             } else {
                 wd = 0;
@@ -1296,8 +1296,8 @@ static void panels_refresh(uint32_t a)
     uint32_t list, n, i, w, layout;
     int32_t ident, visible;
 
-    WN(0x80, f3)(P(&list), P(&n), 2);
-    AC(0x30, f4)(a, 6, P(cfg), 0x104);
+    WN(0x80, f3)(fs98_handle(&list), fs98_handle(&n), 2);
+    AC(0x30, f4)(a, 6, fs98_handle(cfg), 0x104);
     for (i = 0; i < n; i++) {
         w = R32(list, 4 * i);
         ident = window_ident(w);
@@ -1354,7 +1354,7 @@ static uint32_t panel_window_new(uint32_t title)
 {
     uint32_t w = 0;
 
-    if (WN(0x78, f3)(P(&w), title, 2) == 0) {
+    if (WN(0x78, f3)(fs98_handle(&w), title, 2) == 0) {
         R32(w, 8) = 0x10000000;
         R32(w, 0x78) = 0x4000;
         R32(w, 0x7c) = 0;
@@ -1449,8 +1449,8 @@ static void gauge_load(uint32_t e, const char *name, int32_t x, int32_t y, int32
     hdr = R32(M32(slot), 0x18);
     R32(hdr, 0x40) = e;
     R32(hdr, 0x3c) = R32(e, 4);
-    R32(hdr, 0x44) = FTOL(FI(x) * RFL(e, 0x28));
-    R32(hdr, 0x48) = FTOL(FI(y) * RFL(e, 0x2c));
+    R32(hdr, 0x44) = FTOL(FI(x) * RF(e, 0x28));
+    R32(hdr, 0x48) = FTOL(FI(y) * RF(e, 0x2c));
     if (w > 0)
         R32(hdr, 0x2c) = w;
     h_module_enter(M32(slot), &tag);
@@ -1478,7 +1478,7 @@ static uint32_t FS98_STDCALL panel_free(uint32_t e, uint32_t c)
         h_free(e + 0x4c);
         /* RETAIL BUG (kept): PANEL-FREE-USE -- the record's +0x10 is read after h_window_destroy freed it. */
         h_free(w + 0x10);
-        WN(0x7c, f1)(P(&w));
+        WN(0x7c, f1)(fs98_handle(&w));
     }
     surfaces_free(e + 8);
     panel_children_reset(e, 0);
@@ -1985,7 +1985,7 @@ static void shrink_8_to_8(uint32_t info, uint32_t bits, uint32_t dst, uint32_t b
         nranges = 4;
         ranges = DA(0x1000f5e8);
         h_palette_copy(hostpal);
-        pal = P(hostpal);
+        pal = fs98_handle(hostpal);
     } else {
         cache = DA(0x10010ee0);
         nranges = 2;
@@ -2140,7 +2140,7 @@ static void shrink_8_to_8_plain(uint32_t info, uint32_t bits, uint32_t dst, uint
         nranges = 4;
         ranges = DA(0x1000f5e8);
         h_palette_copy(hostpal);
-        pal = P(hostpal);
+        pal = fs98_handle(hostpal);
     } else {
         cache = DA(0x10010ee0);
         nranges = 2;
@@ -2338,7 +2338,7 @@ static void FS98_STDCALL to_8_host(uint32_t src, uint32_t dst)
 
         for (k = R32(src, 4); k != 0; k--, d++, p += 3)
             M8(d) = colour_8(M8(p + 2), M8(p + 1), M8(p), DA(0x10018ee0), DA(0x1000f5e8), 4,
-                             P(hostpal), 1);
+                             fs98_handle(hostpal), 1);
     }
 }
 
@@ -2602,7 +2602,7 @@ static void FS98_STDCALL edges_24(uint32_t s, uint32_t back, uint32_t at)
     int32_t w = R32(s, 4), h = R32(s, 8), i, j;
     uint32_t prevb = 0, curb = 0, nextb = 0, stride, lo, hi;
 
-    if (clip(P(&sx), P(&sy), P(&ax), P(&ay), P(&w), P(&h), R32(s, 4), R32(s, 8),
+    if (clip(fs98_handle(&sx), fs98_handle(&sy), fs98_handle(&ax), fs98_handle(&ay), fs98_handle(&w), fs98_handle(&h), R32(s, 4), R32(s, 8),
              R32(back, 4), R32(back, 8)) == 0)
         return;
     stride = R32(s, 0xc);
@@ -2644,14 +2644,14 @@ static void FS98_STDCALL edges_24(uint32_t s, uint32_t back, uint32_t at)
             v[5] = i != 0 && j < h - 1 ? (int32_t)(M32(next - 3) & 0xffffff) : -1;
             v[6] = j < h - 1 ? (int32_t)(M32(next) & 0xffffff) : -1;
             v[7] = i < w - 1 && j < h - 1 ? (int32_t)(M32(next + 3) & 0xffffff) : -1;
-            at8[0] = v[0] < 0 ? P(none) : prev - 3;
-            at8[1] = v[1] < 0 ? P(none) : prev;
-            at8[2] = v[2] < 0 ? P(none) : prev + 3;
-            at8[3] = v[3] < 0 ? P(none) : cur - 3;
-            at8[4] = v[4] < 0 ? P(none) : cur + 3;
-            at8[5] = v[5] < 0 ? P(none) : next - 3;
-            at8[6] = v[6] < 0 ? P(none) : next;
-            at8[7] = v[7] < 0 ? P(none) : next + 3;
+            at8[0] = v[0] < 0 ? fs98_handle(none) : prev - 3;
+            at8[1] = v[1] < 0 ? fs98_handle(none) : prev;
+            at8[2] = v[2] < 0 ? fs98_handle(none) : prev + 3;
+            at8[3] = v[3] < 0 ? fs98_handle(none) : cur - 3;
+            at8[4] = v[4] < 0 ? fs98_handle(none) : cur + 3;
+            at8[5] = v[5] < 0 ? fs98_handle(none) : next - 3;
+            at8[6] = v[6] < 0 ? fs98_handle(none) : next;
+            at8[7] = v[7] < 0 ? fs98_handle(none) : next + 3;
             for (k = 0; k < 8; k++)
                 if (v[k] < 0)
                     v[k] = 0;
@@ -2724,7 +2724,7 @@ static void FS98_STDCALL blit(uint32_t dst, uint32_t src, uint32_t at_dst, uint3
     sy = R32(at_src, 4);
     w = R32(size, 0);
     h = R32(size, 4);
-    if (clip(P(&dx), P(&dy), P(&sx), P(&sy), P(&w), P(&h), R32(dst, 4), R32(dst, 8),
+    if (clip(fs98_handle(&dx), fs98_handle(&dy), fs98_handle(&sx), fs98_handle(&sy), fs98_handle(&w), fs98_handle(&h), R32(dst, 4), R32(dst, 8),
              R32(src, 4), R32(src, 8)) == 0)
         return;
     d = R32(R32(dst, 0x10), 4 * dy) + dx;
@@ -2861,7 +2861,7 @@ static uint32_t FS98_STDCALL dib_new(uint32_t type, int32_t w, int32_t h, uint32
     bm = CreateDIBSection(NULL, (BITMAPINFO *)(uintptr_t)info, 0, (void **)(uintptr_t)bits,
                           NULL, 0);
     h_free(&info);
-    return P(bm);
+    return fs98_handle(bm);
 }
 
 /* 0x10007300 -- a surface record (as host +0x1b4's) over the bits *bits:
@@ -2918,17 +2918,17 @@ static void wrap_360(uint32_t v)
 {
     long double x;
 
-    if ((long double)VAL(v) > RD(0x1000e0a8))
+    if ((long double)VAL(v) > PN_RD(0x1000e0a8))
         do {
-            x = (long double)VAL(v) - RD(0x1000e0a8);
+            x = (long double)VAL(v) - PN_RD(0x1000e0a8);
             VAL(v) = (double)x;
-        } while (x > RD(0x1000e0a8));
-    if ((long double)VAL(v) > RD(0x1000e0b0))
+        } while (x > PN_RD(0x1000e0a8));
+    if ((long double)VAL(v) > PN_RD(0x1000e0b0))
         return;
     x = VAL(v);
     do
-        x -= RD(0x1000e0b8);
-    while (!(x > RD(0x1000e0b0)));
+        x -= PN_RD(0x1000e0b8);
+    while (!(x > PN_RD(0x1000e0b0)));
     VAL(v) = (double)x;
 }
 
@@ -2946,7 +2946,7 @@ static void var_scaled(uint32_t v, uint32_t op, uint32_t field)
         return;
     a = GD(field);
     VAL(v) = (double)a;
-    VAL(v) = (double)(a / (FI((int16_t)G16(0xaf4)) * RD(0x1000e070)));
+    VAL(v) = (double)(a / (FI((int16_t)G16(0xaf4)) * PN_RD(0x1000e070)));
 }
 static uint32_t FS98_STDCALL v_7420(uint32_t v, uint32_t op) { var_scaled(v, op, 0x918); return 0; }
 static uint32_t FS98_STDCALL v_7480(uint32_t v, uint32_t op) { var_scaled(v, op, 0x9b0); return 0; }
@@ -2964,12 +2964,12 @@ static uint32_t FS98_STDCALL v_75a0(uint32_t v, uint32_t op)
     }
     if (op != 1)
         return 0;
-    x = FI((uint32_t)G16(0x330) - (uint32_t)G16(0xf48)) * RD(0x1000e078);
+    x = FI((uint32_t)G16(0x330) - (uint32_t)G16(0xf48)) * PN_RD(0x1000e078);
     VAL(v) = (double)x;
     x += FI(G32(0x574));
     VAL(v) = (double)x;
     if (G16(0xc18) != 2)
-        VAL(v) = (double)(x * RD(0x1000e080));
+        VAL(v) = (double)(x * PN_RD(0x1000e080));
     return 0;
 }
 
@@ -2985,11 +2985,11 @@ static uint32_t FS98_STDCALL v_75a0(uint32_t v, uint32_t op)
         return 0; \
     }
 
-VAR_SIMPLE(v_7620, FI(G16(0x330)) * RD(0x1000e088))                        /* 0x10007620 */
-VAR_SIMPLE(v_7670, FI(G16(0x330)) * RD(0x1000e090))                        /* 0x10007670 */
-VAR_SIMPLE(v_76c0, FI(G32(0x578)) * RD(0x1000e098))                        /* 0x100076c0 */
-VAR_SIMPLE(v_7750, FIU(G32(0x57c)) * RD(0x1000e098))                       /* 0x10007750 */
-VAR_SIMPLE(v_7da0, FIU(G32(0x2c0) * 360u) * RD(0x1000e0e8))                /* 0x10007da0 */
+VAR_SIMPLE(v_7620, FI(G16(0x330)) * PN_RD(0x1000e088))                        /* 0x10007620 */
+VAR_SIMPLE(v_7670, FI(G16(0x330)) * PN_RD(0x1000e090))                        /* 0x10007670 */
+VAR_SIMPLE(v_76c0, FI(G32(0x578)) * PN_RD(0x1000e098))                        /* 0x100076c0 */
+VAR_SIMPLE(v_7750, FIU(G32(0x57c)) * PN_RD(0x1000e098))                       /* 0x10007750 */
+VAR_SIMPLE(v_7da0, FIU(G32(0x2c0) * 360u) * PN_RD(0x1000e0e8))                /* 0x10007da0 */
 
 /* 0x10007700, 0x100077a0: a double through GLOBAL +0x11d4's +0x20/+0x24,
  * copied as two dwords */
@@ -3036,9 +3036,9 @@ static uint32_t FS98_STDCALL v_77f0(uint32_t v, uint32_t op)
     }
     if (op != 1)
         return 0;
-    x = FIU(G32(0x580)) * RD(0x1000e098);
+    x = FIU(G32(0x580)) * PN_RD(0x1000e098);
     VAL(v) = (double)x;
-    VAL(v) = (double)(x - FI(G16(0x2a0)) * RD(0x1000e0a0));
+    VAL(v) = (double)(x - FI(G16(0x2a0)) * PN_RD(0x1000e0a0));
     wrap_360(v);
     return 0;
 }
@@ -3054,10 +3054,10 @@ static uint32_t FS98_STDCALL v_78c0(uint32_t v, uint32_t op)
     }
     if (op != 1)
         return 0;
-    x = FIU(G32(0x580)) * RD(0x1000e098);
+    x = FIU(G32(0x580)) * PN_RD(0x1000e098);
     VAL(v) = (double)x;
     VAL(v) = (double)(x - FI((int32_t)(int16_t)G16(0xc3e) - (int32_t)G16(0x2a0)) *
-                              RD(0x1000e0c0));
+                              PN_RD(0x1000e0c0));
     wrap_360(v);
     return 0;
 }
@@ -3071,7 +3071,7 @@ static uint32_t FS98_STDCALL v_79a0(uint32_t v, uint32_t op)
     }
     if (op != 1)
         return 0;
-    VAL(v) = (double)(FIU(G32(0x580)) * RD(0x1000e098));
+    VAL(v) = (double)(FIU(G32(0x580)) * PN_RD(0x1000e098));
     wrap_360(v);
     return 0;
 }
@@ -3095,12 +3095,12 @@ static uint32_t FS98_STDCALL v_7a50(uint32_t v, uint32_t op)
         return 0;
     }
     x = FI(G16(0xc60)) - (FIU(G32(0x580) >> 16) - FI(G16(0x2a0)));
-    x = (x - RD(0x1000e0c8)) * RD(0x1000e0a0);
+    x = (x - PN_RD(0x1000e0c8)) * PN_RD(0x1000e0a0);
     VAL(v) = (double)x;
-    if (x < RD(0x1000e0b0))
-        VAL(v) = (double)(x - RD(0x1000e0b8));
-    if (!((long double)VAL(v) < RD(0x1000e0a8)))
-        VAL(v) = (double)((long double)VAL(v) - RD(0x1000e0a8));
+    if (x < PN_RD(0x1000e0b0))
+        VAL(v) = (double)(x - PN_RD(0x1000e0b8));
+    if (!((long double)VAL(v) < PN_RD(0x1000e0a8)))
+        VAL(v) = (double)((long double)VAL(v) - PN_RD(0x1000e0a8));
     return 0;
 }
 
@@ -3115,13 +3115,13 @@ static void var_main_tenths(uint32_t v, uint32_t op, uint32_t what)
     }
     if (op != 1)
         return;
-    if (MN(0x80, f2)(what, P(&t)) != 0) {
+    if (MN(0x80, f2)(what, fs98_handle(&t)) != 0) {
         R32(v, 0xc) = 0;
         R32(v, 0x10) = 0xbff00000;
     } else if (t == -1) {
-        VAL(v) = RD(0x1000e0d0);
+        VAL(v) = PN_RD(0x1000e0d0);
     } else {
-        VAL(v) = (double)(FI(t) * RD(0x1000e0d8));
+        VAL(v) = (double)(FI(t) * PN_RD(0x1000e0d8));
     }
 }
 static uint32_t FS98_STDCALL v_7b70(uint32_t v, uint32_t op) { var_main_tenths(v, op, 1); return 0; }
@@ -3138,7 +3138,7 @@ static void var_main_whole(uint32_t v, uint32_t op, uint32_t what)
     }
     if (op != 1)
         return;
-    if (MN(0x80, f2)(what, P(&t)) != 0) {
+    if (MN(0x80, f2)(what, fs98_handle(&t)) != 0) {
         R32(v, 0xc) = 0;
         R32(v, 0x10) = 0;
     } else {
@@ -3166,7 +3166,7 @@ static uint32_t FS98_STDCALL v_7d30(uint32_t v, uint32_t op)
         t = G32(0x2b8);
     else if (G16(0x612) == 1)
         t = G32(0x2bc);
-    VAL(v) = (double)(FI(t) * RD(0x1000e0e0));
+    VAL(v) = (double)(FI(t) * PN_RD(0x1000e0e0));
     return 0;
 }
 
@@ -3185,7 +3185,7 @@ static void var_products(uint32_t v, uint32_t op, uint32_t a, uint32_t b, uint32
     x = FIU(G32(a)) * FIU(G32(b));
     x = x + FIU(G32(c)) * FIU(G32(d));
     x = x + FIU(G32(e)) * FIU(G32(f));
-    VAL(v) = (double)(x * RD(0x1000e0f0));
+    VAL(v) = (double)(x * PN_RD(0x1000e0f0));
 }
 static uint32_t FS98_STDCALL v_7e00(uint32_t v, uint32_t op)
 {
@@ -3197,7 +3197,7 @@ static uint32_t FS98_STDCALL v_7ec0(uint32_t v, uint32_t op)
     var_products(v, op, 0xb80, 0xb7c, 0xb8c, 0xb90, 0xb84, 0xb88);
     return 0;
 }
-VAR_SIMPLE(v_7f80, FIU(G32(0xb74)) * FIU(G32(0xb78)) * RD(0x1000e0f0))     /* 0x10007f80 */
+VAR_SIMPLE(v_7f80, FIU(G32(0xb74)) * FIU(G32(0xb78)) * PN_RD(0x1000e0f0))     /* 0x10007f80 */
 
 /* 0x10007ff0 -- 1, 2 or 3 by which of GLOBAL +0xbb0, +0xbae, +0xbac is
  * set first, else 0 */
@@ -3243,7 +3243,7 @@ static uint32_t FS98_STDCALL v_8070(uint32_t v, uint32_t op)
         x = R16(w, 0x26);
     else if (R32(w, 0x14) <= 4)
         x = R16(w, 0x1c + 2 * R32(w, 0x14));
-    VAL(v) = (double)(FIU(x) * RD(0x1000e0f8));
+    VAL(v) = (double)(FIU(x) * PN_RD(0x1000e0f8));
     return 0;
 }
 
@@ -3258,10 +3258,10 @@ static uint32_t FS98_STDCALL v_8130(uint32_t v, uint32_t op)
     }
     if (op != 1)
         return 0;
-    x = FIU(G32(0x7d4)) * RD(0x1000e0e8);
+    x = FIU(G32(0x7d4)) * PN_RD(0x1000e0e8);
     VAL(v) = (double)x;
     if (G16(0xc18) != 2)
-        VAL(v) = (double)(x * RD(0x1000e100));
+        VAL(v) = (double)(x * PN_RD(0x1000e100));
     return 0;
 }
 
@@ -3275,7 +3275,7 @@ static uint32_t FS98_STDCALL v_81a0(uint32_t v, uint32_t op)
     if (op != 1)
         return 0;
     if (G16(0xc18) == 2)
-        VAL(v) = (double)(FI(G32(0x7f0)) * RD(0x1000e108));
+        VAL(v) = (double)(FI(G32(0x7f0)) * PN_RD(0x1000e108));
     else
         VAL(v) = (double)FI((int32_t)G32(0x7f0) / 0x10000);
     return 0;
@@ -3494,23 +3494,23 @@ static uint32_t FS98_STDCALL var_lookup(uint32_t v)
     case 0x03: VAL(v) = (double)FI((int8_t)M8(p)); break;
     case 0x04: case 0x05: R32(v, 0xc) = M8(p); break;
     case 0x06: R32(v, 0xc) = 0; R32(v, 0x10) = M16(p) != 0 ? 0x3ff00000 : 0; break;
-    case 0x07: VAL(v) = (double)(FI(M16(p)) * RD(0x1000e0a0)); break;
+    case 0x07: VAL(v) = (double)(FI(M16(p)) * PN_RD(0x1000e0a0)); break;
     case 0x08: case 0x10: VAL(v) = (double)FI(M16(p)); break;
     case 0x09: VAL(v) = (double)FI((int16_t)M16(p)); break;
-    case 0x0a: VAL(v) = (double)(FI(M16(p)) * RD(0x1000e070)); break;
-    case 0x0b: VAL(v) = (double)(FI((int16_t)M16(p)) * RD(0x1000e070)); break;
+    case 0x0a: VAL(v) = (double)(FI(M16(p)) * PN_RD(0x1000e070)); break;
+    case 0x0b: VAL(v) = (double)(FI((int16_t)M16(p)) * PN_RD(0x1000e070)); break;
     case 0x0c: case 0x0d: case 0x0e: case 0x0f: R32(v, 0xc) = M16(p); break;
     case 0x11: case 0x22: R32(v, 0xc) = 0; R32(v, 0x10) = M32(p) != 0 ? 0x3ff00000 : 0; break;
     case 0x12: case 0x13: case 0x19: VAL(v) = (double)FIU(M32(p)); break;
     case 0x14: VAL(v) = (double)FI(M32(p)); break;
-    case 0x15: VAL(v) = (double)(FIU(M32(p)) * RD(0x1000e0e8)); break;
-    case 0x16: VAL(v) = (double)(FI(M32(p)) * RD(0x1000e0e8)); break;
+    case 0x15: VAL(v) = (double)(FIU(M32(p)) * PN_RD(0x1000e0e8)); break;
+    case 0x16: VAL(v) = (double)(FI(M32(p)) * PN_RD(0x1000e0e8)); break;
     case 0x17: case 0x18: case 0x23: case 0x24: case 0x26: R32(v, 0xc) = M32(p); break;
     case 0x1a: case 0x1b:
-        VAL(v) = (double)(FI(M16(p + 2)) - FIU(M32(p + 4)) * RD(0x1000e110));
+        VAL(v) = (double)(FI(M16(p + 2)) - FIU(M32(p + 4)) * PN_RD(0x1000e110));
         break;
-    case 0x1c: VAL(v) = (double)(FIU(M32(p + 4)) - FI(M16(p + 2)) * RD(0x1000e118)); break;
-    case 0x1d: VAL(v) = (double)(FI(M32(p + 4)) - FI(M16(p + 2)) * RD(0x1000e118)); break;
+    case 0x1c: VAL(v) = (double)(FIU(M32(p + 4)) - FI(M16(p + 2)) * PN_RD(0x1000e118)); break;
+    case 0x1d: VAL(v) = (double)(FI(M32(p + 4)) - FI(M16(p + 2)) * PN_RD(0x1000e118)); break;
     case 0x21: R32(v, 0xc) = M32(p); R32(v, 0x10) = M32(p + 4); break;
     case 0x25: R32(v, 0xc) = p; break;
     }
@@ -3661,7 +3661,7 @@ static uint32_t token(uint32_t src, uint32_t dst, uint32_t delim)
     trim(src);
     if (src == 0)
         return 0;
-    at = ADDR(strchr((const char *)(uintptr_t)src, (int)(delim & 0xff)));
+    at = fs98_handle(strchr((const char *)(uintptr_t)src, (int)(delim & 0xff)));
     if (at == 0) {
         h_strcpy(dst, src);
         trim(dst);
@@ -3694,27 +3694,27 @@ static uint32_t resource_bitmap(uint32_t hmod, uint32_t id, uint32_t out, uint32
     HRSRC res;
 
     res = FindResourceA((HMODULE)(uintptr_t)hmod, MAKEINTRESOURCEA(id & 0xffff), RT_BITMAP);
-    info = P(LockResource(LoadResource((HMODULE)(uintptr_t)hmod, res)));
+    info = fs98_handle(LockResource(LoadResource((HMODULE)(uintptr_t)hmod, res)));
     if (scaled == 0) {
-        sx = RF(0x1000e124);
+        sx = PN_RF(0x1000e124);
         sy = 1.0f;
         wide = 0x3f800000;
     } else {
         if (R32(g, 0x30) == 0)
             R32(g, 0x30) = FTOL(FIU(R32(g, 0x2c)) * FI(R32(info, 8)) / FI(R32(info, 4)));
-        wide = FTOL(FIU(R32(g, 0x2c)) * RFL(R32(g, 0x40), 0x28));
-        high = FTOL(FIU(R32(g, 0x30)) * RFL(R32(g, 0x40), 0x2c));
-        if (!(RFL(g, 0x34) < RF(0x1000e120) || RFL(g, 0x34) > RF(0x1000e120))) {
-            RFL(g, 0x34) = (float)(FIU(wide) / FI(R32(info, 4)));
-            RFL(g, 0x38) = (float)(FIU(high) / FI(R32(info, 8)));
+        wide = FTOL(FIU(R32(g, 0x2c)) * RF(R32(g, 0x40), 0x28));
+        high = FTOL(FIU(R32(g, 0x30)) * RF(R32(g, 0x40), 0x2c));
+        if (!(RF(g, 0x34) < PN_RF(0x1000e120) || RF(g, 0x34) > PN_RF(0x1000e120))) {
+            RF(g, 0x34) = (float)(FIU(wide) / FI(R32(info, 4)));
+            RF(g, 0x38) = (float)(FIU(high) / FI(R32(info, 8)));
         }
-        sx = RFL(g, 0x34);
-        sy = RFL(g, 0x38);
+        sx = RF(g, 0x34);
+        sy = RF(g, 0x38);
         if ((int32_t)R32(R32(g, 0x3c), 0x84) < 0x2bc) {
             res = FindResourceA((HMODULE)(uintptr_t)hmod,
                                 MAKEINTRESOURCEA((id + 0x30) & 0xffff), RT_BITMAP);
             if (res != 0) {
-                info = P(LockResource(LoadResource((HMODULE)(uintptr_t)hmod, res)));
+                info = fs98_handle(LockResource(LoadResource((HMODULE)(uintptr_t)hmod, res)));
                 sx = FIU(wide) / FI(R32(info, 4));
                 sy = (float)(FIU(high) / FI(R32(info, 8)));
             }
@@ -3722,11 +3722,11 @@ static uint32_t resource_bitmap(uint32_t hmod, uint32_t id, uint32_t out, uint32
     }
     if (pt != 0) {
         long double x = FI(R32(pt, 0)), y;
-        uint32_t nx = FTOL(x * RFL(g, 0x34) - RD(0x1000e128)) + R32(g, 0x44);
+        uint32_t nx = FTOL(x * RF(g, 0x34) - PN_RD(0x1000e128)) + R32(g, 0x44);
 
         y = FI(R32(pt, 4));
         R32(pt, 0) = nx;
-        R32(pt, 4) = FTOL(y * RFL(g, 0x38) - RD(0x1000e128)) + R32(g, 0x48);
+        R32(pt, 4) = FTOL(y * RF(g, 0x38) - PN_RD(0x1000e128)) + R32(g, 0x48);
     }
     if (info == 0)
         return 0;
@@ -3764,15 +3764,15 @@ static void rotate(uint32_t pt, double angle, uint32_t out)
     long double a = angle, x, y, s, c, X;
     double sd, cd, xd, yd, Yd;
 
-    if (a > RD(0x1000e0a8))
+    if (a > PN_RD(0x1000e0a8))
         do
-            a -= RD(0x1000e0a8);
-        while (a > RD(0x1000e0a8));
-    if (a < RD(0x1000e130))
+            a -= PN_RD(0x1000e0a8);
+        while (a > PN_RD(0x1000e0a8));
+    if (a < PN_RD(0x1000e130))
         do
-            a -= RD(0x1000e0b8);
-        while (a < RD(0x1000e130));
-    a *= RD(0x1000e138);
+            a -= PN_RD(0x1000e0b8);
+        while (a < PN_RD(0x1000e130));
+    a *= PN_RD(0x1000e138);
     x = FI(R32(pt, 0));
     y = FI(R32(pt, 4));
     s = pn_fsin(a);
@@ -3783,9 +3783,9 @@ static void rotate(uint32_t pt, double angle, uint32_t out)
     yd = (double)y;
     X = c * xd - s * yd;
     Yd = (double)((long double)cd * yd + (long double)sd * xd);
-    R32(out, 0) = FTOL(X > RD(0x1000e0b0) ? X - RD(0x1000e140) : X - RD(0x1000e148));
-    R32(out, 4) = FTOL((long double)Yd > RD(0x1000e0b0) ? (long double)Yd - RD(0x1000e140)
-                                                      : (long double)Yd - RD(0x1000e148));
+    R32(out, 0) = FTOL(X > PN_RD(0x1000e0b0) ? X - PN_RD(0x1000e140) : X - PN_RD(0x1000e148));
+    R32(out, 4) = FTOL((long double)Yd > PN_RD(0x1000e0b0) ? (long double)Yd - PN_RD(0x1000e140)
+                                                      : (long double)Yd - PN_RD(0x1000e148));
 }
 
 /* 0x10009570 */
@@ -3888,7 +3888,7 @@ static uint32_t FS98_STDCALL panel_walk_redraw(uint32_t p, uint32_t x)
     bmp = R32(p, 8);
     local[0] = R32(p, 8);
     local[1] = R32(p, 0xc);
-    surface_convert(p, ADDR(local), DA(0x10010e60), 0);
+    surface_convert(p, fs98_handle(local), DA(0x10010e60), 0);
     h_memset(R32(w, 0x98), 0xf7, R32(w, 0x94));
     blit(w + 0x80, bmp, DA(0x10010e60), DA(0x10010e60), bmp + 4, 1);
     if (R8(R32(HG2D, 0x90), 0) != 0xa)
@@ -3939,11 +3939,11 @@ static uint32_t FS98_STDCALL cb_engines(uint32_t a, uint32_t b)
     (void)a; (void)b;
     if (!(G8(0xc46) & 4))
         return 0;
-    t = RD(0x1000e158) - FI(100 - (uint32_t)G16(0x372)) * RD(0x1000e150);
+    t = PN_RD(0x1000e158) - FI(100 - (uint32_t)G16(0x372)) * PN_RD(0x1000e150);
     t = t * FI((uint32_t)G16(0xc44) - 0x32);
-    t = t * RD(0x1000e160);
+    t = t * PN_RD(0x1000e160);
     t = t * FI((uint32_t)G16(0xc1a));
-    t = t * RD(0x1000e168);
+    t = t * PN_RD(0x1000e168);
     G16(0xc3e) = (uint16_t)(G16(0xc3e) + (uint16_t)FTOL(t));
     return 0;
 }
@@ -3969,16 +3969,16 @@ static uint32_t FS98_STDCALL cb_command(uint32_t m, uint32_t p)
 /* 0x10009c30, 0x10009c60 */
 static void chain_register(void)
 {
-    CH(0x18, f2)(2, ADDR(cb_frame));
-    CH(0x18, f2)(1, ADDR(cb_reset));
-    CH(0x18, f2)(0xc, ADDR(cb_command));
+    CH(0x18, f2)(2, fs98_handle(cb_frame));
+    CH(0x18, f2)(1, fs98_handle(cb_reset));
+    CH(0x18, f2)(0xc, fs98_handle(cb_command));
 }
 
 static void chain_unregister(void)
 {
-    CH(0x1c, f2)(2, ADDR(cb_frame));
-    CH(0x1c, f2)(1, ADDR(cb_reset));
-    CH(0x1c, f2)(0xc, ADDR(cb_command));
+    CH(0x1c, f2)(2, fs98_handle(cb_frame));
+    CH(0x1c, f2)(1, fs98_handle(cb_reset));
+    CH(0x1c, f2)(0xc, fs98_handle(cb_command));
 }
 
 /* 0x10009cb0 -- a situation record: 0x320 sets the saved mode byte, 0x321
@@ -4006,7 +4006,7 @@ static void layouts_save(void)
 {
     uint32_t count, array, i, w, rec[10], mode;
 
-    WN(0x80, f3)(ADDR(&array), ADDR(&count), 2);
+    WN(0x80, f3)(fs98_handle(&array), fs98_handle(&count), 2);
     for (i = 0; i < count; i++) {
         w = M32(array + 4 * i);
         rec[0] = R32(w, 0x20);
@@ -4020,13 +4020,13 @@ static void layouts_save(void)
         rec[8] = R32(w, 8) & 0xc0000001u;
         rec[9] = window_ident(w);
         MN(0x5c, f2)(0x321, 0x28);
-        MN(0x60, f3)(ADDR(rec), 0x28, 0);
+        MN(0x60, f3)(fs98_handle(rec), 0x28, 0);
         MN(0x64, f0)();
     }
-    h_free(ADDR(&array));
+    h_free(fs98_handle(&array));
     mode = G8(0x280);
     MN(0x5c, f2)(0x320, 4);
-    MN(0x60, f3)(ADDR(&mode), 4, 0);
+    MN(0x60, f3)(fs98_handle(&mode), 4, 0);
     MN(0x64, f0)();
 }
 
@@ -4166,7 +4166,7 @@ static uint32_t e_a140(void)
 {
     uint32_t e;
 
-    h_alloc(1, 0x50, ADDR(&e), 0);
+    h_alloc(1, 0x50, fs98_handle(&e), 0);
     R32(e, 0) = 0;
     return e;
 }
@@ -4191,8 +4191,8 @@ static uint32_t FS98_STDCALL e_a170(uint32_t e, uint32_t hmod)
     failures_reset(R32(e, 0x2c));
     resource_bitmap(hmod, R32(e, 4), e + 0xbc, R32(e, 0x20), 0, 0, R32(e, 0x30), 0);
     g = R32(e, 0x20);
-    sx = RFL(g, 0x34);
-    sy = RFL(g, 0x38);
+    sx = RF(g, 0x34);
+    sy = RF(g, 0x38);
     h_surface_new(e + 0xcc, 0x100, 0x100, 1);
     if (R32(e, 0x30) & 2) {
         img = R32(e, 0xbc);
@@ -4244,9 +4244,9 @@ static uint32_t FS98_STDCALL e_a170(uint32_t e, uint32_t hmod)
     if (tbl != 0 && n != 0 && (int32_t)n > 0) {
         for (i = 0, off = 0; (int32_t)i < (int32_t)R32(e, 0x74); i++, off += 0x18) {
             tbl = R32(e, 0x70);
-            R32(tbl + off, 0) = FTOL(FI(R32(tbl + off, 0)) * sx - RD(0x1000e170));
+            R32(tbl + off, 0) = FTOL(FI(R32(tbl + off, 0)) * sx - PN_RD(0x1000e170));
             tbl = R32(e, 0x70);
-            R32(tbl + off, 4) = FTOL(FI(R32(tbl + off, 4)) * sy - RD(0x1000e170));
+            R32(tbl + off, 4) = FTOL(FI(R32(tbl + off, 4)) * sy - PN_RD(0x1000e170));
             tbl = R32(e, 0x70);
             R32(tbl + off, 0) = R32(tbl + off, 0) - R32(e, 8);
             tbl = R32(e, 0x70);
@@ -4254,11 +4254,11 @@ static uint32_t FS98_STDCALL e_a170(uint32_t e, uint32_t hmod)
             tbl = R32(e, 0x70);
             mem = tbl + off;
             RDB(mem, 0x10) = (double)pn_fpatan(FI(R32(mem, 4)), FI(R32(mem, 0)));
-            RDB(mem, 0x10) = (double)((long double)RDB(mem, 0x10) * RD(0x1000e178));
-            if ((long double)RDB(mem, 0x10) < RD(0x1000e180))
-                RDB(mem, 0x10) = (double)((long double)RDB(mem, 0x10) - RD(0x1000e188));
+            RDB(mem, 0x10) = (double)((long double)RDB(mem, 0x10) * PN_RD(0x1000e178));
+            if ((long double)RDB(mem, 0x10) < PN_RD(0x1000e180))
+                RDB(mem, 0x10) = (double)((long double)RDB(mem, 0x10) - PN_RD(0x1000e188));
             if (off != 0 && (long double)RDB(mem, 0x10) < (long double)RDB(mem, 0x10 - 0x18))
-                RDB(mem, 0x10) = (double)((long double)RDB(mem, 0x10) - RD(0x1000e188));
+                RDB(mem, 0x10) = (double)((long double)RDB(mem, 0x10) - PN_RD(0x1000e188));
         }
     }
     e_a470(e);
@@ -4350,7 +4350,7 @@ static uint32_t FS98_STDCALL e_a470(uint32_t e)
         q = (int32_t)FTOL(v);
         q = q < 0 ? -q : q;
         if (q > lim) {
-            if (v < RD(0x1000e180))
+            if (v < PN_RD(0x1000e180))
                 RDB(e, 0x8c) = (double)((long double)lim + RDB(e, 0x8c));
             else
                 RDB(e, 0x8c) = (double)((long double)RDB(e, 0x8c) - (long double)lim);
@@ -4396,7 +4396,7 @@ static uint32_t FS98_STDCALL e_a6f0(uint32_t e, uint32_t a)
 static uint32_t FS98_STDCALL e_a790(uint32_t e)
 {
     uint32_t g = R32(e, 0x20), win;
-    float sx = RFL(g, 0x34), sy = RFL(g, 0x38);
+    float sx = RF(g, 0x34), sy = RF(g, 0x38);
     int32_t rx, ry, p[4][2], minx, miny, maxx, maxy, size[2], at[2], i, k, lim;
     uint32_t f;
     double ang;
@@ -4413,7 +4413,7 @@ static uint32_t FS98_STDCALL e_a790(uint32_t e)
     {
         int32_t o[2];
 
-        rotate(e + 0x68, ang, ADDR(o));
+        rotate(e + 0x68, ang, fs98_handle(o));
         rx = o[0];
         ry = o[1];
     }
@@ -4421,13 +4421,13 @@ static uint32_t FS98_STDCALL e_a790(uint32_t e)
         return 0;
     R32(e, 0x94) = rx;
     R32(e, 0x98) = ry;
-    rotate(e + 0x9c, ang, ADDR(p[0]));
-    rotate(e + 0xa4, ang, ADDR(p[1]));
-    rotate(e + 0xac, ang, ADDR(p[2]));
-    rotate(e + 0xb4, ang, ADDR(p[3]));
+    rotate(e + 0x9c, ang, fs98_handle(p[0]));
+    rotate(e + 0xa4, ang, fs98_handle(p[1]));
+    rotate(e + 0xac, ang, fs98_handle(p[2]));
+    rotate(e + 0xb4, ang, fs98_handle(p[3]));
     for (i = 0; i < 4; i++) {
-        p[i][0] = FTOL(FI(p[i][0]) * sx - RD(0x1000e170)) + R32(e, 0x18);
-        p[i][1] = FTOL(FI(p[i][1]) * sy - RD(0x1000e170)) + R32(e, 0x1c);
+        p[i][0] = FTOL(FI(p[i][0]) * sx - PN_RD(0x1000e170)) + R32(e, 0x18);
+        p[i][1] = FTOL(FI(p[i][1]) * sy - PN_RD(0x1000e170)) + R32(e, 0x1c);
     }
     minx = maxx = p[0][0];
     miny = maxy = p[0][1];
@@ -4445,8 +4445,8 @@ static uint32_t FS98_STDCALL e_a790(uint32_t e)
         at[0] = minx;
         at[1] = miny;
         HC(0x1bc, f3)(R32(e, 0xd4), size[0], size[1]);
-        blit(R32(e, 0xd4), R32(R32(e, 0x20), 0x3c) + 0x80, DA(0x10010e60), ADDR(at),
-             ADDR(size), R32(e, 0x30) & ~1u);
+        blit(R32(e, 0xd4), R32(R32(e, 0x20), 0x3c) + 0x80, DA(0x10010e60), fs98_handle(at),
+             fs98_handle(size), R32(e, 0x30) & ~1u);
         R32(e, 0xd8) = at[0];
         R32(e, 0xdc) = at[1];
     }
@@ -4530,7 +4530,7 @@ static uint32_t e_ae10(void)
 {
     uint32_t e;
 
-    h_alloc(1, 0xe0, ADDR(&e), 0);
+    h_alloc(1, 0xe0, fs98_handle(&e), 0);
     R32(e, 0) = 1;
     return e;
 }
@@ -4551,7 +4551,7 @@ static uint32_t e_ae10(void)
 static uint32_t FS98_STDCALL e_ae40(uint32_t e, uint32_t hmod)
 {
     uint32_t g = R32(e, 0x20), bits = 0, i, v, dc, font, n, win;
-    float sx = RFL(g, 0x34), sy = RFL(g, 0x38);
+    float sx = RF(g, 0x34), sy = RF(g, 0x38);
     int32_t h;
     RECT rc;
 
@@ -4567,11 +4567,11 @@ static uint32_t FS98_STDCALL e_ae40(uint32_t e, uint32_t hmod)
     for (i = 0, v = e + 0x3c; i < 3; i++, v += 0x1c)
         var_init(v);
     win = R32(g, 0x3c);
-    R32(e, 0xe8) = dib_new(R32(win, 0x80), R32(e, 0xc0), R32(e, 0xc4), ADDR(&bits),
+    R32(e, 0xe8) = dib_new(R32(win, 0x80), R32(e, 0xc0), R32(e, 0xc4), fs98_handle(&bits),
                            R32(e, 0x30));
-    dc = P(CreateCompatibleDC(NULL));
+    dc = fs98_handle(CreateCompatibleDC(NULL));
     R32(e, 0xdc) = dc;
-    R32(e, 0xec) = P(SelectObject(HGDI(dc), HGDI(R32(e, 0xe8))));
+    R32(e, 0xec) = fs98_handle(SelectObject(HGDI(dc), HGDI(R32(e, 0xe8))));
     if (R32(e, 0xdc) != 0) {
         D32(0x10010ea0) = 0;
         D32(0x10010ea4) = 0;
@@ -4580,8 +4580,8 @@ static uint32_t FS98_STDCALL e_ae40(uint32_t e, uint32_t hmod)
         SetBkMode(HGDI(R32(e, 0xdc)), 1);
         SetBkColor(HGDI(R32(e, 0xdc)), R32(e, 0xd4));
         SetTextColor(HGDI(R32(e, 0xdc)), R32(e, 0xd0));
-        R32(e, 0xf0) = P(CreateSolidBrush(R32(e, 0xd4)));
-        R32(e, 0xf4) = P(SelectObject(HGDI(R32(e, 0xdc)), HGDI(R32(e, 0xf0))));
+        R32(e, 0xf0) = fs98_handle(CreateSolidBrush(R32(e, 0xd4)));
+        R32(e, 0xf4) = fs98_handle(SelectObject(HGDI(R32(e, 0xdc)), HGDI(R32(e, 0xf0))));
         h = (int32_t)R32(e, 0xc4);
         n = R16(e, 0x124);
         h_alloc(1, 4 * n + 1, e + 0xb8, 0);
@@ -4605,12 +4605,12 @@ static uint32_t FS98_STDCALL e_ae40(uint32_t e, uint32_t hmod)
                 SelectObject(HGDI(R32(e, 0xdc)), HGDI(R32(e, 0xe4)));
             if (R32(e, 0xe0) != 0)
                 DeleteObject(HGDI(R32(e, 0xe0)));
-            font = P(CreateFontA((int)i, 0, 0, 0, (int)R32(e, 0x118), 0, 0, 0, M8(e + 0x11c),
+            font = fs98_handle(CreateFontA((int)i, 0, 0, 0, (int)R32(e, 0x118), 0, 0, 0, M8(e + 0x11c),
                                  0, 0, 0, 0, (LPCSTR)(uintptr_t)(e + 0xf8)));
             R32(e, 0xe0) = font;
             if (font == 0)
                 break;
-            R32(e, 0xe4) = P(SelectObject(HGDI(R32(e, 0xdc)), HGDI(font)));
+            R32(e, 0xe4) = fs98_handle(SelectObject(HGDI(R32(e, 0xdc)), HGDI(font)));
             DrawTextA(HGDI(R32(e, 0xdc)), (LPCSTR)(uintptr_t)R32(e, 0xb8), -1, &rc,
                       R32(e, 0x120) | 0x400);
             h--;
@@ -4623,7 +4623,7 @@ static uint32_t FS98_STDCALL e_ae40(uint32_t e, uint32_t hmod)
         M8(R32(e, 0xb8)) = 0;
         PatBlt(HGDI(R32(e, 0xdc)), 0, 0, (int)R32(e, 0xc0), (int)R32(e, 0xc4), 0xf00021);
     }
-    surface_over(e + 0xc8, R32(e, 0xc0), R32(e, 0xc4), R32(win, 0x80), ADDR(&bits));
+    surface_over(e + 0xc8, R32(e, 0xc0), R32(e, 0xc4), R32(win, 0x80), fs98_handle(&bits));
     if (R32(e, 0x30) & 2) {
         i = R32(e, 0xc8);
         h_surface_new(e + 0xcc, R32(i, 4), R32(i, 8), R32(i, 0));
@@ -4830,7 +4830,7 @@ static uint32_t e_b740(void)
 {
     uint32_t e;
 
-    h_alloc(1, 0x134, ADDR(&e), 0);
+    h_alloc(1, 0x134, fs98_handle(&e), 0);
     R32(e, 0) = 2;
     return e;
 }
@@ -4854,8 +4854,8 @@ static uint32_t FS98_STDCALL e_b770(uint32_t e, uint32_t hmod)
     failures_reset(R32(e, 0x2c));
     resource_bitmap(hmod, R32(e, 4), e + 0x94, R32(e, 0x20), 0, 0, R32(e, 0x30), 1);
     g = R32(e, 0x20);
-    sx = RFL(g, 0x34);
-    sy = RFL(g, 0x38);
+    sx = RF(g, 0x34);
+    sy = RF(g, 0x38);
     if (R8(e, 0x30) & 1) {
         img = R32(e, 0x94);
         h_surface_new(e + 0xa4, R32(img, 4), R32(img, 8), R32(img, 0));
@@ -4996,7 +4996,7 @@ static uint32_t e_bbc0(void)
 {
     uint32_t e;
 
-    h_alloc(1, 0xa8, ADDR(&e), 0);
+    h_alloc(1, 0xa8, fs98_handle(&e), 0);
     R32(e, 0) = 3;
     return e;
 }
@@ -5196,7 +5196,7 @@ static uint32_t e_c100(void)
 {
     uint32_t e;
 
-    h_alloc(1, 0x84, ADDR(&e), 0);
+    h_alloc(1, 0x84, fs98_handle(&e), 0);
     R32(e, 0) = 4;
     return e;
 }
@@ -5222,8 +5222,8 @@ static uint32_t FS98_STDCALL e_c130(uint32_t e, uint32_t hmod)
     failures_reset(R32(e, 0x2c));
     resource_bitmap(hmod, R32(e, 4), e + 0xcc, g, 0, 0, R32(e, 0x30), 1);
     resource_bitmap(hmod, R32(e, 4) + 3, e + 0xdc, g, 0, 0, R32(e, 0x30), 1);
-    sx = RFL(R32(e, 0x20), 0x34);
-    sy = RFL(R32(e, 0x20), 0x38);
+    sx = RF(R32(e, 0x20), 0x34);
+    sy = RF(R32(e, 0x20), 0x38);
     h_surface_new(e + 0xec, R32(R32(e, 0xe0), 4), R32(R32(e, 0xe0), 8),
                   R32(R32(R32(e, 0x20), 0x3c), 0x80));
     g = R32(e, 0x20);
@@ -5232,7 +5232,7 @@ static uint32_t FS98_STDCALL e_c130(uint32_t e, uint32_t hmod)
     var_init(e + 0x3c);
     var_init(e + 0x70);
     range = (long double)RDB(e, 0x64) - (long double)RDB(e, 0x5c);
-    if (!(range < RD(0x1000e190) || range > RD(0x1000e190))) {
+    if (!(range < PN_RD(0x1000e190) || range > PN_RD(0x1000e190))) {
         R32(e, 0xa4) = 0;
         R32(e, 0xa8) = 0;
     } else {
@@ -5240,7 +5240,7 @@ static uint32_t FS98_STDCALL e_c130(uint32_t e, uint32_t hmod)
         RDB(e, 0xa4) = (double)(FI(d) / range);
     }
     range = (long double)RDB(e, 0x98) - (long double)RDB(e, 0x90);
-    if (!(range < RD(0x1000e190) || range > RD(0x1000e190))) {
+    if (!(range < PN_RD(0x1000e190) || range > PN_RD(0x1000e190))) {
         R32(e, 0xac) = 0;
         R32(e, 0xb0) = 0;
     } else {
@@ -5384,7 +5384,7 @@ static uint32_t e_c6f0(void)
 {
     uint32_t e;
 
-    h_alloc(1, 0xf4, ADDR(&e), 0);
+    h_alloc(1, 0xf4, fs98_handle(&e), 0);
     R32(e, 0) = 5;
     return e;
 }
@@ -5409,36 +5409,36 @@ static uint32_t FS98_STDCALL e_c720(uint32_t e, uint32_t hmod)
     resource_bitmap(hmod, R32(e, 4), e + 0x10c, R32(e, 0x20), 0, 0, R32(e, 0x30), 0);
     resource_bitmap(hmod, R32(e, 4) + 3, e + 0x124, R32(e, 0x20), 0, 0, R32(e, 0x30), 1);
     g = R32(e, 0x20);
-    sx = RFL(g, 0x34);
-    sy = RFL(g, 0x38);
+    sx = RF(g, 0x34);
+    sy = RF(g, 0x38);
     img2 = R32(e, 0x124);
     h_surface_new(e + 0x134, R32(img2, 4), R32(img2, 8), R32(img2, 0));
     h_surface_new(e + 0x11c, 0x100, 0x100, 1);
     var_init(e + 0x3c);
     var_init(e + 0x64);
     var_init(e + 0x8c);
-    pivx = FTOL(FI(R32(e, 0x18)) * sx - RD(0x1000e198));
+    pivx = FTOL(FI(R32(e, 0x18)) * sx - PN_RD(0x1000e198));
     R32(e, 0x18) = pivx;
-    pivy = FTOL(FI(R32(e, 0x1c)) * sy - RD(0x1000e198));
+    pivy = FTOL(FI(R32(e, 0x1c)) * sy - PN_RD(0x1000e198));
     R32(e, 0x1c) = pivy;
-    posx = FTOL(FI(R32(e, 8)) * sx - RD(0x1000e198));
+    posx = FTOL(FI(R32(e, 8)) * sx - PN_RD(0x1000e198));
     R32(e, 8) = posx;
-    posy = FTOL(FI(R32(e, 0xc)) * sy - RD(0x1000e198));
+    posy = FTOL(FI(R32(e, 0xc)) * sy - PN_RD(0x1000e198));
     R32(e, 0xc) = posy;
     img2 = R32(e, 0x124);
     w2 = (int32_t)R32(img2, 4);
     h2 = (int32_t)R32(img2, 8);
     dx = posx - pivx;
     dxw = dx + w2;
-    R32(e, 0xcc) = FTOL(FI(dxw) / sx - RD(0x1000e198));
+    R32(e, 0xcc) = FTOL(FI(dxw) / sx - PN_RD(0x1000e198));
     dy = posy - pivy;
     dyh = h2 + dy;
-    R32(e, 0xd0) = FTOL(FI(dyh) / sy - RD(0x1000e198));
-    R32(e, 0xd4) = FTOL(FI(dx) / sx - RD(0x1000e198));
-    R32(e, 0xd8) = FTOL(FI(h2 + dy) / sy - RD(0x1000e198));
+    R32(e, 0xd0) = FTOL(FI(dyh) / sy - PN_RD(0x1000e198));
+    R32(e, 0xd4) = FTOL(FI(dx) / sx - PN_RD(0x1000e198));
+    R32(e, 0xd8) = FTOL(FI(h2 + dy) / sy - PN_RD(0x1000e198));
     R32(e, 0xdc) = R32(e, 0xd4);
-    R32(e, 0xe0) = FTOL(FI(dy) / sy - RD(0x1000e198));
-    R32(e, 0xe4) = FTOL(FI(dx + w2) / sx - RD(0x1000e198));
+    R32(e, 0xe0) = FTOL(FI(dy) / sy - PN_RD(0x1000e198));
+    R32(e, 0xe4) = FTOL(FI(dx + w2) / sx - PN_RD(0x1000e198));
     R32(e, 0xe8) = R32(e, 0xe0);
     g = R32(e, 0x20);
     R32(e, 8) = R32(g, 0x44) + posx;
@@ -5566,7 +5566,7 @@ static uint32_t FS98_STDCALL e_cda0(uint32_t e)
             tree_op17e0(e);
         return 0;
     }
-    rotate(e + 0xbc, RDB(e, 0x98), ADDR(c));
+    rotate(e + 0xbc, RDB(e, 0x98), fs98_handle(c));
     c[0] += FTOL(RDB(e, 0x48));
     c[1] += FTOL(RDB(e, 0x70));
     px = c[0];
@@ -5583,15 +5583,15 @@ static uint32_t FS98_STDCALL e_cda0(uint32_t e)
         compose(R32(e, 0x134), R32(e, 0x124), R32(R32(e, 0x20), 0x3c) + 0x80, e + 8);
     R32(e, 0xc4) = px;
     R32(e, 0xc8) = py;
-    rotate(e + 0xcc, RDB(e, 0x98), ADDR(q[0]));
-    rotate(e + 0xd4, RDB(e, 0x98), ADDR(q[1]));
-    rotate(e + 0xdc, RDB(e, 0x98), ADDR(q[2]));
-    rotate(e + 0xe4, RDB(e, 0x98), ADDR(q[3]));
+    rotate(e + 0xcc, RDB(e, 0x98), fs98_handle(q[0]));
+    rotate(e + 0xd4, RDB(e, 0x98), fs98_handle(q[1]));
+    rotate(e + 0xdc, RDB(e, 0x98), fs98_handle(q[2]));
+    rotate(e + 0xe4, RDB(e, 0x98), fs98_handle(q[3]));
     bx = R32(e, 0x18) + FTOL(RDB(e, 0x48));
     by = R32(e, 0x1c) + FTOL(RDB(e, 0x70));
     for (i = 0; i < 4; i++) {
-        q[i][0] = FTOL(FI(q[i][0]) * RFL(e, 0xb4)) + bx;
-        q[i][1] = FTOL(FI(q[i][1]) * RFL(e, 0xb8)) + by;
+        q[i][0] = FTOL(FI(q[i][0]) * RF(e, 0xb4)) + bx;
+        q[i][1] = FTOL(FI(q[i][1]) * RF(e, 0xb8)) + by;
     }
     G32(0xc8c) = R32(e, 0x120);
     G16(0xcb6) = 1;
@@ -5661,7 +5661,7 @@ static uint32_t e_d300(void)
 {
     uint32_t e;
 
-    h_alloc(1, 0x13c, ADDR(&e), 0);
+    h_alloc(1, 0x13c, fs98_handle(&e), 0);
     R32(e, 0) = 6;
     return e;
 }
@@ -5680,7 +5680,7 @@ static uint32_t e_d340(void)
 {
     uint32_t e;
 
-    h_alloc(1, 0xc8, ADDR(&e), 0);
+    h_alloc(1, 0xc8, fs98_handle(&e), 0);
     R32(e, 0) = 7;
     return e;
 }
@@ -6408,89 +6408,89 @@ __asm__(".globl _ImportTable\n\t.set _ImportTable, _panels_image + 0x0\n\t"
 static uint32_t routine(uint32_t a)
 {
     switch (a) {
-    case 0x10001020: return (uint32_t)(uintptr_t)panels_init;
-    case 0x10001140: return (uint32_t)(uintptr_t)panels_deinit;
-    case 0x100011b0: return (uint32_t)(uintptr_t)panels_aircraft;
-    case 0x10009e60: return (uint32_t)(uintptr_t)panels_nop;
-    case 0x100012e0: return (uint32_t)(uintptr_t)window_show;
-    case 0x10001300: return (uint32_t)(uintptr_t)window_hide;
-    case 0x10001320: return (uint32_t)(uintptr_t)windows_show_all;
-    case 0x100013a0: return (uint32_t)(uintptr_t)windows_hide_all;
-    case 0x10001420: return (uint32_t)(uintptr_t)windows_toggle;
-    case 0x10001440: return (uint32_t)(uintptr_t)windows_options;
-    case 0x10001510: return (uint32_t)(uintptr_t)windows_any_shown;
-    case 0x10001950: return (uint32_t)(uintptr_t)element_failures;
-    case 0x10001580: return (uint32_t)(uintptr_t)element_install;
-    case 0x10001610: return (uint32_t)(uintptr_t)element_unmark;
-    case 0x10001630: return (uint32_t)(uintptr_t)element_op48;
-    case 0x100016b0: return (uint32_t)(uintptr_t)element_op4c;
-    case 0x10001760: return (uint32_t)(uintptr_t)element_op50;
-    case 0x10001b50: return (uint32_t)(uintptr_t)tree_op17e0_entry;
-    case 0x10001860: return (uint32_t)(uintptr_t)element_op58;
-    case 0x100018e0: return (uint32_t)(uintptr_t)element_op5c;
-    case 0x10001970: return (uint32_t)(uintptr_t)tree_failures;
-    case 0x100019b0: return (uint32_t)(uintptr_t)tree_install;
-    case 0x10001a30: return (uint32_t)(uintptr_t)tree_unmark_entry;
-    case 0x10001a50: return (uint32_t)(uintptr_t)tree_op48;
-    case 0x10001a80: return (uint32_t)(uintptr_t)tree_op4c;
-    case 0x10001ac0: return (uint32_t)(uintptr_t)tree_op50;
-    case 0x10001b10: return (uint32_t)(uintptr_t)tree_op17e0;
-    case 0x10001b60: return (uint32_t)(uintptr_t)tree_op58;
-    case 0x10001ba0: return (uint32_t)(uintptr_t)mouse_place;
-    case 0x10001c40: return (uint32_t)(uintptr_t)mouse_add;
-    case 0x10001c70: return (uint32_t)(uintptr_t)mouse_remove;
-    case 0x10001c90: return (uint32_t)(uintptr_t)window_toggle;
-    case 0x10001d20: return (uint32_t)(uintptr_t)post_command;
-    case 0x10008830: return (uint32_t)(uintptr_t)named_add;
-    case 0x100088b0: return (uint32_t)(uintptr_t)var_init;
-    case 0x10008920: return (uint32_t)(uintptr_t)named_find;
-    case 0x10008980: return (uint32_t)(uintptr_t)var_lookup;
-    case 0x10008ce0: return (uint32_t)(uintptr_t)named_remove;
-    case 0x10008d70: return (uint32_t)(uintptr_t)named_clear;
-    case 0x10008550: return (uint32_t)(uintptr_t)v_8550;
-    case 0x100085b0: return (uint32_t)(uintptr_t)v_85b0;
-    case 0x10008740: return (uint32_t)(uintptr_t)v_8740;
-    case 0x100086a0: return (uint32_t)(uintptr_t)v_86a0;
-    case 0x100086f0: return (uint32_t)(uintptr_t)v_86f0;
-    case 0x10007b70: return (uint32_t)(uintptr_t)v_7b70;
-    case 0x10007c70: return (uint32_t)(uintptr_t)v_7c70;
-    case 0x10008790: return (uint32_t)(uintptr_t)v_8790;
-    case 0x10007bf0: return (uint32_t)(uintptr_t)v_7bf0;
-    case 0x10007cd0: return (uint32_t)(uintptr_t)v_7cd0;
-    case 0x100087e0: return (uint32_t)(uintptr_t)v_87e0;
-    case 0x10008620: return (uint32_t)(uintptr_t)v_8620;
-    case 0x10008210: return (uint32_t)(uintptr_t)v_8210;
-    case 0x10008270: return (uint32_t)(uintptr_t)v_8270;
-    case 0x100082d0: return (uint32_t)(uintptr_t)v_82d0;
-    case 0x10008340: return (uint32_t)(uintptr_t)v_8340;
-    case 0x100083b0: return (uint32_t)(uintptr_t)v_83b0;
-    case 0x10008410: return (uint32_t)(uintptr_t)v_8410;
-    case 0x10008470: return (uint32_t)(uintptr_t)v_8470;
-    case 0x100084e0: return (uint32_t)(uintptr_t)v_84e0;
-    case 0x10007a50: return (uint32_t)(uintptr_t)v_7a50;
-    case 0x10007d30: return (uint32_t)(uintptr_t)v_7d30;
-    case 0x10007da0: return (uint32_t)(uintptr_t)v_7da0;
-    case 0x100075a0: return (uint32_t)(uintptr_t)v_75a0;
-    case 0x10007620: return (uint32_t)(uintptr_t)v_7620;
-    case 0x10007670: return (uint32_t)(uintptr_t)v_7670;
-    case 0x100076c0: return (uint32_t)(uintptr_t)v_76c0;
-    case 0x10007700: return (uint32_t)(uintptr_t)v_7700;
-    case 0x10007750: return (uint32_t)(uintptr_t)v_7750;
-    case 0x100077a0: return (uint32_t)(uintptr_t)v_77a0;
-    case 0x100077f0: return (uint32_t)(uintptr_t)v_77f0;
-    case 0x100078c0: return (uint32_t)(uintptr_t)v_78c0;
-    case 0x100079a0: return (uint32_t)(uintptr_t)v_79a0;
-    case 0x10008130: return (uint32_t)(uintptr_t)v_8130;
-    case 0x100081a0: return (uint32_t)(uintptr_t)v_81a0;
-    case 0x10007420: return (uint32_t)(uintptr_t)v_7420;
-    case 0x10007480: return (uint32_t)(uintptr_t)v_7480;
-    case 0x100074e0: return (uint32_t)(uintptr_t)v_74e0;
-    case 0x10007540: return (uint32_t)(uintptr_t)v_7540;
-    case 0x10007e00: return (uint32_t)(uintptr_t)v_7e00;
-    case 0x10007ec0: return (uint32_t)(uintptr_t)v_7ec0;
-    case 0x10007f80: return (uint32_t)(uintptr_t)v_7f80;
-    case 0x10008070: return (uint32_t)(uintptr_t)v_8070;
-    case 0x10007ff0: return (uint32_t)(uintptr_t)v_7ff0;
+    case 0x10001020: return fs98_handle(panels_init);
+    case 0x10001140: return fs98_handle(panels_deinit);
+    case 0x100011b0: return fs98_handle(panels_aircraft);
+    case 0x10009e60: return fs98_handle(panels_nop);
+    case 0x100012e0: return fs98_handle(window_show);
+    case 0x10001300: return fs98_handle(window_hide);
+    case 0x10001320: return fs98_handle(windows_show_all);
+    case 0x100013a0: return fs98_handle(windows_hide_all);
+    case 0x10001420: return fs98_handle(windows_toggle);
+    case 0x10001440: return fs98_handle(windows_options);
+    case 0x10001510: return fs98_handle(windows_any_shown);
+    case 0x10001950: return fs98_handle(element_failures);
+    case 0x10001580: return fs98_handle(element_install);
+    case 0x10001610: return fs98_handle(element_unmark);
+    case 0x10001630: return fs98_handle(element_op48);
+    case 0x100016b0: return fs98_handle(element_op4c);
+    case 0x10001760: return fs98_handle(element_op50);
+    case 0x10001b50: return fs98_handle(tree_op17e0_entry);
+    case 0x10001860: return fs98_handle(element_op58);
+    case 0x100018e0: return fs98_handle(element_op5c);
+    case 0x10001970: return fs98_handle(tree_failures);
+    case 0x100019b0: return fs98_handle(tree_install);
+    case 0x10001a30: return fs98_handle(tree_unmark_entry);
+    case 0x10001a50: return fs98_handle(tree_op48);
+    case 0x10001a80: return fs98_handle(tree_op4c);
+    case 0x10001ac0: return fs98_handle(tree_op50);
+    case 0x10001b10: return fs98_handle(tree_op17e0);
+    case 0x10001b60: return fs98_handle(tree_op58);
+    case 0x10001ba0: return fs98_handle(mouse_place);
+    case 0x10001c40: return fs98_handle(mouse_add);
+    case 0x10001c70: return fs98_handle(mouse_remove);
+    case 0x10001c90: return fs98_handle(window_toggle);
+    case 0x10001d20: return fs98_handle(post_command);
+    case 0x10008830: return fs98_handle(named_add);
+    case 0x100088b0: return fs98_handle(var_init);
+    case 0x10008920: return fs98_handle(named_find);
+    case 0x10008980: return fs98_handle(var_lookup);
+    case 0x10008ce0: return fs98_handle(named_remove);
+    case 0x10008d70: return fs98_handle(named_clear);
+    case 0x10008550: return fs98_handle(v_8550);
+    case 0x100085b0: return fs98_handle(v_85b0);
+    case 0x10008740: return fs98_handle(v_8740);
+    case 0x100086a0: return fs98_handle(v_86a0);
+    case 0x100086f0: return fs98_handle(v_86f0);
+    case 0x10007b70: return fs98_handle(v_7b70);
+    case 0x10007c70: return fs98_handle(v_7c70);
+    case 0x10008790: return fs98_handle(v_8790);
+    case 0x10007bf0: return fs98_handle(v_7bf0);
+    case 0x10007cd0: return fs98_handle(v_7cd0);
+    case 0x100087e0: return fs98_handle(v_87e0);
+    case 0x10008620: return fs98_handle(v_8620);
+    case 0x10008210: return fs98_handle(v_8210);
+    case 0x10008270: return fs98_handle(v_8270);
+    case 0x100082d0: return fs98_handle(v_82d0);
+    case 0x10008340: return fs98_handle(v_8340);
+    case 0x100083b0: return fs98_handle(v_83b0);
+    case 0x10008410: return fs98_handle(v_8410);
+    case 0x10008470: return fs98_handle(v_8470);
+    case 0x100084e0: return fs98_handle(v_84e0);
+    case 0x10007a50: return fs98_handle(v_7a50);
+    case 0x10007d30: return fs98_handle(v_7d30);
+    case 0x10007da0: return fs98_handle(v_7da0);
+    case 0x100075a0: return fs98_handle(v_75a0);
+    case 0x10007620: return fs98_handle(v_7620);
+    case 0x10007670: return fs98_handle(v_7670);
+    case 0x100076c0: return fs98_handle(v_76c0);
+    case 0x10007700: return fs98_handle(v_7700);
+    case 0x10007750: return fs98_handle(v_7750);
+    case 0x100077a0: return fs98_handle(v_77a0);
+    case 0x100077f0: return fs98_handle(v_77f0);
+    case 0x100078c0: return fs98_handle(v_78c0);
+    case 0x100079a0: return fs98_handle(v_79a0);
+    case 0x10008130: return fs98_handle(v_8130);
+    case 0x100081a0: return fs98_handle(v_81a0);
+    case 0x10007420: return fs98_handle(v_7420);
+    case 0x10007480: return fs98_handle(v_7480);
+    case 0x100074e0: return fs98_handle(v_74e0);
+    case 0x10007540: return fs98_handle(v_7540);
+    case 0x10007e00: return fs98_handle(v_7e00);
+    case 0x10007ec0: return fs98_handle(v_7ec0);
+    case 0x10007f80: return fs98_handle(v_7f80);
+    case 0x10008070: return fs98_handle(v_8070);
+    case 0x10007ff0: return fs98_handle(v_7ff0);
     default:
         return 0;
     }

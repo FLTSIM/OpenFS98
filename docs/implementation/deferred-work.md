@@ -263,3 +263,11 @@
 - source_spec: `docs/implementation/spec-1-8-every-module-uses-the-shared-arena-h.md`
   summary: The arena lint (`tools/check_arena.py`) covers `src/` only, by the user's decision. The difftest harnesses in `tools/` keep their 1,293 `(uint32_t)(uintptr_t)` casts, since they run under wine on real host pointers. If Epic 3 runs harnesses natively against the arena, they need their own conversion.
   evidence: Story 1.8 scope question, 2026-11-24.
+
+- source_spec: `docs/implementation/spec-1-8b-controls-panels-gauges-use-arena-h.md`
+  summary: CONTROLS, PANELS and the gauges keep address-to-pointer and callback conversions (`(uint8_t *)(uintptr_t)`, `(const char *)(uintptr_t)(D + ...)`, `(fn *)(uintptr_t)` slot and callback loads, the gauges' `(panel_one)(uintptr_t)panel_service(...)` and `GAUGE_PANELS`), Win32 handle conversions and the `CALL`/`SVC`/`COM` slot loads. They hold only on i386 and are for the story that needs them off i386 (with the bridge removal above). The reverse-cast inventory is 43 after this slice (52 before).
+  evidence: Story 1.8 slice 2 spec, "Reverse conversions".
+
+- source_spec: `docs/implementation/spec-1-8b-controls-panels-gauges-use-arena-h.md`
+  summary: The panels and gauges break runners' verdicts cannot supply the spec's acceptance fallback ("caught means the harness's mismatch exit with N differ non-zero, never a crash, timeout or guard exit") as written. `panels_breaks.py` counts a watchdog hang (exit 4) and a timeout as caught, and its unit mode runs 400 vectors whatever N is; `gauges_breaks.py` (warning and suction) runs a fixed 100. A later slice that needs a mutant's verdict compared at N=20000 must first give these runners the strict test and an N that reaches the harness. Slice 2 did not need the fallback: every output and mutant was byte-identical.
+  evidence: Story 1.8 slice 2 review.

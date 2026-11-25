@@ -183,9 +183,9 @@ void controls_init_body(void)
 {
     SAVE_REGS;
 
-    XCALL(SVC(CHAIN, 0x18), 0xb, ADDR(cb_command_entry));
-    XCALL(SVC(CHAIN, 0x18), 0x2, ADDR(cb_frame_entry));
-    XCALL(SVC(CHAIN, 0x18), 0x3, ADDR(cb_frame3_entry));
+    XCALL(SVC(CHAIN, 0x18), 0xb, fs98_handle(cb_command_entry));
+    XCALL(SVC(CHAIN, 0x18), 0x2, fs98_handle(cb_frame_entry));
+    XCALL(SVC(CHAIN, 0x18), 0x3, fs98_handle(cb_frame3_entry));
     /* host +0xa8: [CONTROLS] PAN_RATE into the dword at +0x10c */
     XCALL(SVC(HOST, 0xa8), D + S_SECTION, D + S_PAN_KEY, D + S_PAN_RATE);
     eax = controls_input_init();    /* the C half's count is init's eax */
@@ -198,9 +198,9 @@ void controls_deinit_body(void)
     SAVE_REGS;
 
     XCALL(SVC(HOST, 0xac), D + S_SECTION, D + S_PAN_KEY, V32(S_PAN_RATE));
-    XCALL(SVC(CHAIN, 0x1c), 0xb, ADDR(cb_command_entry));
-    XCALL(SVC(CHAIN, 0x1c), 0x2, ADDR(cb_frame_entry));
-    XCALL(SVC(CHAIN, 0x1c), 0x3, ADDR(cb_frame3_entry));
+    XCALL(SVC(CHAIN, 0x1c), 0xb, fs98_handle(cb_command_entry));
+    XCALL(SVC(CHAIN, 0x1c), 0x2, fs98_handle(cb_frame_entry));
+    XCALL(SVC(CHAIN, 0x1c), 0x3, fs98_handle(cb_frame3_entry));
     eax = controls_input_deinit();
     RESTORE_REGS;
 }
@@ -330,7 +330,7 @@ static void command(uint32_t id, uint32_t value)
     uint32_t taken = 0, keep_edi = edi;
 
     edi = G;
-    XCALL(SVC(CHAIN, 0x20), 0xc, id, ADDR(&taken));
+    XCALL(SVC(CHAIN, 0x20), 0xc, id, fs98_handle(&taken));
     if (taken == 0) {
         eax = id;
         ecx = value;
@@ -405,7 +405,7 @@ static void dispatch(void)
         }
     }
     rec = &controls_table[eax];
-    eax = ADDR(rec);
+    eax = fs98_handle(rec);
     kind = rec->kind;
     rec->handler();
     eax = kind;
@@ -1230,7 +1230,7 @@ static void pan_pitch(void)
         ecx = GD(0x11a0);
         XCALL(SVC(UTIL, 0x3c), M32(ecx + 0x2c), M32(ecx + 0x34));
         angle += AX;
-        XCALL(SVC(UTIL, 0x2c), angle, ADDR(&s), ADDR(&c));
+        XCALL(SVC(UTIL, 0x2c), angle, fs98_handle(&s), fs98_handle(&c));
         ecx = GD(0x11a0);
         eax = M32(ecx + 0x2c);
         eax = eax * eax;
@@ -1239,7 +1239,7 @@ static void pan_pitch(void)
         eax += ebx;
         square[0] = eax;
         square[1] = 0;
-        XCALL(SVC(UTIL, 0x18), ADDR(square));
+        XCALL(SVC(UTIL, 0x18), fs98_handle(square));
         ebx = eax;
         ecx = (uint32_t)(int32_t)(int16_t)s;
         eax = (uint32_t)((int32_t)eax * (int32_t)ecx);
@@ -1322,7 +1322,7 @@ static void h_42f8(void)
         eax += ebx;
         square[0] = eax;
         square[1] = 0;
-        XCALL(SVC(UTIL, 0x18), ADDR(square));
+        XCALL(SVC(UTIL, 0x18), fs98_handle(square));
         ebx = eax;
         ecx = GD(0x11a0);
         M32(ecx + 0x2c) = eax;
@@ -2156,7 +2156,7 @@ static void h_557b(void)
 
     if (GD(0x850) == 0 || GD(0x628) != 0 || GD(0x758) != 0 || GW(0x5dc) != 0)
         return;
-    XCALL(SVC(ADVDRV, 0x18), ADDR(&state));
+    XCALL(SVC(ADVDRV, 0x18), fs98_handle(&state));
     if (eax != 0 && state == 0x20)
         return;
     GD(0x84c) ^= 1;
@@ -3008,7 +3008,7 @@ ENTRY3(mouse_entry, mouse_body);
 static void yoke(uint32_t on)
 {
     if (on != 0)
-        XCALL(SVC(HOST, 0x274), ADDR(mouse_entry));
+        XCALL(SVC(HOST, 0x274), fs98_handle(mouse_entry));
     else
         XCALL0(SVC(HOST, 0x278));
 }
@@ -3576,8 +3576,8 @@ void zoom_report(void)
     zoom_get();
     f.value = AX;
     pilot_event(0xc, f.value);
-    XCALL(SVC(NUMERIC, 0x18), ADDR(&f.value), 0x13, ADDR(f.text));
-    ebx = ADDR(f.text);
+    XCALL(SVC(NUMERIC, 0x18), fs98_handle(&f.value), 0x13, fs98_handle(f.text));
+    ebx = fs98_handle(f.text);
     while (M8(ebx) == 0x30)
         ebx++;
     SET_AL(M8(ebx));
@@ -3845,7 +3845,7 @@ static void h_721e(void)                    /* NEXT_VIEW */
 
     eax = GD(0x119c);
     if (eax != 0) {
-        XCALL(SVC(WINDOW, 0x84), ADDR(&next), GD(0x119c), 3);
+        XCALL(SVC(WINDOW, 0x84), fs98_handle(&next), GD(0x119c), 3);
         XCALL(SVC(WINDOW, 0x48), next);
     }
 }
@@ -3856,7 +3856,7 @@ static void h_7286(void)                    /* PREV_VIEW */
 
     eax = GD(0x119c);
     if (eax != 0) {
-        XCALL(SVC(WINDOW, 0x88), ADDR(&prev), GD(0x119c), 3);
+        XCALL(SVC(WINDOW, 0x88), fs98_handle(&prev), GD(0x119c), 3);
         XCALL(SVC(WINDOW, 0x48), prev);
     }
 }
@@ -4669,26 +4669,26 @@ static void controls_install(void)
 {
     uint32_t i;
 
-    M32(D + CT_LINKAGE + 0x04) = ADDR(init_entry);
-    M32(D + CT_LINKAGE + 0x08) = ADDR(deinit_entry);
-    M32(D + CT_LINKAGE + 0x18) = ADDR(curves_entry);
-    M32(D + CT_LINKAGE + 0x1c) = ADDR(suspend_entry);
-    M32(D + CT_LINKAGE + 0x20) = ADDR(resume_entry);
-    M32(D + CT_LINKAGE + 0x24) = ADDR(zoom_entry);
-    M32(D + CT_LINKAGE + 0x28) = ADDR(aileron_entry);
-    M32(D + CT_LINKAGE + 0x2c) = ADDR(elevator_entry);
-    M32(D + CT_LINKAGE + 0x30) = ADDR(rudder_entry);
-    M32(D + CT_LINKAGE + 0x34) = ADDR(trim_entry);
-    M32(D + CT_LINKAGE + 0x38) = ADDR(engines_by_entry);
-    M32(D + CT_LINKAGE + 0x3c) = ADDR(engines_to_entry);
-    M32(D + CT_LINKAGE + 0x40) = ADDR(event_entry);
-    M32(D + CT_LINKAGE + 0x44) = ADDR(dispatch_entry);
-    M32(D + CT_LINKAGE + 0x48) = ADDR(radios_entry);
-    M32(D + CT_LINKAGE + 0x4c) = ADDR(controls_keys_load);
-    M32(D + CT_LINKAGE + 0x50) = ADDR(controls_keys_save);
-    M32(D + CT_LINKAGE + 0x54) = ADDR(controls_keys_list);
-    M32(D + CT_LINKAGE + 0x58) = ADDR(controls_dialog);
-    M32(D + CT_LINKAGE + 0x5c) = ADDR(controls_force);
+    M32(D + CT_LINKAGE + 0x04) = fs98_handle(init_entry);
+    M32(D + CT_LINKAGE + 0x08) = fs98_handle(deinit_entry);
+    M32(D + CT_LINKAGE + 0x18) = fs98_handle(curves_entry);
+    M32(D + CT_LINKAGE + 0x1c) = fs98_handle(suspend_entry);
+    M32(D + CT_LINKAGE + 0x20) = fs98_handle(resume_entry);
+    M32(D + CT_LINKAGE + 0x24) = fs98_handle(zoom_entry);
+    M32(D + CT_LINKAGE + 0x28) = fs98_handle(aileron_entry);
+    M32(D + CT_LINKAGE + 0x2c) = fs98_handle(elevator_entry);
+    M32(D + CT_LINKAGE + 0x30) = fs98_handle(rudder_entry);
+    M32(D + CT_LINKAGE + 0x34) = fs98_handle(trim_entry);
+    M32(D + CT_LINKAGE + 0x38) = fs98_handle(engines_by_entry);
+    M32(D + CT_LINKAGE + 0x3c) = fs98_handle(engines_to_entry);
+    M32(D + CT_LINKAGE + 0x40) = fs98_handle(event_entry);
+    M32(D + CT_LINKAGE + 0x44) = fs98_handle(dispatch_entry);
+    M32(D + CT_LINKAGE + 0x48) = fs98_handle(radios_entry);
+    M32(D + CT_LINKAGE + 0x4c) = fs98_handle(controls_keys_load);
+    M32(D + CT_LINKAGE + 0x50) = fs98_handle(controls_keys_save);
+    M32(D + CT_LINKAGE + 0x54) = fs98_handle(controls_keys_list);
+    M32(D + CT_LINKAGE + 0x58) = fs98_handle(controls_dialog);
+    M32(D + CT_LINKAGE + 0x5c) = fs98_handle(controls_force);
     M32(D + 0x344) = D + 0xb00;
     M32(D + 0x350) = D + 0xd48;
     for (i = 0; i < sizeof rdata_pointers / sizeof *rdata_pointers; i++)

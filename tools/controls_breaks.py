@@ -11,14 +11,22 @@ and run for N scenarios; controlsdiff exits non-zero when any differ.  The
 real build goes back at the end.  A missed break is a gap in the harness or
 an equivalence; either way it is reported.
 
-Usage: tools/controls_breaks.py [N] [name...]   (from the repository root,
-       after tools/ofs controlsdiff)
+Usage: tools/controls_breaks.py [N] [name...] [--build-only DIR]   (from the repository
+       root, after tools/ofs controlsdiff).  --build-only builds every case's mutant DLL, one at
+       a time, keeps it as DIR/<case>/mutant.dll with meta.json, and runs nothing.
 """
+import json
 import os
 import re
+import shutil
 import subprocess
 import sys
 
+BUILD_ONLY = None
+if "--build-only" in sys.argv:
+    i = sys.argv.index("--build-only")
+    BUILD_ONLY = sys.argv[i + 1]
+    del sys.argv[i:i + 2]
 N = int(sys.argv[1]) if len(sys.argv) > 1 and sys.argv[1].isdigit() else 2000
 ONLY = [a for a in sys.argv[1:] if not a.isdigit()]
 SRC = "src/controls/controls.c"
@@ -88,8 +96,8 @@ INPUT_BREAKS = [
     ("read-locked", "        HC(0xa8, f3)(section, D + 0x468, table + 0);        /* LOCKED */",
      "        HC(0xa8, f3)(section, D + 0x460, table + 0);        /* LOCKED */"),
     ("read-name", "            M32(out) = CMD(i).command;", "            M32(out) = CMD(i).command + 1;"),
-    ("read-exists", "        if (HC(0x158, f2)(P(file), 0x24) == 0)",
-     "        if (HC(0x158, f2)(P(file), 0x24) != 0)"),
+    ("read-exists", "        if (HC(0x158, f2)(fs98_handle(file), 0x24) == 0)",
+     "        if (HC(0x158, f2)(fs98_handle(file), 0x24) != 0)"),
     ("parse-neg", "    if (neg && negative)", "    if (neg)"),
     ("parse-bad", "    if (bad)\n        v = 0;", "    if (0)\n        v = 0;"),
     ("default-slew", 'h_strcat(buf, D + 0x3f8);                           /* " SLEW" */', ""),
@@ -99,23 +107,23 @@ INPUT_BREAKS = [
      "    if (M32(D + 0xd48 + joy * 0x3cc) != 0)"),
     ("save-unset", "            if (M32(e + 0xc + k * 4) == 0)\n                continue;",
      "            if (0)\n                continue;"),
-    ("save-repeat", "                HC(0xac, f3)(s, P(k78), M32(e + 0x1cc + k * 4));",
-     "                HC(0xac, f3)(s, P(k78), M32(e + 0xcc + k * 4));"),
+    ("save-repeat", "                HC(0xac, f3)(s, fs98_handle(k78), M32(e + 0x1cc + k * 4));",
+     "                HC(0xac, f3)(s, fs98_handle(k78), M32(e + 0xcc + k * 4));"),
     ("write-nameless", "        if (CMD(i).command == value)",
      "        if (CMD(i).command == value && CMD(i).name)"),
-    ("section-digits", "        NUMF(0x18, f3)(P(&joy), 0xb, s + h_strlen(s));",
-     "        NUMF(0x18, f3)(P(&joy), 0xc, s + h_strlen(s));"),
+    ("section-digits", "        NUMF(0x18, f3)(fs98_handle(&joy), 0xb, s + h_strlen(s));",
+     "        NUMF(0x18, f3)(fs98_handle(&joy), 0xc, s + h_strlen(s));"),
     # the key bindings: the three faults the first transliteration had, put back
-    ("layout-return", "        HC(0xd8, f6)(P(layout), P(CMD(i).name), P(parsed), 2, P(dir), 0x24);\n"
+    ("layout-return", "        HC(0xd8, f6)(fs98_handle(layout), fs98_handle(CMD(i).name), fs98_handle(parsed), 2, fs98_handle(dir), 0x24);\n"
      "        ent[0] = parsed[0];\n        ent[1] = parsed[1];\n        ent[2] = CMD(i).command;\n"
-     "        if (ent[0] == 0)\n            continue;\n        HC(0x1f4, f3)(*pAccel, P(ent), 1);\n"
+     "        if (ent[0] == 0)\n            continue;\n        HC(0x1f4, f3)(*pAccel, fs98_handle(ent), 1);\n"
      "    }\n    return got;",
-     "        HC(0xd8, f6)(P(layout), P(CMD(i).name), P(parsed), 2, P(dir), 0x24);\n"
+     "        HC(0xd8, f6)(fs98_handle(layout), fs98_handle(CMD(i).name), fs98_handle(parsed), 2, fs98_handle(dir), 0x24);\n"
      "        ent[0] = parsed[0];\n        ent[1] = parsed[1];\n        ent[2] = CMD(i).command;\n"
-     "        if (ent[0] == 0)\n            continue;\n        HC(0x1f4, f3)(*pAccel, P(ent), 1);\n"
+     "        if (ent[0] == 0)\n            continue;\n        HC(0x1f4, f3)(*pAccel, fs98_handle(ent), 1);\n"
      "    }\n    return 0;"),
-    ("layout-args", "HC(0xd8, f6)(P(layout), P(CMD(i).name), P(parsed), 2, P(dir), 0x24);",
-     "HC(0xd8, f6)(P(layout), P(CMD(i).name), 2, P(parsed), P(dir), 0x24);"),
+    ("layout-args", "HC(0xd8, f6)(fs98_handle(layout), fs98_handle(CMD(i).name), fs98_handle(parsed), 2, fs98_handle(dir), 0x24);",
+     "HC(0xd8, f6)(fs98_handle(layout), fs98_handle(CMD(i).name), 2, fs98_handle(parsed), fs98_handle(dir), 0x24);"),
     ("list-first", "                pair[1] = buf[k * 3 + 0] + (buf[k * 3 + 1] << 8);",
      "            { pair[1] = buf[k * 3 + 0] + (buf[k * 3 + 1] << 8); break; }",
      "equivalent while no table gives a command two keys: neither default table "
@@ -147,8 +155,8 @@ INPUT_BREAKS = [
      "                r = di_create(wnd, inst, D + 0xbfc0, D + 0xbfc4, 4);"),
     ("enum-type", "    if (M8(ddi + 0x24) != 4)                            /* dwDevType: DIDEVTYPE_JOYSTICK */",
      "    if (M8(ddi + 0x24) != 3)                            /* dwDevType: DIDEVTYPE_JOYSTICK */"),
-    ("init-slope", "    HC(0xe0, f5)(P(sect), D + 0x944, D + 0x4c0, P(path), 0x24);    /* ground_bumps_slope1 */",
-     "    HC(0xe0, f5)(P(sect), D + 0x944, D + 0x4d0, P(path), 0x24);    /* ground_bumps_slope1 */"),
+    ("init-slope", "    HC(0xe0, f5)(fs98_handle(sect), D + 0x944, D + 0x4c0, fs98_handle(path), 0x24);    /* ground_bumps_slope1 */",
+     "    HC(0xe0, f5)(fs98_handle(sect), D + 0x944, D + 0x4d0, fs98_handle(path), 0x24);    /* ground_bumps_slope1 */"),
     ("release-unacquire", "        COM(M32(pdev), 0x20, f1)(M32(pdev));            /* Unacquire */", ""),
     ("crash-args", "            r = eff_constant(V32(0xbfc4), D + 0xbfe4, V32(0x4d8), V32(0x4dc), V32(0x4e0));",
      "            r = eff_constant(V32(0xbfc4), D + 0xbfe4, V32(0x4d8), V32(0x4e0), V32(0x4dc));"),
@@ -160,9 +168,9 @@ INPUT_BREAKS = [
     ("joy-type", "        M32(bind + k * 8 + 4) = (CMD(idx).kind & 3) != 0 ? 2 : 3;",
      "        M32(bind + k * 8 + 4) = (CMD(idx).kind & 3) != 0 ? 3 : 2;"),
     ("joy-button-base", "        M32(bind + at * 8) = a + 0x11;", "        M32(bind + at * 8) = a + 0x10;"),
-    ("apply-repeat", "                M32(P(cfg) + 0x188 + v * 4) = M32(ext + k * 0xc + 8);",
-     "                M32(P(cfg) + 0x288 + v * 4) = M32(ext + k * 0xc + 8);"),
-    ("apply-flags", "                M32(P(cfg) + 8) |= 1u << (v - 1);", "                M32(P(cfg) + 8) |= 1u << v;"),
+    ("apply-repeat", "                M32(fs98_handle(cfg) + 0x188 + v * 4) = M32(ext + k * 0xc + 8);",
+     "                M32(fs98_handle(cfg) + 0x288 + v * 4) = M32(ext + k * 0xc + 8);"),
+    ("apply-flags", "                M32(fs98_handle(cfg) + 8) |= 1u << (v - 1);", "                M32(fs98_handle(cfg) + 8) |= 1u << v;"),
     ("apply-keyflags", "        ent[1] = spec >> 8;", "        ent[1] = (spec >> 8) & 7;"),
     ("records-swap", "    M16(G + 0xc0a) = M16(rec + 0x50);", "    M16(G + 0xc0a) = M16(rec + 0x60);"),
     ("records-read", "    M16(rec + 0x88) = M16(G + 0xc04);", "    M16(rec + 0x88) = M16(G + 0xc06);"),
@@ -170,11 +178,11 @@ INPUT_BREAKS = [
     ("adjust-scale", "            M32(M32(e + 0x24) + k * 0xc) = 0x64;",
      "            M32(M32(e + 0x24) + k * 0xc) = 0x63;"),
     ("refresh-flag", "    V32(0x250) = HC(0x1c0, f0)() == 0;", "    V32(0x250) = HC(0x1c0, f0)() != 0;"),
-    ("reset-default", "                HC(0x1e4, f2)(P(&accel), 0x67);", "                HC(0x1e4, f2)(P(&accel), 0x68);"),
+    ("reset-default", "                HC(0x1e4, f2)(fs98_handle(&accel), 0x67);", "                HC(0x1e4, f2)(fs98_handle(&accel), 0x68);"),
     ("setup-noff", "    V32(0x300) = ff[0] == 0;", "    V32(0x300) = ff[0] != 0;"),
     ("dialog-answer", "        if (r == 0 && V32(0x240) == 1)", "        if (r == 0 && V32(0x240) == 0)"),
     ("keyboard-name", "    h_strcpy(M32(devs + 8), D + 0x1d0);", "    h_strcpy(M32(devs + 8), D + 0x208);"),
-    ("current-mask", "        M32(out + 8) = M32(P(state) + 8);", "        M32(out + 8) = M32(P(state) + 8) | 1;",
+    ("current-mask", "        M32(out + 8) = M32(fs98_handle(state) + 8);", "        M32(out + 8) = M32(fs98_handle(state) + 8) | 1;",
      "equivalent: joy_current writes the mask into build_list's stack copy of the config, "
      "which only fill_joy reads, and fill_joy reads the axis and button commands and their "
      "extras, never +8"),
@@ -184,21 +192,32 @@ if not os.path.exists("bin/difftest/controlsdiff.exe"):
     print("run `tools/ofs controlsdiff` first"); sys.exit(2)
 src = open(SRC).read()
 inp = open(INPUT).read()
-caught = missed = 0
-for b in [(SRC,) + t for t in BREAKS] + [(INPUT,) + t for t in INPUT_BREAKS]:
+caught = missed = matched = built = 0
+cases = [b for b in [(SRC,) + t for t in BREAKS] + [(INPUT,) + t for t in INPUT_BREAKS] if not ONLY or b[1] in ONLY]
+if not cases:       # before anything is rewritten, built or restored
+    print("no case matches %s" % " ".join(ONLY)); sys.exit(1)
+try:
+  for b in cases:
     path, name, old, new = b[0], b[1], b[2], b[3]
     note = b[4] if len(b) > 4 else None
-    if ONLY and name not in ONLY:
-        continue
+    matched += 1
     text = src if path == SRC else inp
     if text.count(old) != 1:
-        print("%-18s SKIP (anchor appears %d times)" % (name, text.count(old))); continue
+        print("%-18s SKIP (anchor appears %d times)" % (name, text.count(old))); missed += 1; continue
     open(TMP, "w").write(src.replace(old, new, 1) if path == SRC else src)
     open(INPUT_TMP, "w").write(inp.replace(old, new, 1) if path == INPUT else inp)
     os.remove("bin/difftest/CONTROLS_ours.dll") if os.path.exists("bin/difftest/CONTROLS_ours.dll") else None
     r = subprocess.run(["tools/ofs", "controls-break-build"], capture_output=True, text=True)
     if not os.path.exists("bin/difftest/CONTROLS_ours.dll"):
-        print("%-18s BUILD FAILED\n%s" % (name, r.stderr[-800:])); continue
+        print("%-18s BUILD FAILED\n%s" % (name, r.stderr[-800:])); missed += 1; continue
+    if BUILD_ONLY:
+        d = os.path.join(BUILD_ONLY, name)
+        os.makedirs(d, exist_ok=True)
+        shutil.copy("bin/difftest/CONTROLS_ours.dll", os.path.join(d, "mutant.dll"))
+        json.dump({"name": name, "equivalent": note is not None, "why": note or ""},
+                  open(os.path.join(d, "meta.json"), "w"), sort_keys=True)
+        built += 1
+        continue
     run = subprocess.run(["wine", "controlsdiff.exe", str(N)], cwd="bin/difftest",
                          env=dict(os.environ, WINEDEBUG="-all", CONTROLS_FIRST="1"),
                          capture_output=True, text=True)
@@ -212,8 +231,14 @@ for b in [(SRC,) + t for t in BREAKS] + [(INPUT,) + t for t in INPUT_BREAKS]:
         print("%-18s CRASHED (exit %d)" % (name, run.returncode)); missed += 1
     else:
         print("%-18s MISSED" % name); missed += 1
-
-# restore the real build
-subprocess.run(["tools/ofs", "controlsdiff"], capture_output=True)
+finally:                          # the baseline source and build go back, whatever failed
+    open(TMP, "w").write(src)
+    open(INPUT_TMP, "w").write(inp)
+    if BUILD_ONLY:
+        shutil.copy("bin/CONTROLS.DLL", "bin/difftest/CONTROLS_ours.dll")
+    else:
+        subprocess.run(["tools/ofs", "controlsdiff"], capture_output=True)
+if BUILD_ONLY:
+    print("%d mutants built into %s of %d" % (built, BUILD_ONLY, matched)); sys.exit(0 if built == matched else 1)
 print("\n%d caught, %d missed" % (caught, missed))
 sys.exit(1 if missed else 0)

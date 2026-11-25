@@ -6,8 +6,6 @@ src/advdrv/advdrv.c 2 2
 src/atc/atc.c 0 1
 src/booster/booster.c 4 1
 src/chain/chain.c 4 0
-src/controls/controls.h 3 6
-src/controls/controls_input.c 11 0
 src/demo/demo.c 128 4
 src/dynamic/dynamic.c 1 4
 src/facil/facil.c 6 1
@@ -19,9 +17,6 @@ src/flights/flights_events.c 1 0
 src/flights/flights_navigation.c 1 0
 src/flights/flights_select.c 2 0
 src/g3d/g3d.c 8 4
-src/gauges/gauge.h 4 0
-src/gauges/suction.c 8 0
-src/gauges/warning.c 2 0
 src/hg2d/hg2d.c 1 0
 src/host/host.c 3 5
 src/host/host_rt_exe.c 3 0
@@ -48,8 +43,6 @@ src/options/options_keys.c 12 0
 src/options/options_logbook.c 5 0
 src/options/options_replay.c 2 0
 src/options/options_videos.c 2 0
-src/panels/panels.c 83 0
-src/panels/panels.h 4 13
 src/sim1/sim1.c 0 1
 src/sim1/sim1_internal.h 1 0
 src/sim1/sim1_native.c 3 0

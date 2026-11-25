@@ -53,7 +53,7 @@
  * CHAIN entered it with. */
 uint32_t FS98_STDCALL main_record_listener(uint32_t a, uint32_t b);
 __asm__(".text\n\t.p2align 4\n\t.globl _main_record_listener@8\n_main_record_listener@8:\n\tret $8\n");
-#define RECORD_LISTENER ((uint32_t)(uintptr_t)main_record_listener)
+#define RECORD_LISTENER fs98_handle(main_record_listener)
 
 /* ---- the wind ------------------------------------------------------------- */
 

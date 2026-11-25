@@ -27,22 +27,17 @@
 #define MAIN_DATA_VA    0x20800000u    /* retail's .data */
 #define MAIN_LINKAGE    0x0c0u
 
-typedef volatile uint8_t  main_v8;
-typedef volatile uint16_t __attribute__((may_alias)) main_v16;
-typedef volatile uint32_t __attribute__((may_alias)) main_v32;
-
 struct main_image {
     uint8_t bytes[MAIN_IMAGE_SIZE];
 };
 
 extern struct main_image main_image;
 
-#define D       ((uint32_t)(uintptr_t)main_image.bytes)
+#define FS98_DATA_IMAGE main_image.bytes
+#include "fs98/arena.h"
+
 #define V(a)    (D + ((uint32_t)(a) - MAIN_DATA_VA))
-#define M8(a)   (*(main_v8  *)(uintptr_t)(uint32_t)(a))
-#define M16(a)  (*(main_v16 *)(uintptr_t)(uint32_t)(a))
-#define M32(a)  (*(main_v32 *)(uintptr_t)(uint32_t)(a))
-#define ADDR(p) ((uint32_t)(uintptr_t)(p))
+#define ADDR(p) fs98_handle(p)
 
 /* The ImportTable's links, as retail reads them (ds:0x20800004 and on). */
 #define HOST     M32(V(0x20800004))

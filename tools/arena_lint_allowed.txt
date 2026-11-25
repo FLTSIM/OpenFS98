@@ -17,8 +17,6 @@ src/flights/flights_navigation.c 1 0
 src/flights/flights_select.c 2 0
 src/g3d/g3d.c 8 4
 src/hg2d/hg2d.c 1 0
-src/main/main.c 2 4
-src/main/main_frame.inc 1 0
 src/mdl/mdl_crash.c 1 0
 src/mdl/mdl_image.c 2 0
 src/mpdialog/mpdialog_details.c 1 0

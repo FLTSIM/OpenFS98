@@ -1,0 +1,3 @@
+# GitHub's language stats: these are C fragments and headers, not Pawn or C++.
+*.inc linguist-language=C
+*.h linguist-language=C

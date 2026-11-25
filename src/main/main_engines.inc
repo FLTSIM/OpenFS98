@@ -4,7 +4,7 @@
  * and the check at +0x4010 works out which of them the user last edited. */
 
 #define EN_DLG  V(0x208009f8)
-#define M64F(a) (*(volatile double *)(uintptr_t)(uint32_t)(a))
+#define M64F(a) MD(a)
 
 static const double en_scale = 0.00390625, en_gal = 0.11984, en_16 = 65536.0, en_pct = 83886.07, en_inv = 1.1920930376163764e-05,
                     en_half = -0.5, en_100 = 100.0, en_l = 3.785, en_01 = 0.01, en_101 = 101.0, en_200 = 200.0;

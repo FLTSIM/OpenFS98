@@ -291,3 +291,19 @@
 - source_spec: `docs/implementation/spec-1-4-module-data-decompiled-no-raw-dumps-in-git.md`
   summary: Two harnesses differ from retail, both already before Story 1.x: `g3ddiff-meshc-run` (G3D with the portable mesh compiler, `FS98_PORTABLE_FP`) 43 of 20000 scenarios, some polygons emitted as `line(...)` where retail emits `v(...)` (e.g. scenario 747, op 14); `gauges-panels-run N=1000` (PANELS_STRICT, retail/rebuilt warning and suction gauges) 143 of 1000, heap block hashes and full state (first scenarios 6, 20, 28). Not investigated.
   evidence: ~/openfs98-verify/p14-final/g3ddiff-meshc-run.log, p14-bisect/new-panels-1000.log; the same scenario lists from 27371fb in p14-bisect/old-meshc-b.log and old-panels-1000b.log (tree ~/openfs98-verify/p14-old).
+
+- source_spec: `docs/implementation/spec-1-8f-main-uses-arena-h.md`
+  summary: Story 1.8 slice 6b: FLIGHTS, MPDIALOG and WORLD convert to arena.h (12 casts; their DLL recipes, difftests and break runners need `-Iinclude`, the runners `--build-only`, and FLIGHTS' anchors that hold the literal cast are repaired).
+  evidence: slice 6 (MAIN + English dialogs) split into four at its Checkpoint 1 (2026-11-25): about 15 recipes and 12 runners need work, too much for one spec.
+
+- source_spec: `docs/implementation/spec-1-8f-main-uses-arena-h.md`
+  summary: Story 1.8 slice 6c: OPTIONS converts to arena.h (27 casts across six files; `options_breaks.py` needs `-Iinclude`, `--build-only` and its 11 anchor lines that hold the literal cast).
+  evidence: as above, split from slice 6 on 2026-11-25.
+
+- source_spec: `docs/implementation/spec-1-8f-main-uses-arena-h.md`
+  summary: Story 1.8 slice 6d: SIMSUI converts to arena.h (13 casts across five files; its per-unit, native and image compiles, `simsuidiff` and `simsui_breaks.py` need `-Iinclude`, the runner `--build-only`, and anchor `dib-valid-low`).
+  evidence: as above, split from slice 6 on 2026-11-25.
+
+- source_spec: `docs/implementation/spec-1-8f-main-uses-arena-h.md`
+  summary: Pre-existing defect, repaired in slice 6a: MAIN break anchors `session/create-fail` (`main_kneeboard.inc`) and `spot/main-cmp1` (`main_spot.inc`) matched nothing at HEAD, because Story 1.5 put a RETAIL BUG and a `Not reproduced` comment inside them; their `main_breaks.py` counts since then never ran them. The anchors now take in the comment; the mutations are unchanged.
+  evidence: `--build-only` on the HEAD tree without the repair reports both as not unique; slice 4 repaired its anchors the same way.

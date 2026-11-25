@@ -10,7 +10,8 @@ exits non-zero when any differ).  At the end the real build goes back.  A
 missed break is a gap in the harness or an equivalence; either way it is
 reported, and docs/modules/main.md says which.
 
-Usage: tools/main_breaks.py [N] [suite] [name...]   (from the repository
+Usage: tools/main_breaks.py --build-only DIR [SUITE...]  builds every mutant DLL into DIR, running nothing (Story 1.8 slice 6a).
+       tools/main_breaks.py [N] [suite] [name...]   (from the repository
        root, after tools/ofs maindiff).  MAIN_BREAK_DIFFDIR names another
        directory holding maindiff.exe and the retail DLLs, so that suites
        can be broken side by side.
@@ -1108,7 +1109,7 @@ BREAKS = {
         ('create-str', 'main_kneeboard.inc', '(0x1566, ADDR(buf), 0x400)', '(0x1567, ADDR(buf), 0x400)'),
         ('create-bits', 'main_kneeboard.inc', '|= 0x15000000u;', '|= 0x14000000u;'),
         ('create-x', 'main_kneeboard.inc', 'M32(rec + 0x20) = 0x1644;', 'M32(rec + 0x20) = 0x1645;'),
-        ('create-fail', 'main_kneeboard.inc', '    if (r != 0)\n        return r;\n    bm =', '    bm ='),
+        ('create-fail', 'main_kneeboard.inc', '    if (r != 0)\n        return r;\n    /* RETAIL BUG (kept): MAIN-25 (docs/retail-bugs.md). Retail imports no DeleteObject: every call leaves its DIB section behind (the process runs out of address space after about 30,000); ours keeps the leak. */\n    bm =', '    /* RETAIL BUG (kept): MAIN-25 (docs/retail-bugs.md). Retail imports no DeleteObject: every call leaves its DIB section behind (the process runs out of address space after about 30,000); ours keeps the leak. */\n    bm ='),
         ('create-bm', 'main_kneeboard.inc', 'MAKEINTRESOURCEA(0x65)', 'MAKEINTRESOURCEA(0x66)'),
         ('create-w', 'main_kneeboard.inc', 'M32(rec + 0x70) = *(uint32_t *)(info + 4);', 'M32(rec + 0x70) = *(uint32_t *)(info + 8);'),
         ('create-list', 'main_kneeboard.inc', 'CHAIN_ADD(0x14, ADDR(kb_listener));', 'CHAIN_ADD(0x13, ADDR(kb_listener));'),
@@ -1996,7 +1997,7 @@ BREAKS = {
         ("main-1926", "main_spot.inc", "M16(V(0x20801926)) = M16(gp + 0xe68);", "M16(V(0x20801926)) = M16(gp + 0xe66);"),
         ("main-slew", "main_spot.inc", "        if (!(M16(gp + 0xe62) & 2))\n            M32(V(0x2080191c)) = 0;", "        if (!(M16(gp + 0xe62) & 1))\n            M32(V(0x2080191c)) = 0;"),
         ("main-18d0", "main_spot.inc", "    if (M16(gp + 0xe64) == 2)\n        M32(V(0x208018d0)) = (uint32_t)(int32_t)(int16_t)M16(gp + 0xe5c);\n    COPY24", "    if (M16(gp + 0xe64) == 4)\n        M32(V(0x208018d0)) = (uint32_t)(int32_t)(int16_t)M16(gp + 0xe5c);\n    COPY24"),
-        ("main-cmp1", "main_spot.inc", "    if (saved >= M32(gp + 0xd4c))\n        M32(V(0x20801920)) = 1;\n    n =", "    if (saved > M32(gp + 0xd4c))\n        M32(V(0x20801920)) = 1;\n    n ="),
+        ("main-cmp1", "main_spot.inc", "    if (saved >= M32(gp + 0xd4c))\n        M32(V(0x20801920)) = 1;\n    /* Not reproduced (MAIN-15): the step count for GLOBAL +0xe60 past 2 is G3D's leftover ecx in retail; this takes no steps there (not reproduced). */\n    n =", "    if (saved > M32(gp + 0xd4c))\n        M32(V(0x20801920)) = 1;\n    /* Not reproduced (MAIN-15): the step count for GLOBAL +0xe60 past 2 is G3D's leftover ecx in retail; this takes no steps there (not reproduced). */\n    n ="),
         ("main-count", "main_spot.inc", "M16(gp + 0xe60) == 1 ? 7 :", "M16(gp + 0xe60) == 1 ? 8 :"),
         ("main-back", "main_spot.inc", "    COPY24(V(0x20801868), V(0x208018bc));\n    V48_SUB(V(0x20801868), V(0x20801868), V(0x208018d4));\n    spot_eye();\n    if (saved", "    V48_SUB(V(0x20801868), V(0x20801868), V(0x208018d4));\n    spot_eye();\n    if (saved"),
         ("main-walk", "main_spot.inc", "    if (M32(V(0x20801920)) != 0)\n        spot_walk();", "    if (M32(V(0x20801920)) == 0)\n        spot_walk();"),
@@ -2344,7 +2345,64 @@ BREAKS = {
 }
 
 
+def build_only(argv):
+    """--build-only DIR [SUITE...]: every case's mutant MAIN_ours.dll, built from a mutated copy of src/main in a temporary
+    directory outside the tree, into DIR/<suite>.<name>/mutant.dll with meta.json; no wine, nothing written under the tree."""
+    import json, signal, tempfile
+    if not argv or not argv[0] or (os.path.exists(argv[0]) and (not os.path.isdir(argv[0]) or os.listdir(argv[0]))):
+        print("--build-only needs DIR: a missing or empty directory")
+        return 2
+    dest, suites = argv[0], argv[1:] or list(BREAKS)
+    unknown = [x for x in suites if x not in BREAKS]
+    if unknown:
+        print("no suite %s" % " ".join(unknown))
+        return 1
+    src = {f: open(os.path.join("src/main", f)).read() for f in os.listdir("src/main") if f.endswith((".c", ".inc"))}
+    cases = [(s, e) for s in suites for e in BREAKS[s]]
+    bad = ["%s.%s (anchor appears %d times)" % (s, e[0], src[e[1]].count(e[2])) for s, e in cases if src[e[1]].count(e[2]) != 1]
+    if bad:
+        print("anchors not unique: " + ", ".join(bad))
+        return 1
+    flags = subprocess.run([sys.executable, "-B", "-c", "import sys; sys.path.insert(0, 'tools'); import module_flags; print(' '.join(module_flags.FLAGS))"],
+                           capture_output=True, text=True, check=True).stdout.split()
+    for sig, code in ((signal.SIGTERM, 143), (signal.SIGHUP, 129)):     # a kill still kills the compiler and removes the copy
+        signal.signal(sig, lambda *_, code=code: sys.exit(code))
+    os.makedirs(dest, exist_ok=True)
+    failed, built = [], 0
+    for suite, e in cases:
+        name, path, old, new = e[:4]
+        case = "%s.%s" % (suite, name)
+        d = os.path.join(dest, case)
+        os.makedirs(d)
+        with tempfile.TemporaryDirectory() as tmp:
+            copy = os.path.join(tmp, "main")
+            shutil.copytree("src/main", copy)
+            open(os.path.join(copy, path), "w").write(src[path].replace(old, new, 1))
+            argv_cc = (["i686-w64-mingw32-gcc"] + flags + ["-std=c99", "-Os", "-Wall", "-Wextra", "-Iinclude", "-ffreestanding", "-fno-builtin",
+                       "-fno-asynchronous-unwind-tables", "-fomit-frame-pointer", "-I" + copy, "-shared", "-nostdlib", "-Wl,--enable-stdcall-fixup",
+                       "-Wl,--entry=_DllMain@12", "-Wl,--disable-dynamicbase", "-Wl,--disable-nxcompat", "-Wl,--image-base=0x207e0000",
+                       "-o", os.path.join(d, "mutant.dll"), os.path.join(copy, "main.c"), "bin/main.res", "src/main/main.def",
+                       "-lmsvcrt", "-lkernel32", "-luser32", "-lgdi32", "-lgcc"])
+            p = subprocess.Popen(argv_cc, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+            try:
+                _, err = p.communicate()
+            except BaseException:
+                p.kill()
+                p.wait()
+                raise
+        if p.returncode != 0 or not os.path.isfile(os.path.join(d, "mutant.dll")):
+            print("%-30s BUILD FAILED\n%s" % (case, err[-800:]))
+            failed.append(case)
+            continue
+        json.dump({"name": case, "equivalent": len(e) > 4, "why": e[4] if len(e) > 4 else ""}, open(os.path.join(d, "meta.json"), "w"), sort_keys=True)
+        built += 1
+    print("%d mutants built into %s of %d%s" % (built, dest, len(cases), "; failed: " + " ".join(failed) if failed else ""))
+    return 1 if failed else 0
+
+
 def main():
+    if "--build-only" in sys.argv[1:]:
+        return build_only(sys.argv[sys.argv.index("--build-only") + 1:])
     results = []
     for entry in BREAKS[SUITE]:
         name, path, old, new = entry[:4]

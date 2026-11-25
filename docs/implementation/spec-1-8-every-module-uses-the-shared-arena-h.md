@@ -2,10 +2,10 @@
 title: 'Story 1.8, slice 1: arena.h, its lint with a shrink-only allowlist, and REALITY and ANALYSIS converted'
 type: 'refactor'
 created: '2026-11-24'
-status: 'in-progress'
+status: 'done'
 route: 'dispatch'
 baseline_commit: '1932b40b08c0aa6cfa0d5f91f36170129b658c99'
-review_loop_iteration: 0
+review_loop_iteration: 1
 context: ['{project-root}/OpenFS98/AGENTS.md', '{project-root}/OpenFS98/docs/native-port/architecture/ARCHITECTURE-SPINE.md', '{project-root}/OpenFS98/docs/implementation/spec-1-7-the-module-abi-headers-are-32-bit.md']
 ---
 
@@ -114,19 +114,19 @@ Later slices convert the rest (Design Notes), and the last deletes the allowlist
 ## Tasks & Acceptance
 
 **Execution:**
-- [ ] Package the gate in `~/openfs98-verify/gate/`. Build the before snapshot at `p18`, recording hashes, the replay manifest and objects, and the break mutations' objects.
-- [ ] `include/fs98/arena.h` (new).
-- [ ] `tools/check_arena.py` (new) with `--self-test` and `--inventory`, and `tools/arena_lint_allowed.txt` seeded by it.
-- [ ] `cmake/`: the always-run lint target ahead of the default build.
-- [ ] `src/reality/reality.c` and `src/analysis/analysis.c`: convert, and delete their rows.
-- [ ] `tools/reality_breaks.py` and `tools/analysis_breaks.py`: update the strings, and add `--build-only DIR`.
-- [ ] Docs:
+- [x] Package the gate in `~/openfs98-verify/gate/`. Build the before snapshot at `p18`, recording hashes, the replay manifest and objects, and the break mutations' objects.
+- [x] `include/fs98/arena.h` (new).
+- [x] `tools/check_arena.py` (new) with `--self-test` and `--inventory`, and `tools/arena_lint_allowed.txt` seeded by it.
+- [x] `cmake/`: the always-run lint target ahead of the default build.
+- [x] `src/reality/reality.c` and `src/analysis/analysis.c`: convert, and delete their rows.
+- [x] `tools/reality_breaks.py` and `tools/analysis_breaks.py`: update the strings, and add `--build-only DIR`.
+- [x] Docs:
   - `docs/tools.md`: the Baselines line;
   - `docs/architecture.md`: an `arena.h` paragraph;
   - `docs/implementation/deferred-work.md`: the bridge-removal story and the lint's scope are already logged (2026-11-24), so nothing to add unless the slice finds more;
   - the comments at `abi.h:31` and `host.h:38`.
-- [ ] Build the after snapshot, then run the gate and the mutation-object comparison.
-- [ ] This spec: `## Implementation Notes` with the seed counts, the inventory, the gate result and any difference left.
+- [x] Build the after snapshot, then run the gate and the mutation-object comparison.
+- [x] This spec: `## Implementation Notes` with the seed counts, the inventory, the gate result and any difference left.
 
 **Acceptance Criteria:**
 - Given the slice, when `python3 -B tools/check_arena.py` and `--self-test` run, then both pass, the summary shows 472 casts and 71 definitions across 65 files, and REALITY and ANALYSIS have no row.
@@ -177,3 +177,27 @@ Spec review 2 (Codex gpt-6.2-sol), 6 findings, all applied:
 4. medium: the lint target sits in every output recipe's `DEPENDS`, tested with a stale output under `-j 2`.
 5. medium: only `(0, 0)` rows are invalid.
 6. low: SOUND and ADVDRV byte-pointer `D` and ADVDRV's pointer `DA` added; the SIM1 citation is `:4852-4853`.
+
+## Implementation Notes
+
+**Seed.** `tools/check_arena.py` on the before tree: 67 files, 478 casts, 81 definitions, 60 reverse casts, as the spec counted. After the conversion: 65 files, 472 casts, 71 definitions, 52 reverse casts (`tools/arena_lint_allowed.txt`, seeded by `--inventory`, REALITY's and ANALYSIS's rows gone). `--self-test` runs 30 cases through the CLI's own `main`, covering every matrix row.
+
+**Conversion.** REALITY and ANALYSIS define `FS98_DATA_IMAGE` and `FS98_RDATA_IMAGE` (the whole objects) and include `fs98/arena.h` after `fs98/host.h`; their private typedefs, `D`, `R`, `M8`..`MD` and `ADDR` are gone; `ADDR(p)` is `fs98_handle(p)`, `R` is `RDATA`, and `RD(o)` became `RE_RD(o)` and `AN_RD(o)` (module-local, `MD(RDATA + (o))`). `CALL` is untouched. The object files of both modules are byte-identical to before (checked by compiling both trees directly, then by the gate).
+
+**Break runners.** 11 REALITY cases (crash-string, crash-time, collect-frac, prepare-descent, plot-sub, plot-order, labels-hi, scale-metric-stride, scale-feet-equal, scale-zero, curve-first) and 5 ANALYSIS cases (compute-fst, scale-compare, scale-low, mpoint-order, mpoint-double) had exact-match strings that stopped matching; each is updated and matches once. `--build-only DIR` keeps `DIR/<case>/mutant.dll` and `meta.json` (name, equivalent flag, why). The before side ran the same `--build-only` patch applied to its own, unedited runners.
+
+**Gate** (`~/openfs98-verify/gate/`: `build_side.sh SNAPSHOT ROOT OUT`, `compare.py BEFORE AFTER [--mut B A]`, with the wrapper, `replay.py`, `ondemand.py`, `pehash.py`; every failure exits non-zero). Built at `~/openfs98-verify/p18`, before (`p18-before-src`) then after (`p18-after-src`), results in `p18-results/`:
+- artifacts 1129 and 1129, the same paths, 0 `ERR`; 320 PEs identical after normalisation; 206 `.o`/`.a` identical;
+- 522 replayed units and flags equal in both manifests, every object `cmp`-identical;
+- 67 REALITY and 103 ANALYSIS mutant DLLs normalised-identical, metadata equal.
+So no difftest or flight run was needed, and none was run.
+
+**Lint behaviour checked in the up-to-date after tree:** a new `.S` file with a banned cast failed `cmake --build` (exit 2) naming `src/reality/zz_test.S:2`; with it present and `reality.c` touched (a stale `REALITY.DLL`), `-j 2` failed without starting any gcc and the DLL was untouched. The file was removed afterwards.
+
+**Not done / limits.** HEAD has no allowlist yet, so the lint reports it checked only the working tree until the allowlist is committed; the first commit's raise guard is `--prior ~/openfs98-verify/p18-results/before-inventory.txt`. The 74 flights and the 20,000-scenario difftests were not run (identity stood in, per the acceptance rule).
+
+**Review patches (after code review 1).**
+- `ofs_target` now adds `ofs_arena_lint` as a dependency of every command target. Proved in `p18`: a banned cast in a scratch `.S` made `cmake --build --target reality-break-build` fail with the lint's message before any gcc ran; the file was removed.
+- `check_arena.py` directive scanning: a block comment with a newline inside a directive is one directive (its newlines are kept for line numbers), `\f` and `\v` count as blanks, the `%:` digraph is accepted, `$` is an identifier character, a backslash followed by blanks before the newline splices, and a definition is reported at the line of its `#`. Each has a self-test case, the two-casts-on-a-line case asserts two diagnostics, and a temporary git repository covers the HEAD lookup without `--prior`: 37 cases pass. The seed counts are unchanged (472, 71, 65).
+- The break runners restore `bin/<M>.DLL` over the `_ours.dll` in a `finally`, and exit 1 when the case filter matches nothing (in `--build-only` runs too).
+- Gate: `build_side.sh` takes an optional prior inventory and runs the lint with `--prior` on it (`lint-prior.log`); each side hashes the retail binaries under `orig/` (`retail.sha256`, `retail_hash.sh`); `compare.py` fails on a missing expected binary or kept artifact, on empty or miscounted mutation sets (it takes the expected count, 67 and 103), on missing mutant files, on differing retail hashes, and when `lint-prior.log` is missing or failed. The existing results were not rebuilt: `retail.sha256` was produced from each side's snapshot (`p18-before-src`, `p18-after-src`, the trees the sides were built from) and the after side's `lint-prior.log` from the after snapshot. `compare.py` passes on both mutation sets.

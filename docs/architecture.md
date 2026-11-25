@@ -87,7 +87,9 @@ a function type (`fs98_host_<name>_fn`) over `fs98_addr` and `fs98_code`, and ea
 `_Static_assert`s on its size, alignment and offsets. `tools/check_abi_headers.py` checks the types and compiles the
 headers with mingw i686, `gcc -m32` and `gcc`. On `win32-retail` only, `host.h` also keeps a transitional bridge: a
 `fs98_host_<name>_call` type with the native pointer signature for each service, which the `FS98_HOST_*` macros use so
-existing callers compile unchanged, plus a pointer view of `fs98_import.link` (`FS98_LINK`, an anonymous union member) and `FS98_RETAIL_PTR` for list `data` fields, which keep the code gcc generates for those fields byte-identical. Story 1.8's `fs98_call` removes it module by module.
+existing callers compile unchanged, plus a pointer view of `fs98_import.link` (`FS98_LINK`, an anonymous union member) and `FS98_RETAIL_PTR` for list `data` fields, which keep the code gcc generates for those fields byte-identical. A story of its own removes the bridge (`docs/implementation/deferred-work.md`).
+
+`include/fs98/arena.h` is the one home of the address macros (AD-15): the `fs98_v8`..`fs98_vd` access types, `fs98_ptr`, `fs98_handle`, `fs98_call` (retail only), `M8`..`MD`, `R8`..`RDB`, and `D`, `RDATA` and `DA` for a module that defines `FS98_DATA_IMAGE`, `FS98_RDATA_IMAGE` or `FS98_DATA_VA`. The base is the constant 0 on i386 and `fs98_arena_base` elsewhere (Epic 3). A module includes it directly, after its system and ABI includes, and deletes its private copies; no shared header includes it yet. `tools/check_arena.py` runs on every `cmake --build` (the always-run `ofs_arena_lint` target, a dependency of every build step) and fails on a `(uint32_t)(uintptr_t)` cast or a `#define` of those names in `src/` outside `src/platform/arena/`, beyond the per-file counts in `tools/arena_lint_allowed.txt`, which may only shrink. REALITY and ANALYSIS are converted; the other modules follow in slices, and the last deletes the allowlist.
 
 The host reads each module's id out of `Linkage`, then walks every
 `ImportTable` and patches in a pointer to the corresponding module's

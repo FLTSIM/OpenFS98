@@ -35,7 +35,7 @@
  * TRANSITIONAL, RETAIL-ONLY: at the end of this header, under
  * `_WIN32 && __i386__`, each service also has a `fs98_host_<name>_call` type
  * with the native pointer signature, which the FS98_HOST_* macros use so that
- * existing callers compile unchanged.  Story 1.8's `fs98_call` removes it,
+ * existing callers compile unchanged.  a story of its own removes it (deferred-work.md),
  * module by module. */
 
 /* The table's absolute address in the retail image.  FLTSIM98.EXE has no
@@ -713,7 +713,7 @@ typedef int32_t FS98_STDCALL fs98_host_string_fn(uint32_t id, fs98_addr out /* c
 
 /* ---- reaching them ------------------------------------------------------- */
 
-/* RETAIL-ONLY, TRANSITIONAL (Story 1.7 bridge; Story 1.8's fs98_call replaces it).
+/* RETAIL-ONLY, TRANSITIONAL (Story 1.7 bridge; a story of its own removes it, deferred-work.md).
  * A slot holds retail's function pointer, so fetching one is a load from
  * host + slot as the native `_call` type.  Elsewhere these macros do not exist
  * and calls fail to compile.  Use the typed wrappers rather than casting. */

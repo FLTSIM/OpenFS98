@@ -9,14 +9,21 @@ scenarios (realitydiff exits non-zero when any differ).  At the end the real
 build goes back.  A missed break is a gap in the harness or an equivalence;
 either way it is reported, and docs/modules/reality.md says which.
 
-Usage: tools/reality_breaks.py [N] [name...]       (from the repository root,
+Usage: tools/reality_breaks.py [N] [name...] [--build-only DIR]       (from the repository root,
        after tools/ofs realitydiff)
 """
 import os
 import re
+import json
+import shutil
 import subprocess
 import sys
 
+BUILD_ONLY = None                     # --build-only DIR: build every case's mutant DLL, keep it under DIR/<case>, run nothing
+if "--build-only" in sys.argv:
+    i = sys.argv.index("--build-only")
+    BUILD_ONLY = sys.argv[i + 1]
+    del sys.argv[i:i + 2]
 N = int(sys.argv[1]) if len(sys.argv) > 1 and sys.argv[1].isdigit() else 2000
 ONLY = [a for a in sys.argv[1:] if not a.isdigit()]
 SRC = "src/reality/reality.c"
@@ -34,8 +41,8 @@ BREAKS = [
     ("crash-84a", "(code == 0x10 || code == 0x12 || code == 0x14) && GLB16(0x84a) == 0",
      "(code == 0x10 || code == 0x12) && GLB16(0x84a) == 0"),
     ("crash-odd", "    if ((code & 1) || code > 0x14)", "    if ((code & 1) || code > 0x16)"),
-    ("crash-string", "    H_LOADSTRING(code + 0x258, ADDR(text), 0x40);", "    H_LOADSTRING(code + 0x259, ADDR(text), 0x40);"),
-    ("crash-time", "    WINMSG_SHOW(ADDR(text), 5, 0x3c, 0);", "    WINMSG_SHOW(ADDR(text), 5, 0x3d, 0);"),
+    ("crash-string", "    H_LOADSTRING(code + 0x258, fs98_handle(text), 0x40);", "    H_LOADSTRING(code + 0x259, fs98_handle(text), 0x40);"),
+    ("crash-time", "    WINMSG_SHOW(fs98_handle(text), 5, 0x3c, 0);", "    WINMSG_SHOW(fs98_handle(text), 5, 0x3d, 0);"),
     ("crash-b24", "        M32(S_SOUND) |= 0x10;\n", ""),
     ("crash-sound-result", "    if (SOUND_EVENT(0xe, S_SOUND) != 0)\n        M32(S_PLAYING) = 0;",
      "    SOUND_EVENT(0xe, S_SOUND);"),
@@ -89,28 +96,28 @@ BREAKS = [
     ("collect-high", "M16(e + 0x12) > M16(S_HIGHEST + 2))) {", "M16(e + 0x12) >= M16(S_HIGHEST + 2))) {",
      "on a tie it copies what is there"),
     ("collect-x", "        MD(pt) = (double)(long double)(uint64_t)index;", "        MD(pt) = (double)(int32_t)index;"),
-    ("collect-frac", "(long double)(int32_t)M16(e + 0x12) * (long double)RD(0xc8)",
-     "(long double)(int16_t)M16(e + 0x12) * (long double)RD(0xc8)"),
-    ("prepare-descent", "(long double)(int16_t)GLB16(0x842) * (long double)RD(0xc0)",
-     "(long double)GLB16(0x842) * (long double)RD(0xc0)"),
+    ("collect-frac", "(long double)(int32_t)M16(e + 0x12) * (long double)RE_RD(0xc8)",
+     "(long double)(int16_t)M16(e + 0x12) * (long double)RE_RD(0xc8)"),
+    ("prepare-descent", "(long double)(int16_t)GLB16(0x842) * (long double)RE_RD(0xc0)",
+     "(long double)GLB16(0x842) * (long double)RE_RD(0xc0)"),
     ("analysis-one", "        if (r == 0 && M32(S_BLOCK) == 1)\n            r = nothing();", "",
      "nothing() returns the 0 r already is"),
     ("rate-units", "    if ((int32_t)units > 0 && (int32_t)units <= 2)", "    if ((int32_t)units > 0 && (int32_t)units <= 1)"),
-    ("plot-sub", "    xx = xx - (long double)RD(0xd0);", "    xx = xx + (long double)RD(0xd0);"),
-    ("plot-order", "    t = xx * (long double)(int32_t)M32(S_WIDTH);\n    t = t * (long double)RD(0x128);",
-     "    t = xx * ((long double)(int32_t)M32(S_WIDTH) * (long double)RD(0x128));"),
-    ("labels-hi", "        NUM_FORMAT(ADDR(&v.hi), 0x1001b, p);", "        NUM_FORMAT(ADDR(&v.lo), 0x1001b, p);"),
+    ("plot-sub", "    xx = xx - (long double)RE_RD(0xd0);", "    xx = xx + (long double)RE_RD(0xd0);"),
+    ("plot-order", "    t = xx * (long double)(int32_t)M32(S_WIDTH);\n    t = t * (long double)RE_RD(0x128);",
+     "    t = xx * ((long double)(int32_t)M32(S_WIDTH) * (long double)RE_RD(0x128));"),
+    ("labels-hi", "        NUM_FORMAT(fs98_handle(&v.hi), 0x1001b, p);", "        NUM_FORMAT(fs98_handle(&v.lo), 0x1001b, p);"),
     ("labels-blank", "        if ((i & 1) == 1) {", "        if ((i & 1) == 0) {"),
-    ("scale-metric-stride", "M32(R + 0x60 + 0x30 * i))", "M32(R + 0x60 + 8 * i))"),
-    ("scale-feet-equal", "            while (range > (long double)(uint64_t)M32(R + 8 * i))",
-     "            while (range >= (long double)(uint64_t)M32(R + 8 * i))"),
-    ("scale-zero", "    if (range == (long double)RD(0xf0)) {", "    if (range == (long double)RD(0xf8)) {"),
+    ("scale-metric-stride", "M32(RDATA + 0x60 + 0x30 * i))", "M32(RDATA + 0x60 + 8 * i))"),
+    ("scale-feet-equal", "            while (range > (long double)(uint64_t)M32(RDATA + 8 * i))",
+     "            while (range >= (long double)(uint64_t)M32(RDATA + 8 * i))"),
+    ("scale-zero", "    if (range == (long double)RE_RD(0xf0)) {", "    if (range == (long double)RE_RD(0xf8)) {"),
     ("scale-double", "    long double range = (long double)MD(S_MAX) - (long double)MD(S_MIN);",
      "    long double range = (long double)(double)(MD(S_MAX) - MD(S_MIN));",
      "two 32.16 values differ by at most 49 bits, exact in a double"),
     ("grid-vertical", "    for (x = 0x29; x < 0x2270; x += 0x2a3) {", "    for (x = 0x29; x <= 0x2270; x += 0x2a3) {"),
     ("grid-horizontal-y", "(0x17e1 - i) * h / 6144);", "(uint32_t)((int32_t)((0x17e1 - i) * h) / 6144));"),
-    ("curve-first", "    plot(0, -0x16, ADDR(from));", "    plot(0, -0x15, ADDR(from));"),
+    ("curve-first", "    plot(0, -0x16, fs98_handle(from));", "    plot(0, -0x15, fs98_handle(from));"),
     ("paint-fill", "    if (H_MEMSET(M32(S_BITS), 0xff, M32(S_BITS_SIZE)) != 0)",
      "    if (H_MEMSET(M32(S_BITS), 0xfe, M32(S_BITS_SIZE)) != 0)"),
     ("attach-top", "    M32(view + 8) = (uint32_t)-((int32_t)M32(S_HEIGHT) / 2);",
@@ -122,37 +129,55 @@ BREAKS = [
 def main():
     source = open(SRC).read()
     results = []
-    for entry in BREAKS:
-        name, old, new = entry[:3]
-        if ONLY and name not in ONLY:
-            continue
-        if source.count(old) != 1:
-            print("%-20s cannot apply: %d matches" % (name, source.count(old)))
-            results.append((name, "unapplied"))
-            continue
-        open(TMP, "w").write(source.replace(old, new))
-        if os.path.exists("bin/difftest/REALITY_ours.dll"):
-            os.remove("bin/difftest/REALITY_ours.dll")
-        build = subprocess.run(["tools/ofs", "reality-break-build", "REALITY_SRC=" + TMP],
-                               capture_output=True, text=True)
-        if build.returncode != 0:
-            print("%-20s does not build:\n%s" % (name, build.stderr[-2000:]))
-            results.append((name, "unbuilt"))
-            continue
-        run = subprocess.run(["wine", "realitydiff.exe", str(N)], cwd="bin/difftest",
-                             capture_output=True, text=True,
-                             env=dict(os.environ, WINEDEBUG="-all"))
-        last = [l for l in run.stdout.splitlines() if l.startswith("realitydiff:")]
-        # only a finished comparison that reports differences is a catch: a crash, a load failure
-        # or a harness guard (exit 2-6) is not, as main_breaks.py learnt from 27 hidden misses
-        caught = (run.returncode == 1 and bool(last) and re.search(r" [1-9][0-9]* differ$", last[-1]) is not None)
-        crashed = not caught and run.returncode != 0
-        verdict = ("caught" if caught else "CRASHED (exit %d)" % run.returncode if crashed
-                   else "equivalent" if len(entry) > 3 else "MISSED")
-        print("%-20s %s  %s%s" % (name, verdict, last[0] if last else run.stdout.strip()[-200:],
-                                  "  (" + entry[3] + ")" if len(entry) > 3 and not caught else ""))
-        results.append((name, verdict.lower()))
-        sys.stdout.flush()
+    try:
+        for entry in BREAKS:
+            name, old, new = entry[:3]
+            if ONLY and name not in ONLY:
+                continue
+            if source.count(old) != 1:
+                print("%-20s cannot apply: %d matches" % (name, source.count(old)))
+                results.append((name, "unapplied"))
+                continue
+            open(TMP, "w").write(source.replace(old, new))
+            if os.path.exists("bin/difftest/REALITY_ours.dll"):
+                os.remove("bin/difftest/REALITY_ours.dll")
+            build = subprocess.run(["tools/ofs", "reality-break-build", "REALITY_SRC=" + TMP],
+                                   capture_output=True, text=True)
+            if build.returncode != 0:
+                print("%-20s does not build:\n%s" % (name, build.stderr[-2000:]))
+                results.append((name, "unbuilt"))
+                continue
+            if BUILD_ONLY:
+                d = os.path.join(BUILD_ONLY, name)
+                os.makedirs(d, exist_ok=True)
+                shutil.copy("bin/difftest/REALITY_ours.dll", os.path.join(d, "mutant.dll"))
+                json.dump({"name": name, "equivalent": len(entry) > 3, "why": entry[3] if len(entry) > 3 else ""},
+                          open(os.path.join(d, "meta.json"), "w"), sort_keys=True)
+                results.append((name, "built"))
+                continue
+            run = subprocess.run(["wine", "realitydiff.exe", str(N)], cwd="bin/difftest",
+                                 capture_output=True, text=True,
+                                 env=dict(os.environ, WINEDEBUG="-all"))
+            last = [l for l in run.stdout.splitlines() if l.startswith("realitydiff:")]
+            # only a finished comparison that reports differences is a catch: a crash, a load failure
+            # or a harness guard (exit 2-6) is not, as main_breaks.py learnt from 27 hidden misses
+            caught = (run.returncode == 1 and bool(last) and re.search(r" [1-9][0-9]* differ$", last[-1]) is not None)
+            crashed = not caught and run.returncode != 0
+            verdict = ("caught" if caught else "CRASHED (exit %d)" % run.returncode if crashed
+                       else "equivalent" if len(entry) > 3 else "MISSED")
+            print("%-20s %s  %s%s" % (name, verdict, last[0] if last else run.stdout.strip()[-200:],
+                                      "  (" + entry[3] + ")" if len(entry) > 3 and not caught else ""))
+            results.append((name, verdict.lower()))
+            sys.stdout.flush()
+    finally:                          # a mutant is never left installed, whatever failed
+        shutil.copy("bin/REALITY.DLL", "bin/difftest/REALITY_ours.dll")
+    if not results:
+        print("no case matches %s" % " ".join(ONLY))
+        return 1
+    if BUILD_ONLY:
+        bad = [n for n, r in results if r != "built"]
+        print("%d mutants built into %s; not built: %s" % (len(results), BUILD_ONLY, " ".join(bad) or "none"))
+        return 1 if bad else 0
     subprocess.run(["tools/ofs", "realitydiff"], check=True)
     missed = [n for n, r in results if r not in ("caught", "equivalent")]
     same = [n for n, r in results if r == "equivalent"]

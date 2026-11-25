@@ -28,7 +28,7 @@ _Static_assert(sizeof(FS98_WCHAR) == 2, "FS98_WCHAR is 16-bit");
 #endif
 #define FS98_STDCALL FS98_ABI_STDCALL_
 
-/* RETAIL-ONLY, TRANSITIONAL (the Story 1.7 bridge, removed with it by Story 1.8's fs98_call): read an
+/* RETAIL-ONLY, TRANSITIONAL (the Story 1.7 bridge, removed with it in its own story, deferred-work.md): read an
  * `fs98_addr` field as the native pointer it holds on win32-retail.  The load is pointer-typed, which keeps the
  * code gcc generates for the pointer fields this replaced byte-identical. */
 #if defined(_WIN32) && defined(__i386__)

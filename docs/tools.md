@@ -326,6 +326,7 @@ o=$(mktemp -d -u) && REFERENCES_OUT=$o tools/ofs references CASES="global/STGEOR
 tools/ofs smoke               # every module of tools/modules.txt installed (tools/ofs ofs_install) -> 27/27 modules (the 27 of Modules\; a leftover OFSTEST.DLL makes it 28/28), 95 gauges, PASS
 tools/ofs util-trace          # which UTIL services the game calls, counted in-game
 tools/check_module_flags.sh   # every gcc invocation takes OFS_MODULE_FLAGS (Story 1.3) -> PASS, prints "every site takes OFS_MODULE_FLAGS"
+python3 -B tools/check_arena.py   # Story 1.8 (AD-15; also runs on every cmake --build): no (uint32_t)(uintptr_t) cast or #define of arena.h's names in src/ beyond tools/arena_lint_allowed.txt, whose rows may only shrink (also vs HEAD, or `--prior FILE`); `--inventory` prints the rows and the reverse-cast count, `--self-test` runs the matrix -> arena lint: 65 files allowlisted, 472 casts, 71 defines left (reverse casts: 52); self-test 30 cases
 python3 -B tools/check_abi_headers.py   # Story 1.7: one FS98_STDCALL (abi.h), no pointer/long/size_t/wchar_t/bitfield/long double in the four ABI headers, and the headers with their _Static_asserts compile on mingw i686, gcc -m32 and gcc; `--self-test` runs failing fixtures for each -> both PASS
 ```
 

@@ -22,16 +22,19 @@ ALLOW = "tools/arena_lint_allowed.txt"
 EXT = (".c", ".h", ".inc", ".S")
 EXEMPT = "src/platform/arena/"
 NAMES = "M8 M16 M32 MF MD R8 R16 R32 RF RDB DA D RDATA fs98_ptr fs98_handle fs98_call".split()
-CAST = re.compile(r"\(\s*uint32_t\s*\)\s*\(\s*uintptr_t\s*\)")
-REVERSE = re.compile(r"\(\s*uintptr_t\s*\)\s*\(\s*uint32_t\s*\)")
-DEFINE = re.compile(r"^[ \t]*#[ \t]*define[ \t]+(%s)(?![A-Za-z0-9_])" % "|".join(NAMES), re.M)
+# \x01 stands for a newline inside a block comment (see clean): whitespace, as for cpp, but still a line
+W = r"[\s\x01]*"
+CAST = re.compile(r"\(%suint32_t%s\)%s\(%suintptr_t%s\)" % ((W,) * 5))
+REVERSE = re.compile(r"\(%suintptr_t%s\)%s\(%suint32_t%s\)" % ((W,) * 5))
+B = r"[ \t\f\v\x01]"            # blank within a directive
+DEFINE = re.compile(r"^%s*(?P<hash>#|%%:)%s*define%s+(?P<name>%s)(?![A-Za-z0-9_$])" % (B, B, B, "|".join(NAMES)), re.M)
 
 
 def clean(text):
     """Splices joined; comments, strings and character literals blanked (newlines kept).
     Returns the cleaned text and a function from an offset in it to a physical line."""
     parts, splices, pos, total = [], [], 0, 0
-    for m in re.finditer(r"\\\r?\n", text):          # join line splices, remembering where
+    for m in re.finditer(r"\\[ \t]*\r?\n", text):          # join line splices, remembering where
         parts.append(text[pos:m.start()])
         total += m.start() - pos
         splices.append(total)
@@ -44,7 +47,7 @@ def clean(text):
         if t.startswith("/*", i):
             e = t.find("*/", i + 2)
             e = n if e < 0 else e + 2
-            res.append(re.sub(r"[^\n]", " ", t[i:e]))
+            res.append(re.sub(r"[^\n]", " ", t[i:e]).replace("\n", "\x01"))
             i = e
         elif t.startswith("//", i):
             e = t.find("\n", i)
@@ -65,7 +68,7 @@ def clean(text):
             res.append(c)
             i += 1
     cl = "".join(res)
-    nls = [m.start() for m in re.finditer("\n", cl)]
+    nls = [m.start() for m in re.finditer("[\n\x01]", cl)]
 
     def line(off):
         return 1 + bisect.bisect_left(nls, off) + bisect.bisect_right(splices, off)  # a splice before it adds a line
@@ -76,7 +79,7 @@ def scan_file(path):
     text = open(path, encoding="latin-1", newline="").read()
     cl, line = clean(text)
     return ([line(m.start()) for m in CAST.finditer(cl)],
-            [(line(m.start()), m.group(1)) for m in DEFINE.finditer(cl)],
+            [(line(m.start("hash")), m.group("name")) for m in DEFINE.finditer(cl)],
             len(REVERSE.findall(cl)))
 
 
@@ -212,6 +215,31 @@ def main(argv):
     return run(root, prior, inventory=bool(a))
 
 
+def git_case(fails):
+    """HEAD's allowlist, with no --prior, in a temporary git repository: a row raised since HEAD fails."""
+    import io
+    import contextlib
+    d = tempfile.mkdtemp(prefix="arena_lint_git_")
+    c1 = "int a = (uint32_t)(uintptr_t)p;\n"
+    os.makedirs(os.path.join(d, "src/a"))
+    os.makedirs(os.path.join(d, "tools"))
+    open(os.path.join(d, "src/a/a.c"), "w").write(c1)
+    open(os.path.join(d, ALLOW), "w").write("src/a/a.c 1 0\n")
+    env = dict(os.environ, GIT_AUTHOR_NAME="t", GIT_AUTHOR_EMAIL="t@t", GIT_COMMITTER_NAME="t", GIT_COMMITTER_EMAIL="t@t")
+    for cmd in (["init", "-q"], ["add", "."], ["commit", "-q", "-m", "x"]):
+        r = subprocess.run(["git", "-C", d] + cmd, capture_output=True, env=env)
+        if r.returncode:
+            fails.append("git case: git %s failed" % cmd[0])
+            return
+    open(os.path.join(d, "src/a/a.c"), "w").write(c1 + c1)
+    open(os.path.join(d, ALLOW), "w").write("src/a/a.c 2 0\n")
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf):
+        got = main(["--root", d])
+    if got != 1 or "is above HEAD's allowlist" not in buf.getvalue():
+        fails.append("git HEAD lookup: exit %s\n%s" % (got, buf.getvalue()))
+
+
 def self_test():
     cases = 0
     fails = []
@@ -234,7 +262,7 @@ def self_test():
         with contextlib.redirect_stdout(buf):
             got = main(["--root", d] + (["--prior", prior_file(prior)] if prior is not None else []))
         txt = buf.getvalue()
-        ok = got == code and all(w in txt for w in want) and not any(w in txt for w in no)
+        ok = got == code and all(txt.count(w[0]) == w[1] if isinstance(w, tuple) else w in txt for w in want) and not any(w in txt for w in no)
         if not ok:
             fails.append("%s: exit %s (want %s)\n%s" % (name, got, code, txt))
 
@@ -249,12 +277,19 @@ def self_test():
     case("new cast, unlisted", {"src/a/a.c": c1}, "", 1, ["src/a/a.c:1: banned (uint32_t)(uintptr_t) cast"])
     case("new cast, listed file", {"src/a/a.c": c1 + "\n" + c1}, "src/a/a.c 1 0\n", 1, ["src/a/a.c: 2 banned casts"])
     case("several to a line", {"src/a/a.c": "x = (uint32_t)(uintptr_t)a + (uint32_t) ( uintptr_t ) b;\n"}, "", 1,
-         ["a.c:1:"])
+         [("a.c:1: banned", 2)])
     case("cast in .S", {"src/a/a.S": "/* x */\n  .long (uint32_t)(uintptr_t) 0\n"}, "", 1, ["src/a/a.S:2:"])
     case("cast across a newline", {"src/a/a.c": "(uint32_t)\n(uintptr_t) p\n"}, "", 1, ["a.c:1:"])
     for nm, src in (("define", "#define M32(a) x\n"), ("spaced", "# define D x\n"), ("comment form", "#define/**/D x\n"),
                     ("split", "#define \\\n  RDATA x\n"), ("indented", "  #  define fs98_ptr(a) a\n")):
         case("new definition: " + nm, {"src/a/a.h": src}, "", 1, ["banned #define of"])
+    case("directive spanning a comment", {"src/a/a.h": "#define /* x\n y */ M32 1\n#define M8 2\n"}, "", 1,
+         [("a.h:1: banned #define of M32", 1), ("a.h:3: banned #define of M8", 1)])
+    case("form feed and vertical tab", {"src/a/a.h": "#\fdefine\vM32 1\n"}, "", 1, ["a.h:1: banned #define of M32"])
+    case("digraph", {"src/a/a.h": "%:define M32 1\n  %: define RF 1\n"}, "", 1, ["a.h:1:", "a.h:2:"])
+    case("dollar identifier", {"src/a/a.h": "#define M32$local 1\n#define D$ 1\n"}, "", 0, ["0 defines"])
+    case("splice with trailing blanks", {"src/a/a.h": "#define A \\ \t\n  1\n#define \\  \n  M16 x\n"}, "", 1, ["a.h:3: banned #define of M16"])
+    case("line of the hash", {"src/a/a.h": "\n\n   \t  #define D 1\n"}, "", 1, ["a.h:3: banned #define of D"])
     case("split line number", {"src/a/a.c": "#define A \\\n  1\n#define M8(a) x\n"}, "", 1, ["a.c:3:"])
     case("not a site: comment", {"src/a/a.c": "/* (uint32_t)(uintptr_t) #define M32 */\n// (uint32_t)(uintptr_t)\n"}, "", 0, ["0 casts"])
     case("not a site: string", {"src/a/a.c": 'char *s = "(uint32_t)(uintptr_t)"; char c = \'"\';\n'
@@ -276,6 +311,8 @@ def self_test():
     case("reverse cast", {"src/a/a.c": "x = (uintptr_t)(uint32_t)a;\n"}, "", 0, ["(reverse casts: 1)"])
     case("no git", {"src/a/a.c": c1}, "src/a/a.c 1 0\n", 0, ["checked only the working tree"])
     case("missing allowlist", {"src/a/a.c": c1}, None, 1, ["is missing"])
+    git_case(fails)
+    cases += 1
     if fails:
         sys.stdout.write("\n".join(fails) + "\narena lint self-test: FAILED %d of %d\n" % (len(fails), cases))
         return 1

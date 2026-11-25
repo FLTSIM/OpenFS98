@@ -18,6 +18,11 @@ foreach(p IN ITEMS WORLD_SOURCES SIMSUI_SOURCES SIMSUI_OBJECTS)
   string(JOIN " " OFS_${p}_TEXT ${OFS_${p}})
 endforeach()
 
+# The AD-15 lint (Story 1.8): a target with no output, so it runs on every build, even an up-to-date tree. Every
+# output-producing custom command below names it in DEPENDS, so no module recipe starts before it passes.
+add_custom_target(ofs_arena_lint COMMAND python3 -B tools/check_arena.py
+  WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}" USES_TERMINAL VERBATIM)
+
 function(ofs_step group)
   cmake_parse_arguments(S "" "" "OUTPUTS;COMMANDS;DEPENDS_GLOB" ${ARGN})
   set(deps "${CMAKE_SOURCE_DIR}/cmake/toolchains/win32-retail.cmake")  # a flag change rebuilds every step
@@ -64,7 +69,7 @@ function(ofs_step group)
     list(APPEND deps ${gs})
   endforeach()
   list(REMOVE_DUPLICATES deps)
-  add_custom_command(OUTPUT ${abs} ${cmds} WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}" DEPENDS ${deps} VERBATIM)
+  add_custom_command(OUTPUT ${abs} ${cmds} WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}" DEPENDS ${deps} ofs_arena_lint VERBATIM)
   # Order by target, not by file: a step runs after the one before it (they share generated files),
   # but an edit to one module does not make every later step look out of date.
   list(LENGTH OFS_${group}_OUTPUTS n)
@@ -92,6 +97,7 @@ function(ofs_target name)
   else()
     add_custom_target(${name})  # a make target that only built things: the dependencies are the work
   endif()
+  add_dependencies(${name} ofs_arena_lint)  # command targets too: a lint failure stops them before any compile
   if(T_DEPENDS)
     add_dependencies(${name} ${T_DEPENDS})
   endif()

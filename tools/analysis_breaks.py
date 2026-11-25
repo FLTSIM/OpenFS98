@@ -10,14 +10,21 @@ any differ).  At the end the real build goes back.  A missed break is a gap
 in the harness or an equivalence; either way it is reported, and
 docs/modules/analysis.md says which.
 
-Usage: tools/analysis_breaks.py [N] [name...]      (from the repository root,
+Usage: tools/analysis_breaks.py [N] [name...] [--build-only DIR]      (from the repository root,
        after tools/ofs analysisdiff)
 """
 import os
 import re
+import json
+import shutil
 import subprocess
 import sys
 
+BUILD_ONLY = None                     # --build-only DIR: build every case's mutant DLL, keep it under DIR/<case>, run nothing
+if "--build-only" in sys.argv:
+    i = sys.argv.index("--build-only")
+    BUILD_ONLY = sys.argv[i + 1]
+    del sys.argv[i:i + 2]
 N = int(sys.argv[1]) if len(sys.argv) > 1 and sys.argv[1].isdigit() else 2000
 ONLY = [a for a in sys.argv[1:] if not a.isdigit()]
 SRC = "src/analysis/analysis.c"
@@ -131,19 +138,19 @@ BREAKS = [
     ("extents-flag", "        M32(S_UNSIGNED) = 0;\n        M32(S_LONA + 4) = M32(p + 0xc);",
      "        M32(S_LONA + 4) = M32(p + 0xc);"),
     ("extents-twice", "        get_position(esi - 1, q);", "        get_position(esi, q);"),
-    ("compute-fst", "    MD(S_MIDLAT) = (double)(t * (long double)RD(0x00) + (long double)MD(b + 8));",
-     "    MD(S_MIDLAT) = (double)((long double)MD(S_LATSPAN) * (long double)RD(0x00) + (long double)MD(b + 8));",
+    ("compute-fst", "    MD(S_MIDLAT) = (double)(t * (long double)AN_RD(0x00) + (long double)MD(b + 8));",
+     "    MD(S_MIDLAT) = (double)((long double)MD(S_LATSPAN) * (long double)AN_RD(0x00) + (long double)MD(b + 8));",
      "two 32.16 values differ by at most 49 bits: the register's value is a double already"),
     ("compute-unsigned", "    if (M32(S_UNSIGNED) == 1) {\n        UTIL_C0(S_LONSPAN, S_LONA);",
      "    if (M32(S_UNSIGNED) == 2) {\n        UTIL_C0(S_LONSPAN, S_LONA);"),
-    ("scale-compare", "    if (a > (long double)MD(ADDR(q))) {", "    if (a >= (long double)MD(ADDR(q))) {",
+    ("scale-compare", "    if (a > (long double)MD(fs98_handle(q))) {", "    if (a >= (long double)MD(fs98_handle(q))) {",
      "at equality a is the double both branches use"),
     ("scale-extended", "        m = a;\n    } else {", "        m = (long double)(double)a;\n    } else {"),
-    ("scale-low", "    M32(ADDR(q)) = (uint32_t)e;", "    MD(ADDR(q)) = (double)e;"),
+    ("scale-low", "    M32(fs98_handle(q)) = (uint32_t)e;", "    MD(fs98_handle(q)) = (double)e;"),
     ("scale-flag", "    M32(S_MBLOCK + 0x10) = 1;\n", ""),
-    ("mpoint-order", "    y = y - (long double)RD(0x38);", "    y = (long double)RD(0x38) - y;"),
-    ("mpoint-double", "    MD(b + 0x20) = (double)((long double)(int32_t)W * (long double)RD(0x28));",
-     "    MD(b + 0x20) = (double)((long double)W * (long double)RD(0x28));"),
+    ("mpoint-order", "    y = y - (long double)AN_RD(0x38);", "    y = (long double)AN_RD(0x38) - y;"),
+    ("mpoint-double", "    MD(b + 0x20) = (double)((long double)(int32_t)W * (long double)AN_RD(0x28));",
+     "    MD(b + 0x20) = (double)((long double)W * (long double)AN_RD(0x28));"),
     ("mcurve-drawn", "    if (M32(S_DRAWN) != 1 || M32(S_MCOUNT) == 0)", "    if (M32(S_MCOUNT) == 0)",
      "+0x170 is 1 in the image and only ever set to 1"),
     ("mgrid-ticks", "    for (esi = 0x1630; esi <= 0x9b50; esi += 0x1630)", "    for (esi = 0x1630; esi < 0x9b50; esi += 0x1630)"),
@@ -177,37 +184,55 @@ BREAKS = [
 def main():
     source = open(SRC).read()
     results = []
-    for entry in BREAKS:
-        name, old, new = entry[:3]
-        if ONLY and name not in ONLY:
-            continue
-        if source.count(old) != 1:
-            print("%-20s cannot apply: %d matches" % (name, source.count(old)))
-            results.append((name, "unapplied"))
-            continue
-        open(TMP, "w").write(source.replace(old, new))
-        if os.path.exists("bin/difftest/ANALYSIS_ours.dll"):
-            os.remove("bin/difftest/ANALYSIS_ours.dll")
-        build = subprocess.run(["tools/ofs", "analysis-break-build", "ANALYSIS_SRC=" + TMP],
-                               capture_output=True, text=True)
-        if build.returncode != 0:
-            print("%-20s does not build:\n%s" % (name, build.stderr[-2000:]))
-            results.append((name, "unbuilt"))
-            continue
-        run = subprocess.run(["wine", "analysisdiff.exe", str(N)], cwd="bin/difftest",
-                             capture_output=True, text=True,
-                             env=dict(os.environ, WINEDEBUG="-all"))
-        last = [l for l in run.stdout.splitlines() if l.startswith("analysisdiff:")]
-        # only a finished comparison that reports differences is a catch: a crash, a load failure
-        # or a harness guard (exit 2-6) is not, as main_breaks.py learnt from 27 hidden misses
-        caught = (run.returncode == 1 and bool(last) and re.search(r" [1-9][0-9]* differ$", last[-1]) is not None)
-        crashed = not caught and run.returncode != 0
-        verdict = ("caught" if caught else "CRASHED (exit %d)" % run.returncode if crashed
-                   else "equivalent" if len(entry) > 3 else "MISSED")
-        print("%-20s %s  %s%s" % (name, verdict, last[0] if last else run.stdout.strip()[-200:],
-                                  "  (" + entry[3] + ")" if len(entry) > 3 and not caught else ""))
-        results.append((name, verdict.lower()))
-        sys.stdout.flush()
+    try:
+        for entry in BREAKS:
+            name, old, new = entry[:3]
+            if ONLY and name not in ONLY:
+                continue
+            if source.count(old) != 1:
+                print("%-20s cannot apply: %d matches" % (name, source.count(old)))
+                results.append((name, "unapplied"))
+                continue
+            open(TMP, "w").write(source.replace(old, new))
+            if os.path.exists("bin/difftest/ANALYSIS_ours.dll"):
+                os.remove("bin/difftest/ANALYSIS_ours.dll")
+            build = subprocess.run(["tools/ofs", "analysis-break-build", "ANALYSIS_SRC=" + TMP],
+                                   capture_output=True, text=True)
+            if build.returncode != 0:
+                print("%-20s does not build:\n%s" % (name, build.stderr[-2000:]))
+                results.append((name, "unbuilt"))
+                continue
+            if BUILD_ONLY:
+                d = os.path.join(BUILD_ONLY, name)
+                os.makedirs(d, exist_ok=True)
+                shutil.copy("bin/difftest/ANALYSIS_ours.dll", os.path.join(d, "mutant.dll"))
+                json.dump({"name": name, "equivalent": len(entry) > 3, "why": entry[3] if len(entry) > 3 else ""},
+                          open(os.path.join(d, "meta.json"), "w"), sort_keys=True)
+                results.append((name, "built"))
+                continue
+            run = subprocess.run(["wine", "analysisdiff.exe", str(N)], cwd="bin/difftest",
+                                 capture_output=True, text=True,
+                                 env=dict(os.environ, WINEDEBUG="-all"))
+            last = [l for l in run.stdout.splitlines() if l.startswith("analysisdiff:")]
+            # only a finished comparison that reports differences is a catch: a crash, a load failure
+            # or a harness guard (exit 2-6) is not, as main_breaks.py learnt from 27 hidden misses
+            caught = (run.returncode == 1 and bool(last) and re.search(r" [1-9][0-9]* differ$", last[-1]) is not None)
+            crashed = not caught and run.returncode != 0
+            verdict = ("caught" if caught else "CRASHED (exit %d)" % run.returncode if crashed
+                       else "equivalent" if len(entry) > 3 else "MISSED")
+            print("%-20s %s  %s%s" % (name, verdict, last[0] if last else run.stdout.strip()[-200:],
+                                      "  (" + entry[3] + ")" if len(entry) > 3 and not caught else ""))
+            results.append((name, verdict.lower()))
+            sys.stdout.flush()
+    finally:                          # a mutant is never left installed, whatever failed
+        shutil.copy("bin/ANALYSIS.DLL", "bin/difftest/ANALYSIS_ours.dll")
+    if not results:
+        print("no case matches %s" % " ".join(ONLY))
+        return 1
+    if BUILD_ONLY:
+        bad = [n for n, r in results if r != "built"]
+        print("%d mutants built into %s; not built: %s" % (len(results), BUILD_ONLY, " ".join(bad) or "none"))
+        return 1 if bad else 0
     subprocess.run(["tools/ofs", "analysisdiff"], check=True)
     missed = [n for n, r in results if r not in ("caught", "equivalent")]
     same = [n for n, r in results if r == "equivalent"]

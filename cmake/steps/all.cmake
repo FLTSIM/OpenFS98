@@ -103,6 +103,7 @@ ofs_step(all
 
 ofs_step(all
   OUTPUTS bin/FE.DLL
+  DEPENDS_FILES src/fe/fe_library.c
   COMMANDS
     [==[mkdir -p bin]==]
     [==[i686-w64-mingw32-windres src/fe/fe.rc -O coff -o bin/fe.res]==]
@@ -410,7 +411,7 @@ endif()
 string(STRIP "${OFS_GAUGE_PAIRS}" OFS_GAUGE_PAIRS)
 
 ofs_step(all
-  OUTPUTS bin/gauges-all/built.stamp
+  OUTPUTS bin/gauges-all/built.stamp bin/gauges-all/all_gauges.inc bin/gauges-all/all_panels.inc
   DEPENDS_GLOB src/gauges/*.c src/gauges/*.h include/fs98/arena.h include/fs98/abi.h src/gauges/images/* src/gauges/gauges_manifest.json tools/data_images.txt orig/Gauges/*.GAU docs/setup_map.tsv
   COMMANDS
     [==[python3 -B tools/gen_gauges.py]==]

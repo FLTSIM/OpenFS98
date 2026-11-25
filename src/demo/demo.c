@@ -422,8 +422,8 @@ static void record_flush(void)
 
 /* .text+0x121d -- under 4K free: say so once ("disk full", or while starting
  * "not enough room to record").  Retail ignores the free-space call's
- * result, and its outputs are uninitialised if it fails; here they start
- * at 0. */
+ * result; the host (+0x150) zeroes both output words before the call, so a
+ * failure leaves them 0, as here. */
 static void disk_check(void)
 {
     uint32_t space[2] = { 0, 0 };

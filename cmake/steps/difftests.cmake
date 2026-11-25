@@ -32,6 +32,7 @@ ofs_step(difftests
 
 ofs_step(difftests
   OUTPUTS bin/difftest/advdrvdiff.exe
+  DEPENDS_FILES src/advdrv/advdrv_relocs.inc
   COMMANDS
     [==[mkdir -p bin/difftest]==]
     [==[i686-w64-mingw32-gcc @MODULE_FLAGS@ -std=c99 -O1 -Wall -Wextra -o bin/difftest/advdrvdiff.exe tools/difftest/advdrvdiff.c]==]
@@ -257,12 +258,14 @@ ofs_step(difftests
 
 ofs_step(difftests
   OUTPUTS bin/gauges-all/allgaugesdiff.exe
+  DEPENDS_FILES bin/gauges-all/all_gauges.inc
   COMMANDS
     [==[i686-w64-mingw32-gcc @MODULE_FLAGS@ -std=gnu99 -O2 -Wall -Wextra -Werror -Ibin/gauges-all -o bin/gauges-all/allgaugesdiff.exe tools/difftest/allgaugesdiff.c]==]
   )
 
 ofs_step(difftests
   OUTPUTS bin/gauges-all/allpaneldiff.exe
+  DEPENDS_FILES bin/gauges-all/all_panels.inc
   COMMANDS
     [==[i686-w64-mingw32-gcc @MODULE_FLAGS@ -std=gnu99 -O1 -Wall -Wextra -DGAUGES_DIFF -DGAUGES_ALL_DIFF -DGAME_DIR='"..\\..\\game"' -Ibin/gauges-all -o bin/gauges-all/allpaneldiff.exe tools/difftest/panelsdiff.c -lgdi32 -luser32]==]
   )

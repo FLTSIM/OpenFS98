@@ -2,7 +2,7 @@
 title: 'Cleanup 1: build-dependency gaps, three retail-bug ids, a committed PE normalizer'
 type: 'chore'
 created: '2026-11-25'
-status: 'in-progress'
+status: 'done'
 route: 'dispatch'
 baseline_commit: '0f8e49e12f345913116964b6aead145e6b8c520d'
 review_loop_iteration: 0
@@ -119,11 +119,11 @@ context: ['{project-root}/OpenFS98/AGENTS.md']
 ## Tasks & Acceptance
 
 **Execution:**
-- [ ] `~/source/OpenFS98-cl1` -- a worktree off HEAD, with `orig/` and this spec copied in.
-- [ ] `cmake/OpenFS98.cmake`, `cmake/steps/{all,difftests}.cmake` -- (A).
-- [ ] `docs/retail-bugs.md`, `src/weatherm/weatherm.c`, `docs/modules/weatherm.md`, `src/demo/demo.c` (comment) -- (B).
-- [ ] `tools/norm_pe.py`, `docs/tools.md` -- (C).
-- [ ] The proofs; `deferred-work.md` (the eight entries RESOLVED); this spec's `## Implementation Notes`.
+- [x] `~/source/OpenFS98-cl1` -- a worktree off HEAD, with `orig/` and this spec copied in.
+- [x] `cmake/OpenFS98.cmake`, `cmake/steps/{all,difftests}.cmake` -- (A).
+- [x] `docs/retail-bugs.md`, `src/weatherm/weatherm.c`, `docs/modules/weatherm.md`, `src/demo/demo.c` (comment) -- (B).
+- [x] `tools/norm_pe.py`, `docs/tools.md` -- (C).
+- [x] The proofs; `deferred-work.md` (the eight entries RESOLVED); this spec's `## Implementation Notes`.
 
 **Acceptance Criteria:**
 - **(A):** given the proof runs, each touched input reruns exactly its listed recipes, and the bad-hash case fails the build.
@@ -165,3 +165,44 @@ Second round (Codex gpt-6.2-sol, 2026-11-25), on the revision:
 | R4 | A scratch manifest copy has no effect | medium | The worktree's own manifest is mutated, then restored; the mismatch diagnostic is required. |
 | R5 | WXM sites and the WXM-11 trigger | medium | Sites corrected; "immediately following"; the existing wording fixed. |
 | R6 | The 334 and 335 counts | low | Both stated. |
+
+Code review (three Codex gpt-6.2-sol layers, 2026-11-25; B blind, E edge-case, V verification-gap):
+
+| # | Finding | Verdict | Evidence / action |
+|---|---|---|---|
+| V3 | The Baselines row runs the literal `FILE...` | high | `cmake_verify --only norm_pe` selects it and records FAIL. Patch: the Baselines line runs `--self-test`. |
+| V2 | The CLI multi-file loop is untested | medium | A `break` after the first bad file passes the self-test. Patch: a mixed-input CLI case. |
+| E1/E2 | `DEPENDS_GLOB` drops a dependency when the file is removed | low | Real, trivial fix. Patch: `DEPENDS_FILES`. |
+| B6 | The FE closeout still says FE_sl_ours.dll goes stale | low | Patch (doc). |
+| B7 | The DEMO closeout's evidence still asks for DEMO-12 | low | Patch (doc). |
+| V1 | No recurring check of the new rebuild edges | medium | Real, but the fix is a new test harness. Deferred. |
+| B1/E3, B2/E4, B4/E5 | The normaliser trusts NumberOfRvaAndSizes, virtual-tail export RVAs and the symbol pointer | low | Rejected: the frozen intent requires exactly the gate's algorithm, and these only matter for malformed PEs the toolchain never emits. |
+| B3 | A file truncated inside a section still hashes | false | Truncation changes the bytes hashed, so it masks nothing. |
+| B5 | The diff omits the spec file | false | Excluded from the review diff on purpose; the spec merges from the main tree. |
+| B8 | No harness vectors for WXM-11 | low | Rejected: the effect lists are suspected unused (WXM-8). |
+| E6 | `--` is not handled as the end of options | low | Rejected: no artifact name starts with `--`. |
+
+## Implementation Notes
+
+Worktree `~/source/OpenFS98-cl1` (detached at the baseline). Logs in `~/openfs98-verify/cl1` (`proof.log`, `compare.out`).
+
+- **(A)** `ofs_step` gains `DEPENDS_FILES` (unconditional source-root-relative files, for another step's outputs) and adds `tools/data_images.txt` to any step whose command mentions `tools/check_data_image.py`. The gauges step now declares `all_gauges.inc` and `all_panels.inc` as outputs; `allgaugesdiff.exe` and `allpaneldiff.exe` use `DEPENDS_FILES` on them; `advdrvdiff.exe` and `FE.DLL` use `DEPENDS_GLOB`. The header comment at `OpenFS98.cmake:4-5` is updated.
+- **(A) Proof**, recipes rerun (`cmake --build`, then `--target difftests`; a second build after each case ran only the lint):
+  - touch `tools/data_images.txt`: reconfigure; the 28 single-pair `--hash` recipes (ACONTAIN ... WINMSG, SIMSUI, SIM1, OPENFS98.EXE), the gauges step, the MDL step; then `allgaugesdiff.exe`, `allpaneldiff.exe`.
+  - touch `advdrv_relocs.inc`: `ADVDRV.DLL`, `advdrvdiff.exe`.
+  - touch `fe_library.c`: `FE.DLL`.
+  - touch one `src/gauges/*.c`: the gauges step, then both harnesses.
+  - delete `all_panels.inc`: the gauges step (rewrites both), then both harnesses.
+  - `rm -rf bin/gauges-all`: gauges step, both harnesses, rc 0.
+  - wrong `sha256=` on the WINMSG row: build failed in WINMSG's step with "our .data image ... differs from the manifest" (not a configure error); line restored.
+- **(B)** WXM-9/10/11 added to `docs/retail-bugs.md` with markers at the listed sites in `weatherm.c`; `weatherm.md` names them and states the exact WXM-11 trigger. `disk_check`'s comment corrected; no DEMO id. `check_retail_bugs.py`: 334 entries, 326 marked. `docs/tools.md` count updated.
+- **(B) identity gate**: `build_side.sh` for baseline and after at `~/openfs98-verify/cl1/root`, then `compare.py` without `--require-set`: artifacts 1129/1129, PEs 320, objects 206, replayed units 522, `GATE PASS`. `compare.py` insists on `after/lint-prior.log`, which `build_side.sh` only writes when given a prior inventory, so the first compare reported only that; I ran `check_arena.py --prior <baseline's tools/arena_lint_allowed.txt>` in the after root, wrote the log, and compare passed.
+- **(C)** `tools/norm_pe.py` (both modes, `--self-test` passes with digests pinned from the reference scripts). Agreement over all 300 PEs in the worktree's built `bin/`: default equals `pehash_norm.py` and `pehash.py`'s per-file digests, `--peh2` equals `peh2-legacy.py`; `bin/SIM1.sim` gives `c12f2271...` / `21306e24...`. `docs/tools.md` has the row. One deliberate departure: an export-timestamp write that falls past EOF is skipped rather than growing the file (the reference scripts only ever see valid images).
+- **Paperwork**: nine `deferred-work.md` entries marked RESOLVED (the spec says eight; the three data_images entries at 87/159/203 plus advdrv, gauges headers, FE, WEATHERM, DEMO and the normaliser make nine).
+
+### Review fixes (2026-11-25)
+
+- `docs/tools.md`: the Baselines line is now `python3 -B tools/norm_pe.py --self-test`; the usage with `FILE...` is a table row. `tools/cmake_verify.py --only norm_pe --list` selects exactly the self-test (line 125).
+- `tools/norm_pe.py --self-test` adds a mixed CLI case, both modes: a bad first file then a valid one; it asserts the diagnostic names the bad file, the valid file's digest is printed in that mode's format, and the exit is 2.
+- `fe_library.c` and `advdrv_relocs.inc` use `DEPENDS_FILES` (the dependency survives deletion); the `OpenFS98.cmake` header comment says so. Re-ran the touch checks: `fe_library.c` reran only FE.DLL; `advdrv_relocs.inc` reran ADVDRV.DLL and advdrvdiff.exe; a second build after each ran only the lint.
+- `deferred-work.md`: the FE entry says only FE.DLL needed the edge; the DEMO evidence cites host `+0x150`; a new entry asks for a recurring incremental-build check.

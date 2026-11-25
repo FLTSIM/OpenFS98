@@ -1293,6 +1293,7 @@ static void *FS98_STDCALL wx_record_next(void *area, void *record, uint32_t type
         return NULL;
     if (record != NULL) {
         for (e = PPTR(record, 0); e != NULL; e = PPTR(e, 0))
+            /* RETAIL BUG (kept, suspected): WXM-9 -- the word type at +4 is compared as a dword. */
             if (type == 0 || type == P32(e, 4))
                 return e;
         return NULL;
@@ -1301,6 +1302,7 @@ static void *FS98_STDCALL wx_record_next(void *area, void *record, uint32_t type
     if (head == NULL)
         return NULL;
     for (e = *head; e != NULL; e = PPTR(e, 0))
+        /* RETAIL BUG (kept, suspected): WXM-9 -- the word type at +4 is compared as a dword. */
         if (type == P32(e, 4))
             return e;
     return NULL;
@@ -1390,6 +1392,7 @@ static void wx_record_copy(const void *src, void *dst)
     uint32_t size, i;
     void *next = PPTR(dst, 0);
 
+    /* RETAIL BUG (kept, suspected): WXM-9 -- the word type at +4 is dispatched as a dword. */
     switch (P32(src, 4)) {
     case 1: case 2: size = 0x14; break;
     case 3: case 4: case 5: size = 0xc; break;
@@ -1403,9 +1406,10 @@ static void wx_record_copy(const void *src, void *dst)
 
 /* .text+0x2e60 -- +0x50: free `record` from its type's list; or with no
  * record, every record of `type`; or with neither, every type.  A record
- * that is not in the list is freed anyway.  When freeing by type, the
- * previous pointer is lost after the first free that is not at the head, and
- * a second such free writes through null. */
+ * that is not in the list is freed anyway (RETAIL BUG (kept, suspected): WXM-10).  When freeing by type,
+ * the previous pointer is lost after a free that is not at the head; if the very next node also
+ * matches and is not the head, that free writes through null (WXM-11; a non-matching node between
+ * them restores it). */
 static uint32_t FS98_STDCALL wx_record_free(void *area, void *record, uint32_t type)
 {
     void **head, *first, *cur, *prev, *next;
@@ -1426,6 +1430,7 @@ static uint32_t FS98_STDCALL wx_record_free(void *area, void *record, uint32_t t
             if (cur != NULL)
                 PPTR(prev, 0) = wx_record_next(area, cur, 0);
         }
+        /* RETAIL BUG (kept, suspected): WXM-10 -- frees `record` even when it was not in the list. */
         wx_free(&record);
         return 0;
     }
@@ -1437,12 +1442,15 @@ static uint32_t FS98_STDCALL wx_record_free(void *area, void *record, uint32_t t
         prev = cur;
         while (cur != NULL) {
             next = wx_record_next(area, cur, 0);
+            /* RETAIL BUG (kept, suspected): WXM-9 -- the word type at +4 is compared as a dword. */
             if (P32(cur, 4) == type) {
                 if (cur == *head)
                     *head = next;
                 else
                     PPTR(prev, 0) = next;
-                wx_free(&cur);          /* nulls cur, so prev becomes null */
+                /* RETAIL BUG (kept, suspected): WXM-11 -- wx_free nulls cur, so prev becomes null; the
+                 * immediately following matching non-head node then writes through null. */
+                wx_free(&cur);
             }
             prev = cur;
             cur = next;
@@ -1534,6 +1542,7 @@ static int32_t FS98_STDCALL wx_area_remove(void *cell, void *area)
                 PPTR(prev, 0) = wx_area_next(cell, cur);
         }
         wx_record_free(area, NULL, 0);
+        /* RETAIL BUG (kept, suspected): WXM-10 -- frees `area` even when it was not in the list. */
         return wx_free(&area);
     }
     cur = first;

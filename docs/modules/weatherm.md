@@ -138,12 +138,14 @@ is non-zero), and then walks `next` pointers and list heads a fresh area never s
 only works if `malloc` happens to hand back zeroes. Transliterated anyway, with
 its own quirks:
 
-- Record types are words at `+4` but compared as the dword at `+4`. Types 4, 5
+- WXM-9: record types are words at `+4` but compared as the dword at `+4`
+  (the two walks, the copy-size dispatch and the free-by-type test). Types 4, 5
   and 6 are created with a non-zero word at `+6`, so no type-filtered walk ever
   finds them, and freeing or copying by type never touches them.
-- Freeing a record or area that is not in its list frees it anyway.
-- Freeing by type loses the previous pointer after the first free that is not
-  at the head. A second such free writes through null.
+- WXM-10: freeing a record or area that is not in its list frees it anyway.
+- WXM-11: freeing by type loses the previous pointer after a free that is not
+  at the head. The immediately following matching node, if it is not the head,
+  then writes through null; a non-matching node in between restores it.
 
 ## Testing
 

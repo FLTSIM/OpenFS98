@@ -2,7 +2,10 @@
 # One build step: its commands run in order, from the source root, under sh. Steps run in the Makefile's order. Re-run when a named input or a header in a named source directory
 # is newer, or a .inc/.h beside a named tools/ source. Since Story 1.4 every module's .inc files are committed C beside its
 # sources, so they are inputs too; the generators left read them or orig/ and write only into bin/. A .c that a named
-# source #includes is not globbed (src/fe/fe_library.c; docs/implementation/deferred-work.md).
+# source #includes is not globbed: name it with DEPENDS_FILES (src/fe/fe_library.c, src/advdrv/advdrv_relocs.inc), which
+# keeps the dependency if the file is removed (the build then fails instead of going stale). DEPENDS_FILES also names a
+# generated file under bin/ (the token scan ignores it), which must be another step's output.
+# Every step that runs tools/check_data_image.py depends on tools/data_images.txt.
 string(REPLACE ";" " " OFS_MODULE_FLAGS_TEXT "${OFS_MODULE_FLAGS}")
 
 # The World and SIMSUI unit lists live once, in src/<module>/sources.txt, which the break runners read too
@@ -24,7 +27,7 @@ add_custom_target(ofs_arena_lint COMMAND python3 -B tools/check_arena.py
   WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}" USES_TERMINAL VERBATIM)
 
 function(ofs_step group)
-  cmake_parse_arguments(S "" "" "OUTPUTS;COMMANDS;DEPENDS_GLOB" ${ARGN})
+  cmake_parse_arguments(S "" "" "OUTPUTS;COMMANDS;DEPENDS_GLOB;DEPENDS_FILES" ${ARGN})
   set(deps "${CMAKE_SOURCE_DIR}/cmake/toolchains/win32-retail.cmake")  # a flag change rebuilds every step
   set(dirs include/fs98)
   set(cmds "")
@@ -35,6 +38,9 @@ function(ofs_step group)
       string(REPLACE "@${p}@" "${OFS_${p}_TEXT}" c "${c}")  # before the token scan, so each unit is an input
     endforeach()
     list(APPEND cmds COMMAND sh -c "${c}")
+    if(c MATCHES "tools/check_data_image\\.py")
+      list(APPEND deps "${CMAKE_SOURCE_DIR}/tools/data_images.txt")
+    endif()
     string(REGEX MATCHALL "[A-Za-z0-9_./+-]+" toks "${c}")
     if(c MATCHES "^(PYTHONDONTWRITEBYTECODE=1 )?python3 ")
       # a generator names its outputs too: depend on its script and the orig/ file only
@@ -67,6 +73,10 @@ function(ofs_step group)
   foreach(g IN LISTS S_DEPENDS_GLOB)
     file(GLOB_RECURSE gs CONFIGURE_DEPENDS "${CMAKE_SOURCE_DIR}/${g}")
     list(APPEND deps ${gs})
+  endforeach()
+  # DEPENDS_FILES: source-root-relative files, unconditionally (a generated file may not exist yet: another step writes it)
+  foreach(f IN LISTS S_DEPENDS_FILES)
+    list(APPEND deps "${CMAKE_SOURCE_DIR}/${f}")
   endforeach()
   list(REMOVE_DUPLICATES deps)
   add_custom_command(OUTPUT ${abs} ${cmds} WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}" DEPENDS ${deps} ofs_arena_lint VERBATIM)

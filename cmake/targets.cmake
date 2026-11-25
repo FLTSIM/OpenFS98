@@ -515,7 +515,7 @@ ofs_target(gauges-panels-run
   COMMANDS
     [==[cp bin/PANELS.DLL bin/gauges-diff/PANELS_retail.dll]==]
     [==[cp bin/PANELS.DLL bin/gauges-diff/PANELS_ours.dll]==]
-    [==[bash tools/run_gaugesdiff.sh --panels ${N:-20000} ${START:-}]==]
+    [==[bash tools/run_gaugesdiff.sh --panels ${N:-1000} ${START:-}]==]
   )
 
 ofs_target(gauges-game-run

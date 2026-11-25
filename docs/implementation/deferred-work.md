@@ -65,8 +65,11 @@
   summary: Prove that each `cset=` slot is installed at attach (the symbol-per-slot check deferred from slice 6 now covers G3D's 22 and HG2D's 40 `cset=` slots).
   evidence: slice 14 code review; `cset=` proves only that the slot is zero in the image, so deleting its assignment in C passes.
 - source_spec: none
-  summary: Parallel verification, after slice 15. First, give the break runners a worker pool, each worker with its own frozen tree copy, build directory and `WINEPREFIX` (starting with `host-breaks` and `main-breaks`). Then add `cmake_verify.py -j N`, running independent Baselines lines at once, each in its own tree, prefix and Xvfb display. Move the remaining wine steps off the shared `~/.wine`.
-  evidence: Story 1.3's Baselines run (p13) took about 44 h serially on a 12-core, 78 GB machine with load around 1.8. Its longest steps are `host-breaks` (4.2 h), `options-breaks` (2.1 h), and three that hit the 2 h timeout (`main-breaks SUITE=situations`, `sim1r-breaks`, `g3d-breaks N=1000`). Docker is not needed: separate prefixes give the same isolation. Requested by the user on 2026-11-21.
+  summary: Parallel verification, what is left after verifier slots and `-j N` (the break runners' worker pool, `BREAK_JOBS`, exists too): the break runners should restore their mutation on SIGTERM, and each runner should mutate its own tree copy, never the tree it was started from. Runner work waits for slice 6b0, which edits the runners.
+  evidence: Story 1.3's Baselines run (p13) took about 44 h serially; the p13 leftover `sim1r-breaks` mutant (found 2026-11-21) is now stopped by `cmake_verify.py`'s tree guards (spec-cleanup-3b), but a runner killed at a timeout still leaves its mutant in a tree it was started from.
+- source_spec: `docs/implementation/spec-cleanup-3b-cmake-verify-tree-guards.md`
+  summary: `cmake_verify.py`'s `break_verdict` selects a break suite by `'breaks' in cmd`. Classify parsed target names and direct runner invocations (`tools/*_breaks.py`) instead, with a test that an unrelated command containing `breaks` (a path, an argument) is not one.
+  evidence: cleanup 2 and 3b spec reviews (Codex gpt-6.2-sol, 2026-11-25).
 - source_spec: `docs/implementation/spec-1-4o-main-data.md`
   summary: MAIN's `main_image.inc` types only the ImportTable, Linkage, month and season tables and the situation records by structure; the rest (menus, dialogs, strings and state, about 30 kB) is typed words marked "meaning not yet known". Describe them as the slices that read them settle their layout. The `tail=` window's retail-relocation allowance (the spec asked for none overlapping; retail's code there has 2,309) can tighten once the tail goes.
   evidence: slice 15 implementation.
@@ -84,10 +87,6 @@
 - source_spec: `docs/implementation/spec-1-4p-host-data.md`
   summary: Check whether `gen_host_resources.py` (which reads `orig/FLTSIM98.EXE` in the `OPENFS98.EXE` build step) gives the same resources from another pressing. Add a pin or a pressing-independent check if it doesn't.
   evidence: slice 16 code review. `gen_host_data.py` used to stop the build on any EXE but the reference; now only `host-rt-tables-check` and the image headers name the reference sha256.
-- source_spec: none
-  summary: A break runner killed by `cmake_verify.py`'s timeout leaves its mutation in the tree. The timeout uses `killpg(…, SIGKILL)`, so no cleanup runs. Story 1.3's p13 kept `sim1r-breaks`' `>=` mutant in `src/sim1/sim1_small.c:843`, and every later SIM1 build in p13 used it (`sim1rdiff-run`, `sim1native-flights` and both smoke runs). Fix it with the parallel-verification work: each break runner mutates its own tree copy, never the tree it was started from. Until then, `cmake_verify.py` should send SIGTERM and wait before SIGKILL, the runners should restore on SIGTERM, and the verifier should check the tree is unchanged after each break step.
-  evidence: found 2026-11-21 when re-running p13's `sim1rdiff-run`. It differed in `op_crash_count` (GLOBAL +0xb7c) because of the leftover mutant; the current tree gives 0 differ. Restoring the line in p13 was enough. `main`, `g3d`, `hg2d` and `controls` in p13 were clean.
-  review (cleanup 2 spec review, Codex gpt-6.2-sol, 2026-11-25): a leak must stop the run and block resuming; protected paths must be told apart from the expected `bin/` outputs; the break-line classification needs fixing; and `cmake_verify.py --self-test` currently raises `IndexError`.
 - source_spec: none
   summary: Story 1.4 slice 18d: `tools/gen_window_data.py` (WINDOW's .text tail for WIN-2) stays a `gen:` build step, as the user chose in slice 6, until WIN-2 is fixed at porting.
   evidence: split from slice 18 on 2026-11-22; revisit only with the user.

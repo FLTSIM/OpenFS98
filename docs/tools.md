@@ -110,7 +110,7 @@ the old Makefile (MAIN's `menu` and `aircraft` suites checked at the commits the
 the older, higher counts were crashes counted as catches. "Missed" means the harness reported 0 differ: a gap in
 what it compares.
 
-`python3 -B tools/cmake_verify.py build/win32-retail RESULTS [-j N] [--in-place] [--baselines FILE] [--clean-slots] [--only S] [--lines N,N] [--factor F] [--list]`
+`python3 -B tools/cmake_verify.py build/win32-retail RESULTS [-j N] [--in-place] [--baselines FILE] [--clean-slots] [--only S] [--lines N,N] [--factor F] [--list] [--clear-stop]`
 runs this block (168 lines) and records each as `RESULTS/NNN.json`/`.log`, with `report.md`. By default every line runs in a
 **slot**: a disposable copy of the tree it was started in (`RESULTS/slots/K`, outside the start tree), with its own `bin`,
 a copy of `game`, a self-contained copy of `~/.wine` (`WINEPREFIX`, `FS98_DIR` and `OFS_BUILD` point into it) and a
@@ -126,6 +126,27 @@ slot's game. After a line the processes the slot owns are stopped; a changed fil
 a `bin/` subdirectory of the start tree (run output) is not copied into a slot: a live `bin` is about 106 GB, and the
 required fixtures inside a skipped directory are still copied. `RESULTS/meta.json` ties the records to the Baselines list; another
 list is refused unless `--lines` names what to re-run. The tables and the disk use are in the script's docstring.
+**Tree guards.** One protected inventory serves both modes: `cmake`, `docs`, `include`, `src` and `tools` (content, symlink
+targets, untracked files) plus every top-level file and symlink such as `CMakeLists.txt`. Not protected, as run outputs, fixtures or
+too large: `bin/`, `build*/`, `game/`, `orig/`, `cd/`, `wineprefix/`, `.git/`. `--in-place` writes `RESULTS/GUARD.json` (atomically)
+before each line, empties the line's session after it (SIGKILL to survivors; a process that called `setsid` itself is not tracked),
+and checks the inventory: a change records the row as FAIL with `tree_changed`, stops the run (`stopped: line N changed the tree`) and
+leaves the marker `stopped`; a crash or interrupt mid-line leaves it `running`. Every later start of that results directory, in either
+mode, refuses unless the Baselines list is unchanged and the tree equals the marker's inventory (the refusal names the paths: restore
+them), then re-queues line N; `--clear-stop` goes on after a deliberate edit; `--lines` and `--only` neither bypass nor clear it. A new
+results directory starts clean. Slots also check the slot against its template after each reset and the start tree after each line
+(a write through a symlink); either stops the queue. Records and `meta.json` are written atomically; a truncated record or a `.json`
+without its `.log` is moved to `earlier/*.partial` and re-run. Each line runs with an inherited `UPDATE` dropped (`UPDATE=1` rewrites
+`tools/data_images.txt`; verification runs with it unset). `python3 -B tools/cmake_verify.py --self-test` runs the module's asserts. `GUARD.json` also holds the session of each running
+line (pid, boot id and the leader's starttime; every line starts behind a pipe gate released only after the guard holds it, so a verifier
+killed in between leaves a child that exits without running) and the lines it covers: a start first empties those sessions (SIGKILL; an
+unreadable `/proc` entry is never killed and refuses the start), so an orphan of a killed verifier cannot write after the check, and then moves
+every covered line's record aside. Once a start-tree change is recorded every line in flight stays in the guard. Slots keep a guard for the whole run (deleted only
+after the final start-tree check; every worker failure checks the start tree first); with `-j N` the check and the guard update run under
+the queue lock. A second verifier on one results directory is refused (`flock` on `RESULTS/.lock`), and RESULTS may not be the start
+tree or hold `cmake`, `docs`, `include`, `src` or `tools`. The inventory records a FIFO, socket or device as `special:<mode>` without opening it,
+and an unreadable subtree stops the run. Limits: a process that called `setsid` itself, a reused pid inside the scan's window, a zombie
+group leader with live threads and a crash with power loss (no directory fsync) are not covered.
 **Parallel break runners.** `host-breaks`, `g3d-breaks`, `options-breaks` and `sim1r-breaks` run their breaks on a worker pool
 when `BREAK_JOBS=N` is set (unset or 1: serial in the tree, exactly as before; `main-breaks` stays out, its suites are separate
 Baselines lines). `tools/break_pool.py` makes up to N workers (never more than there are breaks) under

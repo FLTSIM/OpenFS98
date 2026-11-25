@@ -36,10 +36,6 @@
 #define DEMO_IMPORTS    0x000
 #define DEMO_LINKAGE    0x050
 
-typedef volatile uint8_t  demo_v8;
-typedef volatile uint16_t __attribute__((may_alias)) demo_v16;
-typedef volatile uint32_t __attribute__((may_alias)) demo_v32;
-
 /* Retail's .data image at its offsets.  Gaps are zero at load, or hold pointers that
  * demo_install() writes (the Linkage code pointers, the reader and handler tables, the dialog
  * callbacks and six pointers into this image); meaning not yet known. */
@@ -91,10 +87,8 @@ _Static_assert(__builtin_offsetof(struct demo_image, flag_f05) == 0xf05, "flag_f
 
 extern struct demo_image demo_image;
 
-#define D       ((uint32_t)(uintptr_t)&demo_image)
-#define M8(a)   (*(demo_v8  *)(uintptr_t)(uint32_t)(a))
-#define M16(a)  (*(demo_v16 *)(uintptr_t)(uint32_t)(a))
-#define M32(a)  (*(demo_v32 *)(uintptr_t)(uint32_t)(a))
+#define FS98_DATA_IMAGE demo_image
+#include "fs98/arena.h"
 
 #define IMPORT(i)  M32(D + DEMO_IMPORTS + 8 * (i) + 4)
 #define HOST       IMPORT(0)
@@ -411,7 +405,7 @@ static void record_flush(void)
     if (M32(S_REC_FILE) != 0 && M32(S_BUF_FILL) != 0) {
         disk_check();
         demo_call4_edx(M32(HOST + 0x1b0), M32(S_REC_FILE), S_BUF, M32(S_BUF_FILL),
-                       (uint32_t)(uintptr_t)&wrote);
+                       fs98_handle(&wrote));
         edx = demo_callee_edx;
         ecx = M32(S_BUF_FILL);
         M32(S_BUF_FILL) = 0;
@@ -435,7 +429,7 @@ static void disk_check(void)
     uint32_t space[2] = { 0, 0 };
 
     M32(S_DISK_OK) = 1;
-    H_FREE_SPACE(0, (uint32_t)(uintptr_t)space);
+    H_FREE_SPACE(0, fs98_handle(space));
     if (space[1] == 0 && space[0] <= 0x1000 && M32(S_LOW_DISK) == 0) {
         M32(S_LOW_DISK) = 1;
         M32(S_DISK_OK) = 0;
@@ -471,8 +465,8 @@ static void alert(uint32_t tag, uint32_t id)
 {
     char text[0x100];
 
-    H_LOADSTRING(id, (uint32_t)(uintptr_t)text, 0x100);
-    demo_call8_edx(M32(UTIL + 0xa4), 1, tag, (uint32_t)(uintptr_t)text, 0, 0, 0, 0, 0);
+    H_LOADSTRING(id, fs98_handle(text), 0x100);
+    demo_call8_edx(M32(UTIL + 0xa4), 1, tag, fs98_handle(text), 0, 0, 0, 0, 0);
 }
 
 /* .text+0x272 -- start recording to a temporary file in PILOTS (string
@@ -493,8 +487,8 @@ static void record_start(void)
     M32(S_LOW_DISK) = 0;
     if (M32(S_DISK_OK) == 0)
         goto out;
-    H_LOADSTRING(0x9002, (uint32_t)(uintptr_t)dir, 0x100);
-    eax = H_TEMP(S_REC_NAME, (uint32_t)(uintptr_t)dir);
+    H_LOADSTRING(0x9002, fs98_handle(dir), 0x100);
+    eax = H_TEMP(S_REC_NAME, fs98_handle(dir));
     if (eax != 0) {
         M8(S_REC_NAME) = 0;
         alert(1, 0xf411);
@@ -556,7 +550,7 @@ static void patch_field(void)
     for (i = 0; i < 0x104; i++)
         field[i] = 0;
     ecx = keep_ecx - 1;
-    edi = (uint32_t)(uintptr_t)field;
+    edi = fs98_handle(field);
     for (;;) {
         SET_AL(M8(esi));
         esi++;
@@ -567,12 +561,12 @@ static void patch_field(void)
         if (--ecx == 0)
             break;
     }
-    esi = (uint32_t)(uintptr_t)field;
+    esi = fs98_handle(field);
     ecx = keep_ecx;
     eax = keep_eax;
     off = eax;
     record_flush();
-    H_TELL(M32(S_REC_FILE), (uint32_t)(uintptr_t)&pos);
+    H_TELL(M32(S_REC_FILE), fs98_handle(&pos));
     H_SEEK(M32(S_REC_FILE), off, 0);
     put_bytes();
     record_flush();
@@ -609,11 +603,11 @@ static void FS98_STDCALL record_save(uint32_t name, uint32_t title,
         esi = description;
         patch_description();
         record_end();
-        H_LOADSTRING(0x9002, (uint32_t)(uintptr_t)dir, 0x100);
-        H_JOIN((uint32_t)(uintptr_t)path, 0, (uint32_t)(uintptr_t)dir, name);
-        if (H_EXISTS((uint32_t)(uintptr_t)path, 0x1d) == 0)
-            H_DELETE((uint32_t)(uintptr_t)path, 0x1d);
-        eax = H_MOVE((uint32_t)(uintptr_t)path, 0x1d, S_REC_NAME, 0x1d);
+        H_LOADSTRING(0x9002, fs98_handle(dir), 0x100);
+        H_JOIN(fs98_handle(path), 0, fs98_handle(dir), name);
+        if (H_EXISTS(fs98_handle(path), 0x1d) == 0)
+            H_DELETE(fs98_handle(path), 0x1d);
+        eax = H_MOVE(fs98_handle(path), 0x1d, S_REC_NAME, 0x1d);
         if (eax == 0)
             M8(S_REC_NAME) = 0;
     }
@@ -782,11 +776,11 @@ found:
     for (i = 0; i < length; i++)
         local[1 + i] = M8(text + i);
     length++;
-    H_TELL(M32(S_PLAY_FILE), (uint32_t)(uintptr_t)&pos);
+    H_TELL(M32(S_PLAY_FILE), fs98_handle(&pos));
     H_CLOSE(M32(S_PLAY_FILE));
     eax = H_OPEN(S_PLAY_FILE, S_PLAY_NAME, 0x1d, 1);
     if (eax == 0)
-        file_insert(M32(S_PLAY_FILE), pos, (uint32_t)(uintptr_t)local, length);
+        file_insert(M32(S_PLAY_FILE), pos, fs98_handle(local), length);
     H_CLOSE(M32(S_PLAY_FILE));
     play_file_reopen();
 out:
@@ -1096,14 +1090,14 @@ static void record_end(void)
 /* .text+0x1302, +0x1336 */
 static void chain_c_on(void)
 {
-    CHAIN_ADD(0xc, (uint32_t)(uintptr_t)demo_command);
+    CHAIN_ADD(0xc, fs98_handle(demo_command));
     M32(S_LIST_C) = 1;
 }
 
 static void chain_c_off(void)
 {
     if (M32(S_LIST_C) != 0) {
-        CHAIN_REMOVE(0xc, (uint32_t)(uintptr_t)demo_command);
+        CHAIN_REMOVE(0xc, fs98_handle(demo_command));
         M32(S_LIST_C) = 0;
     }
 }
@@ -1335,15 +1329,15 @@ static void m_sync(void)  { }
 
 static void readers_memory(void)
 {
-    M32(S_READ_CLOSE) = (uint32_t)(uintptr_t)m_close;
-    M32(S_READ_REWIND) = (uint32_t)(uintptr_t)m_rewind;
-    M32(S_READ_BYTE) = (uint32_t)(uintptr_t)m_byte;
-    M32(S_READ_PEEK) = (uint32_t)(uintptr_t)m_peek;
-    M32(S_READ_WORD) = (uint32_t)(uintptr_t)m_word;
-    M32(S_READ_DWORD) = (uint32_t)(uintptr_t)m_dword;
-    M32(S_READ_SKIP1) = (uint32_t)(uintptr_t)m_skip1;
-    M32(S_READ_SKIP) = (uint32_t)(uintptr_t)m_skip;
-    M32(S_READ_SYNC) = (uint32_t)(uintptr_t)m_sync;
+    M32(S_READ_CLOSE) = fs98_handle(m_close);
+    M32(S_READ_REWIND) = fs98_handle(m_rewind);
+    M32(S_READ_BYTE) = fs98_handle(m_byte);
+    M32(S_READ_PEEK) = fs98_handle(m_peek);
+    M32(S_READ_WORD) = fs98_handle(m_word);
+    M32(S_READ_DWORD) = fs98_handle(m_dword);
+    M32(S_READ_SKIP1) = fs98_handle(m_skip1);
+    M32(S_READ_SKIP) = fs98_handle(m_skip);
+    M32(S_READ_SYNC) = fs98_handle(m_sync);
 }
 
 /* .text+0x17dc..+0x1ac1 -- the readers for a file, through the 0x200-byte
@@ -1357,7 +1351,7 @@ static void f_refill(void)
 
     /* RETAIL BUG (kept): DEMO-7 -- only eax is kept: ecx comes back as the host's read left it. */
     demo_call4_edx(M32(HOST + 0x19c), M32(S_PLAY_FILE), S_BUF, 0x200,
-                   (uint32_t)(uintptr_t)&got);
+                   fs98_handle(&got));
     ecx = demo_callee_ecx4;
     edx = demo_callee_edx;
     eax = got;
@@ -1463,7 +1457,7 @@ static void f_open(void)
     eax = H_EXISTS(S_PLAY_NAME, 0x1d);
     if (eax != 0)
         goto fail;
-    eax = H_GET_ATTR((uint32_t)(uintptr_t)&attributes, S_PLAY_NAME, 0x1d);
+    eax = H_GET_ATTR(fs98_handle(&attributes), S_PLAY_NAME, 0x1d);
     if (eax != 0)
         goto fail;
     M32(S_WRITABLE) = 0;
@@ -1492,16 +1486,16 @@ static void f_sync(void)
 
 static void readers_file(void)
 {
-    M32(S_READ_OPEN) = (uint32_t)(uintptr_t)f_open;
-    M32(S_READ_CLOSE) = (uint32_t)(uintptr_t)f_close;
-    M32(S_READ_REWIND) = (uint32_t)(uintptr_t)f_rewind;
-    M32(S_READ_BYTE) = (uint32_t)(uintptr_t)f_byte;
-    M32(S_READ_PEEK) = (uint32_t)(uintptr_t)f_peek;
-    M32(S_READ_WORD) = (uint32_t)(uintptr_t)f_word;
-    M32(S_READ_DWORD) = (uint32_t)(uintptr_t)f_dword;
-    M32(S_READ_SKIP1) = (uint32_t)(uintptr_t)f_skip1;
-    M32(S_READ_SKIP) = (uint32_t)(uintptr_t)f_skip;
-    M32(S_READ_SYNC) = (uint32_t)(uintptr_t)f_sync;
+    M32(S_READ_OPEN) = fs98_handle(f_open);
+    M32(S_READ_CLOSE) = fs98_handle(f_close);
+    M32(S_READ_REWIND) = fs98_handle(f_rewind);
+    M32(S_READ_BYTE) = fs98_handle(f_byte);
+    M32(S_READ_PEEK) = fs98_handle(f_peek);
+    M32(S_READ_WORD) = fs98_handle(f_word);
+    M32(S_READ_DWORD) = fs98_handle(f_dword);
+    M32(S_READ_SKIP1) = fs98_handle(f_skip1);
+    M32(S_READ_SKIP) = fs98_handle(f_skip);
+    M32(S_READ_SYNC) = fs98_handle(f_sync);
 }
 
 /* .text+0x1b08 -- stop playing (a review runs to its end first). */
@@ -2546,15 +2540,15 @@ static uint32_t FS98_STDCALL file_copy(uint32_t dst, uint32_t dst_off,
             goto out;
         do {
             chunk = n <= 0x200 ? n : 0x200;
-            eax = H_READ(src, (uint32_t)(uintptr_t)buf, chunk,
-                         (uint32_t)(uintptr_t)&got);
+            eax = H_READ(src, fs98_handle(buf), chunk,
+                         fs98_handle(&got));
             if (eax != 0)
                 goto out;
             eax = got;
             if (eax != chunk)
                 goto out;
-            eax = H_WRITE(dst, (uint32_t)(uintptr_t)buf, got,
-                          (uint32_t)(uintptr_t)&wrote);
+            eax = H_WRITE(dst, fs98_handle(buf), got,
+                          fs98_handle(&wrote));
             if (eax != 0)
                 goto out;
             eax = wrote;
@@ -2580,35 +2574,35 @@ static void FS98_STDCALL file_insert(uint32_t file, uint32_t pos,
     char dir[0x100], temp[0x104];
     SAVE_REGS;
 
-    if (H_TELL(file, (uint32_t)(uintptr_t)&keep) != 0)
+    if (H_TELL(file, fs98_handle(&keep)) != 0)
         goto out;
     if (H_SEEK(file, 0, 2) != 0)
         goto out;
-    if (H_TELL(file, (uint32_t)(uintptr_t)&size) != 0)
+    if (H_TELL(file, fs98_handle(&size)) != 0)
         goto out;
-    if (H_LOADSTRING(0x9002, (uint32_t)(uintptr_t)dir, 0x100) == 0)
+    if (H_LOADSTRING(0x9002, fs98_handle(dir), 0x100) == 0)
         goto out;
-    if (H_TEMP((uint32_t)(uintptr_t)temp, (uint32_t)(uintptr_t)dir) != 0)
+    if (H_TEMP(fs98_handle(temp), fs98_handle(dir)) != 0)
         goto out;
-    if (H_CREATE((uint32_t)(uintptr_t)&temp_file, (uint32_t)(uintptr_t)temp,
+    if (H_CREATE(fs98_handle(&temp_file), fs98_handle(temp),
                  0x1d) != 0)
         goto out;
-    if (file_copy(temp_file, 0, file, 0, size, (uint32_t)(uintptr_t)&result) != 0)
+    if (file_copy(temp_file, 0, file, 0, size, fs98_handle(&result)) != 0)
         goto out;
     if (H_SEEK(file, pos, 0) != 0)
         goto out;
     if (H_SEEK(temp_file, pos, 0) != 0)
         goto out;
-    if (H_WRITE(file, buf, n, (uint32_t)(uintptr_t)&wrote) != 0)
+    if (H_WRITE(file, buf, n, fs98_handle(&wrote)) != 0)
         goto out;
     if (wrote != n)
         goto out;
     tail = size - pos;
     after = pos + n;
-    if (file_copy(file, after, temp_file, pos, tail, (uint32_t)(uintptr_t)&result) != 0)
+    if (file_copy(file, after, temp_file, pos, tail, fs98_handle(&result)) != 0)
         goto out;
     H_CLOSE(temp_file);
-    if (H_DELETE((uint32_t)(uintptr_t)temp, 0x1d) != 0)
+    if (H_DELETE(fs98_handle(temp), 0x1d) != 0)
         goto out;
     H_SEEK(file, keep, 0);
 out:
@@ -2629,7 +2623,7 @@ static void sound_cue(uint32_t name)
         return;
     eax = SOUND_VOLUME(4);
     H_VOICE_VOL(M32(D + 0xf10), eax);
-    H_VOICE_PLAY(M32(D + 0xf10), 0, 0.0, (uint32_t)(uintptr_t)cue_done);
+    H_VOICE_PLAY(M32(D + 0xf10), 0, 0.0, fs98_handle(cue_done));
 }
 
 static void FS98_STDCALL cue_done(uint32_t h)
@@ -2666,7 +2660,7 @@ top:
         M32(S_VS_SET) = 0;
         M32(S_REPLAY_STOP) = 0;
         if (M32(S_REPLAY_CB) == 0) {
-            CHAIN_ADD(0xc, (uint32_t)(uintptr_t)replay_command);
+            CHAIN_ADD(0xc, fs98_handle(replay_command));
             M32(S_REPLAY_CB) = 1;
         }
         M32(edi + 0x74c) = 1;
@@ -2737,7 +2731,7 @@ stop:
     M32(edi + 0x620) = 0;
 cleanup:
     if (M32(S_REPLAY_CB) != 0) {
-        CHAIN_REMOVE(0xc, (uint32_t)(uintptr_t)replay_command);
+        CHAIN_REMOVE(0xc, fs98_handle(replay_command));
         M32(S_REPLAY_CB) = 0;
     }
     if (M16(edi + 0x18) == 8)
@@ -2755,8 +2749,8 @@ static void FS98_STDCALL replay_step(uint32_t resync)
         ebx = AL;
         SOUND_SET(8, ebx);
     }
-    parse_memory((uint32_t)(uintptr_t)&cursor, S_REPLAY_END, resync,
-                 (uint32_t)(uintptr_t)&done);
+    parse_memory(fs98_handle(&cursor), S_REPLAY_END, resync,
+                 fs98_handle(&done));
     esi = cursor;
     if (esi >= S_REPLAY_END)
         esi = S_REPLAY;
@@ -3007,21 +3001,21 @@ static uint32_t FS98_STDCALL video_dialog(void)
         uint32_t play, record, one, x1c, rate, loop, pick, count, data;
     } block;
 
-    if (catalogue((uint32_t)(uintptr_t)&block.count,
-                  (uint32_t)(uintptr_t)&block.data) == 0)
+    if (catalogue(fs98_handle(&block.count),
+                  fs98_handle(&block.data)) == 0)
         return 0;
-    block.check = (uint32_t)(uintptr_t)list_check;
+    block.check = fs98_handle(list_check);
     block.pick = 0;
     block.result = 0;
-    block.remove = (uint32_t)(uintptr_t)list_delete;
-    block.edit = (uint32_t)(uintptr_t)list_edit;
+    block.remove = fs98_handle(list_delete);
+    block.edit = fs98_handle(list_edit);
     block.play = 0;
     block.record = 0;
     block.loop = 0;
     block.x1c = 0;
     block.one = 1;
     block.rate = M32(G + 0x75c);
-    H_DIALOG(0x1404, (uint32_t)(uintptr_t)&block);
+    H_DIALOG(0x1404, fs98_handle(&block));
     M32(G + 0x75c) = block.rate;
     if (block.record != 0) {
         M32(D + 0xee8) = 0;
@@ -3036,7 +3030,7 @@ static uint32_t FS98_STDCALL video_dialog(void)
         else
             play(ITEM(block.data, block.pick) + 0x900, 1);
     }
-    H_FREE((uint32_t)(uintptr_t)&block.data);
+    H_FREE(fs98_handle(&block.data));
     return 0;
 }
 
@@ -3051,8 +3045,8 @@ static uint32_t FS98_STDCALL catalogue(uint32_t count, uint32_t data)
 
     play_file_close();
     r = UTIL_LIST(0x9007, 0x9002, 0x1d, count, data,
-                  (uint32_t)(uintptr_t)read_title,
-                  (uint32_t)(uintptr_t)read_description, 0, 1);
+                  fs98_handle(read_title),
+                  fs98_handle(read_description), 0, 1);
     play_file_reopen();
     return r;
 }
@@ -3112,30 +3106,30 @@ static uint32_t FS98_STDCALL list_edit(uint32_t block, uint32_t item)
 
     if (i >= M32(block + 0x2c) || M32(entry + 0xa04) == 0)
         return 0xffffffffu;
-    H_GET_ATTR((uint32_t)(uintptr_t)&attributes, item + 0x900, 0x1d);
+    H_GET_ATTR(fs98_handle(&attributes), item + 0x900, 0x1d);
     if (attributes & 2)
         return 0xffffffffu;
     if (M8(item) != 0) {
         if (H_BAD_NAME(item) != 0)
             return 0x100d;
-        H_SPLIT(item + 0x900, (uint32_t)(uintptr_t)drive,
-                (uint32_t)(uintptr_t)dir, (uint32_t)(uintptr_t)name, 0);
-        if (H_JOIN((uint32_t)(uintptr_t)path, (uint32_t)(uintptr_t)drive,
-                   (uint32_t)(uintptr_t)dir, item) != 0)
+        H_SPLIT(item + 0x900, fs98_handle(drive),
+                fs98_handle(dir), fs98_handle(name), 0);
+        if (H_JOIN(fs98_handle(path), fs98_handle(drive),
+                   fs98_handle(dir), item) != 0)
             return 0x100d;
-        if (H_PATH_LEN((uint32_t)(uintptr_t)path, 0x1d,
-                       (uint32_t)(uintptr_t)&length) != 0)
+        if (H_PATH_LEN(fs98_handle(path), 0x1d,
+                       fs98_handle(&length)) != 0)
             return 0x100d;
         if (length >= 0x104)
             return 0x100d;
-        if (H_EXISTS((uint32_t)(uintptr_t)path, 0x1d) == 0 &&
-            H_STRICMP((uint32_t)(uintptr_t)path, item + 0x900) != 0)
+        if (H_EXISTS(fs98_handle(path), 0x1d) == 0 &&
+            H_STRICMP(fs98_handle(path), item + 0x900) != 0)
             return 0x1004;
-        if (H_MOVE((uint32_t)(uintptr_t)path, 0x1d, entry + 0x900, 0x1d) != 0)
+        if (H_MOVE(fs98_handle(path), 0x1d, entry + 0x900, 0x1d) != 0)
             return 0xffffffffu;
-        H_STRCPY(entry + 0x900, (uint32_t)(uintptr_t)path);
+        H_STRCPY(entry + 0x900, fs98_handle(path));
         H_STRCPY(entry, item);
-        set_title((uint32_t)(uintptr_t)path, item);
+        set_title(fs98_handle(path), item);
         return 0;
     }
     item += 0x100;
@@ -3155,10 +3149,10 @@ static uint32_t FS98_STDCALL read_title(uint32_t path, uint32_t out)
     uint16_t word = 0;
 
     M8(out) = 0;
-    if (H_OPEN((uint32_t)(uintptr_t)&file, path, 0x1d, 0) != 0)
+    if (H_OPEN(fs98_handle(&file), path, 0x1d, 0) != 0)
         return 0;
     H_SEEK(file, 0, 0);
-    H_READ(file, (uint32_t)(uintptr_t)&word, 2, 0);
+    H_READ(file, fs98_handle(&word), 2, 0);
     if (word == 0x140) {
         H_SEEK(file, 4, 0);
         if (H_READ(file, out, 0x1f, 0) == 0)
@@ -3176,10 +3170,10 @@ static uint32_t FS98_STDCALL read_description(uint32_t path, uint32_t out)
     uint16_t word = 0;
 
     M8(out) = 0;
-    if (H_OPEN((uint32_t)(uintptr_t)&file, path, 0x1d, 0) != 0)
+    if (H_OPEN(fs98_handle(&file), path, 0x1d, 0) != 0)
         return 0;
     H_SEEK(file, 0x23, 0);
-    H_READ(file, (uint32_t)(uintptr_t)&word, 2, 0);
+    H_READ(file, fs98_handle(&word), 2, 0);
     if (word == 0x240) {
         H_SEEK(file, 0x27, 0);
         H_READ(file, out, 0x100, 0);
@@ -3200,7 +3194,7 @@ static void dialog_finished(void)
     M32(D + 0xedc) = 0;
     M32(D + 0xee0) = 0;
     M32(D + 0xee4) = 0;
-    M32(D + 0xed4) = (uint32_t)(uintptr_t)finished_check;
+    M32(D + 0xed4) = fs98_handle(finished_check);
     H_DIALOG(0x14040001, D + 0xed0);
     if (M32(D + 0xee0) != 0) {
         play_recording();
@@ -3231,7 +3225,7 @@ static uint32_t FS98_STDCALL finished_check(uint32_t block)
     dir[0] = path[0] = (char)fill;
     M32(block + 0x18) = 0;
     M32(block + 0x2c) = 0;
-    if (H_LOADSTRING(0x9002, (uint32_t)(uintptr_t)dir, 0x104) == 0)
+    if (H_LOADSTRING(0x9002, fs98_handle(dir), 0x104) == 0)
         return 0xffffffffu;
     M32(block + 0x18) = 0;
     if (M8(M32(block + 0x1c)) == 0) {
@@ -3242,17 +3236,17 @@ static uint32_t FS98_STDCALL finished_check(uint32_t block)
         r = 0xffffffffu;
         M32(block + 0x18) = 0x100d;
     }
-    if (H_JOIN((uint32_t)(uintptr_t)path, 0, (uint32_t)(uintptr_t)dir,
+    if (H_JOIN(fs98_handle(path), 0, fs98_handle(dir),
                M32(block + 0x1c)) != 0) {
         M32(block + 0x18) = 0x100d;
         return 0xffffffffu;
     }
-    if (H_PATH_LEN((uint32_t)(uintptr_t)path, 0x1d, (uint32_t)(uintptr_t)&length) != 0 ||
+    if (H_PATH_LEN(fs98_handle(path), 0x1d, fs98_handle(&length)) != 0 ||
         length >= 0x104) {
         r = 0xffffffffu;
         M32(block + 0x18) = 0x100d;
     }
-    if (r == 0 && H_EXISTS((uint32_t)(uintptr_t)path, 0x1d) == 0) {
+    if (r == 0 && H_EXISTS(fs98_handle(path), 0x1d) == 0) {
         r = 0xffffffffu;
         M32(block + 0x18) = 0x1004;
     }
@@ -3276,11 +3270,11 @@ static void dialog_ask(void)
     } block;
 
     block.ok = 0;
-    block.check = (uint32_t)(uintptr_t)ask_check;
+    block.check = fs98_handle(ask_check);
     block.text[0] = 0;
-    H_DIALOG(0x14040002, (uint32_t)(uintptr_t)&block);
+    H_DIALOG(0x14040002, fs98_handle(&block));
     if (block.ok != 0)
-        demo_message((uint32_t)(uintptr_t)block.text);
+        demo_message(fs98_handle(block.text));
 }
 
 /* .text+0x4170 */
@@ -3296,12 +3290,12 @@ static void demo_init(void)
 {
     SAVE_REGS;
 
-    CHAIN_ADD(1, (uint32_t)(uintptr_t)demo_tick);
-    CHAIN_ADD(0xd, (uint32_t)(uintptr_t)demo_paused);
-    CHAIN_ADD(9, (uint32_t)(uintptr_t)demo_paused);
-    CHAIN_ADD(0x14, (uint32_t)(uintptr_t)replay_message);
-    CHAIN_ADD(3, (uint32_t)(uintptr_t)demo_frame);
-    CHAIN_ADD(2, (uint32_t)(uintptr_t)demo_sample);
+    CHAIN_ADD(1, fs98_handle(demo_tick));
+    CHAIN_ADD(0xd, fs98_handle(demo_paused));
+    CHAIN_ADD(9, fs98_handle(demo_paused));
+    CHAIN_ADD(0x14, fs98_handle(replay_message));
+    CHAIN_ADD(3, fs98_handle(demo_frame));
+    CHAIN_ADD(2, fs98_handle(demo_sample));
     ring_reset();
     RESTORE_REGS;
 }
@@ -3315,12 +3309,12 @@ static void demo_deinit(void)
     /* RETAIL BUG (kept): DEMO-5 -- with the readers still switched to memory (see parse_memory) the close
      * this runs is the memory one, so a video file still open is left open. */
     stop_playing();
-    CHAIN_REMOVE(1, (uint32_t)(uintptr_t)demo_tick);
-    CHAIN_REMOVE(0xd, (uint32_t)(uintptr_t)demo_paused);
-    CHAIN_REMOVE(9, (uint32_t)(uintptr_t)demo_paused);
-    CHAIN_REMOVE(0x14, (uint32_t)(uintptr_t)replay_message);
-    CHAIN_REMOVE(3, (uint32_t)(uintptr_t)demo_frame);
-    CHAIN_REMOVE(2, (uint32_t)(uintptr_t)demo_sample);
+    CHAIN_REMOVE(1, fs98_handle(demo_tick));
+    CHAIN_REMOVE(0xd, fs98_handle(demo_paused));
+    CHAIN_REMOVE(9, fs98_handle(demo_paused));
+    CHAIN_REMOVE(0x14, fs98_handle(replay_message));
+    CHAIN_REMOVE(3, fs98_handle(demo_frame));
+    CHAIN_REMOVE(2, fs98_handle(demo_sample));
     RESTORE_REGS;
 }
 
@@ -3372,34 +3366,34 @@ static void demo_install(void)
     uint32_t i;
 
     for (i = 0; i < 0x19; i++)
-        M32(S_HANDLERS + 4 * i) = (uint32_t)(uintptr_t)handlers[i];
+        M32(S_HANDLERS + 4 * i) = fs98_handle(handlers[i]);
     for (i = 0; i < 0x17; i++)
-        M32(S_WORD_HANDLERS + 4 * i) = (uint32_t)(uintptr_t)word_handlers[i];
+        M32(S_WORD_HANDLERS + 4 * i) = fs98_handle(word_handlers[i]);
     for (i = 0; i < 0x14; i++)
-        M32(S_EVENTS + 4 * i) = (uint32_t)(uintptr_t)events[i];
+        M32(S_EVENTS + 4 * i) = fs98_handle(events[i]);
     /* As retail's image starts: the memory readers, and the file open. */
     readers_memory();
-    M32(S_READ_OPEN) = (uint32_t)(uintptr_t)f_open;
-    M32(D + 0xe84) = (uint32_t)(uintptr_t)replay_check;
+    M32(S_READ_OPEN) = fs98_handle(f_open);
+    M32(D + 0xe84) = fs98_handle(replay_check);
     M32(D + 0xea4) = D + 0xf18;
     M32(D + 0xea8) = D + 0xf28;
     M32(D + 0xec0) = D + 0xf38;
     M32(D + 0xec4) = D + 0xf48;
-    M32(D + 0xed4) = (uint32_t)(uintptr_t)finished_check;
+    M32(D + 0xed4) = fs98_handle(finished_check);
     M32(D + 0xeec) = D + 0xf58;
     M32(D + 0xf00) = D + 0x1060;
-    M32(D + DEMO_LINKAGE + 0x04) = (uint32_t)(uintptr_t)demo_init;
-    M32(D + DEMO_LINKAGE + 0x08) = (uint32_t)(uintptr_t)demo_deinit;
-    M32(D + DEMO_LINKAGE + 0x18) = (uint32_t)(uintptr_t)demo_play_frame;
-    M32(D + DEMO_LINKAGE + 0x1c) = (uint32_t)(uintptr_t)interpolate;
-    M32(D + DEMO_LINKAGE + 0x20) = (uint32_t)(uintptr_t)parse_memory;
-    M32(D + DEMO_LINKAGE + 0x24) = (uint32_t)(uintptr_t)demo_event_entry;
-    M32(D + DEMO_LINKAGE + 0x28) = (uint32_t)(uintptr_t)play;
-    M32(D + DEMO_LINKAGE + 0x2c) = (uint32_t)(uintptr_t)video_dialog;
-    M32(D + DEMO_LINKAGE + 0x30) = (uint32_t)(uintptr_t)replay_dialog;
-    M32(D + DEMO_LINKAGE + 0x34) = (uint32_t)(uintptr_t)demo_stop;
-    M32(D + DEMO_LINKAGE + 0x38) = (uint32_t)(uintptr_t)catalogue;
-    M32(D + DEMO_LINKAGE + 0x3c) = (uint32_t)(uintptr_t)replay_position;
+    M32(D + DEMO_LINKAGE + 0x04) = fs98_handle(demo_init);
+    M32(D + DEMO_LINKAGE + 0x08) = fs98_handle(demo_deinit);
+    M32(D + DEMO_LINKAGE + 0x18) = fs98_handle(demo_play_frame);
+    M32(D + DEMO_LINKAGE + 0x1c) = fs98_handle(interpolate);
+    M32(D + DEMO_LINKAGE + 0x20) = fs98_handle(parse_memory);
+    M32(D + DEMO_LINKAGE + 0x24) = fs98_handle(demo_event_entry);
+    M32(D + DEMO_LINKAGE + 0x28) = fs98_handle(play);
+    M32(D + DEMO_LINKAGE + 0x2c) = fs98_handle(video_dialog);
+    M32(D + DEMO_LINKAGE + 0x30) = fs98_handle(replay_dialog);
+    M32(D + DEMO_LINKAGE + 0x34) = fs98_handle(demo_stop);
+    M32(D + DEMO_LINKAGE + 0x38) = fs98_handle(catalogue);
+    M32(D + DEMO_LINKAGE + 0x3c) = fs98_handle(replay_position);
 }
 
 BOOL WINAPI DllMain(HINSTANCE instance, DWORD reason, LPVOID reserved)

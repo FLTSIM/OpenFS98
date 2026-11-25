@@ -17,6 +17,7 @@
 
 #include "fs98/linkage.h"
 #include "fs98/host.h"
+#include "fs98/arena.h"
 
 #define LANDME_IMAGE_SIZE 0x854
 #define LANDME_IMPORTS    0x7f8
@@ -53,13 +54,13 @@ _Static_assert(__builtin_offsetof(struct landme_image, linkage) == LANDME_LINKAG
 
 extern struct landme_image landme_image;
 
-#define D              ((uint8_t *)(uintptr_t)&landme_image)
-#define D8(offset)     (*(uint8_t *)(D + (offset)))
-#define D16(offset)    (*(landme_u16 *)(D + (offset)))
-#define D32(offset)    (*(landme_u32 *)(D + (offset)))
-#define DPTR(offset)   (*(uint8_t **)(D + (offset)))
+#define LM_D           ((uint8_t *)(uintptr_t)&landme_image)
+#define D8(offset)     (*(uint8_t *)(LM_D + (offset)))
+#define D16(offset)    (*(landme_u16 *)(LM_D + (offset)))
+#define D32(offset)    (*(landme_u32 *)(LM_D + (offset)))
+#define DPTR(offset)   (*(uint8_t **)(LM_D + (offset)))
 
-#define IMPORT(index)  (*(void **)(D + LANDME_IMPORTS + 8 * (index) + 4))
+#define IMPORT(index)  (*(void **)(LM_D + LANDME_IMPORTS + 8 * (index) + 4))
 #define HOST           IMPORT(0)
 #define G              ((uint8_t *)IMPORT(1))
 #define G8(offset)     (*(uint8_t *)(G + (offset)))
@@ -103,10 +104,10 @@ typedef void (FS98_STDCALL *winmsg_show_fn)(const char *, uint32_t, uint32_t,
 
 /* State at retail's offsets. */
 #define LAND_SPEED          D32(0x000)
-#define LAND_END_A          (D + 0x004)
+#define LAND_END_A          (LM_D + 0x004)
 #define LAND_FORWARD        D32(0x020)
-#define LAND_END_B          (D + 0x024)
-#define LAND_TARGET         (D + 0x03c)
+#define LAND_END_B          (LM_D + 0x024)
+#define LAND_TARGET         (LM_D + 0x03c)
 #define LAND_BEST_LOW       D32(0x054)
 #define LAND_BEST_HIGH      D16(0x058)
 #define LAND_X              D32(0x05a)
@@ -125,7 +126,7 @@ typedef void (FS98_STDCALL *winmsg_show_fn)(const char *, uint32_t, uint32_t,
 #define LAND_SAVED_278      D32(0x080)
 #define LAND_PENDING_STATE  D32(0x084)
 #define LAND_STATE          D32(0x088)
-#define LAND_MESSAGE        ((char *)D + 0x0a8)
+#define LAND_MESSAGE        ((char *)LM_D + 0x0a8)
 
 static void FS98_STDCALL landme_tick(uint32_t first, uint32_t second);
 static void landme_state_setup(void);
@@ -199,7 +200,7 @@ static void landme_runway_frame(void)
     D32(0x01c) = component;
     LAND_RUNWAY_ANGLE = (uint16_t)UTIL_ATAN(component, LAND_FORWARD);
     UTIL_SINCOS((int16_t)LAND_RUNWAY_ANGLE,
-                (int16_t *)(D + 0x06a), (int16_t *)(D + 0x06c));
+                (int16_t *)(LM_D + 0x06a), (int16_t *)(LM_D + 0x06c));
 }
 
 /* .text+0xa93 -- aircraft offset from the runway midpoint, converted to
@@ -246,7 +247,7 @@ static void landme_find_runway(void)
         uint64_t distance;
         uint64_t best;
 
-        if (FE_NEXT(kind, D + 0x0cf, &length) == 0)
+        if (FE_NEXT(kind, LM_D + 0x0cf, &length) == 0)
             break;
         record = (const uint8_t *)(uintptr_t)D32(0x0cf);
         kind = 1;
@@ -338,7 +339,7 @@ static void landme_show(uint32_t string_id)
  * 0x14-byte records at .data+0x743. */
 static void landme_set_target(uint32_t config_offset)
 {
-    const uint8_t *config = D + config_offset;
+    const uint8_t *config = LM_D + config_offset;
     int32_t across;
     int32_t forward;
     int32_t longitude_step;
@@ -554,7 +555,7 @@ static int32_t landme_phase_boundary(uint32_t which)
     int16_t cosine;
     int32_t product;
     int32_t scaled;
-    int32_t threshold = *(int32_t *)(D + 0x68b + LAND_PHASE_OFFSET);
+    int32_t threshold = *(int32_t *)(LM_D + 0x68b + LAND_PHASE_OFFSET);
     int32_t value;
 
     UTIL_SINCOS((int16_t)(G16(0xe92) - G16(0x870)), 0, &cosine);
@@ -613,7 +614,7 @@ static void landme_state_follow(void)
             LAND_STATE = 2;
         break;
     case 11:
-        if ((int32_t)G32(0x574) < *(int32_t *)(D + 0x68b + LAND_PHASE_OFFSET))
+        if ((int32_t)G32(0x574) < *(int32_t *)(LM_D + 0x68b + LAND_PHASE_OFFSET))
             LAND_STATE = 2;
         break;
     }
@@ -639,11 +640,11 @@ static void landme_state_setup(void)
 
     LAND_PHASE_OFFSET = 0xffffffffu;
     if ((int16_t)LAND_RUNWAY_KIND < 1)
-        LAND_SCRIPT = D + 0x0d7;
+        LAND_SCRIPT = LM_D + 0x0d7;
     else if (LAND_RUNWAY_KIND == 1)
-        LAND_SCRIPT = D + 0x67b;
+        LAND_SCRIPT = LM_D + 0x67b;
     else
-        LAND_SCRIPT = D + 0x67f;
+        LAND_SCRIPT = LM_D + 0x67f;
 
     for (index = 0; index < sizeof(zero_offsets) / sizeof(zero_offsets[0]); index++)
         G32(zero_offsets[index]) = 0;
@@ -799,7 +800,7 @@ static void landme_check_7(void)
 
 static void landme_check_11(void)
 {
-    if ((int32_t)G32(0x574) < *(int32_t *)(D + 0x68b + LAND_PHASE_OFFSET))
+    if ((int32_t)G32(0x574) < *(int32_t *)(LM_D + 0x68b + LAND_PHASE_OFFSET))
         LAND_STATE = 2;
 }
 
@@ -907,14 +908,14 @@ static void landme_install_code_pointers(void)
     for (index = 0;
          index < sizeof(state_functions) / sizeof(state_functions[0]); index++)
         D32(0x08c + index * 4) =
-            (uint32_t)(uintptr_t)state_functions[index];
+            fs98_handle(state_functions[index]);
     for (index = 0;
          index < sizeof(phase_functions) / sizeof(phase_functions[0]); index++)
         D32(0x683 + index * 4 + (index / 2) * 8) =
-            (uint32_t)(uintptr_t)phase_functions[index];
-    D32(LANDME_LINKAGE + 4) = (uint32_t)(uintptr_t)landme_init;
-    D32(LANDME_LINKAGE + 8) = (uint32_t)(uintptr_t)landme_deinit;
-    D32(LANDME_LINKAGE + 0x18) = (uint32_t)(uintptr_t)landme_start;
+            fs98_handle(phase_functions[index]);
+    D32(LANDME_LINKAGE + 4) = fs98_handle(landme_init);
+    D32(LANDME_LINKAGE + 8) = fs98_handle(landme_deinit);
+    D32(LANDME_LINKAGE + 0x18) = fs98_handle(landme_start);
 }
 
 BOOL WINAPI DllMain(HINSTANCE instance, DWORD reason, LPVOID reserved)

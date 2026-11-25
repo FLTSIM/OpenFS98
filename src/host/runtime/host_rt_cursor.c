@@ -1,6 +1,7 @@
 /* The cursor in full screen, drawn by the game on the back buffer (0x41a53c, the region to
  * redraw, is made on entering full screen), and the 8-bit-to-16-bit copies through a palette. */
 #include "host_rt.h"
+#include "fs98/arena.h"
 
 #define BACK_BUFFER G_PTR(0x41a4e0)
 #define COM(object, slot, result, parameters) ((result (SC *) parameters)PTR(PTR(object, 0), slot))
@@ -144,7 +145,7 @@ struct picture {
 /* a byte of a picture, as retail works it out: in 32 bits, wrapping */
 static uint8_t *picture_at(const struct picture *picture, int32_t byte, int32_t row)
 {
-    return (uint8_t *)(uintptr_t)((uint32_t)(uintptr_t)picture->bits + (uint32_t)row * (uint32_t)picture->pitch +
+    return (uint8_t *)(uintptr_t)(fs98_handle(picture->bits) + (uint32_t)row * (uint32_t)picture->pitch +
                                   (uint32_t)byte);
 }
 

@@ -14,6 +14,7 @@
 #include <stdio.h>
 #include "runtime/host_rt.h"
 #include "fs98/host_runtime.h"
+#include "fs98/arena.h"
 
 #define IMAGE_START 0x16000u     /* .rdata */
 #define IMAGE_END 0x1f000u       /* to .idata's end */
@@ -81,8 +82,8 @@ static uint32_t code_for(uint32_t target)
 {
     uint32_t at;
     for (at = 0; at < sizeof s_routines / sizeof s_routines[0]; ++at)
-        if (s_routines[at].rva == target) return (uint32_t)(uintptr_t)s_routines[at].ours;
-#define HOST_RT_THUNK(rva, index) if (target == rva) return (uint32_t)(uintptr_t)fs98_host_rt_imports[index];
+        if (s_routines[at].rva == target) return fs98_handle(s_routines[at].ours);
+#define HOST_RT_THUNK(rva, index) if (target == rva) return fs98_handle(fs98_host_rt_imports[index]);
 #include "runtime/host_rt_tables.inc"
 #undef HOST_RT_THUNK
     return 0;           /* the SEH scopes, the CRT's own: never called */
@@ -99,7 +100,7 @@ static int map_image(void)
     memcpy(IMAGE_AT(0x16000), s_rdata, sizeof s_rdata < 0x1000 ? sizeof s_rdata : 0x1000);
     memcpy(IMAGE_AT(0x17000), host_image, 0x55cc);
     if (!resolve_imports()) return 0;
-#define HOST_RT_DATA_POINTER(site, target) *(uint32_t *)IMAGE_AT(site) = (uint32_t)(uintptr_t)IMAGE_AT(target);
+#define HOST_RT_DATA_POINTER(site, target) *(uint32_t *)IMAGE_AT(site) = fs98_handle(IMAGE_AT(target));
 #define HOST_RT_CODE_POINTER(site, target) *(uint32_t *)IMAGE_AT(site) = code_for(target);
 #include "runtime/host_rt_tables.inc"
 #undef HOST_RT_DATA_POINTER

@@ -6,6 +6,7 @@
  * 0x41c5a0 the message to repeat, 0x41bfe4 the delay and 0x41c224 the rate, which the timer
  * uses). */
 #include "host_rt.h"
+#include "fs98/arena.h"
 
 #define WIN(ident, result, parameters) CALL_STD(ident, result, parameters)
 #define MAIN_WINDOW G32(0x41880c)
@@ -98,7 +99,7 @@ uint32_t SC fs98_host_rt_hot_spot(uint8_t *element, struct mouse_context *contex
     message = context->message;
     switch (message) {
     case 0x84:
-        return D32(spot, 0x1c) ? (uint32_t)(uintptr_t)element : 0;
+        return D32(spot, 0x1c) ? fs98_handle(element) : 0;
     case 0x204:         /* the right button down: its event (bit 31), else its tool tip's menu */
         if (D32(spot, 0x1c) & 0x2000000)
             G_PTR(0x41888c) = spot;
@@ -106,7 +107,7 @@ uint32_t SC fs98_host_rt_hot_spot(uint8_t *element, struct mouse_context *contex
             send_event(spot, offset, 0x80000000);
             if ((D32(spot, 0x1c) & 0x200000) && G32(0x41c5a0) == 0)
                 goto repeat;
-            return (uint32_t)(uintptr_t)element;
+            return fs98_handle(element);
         }
         if (D32(spot, 0x1c) & 0x12000000)
             return 0;
@@ -127,13 +128,13 @@ uint32_t SC fs98_host_rt_hot_spot(uint8_t *element, struct mouse_context *contex
         G32(0x41bb38) = hit.tool[9];
         WIN(ClientToScreen, int32_t, (uint32_t, void *))(context->window, &context->x);
         fs98_host_rt_popup_menu(context->data, &context->x, 1);
-        return (uint32_t)(uintptr_t)element;
+        return fs98_handle(element);
     }
     case 0x206:         /* the right button double-clicked */
         if (!(D32(spot, 0x1c) & 0x10000000))
             return 0;
         send_event(spot, offset, 0x10000000);
-        return (uint32_t)(uintptr_t)element;
+        return fs98_handle(element);
     case 0x201:         /* the left button down */
         if (D32(spot, 0x1c) & 0x800000)
             G_PTR(0x41888c) = spot;
@@ -142,12 +143,12 @@ uint32_t SC fs98_host_rt_hot_spot(uint8_t *element, struct mouse_context *contex
         send_event(spot, offset, 0x20000000);
         if ((D32(spot, 0x1c) & 0x200000) && G32(0x41c5a0) == 0)
             goto repeat;
-        return (uint32_t)(uintptr_t)element;
+        return fs98_handle(element);
     case 0x203:         /* the left button double-clicked */
         if (!(D32(spot, 0x1c) & 0x4000000))
             return 0;
         send_event(spot, offset, 0x4000000);
-        return (uint32_t)(uintptr_t)element;
+        return fs98_handle(element);
     case 0x207:         /* the middle button down */
         if (D32(spot, 0x1c) & 0x1000000)
             G_PTR(0x41888c) = spot;
@@ -156,12 +157,12 @@ uint32_t SC fs98_host_rt_hot_spot(uint8_t *element, struct mouse_context *contex
         send_event(spot, offset, 0x40000000);
         if ((D32(spot, 0x1c) & 0x200000) && G32(0x41c5a0) == 0)
             goto repeat;
-        return (uint32_t)(uintptr_t)element;
+        return fs98_handle(element);
     case 0x209:         /* the middle button double-clicked */
         if (!(D32(spot, 0x1c) & 0x8000000))
             return 0;
         send_event(spot, offset, 0x8000000);
-        return (uint32_t)(uintptr_t)element;
+        return fs98_handle(element);
     case 0x202:         /* a button up: the repeat stopped */
     case 0x205:
     case 0x208:
@@ -173,7 +174,7 @@ uint32_t SC fs98_host_rt_hot_spot(uint8_t *element, struct mouse_context *contex
             spot_callback callback;
             if (!IN_RECT(area, context->x, context->y) && G32(0x41c5a0)) {
                 stop_repeat();
-                return (uint32_t)(uintptr_t)element;
+                return fs98_handle(element);
             }
             w = context->w;
             callback = (spot_callback)PTR(spot, 0x24);
@@ -187,17 +188,17 @@ uint32_t SC fs98_host_rt_hot_spot(uint8_t *element, struct mouse_context *contex
                 if (callback)
                     callback(offset, 0x2000000);
             }
-            return (uint32_t)(uintptr_t)element;
+            return fs98_handle(element);
         }
         if (!(D32(spot, 0x1c) & 0x400000) || PTR(spot, 0x24) == 0)
             return 0;
         ((spot_callback)PTR(spot, 0x24))(offset, 0x400000);
-        return (uint32_t)(uintptr_t)element;
+        return fs98_handle(element);
     case 0x468:         /* a key, from a 3D dialog */
         if (!(D32(spot, 0x1c) & 0x100000) || PTR(spot, 0x24) == 0)
             return 0;
         ((spot_callback)PTR(spot, 0x24))(offset, 0x100000);
-        return (uint32_t)(uintptr_t)element;
+        return fs98_handle(element);
     case 0x46a: {       /* help on the spot the menu was for (0x41bb38) */
         char *path = (char *)VA(0x41c480);
         uint32_t at = 0, end, topic = G32(0x41bb38);
@@ -214,7 +215,7 @@ uint32_t SC fs98_host_rt_hot_spot(uint8_t *element, struct mouse_context *contex
         G32(0x41bb38) = 0;
         G32(0x41bb34) = 0;
         G32(0x41bb30) = 0;
-        return (uint32_t)(uintptr_t)element;
+        return fs98_handle(element);
     }
     default:
         return 0;
@@ -224,7 +225,7 @@ repeat:                 /* the message repeated by the timer: 18 ticks first, th
     SERVICE(0x21c, int32_t, (void *, const void *, uint32_t))(VA(0x41c5a0), context, 0x20);
     G32(0x41bfe4) = 0x12;
     G32(0x41c224) = 1;
-    return (uint32_t)(uintptr_t)element;
+    return fs98_handle(element);
 }
 
 /* the hit test's answer for an edge of a fixed size (+0x68 == +0x70 across, +0x6c == +0x74
@@ -331,7 +332,7 @@ int32_t SC fs98_host_rt_window_mouse(uint32_t window, uint32_t message, uint32_t
             if (D32(data, 8) & 0x40000000)
                 WIN(SetActiveWindow, uint32_t, (uint32_t))(D32(bitmap, 0x28));
             else
-                fs98_host_rt_hook(0x20007, (uint32_t)(uintptr_t)data);
+                fs98_host_rt_hook(0x20007, fs98_handle(data));
         }
         break;
     case 0xa4:          /* a right button down: the window's menu */

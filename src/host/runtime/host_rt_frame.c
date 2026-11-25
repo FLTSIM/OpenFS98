@@ -1,6 +1,7 @@
 /* The main window (FS98MAIN): its procedure, its commands, full screen in a window and back,
  * help, and the callbacks it walks its child and floating windows with. */
 #include "host_rt.h"
+#include "fs98/arena.h"
 
 #define WIN(ident, result, parameters) CALL_STD(ident, result, parameters)
 #define CFG ((const char *)VA(0x41c120))
@@ -95,7 +96,7 @@ void SC fs98_host_rt_copied(uint32_t unused, const uint32_t *data)
     if (*(const uint32_t *)(uintptr_t)data[2] != 1)
         return;
     WIN(SetForegroundWindow, int32_t, (uint32_t))(MAIN_WINDOW);
-    fs98_host_rt_hook(0x20014, (uint32_t)(uintptr_t)data);
+    fs98_host_rt_hook(0x20014, fs98_handle(data));
 }
 
 /* ---- full screen in a window ------------------------------------------------------------- */
@@ -204,7 +205,7 @@ int32_t SC fs98_host_rt_command(uint32_t window, uint32_t id, uint32_t code, uin
     case 0x1609: fs98_host_rt_help(MAIN_WINDOW, concept, 1, 0xbbe); return 1;
     case 0x160a: fs98_host_rt_help(MAIN_WINDOW, concept, 1, 0xbc0); return 1;
     case 0x1602: fs98_host_rt_help(MAIN_WINDOW, STR(0x41c000), 0xf, 0); return 1;
-    case 0x1603: fs98_host_rt_help(MAIN_WINDOW, STR(0x41c000), 0x105, (uint32_t)(uintptr_t)VA(0x4187f8)); return 1;
+    case 0x1603: fs98_host_rt_help(MAIN_WINDOW, STR(0x41c000), 0x105, fs98_handle(VA(0x4187f8))); return 1;
     case 0x1604: fs98_host_rt_help(MAIN_WINDOW, STR(0x41c000), 1, 0xbb8); return 1;
     case 0x1661: return open_page(0xf600, 0x417ad0);
     case 0x1662: return open_page(0xf601, 0x417ac4);

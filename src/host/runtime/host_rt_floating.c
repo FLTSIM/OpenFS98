@@ -1,5 +1,6 @@
 /* The frames a game window floats in (FS98FLOAT) and the 3D dialog windows (FS98DLG3D). */
 #include "host_rt.h"
+#include "fs98/arena.h"
 
 #define WIN(ident, result, parameters) CALL_STD(ident, result, parameters)
 #define MAIN_WINDOW G32(0x41880c)
@@ -60,10 +61,10 @@ int32_t SC fs98_host_rt_floating_procedure(uint32_t window, uint32_t message, ui
         break;
     case 6:             /* WM_ACTIVATE: the main window told (0x46e) and the game (0x20007) */
         WIN(PostMessageA, int32_t, (uint32_t, uint32_t, uint32_t, uint32_t))(MAIN_WINDOW, 0x46e, w & 0xffff, window);
-        fs98_host_rt_hook(0x20007, (uint32_t)(uintptr_t)data);
+        fs98_host_rt_hook(0x20007, fs98_handle(data));
         return 0;
     case 0x10:          /* WM_CLOSE: the game's (0x20010) */
-        fs98_host_rt_hook(0x20010, (uint32_t)(uintptr_t)data);
+        fs98_host_rt_hook(0x20010, fs98_handle(data));
         return 0;
     case 0x14:          /* WM_ERASEBKGND */
         return 1;

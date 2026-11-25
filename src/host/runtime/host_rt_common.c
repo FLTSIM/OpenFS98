@@ -5,6 +5,7 @@
  * Shared with the services: src/host/host.c calls these too, and its standalone builds compile
  * this file with HOST_RT_STANDALONE (host_rt.h), so there is one copy of each. */
 #include "host_rt.h"
+#include "fs98/arena.h"
 #define WIN(ident, result, parameters) CALL_STD(ident, result, parameters)
 #define MAIN_WINDOW G32(0x41880c)
 typedef int32_t (SC *window_callback)(uint32_t, uint32_t);
@@ -30,7 +31,7 @@ uint32_t SC fs98_host_rt_modeless_message(uint32_t *entry, void *message)
     }
     WIN(SendMessageA, int32_t, (uint32_t, uint32_t, uint32_t, uint32_t))(entry[1], 0x464, 0, 0);
     if (WIN(IsDialogMessageA, int32_t, (uint32_t, void *))(entry[1], message))
-        return (uint32_t)(uintptr_t)entry;
+        return fs98_handle(entry);
     return 0;
 }
 

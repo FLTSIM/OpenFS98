@@ -18,16 +18,6 @@ src/flights/flights_navigation.c 1 0
 src/flights/flights_select.c 2 0
 src/g3d/g3d.c 8 4
 src/hg2d/hg2d.c 1 0
-src/host/host.c 3 5
-src/host/host_rt_exe.c 3 0
-src/host/runtime/host_rt_child.c 9 0
-src/host/runtime/host_rt_common.c 1 0
-src/host/runtime/host_rt_cursor.c 1 0
-src/host/runtime/host_rt_floating.c 2 0
-src/host/runtime/host_rt_frame.c 2 0
-src/host/runtime/host_rt_main.c 6 0
-src/host/runtime/host_rt_misc.c 1 0
-src/host/runtime/host_rt_mouse.c 15 0
 src/landme/landme.c 5 1
 src/main/main.c 2 4
 src/main/main_frame.inc 1 0

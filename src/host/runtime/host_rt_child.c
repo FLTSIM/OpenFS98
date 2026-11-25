@@ -8,6 +8,7 @@
  * place on the screen, +0x24 the window, +0x28 the frame, +0x30 the bitmap, +0x34 the window's
  * DC, +0x38 a memory DC, +0x3c its cursor, +0x54 its pieces, +0x70, +0x8c its clipper. */
 #include "host_rt.h"
+#include "fs98/arena.h"
 
 #define WIN(ident, result, parameters) CALL_STD(ident, result, parameters)
 #define MAIN_WINDOW G32(0x41880c)
@@ -45,7 +46,7 @@ static void created(uint32_t window, const uint32_t *create)
     D32(bitmap, 0x38) = WIN(CreateCompatibleDC, uint32_t, (uint32_t))(D32(bitmap, 0x34));
     mode(D32(bitmap, 0x38), 1);
     select(D32(bitmap, 0x38), G32(0x41bb60), 0);
-    WIN(SetWindowLongA, uint32_t, (uint32_t, int32_t, uint32_t))(window, -21, (uint32_t)(uintptr_t)data);
+    WIN(SetWindowLongA, uint32_t, (uint32_t, int32_t, uint32_t))(window, -21, fs98_handle(data));
     if (D32(data, 0x7c)) {
         uint8_t *entry;
         shared = SERVICE(0x310, uint8_t *, (void *, uint32_t, void *, uint32_t, uint32_t))(VA(0x417ae8), 0, AT(data, 0x7c), 4, 0);
@@ -428,14 +429,14 @@ int32_t SC fs98_host_rt_child_procedure(uint32_t window, uint32_t message, uint3
         return fs98_host_rt_window_mouse(window, message, w, l, point, data, bitmap);
     case 0x111:         /* WM_COMMAND: the floating window's menu (whole wParam) */
         switch (w) {
-        case 0x100: fs98_host_rt_hook(0x20008, (uint32_t)(uintptr_t)data); return 0;
-        case 0x101: fs98_host_rt_hook(0x20009, (uint32_t)(uintptr_t)data); return 0;
-        case 0x102: fs98_host_rt_hook(0x2000a, (uint32_t)(uintptr_t)data); return 0;
-        case 0x103: fs98_host_rt_hook(0x2000b, (uint32_t)(uintptr_t)data); return 0;
-        case 0x105: fs98_host_rt_hook(0x2000d, (uint32_t)(uintptr_t)data); return 0;
-        case 0x200: fs98_host_rt_hook(0x2000e, (uint32_t)(uintptr_t)data); return 0;
-        case 0x201: fs98_host_rt_hook(0x2000f, (uint32_t)(uintptr_t)data); return 0;
-        case 0x202: fs98_host_rt_hook(0x20010, (uint32_t)(uintptr_t)data); return 0;
+        case 0x100: fs98_host_rt_hook(0x20008, fs98_handle(data)); return 0;
+        case 0x101: fs98_host_rt_hook(0x20009, fs98_handle(data)); return 0;
+        case 0x102: fs98_host_rt_hook(0x2000a, fs98_handle(data)); return 0;
+        case 0x103: fs98_host_rt_hook(0x2000b, fs98_handle(data)); return 0;
+        case 0x105: fs98_host_rt_hook(0x2000d, fs98_handle(data)); return 0;
+        case 0x200: fs98_host_rt_hook(0x2000e, fs98_handle(data)); return 0;
+        case 0x201: fs98_host_rt_hook(0x2000f, fs98_handle(data)); return 0;
+        case 0x202: fs98_host_rt_hook(0x20010, fs98_handle(data)); return 0;
         case 0x300:     /* the main window's menu shown or hidden */
             if (G32(0x418854)) {
                 G32(0x417198) = G32(0x417198) == 0;

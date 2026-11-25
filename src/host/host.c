@@ -28,10 +28,6 @@
 #define HOST_DATA_VA    0x417000u
 #define HOST_IMAGE_SIZE 0x55ccu
 
-typedef volatile uint8_t  host_v8;
-typedef volatile uint16_t __attribute__((may_alias)) host_v16;
-typedef volatile uint32_t __attribute__((may_alias)) host_v32;
-
 struct host_image {
     uint8_t bytes[HOST_IMAGE_SIZE];
 };
@@ -55,15 +51,12 @@ const uint8_t fs98_host_rt_rdata[] = {
 /* the decompiled runtime's executable (src/host/host_rt_exe.c): .data in the image it shares
  * with the runtime, host_image copied there (and its pointers rebased) before anything runs */
 extern uint8_t *fs98_host_data;
-#define D       ((uint32_t)(uintptr_t)fs98_host_data)
+#define FS98_DATA_IMAGE (*fs98_host_data)
 #else
-#define D       ((uint32_t)(uintptr_t)host_image.bytes)
+#define FS98_DATA_IMAGE host_image.bytes[0]
 #endif
+#include "fs98/arena.h"
 #define V(a)    (D + ((uint32_t)(a) - HOST_DATA_VA))
-#define M8(a)   (*(host_v8  *)(uintptr_t)(uint32_t)(a))
-#define M16(a)  (*(host_v16 *)(uintptr_t)(uint32_t)(a))
-#define M32(a)  (*(host_v32 *)(uintptr_t)(uint32_t)(a))
-#define ADDR(p) ((uint32_t)(uintptr_t)(p))
 
 /* ---- services ---------------------------------------------------------------- */
 
@@ -279,13 +272,13 @@ static uint32_t FS98_STDCALL host_20c(uint32_t flags, uint32_t size, uint32_t ou
 {
     uint8_t *p = malloc(size);
     uint32_t i;
-    M32(out) = ADDR(p);
+    M32(out) = fs98_handle(p);
     if (p == 0) {
         if (flags == 4)
             return (uint32_t)-1;
         (uint32_t)fs98_host_rt_hook(0x20012, 0);
         p = malloc(size);
-        M32(out) = ADDR(p);
+        M32(out) = fs98_handle(p);
         if (p == 0) {
             host_oom_box();
             ExitProcess(0);
@@ -316,15 +309,15 @@ static uint32_t FS98_STDCALL host_210(uint32_t flags, uint32_t size, uint32_t pp
 {
     void *old = (void *)(uintptr_t)M32(pp);
     void *p = realloc(old, size);
-    M32(pp) = ADDR(p);
+    M32(pp) = fs98_handle(p);
     if (p == 0) {
         if (flags == 4) {
-            M32(pp) = ADDR(old);
+            M32(pp) = fs98_handle(old);
             return (uint32_t)-1;
         }
         (uint32_t)fs98_host_rt_hook(0x20012, 0);
         p = realloc(old, size);
-        M32(pp) = ADDR(p);
+        M32(pp) = fs98_handle(p);
         if (p == 0) {
             host_oom_box();
             host_quit();
@@ -543,7 +536,7 @@ static uint32_t FS98_STDCALL host_2fc(uint32_t l)
 static int __cdecl host_cmp_tramp(const void *a, const void *b)
 {
     return (int)((uint32_t (FS98_STDCALL *)(uint32_t, uint32_t))(uintptr_t)M32(V(0x41a24c)))(
-        ADDR(a), ADDR(b));
+        fs98_handle(a), fs98_handle(b));
 }
 
 /* +0x22c (0x40cfb0): qsort(base, n, width, cmp).  Returns whatever MSVCRT's
@@ -560,7 +553,7 @@ static uint32_t FS98_STDCALL host_234(uint32_t key, uint32_t base, uint32_t n, u
                                       uint32_t cmp)
 {
     M32(V(0x41a24c)) = cmp;
-    return ADDR(bsearch((const void *)(uintptr_t)key, (const void *)(uintptr_t)base, n, width,
+    return fs98_handle(bsearch((const void *)(uintptr_t)key, (const void *)(uintptr_t)base, n, width,
                         host_cmp_tramp));
 }
 
@@ -570,17 +563,17 @@ static uint32_t FS98_STDCALL host_234(uint32_t key, uint32_t base, uint32_t n, u
 static uint32_t FS98_STDCALL host_230(uint32_t a, uint32_t b, uint32_t size)
 {
     uint32_t tmp;
-    host_20c(1, size, ADDR(&tmp), 0);
+    host_20c(1, size, fs98_handle(&tmp), 0);
     host_21c(tmp, a, size);
     host_21c(a, b, size);
     host_21c(b, tmp, size);
-    return host_214(ADDR(&tmp));
+    return host_214(fs98_handle(&tmp));
 }
 
 /* +0x2ac (0x40eea0): strncpy(dst, src, n), returning dst. */
 static uint32_t FS98_STDCALL host_2ac(uint32_t dst, uint32_t src, uint32_t n)
 {
-    return ADDR(strncpy((char *)(uintptr_t)dst, (const char *)(uintptr_t)src, n));
+    return fs98_handle(strncpy((char *)(uintptr_t)dst, (const char *)(uintptr_t)src, n));
 }
 
 /* +0x2b4 (0x40ef00): a copy of `s` from +0x20c (fatal on failure), or null for
@@ -590,7 +583,7 @@ static uint32_t FS98_STDCALL host_2b4(uint32_t s)
     uint32_t p;
     if (s == 0)
         return 0;
-    host_20c(1, host_2b8(s) + 1, ADDR(&p), 0);
+    host_20c(1, host_2b8(s) + 1, fs98_handle(&p), 0);
     lstrcpyA((char *)(uintptr_t)p, (const char *)(uintptr_t)s);
     return p;
 }
@@ -638,7 +631,7 @@ static uint32_t host_opt_find(uint32_t p, uint32_t name)
             host_228(p + 1, name, host_2b8(name)) == 0 &&
             (M8(host_2b8(name) + p + 1) == ':' || M8(host_2b8(name) + p + 1) == ' '))
             return host_2b8(name) + p + 2;
-        p = ADDR(CharNextA((const char *)(uintptr_t)p));
+        p = fs98_handle(CharNextA((const char *)(uintptr_t)p));
     } while (M8(p) != 0);
     return 0;
 }
@@ -653,7 +646,7 @@ static uint32_t host_opt_copy(uint32_t v, uint32_t buf, uint32_t len)
     while (c != 0) {
         if ((c == '/' || c == '-') && M8(e - 1) == ' ')
             break;
-        e = ADDR(CharNextA((const char *)(uintptr_t)e));
+        e = fs98_handle(CharNextA((const char *)(uintptr_t)e));
         c = M8(e);
     }
     n = e - v;
@@ -663,13 +656,13 @@ static uint32_t host_opt_copy(uint32_t v, uint32_t buf, uint32_t len)
     host_21c(buf, v, n);
     q = buf;
     while (M8(q) != 0 && M8(q) == ' ')
-        q = ADDR(CharNextA((const char *)(uintptr_t)q));
+        q = fs98_handle(CharNextA((const char *)(uintptr_t)q));
     host_2a8(buf, q);
     t = host_2b8(buf) + buf - 1;
     if (M8(t) == ' ') {
         while (t != buf) {
             M8(t) = 0;
-            t = ADDR(CharPrevA((const char *)(uintptr_t)buf, (const char *)(uintptr_t)t));
+            t = fs98_handle(CharPrevA((const char *)(uintptr_t)buf, (const char *)(uintptr_t)t));
             if (M8(t) != ' ')
                 break;
         }
@@ -681,7 +674,7 @@ static uint32_t host_opt_copy(uint32_t v, uint32_t buf, uint32_t len)
  * Only the colon form counts; 0, or -1 if absent, colonless or too long. */
 static uint32_t FS98_STDCALL host_098(uint32_t name, uint32_t buf, uint32_t len)
 {
-    uint32_t cl = ADDR(GetCommandLineA()), v;
+    uint32_t cl = fs98_handle(GetCommandLineA()), v;
     if (M8(cl) == 0)
         return (uint32_t)-1;
     v = host_opt_find(cl, name);
@@ -695,7 +688,7 @@ static uint32_t FS98_STDCALL host_098(uint32_t name, uint32_t buf, uint32_t len)
 static uint32_t FS98_STDCALL host_09c(uint32_t name, uint32_t out)
 {
     char buf[0x40];
-    uint32_t r = host_098(name, ADDR(buf), 0x40);
+    uint32_t r = host_098(name, fs98_handle(buf), 0x40);
     if (r == 0)
         M32(out) = (uint32_t)atoi(buf);
     return r;
@@ -704,7 +697,7 @@ static uint32_t FS98_STDCALL host_09c(uint32_t name, uint32_t out)
 static uint32_t FS98_STDCALL host_0a0(uint32_t name, uint32_t out)
 {
     char buf[0x40];
-    uint32_t r = host_098(name, ADDR(buf), 0x40);
+    uint32_t r = host_098(name, fs98_handle(buf), 0x40);
     if (r == 0)
         *(double *)(uintptr_t)out = atof(buf);
     return r;
@@ -714,7 +707,7 @@ static uint32_t FS98_STDCALL host_0a0(uint32_t name, uint32_t out)
  * for "/name ..." (more exactly: 1 when a space precedes what follows). */
 static uint32_t FS98_STDCALL host_0a4(uint32_t name)
 {
-    uint32_t v = host_opt_find(ADDR(GetCommandLineA()), name);
+    uint32_t v = host_opt_find(fs98_handle(GetCommandLineA()), name);
     if (v == 0)
         return 0;
     return (M8(v - 1) != ' ') + 1;
@@ -775,7 +768,7 @@ static uint32_t FS98_STDCALL host_1ac(uint32_t ext, uint32_t out)
     else
         host_210(1, n * 4 + 4, V(0x4188b0));
     M32(out) = M32(V(0x4188ac)) + 0x25;
-    M32(M32(V(0x4188b0)) + M32(V(0x4188ac)) * 4) = ADDR(_strdup((const char *)(uintptr_t)ext));
+    M32(M32(V(0x4188b0)) + M32(V(0x4188ac)) * 4) = fs98_handle(_strdup((const char *)(uintptr_t)ext));
     M32(V(0x4188ac)) = M32(V(0x4188ac)) + 1;
     return 0;
 }
@@ -818,20 +811,20 @@ static uint32_t FS98_STDCALL host_188(uint32_t path, uint32_t drive, uint32_t di
     if (path == 0)
         return (uint32_t)-1;
     if (drive != 0 && host_168(path) != 0) {
-        host_2a8(ADDR(unc), V(0x4180c8));
-        host_2a8(ADDR(unc) + 2, path + 2);
-        p = ADDR(unc) + 2;
+        host_2a8(fs98_handle(unc), V(0x4180c8));
+        host_2a8(fs98_handle(unc) + 2, path + 2);
+        p = fs98_handle(unc) + 2;
         do
-            p = ADDR(CharNextA((const char *)(uintptr_t)p));
+            p = fs98_handle(CharNextA((const char *)(uintptr_t)p));
         while (M8(p) != '\\' && M8(p) != 0);
-        host_split(p, 0, dir, fname, ADDR(ext));
+        host_split(p, 0, dir, fname, fs98_handle(ext));
         M8(p) = 0;
-        host_2a8(drive, ADDR(unc));
+        host_2a8(drive, fs98_handle(unc));
     } else {
-        host_split(path, drive, dir, fname, ADDR(ext));
+        host_split(path, drive, dir, fname, fs98_handle(ext));
     }
-    if (ext[0] != 0 && ext_id != 0 && host_ext_lookup(ADDR(ext), ext_id) != 0)
-        host_1ac(ADDR(ext), ext_id);
+    if (ext[0] != 0 && ext_id != 0 && host_ext_lookup(fs98_handle(ext), ext_id) != 0)
+        host_1ac(fs98_handle(ext), ext_id);
     return 0;
 }
 
@@ -861,7 +854,7 @@ static uint32_t FS98_STDCALL host_2a0(uint32_t id, uint32_t buf, uint32_t len)
     req[0] = id;
     req[1] = buf;
     req[2] = len;
-    n = host_30c(HOST_STRMODS, ADDR(req), ADDR(host_str_cb));
+    n = host_30c(HOST_STRMODS, fs98_handle(req), fs98_handle(host_str_cb));
     if (n == 0)
         n = (uint32_t)LoadStringA((HINSTANCE)(uintptr_t)M32(V(0x41882c)), id,
                                   (char *)(uintptr_t)buf, (int)len);
@@ -875,10 +868,10 @@ static uint32_t FS98_STDCALL host_2a4(uint32_t id, uint32_t out)
     char buf[0x400];
     uint32_t n;
     M32(out) = 0;
-    n = host_2a0(id, ADDR(buf), 0x400);
+    n = host_2a0(id, fs98_handle(buf), 0x400);
     if (n != 0) {
         host_20c(1, n + 1, out, 0);
-        host_2a8(M32(out), ADDR(buf));
+        host_2a8(M32(out), fs98_handle(buf));
     }
     return n;
 }
@@ -888,7 +881,7 @@ static uint32_t FS98_STDCALL host_2a4(uint32_t id, uint32_t out)
  * with *out 0 if there is no such record or it is not loaded. */
 static uint32_t FS98_STDCALL host_298(uint32_t id, uint32_t out)
 {
-    uint32_t rec = host_310(HOST_MODULES, 0xc, ADDR(&id), 4, 0), e;
+    uint32_t rec = host_310(HOST_MODULES, 0xc, fs98_handle(&id), 4, 0), e;
     if (rec == 0) {
         M32(out) = 0;
         return (uint32_t)-1;
@@ -906,7 +899,7 @@ static uint32_t FS98_STDCALL host_298(uint32_t id, uint32_t out)
 /* +0x29c (0x40ed40): take `hmod` off the string list.  0, or -1 if absent. */
 static uint32_t FS98_STDCALL host_29c(uint32_t hmod)
 {
-    uint32_t e = host_310(HOST_STRMODS, 0, ADDR(&hmod), 4, 0);
+    uint32_t e = host_310(HOST_STRMODS, 0, fs98_handle(&hmod), 4, 0);
     if (e == 0)
         return (uint32_t)-1;
     host_300(HOST_STRMODS, e);
@@ -1007,7 +1000,7 @@ static uint32_t host_name_check(uint32_t s, int path)
     while (M8(s) != 0) {
         if (host_name_bad(M8(s), path))
             return (uint32_t)-1;
-        s = ADDR(CharNextA((const char *)(uintptr_t)s));
+        s = fs98_handle(CharNextA((const char *)(uintptr_t)s));
         n++;
     }
     return n != 0 ? 0 : 0x1003;
@@ -1041,7 +1034,7 @@ static void host_cut_sep(uint32_t buf, uint32_t seplen)
 static uint32_t FS98_STDCALL host_184(uint32_t out, uint32_t drive, uint32_t dir, uint32_t name)
 {
     uint8_t buf[0x208];     /* RETAIL BUG (kept): HOST-2 -- only the result is checked against 0x104, not the parts */
-    uint32_t seplen = host_2b8(V(0x4180c4)), i, b = ADDR(buf);
+    uint32_t seplen = host_2b8(V(0x4180c4)), i, b = fs98_handle(buf);
     buf[0] = M8(V(0x4187f8));
     for (i = 1; i < sizeof buf; i++)
         buf[i] = 0;
@@ -1099,7 +1092,7 @@ static uint32_t FS98_STDCALL host_1b4(uint32_t out, uint32_t w, uint32_t h, uint
     uint32_t p;
     if ((int32_t)fmt < 0 || (int32_t)fmt >= 6)
         return (uint32_t)-1;
-    host_20c(1, 0x20, ADDR(&p), 1);
+    host_20c(1, 0x20, fs98_handle(&p), 1);
     M32(p) = fmt;
     M32(p + 4) = w;
     M32(p + 8) = h;
@@ -1126,7 +1119,7 @@ static uint32_t FS98_STDCALL host_1b8(uint32_t p)
         host_214(p + 0x18);
     if (M32(p + 0x10) != 0)
         host_214(p + 0x10);
-    host_214(ADDR(&p));
+    host_214(fs98_handle(&p));
     return 0;
 }
 
@@ -1238,7 +1231,7 @@ static uint32_t FS98_STDCALL host_1e0(uint32_t out, uint32_t i)
 /* 0x40ccf0: the walk's callback -- LoadAcceleratorsA from one module. */
 static uint32_t FS98_STDCALL host_accel_cb(uint32_t elem, uint32_t res)
 {
-    return ADDR(LoadAcceleratorsA((HINSTANCE)(uintptr_t)M32(elem),
+    return fs98_handle(LoadAcceleratorsA((HINSTANCE)(uintptr_t)M32(elem),
                                   (const char *)(uintptr_t)(uint32_t)M16(res)));
 }
 
@@ -1248,16 +1241,16 @@ static uint32_t FS98_STDCALL host_accel_cb(uint32_t elem, uint32_t res)
 static uint32_t FS98_STDCALL host_1e4(uint32_t out, uint32_t res)
 {
     uint32_t h, n, tmp, t, i;
-    h = host_30c(HOST_STRMODS, ADDR(&res), ADDR(host_accel_cb));
+    h = host_30c(HOST_STRMODS, fs98_handle(&res), fs98_handle(host_accel_cb));
     if (h == 0)
-        h = ADDR(LoadAcceleratorsA((HINSTANCE)(uintptr_t)M32(V(0x41882c)),
+        h = fs98_handle(LoadAcceleratorsA((HINSTANCE)(uintptr_t)M32(V(0x41882c)),
                                    (const char *)(uintptr_t)(res & 0xffff)));
     if (h == 0) {
         M32(out) = 0;
         return (uint32_t)-1;
     }
     n = (uint32_t)CopyAcceleratorTableA((HACCEL)(uintptr_t)h, 0, 0);
-    if (host_20c(1, n * 6, ADDR(&tmp), 0) != 0)
+    if (host_20c(1, n * 6, fs98_handle(&tmp), 0) != 0)
         return (uint32_t)-1;
     CopyAcceleratorTableA((HACCEL)(uintptr_t)h, (ACCEL *)(uintptr_t)tmp, (int)n);
     DestroyAcceleratorTable((HACCEL)(uintptr_t)h);
@@ -1267,7 +1260,7 @@ static uint32_t FS98_STDCALL host_1e4(uint32_t out, uint32_t res)
     host_20c(1, n * 12, t + 8, 1);
     for (i = 0; i < M32(t + 0xc); i++)
         host_accel_entry(tmp + 6 * i, M32(t + 8) + 12 * i);
-    host_214(ADDR(&tmp));
+    host_214(fs98_handle(&tmp));
     return 0;
 }
 
@@ -1278,7 +1271,7 @@ static uint32_t FS98_STDCALL host_1e8(uint32_t id)
     uint32_t t;
     if (id == 0)
         return (uint32_t)-1;
-    t = host_accel_find(ADDR(&id));
+    t = host_accel_find(fs98_handle(&id));
     if (t == 0)
         return (uint32_t)-1;
     M32(t) = 1;
@@ -1290,7 +1283,7 @@ static uint32_t FS98_STDCALL host_1ec(uint32_t id)
     uint32_t t;
     if (id == 0)
         return (uint32_t)-1;
-    t = host_accel_find(ADDR(&id));
+    t = host_accel_find(fs98_handle(&id));
     if (t == 0)
         return (uint32_t)-1;
     M32(t) = 0;
@@ -1300,7 +1293,7 @@ static uint32_t FS98_STDCALL host_1ec(uint32_t id)
 /* +0x1f0 (0x40c390): empty table `id`.  0, or -1. */
 static uint32_t FS98_STDCALL host_1f0(uint32_t id)
 {
-    uint32_t t = host_accel_find(ADDR(&id));
+    uint32_t t = host_accel_find(fs98_handle(&id));
     if (t == 0)
         return (uint32_t)-1;
     host_214(t + 8);
@@ -1311,7 +1304,7 @@ static uint32_t FS98_STDCALL host_1f0(uint32_t id)
 /* +0x1f4 (0x40c3d0): append n entries to table `id`.  0, or -1. */
 static uint32_t FS98_STDCALL host_1f4(uint32_t id, uint32_t entries, uint32_t n)
 {
-    uint32_t t = host_accel_find(ADDR(&id));
+    uint32_t t = host_accel_find(fs98_handle(&id));
     if (t == 0)
         return (uint32_t)-1;
     if (M32(t + 0xc) != 0)
@@ -1331,7 +1324,7 @@ static uint32_t FS98_STDCALL host_1f4(uint32_t id, uint32_t entries, uint32_t n)
  * -1 for an unknown table. */
 static uint32_t FS98_STDCALL host_1f8(uint32_t id, uint32_t entries, uint32_t n)
 {
-    uint32_t t = host_accel_find(ADDR(&id)), removed = 0, k, j, at, next, cnt;
+    uint32_t t = host_accel_find(fs98_handle(&id)), removed = 0, k, j, at, next, cnt;
     if (t == 0)
         return (uint32_t)-1;
     for (k = n; k != 0; k--, entries += 12) {
@@ -1377,7 +1370,7 @@ static uint32_t FS98_STDCALL host_1f8(uint32_t id, uint32_t entries, uint32_t n)
 static uint32_t FS98_STDCALL host_1fc(uint32_t id, uint32_t unused, uint32_t start, uint32_t mode,
                                       uint32_t buf, uint32_t n)
 {
-    uint32_t t = host_accel_find(ADDR(&id)), c;
+    uint32_t t = host_accel_find(fs98_handle(&id)), c;
     (void)unused;
     if (t == 0)
         return (uint32_t)-1;
@@ -1494,7 +1487,7 @@ static uint32_t FS98_STDCALL host_204(uint32_t s, uint32_t out)
         vk = 0x90;
     else {
         for (vk = 0; vk < 0x100; vk++) {
-            host_key_text(vk, ADDR(text), 0x7f);
+            host_key_text(vk, fs98_handle(text), 0x7f);
             r = (uint32_t)_strcmpi((const char *)(uintptr_t)s, text);
             if (r == 0)
                 break;
@@ -1540,11 +1533,11 @@ static uint32_t host_ext_name(uint32_t id, uint32_t buf)
 static uint32_t host_path_ext(uint32_t out, uint32_t path, uint32_t id)
 {
     char ext[0x100];
-    if (host_ext_name(id, ADDR(ext)) == (uint32_t)-1)
+    if (host_ext_name(id, fs98_handle(ext)) == (uint32_t)-1)
         return (uint32_t)-1;
-    host_20c(1, host_2b8(path) + host_2b8(ADDR(ext)) + 1, out, 0);
+    host_20c(1, host_2b8(path) + host_2b8(fs98_handle(ext)) + 1, out, 0);
     host_2a8(M32(out), path);
-    host_2b0(M32(out), ADDR(ext));
+    host_2b0(M32(out), fs98_handle(ext));
     return 0;
 }
 
@@ -1589,7 +1582,7 @@ static uint32_t host_prof_get_list(uint32_t sec, uint32_t key, uint32_t out, uin
 {
     uint32_t size = n * (dbl ? 30 : 15), buf;   /* RETAIL BUG (kept): HOST-11 -- 15 bytes an int, 30 a double */
     char *p;
-    if (host_20c(1, size, ADDR(&buf), 0) != 0)
+    if (host_20c(1, size, fs98_handle(&buf), 0) != 0)
         return (uint32_t)-1;
     M8(buf) = 0;
     GetPrivateProfileStringA((LPCSTR)(uintptr_t)sec, (LPCSTR)(uintptr_t)key,
@@ -1608,7 +1601,7 @@ static uint32_t host_prof_get_list(uint32_t sec, uint32_t key, uint32_t out, uin
             p += strspn(p, (const char *)(uintptr_t)V(0x417ed0));
         }
     }
-    host_214(ADDR(&buf));
+    host_214(fs98_handle(&buf));
     return 0;
 }
 
@@ -1619,7 +1612,7 @@ static uint32_t host_prof_put_list(uint32_t sec, uint32_t key, uint32_t vals, ui
     char t[0x24];
     uint32_t buf, i;
     /* RETAIL BUG (kept): HOST-11 -- the same block size, written into unchecked; and a double's "%f" overruns t[0x24] (one value suffices: 318 bytes at most) */
-    if (host_20c(1, n * (dbl ? 30 : 15), ADDR(&buf), 0) != 0)
+    if (host_20c(1, n * (dbl ? 30 : 15), fs98_handle(&buf), 0) != 0)
         return (uint32_t)-1;
     M8(buf) = 0;
     for (i = 0; i < n; i++) {
@@ -1629,11 +1622,11 @@ static uint32_t host_prof_put_list(uint32_t sec, uint32_t key, uint32_t vals, ui
             sprintf(t, (const char *)(uintptr_t)V(0x417ed8), *(double *)(uintptr_t)(vals + 8 * i));
         else
             sprintf(t, (const char *)(uintptr_t)V(0x417a24), M32(vals + 4 * i));
-        host_2b0(buf, ADDR(t));
+        host_2b0(buf, fs98_handle(t));
     }
     WritePrivateProfileStringA((LPCSTR)(uintptr_t)sec, (LPCSTR)(uintptr_t)key,
                                (LPCSTR)(uintptr_t)buf, (LPCSTR)(uintptr_t)file);
-    host_214(ADDR(&buf));
+    host_214(fs98_handle(&buf));
     return 0;
 }
 
@@ -1740,20 +1733,20 @@ static uint32_t FS98_STDCALL host_100(uint32_t sec, uint32_t out)
 static uint32_t FS98_STDCALL host_0d0(uint32_t sec, uint32_t key, uint32_t io, uint32_t path, uint32_t ext)
 {
     uint32_t f;
-    if (host_path_ext(ADDR(&f), path, ext) == (uint32_t)-1)
+    if (host_path_ext(fs98_handle(&f), path, ext) == (uint32_t)-1)
         return (uint32_t)-1;
     host_prof_get_int(sec, key, io, f);
-    host_214(ADDR(&f));
+    host_214(fs98_handle(&f));
     return 0;
 }
 
 static uint32_t FS98_STDCALL host_0d4(uint32_t sec, uint32_t key, uint32_t v, uint32_t path, uint32_t ext)
 {
     uint32_t f;
-    if (host_path_ext(ADDR(&f), path, ext) == (uint32_t)-1)
+    if (host_path_ext(fs98_handle(&f), path, ext) == (uint32_t)-1)
         return (uint32_t)-1;
     host_prof_put_int(sec, key, v, f);
-    host_214(ADDR(&f));
+    host_214(fs98_handle(&f));
     return 0;
 }
 
@@ -1761,10 +1754,10 @@ static uint32_t FS98_STDCALL host_0d8(uint32_t sec, uint32_t key, uint32_t out, 
                                       uint32_t path, uint32_t ext)
 {
     uint32_t f, r;
-    if (host_path_ext(ADDR(&f), path, ext) == (uint32_t)-1)
+    if (host_path_ext(fs98_handle(&f), path, ext) == (uint32_t)-1)
         return (uint32_t)-1;
     r = host_prof_get_list(sec, key, out, n, f, 0);
-    host_214(ADDR(&f));
+    host_214(fs98_handle(&f));
     return r;
 }
 
@@ -1772,30 +1765,30 @@ static uint32_t FS98_STDCALL host_0dc(uint32_t sec, uint32_t key, uint32_t vals,
                                       uint32_t path, uint32_t ext)
 {
     uint32_t f, r;
-    if (host_path_ext(ADDR(&f), path, ext) == (uint32_t)-1)
+    if (host_path_ext(fs98_handle(&f), path, ext) == (uint32_t)-1)
         return (uint32_t)-1;
     r = host_prof_put_list(sec, key, vals, n, f, 0);
-    host_214(ADDR(&f));
+    host_214(fs98_handle(&f));
     return r;
 }
 
 static uint32_t FS98_STDCALL host_0e0(uint32_t sec, uint32_t key, uint32_t out, uint32_t path, uint32_t ext)
 {
     uint32_t f;
-    if (host_path_ext(ADDR(&f), path, ext) == (uint32_t)-1)
+    if (host_path_ext(fs98_handle(&f), path, ext) == (uint32_t)-1)
         return (uint32_t)-1;
     host_prof_get_double(sec, key, out, f);
-    host_214(ADDR(&f));
+    host_214(fs98_handle(&f));
     return 0;
 }
 
 static uint32_t FS98_STDCALL host_0e4(uint32_t sec, uint32_t key, double v, uint32_t path, uint32_t ext)
 {
     uint32_t f;
-    if (host_path_ext(ADDR(&f), path, ext) == (uint32_t)-1)
+    if (host_path_ext(fs98_handle(&f), path, ext) == (uint32_t)-1)
         return (uint32_t)-1;
     host_prof_put_double(sec, key, v, f);
-    host_214(ADDR(&f));
+    host_214(fs98_handle(&f));
     return 0;
 }
 
@@ -1803,10 +1796,10 @@ static uint32_t FS98_STDCALL host_0e8(uint32_t sec, uint32_t key, uint32_t out, 
                                       uint32_t path, uint32_t ext)
 {
     uint32_t f, r;
-    if (host_path_ext(ADDR(&f), path, ext) == (uint32_t)-1)
+    if (host_path_ext(fs98_handle(&f), path, ext) == (uint32_t)-1)
         return (uint32_t)-1;
     r = host_prof_get_list(sec, key, out, n, f, 1);
-    host_214(ADDR(&f));
+    host_214(fs98_handle(&f));
     return r;
 }
 
@@ -1814,10 +1807,10 @@ static uint32_t FS98_STDCALL host_0ec(uint32_t sec, uint32_t key, uint32_t vals,
                                       uint32_t path, uint32_t ext)
 {
     uint32_t f, r;
-    if (host_path_ext(ADDR(&f), path, ext) == (uint32_t)-1)
+    if (host_path_ext(fs98_handle(&f), path, ext) == (uint32_t)-1)
         return (uint32_t)-1;
     r = host_prof_put_list(sec, key, vals, n, f, 1);
-    host_214(ADDR(&f));
+    host_214(fs98_handle(&f));
     return r;
 }
 
@@ -1826,33 +1819,33 @@ static uint32_t FS98_STDCALL host_0f0(uint32_t sec, uint32_t key, uint32_t buf, 
                                       uint32_t path, uint32_t ext)
 {
     uint32_t f, r;
-    if (host_path_ext(ADDR(&f), path, ext) == (uint32_t)-1)
+    if (host_path_ext(fs98_handle(&f), path, ext) == (uint32_t)-1)
         return (uint32_t)-1;
     r = GetPrivateProfileStringA((LPCSTR)(uintptr_t)sec, (LPCSTR)(uintptr_t)key,
                                  (LPCSTR)(uintptr_t)buf, (LPSTR)(uintptr_t)buf, size,
                                  (LPCSTR)(uintptr_t)f);
-    host_214(ADDR(&f));
+    host_214(fs98_handle(&f));
     return r;
 }
 
 static uint32_t FS98_STDCALL host_0f4(uint32_t sec, uint32_t key, uint32_t s, uint32_t path, uint32_t ext)
 {
     uint32_t f;
-    if (host_path_ext(ADDR(&f), path, ext) == (uint32_t)-1)
+    if (host_path_ext(fs98_handle(&f), path, ext) == (uint32_t)-1)
         return (uint32_t)-1;
     WritePrivateProfileStringA((LPCSTR)(uintptr_t)sec, (LPCSTR)(uintptr_t)key,
                                (LPCSTR)(uintptr_t)s, (LPCSTR)(uintptr_t)f);
-    host_214(ADDR(&f));
+    host_214(fs98_handle(&f));
     return 0;
 }
 
 static uint32_t FS98_STDCALL host_0fc(uint32_t sec, uint32_t path, uint32_t ext)
 {
     uint32_t f;
-    if (host_path_ext(ADDR(&f), path, ext) == (uint32_t)-1)
+    if (host_path_ext(fs98_handle(&f), path, ext) == (uint32_t)-1)
         return (uint32_t)-1;
     host_prof_clear(sec, f);
-    host_214(ADDR(&f));
+    host_214(fs98_handle(&f));
     return 0;
 }
 
@@ -1861,10 +1854,10 @@ static uint32_t FS98_STDCALL host_104(uint32_t sec, uint32_t path, uint32_t ext,
 {
     uint32_t f;
     M32(out) = 0;
-    if (host_path_ext(ADDR(&f), path, ext) == (uint32_t)-1)
+    if (host_path_ext(fs98_handle(&f), path, ext) == (uint32_t)-1)
         return (uint32_t)-1;
     host_prof_section(sec, out, f);
-    host_214(ADDR(&f));
+    host_214(fs98_handle(&f));
     return 0;
 }
 
@@ -1897,14 +1890,14 @@ static uint32_t FS98_STDCALL host_17c(uint32_t out, uint32_t path, uint32_t ext,
     case 0:
     case 1:
     case 2:
-        h = ADDR(CreateFileA((LPCSTR)(uintptr_t)M32(M32(out) + 4),
+        h = fs98_handle(CreateFileA((LPCSTR)(uintptr_t)M32(M32(out) + 4),
                              mode == 0 ? GENERIC_READ : mode == 1 ? GENERIC_READ | GENERIC_WRITE
                                                                   : GENERIC_WRITE,
                              0, 0, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, 0));
         M32(M32(out)) = h;
         break;
     case 3:
-        h = ADDR(CreateFileA((LPCSTR)(uintptr_t)M32(M32(out) + 4), GENERIC_WRITE, 0, 0,
+        h = fs98_handle(CreateFileA((LPCSTR)(uintptr_t)M32(M32(out) + 4), GENERIC_WRITE, 0, 0,
                              OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, 0));
         M32(M32(out)) = h;
         SetFilePointer((HANDLE)(uintptr_t)M32(M32(out)), 0, 0, FILE_END);
@@ -1933,7 +1926,7 @@ static uint32_t FS98_STDCALL host_148(uint32_t out, uint32_t path, uint32_t ext)
     }
     M32(M32(out) + 0xc) = ext;
     M32(M32(out) + 8) = 1;
-    M32(M32(out)) = ADDR(CreateFileA((LPCSTR)(uintptr_t)M32(M32(out) + 4),
+    M32(M32(out)) = fs98_handle(CreateFileA((LPCSTR)(uintptr_t)M32(M32(out) + 4),
                                      GENERIC_READ | GENERIC_WRITE, 0, 0, CREATE_ALWAYS,
                                      FILE_ATTRIBUTE_NORMAL, 0));
     if (M32(M32(out)) == 0xffffffffu) {
@@ -1958,7 +1951,7 @@ static uint32_t FS98_STDCALL host_13c(uint32_t f)
         r = (uint32_t)-1;
     }
     host_214(f + 4);
-    host_214(ADDR(&f));
+    host_214(fs98_handle(&f));
     return r;
 }
 
@@ -2052,11 +2045,11 @@ static uint32_t FS98_STDCALL host_1a8(uint32_t f, uint32_t pos)
 static uint32_t FS98_STDCALL host_134(uint32_t out, uint32_t path, uint32_t ext)
 {
     uint32_t file, a;
-    if (host_path_ext(ADDR(&file), path, ext) != 0)
+    if (host_path_ext(fs98_handle(&file), path, ext) != 0)
         return (uint32_t)-1;
     a = GetFileAttributesA((LPCSTR)(uintptr_t)file);
     if (a == 0xffffffffu) {
-        host_214(ADDR(&file));
+        host_214(fs98_handle(&file));
         return (uint32_t)-1;
     }
     M32(out) = 0;
@@ -2070,7 +2063,7 @@ static uint32_t FS98_STDCALL host_134(uint32_t out, uint32_t path, uint32_t ext)
         M32(out) |= 8;
     if (a & FILE_ATTRIBUTE_DIRECTORY)
         M32(out) |= 0x10;
-    host_214(ADDR(&file));
+    host_214(fs98_handle(&file));
     return 0;
 }
 
@@ -2080,10 +2073,10 @@ static uint32_t FS98_STDCALL host_138(uint32_t flags, uint32_t path, uint32_t ex
 {
     uint32_t file, a = 0;
     BOOL ok;
-    if (host_path_ext(ADDR(&file), path, ext) != 0)
+    if (host_path_ext(fs98_handle(&file), path, ext) != 0)
         return (uint32_t)-1;
     if (GetFileAttributesA((LPCSTR)(uintptr_t)file) == 0xffffffffu) {
-        host_214(ADDR(&file));
+        host_214(fs98_handle(&file));
         return (uint32_t)-1;
     }
     if (flags & 1)
@@ -2097,7 +2090,7 @@ static uint32_t FS98_STDCALL host_138(uint32_t flags, uint32_t path, uint32_t ex
     if (flags & 0x10)
         a |= FILE_ATTRIBUTE_DIRECTORY;
     ok = SetFileAttributesA((LPCSTR)(uintptr_t)file, a);
-    host_214(ADDR(&file));
+    host_214(fs98_handle(&file));
     return ok ? 0 : (uint32_t)-1;
 }
 
@@ -2105,11 +2098,11 @@ static uint32_t FS98_STDCALL host_138(uint32_t flags, uint32_t path, uint32_t ex
 static uint32_t FS98_STDCALL host_158(uint32_t path, uint32_t ext)
 {
     uint32_t file, r = 0;
-    if (host_path_ext(ADDR(&file), path, ext) != 0)
+    if (host_path_ext(fs98_handle(&file), path, ext) != 0)
         return (uint32_t)-1;
     if (GetFileAttributesA((LPCSTR)(uintptr_t)file) == 0xffffffffu)
         r = (uint32_t)-1;
-    host_214(ADDR(&file));
+    host_214(fs98_handle(&file));
     return r;
 }
 
@@ -2118,11 +2111,11 @@ static uint32_t FS98_STDCALL host_158(uint32_t path, uint32_t ext)
 static uint32_t FS98_STDCALL host_11c(uint32_t path)
 {
     uint32_t file = 0;
-    if (host_path_ext(ADDR(&file), path, 0) != 0)
+    if (host_path_ext(fs98_handle(&file), path, 0) != 0)
         return (uint32_t)-1;
     if (!CreateDirectoryA((LPCSTR)(uintptr_t)file, 0))
         return (uint32_t)-1;    /* RETAIL BUG (kept): HOST-12 -- the copy is not freed */
-    return host_214(ADDR(&file)) != 0 ? (uint32_t)-1 : 0;
+    return host_214(fs98_handle(&file)) != 0 ? (uint32_t)-1 : 0;
 }
 
 /* +0x14c (0x40acb0): delete path + extension.  0, or -1. */
@@ -2130,10 +2123,10 @@ static uint32_t FS98_STDCALL host_14c(uint32_t path, uint32_t ext)
 {
     uint32_t file;
     BOOL ok;
-    if (host_path_ext(ADDR(&file), path, ext) != 0)
+    if (host_path_ext(fs98_handle(&file), path, ext) != 0)
         return (uint32_t)-1;
     ok = DeleteFileA((LPCSTR)(uintptr_t)file);
-    host_214(ADDR(&file));
+    host_214(fs98_handle(&file));
     return ok ? 0 : (uint32_t)-1;
 }
 
@@ -2145,16 +2138,16 @@ static uint32_t host_copy_move(uint32_t to, uint32_t to_ext, uint32_t from, uint
 {
     uint32_t src, dst;
     BOOL ok;
-    if (host_path_ext(ADDR(&src), from, from_ext) != 0)
+    if (host_path_ext(fs98_handle(&src), from, from_ext) != 0)
         return (uint32_t)-1;
-    if (host_path_ext(ADDR(&dst), to, to_ext) != 0) {
-        host_214(ADDR(&src));
+    if (host_path_ext(fs98_handle(&dst), to, to_ext) != 0) {
+        host_214(fs98_handle(&src));
         return (uint32_t)-1;
     }
     ok = move ? MoveFileA((LPCSTR)(uintptr_t)src, (LPCSTR)(uintptr_t)dst)
               : CopyFileA((LPCSTR)(uintptr_t)src, (LPCSTR)(uintptr_t)dst, TRUE);
-    host_214(ADDR(&src));
-    host_214(ADDR(&dst));
+    host_214(fs98_handle(&src));
+    host_214(fs98_handle(&dst));
     return ok ? 0 : (uint32_t)-1;
 }
 
@@ -2183,27 +2176,27 @@ static uint32_t FS98_STDCALL host_164(uint32_t out, uint32_t dir, uint32_t patte
 {
     char buf[0x104];
     uint32_t f, n;
-    host_20c(1, 0x14c, ADDR(&f), 0);
+    host_20c(1, 0x14c, fs98_handle(&f), 0);
     M32(f + 0x144) = ext;
     M32(f + 0x148) = 0;
     buf[0] = 0;
     if (dir != 0) {
-        host_2b0(ADDR(buf), dir);
-        n = host_2b8(ADDR(buf));
+        host_2b0(fs98_handle(buf), dir);
+        n = host_2b8(fs98_handle(buf));
         /* RETAIL BUG (kept): HOST-1 -- an empty dir reads the byte before buf (the heap pointer's top byte; 0x5c appends nothing) */
         if ((n != 0 ? (uint8_t)buf[n - 1] : (uint8_t)(f >> 24)) != '\\')
-            host_2b0(ADDR(buf), V(0x4180c4));
+            host_2b0(fs98_handle(buf), V(0x4180c4));
     }
-    host_2b0(ADDR(buf), pattern != 0 ? pattern : V(0x4180d0));
+    host_2b0(fs98_handle(buf), pattern != 0 ? pattern : V(0x4180d0));
     if (ext == 0xffffffffu) {
-        host_2b0(ADDR(buf), V(0x4180cc));
-    } else if (host_ext_name(ext, ADDR(buf) + host_2b8(ADDR(buf))) == (uint32_t)-1) {
-        host_214(ADDR(&f));
+        host_2b0(fs98_handle(buf), V(0x4180cc));
+    } else if (host_ext_name(ext, fs98_handle(buf) + host_2b8(fs98_handle(buf))) == (uint32_t)-1) {
+        host_214(fs98_handle(&f));
         return (uint32_t)-1;
     }
-    M32(f) = ADDR(FindFirstFileA(buf, (WIN32_FIND_DATAA *)(uintptr_t)(f + 4)));
+    M32(f) = fs98_handle(FindFirstFileA(buf, (WIN32_FIND_DATAA *)(uintptr_t)(f + 4)));
     if (M32(f) == 0xffffffffu) {
-        host_214(ADDR(&f));
+        host_214(fs98_handle(&f));
         return (uint32_t)-1;
     }
     M32(f + 0x148) = 1;
@@ -2232,7 +2225,7 @@ static uint32_t FS98_STDCALL host_160(uint32_t f, uint32_t entry)
             }
         } else {
             _splitpath((const char *)(uintptr_t)(f + 0x30), 0, 0, (char *)(uintptr_t)entry, ext);
-            host_ext_lookup(ADDR(ext), entry + 0x104);
+            host_ext_lookup(fs98_handle(ext), entry + 0x104);
             M32(entry + 0x108) = M32(f + 0x24);
             M32(entry + 0x10c) = (M8(f + 4) & FILE_ATTRIBUTE_READONLY) ? 0 : 1;
             found = 1;
@@ -2374,7 +2367,7 @@ static uint32_t FS98_STDCALL host_088(uint32_t w, uint32_t r)
     if (w == 0)
         return 0;
     l = M32(w + 0xa0) + 0x54;
-    e = host_308(l, r, ADDR(host_rect_merge));
+    e = host_308(l, r, fs98_handle(host_rect_merge));
     if (e != 0)
         return e;
     return host_21c(host_2f8(l), r, 0x10);
@@ -2534,7 +2527,7 @@ static uint32_t host_joy_oem(uint32_t idx, uint32_t caps, uint32_t name)
     size = 0x30;
     r = RegQueryValueExA(h, (const char *)(uintptr_t)V(0x418174), 0, 0, (BYTE *)oem, &size);
     RegCloseKey(h);
-    host_2a8(name, ADDR(oem));
+    host_2a8(name, fs98_handle(oem));
     return r;
 }
 
@@ -2544,8 +2537,8 @@ static uint32_t host_joy_match(uint32_t s, uint32_t out)
     char t[0x30];
     uint32_t id;
     for (id = 0xb000; id < 0xb100; id++) {
-        host_2a0(id, ADDR(t), 0x30);
-        if (host_2bc(s, ADDR(t)) == 0) {
+        host_2a0(id, fs98_handle(t), 0x30);
+        if (host_2bc(s, fs98_handle(t)) == 0) {
             M32(out) = id;
             return 0;
         }
@@ -2563,10 +2556,10 @@ static uint32_t host_joy_match(uint32_t s, uint32_t out)
 static uint32_t FS98_STDCALL host_1c8(uint32_t idx, uint32_t out)
 {
     char name[0x40], caps[0x194], rname[0x40], gen[0x40];
-    uint32_t r = host_joy_oem(idx, ADDR(caps), ADDR(name)), rudder, axes, t;
+    uint32_t r = host_joy_oem(idx, fs98_handle(caps), fs98_handle(name)), rudder, axes, t;
     if (r != 0 && r != (uint32_t)-1)
         return (uint32_t)-1;
-    host_2ac(out + 0x10, ADDR(name), 0x40);
+    host_2ac(out + 0x10, fs98_handle(name), 0x40);
     sprintf(rname, (const char *)(uintptr_t)V(0x418264), name);
     rudder = *(uint32_t *)(caps + 0x60) & 2;
     M32(out + 0xc) = rudder ? 1 : 0;
@@ -2574,7 +2567,7 @@ static uint32_t FS98_STDCALL host_1c8(uint32_t idx, uint32_t out)
     M32(out + 4) = axes;
     M32(out + 8) = *(uint32_t *)(caps + 0x6c);
     if (r == 0) {
-        if (host_joy_match(rudder ? ADDR(rname) : ADDR(name), out) == 0)
+        if (host_joy_match(rudder ? fs98_handle(rname) : fs98_handle(name), out) == 0)
             return 0;
     }
     if (*(uint32_t *)(caps + 0x60) & 2) {
@@ -2586,11 +2579,11 @@ static uint32_t FS98_STDCALL host_1c8(uint32_t idx, uint32_t out)
         sprintf(gen, (const char *)(uintptr_t)V(0x418248), axes);
     }
     if (M8(out + 0x10) == 0) {
-        host_2a4(0x73, ADDR(&t));
+        host_2a4(0x73, fs98_handle(&t));
         sprintf((char *)(uintptr_t)(out + 0x10), (const char *)(uintptr_t)t, axes);
-        host_214(ADDR(&t));
+        host_214(fs98_handle(&t));
     }
-    return host_joy_match(ADDR(gen), out);
+    return host_joy_match(fs98_handle(gen), out);
 }
 
 /* +0x1cc (0x40be90): wait (up to 5 s by timeGetTime) for joystick idx to
@@ -2601,15 +2594,15 @@ static uint32_t FS98_STDCALL host_1cc(uint32_t idx, uint32_t mode, uint32_t out)
 {
     uint32_t a[0x53], b[0x53], start, i;
     int32_t d;
-    host_218(ADDR(a), 0, 0x14c);
+    host_218(fs98_handle(a), 0, 0x14c);
     a[2] = 0xffff;
-    host_1c4(idx, ADDR(a));
+    host_1c4(idx, fs98_handle(a));
     start = timeGetTime();
     M32(out) = 0;
     for (;;) {
-        host_218(ADDR(b), 0, 0x14c);
+        host_218(fs98_handle(b), 0, 0x14c);
         b[2] = 0xffff;
-        host_1c4(idx, ADDR(b));
+        host_1c4(idx, fs98_handle(b));
         if (mode == 0 || mode == 2)
             for (i = 0; i < 0x40; i++)
                 if (a[0x13 + i] != b[0x13 + i]) {
@@ -2667,34 +2660,34 @@ static uint32_t FS98_STDCALL host_170(uint32_t path, uint32_t ext, uint32_t len)
     uint32_t file = 0;
     char dummy[4];
     *(uint32_t *)dummy = M32(V(0x4180dc));
-    if (host_path_ext(ADDR(&file), path, ext) != 0)
+    if (host_path_ext(fs98_handle(&file), path, ext) != 0)
         goto fail;
-    if (host_188(path, ADDR(drive), ADDR(dir), ADDR(name), 0) != 0)
+    if (host_188(path, fs98_handle(drive), fs98_handle(dir), fs98_handle(name), 0) != 0)
         goto fail;
     if (drive[0] != 0) {
         M32(len) = host_2b8(file);
-        host_214(ADDR(&file));
+        host_214(fs98_handle(&file));
         return 0;
     }
-    if (host_184(ADDR(joined), ADDR(drive), ADDR(dir), ADDR(dummy)) != 0)
+    if (host_184(fs98_handle(joined), fs98_handle(drive), fs98_handle(dir), fs98_handle(dummy)) != 0)
         goto fail;
     if (_fullpath(full, joined, 0x208) == 0)
         goto fail;
-    if (host_188(ADDR(full), ADDR(drive), ADDR(dir), 0, 0) != 0)
+    if (host_188(fs98_handle(full), fs98_handle(drive), fs98_handle(dir), 0, 0) != 0)
         goto fail;
-    if (host_184(ADDR(joined), ADDR(drive), ADDR(dir), ADDR(name)) != 0)
+    if (host_184(fs98_handle(joined), fs98_handle(drive), fs98_handle(dir), fs98_handle(name)) != 0)
         goto fail;
     if (file != 0)
-        host_214(ADDR(&file));
-    if (host_path_ext(ADDR(&file), ADDR(joined), ext) != 0)
+        host_214(fs98_handle(&file));
+    if (host_path_ext(fs98_handle(&file), fs98_handle(joined), ext) != 0)
         goto fail;
     M32(len) = host_2b8(file);
-    host_214(ADDR(&file));
+    host_214(fs98_handle(&file));
     return 0;
 fail:
     M32(len) = 0xffffffffu;
     if (file != 0)
-        host_214(ADDR(&file));
+        host_214(fs98_handle(&file));
     return (uint32_t)-1;
 }
 
@@ -2785,12 +2778,12 @@ static uint32_t FS98_STDCALL host_150(uint32_t path, uint32_t out)
     char cwd[0x104], drive[0x104];
     DWORD spc, bps, free_, total;
     if (path == 0) {
-        host_130(ADDR(cwd));
-        host_188(ADDR(cwd), ADDR(drive), 0, 0, 0);
+        host_130(fs98_handle(cwd));
+        host_188(fs98_handle(cwd), fs98_handle(drive), 0, 0, 0);
     } else {
-        host_188(path, ADDR(drive), 0, 0, 0);
+        host_188(path, fs98_handle(drive), 0, 0, 0);
     }
-    host_2b0(ADDR(drive), V(0x4180c4));
+    host_2b0(fs98_handle(drive), V(0x4180c4));
     M32(out + 4) = 0;
     M32(out) = 0;
     if (!GetDiskFreeSpaceA(drive, &spc, &bps, &free_, &total))
@@ -2809,12 +2802,12 @@ static uint32_t FS98_STDCALL host_174(uint32_t out, uint32_t dir)
     prefix[0] = (char)M8(V(0x4187f8));
     prefix[1] = 0;
     if (dir == 0) {
-        host_130(ADDR(cwd));
-        host_188(ADDR(cwd), ADDR(drive), ADDR(sub), 0, 0);
-        host_184(ADDR(path), ADDR(drive), ADDR(sub), 0);
+        host_130(fs98_handle(cwd));
+        host_188(fs98_handle(cwd), fs98_handle(drive), fs98_handle(sub), 0, 0);
+        host_184(fs98_handle(path), fs98_handle(drive), fs98_handle(sub), 0);
     } else {
-        host_188(dir, ADDR(drive), ADDR(sub), ADDR(name), 0);
-        host_184(ADDR(path), ADDR(drive), ADDR(sub), ADDR(name));
+        host_188(dir, fs98_handle(drive), fs98_handle(sub), fs98_handle(name), 0);
+        host_184(fs98_handle(path), fs98_handle(drive), fs98_handle(sub), fs98_handle(name));
     }
     if (GetTempFileNameA(path, prefix, 0, (char *)(uintptr_t)out) == 0)
         return (uint32_t)-1;
@@ -2877,7 +2870,7 @@ static uint32_t host_menu_count(uint32_t items)
 static uint32_t host_menu_dup(uint32_t items)
 {
     uint32_t size = host_menu_count(items) * 0x14, p;
-    host_20c(1, size, ADDR(&p), 0);
+    host_20c(1, size, fs98_handle(&p), 0);
     host_21c(p, items, size);
     return p;
 }
@@ -2898,7 +2891,7 @@ static void host_menu_text(uint32_t item)
 static void host_menu_build(uint32_t pitems, uint32_t hmenu, uint32_t items, uint32_t dup)
 {
     uint32_t i;
-    M32(hmenu) = ADDR(CreateMenu());
+    M32(hmenu) = fs98_handle(CreateMenu());
     if (dup != 0)
         items = host_menu_dup(items);
     M32(pitems) = items;
@@ -2963,7 +2956,7 @@ static void host_menu_rebuild(void)
 static uint32_t host_menu_insert(uint32_t items, uint32_t n, uint32_t add, uint32_t before)
 {
     uint32_t count = host_menu_count(items), p, k = 0, i;
-    host_20c(1, (count + n) * 0x14, ADDR(&p), 0);
+    host_20c(1, (count + n) * 0x14, fs98_handle(&p), 0);
     while (MI_ID(items + k * 0x14) != before) {
         host_21c(p + k * 0x14, items + k * 0x14, 0x14);
         k++;
@@ -2973,7 +2966,7 @@ static uint32_t host_menu_insert(uint32_t items, uint32_t n, uint32_t add, uint3
         if (MI_SUB(p + i * 0x14) != 0)
             host_menu_build(p + i * 0x14 + 0xc, p + i * 0x14 + 0x10, MI_SUB(p + i * 0x14), 1);
     host_21c(p + (k + n) * 0x14, items + k * 0x14, (count - k) * 0x14);
-    host_214(ADDR(&items));
+    host_214(fs98_handle(&items));
     return p;
 }
 
@@ -3015,7 +3008,7 @@ static uint32_t FS98_STDCALL host_244(uint32_t parent, uint32_t id, uint32_t tex
     if (p == 0)
         return (uint32_t)-1;
     /* RETAIL BUG (kept): HOST-17 -- an item with no submenu (MI_SUB 0): host_menu_count reads through null here */
-    r = host_menu_insert(MI_SUB(p), 1, ADDR(item), 0xffff);
+    r = host_menu_insert(MI_SUB(p), 1, fs98_handle(item), 0xffff);
     MI_SUB(p) = r;
     if (r == 0)
         return (uint32_t)-1;
@@ -3053,7 +3046,7 @@ static uint32_t FS98_STDCALL host_24c(uint32_t id, uint32_t new_id, uint32_t tex
     item[2] = flags;
     item[3] = 0;
     item[4] = 0;
-    r = host_menu_insert(MI_SUB(p), 1, ADDR(item), id & 0xffff);
+    r = host_menu_insert(MI_SUB(p), 1, fs98_handle(item), id & 0xffff);
     MI_SUB(p) = r;
     if (r == 0)
         return (uint32_t)-1;
@@ -3146,7 +3139,7 @@ static uint32_t FS98_STDCALL host_25c(uint32_t id)
     /* RETAIL BUG (kept): HOST-17 -- found through the item's own parent id, idx unchecked; and
      * the removed item's own submenu is never freed */
     idx = host_menu_index(M32(sub), id);
-    host_20c(1, host_menu_count(M32(sub)) * 0x14 - 0x14, ADDR(&fresh), 0);
+    host_20c(1, host_menu_count(M32(sub)) * 0x14 - 0x14, fs98_handle(&fresh), 0);
     if (fresh == 0)
         return (uint32_t)-1;
     host_21c(fresh, M32(sub), (uint32_t)idx * 0x14);
@@ -3208,14 +3201,14 @@ static uint32_t FS98_STDCALL host_26c(uint32_t out, uint32_t path, uint32_t ext)
     uint32_t file;
     if (host_158(path, ext) != 0)
         return (uint32_t)-1;
-    if (host_path_ext(ADDR(&file), path, ext) == (uint32_t)-1)
+    if (host_path_ext(fs98_handle(&file), path, ext) == (uint32_t)-1)
         return (uint32_t)-1;
     if (fs98_host_rt_add_module((const char *)(uintptr_t)file, 0) == 0) {
-        host_214(ADDR(&file));
+        host_214(fs98_handle(&file));
         return (uint32_t)-1;
     }
-    M32(out) = ADDR(fs98_host_rt_acquire(fs98_host_rt_module_named((const char *)(uintptr_t)file)));
-    host_214(ADDR(&file));
+    M32(out) = fs98_handle(fs98_host_rt_acquire(fs98_host_rt_module_named((const char *)(uintptr_t)file)));
+    host_214(fs98_handle(&file));
     return 0;
 }
 
@@ -3240,7 +3233,7 @@ static uint32_t FS98_STDCALL host_294(uint32_t name, uint32_t out)
     host_184(buf, 0, buf, name);
     host_2b0(buf, V(0x4182fc));
     e = host_2f8(HOST_STRMODS);
-    h = ADDR(LoadLibraryA((LPCSTR)(uintptr_t)buf));
+    h = fs98_handle(LoadLibraryA((LPCSTR)(uintptr_t)buf));
     M32(e) = h;
     if (h == 0) {
         host_300(HOST_STRMODS, e);
@@ -3326,13 +3319,13 @@ static uint32_t host_wav_load(uint32_t name, uint32_t unused, uint32_t pdata, ui
 static uint32_t host_wav_chunk(uint32_t f, uint32_t c)
 {
     uint32_t h[2], got;
-    host_19c(f, ADDR(h), 8, ADDR(&got));
+    host_19c(f, fs98_handle(h), 8, fs98_handle(&got));
     if (got != 8)
         return 0;
     while (h[0] != M32(c)) {
         if (host_194(f, h[1], FILE_CURRENT) != 0)
             return 0;
-        host_19c(f, ADDR(h), 8, ADDR(&got));
+        host_19c(f, fs98_handle(h), 8, fs98_handle(&got));
         if (got != 8)
             return 0;
     }
@@ -3353,23 +3346,23 @@ static uint32_t host_wav_load(uint32_t name, uint32_t unused, uint32_t pdata, ui
     (void)unused;
     M32(pdata) = 0;
     M32(plen) = 0;
-    if (host_17c(ADDR(&f), name, 0, 0) != 0)
+    if (host_17c(fs98_handle(&f), name, 0, 0) != 0)
         goto out;
-    if (host_19c(f, ADDR(riff), 0xc, ADDR(&got)) != 0 || got != 0xc)
+    if (host_19c(f, fs98_handle(riff), 0xc, fs98_handle(&got)) != 0 || got != 0xc)
         goto out;
     if (riff[0] != 0x46464952u || riff[2] != 0x45564157u)
         goto out;
     c[0] = 0x20746d66u;
-    if (!host_wav_chunk(f, ADDR(c)))
+    if (!host_wav_chunk(f, fs98_handle(c)))
         goto out;
-    host_20c(1, c[1], ADDR(&fmtbuf), 0);
-    if (host_19c(f, fmtbuf, c[1], ADDR(&got)) != 0 || got != c[1])
+    host_20c(1, c[1], fs98_handle(&fmtbuf), 0);
+    if (host_19c(f, fmtbuf, c[1], fs98_handle(&got)) != 0 || got != c[1])
         goto out;
     c[0] = 0x61746164u;
-    if (!host_wav_chunk(f, ADDR(c)))
+    if (!host_wav_chunk(f, fs98_handle(c)))
         goto out;
-    host_20c(1, c[1], ADDR(&databuf), 0);
-    if (host_19c(f, databuf, c[1], ADDR(&got)) != 0 || got != c[1])
+    host_20c(1, c[1], fs98_handle(&databuf), 0);
+    if (host_19c(f, databuf, c[1], fs98_handle(&got)) != 0 || got != c[1])
         goto out;
     M16(fmt) = 1;
     M16(fmt + 2) = M16(fmtbuf + 2);
@@ -3392,7 +3385,7 @@ static uint32_t host_wav_load(uint32_t name, uint32_t unused, uint32_t pdata, ui
         goto out;
     if (acmStreamSize(has, c[1], (LPDWORD)(uintptr_t)plen, ACM_STREAMSIZEF_SOURCE) == 0) {
         host_20c(1, M32(plen), pdata, 0);
-        host_218(ADDR(&hdr), 0, sizeof hdr);
+        host_218(fs98_handle(&hdr), 0, sizeof hdr);
         hdr.cbStruct = 0x54;
         hdr.pbSrc = (LPBYTE)(uintptr_t)databuf;
         hdr.cbSrcLength = c[1];
@@ -3412,9 +3405,9 @@ static uint32_t host_wav_load(uint32_t name, uint32_t unused, uint32_t pdata, ui
         acmStreamClose(has, 0);
 out:
     if (fmtbuf != 0)
-        host_214(ADDR(&fmtbuf));
+        host_214(fs98_handle(&fmtbuf));
     if (databuf != 0)
-        host_214(ADDR(&databuf));
+        host_214(fs98_handle(&databuf));
     if (f != 0)
         host_13c(f);
     return M32(pdata) != 0;
@@ -3438,7 +3431,7 @@ static uint32_t host_voice_buffer(uint32_t v)
         desc[2] = M32(v + 8);
         desc[3] = 0;
         desc[4] = v + 0xc;
-        hr = ((host_com4)(uintptr_t)COM(ds, 0xc))(ds, ADDR(desc), v + 0x60, 0);
+        hr = ((host_com4)(uintptr_t)COM(ds, 0xc))(ds, fs98_handle(desc), v + 0x60, 0);
     }
     if (hr != 0) {
         err = 0x90003;
@@ -3447,14 +3440,14 @@ static uint32_t host_voice_buffer(uint32_t v)
     }
     if (M32(v + 0x24) != 6) {
         hr = ((host_com8)(uintptr_t)COM(M32(v + 0x60), 0x2c))(M32(v + 0x60), 0, M32(v + 8),
-                                                             ADDR(&p1), ADDR(&n1), ADDR(&p2),
-                                                             ADDR(&n2), 0);
+                                                             fs98_handle(&p1), fs98_handle(&n1), fs98_handle(&p2),
+                                                             fs98_handle(&n2), 0);
         if (hr != 0) {
             err = host_snd_error(hr);
             goto cleanup;
         }
         if (M32(v + 0x24) == 5 && M32(v + 4) == 0) {
-            if (host_wav_load(v + 0x64, ADDR(&scratch), v + 4, v + 8, v + 0xc) == 0)
+            if (host_wav_load(v + 0x64, fs98_handle(&scratch), v + 4, v + 8, v + 0xc) == 0)
                 goto cleanup;
         }
         /* RETAIL BUG (kept): HOST-18 -- copies from the voice's sound, null for a type 7 duplicate of a buffered type 5 voice */
@@ -3477,7 +3470,7 @@ static uint32_t host_voice_buffer(uint32_t v)
         goto cleanup;
     }
     caps[0] = 0x14;
-    if (((host_com2)(uintptr_t)COM(M32(v + 0x60), 0xc))(M32(v + 0x60), ADDR(caps)) != 0) {
+    if (((host_com2)(uintptr_t)COM(M32(v + 0x60), 0xc))(M32(v + 0x60), fs98_handle(caps)) != 0) {
         err = 0x90008;
         goto cleanup;
     }
@@ -3527,7 +3520,7 @@ static uint32_t FS98_STDCALL host_2d4(uint32_t src, uint32_t type, uint32_t out)
         if (host_voice_check(src) != 0 || M32(src + 0x24) == 6 || M32(src + 0x24) == 7)
             goto fail;
     }
-    host_20c(1, 0x16c, ADDR(&v), 0);
+    host_20c(1, 0x16c, fs98_handle(&v), 0);
     M32(out) = v;
     if (v == 0) {
         err = 0x90001;
@@ -3551,7 +3544,7 @@ static uint32_t FS98_STDCALL host_2d4(uint32_t src, uint32_t type, uint32_t out)
     if (type == 2 || type == 4 || type == 5) {
         host_2a8(v + 0x64, src);
         host_2b0(v + 0x64, V(0x418374));
-        if (!host_wav_load(v + 0x64, ADDR(&unused), v + 4, v + 8, v + 0xc)) {
+        if (!host_wav_load(v + 0x64, fs98_handle(&unused), v + 4, v + 8, v + 0xc)) {
             err = 0x90002;
             goto fail;
         }
@@ -3581,7 +3574,7 @@ fail:
         /* RETAIL BUG (kept): HOST-18 -- a duplicate that fails to get a buffer frees the sound it shares with its source */
         if (M32(v + 4) != 0)
             host_214(v + 4);
-        host_214(ADDR(&v));
+        host_214(fs98_handle(&v));
     }
     M32(out) = 0;
     return err;
@@ -3601,7 +3594,7 @@ static uint32_t FS98_STDCALL host_2dc(uint32_t pv)
         return 0x90019;
     if (M32(v + 0x24) == 6) {
         src = M32(v + 0x20);
-        host_2dc(ADDR(&src));
+        host_2dc(fs98_handle(&src));
     }
     M32(v + 0x28) = M32(v + 0x28) - 1;
     if (M32(v + 0x28) == 0) {
@@ -3613,7 +3606,7 @@ static uint32_t FS98_STDCALL host_2dc(uint32_t pv)
         host_voice_unbuffer(v);
         if (M32(v + 0x24) != 6 && M32(v + 4) != 0)
             host_214(v + 4);
-        host_214(ADDR(&v));
+        host_214(fs98_handle(&v));
     }
     M32(pv) = 0;
     return 0;
@@ -3634,7 +3627,7 @@ static uint32_t FS98_STDCALL host_2d8(uint32_t src, uint32_t kind, uint32_t v, u
     if (src == 0 && kind == 0 && rebuild == 1)
         return host_voice_buffer(v);
     if (kind == 2) {
-        r = host_2d4(src, 4, ADDR(&tmp));
+        r = host_2d4(src, 4, fs98_handle(&tmp));
         if (r != 0)
             return r;
         add = tmp;
@@ -3645,7 +3638,7 @@ static uint32_t FS98_STDCALL host_2d8(uint32_t src, uint32_t kind, uint32_t v, u
     } else {
         return 0;
     }
-    host_20c(1, M32(v + 8) + M32(add + 8), ADDR(&block), 0);
+    host_20c(1, M32(v + 8) + M32(add + 8), fs98_handle(&block), 0);
     /* RETAIL BUG (kept): HOST-18 -- either sound may be null (a type 5 voice's, once buffered), copied from regardless */
     host_21c(block, M32(v + 4), M32(v + 8));
     host_21c(block + M32(v + 8), M32(add + 4), M32(add + 8));
@@ -3654,7 +3647,7 @@ static uint32_t FS98_STDCALL host_2d8(uint32_t src, uint32_t kind, uint32_t v, u
     host_214(v + 4);
     M32(v + 4) = block;
     if (kind == 2)
-        host_2dc(ADDR(&tmp));
+        host_2dc(fs98_handle(&tmp));
     host_voice_unbuffer(v);
     if (rebuild == 1)
         return host_voice_buffer(v);
@@ -3692,7 +3685,7 @@ static uint32_t FS98_STDCALL host_2e0(uint32_t v, uint32_t loop, uint32_t m_lo, 
         return 0;
     b = M32(v + 0x60);
     M32(v + 0x2c) = host_voice_freq(v);
-    if (((host_com2)(uintptr_t)COM(b, 0x24))(b, ADDR(&status)) == 0 && (status & 1) == 1)
+    if (((host_com2)(uintptr_t)COM(b, 0x24))(b, fs98_handle(&status)) == 0 && (status & 1) == 1)
         return ((host_com2)(uintptr_t)COM(M32(v + 0x60), 0x34))(M32(v + 0x60), 0) != 0 ? 0x9001b : 0;
     ((host_com2)(uintptr_t)COM(M32(v + 0x60), 0x44))(M32(v + 0x60), M32(v + 0x2c));
     if (((host_com4)(uintptr_t)COM(M32(v + 0x60), 0x30))(M32(v + 0x60), 0, 0, loop != 0 ? 1 : 0) != 0)
@@ -3796,7 +3789,7 @@ static uint32_t FS98_STDCALL host_2e8(uint32_t v, uint32_t st)
     if (v == 0)
         v = SND_HEAD;
     /* RETAIL BUG (kept): HOST-18 -- the voice (the list's head if null) and its buffer are used unchecked */
-    if (((host_com2)(uintptr_t)COM(M32(v + 0x60), 0x24))(M32(v + 0x60), ADDR(&status)) != 0) {
+    if (((host_com2)(uintptr_t)COM(M32(v + 0x60), 0x24))(M32(v + 0x60), fs98_handle(&status)) != 0) {
         M32(st + 4) |= 0x80;
     } else {
         M32(v + 0x3c) = 0;
@@ -3886,7 +3879,7 @@ static uint32_t FS98_STDCALL host_2c4(uint32_t dst, uint32_t src, uint32_t len)
     }
     if (len <= suf)
         return (uint32_t)-1;
-    if (host_20c(5, len, ADDR(&tmp), 1) != 0)
+    if (host_20c(5, len, fs98_handle(&tmp), 1) != 0)
         return (uint32_t)-1;
     left = len;
     last = len - 1;
@@ -3911,7 +3904,7 @@ static uint32_t FS98_STDCALL host_2c4(uint32_t dst, uint32_t src, uint32_t len)
      * null, so this always returns -1 -- and never frees its working copy. */
     if (host_2a8(dst, tmp) != 0)    /* RETAIL BUG (kept): HOST-14 */
         return (uint32_t)-1;
-    return host_214(ADDR(&tmp)) != 0 ? (uint32_t)-1 : 0;
+    return host_214(fs98_handle(&tmp)) != 0 ? (uint32_t)-1 : 0;
 }
 
 /* ---- view-window surfaces and order ------------------------------------------ */
@@ -3960,7 +3953,7 @@ static uint32_t FS98_STDCALL host_06c(uint32_t rec)
     if (host_view_dd(rec)) {
         if (M32(rec + 8) & 0x4000)
             M32(rec + 0x9c) = HOST_SURFACE;
-        else if (fs98_host_rt_lock((void *)(uintptr_t)HOST_SURFACE, (void **)(uintptr_t)ADDR(&bits), (int32_t *)(uintptr_t)ADDR(&pitch)))
+        else if (fs98_host_rt_lock((void *)(uintptr_t)HOST_SURFACE, (void **)(uintptr_t)fs98_handle(&bits), (int32_t *)(uintptr_t)fs98_handle(&pitch)))
             M32(rec + 0x9c) = HOST_SURFACE;
     }
     M32(rec + 0x98) = bits;
@@ -4000,7 +3993,7 @@ static uint32_t FS98_STDCALL host_074(uint32_t hwnd, uint32_t rec)
     uint32_t b;
     if (rec == 0)
         return (uint32_t)-1;
-    host_20c(1, 0x90, ADDR(&b), 1);
+    host_20c(1, 0x90, fs98_handle(&b), 1);
     M32(rec + 0xa0) = b;    /* RETAIL BUG (kept): HOST-19 -- the old block is not freed */
     M32(b + 0x54) = 0;
     M32(b + 0x58) = 0;
@@ -4091,9 +4084,9 @@ static void host_view_unlink(uint32_t rec)
                     M32(pg + 8) = M32(g + 8);
                 else
                     M32(V(0x41a3dc)) = M32(g + 8);
-                host_214(ADDR(&g));
+                host_214(fs98_handle(&g));
             }
-            host_214(ADDR(&n));
+            host_214(fs98_handle(&n));
             return;
         }
     }
@@ -4125,7 +4118,7 @@ static uint32_t host_view_getdc(uint32_t rec, uint32_t out)
         }
         return 0;
     }
-    M32(V(0x41a3d0)) = ADDR(SelectObject((HDC)(uintptr_t)M32(block + 0x38), (HGDIOBJ)(uintptr_t)M32(block + 0x30)));
+    M32(V(0x41a3d0)) = fs98_handle(SelectObject((HDC)(uintptr_t)M32(block + 0x38), (HGDIOBJ)(uintptr_t)M32(block + 0x30)));
     M32(out) = M32(block + 0x38);
     return 0;
 }
@@ -4166,16 +4159,16 @@ static uint32_t host_view_colour(uint32_t rec, uint32_t c)
 static uint32_t host_res_font(uint32_t id, int weight)
 {
     char face[0x40], size[0x40], *p, *q;
-    host_2a0(id, ADDR(face), 0x3f);
+    host_2a0(id, fs98_handle(face), 0x3f);
     for (p = face; *p != 0 && *p != ','; p = CharNextA(p))
         ;
     q = CharNextA(p);
-    host_2a8(ADDR(size), ADDR(q));
+    host_2a8(fs98_handle(size), fs98_handle(q));
     *CharPrevA(face, q) = 0;
     for (p = size; *p != 0 && *p != ','; p = CharNextA(p))
         ;
     *p = 0;
-    return ADDR(CreateFontA(atoi(size), 0, 0, 0, weight, 0, 0, 0, 0, 4, 2, 2, 0, face));
+    return fs98_handle(CreateFontA(atoi(size), 0, 0, 0, weight, 0, 0, 0, 0, 4, 2, 2, 0, face));
 }
 
 /* +0x318 (0x411200): draw text in a view record's window, in a font by kind
@@ -4189,11 +4182,11 @@ static uint32_t FS98_STDCALL host_318(uint32_t rec, uint32_t rect, uint32_t fg, 
 {
     uint32_t dc, font, old;
     (void)unused;
-    host_view_getdc(rec, ADDR(&dc));
+    host_view_getdc(rec, fs98_handle(&dc));
     if (kind == 0)      /* RETAIL BUG (kept): HOST-21 -- a new font every call, never deleted */
-        font = ADDR(CreateFontA(-7, 0, 0, 0, 0, 0, 0, 0, 1, 6, 0, 0, 0, (LPCSTR)(uintptr_t)V(0x41839c)));
+        font = fs98_handle(CreateFontA(-7, 0, 0, 0, 0, 0, 0, 0, 1, 6, 0, 0, 0, (LPCSTR)(uintptr_t)V(0x41839c)));
     else if (kind == 1)
-        font = ADDR(GetStockObject(SYSTEM_FIXED_FONT));
+        font = fs98_handle(GetStockObject(SYSTEM_FIXED_FONT));
     else if (kind == 2) {
         if (M32(V(0x41a3e0)) == 0)
             M32(V(0x41a3e0)) = host_res_font(0x10, 0x190);
@@ -4204,7 +4197,7 @@ static uint32_t FS98_STDCALL host_318(uint32_t rec, uint32_t rect, uint32_t fg, 
         font = M32(V(0x41a3e4));
     } else
         return (uint32_t)-1;
-    old = ADDR(SelectObject((HDC)(uintptr_t)dc, (HGDIOBJ)(uintptr_t)font));
+    old = fs98_handle(SelectObject((HDC)(uintptr_t)dc, (HGDIOBJ)(uintptr_t)font));
     if (fg == (uint32_t)-1) {
         DrawTextA((HDC)(uintptr_t)dc, (LPCSTR)(uintptr_t)text, -1, (LPRECT)(uintptr_t)rect, 0x2410);
     } else {
@@ -4244,17 +4237,17 @@ static uint32_t FS98_STDCALL host_08c(uint32_t rec, uint32_t place, uint32_t col
     if ((M32(rec + 8) & 0x10000) && GetACP() != 0x3a4) {
         lstrcpynA(buf, (LPCSTR)(uintptr_t)text, 0x80);
         CharUpperA(buf);
-        text = ADDR(buf);
+        text = fs98_handle(buf);
         if (M32(V(0x41a3d8)) == 0)
-            M32(V(0x41a3d8)) = ADDR(CreateFontA(-7, 0, 0, 0, 0, 0, 0, 0, 1, 6, 0, 0, 0, (LPCSTR)(uintptr_t)V(0x41839c)));
+            M32(V(0x41a3d8)) = fs98_handle(CreateFontA(-7, 0, 0, 0, 0, 0, 0, 0, 1, 6, 0, 0, 0, (LPCSTR)(uintptr_t)V(0x41839c)));
         font = M32(V(0x41a3d8));
     } else {
         if (M32(V(0x41a3d4)) == 0)
-            M32(V(0x41a3d4)) = ADDR(GetStockObject(SYSTEM_FIXED_FONT));
+            M32(V(0x41a3d4)) = fs98_handle(GetStockObject(SYSTEM_FIXED_FONT));
         font = M32(V(0x41a3d4));
     }
-    host_view_getdc(rec, ADDR(&dc));
-    old = ADDR(SelectObject((HDC)(uintptr_t)dc, (HGDIOBJ)(uintptr_t)font));
+    host_view_getdc(rec, fs98_handle(&dc));
+    old = fs98_handle(SelectObject((HDC)(uintptr_t)dc, (HGDIOBJ)(uintptr_t)font));
     SetBkMode((HDC)(uintptr_t)dc, TRANSPARENT);
     len = (uint32_t)lstrlenA((LPCSTR)(uintptr_t)text);
     GetTextExtentPoint32A((HDC)(uintptr_t)dc, (LPCSTR)(uintptr_t)text, (int)len, &size);
@@ -4411,8 +4404,8 @@ static uint32_t host_dplay_works(uint32_t lib)
 {
     uint32_t dp = 0, dp2 = 0, ok = 0;
     FARPROC create = GetProcAddress((HMODULE)(uintptr_t)lib, (LPCSTR)(uintptr_t)V(0x418440));
-    if (create != 0 && ((host_com3)(uintptr_t)create)(V(0x41a508), ADDR(&dp), 0) == 0 &&
-        ((host_com3)(uintptr_t)COM(dp, 0))(dp, ADDR(host_iid_dplay2a), ADDR(&dp2)) == 0)
+    if (create != 0 && ((host_com3)(uintptr_t)create)(V(0x41a508), fs98_handle(&dp), 0) == 0 &&
+        ((host_com3)(uintptr_t)COM(dp, 0))(dp, fs98_handle(host_iid_dplay2a), fs98_handle(&dp2)) == 0)
         ok = 1;
     if (dp2 != 0)
         ((host_com1)(uintptr_t)COM(dp2, 8))(dp2);
@@ -4429,7 +4422,7 @@ static uint32_t host_dplay_works(uint32_t lib)
 static uint32_t FS98_STDCALL host_124(uint32_t p)
 {
     if (M32(V(0x41a518)) == 0) {
-        M32(V(0x41a51c)) = ADDR(LoadLibraryA((LPCSTR)(uintptr_t)V(0x418420)));
+        M32(V(0x41a51c)) = fs98_handle(LoadLibraryA((LPCSTR)(uintptr_t)V(0x418420)));
         if (M32(V(0x41a51c)) == 0)
             return (uint32_t)-1;
         M32(V(0x41a518)) = 1;
@@ -4439,9 +4432,9 @@ static uint32_t FS98_STDCALL host_124(uint32_t p)
             return 0;
     }
     if (p != 0) {
-        M32(M32(p)) = ADDR(GetProcAddress((HMODULE)(uintptr_t)M32(V(0x41a51c)), (LPCSTR)(uintptr_t)V(0x418440)));
-        M32(M32(p + 4)) = ADDR(GetProcAddress((HMODULE)(uintptr_t)M32(V(0x41a51c)), (LPCSTR)(uintptr_t)V(0x418428)));
-        M32(M32(p + 8)) = ADDR(GetProcAddress((HMODULE)(uintptr_t)M32(V(0x41a51c)), (LPCSTR)(uintptr_t)V(0x418408)));
+        M32(M32(p)) = fs98_handle(GetProcAddress((HMODULE)(uintptr_t)M32(V(0x41a51c)), (LPCSTR)(uintptr_t)V(0x418440)));
+        M32(M32(p + 4)) = fs98_handle(GetProcAddress((HMODULE)(uintptr_t)M32(V(0x41a51c)), (LPCSTR)(uintptr_t)V(0x418428)));
+        M32(M32(p + 8)) = fs98_handle(GetProcAddress((HMODULE)(uintptr_t)M32(V(0x41a51c)), (LPCSTR)(uintptr_t)V(0x418408)));
     }
     return 0;
 }
@@ -4463,21 +4456,21 @@ static uint32_t FS98_STDCALL host_120(uint32_t block, uint32_t size, uint32_t fl
     M32(block) = 0;
     lib = M32(V(0x41a51c));
     if (lib == 0) {
-        lib = ADDR(LoadLibraryA((LPCSTR)(uintptr_t)V(0x418420)));
+        lib = fs98_handle(LoadLibraryA((LPCSTR)(uintptr_t)V(0x418420)));
         M32(V(0x41a51c)) = lib;
         loaded = 1;
         if (lib == 0)
             return 0;
     }
     create = GetProcAddress((HMODULE)(uintptr_t)lib, (LPCSTR)(uintptr_t)V(0x418408));
-    if (create != 0 && ((host_com5)(uintptr_t)create)(0, ADDR(&lobby), 0, 0, 0) == 0 &&
+    if (create != 0 && ((host_com5)(uintptr_t)create)(0, fs98_handle(&lobby), 0, 0, 0) == 0 &&
         host_dplay_works(M32(V(0x41a51c)))) {
-        ((host_com4)(uintptr_t)COM(lobby, 0x20))(lobby, 0, 0, ADDR(&n));
+        ((host_com4)(uintptr_t)COM(lobby, 0x20))(lobby, 0, 0, fs98_handle(&n));
         if (n == 0)
             return 0;
-        if (host_20c(1, n, ADDR(&conn), 1) != 0)
+        if (host_20c(1, n, fs98_handle(&conn), 1) != 0)
             return (uint32_t)-1;
-        ((host_com4)(uintptr_t)COM(lobby, 0x20))(lobby, 0, conn, ADDR(&n));
+        ((host_com4)(uintptr_t)COM(lobby, 0x20))(lobby, 0, conn, fs98_handle(&n));
     }
     if (lobby != 0)
         ((host_com1)(uintptr_t)COM(lobby, 8))(lobby);
@@ -4529,7 +4522,7 @@ static uint32_t FS98_STDCALL host_120(uint32_t block, uint32_t size, uint32_t fl
     if (host_21c(at, M32(M32(conn + 0xc) + 0xc), l3) != 0)
         return (uint32_t)-1;
     (void)b;
-    if (host_214(ADDR(&conn)) != 0)
+    if (host_214(fs98_handle(&conn)) != 0)
         return (uint32_t)-1;
     return 0;
 }
@@ -4599,15 +4592,15 @@ static void host_display_add(uint32_t cfg, uint32_t s)
 static HRESULT WINAPI host_d3d_dev_cb(GUID *guid, LPSTR desc, LPSTR name, void *hal, void *hel, LPVOID ctx)
 {
     char buf[0x80];
-    uint32_t cfg = ADDR(ctx), f;
+    uint32_t cfg = fs98_handle(ctx), f;
     (void)desc; (void)name; (void)hel;
-    if (guid != 0 && memcmp(guid, host_guid_hal, 16) == 0 && hal != 0 && M32(ADDR(hal) + 4) != 0 &&
-        (M8(ADDR(hal) + 0x84) & 1)) {
+    if (guid != 0 && memcmp(guid, host_guid_hal, 16) == 0 && hal != 0 && M32(fs98_handle(hal) + 4) != 0 &&
+        (M8(fs98_handle(hal) + 0x84) & 1)) {
         M32(cfg + 0xd0) |= 0x10000000;
         if (M8(cfg + 0xd0) & 4) {
             wsprintfA(buf, (const char *)(uintptr_t)V(0x41859c), (const char *)(uintptr_t)cfg,
                       (const char *)(uintptr_t)V(0x4183fc));
-            host_display_add(cfg, ADDR(buf));
+            host_display_add(cfg, fs98_handle(buf));
         }
     }
     f = M32(cfg + 0xd0);
@@ -4617,7 +4610,7 @@ static HRESULT WINAPI host_d3d_dev_cb(GUID *guid, LPSTR desc, LPSTR name, void *
         if ((f & 4) && !(f & 0x10000000)) {
             wsprintfA(buf, (const char *)(uintptr_t)V(0x41859c), (const char *)(uintptr_t)cfg,
                       (const char *)(uintptr_t)V(0x4183ec));
-            host_display_add(cfg, ADDR(buf));
+            host_display_add(cfg, fs98_handle(buf));
         }
     }
     return 1;
@@ -4628,15 +4621,15 @@ static HRESULT WINAPI host_d3d_dev_cb(GUID *guid, LPSTR desc, LPSTR name, void *
  * Direct3D devices.  1. */
 static BOOL WINAPI host_dd_driver_cb(GUID *guid, LPSTR desc, LPSTR name, LPVOID ctx)
 {
-    uint32_t cfg = ADDR(ctx), d3d = 0, dd = 0;
+    uint32_t cfg = fs98_handle(ctx), d3d = 0, dd = 0;
     if (DirectDrawCreate(guid, (LPDIRECTDRAW *)&dd, 0) != 0)
         return TRUE;
     fs98_host_rt_device_name((char *)(uintptr_t)cfg, desc, name, 0);
     if (fs98_host_rt_device_is(guid, desc, name))
         host_display_add(cfg, cfg);
-    ((host_com3)(uintptr_t)COM(dd, 0))(dd, ADDR(host_iid_d3d), ADDR(&d3d));
+    ((host_com3)(uintptr_t)COM(dd, 0))(dd, fs98_handle(host_iid_d3d), fs98_handle(&d3d));
     if (d3d != 0) {
-        ((host_com3)(uintptr_t)COM(d3d, 0xc))(d3d, ADDR(host_d3d_dev_cb), cfg);
+        ((host_com3)(uintptr_t)COM(d3d, 0xc))(d3d, fs98_handle(host_d3d_dev_cb), cfg);
         ((host_com1)(uintptr_t)COM(d3d, 8))(d3d);
     }
     ((host_com1)(uintptr_t)COM(dd, 8))(dd);
@@ -4667,7 +4660,7 @@ static uint32_t host_display_devices(uint32_t cfg)
 static HRESULT WINAPI host_dd_mode_cb(void *descp, LPVOID ctx)
 {
     char buf[0x28];
-    uint32_t desc = ADDR(descp), cfg = ADDR(ctx);
+    uint32_t desc = fs98_handle(descp), cfg = fs98_handle(ctx);
     int32_t w = (int32_t)M32(desc + 0xc), h = (int32_t)M32(desc + 8), wh2;
     uint32_t bpp = M32(desc + 0x54);
     if (lstrcmpA((const char *)(uintptr_t)(cfg + 0x80), (const char *)(uintptr_t)V(0x4187f8)) != 0 &&
@@ -4682,7 +4675,7 @@ static HRESULT WINAPI host_dd_mode_cb(void *descp, LPVOID ctx)
     } else if (bpp != 8)
         return 1;
     wsprintfA(buf, (const char *)(uintptr_t)V(0x4185a4), w, h, bpp);
-    host_display_add(cfg, ADDR(buf));
+    host_display_add(cfg, fs98_handle(buf));
     return 1;
 }
 
@@ -4693,9 +4686,9 @@ static uint32_t host_dd_memory(uint32_t dd)
     uint32_t desc[0x1b], caps[0x5b], m;
     memset(desc, 0, sizeof desc);
     desc[0] = 0x6c;
-    ((host_com2)(uintptr_t)COM(dd, 0x30))(dd, ADDR(desc));
+    ((host_com2)(uintptr_t)COM(dd, 0x30))(dd, fs98_handle(desc));
     caps[0] = 0x16c;
-    ((host_com3)(uintptr_t)COM(dd, 0x2c))(dd, ADDR(caps), 0);
+    ((host_com3)(uintptr_t)COM(dd, 0x2c))(dd, fs98_handle(caps), 0);
     m = caps[0x3c / 4];
     if (m != 0)
         m += (desc[0x54 / 4] >> 3) * desc[0xc / 4] * desc[8 / 4];
@@ -4717,12 +4710,12 @@ static uint32_t host_display_modes(uint32_t cfg)
         host_050(0);
         return 0;
     }
-    if (fs98_host_rt_device_create((const char *)(uintptr_t)cfg, (void **)(uintptr_t)ADDR(&dd)) != 0) {
+    if (fs98_host_rt_device_create((const char *)(uintptr_t)cfg, (void **)(uintptr_t)fs98_handle(&dd)) != 0) {
         fs98_host_rt_device_suffix((char *)(uintptr_t)cfg, (char *)(uintptr_t)(cfg + 0x80), 0);
         if (M8(cfg + 0x80) != 0)
             M32(cfg + 0xd0) |= 0x10000000;
         M32(cfg + 0xe0) = host_dd_memory(dd);
-        ((host_com5)(uintptr_t)COM(dd, 0x20))(dd, 0, 0, cfg, ADDR(host_dd_mode_cb));
+        ((host_com5)(uintptr_t)COM(dd, 0x20))(dd, 0, 0, cfg, fs98_handle(host_dd_mode_cb));
         ((host_com1)(uintptr_t)COM(dd, 8))(dd);
     }
     M32(M32(cfg + 0xe4)) = 0;
@@ -4808,7 +4801,7 @@ static uint32_t FS98_STDCALL host_10c(uint32_t id, uint32_t param)
 {
     MSG msg;
     uint32_t rec, link, w, arr = 0, paused = 0, n, prev, accel, p;
-    rec = host_310(V(0x417ee0), 0, ADDR(&id), 4, 0);
+    rec = host_310(V(0x417ee0), 0, fs98_handle(&id), 4, 0);
     if (rec == 0)
         return (uint32_t)-1;
     if (IsWindowEnabled(HOST_HWND)) {
@@ -4816,7 +4809,7 @@ static uint32_t FS98_STDCALL host_10c(uint32_t id, uint32_t param)
         if (!(M8(rec + 0xc) & 8))
             fs98_host_rt_pause_look(1);
     }
-    link = ADDR(fs98_host_rt_acquire(fs98_host_rt_module_with_id(M32(rec + 4))));
+    link = fs98_handle(fs98_host_rt_acquire(fs98_host_rt_module_with_id(M32(rec + 4))));
     w = ((uint32_t (FS98_STDCALL *)(uint32_t, uint32_t))(uintptr_t)M32(M32(link + 0x14) + M32(rec + 8) * 12 + 4))(
         M32(V(0x41880c)), param);
     if (M8(rec + 0xc) & 2) {
@@ -4866,7 +4859,7 @@ static uint32_t FS98_STDCALL host_10c(uint32_t id, uint32_t param)
         M32(V(0x418848)) = 3;
         (uint32_t)fs98_host_rt_hook(0x20004, 0);
     }
-    accel = ADDR(LoadAcceleratorsA((HINSTANCE)(uintptr_t)M32(V(0x41882c)), (LPCSTR)0x69));
+    accel = fs98_handle(LoadAcceleratorsA((HINSTANCE)(uintptr_t)M32(V(0x41882c)), (LPCSTR)0x69));
     /* the pumps, in retail's order of checks: alive, done, a message */
     if (M8(rec + 0xc) & 2) {
         if (!DLG_ALIVE(M32(arr)))
@@ -4879,7 +4872,7 @@ static uint32_t FS98_STDCALL host_10c(uint32_t id, uint32_t param)
     array_pump:
         if (DLG_DONE(M32(arr)) || !PeekMessageA(&msg, 0, 0, 0, PM_REMOVE))
             goto array_idle;
-        if (!fs98_host_rt_modeless_took(&msg) && !host_array_take(ADDR(&msg), arr, accel)) {
+        if (!fs98_host_rt_modeless_took(&msg) && !host_array_take(fs98_handle(&msg), arr, accel)) {
             TranslateMessage(&msg);
             DispatchMessageA(&msg);
         }
@@ -4950,7 +4943,7 @@ static uint32_t FS98_STDCALL host_110(uint32_t id, uint32_t param)
  * released and dropped. */
 static uint32_t FS98_STDCALL host_114(void)
 {
-    return host_308(V(0x417f00), 0, ADDR(host_modeless_tick));
+    return host_308(V(0x417f00), 0, fs98_handle(host_modeless_tick));
 }
 
 /* +0x314 (0x401140): does nothing (two arguments). */
@@ -4981,7 +4974,7 @@ static void host_view_link(uint32_t rec)
             for (n = M32(g + 4); n != 0; n = M32(n + 4))
                 if (M32(n) == rec)
                     return;
-            host_20c(1, 8, ADDR(&fresh), 0);
+            host_20c(1, 8, fs98_handle(&fresh), 0);
             M32(fresh) = rec;
             M32(fresh + 4) = M32(g + 4);
             M32(g + 4) = fresh;
@@ -4994,7 +4987,7 @@ static void host_view_link(uint32_t rec)
         host_20c(1, 0xc, prev + 8, 0);
         fresh = M32(prev + 8);
     } else {
-        host_20c(1, 0xc, ADDR(&fresh), 0);
+        host_20c(1, 0xc, fs98_handle(&fresh), 0);
         M32(V(0x41a3dc)) = fresh;
     }
     M32(fresh) = key;
@@ -5014,7 +5007,7 @@ static uint32_t FS98_STDCALL host_064(uint32_t rec)
     uint32_t b;
     if (rec == 0)
         return (uint32_t)-1;
-    host_20c(1, 0x90, ADDR(&b), 1);
+    host_20c(1, 0x90, fs98_handle(&b), 1);
     M32(rec + 0xa0) = b;
     M32(b + 0x54) = 0;
     M32(b + 0x58) = 0;
@@ -5030,14 +5023,14 @@ static uint32_t FS98_STDCALL host_064(uint32_t rec)
     M32(b + 0x80) = 0;
     M32(b + 0x84) = 0;
     M32(b + 0x88) = 0;
-    M32(b + 0x24) = ADDR(CreateWindowExA(0, (LPCSTR)(uintptr_t)V(0x417168), (LPCSTR)(uintptr_t)M32(rec),
+    M32(b + 0x24) = fs98_handle(CreateWindowExA(0, (LPCSTR)(uintptr_t)V(0x417168), (LPCSTR)(uintptr_t)M32(rec),
                                          0x44000000, (int)M32(rec + 0x30), (int)M32(rec + 0x34),
                                          (int)M32(rec + 0x38), (int)M32(rec + 0x3c), HOST_HWND, 0,
                                          (HINSTANCE)(uintptr_t)M32(V(0x418828)), (LPVOID)(uintptr_t)rec));
     if (M32(b + 0x24) != 0) {
         ShowWindow((HWND)(uintptr_t)M32(b + 0x24), SW_HIDE);
         UpdateWindow((HWND)(uintptr_t)M32(b + 0x24));
-        M32(b + 0x28) = ADDR(CreateWindowExA(0x80, (LPCSTR)(uintptr_t)V(0x417178), (LPCSTR)(uintptr_t)M32(rec),
+        M32(b + 0x28) = fs98_handle(CreateWindowExA(0x80, (LPCSTR)(uintptr_t)V(0x417178), (LPCSTR)(uintptr_t)M32(rec),
                                              0x84cc0000, 0, 0, 0, 0, HOST_HWND, 0,
                                              (HINSTANCE)(uintptr_t)M32(V(0x418828)), (LPVOID)(uintptr_t)rec));
         if (M32(b + 0x28) != 0) {
@@ -5116,7 +5109,7 @@ static void host_tip_send(uint32_t block, uint32_t msg, uint32_t node, uint32_t 
         ti[8] = M32(V(0x41882c));
         ti[9] = M16(node + 0x18);
     }
-    SendMessageA((HWND)(uintptr_t)M32(block + 0x2c), msg, 0, (LPARAM)ADDR(ti));
+    SendMessageA((HWND)(uintptr_t)M32(block + 0x2c), msg, 0, (LPARAM)fs98_handle(ti));
 }
 
 /* 0x40dd90: give each node of a list (and its groups' nodes) a rectangle at
@@ -5132,7 +5125,7 @@ static uint32_t host_tip_add(uint32_t rec, uint32_t nodes, int32_t dx, int32_t d
         n = TN(nodes, i);
         if (M32(n) == 3)
             break;
-        host_20c(1, 0x1c, ADDR(&r), 0);
+        host_20c(1, 0x1c, fs98_handle(&r), 0);
         M32(n + 0x28) = r;
         M32(r) = M32(n + 4) + (uint32_t)dx;
         M32(r + 8) = M32(n + 0xc) + M32(r) + 1;
@@ -5263,10 +5256,10 @@ static uint32_t FS98_STDCALL host_27c(uint32_t rec, uint32_t tree, uint32_t x, u
 {
     uint32_t block = M32(rec + 0xa0), e;
     if (M32(block + 0x2c) == 0)
-        M32(block + 0x2c) = ADDR(CreateWindowExA(8, (LPCSTR)(uintptr_t)V(0x4182c4), 0, 1, (int)0x80000000,
+        M32(block + 0x2c) = fs98_handle(CreateWindowExA(8, (LPCSTR)(uintptr_t)V(0x4182c4), 0, 1, (int)0x80000000,
                                                  (int)0x80000000, (int)0x80000000, (int)0x80000000, 0, 0,
                                                  (HINSTANCE)(uintptr_t)M32(V(0x418828)), 0));
-    if (host_310(block + 0x70, 0x10, ADDR(&tree), 4, 0) != 0)
+    if (host_310(block + 0x70, 0x10, fs98_handle(&tree), 4, 0) != 0)
         return (uint32_t)-1;
     /* RETAIL BUG (kept): HOST-20 -- the tools are registered (host_tip_add) before host_tip_check */
     e = host_2f8(block + 0x70);
@@ -5294,7 +5287,7 @@ static uint32_t FS98_STDCALL host_280(uint32_t rec, uint32_t tree)
  * last.  0, or -1 if it was not registered. */
 static uint32_t FS98_STDCALL host_284(uint32_t rec, uint32_t tree)
 {
-    uint32_t block = M32(rec + 0xa0), e = host_310(block + 0x70, 0x10, ADDR(&tree), 4, 0);
+    uint32_t block = M32(rec + 0xa0), e = host_310(block + 0x70, 0x10, fs98_handle(&tree), 4, 0);
     if (e == 0)
         return (uint32_t)-1;
     host_300(block + 0x70, e);
@@ -5314,10 +5307,10 @@ static uint32_t FS98_STDCALL host_284(uint32_t rec, uint32_t tree)
 static void host_fatal(uint32_t id, uint32_t text)
 {
     char buf[0x400];
-    host_2a0(id, ADDR(buf), 0x400);
+    host_2a0(id, fs98_handle(buf), 0x400);
     if (text != 0) {
-        host_2b0(ADDR(buf), V(0x4180e0));
-        host_2b0(ADDR(buf), text);
+        host_2b0(fs98_handle(buf), V(0x4180e0));
+        host_2b0(fs98_handle(buf), text);
     }
     MessageBoxA(0, buf, (LPCSTR)(uintptr_t)V(0x41c380), 0);
     ExitProcess(1);
@@ -5360,12 +5353,12 @@ static uint32_t FS98_STDCALL host_140(uint32_t f)
     if (f != 0) {
         ok = CloseHandle((HANDLE)(uintptr_t)M32(f));
         if (!ok)
-            host_2a8(ADDR(text), M32(f + 4));
+            host_2a8(fs98_handle(text), M32(f + 4));
         host_214(f + 4);
-        host_214(ADDR(&f));
+        host_214(fs98_handle(&f));
     }
     if (!ok)
-        host_fatal(0xf520, ADDR(text));
+        host_fatal(0xf520, fs98_handle(text));
     return 0;
 }
 

@@ -3,6 +3,7 @@
  * 16-bit GDI path draws through), sound's start, tick and end, the frames' stacking, and the
  * lists let go at the end. */
 #include "host_rt.h"
+#include "fs98/arena.h"
 
 #define WIN(ident, result, parameters) CALL_STD(ident, result, parameters)
 #define CFG ((const char *)VA(0x41c120))
@@ -50,7 +51,7 @@ uint32_t SC fs98_host_rt_key_table(uint32_t *table, const struct key_press *pres
         if ((flags & 0x10) ? entry[0] == press->scan : entry[0] == press->key)
             if ((flags & 7) == press->modifiers) {
                 fs98_host_rt_hook(((const uint32_t *)(uintptr_t)table[2])[at * 3 + 2], 0);
-                return (uint32_t)(uintptr_t)table;
+                return fs98_handle(table);
             }
     }
     return 0;

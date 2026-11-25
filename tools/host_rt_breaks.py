@@ -29,6 +29,7 @@ depends on the fixtures' random stream.
 """
 EQUIVALENT = {'open-fallback-depth', 'initialise-word', 'gdi-shown', 'command-concept', 'dock-below', 'init-period-max',
               'picture-min', 'relaid-adjust', 'setup-channels', 'speed-tsc-bit'}
+import break_build_only
 import module_flags
 from concurrent.futures import ThreadPoolExecutor
 import json
@@ -494,7 +495,7 @@ BREAKS = [
     ('child-minmax', 'child', '            D32(info, 0x1c) = 0x28;\n            break;', '            D32(info, 0x1c) = 0x20;\n            break;'),
     ('child-max-size', 'child', '        if (D32(data, 0x74))\n            D32(info, 0x24) = D32(data, 0x74);', '        if (D32(data, 0x74))\n            D32(info, 0x20) = D32(data, 0x74);'),
     ('child-hit-point', 'child', '        point[1] = l >> 16;\n        WIN(ScreenToClient', '        point[1] = (int16_t)(l >> 16);\n        WIN(ScreenToClient'),
-    ('child-command-float', 'child', '        case 0x200: fs98_host_rt_hook(0x2000e, (uint32_t)(uintptr_t)data); return 0;', '        case 0x200: fs98_host_rt_hook(0x2000e, 0); return 0;'),
+    ('child-command-float', 'child', '        case 0x200: fs98_host_rt_hook(0x2000e, fs98_handle(data)); return 0;', '        case 0x200: fs98_host_rt_hook(0x2000e, 0); return 0;'),
     ('child-command-menu', 'child', '                G32(0x418824) = G32(0x418824) == 0;', '                G32(0x418824) = G32(0x418824) != 0;'),
     ('child-help-topic', 'child', 'fs98_host_rt_help(MAIN_WINDOW, path, 8, D32(data, 4) + 0xaf00);', 'fs98_host_rt_help(MAIN_WINDOW, path, 8, D32(data, 4) + 0xaf01);'),
     ('child-help-spot', 'child', '(int32_t *)VA(0x41bb30), data, bitmap) != -1)', '(int32_t *)VA(0x41bb30), data, bitmap) != 0)'),
@@ -585,7 +586,7 @@ BREAKS = [
     ('spot-submenu', 'mouse', '                entry += (uint32_t)fs98_host_rt_menu_length(list + (entry + 1) * 11);', '                entry += 1;'),
     ('spot-cursor-kind', 'mouse', '            case 2: case 3: D32(context->bitmap, 0x3c) = load(G32(0x418828), 0x68); break;', '            case 2: case 3: D32(context->bitmap, 0x3c) = load(G32(0x418828), 0x67); break;'),
     ('spot-cursor-none', 'mouse', '        if (D32(spot, 0x14) != 0xffffffffu) {', '        if (D32(spot, 0x14) != 0) {'),
-    ('spot-hit', 'mouse', '        return D32(spot, 0x1c) ? (uint32_t)(uintptr_t)element : 0;', '        return (uint32_t)(uintptr_t)element;'),
+    ('spot-hit', 'mouse', '        return D32(spot, 0x1c) ? fs98_handle(element) : 0;', '        return fs98_handle(element);'),
     ('spot-right-capture', 'mouse', '        if (D32(spot, 0x1c) & 0x2000000)\n            G_PTR(0x41888c) = spot;\n        if (D32(spot, 0x1c) & 0x80000000) {', '        if (D32(spot, 0x1c) & 0x80000000) {'),
     ('spot-tool-scale', 'mouse', '        context->y = (int32_t)(D32(bitmap, 0x48) * (uint32_t)context->y) >> 16;', '        context->y = (int32_t)(D32(bitmap, 0x44) * (uint32_t)context->y) >> 16;'),
     ('spot-tool-text', 'mouse', '        G32(0x41bb38) = hit.tool[9];', '        G32(0x41bb38) = hit.tool[8];'),
@@ -616,7 +617,7 @@ BREAKS = [
     # host_rt_misc.c
     ('modeless-pause', 'common', '        if (!(D8((void *)(uintptr_t)entry[0], 0xc) & 8))', '        if (!(D8((void *)(uintptr_t)entry[0], 0xc) & 4))'),
     ('modeless-tick', 'common', '(entry[1], 0x464, 0, 0);', '(entry[1], 0x465, 0, 0);'),
-    ('modeless-took', 'common', '        return (uint32_t)(uintptr_t)entry;\n    return 0;\n}', '        return 1;\n    return 0;\n}'),
+    ('modeless-took', 'common', '        return fs98_handle(entry);\n    return 0;\n}', '        return 1;\n    return 0;\n}'),
     ('keys-enabled', 'misc', '    if (table[0] == 0)\n        return 0;', '    if (0)\n        return 0;'),
     ('keys-scan', 'misc', '        if ((flags & 0x10) ? entry[0] == press->scan : entry[0] == press->key)', '        if ((flags & 0x10) ? entry[0] == press->key : entry[0] == press->key)'),
     ('keys-modifiers', 'misc', '            if ((flags & 7) == press->modifiers) {', '            if ((flags & 3) == press->modifiers) {'),
@@ -676,7 +677,7 @@ def build(name, file, before, after):
     path.write_text(text.replace(before, after))
     sources = sorted(str(p) for p in (work / 'runtime').glob('*.c'))
     exe = work / 'hostrtdiff.exe'
-    result = subprocess.run(CC + ['-I', str(work / 'runtime'), '-o', str(exe), 'tools/difftest/hostrtdiff.c'] + sources,
+    result = subprocess.run(CC + ['-I', str(work / 'runtime'), '-Iinclude', '-o', str(exe), 'tools/difftest/hostrtdiff.c'] + sources,
                             capture_output=True, text=True)
     return None if result.returncode == 0 else result.stderr[-2000:]
 
@@ -697,7 +698,29 @@ def run(name, count):
     return 'error', text[-800:]
 
 
+def build_only(directory, names):
+    """--build-only DIR: every case's mutated runtime file compiled with -c to DIR/<case>/mutant.o; DIR/baseline/ holds
+    hostrtdiff.c and the unmutated runtime files, compiled with the runner's profile.  Nothing runs."""
+    cc = [c for c in CC if not c.startswith('-Wl,')] + ['-I', str(SOURCE), '-Iinclude']
+    cases = []
+    for name, file, before, after in BREAKS:
+        base = f'host_rt_{file}.c'
+        cases.append((name, base, (SOURCE / base).read_text(), before, after, {'equivalent': name in EQUIVALENT, 'file': base}))
+    baselines = [(p.stem + '.o', cc + ['-c', str(p)]) for p in sorted(SOURCE.glob('*.c'))]
+    baselines.append(('hostrtdiff.o', cc + ['-c', 'tools/difftest/hostrtdiff.c']))
+    return break_build_only.run_compile(cases, names, directory, lambda src, obj: cc + ['-c', src, '-o', obj], baselines)
+
+
 def main():
+    args = sys.argv[1:]
+    if '--build-only' in args:
+        i = args.index('--build-only')
+        directory = args[i + 1] if i + 1 < len(args) else ''
+        if not directory or directory.startswith('--'):
+            sys.stderr.write('--build-only needs a directory\n')
+            return 2
+        del args[i:i + 2]
+        return build_only(directory, [a for a in args if not a.isdigit()])
     count = int(sys.argv[1]) if len(sys.argv) > 1 and sys.argv[1].isdigit() else 2000
     names = [a for a in sys.argv[1:] if not a.isdigit()]
     breaks = [b for b in BREAKS if not names or b[0] in names]

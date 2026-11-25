@@ -2,6 +2,7 @@
  * InitInstance, Run and ExitInstance as the game overrides them, the multimedia timer, the
  * logo, the language DLL and the main window's placement. */
 #include "host_rt.h"
+#include "fs98/arena.h"
 
 /* a Win32 import called through the table, by its arguments */
 #define WIN(ident, result, parameters) CALL_STD(ident, result, parameters)
@@ -57,7 +58,7 @@ static int32_t register_class(uint32_t *wc, uint32_t style, void *procedure, int
 {
     uint32_t instance = G32(0x418828);
     wc[0] = style;
-    wc[1] = (uint32_t)(uintptr_t)procedure;
+    wc[1] = fs98_handle(procedure);
     wc[2] = 0;
     wc[3] = 0;
     wc[4] = instance;
@@ -65,7 +66,7 @@ static int32_t register_class(uint32_t *wc, uint32_t style, void *procedure, int
     wc[6] = WIN(LoadCursorA, uint32_t, (uint32_t, uint32_t))(0, 0x7f00);
     wc[7] = WIN(GetStockObject, uint32_t, (int32_t))(4);
     wc[8] = 0;
-    wc[9] = (uint32_t)(uintptr_t)VA(name);
+    wc[9] = fs98_handle(VA(name));
     if ((uint16_t)WIN(RegisterClassA, uint32_t, (const uint32_t *))(wc) != 0)
         return 1;
     fs98_host_rt_report(error);
@@ -299,7 +300,7 @@ void SC fs98_host_rt_tell_running(uint32_t window)
     if (SERVICE(0x98, int32_t, (const char *, char *, uint32_t))(STR(0x417150), (char *)block + 8, 0x104))
         D32(block, 4) = 1;
     data[1] = size + 0x114;
-    data[2] = (uint32_t)(uintptr_t)block;
+    data[2] = fs98_handle(block);
     WIN(SendMessageA, int32_t, (uint32_t, uint32_t, uint32_t, void *))(window, 0x4a, 0, data);
     SERVICE(0x214, int32_t, (void *))(&connection);
     SERVICE(0x214, int32_t, (void *))(&block);
@@ -343,7 +344,7 @@ int32_t SC fs98_host_rt_show_logo(uint32_t unused)
     WIN(SetWindowLongA, uint32_t, (uint32_t, int32_t, uint32_t))(
         window, -20, WIN(GetWindowLongA, uint32_t, (uint32_t, int32_t))(window, -20) | 0x80);
     WIN(SetWindowLongA, uint32_t, (uint32_t, int32_t, uint32_t))(window, -21, WIN(GetWindowLongA, uint32_t, (uint32_t, int32_t))(window, -4));
-    WIN(SetWindowLongA, uint32_t, (uint32_t, int32_t, uint32_t))(window, -4, (uint32_t)(uintptr_t)fs98_host_rt_logo_procedure);
+    WIN(SetWindowLongA, uint32_t, (uint32_t, int32_t, uint32_t))(window, -4, fs98_handle(fs98_host_rt_logo_procedure));
     if (WIN(GetSystemMetrics, int32_t, (int32_t))(0) > 0x280)
         WIN(SendMessageA, int32_t, (uint32_t, uint32_t, uint32_t, uint32_t))(window, 0x46c, 0, 0xc8);
     WIN(GetWindowRect, int32_t, (uint32_t, int32_t *))(window, rect);
@@ -434,12 +435,12 @@ int32_t fs98_host_rt_init_instance(void)
         buffer[0] = 0x28;
         buffer[1] = 0;
         buffer[2] = 0;
-        buffer[3] = (uint32_t)(uintptr_t)VA(0x41c480);
+        buffer[3] = fs98_handle(VA(0x41c480));
         buffer[4] = 0;
         buffer[5] = 0x14010;
         buffer[6] = 0;
         buffer[7] = 0xbc2;
-        buffer[8] = (uint32_t)(uintptr_t)fs98_host_rt_message_help;
+        buffer[8] = fs98_handle(fs98_host_rt_message_help);
         buffer[9] = 0;
         WIN(MessageBoxIndirectA, int32_t, (const void *))(buffer);
         return 0;

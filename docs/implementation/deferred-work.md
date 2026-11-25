@@ -279,3 +279,11 @@
 - source_spec: `docs/implementation/spec-1-8c-window-winmsg-mpchat-use-arena-h.md`
   summary: Pre-existing runner defects found and fixed in this slice: `winmsg_breaks.py` never ran `word-empty`, `split-fits` and `close-title` (their anchors sat across retail-bug comments, 61 of 64 ran), and `mpchat_ui_breaks.py` did not build since Story 1.7 (it copied `linkage.h` and `host.h` but not the `abi.h` they include). The WINMSG and MPCHAT UI break counts in `docs/tools.md` and the module docs predate this and were not re-run.
   evidence: Story 1.8 slice 3, runner `--build-only` work.
+
+- source_spec: `docs/implementation/spec-1-8d-host-uses-arena-h.md`
+  summary: HOST keeps its address-to-pointer conversions (`(T *)(uintptr_t)` in `host.c`, including `host.c:1242`, the Win32 handle and callback casts) and the cursor's outer `(uint8_t *)(uintptr_t)(...)` in `host_rt_cursor.c`. Only `host.c`'s private `M8`/`M16`/`M32` left the inventory: 33 to 30.
+  evidence: Story 1.8 slice 4 spec, "Reverse conversions".
+
+- source_spec: `docs/implementation/spec-1-8d-host-uses-arena-h.md`
+  summary: Pre-existing runner defect fixed on both sides: `host_breaks.py` never ran `ab-ret`, `sd-stop`, `vw-rows-skip`, `vw-block-grow`, `tx-font0`, `tt-right` and `tt-dup` (retail-bug comments sit inside their anchors; 498 of 505 ran). The 505 count in `docs/tools.md` predates the repair.
+  evidence: Story 1.8 slice 4, runner anchor work.

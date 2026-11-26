@@ -1,9 +1,14 @@
 #!/usr/bin/env python3
 """Mutations for independent descriptor/error/update review boundaries."""
+import sys
+sys.dont_write_bytecode = True    # before any local import, so no .pyc is written into the tree
+import sys
 import mpdialog_ui_breaks as ui
 
 
 def compare(name, dll, args, marker=None):
+    if ui.RECORDING is not None:
+        return
     result = ui.run_wine(['wine', str(ui.OUT / 'mpdialoguidiff.exe'), str(dll), '12', *args], name)
     if (result.returncode != (1 if marker else 0) or
             (marker and marker not in result.stdout) or
@@ -44,4 +49,4 @@ def main():
 
 
 if __name__ == '__main__':
-    main()
+    sys.exit(ui.entry(main))

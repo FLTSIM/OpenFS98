@@ -1,5 +1,9 @@
 #!/usr/bin/env python3
 """Snapshot weather-area mutations and count only explicit retail differences."""
+import sys
+sys.dont_write_bytecode = True    # before any local import, so no .pyc is written into the tree
+import break_build_only as bo
+import world_native
 import module_flags
 from pathlib import Path
 import argparse
@@ -8,14 +12,13 @@ import json
 import os
 import subprocess
 
+CORE = 'world_wareas.c'
+LIFE = 'world_wareas_objects.c'
+FLAGS = ['i686-w64-mingw32-gcc', *module_flags.FLAGS, '-std=c99', '-Itools/difftest', '-O2', '-Wall', '-Wextra', '-Werror']
 
-def main():
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--native', action='store_true')
-    parser.add_argument('names', nargs='*')
-    args = parser.parse_args()
-    core = 'world_wareas.c'
-    life = 'world_wareas_objects.c'
+
+def all_mutations(native):
+    core, life = CORE, LIFE
     runtime = 'world_runtime_tables.inc'
     mutations = [
         ('selection-store', 'core', core, 'U32(object, 0x10f4) = selection;', 'U32(object, 0x10f4) = selection + 1;'),
@@ -72,7 +75,7 @@ def main():
         ('ddx-base', 'life', life, '    uint32_t index;\n    for (index', '    uint32_t index;\n    s_object_services->ddx(exchange, 0, object);\n    for (index'),
         ('help-command', 'life', life, '"fs98.hlp", 12,', '"fs98.hlp", 10,'),
     ]
-    if args.native:
+    if native:
         native_names = {'selection-edit','selection-disable','selection-check','populate-add','advanced-enable','cancel-answer','accept-answer','accept-owner-cache','validation-priority','init-art','init-units','init-font-style','init-edit-label','init-name-limit'}
         mutations = [m for m in mutations if m[0] in native_names]
         mutations += [
@@ -83,40 +86,75 @@ def main():
             ('parent-deletion','native',runtime,'fs98_world_priority_post_destroy(object);','(void)object;'),
             ('font-cleanup','native','world_runtime.c','s_font_exit = NULL; callback();','s_font_exit = NULL; (void)callback;'),
         ]
-    requested=set(args.names)
-    if requested - {m[0] for m in mutations}: raise ValueError('unknown mutation')
-    selected=[m for m in mutations if not requested or m[0] in requested]
-    output=Path('bin/world-diff/wareas-'+('native-breaks' if args.native else 'breaks'))
-    output.mkdir(parents=True,exist_ok=True)
+    return mutations
+
+
+def load_sources(native):
     sources={p.name:p.read_bytes() for p in Path('src/world').iterdir() if p.suffix in ('.c','.h','.inc','.def')}
     for name in ('worldwareasdiff.c','worldwareasinitdiff.c','worldwareaslifediff.c','worldwareasuidiff.c','worlduidiff.c'):
         sources[name]=(Path('tools/difftest')/name).read_bytes().replace(b'../../src/world/',b'')
     for name in ('world-res.o','libworld-simsui.a','WORLD_area.dll'):
         sources[name]=(Path('bin/world-diff')/name).read_bytes()
+    sources['sources.txt']=world_native.sources_txt()
+    return sources
+
+
+def make_case(sources, native, row):
+    name,unit,filename,before,after=row
+
+    def overlay():
+        data=sources[filename]
+        if data.count(before.encode())!=1: raise ValueError(f'{name}: anchor count {data.count(before.encode())}')
+        data=data.replace(before.encode(),after.encode())
+        if name=='accept-owner-cache':
+            if data.count(b'U32(PTR(object, 0x10f8), 0) = 1;')!=1: raise ValueError(f'{name}: follow-up anchor count changed')
+            data=data.replace(b'U32(PTR(object, 0x10f8), 0) = 1;',b'U32(saved_descriptor, 0) = 1;')
+        return {filename:data}
+
+    def builds(work):
+        if native:
+            dll=work/'mutant.dll';exe=work/'worldwareasuidiff.exe'
+            world_sources=world_native.units()
+            return [FLAGS+['-shared','-nostdlib','-Wl,--entry=_DllMain@12','-Wl,--disable-dynamicbase','-Wl,--image-base=0x223f0000','-o',str(dll),*[str(work/Path(p).name) for p in world_sources],str(work/'world.def'),str(work/'world-res.o'),str(work/'libworld-simsui.a'),'-lkernel32','-luser32','-lmsvcrt','-lntdll'],FLAGS+['-o',str(exe),str(work/'worldwareasuidiff.c'),'-lgdi32','-lntdll']]
+        harness='worldwareas'+{'core':'','init':'init','life':'life'}[unit]+'diff.c';exe=work/'mutant.exe'
+        inputs=[str(work/harness),str(work/CORE)]
+        if unit=='life': inputs.append(str(work/LIFE))
+        return [FLAGS+['-o',str(exe),*inputs,'-lntdll']]
+    return bo.Case(name,overlay,builds,['mutant.dll','worldwareasuidiff.exe'] if native else ['mutant.exe'])
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--native', action='store_true')
+    parser.add_argument('--build-only', metavar='DIR', nargs='+')
+    parser.add_argument('names', nargs='*')
+    args = parser.parse_args()
+    mutations = all_mutations(args.native)
+    if args.build_only:
+        def factory():
+            sources = load_sources(args.native)
+            return [make_case(sources, args.native, m) for m in mutations], sources
+        return bo.build_only(args.build_only, factory)
+    requested=set(args.names)
+    if requested - {m[0] for m in mutations}: raise ValueError('unknown mutation')
+    selected=[m for m in mutations if not requested or m[0] in requested]
+    output=Path('bin/world-diff/wareas-'+('native-breaks' if args.native else 'breaks'))
+    output.mkdir(parents=True,exist_ok=True)
+    sources=load_sources(args.native)
     (output/'inputs.json').write_text(json.dumps({name:hashlib.sha256(data).hexdigest() for name,data in sources.items()},indent=2)+'\n')
-    world_sources=Path('src/world/sources.txt').read_text().split()
     caught=0
-    for name,unit,filename,before,after in selected:
+    for row in selected:
+        name=row[0]
+        case=make_case(sources,args.native,row)
         work=output/name;work.mkdir(exist_ok=True)
-        for source,data in sources.items():
-            if source==filename:
-                if data.count(before.encode())!=1: raise ValueError(f'{name}: anchor count {data.count(before.encode())}')
-                data=data.replace(before.encode(),after.encode())
-                if name=='accept-owner-cache':
-                    data=data.replace(b'U32(PTR(object, 0x10f8), 0) = 1;',b'U32(saved_descriptor, 0) = 1;')
-            (work/source).write_bytes(data)
-        flags=['i686-w64-mingw32-gcc', *module_flags.FLAGS,'-std=c99', '-Itools/difftest','-O2','-Wall','-Wextra','-Werror']
+        bo.write_case(work,sources,case.overlay())
         if args.native:
             dll=work/'mutant.dll';exe=work/'worldwareasuidiff.exe'
-            commands=[flags+['-shared','-nostdlib','-Wl,--entry=_DllMain@12','-Wl,--disable-dynamicbase','-Wl,--image-base=0x223f0000','-o',str(dll),*[str(work/Path(p).name) for p in world_sources],str(work/'world.def'),str(work/'world-res.o'),str(work/'libworld-simsui.a'),'-lkernel32','-luser32','-lmsvcrt','-lntdll'],flags+['-o',str(exe),str(work/'worldwareasuidiff.c'),'-lgdi32','-lntdll']]
             run=['wine',str(exe),str(dll),'1','0' if name=='selection-disable' else '5']
         else:
-            harness='worldwareas'+{'core':'','init':'init','life':'life'}[unit]+'diff.c';exe=work/'mutant.exe'
-            inputs=[str(work/harness),str(work/core)]
-            if unit=='life': inputs.append(str(work/life))
-            commands=[flags+['-o',str(exe),*inputs,'-lntdll']]
-            run=['wine',str(exe),'100','0x4a971b63','unwind' if unit!='core' else 'interrupt']
-        for command in commands:
+            exe=work/'mutant.exe'
+            run=['wine',str(exe),'100','0x4a971b63','unwind' if row[1]!='core' else 'interrupt']
+        for command in case.builds(work):
             result=subprocess.run(command,capture_output=True,text=True)
             if result.returncode:
                 (work/'build.log').write_text(result.stdout+result.stderr)

@@ -228,6 +228,8 @@ The 502 were caught over three runs while Navigation's harness grew: 472 in one 
 the 28 OnInitDialog and page-allocator breaks, then the two that needed a harness or break
 fix (a report given no failure, and a break that did not build).
 
+`python3 -B tools/flights_breaks.py --build-only DIR [NAME...]` builds the 502 mutants' `.exe` without wine (Story 1.8 slice 6b0; see `docs/tools.md`).
+
 The stubs disturb the fixture at two calls per operation, one among the first four and one
 anywhere in the first 32; the replacement vtable's every slot, and each descriptor's
 callbacks, log under their own names, so a call through the wrong table or a stale

@@ -1,5 +1,8 @@
 #!/usr/bin/env python3
 """Build MP_DIALOG mutants and prove the native retail comparison catches them."""
+import sys
+sys.dont_write_bytecode = True    # before any local import, so no .pyc is written into the tree
+import break_build_only as bo
 import module_flags
 from pathlib import Path
 import os
@@ -17,6 +20,7 @@ OUT = ROOT / 'bin/mpdialog-diff'
 WORK = OUT / 'ui-breaks'
 CC = 'i686-w64-mingw32-gcc'
 _private_wine_prefix = None
+RECORDING = None    # --build-only: build() records its cases here and nothing runs under wine
 FLAGS = [
     *module_flags.FLAGS, '-std=c99', '-O2', '-Wall', '-Wextra', '-Werror',
 ]
@@ -38,6 +42,9 @@ def run(command, **kwargs):
 @contextlib.contextmanager
 def isolated_wine_prefix():
     """Own a fresh Wine server; never stop a server from the caller's prefix."""
+    if RECORDING is not None:
+        yield None
+        return
     OUT.mkdir(parents=True, exist_ok=True)
     global _private_wine_prefix
     if _private_wine_prefix is not None:
@@ -104,76 +111,87 @@ def run_wine(command, label, timeout=90):
     return subprocess.CompletedProcess(command, process.returncode, output)
 
 
-def build(name, session_text, tables_text, details_text=None, unwind_text=None):
+SOURCES = ('mpdialog_runtime.c', 'mpdialog_internal.h', 'mpdialog_unwind.h', 'mpdialog.def', 'mpdialog_flow.c',
+           'mpdialog_session.c', 'mpdialog_details.c', 'mpdialog_runtime_tables.inc')
+
+
+def make(name, mutated):
+    """The mutant DLL of `name`: src/mpdialog's files copied, those in `mutated` (file name -> text) replaced.
+    Under --build-only the case is recorded, not built."""
     work = WORK / name
-    source = work / 'src/mpdialog'
-    source.mkdir(parents=True, exist_ok=True)
-    for filename in ('mpdialog_runtime.c', 'mpdialog_internal.h', 'mpdialog_unwind.h', 'mpdialog.def'):
-        shutil.copyfile(ROOT / 'src/mpdialog' / filename, source / filename)
-    if unwind_text is not None:
-        (source / 'mpdialog_unwind.h').write_text(unwind_text)
-    shutil.copyfile(ROOT / 'src/mpdialog/mpdialog_flow.c', source / 'mpdialog_flow.c')
-    (source / 'mpdialog_session.c').write_text(session_text)
+
+    def overlay():
+        files = {f'src/mpdialog/{filename}': (ROOT / 'src/mpdialog' / filename).read_bytes() for filename in SOURCES}
+        files.update({f'src/mpdialog/{filename}': text.encode() for filename, text in mutated.items()})
+        return files
+
+    def builds(base):
+        source = base / 'src/mpdialog'
+        resources = [
+            OUT / 'mpdialog-res.o', OUT / 'mpdialog-details-res.o',
+            OUT / 'mpdialog-flow-intro-res.o', OUT / 'mpdialog-flow-choice-res.o',
+            OUT / 'mpdialog-flow-host-res.o', OUT / 'mpdialog-flow-connection-res.o',
+            OUT / 'mpdialog-flow-browser-res.o', OUT / 'mpdialog-flow-support-res.o',
+        ]
+        return [[
+            CC, *FLAGS, '-shared', '-nostdlib', '-Wl,--entry=_DllMain@12',
+            '-Wl,--disable-dynamicbase', '-Wl,--image-base=0x22340000',
+            '-o', str(base / 'MP_DIALOG_mutant.dll'), str(source / 'mpdialog_flow.c'),
+            str(source / 'mpdialog_session.c'),
+            str(source / 'mpdialog_details.c'), str(source / 'mpdialog_runtime.c'),
+            str(source / 'mpdialog.def'),
+            *(str(resource) for resource in resources),
+            str(OUT / 'libmpdialog-simsui.a'),
+            '-lkernel32', '-luser32', '-lcomctl32', '-lmsvcrt',
+        ]]
+    case = bo.Case(name, overlay, builds, ['MP_DIALOG_mutant.dll'])
+    if RECORDING is not None:
+        RECORDING.append(case)
+    else:
+        bo.write_case(work, {}, case.overlay())
+        run(case.builds(work)[0], cwd=ROOT)
+    return work / 'MP_DIALOG_mutant.dll'
+
+
+def build(name, session_text, tables_text, details_text=None, unwind_text=None):
     if details_text is None:
         details_text = (ROOT / 'src/mpdialog/mpdialog_details.c').read_text()
-    (source / 'mpdialog_details.c').write_text(details_text)
-    (source / 'mpdialog_runtime_tables.inc').write_text(tables_text)
-    resources = [
-        OUT / 'mpdialog-res.o', OUT / 'mpdialog-details-res.o',
-        OUT / 'mpdialog-flow-intro-res.o', OUT / 'mpdialog-flow-choice-res.o',
-        OUT / 'mpdialog-flow-host-res.o', OUT / 'mpdialog-flow-connection-res.o',
-        OUT / 'mpdialog-flow-browser-res.o', OUT / 'mpdialog-flow-support-res.o',
-    ]
-    dll = work / 'MP_DIALOG_mutant.dll'
-    command = [
-        CC, *FLAGS, '-shared', '-nostdlib', '-Wl,--entry=_DllMain@12',
-        '-Wl,--disable-dynamicbase', '-Wl,--image-base=0x22340000',
-        '-o', str(dll), str(source / 'mpdialog_flow.c'),
-        str(source / 'mpdialog_session.c'),
-        str(source / 'mpdialog_details.c'), str(source / 'mpdialog_runtime.c'),
-        str(source / 'mpdialog.def'),
-        *(str(resource) for resource in resources),
-        str(OUT / 'libmpdialog-simsui.a'),
-        '-lkernel32', '-luser32', '-lcomctl32', '-lmsvcrt',
-    ]
-    run(command, cwd=ROOT)
-    return dll
+    mutated = {'mpdialog_session.c': session_text, 'mpdialog_details.c': details_text,
+               'mpdialog_runtime_tables.inc': tables_text}
+    if unwind_text is not None:
+        mutated['mpdialog_unwind.h'] = unwind_text
+    return make(name, mutated)
 
 
 def build_flow(name, flow_text, tables_text):
-    work = WORK / name
-    source = work / 'src/mpdialog'
-    source.mkdir(parents=True, exist_ok=True)
-    for filename in ('mpdialog_runtime.c', 'mpdialog_internal.h', 'mpdialog_unwind.h', 'mpdialog.def'):
-        shutil.copyfile(ROOT / 'src/mpdialog' / filename, source / filename)
-    shutil.copyfile(ROOT / 'src/mpdialog/mpdialog_session.c', source / 'mpdialog_session.c')
-    shutil.copyfile(ROOT / 'src/mpdialog/mpdialog_details.c', source / 'mpdialog_details.c')
-    (source / 'mpdialog_flow.c').write_text(flow_text)
-    (source / 'mpdialog_runtime_tables.inc').write_text(tables_text)
-    resources = [
-        OUT / 'mpdialog-res.o', OUT / 'mpdialog-details-res.o',
-        OUT / 'mpdialog-flow-intro-res.o', OUT / 'mpdialog-flow-choice-res.o',
-        OUT / 'mpdialog-flow-host-res.o', OUT / 'mpdialog-flow-connection-res.o',
-        OUT / 'mpdialog-flow-browser-res.o', OUT / 'mpdialog-flow-support-res.o',
-    ]
-    dll = work / 'MP_DIALOG_mutant.dll'
-    command = [
-        CC, *FLAGS, '-shared', '-nostdlib', '-Wl,--entry=_DllMain@12',
-        '-Wl,--disable-dynamicbase', '-Wl,--image-base=0x22340000',
-        '-o', str(dll), str(source / 'mpdialog_flow.c'),
-        str(source / 'mpdialog_session.c'), str(source / 'mpdialog_details.c'),
-        str(source / 'mpdialog_runtime.c'), str(source / 'mpdialog.def'),
-        *(str(resource) for resource in resources),
-        str(OUT / 'libmpdialog-simsui.a'),
-        '-lkernel32', '-luser32', '-lcomctl32', '-lmsvcrt',
-    ]
-    run(command, cwd=ROOT)
-    return dll
+    return make(name, {'mpdialog_flow.c': flow_text, 'mpdialog_runtime_tables.inc': tables_text})
+
+
+def build_only(argv, suite):
+    """--build-only DIR [CASE...]: run `suite` (a runner's main) with its builds recorded and its wine comparisons skipped,
+    then build the recorded cases.  A mutation anchor that does not match fails the run before anything is made."""
+    def factory():
+        global RECORDING
+        RECORDING = []
+        try:
+            suite()
+            return RECORDING, None
+        finally:
+            RECORDING = None
+    return bo.build_only(argv, factory)
+
+
+def entry(main):
+    if '--build-only' in sys.argv[1:]:
+        return build_only(sys.argv[sys.argv.index('--build-only') + 1:], main)
+    return main()
 
 
 def check_mutant(name, dll, expected_group, flow_case=None,
                  mutation_suite=None, mutation_case=None,
                  cleanup_flow_lifetime=False):
+    if RECORDING is not None:
+        return
     command = ['wine', str(OUT / 'mpdialoguidiff.exe'), str(dll), '12']
     if flow_case is not None:
         command.extend(['--flow-mutation-case', str(flow_case)])
@@ -215,6 +233,8 @@ def check_mutant(name, dll, expected_group, flow_case=None,
 
 
 def check_render_mutant(name, dll):
+    if RECORDING is not None:
+        return
     result = run_wine(
         ['wine', str(OUT / 'mpdialoguidiff.exe'), str(dll), '12', '--render-only'], name)
     if result.returncode != 1 or 'MP_DIALOG RENDER DIFFER ' not in result.stdout:
@@ -230,6 +250,8 @@ def check_render_mutant(name, dll):
 
 
 def check_help_mutant(name, dll):
+    if RECORDING is not None:
+        return
     result = run_wine(['wine', str(OUT / 'mpdialoguidiff.exe'), str(dll),
                        '12', '--help-only'], name)
     if (result.returncode != 1 or 'MP_DIALOG HELP DIFFER ' not in result.stdout or
@@ -239,7 +261,7 @@ def check_help_mutant(name, dll):
     print(f'MUTATION CAUGHT {name}: help comparison differs from retail', flush=True)
 
 
-def run_suite():
+def baseline_gate():
     WORK.mkdir(parents=True, exist_ok=True)
     baseline = run_wine(
         ['wine', str(OUT / 'mpdialoguidiff.exe'),
@@ -281,6 +303,10 @@ def run_suite():
     print('BASELINE PASSED 0x110a/0x110b/0x110c native behavior, control-tree, rendering, '
           'and repeatability gates across two load/unload cycles', flush=True)
 
+
+def run_suite():
+    if RECORDING is None:
+        baseline_gate()
     session = (ROOT / 'src/mpdialog/mpdialog_session.c').read_text()
     details = (ROOT / 'src/mpdialog/mpdialog_details.c').read_text()
     tables = (ROOT / 'src/mpdialog/mpdialog_runtime_tables.inc').read_text()
@@ -307,7 +333,7 @@ def run_suite():
         check_help_mutant(name, build(name, session.replace(old_help, new_help, 1), tables))
 
     old = '    return ((int32_t (TC *)(void *, int32_t))PTR(PTR(object, 0), 0xe0))(object, field);'
-    if old not in flow:
+    if flow.count(old) != 2:
         raise RuntimeError('Host error return mutation anchor missing')
     host_start = flow.index('int32_t TC fs98_mpdialog_flow_error_host(')
     host_return = flow.index(old, host_start)
@@ -322,7 +348,7 @@ def run_suite():
     choice_end = flow.index('\nstatic void flow_choice_route_update', choice_start)
     choice = flow[choice_start:choice_end]
     choice_field = '        if (result) field = 0x419;\n    } else field = 0;'
-    if choice_field not in choice or old not in choice:
+    if choice.count(choice_field) != 1 or choice.count(old) != 1:
         raise RuntimeError('Choice error mutation anchors missing')
     for name, mutated_choice in (
         ('flow-choice-error-no-status', choice.replace(choice_field,
@@ -336,7 +362,7 @@ def run_suite():
         check_mutant(name, build_flow(name, mutant, tables), 'validation', flow_case=6)
 
     old = 'EM_SETLIMITTEXT, D32(block, 0x64) - 1, 0);'
-    if old not in flow:
+    if flow.count(old) != 1:
         raise RuntimeError('Host initialization limit mutation anchor missing')
     for name, expression, case in (
         ('flow-host-init-zero', 'D32(block, 0x64) ? D32(block, 0x64) - 1 : 0', 1),
@@ -348,7 +374,7 @@ def run_suite():
 
     old = '    set_checked(AT(object, 0x19b4), D32(block, 0x40) == 2);'
     first_range = '    SendMessageA((HWND)D32(object, 0x1714), UDM_SETRANGE, 0,'
-    if old not in flow or first_range not in flow:
+    if flow.count(old) != 1 or flow.count(first_range) != 1:
         raise RuntimeError('Host update order mutation anchor missing')
     mutant = flow.replace(old, '', 1).replace(first_range, old + "\n" + first_range, 1)
     check_mutant('flow-host-update-order', build_flow('flow-host-update-order',
@@ -360,7 +386,7 @@ def run_suite():
         flow.replace(old, new, 1), tables), 'host_update', flow_case=0)
 
     old = '        if (!result) field = original_field;\n    } else field = 0;'
-    if old not in flow:
+    if flow.count(old) != 1:
         raise RuntimeError('Host error field mutation anchor missing')
     for name, replacement in (
         ('flow-host-error-empty', '        if (!result) field = original_field;\n    }'),
@@ -370,7 +396,7 @@ def run_suite():
                      'validation', flow_case=2)
 
     old = '    if (D32(block, 0x5c)) return 0x40f;'
-    if old not in flow:
+    if flow.count(old) != 1:
         raise RuntimeError('Host validation priority mutation anchor missing')
     check_mutant('flow-host-validation-status', build_flow('flow-host-validation-status',
         flow.replace(old, '    if (D32(block, 0x5c)) return 0x410;', 1), tables),
@@ -378,21 +404,21 @@ def run_suite():
 
     old = 'PostMessageA((HWND)s_flow_hwnds[0], WM_COMMAND, 0x3e8, 0);'
     new = 'SendMessageA((HWND)s_flow_hwnds[0], WM_COMMAND, 0x3e8, 0);'
-    if old not in flow:
+    if flow.count(old) != 1:
         raise RuntimeError('0x110a initial-command timing mutation anchor missing')
     check_mutant('flow-initial-command-timing', build_flow('flow-initial-command-timing',
         flow.replace(old, new, 1), tables), 'timing', flow_case=0)
 
     old = 'case 0: target = 1; break;'
     new = 'case 0: target = 2; break; /* mutation: skip Choice */'
-    if old not in flow:
+    if flow.count(old) != 1:
         raise RuntimeError('0x110a page-transition mutation anchor missing')
     check_mutant('flow-page-transition', build_flow('flow-page-transition',
         flow.replace(old, new, 1), tables), 'transitions', flow_case=0)
 
     old = 'return result && D32(block, 0x28) ? 0x41a : 0;'
     new = 'result = 0; return result; /* mutation: suppress pending validation command */'
-    if old not in flow:
+    if flow.count(old) != 1:
         raise RuntimeError('0x110a validation suppression mutation anchor missing')
     check_mutant('flow-validation-command-suppression', build_flow(
         'flow-validation-command-suppression', flow.replace(old, new, 1), tables),
@@ -401,7 +427,7 @@ def run_suite():
     old = 'if (((int32_t (SC *)(void *))D32(block, 0x0c))(block) == 0) flow_finish(block, 1);'
     new = ('if (((int32_t (SC *)(void *))D32(block, 0x0c))((void *)(uintptr_t)object) == 0) '
            'flow_finish(block, 1); /* mutation: pass page instead of descriptor */')
-    if old not in flow:
+    if flow.count(old) != 2:
         raise RuntimeError('0x110a callback argument mutation anchor missing')
     check_mutant('flow-callback-argument', build_flow('flow-callback-argument',
         flow.replace(old, new, 1), tables), 'callbacks', flow_case=5)
@@ -420,7 +446,7 @@ def run_suite():
 
     old = 'for (index = 0; index < D32(block, 0xb0); ++index) {'
     new = 'for (index = 0; index < D32(block, 0xb0) && index < 128; ++index) {'
-    if old not in flow:
+    if flow.count(old) != 1:
         raise RuntimeError('Browser row cap mutation anchor missing')
     check_mutant('flow-browser-row-cap', build_flow(
         'flow-browser-row-cap', flow.replace(old, new, 1), tables),
@@ -428,7 +454,7 @@ def run_suite():
 
     old = 'SendMessageA(list, LB_SETCURSEL, count ? 0 : (WPARAM)-1, 0);'
     new = 'SendMessageA(list, LB_SETCURSEL, count ? 1 : (WPARAM)-1, 0);'
-    if old not in flow:
+    if flow.count(old) != 1:
         raise RuntimeError('Browser rebuild selection mutation anchor missing')
     check_mutant('flow-browser-rebuild-selection', build_flow(
         'flow-browser-rebuild-selection', flow.replace(old, new, 1), tables),
@@ -440,7 +466,7 @@ def run_suite():
     new = ("    selection = (uint32_t)SendMessageA((HWND)D32(object, 0x190c), LB_GETCURSEL, 0, 0);\n"
            "    ((int32_t (SC *)(void *, uint32_t))D32(block, 0x98))(block, selection);\n"
            "    fs98_mpdialog_enable(AT(object, 0x11d8), selection != (uint32_t)-1);")
-    if old not in flow:
+    if flow.count(old) != 1:
         raise RuntimeError('Browser callback ordering mutation anchor missing')
     check_mutant('flow-browser-callback-order', build_flow(
         'flow-browser-callback-order', flow.replace(old, new, 1), tables),
@@ -448,7 +474,7 @@ def run_suite():
 
     old = '"\\t%d of %d\\t%d of %d"'
     new = '"\\t%u of %u\\t%u of %u"'
-    if old not in flow:
+    if flow.count(old) != 1:
         raise RuntimeError('Browser signed formatting mutation anchor missing')
     check_mutant('flow-browser-unsigned-format', build_flow(
         'flow-browser-unsigned-format', flow.replace(old, new, 1), tables),
@@ -456,7 +482,7 @@ def run_suite():
 
     old = '    if (block) D32(block, 0x40) = D32(object, 0x1ad8) ? 2 : 1;'
     new = '    if (block) flow_capture(object);'
-    if old not in flow:
+    if flow.count(old) != 1:
         raise RuntimeError('Browser observer fields mutation anchor missing')
     check_mutant('flow-browser-observer-fields', build_flow(
         'flow-browser-observer-fields', flow.replace(old, new, 1), tables),
@@ -466,7 +492,7 @@ def run_suite():
            '    if (D32(block, 0xb8) != (uint32_t)-1)')
     new = ('    flow_capture(object);\n'
            '    if (D32(block, 0xb8) != (uint32_t)-1)')
-    if old not in flow:
+    if flow.count(old) != 1:
         raise RuntimeError('Browser details fields mutation anchor missing')
     check_mutant('flow-browser-details-fields', build_flow(
         'flow-browser-details-fields', flow.replace(old, new, 1), tables),
@@ -475,7 +501,7 @@ def run_suite():
     old = ('    D32(object, 0x1aec) = 1;\n'
            '    D32(block, 0xb8) = (uint32_t)SendMessageA((HWND)D32(object, 0x190c), LB_GETCURSEL, 0, 0);')
     new = '    D32(object, 0x1aec) = 1;\n    flow_capture(object);'
-    if old not in flow:
+    if flow.count(old) != 1:
         raise RuntimeError('Browser refresh fields mutation anchor missing')
     check_mutant('flow-browser-refresh-fields', build_flow(
         'flow-browser-refresh-fields', flow.replace(old, new, 1), tables),
@@ -484,7 +510,7 @@ def run_suite():
     old = ('    ((int32_t (SC *)(void *))D32(block, 0x0c))(block);\n'
            '    flow_finish(block, 1);')
     new = '    if (((int32_t (SC *)(void *))D32(block, 0x0c))(block) == 0) flow_finish(block, 1);'
-    if old not in flow:
+    if flow.count(old) != 1:
         raise RuntimeError('Browser accept return mutation anchor missing')
     check_mutant('flow-browser-accept-return', build_flow(
         'flow-browser-accept-return', flow.replace(old, new, 1), tables),
@@ -494,7 +520,7 @@ def run_suite():
            '    SendMessageA(list, LB_SETCURSEL, (WPARAM)-1, 0);\n'
            '    fs98_mpdialog_enable(AT(object, 0x11d8), 0);')
     new = '    (void)list;\n    flow_capture(object);'
-    if old not in flow:
+    if flow.count(old) != 1:
         raise RuntimeError('Browser back callback mutation anchor missing')
     check_mutant('flow-browser-back-order', build_flow(
         'flow-browser-back-order', flow.replace(old, new, 1), tables),
@@ -507,7 +533,7 @@ def run_suite():
            '    for (index = 0; index < count; ++index) {\n'
            '        uint8_t *row;\n'
            '        rows = (uint8_t *)(uintptr_t)D32(block, 0xac);')
-    if old not in flow:
+    if flow.count(old) != 1:
         raise RuntimeError('Browser reentrant row count mutation anchor missing')
     check_mutant('flow-browser-reentrant-row-count', build_flow(
         'flow-browser-reentrant-row-count', flow.replace(old, new, 1), tables),
@@ -519,7 +545,7 @@ def run_suite():
     new = ('    rows = (uint8_t *)(uintptr_t)D32(block, 0xac);\n'
            '    for (index = 0; index < D32(block, 0xb0); ++index) {\n'
            '        uint8_t *row;')
-    if old not in flow:
+    if flow.count(old) != 1:
         raise RuntimeError('Browser reentrant row pointer mutation anchor missing')
     check_mutant('flow-browser-reentrant-row-pointer', build_flow(
         'flow-browser-reentrant-row-pointer', flow.replace(old, new, 1), tables),
@@ -540,7 +566,7 @@ def run_suite():
          '{ (void)object; (void)timer_id; }'),
     )
     for old, new in browser_handlers:
-        if old not in flow:
+        if flow.count(old) != 1:
             raise RuntimeError('Browser timer-handler mutation anchor missing')
         flow = flow.replace(old, new, 1)
     old = ('int32_t TC fs98_mpdialog_flow_mouse_activate_browser(void *object, uint32_t active,\n'
@@ -551,7 +577,7 @@ def run_suite():
     new = ('int32_t TC fs98_mpdialog_flow_mouse_activate_browser(void *object, uint32_t active,\n'
            '                                                     uint32_t hit_test, uint32_t message)\n'
            '{ (void)object; (void)active; (void)hit_test; (void)message; return 0; }')
-    if old not in flow:
+    if flow.count(old) != 1:
         raise RuntimeError('Browser mouse-activation mutation anchor missing')
     flow = flow.replace(old, new, 1)
     check_mutant('flow-browser-message-handlers', build_flow(
@@ -559,7 +585,7 @@ def run_suite():
 
     old = 'if (!block || D32(object, 0x1aec)) return;'
     new = 'if (!block) return; /* mutation: permit nested refresh callback */'
-    if old not in flow:
+    if flow.count(old) != 1:
         raise RuntimeError('Browser refresh reentry-guard mutation anchor missing')
     check_mutant('flow-browser-refresh-reentry-guard', build_flow(
         'flow-browser-refresh-reentry-guard', flow.replace(old, new, 1), tables),
@@ -569,7 +595,7 @@ def run_suite():
     new = ('    block->result = 0;\n'
            '    ((fs98_mpdialog_callback)block->accept)(block);\n'
            '    block->result = 1;')
-    if old not in session:
+    if session.count(old) != 1:
         raise RuntimeError('accept-result mutation anchor missing')
     check_mutant('accept-result-order', build('accept-result-order',
         session.replace(old, new, 1), tables), 'callbacks',
@@ -579,7 +605,7 @@ def run_suite():
            '    {0x111, 0x0, 0x3ee, 0x3ee, 0xc, (void *)fs98_mpdialog_set_conditions},')
     new = ('{0x111, 0x0, 0x3eb, 0x3eb, 0xc, (void *)fs98_mpdialog_set_conditions},\n'
            '    {0x111, 0x0, 0x3ee, 0x3ee, 0xc, (void *)fs98_mpdialog_get_conditions},')
-    if old not in tables:
+    if tables.count(old) != 1:
         raise RuntimeError('callback-map mutation anchor missing')
     check_mutant('flight-callback-map', build('flight-callback-map',
         session, tables.replace(old, new, 1)), 'callbacks',
@@ -587,7 +613,7 @@ def run_suite():
 
     old = 'fs98_mpdialog_check(AT(object, 0x1b80), block->dme_lock != 0);'
     new = 'fs98_mpdialog_check(AT(object, 0x1b80), block->dme_lock == 0);'
-    if old not in session:
+    if session.count(old) != 1:
         raise RuntimeError('DME-state mutation anchor missing')
     check_mutant('dme-state-invert', build('dme-state-invert',
         session.replace(old, new, 1), tables), 'checks',
@@ -603,7 +629,7 @@ def run_suite():
     new = ("    } else {\n"
            "        /* mutation: omit retail's second visibility decision */\n"
            "    }\n")
-    if old not in session:
+    if session.count(old) != 1:
         raise RuntimeError('visibility mutation anchor missing')
     check_mutant('visibility-final-branch', build('visibility-final-branch',
         session.replace(old, new, 1), tables), 'visibility',
@@ -613,7 +639,7 @@ def run_suite():
            '        ((void (TC *)(void *))PTR(PTR(object, 0), 0xf8))(object);')
     new = ('    if (!((fs98_mpdialog_callback)D32(block, 0x10))(block))\n'
            '        ((void (TC *)(void *))PTR(PTR(object, 0), 0xf8))(object);')
-    if old not in details:
+    if details.count(old) != 1:
         raise RuntimeError('0x110c refresh mutation anchor missing')
     check_mutant('details-refresh-polarity', build('details-refresh-polarity',
         session, tables, details.replace(old, new, 1)), 'refresh',
@@ -621,7 +647,7 @@ def run_suite():
 
     old = '    if (((fs98_mpdialog_callback)D32(block, 4))(block)) {'
     new = '    if (0) { /* mutation: bypass capacity validation result */'
-    if old not in details:
+    if details.count(old) != 1:
         raise RuntimeError('0x110c validation mutation anchor missing')
     check_mutant('details-capacity-validation', build('details-capacity-validation',
         session, tables, details.replace(old, new, 1)), 'capacity',
@@ -632,7 +658,7 @@ def run_suite():
            '            SetFocus(GetDlgItem((HWND)D32(object, 0x20), 0x40d));\n'
            '            return 0x40d;\n'
            '        }')
-    if old not in details:
+    if details.count(old) != 1:
         raise RuntimeError('0x110c focus mutation anchor missing')
     check_mutant('details-validation-focus', build('details-validation-focus',
         session, tables, details.replace(old, new, 1)), 'capacity',
@@ -640,7 +666,7 @@ def run_suite():
 
     old = '    ((fs98_mpdialog_callback)D32(block, 0x0c))(block);'
     new = '    (void)block; /* mutation: skip MULTIP removal confirmation callback */'
-    if old not in details:
+    if details.count(old) != 1:
         raise RuntimeError('0x110c removal mutation anchor missing')
     check_mutant('details-removal-callback', build('details-removal-callback',
         session, tables, details.replace(old, new, 1)), 'removal',
@@ -649,7 +675,7 @@ def run_suite():
     old = ('    if (object)\n'
            '        ((void *(TC *)(void *, uint32_t))PTR(PTR(object, 0), 4))(object, 1);')
     new = '    (void)object; /* mutation: omit the WM_NCDESTROY deleting path */'
-    if old not in details:
+    if details.count(old) != 1:
         raise RuntimeError('0x110c lifetime mutation anchor missing')
     check_mutant('details-lifetime-order', build('details-lifetime-order',
         session, tables, details.replace(old, new, 1)), 'lifetime',
@@ -658,7 +684,7 @@ def run_suite():
     flow = (ROOT / 'src/mpdialog/mpdialog_flow.c').read_text()
     old = '?GetSimsBaseFont@@YGPAVCFont@@H@Z"))(2);'
     new = '?GetSimsBaseFont@@YGPAVCFont@@H@Z"))(0); /* mutation: wrong font */'
-    if old not in flow:
+    if flow.count(old) != 1:
         raise RuntimeError('render font mutation anchor missing')
     check_render_mutant('render-font-selector', build_flow('render-font-selector',
         flow.replace(old, new, 1), tables))
@@ -672,7 +698,7 @@ def main():
 
 if __name__ == '__main__':
     try:
-        sys.exit(main())
+        sys.exit(entry(main))
     except (OSError, RuntimeError, subprocess.CalledProcessError) as error:
         print(f'MP_DIALOG mutation check failed: {error}', file=sys.stderr)
         sys.exit(1)

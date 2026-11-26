@@ -1,24 +1,14 @@
 #!/usr/bin/env python3
 """Snapshot and mutate native area DLLs; faults/timeouts never count as caught."""
-import module_flags
+import sys
+sys.dont_write_bytecode = True    # before any local import, so no .pyc is written into the tree
+import break_build_only as bo
+import world_native
 from pathlib import Path
-import hashlib
-import json
 import subprocess
 import sys
 
-
-def main():
-    output_dir = Path('bin/world-diff/ui-breaks')
-    output_dir.mkdir(parents=True, exist_ok=True)
-    sources = {path.name: path.read_bytes() for path in Path('src/world').iterdir()
-                if path.suffix in ('.c', '.h', '.inc', '.def')}
-    sources['worlduidiff.c'] = Path('tools/difftest/worlduidiff.c').read_bytes().replace(b'../../src/world/', b'')
-    for filename in ('world-res.o', 'libworld-simsui.a'):
-        sources[filename] = (Path('bin/world-diff') / filename).read_bytes()
-    (output_dir / 'inputs.json').write_text(json.dumps({name: hashlib.sha256(data).hexdigest()
-        for name, data in sources.items()}, indent=2) + '\n')
-    mutations = [
+MUTATIONS = [
         ('edit-color', 'world_init.c', '0x1258), font, 0xffffff', '0x1258), font, 0x00ff00'),
         ('position-limit', 'world_init.c', '0x19c0), 0xc5, 4, 0', '0x19c0), 0xc5, 3, 0'),
         ('empty-path-enable', 'world_init.c', 'WORLD_U32(object, 0x10e0) = 0;', 'WORLD_U32(object, 0x10e0) = 1;'),
@@ -29,32 +19,41 @@ def main():
         ('path-error-focus', 'world_area.c', 'focus_control((uint8_t *)object + 0x1258);', 'focus_control((uint8_t *)object + 0x1938);'),
         ('module-unwind-delete', 'world_runtime.c', '((void (*)(void *))world_mfc(825))(state->dynamic);', '(void)state;'),
         ('module-deinit-clear', 'world_runtime.c', 's_module = s_resource_module = 0;', 's_resource_module = 0;'),
-    ]
-    requested = set(sys.argv[1:])
-    if requested - {mutation[0] for mutation in mutations}:
+]
+
+
+def make_case(data, name, filename, before, after):
+    builds = lambda work: [world_native.dll_command(work, work / 'WORLD_area.dll'), world_native.ui_command(work, work / 'worlduidiff.exe', 'worlduidiff.c')]
+    if name == 'baseline':
+        return bo.Case(name, lambda: {}, builds, ['WORLD_area.dll', 'worlduidiff.exe'])
+    return world_native.case(name, data, filename, lambda blob: world_native.mutate(blob, name, filename, before, after),
+                             builds, ['WORLD_area.dll', 'worlduidiff.exe'])
+
+
+def main():
+    args = sys.argv[1:]
+    jobs = [('baseline', None, None, None)] + MUTATIONS
+    if '--build-only' in args:
+        def factory():
+            data = world_native.sources(('worlduidiff.c',))
+            return [make_case(data, *job) for job in jobs], data
+        return bo.build_only(args[args.index('--build-only') + 1:], factory)
+    output_dir = Path('bin/world-diff/ui-breaks')
+    output_dir.mkdir(parents=True, exist_ok=True)
+    data = world_native.sources(('worlduidiff.c',))
+    world_native.write_inputs_json(output_dir, data)
+    requested = set(args)
+    if requested - {mutation[0] for mutation in MUTATIONS}:
         raise ValueError('unknown World native mutation')
-    jobs = [('baseline', None, None, None)] + [mutation for mutation in mutations if not requested or mutation[0] in requested]
+    jobs = [('baseline', None, None, None)] + [mutation for mutation in MUTATIONS if not requested or mutation[0] in requested]
     caught = 0
     for name, filename, before, after in jobs:
+        case = make_case(data, name, filename, before, after)
         work = output_dir / name
         work.mkdir(exist_ok=True)
-        for source_text, data in sources.items():
-            if source_text == filename:
-                if data.count(before.encode()) != 1:
-                    raise ValueError(f'{name}: mutation anchor is not unique')
-                data = data.replace(before.encode(), after.encode(), 1)
-            (work / source_text).write_bytes(data)
+        bo.write_case(work, data, case.overlay())
         dll, harness = work / 'WORLD_area.dll', work / 'worlduidiff.exe'
-        commands = [
-            ['i686-w64-mingw32-gcc', *module_flags.FLAGS, '-std=c99', '-Itools/difftest', '-O2', '-Wall', '-Wextra', '-Werror', '-shared', '-nostdlib', '-Wl,--entry=_DllMain@12',
-             '-Wl,--disable-dynamicbase', '-Wl,--image-base=0x223f0000', '-o', str(dll),
-             *(str(work / f'world_{unit}.c') for unit in ('area', 'objects', 'init', 'priority', 'priority_objects', 'booster', 'booster_objects', 'booster_init', 'search', 'search_objects', 'search_init', 'list', 'list_objects', 'cache', 'cache_objects', 'files', 'files_objects', 'position', 'position_objects', 'facilities', 'facilities_objects', 'airport', 'airport_objects', 'complexity', 'complexity_objects', 'complexity_init', 'dynamic', 'dynamic_objects', 'dynamic_init', 'copy', 'copy_objects', 'copy_init', 'weather', 'weather_objects', 'time', 'time_init', 'time_objects', 'runtime')),
-             str(work / 'world.def'), str(work / 'world-res.o'), str(work / 'libworld-simsui.a'),
-             '-lkernel32', '-luser32', '-lmsvcrt', '-lntdll'],
-            ['i686-w64-mingw32-gcc', *module_flags.FLAGS, '-std=c99', '-Itools/difftest', '-O2', '-Wall', '-Wextra', '-Werror',
-             '-o', str(harness), str(work / 'worlduidiff.c'), '-lgdi32', '-lntdll'],
-        ]
-        for command in commands:
+        for command in case.builds(work):
             build = subprocess.run(command, capture_output=True, text=True)
             if build.returncode:
                 print(f'{name}: BUILD FAILED (not counted)\n{build.stderr}', flush=True)

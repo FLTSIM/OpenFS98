@@ -2,7 +2,7 @@
 title: 'Story 1.8, slice 6b0: the FLIGHTS, MPDIALOG and WORLD break runners share --build-only'
 type: 'refactor'
 created: '2026-11-25'
-status: 'in-progress'
+status: 'done'
 route: 'dispatch'
 baseline_commit: '0f8e49e12f345913116964b6aead145e6b8c520d'
 review_loop_iteration: 0
@@ -113,7 +113,23 @@ No module source changes in this slice.
 - [ ] The 14 WORLD natives plus `world_ui`, `world_priority`, `world_wareas` -- onto one shared native module reading `sources.txt`.
 - [ ] `tools/mpdialog_ui_breaks.py` and the six wrappers -- onto the helper.
 - [ ] Docs: `docs/modules/{flights,mpdialog,world}.md` get `--build-only` usage and the repair; `docs/remaining-work.md:177` is updated; `deferred-work.md` gets two entries.
-- [ ] After snapshot, the runs and `check.sh`; this spec's `## Implementation Notes` gets the per-runner manifests, counts, trace hashes and run times.
+- [ ] After snapshot, the runs and `check.sh`; this spec's `Code review (Codex gpt-6.2-sol, three layers, 2026-11-25):
+
+| # | Finding | Verdict | Action |
+|---|---|---|---|
+| 1 | check.py did not enforce the DLL decision; one build-only pass | blocker | A second pass; DLL pass-to-pass equality; exact EXE, FLIGHTS and MPDIALOG equality; PASS/FAIL. |
+| 2 | A signal after Popen leaves the compiler running (reproduced) | high | Signals blocked across registration; reaped after unwinding. |
+| 3 | .pyc and TMPDIR probes write into the tree | high | Bytecode off before imports; paths validated first. |
+| 4 | Retail-side ownership guard counted as caught | high | Deferred (frozen predicates); entry added. |
+| 5 | Proof evidence incomplete (WORLD counts, verdict prefixes, gcc -M) | medium | Asserted in check.py. |
+| 6 | Destination validated after loading inputs | medium | Validated first. |
+| 7 | CRLF anchor regression in advanced weather (reproduced) | medium | Universal newlines restored. |
+| 8 | Anchor counts unchecked; secondary zero-matches | medium | Exact counts enforced. |
+| 9 | Compiler TMPDIR and cwd; partial cases; missing compiler; PE signatures | medium | Fixed. |
+| 10 | Wine lock not held across the proof | medium | The earlier overlap accepted with evidence; any rerun holds an outer lock. |
+| 11 | cmake_verify verdicts, shared displays, filters, SUITE, mp_ui anchors | medium/low | Deferred entries. |
+
+## Implementation Notes` gets the per-runner manifests, counts, trace hashes and run times.
 
 **Acceptance Criteria:**
 - Given both snapshots' wine runs and traces, when `check.sh` runs, then (a), (b) and (c) hold for all 27 runners.
@@ -149,7 +165,7 @@ Spec review (Codex gpt-6.2-sol, 2026-11-25), before approval:
 
 Code in worktree `~/source/OpenFS98-6b0` (tools and docs only). Proof in `~/openfs98-verify/p18g0` (`check.sh`, output `check.out`; before = `git archive 0f8e49e`, after = the worktree; `cd/`, `game/` and `orig/` copied into both; traces by `trace/`).
 
-**Result:** `check.sh` ends `P18G0 PARTIAL`: (a) counts and (b) traces and verdict lines hold for all 28 modes, and (c) holds for argv, inputs and dependencies in every runner, but the output hashes of the 12 WORLD mutant DLLs of the multi-unit runners differ between `--build-only` and wine mode (see Deviation). No repaired runner missed a break.
+**Result:** `bash ~/openfs98-verify/p18g0/check.sh` (output `check2.out`) ends `P18G0 PASS`: (a) counts, (b) traces and verdict lines for all 28 modes, and (c) build-only against wine mode as decided below. Two `--build-only` passes of all 28 modes (1,910 case directories, 2,342 PEs in the two passes together) are equal pass to pass for every DLL, and every PE equals the pre-review build-only run (1,171 PEs, so the review patches changed no mutant; no wine rerun was needed).
 
 **(a) Counts (after):** flights 502/502; mp_ui 46 (45 builds, 48 wine calls), review 5, construction 5, common 6, retained 8, create_failure 7, exception 12 (10 builds); WORLD: search 22, search_init 24, ui 10 + baseline, priority 22, wareas 53, wareas --native 20, advanced 23, airport 14, booster 18, cache 14, complexity 13, copy 14, dynamic 16, facilities 16, files 11, list 13, position 12, search_native 13, time 23, weather 15. Before: identical except the 14 repaired runners (HEAD: `world_ui` and the 12 natives fail at the first link with undefined references; `priority` and `booster` run their non-UI suites, 17 and 12 cases, then fail at the first `ui` link).
 
@@ -157,10 +173,12 @@ Code in worktree `~/source/OpenFS98-6b0` (tools and docs only). Proof in `~/open
 
 **(c):** build-only case counts equal the wine-mode build manifests (flights 502, mp 45/6/5/7/10/8/5, WORLD as above); argv, input hashes and `gcc -M` dependency hashes equal in every runner; output hashes equal in all FLIGHTS, MPDIALOG, search, search_init and wareas (non-native) cases and in every harness EXE.
 
-**Deviation (decision needed):** the DLLs of `world_ui`, `priority`, `wareas --native`, `advanced` and the 12 natives hash differently between build-only and wine mode. Same inputs and argv; only the form of the source paths differs (wine mode: relative under the tree; build-only: absolute in a temporary directory outside it, as the spec requires). Rebuilding one case at `bin/zz/a` or a sibling relative directory reproduces the wine-mode hash; at `/tmp/zzdir/a` or `../../../tmp/zzdir/a` it gives the build-only hash. The difference is the import-directory order (about 255 bytes). A rebuild at the same path is deterministic. Build-only against build-only (the before/after use in 6b) is unaffected.
+**Deviation (decided: relax (c) for DLLs):** the DLLs of `world_ui`, `priority`, `wareas --native`, `advanced` and the 12 natives hash differently between build-only and wine mode. Same inputs and argv; only the form of the source paths differs (wine mode: relative under the tree; build-only: absolute in a scratch directory outside it, as the spec requires). Rebuilding one case at `bin/zz/a` or a sibling relative directory reproduces the wine-mode hash; at `/tmp/zzdir/a` or `../../../tmp/zzdir/a` it gives the build-only hash. The difference is the import-directory order (about 255 bytes); a rebuild at the same path is deterministic. check.py therefore requires equal argv, inputs and dependencies to wine mode, and equal DLL hashes between the two build-only passes; EXEs, FLIGHTS and MPDIALOG keep exact equality with wine mode.
 
 **Environment findings (not runner defects):** the UI harnesses hang without a window manager (`w_ui` baseline idle 416 s on a drawn dialog, 11 s with `metacity`), and `mp_ui`'s baseline hangs near flow case 203 on Xvfb with or without a window manager (never finished in 900 s) but passes in 21 s on the desktop display `:0`; the final `mp_ui` runs used `:0`. The first run of every MPDIALOG and most WORLD runners also lacked `cd/`. No runner or timeout was changed.
 
 **Run times (s, before / after):** flights 4475 / 3778; mp_ui 249/250, common 93/93, construction 80/79, create_failure 76/76, exception 165/168, retained 128/129, review 91/92; search 52/52, search_init 73/75, ui 17(fail)/269, priority 77(fail)/270, wareas 164/176, wareas_native 1045/1055, advanced 634/652, airport 16(fail)/783, booster 61(fail)/200, cache 17(fail)/1101, complexity 18(fail)/506, copy 17(fail)/649, dynamic 18(fail)/386, facilities 18(fail)/416, files 18(fail)/860, list 17(fail)/344, position 18(fail)/432, search_native 17(fail)/378, time 631/664, weather 16(fail)/389.
 
 **Slice 1.10a overlap:** a harness of slice 1.10a ran under wine outside the lock during the FLIGHTS passes (about 09:30 to 10:30); both FLIGHTS logs show 502/502 caught and no TIMEOUT, "not counted" or BUILD FAILED line.
+
+**After the code review:** `break_build_only.py` blocks SIGTERM and SIGHUP across the compiler launch (tested at 0 to 3 s, TERM and HUP: exit 143 and 129, no compiler, partial directory or scratch directory left); gives the compiler `TMPDIR` and the tree root as cwd; stages each case beside DIR and renames it into place; validates PE signatures; treats a missing compiler as a case failure; validates DIR and `TMPDIR` before any probe or input load. Every runner sets `sys.dont_write_bytecode` first. Anchors have exact counts, follow-up replacements included (`core.position-format` is anchored on the whole call, byte-identical mutant). `mpdialog_ui_breaks.py` restores `RECORDING` in a `finally`; the inherited `flow` mutations in `flow-browser-refresh-reentry-guard` are pre-existing in HEAD (deferred-work). `world_native.py` reads `sources.txt` once per run. The earlier unlocked FLIGHTS overlap is accepted (502/502 and no TIMEOUT or not-counted line); `mp_ui`'s final runs used the real display `:0`.

@@ -3914,3 +3914,7 @@ compares `bin/WORLD.DLL` with `English/World.DLL` and requires the World load
 trace. Flight selection from Exact Location, actual aircraft repositioning,
 and saved-flight persistence remain MAIN/host workflows outside this World
 DLL acceptance.
+
+## Break runners without wine (Story 1.8 slice 6b0)
+
+`world_search`, `world_search_init`, `world_ui`, `world_priority`, `world_wareas` and the 14 `world_*_native_breaks.py` take `--build-only DIR [CASE...]` and build every mutant PE without wine (`docs/tools.md`). The 12 native runners plus `world_ui` and `world_priority`'s `ui` suite had compiled a stale hard-coded 38-unit list while `src/world/sources.txt` names 45; their baseline did not link (58 undefined references) and none of them could run. They now read `sources.txt`, as `time`, `advanced` and `wareas` already did; `world_ui_breaks.py` and the twelve near-copies share `tools/world_native.py`.

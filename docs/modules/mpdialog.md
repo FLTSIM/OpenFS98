@@ -54,7 +54,9 @@ Current-hash native acceptance is recorded under `bin/mpdialog-diff/runs/`:
 | SEH/C++ constructor, destructor and module-init unwind | `isolated-mk4r4ey3` | 448 paired exception/init cases pass; ordinary construction passes; 12 negative comparisons detected with controlled unload |
 | Private startup before installation | `smoke-sehfix-nrsnz0hc` | PASS, 27/27 modules, 58 gauge loads/29 distinct paths |
 
-These gates detect **89 negative comparisons** in total. Exceptions use real
+These gates detect **89 negative comparisons** in total.
+Each `tools/mpdialog_*_breaks.py` takes `--build-only DIR [NAME...]`: it builds every mutant `MP_DIALOG_mutant.dll` without wine, runs no comparison and needs no wine prefix (Story 1.8 slice 6b0; `docs/tools.md`).
+ Exceptions use real
 Windows unwind through the outer handler, rather than calling the cleanup
 routine directly. Completed members unwind in reverse order, followed by the
 base and the matching factory allocation delete. The dynamic-link allocation

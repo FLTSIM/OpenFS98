@@ -184,3 +184,26 @@
     - The two `[ebp-4]` sites are DIVIDE-DISP8-UNSIGNED, fixed, not kept (user's decision), and get one new register id. `fault_div` goes; DEMO-10 becomes reproduced apart from them, and `docs/open-differences.md:119-125` goes. `demodiff`'s repair becomes our filter plus the override. Then empty `tools/div_asm_allowed.txt`, completing Story 1.10's AC with 1.10c.
   evidence: as above.
 
+- source_spec: `docs/implementation/spec-1-8g-break-runners-share-build-only.md`
+  summary: Pre-existing defect, repaired in slice 6b0: `world_ui_breaks.py`, `world_priority_breaks.py` (its `ui` suite) and 12 `world_*_native_breaks.py` (airport, booster, cache, complexity, copy, dynamic, facilities, files, list, position, search, weather) hard-coded 38 World units while `src/world/sources.txt` lists 45, so their DLL never linked (58 undefined references) and their counts in `docs/modules/world.md` could not be reproduced. They read `sources.txt` now. A repaired runner that misses a break would stop the slice and be logged, not changed.
+  evidence: baseline link of the HEAD runner, 58 undefined references; `time`, `advanced` and `wareas` already read `sources.txt`.
+
+- source_spec: `docs/implementation/spec-1-8g-break-runners-share-build-only.md`
+  summary: Kept, not fixed: `mpdialog_ui_breaks.py` rebinds `flow` cumulatively in `run_suite` (the Browser timer, mouse and refresh-guard mutations are applied to the text the later `flow-browser-message-handlers` and `flow-browser-refresh-reentry-guard` cases build from), so those later cases carry the earlier mutations. Pre-existing, confirmed against HEAD's `run_suite` (the `browser_handlers` loop and the `flow = flow.replace(old, new, 1)` rebinding are in HEAD); slice 6b0 moved the code verbatim and the cases build the same bytes, so `flow-browser-refresh-reentry-guard` still inherits the timer and mouse-handler mutations. Fix: build it from pristine flow text, which changes that mutant and needs a wine rerun.
+  evidence: `run_suite`, the `browser_handlers` loop, `flow = flow.replace(old, new, 1)`.
+
+- source_spec: `docs/implementation/spec-1-8g-break-runners-share-build-only.md`
+  summary: WORLD weather and wareas runners (frozen predicates, kept in slice 6b0) accept the `UI DIFFER ownership` retail-side guard as a caught break. Retail-side and fixture failures need a distinct exit status from a real difference.
+  evidence: Codex code review 2026-11-25, finding 4.
+
+- source_spec: `docs/implementation/spec-1-8g-break-runners-share-build-only.md`
+  summary: `cmake_verify`'s break verdict should check the runner's summary line and its exit status together, and handle WORLD's `N/N detected` form (and FLIGHTS' `N/N caught`).
+  evidence: Codex code review 2026-11-25.
+
+- source_spec: `docs/implementation/spec-1-8g-break-runners-share-build-only.md`
+  summary: Break lines that share a display must not run in parallel slots. The UI harnesses hang without a window manager under Xvfb, and `mpdialog_ui_breaks.py` hangs near flow case 203 under Xvfb even with one (its baseline never finished in 900 s; on a real display `:0` it passes in 21 s), so it needs a real display.
+  evidence: ~/openfs98-verify/p18g0 (`w_ui` baseline idle 416 s on Xvfb, 11 s with metacity; `mp_ui` baseline 900 s timeout on Xvfb, 21 s on :0).
+
+- source_spec: `docs/implementation/spec-1-8g-break-runners-share-build-only.md`
+  summary: Runner argument handling: `flights_breaks.py` with a mistyped case name selects no case and reports 0/0 caught with exit 0; the `world-priority-breaks` target does not forward SUITE; `mpdialog_ui_breaks.py` evaluates every anchor even when one mutant is requested; the weather, time and copy native runners copy a prebuilt baseline DLL into every case that no compile uses.
+  evidence: Codex code review 2026-11-25; the runners at HEAD.

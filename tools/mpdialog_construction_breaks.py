@@ -1,11 +1,15 @@
 #!/usr/bin/env python3
 """Check paired ordinary construction, DDX and destructor-order mutations."""
+import sys
+sys.dont_write_bytecode = True    # before any local import, so no .pyc is written into the tree
 import subprocess
 import sys
 import mpdialog_ui_breaks as ui
 
 
 def compare(label, dll, expect_difference=False, page=None):
+    if ui.RECORDING is not None:
+        return
     result = ui.run_wine(['wine', str(ui.OUT / 'mpdialoguidiff.exe'), str(dll),
                           '12', '--construction-only'], label)
     difference = f'MP_DIALOG CONSTRUCTION DIFFER page={page} ' if page is not None else 'MP_DIALOG CONSTRUCTION DIFFER '
@@ -64,7 +68,7 @@ def main():
 
 if __name__ == '__main__':
     try:
-        sys.exit(main())
+        sys.exit(ui.entry(main))
     except (OSError, RuntimeError, subprocess.CalledProcessError) as error:
         print(f'MP_DIALOG construction mutation check failed: {error}', file=sys.stderr)
         sys.exit(1)

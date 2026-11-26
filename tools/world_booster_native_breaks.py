@@ -1,24 +1,15 @@
 #!/usr/bin/env python3
 """Booster initializer/native mutations; require mismatches, never crashes."""
-import module_flags
+import sys
+sys.dont_write_bytecode = True    # before any local import, so no .pyc is written into the tree
+import break_build_only as bo
+import world_native
+from world_native import FLAGS
 from pathlib import Path
-import hashlib
-import json
 import subprocess
 import sys
 
-
-def main():
-    output_dir = Path('bin/world-diff/booster-native-breaks')
-    output_dir.mkdir(parents=True, exist_ok=True)
-    sources = {path.name: path.read_bytes() for path in Path('src/world').iterdir()
-               if path.suffix in ('.c', '.h', '.inc', '.def')}
-    for name in ('worldboosterdiff.c', 'worldboosterinitdiff.c', 'worldboosteruidiff.c', 'worlduidiff.c'):
-        sources[name] = (Path('tools/difftest') / name).read_bytes().replace(b'../../src/world/', b'')
-    for name in ('world-res.o', 'libworld-simsui.a'):
-        sources[name] = (Path('bin/world-diff') / name).read_bytes()
-    (output_dir / 'inputs.json').write_text(json.dumps({name: hashlib.sha256(data).hexdigest() for name, data in sources.items()}, indent=2) + '\n')
-    mutations = [
+MUTATIONS = [
         ('string-unwind', 'init', 'world_booster_init.c', 's_services->ui->string_destroy(state->string);', '(void)state;'),
         ('empty-resource', 'init', 'world_booster_init.c', '0xf8d4, buffer', '0xf8d5, buffer'),
         ('skin-return', 'init', 'world_booster_init.c', '15)) return 0;', '15)) return 1;'),
@@ -45,34 +36,53 @@ def main():
         ('native-auto-delete', 'ui', 'world_runtime_tables.inc', 'fs98_world_priority_post_destroy(object);', '(void)object;'),
         ('native-error-focus', 'ui', 'world_booster.c', 'ui->focus_control(AT(object, control));', 'ui->focus_control(AT(object, 0x1b90));'),
         ('native-font-cleanup', 'ui', 'world_runtime.c', 's_font_exit = NULL; callback();', 's_font_exit = NULL; (void)callback;'),
-    ]
-    requested = set(sys.argv[1:])
-    if requested - {item[0] for item in mutations}:
+]
+
+
+def make_case(data, row):
+    name, suite, filename, before, after = row
+    exe_name = f'worldbooster{suite}diff.exe'
+
+    def builds(work):
+        exe = work / exe_name
+        if suite == 'ui':
+            return [world_native.dll_command(work, work / 'WORLD_area.dll'), world_native.ui_command(work, exe, 'worldboosteruidiff.c')]
+        return [[*FLAGS, '-o', str(exe), str(work / 'worldboosterinitdiff.c'),
+                 *(str(work / f'world_{unit}.c') for unit in ('booster_init', 'booster', 'init', 'area')), '-lntdll']]
+    return world_native.case(f'{suite}.{name}', data, filename, lambda blob: world_native.mutate(blob, name, filename, before, after),
+                             builds, ['WORLD_area.dll', exe_name] if suite == 'ui' else [exe_name])
+
+
+def main():
+    harnesses = ('worldboosterdiff.c', 'worldboosterinitdiff.c', 'worldboosteruidiff.c', 'worlduidiff.c')
+    args = sys.argv[1:]
+    if '--build-only' in args:
+        def factory():
+            data = world_native.sources(harnesses)
+            return [make_case(data, row) for row in MUTATIONS], data
+        return bo.build_only(args[args.index('--build-only') + 1:], factory)
+    output_dir = Path('bin/world-diff/booster-native-breaks')
+    output_dir.mkdir(parents=True, exist_ok=True)
+    data = world_native.sources(harnesses)
+    world_native.write_inputs_json(output_dir, data)
+    requested = set(args)
+    if requested - {item[0] for item in MUTATIONS}:
         raise ValueError('unknown booster mutation')
-    selected = [item for item in mutations if not requested or item[0] in requested]
+    selected = [item for item in MUTATIONS if not requested or item[0] in requested]
     caught = 0
-    for name, suite, filename, before, after in selected:
+    for row in selected:
+        name, suite = row[0], row[1]
+        case = make_case(data, row)
         work = output_dir / name
         work.mkdir(exist_ok=True)
-        for source_name, data in sources.items():
-            if source_name == filename:
-                if data.count(before.encode()) != 1:
-                    raise ValueError(f'{name}: mutation anchor is not unique')
-                data = data.replace(before.encode(), after.encode(), 1)
-            (work / source_name).write_bytes(data)
+        bo.write_case(work, data, case.overlay())
         exe = work / f'worldbooster{suite}diff.exe'
-        flags = ['i686-w64-mingw32-gcc', *module_flags.FLAGS, '-std=c99', '-Itools/difftest', '-O2', '-Wall', '-Wextra', '-Werror']
+        commands = case.builds(work)
         if suite == 'ui':
             dll = work / 'WORLD_area.dll'
-            commands = [flags + ['-shared', '-nostdlib', '-Wl,--entry=_DllMain@12', '-Wl,--disable-dynamicbase', '-Wl,--image-base=0x223f0000', '-o', str(dll),
-                *(str(work / f'world_{unit}.c') for unit in ('area', 'objects', 'init', 'priority', 'priority_objects', 'booster', 'booster_objects', 'booster_init', 'search', 'search_objects', 'search_init', 'list', 'list_objects', 'cache', 'cache_objects', 'files', 'files_objects', 'position', 'position_objects', 'facilities', 'facilities_objects', 'airport', 'airport_objects', 'complexity', 'complexity_objects', 'complexity_init', 'dynamic', 'dynamic_objects', 'dynamic_init', 'copy', 'copy_objects', 'copy_init', 'weather', 'weather_objects', 'time', 'time_init', 'time_objects', 'runtime')),
-                str(work / 'world.def'), str(work / 'world-res.o'), str(work / 'libworld-simsui.a'), '-lkernel32', '-luser32', '-lmsvcrt', '-lntdll'],
-                flags + ['-o', str(exe), str(work / 'worldboosteruidiff.c'), '-lgdi32', '-lntdll']]
             run = ['wine', str(exe), str(dll), '10']
             marker = 'BOOSTER UI DIFFER'
         else:
-            commands = [flags + ['-o', str(exe), str(work / 'worldboosterinitdiff.c'),
-                *(str(work / f'world_{unit}.c') for unit in ('booster_init', 'booster', 'init', 'area')), '-lntdll']]
             run = ['wine', str(exe), '64', 'unwind']
             marker = 'BOOSTER INIT DIFFER'
         for command in commands:

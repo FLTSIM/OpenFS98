@@ -174,10 +174,10 @@ Still to do:
    `gen_sim1_lift`) for generators deleted with the lifted code. `git rm -r --cached
    tools/__pycache__`, add `__pycache__/` to `.gitignore`; the build steps (`cmake/steps/`) that run
    `python3` without `-B` are what write them.
-6. **The `tools/world_*_native_breaks.py` runners are near-copies** (about fifteen files,
-   1,149 lines), each with the same hard-coded list of 38 World source units. Adding a unit
-   means editing all of them. One runner with a mutation table per family, and the unit list
-   taken from `src/world/*.c`.
+6. **The `tools/world_*_native_breaks.py` runners are near-copies**: twelve of them now share
+   `tools/world_native.py` for the snapshot, the compile argvs and the loop (slice 6b0), and read the
+   unit list from `src/world/sources.txt`; each still holds its own mutation table and its harness
+   name. One runner with a table per family is what is left.
 7. **A zero or mistyped `N` passes.** The harnesses read it with `strtoul`, so `N=2OOOO`
    runs 0 scenarios and reports 0 differ, exit 0. Exit 2 when `n == 0`.
 8. **`WINDOW_` is defined twice in MAIN** (`src/main/main_kneeboard.inc` and

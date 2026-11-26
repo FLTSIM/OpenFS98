@@ -1,5 +1,8 @@
 #!/usr/bin/env python3
 """Require shared virtual state, call and ABI mutations to differ from retail."""
+import sys
+sys.dont_write_bytecode = True    # before any local import, so no .pyc is written into the tree
+import sys
 import mpdialog_ui_breaks as ui
 from mpdialog_review_breaks import compare
 
@@ -36,4 +39,4 @@ def main():
 
 
 if __name__ == '__main__':
-    main()
+    sys.exit(ui.entry(main))

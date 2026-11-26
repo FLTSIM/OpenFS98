@@ -130,3 +130,156 @@ def run_compile(cases, only, dest, compile_argv, baselines=()):
     print("%d mutants built into %s of %d%s" % (len(picked) - len([f for f in failed if not f.startswith("baseline/")]), dest, len(picked),
                                                "; failed: " + " ".join(failed) if failed else ""))
     return 1 if failed else 0
+
+
+class Case:
+    """Story 1.8 slice 6b0: one mutant of a break runner that builds PEs.  overlay() -> {file name: text or bytes}, the
+    mutated files laid over a copy of the inputs (it raises on an anchor whose count is wrong); builds(work) -> the compile
+    argvs, run in order from the tree's root; outputs: the PE names (relative to work) those argvs leave."""
+
+    def __init__(self, id, overlay, builds, outputs):
+        self.id, self.overlay, self.builds, self.outputs = id, overlay, builds, outputs
+
+
+def write_case(work, inputs, overlay):
+    """Lay the inputs, then the overlay over them, into `work` (names may hold directories).  Overlay text is read and
+    written as universal-newline text by the runners; bytes are written as given."""
+    import pathlib
+    for name, data in {**(inputs or {}), **overlay}.items():
+        path = pathlib.Path(work) / name
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(data if isinstance(data, bytes) else data.encode())
+
+
+ROOT = os.path.realpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
+_SIGS = {signal.SIGTERM, signal.SIGHUP}
+
+
+def _inside(path):
+    return os.path.commonpath([os.path.realpath(path), ROOT]) == ROOT
+
+
+def _compile_group(argv, scratch):
+    """Run a compiler from the tree's root with TMPDIR=scratch, in its own process group.  SIGTERM and SIGHUP are blocked
+    across the launch and the registration, and the handler only raises, so an interruption always reaches the cleanup
+    below, which kills and reaps the whole group.  A compiler that cannot start is a failed build, not a traceback."""
+    old = signal.pthread_sigmask(signal.SIG_BLOCK, _SIGS)
+    p = None
+    try:
+        try:
+            p = subprocess.Popen(argv, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, start_new_session=True,
+                                 cwd=ROOT, env=dict(os.environ, TMPDIR=scratch))
+        except OSError as e:
+            return subprocess.CompletedProcess(argv, 127, "", "%s: %s" % (argv[0], e))
+        try:
+            signal.pthread_sigmask(signal.SIG_SETMASK, old)     # a signal that arrived meanwhile is delivered here
+            old = None
+            out, err = p.communicate()
+        except BaseException:
+            try:
+                os.killpg(p.pid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+            p.wait()
+            raise
+        return subprocess.CompletedProcess(argv, p.returncode, out, err)
+    finally:
+        if old is not None:
+            signal.pthread_sigmask(signal.SIG_SETMASK, old)
+
+
+def _is_pe(path):
+    """The DOS and PE signatures of a built output."""
+    import struct
+    with open(path, "rb") as f:
+        head = f.read(0x40)
+        if len(head) < 0x40 or head[:2] != b"MZ":
+            return False
+        f.seek(struct.unpack_from("<I", head, 0x3c)[0])
+        return f.read(4) == b"PE\0\0"
+
+
+def validate(argv):
+    """--build-only DIR [CASE...]: everything checkable before any input is loaded or any case recorded.  Returns
+    (code, dest, names, base): code 2 for a bad DIR or TMPDIR (nothing was probed or made), else None.  base is the
+    directory outside the tree where the compilers' scratch directories go; no gettempdir() probe is ever made."""
+    os.environ.pop("MPD_PROVENANCE_DIR", None)
+    if not argv or not argv[0]:
+        print("--build-only needs DIR: a missing or empty directory outside the tree")
+        return 2, None, None, None
+    dest = os.path.abspath(argv[0])
+    if os.path.isfile(dest) or (os.path.isdir(dest) and os.listdir(dest)) or _inside(dest):
+        print("--build-only needs DIR: a missing or empty directory outside the tree")
+        return 2, None, None, None
+    base = "/tmp"
+    for var in ("TMPDIR", "TEMP", "TMP"):
+        if os.environ.get(var):
+            base = os.path.abspath(os.environ[var])
+            break
+    if _inside(base) or not os.path.isdir(base):
+        print("TMPDIR is inside the tree or is not a directory")
+        return 2, None, None, None
+    return None, dest, argv[1:], base
+
+
+def build_only(argv, factory):
+    """--build-only DIR [CASE...] for the runners built on Case.  factory() -> (cases, inputs) is called only after DIR and
+    TMPDIR are validated.  Every selected case (all by default) is built in a scratch directory outside the tree and staged
+    beside DIR/<id> (PEs and meta.json), renamed into place only when every write succeeded.  No wine runs and nothing is
+    written under the tree.  Exit 0 all built; 1 a bad CASE or anchor (before any output) or a failed build; 2 a bad DIR."""
+    import tempfile
+    code, dest, names, base = validate(argv)
+    if code:
+        return code
+    os.chdir(ROOT)                                  # the runners read src/ and tools/ relative to the tree
+    try:
+        cases, inputs = factory()
+    except (Exception, SystemExit) as e:            # an anchor that does not match
+        print("anchor: %s" % e)
+        return 1
+    ids = [c.id for c in cases]
+    unknown = [n for n in names if n not in ids]
+    dupes = sorted({n for n in names if names.count(n) > 1} | {i for i in ids if ids.count(i) > 1})
+    if unknown or dupes:
+        print("no case %s" % " ".join(unknown) if unknown else "duplicate case %s" % " ".join(dupes))
+        return 1
+    picked = [c for c in cases if not names or c.id in names]
+    try:
+        prepared = [(c, c.overlay()) for c in picked]
+    except (Exception, SystemExit) as e:
+        print("anchor: %s" % e)
+        return 1
+    for sig, code in ((signal.SIGTERM, 143), (signal.SIGHUP, 129)):
+        signal.signal(sig, lambda *_, code=code: sys.exit(code))      # the handler only raises
+    os.makedirs(dest, exist_ok=True)
+    failed = []
+    for c, overlay in prepared:
+        stage = os.path.join(dest, ".%s.partial" % c.id)
+        shutil.rmtree(stage, ignore_errors=True)
+        try:
+            with tempfile.TemporaryDirectory(prefix="break-", dir=base) as tmp:
+                write_case(tmp, inputs, overlay)
+                bad = None
+                for cmd in c.builds(__import__("pathlib").Path(tmp)):
+                    r = _compile_group(cmd, tmp)
+                    if r.returncode:
+                        bad = r.stderr[-800:]
+                        break
+                if bad is None:
+                    for o in c.outputs:
+                        if not os.path.isfile(os.path.join(tmp, o)) or not _is_pe(os.path.join(tmp, o)):
+                            bad = "%s: not built, or not a PE" % o
+                            break
+                if bad is not None:
+                    print("%-30s BUILD FAILED\n%s" % (c.id, bad))
+                    failed.append(c.id)
+                    continue
+                os.makedirs(stage)
+                for o in c.outputs:
+                    shutil.copy(os.path.join(tmp, o), os.path.join(stage, os.path.basename(o)))
+                json.dump({"name": c.id}, open(os.path.join(stage, "meta.json"), "w"), sort_keys=True)
+            os.rename(stage, os.path.join(dest, c.id))
+        finally:
+            shutil.rmtree(stage, ignore_errors=True)
+    print("%d cases built into %s of %d%s" % (len(prepared) - len(failed), dest, len(prepared), "; failed: " + " ".join(failed) if failed else ""))
+    return 1 if failed else 0

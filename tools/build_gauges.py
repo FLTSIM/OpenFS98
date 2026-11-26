@@ -21,7 +21,7 @@ def build(item):
     source = Path('src/gauges') / (gauge['name'].lower() + '.c')
     image = Path('src/gauges/images') / gauge['name']
     dependencies = [source, directory / 'gauge.def', directory / 'gauge.res', *(image / file for file in IMAGE_FILES),
-                    Path('src/gauges/gauge.h'), Path('include/fs98/arena.h'), Path('include/fs98/abi.h'), module_flags.TOOLCHAIN]
+                    Path('src/gauges/gauge.h'), Path('include/fs98/arena.h'), Path('include/fs98/image_end.h'), Path('include/fs98/abi.h'), module_flags.TOOLCHAIN]
     if output.exists() and output.stat().st_mtime >= max(path.stat().st_mtime for path in dependencies):
         return gauge['name'] + ' up to date'
     resource = directory / 'resource.o'

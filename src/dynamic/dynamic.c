@@ -38,6 +38,7 @@
  *     stub that passes ecx on.
  */
 #include <windows.h>
+#include "fs98/image_end.h"
 #include <stdint.h>
 
 #include "fs98/linkage.h"
@@ -2726,6 +2727,7 @@ struct dyn_image dyn_image = {
     },
     { 0 }, 1, { 0 }
 };
+FS98_IMAGE_END(dyn_image)
 
 /* The two exports are the image's first 0x40 bytes and the 0x130 at +0x40,
  * where retail has them. */

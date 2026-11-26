@@ -27,6 +27,7 @@
  * docs/modules/controls.md has the details.
  */
 #include <windows.h>
+#include "fs98/image_end.h"
 #include <stdint.h>
 
 #include "fs98/linkage.h"
@@ -4598,6 +4599,7 @@ struct controls_image controls_image = {
     .s_directinputcreatea = "DirectInputCreateA",
     .s_dinput = "dinput",
 };
+FS98_IMAGE_END(controls_image)
 
 /* aligned(8) on the object, as before: a bare aggregate this size would be aligned to 32 and move the image */
 struct controls_rdata controls_rdata __attribute__((aligned(8))) = {

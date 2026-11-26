@@ -16,6 +16,7 @@
  * them map them), and the Linkage's are installed here.
  */
 #include <windows.h>
+#include "fs98/image_end.h"
 #include <stdint.h>
 #include <string.h>
 #include <stdlib.h>
@@ -253,6 +254,7 @@ static void imul32(uint32_t m)
 struct main_image main_image = {{
 #include "main_image.inc"
 }};
+FS98_IMAGE_END(main_image)
 
 static const struct { uint32_t at, to; } data_pointers[] = {
 #define MAIN_DATA_POINTER(at, to) { at, to },
@@ -282,6 +284,7 @@ _Static_assert(sizeof retail_linkage / sizeof retail_linkage[0] == 51, "MAIN's L
 
 #include "main_records.inc"
 #include "main_situation.inc"
+FS98_IMAGE_END(text_tail)
 #include "main_nav.inc"
 #include "main_season.inc"
 #include "main_sun.inc"

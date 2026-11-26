@@ -26,6 +26,7 @@
  * offsets.  docs/modules/advdrv.md describes the format and the variables.
  */
 #include <windows.h>
+#include "fs98/image_end.h"
 #include <stdint.h>
 
 #include "fs98/linkage.h"
@@ -4886,6 +4887,7 @@ struct advdrv_image advdrv_image = {
     .events_max = 0xc8,
     .cache_key = "CACHE_WAV_FILES",
 };
+FS98_IMAGE_END(advdrv_image)
 
 __asm__(".globl _ImportTable\n\t.set _ImportTable, _advdrv_image + 0x0\n\t"
         ".globl _Linkage\n\t.set _Linkage, _advdrv_image + 0x48");

@@ -63,6 +63,21 @@ gives for retail's raw word: DATA when it lies in the window plus 0x10; else in 
 funclet (0x13560 and up, or one of four).  sha256= hashes the window; the bound= hash covers the bounds and the rows in order.
 switch=IDX_RVA:LEN:JT_RVA:T=A,...[:SHA256] (manifest field): a table rebuilt from retail's compressed
 switch (byte table, jump table, target T's action A); it must appear once in ours.  --hash hashes the window.
+obj=SYMBOL, extent=prefix:SIZE[:zero]|suffix:OFF (manifest fields; obj= on every row): the image window W = [start, start+len) must be exactly one C
+object of ours, whose real extent is read from the linked DLL: the COFF symbol _SYMBOL and its local alias _SYMBOL_end (= _SYMBOL + sizeof,
+emitted by FS98_IMAGE_END in include/fs98/image_end.h, once per image object, in the defining TU).  Both must resolve once, in one section,
+the start inside the section and the end at or before its upper bound (max of vsize and rawsize; the boundary itself is allowed), the end
+after the start; uniqueness counts every primary record of the name in the table.  No extent=: start == _SYMBOL and start + len == _SYMBOL_end.  extent=prefix:SIZE
+(ATC, NUMERIC: a declared part of a larger object; also the three rows whose objects are rounded up, DEMO, MULTIP and WEATHERM): start == _SYMBOL,
+start + len <= _SYMBOL_end and _SYMBOL_end - _SYMBOL == SIZE, the object's pinned size.  With :zero (the rounded rows) the slack from start + len to
+the end must be zero bytes with no relocation in them.  extent=suffix:OFF (the MDLs): start ==
+_SYMBOL + OFF and start + len == _SYMBOL_end.  The check runs in the retail comparison (--orig and --manifest), in --hash (single and batch), and
+for every --linked row; --gauge-pairs checks at configure time that the gauge rows are obj=gauge_data with no extent=.  tail= also needs
+len == _SYMBOL_end - _SYMBOL of its symbol; bound= needs start == _SYMBOL and len == BOUND_END - BOUND_START == _SYMBOL_end - _SYMBOL.  A
+missing symbol or a failed equation fails, naming the row, the symbol and the numbers, and is a hard error under UPDATE=1 (--hash does
+not downgrade it to a warning; --orig never rewrites len= of a row whose extent failed).  UPDATE=1 never writes obj= or extent=: they are
+edited by hand.  Out of scope: the two-file command line (<retail.dll> <ours.dll>), which has no object metadata and keeps its behaviour,
+and rdata= and switch=, which are content searches (already bounded to a section, unique and relocation-checked).
 --manifest with --orig: every row against retail.  UPDATE=1 (or --update)
 rewrites the hashes of the rows that pass.  --self-test: see self_test().
 """
@@ -70,17 +85,25 @@ import hashlib, os, re, struct, subprocess, sys, tempfile, shutil
 
 def load(path):
     b = open(path, "rb").read()
-    pe = struct.unpack_from("<I", b, 0x3C)[0]
-    n = struct.unpack_from("<H", b, pe + 6)[0]
-    opt = pe + 24
-    base = struct.unpack_from("<I", b, opt + 28)[0]
-    dirs = opt + 96
-    s = opt + struct.unpack_from("<H", b, pe + 20)[0]
-    secs = {}
-    for i in range(n):
-        o = s + 40 * i
-        name = b[o:o + 8].rstrip(b"\0").decode()
-        secs[name] = struct.unpack_from("<IIII", b, o + 8)  # vsize, rva, rawsize, raw
+    try:
+        pe = struct.unpack_from("<I", b, 0x3C)[0]
+        if b[pe:pe + 4] != b"PE\0\0":
+            raise ValueError("no PE signature")
+        n = struct.unpack_from("<H", b, pe + 6)[0]
+        opt = pe + 24
+        base = struct.unpack_from("<I", b, opt + 28)[0]
+        dirs = opt + 96
+        osz = struct.unpack_from("<H", b, pe + 20)[0]
+        s = opt + osz
+        if osz < 96 + 16 * 8 or s + 40 * n > len(b):
+            raise ValueError("the optional header or the section table runs past the end of the file")
+        secs = {}
+        for i in range(n):
+            o = s + 40 * i
+            name = b[o:o + 8].rstrip(b"\0").decode()
+            secs[name] = struct.unpack_from("<IIII", b, o + 8)  # vsize, rva, rawsize, raw
+    except (struct.error, ValueError, UnicodeDecodeError) as e:
+        raise SystemExit("%s: malformed PE: %s" % (path, e))
     return b, base, dirs, secs
 
 def read_rva(b, secs, rva, size):
@@ -131,39 +154,131 @@ def export(ob, odirs, os_):
 def hexint(x):
     return int(x, 0)
 
-def coff_symbol(b, secs, name):
-    """(RVA, None) of the COFF symbol `name` in a PE image, or (None, message): no symbol table, no such symbol, more than one, or not in a section.
-    Needs the DLL's COFF symbol table, so a module linked with -s / --strip-all cannot use at=."""
+def sec_headers(b):
+    """[(vsize, rva, rawsize, rawptr)] of the PE's section headers in file order (the numbering the COFF symbols use; names may repeat)."""
     pe = struct.unpack_from("<I", b, 0x3C)[0]
-    ptr, n = struct.unpack_from("<II", b, pe + 12)
-    if not ptr:
-        return None, "no COFF symbol table in our DLL (at=; was it stripped?)"
-    strtab = ptr + 18 * n
-    order = list(secs.values())
-    found = []
-    i = 0
-    while i < n:
-        o = ptr + 18 * i
-        raw = b[o:o + 8]
-        if raw[:4] == bytes(4):
-            so = strtab + struct.unpack_from("<I", raw, 4)[0]
-            nm = b[so:b.index(b"\0", so)]
-        else:
-            nm = raw.rstrip(b"\0")
-        value, sec = struct.unpack_from("<Ih", b, o + 8)
-        if nm == name.encode() and 1 <= sec <= len(order):
-            found.append(order[sec - 1][1] + value)
-        i += 1 + b[o + 17]
+    n = struct.unpack_from("<H", b, pe + 6)[0]
+    s0 = pe + 24 + struct.unpack_from("<H", b, pe + 20)[0]
+    return [struct.unpack_from("<IIII", b, s0 + 40 * i + 8) for i in range(n)]
+
+def coff_symbol_in(b, secs, name):
+    """(RVA, section number, None) of the COFF symbol `name` in a PE image, or (None, None, Structural message): no symbol table, a malformed
+    one, no such symbol, more than one primary record of that name anywhere in the table, or one not in a section.  Needs the DLL's COFF symbol
+    table, so a module linked with -s / --strip-all cannot use at=."""
+    try:
+        pe = struct.unpack_from("<I", b, 0x3C)[0]
+        ptr, n = struct.unpack_from("<II", b, pe + 12)
+        if not ptr:
+            return None, None, Structural("no COFF symbol table in our DLL (at=; was it stripped?)")
+        strtab = ptr + 18 * n
+        if strtab + 4 > len(b):
+            raise ValueError("the symbol table runs past the end of the file")
+        strsize = struct.unpack_from("<I", b, strtab)[0]
+        if strsize < 4 or strtab + strsize > len(b):
+            raise ValueError("the string table runs past the end of the file")
+        hdrs = sec_headers(b)
+        found = []
+        i = 0
+        while i < n:
+            o = ptr + 18 * i
+            raw = b[o:o + 8]
+            if raw[:4] == bytes(4):
+                off = struct.unpack_from("<I", raw, 4)[0]
+                stop = b.find(b"\0", strtab + off, strtab + strsize) if 4 <= off < strsize else -1
+                if stop < 0:
+                    raise ValueError("a symbol name lies outside the string table")
+                nm = b[strtab + off:stop]
+            else:
+                nm = raw.rstrip(b"\0")
+            naux = b[o + 17]
+            if i + 1 + naux > n:
+                raise ValueError("aux records run past the symbol table")
+            if nm == name.encode():
+                found.append(struct.unpack_from("<Ih", b, o + 8))
+            i += 1 + naux
+    except (struct.error, ValueError, IndexError) as e:
+        return None, None, Structural("malformed COFF symbol table in our DLL: %s" % e)
     if len(found) != 1:
-        return None, "no symbol %s in our DLL (at=)" % name if not found else "%d symbols named %s in our DLL (at=)" % (len(found), name)
-    return found[0], None
+        return None, None, Structural("no symbol %s in our DLL (at=)" % name if not found else "%d symbols named %s in our DLL (at=)" % (len(found), name))
+    value, sec = found[0]
+    if not 1 <= sec <= len(hdrs):
+        return None, None, Structural("symbol %s in our DLL is not in a section (section number %d) (at=)" % (name, sec))
+    vs, rva, rs, _ = hdrs[sec - 1]
+    if value > max(vs, rs):  # the value is section-relative: an address outside its declared section is no anchor (the section's end itself is allowed)
+        return None, None, Structural("symbol %s in our DLL lies outside its declared section %d (value 0x%x, section size 0x%x) (at=)" % (name, sec, value, max(vs, rs)))
+    return rva + value, sec, None
+
+def coff_symbol(b, secs, name):
+    """(RVA, None) of the COFF symbol `name`, or (None, message); see coff_symbol_in."""
+    rva, _, err = coff_symbol_in(b, secs, name)
+    return rva, err
+
+def retag(err, old, new):
+    return Structural(err.replace(old, new))
+
+def section_bounds(ob, sec, lo, hi=None):
+    """An error string unless lo (and hi, if given) lie in section number sec: lo inside it, hi at or before its upper bound (max of vsize and rawsize;
+    the boundary itself is allowed), as our_image bounds a window."""
+    vs, rva, rs, _ = sec_headers(ob)[sec - 1]
+    top = rva + max(vs, rs)
+    if not rva <= lo < top or (hi is not None and not lo < hi <= top):
+        return "RVA 0x%x..%s is not inside section %d (RVA 0x%x..0x%x)" % (lo, "0x%x" % hi if hi is not None else "?", sec, rva, top)
+    return None
+
+def object_symbols(ob, os_, who, obj):
+    """(start, end, section, error): the object's two symbols resolve once, in one section, the end after the start, both inside the section."""
+    lo, slo, err = coff_symbol_in(ob, os_, "_" + obj)
+    if err:
+        return None, None, None, retag("%s: %s" % (who, err), "(at=)", "(obj=)")
+    hi, shi, err = coff_symbol_in(ob, os_, "_%s_end" % obj)
+    if err:
+        return None, None, None, (Structural("%s: no end symbol _%s_end in our DLL (FS98_IMAGE_END(%s) missing or dropped?)" % (who, obj, obj)) if err.startswith("no symbol")
+                                  else retag("%s: %s" % (who, err), "(at=)", "(obj=)"))
+    if slo != shi:
+        return None, None, None, Structural("%s: _%s is in section %d but _%s_end in section %d" % (who, obj, slo, obj, shi))
+    if hi <= lo:
+        return None, None, None, Structural("%s: _%s_end (RVA 0x%x) is not after _%s (RVA 0x%x)" % (who, obj, hi, obj, lo))
+    err = section_bounds(ob, slo, lo, hi)
+    if err:
+        return None, None, None, Structural("%s: _%s..._%s_end %s" % (who, obj, obj, err))
+    return lo, hi, slo, None
+
+EXTENT_PREFIX = re.compile(r"prefix:(0x[0-9a-fA-F]+)(:zero)?")
+
+def extent_problem(ob, odirs, os_, ours, row, start, ln):
+    """An error (Structural) unless the window [start, start+ln) is the row's whole image object, or the prefix or suffix the row declares; None
+    if it is.  row is (module, obj, extent): obj= names the object's COFF symbol _<obj>, and the FS98_IMAGE_END macro (include/fs98/image_end.h)
+    gives it the local symbol _<obj>_end = _<obj> + sizeof.  Both must resolve once, in one section, the start inside it and the end at or
+    before its upper bound, the end after the start.  extent: None (whole), ("prefix", size, zero) or ("suffix", off); a prefix row pins the
+    object's size, and with zero its slack past the window must be zero bytes with no relocation in them."""
+    module, obj, extent = row
+    who = "%s (%s): obj=%s" % (ours, module, obj)
+    lo, hi, slo, err = object_symbols(ob, os_, who, obj)
+    if err:
+        return err
+    kind = extent[0] if extent else "whole"
+    off = extent[1] if kind == "suffix" else 0
+    if kind == "prefix" and hi - lo != extent[1]:
+        return Structural("%s: _%s is 0x%x bytes (RVA 0x%x..0x%x), the row declares the object size 0x%x" % (who, obj, hi - lo, lo, hi, extent[1]))
+    if start != lo + off or (start + ln > hi if kind == "prefix" else start + ln != hi):
+        return Structural("%s: image window RVA 0x%x..0x%x (len 0x%x) is not %s of _%s, RVA 0x%x..0x%x (size 0x%x)"
+                          % (who, start, start + ln, ln, {"whole": "the whole object", "prefix": "a prefix", "suffix": "the suffix at +0x%x" % off}[kind], obj, lo, hi, hi - lo))
+    if kind == "prefix" and extent[2] and start + ln < hi:
+        if any(read_rva(ob, os_, start + ln, hi - start - ln)):
+            return Structural("%s: the slack of _%s past the window (RVA 0x%x..0x%x) is not all zero" % (who, obj, start + ln, hi))
+        for r in targets(ob, odirs, os_):
+            if r + 4 > start + ln and r < hi:
+                return Structural("%s: our relocation at RVA 0x%x is in the slack of _%s (RVA 0x%x..0x%x)" % (who, r, obj, start + ln, hi))
+    return None
 
 def our_image(ob, odirs, os_, ours, off, vs, at=None):
     """Ours with our relocation targets zeroed, and the sorted relocation offsets in it."""
     if at:
-        start, err = coff_symbol(ob, os_, at)  # the DLL must keep its COFF symbol table (no -s / --strip-all)
+        start, asec, err = coff_symbol_in(ob, os_, at)  # the DLL must keep its COFF symbol table (no -s / --strip-all)
         if err:
-            return None, None, "%s: %s" % (ours, err)
+            return None, None, Structural("%s: %s" % (ours, err))
+        if section_bounds(ob, asec, start, start + vs):
+            return None, None, Structural("%s: at=%s: the window 0x%x..0x%x is not inside the anchor's declared section" % (ours, at, start, start + vs))
     else:
         start = export(ob, odirs, os_)
         if start is None:
@@ -435,7 +550,7 @@ def bound_check(path, rb, base, rs, rdirs, window):
         counts[kind] += 1
     return rows, counts, None
 
-def compare_bound(rb, base, rdirs, rs, ours, at, bound):
+def compare_bound(rb, base, rdirs, rs, ours, at, bound, ext=None):
     """compare() for a bound= row: our symbol's window against retail's unrelocated one, then the table; (rc, info)."""
     window, err = bound_window(rb, base, rs)
     ob, _, odirs, os_ = load(ours)
@@ -444,6 +559,8 @@ def compare_bound(rb, base, rdirs, rs, ours, at, bound):
     if not err:
         start, mine, offs = our_image(ob, odirs, os_, ours, 0, len(window), at)
         err = offs if mine is None else "%s: our relocation at +0x%x is inside the bound= window" % (ours, offs[0]) if offs else None
+        if not err and ext:  # the window is the whole object: start == _obj and len == BOUND_END - BOUND_START == _obj_end - _obj
+            err = extent_problem(ob, odirs, os_, ours, ext, start, len(window))
     if not err:
         diff = next((i for i in range(len(window)) if window[i] != mine[i]), None)
         if diff is not None:
@@ -574,17 +691,24 @@ def parse_tail(v):
     return (p[0], hexint(p[1]), hexint(p[2]), p[3] if len(p) > 3 else None)
 
 def our_tail(ob, odirs, os_, ours, sym, ln):
-    """(bytes, None) of our COFF symbol's ln bytes, or (None, error): the window must be positive, inside one of our sections, and clear of our relocations."""
+    """(bytes, None) of our COFF symbol's ln bytes, or (None, Structural error): the window must be positive, inside the symbol's own section, the
+    whole object (its _end symbol, same section, ln == end - start) and clear of our relocations."""
     if ln <= 0:
-        return None, "%s: tail= length 0x%x is not positive" % (ours, ln)
-    start, err = coff_symbol(ob, os_, sym)
+        return None, Structural("%s: tail= length 0x%x is not positive" % (ours, ln))
+    start, ssec, err = coff_symbol_in(ob, os_, sym)
     if err:
-        return None, "%s: %s" % (ours, err.replace("(at=)", "(tail=)"))
-    if not any(h[1] <= start and start + ln <= h[1] + max(h[0], h[2]) for h in os_.values()):
-        return None, "%s: tail= window 0x%x..0x%x is not inside one of our sections" % (ours, start, start + ln)
+        return None, retag("%s: %s" % (ours, err), "(at=)", "(tail=)")
+    if section_bounds(ob, ssec, start, start + ln):
+        return None, Structural("%s: tail= window 0x%x..0x%x is not inside one of our sections" % (ours, start, start + ln))
+    end, esec, err = coff_symbol_in(ob, os_, sym + "_end")  # the tail= window is the whole object: its length is the object's size
+    if err:
+        return None, (Structural("%s: tail= %s: no end symbol %s_end in our DLL (FS98_IMAGE_END missing or dropped?)" % (ours, sym, sym)) if err.startswith("no symbol")
+                      else retag("%s: tail= %s: %s" % (ours, sym, err), "(at=)", "(tail=)"))
+    if esec != ssec or end - start != ln:
+        return None, Structural("%s: tail= %s: len 0x%x is not the object's size: %s_end is RVA 0x%x in section %d, %s RVA 0x%x in section %d (size 0x%x)" % (ours, sym, ln, sym, end, esec, sym, start, ssec, end - start))
     for r in targets(ob, odirs, os_):
         if r + 4 > start and r < start + ln:
-            return None, "%s: our relocation at RVA 0x%x overlaps the tail= window at RVA 0x%x" % (ours, r, start)
+            return None, Structural("%s: our relocation at RVA 0x%x overlaps the tail= window at RVA 0x%x" % (ours, r, start))
     return read_rva(ob, os_, start, ln), None
 
 def retail_tail(rb, base, rs, va, ln):
@@ -623,11 +747,12 @@ def image_hash(mine, offs, cset=(), link=None):
         extra += b"link" + b"".join(struct.pack("<cI", k[:1].encode(), r if k == "data" else 0) for _, k, r in link)
     return hashlib.sha256(bytes(mine) + b"".join(struct.pack("<I", t) for t in sorted(offs)) + extra).hexdigest()
 
-def compare(retail, ours, kept_mode, rdatas=(), ptrs=None, switch=None, at=None, mixed=False, cset=None, tail=None, rawptrs=None, bound=None, linked=False):
-    """Returns (rc, info); info is None unless rc == 0.  Prints what it always has."""
+def compare(retail, ours, kept_mode, rdatas=(), ptrs=None, switch=None, at=None, mixed=False, cset=None, tail=None, rawptrs=None, bound=None, linked=False, ext=None):
+    """Returns (rc, info); info is None unless rc == 0.  Prints what it always has.  ext is (module, obj, extent) of a manifest row: the
+    window must be that image object (extent_problem); None for the two-file CLI, which has no object metadata."""
     rb, base, rdirs, rs = load(retail)
     if bound:
-        return compare_bound(rb, base, rdirs, rs, ours, at, bound)
+        return compare_bound(rb, base, rdirs, rs, ours, at, bound, ext)
     vs, va, rawsize, raw = rs[".data"]
     img = bytearray(read_rva(rb, rs, va, vs))
     rt = targets(rb, rdirs, rs)
@@ -645,6 +770,10 @@ def compare(retail, ours, kept_mode, rdatas=(), ptrs=None, switch=None, at=None,
     start, mine, offs = our_image(ob, odirs, os_, ours, off, vs, at)
     if mine is None:
         print(offs)
+        return 1, None
+    err = extent_problem(ob, odirs, os_, ours, ext, start, vs) if ext else None
+    if err:
+        print(err)
         return 1, None
     rset = {r - va for r in rt if va <= r < va + vs}
     for t in offs:
@@ -789,6 +918,7 @@ def compare(retail, ours, kept_mode, rdatas=(), ptrs=None, switch=None, at=None,
 def read_manifest(path):
     """Rows as dicts (with their text as read); comment and blank lines as plain strings."""
     rows = []
+    modules = {}
     lines = open(path).read().split("\n")
     if lines[-1] == "":
         lines.pop()
@@ -801,9 +931,16 @@ def read_manifest(path):
             raise SystemExit("%s:%d: %s" % (path, n, why))
         if len(f) < 3:
             bad("a row needs MODULE retail ours")
-        row = dict(module=f[0], retail=f[1], ours=f[2], kept=False, mixed=False, linked=False, cset=None, tail=None, at=None, rdata=[], ptrs=None, rawptrs=None, bound=None, switch=None, off=None, len=None, sha=None, text=line)
+        if f[0] in modules:
+            bad("duplicate module %s (first at line %d)" % (f[0], modules[f[0]]))
+        modules[f[0]] = n
+        row = dict(module=f[0], retail=f[1], ours=f[2], kept=False, mixed=False, linked=False, cset=None, tail=None, at=None, obj=None, extent=None, rdata=[], ptrs=None, rawptrs=None, bound=None, switch=None, off=None, len=None, sha=None, text=line)
+        seen = set()
         for w in f[3:]:
             k, _, v = w.partition("=")
+            if (k if "=" in w else w) in seen and k != "rdata":
+                bad("duplicate field %s" % (k if "=" in w else w))
+            seen.add(k if "=" in w else w)
             try:
                 if w == "--kept":
                     row["kept"] = True
@@ -818,20 +955,27 @@ def read_manifest(path):
                     row["tail"] = parse_tail(v)
                 elif k == "at" and v:
                     row["at"] = v
+                elif k == "obj" and re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", v):
+                    row["obj"] = v
+                elif k == "extent" and EXTENT_PREFIX.fullmatch(v):
+                    m = EXTENT_PREFIX.fullmatch(v)
+                    row["extent"] = ("prefix", hexint(m.group(1)), bool(m.group(2)))
+                elif k == "extent" and re.fullmatch(r"suffix:0x[0-9a-fA-F]+", v):
+                    row["extent"] = ("suffix", hexint(v[7:]))
                 elif k == "rdata":
                     p = v.split(":")
                     if len(p) not in (2, 3):
                         bad("rdata= needs RVA:LEN[:SHA256], got %r" % w)
                     row["rdata"].append((hexint(p[0]), hexint(p[1]), p[2] if len(p) > 2 else None))
                 elif k == "ptrs":
-                    path, _, sha = v.partition(":")
-                    row["ptrs"] = (path, sha or None)
+                    file, _, sha = v.partition(":")
+                    row["ptrs"] = (file, sha or None)
                 elif k == "rawptrs" and v:
-                    path, _, sha = v.partition(":")
-                    row["rawptrs"] = (path, sha or None)
+                    file, _, sha = v.partition(":")
+                    row["rawptrs"] = (file, sha or None)
                 elif k == "bound" and v:
-                    path, _, sha = v.partition(":")
-                    row["bound"] = (path, sha or None)
+                    file, _, sha = v.partition(":")
+                    row["bound"] = (file, sha or None)
                 elif k == "switch":
                     row["switch"] = parse_switch(v)
                 elif k == "off":
@@ -844,6 +988,12 @@ def read_manifest(path):
                     bad("bad field %r" % w)
             except ValueError:
                 bad("bad number in %r" % w)
+        if not row["obj"]:
+            bad("a row needs obj=SYMBOL, its image object (the FS98_IMAGE_END symbol, without the leading underscore)")
+        if row["extent"] and row["extent"][0] == "suffix" and not row["extent"][1]:
+            bad("extent=suffix:OFF needs a nonzero OFF (a window at the object's start is a prefix)")
+        if row["bound"] and row["extent"]:
+            bad("bound= rows are the whole object: no extent=")
         if row["kept"] and row["mixed"]:
             bad("--mixed and --kept are exclusive")
         if row["linked"] and (not row["at"] or row["kept"] or row["mixed"] or row["bound"] or row["ptrs"] or row["rawptrs"] or row["switch"] or row["tail"]):
@@ -860,7 +1010,7 @@ def read_manifest(path):
     return rows
 
 def format_row(r):
-    f = [r["module"], r["retail"], r["ours"]] + (["--kept"] if r["kept"] else []) + (["--mixed"] if r["mixed"] else []) + (["--linked"] if r["linked"] else []) + (["at=" + r["at"]] if r["at"] else []) + (["cset=" + r["cset"]] if r["cset"] else [])
+    f = [r["module"], r["retail"], r["ours"]] + (["--kept"] if r["kept"] else []) + (["--mixed"] if r["mixed"] else []) + (["--linked"] if r["linked"] else []) + (["at=" + r["at"]] if r["at"] else []) + ["obj=" + r["obj"]] + (["extent=" + ("prefix:0x%x%s" % (r["extent"][1], ":zero" if r["extent"][2] else "") if r["extent"][0] == "prefix" else "suffix:0x%x" % r["extent"][1])] if r["extent"] else []) + (["cset=" + r["cset"]] if r["cset"] else [])
     f += ["rdata=0x%x:0x%x%s" % (a, b, ":" + c if c else "") for a, b, c in r["rdata"]]
     if r["ptrs"]:
         f.append("ptrs=" + r["ptrs"][0] + (":" + r["ptrs"][1] if r["ptrs"][1] else ""))
@@ -878,14 +1028,31 @@ def format_row(r):
         f += ["off=0x%x" % r["off"], "len=0x%x" % r["len"], "sha256=%s" % r["sha"]]
     return " ".join(f)
 
+class Structural(str):
+    """A failure of the symbol lookups, bounds or extent equations (a type, not a message test)."""
+
+class Mismatch(str):
+    """A hash_check message about a hash the manifest holds (or lacks): the only kind UPDATE=1 may downgrade to a warning."""
+
 def hash_check(row, ours):
     ob, obase, odirs, os_ = load(ours)
     bad = []
     offs = []
-    if row["off"] is None:
-        bad.append("the manifest row has no hashes yet")
+    if row["off"] is None:  # a row without off=, len= and sha256=: the symbol checks still run, and the row stays a hard error (UPDATE=1 fills it via --orig)
+        bad.append(Structural("%s (%s): the manifest row has no off=, len= and sha256= yet; tools/ofs data-images UPDATE=1 writes them" % (ours, row["module"])))
+        if row["at"]:
+            _, _, err = coff_symbol_in(ob, os_, row["at"])
+            if err:
+                bad.append(Structural("%s: %s" % (ours, err)))
+        _, _, _, err = object_symbols(ob, os_, "%s (%s): obj=%s" % (ours, row["module"], row["obj"]), row["obj"])
+        if err:
+            bad.append(err)
     else:
         start, mine, offs = our_image(ob, odirs, os_, ours, row["off"], row["len"], row["at"])
+        if mine is not None:
+            err = extent_problem(ob, odirs, os_, ours, (row["module"], row["obj"], row["extent"]), start, row["len"])
+            if err:
+                bad.append(err)
         link = None
         if mine is not None and row["linked"]:
             link, err = link_targets(ob, obase, os_, start, row["len"], mine, offs, ours)
@@ -894,22 +1061,22 @@ def hash_check(row, ours):
                 mine = None
         if mine is None:
             if not bad:
-                bad.append(offs)
+                bad.append(Structural(offs))
         else:
             for t in offs:
                 mine[t:t + 4] = bytes(4)
             if image_hash(mine, offs, parse_cset(row["cset"]) if row["cset"] else (), link) != row["sha"]:
-                bad.append("%s: our .data image (or its relocations) differs from the manifest" % ours)
+                bad.append(Mismatch("%s: our .data image (or its relocations) differs from the manifest" % ours))
     wins = [("%s: .rdata 0x%x:0x%x" % (ours, a, b), b, c) for a, b, c in row["rdata"]]
     if row["switch"]:
         wins.append(("%s: switch 0x%x table" % (ours, row["switch"][0]), row["switch"][1], row["switch"][4]))
     for what, ln, sha in wins:
         if sha is None:
-            bad.append("%s: no hash" % what)
+            bad.append(Mismatch("%s: no hash" % what))
             continue
         ms = rdata_windows(ob, os_, ln, sha)
         if len(ms) != 1:
-            bad.append("%s window found %d times, not once" % (what, len(ms)))
+            bad.append(Structural("%s window found %d times, not once" % (what, len(ms))))
             continue
         err = rdata_overlap(ob, odirs, os_, ours, ms[0], ln)
         if err:
@@ -920,35 +1087,37 @@ def hash_check(row, ours):
         if err:
             bad.append(err)
         elif tsha is None:
-            bad.append("%s: no hash for the tail= window" % ours)
+            bad.append(Mismatch("%s: no hash for the tail= window" % ours))
         elif hashlib.sha256(got).hexdigest() != tsha:
-            bad.append("%s: tail= window %s differs from the manifest" % (ours, sym))
+            bad.append(Mismatch("%s: tail= window %s differs from the manifest" % (ours, sym)))
     if row["ptrs"]:
         ents, err = parse_ptrs(row["ptrs"][0])
         if err:
             bad.append(err)
         elif row["ptrs"][1] is None:
-            bad.append("%s: no hash for pointer list %s" % (ours, row["ptrs"][0]))
+            bad.append(Mismatch("%s: no hash for pointer list %s" % (ours, row["ptrs"][0])))
         elif ptrs_hash(ents) != row["ptrs"][1]:
-            bad.append("%s: pointer list %s differs from the manifest" % (ours, row["ptrs"][0]))
+            bad.append(Mismatch("%s: pointer list %s differs from the manifest" % (ours, row["ptrs"][0])))
     if row["bound"]:
         bounds, rows, err = parse_bound(row["bound"][0])
         if err:
             bad.append(err)
         elif row["bound"][1] is None:
-            bad.append("%s: no hash for bound rows %s" % (ours, row["bound"][0]))
+            bad.append(Mismatch("%s: no hash for bound rows %s" % (ours, row["bound"][0])))
         elif bound_hash(bounds, rows) != row["bound"][1]:
-            bad.append("%s: bound rows %s differ from the manifest" % (ours, row["bound"][0]))
-        elif offs:
-            bad.append("%s: our relocation inside the bound= window" % ours)
+            bad.append(Mismatch("%s: bound rows %s differ from the manifest" % (ours, row["bound"][0])))
+        if not err and offs:  # whatever the digest says: no relocation of ours may lie inside the bound= window
+            bad.append(Structural("%s: our relocation inside the bound= window" % ours))
+        if row["len"] is not None and row["len"] != BOUND_END - BOUND_START:
+            bad.append(Structural("%s (%s): bound= len 0x%x is not BOUND_END - BOUND_START (0x%x)" % (ours, row["module"], row["len"], BOUND_END - BOUND_START)))
     if row["rawptrs"]:
         rows, err = parse_rawptrs(row["rawptrs"][0])
         if err:
             bad.append(err)
         elif row["rawptrs"][1] is None:
-            bad.append("%s: no hash for raw pointer rows %s" % (ours, row["rawptrs"][0]))
+            bad.append(Mismatch("%s: no hash for raw pointer rows %s" % (ours, row["rawptrs"][0])))
         elif rawptrs_hash(rows, row["rawptrs"][0]) != row["rawptrs"][1]:
-            bad.append("%s: raw pointer rows %s differ from the manifest" % (ours, row["rawptrs"][0]))
+            bad.append(Mismatch("%s: raw pointer rows %s differ from the manifest" % (ours, row["rawptrs"][0])))
     return bad
 
 def run_hash(module, ours, manifest, warn, rows=None, warn_code=0):
@@ -960,9 +1129,10 @@ def run_hash(module, ours, manifest, warn, rows=None, warn_code=0):
         return 0
     for b in bad:
         print(b)
-    print("%s: data image changed since tools/data_images.txt; if intended, run tools/ofs data-images UPDATE=1"
-          % module)
-    if warn:
+    soft = all(isinstance(b, Mismatch) for b in bad)  # only a hash mismatch may be warned about under UPDATE=1; anything else is a hard error
+    print("%s: data image changed since tools/data_images.txt; if intended, run tools/ofs data-images UPDATE=1" % module if soft
+          else "%s: a failure that is not a hash mismatch (symbols, extent, files); UPDATE=1 does not downgrade it" % module)
+    if warn and soft:
         os.utime(ours, (0, 0))  # rerun this step next build, against the manifest as it is then
         print("WARNING only (UPDATE=1)")
         return warn_code
@@ -976,7 +1146,10 @@ def run_manifest(orig, manifest, update):
         if not isinstance(r, dict):
             continue
         rc, info = compare(os.path.join(orig, r["retail"]), r["ours"], r["kept"],
-                           [(a, b) for a, b, _ in r["rdata"]], r["ptrs"] and r["ptrs"][0], r["switch"], r["at"], r["mixed"], r["cset"], r["tail"], r["rawptrs"] and r["rawptrs"][0], r["bound"] and r["bound"][0], r["linked"])
+                           [(a, b) for a, b, _ in r["rdata"]], r["ptrs"] and r["ptrs"][0], r["switch"], r["at"], r["mixed"], r["cset"], r["tail"], r["rawptrs"] and r["rawptrs"][0], r["bound"] and r["bound"][0], r["linked"], (r["module"], r["obj"], r["extent"]))
+        if not rc and r["bound"] and r["len"] is not None and r["len"] != BOUND_END - BOUND_START:  # the whole SIMSUI block, whatever retail's window gave
+            print("%s (%s): bound= len 0x%x is not BOUND_END - BOUND_START (0x%x)" % (r["ours"], r["module"], r["len"], BOUND_END - BOUND_START))
+            rc = 1
         if rc:
             fails += 1
             continue
@@ -1524,6 +1697,164 @@ def self_test(orig, manifest):
         open(m, "w").write(format_row(row) + "\n")
         expect("139 ptrs: a GAUGE_REBIND target in .rdata (synthetic) passes", run(["--orig", d, "--manifest", m]), "data-images:", 0)
 
+    # --- the image-extent check (extent_problem, our_tail): edits of our COFF symbol table, and of the row's obj= and extent=
+    def sym_rec(b, name):  # the file offset of the one primary symbol record named `name`
+        pe = struct.unpack_from("<I", b, 0x3C)[0]
+        ptr, n = struct.unpack_from("<II", b, pe + 12)
+        found, i = [], 0
+        while i < n:
+            o = ptr + 18 * i
+            nm = (b[o:o + 8].rstrip(b"\0") if b[o:o + 4] != bytes(4) else
+                  b[ptr + 18 * n + struct.unpack_from("<I", b, o + 4)[0]:].split(b"\0")[0])
+            if nm == name.encode():
+                found.append(o)
+            i += 1 + b[o + 17]
+        if len(found) != 1:
+            raise SystemExit("self-test: %d symbols named %s" % (len(found), name))
+        return found[0]
+
+    def add_symbol(b, name, value, sec):  # a local symbol appended to the table (the string table ends the file)
+        pe = struct.unpack_from("<I", b, 0x3C)[0]
+        ptr, n = struct.unpack_from("<II", b, pe + 12)
+        st = ptr + 18 * n
+        size = struct.unpack_from("<I", b, st)[0]
+        if len(b) != st + size:
+            raise SystemExit("self-test: the string table does not end the file")
+        b[st:st] = struct.pack("<IIIhHBB", 0, size, value, sec, 0, 3, 0)
+        b += name.encode() + b"\0"
+        struct.pack_into("<I", b, st + 18, size + len(name) + 1)
+        struct.pack_into("<I", b, pe + 16, n + 1)
+
+    def obj_name(row):
+        return "_" + row["obj"]
+
+    def end_of(sym):  # the symbol the edits below move: _<obj>_end, or tail='s _end
+        return lambda row: (sym(row) if sym else obj_name(row)) + "_end"
+
+    def end_moved(delta, sym=None):
+        def edit(b, dirs, secs, start, row):
+            o = sym_rec(b, end_of(sym)(row))
+            struct.pack_into("<I", b, o + 8, struct.unpack_from("<I", b, o + 8)[0] + delta)
+        return edit
+
+    def end_in_section(b, dirs, secs, start, row):
+        o = sym_rec(b, end_of(None)(row))
+        sec = struct.unpack_from("<h", b, o + 12)[0]
+        struct.pack_into("<h", b, o + 12, 1 if sec != 1 else 2)
+
+    def end_at_start(b, dirs, secs, start, row):  # the end symbol on the object's own address: not after it
+        s0, e0 = sym_rec(b, obj_name(row)), sym_rec(b, end_of(None)(row))
+        struct.pack_into("<I", b, e0 + 8, struct.unpack_from("<I", b, s0 + 8)[0])
+
+    def twice(name):  # a second symbol of the same name, section and value
+        def edit(b, dirs, secs, start, row):
+            o = sym_rec(b, name(row))
+            add_symbol(b, name(row), struct.unpack_from("<I", b, o + 8)[0], struct.unpack_from("<h", b, o + 12)[0])
+        return edit
+
+    def row_edit(**kw):  # the row's own obj= / extent= / len
+        def edit(b, dirs, secs, start, row):
+            row.update(kw)
+        return edit
+
+    def extent_case(name, module, edit, needle, rc=1):  # both checks on a temp copy of the module: --orig, and --hash against the real manifest row
+        def f():
+            m, row = mutated(module, edit)
+            expect(name + " (retail)", run(with_orig + [m]), needle if rc else "data-images:", rc)
+            expect(name + " (hash)", run(["--hash", module, row["ours"], "--manifest", m]), needle if rc else "", rc)
+        f.__name__ = name
+        return f
+
+    def extent_manifest(name, module, edit, needle):  # the manifest row edited (not the DLL); both read the manifest
+        def f():
+            row = dict(rows[module])
+            edit(row)
+            m = os.path.join(tempfile.mkdtemp(dir=tmp), "m.txt")
+            open(m, "w").write(format_row(row) + "\n")
+            expect(name + " (retail)", run(with_orig + [m]), needle)
+            expect(name + " (hash)", run(["--hash", module, row["ours"], "--manifest", m]), needle)
+        f.__name__ = name
+        return f
+
+    def bad_row_text(name, edit, needle, module="WINMSG"):  # a manifest line edited as text: it must not parse
+        def f():
+            m = os.path.join(tempfile.mkdtemp(dir=tmp), "m.txt")
+            open(m, "w").write(edit(format_row(rows[module])) + "\n")
+            expect(name, run(with_orig + [m]), needle)
+        f.__name__ = name
+        return f
+
+    def truncate_symbols(b, dirs, secs, start, row):  # NumberOfSymbols past the end of the file
+        pe = struct.unpack_from("<I", b, 0x3C)[0]
+        struct.pack_into("<I", b, pe + 16, struct.unpack_from("<I", b, pe + 16)[0] + 100000)
+
+    def end_unsectioned(b, dirs, secs, start, row):
+        struct.pack_into("<h", b, sym_rec(b, end_of(None)(row)) + 12, 0)
+
+    def bad_optsize(b, dirs, secs, start, row):  # SizeOfOptionalHeader 0xffff
+        struct.pack_into("<H", b, struct.unpack_from("<I", b, 0x3C)[0] + 20, 0xffff)
+
+    def anchor_in_text(b, dirs, secs, start, row):  # the at= symbol tagged .text, its value moved so that the address stays where it was (in .data)
+        o = sym_rec(b, row["at"])
+        hdrs = sec_headers(bytes(b))
+        sec = struct.unpack_from("<h", b, o + 12)[0]
+        value = struct.unpack_from("<I", b, o + 8)[0] + hdrs[sec - 1][1] - hdrs[0][1]
+        struct.pack_into("<I", b, o + 8, value)
+        struct.pack_into("<h", b, o + 12, 1)
+
+    def both(*edits):
+        def edit(b, dirs, secs, start, row):
+            for e in edits:
+                e(b, dirs, secs, start, row)
+        return edit
+
+    def stale_bound(b, dirs, secs, start, row):
+        row["bound"] = (row["bound"][0], "0" * 64)
+
+    def hard_update(name, module, edit, needle):  # UPDATE=1 downgrades a hash mismatch only: this fails, single pair and batch
+        def f():
+            m, row = mutated(module, edit)
+            _, good = mutated(module, lambda *x: None)
+            for label, pairs, rc in (("single", [module, row["ours"]], 1), ("batch", [module, row["ours"], module, good["ours"]], 1)):
+                p = run(["--hash"] + pairs + ["--manifest", m], {"UPDATE": "1"})
+                expect("%s (%s)" % (name, label), p, needle, rc)
+                if (label == "single" and "WARNING only" in p.stdout) or os.stat(row["ours"]).st_mtime == 0:
+                    fails.append("%s (%s): downgraded to a warning (%s)" % (name, label, p.stdout.strip()[:200]))
+        f.__name__ = name
+        return f
+
+    def update_extent():  # UPDATE=1 downgrades a hash mismatch to a warning, never an extent failure
+        m, row = mutated("WINMSG", end_moved(4))
+        p = run(["--hash", "WINMSG", row["ours"], "--manifest", m], {"UPDATE": "1"})
+        expect("UPDATE=1 --hash: an extent failure is a hard error", p, "is not the whole object")
+        if "WARNING only" in p.stdout or os.stat(row["ours"]).st_mtime == 0:
+            fails.append("UPDATE=1 --hash: an extent failure was downgraded (%s)" % p.stdout.strip())
+        _, good = mutated("WINMSG", lambda *x: None)
+        p = run(["--hash", "WINMSG", row["ours"], "WINMSG", good["ours"], "--manifest", m], {"UPDATE": "1"})
+        expect("UPDATE=1 --hash, two pairs: an extent failure exits 1, not 3", p, "is not the whole object")
+        m2, row2 = mutated("WINMSG", lambda *x: None)  # a stale hash: UPDATE=1 only warns (the old behaviour stands)
+        row2["sha"] = "0" * 64
+        open(m2, "w").write(format_row(row2) + "\n")
+        expect("UPDATE=1 --hash: a stale hash is still a warning", run(["--hash", "WINMSG", row2["ours"], "--manifest", m2], {"UPDATE": "1"}), "WARNING only", 0)
+        m3, row3 = mutated("WINMSG", end_moved(4))  # --orig --update with a stale hash and a broken extent: exit 1, nothing rewritten
+        row3["sha"] = "0" * 64
+        open(m3, "w").write(format_row(row3) + "\n")
+        before = open(m3).read()
+        expect("UPDATE=1 --orig: an extent failure is a hard error", run(with_orig + [m3, "--update"], {"UPDATE": "1"}), "is not the whole object")
+        if open(m3).read() != before:
+            fails.append("UPDATE=1 --orig rewrote a row whose extent failed")
+
+    def gauge_pairs():  # configure time: every gauge row names gauge_data, whole
+        d = tempfile.mkdtemp(dir=tmp)
+        text = open(manifest).read()
+        m = os.path.join(d, "m.txt")
+        open(m, "w").write(text)
+        expect("gauge-pairs: the real manifest passes", run(["--gauge-pairs", "src/gauges/gauges_manifest.json", "--manifest", m]), "737ADI", 0)
+        open(m, "w").write(re.sub(r"^(737ADI .*?)obj=gauge_data", r"\1obj=gauge_rdata", text, count=1, flags=re.M))
+        expect("gauge-pairs: a gauge row with another obj=", run(["--gauge-pairs", "src/gauges/gauges_manifest.json", "--manifest", m]), "obj=gauge_data")
+        open(m, "w").write(re.sub(r"^(737ADI .*?obj=gauge_data)", r"\1 extent=prefix:0x10", text, count=1, flags=re.M))
+        expect("gauge-pairs: a gauge row with an extent=", run(["--gauge-pairs", "src/gauges/gauges_manifest.json", "--manifest", m]), "no extent=")
+
     def batch_hash():  # --hash with several pairs
         good, other = rows["737ADI"], rows["737ALTIM"]
         bad1, bad2 = (mutated(x, flip_at(0))[1]["ours"] for x in ("737ADI", "737ALTIM"))
@@ -1782,6 +2113,60 @@ def self_test(orig, manifest):
                 hashed("SOPWITHCAMEL_N", flip_copy, "window found 0 times", "168 hash: Sopwith's literal"),
                 retail("BOEING737-400_N", dup_slot, "listed more than once", "169 linked: a relocation of ours repeated"),
                 hashed("BOEING737-400_N", dup_slot, "listed more than once", "170 hash: a relocation of ours repeated"),
+                extent_case("171 extent: an image shorter than its object (the end symbol moved up)", "WINMSG", end_moved(4), "is not the whole object"),
+                extent_case("172 extent: an image longer than its object (the end symbol moved down)", "WINMSG", end_moved(-4), "is not the whole object"),
+                extent_case("173 extent: a gauge's image shorter than its object", "737ADI", end_moved(4), "is not the whole object"),
+                extent_case("174 extent: no end symbol", "WINMSG", row_edit(obj="ImportTable"), "no end symbol _ImportTable_end"),
+                extent_case("175 extent: no such object", "WINMSG", row_edit(obj="winmsg_no_such"), "no symbol _winmsg_no_such"),
+                extent_case("176 extent: two end symbols", "WINMSG", twice(end_of(None)), "2 symbols named _winmsg_image_end"),
+                extent_case("177 extent: two object symbols", "WINMSG", twice(obj_name), "2 symbols named _winmsg_image"),
+                extent_case("178 extent: the end in another section", "WINMSG", end_in_section, "in section"),
+                extent_case("179 extent: the end not after the start", "WINMSG", end_at_start, "is not after"),
+                extent_case("180 extent: a prefix row whose object shrank below its window", "ATC", end_moved(-0x700), "declares the object size 0x2000"),
+                extent_case("181 extent: a prefix row whose object lost 4 bytes but still holds its window", "ATC", end_moved(-4), "declares the object size 0x2000"),
+                extent_case("182 extent: NUMERIC's object shrank but still holds its window", "NUMERIC", end_moved(-0x80), "declares the object size 0x400"),
+                extent_case("184 extent: a suffix that stops short of the object's end", "BOEING737-400_N", end_moved(4), "is not the suffix at +0x3000"),
+                extent_case("185 extent: a crash model's suffix that overruns the object", "EXTRA300S_C", end_moved(-4), "is not the suffix at +0x5000"),
+                extent_manifest("186 extent: a wrong suffix offset (+4)", "BOEING737-400_N", lambda r: r.update(extent=("suffix", 0x3004)), "is not the suffix at +0x3004"),
+                extent_manifest("187 extent: a wrong suffix offset (-4)", "EXTRA300S_C", lambda r: r.update(extent=("suffix", 0x4ffc)), "is not the suffix at +0x4ffc"),
+                extent_manifest("188 extent: a whole-object row declared a prefix at the wrong start", "BOEING737-400_N", lambda r: r.update(extent=("prefix", 0xeab8, False)), "is not a prefix"),
+                extent_case("189 extent: bound= window shorter than its object", "SIMSUI", end_moved(4), "is not the whole object"),
+                extent_case("190 extent: bound= window longer than its object", "SIMSUI", end_moved(-4), "is not the whole object"),
+                extent_manifest("191 extent: bound= len not the window", "SIMSUI", lambda r: r.update(len=0xc3fc), "BOUND_END - BOUND_START"),
+                extent_case("192 extent: tail= longer than its object", "MAIN", end_moved(-4, lambda r: r["tail"][0]), "object's size"),
+                extent_case("193 extent: tail= shorter than its object", "MAIN", end_moved(4, lambda r: r["tail"][0]), "object's size"),
+                extent_case("194 extent: tail= with no end symbol", "MAIN", lambda b, d, sc, st, row: row.update(tail=("_ImportTable",) + row["tail"][1:]), "no end symbol _ImportTable_end"),
+                bad_row_text("196 manifest: a row without obj=", lambda t: t.replace(" obj=winmsg_image", ""), "a row needs obj="),
+                bad_row_text("197 manifest: extent= that is neither prefix nor suffix:OFF", lambda t: t.replace(" obj=winmsg_image", " obj=winmsg_image extent=middle"), "bad field"),
+                bad_row_text("198 manifest: extent=suffix:0x0", lambda t: t.replace(" obj=winmsg_image", " obj=winmsg_image extent=suffix:0x0"), "nonzero OFF"),
+                bad_row_text("199 manifest: an obj= that is not a symbol name", lambda t: t.replace("obj=winmsg_image", "obj=winmsg-image"), "bad field"),
+                update_extent,
+                gauge_pairs,
+                extent_case("200 extent: DEMO's slack is not zero", "DEMO", flip_at(0x1165), "is not all zero"),
+                extent_case("201 extent: MULTIP's slack is not zero", "MULTIP", flip_at(0xf38 + 8), "is not all zero"),
+                extent_case("202 extent: WEATHERM's slack is not zero", "WEATHERM", flip_at(0x1c5 + 2), "is not all zero"),
+                extent_case("203 extent: a relocation in MULTIP's slack", "MULTIP", reloc_at(0xf40), "is in the slack"),
+                extent_case("204 extent: MULTIP's object shrunk into its slack", "MULTIP", end_moved(-0x10), "declares the object size 0x1000"),
+                bad_row_text("205 manifest: extent= on a bound= row", lambda t: t.replace(" obj=fs98_simsui_block", " obj=fs98_simsui_block extent=prefix:0xc400"), "no extent=", "SIMSUI"),
+                bad_row_text("206 manifest: a duplicate field", lambda t: t + " obj=winmsg_image", "duplicate field obj"),
+                bad_row_text("207 manifest: a duplicate module", lambda t: t + "\n" + t, "duplicate module WINMSG"),
+                extent_case("208 extent: a truncated symbol table is a clean error", "WINMSG", truncate_symbols, "malformed COFF symbol table"),
+                extent_case("209 extent: an end symbol beyond its section", "WINMSG", end_moved(0x100000), "outside its declared section"),
+                extent_case("210 extent: an end symbol in no section", "WINMSG", end_unsectioned, "is not in a section"),
+                hard_update("211 UPDATE=1: a missing at= symbol is a hard error", "NUMERIC", no_symbol, "no symbol _fs98_no_such_symbol"),
+                hard_update("212 UPDATE=1: a missing tail= start is a hard error", "MAIN", lambda b, d, sc, st, row: row.update(tail=("_no_such_tail",) + row["tail"][1:]), "no symbol _no_such_tail"),
+                hard_update("213 UPDATE=1: a duplicate tail= start is a hard error", "MAIN", twice(lambda row: row["tail"][0]), "2 symbols named _main_text_tail"),
+                hard_update("214 UPDATE=1: a missing end symbol is a hard error", "WINMSG", row_edit(obj="ImportTable"), "no end symbol _ImportTable_end"),
+                hard_update("215 UPDATE=1: a row without off=, len=, sha256= still checks obj= (WINMSG)", "WINMSG", row_edit(off=None, len=None, sha=None, obj="no_such_obj"), "no symbol _no_such_obj"),
+                hard_update("216 UPDATE=1: a row without off=, len=, sha256= still checks obj= (SIMSUI)", "SIMSUI", row_edit(off=None, len=None, sha=None, obj="no_such_obj"), "no symbol _no_such_obj"),
+                hard_update("217 UPDATE=1: a row without off=, len=, sha256= is itself a hard error", "WINMSG", row_edit(off=None, len=None, sha=None), "has no off=, len= and sha256="),
+                hard_update("218 UPDATE=1: a stale bound= digest does not hide a relocation in the image", "SIMSUI", both(reloc_at(0x100), stale_bound), "our relocation inside the bound= window"),
+                extent_case("219 anchor: an at= symbol whose value lies outside its declared section", "NUMERIC", anchor_in_text, "outside its declared section"),
+                hard_update("220 UPDATE=1: the same anchor is a hard error", "NUMERIC", anchor_in_text, "outside its declared section"),
+                hard_update("221 UPDATE=1: an .rdata window matching many times is a hard error", "ANALYSIS", row_edit(rdata=[(0x3000, 4, hashlib.sha256(bytes(4)).hexdigest())]), "times, not once"),
+                hard_update("222 UPDATE=1: an .rdata window matching nowhere is a hard error", "ANALYSIS", row_edit(rdata=[(0x3000, 4, "0" * 64)]), "found 0 times, not once"),
+                extent_case("223 a malformed PE header is a clean error", "WINMSG", bad_optsize, "malformed PE"),
+                bad_row_text("224 manifest: a duplicate field after ptrs= is reported at the manifest line", lambda t: t + " obj=x", "m.txt:1: duplicate field obj", "FACIL"),
                 ):
             case(fn)
     finally:
@@ -1812,6 +2197,9 @@ def cli():
         rows = [r for r in read_manifest(manifest) if isinstance(r, dict) and r["ours"].startswith("bin/gauges-all/Gauges/")]
         if sorted((r["module"], r["ours"]) for r in rows) != sorted((g["name"], "bin/gauges-all/Gauges/" + g["installed"]) for g in gauges):
             sys.exit("%s: the gauge rows do not cover exactly the %d gauges of %s" % (manifest, len(gauges), a[i + 1]))
+        for r in rows:  # one image per separately linked gauge: src/gauges/gauge.h's gauge_data, whole
+            if r["obj"] != "gauge_data" or r["extent"]:
+                sys.exit("%s: gauge row %s must have obj=gauge_data and no extent= (has obj=%s%s)" % (manifest, r["module"], r["obj"], ", extent=" + r["extent"][0] if r["extent"] else ""))
         print(" ".join("%s %s" % (r["module"], r["ours"]) for r in rows))
         return 0
     if "--hash" in a:
@@ -1850,4 +2238,5 @@ def cli():
         rd = [(hexint(p[0]), hexint(p[1]))]
     return compare(a[0], a[1], bool(kept), rd)[0]
 
-sys.exit(cli())
+if __name__ == "__main__":
+    sys.exit(cli())

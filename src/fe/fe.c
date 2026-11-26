@@ -24,6 +24,7 @@
  *     its slot, so they are plain stdcall functions.
  */
 #include <windows.h>
+#include "fs98/image_end.h"
 #include <stdint.h>
 
 #include "fs98/linkage.h"
@@ -4834,6 +4835,7 @@ struct fe_image fe_image = {
 #include "fe_bands.inc"
     }
 };
+FS98_IMAGE_END(fe_image)
 
 /* The pointers retail's loader relocates inside the image. */
 #include "fe_library.c"

@@ -14,6 +14,7 @@
  */
 
 #include <stdint.h>
+#include "fs98/image_end.h"
 
 #include <fs98/host.h>
 
@@ -186,6 +187,7 @@ static int64_t fs98_fsqrt_round(int64_t v)
  */
 int32_t FS98_STDCALL fs98_util_sqrt32(uint32_t v)
 {
+    FS98_IMAGE_END_IN(fs98_util_data);  /* not FS98_IMAGE_END: a helper function would add an FDE to this TU's .eh_frame */
     int32_t r = (int32_t)fs98_fsqrt_round((int64_t)(uint64_t)v);
     return r - (int32_t)((uint32_t)r >> 16);
 }

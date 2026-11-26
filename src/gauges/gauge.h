@@ -18,11 +18,13 @@
 #include <string.h>
 
 #include "fs98/arena.h"
+#include "fs98/image_end.h"
 #include "layout.h"
 
 uint8_t gauge_data[GAUGE_DATA_SIZE] = {
 #include "data.inc"
 };
+FS98_IMAGE_END(gauge_data)
 static const uint8_t gauge_rdata[GAUGE_RDATA_SIZE] = {
 #include "rdata.inc"
 };

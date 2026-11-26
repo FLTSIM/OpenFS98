@@ -2,6 +2,7 @@
  * All 352 bytes of retail .text are lifecycle wrappers and a [2,8] clamp.
  * PANELS draws the element tree and installs its mouse rectangles. */
 #include <windows.h>
+#include "fs98/image_end.h"
 #include <stdint.h>
 #include "fs98/arena.h"
 
@@ -72,6 +73,7 @@ static uint32_t __stdcall suction_draw(void)
 /* 0x1100: remove the mouse area before reading the current root. */
 static uint32_t __stdcall suction_release(void)
 {
+    FS98_IMAGE_END_IN(suction_image);  /* not FS98_IMAGE_END: a helper function would add an FDE to this TU's .eh_frame */
     ((panel_two)(uintptr_t)panel_service(0x88))(
         fs98_handle(suction_image.bytes + 0x1d8),
         fs98_handle(suction_image.bytes + 0x18));

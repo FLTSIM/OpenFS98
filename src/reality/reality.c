@@ -24,6 +24,7 @@
  * reads it without a bound.  docs/modules/reality.md has the details.
  */
 #include <windows.h>
+#include "fs98/image_end.h"
 #include <stdint.h>
 
 #include "fs98/linkage.h"
@@ -987,6 +988,7 @@ struct reality_image reality_image = {
         [28] = {0x20, 0x10},
     },
 };
+FS98_IMAGE_END(reality_image)
 
 __asm__(".globl _ImportTable\n\t.set _ImportTable, _reality_image + 0x48\n\t"
         ".globl _Linkage\n\t.set _Linkage, _reality_image + 0xb0");

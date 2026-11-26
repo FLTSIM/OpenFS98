@@ -14,6 +14,7 @@
  */
 #define __USE_MINGW_ANSI_STDIO 0      /* MSVCRT's own sprintf, as retail's */
 #include <windows.h>
+#include "fs98/image_end.h"
 #include <mmreg.h>
 #include <msacm.h>
 #include <ddraw.h>
@@ -5566,6 +5567,7 @@ __declspec(dllexport) void *HostTable[0xc8] = {
 
 BOOL WINAPI DllMain(HINSTANCE inst, DWORD reason, LPVOID reserved)
 {
+    FS98_IMAGE_END_IN(host_image);  /* the one place the image's end symbol is emitted: a helper function would change .eh_frame */
     (void)reserved;
     if (reason == DLL_PROCESS_ATTACH)
         DisableThreadLibraryCalls(inst);

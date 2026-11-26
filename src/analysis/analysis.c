@@ -35,6 +35,7 @@
  * docs/modules/analysis.md has the details.
  */
 #include <windows.h>
+#include "fs98/image_end.h"
 #include <stdint.h>
 
 #include "fs98/linkage.h"
@@ -1277,6 +1278,7 @@ struct analysis_image analysis_image = {
     .scale = "Scale String",
     .exchange = { 0, 8, 0x2001, 0, 0, 1, 0x30, 0x2005, 0x828, 1, 1, 0x38, 0x2005, 0x824, 1 },
 };
+FS98_IMAGE_END(analysis_image)
 
 __asm__(".globl _ImportTable\n\t.set _ImportTable, _analysis_image + 0x88\n\t"
         ".globl _Linkage\n\t.set _Linkage, _analysis_image + 0xc8");

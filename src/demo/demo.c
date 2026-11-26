@@ -27,6 +27,7 @@
  * +0x710).  docs/modules/demo.md walks through the format.
  */
 #include <windows.h>
+#include "fs98/image_end.h"
 #include <stdint.h>
 
 #include "fs98/linkage.h"
@@ -3341,6 +3342,7 @@ struct demo_image demo_image = {
     .flag_ef1 = 1,
     .flag_f05 = 1,
 };
+FS98_IMAGE_END(demo_image)
 
 __asm__(".globl _ImportTable\n\t.set _ImportTable, _demo_image + 0x0\n\t"
         ".globl _Linkage\n\t.set _Linkage, _demo_image + 0x50");

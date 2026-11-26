@@ -6,6 +6,7 @@
  * quirks are part of the interface.
  */
 #include <stdint.h>
+#include "fs98/image_end.h"
 
 #if defined(__MINGW32__)
 __declspec(dllimport) double __cdecl floor(double value);
@@ -853,6 +854,7 @@ char *FS98_STDCALL fs98_numeric_format(const void *input, uint32_t format,
 
 void FS98_STDCALL fs98_numeric_init(void)
 {
+    FS98_IMAGE_END_IN(fs98_numeric_data);  /* not FS98_IMAGE_END: a helper function would add an FDE to this TU's .eh_frame */
     fs98_numeric_load_string_fn load_string;
     fs98_numeric_config_fn config;
     char directions[12];

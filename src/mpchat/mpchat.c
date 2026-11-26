@@ -27,6 +27,7 @@
  * has the layout and what retail does that is worth knowing.
  */
 #include <windows.h>
+#include "fs98/image_end.h"
 #include <stddef.h>
 #include <stdint.h>
 
@@ -596,6 +597,7 @@ struct mpchat_image mpchat_image = {
     .richedit = "RichEdit",
     .newline = "\n",
 };
+FS98_IMAGE_END(mpchat_image)
 
 __asm__(".globl _ImportTable\n\t.set _ImportTable, _mpchat_image + 0x0\n\t"
         ".globl _Linkage\n\t.set _Linkage, _mpchat_image + 0x48");

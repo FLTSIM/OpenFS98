@@ -2,6 +2,7 @@
  * Retail .text: 0x20d21000..0x20d210d0. The element and bitmap are data;
  * PANELS implements all drawing. See docs/modules/gauges.md. */
 #include <windows.h>
+#include "fs98/image_end.h"
 #include <stdint.h>
 #include "fs98/arena.h"
 
@@ -58,6 +59,7 @@ static uint32_t __stdcall warning_draw(void)
 
 static uint32_t __stdcall warning_release(void)
 {
+    FS98_IMAGE_END_IN(warning_image);  /* not FS98_IMAGE_END: a helper function would add an FDE to this TU's .eh_frame */
     return ((panel_one)(uintptr_t)panel_service(0x7c))(warning_image.words[0xc0 / 4]);
 }
 

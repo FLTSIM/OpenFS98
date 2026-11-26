@@ -26,6 +26,7 @@
  *   +0x21f  1 once copying is cancelled; BOOSTER stops scanning it
  */
 #include <windows.h>
+#include "fs98/image_end.h"
 #include <stdint.h>
 
 #include "fs98/linkage.h"
@@ -1392,6 +1393,7 @@ struct booster_image booster_image = {
     .dir_grid = "GRID",
     .extensions = {".TXR", ".BGL", ".PAL", ".HAZ"},
 };
+FS98_IMAGE_END(booster_image)
 
 /* Retail's exports point into its .data section. */
 __asm__(".globl _ImportTable\n\t.set _ImportTable, _booster_image + 0x0\n\t"

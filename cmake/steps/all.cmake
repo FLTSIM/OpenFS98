@@ -390,7 +390,7 @@ ofs_step(all
     ${simsui_units}
     [==[i686-w64-mingw32-gcc @MODULE_FLAGS@ -std=c99 -O2 -Wall -Wextra -Werror -fno-tree-loop-distribute-patterns -fno-tree-vectorize -c -o bin/simsui-native/simsui_native.o src/simsui/simsui_native.c]==]
     [==[python3 -B tools/gen_simsui_native.py @SIMSUI_OBJECTS@ bin/simsui-native/simsui_native.o]==]
-    [==[i686-w64-mingw32-gcc @MODULE_FLAGS@ -std=c99 -O2 -Wall -Wextra -Werror -fno-ident -fno-tree-loop-distribute-patterns -fno-tree-vectorize -Ibin/simsui-native -c -o bin/simsui-native/simsui_image.o src/simsui/simsui_image.c]==]
+    [==[i686-w64-mingw32-gcc @MODULE_FLAGS@ -std=c99 -O2 -Wall -Wextra -Werror -fno-ident -fno-tree-loop-distribute-patterns -fno-tree-vectorize -fno-asynchronous-unwind-tables -Iinclude -Ibin/simsui-native -c -o bin/simsui-native/simsui_image.o src/simsui/simsui_image.c]==]
     [==[i686-w64-mingw32-windres -J res -O coff bin/simsui-native/simsui.res bin/simsui-native/simsui-res.o]==]
     [==[printf 'LIBRARY MFC42.DLL\nEXPORTS\n    fs98_simsui_mfc42_anchor@0 @1168 NONAME\n' > bin/simsui-native/mfc42-anchor.def]==]
     [==[i686-w64-mingw32-dlltool -d bin/simsui-native/mfc42-anchor.def -l bin/simsui-native/libsimsui-mfc42.a]==]
@@ -402,7 +402,7 @@ ofs_step(all
 
 # the 120 gauges' rows of tools/data_images.txt, as MODULE DLL pairs for one --hash run (the script's own parser; it fails
 # unless the rows are exactly the gauges of src/gauges/gauges_manifest.json)
-set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${CMAKE_SOURCE_DIR}/tools/data_images.txt" "${CMAKE_SOURCE_DIR}/src/gauges/gauges_manifest.json")
+set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${CMAKE_SOURCE_DIR}/tools/data_images.txt" "${CMAKE_SOURCE_DIR}/tools/check_data_image.py" "${CMAKE_SOURCE_DIR}/src/gauges/gauges_manifest.json")
 execute_process(COMMAND python3 -B tools/check_data_image.py --gauge-pairs src/gauges/gauges_manifest.json
   WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}" OUTPUT_VARIABLE OFS_GAUGE_PAIRS ERROR_VARIABLE OFS_GAUGE_ERR RESULT_VARIABLE OFS_GAUGE_RC)
 if(NOT OFS_GAUGE_RC EQUAL 0)

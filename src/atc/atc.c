@@ -27,6 +27,7 @@
  *     two calls without the exchange finishing step it twice a frame.
  */
 #include <windows.h>
+#include "fs98/image_end.h"
 #include <stdint.h>
 
 #include "fs98/linkage.h"
@@ -1094,6 +1095,7 @@ struct atc_image atc_image = {
         .letter_a = "A",
     }
 };
+FS98_IMAGE_END(atc_image)
 
 /* The two exports are the image's first 0x40 bytes and the 0x2c at +0x40,
  * where retail has them. */

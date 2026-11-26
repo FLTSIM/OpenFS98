@@ -78,6 +78,9 @@ No module source changes in this slice.
 - No change to the other 12 `--build-only` runners or to `compare.py`.
 - No commits or staging.
 
+
+**Decision (user, 2026-11-25, at the proof):** check (c) is relaxed for DLLs. The 17 WORLD runners' mutant DLLs differ by about 255 bytes of import-directory order between `--build-only` (an absolute temp directory outside the tree, as required above) and wine mode (relative paths under the tree). This is a path-form effect, reproduced at `bin/zz/a` against `/tmp/zzdir/a`. For DLLs, (c) now requires equal argv, inputs and dependencies, plus equal hashes between build-only runs. EXEs, FLIGHTS and MPDIALOG keep exact hash equality.
+
 </frozen-after-approval>
 
 ## Code Map
@@ -141,3 +144,23 @@ Spec review (Codex gpt-6.2-sol, 2026-11-25), before approval:
 | 8 | Prebuild, artifacts, selectors, failure and DIR edge cases | medium | Specified. |
 | 9 | Kill only the parent, `TMPDIR`, provenance, import-time writes | medium | Process group; `TMPDIR` check; provenance ignored; nothing at import. |
 | 10 | Cost and a cross-snapshot wine lock | medium | One `flock`; cost noted; pilot first. |
+
+## Implementation Notes
+
+Code in worktree `~/source/OpenFS98-6b0` (tools and docs only). Proof in `~/openfs98-verify/p18g0` (`check.sh`, output `check.out`; before = `git archive 0f8e49e`, after = the worktree; `cd/`, `game/` and `orig/` copied into both; traces by `trace/`).
+
+**Result:** `check.sh` ends `P18G0 PARTIAL`: (a) counts and (b) traces and verdict lines hold for all 28 modes, and (c) holds for argv, inputs and dependencies in every runner, but the output hashes of the 12 WORLD mutant DLLs of the multi-unit runners differ between `--build-only` and wine mode (see Deviation). No repaired runner missed a break.
+
+**(a) Counts (after):** flights 502/502; mp_ui 46 (45 builds, 48 wine calls), review 5, construction 5, common 6, retained 8, create_failure 7, exception 12 (10 builds); WORLD: search 22, search_init 24, ui 10 + baseline, priority 22, wareas 53, wareas --native 20, advanced 23, airport 14, booster 18, cache 14, complexity 13, copy 14, dynamic 16, facilities 16, files 11, list 13, position 12, search_native 13, time 23, weather 15. Before: identical except the 14 repaired runners (HEAD: `world_ui` and the 12 natives fail at the first link with undefined references; `priority` and `booster` run their non-UI suites, 17 and 12 cases, then fail at the first `ui` link).
+
+**(b):** 14 non-repaired modes: compile traces, wine traces and result lines identical after normalisation. 14 repaired: the failing link differs from after's only in the unit list (38 before, 45 after, `sources.txt` order), earlier compiles identical.
+
+**(c):** build-only case counts equal the wine-mode build manifests (flights 502, mp 45/6/5/7/10/8/5, WORLD as above); argv, input hashes and `gcc -M` dependency hashes equal in every runner; output hashes equal in all FLIGHTS, MPDIALOG, search, search_init and wareas (non-native) cases and in every harness EXE.
+
+**Deviation (decision needed):** the DLLs of `world_ui`, `priority`, `wareas --native`, `advanced` and the 12 natives hash differently between build-only and wine mode. Same inputs and argv; only the form of the source paths differs (wine mode: relative under the tree; build-only: absolute in a temporary directory outside it, as the spec requires). Rebuilding one case at `bin/zz/a` or a sibling relative directory reproduces the wine-mode hash; at `/tmp/zzdir/a` or `../../../tmp/zzdir/a` it gives the build-only hash. The difference is the import-directory order (about 255 bytes). A rebuild at the same path is deterministic. Build-only against build-only (the before/after use in 6b) is unaffected.
+
+**Environment findings (not runner defects):** the UI harnesses hang without a window manager (`w_ui` baseline idle 416 s on a drawn dialog, 11 s with `metacity`), and `mp_ui`'s baseline hangs near flow case 203 on Xvfb with or without a window manager (never finished in 900 s) but passes in 21 s on the desktop display `:0`; the final `mp_ui` runs used `:0`. The first run of every MPDIALOG and most WORLD runners also lacked `cd/`. No runner or timeout was changed.
+
+**Run times (s, before / after):** flights 4475 / 3778; mp_ui 249/250, common 93/93, construction 80/79, create_failure 76/76, exception 165/168, retained 128/129, review 91/92; search 52/52, search_init 73/75, ui 17(fail)/269, priority 77(fail)/270, wareas 164/176, wareas_native 1045/1055, advanced 634/652, airport 16(fail)/783, booster 61(fail)/200, cache 17(fail)/1101, complexity 18(fail)/506, copy 17(fail)/649, dynamic 18(fail)/386, facilities 18(fail)/416, files 18(fail)/860, list 17(fail)/344, position 18(fail)/432, search_native 17(fail)/378, time 631/664, weather 16(fail)/389.
+
+**Slice 1.10a overlap:** a harness of slice 1.10a ran under wine outside the lock during the FLIGHTS passes (about 09:30 to 10:30); both FLIGHTS logs show 502/502 caught and no TIMEOUT, "not counted" or BUILD FAILED line.

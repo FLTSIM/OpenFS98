@@ -29,6 +29,7 @@
  *     template and land on the shared default record.  See the notes there.
  */
 #include <windows.h>
+#include "fs98/image_end.h"
 #include <stdint.h>
 #include <string.h>
 
@@ -3291,6 +3292,7 @@ struct snd_image snd_image = {
     .m_b = "-...",
     .m_a = ".-",
 };
+FS98_IMAGE_END(snd_image)
 
 /* The two exports are the image's first 0x30 bytes and the 0x48 at +0x30,
  * where retail has them. */

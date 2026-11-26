@@ -21,6 +21,7 @@
  * the message layout and the rest of retail's quirks.
  */
 #include <windows.h>
+#include "fs98/image_end.h"
 #include <stddef.h>
 #include <stdint.h>
 
@@ -757,6 +758,7 @@ struct winmsg_image winmsg_image = {
     .slot_colour = {0, 0x6a, 0x75, 0x75, 0x75, 0x6a, 0x6a},
     .fill = 0x0b,
 };
+FS98_IMAGE_END(winmsg_image)
 
 __asm__(".globl _ImportTable\n\t.set _ImportTable, _winmsg_image + 0x0\n\t"
         ".globl _Linkage\n\t.set _Linkage, _winmsg_image + 0x30");

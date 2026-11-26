@@ -68,7 +68,7 @@ def image_object(record, directory, images=None, image_source='src/mdl/mdl_image
     target = directory / 'mdl_image.o'
     result = subprocess.run(['i686-w64-mingw32-gcc', *module_flags.FLAGS, '-std=c99', '-Os', '-Wall', '-Wextra', '-fno-ident',
                              '-ffreestanding', '-fno-builtin', '-fno-asynchronous-unwind-tables',
-                             '-I' + str(images), '-c', '-o', str(target), str(image_source)], text=True, capture_output=True)
+                             '-Iinclude', '-I' + str(images), '-c', '-o', str(target), str(image_source)], text=True, capture_output=True)
     if result.returncode or result.stderr:
         raise RuntimeError(f'{record["path"]}: image compiler output\n{result.stdout}{result.stderr}')
     return target

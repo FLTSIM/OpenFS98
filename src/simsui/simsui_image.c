@@ -3,10 +3,12 @@
  * table, found through -Ibin/simsui-native) holds the exported data's labels as file-scope asm, assembled in this unit because COFF
  * cannot alias an undefined symbol plus an offset.  Built with -fno-ident (the old assembly emitted no .ident). */
 #include <stdint.h>
+#include "fs98/image_end.h"
 
 __attribute__((section(".data"), aligned(4096)))
 uint8_t fs98_simsui_block[0xc400] = {
 #include "simsui_image.inc"
 };
+FS98_IMAGE_END(fs98_simsui_block)
 
 #include "simsui_labels.h"

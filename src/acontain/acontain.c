@@ -30,6 +30,7 @@
  *     ac_find_title and ac_model_load.
  */
 #include <windows.h>
+#include "fs98/image_end.h"
 #include <stdint.h>
 
 #include "fs98/linkage.h"
@@ -1016,6 +1017,7 @@ struct ac_image ac_image = {
         "colors", "%.2d", 0, 0, "", { 0 }
     }
 };
+FS98_IMAGE_END(ac_image)
 
 /* The two exports are the image's first 0x38 bytes and the 0x40 at +0x38,
  * where retail has them. */

@@ -12,6 +12,7 @@
  * module and the image contains live pointers.
  */
 #include <windows.h>
+#include "fs98/image_end.h"
 #include <stdint.h>
 
 #include "fs98/linkage.h"
@@ -3385,6 +3386,7 @@ struct facil_image facil_image = {
     .s_053c = "REGION",
     }
 };
+FS98_IMAGE_END(facil_image)
 
 __asm__(".globl _ImportTable\n\t.set _ImportTable, _facil_image\n\t"
         ".globl _Linkage\n\t.set _Linkage, _facil_image + 0x40");

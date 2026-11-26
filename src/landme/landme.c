@@ -13,6 +13,7 @@
  * contains live pointers and the imported ABI is Win32 stdcall.
  */
 #include <windows.h>
+#include "fs98/image_end.h"
 #include <stdint.h>
 
 #include "fs98/linkage.h"
@@ -877,6 +878,7 @@ struct landme_image landme_image = {
     .import = { {1,0},{2,0},{3,0},{4,0},{0x12,0},{0x14,0},{0x16,0},{0,0} },
     .linkage = { 0x1a },
 };
+FS98_IMAGE_END(landme_image)
 
 /* Retail exports point into the tail of its .data section. */
 __asm__(".globl _ImportTable\n\t.set _ImportTable, _landme_image + 0x7f8\n\t"

@@ -337,6 +337,9 @@ undeclared identifiers rather than as the twenty missing functions it is.
 - Identifiers describing the original game take `fs98_` / `FS98_`; `openfs98`
   names only this project. Most of what gets written here is a description of
   someone else's 1997 build and should read that way.
+- Every image object that `tools/data_images.txt` compares with retail carries one `FS98_IMAGE_END(object)` line
+  (`include/fs98/image_end.h`) in the TU that defines it: `tools/check_data_image.py` reads the object's real extent from the
+  linked binary through it (`obj=` and `extent=` in the manifest), so a shrunken image cannot pass on the bytes that follow it.
 - Generated files say they are generated and name the tool. `orig/`, `game/`,
   `cd/` and `bin/` are gitignored; no game content is committed.
 - Offsets stay as raw numbers in comments so a number seen in a disassembly

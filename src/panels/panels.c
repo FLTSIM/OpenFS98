@@ -25,6 +25,7 @@
  */
 #define __USE_MINGW_ANSI_STDIO 0      /* MSVCRT's own sprintf, as retail's */
 #include <windows.h>
+#include "fs98/image_end.h"
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -6323,6 +6324,7 @@ struct panels_image panels_image = {
         [354] = { .offset = 0x378, .size = 0x24 },
     },
 };
+FS98_IMAGE_END(panels_image)
 
 const struct panels_rdata panels_rdata = {
     .k_0000 = 0x1.9000000000000p+6,

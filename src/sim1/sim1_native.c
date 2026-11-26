@@ -14,6 +14,7 @@
  * descriptor (+0x18), the word (+0x28, its ax) and the wind (+0x38, its result in st0). They
  * go through the thunks below, which keep eax around the C. */
 #include <windows.h>
+#include "fs98/image_end.h"
 #include <stdint.h>
 #include <stddef.h>
 #include "sim1_internal.h"
@@ -96,6 +97,7 @@ __asm__(".text\n"
 /* retail's entry (0x22001000): on attach, DisableThreadLibraryCalls; always TRUE */
 BOOL WINAPI sim1_native_entry(HINSTANCE instance, DWORD reason, LPVOID reserved)
 {
+    FS98_IMAGE_END_IN(sim1_native_image);  /* not FS98_IMAGE_END: a helper function would add an FDE to this TU's .eh_frame */
     (void)reserved;
     if (reason == DLL_PROCESS_ATTACH) {
         HMODULE msvcrt = LoadLibraryA("msvcrt.dll");

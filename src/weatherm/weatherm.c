@@ -32,6 +32,7 @@
  *     allocator happens to return zeroes.  Nothing in the retail set calls it.
  */
 #include <windows.h>
+#include "fs98/image_end.h"
 #include <stdint.h>
 
 #include "fs98/linkage.h"
@@ -1624,6 +1625,7 @@ struct wx_image wx_image = {
         },
     }
 };
+FS98_IMAGE_END(wx_image)
 
 /* The two exports are the image's first 0x38 bytes and the 0x60 at +0x38,
  * where retail has them. */

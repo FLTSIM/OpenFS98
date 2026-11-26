@@ -28,6 +28,7 @@
  * reads in a register after a call is retail's by construction.
  */
 #include <windows.h>
+#include "fs98/image_end.h"
 #include <stdint.h>
 
 #include "fs98/linkage.h"
@@ -15461,6 +15462,7 @@ static routine_fn routine(uint32_t a)
 struct g3d_image g3d_image = {{
 #include "g3d_image.inc"
 }};
+FS98_IMAGE_END(g3d_image)
 
 __asm__(".globl _ImportTable\n\t.set _ImportTable, _g3d_image + 0x0\n\t"
         ".globl _Linkage\n\t.set _Linkage, _g3d_image + 0x58");

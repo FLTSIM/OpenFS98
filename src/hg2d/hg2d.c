@@ -2,6 +2,7 @@
  * Keep the retail .data layout for whole-image differential testing.
  * See docs/modules/hg2d.md. */
 #include <windows.h>
+#include "../../include/fs98/image_end.h"
 #include <stdint.h>
 
 #define STDCALL __attribute__((stdcall))
@@ -234,6 +235,7 @@ __asm__(".text\n_module_deinit:\n\tpushl %ebx\n\tpushl %esi\n\tpushl %edi\n\t"
 
 BOOL WINAPI DllMain(HINSTANCE instance, DWORD reason, LPVOID reserved)
 {
+    FS98_IMAGE_END_IN(hg2d_image);  /* not FS98_IMAGE_END: a helper function would add an FDE to this TU's .eh_frame */
     (void)instance;
     (void)reserved;
     if (reason == DLL_PROCESS_ATTACH) {

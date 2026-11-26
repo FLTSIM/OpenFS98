@@ -4,6 +4,7 @@
  * Linkage +0x4, +0x8, +0x18, +0x1c, +0x20 (the module's code; the symbols are in mdl_module.c and mdl_crash_entry.S).
  * A normal model's image is in .data; a crash model's (MDL_CRASH) in its own section, .mdlimg. */
 #include <stddef.h>
+#include "fs98/image_end.h"
 #include <stdint.h>
 
 #include "layout.h"
@@ -74,6 +75,7 @@ __attribute__((aligned(16))) MDL_IN struct mdl_image_layout mdl_image = {
                 CODE(mdl_attach), CODE(mdl_state), CODE(mdl_detach)},
     .tail = {MDL_TAIL},
 };
+FS98_IMAGE_END(mdl_image)
 
 #define MDL_STRING_(x) #x
 #define MDL_STRING(x) MDL_STRING_(x)

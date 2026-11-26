@@ -182,3 +182,9 @@ Entries moved from `deferred-work.md` once resolved (2026-11-25), unchanged and 
 - source_spec: `docs/implementation/spec-cleanup-3b-cmake-verify-tree-guards.md`
   summary: RESOLVED by spec-cleanup-4-raw-data-guards.md (2026-11-25): `cmake_verify.py`'s `break_verdict` selects a break suite by `'breaks' in cmd`. Classify parsed target names and direct runner invocations (`tools/*_breaks.py`) instead, with a test that an unrelated command containing `breaks` (a path, an argument) is not one.
   evidence: cleanup 2 and 3b spec reviews (Codex gpt-6.2-sol, 2026-11-25).
+
+## Resolved by spec-cleanup-4b (2026-11-25)
+
+- source_spec: `docs/implementation/spec-1-4-module-data-decompiled-no-raw-dumps-in-git.md`
+  summary: RESOLVED by spec-cleanup-4b-image-extents.md (2026-11-25) (`obj=` and `extent=` in the manifest, `FS98_IMAGE_END` end symbols; was 4b, split from the raw-data-guards cleanup): check_data_image.py does not compare our image's own size (the structs' _Static_assert does for WINMSG and MPCHAT).
+  evidence: later modules should keep the sizeof assert or the tool should check the export's section bounds. Spec review (Codex gpt-6.2-sol, 2026-11-25): COFF symbols cannot give object extents (alignment, aliases such as `_Linkage` inside `winmsg_image`, intentional sub-windows such as NUMERIC's `0x321` of `0x400` and SIMSUI's would fail 147 of 161 rows); use measured sizes or end labels with per-row declared sub-windows and padding; define scope for `tail=`, `.rdata`, `switch` and `bound`; a layout digest cannot establish extent, so `layout=` needs a manifest bootstrap and verification contract; editing `check_data_image.py` or `tools/data_images.txt` reruns the 30 hash-bearing build recipes and configure, with new PE timestamps; mutant proofs must get past the compile-time asserts and the existing hash.

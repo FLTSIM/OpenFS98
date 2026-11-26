@@ -12,6 +12,7 @@
  * +0x058, lets the differential harness set up that state at the same offsets.
  */
 #include <windows.h>
+#include "fs98/image_end.h"
 #include <stdint.h>
 
 #include "fs98/linkage.h"
@@ -479,6 +480,7 @@ static struct multip_image s_multip_image = {
     .s_0908 = "SESSION_NAME",
     .s_0918 = "ALWAYS_SHOW_INITIAL_DIALOG",
 };
+FS98_IMAGE_END(s_multip_image)
 
 /* Retail's .rdata, 0x1f0 bytes at RVA 0xc000, with no relocations: scale constants (doubles read by byte
  * offset through s_multip_rdata), 19 GUIDs, rate constants, and a 6-dword table the browser indexes (all zero).

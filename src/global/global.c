@@ -16,6 +16,7 @@
  */
 
 #include <windows.h>
+#include "fs98/image_end.h"
 
 #include "fs98/global.h"
 #include "fs98/linkage.h"
@@ -166,6 +167,7 @@ struct global_module Linkage = {
     AT(0x1259) U8(0x06),
     }
 };
+FS98_IMAGE_END(Linkage)
 _Static_assert(sizeof(struct global_module) == FS98_GLOBAL_SIZE, "GLOBAL is 0x12a8 bytes");
 _Static_assert(__builtin_offsetof(struct global_module, state) == FS98_GLOBAL_HEAD, "state follows the Linkage header");
 

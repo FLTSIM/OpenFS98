@@ -1,4 +1,4 @@
-# Raw-dump offenders (tools/check_raw_dumps.py). Dump-file and gen: entries may only be removed (Story 1.4), except a dump file newly detected by a stricter rule, which is listed with the reason on its line; resource: and oracle: entries may stay.
+# Raw-dump offenders (tools/check_raw_dumps.py). Dump-file and gen: entries may only be removed (Story 1.4; tools/check_raw_dumps.py enforces it against HEAD's copy of this file), except a dump file newly detected by a stricter rule, which is listed with the reason on its line; resource: and oracle: entries may stay.
 # Path lines: tracked raw dumps, tagged (a) hex-dump rule or (b) identical to an orig/ file; without orig/ only (b)-tagged stale entries go unreported. Script lines, one per tools/*.py that CMake runs and that reads orig/, as <kind>:<script>  # <reason>:
 #   gen:      feeds module data into a build and is not yet converted (may only be removed)
 #   resource: reads only resources by type and id, or export tables by name, from retail (may stay)
@@ -42,4 +42,14 @@ oracle:stage_mdls.py  # stages retail MDLs for the game copy
 oracle:stage_sim1.py  # stages retail SIM1 for the game copy
 src/main/main_text_tail.inc  # (a) retail's own code and .rdata around the season and daylight tables; MAIN-6/MAIN-18's unbounded season index reads through it; goes when the index is bounded at porting
 oracle:check_data_image.py  # re-proves the converted data images against retail (tools/ofs data-images)
+oracle:mpdialog_common_breaks.py  # MP_DIALOG test runner; reads retail through mpdialog_provenance.py (tools/run_mpdialogdiff.sh)
+oracle:mpdialog_construction_breaks.py  # MP_DIALOG test runner; reads retail through mpdialog_provenance.py (tools/run_mpdialogdiff.sh)
+oracle:mpdialog_create_failure_breaks.py  # MP_DIALOG test runner; reads retail through mpdialog_provenance.py (tools/run_mpdialogdiff.sh)
+oracle:mpdialog_exception_breaks.py  # MP_DIALOG test runner; reads retail through mpdialog_provenance.py (tools/run_mpdialogdiff.sh)
+oracle:mpdialog_provenance.py  # hashes retail's orig/English/mpdialog.dll into the run's provenance record
+oracle:mpdialog_retained_breaks.py  # MP_DIALOG test runner; reads retail through mpdialog_provenance.py (tools/run_mpdialogdiff.sh)
+oracle:mpdialog_review_breaks.py  # MP_DIALOG test runner; reads retail through mpdialog_provenance.py (tools/run_mpdialogdiff.sh)
+oracle:mpdialog_smoke.py  # MP_DIALOG test runner; reads retail through mpdialog_provenance.py (tools/run_mpdialogdiff.sh)
+oracle:mpdialog_ui_breaks.py  # MP_DIALOG test runner; reads retail through mpdialog_provenance.py (tools/run_mpdialogdiff.sh)
+oracle:world_game.py  # hashes retail's FLTSIM98.EXE and MAIN.DLL to check the game copy it exercises
 src/fe/fe_bands.inc  # (a) retail latitude-band and cosine-step tables, typed u32; no exact formula known (newly detected in slice 9)

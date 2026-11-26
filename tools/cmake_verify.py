@@ -84,15 +84,23 @@ def minutes(note):
     return v / 60 if m.group(2) == 's' else v if m.group(2) == 'min' else v * 60
 
 
+def make_target(words):
+    """(target, args) of a `make [-f X.mk] T ARGS` or `tools/ofs T ARGS` line, else None; shared by plan and is_break."""
+    if words[0] not in ('make', 'tools/ofs'):
+        return None
+    i = 1
+    if words[0] == 'make' and words[1:2] == ['-f']:
+        i += 2
+    return (words[i], words[i + 1:]) if i < len(words) else None
+
+
 def plan(cmd, build):
     """-> (argv or shell string, env additions, via_cmake)"""
     words = shlex.split(cmd)
     env = {}
-    if words[0] in ('make', 'tools/ofs'):
-        i = 1
-        if words[0] == 'make' and words[i] == '-f':
-            i += 2
-        target, args = words[i], words[i + 1:]
+    mt = make_target(words)
+    if mt:
+        target, args = mt
         for a in args:
             k, _, v = a.partition('=')
             env[k] = v
@@ -124,9 +132,45 @@ def break_counts(text, last=False):
     return (found[-1] if last else found[0])[1]
 
 
+def is_break(cmd):
+    """A break suite: a make/tools/ofs target ending in -breaks, or an executed tools/<name>_breaks.py or .sh
+    (for python3: the first word after its options, those taking a value included; -c, -m and - mean no script)."""
+    words = shlex.split(cmd)
+    if not words:
+        return False
+    mt = make_target(words)
+    if mt:
+        return mt[0].endswith('-breaks')
+    script = words[0]
+    if re.fullmatch(r'python3?(?:\.\d+)?', os.path.basename(words[0])):
+        script, i = None, 1
+        while i < len(words):
+            w = words[i]
+            if w == '--':
+                script = words[i + 1] if i + 1 < len(words) else None
+                break
+            if w == '-':
+                break
+            if w.startswith('--'):
+                i += 2 if w == '--check-hash-based-pycs' else 1
+                continue
+            if w.startswith('-'):
+                for j, c in enumerate(w[1:], 1):
+                    if c in 'cm':
+                        return False
+                    if c in 'WX':
+                        i += 1 if j == len(w) - 1 else 0
+                        break
+                i += 1
+                continue
+            script = w
+            break
+    return script is not None and re.fullmatch(r'tools/\w+_breaks\.(?:py|sh)', os.path.normpath(script)) is not None
+
+
 def break_verdict(cmd, note, code, out):
     """PASS/FAIL for a break suite whose expectation states its counts; None when this rule does not apply."""
-    want = break_counts(note.split('->', 1)[-1]) if 'breaks' in cmd else None
+    want = break_counts(note.split('->', 1)[-1]) if is_break(cmd) else None
     if want is None or code == 'timeout':
         return None
     got = break_counts(out, last=True)
@@ -145,6 +189,15 @@ assert break_verdict('tools/ofs main-breaks SUITE=menu', 'its breaks -> 6, 5 cau
 assert break_verdict('tools/ofs main-breaks SUITE=menu', 'its breaks -> 6, 5 caught; slot crashes', 1,
                      'menu: 6 breaks, 4 caught, 0 proven equivalent ()') == 'FAIL'
 assert break_verdict('tools/ofs x-breaks', '-> 6 breaks, 5 caught', 'timeout', '6 breaks, 5 caught') is None
+
+
+assert is_break('python3 tools/host_breaks.py N=20') and is_break('tools/g3d_breaks.sh') and is_break('python3 -B -u tools/x_breaks.py')
+assert is_break('make -f X.mk foo-breaks') and is_break('tools/ofs host-breaks N=1')
+assert not is_break('python3 tools/check.py src/breaks/x.c') and not is_break('echo breaks') and not is_break('tools/ofs graph BREAKS=1')
+assert is_break('python3 -W ignore -X dev tools/x_breaks.py') and is_break('python3 -Wignore ./tools/x_breaks.py') and is_break('python3 -- tools/x_breaks.py')
+assert not is_break('python3 -cpass tools/x_breaks.py') and not is_break('python3 -Bm x_breaks') and not is_break('python3 - tools/x_breaks.py')
+assert not is_break('') and not is_break('tools/ofs') and not is_break('make -f rules.mk') and not is_break('python3')
+assert not is_break('python3 -m x_breaks') and not is_break('python3 -c x_breaks') and not is_break('python3')
 
 
 def found(number, out):
@@ -882,6 +935,11 @@ if '--self-test' in sys.argv:
         time.sleep(1)
         assert not os.path.exists(t + '/ran')
     assert update_env({'UPDATE': '1', 'A': 'b'}) == {'A': 'b'}
+    # is_break selects what the old `'breaks' in cmd` test selected, on the current Baselines
+    base = re.search(r'## Baselines.*?```sh\n(.*?)\n```', open('docs/tools.md').read(), re.S).group(1)
+    cmds = [r.partition(' #')[0].strip() for r in base.splitlines() if r.strip() and not r.lstrip().startswith('#')]
+    assert [c for c in cmds if is_break(c)] == [c for c in cmds if 'breaks' in c], 'is_break differs from the old selection'
+    print('is_break: %d of %d Baselines lines' % (sum(map(is_break, cmds)), len(cmds)))
     print('cmake_verify self-test: ok')
     sys.exit(0)
 

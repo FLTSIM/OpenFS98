@@ -5,6 +5,7 @@
 # source #includes is not globbed: name it with DEPENDS_FILES (src/fe/fe_library.c, src/advdrv/advdrv_relocs.inc), which
 # keeps the dependency if the file is removed (the build then fails instead of going stale). DEPENDS_FILES also names a
 # generated file under bin/ (the token scan ignores it), which must be another step's output.
+# With OFS_STEP_LOG set, each recipe that runs first appends its step id (its first output) to that file.
 # Every step that runs tools/check_data_image.py depends on tools/data_images.txt.
 string(REPLACE ";" " " OFS_MODULE_FLAGS_TEXT "${OFS_MODULE_FLAGS}")
 
@@ -71,6 +72,9 @@ function(ofs_step group)
   foreach(o IN LISTS S_OUTPUTS)
     list(APPEND abs "${CMAKE_SOURCE_DIR}/${o}")
   endforeach()
+  # OFS_STEP_LOG (tools/check_build_wiring.py): when set, each recipe that runs first appends its step id (its first output)
+  list(GET S_OUTPUTS 0 step_id)
+  list(PREPEND cmds COMMAND sh -c "[ -z \"\$OFS_STEP_LOG\" ] || echo ${step_id} >> \"\$OFS_STEP_LOG\"")
   # DEPENDS_GLOB: source-root-relative patterns, searched recursively (committed files a command reads that it does not name)
   foreach(g IN LISTS S_DEPENDS_GLOB)
     file(GLOB_RECURSE gs CONFIGURE_DEPENDS "${CMAKE_SOURCE_DIR}/${g}")

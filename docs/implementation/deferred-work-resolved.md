@@ -158,6 +158,14 @@ Entries moved from `deferred-work.md` once resolved (2026-11-25), unchanged and 
 - source_spec: `docs/implementation/spec-1-10a-divide-helpers-match-the-host-filter.md`
   summary: SPLIT 2026-11-25 into Story 1.10b1 (FE, DYNAMIC, ADVDRV, BOOSTER; spec-1-10b1-fe-dynamic-advdrv-booster-divides.md), 1.10b2 (PANELS) and 1.10b3 (DEMO), whose entries are in deferred-work.md; the combined entry follows unchanged. Story 1.10b: the six modules whose inline `div`/`idiv` asm relies on the trap move onto `include/fs98/divide.h`: FE (`fe.c:254,262,277`), DYNAMIC (`dynamic.c:183,193,202`), PANELS (`panels.c:75,87,96,105`), BOOSTER (`booster.c:788,797`), ADVDRV (`advdrv.c:571`), plus DEMO's deliberate fault (`demo.c:2256` `fault_div`, DEMO-10, a design decision). The proof is their difftests under wine, after checking each harness's repair model against the filter.
   evidence: Story 1.10 split at its Checkpoint 1 (2026-11-25) into a foundation and two waves; asm becoming C changes code by construction, so these need behavioural proof.
+- source_spec: `docs/implementation/spec-cleanup-1-deps-retail-ids-norm-pe.md`
+  summary: RESOLVED by `tools/check_build_wiring.py` (Cleanup 3a, 2026-11-25): Nothing re-checks the new rebuild edges automatically: a recurring incremental-build check is wanted (touch `tools/data_images.txt`, `advdrv_relocs.inc`, `fe_library.c`, a gauges input; delete a generated header; a wrong pinned hash; assert the exact recipe sets and a lint-only second build).
+  evidence: the touch, delete and bad-hash proofs were one-off runs (the spec's Implementation Notes); removing the `data_images.txt` edge from `ofs_step` would pass every recurring check.
+  review (cleanup 2 spec review, Codex gpt-6.2-sol, 2026-11-25): it needs a scratch configure and build (a copied build is tied to its source path), stable recipe identifiers, the absent-`bin/gauges-all` case, and the bad-hash restore.
+
+- source_spec: `docs/implementation/spec-cleanup-2-tooling-guards.md`
+  summary: RESOLVED by `tools/check_build_wiring.py` (Cleanup 3a, 2026-11-25): Nothing recurring asserts that the codegen check stays wired into `ofs_arena_lint`: removing its `COMMAND` in `cmake/OpenFS98.cmake` passes every recurring check. Wanted: a scratch-CMake test that drops a flag and requires a command-only target such as `graph` to fail first.
+  evidence: cleanup 2 review; the wiring proof was a one-off run (the spec's Implementation Notes).
 
 ## Resolved by spec-cleanup-3b (2026-11-25)
 

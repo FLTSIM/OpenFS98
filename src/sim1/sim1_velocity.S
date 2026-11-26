@@ -1,3 +1,5 @@
+#include "fs98/retail_abi.h"
+#if defined(FS98_RETAIL_ABI)
 /* 0x22002ac0: body-to-world velocity transform, stdcall(three raw doubles,
  * three output pointers). The stack's argument copies are scratch doubles:
  * their explicit stores round at 64 bits between longer x87 calculations.
@@ -128,3 +130,4 @@ _sim1_velocity:
     fstp QWORD PTR [edx]
     ret 36
 .att_syntax prefix
+#endif

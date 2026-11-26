@@ -56,7 +56,8 @@ void FS98_STDCALL fs98_util_deinit(void);
 void FS98_STDCALL fs98_util_mul48_s16(const void *, int16_t, void *);
 void FS98_STDCALL fs98_util_unpack_position(const void *, void *);
 /* The slots keep what retail's keep: see the end of util_math.c. */
-#if defined(__i386__)
+#include "fs98/retail_abi.h"
+#if defined(FS98_RETAIL_ABI)
 void fs98_util_sqrt64_entry(void);
 void fs98_util_sqrt32_entry(void);
 void fs98_util_sqrt16_entry(void);

@@ -2,7 +2,7 @@
 title: 'Story 1.9, slice a: FS98_RETAIL_ABI gates the register wrappers'
 type: 'refactor'
 created: '2026-11-25'
-status: 'in-progress'
+status: 'done'
 baseline_commit: '27a9e496c2495c57b970c4e265054fce528b76e1'
 route: 'dispatch'
 review_loop_iteration: 0
@@ -72,6 +72,8 @@ context: ['{project-root}/OpenFS98/AGENTS.md', '{project-root}/OpenFS98/docs/nat
 - No `tools/difftest/` `.S` file, toolchain or CMake option changes.
 - No commits or staging.
 
+**Decided (2026-11-26, user):** `--strict` cannot pass on an identical pair; the default gate plus `verify.py`'s raw comparison of every kept file stands in for it.
+
 </frozen-after-approval>
 
 ## Code Map
@@ -127,3 +129,28 @@ Spec review (Codex gpt-6.2-sol, 2026-11-25), before approval:
 **Commands:**
 - `bash ~/openfs98-verify/p19a/probe.sh` -- expected: pass.
 - The gate and `python3 -B ~/openfs98-verify/p19a/verify.py` -- expected: `GATE PASS`, and the verifier passes.
+
+## Implementation Notes
+
+Changed: new `include/fs98/retail_abi.h`; `abi.h`, `keep.h`, `hg2d.c`, `util_math.c` (both blocks), `util.c`, the six `.S` stubs; one line each in `docs/architecture.md` and `deferred-work.md`. Verification files are in `~/openfs98-verify/p19a/`.
+
+- **Probe:** `probe.sh` passes (every preprocessor call exit 0, outputs in `probe-out/`). The `.S` files on win32-retail compile to objects byte-identical to the baseline's. Whole-file probe: HG2D's `draw_depth_point_entry` and all UTIL `_entry` definitions are present on and absent off, and the off slot table names the C functions. UTIL has 31 wrappers, not 30 (29 in the macro/raw block plus `rand` and `rand32`). `FS98_ENTRY` itself is undefined off (only the `KEEP_*` forms are empty), so `hg2d.c` keeps its `#if`.
+- **Snapshots:** `before-src` is `git archive 27a9e49`, `after-src` the working tree, both with `orig/`; built by `run.sh` (`build_side.sh`, root `p19a/root`, serial, nice 19, `-j 2`), `PRIOR_INVENTORY` the baseline's `arena_lint_allowed.txt` (`prior.txt`).
+- **Gate:** `compare.py` sha256 b35049b3... at the first run; rerun after 6b's edits with 7ea84a536b6c775bd30f58a87ea31fb77bfafe34c4331656f09964fd20f77077 (`GATE PASS` again). Default mode: `python3 -B compare.py before after` gives `GATE PASS` (1130 artifacts, 321 PEs, 524 replayed units). `--strict --manifest-rows tools/data_images.txt` FAILS on identical sides (185 DIFFs, `gate.out`): it is hard-wired to cl4b's expectations (an added `_image_end` symbol per PE, 13 flag-only recipe edits). It still passes on 4b's kept outputs. So the spec's `--strict` cannot be met as written; `verify.py` rehashes every PE's raw bytes instead.
+- **verify.py:** passes. gcc.log (365 invocations; CMake's random-named compiler-probe dirs are collapsed) and gcc.od.log identical; all 9 changed units compiled equally on both sides; 524 replayed objects byte-equal; 1130 bin files, 809 byte-identical and 321 equal after the masks (COFF timestamp, checksum, export timestamp/CSWTCH).
+- **Break-runner builds** (after side, frozen copy, no wine, all exit 0 and make a PE): MAIN `--build-only` suite `radiodlg` (118 mutants); HG2D, SIM1 (`sim1_breaks` and `sim1_state_breaks` commands), MDL crash (`build_hand`), HELP (`help_ui_breaks` work-dir layout) and VIEWS (`views_ui_breaks`) by their compile commands on unmodified copies (`rb/rb.py`). ATC, NUMERIC, DYNAMIC, WEATHERM and UTIL have no break runner that compiles their sources; their difftests are built in the gate's `difftests` target.
+- **Negative check:** on a `cp -al` copy, `sim1_stack.S`'s object replaced by `sim1_velocity.S`'s: `compare.py` (default) exits 1 `object differs: src/sim1/sim1_stack.S`; `verify.py` exits 1 `replayed object differs: unit src/sim1/sim1_stack.S`.
+
+### Code review triage (Codex, 2026-11-26, `~/openfs98-verify/p19a/code-review.out`)
+
+| # | Finding | Verdict | Action |
+|---|---|---|---|
+| 1 | No bug in the diff alone | ok | none |
+| 2 | `check_abi_headers.py` self-test anchor stale, check skipped | fixed | fixture mutates `retail_abi.h`'s gate, still asserts Linux i386 rejects stdcall; `--self-test` ok |
+| 3 | `mpchat_ui_breaks.py` frozen includes lack `retail_abi.h` (and `image_end.h`) | fixed | both added; `--build-only ... sender-color` builds a PE |
+| 4 | `build_gauges.py` freshness ignores `retail_abi.h` | fixed | added to the dependencies |
+| 5 | Probe names from the candidate; count informational; off check weak | fixed | 31 names and offsets pinned in `probe.sh`; hard count; each `Linkage` initializer and label asserted on and off; `FS98_ENTRY` undefined off checked; a miswired slot makes it fail |
+| 6 | `verify.py` drops scratch argv; artifact set not tied to `art.paths` | fixed | only `TryCompile-*` and `cmTC_*` ids normalised; each kept tree must equal its `art.paths`; 29 exact outputs required (`SIM1_AIR_TEST.DLL` included); negative check on that file exits 1 |
+| 7 | `pehash_norm` CSWTCH mask runs past the string table | deferred | a gate change; the coordinator handles it after 6b closes |
+| 8 | `--strict` criterion open | decided | the user's decision above |
+| 9 | Break-runner builds were unmutated and missed three runners | fixed | `rb2/rb2.py` builds one real mutant for SIM1 (`word-eax-high`), SIM1 Air (`query-key`), SIM1 state (`velocity-negation`), MDL crash (`update-edi`), HELP events (`about-string-unwind`), HELP UI (`credits-timer-counter`), VIEWS events (`temporary-unwind`), VIEWS UI (`module-unwind-delete`), HG2D (`descriptor width`) and MPCHAT UI (`sender-color`, `--build-only`); each exits 0 and writes a PE (`rb2/rb2.out`); MAIN as before |

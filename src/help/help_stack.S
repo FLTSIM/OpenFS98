@@ -1,3 +1,5 @@
+#include "../../include/fs98/retail_abi.h"
+#if defined(FS98_RETAIL_ABI)
 /* RETAIL BUG (kept): HELP-2 -- the Name buffer is a local of retail's populate frame (the dangling
  * descriptor+8 pointer): the frame reserved below keeps its address.
  * About publishes a local Name buffer through descriptor+8. Retain its
@@ -29,3 +31,4 @@ _fs98_help_about_init:
     call _fs98_help_about_init_body
     addl $0x344, %esp
     ret
+#endif

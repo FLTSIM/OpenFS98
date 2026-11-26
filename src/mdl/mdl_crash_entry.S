@@ -1,3 +1,5 @@
+#include "fs98/retail_abi.h"
+#if defined(FS98_RETAIL_ABI)
 /* The crash models' entry points whose registers C does not give (see mdl_crash.c).
  * Linkage +0x04/+0x08 are bare returns and +0x18 writes the header pointer, as in the
  * normal models; +0x1c and +0x20 are crash_init and crash_detach themselves. */
@@ -41,3 +43,4 @@ _crash_chain_entry:
     popl %esi
     popl %ebx
     ret $8
+#endif

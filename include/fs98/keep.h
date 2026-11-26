@@ -3,12 +3,14 @@
  * Retail's assembly modules keep values in registers across calls into each other, so what
  * a service leaves is part of its contract, and C does not honour it.  tools/reg_contracts.sh
  * finds where that differs.  `symbol` is the function's assembler name and `bytes` what it
- * pops.  x86 only: on anything else the slot holds the function itself.
+ * pops.  win32-retail only (FS98_RETAIL_ABI): on anything else the slot holds the function itself.
  */
 #ifndef FS98_KEEP_H
 #define FS98_KEEP_H
 
-#if defined(__i386__)
+#include "retail_abi.h"
+
+#if defined(FS98_RETAIL_ABI)
 #define FS98_ENTRY(entry, symbol, bytes, count, saves, restores) \
     __asm__(".text\n.globl _" #entry "\n_" #entry ":\n\t" saves \
             ".rept " #bytes "/4\n\tpushl 4*" #count "+" #bytes "(%esp)\n\t.endr\n\t" \

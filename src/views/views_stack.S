@@ -1,3 +1,5 @@
+#include "../../include/fs98/retail_abi.h"
+#if defined(FS98_RETAIL_ABI)
 /* Retail's uninitialized Map metric flag and Zoom float both live at entry
  * ESP-16. Capture those bytes before a compiled-C frame can overwrite them.
  * Valid units / successful sscanf replace the captured value in the C body.
@@ -26,3 +28,4 @@ _fs98_views_zoom:
     call _fs98_views_zoom_body
     addl $8, %esp
     ret
+#endif

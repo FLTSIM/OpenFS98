@@ -1,3 +1,5 @@
+#include "fs98/retail_abi.h"
+#if defined(FS98_RETAIL_ABI)
 /* Explicit saved registers keep the caller-visible compiled-C leftovers
  * reproducible while record/ownership logic is expressed in C.
  */
@@ -76,3 +78,4 @@ _sim1_import:
     popl %ebx
     leave
     ret
+#endif

@@ -1,3 +1,5 @@
+#include "fs98/retail_abi.h"
+#if defined(FS98_RETAIL_ABI)
 /* Volatile register results are observable at the retail module boundary. */
 .text
 .globl _sim1_descriptor
@@ -64,3 +66,4 @@ _sim1_wind:
     popl %ecx
     popl %eax
     ret
+#endif

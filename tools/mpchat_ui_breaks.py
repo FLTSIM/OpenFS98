@@ -30,7 +30,7 @@ def main():
         build_only = Path(sys.argv[i + 1])
         del sys.argv[i:i + 2]
     directory = Path('bin/mpchat-ui/breaks')
-    inputs = [*Path('src/mpchat').iterdir(), Path('include/fs98/abi.h'), Path('include/fs98/arena.h'),
+    inputs = [*Path('src/mpchat').iterdir(), Path('include/fs98/abi.h'), Path('include/fs98/retail_abi.h'), Path('include/fs98/image_end.h'), Path('include/fs98/arena.h'),
               Path('include/fs98/linkage.h'), Path('include/fs98/host.h'), Path('tools/difftest/argcount.h'),
               Path('tools/difftest/mpchatuidiff.c')]
     sources = {str(path): path.read_bytes() for path in inputs if path.is_file()}

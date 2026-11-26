@@ -325,8 +325,8 @@ def self_test():
         mutate('resized struct', 'linkage.h', '    fs98_code init;', '    uint64_t  init;', 'fs98_linkage header')
         mutate('outside GLOBAL', 'global.h', 'FS98_G_ALT_OFFSET     = 0x120c,', 'FS98_G_ALT_OFFSET     = 0x12a8,', 'outside GLOBAL')
         # stdcall guard without _WIN32: native linux-i386 would take stdcall; only gcc -m32 sees it
-        mutate('stdcall without _WIN32', 'abi.h', '#if defined(_WIN32) && defined(__i386__)\n#  define FS98_ABI_STDCALL_',
-               '#if defined(__i386__)\n#  define FS98_ABI_STDCALL_', 'calling convention', failing=1)
+        mutate('stdcall without _WIN32', 'retail_abi.h', '#if defined(_WIN32) && defined(__i386__)\n#  define FS98_RETAIL_ABI 1',
+               '#if defined(__i386__)\n#  define FS98_RETAIL_ABI 1', 'calling convention', failing=1)
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
     for f in fails:

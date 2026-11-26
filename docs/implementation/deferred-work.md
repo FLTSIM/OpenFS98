@@ -99,7 +99,7 @@
   evidence: spec Boundaries, `abi.h`.
 
 - source_spec: `docs/implementation/spec-1-7-the-module-abi-headers-are-32-bit.md`
-  summary: Not converted, and listed here for the stories that migrate them: `host_runtime.h`, `keep.h`, the rest of `numeric.h`, and modules' private struct copies (FE's harness `struct fs98_import` in `tools/difftest/fediff.c`, SLEW's private UTIL typedefs and export layouts, GLOBAL's private export layout, SIM1's `uintptr_t linkage[15]`). SIM1's embedded `fs98_import` array does change through the header. MinGW i686 accepts `(fs98_code)(uintptr_t)func` in a static initialiser and x86-64 GCC rejects it, so those tables need another form at migration.
+  summary: Not converted, and listed here for the stories that migrate them: `host_runtime.h`, `keep.h` (its wrappers are gated by `FS98_RETAIL_ABI` since Story 1.9a; conversion is 1.9b-e), the rest of `numeric.h`, and modules' private struct copies (FE's harness `struct fs98_import` in `tools/difftest/fediff.c`, SLEW's private UTIL typedefs and export layouts, GLOBAL's private export layout, SIM1's `uintptr_t linkage[15]`). SIM1's embedded `fs98_import` array does change through the header. MinGW i686 accepts `(fs98_code)(uintptr_t)func` in a static initialiser and x86-64 GCC rejects it, so those tables need another form at migration.
   evidence: spec Boundaries, "The other users" and "Never".
 
 - source_spec: `docs/implementation/spec-1-7-the-module-abi-headers-are-32-bit.md`

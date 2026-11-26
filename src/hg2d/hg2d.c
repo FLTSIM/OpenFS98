@@ -210,7 +210,8 @@ EAX_ENTRY(texture_update, texture_update_body);
 /* What these slots leave is retail's: see include/fs98/keep.h.  +0x24 has its third argument
  * in ecx throughout. */
 #include "../../include/fs98/keep.h"
-#if defined(__i386__)
+#include "../../include/fs98/retail_abi.h"
+#if defined(FS98_RETAIL_ABI)
 FS98_ENTRY(draw_depth_point_entry, "_draw_depth_point@16", 16, 0, "", "movl 12(%esp), %ecx\n\t")
 #endif
 FS98_KEEP_EDX(colour_convert_entry, "_colour_convert@12", 12)

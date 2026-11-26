@@ -490,7 +490,8 @@ uint32_t FS98_STDCALL fs98_util_rand(void)
  */
 /* Retail's two draws touch only eax and save edx, and MAIN's radios keep their course
  * in cx across +0x6c, so the slots preserve ecx and edx. */
-#if defined(__i386__)
+#include "fs98/retail_abi.h"
+#if defined(FS98_RETAIL_ABI)
 __asm__(".text\n.globl _fs98_util_rand_entry\n"
         "_fs98_util_rand_entry:\n\t"
         "pushl %ecx\n\tpushl %edx\n\t"
@@ -1643,7 +1644,7 @@ void FS98_STDCALL fs98_util_marshal(const void *source, const void *descriptors,
  * and longitude services, +0x2c and +0x40..+0x4c) leave eax as WINDOW entered, UTIL's Linkage, which
  * WINDOW's code reads back; callers reach +0x5c through the stub above.
  */
-#if defined(__i386__)
+#if defined(FS98_RETAIL_ABI)
 #define ENTRY_NAME(name) ".text\n.globl _" #name "_entry\n_" #name "_entry:\n\t"
 #define KEEP_ALL(name, bytes) \
     __asm__(ENTRY_NAME(name) "pushl %eax\n\tpushl %ecx\n\tpushl %edx\n\t" \

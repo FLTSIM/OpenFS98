@@ -81,7 +81,7 @@ struct fs98_linkage {
 
 The shared headers describe FS98 memory with 32-bit contract types (AD-14), so one layout holds on every build.
 `include/fs98/abi.h` defines `fs98_addr` (a data address, an arena offset), `fs98_code` (a code handle),
-`FS98_WCHAR` and the only `FS98_STDCALL` (stdcall on `win32-retail`, the platform default elsewhere). `linkage.h`,
+`FS98_WCHAR` and the only `FS98_STDCALL` (stdcall on `win32-retail`, the platform default elsewhere). `include/fs98/retail_abi.h` defines `FS98_RETAIL_ABI` once (an interim proxy for `win32-retail`: `_WIN32` and `__i386__`); `abi.h`, `keep.h`'s register-keeping wrappers and the `.S` entry stubs key on it (AD-4). `linkage.h`,
 `host.h` and `global.h` use no C pointer, `long`, `size_t`, `wchar_t`, bitfield or `long double`; every host service is
 a function type (`fs98_host_<name>_fn`) over `fs98_addr` and `fs98_code`, and each shared struct is 4-packed with
 `_Static_assert`s on its size, alignment and offsets. `tools/check_abi_headers.py` checks the types and compiles the

@@ -50,7 +50,7 @@ def make_case(snapshots, source_names, row):
         return {filename: source.replace(before, after)}
 
     def builds(work):
-        command = ['i686-w64-mingw32-gcc', *module_flags.FLAGS, '-std=c99', '-Itools/difftest', '-O2', '-Wall', '-Wextra', '-Werror', '-shared', '-nostdlib', '-Wl,--entry=_DllMain@12', '-Wl,--disable-dynamicbase',
+        command = ['i686-w64-mingw32-gcc', *module_flags.FLAGS, '-std=c99', '-Itools/difftest', '-O2', '-Wall', '-Wextra', '-Werror', '-Iinclude', '-shared', '-nostdlib', '-Wl,--entry=_DllMain@12', '-Wl,--disable-dynamicbase',
                    '-Wl,--image-base=0x223f0000', '-o', str(work / 'mutant.dll')]
         command += [str(work / Path(path).name) for path in source_names]
         command += [str(work / 'world.def'), str(work / 'world-res.o'), str(work / 'libworld-simsui.a'), '-lkernel32', '-luser32', '-lmsvcrt', '-lntdll']

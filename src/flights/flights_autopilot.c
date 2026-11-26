@@ -9,6 +9,7 @@
  * speed 0x2054 (+0x2074). The descriptor is +0x2174 (flights_internal.h). */
 #include "flights_internal.h"
 #include "flights_unwind.h"
+#include "fs98/arena.h"
 
 #define D32(object, offset) (*(uint32_t *)((uint8_t *)(object) + (offset)))
 #define PTR(object, offset) (*(void **)((uint8_t *)(object) + (offset)))
@@ -499,7 +500,7 @@ uint32_t TC fs98_flights_autopilot_error(void *object, uint32_t code)
         for (index = 0; index < 5; ++index) {
             uint32_t *status = (uint32_t *)AT(DESCRIPTOR(object), fields[index].status);
             if (!ON(object, fields[index].box) || *status == 0) continue;
-            if (SERVICES->error_dialog(object, AT(object, fields[index].edit), (uint32_t)(uintptr_t)status))
+            if (SERVICES->error_dialog(object, AT(object, fields[index].edit), fs98_handle(status)))
                 handled = fields[index].id;
             break;
         }

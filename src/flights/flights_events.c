@@ -3,6 +3,7 @@
  * harness can run the original routines and these over the same logged stubs. */
 #include "flights_internal.h"
 #include "flights_tables.inc"
+#include "fs98/arena.h"
 
 #define D32(object, offset) (*(uint32_t *)((uint8_t *)(object) + (offset)))
 #define PTR(object, offset) (*(void **)((uint8_t *)(object) + (offset)))
@@ -174,7 +175,7 @@ static void fs98_flights_picker_fill(void *object)
     descriptor = PTR(object, 0x10dc);
     for (index = 0, offset = 0; index < D32(descriptor, 8); ++index, offset += 0xa08) {
         s_services->send_message(D32(object, 0x1270), LB_ADDSTRING, 0,
-                                 (uint32_t)(uintptr_t)AT(PTR(descriptor, 0x10), offset));
+                                 fs98_handle(AT(PTR(descriptor, 0x10), offset)));
         descriptor = PTR(object, 0x10dc);
     }
 }

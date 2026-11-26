@@ -7,6 +7,7 @@
  * frame and double click tests for null. */
 #include "flights_internal.h"
 #include "flights_unwind.h"
+#include "fs98/arena.h"
 
 #define D32(object, offset) (*(uint32_t *)((uint8_t *)(object) + (offset)))
 #define PTR(object, offset) (*(void **)((uint8_t *)(object) + (offset)))
@@ -115,7 +116,7 @@ void TC fs98_flights_aircraft_populate(void *object)
     SERVICES->send_message(D32(object, 0x151c), LB_RESETCONTENT, 0, 0);
     for (index = 0, offset = 0; index < (int32_t)D32(DESCRIPTOR(object), 0x18); ++index, offset += 0xa08)
         SERVICES->send_message(D32(object, 0x151c), LB_ADDSTRING, 0,
-                               (uint32_t)(uintptr_t)AT(PTR(DESCRIPTOR(object), 0x1c), offset));
+                               fs98_handle(AT(PTR(DESCRIPTOR(object), 0x1c), offset)));
     fs98_flights_string_enter(&title);
     SERVICES->send_message(D32(object, 0x151c), LB_SETCURSEL, D32(DESCRIPTOR(object), 0x14), 0);
     fs98_flights_aircraft_show(object, &title.string);

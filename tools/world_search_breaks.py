@@ -57,7 +57,7 @@ def search_case(name, before, after):
         return {f'{name}.c': mutated}
 
     def builds(work):
-        return [['i686-w64-mingw32-gcc', *module_flags.FLAGS, '-std=c99', '-Itools/difftest', '-O2', '-Wall', '-Wextra', '-Werror', '-Isrc/world', '-o', str(work / f'{name}.exe'),
+        return [['i686-w64-mingw32-gcc', *module_flags.FLAGS, '-std=c99', '-Itools/difftest', '-O2', '-Wall', '-Wextra', '-Werror', '-Isrc/world', '-Iinclude', '-o', str(work / f'{name}.exe'),
                  'tools/difftest/worldsearchdiff.c', str(work / f'{name}.c')]]
     return bo.Case(name, overlay, builds, [f'{name}.exe'])
 

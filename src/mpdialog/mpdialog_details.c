@@ -7,6 +7,7 @@
 #include <stdlib.h>
 #include "mpdialog_internal.h"
 #include "mpdialog_unwind.h"
+#include "fs98/arena.h"
 
 #define D32(object, offset) (*(uint32_t *)((uint8_t *)(object) + (offset)))
 #define S32(object, offset) (*(int32_t *)((uint8_t *)(object) + (offset)))
@@ -340,7 +341,7 @@ int32_t FS98_MPDIALOG_THISCALL fs98_mpdialog_details_validation_result(void *obj
     if (status) {
         int32_t helper = ((int32_t (TC *)(void *, void *, uint32_t))
             fs98_mpdialog_import_va(0x2234b414))(
-                object, AT(object, control), (uint32_t)(uintptr_t)AT(block, status));
+                object, AT(object, control), fs98_handle(AT(block, status)));
         D32(object, 0x8c) = helper;
         if (helper) result = status == 0x1c ? 0x40b : 0x40d;
     } else result = 0;

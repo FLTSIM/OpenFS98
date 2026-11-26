@@ -49,7 +49,7 @@ def write_inputs_json(output_dir, data):
 
 
 def dll_command(work, dll, flags=FLAGS):
-    return [*flags, '-shared', '-nostdlib', '-Wl,--entry=_DllMain@12', '-Wl,--disable-dynamicbase', '-Wl,--image-base=0x223f0000', '-o', str(dll),
+    return [*flags, '-Iinclude', '-shared', '-nostdlib', '-Wl,--entry=_DllMain@12', '-Wl,--disable-dynamicbase', '-Wl,--image-base=0x223f0000', '-o', str(dll),
             *(str(work / Path(unit).name) for unit in units()),
             str(work / 'world.def'), str(work / 'world-res.o'), str(work / 'libworld-simsui.a'), '-lkernel32', '-luser32', '-lmsvcrt', '-lntdll']
 

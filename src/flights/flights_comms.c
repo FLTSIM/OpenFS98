@@ -6,6 +6,7 @@
  * box 0x1e60 (state +0x1f1c), a group box 0x1f28. The descriptor is at +0x1fdc
  * (flights_internal.h). */
 #include "flights_internal.h"
+#include "fs98/arena.h"
 
 #define D32(object, offset) (*(uint32_t *)((uint8_t *)(object) + (offset)))
 #define PTR(object, offset) (*(void **)((uint8_t *)(object) + (offset)))
@@ -142,7 +143,7 @@ uint32_t TC fs98_flights_comms_error(void *object, uint32_t code)
     uint32_t *status = (uint32_t *)AT(DESCRIPTOR(object), 0xc);
     (void)code;
     if (*status != 0 &&
-        SERVICES->error_dialog(object, AT(object, 0x1df8), (uint32_t)(uintptr_t)status))
+        SERVICES->error_dialog(object, AT(object, 0x1df8), fs98_handle(status)))
         handled = 0xcb3;
     return ((uint32_t (TC *)(void *, uint32_t))PTR(PTR(object, 0), 0xe0))(object, handled);
 }

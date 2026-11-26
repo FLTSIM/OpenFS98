@@ -2,6 +2,7 @@
  * Class lifetimes live in world_search_objects.c; native bindings live in
  * world_runtime.c. */
 #include "world_search.h"
+#include "fs98/arena.h"
 #define U32 WORLD_U32
 #define PTR WORLD_PTR
 #define AT(ptr, offset) ((uint8_t *)(ptr) + (offset))
@@ -46,7 +47,7 @@ void fs98_world_search_populate(void *object)
     while (index < (int32_t)U32(PTR(object, 0x10dc), 0x68)) {
         descriptor = PTR(object, 0x10dc);
         ui->send(U32(object, 0x1898), 0x143, 0,
-            (uint32_t)(uintptr_t)AT(PTR(descriptor, 0x70), (uint32_t)index * 4));
+            fs98_handle(AT(PTR(descriptor, 0x70), (uint32_t)index * 4)));
         ++index;
     }
     ui->send(U32(object, 0x1898), 0x14e, U32(PTR(object, 0x10dc), 0x6c), 0);

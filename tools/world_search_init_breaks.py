@@ -57,7 +57,7 @@ def search_init_case(name, before, after):
         return {f'{name}.c': mutated}
 
     def builds(work):
-        return [['i686-w64-mingw32-gcc', *module_flags.FLAGS, '-std=c99', '-Itools/difftest', '-O2', '-Wall', '-Wextra', '-Werror', '-Isrc/world',
+        return [['i686-w64-mingw32-gcc', *module_flags.FLAGS, '-std=c99', '-Itools/difftest', '-O2', '-Wall', '-Wextra', '-Werror', '-Isrc/world', '-Iinclude',
                  '-o', str(work / f'{name}.exe'), 'tools/difftest/worldsearchinitdiff.c', str(work / f'{name}.c'),
                  'src/world/world_search.c', 'src/world/world_init.c', 'src/world/world_area.c',
                  '-lntdll']]

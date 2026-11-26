@@ -282,7 +282,7 @@ ofs_step(all
     [==[python3 -B tools/gen_world_runtime.py]==]
     [==[i686-w64-mingw32-windres -J res -O coff bin/world-diff/world.res bin/world-diff/world-res.o]==]
     [==[i686-w64-mingw32-dlltool -d bin/world-diff/simsui-anchor.def -l bin/world-diff/libworld-simsui.a]==]
-    [==[i686-w64-mingw32-gcc @MODULE_FLAGS@ -std=c99 -O2 -Wall -Wextra -Werror -shared -nostdlib -Wl,--entry=_DllMain@12 -Wl,--disable-dynamicbase -Wl,--image-base=0x223f0000 -o bin/world-diff/WORLD_area.dll @WORLD_SOURCES@ src/world/world.def bin/world-diff/world-res.o bin/world-diff/libworld-simsui.a -lkernel32 -luser32 -lmsvcrt -lntdll]==]
+    [==[i686-w64-mingw32-gcc @MODULE_FLAGS@ -std=c99 -O2 -Wall -Wextra -Werror -Iinclude -shared -nostdlib -Wl,--entry=_DllMain@12 -Wl,--disable-dynamicbase -Wl,--image-base=0x223f0000 -o bin/world-diff/WORLD_area.dll @WORLD_SOURCES@ src/world/world.def bin/world-diff/world-res.o bin/world-diff/libworld-simsui.a -lkernel32 -luser32 -lmsvcrt -lntdll]==]
     [==[cmp -s bin/world-diff/WORLD_area.dll bin/WORLD.DLL || cp bin/world-diff/WORLD_area.dll bin/WORLD.DLL]==]
   )
 
@@ -341,7 +341,7 @@ ofs_step(all
     [==[python3 -B tools/gen_flights_runtime.py]==]
     [==[i686-w64-mingw32-windres -J res -O coff bin/flights-diff/flights.res bin/flights-diff/flights-res.o]==]
     [==[i686-w64-mingw32-dlltool -d bin/flights-diff/simsui-anchor.def -l bin/flights-diff/libflights-simsui.a]==]
-    [==[i686-w64-mingw32-gcc @MODULE_FLAGS@ -std=c99 -O2 -Wall -Wextra -Werror -shared -nostdlib -Wl,--entry=_DllMain@12 -Wl,--disable-dynamicbase -Wl,--image-base=0x22310000 -o bin/flights-diff/FLIGHTS_ours.dll src/flights/flights_events.c src/flights/flights_objects.c src/flights/flights_save.c src/flights/flights_comms.c src/flights/flights_create.c src/flights/flights_aircraft.c src/flights/flights_opening.c src/flights/flights_select.c src/flights/flights_autopilot.c src/flights/flights_navigation.c src/flights/flights_runtime.c src/flights/flights.def bin/flights-diff/flights-res.o bin/flights-diff/libflights-simsui.a -lkernel32 -luser32 -lmsvcrt]==]
+    [==[i686-w64-mingw32-gcc @MODULE_FLAGS@ -std=c99 -O2 -Wall -Wextra -Werror -Iinclude -shared -nostdlib -Wl,--entry=_DllMain@12 -Wl,--disable-dynamicbase -Wl,--image-base=0x22310000 -o bin/flights-diff/FLIGHTS_ours.dll src/flights/flights_events.c src/flights/flights_objects.c src/flights/flights_save.c src/flights/flights_comms.c src/flights/flights_create.c src/flights/flights_aircraft.c src/flights/flights_opening.c src/flights/flights_select.c src/flights/flights_autopilot.c src/flights/flights_navigation.c src/flights/flights_runtime.c src/flights/flights.def bin/flights-diff/flights-res.o bin/flights-diff/libflights-simsui.a -lkernel32 -luser32 -lmsvcrt]==]
     [==[mkdir -p bin]==]
     [==[cmp -s bin/flights-diff/FLIGHTS_ours.dll bin/FLIGHTS.DLL || cp bin/flights-diff/FLIGHTS_ours.dll bin/FLIGHTS.DLL]==]
   )
@@ -359,7 +359,7 @@ ofs_step(all
     [==[i686-w64-mingw32-windres -J res -O coff bin/mpdialog-diff/mpdialog-0x110a-browser.res bin/mpdialog-diff/mpdialog-flow-browser-res.o]==]
     [==[i686-w64-mingw32-windres -J res -O coff bin/mpdialog-diff/mpdialog-flow-support.res bin/mpdialog-diff/mpdialog-flow-support-res.o]==]
     [==[i686-w64-mingw32-dlltool -d bin/mpdialog-diff/simsui-anchor.def -l bin/mpdialog-diff/libmpdialog-simsui.a]==]
-    [==[i686-w64-mingw32-gcc @MODULE_FLAGS@ -std=c99 -O2 -Wall -Wextra -Werror -shared -nostdlib -Wl,--entry=_DllMain@12 -Wl,--disable-dynamicbase -Wl,--image-base=0x22340000 -o bin/mpdialog-diff/MP_DIALOG_ours.dll src/mpdialog/mpdialog_flow.c src/mpdialog/mpdialog_session.c src/mpdialog/mpdialog_details.c src/mpdialog/mpdialog_runtime.c src/mpdialog/mpdialog.def bin/mpdialog-diff/mpdialog-res.o bin/mpdialog-diff/mpdialog-details-res.o bin/mpdialog-diff/mpdialog-flow-intro-res.o bin/mpdialog-diff/mpdialog-flow-choice-res.o bin/mpdialog-diff/mpdialog-flow-host-res.o bin/mpdialog-diff/mpdialog-flow-connection-res.o bin/mpdialog-diff/mpdialog-flow-browser-res.o bin/mpdialog-diff/mpdialog-flow-support-res.o bin/mpdialog-diff/libmpdialog-simsui.a -lkernel32 -luser32 -lcomctl32 -lmsvcrt]==]
+    [==[i686-w64-mingw32-gcc @MODULE_FLAGS@ -std=c99 -O2 -Wall -Wextra -Werror -Iinclude -shared -nostdlib -Wl,--entry=_DllMain@12 -Wl,--disable-dynamicbase -Wl,--image-base=0x22340000 -o bin/mpdialog-diff/MP_DIALOG_ours.dll src/mpdialog/mpdialog_flow.c src/mpdialog/mpdialog_session.c src/mpdialog/mpdialog_details.c src/mpdialog/mpdialog_runtime.c src/mpdialog/mpdialog.def bin/mpdialog-diff/mpdialog-res.o bin/mpdialog-diff/mpdialog-details-res.o bin/mpdialog-diff/mpdialog-flow-intro-res.o bin/mpdialog-diff/mpdialog-flow-choice-res.o bin/mpdialog-diff/mpdialog-flow-host-res.o bin/mpdialog-diff/mpdialog-flow-connection-res.o bin/mpdialog-diff/mpdialog-flow-browser-res.o bin/mpdialog-diff/mpdialog-flow-support-res.o bin/mpdialog-diff/libmpdialog-simsui.a -lkernel32 -luser32 -lcomctl32 -lmsvcrt]==]
     [==[mkdir -p bin]==]
     [==[cmp -s bin/mpdialog-diff/MP_DIALOG_ours.dll bin/MP_DIALOG.DLL || cp bin/mpdialog-diff/MP_DIALOG_ours.dll bin/MP_DIALOG.DLL]==]
   )

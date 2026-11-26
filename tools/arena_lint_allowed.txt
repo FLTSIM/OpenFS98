@@ -9,18 +9,10 @@ src/chain/chain.c 4 0
 src/dynamic/dynamic.c 1 4
 src/facil/facil.c 6 1
 src/fe/fe.c 1 4
-src/flights/flights_aircraft.c 1 0
-src/flights/flights_autopilot.c 1 0
-src/flights/flights_comms.c 1 0
-src/flights/flights_events.c 1 0
-src/flights/flights_navigation.c 1 0
-src/flights/flights_select.c 2 0
 src/g3d/g3d.c 8 4
 src/hg2d/hg2d.c 1 0
 src/mdl/mdl_crash.c 1 0
 src/mdl/mdl_image.c 2 0
-src/mpdialog/mpdialog_details.c 1 0
-src/mpdialog/mpdialog_flow.c 3 0
 src/multip/multip.c 2 5
 src/options/options_book.c 4 0
 src/options/options_demo.c 2 0
@@ -41,4 +33,3 @@ src/sound/sound.c 1 1
 src/test/ofstest.c 3 0
 src/util/util_exchange.c 1 0
 src/weatherm/weatherm.c 4 1
-src/world/world_search.c 1 0

@@ -207,3 +207,24 @@
 - source_spec: `docs/implementation/spec-1-8g-break-runners-share-build-only.md`
   summary: Runner argument handling: `flights_breaks.py` with a mistyped case name selects no case and reports 0/0 caught with exit 0; the `world-priority-breaks` target does not forward SUITE; `mpdialog_ui_breaks.py` evaluates every anchor even when one mutant is requested; the weather, time and copy native runners copy a prebuilt baseline DLL into every case that no compile uses.
   evidence: Codex code review 2026-11-25; the runners at HEAD.
+
+- source_spec: `docs/implementation/spec-1-8j-flights-mpdialog-world-use-arena-h.md`
+  summary: Epic 5: the plain `(T *)(uintptr_t)x` casts left in FLIGHTS, MPDIALOG and WORLD. Fourteen are arena pointers: `mpdialog_flow.c` 517, 613-615, 629, 630, 632, 633, 742 (`char **`), 844, 846 and 875 (twelve), `mpdialog_session.c` 400 (`HELPINFO *`) and `world_search.c` 74. Two are `GetProcAddress` ordinals, not arena pointers, and must not become `fs98_ptr`: `flights_runtime.c` 283 and `mpdialog_runtime.c` 103 (the spec's line numbers 279 and 98 are for a different base).
+  evidence: slice 6b converted only the banned `(uint32_t)(uintptr_t)` casts; the plain casts are not lint-banned.
+
+- source_spec: `docs/implementation/spec-1-8j-flights-mpdialog-world-use-arena-h.md`
+  summary: Spec defect found in slice 6b: the spec lists five FLIGHTS anchors to repair, but a sixth, `select-choose-itemdata`, anchors on `0);` at the end of the reverse-cast statement and cannot match once the call is wrapped in `fs98_ptr(...)` (its closing paren makes the text `0));`). It is repaired like the five, and its commutation check passes.
+  evidence: `tools/flights_breaks.py:355`; `~/openfs98-verify/p18g/commute.py` covers all 502 cases.
+
+- source_spec: `docs/implementation/spec-1-9a-retail-abi-gates-register-wrappers.md`
+  summary: Story 1.9b: the 14 `include/fs98/keep.h` entries (and HG2D's raw `FS98_ENTRY` draw_depth_point) take explicit values, by module: NUMERIC+ATC together (ATC relies on NUMERIC +0x18's ecx), HG2D (6 entries), DYNAMIC (after 1.10b1, which edits dynamic.c), WEATHERM, MAIN; the retail wrappers feed the explicit parameter from the saved register under `FS98_RETAIL_ABI`; proof by each module's difftests, `tools/reg_contracts.sh` and the flights.
+  evidence: Story 1.9 split at planning (2026-11-25, user's choice): slice survey in the 1.9a spec's Code Map.
+- source_spec: `docs/implementation/spec-1-9a-retail-abi-gates-register-wrappers.md`
+  summary: Story 1.9c: UTIL's private copy of the keep macros (`src/util/util_math.c:1646-1690`, `KEEP_ALL`/`KEEP_ECX_EDX` and raw `ENTRY_NAME` stubs such as `hypot`, plus `rand`/`rand32` at `:493-504`: 30 entries, selected in `util.c:59`; gated by 1.9a) moves onto `keep.h` and its entries take explicit values; proof by `utildiff-run` (6,452,880 comparisons), `utildiff-portable`, `reg_contracts.sh` and the flights.
+  evidence: as above.
+- source_spec: `docs/implementation/spec-1-9a-retail-abi-gates-register-wrappers.md`
+  summary: Story 1.9d: ANALYSIS's ecx plumbing becomes explicit: `call2_ecx`/`call3_ecx` (`analysis.c:189-210`, the CHAIN-add and memset results) and `an_frame_ecx` (`:399`, the frame's entry ecx from CHAIN's dispatch). The memmove 7 is already the C constant `AN_MEMMOVE_ECX` (`:54`, ANA-1 kept) and stays; the CHAIN callback's ecx needs a cross-module convention (AD-17), so this follows DYNAMIC's conversion.
+  evidence: as above; `docs/modules/analysis.md:147-153`.
+- source_spec: `docs/implementation/spec-1-9a-retail-abi-gates-register-wrappers.md`
+  summary: Story 1.9e: gate under `FS98_RETAIL_ABI` and convert the other register-carrying families 1.9a left out (SIM1's inline wrappers in `sim1_native.c:73`, HG2D's texture EAX shims `hg2d.c:156` and draw/device entries `hg2d_draw.inc:383`, DYNAMIC's `_dyn_frame` thunk `dynamic.c:393`, CHAIN's ANALYSIS entry `analysis.c:512`, FE's register-shifting wrappers `fe.c:3373`, CONTROLS' entry macros `controls.c:81`, MULTIP's tick shims `multip_tick.inc:113`), then audit and convert the other code that reads registers across calls: MAIN's `ecx`/`edx` globals (`main.c:83-84`, SAVE_ALL/RESTORE_ALL), G3D's (`g3d.c:81-82`), DYNAMIC's asm reads (`dynamic.c:337-352,500`), FE, HG2D's two `.inc` asm sites, MULTIP, SIM1, VIEWS' ftol; then the harness stubs and difftest assertions that expect register values. Size unknown until the audit classifies which uses are contracts.
+  evidence: as above (grep survey, not classified).

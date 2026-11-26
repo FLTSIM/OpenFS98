@@ -62,8 +62,8 @@ EVENTS = [
     ('sync-none', '    if (selection != -1) D32', '    D32'),
     # filling the list
     ('fill-reset', 'LB_RESETCONTENT, 0, 0);', 'LB_RESETCONTENT, 1, 0);'),
-    ('fill-reload', '                                 (uint32_t)(uintptr_t)AT(PTR(descriptor, 0x10), offset));\n        descriptor = PTR(object, 0x10dc);',
-     '                                 (uint32_t)(uintptr_t)AT(PTR(descriptor, 0x10), offset));'),
+    ('fill-reload', '                                 fs98_handle(AT(PTR(descriptor, 0x10), offset)));\n        descriptor = PTR(object, 0x10dc);',
+     '                                 fs98_handle(AT(PTR(descriptor, 0x10), offset)));'),
     ('fill-stride', 'offset += 0xa08)', 'offset += 0xa00)'),
     ('fill-count', 'index < D32(descriptor, 8);', 'index <= D32(descriptor, 8);'),
     ('adventures-range', 'if (D32(descriptor, 0xc) < D32(descriptor, 8))', 'if (D32(descriptor, 0xc) <= D32(descriptor, 8))'),
@@ -184,7 +184,7 @@ COMMS = [
     ('comms-validate-control', '    if (control == 0xcb3) {', '    if (failure == 0xcb3) {'),
     ('comms-validate-room', 'text, 0x3f);', 'text, 0x40);'),
     ('comms-validate-format', 'format_number(text, s_number_format, value);', 'format_number(text, "%.2f", value);'),
-    ('comms-error-pointer', '(uint32_t)(uintptr_t)status))', '*status))'),
+    ('comms-error-pointer', 'fs98_handle(status)))', '*status))'),
     ('comms-error-code', '        handled = 0xcb3;', '        handled = 0xcb4;'),
     ('comms-error-slot', 'PTR(PTR(object, 0), 0xe0))(object, handled);', 'PTR(PTR(object, 0), 0xdc))(object, handled);'),
     ('comms-init-slider', '6, 0x1a, 6, 8, 0, -1, module);', '6, 0x1a, 6, 8, 0, 0, module);'),
@@ -352,8 +352,8 @@ SELECT = [
     ('select-cancel-answer', '    descriptor[0] = 0;', '    descriptor[0] = 1;'),
     ('select-accept-default', 'D32(DESCRIPTOR(object), 0x10) = D32(object, 0x1800);', 'D32(DESCRIPTOR(object), 0x10) = D32(object, 0x17fc);'),
     ('select-accept-handled', '(object, failure) != 0)\n        return;', '(object, failure) == 0)\n        return;'),
-    ('select-choose-itemdata', 'LB_GETITEMDATA,\n                                                                    D32(DESCRIPTOR(object), 0x14), 0);',
-     'LB_GETITEMDATA,\n                                                                    0, 0);'),
+    ('select-choose-itemdata', 'LB_GETITEMDATA,\n                                                                    D32(DESCRIPTOR(object), 0x14), 0));',
+     'LB_GETITEMDATA,\n                                                                    0, 0));'),
     ('select-choose-description', '(char *)record + 0x100);\n    SERVICES->send_message', '(char *)record + 0x80);\n    SERVICES->send_message'),
     ('select-choose-readonly', 'EM_SETREADONLY, D32(record, 0xa04) == 0, 0);', 'EM_SETREADONLY, D32(record, 0xa04) != 0, 0);'),
     ('select-choose-delete-flag', '    SERVICES->enable_control(AT(object, 0x1648), (int32_t)D32(record, 0xa04));', '    SERVICES->enable_control(AT(object, 0x1648), 1);'),
@@ -442,7 +442,7 @@ AUTOPILOT = [
     ('ap-validate-climb-box', '        if (ON(object, ALTITUDE) && FIELD(object, 0xc0) != 0) failure = 0xd28;', '        if (FIELD(object, 0xc0) != 0) failure = 0xd28;'),
     ('ap-validate-populate', '    if (failure == 0) fs98_flights_autopilot_populate(object);', '    (void)fs98_flights_autopilot_populate;'),
     ('ap-error-code', '    if (code != 0 && ON(object, ACTIVE)) {', '    if (ON(object, ACTIVE)) {'),
-    ('ap-error-pointer', '(uint32_t)(uintptr_t)status))', '*status))'),
+    ('ap-error-pointer', 'fs98_handle(status)))', '*status))'),
     ('ap-error-ids', '{HEADING, 0x1c, HEADING_EDIT, 0xcb1}, {ALTITUDE, 0x48, ALTITUDE_EDIT, 0xcb0},', '{HEADING, 0x1c, HEADING_EDIT, 0xcb0}, {ALTITUDE, 0x48, ALTITUDE_EDIT, 0xcb1},'),
     ('ap-error-first-only', '                handled = fields[index].id;\n            break;', '                handled = fields[index].id;'),
     ('ap-init-edit-flags', 'SERVICES->init_edit(AT(object, MACH_EDIT), SERVICES->base_font(2), 0xffffff, 0, 0xff0000, 0, 5);', 'SERVICES->init_edit(AT(object, MACH_EDIT), SERVICES->base_font(2), 0xffffff, 0, 0xff0000, 0, 1);'),
@@ -549,11 +549,11 @@ NAVIGATION = [
     ('radios-validate-early-slice', '    failure = (uint32_t)SERVICES->send_message(D32(page, 0x2424), CB_GETCURSEL_, 0, 0);\n    S32(page, 0x9c) = failure;',
      '    {\n        uint32_t *at = (uint32_t *)AT(SLICE(page), 0x9c);\n        *at = (uint32_t)SERVICES->send_message(D32(page, 0x2424), CB_GETCURSEL_, 0, 0);\n    }'),
     ('radios-error-code', '    if (code != 0) {\n        uint8_t *slice', '    if (code != 1) {\n        uint8_t *slice'),
-    ('radios-error-address', '(uint32_t)(uintptr_t)(slice + fields[index][0])))', 'D32(slice, fields[index][0])))'),
+    ('radios-error-address', 'fs98_handle((slice + fields[index][0]))))', 'D32(slice, fields[index][0])))'),
     ('radios-error-edit', '{0x30, 0x2334, 0xcba}, {0xa0, 0x22cc, 0xcbb}', '{0x30, 0x22cc, 0xcba}, {0xa0, 0x2334, 0xcbb}'),
     ('radios-error-first', '                id = fields[index][2];\n            break;', '                id = fields[index][2];'),
-    ('radios-error-answer', '            if (SERVICES->error_dialog(page, AT(page, fields[index][1]), (uint32_t)(uintptr_t)(slice + fields[index][0])))\n                id = fields[index][2];',
-     '            SERVICES->error_dialog(page, AT(page, fields[index][1]), (uint32_t)(uintptr_t)(slice + fields[index][0]));\n            id = fields[index][2];'),
+    ('radios-error-answer', '            if (SERVICES->error_dialog(page, AT(page, fields[index][1]), fs98_handle((slice + fields[index][0]))))\n                id = fields[index][2];',
+     '            SERVICES->error_dialog(page, AT(page, fields[index][1]), fs98_handle((slice + fields[index][0])));\n            id = fields[index][2];'),
     # the transponder and ADF page
     ('adf-fill-limit', '    D32(page, 0x1978) = S32(page, 0x38) - 1;', '    D32(page, 0x1978) = S32(page, 0x38);'),
     ('adf-fill-limit-field', '    D32(page, 0x19e0) = S32(page, 0x4c) - 1;', '    D32(page, 0x19e0) = S32(page, 0x48) - 1;'),
@@ -685,7 +685,7 @@ def flights_case(name, unit, before, after, directory):
 
     def builds(work):
         others = [f'src/flights/flights_{u}.c' for u in UNITS if u != unit]
-        return [['i686-w64-mingw32-gcc', *module_flags.FLAGS, '-std=c99', '-O2', '-Wall', '-Wextra', '-Wno-unused', '-Isrc/flights', '-o', str(work / f'{name}.exe'),
+        return [['i686-w64-mingw32-gcc', *module_flags.FLAGS, '-std=c99', '-O2', '-Wall', '-Wextra', '-Wno-unused', '-Isrc/flights', '-Iinclude', '-o', str(work / f'{name}.exe'),
                  'tools/difftest/flightseventsdiff.c', str(work / f'{name}.c'), *others, '-lntdll']]
     return bo.Case(name, overlay, builds, [f'{name}.exe'])
 

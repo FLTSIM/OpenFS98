@@ -115,7 +115,7 @@ def make_case(sources, native, row):
         if native:
             dll=work/'mutant.dll';exe=work/'worldwareasuidiff.exe'
             world_sources=world_native.units()
-            return [FLAGS+['-shared','-nostdlib','-Wl,--entry=_DllMain@12','-Wl,--disable-dynamicbase','-Wl,--image-base=0x223f0000','-o',str(dll),*[str(work/Path(p).name) for p in world_sources],str(work/'world.def'),str(work/'world-res.o'),str(work/'libworld-simsui.a'),'-lkernel32','-luser32','-lmsvcrt','-lntdll'],FLAGS+['-o',str(exe),str(work/'worldwareasuidiff.c'),'-lgdi32','-lntdll']]
+            return [FLAGS+['-Iinclude','-shared','-nostdlib','-Wl,--entry=_DllMain@12','-Wl,--disable-dynamicbase','-Wl,--image-base=0x223f0000','-o',str(dll),*[str(work/Path(p).name) for p in world_sources],str(work/'world.def'),str(work/'world-res.o'),str(work/'libworld-simsui.a'),'-lkernel32','-luser32','-lmsvcrt','-lntdll'],FLAGS+['-o',str(exe),str(work/'worldwareasuidiff.c'),'-lgdi32','-lntdll']]
         harness='worldwareas'+{'core':'','init':'init','life':'life'}[unit]+'diff.c';exe=work/'mutant.exe'
         inputs=[str(work/harness),str(work/CORE)]
         if unit=='life': inputs.append(str(work/LIFE))

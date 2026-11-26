@@ -2,7 +2,8 @@
 title: 'Story 1.4 follow-up: diagnose, then fix, the two pre-existing harness differences'
 type: 'bugfix'
 created: '2026-11-25'
-status: 'ready-for-dev'
+status: 'in-progress'
+baseline_commit: '27a9e496c2495c57b970c4e265054fce528b76e1'
 route: 'dispatch'
 review_loop_iteration: 0
 context: ['{project-root}/OpenFS98/AGENTS.md']

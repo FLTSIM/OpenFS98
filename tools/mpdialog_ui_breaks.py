@@ -134,7 +134,7 @@ def make(name, mutated):
             OUT / 'mpdialog-flow-browser-res.o', OUT / 'mpdialog-flow-support-res.o',
         ]
         return [[
-            CC, *FLAGS, '-shared', '-nostdlib', '-Wl,--entry=_DllMain@12',
+            CC, *FLAGS, '-Iinclude', '-shared', '-nostdlib', '-Wl,--entry=_DllMain@12',
             '-Wl,--disable-dynamicbase', '-Wl,--image-base=0x22340000',
             '-o', str(base / 'MP_DIALOG_mutant.dll'), str(source / 'mpdialog_flow.c'),
             str(source / 'mpdialog_session.c'),

@@ -15,6 +15,7 @@
  * VOR 2 0x1790; and a CString 0x1b60 exchanged as the altitude. */
 #include "flights_internal.h"
 #include "flights_unwind.h"
+#include "fs98/arena.h"
 
 #define D32(object, offset) (*(uint32_t *)((uint8_t *)(object) + (offset)))
 #define PTR(object, offset) (*(void **)((uint8_t *)(object) + (offset)))
@@ -402,7 +403,7 @@ static uint32_t nav_page_error(void *page, uint32_t code, const uint32_t (*field
         uint8_t *slice = SLICE(page);
         for (index = 0; index < count; ++index) {
             if (D32(slice, fields[index][0]) == 0) continue;
-            if (SERVICES->error_dialog(page, AT(page, fields[index][1]), (uint32_t)(uintptr_t)(slice + fields[index][0])))
+            if (SERVICES->error_dialog(page, AT(page, fields[index][1]), fs98_handle((slice + fields[index][0]))))
                 id = fields[index][2];
             break;
         }

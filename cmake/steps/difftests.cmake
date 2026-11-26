@@ -247,7 +247,7 @@ ofs_step(difftests
   OUTPUTS bin/flights-diff/flightseventsdiff.exe
   COMMANDS
     [==[mkdir -p bin/flights-diff]==]
-    [==[i686-w64-mingw32-gcc @MODULE_FLAGS@ -std=c99 -O2 -Wall -Wextra -Werror -o bin/flights-diff/flightseventsdiff.exe tools/difftest/flightseventsdiff.c src/flights/flights_events.c src/flights/flights_objects.c src/flights/flights_save.c src/flights/flights_comms.c src/flights/flights_create.c src/flights/flights_aircraft.c src/flights/flights_opening.c src/flights/flights_select.c src/flights/flights_autopilot.c src/flights/flights_navigation.c -lntdll]==]
+    [==[i686-w64-mingw32-gcc @MODULE_FLAGS@ -std=c99 -O2 -Wall -Wextra -Werror -Iinclude -o bin/flights-diff/flightseventsdiff.exe tools/difftest/flightseventsdiff.c src/flights/flights_events.c src/flights/flights_objects.c src/flights/flights_save.c src/flights/flights_comms.c src/flights/flights_create.c src/flights/flights_aircraft.c src/flights/flights_opening.c src/flights/flights_select.c src/flights/flights_autopilot.c src/flights/flights_navigation.c -lntdll]==]
   )
 
 ofs_step(difftests
@@ -739,14 +739,14 @@ ofs_step(difftests
   OUTPUTS bin/world-diff/worldsearchdiff.exe
   COMMANDS
     [==[mkdir -p bin/world-diff]==]
-    [==[i686-w64-mingw32-gcc @MODULE_FLAGS@ -std=c99 -O2 -Wall -Wextra -Werror -o bin/world-diff/worldsearchdiff.exe tools/difftest/worldsearchdiff.c src/world/world_search.c]==]
+    [==[i686-w64-mingw32-gcc @MODULE_FLAGS@ -std=c99 -O2 -Wall -Wextra -Werror -Iinclude -o bin/world-diff/worldsearchdiff.exe tools/difftest/worldsearchdiff.c src/world/world_search.c]==]
   )
 
 ofs_step(difftests
   OUTPUTS bin/world-diff/worldsearchinitdiff.exe
   COMMANDS
     [==[mkdir -p bin/world-diff]==]
-    [==[i686-w64-mingw32-gcc @MODULE_FLAGS@ -std=c99 -O2 -Wall -Wextra -Werror -o bin/world-diff/worldsearchinitdiff.exe tools/difftest/worldsearchinitdiff.c src/world/world_search_init.c src/world/world_search.c src/world/world_init.c src/world/world_area.c -lntdll]==]
+    [==[i686-w64-mingw32-gcc @MODULE_FLAGS@ -std=c99 -O2 -Wall -Wextra -Werror -Iinclude -o bin/world-diff/worldsearchinitdiff.exe tools/difftest/worldsearchinitdiff.c src/world/world_search_init.c src/world/world_search.c src/world/world_init.c src/world/world_area.c -lntdll]==]
   )
 
 ofs_step(difftests

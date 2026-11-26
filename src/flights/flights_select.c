@@ -8,6 +8,7 @@
 #include "flights_internal.h"
 #include "flights_unwind.h"
 #include <string.h>
+#include "fs98/arena.h"
 
 #define D32(object, offset) (*(uint32_t *)((uint8_t *)(object) + (offset)))
 #define PTR(object, offset) (*(void **)((uint8_t *)(object) + (offset)))
@@ -47,8 +48,8 @@ void TC fs98_flights_select_choose(void *object)
     int32_t selection = SERVICES->send_message(LIST(object), LB_GETCURSEL, 0, 0);
     uint8_t *record;
     D32(DESCRIPTOR(object), 0x14) = (uint32_t)selection;
-    record = (uint8_t *)(uintptr_t)(uint32_t)SERVICES->send_message(LIST(object), LB_GETITEMDATA,
-                                                                    D32(DESCRIPTOR(object), 0x14), 0);
+    record = (uint8_t *)fs98_ptr(SERVICES->send_message(LIST(object), LB_GETITEMDATA,
+                                                                    D32(DESCRIPTOR(object), 0x14), 0));
     SERVICES->set_window_text(AT(object, 0x15e0), (char *)record);
     SERVICES->set_window_text(AT(object, 0x1578), (char *)record + 0x100);
     SERVICES->send_message(D32(object, 0x1598), EM_SETREADONLY, D32(record, 0xa04) == 0, 0);
@@ -78,8 +79,8 @@ void TC fs98_flights_select_populate(void *object)
     SERVICES->send_message(LIST(object), LB_RESETCONTENT, 0, 0);
     record = PTR(DESCRIPTOR(object), 0x1c);
     for (index = 0; index < D32(DESCRIPTOR(object), 0x18); ++index, record += 0xa08) {
-        int32_t item = SERVICES->send_message(LIST(object), LB_ADDSTRING, 0, (uint32_t)(uintptr_t)record);
-        SERVICES->send_message(LIST(object), LB_SETITEMDATA, (uint32_t)item, (uint32_t)(uintptr_t)record);
+        int32_t item = SERVICES->send_message(LIST(object), LB_ADDSTRING, 0, fs98_handle(record));
+        SERVICES->send_message(LIST(object), LB_SETITEMDATA, (uint32_t)item, fs98_handle(record));
     }
     SERVICES->send_message(LIST(object), LB_SETCURSEL, D32(DESCRIPTOR(object), 0x14), 0);
     if (SERVICES->send_message(LIST(object), LB_GETCURSEL, 0, 0) == -1) {

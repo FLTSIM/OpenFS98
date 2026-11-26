@@ -8,6 +8,7 @@
 #include <string.h>
 #include "mpdialog_internal.h"
 #include "mpdialog_unwind.h"
+#include "fs98/arena.h"
 
 #define D32(object, offset) (*(uint32_t *)((uint8_t *)(object) + (offset)))
 #define S32(object, offset) (*(int32_t *)((uint8_t *)(object) + (offset)))
@@ -186,7 +187,7 @@ uint32_t SC fs98_mpdialog_flow_create(uint32_t parent, void *descriptor)
     s_flow_hwnds[5] = 0;
     if (D32(descriptor, 0x1c) == 0)
         PostMessageA((HWND)s_flow_hwnds[0], WM_COMMAND, 0x3e8, 0);
-    return (uint32_t)(uintptr_t)s_flow_hwnds;
+    return fs98_handle(s_flow_hwnds);
 }
 
 static void *flow_block(void *object, uint32_t page)
@@ -541,7 +542,7 @@ int32_t TC fs98_mpdialog_flow_error_choice(void *object, int32_t field)
     if (block && D32(block, 0x28)) {
         result = ((int32_t (TC *)(void *, void *, uint32_t))
             fs98_mpdialog_import_va(0x2234b414))(
-                object, AT(object, 0x17ac), (uint32_t)(uintptr_t)AT(block, 0x28));
+                object, AT(object, 0x17ac), fs98_handle(AT(block, 0x28)));
         D32(object, 0x8c) = result;
         if (result) field = 0x419;
     } else field = 0;
@@ -664,7 +665,7 @@ int32_t TC fs98_mpdialog_flow_error_host(void *object, int32_t field)
     if (status_offset) {
         result = ((int32_t (TC *)(void *, void *, uint32_t))
             fs98_mpdialog_import_va(0x2234b414))(
-                object, AT(object, control_offset), (uint32_t)(uintptr_t)AT(block, status_offset));
+                object, AT(object, control_offset), fs98_handle(AT(block, status_offset)));
         D32(object, 0x8c) = result;
         if (!result) field = original_field;
     } else field = 0;

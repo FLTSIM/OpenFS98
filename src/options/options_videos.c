@@ -15,6 +15,7 @@
  * holds the CNotify, +0x10e0 the edit callback's answer; the descriptor is at +0x10e4. */
 #include "options_internal.h"
 #include "options_unwind.h"
+#include "fs98/arena.h"
 
 #define D32(object, offset) (*(uint32_t *)((uint8_t *)(object) + (offset)))
 #define PTR(object, offset) (*(void **)((uint8_t *)(object) + (offset)))
@@ -272,8 +273,8 @@ void TC fs98_options_flight_video_select(void *object)
 {
     uint8_t *item;
     D32(VIDEO_DESCRIPTOR(object), 0x28) = (uint32_t)SERVICES->send_message(D32(object, 0x1418), LB_GETCURSEL, 0, 0);
-    item = (uint8_t *)(uintptr_t)(uint32_t)SERVICES->send_message(D32(object, 0x1418), LB_GETITEMDATA,
-                                                                  D32(VIDEO_DESCRIPTOR(object), 0x28), 0);
+    item = (uint8_t *)fs98_ptr(SERVICES->send_message(D32(object, 0x1418), LB_GETITEMDATA,
+                                                                  D32(VIDEO_DESCRIPTOR(object), 0x28), 0));
     SERVICES->set_window_text(AT(object, 0x1440), (char *)item);
     SERVICES->set_window_text(AT(object, 0x14a8), (char *)item + 0x100);
     SERVICES->enable_control(AT(object, 0x1440), (int32_t)D32(item, 0xa04));
@@ -297,8 +298,8 @@ void TC fs98_options_flight_video_populate(void *object)
         index = 0;
         do {
             uint32_t entry = (uint32_t)SERVICES->send_message(D32(object, 0x1418), LB_ADDSTRING, 0,
-                                                              (uint32_t)(uintptr_t)record);
-            SERVICES->send_message(D32(object, 0x1418), LB_SETITEMDATA, entry, (uint32_t)(uintptr_t)record);
+                                                              fs98_handle(record));
+            SERVICES->send_message(D32(object, 0x1418), LB_SETITEMDATA, entry, fs98_handle(record));
             ++index;
             record += RECORD;
         } while (index < (int32_t)D32(VIDEO_DESCRIPTOR(object), 0x2c));
@@ -404,8 +405,8 @@ uint32_t TC fs98_options_flight_video_validate(void *object, uint32_t control)
     for (index = 1; index < sizeof(name); ++index) name[index] = 0;
     SERVICES->get_window_text(AT(object, 0x1440), name, 0xff);
     D32(VIDEO_DESCRIPTOR(object), 0x28) = (uint32_t)SERVICES->send_message(D32(object, 0x1418), LB_GETCURSEL, 0, 0);
-    item = (uint8_t *)(uintptr_t)(uint32_t)SERVICES->send_message(D32(object, 0x1418), LB_GETITEMDATA,
-                                                                  D32(VIDEO_DESCRIPTOR(object), 0x28), 0);
+    item = (uint8_t *)fs98_ptr(SERVICES->send_message(D32(object, 0x1418), LB_GETITEMDATA,
+                                                                  D32(VIDEO_DESCRIPTOR(object), 0x28), 0));
     if (D32(item, 0xa04) == 0) return 0;
     D32(VIDEO_DESCRIPTOR(object), 0x20) = (uint32_t)SERVICES->send_message(D32(object, 0x1530), CB_GETCURSEL, 0, 0);
     D32(VIDEO_DESCRIPTOR(object), 0x24) = D32(object, 0x1a04);

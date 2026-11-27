@@ -31,6 +31,7 @@ rather than the range's minimum (the clamp that follows brings it back).
 """
 import module_flags
 import break_pool
+import break_build_only as bo
 import os
 from pathlib import Path
 import subprocess
@@ -280,7 +281,7 @@ VIDEOS = [
     ('populate-count-once', '        } while (index < (int32_t)D32(VIDEO_DESCRIPTOR(object), 0x2c));', '        } while (index < count);'),
     ('populate-count-signed', '    if (count > 0) {', '    if ((uint32_t)count > 0) {'),
     ('populate-stride', '            record += RECORD;', '            record += RECORD - 8;'),
-    ('populate-item-data', 'LB_SETITEMDATA, entry, (uint32_t)(uintptr_t)record);', 'LB_SETITEMDATA, index, (uint32_t)(uintptr_t)record);'),
+    ('populate-item-data', 'LB_SETITEMDATA, entry, fs98_handle(record));', 'LB_SETITEMDATA, index, fs98_handle(record));'),
     ('populate-pick', 'LB_SETCURSEL, D32(VIDEO_DESCRIPTOR(object), 0x28), 0);', 'LB_SETCURSEL, D32(VIDEO_DESCRIPTOR(object), 0x20), 0);'),
     ('populate-rate', 'CB_SETCURSEL, D32(VIDEO_DESCRIPTOR(object), 0x20), 0);', 'CB_SETCURSEL, D32(VIDEO_DESCRIPTOR(object), 0x28), 0);'),
     ('populate-loop', 'set_checked(AT(object, 0x1948), (int32_t)D32(VIDEO_DESCRIPTOR(object), 0x24));', 'set_checked(AT(object, 0x1948), 1);'),
@@ -387,14 +388,14 @@ LOGBOOK = [
     ('validate-reload-after-check', '    result = ((fs98_options_check_fn)PTR(part, 4))(part);\n    part = ENTRY(object);', '    result = ((fs98_options_check_fn)PTR(part, 4))(part);'),
     ('error-zero', '    if (code == 0) {\n        entry_error_cleanup', '    if (code == 1) {\n        entry_error_cleanup'),
     ('error-date-accepted', 'AT(object, 0x1aa8), D32(part, 8))) target = 0x1199;', 'AT(object, 0x1aa8), D32(part, 8))) target = 0x1198;'),
-    ('error-day-value', '(uint32_t)(uintptr_t)(part + 0x44))) target = 0x1194;', 'D32(part, 0x44))) target = 0x1194;'),
-    ('error-night-value', '(uint32_t)(uintptr_t)(part + 0x58))) target = 0x1196;', 'D32(part, 0x58))) target = 0x1196;'),
+    ('error-day-value', 'fs98_handle(part + 0x44))) target = 0x1194;', 'D32(part, 0x44))) target = 0x1194;'),
+    ('error-night-value', 'fs98_handle(part + 0x58))) target = 0x1196;', 'D32(part, 0x58))) target = 0x1196;'),
     ('error-total', '    } else if (D32(part, 0x6c) == 0x1013) {', '    } else if (D32(part, 0x6c) == 0x1014) {'),
     ('error-total-shows', '        SERVICES->set_sims_text(AT(object, 0x18d0), first.text);\n', ''),
     ('error-total-restores', '        SERVICES->set_sims_text(AT(object, 0x18d0), second.text);\n', ''),
     ('error-total-swapped', '        SERVICES->get_sims_text(AT(object, 0x18d0), &second);\n        SERVICES->window_text_string(AT(object, 0x1b78), &first);',
      '        SERVICES->get_sims_text(AT(object, 0x18d0), &first);\n        SERVICES->window_text_string(AT(object, 0x1b78), &second);'),
-    ('error-instrument-value', '(uint32_t)(uintptr_t)(part + 0x6c))) target = 0x1195;', 'D32(part, 0x6c))) target = 0x1195;'),
+    ('error-instrument-value', 'fs98_handle(part + 0x6c))) target = 0x1195;', 'D32(part, 0x6c))) target = 0x1195;'),
     ('error-destroy-order', "    if (state->live > 1) { state->live = 1; SERVICES->string_destroy(state->second); }\n    if (state->live > 0) { state->live = 0; SERVICES->string_destroy(state->first); }",
      "    if (state->live > 1) { state->live = 1; SERVICES->string_destroy(state->first); }\n    if (state->live > 0) { state->live = 0; SERVICES->string_destroy(state->second); }"),
 ]
@@ -411,7 +412,7 @@ BOOK = [
     ('accept-answer', '        block[0] = 1;', '        block[0] = 2;'),
     ('fill-stride', '++index, book += BOOK)', '++index, book += BOOK - 4)'),
     ('fill-count', 'index < D32(BLOCK(object), 0x1c);', 'index <= D32(BLOCK(object), 0x1c);'),
-    ('fill-data', 'LB_SETITEMDATA, entry, (uint32_t)(uintptr_t)book);', 'LB_SETITEMDATA, index, (uint32_t)(uintptr_t)book);'),
+    ('fill-data', 'LB_SETITEMDATA, entry, fs98_handle(book));', 'LB_SETITEMDATA, index, fs98_handle(book));'),
     ('fill-kept', '    D32(object, 0x10dc) = D32(BLOCK(object), 0x20);', '    D32(object, 0x10dc) = D32(BLOCK(object), 0x1c);'),
     ('show-none', '    if (chosen == -1) {\n        show_cleanup', '    if (chosen == -2) {\n        show_cleanup'),
     ('show-title', 'SERVICES->set_window_text(AT(object, 0x1554), line.text);', 'SERVICES->set_window_text(AT(object, 0x1554), "");'),
@@ -421,7 +422,7 @@ BOOK = [
     ('show-remarks-width', '"%-24s", (const char *)remarks);', '"%-23s", (const char *)remarks);'),
     ('show-short-tab', 'if (SERVICES->text_length((const char *)remarks) < 3)', 'if (SERVICES->text_length((const char *)remarks) < 2)'),
     ('show-time', '"%6s", (const char *)remarks + 0x27);', '"%6s", (const char *)remarks + 0x20);'),
-    ('show-row-data', 'LB_SETITEMDATA, entry, (uint32_t)(uintptr_t)row);', 'LB_SETITEMDATA, entry, (uint32_t)(uintptr_t)line.text);'),
+    ('show-row-data', 'LB_SETITEMDATA, entry, fs98_handle(row));', 'LB_SETITEMDATA, entry, fs98_handle(line.text));'),
     ('show-row-stride', '            row += ROW;', '            row += ROW + 1;'),
     ('show-count-once', '        } while (index < D32(BLOCK(object), 0x48));', '        } while (index < 2);'),
     ('show-empty', '    if (D32(BLOCK(object), 0x48) < 1) {', '    if (D32(BLOCK(object), 0x48) < 2) {'),
@@ -605,7 +606,7 @@ REPLAY = [
     ('error-copy-status', '            D32(BLOCK(object), 0x18) = D32(BLOCK(object), 0x10);', '            D32(BLOCK(object), 0x18) = 1;'),
     ('error-text', '            PTR(BLOCK(object), 0x1c) = value;', '            PTR(BLOCK(object), 0x1c) = "";'),
     ('error-limit', '            D32(BLOCK(object), 0x20) = D32(BLOCK(object), 0xc);', '            D32(BLOCK(object), 0x20) = D32(BLOCK(object), 0x14);'),
-    ('error-block', '(uint32_t)(uintptr_t)((uint8_t *)BLOCK(object) + 0x18)))', '(uint32_t)(uintptr_t)((uint8_t *)BLOCK(object) + 0x10)))'),
+    ('error-block', 'fs98_handle((uint8_t *)BLOCK(object) + 0x18)))', 'fs98_handle((uint8_t *)BLOCK(object) + 0x10)))'),
     ('error-length-target', '                target = 0x119c;', '                target = 0x119d;'),
     ('error-speed-limit', '            D32(BLOCK(object), 0x3c) = 0x64;', '            D32(BLOCK(object), 0x3c) = 0x63;'),
     ('error-speed-edit', 'error_dialog(object, AT(object, 0x16a4),', 'error_dialog(object, AT(object, 0x170c),'),
@@ -640,9 +641,9 @@ DEMO = [
     ('populate-records', '    record = PTR(block, 0x18);', '    record = PTR(block, 0x14);'),
     ('populate-signed', '    if ((int32_t)D32(block, 0x14) > 0) {', '    if (D32(block, 0x14) > 0) {'),
     ('populate-no-test', '    if ((int32_t)D32(block, 0x14) > 0) {', '    if (1) {'),
-    ('populate-add-string', 'LB_ADDSTRING_, 0, (uint32_t)(uintptr_t)record);', 'LB_ADDSTRING_, 0, (uint32_t)(uintptr_t)record + 0x100);'),
-    ('populate-data-index', 'LB_SETITEMDATA_, (uint32_t)at, (uint32_t)(uintptr_t)record);', 'LB_SETITEMDATA_, (uint32_t)index, (uint32_t)(uintptr_t)record);'),
-    ('populate-data-record', 'LB_SETITEMDATA_, (uint32_t)at, (uint32_t)(uintptr_t)record);', 'LB_SETITEMDATA_, (uint32_t)at, 0);'),
+    ('populate-add-string', 'LB_ADDSTRING_, 0, fs98_handle(record));', 'LB_ADDSTRING_, 0, fs98_handle(record) + 0x100);'),
+    ('populate-data-index', 'LB_SETITEMDATA_, (uint32_t)at, fs98_handle(record));', 'LB_SETITEMDATA_, (uint32_t)index, fs98_handle(record));'),
+    ('populate-data-record', 'LB_SETITEMDATA_, (uint32_t)at, fs98_handle(record));', 'LB_SETITEMDATA_, (uint32_t)at, 0);'),
     ('populate-step', '            record += RECORD_SIZE;', '            record += RECORD_SIZE - 4;'),
     ('populate-count-once', '        } while (index < (int32_t)D32(BLOCK(object), 0x14));', '        } while (index < (int32_t)D32(block, 0x14));'),
     ('populate-count-le', '        } while (index < (int32_t)D32(BLOCK(object), 0x14));', '        } while (index <= (int32_t)D32(BLOCK(object), 0x14));'),
@@ -1021,7 +1022,7 @@ KEYS = [
      '        text_cleanup'),
     ('reset-kind', 'D32(device_of(page, CHOSEN(page)), 0) == 0 ? 0xf76b : 0xf76c);', 'D32(device_of(page, 0), 0) == 0 ? 0xf76b : 0xf76c);'),
     ('reset-yes', '    if (block[3] == 0x40) {', '    if (block[3] != 0) {'),
-    ('reset-args', '(WHOLE(page), (uint32_t)(uintptr_t)LIST(page), CHOSEN(page));', '(WHOLE(page), (uint32_t)(uintptr_t)LIST(page), JOYSTICK(page));'),
+    ('reset-args', '(WHOLE(page), fs98_handle(LIST(page)), CHOSEN(page));', '(WHOLE(page), fs98_handle(LIST(page)), JOYSTICK(page));'),
     ('reset-populate', '        fs98_options_keys_populate(page);\n    }\n    text_cleanup', '    }\n    text_cleanup'),
     ('changed-result', '    buttons_off(page);\n    return 0;', '    buttons_off(page);\n    return 1;'),
     ('init-joystick', '    JOYSTICK(page) = 1;', '    JOYSTICK(page) = 0;'),
@@ -1098,18 +1099,11 @@ def one(entry, w):
     w.rec = rec
     root = Path(w.root)
     (root / DIRECTORY).mkdir(parents=True, exist_ok=True)
-    original = (root / f'src/options/options_{unit}.c').read_text()
-    if original.count(before) != 1:
-        raise ValueError(f'{name}: the anchor occurs {original.count(before)} times')
     source = DIRECTORY / f'{name}.c'
     executable = DIRECTORY / f'{name}.exe'
-    (root / source).write_text(original.replace(before, after, 1))
+    (root / source).write_text(mutated(root, name, unit, before, after))
     (root / executable).unlink(missing_ok=True)
-    others = [f'src/options/options_{u}.c' for u in UNITS if u != unit]
-    build = subprocess.run([
-        'i686-w64-mingw32-gcc', *module_flags.FLAGS, '-std=c99', '-O2', '-Wall', '-Wextra', '-Wno-unused', '-Isrc/options', '-o', str(executable),
-        'tools/difftest/optionseventsdiff.c', str(source), *others, '-lntdll'],
-        text=True, capture_output=True, cwd=w.root)
+    build = subprocess.run(compile_argv(unit, name, executable, source), text=True, capture_output=True, cwd=w.root)
     rec['build_exit'] = build.returncode
     if build.returncode:
         return 0, f'{name}: BUILD FAILED (not counted)\n{build.stderr}\n'
@@ -1130,14 +1124,22 @@ def one(entry, w):
     return 0, f'{name}: NOT CAUGHT (exit {run.returncode})\n{output[-600:]}\n'
 
 
-def main():
-    count = int(sys.argv[1]) if len(sys.argv) > 1 else 200
-    global COUNT
-    COUNT = count
-    only = set(sys.argv[2:])
-    if count < 100:
-        raise ValueError('use at least 100 scenarios')
-    DIRECTORY.mkdir(parents=True, exist_ok=True)
+def mutated(root, name, unit, before, after):
+    """The unit's source with the break's one anchor replaced (shared by the wine run and --build-only)."""
+    original = (Path(root) / f'src/options/options_{unit}.c').read_text()
+    if original.count(before) != 1:
+        raise ValueError(f'{name}: the anchor occurs {original.count(before)} times')
+    return original.replace(before, after, 1)
+
+
+def compile_argv(unit, name, executable, source):
+    others = [f'src/options/options_{u}.c' for u in UNITS if u != unit]
+    return [
+        'i686-w64-mingw32-gcc', *module_flags.FLAGS, '-std=c99', '-O2', '-Wall', '-Wextra', '-Wno-unused', '-Isrc/options', '-Iinclude', '-o', str(executable),
+        'tools/difftest/optionseventsdiff.c', str(source), *others, '-lntdll']
+
+
+def all_breaks():
     breaks = [(name, 'events', 'normal', before, after) for name, before, after in EVENTS]
     breaks += [(name, 'objects', 'normal', before, after) for name, before, after in OBJECTS]
     breaks += [(name, 'video', 'normal', before, after) for name, before, after in VIDEO]
@@ -1153,6 +1155,32 @@ def main():
     breaks += [(name, 'controls', 'normal', before, after) for name, before, after in CONTROLS]
     breaks += [(name, 'keys', 'normal', before, after) for name, before, after in KEYS]
     breaks += [(name, unit, 'unwind', before, after) for name, unit, before, after in UNWIND]
+    return breaks
+
+
+def options_case(unit_list, name, unit, before, after):
+    """Case id <list>.<name>, list being the unit's list (or unwind); builds <name>.exe from <name>.c and the 14 units."""
+    def builds(work):
+        return [compile_argv(unit, name, work / f'{name}.exe', work / f'{name}.c')]
+    return bo.Case(f'{unit_list}.{name}', lambda: {f'{name}.c': mutated('.', name, unit, before, after)}, builds, [f'{name}.exe'])
+
+
+def build_only(argv):
+    cases = [options_case('unwind' if mode == 'unwind' else unit, name, unit, before, after) for name, unit, mode, before, after in all_breaks()]
+    return bo.build_only(argv, lambda: (cases, None))
+
+
+def main():
+    if '--build-only' in sys.argv[1:]:
+        return build_only(sys.argv[sys.argv.index('--build-only') + 1:])
+    count = int(sys.argv[1]) if len(sys.argv) > 1 else 200
+    global COUNT
+    COUNT = count
+    only = set(sys.argv[2:])
+    if count < 100:
+        raise ValueError('use at least 100 scenarios')
+    DIRECTORY.mkdir(parents=True, exist_ok=True)
+    breaks = all_breaks()
     if only:
         breaks = [b for b in breaks if b[0] in only]
     results = break_pool.go('options', breaks, one, artifacts=artifacts, pool_bin=POOL_BIN, skip=POOL_SKIP,

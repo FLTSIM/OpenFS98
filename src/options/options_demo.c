@@ -7,6 +7,7 @@
  * block, +0x164c the answer state (1 OK, 2 Cancel). */
 #include "options_internal.h"
 #include "options_unwind.h"
+#include "fs98/arena.h"
 
 #define D32(object, offset) (*(uint32_t *)((uint8_t *)(object) + (offset)))
 #define PTR(object, offset) (*(void **)((uint8_t *)(object) + (offset)))
@@ -101,8 +102,8 @@ void TC fs98_options_demo_populate(void *object)
     record = PTR(block, 0x18);
     if ((int32_t)D32(block, 0x14) > 0) {
         do {
-            int32_t at = SERVICES->send_message(LIST(object), LB_ADDSTRING_, 0, (uint32_t)(uintptr_t)record);
-            SERVICES->send_message(LIST(object), LB_SETITEMDATA_, (uint32_t)at, (uint32_t)(uintptr_t)record);
+            int32_t at = SERVICES->send_message(LIST(object), LB_ADDSTRING_, 0, fs98_handle(record));
+            SERVICES->send_message(LIST(object), LB_SETITEMDATA_, (uint32_t)at, fs98_handle(record));
             ++index;
             record += RECORD_SIZE;
         } while (index < (int32_t)D32(BLOCK(object), 0x14));

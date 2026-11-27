@@ -14,12 +14,6 @@ src/hg2d/hg2d.c 1 0
 src/mdl/mdl_crash.c 1 0
 src/mdl/mdl_image.c 2 0
 src/multip/multip.c 2 5
-src/options/options_book.c 4 0
-src/options/options_demo.c 2 0
-src/options/options_keys.c 12 0
-src/options/options_logbook.c 5 0
-src/options/options_replay.c 2 0
-src/options/options_videos.c 2 0
 src/sim1/sim1.c 0 1
 src/sim1/sim1_internal.h 1 0
 src/sim1/sim1_native.c 3 0

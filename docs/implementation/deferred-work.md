@@ -228,3 +228,7 @@
 - source_spec: `docs/implementation/spec-1-9a-retail-abi-gates-register-wrappers.md`
   summary: Story 1.9e: gate under `FS98_RETAIL_ABI` and convert the other register-carrying families 1.9a left out (SIM1's inline wrappers in `sim1_native.c:73`, HG2D's texture EAX shims `hg2d.c:156` and draw/device entries `hg2d_draw.inc:383`, DYNAMIC's `_dyn_frame` thunk `dynamic.c:393`, CHAIN's ANALYSIS entry `analysis.c:512`, FE's register-shifting wrappers `fe.c:3373`, CONTROLS' entry macros `controls.c:81`, MULTIP's tick shims `multip_tick.inc:113`), then audit and convert the other code that reads registers across calls: MAIN's `ecx`/`edx` globals (`main.c:83-84`, SAVE_ALL/RESTORE_ALL), G3D's (`g3d.c:81-82`), DYNAMIC's asm reads (`dynamic.c:337-352,500`), FE, HG2D's two `.inc` asm sites, MULTIP, SIM1, VIEWS' ftol; then the harness stubs and difftest assertions that expect register values. Size unknown until the audit classifies which uses are contracts.
   evidence: as above (grep survey, not classified).
+
+- source_spec: `docs/implementation/spec-1-8h-options-uses-arena-h.md`
+  summary: Epic 5: the plain `(T *)(uintptr_t)x` casts left in OPTIONS: `options_graphs.c:56`, `options_demo.c:89,118` (118 is the `(void *)(uintptr_t)0xcdcdcdcd` fill test, not an arena pointer), `options_keys.c:337`, `options_runtime.c:363` and `options_controls.c:349-351`.
+  evidence: slice 6c converted only the banned `(uint32_t)(uintptr_t)` casts and the four `(uint8_t *)(uintptr_t)(uint32_t)` reverse casts; the plain casts are not lint-banned.

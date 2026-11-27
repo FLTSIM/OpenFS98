@@ -14,6 +14,7 @@
  * block is at +0x10e0, its part from +0x54 at +0x10dc (options_internal.h). */
 #include "options_internal.h"
 #include "options_unwind.h"
+#include "fs98/arena.h"
 
 #define D32(object, offset) (*(uint32_t *)((uint8_t *)(object) + (offset)))
 #define PTR(object, offset) (*(void **)((uint8_t *)(object) + (offset)))
@@ -167,7 +168,7 @@ void TC fs98_options_logbook_entry_fill(void *object)
             index = 0; offset = 0;
             do {
                 SERVICES->send_message(D32(object, 0x1c68), CB_ADDSTRING, 0,
-                                       (uint32_t)(uintptr_t)((uint8_t *)PTR(part, 0x98) + offset));
+                                       fs98_handle((uint8_t *)PTR(part, 0x98) + offset));
                 part = ENTRY(object);
                 ++index;
                 offset += RECORD;
@@ -263,7 +264,7 @@ uint32_t TC fs98_options_logbook_entry_validate(void *object, uint32_t unused)
     SERVICES->get_window_text(AT(object, 0x1b78), PTR(part, 0x70), (int32_t)D32(part, 0x74));
     D32(ENTRY(object), 0xa0) = (uint32_t)SERVICES->send_message(D32(object, 0x1c68), CB_GETCURSEL, 0, 0);
     SERVICES->send_message(D32(object, 0x1c68), CB_GETLBTEXT, D32(ENTRY(object), 0xa0),
-                           (uint32_t)(uintptr_t)name);
+                           fs98_handle(name));
     name[0x10] = 0;
     out = PTR(ENTRY(object), 0x20);
     for (index = 0; (out[index] = name[index]) != 0; ++index) {}
@@ -317,9 +318,9 @@ FS98_OPTIONS_NOINLINE uint32_t TC fs98_options_logbook_entry_error(void *object,
     } else if (D32(part, 0x30)) {
         if (SERVICES->error_dialog(object, AT(object, 0x1a40), D32(part, 0x30))) target = 0x1198;
     } else if (D32(part, 0x44)) {
-        if (SERVICES->error_dialog(object, AT(object, 0x1be0), (uint32_t)(uintptr_t)(part + 0x44))) target = 0x1194;
+        if (SERVICES->error_dialog(object, AT(object, 0x1be0), fs98_handle(part + 0x44))) target = 0x1194;
     } else if (D32(part, 0x58)) {
-        if (SERVICES->error_dialog(object, AT(object, 0x1b10), (uint32_t)(uintptr_t)(part + 0x58))) target = 0x1196;
+        if (SERVICES->error_dialog(object, AT(object, 0x1b10), fs98_handle(part + 0x58))) target = 0x1196;
     } else if (D32(part, 0x6c) == 0x1013) {
         SERVICES->get_sims_text(AT(object, 0x18d0), &second);
         SERVICES->window_text_string(AT(object, 0x1b78), &first);
@@ -327,7 +328,7 @@ FS98_OPTIONS_NOINLINE uint32_t TC fs98_options_logbook_entry_error(void *object,
         if (SERVICES->error_dialog(object, AT(object, 0x1b78), D32(ENTRY(object), 0x6c))) target = 0x1195;
         SERVICES->set_sims_text(AT(object, 0x18d0), second.text);
     } else if (D32(part, 0x6c)) {
-        if (SERVICES->error_dialog(object, AT(object, 0x1b78), (uint32_t)(uintptr_t)(part + 0x6c))) target = 0x1195;
+        if (SERVICES->error_dialog(object, AT(object, 0x1b78), fs98_handle(part + 0x6c))) target = 0x1195;
     }
     result = focus(object, target);
     entry_error_cleanup(&state.frame);

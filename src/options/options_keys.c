@@ -13,6 +13,7 @@
  * or +0x40), each list's scroll position +0x1b58 and +0x1b5c, the joystick shown +0x1b60. */
 #include "options_internal.h"
 #include "options_unwind.h"
+#include "fs98/arena.h"
 
 #define D32(object, offset) (*(uint32_t *)((uint8_t *)(object) + (offset)))
 #define PTR(object, offset) (*(void **)((uint8_t *)(object) + (offset)))
@@ -102,8 +103,8 @@ FS98_OPTIONS_NOINLINE void TC fs98_options_keys_joystick(void *page, uint32_t jo
         char name[0x34];
         uint32_t *binding;
         SERVICES->host_joystick_name(bindings_of(page, JOYSTICK(page))[index * 2], name, 0x32);
-        message(page, STICK, LB_ADDSTRING_, 0, (uint32_t)(uintptr_t)name);
-        message(page, CHECKS, LB_ADDSTRING_, 0, (uint32_t)(uintptr_t)fs98_options_empty_text);
+        message(page, STICK, LB_ADDSTRING_, 0, fs98_handle(name));
+        message(page, CHECKS, LB_ADDSTRING_, 0, fs98_handle(fs98_options_empty_text));
         SERVICES->check_list_enable(AT(page, 0x19bc), (int32_t)index, 0);
         SERVICES->check_list_set_check(AT(page, 0x19bc), (int32_t)index, -1);
         binding = bindings_of(page, JOYSTICK(page)) + index * 2;
@@ -133,7 +134,7 @@ void TC fs98_options_keys_populate(void *page)
         command_name(page, index, &command);
         message(page, COMMANDS, LB_ADDSTRING_, 0, command);
         SERVICES->host_key_name(bindings_of(page, 0)[index * 2], name, 0x32);
-        message(page, KEYS, LB_ADDSTRING_, 0, (uint32_t)(uintptr_t)name);
+        message(page, KEYS, LB_ADDSTRING_, 0, fs98_handle(name));
     }
     enable(page, 0x18e4, 0);
     SERVICES->set_scroll_range_window(D32(page, 0x1a2c), SB_CTL_, 0, (int32_t)D32(LIST(page), 0) - 1, 1);
@@ -278,7 +279,7 @@ void TC fs98_options_keys_clear(void *page)
     int32_t row = message(page, window, LB_GETCURSEL_, 0, 0);
     if (row == -1) return;
     message(page, window, LB_DELETESTRING_, (uint32_t)row, 0);
-    message(page, window, LB_INSERTSTRING_, (uint32_t)row, (uint32_t)(uintptr_t)fs98_options_empty_text);
+    message(page, window, LB_INSERTSTRING_, (uint32_t)row, fs98_handle(fs98_options_empty_text));
     message(page, window, LB_SETCURSEL_, (uint32_t)row, 0);
     if (window == STICK) {
         SERVICES->check_list_enable(AT(page, 0x19bc), row, 0);
@@ -290,7 +291,7 @@ void TC fs98_options_keys_clear(void *page)
 static void capture_over(void *page, uint32_t window, uint32_t control, int32_t row)
 {
     struct fs98_options_rect rect;
-    message(page, window, LB_GETITEMRECT_, (uint32_t)row, (uint32_t)(uintptr_t)&rect);
+    message(page, window, LB_GETITEMRECT_, (uint32_t)row, fs98_handle(&rect));
     SERVICES->client_to_screen(D32(page, window), &rect.left);
     SERVICES->client_to_screen(D32(page, window), &rect.right);
     SERVICES->screen_to_client(D32(page, 0x20), &rect.left);
@@ -335,7 +336,7 @@ static uint32_t ask(const char *format, const char *binding, uint32_t command)
     char text[0x140];
     uint32_t block[6];
     SERVICES->format_two(text, format, binding, (const char *)(uintptr_t)command);
-    block[0] = 0; block[1] = 0; block[2] = 6; block[3] = 0; block[4] = 1; block[5] = (uint32_t)(uintptr_t)text;
+    block[0] = 0; block[1] = 0; block[2] = 6; block[3] = 0; block[4] = 1; block[5] = fs98_handle(text);
     SERVICES->host_dialog(2, block);
     return block[3] == 2;
 }
@@ -366,7 +367,7 @@ FS98_OPTIONS_NOINLINE void TC fs98_options_keys_key_captured(void *page)
         }
         bindings_of(page, 0)[index * 2] = 0;
         message(page, KEYS, LB_DELETESTRING_, index, 0);
-        message(page, KEYS, LB_INSERTSTRING_, index, (uint32_t)(uintptr_t)fs98_options_empty_text);
+        message(page, KEYS, LB_INSERTSTRING_, index, fs98_handle(fs98_options_empty_text));
         text_cleanup(&state.frame);
         fs98_options_unwind_leave(&state.frame);
     }
@@ -374,7 +375,7 @@ FS98_OPTIONS_NOINLINE void TC fs98_options_keys_key_captured(void *page)
 refresh:
     SERVICES->host_key_name(bindings_of(page, 0)[row * 2], name, 0x32);
     message(page, KEYS, LB_DELETESTRING_, (uint32_t)row, 0);
-    message(page, KEYS, LB_INSERTSTRING_, (uint32_t)row, (uint32_t)(uintptr_t)name);
+    message(page, KEYS, LB_INSERTSTRING_, (uint32_t)row, fs98_handle(name));
     message(page, KEYS, LB_SETCURSEL_, (uint32_t)row, 0);
     SERVICES->set_focus(AT(page, 0x192c));
     SERVICES->show_window(AT(page, 0x1a8c), 0);
@@ -408,7 +409,7 @@ FS98_OPTIONS_NOINLINE void TC fs98_options_keys_stick_captured(void *page)
         }
         bindings_of(page, CHOSEN(page))[index * 2] = 0;
         message(page, STICK, LB_DELETESTRING_, index, 0);
-        message(page, STICK, LB_INSERTSTRING_, index, (uint32_t)(uintptr_t)fs98_options_empty_text);
+        message(page, STICK, LB_INSERTSTRING_, index, fs98_handle(fs98_options_empty_text));
         SERVICES->check_list_enable(AT(page, 0x19bc), (int32_t)index, 0);
         SERVICES->check_list_set_check(AT(page, 0x19bc), (int32_t)index, -1);
         text_cleanup(&state.frame);
@@ -420,7 +421,7 @@ FS98_OPTIONS_NOINLINE void TC fs98_options_keys_stick_captured(void *page)
     }
     SERVICES->host_joystick_name(bindings_of(page, CHOSEN(page))[row * 2], name, 0x32);
     message(page, STICK, LB_DELETESTRING_, (uint32_t)row, 0);
-    message(page, STICK, LB_INSERTSTRING_, (uint32_t)row, (uint32_t)(uintptr_t)name);
+    message(page, STICK, LB_INSERTSTRING_, (uint32_t)row, fs98_handle(name));
     if (bindings_of(page, CHOSEN(page))[row * 2] != 0 && bindings_of(page, CHOSEN(page))[row * 2 + 1] != 2) {
         SERVICES->check_list_enable(AT(page, 0x19bc), row, 1);
         SERVICES->check_list_set_check(AT(page, 0x19bc), row, 0);
@@ -448,11 +449,11 @@ FS98_OPTIONS_NOINLINE void TC fs98_options_keys_reset(void *page)
     SERVICES->string_construct(&text);
     state.live = 1;
     SERVICES->string_load(&text, D32(device_of(page, CHOSEN(page)), 0) == 0 ? 0xf76b : 0xf76c);
-    block[0] = 0; block[1] = 0; block[2] = 0xc0; block[4] = 1; block[5] = (uint32_t)(uintptr_t)text.text;
+    block[0] = 0; block[1] = 0; block[2] = 0xc0; block[4] = 1; block[5] = fs98_handle(text.text);
     block[3] = 0;
     SERVICES->host_dialog(2, block);
     if (block[3] == 0x40) {
-        ((fs98_options_reset_fn)PTR(PART(page), 8))(WHOLE(page), (uint32_t)(uintptr_t)LIST(page), CHOSEN(page));
+        ((fs98_options_reset_fn)PTR(PART(page), 8))(WHOLE(page), fs98_handle(LIST(page)), CHOSEN(page));
         fs98_options_keys_populate(page);
     }
     text_cleanup(&state.frame);

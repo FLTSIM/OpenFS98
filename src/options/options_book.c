@@ -12,6 +12,7 @@
  * text. Every button goes through MAIN's lb_button (block +0x150) and then refreshes. */
 #include "options_internal.h"
 #include "options_unwind.h"
+#include "fs98/arena.h"
 
 #define D32(object, offset) (*(uint32_t *)((uint8_t *)(object) + (offset)))
 #define PTR(object, offset) (*(void **)((uint8_t *)(object) + (offset)))
@@ -116,8 +117,8 @@ void TC fs98_options_book_fill_books(void *object)
     uint32_t index;
     SERVICES->send_message(BOOKS(object), LB_RESETCONTENT, 0, 0);
     for (index = 0; index < D32(BLOCK(object), 0x1c); ++index, book += BOOK) {
-        uint32_t entry = (uint32_t)SERVICES->send_message(BOOKS(object), LB_ADDSTRING, 0, (uint32_t)(uintptr_t)book);
-        SERVICES->send_message(BOOKS(object), LB_SETITEMDATA, entry, (uint32_t)(uintptr_t)book);
+        uint32_t entry = (uint32_t)SERVICES->send_message(BOOKS(object), LB_ADDSTRING, 0, fs98_handle(book));
+        SERVICES->send_message(BOOKS(object), LB_SETITEMDATA, entry, fs98_handle(book));
     }
     SERVICES->send_message(BOOKS(object), LB_SETCURSEL, D32(BLOCK(object), 0x20), 0);
     D32(object, 0x10dc) = D32(BLOCK(object), 0x20);
@@ -195,8 +196,8 @@ FS98_OPTIONS_NOINLINE void TC fs98_options_book_show_book(void *object)
             SERVICES->string_append(&line, buffer);
             {
                 uint32_t entry = (uint32_t)SERVICES->send_message(ROWS(object), LB_ADDSTRING, 0,
-                                                                  (uint32_t)(uintptr_t)line.text);
-                SERVICES->send_message(ROWS(object), LB_SETITEMDATA, entry, (uint32_t)(uintptr_t)row);
+                                                                  fs98_handle(line.text));
+                SERVICES->send_message(ROWS(object), LB_SETITEMDATA, entry, fs98_handle(row));
             }
             ++index;
             row += ROW;
@@ -228,8 +229,8 @@ FS98_OPTIONS_NOINLINE void TC fs98_options_book_show_book(void *object)
         call(object, 7, 0);
     }
     {
-        uint8_t *book = (uint8_t *)(uintptr_t)(uint32_t)SERVICES->send_message(BOOKS(object), LB_GETITEMDATA,
-                                                                                D32(BLOCK(object), 0x20), 0);
+        uint8_t *book = (uint8_t *)fs98_ptr(SERVICES->send_message(BOOKS(object), LB_GETITEMDATA,
+                                                                                D32(BLOCK(object), 0x20), 0));
         SERVICES->enable_control(AT(object, 0x1604), D32(book, 0x120) ? 1 : 0);
     }
     show_cleanup(&state.frame);
@@ -343,7 +344,7 @@ void TC fs98_options_book_rename(void *object)
     SERVICES->get_window_text(AT(object, 0x1554), title, 0x1f);
     chosen = selection(BOOKS(object));
     if (chosen == -1) return;
-    book = (const char *)(uintptr_t)(uint32_t)SERVICES->send_message(BOOKS(object), LB_GETITEMDATA, (uint32_t)chosen, 0);
+    book = (const char *)fs98_ptr(SERVICES->send_message(BOOKS(object), LB_GETITEMDATA, (uint32_t)chosen, 0));
     if (SERVICES->compare_text(title, book) == 0) return;
     D32(BLOCK(object), 0x20) = (uint32_t)chosen;
     SERVICES->copy_text(PTR(BLOCK(object), 0xc), title);

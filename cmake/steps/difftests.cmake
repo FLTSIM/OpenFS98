@@ -349,7 +349,7 @@ ofs_step(difftests
   OUTPUTS bin/options-diff/optionseventsdiff.exe
   COMMANDS
     [==[mkdir -p bin/options-diff]==]
-    [==[i686-w64-mingw32-gcc @MODULE_FLAGS@ -std=c99 -O2 -Wall -Wextra -Werror -o bin/options-diff/optionseventsdiff.exe tools/difftest/optionseventsdiff.c src/options/options_events.c src/options/options_objects.c src/options/options_video.c src/options/options_videos.c src/options/options_logbook.c src/options/options_book.c src/options/options_graphs.c src/options/options_analysis.c src/options/options_replay.c src/options/options_demo.c src/options/options_display.c src/options/options_prefs.c src/options/options_controls.c src/options/options_keys.c -lntdll]==]
+    [==[i686-w64-mingw32-gcc @MODULE_FLAGS@ -std=c99 -O2 -Wall -Wextra -Werror -Iinclude -o bin/options-diff/optionseventsdiff.exe tools/difftest/optionseventsdiff.c src/options/options_events.c src/options/options_objects.c src/options/options_video.c src/options/options_videos.c src/options/options_logbook.c src/options/options_book.c src/options/options_graphs.c src/options/options_analysis.c src/options/options_replay.c src/options/options_demo.c src/options/options_display.c src/options/options_prefs.c src/options/options_controls.c src/options/options_keys.c -lntdll]==]
   )
 
 ofs_step(difftests

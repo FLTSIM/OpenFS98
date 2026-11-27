@@ -30,6 +30,9 @@ behind a lock. The pieces, each Flights' own adapted:
   logged stubs, as `flightseventsdiff.c` does.
 - `tools/options_breaks.py`: src/options/ broken on purpose; only a reported difference
   counts.
+  `python3 -B tools/options_breaks.py --build-only DIR [CASE...]` builds the 859 mutants' `<name>.exe`
+  without wine (Story 1.8 slice 6c) into DIR/`<unit>.<name>`/ (`unwind.<name>` for the 28 unwind breaks)
+  with a `meta.json`; see `docs/tools.md`.
 
 ## The registrations
 

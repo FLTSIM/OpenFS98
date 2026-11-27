@@ -2,7 +2,8 @@
 title: 'Story 1.8, slice 6c: OPTIONS uses arena.h'
 type: 'refactor'
 created: '2026-11-25'
-status: 'ready-for-dev'
+status: 'done'
+baseline_commit: 'd5f6b295f5386967e9b3162da5d51ef3c8c1ee5f'
 route: 'dispatch'
 review_loop_iteration: 0
 context: ['{project-root}/OpenFS98/AGENTS.md', '{project-root}/OpenFS98/docs/implementation/spec-1-8f-main-uses-arena-h.md', '{project-root}/OpenFS98/docs/implementation/spec-1-8g-break-runners-share-build-only.md']
@@ -121,3 +122,27 @@ Spec review (Codex gpt-6.2-sol, 2026-11-25), before approval:
 **Commands:**
 - `python3 -B tools/check_arena.py --self-test`, `python3 -B tools/check_arena.py`, `python3 -B tools/check_arena.py --prior ~/openfs98-verify/p18h/prior.txt` -- expected: pass.
 - `bash ~/openfs98-verify/p18h/gate.sh` -- expected: `GATE PASS`; earlier sets -- expected: `GATE PASS`.
+
+## Implementation Notes
+
+- **Counts:** 27 banned casts and 4 reverse casts converted in six files (each includes `fs98/arena.h`, no `FS98_DATA_IMAGE`); six allowlist rows deleted; reverse casts 22 to 18; the lint, its self-test and `--prior` pass. `-Iinclude` added after `-Werror` in `all.cmake` (OPTIONS_ours.dll), `difftests.cmake` (optionseventsdiff.exe) and the runner argv.
+- **Runner:** `--build-only DIR [CASE...]` on `tools/options_breaks.py` (ids `<unit>.<name>`, 831 normal and 28 unwind, 859; `<name>.exe` plus `meta.json`), sharing `mutated()` and `compile_argv()` with wine mode. Parity: the baseline runner in wine mode with a fake `wine` and a trace-only gcc gave 859 compile records equal (sorted, paths normalised) to the before side's `--build-only` trace. The 859 ids are in `~/openfs98-verify/p18h/cases.txt`.
+- **Step 2:** 11 anchors repaired; seven replacements keep the converted cast (the three logbook error replacements use `D32` and `populate-data-record` uses `0`). `p18h/commute.py` shows for all 859 that converting the old mutated source equals the repaired mutation on the converted source.
+- **Gate:** baseline `d5f6b295` plus step 1's `options_breaks.py` as the only overlay (before); working tree plus `orig/` (after, `diff:139113a8...`); both built at `p18h/root`, serial. `compare.py --require-set p18h` (backup `compare.py.bak-pre-p18h`) via `p18h/gate.sh`: GATE PASS, 1130 artifacts, 321 PEs, 206 objects, 566 replayed units, all 859 mutants identical, no fallback.
+- **Negative checks** (`p18h/negative.sh`, `negative-checks.txt`): OPTIONS.DLL missing, a replay entry removed, a case removed, a case's exe removed, a case renamed, a stray second `--mut` each give GATE FAIL; the unmodified control passes.
+- **Earlier gates:** p18b, p18c, p18d, p18e, p18f, p18g rerun with their recorded commands: all GATE PASS.
+- **Review hardening** (Codex gpt-6.2-sol code review of the slice, gate edits in the p18h blocks of `compare.py`, backups `compare.py.bak-p18h-review`; both sides were rebuilt and rerun afterwards, GATE PASS with `gate-revision.txt` recording the gate files' sha256):
+
+| # | Finding | Verdict | Action |
+|---|---|---|---|
+| 1 | The documented `--build-only` command lacks `-B` | low, fixed | `docs/tools.md` uses `python3 -B`; the runner was not changed (that would change the snapshot) |
+| 2 | A case replaced by a file passes | high, fixed | every case must be a directory of exactly `<name>.exe` and `meta.json` as regular files; a missing digest fails; the count of completed pairs (859 of 859) is checked; negative n7 |
+| 3 | A symmetric exe swap, or a substituted `--cases`, passes | high, fixed | `--trees` loads each snapshot's runner: its ordered ids must equal `cases.txt`; each exe is bound to its side's compile record (argv rebuilt from the runner, mutated-source hash, harness and unit hashes, normalised output hash); negatives n8, n12 |
+| 4 | Manifests trusted, `bin/` not required | high, fixed | both kept `bin/` trees required and rehashed (p18g's walk and `pecheck`), saved digests must agree; negatives n9 (changed OPTIONS.DLL), n10 (deleted trees) |
+| 5 | Equal placeholder replay objects pass | medium, fixed | each of the 16 objects must be a non-empty valid COFF object; each unit's key must come from its logged recipes (DLL link, harness link or both) with the one added `-Iinclude`; negative n11 |
+| 6 | `parity.py` proves argv equality only; an `assert` count | low, fixed | the legacy gcc now logs input hashes; argv and input hashes (the mutated source's included) compared; the count is an explicit failure |
+| 7 | No root inventory around the mutant run; gate revision unrecorded | medium, fixed | `run_side.sh` inventories the populated root just before and after the run and fails on any change; `gate.sh` checks both and records the sha256 of the gate files |
+| 8 | The notes miscount the replacements | low, fixed | seven, as the frozen block says |
+
+Codex found the 27 `fs98_handle` and 4 `fs98_ptr` substitutions correct.
+- Not done: no wine run of the 859 mutants (identical PEs stand in); the fallback runs were not needed.

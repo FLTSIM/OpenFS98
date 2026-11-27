@@ -9,6 +9,7 @@
  * +0x10e0 the block, +0x10e4 and +0x10e8 Cancel and OK once they exist. */
 #include "options_internal.h"
 #include "options_unwind.h"
+#include "fs98/arena.h"
 
 #define D32(object, offset) (*(uint32_t *)((uint8_t *)(object) + (offset)))
 #define PTR(object, offset) (*(void **)((uint8_t *)(object) + (offset)))
@@ -168,14 +169,14 @@ uint32_t TC fs98_options_replay_error(void *object, uint32_t code)
             D32(BLOCK(object), 0x18) = D32(BLOCK(object), 0x10);
             PTR(BLOCK(object), 0x1c) = value;
             D32(BLOCK(object), 0x20) = D32(BLOCK(object), 0xc);
-            if (SERVICES->error_dialog(object, AT(object, 0x170c), (uint32_t)(uintptr_t)((uint8_t *)BLOCK(object) + 0x18)))
+            if (SERVICES->error_dialog(object, AT(object, 0x170c), fs98_handle((uint8_t *)BLOCK(object) + 0x18)))
                 target = 0x119c;
         } else if (D32(block, 0x2c) != 0) {
             SERVICES->format_int(value, "%d", (int32_t)D32(block, 0x30));
             D32(BLOCK(object), 0x34) = D32(BLOCK(object), 0x2c);
             PTR(BLOCK(object), 0x38) = value;
             D32(BLOCK(object), 0x3c) = 0x64;
-            if (SERVICES->error_dialog(object, AT(object, 0x16a4), (uint32_t)(uintptr_t)((uint8_t *)BLOCK(object) + 0x34)))
+            if (SERVICES->error_dialog(object, AT(object, 0x16a4), fs98_handle((uint8_t *)BLOCK(object) + 0x34)))
                 target = 0x119d;
         }
     }

@@ -16,6 +16,9 @@
     __asm__(".text\n.globl _" #entry "\n_" #entry ":\n\t" saves \
             ".rept " #bytes "/4\n\tpushl 4*" #count "+" #bytes "(%esp)\n\t.endr\n\t" \
             "call " symbol "\n\t" restores "ret $" #bytes "\n");
+/* An entry that pops nothing: a plain `ret`, no stack copy (UTIL's rand and rand32, `count` kept for symmetry). */
+#define FS98_ENTRY_NOPOP(entry, symbol, count, saves, restores) \
+    __asm__(".text\n.globl _" #entry "\n_" #entry ":\n\t" saves "call " symbol "\n\t" restores "ret\n");
 #define FS98_KEEP_ALL(entry, symbol, bytes) \
     FS98_ENTRY(entry, symbol, bytes, 3, "pushl %eax\n\tpushl %ecx\n\tpushl %edx\n\t", \
                "popl %edx\n\tpopl %ecx\n\tpopl %eax\n\t")
@@ -27,6 +30,7 @@
     FS98_ENTRY(entry, symbol, bytes, 1, "pushl %edx\n\t", "popl %edx\n\t")
 #define FS98_KEPT(entry, function) entry
 #else
+#define FS98_ENTRY_NOPOP(entry, symbol, count, saves, restores)
 #define FS98_KEEP_ALL(entry, symbol, bytes)
 #define FS98_KEEP_ECX_EDX(entry, symbol, bytes)
 #define FS98_KEEP_ECX(entry, symbol, bytes)

@@ -2,7 +2,7 @@
 title: 'Story 1.9, slice c: UTIL''s register wrappers move onto keep.h'
 type: 'refactor'
 created: '2026-11-28'
-status: 'in-progress'
+status: 'done'
 baseline_commit: 'd4a079d67859a37ec772f7f33c5275c84fb80d76'
 baseline_note: 'HEAD plus the uncommitted 1.9b slice (spec-1-9b), applied in the worktree before implementation'
 route: 'dispatch'
@@ -111,12 +111,12 @@ context: ['{project-root}/OpenFS98/AGENTS.md', '{project-root}/OpenFS98/docs/nat
 ## Tasks & Acceptance
 
 **Execution:**
-- [ ] `include/fs98/keep.h` -- `FS98_ENTRY_NOPOP` and its comment -- the no-pop entries.
-- [ ] `src/util/util_math.c` -- the 31 wrappers onto `keep.h` -- one copy of the macros.
-- [ ] `src/util/util.c` -- `FS98_KEPT` slots, `ENTRY()` deleted -- the AD-4 selector.
-- [ ] `tools/check_keep_entries.py`, `tools/keep_entries.txt` -- UTIL coverage, `c-x87`, `NOPOP`, fixtures -- pins them.
-- [ ] `docs/modules/util.md`, `docs/tools.md`, `docs/implementation/deferred-work.md` -- docs as above.
-- [ ] `~/openfs98-verify/p19c/` -- snapshots, `slots.txt`, `keep_prior.txt`, `gate.sh`, `verify.py`, the presence check, the negatives and the probe.
+- [x] `include/fs98/keep.h` -- `FS98_ENTRY_NOPOP` and its comment -- the no-pop entries.
+- [x] `src/util/util_math.c` -- the 31 wrappers onto `keep.h` -- one copy of the macros.
+- [x] `src/util/util.c` -- `FS98_KEPT` slots, `ENTRY()` deleted -- the AD-4 selector.
+- [x] `tools/check_keep_entries.py`, `tools/keep_entries.txt` -- UTIL coverage, `c-x87`, `NOPOP`, fixtures -- pins them.
+- [x] `docs/modules/util.md`, `docs/tools.md`, `docs/implementation/deferred-work.md` -- docs as above.
+- [x] `~/openfs98-verify/p19c/` -- snapshots, `slots.txt`, `keep_prior.txt`, `gate.sh`, `verify.py`, the presence check, the negatives and the probe.
 
 **Acceptance Criteria:**
 - **Lint:** given the after tree, when `check_keep_entries.py --prior p19c/keep_prior.txt` runs, then it reports `46 entries (39 c, 4 c-asm, 1 thunk-out, 2 thunk-in)` and its thunk count, and exits 0.

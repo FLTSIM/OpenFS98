@@ -1,27 +1,65 @@
-# Story 1.9b: every keep.h entry (and HG2D's raw FS98_ENTRY), pinned by tools/check_keep_entries.py.
-# Entry rows:  file|macro|entry|symbol|args|kept|target|class|body
-#   macro  FS98_KEEP_* or FS98_ENTRY;  args  the arguments after entry and symbol, whitespace-normalised, joined with ", "
+# Stories 1.9b, 1.9c: every keep.h entry (and HG2D's raw FS98_ENTRY), pinned by tools/check_keep_entries.py.
+# Entry rows:  file|macro|entry|symbol|args|kept|target|class|body|bindfile|slot
+#   macro  FS98_KEEP_*, FS98_ENTRY or FS98_ENTRY_NOPOP;  args  the arguments after entry and symbol, whitespace-normalised, joined with ", "
 #   kept   the FS98_KEPT(entry, function) binding, "entry->function";  target  that function
 #   class  c            the target is a C function with no asm: the wrapper only preserves registers for retail's callers
+#          c-asm        a class c target whose body holds only the asm statements pinned by its asm rows (below)
 #          thunk-out    the target is an asm thunk that reads no register input (it returns a flag)
 #          thunk-in:REG the target is an asm thunk that reads REG on entry (a 1.9e row); these rows may only shrink
 #   body   the C definition that must hold no asm: the target itself for class c, else the function the thunk calls
+#   bindfile, slot  src/util/ rows only: the file whose Linkage binds the entry through FS98_KEPT, and the byte offset it must sit at (else empty)
 # Thunk rows:  thunk|label|asm   the label's instructions in the preprocessed unit, ";"-separated, whitespace-normalised
-src/hg2d/hg2d.c|FS98_ENTRY|draw_depth_point_entry|"_draw_depth_point@16"|16, 0, "", "movl 12(%esp), %ecx\n\t"|draw_depth_point_entry->draw_depth_point|draw_depth_point|c|draw_depth_point
-src/hg2d/hg2d.c|FS98_KEEP_EDX|colour_convert_entry|"_colour_convert@12"|12|colour_convert_entry->colour_convert|colour_convert|c|colour_convert
-src/hg2d/hg2d.c|FS98_KEEP_ECX_EDX|palette_select_entry|"_palette_select"|4|palette_select_entry->palette_select|palette_select|thunk-out|palette_select_body
-src/hg2d/hg2d.c|FS98_KEEP_EDX|colour_remap_entry|"_colour_remap"|8|colour_remap_entry->colour_remap|colour_remap|thunk-in:eax|colour_remap_body
-src/hg2d/hg2d.c|FS98_KEEP_EDX|texture_create_entry|"_texture_create@8"|8|texture_create_entry->texture_create|texture_create|c|texture_create
-src/hg2d/hg2d.c|FS98_KEEP_EDX|texture_pixels_entry|"_texture_pixels@4"|4|texture_pixels_entry->texture_pixels|texture_pixels|c|texture_pixels
-src/atc/atc.c|FS98_KEEP_ALL|atc_atis_entry|"_atc_atis@4"|4|atc_atis_entry->atc_atis|atc_atis|c|atc_atis
-src/atc/atc.c|FS98_KEEP_ALL|atc_clear_entry|"_atc_clear"|0|atc_clear_entry->atc_clear|atc_clear|c|atc_clear
-src/numeric/numeric.c|FS98_KEEP_ECX|numeric_format_entry|"_fs98_numeric_format@12"|12|numeric_format_entry->fs98_numeric_format|fs98_numeric_format|c|fs98_numeric_format
-src/numeric/numeric.c|FS98_KEEP_ECX|numeric_parse_entry|"_fs98_numeric_parse@12"|12|numeric_parse_entry->fs98_numeric_parse|fs98_numeric_parse|c|fs98_numeric_parse
-src/numeric/numeric.c|FS98_KEEP_ECX|numeric_parse_internal_entry|"_fs98_numeric_parse_internal@16"|16|numeric_parse_internal_entry->fs98_numeric_parse_internal|fs98_numeric_parse_internal|c|fs98_numeric_parse_internal
-src/main/main.c|FS98_KEEP_EDX|clouds_textures_entry|"_clouds_textures@0"|0|clouds_textures_entry->clouds_textures|clouds_textures|c|clouds_textures
-src/main/main.c|FS98_KEEP_ECX_EDX|nav_eye_entry|"_nav_eye@4"|4|nav_eye_entry->nav_eye|nav_eye|c|nav_eye
-src/weatherm/weatherm.c|FS98_KEEP_EDX|wx_reset_entry|"_wx_reset"|0|wx_reset_entry->wx_reset|wx_reset|c|wx_reset
-src/dynamic/dynamic.c|FS98_KEEP_EDX|dyn_frame_entry|"_dyn_frame"|0|dyn_frame_entry->dyn_frame|dyn_frame|thunk-in:ecx|dyn_frame_ecx
+# Asm rows:    asm|target|n|kind|statement   the n-th asm statement of a c-asm body, canonical: `template : outputs : inputs : clobbers`; kind x87 or image-end
+src/hg2d/hg2d.c|FS98_ENTRY|draw_depth_point_entry|"_draw_depth_point@16"|16, 0, "", "movl 12(%esp), %ecx\n\t"|draw_depth_point_entry->draw_depth_point|draw_depth_point|c|draw_depth_point||
+src/hg2d/hg2d.c|FS98_KEEP_EDX|colour_convert_entry|"_colour_convert@12"|12|colour_convert_entry->colour_convert|colour_convert|c|colour_convert||
+src/hg2d/hg2d.c|FS98_KEEP_ECX_EDX|palette_select_entry|"_palette_select"|4|palette_select_entry->palette_select|palette_select|thunk-out|palette_select_body||
+src/hg2d/hg2d.c|FS98_KEEP_EDX|colour_remap_entry|"_colour_remap"|8|colour_remap_entry->colour_remap|colour_remap|thunk-in:eax|colour_remap_body||
+src/hg2d/hg2d.c|FS98_KEEP_EDX|texture_create_entry|"_texture_create@8"|8|texture_create_entry->texture_create|texture_create|c|texture_create||
+src/hg2d/hg2d.c|FS98_KEEP_EDX|texture_pixels_entry|"_texture_pixels@4"|4|texture_pixels_entry->texture_pixels|texture_pixels|c|texture_pixels||
+src/atc/atc.c|FS98_KEEP_ALL|atc_atis_entry|"_atc_atis@4"|4|atc_atis_entry->atc_atis|atc_atis|c|atc_atis||
+src/atc/atc.c|FS98_KEEP_ALL|atc_clear_entry|"_atc_clear"|0|atc_clear_entry->atc_clear|atc_clear|c|atc_clear||
+src/numeric/numeric.c|FS98_KEEP_ECX|numeric_format_entry|"_fs98_numeric_format@12"|12|numeric_format_entry->fs98_numeric_format|fs98_numeric_format|c|fs98_numeric_format||
+src/numeric/numeric.c|FS98_KEEP_ECX|numeric_parse_entry|"_fs98_numeric_parse@12"|12|numeric_parse_entry->fs98_numeric_parse|fs98_numeric_parse|c|fs98_numeric_parse||
+src/numeric/numeric.c|FS98_KEEP_ECX|numeric_parse_internal_entry|"_fs98_numeric_parse_internal@16"|16|numeric_parse_internal_entry->fs98_numeric_parse_internal|fs98_numeric_parse_internal|c|fs98_numeric_parse_internal||
+src/main/main.c|FS98_KEEP_EDX|clouds_textures_entry|"_clouds_textures@0"|0|clouds_textures_entry->clouds_textures|clouds_textures|c|clouds_textures||
+src/main/main.c|FS98_KEEP_ECX_EDX|nav_eye_entry|"_nav_eye@4"|4|nav_eye_entry->nav_eye|nav_eye|c|nav_eye||
+src/weatherm/weatherm.c|FS98_KEEP_EDX|wx_reset_entry|"_wx_reset"|0|wx_reset_entry->wx_reset|wx_reset|c|wx_reset||
+src/dynamic/dynamic.c|FS98_KEEP_EDX|dyn_frame_entry|"_dyn_frame"|0|dyn_frame_entry->dyn_frame|dyn_frame|thunk-in:ecx|dyn_frame_ecx||
 thunk|_palette_select|pushl 4(%esp); call _palette_select_body@4; btl $0,_hg2d_palette_changed; ret $4
 thunk|_colour_remap|pushl %eax; pushl 12(%esp); pushl 12(%esp); call _colour_remap_body@12; ret $8
 thunk|_dyn_frame|pushl %ecx; call _dyn_frame_ecx; addl $4, %esp; ret
+src/util/util_math.c|FS98_KEEP_ECX_EDX|fs98_util_sqrt64_entry|"_fs98_util_sqrt64@4"|4|fs98_util_sqrt64_entry->fs98_util_sqrt64|fs98_util_sqrt64|c|fs98_util_sqrt64|src/util/util.c|0x18
+src/util/util_math.c|FS98_KEEP_ECX_EDX|fs98_util_sqrt32_entry|"_fs98_util_sqrt32@4"|4|fs98_util_sqrt32_entry->fs98_util_sqrt32|fs98_util_sqrt32|c-asm|fs98_util_sqrt32|src/util/util.c|0x1c
+src/util/util_math.c|FS98_KEEP_ECX_EDX|fs98_util_sqrt16_entry|"_fs98_util_sqrt16@4"|4|fs98_util_sqrt16_entry->fs98_util_sqrt16|fs98_util_sqrt16|c-asm|fs98_util_sqrt16|src/util/util.c|0x20
+src/util/util_math.c|FS98_KEEP_ALL|fs98_util_mul48_s16_entry|"_fs98_util_mul48_s16@12"|12|fs98_util_mul48_s16_entry->fs98_util_mul48_s16|fs98_util_mul48_s16|c|fs98_util_mul48_s16|src/util/util.c|0x24
+src/util/util_math.c|FS98_ENTRY|fs98_util_hypot_entry|"_fs98_util_hypot@8"|8, 1, "pushl %ecx\n\t", "popl %ecx\n\txorl %edx, %edx\n\t"|fs98_util_hypot_entry->fs98_util_hypot|fs98_util_hypot|c|fs98_util_hypot|src/util/util.c|0x28
+src/util/util_math.c|FS98_KEEP_ALL|fs98_util_sincos_entry|"_fs98_util_sincos@12"|12|fs98_util_sincos_entry->fs98_util_sincos|fs98_util_sincos|c|fs98_util_sincos|src/util/util.c|0x2c
+src/util/util_math.c|FS98_KEEP_ALL|fs98_util_div48_u16_entry|"_fs98_util_div48_u16@12"|12|fs98_util_div48_u16_entry->fs98_util_div48_u16|fs98_util_div48_u16|c|fs98_util_div48_u16|src/util/util.c|0x30
+src/util/util_math.c|FS98_KEEP_ALL|fs98_util_rotate2d_entry|"_fs98_util_rotate2d@24"|24|fs98_util_rotate2d_entry->fs98_util_rotate2d|fs98_util_rotate2d|c|fs98_util_rotate2d|src/util/util.c|0x34
+src/util/util_math.c|FS98_KEEP_ECX_EDX|fs98_util_angle_from_sin_entry|"_fs98_util_angle_from_sin@8"|8|fs98_util_angle_from_sin_entry->fs98_util_angle_from_sin|fs98_util_angle_from_sin|c|fs98_util_angle_from_sin|src/util/util.c|0x38
+src/util/util_math.c|FS98_KEEP_ECX_EDX|fs98_util_atan2_entry|"_fs98_util_atan2@8"|8|fs98_util_atan2_entry->fs98_util_atan2|fs98_util_atan2|c|fs98_util_atan2|src/util/util.c|0x3c
+src/util/util_math.c|FS98_KEEP_ALL|fs98_util_metres32_to_longitude_entry|"_fs98_util_metres32_to_longitude@12"|12|fs98_util_metres32_to_longitude_entry->fs98_util_metres32_to_longitude|fs98_util_metres32_to_longitude|c|fs98_util_metres32_to_longitude|src/util/util.c|0x40
+src/util/util_math.c|FS98_KEEP_ALL|fs98_util_metres_to_longitude_entry|"_fs98_util_metres_to_longitude@12"|12|fs98_util_metres_to_longitude_entry->fs98_util_metres_to_longitude|fs98_util_metres_to_longitude|c|fs98_util_metres_to_longitude|src/util/util.c|0x44
+src/util/util_math.c|FS98_KEEP_ALL|fs98_util_longitude_to_metres_entry|"_fs98_util_longitude_to_metres@12"|12|fs98_util_longitude_to_metres_entry->fs98_util_longitude_to_metres|fs98_util_longitude_to_metres|c|fs98_util_longitude_to_metres|src/util/util.c|0x48
+src/util/util_math.c|FS98_KEEP_ALL|fs98_util_rotate3d_entry|"_fs98_util_rotate3d@12"|12|fs98_util_rotate3d_entry->fs98_util_rotate3d|fs98_util_rotate3d|c|fs98_util_rotate3d|src/util/util.c|0x4c
+src/util/util_math.c|FS98_KEEP_ALL|fs98_util_unpack_position_entry|"_fs98_util_unpack_position@8"|8|fs98_util_unpack_position_entry->fs98_util_unpack_position|fs98_util_unpack_position|c|fs98_util_unpack_position|src/util/util.c|0x60
+src/util/util_math.c|FS98_KEEP_ALL|fs98_util_range_and_bearing48_entry|"_fs98_util_range_and_bearing48@24"|24|fs98_util_range_and_bearing48_entry->fs98_util_range_and_bearing48|fs98_util_range_and_bearing48|c|fs98_util_range_and_bearing48|src/util/util.c|0x64
+src/util/util_math.c|FS98_KEEP_ALL|fs98_util_range_and_bearing_entry|"_fs98_util_range_and_bearing@20"|20|fs98_util_range_and_bearing_entry->fs98_util_range_and_bearing|fs98_util_range_and_bearing|c|fs98_util_range_and_bearing|src/util/util.c|0x68
+src/util/util_math.c|FS98_ENTRY_NOPOP|fs98_util_rand_entry|"_fs98_util_rand@0"|0, "pushl %ecx\n\tpushl %edx\n\t", "popl %edx\n\tpopl %ecx\n\t"|fs98_util_rand_entry->fs98_util_rand|fs98_util_rand|c|fs98_util_rand|src/util/util.c|0x6c
+src/util/util_math.c|FS98_ENTRY_NOPOP|fs98_util_rand32_entry|"_fs98_util_rand32@0"|0, "pushl %ecx\n\tpushl %edx\n\t", "popl %edx\n\tpopl %ecx\n\t"|fs98_util_rand32_entry->fs98_util_rand32|fs98_util_rand32|c|fs98_util_rand32|src/util/util.c|0x70
+src/util/util_math.c|FS98_ENTRY|fs98_util_v48_add_entry|"_fs98_util_v48_add@12"|12, 0, "", "movl 4(%esp), %eax\n\tmovl 0x14(%eax), %eax\n\tmovl 8(%esp), %ecx\n\tmovl 12(%esp), %edx\n\t"|fs98_util_v48_add_entry->fs98_util_v48_add|fs98_util_v48_add|c|fs98_util_v48_add|src/util/util.c|0x74
+src/util/util_math.c|FS98_ENTRY|fs98_util_v48_sub_entry|"_fs98_util_v48_sub@12"|12, 0, "", "movl 4(%esp), %eax\n\tmovl 0x14(%eax), %eax\n\tmovl 8(%esp), %ecx\n\tmovl 12(%esp), %edx\n\t"|fs98_util_v48_sub_entry->fs98_util_v48_sub|fs98_util_v48_sub|c|fs98_util_v48_sub|src/util/util.c|0x78
+src/util/util_math.c|FS98_ENTRY|fs98_util_copy24_entry|"_fs98_util_copy24@8"|8, 2, "pushl %eax\n\tpushl %edx\n\t", "popl %edx\n\tpopl %eax\n\txorl %ecx, %ecx\n\t"|fs98_util_copy24_entry->fs98_util_copy24|fs98_util_copy24|c|fs98_util_copy24|src/util/util.c|0x7c
+src/util/util_math.c|FS98_ENTRY|fs98_util_v48_equal_entry|"_fs98_util_v48_equal@8"|8, 0, "", "movl 4(%esp), %ecx\n\tmovl 8(%esp), %edx\n\t"|fs98_util_v48_equal_entry->fs98_util_v48_equal|fs98_util_v48_equal|c|fs98_util_v48_equal|src/util/util.c|0x80
+src/util/util_math.c|FS98_ENTRY|fs98_util_shr48_entry|"_fs98_util_shr48@12"|12, 0, "", "movl 4(%esp), %eax\n\tmovzwl 2(%eax), %edx\n\tmovl 4(%eax), %eax\n\tmovl 12(%esp), %ecx\n\t"|fs98_util_shr48_entry->fs98_util_shr48|fs98_util_shr48|c|fs98_util_shr48|src/util/util.c|0x84
+src/util/util_math.c|FS98_KEEP_ALL|fs98_util_marshal_entry|"_fs98_util_marshal@12"|12|fs98_util_marshal_entry->fs98_util_marshal|fs98_util_marshal|c|fs98_util_marshal|src/util/util.c|0x88
+src/util/util_math.c|FS98_KEEP_ECX_EDX|fs98_util_double_to_int_entry|"_fs98_util_double_to_int@8"|8|fs98_util_double_to_int_entry->fs98_util_double_to_int|fs98_util_double_to_int|c-asm|fs98_util_double_to_int|src/util/util.c|0xb0
+src/util/util_math.c|FS98_KEEP_ECX_EDX|fs98_util_double_to_int64_low_entry|"_fs98_util_double_to_int64_low@8"|8|fs98_util_double_to_int64_low_entry->fs98_util_double_to_int64_low|fs98_util_double_to_int64_low|c-asm|fs98_util_double_to_int64_low|src/util/util.c|0xb4
+src/util/util_math.c|FS98_ENTRY|fs98_util_double_to_fixed48_entry|"_fs98_util_double_to_fixed48@8"|8, 1, "pushl %ecx\n\t", "popl %ecx\n\t"|fs98_util_double_to_fixed48_entry->fs98_util_double_to_fixed48|fs98_util_double_to_fixed48|c|fs98_util_double_to_fixed48|src/util/util.c|0xbc
+src/util/util_math.c|FS98_ENTRY|fs98_util_fixed48_to_double_entry|"_fs98_util_fixed48_to_double@8"|8, 0, "", "movl 8(%esp), %eax\n\tmovl 4(%eax), %ecx\n\tmovzwl 2(%eax), %edx\n\tmovl 4(%esp), %eax\n\t"|fs98_util_fixed48_to_double_entry->fs98_util_fixed48_to_double|fs98_util_fixed48_to_double|c|fs98_util_fixed48_to_double|src/util/util.c|0xc0
+src/util/util_math.c|FS98_ENTRY|fs98_util_double_to_fixed48_signed_entry|"_fs98_util_double_to_fixed48_signed@8"|8, 1, "pushl %ecx\n\t", "popl %ecx\n\t"|fs98_util_double_to_fixed48_signed_entry->fs98_util_double_to_fixed48_signed|fs98_util_double_to_fixed48_signed|c|fs98_util_double_to_fixed48_signed|src/util/util.c|0xc4
+src/util/util_math.c|FS98_ENTRY|fs98_util_fixed48_to_double_signed_entry|"_fs98_util_fixed48_to_double_signed@8"|8, 0, "", "movl 8(%esp), %eax\n\tmovl 4(%eax), %edx\n\tmovl 4(%esp), %ecx\n\t"|fs98_util_fixed48_to_double_signed_entry->fs98_util_fixed48_to_double_signed|fs98_util_fixed48_to_double_signed|c|fs98_util_fixed48_to_double_signed|src/util/util.c|0xc8
+asm|fs98_util_sqrt16|1|x87|fildl %1; fsqrt; fistpl %0 : "=m" ( r ) : "m" ( t ) : "st"
+asm|fs98_util_sqrt32|1|image-end|.set %c0_end, %c0 + %c1 : ~ : "i" ( & ( fs98_util_data ) ) , "i" ( sizeof ( fs98_util_data ) ) : ~
+asm|fs98_util_double_to_int|1|x87|fldl %1; fistpl %0 : "=m" ( r ) : "m" ( v ) : "st"
+asm|fs98_util_double_to_int64_low|1|x87|fldl %1; fistpll %0 : "=m" ( r ) : "m" ( v ) : "st"

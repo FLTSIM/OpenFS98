@@ -490,18 +490,10 @@ uint32_t FS98_STDCALL fs98_util_rand(void)
  */
 /* Retail's two draws touch only eax and save edx, and MAIN's radios keep their course
  * in cx across +0x6c, so the slots preserve ecx and edx. */
-#include "fs98/retail_abi.h"
+#include "fs98/keep.h"
 #if defined(FS98_RETAIL_ABI)
-__asm__(".text\n.globl _fs98_util_rand_entry\n"
-        "_fs98_util_rand_entry:\n\t"
-        "pushl %ecx\n\tpushl %edx\n\t"
-        "call _fs98_util_rand@0\n\t"
-        "popl %edx\n\tpopl %ecx\n\tret\n"
-        ".globl _fs98_util_rand32_entry\n"
-        "_fs98_util_rand32_entry:\n\t"
-        "pushl %ecx\n\tpushl %edx\n\t"
-        "call _fs98_util_rand32@0\n\t"
-        "popl %edx\n\tpopl %ecx\n\tret\n");
+FS98_ENTRY_NOPOP(fs98_util_rand_entry, "_fs98_util_rand@0", 0, "pushl %ecx\n\tpushl %edx\n\t", "popl %edx\n\tpopl %ecx\n\t")
+FS98_ENTRY_NOPOP(fs98_util_rand32_entry, "_fs98_util_rand32@0", 0, "pushl %ecx\n\tpushl %edx\n\t", "popl %edx\n\tpopl %ecx\n\t")
 #endif
 
 uint32_t FS98_STDCALL fs98_util_rand32(void)
@@ -1645,82 +1637,53 @@ void FS98_STDCALL fs98_util_marshal(const void *source, const void *descriptors,
  * WINDOW's code reads back; callers reach +0x5c through the stub above.
  */
 #if defined(FS98_RETAIL_ABI)
-#define ENTRY_NAME(name) ".text\n.globl _" #name "_entry\n_" #name "_entry:\n\t"
-#define KEEP_ALL(name, bytes) \
-    __asm__(ENTRY_NAME(name) "pushl %eax\n\tpushl %ecx\n\tpushl %edx\n\t" \
-            ".rept " #bytes "/4\n\tpushl 12+" #bytes "(%esp)\n\t.endr\n\t" \
-            "call _" #name "@" #bytes "\n\t" \
-            "popl %edx\n\tpopl %ecx\n\tpopl %eax\n\tret $" #bytes "\n");
-#define KEEP_ECX_EDX(name, bytes) \
-    __asm__(ENTRY_NAME(name) "pushl %ecx\n\tpushl %edx\n\t" \
-            ".rept " #bytes "/4\n\tpushl 8+" #bytes "(%esp)\n\t.endr\n\t" \
-            "call _" #name "@" #bytes "\n\t" \
-            "popl %edx\n\tpopl %ecx\n\tret $" #bytes "\n");
-
-KEEP_ECX_EDX(fs98_util_sqrt64, 4)
-KEEP_ECX_EDX(fs98_util_sqrt32, 4)
-KEEP_ECX_EDX(fs98_util_sqrt16, 4)
-KEEP_ALL(fs98_util_mul48_s16, 12)
-KEEP_ALL(fs98_util_sincos, 12)
-KEEP_ALL(fs98_util_div48_u16, 12)
-KEEP_ALL(fs98_util_rotate2d, 24)
-KEEP_ECX_EDX(fs98_util_angle_from_sin, 8)
-KEEP_ECX_EDX(fs98_util_atan2, 8)
-KEEP_ALL(fs98_util_metres32_to_longitude, 12)
-KEEP_ALL(fs98_util_metres_to_longitude, 12)
-KEEP_ALL(fs98_util_longitude_to_metres, 12)
-KEEP_ALL(fs98_util_rotate3d, 12)
-KEEP_ALL(fs98_util_unpack_position, 8)
-KEEP_ALL(fs98_util_range_and_bearing48, 24)
-KEEP_ALL(fs98_util_range_and_bearing, 20)
-KEEP_ALL(fs98_util_marshal, 12)
-KEEP_ECX_EDX(fs98_util_double_to_int, 8)
-KEEP_ECX_EDX(fs98_util_double_to_int64_low, 8)
+FS98_KEEP_ECX_EDX(fs98_util_sqrt64_entry, "_fs98_util_sqrt64@4", 4)
+FS98_KEEP_ECX_EDX(fs98_util_sqrt32_entry, "_fs98_util_sqrt32@4", 4)
+FS98_KEEP_ECX_EDX(fs98_util_sqrt16_entry, "_fs98_util_sqrt16@4", 4)
+FS98_KEEP_ALL(fs98_util_mul48_s16_entry, "_fs98_util_mul48_s16@12", 12)
+FS98_KEEP_ALL(fs98_util_sincos_entry, "_fs98_util_sincos@12", 12)
+FS98_KEEP_ALL(fs98_util_div48_u16_entry, "_fs98_util_div48_u16@12", 12)
+FS98_KEEP_ALL(fs98_util_rotate2d_entry, "_fs98_util_rotate2d@24", 24)
+FS98_KEEP_ECX_EDX(fs98_util_angle_from_sin_entry, "_fs98_util_angle_from_sin@8", 8)
+FS98_KEEP_ECX_EDX(fs98_util_atan2_entry, "_fs98_util_atan2@8", 8)
+FS98_KEEP_ALL(fs98_util_metres32_to_longitude_entry, "_fs98_util_metres32_to_longitude@12", 12)
+FS98_KEEP_ALL(fs98_util_metres_to_longitude_entry, "_fs98_util_metres_to_longitude@12", 12)
+FS98_KEEP_ALL(fs98_util_longitude_to_metres_entry, "_fs98_util_longitude_to_metres@12", 12)
+FS98_KEEP_ALL(fs98_util_rotate3d_entry, "_fs98_util_rotate3d@12", 12)
+FS98_KEEP_ALL(fs98_util_unpack_position_entry, "_fs98_util_unpack_position@8", 8)
+FS98_KEEP_ALL(fs98_util_range_and_bearing48_entry, "_fs98_util_range_and_bearing48@24", 24)
+FS98_KEEP_ALL(fs98_util_range_and_bearing_entry, "_fs98_util_range_and_bearing@20", 20)
+FS98_KEEP_ALL(fs98_util_marshal_entry, "_fs98_util_marshal@12", 12)
+FS98_KEEP_ECX_EDX(fs98_util_double_to_int_entry, "_fs98_util_double_to_int@8", 8)
+FS98_KEEP_ECX_EDX(fs98_util_double_to_int64_low_entry, "_fs98_util_double_to_int64_low@8", 8)
 
 /* +0x28: edx is the high half of a square that always fits in eax. */
-__asm__(ENTRY_NAME(fs98_util_hypot) "pushl %ecx\n\tpushl 12(%esp)\n\tpushl 12(%esp)\n\t"
-        "call _fs98_util_hypot@8\n\tpopl %ecx\n\txorl %edx, %edx\n\tret $8\n");
+FS98_ENTRY(fs98_util_hypot_entry, "_fs98_util_hypot@8", 8, 1, "pushl %ecx\n\t", "popl %ecx\n\txorl %edx, %edx\n\t")
 
 /* +0x80: ecx and edx hold the operands. */
-__asm__(ENTRY_NAME(fs98_util_v48_equal) "pushl 8(%esp)\n\tpushl 8(%esp)\n\t"
-        "call _fs98_util_v48_equal@8\n\t"
-        "movl 4(%esp), %ecx\n\tmovl 8(%esp), %edx\n\tret $8\n");
+FS98_ENTRY(fs98_util_v48_equal_entry, "_fs98_util_v48_equal@8", 8, 0, "", "movl 4(%esp), %ecx\n\tmovl 8(%esp), %edx\n\t")
 
 /* +0x74, +0x78: ecx and edx hold the operands, eax the last high dword stored. */
-#define V48_ENTRY(name) \
-    __asm__(ENTRY_NAME(name) "pushl 12(%esp)\n\tpushl 12(%esp)\n\tpushl 12(%esp)\n\t" \
-            "call _" #name "@12\n\t" \
-            "movl 4(%esp), %eax\n\tmovl 0x14(%eax), %eax\n\t" \
-            "movl 8(%esp), %ecx\n\tmovl 12(%esp), %edx\n\tret $12\n");
-V48_ENTRY(fs98_util_v48_add)
-V48_ENTRY(fs98_util_v48_sub)
+FS98_ENTRY(fs98_util_v48_add_entry, "_fs98_util_v48_add@12", 12, 0, "",
+           "movl 4(%esp), %eax\n\tmovl 0x14(%eax), %eax\n\tmovl 8(%esp), %ecx\n\tmovl 12(%esp), %edx\n\t")
+FS98_ENTRY(fs98_util_v48_sub_entry, "_fs98_util_v48_sub@12", 12, 0, "",
+           "movl 4(%esp), %eax\n\tmovl 0x14(%eax), %eax\n\tmovl 8(%esp), %ecx\n\tmovl 12(%esp), %edx\n\t")
 
 /* +0x7c: rep movs runs ecx to zero. */
-__asm__(ENTRY_NAME(fs98_util_copy24) "pushl %eax\n\tpushl %edx\n\t"
-        "pushl 16(%esp)\n\tpushl 16(%esp)\n\t"
-        "call _fs98_util_copy24@8\n\t"
-        "popl %edx\n\tpopl %eax\n\txorl %ecx, %ecx\n\tret $8\n");
+FS98_ENTRY(fs98_util_copy24_entry, "_fs98_util_copy24@8", 8, 2, "pushl %eax\n\tpushl %edx\n\t", "popl %edx\n\tpopl %eax\n\txorl %ecx, %ecx\n\t")
 
 /* +0x84: ecx the count, eax and edx the two halves stored. */
-__asm__(ENTRY_NAME(fs98_util_shr48) "pushl 12(%esp)\n\tpushl 12(%esp)\n\tpushl 12(%esp)\n\t"
-        "call _fs98_util_shr48@12\n\t"
-        "movl 4(%esp), %eax\n\tmovzwl 2(%eax), %edx\n\tmovl 4(%eax), %eax\n\t"
-        "movl 12(%esp), %ecx\n\tret $12\n");
+FS98_ENTRY(fs98_util_shr48_entry, "_fs98_util_shr48@12", 12, 0, "",
+           "movl 4(%esp), %eax\n\tmovzwl 2(%eax), %edx\n\tmovl 4(%eax), %eax\n\tmovl 12(%esp), %ecx\n\t")
 
 /* +0xbc, +0xc4: edx:eax is the last _ftol, which the C returns; ecx is kept. */
-#define FIXED48_ENTRY(name) \
-    __asm__(ENTRY_NAME(name) "pushl %ecx\n\tpushl 12(%esp)\n\tpushl 12(%esp)\n\t" \
-            "call _" #name "@8\n\tpopl %ecx\n\tret $8\n");
-FIXED48_ENTRY(fs98_util_double_to_fixed48)
-FIXED48_ENTRY(fs98_util_double_to_fixed48_signed)
+FS98_ENTRY(fs98_util_double_to_fixed48_entry, "_fs98_util_double_to_fixed48@8", 8, 1, "pushl %ecx\n\t", "popl %ecx\n\t")
+FS98_ENTRY(fs98_util_double_to_fixed48_signed_entry, "_fs98_util_double_to_fixed48_signed@8", 8, 1, "pushl %ecx\n\t", "popl %ecx\n\t")
 
 /* +0xc0: eax the output, ecx the high dword, edx the fraction.  +0xc8: eax the input,
  * ecx the output, edx the high dword. */
-__asm__(ENTRY_NAME(fs98_util_fixed48_to_double) "pushl 8(%esp)\n\tpushl 8(%esp)\n\t"
-        "call _fs98_util_fixed48_to_double@8\n\t"
-        "movl 8(%esp), %eax\n\tmovl 4(%eax), %ecx\n\tmovzwl 2(%eax), %edx\n\t"
-        "movl 4(%esp), %eax\n\tret $8\n");
-__asm__(ENTRY_NAME(fs98_util_fixed48_to_double_signed) "pushl 8(%esp)\n\tpushl 8(%esp)\n\t"
-        "call _fs98_util_fixed48_to_double_signed@8\n\t"
-        "movl 8(%esp), %eax\n\tmovl 4(%eax), %edx\n\tmovl 4(%esp), %ecx\n\tret $8\n");
+FS98_ENTRY(fs98_util_fixed48_to_double_entry, "_fs98_util_fixed48_to_double@8", 8, 0, "",
+           "movl 8(%esp), %eax\n\tmovl 4(%eax), %ecx\n\tmovzwl 2(%eax), %edx\n\tmovl 4(%esp), %eax\n\t")
+FS98_ENTRY(fs98_util_fixed48_to_double_signed_entry, "_fs98_util_fixed48_to_double_signed@8", 8, 0, "",
+           "movl 8(%esp), %eax\n\tmovl 4(%eax), %edx\n\tmovl 4(%esp), %ecx\n\t")
 #endif

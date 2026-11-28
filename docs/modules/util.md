@@ -282,7 +282,11 @@ caught, which is the check that makes the passing result mean something.
 
 Retail's services are hand-written assembly, and retail's assembly modules keep values in
 registers across calls to them, so what a slot leaves is part of its contract. C does not
-honour it, so each slot enters through a stub at the end of `util_math.c` (x86 only).
+honour it, so each slot enters through a stub at the end of `util_math.c` (x86 only). Since Story 1.9c
+the stubs are `include/fs98/keep.h`'s macros (`FS98_KEEP_ALL`, `FS98_KEEP_ECX_EDX`, `FS98_ENTRY`, and `FS98_ENTRY_NOPOP`
+for `rand` and `rand32`, which end in a plain `ret`), `util.c` binds the 31 wrapper slots (only those; the other populated slots hold their functions directly) through `FS98_KEPT`, and
+`tools/check_keep_entries.py` pins all 31 (`tools/keep_entries.txt`: entry, Linkage offset, and the asm statements of the four
+bodies that hold x87 or the image-end marker). No C body reads a register, so there is nothing to make explicit.
 `utildiff` calls every one with known values in all seven registers and compares what comes
 back, through the stub and through the built DLL's Linkage, since a wrong table entry is
 the other way to get this wrong.

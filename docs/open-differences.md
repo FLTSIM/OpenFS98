@@ -53,14 +53,21 @@ how to read it). With retail callers, a slot that retail leaves a register alone
 does not is a broken contract. On 2026-11-01 it found 18, now fixed with entries from
 `include/fs98/keep.h`:
 
-| module | slots | what retail keeps | seen in the game |
-| --- | --- | --- | --- |
-| NUMERIC | `+0x18`, `+0x1c`, `+0x20` | ecx | retail ATC printed the ATIS ceiling as `Scattered -` |
-| ATC | `+0x20`, `+0x24` | eax, ecx, edx | |
-| WEATHERM | `+0x24` | edx | |
-| DYNAMIC | `+0x18` | edx | |
-| MAIN | `+0x94`; `+0xc0` | edx; ecx, edx | |
-| HG2D | `+0x70`, `+0x88`, `+0xac`, `+0xb4`; `+0x7c`; `+0x24` | edx; ecx, edx; ecx holds the third argument | |
+| module | slots | what retail keeps | class | seen in the game |
+| --- | --- | --- | --- | --- |
+| NUMERIC | `+0x18`, `+0x1c`, `+0x20` | ecx | c | retail ATC printed the ATIS ceiling as `Scattered -` |
+| ATC | `+0x20`, `+0x24` | eax, ecx, edx | c | |
+| WEATHERM | `+0x24` | edx | c | |
+| DYNAMIC | `+0x18` | edx | thunk-in:ecx (`_dyn_frame` reads ecx: DYN-5) | |
+| MAIN | `+0x94`; `+0xc0` | edx; ecx, edx | c | |
+| HG2D | `+0x70`, `+0xac`, `+0xb4` | edx | c | |
+| HG2D | `+0x24` | ecx holds the third argument | c | |
+| HG2D | `+0x7c` | ecx, edx | thunk-out (`palette_select` reads no register and returns carry) | |
+| HG2D | `+0x88` | edx | thunk-in:eax (`colour_remap` reads eax: HG2D-2) | |
+
+Class is pinned by `tools/keep_entries.txt` and `tools/check_keep_entries.py` (Story 1.9b): **c** means
+the entry only preserves registers (or, `+0x24`, leaves an argument in ecx) around a C body with no
+asm, so there is nothing to convert; the two thunk-in slots read a register and are Story 1.9e's.
 
 and one the other way: retail ATC `+0x20` reads GLOBAL through the caller's edi, which our MAIN's
 COM tuning now loads (`main_call_edi1`); without it MAIN alone faulted in retail ATC on `KAUAI`.

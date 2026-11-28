@@ -1,0 +1,27 @@
+# Story 1.9b: every keep.h entry (and HG2D's raw FS98_ENTRY), pinned by tools/check_keep_entries.py.
+# Entry rows:  file|macro|entry|symbol|args|kept|target|class|body
+#   macro  FS98_KEEP_* or FS98_ENTRY;  args  the arguments after entry and symbol, whitespace-normalised, joined with ", "
+#   kept   the FS98_KEPT(entry, function) binding, "entry->function";  target  that function
+#   class  c            the target is a C function with no asm: the wrapper only preserves registers for retail's callers
+#          thunk-out    the target is an asm thunk that reads no register input (it returns a flag)
+#          thunk-in:REG the target is an asm thunk that reads REG on entry (a 1.9e row); these rows may only shrink
+#   body   the C definition that must hold no asm: the target itself for class c, else the function the thunk calls
+# Thunk rows:  thunk|label|asm   the label's instructions in the preprocessed unit, ";"-separated, whitespace-normalised
+src/hg2d/hg2d.c|FS98_ENTRY|draw_depth_point_entry|"_draw_depth_point@16"|16, 0, "", "movl 12(%esp), %ecx\n\t"|draw_depth_point_entry->draw_depth_point|draw_depth_point|c|draw_depth_point
+src/hg2d/hg2d.c|FS98_KEEP_EDX|colour_convert_entry|"_colour_convert@12"|12|colour_convert_entry->colour_convert|colour_convert|c|colour_convert
+src/hg2d/hg2d.c|FS98_KEEP_ECX_EDX|palette_select_entry|"_palette_select"|4|palette_select_entry->palette_select|palette_select|thunk-out|palette_select_body
+src/hg2d/hg2d.c|FS98_KEEP_EDX|colour_remap_entry|"_colour_remap"|8|colour_remap_entry->colour_remap|colour_remap|thunk-in:eax|colour_remap_body
+src/hg2d/hg2d.c|FS98_KEEP_EDX|texture_create_entry|"_texture_create@8"|8|texture_create_entry->texture_create|texture_create|c|texture_create
+src/hg2d/hg2d.c|FS98_KEEP_EDX|texture_pixels_entry|"_texture_pixels@4"|4|texture_pixels_entry->texture_pixels|texture_pixels|c|texture_pixels
+src/atc/atc.c|FS98_KEEP_ALL|atc_atis_entry|"_atc_atis@4"|4|atc_atis_entry->atc_atis|atc_atis|c|atc_atis
+src/atc/atc.c|FS98_KEEP_ALL|atc_clear_entry|"_atc_clear"|0|atc_clear_entry->atc_clear|atc_clear|c|atc_clear
+src/numeric/numeric.c|FS98_KEEP_ECX|numeric_format_entry|"_fs98_numeric_format@12"|12|numeric_format_entry->fs98_numeric_format|fs98_numeric_format|c|fs98_numeric_format
+src/numeric/numeric.c|FS98_KEEP_ECX|numeric_parse_entry|"_fs98_numeric_parse@12"|12|numeric_parse_entry->fs98_numeric_parse|fs98_numeric_parse|c|fs98_numeric_parse
+src/numeric/numeric.c|FS98_KEEP_ECX|numeric_parse_internal_entry|"_fs98_numeric_parse_internal@16"|16|numeric_parse_internal_entry->fs98_numeric_parse_internal|fs98_numeric_parse_internal|c|fs98_numeric_parse_internal
+src/main/main.c|FS98_KEEP_EDX|clouds_textures_entry|"_clouds_textures@0"|0|clouds_textures_entry->clouds_textures|clouds_textures|c|clouds_textures
+src/main/main.c|FS98_KEEP_ECX_EDX|nav_eye_entry|"_nav_eye@4"|4|nav_eye_entry->nav_eye|nav_eye|c|nav_eye
+src/weatherm/weatherm.c|FS98_KEEP_EDX|wx_reset_entry|"_wx_reset"|0|wx_reset_entry->wx_reset|wx_reset|c|wx_reset
+src/dynamic/dynamic.c|FS98_KEEP_EDX|dyn_frame_entry|"_dyn_frame"|0|dyn_frame_entry->dyn_frame|dyn_frame|thunk-in:ecx|dyn_frame_ecx
+thunk|_palette_select|pushl 4(%esp); call _palette_select_body@4; btl $0,_hg2d_palette_changed; ret $4
+thunk|_colour_remap|pushl %eax; pushl 12(%esp); pushl 12(%esp); call _colour_remap_body@12; ret $8
+thunk|_dyn_frame|pushl %ecx; call _dyn_frame_ecx; addl $4, %esp; ret

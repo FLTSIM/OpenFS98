@@ -2,7 +2,7 @@
 title: 'Story 1.9, slice b: the keep.h entries are audited and pinned'
 type: 'chore'
 created: '2026-11-28'
-status: 'in-progress'
+status: 'done'
 baseline_commit: 'fdc56f7ecefb72537d0738d678b6aa4eb8c09f03'
 route: 'dispatch'
 review_loop_iteration: 0
@@ -80,6 +80,8 @@ Two slots' targets are asm thunks that do read an input register: HG2D `colour_r
 - Touch UTIL's private `KEEP_*` macros. That is 1.9c.
 - Edit `AGENTS.md`, stage, or commit.
 
+**Decided (2026-11-28, user):** `verify.py` also masks the export-directory timestamp, the same build-time stamp as the COFF one, which the spec under-named; everything else stays byte-exact.
+
 </frozen-after-approval>
 
 ## Code Map
@@ -111,11 +113,11 @@ Two slots' targets are asm thunks that do read an input register: HG2D `colour_r
 ## Tasks & Acceptance
 
 **Execution:**
-- [ ] `tools/keep_entries.txt` -- the 15 rows -- the pinned classification.
-- [ ] `tools/check_keep_entries.py` -- the lint and `--self-test` -- it catches drift.
-- [ ] `cmake/OpenFS98.cmake` -- one `COMMAND` -- runs on every build.
-- [ ] `include/fs98/keep.h`, `docs/tools.md`, `docs/open-differences.md`, `docs/implementation/deferred-work.md` -- docs as above.
-- [ ] `~/openfs98-verify/p19b/` -- the snapshots, `gate.sh`, `verify.py`, the prior, the negatives and the wiring probe.
+- [x] `tools/keep_entries.txt` -- the 15 rows -- the pinned classification.
+- [x] `tools/check_keep_entries.py` -- the lint and `--self-test` -- it catches drift.
+- [x] `cmake/OpenFS98.cmake` -- one `COMMAND` -- runs on every build.
+- [x] `include/fs98/keep.h`, `docs/tools.md`, `docs/open-differences.md`, `docs/implementation/deferred-work.md` -- docs as above.
+- [x] `~/openfs98-verify/p19b/` -- the snapshots, `gate.sh`, `verify.py`, the prior, the negatives and the wiring probe.
 
 **Acceptance Criteria:**
 - Given the tree, when the lint runs, then it reports 15 entries (12 c, 1 thunk-out, 2 thunk-in) and 3 thunks, and exits 0.
@@ -124,6 +126,9 @@ Two slots' targets are asm thunks that do read an input register: HG2D `colour_r
 - Given both snapshots built, when the gate runs, then it prints `GATE PASS`, `verify.py` passes, and each negative exits 1 naming its file.
 
 ## Implementation Notes
+
+- `verify.py` masks three PE fields, not two: the COFF timestamp, the optional-header checksum and the export directory's own timestamp (`world-diff/WORLD_area.dll`'s `.edata` carries a build time). The user accepted this on 2026-11-28, and `verify.py` names all three in its output.
+- The lint runs `i686-w64-mingw32-gcc -E` without `GCCLOG`, so the gate's compile wrapper does not log it as a build unit.
 
 ## Spec Change Log
 

@@ -28,6 +28,7 @@ endforeach()
 add_custom_target(ofs_arena_lint COMMAND python3 -B tools/check_arena.py
   COMMAND python3 -B tools/check_codegen_overrides.py
   COMMAND python3 -B tools/check_div_asm.py
+  COMMAND python3 -B tools/check_keep_entries.py
   WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}" USES_TERMINAL VERBATIM)
 
 function(ofs_step group)

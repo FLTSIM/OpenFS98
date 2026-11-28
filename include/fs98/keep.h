@@ -4,6 +4,7 @@
  * a service leaves is part of its contract, and C does not honour it.  tools/reg_contracts.sh
  * finds where that differs.  `symbol` is the function's assembler name and `bytes` what it
  * pops.  win32-retail only (FS98_RETAIL_ABI): on anything else the slot holds the function itself.
+ * tools/check_keep_entries.py pins every entry here to tools/keep_entries.txt.
  */
 #ifndef FS98_KEEP_H
 #define FS98_KEEP_H

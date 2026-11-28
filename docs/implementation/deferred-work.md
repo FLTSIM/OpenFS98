@@ -138,10 +138,6 @@
   summary: Pre-existing runner defect fixed on both sides: `host_breaks.py` never ran `ab-ret`, `sd-stop`, `vw-rows-skip`, `vw-block-grow`, `tx-font0`, `tt-right` and `tt-dup` (retail-bug comments sit inside their anchors; 498 of 505 ran). The 505 count in `docs/tools.md` predates the repair.
   evidence: Story 1.8 slice 4, runner anchor work.
 
-- source_spec: `docs/implementation/spec-1-4-module-data-decompiled-no-raw-dumps-in-git.md`
-  summary: Two harnesses differ from retail, both already before Story 1.x: `g3ddiff-meshc-run` (G3D with the portable mesh compiler, `FS98_PORTABLE_FP`) 43 of 20000 scenarios, some polygons emitted as `line(...)` where retail emits `v(...)` (e.g. scenario 747, op 14); `gauges-panels-run N=1000` (PANELS_STRICT, retail/rebuilt warning and suction gauges) 143 of 1000, heap block hashes and full state (first scenarios 6, 20, 28). Not investigated.
-  evidence: ~/openfs98-verify/p14-final/g3ddiff-meshc-run.log, p14-bisect/new-panels-1000.log; the same scenario lists from 27371fb in p14-bisect/old-meshc-b.log and old-panels-1000b.log (tree ~/openfs98-verify/p14-old).
-
 - source_spec: `docs/implementation/spec-1-8f-main-uses-arena-h.md`
   summary: Story 1.8 slice 6b: FLIGHTS, MPDIALOG and WORLD convert to arena.h (12 casts; their DLL recipes, difftests and break runners need `-Iinclude`, the runners `--build-only`, and FLIGHTS' anchors that hold the literal cast are repaired).
   evidence: slice 6 (MAIN + English dialogs) split into four at its Checkpoint 1 (2026-11-25): about 15 recipes and 12 runners need work, too much for one spec.
@@ -165,10 +161,6 @@
 - source_spec: `docs/implementation/spec-1-10a-divide-helpers-match-the-host-filter.md`
   summary: The divide filter (`0x4119a0`, ours in `src/host/runtime/host_rt_divide.c`) reads a narrow (byte or word) memory divisor as a whole dword, so a divisor at the end of a readable page makes the filter itself fault; this is not in `docs/retail-bugs.md` and dividediff pads it away.
   evidence: Codex review of 1.10a (blind layer); the filter's read at about `host_rt_divide.c:111`; settle by a guard-page case against retail's filter, then log it as a retail bug if both fault.
-
-- source_spec: `docs/implementation/spec-1-4z-two-harness-differences-fixed.md`
-  summary: Fix the two pre-existing 1.4 harness differences, both probably harness artifacts. `g3ddiff-meshc-run` (43/20000): `g3ddiff.c` never matches `g3d_mesh_precision` (24 since `48756cd`) to retail's 53-bit default. `gauges-panels-run` (143/1000): `gauge_pointer()` does not normalise pointers into a rebuilt gauge's image outside `.data` (different `.rsrc` RVA and image base). The draft spec is ready for Checkpoint 1.
-  evidence: read-only analysis 2026-11-25; `48756cd` is an ancestor of `27371fb` (same scenario lists); `all-gauges-panels` (which normalises those words) gave 0 differ in ~/openfs98-verify/p14-final. Each needs one confirming wine run (in the spec) when the wine lock is free.
 
 - source_spec: `docs/implementation/spec-1-10b1-fe-dynamic-advdrv-booster-divides.md`
   summary: Story 1.10b2: PANELS' divides onto `divide.h`. That covers its asm wrappers `pn_idiv64`/`pn_div`/`pn_idiv`/`pn_imod` (`src/panels/panels.c:72-107`, `pn_imod` returns a signed remainder via a temporary), its faulting C divides (at least `edges_24`'s six, `panels.c:2591,2632,2683`, retail signed divides `0x10006c1e`-`0x10006c90`; audit the rest), and three DIVIDE-DISP8-UNSIGNED sites, retail `idiv [ebp-0x3c/-0x14/-0x6c]` at `0x1000419d`, `0x100044bc` and `0x100048cd` (the reciprocal `1:0 / d`, d from `MUL16(xs, ys)`). User's decision (2026-11-25): those three are fixed, not kept, with ours using the true divisor's sign and one new register id. The harness repair is our filter, with an independent fixed-rule override keyed by RVA and opcode bytes at those VAs (guarded raw read; an observed raw-vs-fixed delta required at each). Also: the `allpaneldiff.exe`/`gaugespanelsdiff.exe` modes load rebuilt PANELS under both names and need their own fault policy, rerun against their baselines (gauges-panels-run's known 143/1000); and `panels-breaks` `--cases` keys on line numbers, so remap and freeze cases under the strict verdict before converting. Then shrink `tools/div_asm_allowed.txt`.
@@ -232,3 +224,7 @@
 - source_spec: `docs/implementation/spec-1-8h-options-uses-arena-h.md`
   summary: Epic 5: the plain `(T *)(uintptr_t)x` casts left in OPTIONS: `options_graphs.c:56`, `options_demo.c:89,118` (118 is the `(void *)(uintptr_t)0xcdcdcdcd` fill test, not an arena pointer), `options_keys.c:337`, `options_runtime.c:363` and `options_controls.c:349-351`.
   evidence: slice 6c converted only the banned `(uint32_t)(uintptr_t)` casts and the four `(uint8_t *)(uintptr_t)(uint32_t)` reverse casts; the plain casts are not lint-banned.
+
+- source_spec: `docs/implementation/spec-1-4z-two-harness-differences-fixed.md`
+  summary: G3D's break runner `tools/g3d_breaks.py` marks a run that hung past 900 s as caught (`TimeoutExpired` sets `caught = True`), so 10 of the documented 278 caught at N=1000 are timeouts: the strict verdict (a break is caught only on exit 1 with a non-zero `N differ`) gives 268 caught, 7 proven equivalent, 42 missed. Apply the strict verdict in the runner, then rerun `tools/ofs g3d-breaks N=1000` from a frozen copy and update `docs/tools.md` and `docs/modules/g3d.md`. Pre-existing; Story 1.4z keeps 278 as the equality check for its unrelated change.
+  evidence: Codex review of 1.4z (`~/openfs98-verify/p14z-code-review.out`, finding 7); `~/openfs98-verify/p14z-g3d-breaks/r_breaks.log` has ten `caught  hung past 900 s` lines.

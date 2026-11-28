@@ -726,8 +726,11 @@ third's last bit, a float rounding skipped, a product taken from the float
 where retail keeps it on the x87, the adder at 64 bits under any
 precision, the packing bound) are all caught. `tools/ofs g3ddiff-meshc-run`
 builds the module with the software-float compiler in it and runs `g3ddiff`
-against retail: 3,000 scenarios, 0 differences, and the third's break
-caught there too. With the x87 C in it, the module's own `g3ddiff-run`
+against retail: 20,000 scenarios, 0 differences (2026-11-26), and the third's break
+caught there too. That build runs the software float at 64 bits, as the harness runs retail's compiler
+(`__fpreset`'s control word `0x037f`, measured at the service call); at the game's 24 it differed on 43 of 20,000,
+the low bits of `winds_round`'s angle sums flipping a decision. `tools/ofs g3d-portable-breaks` breaks the
+portable arithmetic (two mutations, both caught). With the x87 C in it, the module's own `g3ddiff-run`
 gives 20,000 scenarios, 0 differences (2026-11-14).
 
 The harness slows the longer one process runs (2,000 polygons take about a

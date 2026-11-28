@@ -13,6 +13,8 @@ The list grows with the transliteration, a stage at a time.
 
 Usage: tools/g3d_breaks.py [N] [name...]       (from the repository root,
        after tools/ofs g3ddiff)
+       tools/g3d_breaks.py --portable [N]      the same for the portable mesh compiler
+       (src/g3d/g3d_mesh.c, FS98_PORTABLE_FP) that g3ddiff-meshc-run builds into G3D_ours.dll
 """
 import os
 import re
@@ -23,8 +25,8 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import break_pool
 
-N = int(sys.argv[1]) if len(sys.argv) > 1 and sys.argv[1].isdigit() else 2000
-ONLY = [a for a in sys.argv[1:] if not a.isdigit()]
+N = next((int(a) for a in sys.argv[1:] if a.isdigit()), 2000)
+ONLY = [a for a in sys.argv[1:] if not a.isdigit() and not a.startswith("--")]
 SRC = "src/g3d/g3d.c"
 TMP = "bin/difftest/g3d_break.c"
 LIMIT = 900              # seconds a break's run may take before it counts as a hang
@@ -455,8 +457,99 @@ def one(entry, w):
                                                           "  (" + entry[3] + ")" if len(entry) > 3 and not caught else "")
 
 
+# Breaks of the portable (software x87) mesh arithmetic, built as g3ddiff-meshc-run builds it.
+MESH_SRC = "src/g3d/g3d_mesh.c"
+PORTABLE_BREAKS = [
+    ("mul64-high", "r.hi = p11 + (p01 >> 32) + (p10 >> 32) + (mid >> 32);",
+     "r.hi = (p01 >> 32) + (p10 >> 32) + (mid >> 32);"),
+    ("mul-normalise", "    if (p.hi >> 63)\n        e++;\n    else\n        p = shl128(p, 1);\n    return fx_round(a.s ^ b.s, e, p, 0,",
+     "    if (p.hi >> 62)\n        e++;\n    else\n        p = shl128(p, 1);\n    return fx_round(a.s ^ b.s, e, p, 0,"),
+]
+
+
+PORTABLE_DIR = None                        # a private harness directory per invocation (mkdtemp): the shared bin/difftest is never touched
+PORTABLE_LIMIT = 1800                      # seconds one portable run may take; a timeout is a miss, never a catch
+
+
+def portable_build(text):
+    """The two compile lines of g3ddiff-meshc-run, on text as g3d_mesh.c, into PORTABLE_DIR; True when linked."""
+    import module_flags
+    mf = module_flags.FLAGS
+    cc = "i686-w64-mingw32-gcc"
+    common = ["-std=c99", "-Os", "-Wall", "-Wextra", "-Iinclude", "-ffreestanding", "-fno-builtin",
+              "-fno-asynchronous-unwind-tables", "-fomit-frame-pointer"]
+    src = PORTABLE_DIR + "/g3d_mesh_break.c"
+    open(src, "w").write(text)
+    ours = PORTABLE_DIR + "/G3D_ours.dll"
+    if os.path.exists(ours):
+        os.remove(ours)
+    steps = [[cc, *mf, *common, "-DFS98_PORTABLE_FP", "-DG3D_MESH_PRECISION_DEFAULT=64", "-Isrc/g3d", "-c",
+              "-o", PORTABLE_DIR + "/g3d_mesh_portable.o", src],
+             [cc, *mf, *common, "-fno-ipa-icf", "-Isrc/g3d", "-shared", "-nostdlib", "-Wl,--enable-stdcall-fixup",
+              "-Wl,--entry=_DllMain@12", "-Wl,--disable-dynamicbase", "-Wl,--disable-nxcompat",
+              "-Wl,--image-base=0x206e0000", "-o", ours, "src/g3d/g3d.c", PORTABLE_DIR + "/g3d_mesh_portable.o",
+              "bin/g3d.res", "src/g3d/g3d.def", "-lkernel32", "-luser32", "-lgcc"]]
+    return all(subprocess.run(s, capture_output=True).returncode == 0 for s in steps) and os.path.exists(ours)
+
+
+def portable_run():
+    """g3ddiff against the portable build in PORTABLE_DIR: (caught, summary line)."""
+    try:
+        run = subprocess.run(["wine", "g3ddiff.exe", str(N)], cwd=PORTABLE_DIR, capture_output=True, text=True,
+                             errors="replace", timeout=PORTABLE_LIMIT, env=dict(os.environ, WINEDEBUG="-all"))
+    except subprocess.TimeoutExpired:
+        return None, "hung past %d s" % PORTABLE_LIMIT
+    last = [l for l in run.stdout.splitlines() if l.startswith("g3ddiff:")]
+    differ = re.search(r" ([0-9]+) differ$", last[-1]) if last else None
+    if run.returncode not in (0, 1) or differ is None:
+        return None, "exit %d: %s" % (run.returncode, (last[-1] if last else run.stdout.strip()[-200:]))
+    return (run.returncode == 1 and int(differ.group(1)) > 0), last[-1]
+
+
+def portable_main():
+    """Each portable-path break must make g3ddiff (the meshc build) report differences, and only after the
+    unmodified portable build has passed; all of it in PORTABLE_DIR, removed afterwards."""
+    global PORTABLE_DIR
+    import tempfile
+    PORTABLE_DIR = tempfile.mkdtemp(prefix="difftest-portable-", dir="bin")
+    try:
+        shutil.copy("bin/difftest/g3ddiff.exe", PORTABLE_DIR)
+        for a, b in (("orig/Modules/G3D.DLL", "G3D_retail.dll"), ("orig/Modules/UTIL.DLL", "UTIL_retail.dll"),
+                     ("orig/Modules/WINDOW.DLL", "WINDOW_retail.dll")):
+            shutil.copy(a, PORTABLE_DIR + "/" + b)
+        source = open(MESH_SRC).read()
+        if not portable_build(source):
+            print("the unmodified portable build does not build")
+            return 2
+        ok, line = portable_run()
+        print("%-14s %s  %s" % ("baseline", "passes" if ok is False else "FAILS", line))
+        if ok is not False:
+            return 2        # no mutant counts against a baseline that differs, hangs or crashes
+        missed = []
+        for name, old, new in PORTABLE_BREAKS:
+            if source.count(old) != 1:
+                print("%-14s cannot apply: %d matches" % (name, source.count(old)))
+                missed.append(name)
+                continue
+            if not portable_build(source.replace(old, new)):
+                print("%-14s does not build" % name)
+                missed.append(name)
+                continue
+            caught, line = portable_run()
+            print("%-14s %s  %s" % (name, "caught" if caught else "MISSED", line))
+            if not caught:
+                missed.append(name)
+        print("%d portable breaks, %d caught; missed: %s" % (len(PORTABLE_BREAKS), len(PORTABLE_BREAKS) - len(missed),
+                                                             " ".join(missed) or "none"))
+        return 1 if missed else 0
+    finally:
+        shutil.rmtree(PORTABLE_DIR, ignore_errors=True)
+
+
 def main():
     global source
+    if "--portable" in sys.argv:
+        return portable_main()
     # its own copy, so a hang can be killed without touching other runs
     shutil.copy("bin/difftest/g3ddiff.exe", "bin/difftest/g3ddiff_break.exe")
     source = open(SRC).read()

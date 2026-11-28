@@ -537,22 +537,21 @@ ofs_target(suction-game-run
   )
 
 ofs_target(g3ddiff-run
-  DEPENDS openfs98 difftests
+  DEPENDS g3ddiff
   COMMANDS
-    [==[cp orig/Modules/G3D.DLL bin/difftest/G3D_retail.dll]==]
-    [==[cp orig/Modules/UTIL.DLL bin/difftest/UTIL_retail.dll]==]
-    [==[cp bin/G3D.DLL bin/difftest/G3D_ours.dll]==]
     [==[cd bin/difftest && WINEDEBUG=-all timeout 7200 wine g3ddiff.exe ${N:-20000}]==]
   )
 
 ofs_target(g3d-breaks
+  DEPENDS g3ddiff
+  COMMANDS
+    [==[python3 -B tools/g3d_breaks.py ${N:-2000}]==]
+  )
+
+ofs_target(g3d-portable-breaks
   DEPENDS openfs98 difftests
   COMMANDS
-    [==[cp orig/Modules/G3D.DLL bin/difftest/G3D_retail.dll]==]
-    [==[cp orig/Modules/UTIL.DLL bin/difftest/UTIL_retail.dll]==]
-    [==[cp bin/G3D.DLL bin/difftest/G3D_ours.dll]==]
-    [==[cp orig/Modules/WINDOW.DLL bin/difftest/WINDOW_retail.dll]==]
-    [==[python3 -B tools/g3d_breaks.py ${N:-2000}]==]
+    [==[python3 -B tools/g3d_breaks.py --portable ${N:-2000}]==]
   )
 
 ofs_target(g3dmeshdiff-run
@@ -564,12 +563,10 @@ ofs_target(g3dmeshdiff-run
   )
 
 ofs_target(g3ddiff-meshc-run
-  DEPENDS openfs98 difftests
+  DEPENDS g3ddiff
   COMMANDS
-    [==[i686-w64-mingw32-gcc @MODULE_FLAGS@ -std=c99 -Os -Wall -Wextra -Iinclude -ffreestanding -fno-builtin -fno-asynchronous-unwind-tables -fomit-frame-pointer -DFS98_PORTABLE_FP -c -o bin/difftest/g3d_mesh_portable.o src/g3d/g3d_mesh.c]==]
+    [==[i686-w64-mingw32-gcc @MODULE_FLAGS@ -std=c99 -Os -Wall -Wextra -Iinclude -ffreestanding -fno-builtin -fno-asynchronous-unwind-tables -fomit-frame-pointer -DFS98_PORTABLE_FP -DG3D_MESH_PRECISION_DEFAULT=64 -c -o bin/difftest/g3d_mesh_portable.o src/g3d/g3d_mesh.c]==]
     [==[i686-w64-mingw32-gcc @MODULE_FLAGS@ -std=c99 -Os -Wall -Wextra -Iinclude -ffreestanding -fno-builtin -fno-asynchronous-unwind-tables -fomit-frame-pointer -fno-ipa-icf -Isrc/g3d -shared -nostdlib -Wl,--enable-stdcall-fixup -Wl,--entry=_DllMain@12 -Wl,--disable-dynamicbase -Wl,--disable-nxcompat -Wl,--image-base=0x206e0000 -o bin/difftest/G3D_ours.dll src/g3d/g3d.c bin/difftest/g3d_mesh_portable.o bin/g3d.res src/g3d/g3d.def -lkernel32 -luser32 -lgcc]==]
-    [==[cp orig/Modules/G3D.DLL bin/difftest/G3D_retail.dll]==]
-    [==[cp orig/Modules/UTIL.DLL bin/difftest/UTIL_retail.dll]==]
     [==[cd bin/difftest && WINEDEBUG=-all timeout 7200 wine g3ddiff.exe ${N:-20000}]==]
   )
 
@@ -1249,6 +1246,7 @@ ofs_target(g3ddiff
   COMMANDS
     [==[cp orig/Modules/G3D.DLL bin/difftest/G3D_retail.dll]==]
     [==[cp orig/Modules/UTIL.DLL bin/difftest/UTIL_retail.dll]==]
+    [==[cp orig/Modules/WINDOW.DLL bin/difftest/WINDOW_retail.dll]==]
     [==[cp bin/G3D.DLL bin/difftest/G3D_ours.dll]==]
   )
 

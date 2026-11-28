@@ -110,7 +110,12 @@ typedef struct {
     uint64_t hi, lo;
 } u128;
 
-int g3d_mesh_precision = 24;        /* the game compiles meshes only on Direct3D, at 24 bits (docs/modules/g3d.md) */
+/* The game compiles meshes only on Direct3D, at 24 bits (docs/modules/g3d.md).  Only the g3ddiff-meshc-run
+ * object is built with another default (64, the control word retail runs at in that harness). */
+#ifndef G3D_MESH_PRECISION_DEFAULT
+#  define G3D_MESH_PRECISION_DEFAULT 24
+#endif
+int g3d_mesh_precision = G3D_MESH_PRECISION_DEFAULT;
 
 static u128 mul64(uint64_t a, uint64_t b)
 {

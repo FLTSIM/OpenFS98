@@ -164,13 +164,7 @@ The `radios` suite's stand-in now logs edi, and catches the old call.
   picture: only the order child windows enumerate). With one more plain reopen of Display options
   in between, which the script now has, the two agree. Not explained; it may be SIMSUI's tab
   control and when it raises a page, met through slightly different timing.
-- **Two harnesses differ, and did before Story 1.x.** `g3ddiff-meshc-run` (G3D built with the
-  portable mesh compiler, `FS98_PORTABLE_FP`) differs on 43 of 20000 scenarios: some polygons come
-  out as `line(...)` calls where retail emits `v(...)` vertices (scenario 747, op 14).
-  `gauges-panels-run N=1000` (strict comparison, retail against rebuilt warning and suction gauges)
-  differs on 143 of 1000, in heap block hashes and the full state (first scenarios 6, 20, 28),
-  with equal gauge load counts. Both give the same scenario lists at commit 27371fb, so neither
-  comes from the CMake port or the data decompilation. Not investigated (2026-11-25).
+
 
 ## A class of bug to look for
 

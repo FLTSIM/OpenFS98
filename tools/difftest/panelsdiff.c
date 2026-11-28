@@ -102,7 +102,13 @@ static int gauge_text_allocation(const void *slot);
 struct blk {
     uint32_t off, size;
     uint8_t live, kind;
+#ifdef GAUGES_DIFF
+    uint32_t origin;            /* the host list whose data this is (h_list_add), for the gauge-panel heap rule */
+#endif
 };
+#ifdef GAUGES_DIFF
+static uint32_t cur_origin;
+#endif
 
 static uint8_t *arena;
 static uint32_t arena_used;
@@ -128,15 +134,26 @@ static void *arena_get(uint32_t size, int kind)
     blks[nblks].size = size;
     blks[nblks].live = 1;
     blks[nblks].kind = (uint8_t)kind;
+#ifdef GAUGES_DIFF
+    blks[nblks].origin = cur_origin;
+    cur_origin = 0;
+#endif
     nblks++;
     arena_used += 16 + size + 64;      /* slack: retail overruns are not ours to find */
     return p + 16;
 }
 
+#ifdef GAUGES_DIFF
+static void gauge_images_reset(void);
+#endif
+
 static void arena_reset(void)
 {
     memset(arena, 0, arena_used + 64);
     arena_used = 0;
+#ifdef GAUGES_DIFF
+    gauge_images_reset();
+#endif
     nblks = 0;
     nalloc_calls = 0;
     arena_full = 0;
@@ -184,6 +201,10 @@ static uint8_t host_blob[0x320 + 16], global_blob[0x2000], chain_blob[0x40],
 static int dib_of(uint32_t v);
 #ifdef GAUGES_DIFF
 static int gauge_pointer(uint32_t value, uint32_t *offset);
+static int gp_live_only;                    /* gauge_pointer() skips unloaded instances (norm) */
+static void gauge_images_reset(void);
+static void gauge_image_loaded(uint32_t lo, uint32_t hi, unsigned region, const char *path);
+static void gauge_image_unloaded(unsigned region);
 #endif
 
 static void put_ptr(uint32_t v)
@@ -215,7 +236,24 @@ static int dib_of(uint32_t v);
 static int norm_dibs = 1;
 
 /* a word of memory as it compares: an address in a module image is its offset */
+#ifdef GAUGES_DIFF
+static uint32_t norm_base(uint32_t v);
+/* norm() never matches an unloaded gauge instance: a retained pointer is paired by the heap rule in
+ * gauges_panels.inc (gauge_block_hash), which picks the owning load first. */
 static uint32_t norm(uint32_t v)
+{
+    uint32_t n;
+
+    gp_live_only = 1;
+    n = norm_base(v);
+    gp_live_only = 0;
+    return n;
+}
+
+static uint32_t norm_base(uint32_t v)
+#else
+static uint32_t norm(uint32_t v)
+#endif
 {
     int r, d;
     uint32_t lo;
@@ -881,6 +919,9 @@ static uint32_t STDCALL h_list_add(struct host_list *l)
             put(" listadd(HUGE)");
             return 0;
         }
+#ifdef GAUGES_DIFF
+        cur_origin = (uint32_t)(uintptr_t)l;
+#endif
         d = arena_get((uint32_t)(cap * l->elem_size), K_HEAP);
         if (!d)
             return 0;
@@ -1418,6 +1459,7 @@ static int32_t STDCALL h_module_load(uint32_t *slot, const char *path, uint32_t 
     find_sections(h, NULL, NULL, &g->wlo, &g->whi, &g->wlo2, &g->whi2);
 #ifdef GAUGES_DIFF
     gauge_loaded(g, full);
+    gauge_image_loaded(regions[g->region].lo, regions[g->region].hi, g->region, full);
 #endif
     *slot = (uint32_t)(uintptr_t)g->linkage;
     put("=ok mod%u", g->region);
@@ -1435,6 +1477,9 @@ static int32_t STDCALL h_module_release(uint32_t *slot)
         if (gauges[i].loaded && (uint32_t)(uintptr_t)gauges[i].linkage == *slot) {
             gauges[i].loaded = 0;
             regions[gauges[i].region].live = 0;
+#ifdef GAUGES_DIFF
+            gauge_image_unloaded(gauges[i].region);
+#endif
             FreeLibrary(gauges[i].h);
             break;
         }
@@ -2060,6 +2105,8 @@ static void put_state(void)
         live++;
 #ifdef GAUGES_ALL_DIFF
         bh = gauge_heap_hash(&blks[i]);
+#elif defined(GAUGES_DIFF)
+        bh = blks[i].kind == K_HEAP ? gauge_block_hash(&blks[i], 0) : hash_words(arena + blks[i].off, blks[i].size, 0);
 #else
         bh = hash_words(arena + blks[i].off, blks[i].size, blks[i].kind == K_HEAP);
 #endif
@@ -3338,6 +3385,9 @@ int main(int argc, char **argv)
 #endif
         memcpy(sides[i].pristine, sides[i].imports, IMAGE_SIZE);
     }
+#ifdef GAUGES_DIFF
+    gauge_stale_selftest();
+#endif
     if (only) {
         start = (unsigned)atoi(only);
         n = 1;

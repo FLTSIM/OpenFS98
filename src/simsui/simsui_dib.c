@@ -8,6 +8,7 @@
  * CDIBSection: vtable 0x16078, width +8, height +0xc, the BITMAPINFOHEADER +0x1c (its
  * height +0x24, colours used +0x3c), the CBitmap +0x5c (handle +0x60), the bits +0x64. */
 #include "simsui_internal.h"
+#include "fs98/arena.h"
 
 #define VTABLE_PAL 0x15000
 #define VTABLE_GDI_OBJECT 0x15030       /* CGdiObject's, stored while it is torn down */
@@ -134,8 +135,8 @@ void *TC fs98_simsui_dib_info(void *dib)
 int32_t TC fs98_simsui_dib_is_pointer_valid(void *dib, const uint8_t *pointer)
 {
     uint32_t bits = D32(dib, 0x64);
-    if ((uint32_t)(uintptr_t)pointer < bits) return 0;
-    if ((uint32_t)(uintptr_t)pointer > ((D32(dib, 8) + 3) & 0xfffffffc) * D32(dib, 0xc) + bits - 1) return 0;
+    if (fs98_handle(pointer) < bits) return 0;
+    if (fs98_handle(pointer) > ((D32(dib, 8) + 3) & 0xfffffffc) * D32(dib, 0xc) + bits - 1) return 0;
     return 1;
 }
 /* 0x20477ac0: a BITMAPINFOHEADER rather than a BITMAPCOREHEADER? */

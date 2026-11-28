@@ -3,6 +3,7 @@
  * bits; its BITMAPINFOHEADER +0x1c), the CBitmap +0x5c (handle +0x60), the bits +0x64.
  * Rows are the width rounded up to a dword, top-down (heights are made negative). */
 #include "simsui_internal.h"
+#include "fs98/arena.h"
 
 #define VTABLE_DIB 0x16078
 #define VTABLE_BITMAP 0x16090
@@ -64,7 +65,7 @@ int32_t TC fs98_simsui_dib_create(void *dib, uint8_t *info, void *pal, uint32_t 
     void *bitmap = AT(dib, 0x5c);
     uint8_t dc[0x10];
     uint32_t handle;
-    D32(dib, 0x58) = (uint32_t)(uintptr_t)pal;
+    D32(dib, 0x58) = fs98_handle(pal);
     if (bitmap ? D32(bitmap, 4) : 0)
         CALL_STD(DeleteObject, int32_t, (uint32_t))(CALL_THIS(MFC_2452, uint32_t, (void *))(bitmap));
     CALL_THIS(MFC_323, void *, (void *))(dc);
@@ -93,7 +94,7 @@ int32_t TC fs98_simsui_dib_load(void *dib, int32_t id, uint32_t instance, void *
     uint8_t *data, *info = 0, *source;
     uint32_t resource, loaded, table, index;
     int32_t width, image, height, flipped = 0, row;
-    D32(dib, 0x58) = (uint32_t)(uintptr_t)pal;
+    D32(dib, 0x58) = fs98_handle(pal);
     if (!instance) instance = D32(CALL_STD(MFC_1168, void *, (void))(), 8);
     CALL_STD(SetLastError, void, (uint32_t))(0);
     resource = CALL_STD(FindResourceA, uint32_t, (uint32_t, uint32_t, uint32_t))(instance, (uint32_t)id & 0xffff, 2);

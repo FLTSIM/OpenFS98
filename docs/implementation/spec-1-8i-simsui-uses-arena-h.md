@@ -2,7 +2,7 @@
 title: 'Story 1.8, slice 6d: SIMSUI uses arena.h'
 type: 'refactor'
 created: '2026-11-25'
-status: 'in-progress'
+status: 'done'
 baseline_commit: '3dae7cd27375a77f9ff2bd202015373fae183d0a'
 route: 'dispatch'
 review_loop_iteration: 0
@@ -147,3 +147,14 @@ Spec review (Codex gpt-6.2-sol, 2026-11-25), before approval:
 **Commands:**
 - `python3 -B tools/check_arena.py --self-test`, `python3 -B tools/check_arena.py`, `python3 -B tools/check_arena.py --prior ~/openfs98-verify/p18i/prior.txt` -- expected: pass.
 - `bash ~/openfs98-verify/p18i/gate.sh` -- expected: `GATE PASS`; earlier sets -- expected: `GATE PASS`.
+
+## Implementation Notes
+
+- **Counts:** 11 banned casts on 10 lines converted in five files (`dib`, `dibsection`, `edit`, `native` incl. the three `SIMSUI_RELOC_*` macro bodies and `:124`, `shadow`), each including `fs98/arena.h`, no `FS98_DATA_IMAGE`; five allowlist rows deleted; reverse casts unchanged (18); lint, self-test and `--prior` pass. `-Iinclude` added after `-fno-tree-vectorize` in `all.cmake` (the 24 units, `simsui_native.c`), `difftests.cmake` (`simsuidiff.exe`; the recipe lines are at `all.cmake:385/393` and `difftests.cmake:399` now, not the spec's numbers) and the runner argv. `check_data_image.py --hash SIMSUI` passes in the build.
+- **Runner:** `--build-only DIR [CASE...]` on `tools/simsui_breaks.py` (ids `<unit>.<name>`, 708 in 23 lists), sharing `mutated()` and `compile_argv()` with wine mode. Parity: the baseline runner in wine mode with a fake `wine` and a logging gcc gave 708 records equal (argv and input hashes, sorted, paths normalised) to the before side's `--build-only` trace (`p18i/parity.py`). Ids in `~/openfs98-verify/p18i/cases.txt`.
+- **Step 2:** one anchor repaired, `dib-valid-low` (both strings). `p18i/commute.py` shows for all 708 that converting the old mutated source equals the repaired mutation on the converted source.
+- **Gate:** baseline `3dae7cd2` plus step 1's `simsui_breaks.py` as the only overlay (before); working tree plus `orig/` (after); both at `p18i/root`, serial. `compare.py --require-set p18i` (backup `compare.py.bak-pre-p18i`, units list `gate/p18i_units.txt`, p18h's hardening reused) via `p18i/gate.sh`: GATE PASS, 1130 artifacts, 321 PEs, 206 objects, 566 replayed units, all 708 mutants identical, no fallback. `gate-revision.txt` records the gate files' sha256.
+- **Negative checks** (`p18i/negative.sh`, `negative-checks.txt`): SIMSUI.DLL and one object physically removed from `bin/` (and their rows) on both sides, a replay entry removed, a case removed, an exe removed, a case renamed, a stray second `--mut`, a case replaced by a file, a symmetric exe swap, a changed `bin/SIMSUI.DLL`, deleted `bin/`, an empty replay object, a swapped pair in `cases.txt`, and (after the code review) a wrong object substituted for a replay object, a header-only COFF, `simsui_image.c` dropped from both manifests, a wrong cwd and a failed or empty `deps` in a mutant record, a non-MZ exe missing from `art.pe`, and a same-size overwrite (one file hash changed in the root inventory, `invcheck.py`): each exits 1 with GATE FAIL and its diagnostic; the unmodified control passes.
+- **Earlier gates:** p18b to p18h, 4b `--strict` and p110b1 (`p110b1/gate`) rerun after the final `compare.py` (`p18i/earlier-gates.txt`): all GATE PASS; the rewritten `gate-revision.txt` files were restored.
+- **Code review hardening** (Codex gpt-6.2-sol; backup `compare.py.bak-pre-p18i-fix`): each `src/simsui` replay object must equal the kept `bin/simsui-native/<unit>.o`; replay objects need a symbol table and section data; the replayed simsui unit list must equal the pinned 27 (`gate/p18i_replay_units.txt`, `simsui_image.c` included); every retained `.exe`/`.dll` must be a PE with a row (321); each mutant compile record must have cwd equal to `--root`, `deps_rc` 0 and non-empty deps whose in-tree hashes match the side's snapshot (after: `include/fs98/arena.h` present); `run_side.sh` now hashes every regular file in the populated-root inventories and `invcheck.py` compares them; `gate-revision.txt` also hashes `run_side.sh`, `invcheck.py`, `negative.sh` and the trace wrapper; the lint self-test output is in `p18i/lint-selftest.log` (37 cases passed). Both sides were rebuilt and rerun after these edits; GATE PASS, 708 of 708 identical.
+- **Not done:** no wine run of the 708 mutants and no fallback runs (the identical PEs stand in).

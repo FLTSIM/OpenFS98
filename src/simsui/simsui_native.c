@@ -10,6 +10,7 @@
 #include <imm.h>
 #include <stdlib.h>
 #include "simsui_internal.h"
+#include "fs98/arena.h"
 
 /* one import from each library retail imports, so the loader has them initialised before
  * this DLL, as retail's import table does (their imports are then found by name) */
@@ -73,9 +74,9 @@ static int resolve_imports(void)
 static void bind_image(void)
 {
     fs98_simsui_image = (uint8_t *)((uintptr_t)fs98_simsui_block - SIMSUI_IMAGE_START);
-#define SIMSUI_RELOC_DATA(site, target) D32(fs98_simsui_image, site) = (uint32_t)(uintptr_t)IMAGE(target);
-#define SIMSUI_RELOC_CODE(site, routine) D32(fs98_simsui_image, site) = (uint32_t)(uintptr_t)(void *)routine;
-#define SIMSUI_RELOC_IMPORT(site, index) D32(fs98_simsui_image, site) = (uint32_t)(uintptr_t)fs98_simsui_imports[index];
+#define SIMSUI_RELOC_DATA(site, target) D32(fs98_simsui_image, site) = fs98_handle(IMAGE(target));
+#define SIMSUI_RELOC_CODE(site, routine) D32(fs98_simsui_image, site) = fs98_handle((void *)routine);
+#define SIMSUI_RELOC_IMPORT(site, index) D32(fs98_simsui_image, site) = fs98_handle(fs98_simsui_imports[index]);
 #define SIMSUI_RELOC_NONE(site) D32(fs98_simsui_image, site) = 0;
 #include "simsui_native_tables.inc"
 #undef SIMSUI_RELOC_DATA
@@ -121,7 +122,7 @@ static int32_t crt_init(uint32_t instance, uint32_t reason, void *reserved)
  * CRT's _DllMainCRTStartup: MFC's raw DllMain, the CRT, DllMain, and the reverse on detach */
 BOOL WINAPI fs98_simsui_entry(HINSTANCE module, DWORD reason, void *reserved)
 {
-    uint32_t instance = (uint32_t)(uintptr_t)module;
+    uint32_t instance = fs98_handle(module);
     int32_t (SC *raw)(uint32_t, uint32_t, void *);
     int32_t result = 1;
     if (reason == DLL_PROCESS_ATTACH) {

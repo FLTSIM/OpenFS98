@@ -396,7 +396,7 @@ ofs_step(difftests
   OUTPUTS bin/simsui-diff/simsuidiff.exe
   COMMANDS
     [==[mkdir -p bin/simsui-diff]==]
-    [==[i686-w64-mingw32-gcc @MODULE_FLAGS@ -std=c99 -O2 -Wall -Wextra -Werror -fno-tree-loop-distribute-patterns -fno-tree-vectorize -Wl,--image-base=0x400000 -o bin/simsui-diff/simsuidiff.exe tools/difftest/simsuidiff.c @SIMSUI_SOURCES@]==]
+    [==[i686-w64-mingw32-gcc @MODULE_FLAGS@ -std=c99 -O2 -Wall -Wextra -Werror -fno-tree-loop-distribute-patterns -fno-tree-vectorize -Iinclude -Wl,--image-base=0x400000 -o bin/simsui-diff/simsuidiff.exe tools/difftest/simsuidiff.c @SIMSUI_SOURCES@]==]
   )
 
 ofs_step(difftests

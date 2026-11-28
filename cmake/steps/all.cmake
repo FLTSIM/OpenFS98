@@ -380,7 +380,7 @@ ofs_step(all
 set(simsui_units "")
 foreach(s IN LISTS OFS_SIMSUI_SOURCES)
   get_filename_component(n "${s}" NAME_WE)
-  list(APPEND simsui_units "i686-w64-mingw32-gcc @MODULE_FLAGS@ -std=c99 -O2 -Wall -Wextra -Werror -fno-tree-loop-distribute-patterns -fno-tree-vectorize -c -o bin/simsui-native/${n}.o ${s}")
+  list(APPEND simsui_units "i686-w64-mingw32-gcc @MODULE_FLAGS@ -std=c99 -O2 -Wall -Wextra -Werror -fno-tree-loop-distribute-patterns -fno-tree-vectorize -Iinclude -c -o bin/simsui-native/${n}.o ${s}")
 endforeach()
 ofs_step(all
   OUTPUTS bin/SIMSUI.DLL
@@ -388,7 +388,7 @@ ofs_step(all
     [==[python3 -B tools/gen_simsui_native.py]==]
     [==[mkdir -p bin/simsui-native]==]
     ${simsui_units}
-    [==[i686-w64-mingw32-gcc @MODULE_FLAGS@ -std=c99 -O2 -Wall -Wextra -Werror -fno-tree-loop-distribute-patterns -fno-tree-vectorize -c -o bin/simsui-native/simsui_native.o src/simsui/simsui_native.c]==]
+    [==[i686-w64-mingw32-gcc @MODULE_FLAGS@ -std=c99 -O2 -Wall -Wextra -Werror -fno-tree-loop-distribute-patterns -fno-tree-vectorize -Iinclude -c -o bin/simsui-native/simsui_native.o src/simsui/simsui_native.c]==]
     [==[python3 -B tools/gen_simsui_native.py @SIMSUI_OBJECTS@ bin/simsui-native/simsui_native.o]==]
     [==[i686-w64-mingw32-gcc @MODULE_FLAGS@ -std=c99 -O2 -Wall -Wextra -Werror -fno-ident -fno-tree-loop-distribute-patterns -fno-tree-vectorize -fno-asynchronous-unwind-tables -Iinclude -Ibin/simsui-native -c -o bin/simsui-native/simsui_image.o src/simsui/simsui_image.c]==]
     [==[i686-w64-mingw32-windres -J res -O coff bin/simsui-native/simsui.res bin/simsui-native/simsui-res.o]==]

@@ -77,6 +77,8 @@ OnCommand, are 119 breaks, all caught (one only at N=2000) but one proven equiva
 fixture was widened for the ten first missed (child windows enumerated through the callback, command
 ids, the tab strip's frame count, CString lengths, static styles, header sizes, a file read from
 part-way). The proven equivalents are listed in the script's docstring.
+`python3 -B tools/simsui_breaks.py --build-only DIR [CASE...]` builds the 708 mutants' `<name>.exe` without
+wine (Story 1.8 slice 6d) into DIR/`<unit>.<name>`/ with a `meta.json`; see `docs/tools.md`.
 
 Re-run on 2026-11-19 (CMake port), with a crash counted as a miss: 708 breaks, 698 caught at N=400,
 and of the 10 missed all but two caught at N=2000. On the way the fixture was widened again:

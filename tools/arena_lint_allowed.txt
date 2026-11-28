@@ -18,11 +18,6 @@ src/sim1/sim1.c 0 1
 src/sim1/sim1_internal.h 1 0
 src/sim1/sim1_native.c 3 0
 src/sim1/sim1_small.c 5 1
-src/simsui/simsui_dib.c 2 0
-src/simsui/simsui_dibsection.c 2 0
-src/simsui/simsui_edit.c 2 0
-src/simsui/simsui_native.c 4 0
-src/simsui/simsui_shadow.c 1 0
 src/sound/sound.c 1 1
 src/test/ofstest.c 3 0
 src/util/util_exchange.c 1 0

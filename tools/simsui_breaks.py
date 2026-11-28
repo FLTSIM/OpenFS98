@@ -41,6 +41,7 @@ command-seven-same (N=2000: OnCommand's EN_KILLFOCUS-like case 7 with the focus 
 being validated).
 """
 import module_flags
+import break_build_only as bo
 from pathlib import Path
 import re
 import subprocess
@@ -803,7 +804,7 @@ BREAKS = {
         ('pal-delete-single', 'if (flags & 1) fs98_simsui_ui_delete(pal);', 'if (flags & 1) mfc_operator_delete(pal);'),
         ('dib-handle-offset', 'return bitmap ? D32(bitmap, 4) : 0;', 'return bitmap ? D32(bitmap, 0) : 0;'),
         ('dib-width-bytes', '(D32(dib, 8) + 3) & 0xfffffffc);', '(D32(dib, 8) + 4) & 0xfffffffc);'),
-        ('dib-valid-low', 'if ((uint32_t)(uintptr_t)pointer < bits) return 0;', 'if ((uint32_t)(uintptr_t)pointer <= bits) return 0;'),
+        ('dib-valid-low', 'if (fs98_handle(pointer) < bits) return 0;', 'if (fs98_handle(pointer) <= bits) return 0;'),
         ('dib-valid-high', '* D32(dib, 0xc) + bits - 1) return 0;', '* D32(dib, 0xc) + bits) return 0;'),
         ('info-core', 'return D32(info, 0) != 0xc;', 'return D32(info, 0) != 0x28;'),
         ('colours-bits', '? D16(info, 0xe) : D16(info, 0xa);', '? D16(info, 0xe) : D16(info, 0xe);'),
@@ -813,33 +814,53 @@ BREAKS = {
 }
 
 
+def mutated(name, unit, before, after):
+    """The unit's source with the break's one anchor replaced (shared by the wine run and --build-only)."""
+    original = Path(f'src/simsui/simsui_{unit}.c').read_text()
+    if original.count(before) != 1:
+        raise ValueError(f'{name}: the anchor occurs {original.count(before)} times')
+    return original.replace(before, after, 1)
+
+
+def compile_argv(unit, executable, source):
+    others = [other for other in UNITS if other != f'src/simsui/simsui_{unit}.c']
+    return [
+        'i686-w64-mingw32-gcc', *module_flags.FLAGS, '-std=c99', '-O2', '-Wall', '-Wextra', '-Wno-unused', '-fno-tree-loop-distribute-patterns',
+        '-fno-tree-vectorize', '-Isrc/simsui', '-Iinclude',
+        '-Wl,--image-base=0x400000', '-o', str(executable),
+        'tools/difftest/simsuidiff.c', str(source), *others]
+
+
+def all_breaks():
+    return [(name, unit, before, after) for unit, entries in BREAKS.items() for name, before, after in entries]
+
+
+def build_only(argv):
+    def case(name, unit, before, after):
+        return bo.Case(f'{unit}.{name}', lambda: {f'{name}.c': mutated(name, unit, before, after)},
+                       lambda work: [compile_argv(unit, work / f'{name}.exe', work / f'{name}.c')], [f'{name}.exe'])
+    return bo.build_only(argv, lambda: ([case(*b) for b in all_breaks()], None))
+
+
 def main():
+    if '--build-only' in sys.argv[1:]:
+        return build_only(sys.argv[sys.argv.index('--build-only') + 1:])
     count = int(sys.argv[1]) if len(sys.argv) > 1 else 400
     only = set(sys.argv[2:])
     if count < 100:
         raise ValueError('use at least 100 scenarios')
     directory = Path('bin/simsui-diff/breaks')
     directory.mkdir(parents=True, exist_ok=True)
-    breaks = [(name, unit, before, after) for unit, entries in BREAKS.items() for name, before, after in entries]
+    breaks = all_breaks()
     if only:
         breaks = [entry for entry in breaks if entry[0] in only or entry[1] in only]
     caught = 0
     for name, unit, before, after in breaks:
-        path = f'src/simsui/simsui_{unit}.c'
-        original = Path(path).read_text()
-        if original.count(before) != 1:
-            raise ValueError(f'{name}: the anchor occurs {original.count(before)} times')
         source = directory / f'{name}.c'
         executable = directory / f'{name}.exe'
-        source.write_text(original.replace(before, after, 1))
+        source.write_text(mutated(name, unit, before, after))
         executable.unlink(missing_ok=True)
-        others = [other for other in UNITS if other != path]
-        build = subprocess.run([
-            'i686-w64-mingw32-gcc', *module_flags.FLAGS, '-std=c99', '-O2', '-Wall', '-Wextra', '-Wno-unused', '-fno-tree-loop-distribute-patterns',
-            '-fno-tree-vectorize', '-Isrc/simsui',
-            '-Wl,--image-base=0x400000', '-o', str(executable),
-            'tools/difftest/simsuidiff.c', str(source), *others],
-            text=True, capture_output=True)
+        build = subprocess.run(compile_argv(unit, executable, source), text=True, capture_output=True)
         if build.returncode:
             print(f'{name}: BUILD FAILED (not counted)\n{build.stderr}', flush=True)
             continue

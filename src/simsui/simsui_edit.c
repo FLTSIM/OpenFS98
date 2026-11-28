@@ -6,6 +6,7 @@
  * the IME context +0x5c; flags +0x60 (1 a number: 2 signed, 4 with a point; 8 read only;
  * 0x10 limited to +0x64 characters; 0x20, 0x40, 0x80 no IME); the limit +0x64. */
 #include "simsui_internal.h"
+#include "fs98/arena.h"
 
 #define VTABLE_EDIT 0x16140
 #define VTABLE_BRUSH 0x16200
@@ -137,7 +138,7 @@ void TC fs98_simsui_edit_char(void *edit, uint32_t key, uint32_t repeat, uint32_
         return;
     }
     CALL_STD(SendMessageA, int32_t, (uint32_t, uint32_t, uint32_t, uint32_t))(
-        D32(edit, 0x20), 0xb0, (uint32_t)(uintptr_t)&start, (uint32_t)(uintptr_t)&end);
+        D32(edit, 0x20), 0xb0, fs98_handle(&start), fs98_handle(&end));
     CALL_THIS(MFC_540, void *, (void *))(&text);
     CALL_THIS(MFC_3874, void, (void *, void *))(edit, &text);
     CALL_STD(GetCaretPos, int32_t, (int32_t *))(point);

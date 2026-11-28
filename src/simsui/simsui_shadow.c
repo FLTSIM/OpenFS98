@@ -5,6 +5,7 @@
  * +0x7c/+0x80 (the bitmap's, grown by the shadow's offset); the CDIBPal +0x84 (none: not
  * made). */
 #include "simsui_internal.h"
+#include "fs98/arena.h"
 
 #define VTABLE_SHADOW 0x16c60
 #define VTABLE_OBJECT 0x15018
@@ -48,7 +49,7 @@ void TC fs98_simsui_shadow_init(void *shadow, int32_t id, void *background, void
     I32(shadow, 0x74) = x;
     point[0] = x;
     I32(shadow, 0x78) = y;
-    D32(shadow, 0x84) = (uint32_t)(uintptr_t)pal;
+    D32(shadow, 0x84) = fs98_handle(pal);
     point[1] = y;
     fs98_simsui_remap_point(point, 0);
     I32(shadow, 0x74) = point[0];

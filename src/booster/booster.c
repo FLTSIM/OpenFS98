@@ -31,6 +31,7 @@
 
 #include "fs98/linkage.h"
 #include "fs98/host.h"
+#include "fs98/divide.h"
 
 #define BOOSTER_IMAGE_SIZE 0x904
 #define BOOSTER_IMPORTS    0x000
@@ -785,20 +786,15 @@ static void booster_grid(void)
     south = (((uint32_t)(int32_t)(int8_t)r[8] << 16) | P16(r, 6)) << 1;
     columns = P16(r, 0x13);
     rows_signed = (int16_t)P16(r, 0x15);
-    /* RETAIL BUG (kept): BST-4 -- rows of 0 divide by zero (signed here); columns of 0 below (unsigned). */
-    __asm__ ("cltd\n\tidivl %2"
-             : "=a" (lat_step)
-             : "0" (north - south), "rm" (rows_signed)
-             : "edx", "cc");
+    /* RETAIL BUG (kept): BST-4 -- rows of 0 divide by zero (signed here); columns of 0 below (unsigned).
+     * Retail takes a #DE that the host's repair saturates; ours returns the repaired value (fs98/divide.h). */
+    lat_step = fs98_idiv32(0u - ((north - south) >> 31), north - south, (uint32_t)rows_signed, 0);
     radius <<= 8;
     west = (((uint32_t)r[0xe] << 16) | P16(r, 0xc)) << 8;
     east = (((uint32_t)r[0xb] << 16) | P16(r, 9)) << 8;
     B_INDEX = 0;
     /* RETAIL BUG (kept): BST-4 -- columns of 0 divide by zero (unsigned). */
-    __asm__ ("xorl %%edx,%%edx\n\tdivl %2"
-             : "=a" (lon_step)
-             : "0" (east - west), "rm" ((uint32_t)columns)
-             : "edx", "cc");
+    lon_step = fs98_div32(0, east - west, columns, 0);
     B_NORTH = north;
     B_SOUTH = north;
     rows = P16(r, 0x15);

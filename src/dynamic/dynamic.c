@@ -43,6 +43,7 @@
 
 #include "fs98/linkage.h"
 #include "fs98/host.h"
+#include "fs98/divide.h"
 
 #define DYN_IMAGE_SIZE 0x250        /* .data's virtual size */
 #define DYN_NOPS       0x44
@@ -174,34 +175,27 @@ static uint32_t edi;                /* the object */
 
 /* ---- arithmetic as the processor does it -------------------------------------- */
 
-/* div: edx:eax / d, unsigned.  The processor's own instruction, so a zero
- * divisor or a quotient past 32 bits faults as retail's does. */
+/* div: edx:eax / d, unsigned.  A zero divisor or a quotient past 32 bits gives the
+ * host's repaired value, as retail's fault does. */
 static uint32_t udiv(uint32_t hi, uint32_t lo, uint32_t d, uint32_t *rem)
 {
     /* RETAIL BUG (kept): DYN-2 -- (the divides) nothing tests the divisor or the quotient's range, so a zero
-     * divisor or an overflowing quotient takes a #DE (the host's repair then saturates it). */
-    uint32_t q, r;
-    __asm__ volatile("divl %4" : "=a"(q), "=d"(r) : "a"(lo), "d"(hi), "rm"(d) : "cc");
-    if (rem) *rem = r;
-    return q;
+     * divisor or an overflowing quotient takes a #DE in retail, which the host's repair saturates; ours returns that repaired value (fs98/divide.h). */
+    return fs98_div32(hi, lo, d, rem);
 }
 
 /* idiv: edx:eax / d, signed */
 static uint32_t sdiv(uint32_t hi, uint32_t lo, uint32_t d)
 {
     /* RETAIL BUG (kept): DYN-2 -- (the divides) as udiv: the ramped move divides by a program word (S_LEFT) unchecked. */
-    uint32_t q, r;
-    __asm__ volatile("idivl %4" : "=a"(q), "=d"(r) : "a"(lo), "d"(hi), "rm"(d) : "cc");
-    return q;
+    return fs98_idiv32(hi, lo, d, 0);
 }
 
 /* idiv r/m16: dx:ax / d, signed, quotient in ax */
 static uint16_t sdiv16(uint16_t hi, uint16_t lo, uint16_t d)
 {
     /* RETAIL BUG (kept): DYN-2 -- (the divides) as udiv: the divisor is a program word, and the 16-bit quotient can overflow. */
-    uint16_t q, r;
-    __asm__ volatile("idivw %4" : "=a"(q), "=d"(r) : "a"(lo), "d"(hi), "rm"(d) : "cc");
-    return q;
+    return fs98_idiv16(hi, lo, d, 0);
 }
 
 static uint64_t smul(uint32_t a, uint32_t b)     /* imul r/m32: edx:eax */

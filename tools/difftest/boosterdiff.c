@@ -57,6 +57,7 @@
  * Build: make boosterdiff     Run: make boosterdiff-run
  */
 #include "argcount.h"
+#include "divrepair.h"
 #include <windows.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -1444,8 +1445,9 @@ static void index_boxes(struct booster *b)
             int16_t rows = *(const int16_t *)(r + 0x15);
             int32_t north = get_lat(r, 3), south = get_lat(r, 6);
             uint32_t west = get_lon(r, 0xc), east = get_lon(r, 9);
-            int32_t lat_step = (north - south) / rows;
-            uint32_t lon_step = (east - west) / cols;
+            /* a zero dimension is the directed vectors': no boxes (a C divide by zero here would trap) */
+            int32_t lat_step = rows ? (north - south) / rows : 0;
+            uint32_t lon_step = cols ? (east - west) / cols : 0;
             int i, j;
 
             for (i = 0; i < rows; i++)
@@ -1990,6 +1992,12 @@ static void show_difference(void)
     printf("--- ours:\n...%.900s\n", b + from);
 }
 
+/* the host's divide repair for retail's faults, from any thread (Story 1.10b1) */
+static LONG WINAPI on_vectored(EXCEPTION_POINTERS *e)
+{
+    return divrepair_handle(e) ? EXCEPTION_CONTINUE_EXECUTION : EXCEPTION_CONTINUE_SEARCH;
+}
+
 /* A fault ends the run and says where, rather than waiting on a debugger. */
 static LONG WINAPI on_fault(EXCEPTION_POINTERS *e)
 {
@@ -2030,6 +2038,134 @@ static LONG WINAPI on_fault(EXCEPTION_POINTERS *e)
     return EXCEPTION_CONTINUE_SEARCH;
 }
 
+/* Story 1.10b1's directed vectors: one grid record (type 2) whose dimensions reach BOOSTER's two divides (retail
+ * idiv on the row step, div on the column step) with a zero divisor, a negative signed row count, and a dividend of
+ * either sign. Cells 0..5 and the last are set, so the cells that run are observable (the files copied). */
+static const struct { uint16_t cols, rows; int north_above_south; const char *what; } bst_vectors[] = {
+    {0, 1, 1, "columns 0, rows 1"},
+    {0, 1, 0, "columns 0, rows 1, north below south"},
+    {1, 0, 1, "rows 0, columns 1"},
+    {1, 0, 0, "rows 0, columns 1, north below south (negative dividend)"},
+    {1, 0x8001, 0, "rows -32767, columns 1, north below south"},
+    {1, 0xffff, 0, "rows -1, columns 1, north below south"},
+    {1, 0xffff, 1, "rows -1, columns 1 (negative step)"},
+    {1, 0xfffe, 0, "rows -2, columns 1, north below south"},
+    {2, 3, 1, "in range"},
+};
+
+static void make_directed(uint32_t k)
+{
+    struct booster *b;
+    uint8_t *p, *q;
+    uint32_t cells, bytes, c, o = 0x18;
+    int32_t north = 100000, south = 0;
+    uint32_t cols = bst_vectors[k].cols ? bst_vectors[k].cols : 65536, rows = bst_vectors[k].rows ? bst_vectors[k].rows : 65536;
+    uint16_t kind = 0x0001;
+
+    make_scenario(900000 + 16 * k);
+    sc.nboosters = 1;
+    b = &sc.b[0];
+    memset(b, 0, sizeof *b);
+    snprintf(b->cache, sizeof b->cache, "bw\\c0");
+    snprintf(b->source, sizeof b->source, "bw\\s0");
+    b->real = -1;
+    b->quota_kb = 400;
+    b->keep = 0;
+    b->uniform = 0x40;
+    p = b->info;
+    memset(p, 0, 0x18);
+    *(uint16_t *)(p + 0x14) = 0x18;
+    *(uint16_t *)(p + 0x16) = 100;
+    q = p + o;
+    cells = cols * rows;
+    bytes = (cells + 1) / 2;
+    q[0] = 2;
+    if (!bst_vectors[k].north_above_south) { int32_t t = north; north = south; south = t; }
+    put24_lat(q + 3, north);
+    put24_lat(q + 6, south);
+    put24_lon(q + 9, 0x20000000u);
+    put24_lon(q + 0xc, 0x10000000u);
+    *(uint16_t *)(q + 0xf) = 0x1000;
+    *(uint16_t *)(q + 0x11) = kind;
+    *(uint16_t *)(q + 0x13) = bst_vectors[k].cols;
+    *(uint16_t *)(q + 0x15) = bst_vectors[k].rows;
+    for (c = 0; c < cells && c < 0x10000; c++)
+        if (c < 6 || c == cells - 1) {
+            q[0x17 + c / 2] |= (uint8_t)(1 << (4 * (c & 1)));
+            add_file(b, 1, kind, c);
+        }
+    *(uint16_t *)(q + 1) = (uint16_t)(0x17 + bytes);
+    o += 0x17 + bytes;
+    p[o++] = 0;
+    b->info_len = o;
+    b->nboxes = 1;
+    b->boxes[0].north = north > south ? north : south;
+    b->boxes[0].south = north > south ? south : north;
+    b->boxes[0].west = 0x10000000u;
+    b->boxes[0].east = 0x20000000u;
+    b->boxes[0].reach = 0x1000u << 8;
+}
+
+/* the pinned outcome of each directed vector, from the repaired-old control (the retail transcript's length and crc, the cell files copied,
+ * the repairs retail took) -- the same under raw (where it does not fault) and with the converted module; crc 0 records */
+static const struct { uint32_t length; unsigned long copies, repairs; uint32_t crc; } bst_pins[] = {
+    {19785, 0, 15, 0x5f4fb4d4}, {17092, 7, 6, 0xefb98e83}, {23973, 10, 12, 0x9421cbe4}, {6771, 4, 4, 0x3461643a}, {14809, 0, 0, 0x58107b4c}, {10990, 0, 0, 0x07744680}, {8976, 5, 0, 0xcfb2edbb}, {22599, 11, 0, 0x71325cdd}, {17921, 2, 0, 0x84b127d5},
+};
+
+static uint32_t bst_directed(void)
+{
+    uint32_t k, differ = 0, ran = 0;
+    unsigned long copies0;
+
+    for (k = 0; k < sizeof bst_vectors / sizeof bst_vectors[0]; k++) {
+        struct divrepair_mark mark;
+        char hits[256], want[16];
+        int same, bad;
+        unsigned long ours0 = divrepair_repairs[1], reps;
+        uint32_t crc;
+
+        if (getenv("BOOSTER_ONLY") != NULL && (uint32_t)atoi(getenv("BOOSTER_ONLY")) != k)
+            continue;                   /* the raw control exits 3 at the first fault: one vector a run */
+        make_directed(k);
+        sc_start = sc;
+        sources_dirty = 1;
+        counting = 1;
+        copies0 = cover_copy;
+        divrepair_mark_now(&mark);
+        run_side(&retail);
+        counting = 0;
+        reps = divrepair_since(&mark, hits, sizeof hits);
+        crc = divrepair_crc(retail.transcript, retail.length);
+        run_side(&ours);
+        same = retail.length == ours.length && memcmp(retail.transcript, ours.transcript, retail.length) == 0;
+        /* the intended divide ran: only the row divide (retail 0x20652549) for rows 0, only the column divide (0x2065258d)
+         * for columns 0, none for the in-range vectors; ours repairs only in the repaired-old control */
+        if (bst_vectors[k].rows == 0) snprintf(want, sizeof want, "20652549 x");
+        else if (bst_vectors[k].cols == 0) snprintf(want, sizeof want, "2065258d x");
+        else snprintf(want, sizeof want, "none");
+        bad = divrepair_is_off() ? 0 : (strncmp(hits, want, strlen(want)) != 0 || strstr(hits, ", ") != NULL);
+        /* exact: the repair count, the transcript, the copies; only the transcript's crc may still be unrecorded (0) */
+        if (!divrepair_is_off())
+            bad |= reps != bst_pins[k].repairs;
+        bad |= retail.length != bst_pins[k].length || cover_copy - copies0 != bst_pins[k].copies || (bst_pins[k].crc && crc != bst_pins[k].crc);
+        bad |= (divrepair_repairs[1] != ours0) != (getenv("DIVREPAIR_OURS") != NULL && !strcmp(getenv("DIVREPAIR_OURS"), "repair") && strcmp(want, "none") != 0);
+        printf("directed %u (%s): transcript %u bytes crc %08x (pinned %08x), copies %lu, retail repairs: %s (%lu; want %s)%s%s\n", k, bst_vectors[k].what,
+               retail.length, (unsigned)crc, (unsigned)bst_pins[k].crc, cover_copy - copies0, hits, reps, want, same ? "" : "  DIFFER", bad ? "  DIRECTED FAIL" : "");
+        if (!same) {
+            differ++;
+            show_difference();
+        }
+        differ += bad != 0;
+        ran++;
+    }
+    printf("directed: %u vectors run of %zu, %u differ\n", ran, sizeof bst_vectors / sizeof bst_vectors[0], differ);
+    if (ran == 0) {
+        printf("directed: no vector selected  DIRECTED FAIL\n");
+        differ++;
+    }
+    return differ;
+}
+
 int main(int argc, char **argv)
 {
     uint32_t n = argc > 1 ? (uint32_t)arg_count(argv[1]) : 20000;
@@ -2045,6 +2181,7 @@ int main(int argc, char **argv)
     for (i = 0; i < sizeof cd_root && cd_root[i]; i++)
         if (cd_root[i] == '/') cd_root[i] = '\\';
     SetUnhandledExceptionFilter(on_fault);
+    AddVectoredExceptionHandler(1, on_vectored);
     InitializeCriticalSection(&put_lock);
     InitializeCriticalSection(&new_lock);
     handled_sem = CreateSemaphoreA(NULL, 0, 0x7fffffff, NULL);
@@ -2057,6 +2194,8 @@ int main(int argc, char **argv)
     load_util("UTIL_retail.dll");
     load_side(&retail, "BOOSTER_retail.dll", "retail", 1);
     load_side(&ours, "BOOSTER_ours.dll", "ours", 0);
+    divrepair_add("BOOSTER", 0, (uint8_t *)retail.module);
+    divrepair_add("BOOSTER", 1, (uint8_t *)ours.module);
 
     for (i = first; i < first + n; i++) {
         uint32_t j;
@@ -2078,6 +2217,7 @@ int main(int argc, char **argv)
         sc_start = sc;
         sources_dirty = 1;
         counting = 1;
+        divrepair_tag = i;
         run_side(&retail);
         counting = 0;
         run_side(&ours);
@@ -2119,5 +2259,9 @@ int main(int argc, char **argv)
            cover_jobs, cover_queue_max);
     (void)cover_busy_skip;
     (void)cover_flush;
+    if (getenv("BOOSTER_NO_DIRECTED") == NULL)
+        differ += bst_directed();
+    if (divrepair_report())
+        return DIVREPAIR_EXIT;
     return differ ? 1 : 0;
 }

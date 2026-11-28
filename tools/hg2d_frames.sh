@@ -51,6 +51,8 @@
 # once both have finished.  HG2D_FRAMES_GLOBAL=1 also writes <tag>/global.bin (FRAMELOCK_GLOBAL);
 # HG2D_FRAMES_KEEP=1 keeps the game copies (the recorder takes the scenery index a first run builds).
 #
+# HG2D_FRAMES_WINEDEBUG=+file sets the games' WINEDEBUG (default -all; the game.log of each run keeps the trace).
+#
 # HG2D_FRAMES_ALL=1 compares the whole game instead: every module and the English DLLs
 # retail against every one ours, and the verdict is on all of them.
 # HG2D_FRAMES_ONLY="UTIL MAIN" compares those modules alone: ours has them in an otherwise
@@ -139,6 +141,7 @@ debug=-all
 [ -z "${HG2D_FRAMES_DEVICE:-}" ] || debug=+ddraw
 [ -z "${gauge_name}${HG2D_FRAMES_GAUGES:-}${HG2D_FRAMES_MDLS:-}${HG2D_FRAMES_SIM1:-}" ] || [ -z "${HG2D_FRAMES_DEVICE:-}" ] || debug=+loaddll,+ddraw
 [ -z "$retail_only" ] || debug=+loaddll
+[ -z "${HG2D_FRAMES_WINEDEBUG:-}" ] || debug=$HG2D_FRAMES_WINEDEBUG    # a trace channel for the games themselves (Story 1.10b1: +file, to count a BGL's opens)
 export WINEDEBUG=-all
 [ -z "${HG2D_FRAMES_NOSOUND:-}" ] || export WINEDLLOVERRIDES="dsound=d"
 [ -z "$retail_only" ] || export WINEDLLOVERRIDES="dsound=d"    # no sound, wine's builtin msvcrt

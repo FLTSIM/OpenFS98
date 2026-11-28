@@ -87,7 +87,7 @@ ofs_step(all
     [==[mkdir -p bin]==]
     [==[i686-w64-mingw32-windres src/dynamic/dynamic.rc -O coff -o bin/dynamic.res]==]
     [==[mkdir -p bin]==]
-    [==[i686-w64-mingw32-gcc @MODULE_FLAGS@ -std=c99 -Os -Wall -Wextra -Iinclude -ffreestanding -fno-builtin -fno-asynchronous-unwind-tables -fomit-frame-pointer -Isrc/dynamic -shared -nostdlib -Wl,--enable-stdcall-fixup -Wl,--entry=_DllMain@12 -Wl,--disable-dynamicbase -Wl,--disable-nxcompat -Wl,--image-base=0x206a0000 -o bin/DYNAMIC.DLL src/dynamic/dynamic.c bin/dynamic.res src/dynamic/dynamic.def -lkernel32]==]
+    [==[i686-w64-mingw32-gcc @MODULE_FLAGS@ -std=c99 -Os -Wall -Wextra -Iinclude -ffreestanding -fno-builtin -fno-asynchronous-unwind-tables -fomit-frame-pointer -Isrc/dynamic -shared -nostdlib -Wl,--enable-stdcall-fixup -Wl,--entry=_DllMain@12 -Wl,--disable-dynamicbase -Wl,--disable-nxcompat -Wl,--image-base=0x206a0000 -o bin/DYNAMIC.DLL src/dynamic/dynamic.c bin/dynamic.res src/dynamic/dynamic.def -lkernel32 -lgcc]==]
     [==[python3 -B tools/check_data_image.py --hash DYNAMIC bin/DYNAMIC.DLL]==]
   )
 
@@ -108,7 +108,7 @@ ofs_step(all
     [==[mkdir -p bin]==]
     [==[i686-w64-mingw32-windres src/fe/fe.rc -O coff -o bin/fe.res]==]
     [==[mkdir -p bin]==]
-    [==[i686-w64-mingw32-gcc @MODULE_FLAGS@ -std=c99 -Os -Wall -Wextra -Iinclude -ffreestanding -fno-builtin -fno-asynchronous-unwind-tables -fomit-frame-pointer -Isrc/fe -shared -nostdlib -Wl,--enable-stdcall-fixup -Wl,--entry=_DllMain@12 -Wl,--disable-dynamicbase -Wl,--disable-nxcompat -Wl,--image-base=0x206c0000 -o bin/FE.DLL src/fe/fe.c bin/fe.res src/fe/fe.def -lkernel32]==]
+    [==[i686-w64-mingw32-gcc @MODULE_FLAGS@ -std=c99 -Os -Wall -Wextra -Iinclude -ffreestanding -fno-builtin -fno-asynchronous-unwind-tables -fomit-frame-pointer -Isrc/fe -shared -nostdlib -Wl,--enable-stdcall-fixup -Wl,--entry=_DllMain@12 -Wl,--disable-dynamicbase -Wl,--disable-nxcompat -Wl,--image-base=0x206c0000 -o bin/FE.DLL src/fe/fe.c bin/fe.res src/fe/fe.def -lkernel32 -lgcc]==]
     [==[python3 -B tools/check_data_image.py --hash FE bin/FE.DLL]==]
   )
 

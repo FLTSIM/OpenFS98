@@ -633,7 +633,7 @@ ofs_target(demodiff-run
 ofs_target(fesldiff-run
   DEPENDS openfs98 difftests
   COMMANDS
-    [==[i686-w64-mingw32-gcc @MODULE_FLAGS@ -std=c99 -Os -Wall -Wextra -Iinclude -ffreestanding -fno-builtin -fno-asynchronous-unwind-tables -fomit-frame-pointer -Isrc/fe -shared -nostdlib -Wl,--enable-stdcall-fixup -Wl,--entry=_DllMain@12 -Wl,--disable-dynamicbase -Wl,--disable-nxcompat -Wl,--image-base=0x20c00000 -o bin/difftest/FE_sl_ours.dll src/fe/fe.c bin/fe.res src/fe/fe.def -lkernel32]==]
+    [==[i686-w64-mingw32-gcc @MODULE_FLAGS@ -std=c99 -Os -Wall -Wextra -Iinclude -ffreestanding -fno-builtin -fno-asynchronous-unwind-tables -fomit-frame-pointer -Isrc/fe -shared -nostdlib -Wl,--enable-stdcall-fixup -Wl,--entry=_DllMain@12 -Wl,--disable-dynamicbase -Wl,--disable-nxcompat -Wl,--image-base=0x20c00000 -o bin/difftest/FE_sl_ours.dll src/fe/fe.c bin/fe.res src/fe/fe.def -lkernel32 -lgcc]==]
     [==[cp orig/Modules/FE.DLL bin/difftest/FE_retail.dll]==]
     [==[cp orig/Modules/UTIL.DLL bin/difftest/UTIL_retail.dll]==]
     [==[cp orig/Modules/NUMERIC.DLL bin/difftest/NUMERIC_retail.dll]==]
@@ -1180,7 +1180,7 @@ ofs_target(fegriddiff
 ofs_target(fesldiff
   DEPENDS openfs98 difftests
   COMMANDS
-    [==[i686-w64-mingw32-gcc @MODULE_FLAGS@ -std=c99 -Os -Wall -Wextra -Iinclude -ffreestanding -fno-builtin -fno-asynchronous-unwind-tables -fomit-frame-pointer -Isrc/fe -shared -nostdlib -Wl,--enable-stdcall-fixup -Wl,--entry=_DllMain@12 -Wl,--disable-dynamicbase -Wl,--disable-nxcompat -Wl,--image-base=0x20c00000 -o bin/difftest/FE_sl_ours.dll src/fe/fe.c bin/fe.res src/fe/fe.def -lkernel32]==]
+    [==[i686-w64-mingw32-gcc @MODULE_FLAGS@ -std=c99 -Os -Wall -Wextra -Iinclude -ffreestanding -fno-builtin -fno-asynchronous-unwind-tables -fomit-frame-pointer -Isrc/fe -shared -nostdlib -Wl,--enable-stdcall-fixup -Wl,--entry=_DllMain@12 -Wl,--disable-dynamicbase -Wl,--disable-nxcompat -Wl,--image-base=0x20c00000 -o bin/difftest/FE_sl_ours.dll src/fe/fe.c bin/fe.res src/fe/fe.def -lkernel32 -lgcc]==]
     [==[cp orig/Modules/FE.DLL bin/difftest/FE_retail.dll]==]
     [==[cp orig/Modules/UTIL.DLL bin/difftest/UTIL_retail.dll]==]
     [==[cp orig/Modules/NUMERIC.DLL bin/difftest/NUMERIC_retail.dll]==]

@@ -174,7 +174,8 @@ All reproduced.
   is opened as `NOEXT.HAZ` when the cache is measured, and deleted as
   `NOEXT.HAZ` when it is emptied.
 - **A short grid or list record runs away.** Columns or rows of 0 divide by
-  zero; rows divide signed and columns unsigned. A record shorter than 0x13
+  zero (retail traps and the host's repair saturates; ours returns the repaired
+  value through `fs98/divide.h`, BST-4); rows divide signed and columns unsigned. A record shorter than 0x13
   bytes makes the file loop run 2^31 times.
 - **Retail UTIL `+0x44` faults when the reach is a whole latitude circle.**
   It divides once, 64 by 32 bits, so the quotient overflows (#DE) once the

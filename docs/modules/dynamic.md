@@ -195,7 +195,8 @@ capacity) fill until every tank with a capacity is full. With GLOBAL
 op and `+0xc44` -- and the total room leaves out the first tank: its room
 is stored and then overwritten by the second's (`mov` where the others
 `add`). A first tank with more than twice the others' room overflows the
-divide and faults, in retail and here. A player just waits out a
+divide and faults in retail (the host's repair saturates it); ours returns that
+repaired value from `fs98/divide.h` (Story 1.10b1). A player just waits out a
 countdown.
 
 ## Retail behaviour that is reproduced
@@ -207,7 +208,8 @@ countdown.
   bytes say; `0x31`'s index is a byte, so it writes up to 0x1fe past the
   parameters -- into the next object at 0x8a; a declaration run from a
   program leaves edi on the next object, or on GLOBAL, and the program
-  carries on writing there. Divides fault on zero and overflow.
+  carries on writing there. Divides fault on zero and overflow
+  in retail; ours returns the host's repaired value (`fs98/divide.h`, DYN-2).
 - **`0x20` steps with `add si,7`**: only the low 16 bits of the counter.
 - **The first ramped step after a path moves by the altitude.** The ramped
   moves (`0x19`-`0x1f`, `.text+0x1abd`) keep their offset in ecx across the

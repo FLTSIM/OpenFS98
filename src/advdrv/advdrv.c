@@ -31,6 +31,7 @@
 
 #include "fs98/linkage.h"
 #include "fs98/host.h"
+#include "fs98/divide.h"
 
 #define ADVDRV_IMAGE_SIZE 0x32a0
 #define ADVDRV_IMPORTS    0x000
@@ -562,17 +563,17 @@ static int fcom(ld a, ld b)
     return 0x45;
 }
 
-/* idiv, so that a zero divisor or INT_MIN / -1 faults as retail's does.
+/* cltd; idiv.
  * RETAIL BUG (kept): ADV-7 -- neither x_idiv nor x_mod tests the divisor or INT_MIN / -1, so a program that
- * divides by zero (or INT_MIN by -1) takes a #DE; the host's divide repair then saturates the result. */
+ * divides by zero (or INT_MIN by -1) takes a #DE in retail, which the host's divide repair saturates. Ours
+ * returns that repaired value (fs98/divide.h) instead of trapping. */
 static int32_t idiv(int32_t a, int32_t b, int32_t *remainder)
 {
-    int32_t q, r;
+    uint32_t r;
+    uint32_t q = fs98_idiv32(0u - ((uint32_t)a >> 31), (uint32_t)a, (uint32_t)b, &r);
 
-    __asm__ volatile ("cltd\n\tidivl %3" : "=a"(q), "=&d"(r) : "a"(a), "r"(b)
-                      : "cc");
-    *remainder = r;
-    return q;
+    *remainder = (int32_t)r;
+    return (int32_t)q;
 }
 
 /* ---- forward declarations ----------------------------------------------------------- */

@@ -1,0 +1,7 @@
+# Story 1.10: the hand-written divides left in src/ (tools/check_div_asm.py): file|function|mnemonic|normalised statement.
+# Rows may only shrink; the check fails on a row that is new, raised against HEAD, or no longer in src/. b2 deletes PANELS', b3 DEMO's.
+src/demo/demo.c|fault_div|divl|divl %%ecx
+src/panels/panels.c|pn_div|divl|divl %4
+src/panels/panels.c|pn_idiv64|idivl|idivl %4
+src/panels/panels.c|pn_idiv|idivl|idivl %3
+src/panels/panels.c|pn_imod|idivl|idivl %3

@@ -30,7 +30,9 @@ thread. Many slots take 16-bit arguments, pushed `sub esp,2; push cx`; a
 
 The scenery algorithms are C, including all of part 3, but the current DLL is
 still an i386 retail-compatibility build. Its remaining assembly is confined
-to three exact divide instructions, one x87 bearing calculation, the two entry
+to one x87 bearing calculation (its three divides go through
+`include/fs98/divide.h` since Story 1.10b1, returning the host's repaired value
+where retail traps), the two entry
 shims that reproduce retail's `+0x18`/`+0x40` register corruption, and the
 assembler aliases that place `ImportTable` and `Linkage` exactly. The larger
 portability constraint is the retail image itself: pointers are stored as

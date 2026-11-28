@@ -89,6 +89,7 @@
  * Build: make dynamicdiff     Run: make dynamicdiff-run
  */
 #include "argcount.h"
+#include "divrepair.h"
 #include <windows.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -845,6 +846,24 @@ static uint32_t rng(void)
 
 enum { OP_FRAME, OP_TICK, OP_L3, OP_L4, OP_L16, OP_POKE, OP_MOVE, OP_PLAYERS, OP_DEINIT,
        OP_INIT, OP_MEET, OP_OFF, OP_COUNT };
+/* Story 1.10b1's directed fixtures (DYN_DIRECTED=1): scenario numbers of the 20000-scenario stream at which a retail divide first
+ * faulted and was repaired, with the retail VAs that must be repaired and the crc of the retail transcript (the host's repair
+ * applied; a crc of 0 only records). The 26 other VAs: docs/implementation/spec-1-10b1 "Manifest". */
+struct dyn_pin { unsigned v; struct { uint32_t va; unsigned long n; } rep[4]; uint32_t crc, image_crc, global_crc, arena_used; };
+#define R(va, n) {0x206a##va, n}
+static const struct dyn_pin dyn_pins[] = {
+    {46,    {R(2fb4, 4)}, 0xf687acfa, 0xbe845784, 0xca699cdd, 0x6190},
+    {48,    {R(254a, 9), R(26b8, 3)}, 0xae79af7c, 0x3c3ccaa3, 0xa53c719c, 0x9def0},
+    {884,   {R(2b9a, 1)}, 0xd10479bb, 0xb0ed3d3a, 0xca2653ae, 0xb0d0},
+    {1384,  {R(2c56, 1544), R(2c0a, 1185)}, 0x1e0aae96, 0xebb92b9e, 0xa8002918, 0x6100},
+    {2439,  {R(2b7d, 1)}, 0xace7c4c1, 0x73e0276f, 0x2f5ccad4, 0x4570},
+    {2492,  {R(2b9a, 1), R(2be4, 17)}, 0xa3bf79cc, 0x101a5385, 0xca43f750, 0x3510},
+    {2966,  {R(2c0a, 570), R(2c7c, 167)}, 0x5ed21e4e, 0xfef4aad0, 0x9f8b300b, 0x13590},
+    {6123,  {R(2fb4, 1), R(2be4, 138), R(1f6c, 1)}, 0x2e799a98, 0x75ee0c28, 0x1daae136, 0x5060},
+    {7407,  {R(2c0a, 61), R(2be4, 1), R(2c30, 61)}, 0xeebd9913, 0xb4d121e8, 0x65ca1848, 0x6380},
+    {19373, {R(2b9a, 2), R(2c89, 234)}, 0x11853263, 0x656ef652, 0x1273da25, 0xbad0},
+};
+#undef R
 static const char *const op_names[OP_COUNT] = {
     "frame", "tick", "list3", "list4", "list16", "poke", "move", "players", "deinit", "init",
     "meet", "off"
@@ -1170,6 +1189,7 @@ static void make_scenario(struct scenario *s)
     if (rng() % 15 == 0) s->base = ncd + 3;         /* a circuit and a turn, set up */
     if (rng() % 30 == 0) s->base = 9;               /* Seattle: paths */
     if (getenv("DYNBLOCK")) s->base = (unsigned)atoi(getenv("DYNBLOCK"));  /* for debugging one */
+    if (getenv("DYN_FORCE")) s->base = ncd + 2;     /* DYN_FORCE=capK (K 0..4): the refuel block, tank K's capacity zero, proportional rate */
     s->nrec = rng() % 12 ? 1 + (rng() % 4 == 0) + (rng() % 8 == 0) : 0;
     for (k = 0; k < s->nrec; k++) {
         unsigned b = k == 0 ? s->base : rng() % ncd;
@@ -1229,6 +1249,15 @@ static void make_scenario(struct scenario *s)
         *(uint32_t *)(s->g + 0x268) = 0;
         for (k = 0; k < 4; k++) *(uint32_t *)(s->g + 0x1180 + 4 * k) = 1;
         *(uint32_t *)(s->g + 0x1190) = 5;
+    }
+    if (getenv("DYN_FORCE") != NULL && !strncmp(getenv("DYN_FORCE"), "cap", 3)) {
+        static const uint16_t cap[5] = { 0xb78, 0xb80, 0xb98, 0xb88, 0xba0 };
+        unsigned k0 = (unsigned)atoi(getenv("DYN_FORCE") + 3);
+        for (k = 0; k < 5; k++) {
+            *(uint32_t *)(s->g + cap[k]) = k == k0 ? 0 : 0x100 + rng() % 0x200;
+            *(uint32_t *)(s->g + cap[k] - 4) = 1 + rng() % 0x1000;
+        }
+        *(uint16_t *)(s->g + 0xc44) = (uint16_t)(1 + rng() % 100);
     }
     if (s->base == ncd + 1) {
         *(uint16_t *)(s->g + 0x2aa) = 0x1000;
@@ -1296,6 +1325,9 @@ static LONG WINAPI on_vectored(EXCEPTION_POINTERS *e)
     uint8_t *ip = (uint8_t *)e->ContextRecord->Eip;
     if (!in_module)
         return EXCEPTION_CONTINUE_SEARCH;
+    /* DYNAMIC's own divide faults are repaired as the host does (Story 1.10b1); CHAIN's and UTIL's, as before */
+    if (divrepair_handle(e))
+        return EXCEPTION_CONTINUE_EXECUTION;
     if (code == EXCEPTION_ACCESS_VIOLATION && (in_reach(ip) || e->ExceptionRecord->NumberParameters == 0)) {
         put(" FAULT(av,");
         if (e->ExceptionRecord->NumberParameters >= 2) {
@@ -1934,15 +1966,32 @@ int main(int argc, char **argv)
 
     if (!load_side(&retail, "DYNAMIC_retail.dll", "retail")) return 2;
     if (!load_side(&ours, "DYNAMIC_ours.dll", "openfs98")) return 2;
+    divrepair_add("DYNAMIC", 0, (uint8_t *)retail.dll);
+    divrepair_add("DYNAMIC", 1, (uint8_t *)ours.dll);
+    divrepair_exempt("CHAIN", chain_lo, chain_hi);
+    divrepair_exempt("UTIL", util_lo, util_hi);
     if ((at = compare(retail.pristine, ours.pristine, IMAGE_SIZE)) >= 0) {
         printf("initial images differ at +%#lx\n", at);
         dump_words("img", retail.pristine, ours.pristine, IMAGE_SIZE, 0);
         bad++;
     }
 
+    unsigned pins_run = 0, generated = 0;
+    if (getenv("DYN_DIRECTED") != NULL)
+        n = dyn_pins[sizeof dyn_pins / sizeof dyn_pins[0] - 1].v + 1;     /* the pinned fixtures only: generated in order, run when pinned */
     for (v = 0; v < n; v++) {
+        unsigned long fault0 = cover_fault, pin = 0;
+        struct divrepair_mark mark;
         make_scenario(&s);
+        generated++;
         if (getenv("DYNONLY") && v != (unsigned)atoi(getenv("DYNONLY"))) continue;
+        if (getenv("DYN_DIRECTED") != NULL) {
+            for (pin = 0; pin < sizeof dyn_pins / sizeof dyn_pins[0] && dyn_pins[pin].v != v; pin++) ;
+            if (pin == sizeof dyn_pins / sizeof dyn_pins[0]) continue;
+            pin++;
+        }
+        divrepair_tag = v;
+        divrepair_mark_now(&mark);
         run(&retail, &s, 1);
         memcpy(rlog, tlog, tlen + 1);
         memcpy(rimage, retail.image, IMAGE_SIZE);
@@ -1950,6 +1999,39 @@ int main(int argc, char **argv)
         rused = arena_used;
         rhung = run_hung;
         cover_hung_runs += rhung;
+        divrepair_scenario(v, cover_fault - fault0, (unsigned long)rhung, !rhung, rlog, strlen(rlog));
+        if (pin) {
+            /* a directed fixture: the pinned scenario must repair exactly the pinned retail VAs, each the pinned number of times (no other
+             * VA), and leave the pinned transcript and the pinned continuation (the retail image, GLOBAL and arena use at its end) */
+            char hits[512];
+            const struct dyn_pin *d = &dyn_pins[pin - 1];
+            uint32_t crc = divrepair_crc(rlog, strlen(rlog)), icrc = divrepair_crc(rimage, IMAGE_SIZE), gcrc = divrepair_crc(rglobal, GLOBAL_SIZE);
+            int failed = 0, j, nwant = 0, ngot = 0;
+            const char *at = hits;
+            unsigned va, n;
+            int len;
+            divrepair_since(&mark, hits, sizeof hits);
+            for (j = 0; j < 4 && d->rep[j].va; j++)
+                nwant++;
+            while (sscanf(at, " %x x%u%n", &va, &n, &len) == 2) {
+                int found = 0;
+                for (j = 0; j < nwant; j++)
+                    if (d->rep[j].va == va && d->rep[j].n == n)
+                        found = 1;
+                failed |= !found;
+                ngot++;
+                at += len;
+                if (*at == ',')
+                    at++;
+            }
+            failed |= ngot != nwant;
+            failed |= crc != d->crc || icrc != d->image_crc || gcrc != d->global_crc || rused != d->arena_used;
+            printf("directed scenario %u: retail repairs %s; transcript crc %08x image %08x global %08x arena %#x (pinned %08x %08x %08x %#x)%s\n", v, hits,
+                   (unsigned)crc, (unsigned)icrc, (unsigned)gcrc, (unsigned)rused, (unsigned)d->crc, (unsigned)d->image_crc, (unsigned)d->global_crc,
+                   (unsigned)d->arena_used, failed ? "  DIRECTED FAIL" : "");
+            bad += failed;
+            pins_run++;
+        }
         memcpy(rarena, arena - ARENA_START, ARENA_SIZE);
         run(&ours, &s, 0);
         if (strcmp(rlog, tlog) || (!rhung && (0
@@ -1998,8 +2080,18 @@ int main(int argc, char **argv)
     printf("\npath points emptied %lu, turns put across 64K %lu", cover_emptied, cover_wrapped);
     printf("\nfaults %lu, hangs %lu (scenarios ended by one, state not compared: %lu)\n",
            cover_fault, cover_hang, cover_hung_runs);
+    if (getenv("DYN_DIRECTED") != NULL) {
+        unsigned want = (unsigned)(sizeof dyn_pins / sizeof dyn_pins[0]);
+        if (pins_run != want) {
+            printf("directed: only %u of %u pinned fixtures ran  DIRECTED FAIL\n", pins_run, want);
+            bad++;
+        }
+        printf("directed: %u pinned fixtures executed of %u, %u scenarios generated\n", pins_run, want, generated);
+    }
     printf("%u scenarios, %u differ\n", n, bad);
     if (!bad) printf("IDENTICAL\n");
     (void)cover_alloc;
+    if (divrepair_report())
+        return DIVREPAIR_EXIT;
     return bad != 0;
 }

@@ -2,7 +2,8 @@
 title: 'Story 1.8, slice 6d: SIMSUI uses arena.h'
 type: 'refactor'
 created: '2026-11-25'
-status: 'ready-for-dev'
+status: 'in-progress'
+baseline_commit: '3dae7cd27375a77f9ff2bd202015373fae183d0a'
 route: 'dispatch'
 review_loop_iteration: 0
 context: ['{project-root}/OpenFS98/AGENTS.md', '{project-root}/OpenFS98/docs/implementation/spec-1-8h-options-uses-arena-h.md', '{project-root}/OpenFS98/docs/implementation/spec-1-8g-break-runners-share-build-only.md']
@@ -83,6 +84,8 @@ context: ['{project-root}/OpenFS98/AGENTS.md', '{project-root}/OpenFS98/docs/imp
 - The plain pointer casts through `uintptr_t` (24 explicit, plus 14 `I32((uintptr_t)…)` arguments; the image bias at `native.c:75` is separate, including those in anchors `draw-length`, `combo-compare-sign`, `error-mark`, `char-limit`, `char-sign-empty` and `text-get-length`) are left alone and logged in `deferred-work.md` for Epic 5.
 - The 708/698 counts in `docs/tools.md:276` are not re-run under wine.
 - No commits or staging.
+
+**Decided (2026-11-27, user):** the p18i gate applies the hardening from the 6b and 6c code reviews (reuse `gate/pecheck.py`, the p18g/p18h `bin/` walk and `--trees` binding): both kept `bin/` trees are required and rehashed, and the saved digests must agree with the files; every PE is validated; each case directory holds exactly `<name>.exe` and `meta.json` as regular files, with the completed-pair count reported; each kept mutant exe is bound to its side's compile record (case id, mutated-source hash, input hashes, normalised output hash) and `cases.txt` equals the baseline runner's ordered ids; every replay object is non-empty valid COFF and tied to its logged recipe; a file inventory of the populated root is taken just before and after each mutant run and any change fails; `gate-revision.txt` records the gate scripts' sha256. The negative checks add 6c's set: a case replaced by a file, a symmetric swap of two mutants' exes, a changed retained `SIMSUI.DLL`, deleted `bin/` trees, symmetric empty replay objects and a swapped pair in `cases.txt`; each must exit 1 with `GATE FAIL` and its diagnostic, and the unmodified control must pass. Earlier sets to rerun are p18b to p18h, 4b `--strict` and p110b1 if present.
 
 </frozen-after-approval>
 

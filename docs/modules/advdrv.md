@@ -124,8 +124,9 @@ All reproduced.
   read-only; on stopping, the cached copies are deleted. The copy, not the
   source, gets the attribute; the delete is from string 0x900e's directory.
 - **Faults.** The integer operators divide with `idiv`, so a program that
-  divides by zero takes a #DE; ours takes the same. These are compared as
-  outcomes.
+  divides by zero takes a #DE in retail, which the host's repair saturates;
+  ours returns that repaired value from `fs98/divide.h` (ADV-7, Story 1.10b1).
+  `advdrvdiff` repairs retail's the same way and fails on a divide fault on our side.
 
 ### Dead code
 

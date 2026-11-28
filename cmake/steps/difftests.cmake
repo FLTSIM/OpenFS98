@@ -35,7 +35,7 @@ ofs_step(difftests
   DEPENDS_FILES src/advdrv/advdrv_relocs.inc
   COMMANDS
     [==[mkdir -p bin/difftest]==]
-    [==[i686-w64-mingw32-gcc @MODULE_FLAGS@ -std=c99 -O1 -Wall -Wextra -o bin/difftest/advdrvdiff.exe tools/difftest/advdrvdiff.c]==]
+    [==[i686-w64-mingw32-gcc @MODULE_FLAGS@ -std=c99 -O1 -Wall -Wextra -Iinclude -Isrc/host/runtime -o bin/difftest/advdrvdiff.exe tools/difftest/advdrvdiff.c src/host/runtime/host_rt_divide.c]==]
   )
 
 ofs_step(difftests
@@ -56,7 +56,7 @@ ofs_step(difftests
   OUTPUTS bin/difftest/boosterdiff.exe
   COMMANDS
     [==[mkdir -p bin/difftest]==]
-    [==[i686-w64-mingw32-gcc @MODULE_FLAGS@ -std=c99 -O1 -Wall -Wextra -o bin/difftest/boosterdiff.exe tools/difftest/boosterdiff.c]==]
+    [==[i686-w64-mingw32-gcc @MODULE_FLAGS@ -std=c99 -O1 -Wall -Wextra -Iinclude -Isrc/host/runtime -o bin/difftest/boosterdiff.exe tools/difftest/boosterdiff.c src/host/runtime/host_rt_divide.c]==]
   )
 
 ofs_step(difftests
@@ -84,7 +84,7 @@ ofs_step(difftests
   OUTPUTS bin/difftest/dynamicdiff.exe
   COMMANDS
     [==[mkdir -p bin/difftest]==]
-    [==[i686-w64-mingw32-gcc @MODULE_FLAGS@ -std=c99 -O1 -Wall -Wextra -o bin/difftest/dynamicdiff.exe tools/difftest/dynamicdiff.c]==]
+    [==[i686-w64-mingw32-gcc @MODULE_FLAGS@ -std=c99 -O1 -Wall -Wextra -Iinclude -Isrc/host/runtime -o bin/difftest/dynamicdiff.exe tools/difftest/dynamicdiff.c src/host/runtime/host_rt_divide.c]==]
   )
 
 ofs_step(difftests

@@ -60,6 +60,7 @@
  * Build: make advdrvdiff     Run: make advdrvdiff-run
  */
 #include "argcount.h"
+#include "divrepair.h"
 #include <windows.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -134,6 +135,9 @@ struct side {
 };
 
 static struct side retail, ours;
+static void (*adv_hook)(struct side *s);                    /* the directed vectors hook (run_side) */
+static DWORD dv_code;                                      /* the latest exception code and IP seen while the hook runs */
+static uint32_t dv_ip;
 static struct side *cur;
 static uint8_t host[0x320];
 static uint8_t global[GLOBAL_SIZE] __attribute__((aligned(16)));
@@ -2307,6 +2311,12 @@ static LONG WINAPI on_vectored(EXCEPTION_POINTERS *e)
 
     if (!in_module || cur == NULL)
         return EXCEPTION_CONTINUE_SEARCH;
+    if (adv_hook != NULL) {
+        dv_code = code;
+        dv_ip = e->ContextRecord->Eip;
+    }
+    if (divrepair_handle(e))
+        return EXCEPTION_CONTINUE_EXECUTION;
     if (trace_exceptions) {
         static char line[256];
         DWORD w;
@@ -2485,6 +2495,10 @@ static void run_side(struct side *s)
         put(" =%#x", s->link->init());
     in_module = 0;
     put_state();
+    if (adv_hook != NULL) {
+        adv_hook(s);
+        return;
+    }
     nops = 8 + rnd_n(MAX_OPS - 8);
     for (op_number = 1; op_number <= nops; op_number++) {
         uint32_t k = rnd_n(100), r;
@@ -2730,6 +2744,135 @@ static LONG WINAPI on_fault(EXCEPTION_POINTERS *e)
     return EXCEPTION_CONTINUE_SEARCH;
 }
 
+/* Story 1.10b1's directed vectors: the integer operators x_idiv and x_mod (retail idiv esi at 0x20613029 and
+ * 0x20613069), called through the operator table with the operand stack set by hand, so the divisor and the dividend
+ * are exact. Both sides run each vector; the outcome (the value left on the stack, or the fault) is compared, and
+ * the retail VA the repair hit is printed. */
+static const struct { int32_t a, b; } adv_vectors[] = {
+    {5, 0}, {-5, 0}, {0, 0}, {0x7fffffff, 0}, {-2147483647 - 1, 0},
+    {-2147483647 - 1, -1}, {-2147483647 - 1, 1}, {0x7fffffff, -1}, {-2147483647 - 1, 2},
+    {-7, 2}, {7, -2}, {-7, -2}, {7, 2}, {7, 3}, {-7, 3}, {1, -1}, {0, -1}, {-1, -1}, {100, 7},
+};
+
+/* run_side stops after init and calls adv_hook: the operator table is filled by then */
+static uint32_t dv_ops[2], dv_k, dv_v;
+static const uint32_t dv_table_va[2] = {0x20613010, 0x20613050};   /* x_idiv, x_mod */
+
+/* the operator pairs (id, handler) at image +0x198..+0x318: the handler of a retail address, by its pair's slot */
+static struct { int fault, sp_ok; uint32_t sp; double top; DWORD code; uint32_t ip; } dv_res[2];
+
+static void adv_directed_side(struct side *s)
+{
+    void (*fn)(void) = NULL;
+    uint32_t i;
+    int idx = s == &retail ? 0 : 1;
+
+    if (s == &retail)
+        for (i = 0x198; i < 0x318; i += 8) {
+            if (*(uint32_t *)(s->image + i + 4) == (uint32_t)(uintptr_t)s->module + (dv_table_va[0] - 0x20610000))
+                dv_ops[0] = i;
+            if (*(uint32_t *)(s->image + i + 4) == (uint32_t)(uintptr_t)s->module + (dv_table_va[1] - 0x20610000))
+                dv_ops[1] = i;
+        }
+    if (!dv_ops[0] || !dv_ops[1]) {
+        for (i = 0x198; i < 0x318 && getenv("ADV_TABLE"); i += 8)
+            printf("pair %u: %08x %08x\n", i, *(uint32_t *)(s->image + i), *(uint32_t *)(s->image + i + 4));
+        return;
+    }
+    fn = (void (*)(void))(uintptr_t)*(uint32_t *)(s->image + dv_ops[dv_k] + 4);
+    s->length = 0;
+    *(uint32_t *)(s->image + 0x278c) = 2;
+    *(double *)(s->image + 0x27a0) = (double)adv_vectors[dv_v].a;
+    *(double *)(s->image + 0x27a8) = (double)adv_vectors[dv_v].b;
+    op_faulted = 0;
+    poisoned = 0;
+    dv_code = 0;
+    dv_ip = 0;
+    in_module = 1;
+    if (!__builtin_setjmp(fault_jb))
+        fn();
+    in_module = 0;
+    dv_res[idx].code = dv_code;
+    dv_res[idx].ip = dv_ip;
+    dv_res[idx].fault = op_faulted;
+    dv_res[idx].sp = *(uint32_t *)(s->image + 0x278c);
+    dv_res[idx].sp_ok = dv_res[idx].sp == 1;             /* two operands popped, one result pushed */
+    dv_res[idx].top = dv_res[idx].sp_ok ? *(double *)(s->image + 0x27a0) : 0;
+    poisoned = 0;
+}
+
+/* the expected result of x_idiv / x_mod by the instruction's rules, written out apart from divide.h: a divisor of 0 or
+ * INT_MIN / -1 faults, and the host's repair writes the saturated quotient (its sign from the dividend's sign bit and the
+ * divisor's) and the remainder 0x7fffffff; otherwise truncation toward zero, the remainder with the dividend's sign */
+static int adv_fault_case(int32_t a, int32_t b)
+{
+    return b == 0 || (a == -2147483647 - 1 && b == -1);
+}
+
+static double adv_expected(uint32_t k, int32_t a, int32_t b)
+{
+    if (adv_fault_case(a, b))
+        return k == 0 ? ((a < 0) != (b < 0) ? -2147483647.0 : 2147483647.0) : 2147483647.0;
+    if (b == -1)
+        return k == 0 ? -(double)a : 0.0;
+    return k == 0 ? (double)(a / b) : (double)(a % b);
+}
+
+static uint32_t adv_directed(void)
+{
+    static const char *const names[2] = {"x_idiv", "x_mod"};
+    static const uint32_t retail_va[2] = {0x20613029, 0x20613069};
+    uint32_t differ = 0, vectors = 0, faults_unwound = 0;
+    int raw = divrepair_is_off(), ours_repaired = getenv("DIVREPAIR_OURS") != NULL && !strcmp(getenv("DIVREPAIR_OURS"), "repair");
+
+    adv_hook = adv_directed_side;
+    for (dv_k = 0; dv_k < 2; dv_k++)
+        for (dv_v = 0; dv_v < sizeof adv_vectors / sizeof adv_vectors[0]; dv_v++) {
+            struct divrepair_mark mark;
+            char hits[128], want_hits[64];
+            unsigned long ours0;
+            int a = adv_vectors[dv_v].a, b = adv_vectors[dv_v].b, fc = adv_fault_case(a, b), bad = 0, side;
+            double want = adv_expected(dv_k, a, b);
+
+            precision_start = 0;
+            scenario_number = 7;
+            make_scenario(7);
+            divrepair_mark_now(&mark);
+            ours0 = divrepair_repairs[1];
+            run_side(&retail);
+            if (!dv_ops[0] || !dv_ops[1]) {
+                printf("directed: operator slots not found (x_idiv %u, x_mod %u)\n", dv_ops[0], dv_ops[1]);
+                return 1;
+            }
+            divrepair_since(&mark, hits, sizeof hits);
+            make_scenario(7);
+            run_side(&ours);
+            /* the intended divide ran: retail repaired exactly once at its VA on a fault case (raw: no repair, a fault), none
+             * otherwise; ours repaired once only in the repaired-old control; the result is exact on both sides */
+            if (fc && !raw) snprintf(want_hits, sizeof want_hits, "%08x x1", retail_va[dv_k]); else snprintf(want_hits, sizeof want_hits, "none");
+            if (strcmp(hits, want_hits)) bad |= 1;
+            if (divrepair_repairs[1] - ours0 != (unsigned long)(fc && ours_repaired)) bad |= 2;
+            for (side = 0; side < 2; side++) {
+                /* raw: the fault must be an integer divide (#DE or the overflow code) at the pinned retail VA (ours: in its own image) */
+                if (fc && raw) {
+                    uint32_t want_ip = side == 0 ? (uint32_t)(uintptr_t)retail.module + (retail_va[dv_k] - 0x20610000) : 0;
+                    if (!dv_res[side].fault || (dv_res[side].code != 0xc0000094u && dv_res[side].code != 0xc0000095u)) bad |= 4;
+                    else if (side == 0 ? dv_res[0].ip != want_ip : (dv_res[1].ip < (uint32_t)(uintptr_t)ours.lo || dv_res[1].ip >= (uint32_t)(uintptr_t)ours.hi)) bad |= 4;
+                }
+                else if (dv_res[side].fault || !dv_res[side].sp_ok || dv_res[side].top != want) bad |= 8;
+                faults_unwound += dv_res[side].fault;
+            }
+            printf("directed %s(%d, %d): retail %s %.17g sp=%u | ours %s %.17g sp=%u | want %.17g | retail repairs: %s%s\n", names[dv_k], a, b,
+                   dv_res[0].fault ? "FAULT" : "ok", dv_res[0].top, dv_res[0].sp, dv_res[1].fault ? "FAULT" : "ok", dv_res[1].top, dv_res[1].sp,
+                   want, hits, bad ? "  DIRECTED FAIL" : "");
+            differ += bad != 0;
+            vectors++;
+        }
+    adv_hook = NULL;
+    printf("directed: pair offsets x_idiv %#x x_mod %#x, %u vectors, %u differ, %u faults unwound\n", dv_ops[0], dv_ops[1], vectors, differ, faults_unwound);
+    return differ;
+}
+
 int main(int argc, char **argv)
 {
     uint32_t n = argc > 1 ? (uint32_t)arg_count(argv[1]) : 20000;
@@ -2761,6 +2904,8 @@ int main(int argc, char **argv)
     load_side(&retail, "ADVDRV_retail.dll", "retail");
     load_side(&ours, "ADVDRV_ours.dll", "ours");
     build_static_trees();
+    divrepair_add("ADVDRV", 0, (uint8_t *)retail.module);
+    divrepair_add("ADVDRV", 1, (uint8_t *)ours.module);
 
     if (getenv("ADV_GENCHECK")) {
         for (i = first; i < first + n; i++) {
@@ -2798,6 +2943,7 @@ int main(int argc, char **argv)
         make_scenario(i);
         precision_start = precision;
         counting = 1;
+        divrepair_tag = i;
         run_side(&retail);
         counting = 0;
         precision = precision_start;
@@ -2859,5 +3005,9 @@ int main(int argc, char **argv)
     (void)cover_console;
     (void)cover_events;
     (void)cover_errors;
+    if (getenv("ADV_NO_DIRECTED") == NULL)
+        differ += adv_directed();
+    if (divrepair_report())
+        return DIVREPAIR_EXIT;
     return differ ? 1 : 0;
 }

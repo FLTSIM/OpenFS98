@@ -29,6 +29,7 @@
 
 #include "fs98/linkage.h"
 #include "fs98/host.h"
+#include "fs98/divide.h"
 
 #define FE_IMAGE_SIZE 0x62e0        /* .data's virtual size */
 #define FE_DATA_START 0xd4          /* the end of the Linkage */
@@ -247,21 +248,17 @@ static uint16_t sar16(uint16_t v, unsigned cl)
     return (uint16_t)((int16_t)v >> (cl >= 16 ? 15 : cl));
 }
 
-/* div r/m32 and div r/m16: the processor's own, so a zero divisor or a
- * quotient too wide faults where retail's does. */
+/* div r/m32 and div r/m16: a zero divisor or a quotient too wide gives what the host's repair
+ * (0x4119a0) writes, as in retail (include/fs98/divide.h). */
 static uint32_t udiv32(uint32_t hi, uint32_t lo, uint32_t d)
 {
-    uint32_t q, r;
-    __asm__ volatile("divl %4" : "=a"(q), "=d"(r) : "a"(lo), "d"(hi), "rm"(d) : "cc");
-    return q;
+    return fs98_div32(hi, lo, d, 0);
 }
 
 /* idiv r/m32 */
 static uint32_t sdiv32(uint32_t hi, uint32_t lo, uint32_t d)
 {
-    uint32_t q, r;
-    __asm__ volatile("idivl %4" : "=a"(q), "=d"(r) : "a"(lo), "d"(hi), "rm"(d) : "cc");
-    return q;
+    return fs98_idiv32(hi, lo, d, 0);
 }
 
 /* imul r/m32, folded as retail folds it: the middle 32 bits of the 64-bit
@@ -274,11 +271,7 @@ static uint32_t imul_mid(uint32_t a, uint32_t b)
 
 static uint16_t udiv16(uint16_t hi, uint16_t lo, uint16_t d, uint16_t *rem)
 {
-    uint16_t q, r;
-    __asm__ volatile("divw %4" : "=a"(q), "=d"(r) : "a"(lo), "d"(hi), "rm"(d) : "cc");
-    if (rem)
-        *rem = r;
-    return q;
+    return fs98_div16(hi, lo, d, rem);
 }
 
 /* ---- the grid --------------------------------------------------------------------- */

@@ -27,6 +27,7 @@ endforeach()
 # The codegen-override check (Cleanup 2) rides on the same target, so it runs on the same paths. ofs_revert bypasses both.
 add_custom_target(ofs_arena_lint COMMAND python3 -B tools/check_arena.py
   COMMAND python3 -B tools/check_codegen_overrides.py
+  COMMAND python3 -B tools/check_div_asm.py
   WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}" USES_TERMINAL VERBATIM)
 
 function(ofs_step group)
